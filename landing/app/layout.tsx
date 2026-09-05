@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 const sans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
@@ -10,6 +10,10 @@ export const metadata: Metadata = {
   icons: {
     icon: '/openmerit-icon.png',
   },
+};
+export const viewport: Viewport = {
+  colorScheme: 'dark',
+  themeColor: '#0a0c10',
 };
 export default function RootLayout({
   children,
