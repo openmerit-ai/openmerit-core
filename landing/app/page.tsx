@@ -97,10 +97,7 @@ function RotatingCompany({
   const [index, setIndex] = useState(0);
   useEffect(() => {
     const timer = setInterval(
-      () => {
-        if (!document.hidden)
-          setIndex((current) => (current + 1) % group.brands.length);
-      },
+      () => setIndex((current) => (current + 1) % group.brands.length),
       2200 + order * 250,
     );
     return () => clearInterval(timer);
