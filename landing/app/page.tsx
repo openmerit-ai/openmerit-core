@@ -90,11 +90,9 @@ const observabilityExamples = [
 function RotatingCompany({
   group,
   order,
-  paused,
 }: {
   group: (typeof infrastructureExamples)[number];
   order: number;
-  paused: boolean;
 }) {
   const [index, setIndex] = useState(0);
   useEffect(() => {
@@ -102,13 +100,13 @@ function RotatingCompany({
     let timer: ReturnType<typeof setInterval> | undefined;
     function sync() {
       clearInterval(timer);
-      if (!paused && !motion.matches) {
+      if (!motion.matches) {
         timer = setInterval(
           () => {
             if (!document.hidden)
               setIndex((current) => (current + 1) % group.brands.length);
           },
-          4200 + order * 600,
+          2600 + order * 350,
         );
       }
     }
@@ -118,7 +116,7 @@ function RotatingCompany({
       clearInterval(timer);
       motion.removeEventListener('change', sync);
     };
-  }, [group, order, paused]);
+  }, [group, order]);
   const brand = group.brands[index];
   return (
     <span
@@ -226,8 +224,6 @@ function Mark() {
 }
 export default function Home() {
   const [task, setTask] = useState(0);
-  const [brandsHovered, setBrandsHovered] = useState(false);
-  const [observabilityHovered, setObservabilityHovered] = useState(false);
   const d = tasks[task];
   function download() {
     const text = `# Model Decision Record\n\nIllustrative example — not a live benchmark.\n\nTask: ${d.name}\n${d.subtitle}\n\n## Requirements\n${d.constraints.map((x) => '- ' + x).join('\n')}\n\n## Decision\n${d.outcome}\nConfidence: ${d.confidence} (illustrative)\n\n## Recommendation\n${d.choice}\n${d.reason}\n\n## Evidence\n${d.evidence}\n\n## Next action\n${d.next}\n\n## Candidates\nModel | Quality | p95 | Cost / 1k\n${d.models.map((m) => m.slice(1).join(' | ')).join('\n')}\n`;
@@ -284,11 +280,7 @@ export default function Home() {
             className="infra-diagram"
             aria-label="OpenMerit exchanges context with inference infrastructure and observability tools"
           >
-            <div
-              className="infra-group"
-              onMouseEnter={() => setBrandsHovered(true)}
-              onMouseLeave={() => setBrandsHovered(false)}
-            >
+            <div className="infra-group">
               <div className="infra-group-heading">
                 <p className="eyebrow">INFERENCE INFRASTRUCTURE</p>
               </div>
@@ -298,7 +290,6 @@ export default function Home() {
                     key={group.role}
                     group={group}
                     order={order}
-                    paused={brandsHovered}
                   />
                 ))}
               </div>
@@ -331,11 +322,7 @@ export default function Home() {
                 <span>Decision &amp; eval context</span>
               </div>
             </div>
-            <div
-              className="infra-group"
-              onMouseEnter={() => setObservabilityHovered(true)}
-              onMouseLeave={() => setObservabilityHovered(false)}
-            >
+            <div className="infra-group">
               <p className="eyebrow">OBSERVABILITY &amp; EVALS</p>
               <div className="infra-nodes observability-nodes">
                 {observabilityExamples.map((group, order) => (
@@ -343,7 +330,6 @@ export default function Home() {
                     key={group.brands[0].name}
                     group={group}
                     order={order + 1}
-                    paused={observabilityHovered}
                   />
                 ))}
               </div>
