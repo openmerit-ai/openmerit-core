@@ -1,0 +1,872 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - link "Skip to content" [ref=e3] [cursor=pointer]:
+      - /url: "#main"
+    - banner [ref=e4]:
+      - generic [ref=e7]:
+        - link "Interfere" [ref=e11] [cursor=pointer]:
+          - /url: /
+        - navigation [ref=e36]:
+          - list [ref=e37]:
+            - listitem [ref=e38]:
+              - button "Product" [ref=e39] [cursor=pointer]
+            - listitem [ref=e40]:
+              - link "Careers" [ref=e41] [cursor=pointer]:
+                - /url: /careers
+            - listitem [ref=e42]:
+              - link "Changelog" [ref=e43] [cursor=pointer]:
+                - /url: /changelog
+            - listitem [ref=e44]:
+              - link "Blog" [ref=e45] [cursor=pointer]:
+                - /url: /blog
+            - listitem [ref=e46]:
+              - link "Docs" [ref=e47] [cursor=pointer]:
+                - /url: https://interfere.com/docs
+            - listitem [ref=e48]:
+              - link "Contact" [ref=e49] [cursor=pointer]:
+                - /url: /join
+        - generic [ref=e52]:
+          - link "Login" [ref=e53] [cursor=pointer]:
+            - /url: /auth
+            - generic [ref=e55]:
+              - generic [aria-hidden]: l
+          - link "Sign up" [ref=e56] [cursor=pointer]:
+            - /url: /join
+            - generic [ref=e58]:
+              - generic [aria-hidden]: d
+    - main [ref=e59]:
+      - generic [ref=e62]:
+        - generic [ref=e63]:
+          - heading "Ship software that never breaks" [level=1] [ref=e64]:
+            - generic [ref=e65]:
+              - generic [ref=e66]:
+                - generic [ref=e67]: Ship
+                - generic [ref=e68]: software
+                - generic [ref=e69]: that
+              - generic [ref=e70]:
+                - generic [ref=e71]: never
+                - generic [ref=e72]: breaks
+          - generic [ref=e73]:
+            - heading "Interfere empowers engineers, product managers and designers with real-time understanding of previously unseen bugs and issues." [level=2] [ref=e74]
+            - generic [ref=e75]:
+              - link "Sign up" [ref=e76] [cursor=pointer]:
+                - /url: /join
+              - link "Contact sales" [ref=e78] [cursor=pointer]:
+                - /url: /join
+        - generic [ref=e80]:
+          - generic [aria-hidden]:
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic:
+                      - separator
+                    - button [aria-hidden]
+              - generic:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - paragraph: Inbox
+                        - paragraph: Broken password reset link
+                      - generic:
+                        - link [ref=e81] [cursor=pointer]:
+                          - /url: /careers
+                        - button:
+                          - generic: Subscribed
+                        - button
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - paragraph: "#120"
+                              - heading [level=3]: Broken password reset link
+                            - paragraph: Users are unable to complete password resets after clicking reset links generated in production.
+                        - generic:
+                          - generic:
+                            - paragraph: Title
+                            - generic:
+                              - paragraph: Broken password reset link
+                          - generic:
+                            - paragraph: Priority
+                            - generic:
+                              - paragraph: High
+                          - generic:
+                            - paragraph: Assignee
+                            - generic:
+                              - paragraph: Luke Shiels
+                          - generic:
+                            - paragraph: Status
+                            - generic:
+                              - paragraph: Active
+                          - generic:
+                            - paragraph: Surface
+                            - generic:
+                              - generic:
+                                - paragraph: Website Frontend
+                              - generic:
+                                - paragraph: iOS App
+                        - generic:
+                          - separator
+                        - generic:
+                          - generic:
+                            - paragraph: Regression
+                            - generic:
+                              - paragraph: "Yes"
+                          - generic:
+                            - paragraph: First detection
+                            - generic:
+                              - paragraph: 36 minutes ago
+                          - generic:
+                            - paragraph: Latest detection
+                            - generic:
+                              - paragraph: Just now
+                          - generic:
+                            - paragraph: Duration
+                            - generic:
+                              - paragraph: 36 min 47 s
+                          - generic:
+                            - paragraph: Findings
+                            - generic:
+                              - paragraph: 146 findings
+                        - generic:
+                          - separator
+                        - generic:
+                          - generic:
+                            - paragraph: Impacted Users
+                            - paragraph: 12,881
+                          - generic:
+                            - generic:
+                              - img [aria-hidden]:
+                                - generic: H-2
+                                - generic: H-1
+                                - generic: Now
+                                - generic: Fix
+                                - generic: H+1
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - paragraph: Activity
+                            - generic:
+                              - paragraph: Sessions
+                            - generic:
+                              - paragraph: Findings
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - paragraph: Problem detected
+                                  - paragraph [aria-hidden]: ·
+                                  - paragraph: 4 min ago
+                                - paragraph: Interfere detected a surge in failed password reset attempts. Users are clicking reset links but failing to complete the flow.
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - paragraph: Status updated to Investigating
+                                  - paragraph [aria-hidden]: ·
+                                  - paragraph: 4 min ago
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - paragraph: Finding
+                                  - paragraph [aria-hidden]: ·
+                                  - paragraph: 3 min ago
+                                - paragraph: A recent change in auth/reset.ts may cause invalid token validation.
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - paragraph: auth/reset.ts
+                                    - generic:
+                                      - paragraph: Open
+                                  - generic:
+                                    - generic:
+                                      - generic: "7"
+                                      - generic: "export function buildResetLink(userId: string) {"
+                                    - generic:
+                                      - generic: "8"
+                                      - generic: "const token = sign<ResetTokenPayload>({ uid: userId });"
+                                    - generic: "9"
+                                    - generic:
+                                      - generic: "10"
+                                      - generic: const baseUrl = "https://staging.example.com";
+                                    - generic:
+                                      - generic: "11"
+                                      - generic: const baseUrl = "https://example.com/reset-password";
+                                    - generic: "12"
+                                    - generic:
+                                      - generic: "13"
+                                      - generic: const path = "/reset-password";
+                                    - generic:
+                                      - generic: "14"
+                                      - generic: const url = new URL(path, baseUrl);
+                                    - generic:
+                                      - generic: "15"
+                                      - generic: url.searchParams.set("token", token);
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - paragraph: Fact
+                                  - paragraph [aria-hidden]: ·
+                                  - paragraph: 3 min ago
+                                - paragraph: Error rate increased from 0.2% to 12% within 6 minutes after deployment.
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - paragraph: Assigned to Luke Shiels
+                                  - paragraph [aria-hidden]: ·
+                                  - paragraph: 3 min ago
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - paragraph: Priority set to High
+                                  - paragraph [aria-hidden]: ·
+                                  - paragraph: 3 min ago
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - paragraph: Status updated to Active
+                                  - paragraph [aria-hidden]: ·
+                                  - paragraph: 3 min ago
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic: Jakub Krehel commented
+                                    - generic [aria-hidden]: ·
+                                    - generic: 2h ago
+                                  - paragraph: Looks related to yesterday’s auth refactor.
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - status
+                              - generic:
+                                - generic: Suggesting a fix...
+                                - paragraph: The reset link points to a route that no longer exists after the latest deployment. Users are redirected to a generic error page instead of the password reset form.
+      - generic [ref=e86]:
+        - generic [ref=e87]: Trusted and funded by
+        - generic [ref=e88]:
+          - generic [ref=e89]:
+            - img "Worldbuild Ventures" [ref=e91]
+            - img "Y Combinator" [ref=e104]
+            - img "Vercel" [ref=e111]
+            - img "SF Compute" [ref=e115]
+            - img "Profound" [ref=e119]
+            - img "Tabs" [ref=e130]
+            - img "Delphi" [ref=e137]
+            - img "DF" [ref=e142]
+            - img "HB" [ref=e146]
+          - generic [ref=e148]:
+            - img "Worldbuild Ventures" [ref=e150]
+            - img "Y Combinator" [ref=e163]
+            - img "Vercel" [ref=e170]
+            - img "SF Compute" [ref=e174]
+            - img "Profound" [ref=e178]
+            - img "Tabs" [ref=e189]
+            - img "Delphi" [ref=e196]
+            - img "DF" [ref=e201]
+            - img "HB" [ref=e205]
+      - generic [ref=e208]:
+        - heading "Interfere finds 01 issues in your app, understands 02 what's happening, and owns resolution 03 from first signal to production." [level=2] [ref=e210]:
+          - generic [ref=e212]:
+            - text: Interfere
+            - generic [ref=e213]: finds
+            - generic [ref=e215]: "01"
+            - text: issues in your app,
+          - generic [ref=e217]:
+            - generic [ref=e218]: understands
+            - generic [ref=e220]: "02"
+            - text: what's happening,
+          - generic [ref=e222]:
+            - text: and owns
+            - generic [ref=e223]: resolution
+            - generic [ref=e225]: "03"
+            - text: from first signal to production.
+        - generic [ref=e226]:
+          - generic [ref=e227]:
+            - generic [ref=e228]: Reset Password
+            - generic [ref=e257]: "01"
+            - generic [ref=e258]:
+              - heading "Learn about issues before your customers do" [level=3] [ref=e259]
+              - paragraph [ref=e260]: Interfere continuously monitors your app and notices when behavior or outcomes change, before errors escalate or users report issues.
+          - generic [ref=e261]:
+            - generic [ref=e264]:
+              - generic [ref=e266]:
+                - paragraph [ref=e267]: "#112"
+                - paragraph [ref=e271]: Reset password flow issue
+              - generic:
+                - generic:
+                  - generic:
+                    - text: Investigating
+                    - generic: ...
+                - generic:
+                  - img "Medium priority"
+                  - generic: Medium priority
+            - generic [ref=e280]: "02"
+            - generic [ref=e281]:
+              - heading "Understand what's going wrong" [level=3] [ref=e282]
+              - paragraph [ref=e283]: Interfere goes beyond logs, metrics, and traces. It finds the root cause and explains what’s broken, why, and who it impacts.
+          - generic [ref=e284]:
+            - generic [ref=e288]:
+              - generic [ref=e289]:
+                - generic [ref=e291]: "7"
+                - generic [ref=e292]: "export function buildResetLink(userId: string) {"
+              - generic [ref=e293]:
+                - generic [ref=e295]: "8"
+                - generic [ref=e296]: "const token = sign<ResetTokenPayload>({ uid: userId });"
+              - generic [ref=e297]: "9"
+              - generic [ref=e301]:
+                - generic [ref=e303]: "10"
+                - generic [ref=e304]: const baseUrl = "https://acme.com/auth";
+              - generic [ref=e305]:
+                - generic [ref=e307]: "10"
+                - generic [ref=e308]: const baseUrl = "https://staging.acme.com/auth";
+              - generic [ref=e309]:
+                - generic [ref=e311]: "11"
+                - generic [ref=e312]: const path = "/reset-password";
+              - generic [ref=e313]: "12"
+              - generic [ref=e317]:
+                - generic [ref=e319]: "13"
+                - generic [ref=e320]: const url = new URL(path, baseUrl);
+              - generic [ref=e321]:
+                - generic [ref=e323]: "14"
+                - generic [ref=e324]: url.searchParams.set("token", token);
+              - generic [ref=e325]: "15"
+              - generic [ref=e329]:
+                - generic [ref=e331]: "16"
+                - generic [ref=e332]: return url.toString();
+              - generic [ref=e333]:
+                - generic [ref=e335]: "17"
+                - generic [ref=e336]: "}"
+              - generic [ref=e337]: "18"
+              - generic [ref=e341]:
+                - generic [ref=e343]: "19"
+                - generic [ref=e344]: "export function buildResetEmail(userId: string) {"
+              - generic [ref=e345]:
+                - generic [ref=e347]: "20"
+                - generic [ref=e348]: const resetLink = buildResetLink(userId);
+              - generic [ref=e349]:
+                - generic [ref=e351]: "21"
+                - generic [ref=e352]: "return `"
+              - generic [ref=e353]:
+                - generic [ref=e355]: "22"
+                - generic [ref=e356]: Hi there,
+              - generic [ref=e357]: "23"
+              - generic [ref=e361]:
+                - generic [ref=e363]: "24"
+                - generic [ref=e364]: "Click the link below to reset your password:"
+              - generic [ref=e365]:
+                - generic [ref=e367]: "25"
+                - generic [ref=e368]: "${resetLink}"
+              - generic [ref=e369]: "26"
+              - generic [ref=e373]:
+                - generic [ref=e375]: "27"
+                - generic [ref=e376]: If you didn't request this, you can ignore this email.
+              - generic [ref=e377]:
+                - generic [ref=e379]: "28"
+                - generic [ref=e380]: "`.trim();"
+              - generic [ref=e381]:
+                - generic [ref=e383]: "29"
+                - generic [ref=e384]: "}"
+            - generic [ref=e385]: "03"
+            - generic [ref=e386]:
+              - heading "Fix problems with confidence" [level=3] [ref=e387]
+              - paragraph [ref=e388]: Interfere turns insight into action by suggesting fixes, linking them to your codebase, and tracking progress until resolved. You're always in control.
+      - generic [ref=e391]:
+        - blockquote [ref=e393]: “Every hour spent chasing bugs is time away from building features that users actually want. Interfere gives your team time to focus on what actually matters.”
+        - link [ref=e394] [cursor=pointer]:
+          - /url: https://x.com/dbabbs
+          - generic [ref=e396]:
+            - img "Dylan Babbs" [ref=e397]
+            - img "Profound" [ref=e398]
+          - generic [ref=e400]:
+            - paragraph [ref=e401]: Dylan Babbs
+            - paragraph [ref=e402]: CTO of Profound
+      - generic [ref=e404]:
+        - generic [ref=e406]:
+          - generic [ref=e407]: "01"
+          - heading "Learn about issues before your customers do" [level=2] [ref=e408]
+          - paragraph [ref=e409]: Interfere continuously monitors your app and notices when behavior or outcomes change, before errors escalate or users report issues.
+          - paragraph [ref=e410]: Full-stack understanding
+          - generic [ref=e411]:
+            - separator [ref=e413]
+            - generic [ref=e414]:
+              - paragraph [ref=e415]: User Tracking
+              - paragraph [ref=e416]: Logging & Alerting
+              - paragraph [ref=e417]: Session Replays
+              - paragraph [ref=e418]: Predictive Analysis
+              - paragraph [ref=e419]: Release Tracking
+        - generic [ref=e431]:
+          - paragraph [ref=e438]: Inbox
+          - generic [ref=e439]:
+            - generic [ref=e440]:
+              - generic [ref=e441]:
+                - paragraph [ref=e458]: Under Investigation
+                - paragraph [ref=e461]: "2"
+              - generic [ref=e462]:
+                - generic [ref=e463]:
+                  - paragraph [ref=e465]: "#87"
+                  - paragraph [ref=e474]: Users unable to export billing invoices
+                  - generic [ref=e475]:
+                    - paragraph [ref=e488]: High
+                    - paragraph [ref=e497]: 1,521
+                    - paragraph [ref=e505]: Reasoning
+                - generic [ref=e506]:
+                  - paragraph [ref=e508]: "#65"
+                  - paragraph [ref=e516]: Payments failing for users in Brazil
+                  - generic [ref=e517]:
+                    - paragraph [ref=e531]: Low
+                    - paragraph [ref=e540]: "340"
+                    - paragraph [ref=e548]: Reasoning
+            - generic [ref=e549]:
+              - generic [ref=e550]:
+                - paragraph [ref=e567]: Active
+                - paragraph [ref=e570]: "3"
+              - generic [ref=e571]:
+                - generic [ref=e572]:
+                  - paragraph [ref=e574]: "#120"
+                  - paragraph [ref=e581]: Broken password reset link
+                  - generic [ref=e582]:
+                    - paragraph [ref=e595]: High
+                    - paragraph [ref=e604]: 2,122
+                - generic [ref=e605]:
+                  - paragraph [ref=e607]: "#108"
+                  - paragraph [ref=e614]: Onboarding emails not being delivered
+                  - generic [ref=e615]:
+                    - paragraph [ref=e629]: Medium
+                    - paragraph [ref=e638]: "870"
+                - generic [ref=e639]:
+                  - paragraph [ref=e641]: "#95"
+                  - paragraph [ref=e648]: Search results showing wrong products
+                  - generic [ref=e649]:
+                    - paragraph [ref=e663]: Low
+                    - paragraph [ref=e672]: "109"
+            - generic [ref=e673]:
+              - generic [ref=e674]:
+                - paragraph [ref=e691]: In Recovery
+                - paragraph [ref=e694]: "3"
+              - generic [ref=e695]:
+                - generic [ref=e696]:
+                  - paragraph [ref=e698]: "#74"
+                  - paragraph [ref=e710]: Team invite links expiring too soon
+                  - generic [ref=e711]:
+                    - paragraph [ref=e725]: Medium
+                    - paragraph [ref=e734]: 1,120
+                - generic [ref=e735]:
+                  - paragraph [ref=e737]: "#61"
+                  - paragraph [ref=e746]: Dashboard charts blank for new accounts
+                  - generic [ref=e747]:
+                    - paragraph [ref=e761]: Low
+                    - paragraph [ref=e770]: "891"
+      - separator [ref=e773]
+      - generic [ref=e775]:
+        - generic [ref=e777]:
+          - generic [ref=e778]: "02"
+          - heading "Understand what's going wrong" [level=2] [ref=e779]
+          - paragraph [ref=e780]: Interfere goes beyond logs, metrics, and traces. It finds the root cause and explains what’s broken, why, and who it impacts.
+          - paragraph [ref=e781]: Zero-touch triage
+          - generic [ref=e782]:
+            - separator [ref=e784]
+            - generic [ref=e785]:
+              - paragraph [ref=e786]: Prioritization
+              - paragraph [ref=e787]: User Impact
+              - paragraph [ref=e788]: Team Routing
+              - paragraph [ref=e789]: Root Cause Analysis
+        - generic [ref=e801]:
+          - generic [ref=e803]:
+            - paragraph [ref=e808]: Inbox
+            - paragraph [ref=e811]: "#120"
+          - generic [ref=e812]:
+            - generic [ref=e813]:
+              - generic [ref=e818]:
+                - generic [ref=e819]:
+                  - paragraph [ref=e820]: "#120"
+                  - heading [level=3] [ref=e821]: Broken password reset link
+                - paragraph [ref=e822]: Users are unable to complete password resets after clicking reset links generated in production.
+              - generic [ref=e823]:
+                - generic [ref=e824]:
+                  - paragraph [ref=e825]: Title
+                  - paragraph [ref=e827]: Broken password reset link
+                - generic [ref=e828]:
+                  - paragraph [ref=e829]: Priority
+                  - paragraph [ref=e842]: High
+                - generic [ref=e843]:
+                  - paragraph [ref=e844]: Assignee
+                  - paragraph [ref=e848]: Luke Shiels
+                - generic [ref=e849]:
+                  - paragraph [ref=e850]: Status
+                  - paragraph [ref=e867]: Active
+                - generic [ref=e868]:
+                  - paragraph [ref=e869]: Surface
+                  - generic [ref=e870]:
+                    - paragraph [ref=e875]: Website Frontend
+                    - paragraph [ref=e879]: iOS App
+              - separator [ref=e881]
+              - generic [ref=e882]:
+                - generic [ref=e883]:
+                  - paragraph [ref=e884]: Regression
+                  - paragraph [ref=e888]: "Yes"
+                - generic [ref=e889]:
+                  - paragraph [ref=e890]: First detection
+                  - paragraph [ref=e892]: 36 minutes ago
+                - generic [ref=e893]:
+                  - paragraph [ref=e894]: Latest detection
+                  - paragraph [ref=e896]: Just now
+                - generic [ref=e897]:
+                  - paragraph [ref=e898]: Duration
+                  - paragraph [ref=e900]: 36 min 47 s
+                - generic [ref=e901]:
+                  - paragraph [ref=e902]: Findings
+                  - paragraph [ref=e904]: 146 findings
+              - separator [ref=e908]
+              - generic [ref=e909]:
+                - generic [ref=e910]:
+                  - paragraph [ref=e911]: Impacted Users
+                  - paragraph [ref=e912]: 12,881
+                - generic [ref=e913]:
+                  - generic:
+                    - img [aria-hidden]:
+                      - generic: H-2
+                      - generic: H-1
+                      - generic: Now
+                      - generic: Fix
+                      - generic: H+1
+            - generic [ref=e914]:
+              - generic [ref=e916]:
+                - paragraph [ref=e918]: Activity
+                - paragraph [ref=e920]: Sessions
+                - paragraph [ref=e922]: Findings
+              - generic [ref=e924]:
+                - generic [ref=e932]:
+                  - generic [ref=e933]:
+                    - paragraph [ref=e934]: Problem detected
+                    - paragraph [aria-hidden] [ref=e935]: ·
+                    - paragraph [ref=e936]: 4 min ago
+                  - paragraph [ref=e937]: Interfere detected a surge in failed password reset attempts. Users are clicking reset links but failing to complete the flow.
+                - generic [ref=e959]:
+                  - paragraph [ref=e960]: Status updated to Investigating
+                  - paragraph [aria-hidden] [ref=e961]: ·
+                  - paragraph [ref=e962]: 4 min ago
+                - generic [ref=e970]:
+                  - generic [ref=e971]:
+                    - paragraph [ref=e972]: Finding
+                    - paragraph [aria-hidden] [ref=e973]: ·
+                    - paragraph [ref=e974]: 3 min ago
+                  - paragraph [ref=e975]: A recent change in auth/reset.ts may cause invalid token validation.
+                  - generic [ref=e976]:
+                    - generic [ref=e977]:
+                      - paragraph [ref=e983]: auth/reset.ts
+                      - paragraph [ref=e985]: Open
+                    - generic [ref=e986]:
+                      - generic [ref=e987]:
+                        - generic [ref=e989]: "7"
+                        - generic [ref=e990]: "export function buildResetLink(userId: string) {"
+                      - generic [ref=e991]:
+                        - generic [ref=e993]: "8"
+                        - generic [ref=e994]: "const token = sign<ResetTokenPayload>({ uid: userId });"
+                      - generic [ref=e995]: "9"
+                      - generic [ref=e999]:
+                        - generic [ref=e1001]: "10"
+                        - generic [ref=e1002]: const baseUrl = "https://staging.example.com";
+                      - generic [ref=e1003]:
+                        - generic [ref=e1005]: "11"
+                        - generic [ref=e1006]: const baseUrl = "https://example.com/reset-password";
+                      - generic [ref=e1007]: "12"
+                      - generic [ref=e1011]:
+                        - generic [ref=e1013]: "13"
+                        - generic [ref=e1014]: const path = "/reset-password";
+                      - generic [ref=e1015]:
+                        - generic [ref=e1017]: "14"
+                        - generic [ref=e1018]: const url = new URL(path, baseUrl);
+                      - generic [ref=e1019]:
+                        - generic [ref=e1021]: "15"
+                        - generic [ref=e1022]: url.searchParams.set("token", token);
+                - generic [ref=e1030]:
+                  - generic [ref=e1031]:
+                    - paragraph [ref=e1032]: Fact
+                    - paragraph [aria-hidden] [ref=e1033]: ·
+                    - paragraph [ref=e1034]: 3 min ago
+                  - paragraph [ref=e1035]: Error rate increased from 0.2% to 12% within 6 minutes after deployment.
+                - generic [ref=e1044]:
+                  - paragraph [ref=e1045]: Assigned to Luke Shiels
+                  - paragraph [aria-hidden] [ref=e1046]: ·
+                  - paragraph [ref=e1047]: 3 min ago
+                - generic [ref=e1065]:
+                  - paragraph [ref=e1066]: Priority set to High
+                  - paragraph [aria-hidden] [ref=e1067]: ·
+                  - paragraph [ref=e1068]: 3 min ago
+                - generic [ref=e1090]:
+                  - paragraph [ref=e1091]: Status updated to Active
+                  - paragraph [aria-hidden] [ref=e1092]: ·
+                  - paragraph [ref=e1093]: 3 min ago
+                - generic [ref=e1098]:
+                  - generic [ref=e1099]:
+                    - generic [ref=e1103]: Jakub Krehel commented
+                    - generic [aria-hidden] [ref=e1104]: ·
+                    - generic [ref=e1105]: 2h ago
+                  - paragraph [ref=e1106]: Looks related to yesterday’s auth refactor.
+                - generic [ref=e1109]:
+                  - status [ref=e1114]
+                  - generic [ref=e1118]:
+                    - generic [ref=e1119]: Suggesting a fix...
+                    - paragraph [ref=e1120]: The reset link points to a route that no longer exists after the latest deployment. Users are redirected to a generic error page instead of the password reset form.
+      - separator [ref=e1123]
+      - generic [ref=e1125]:
+        - generic [ref=e1127]:
+          - generic [ref=e1128]: "03"
+          - heading "Fix problems with confidence" [level=2] [ref=e1129]
+          - paragraph [ref=e1130]: Interfere turns insight into action by suggesting fixes, linking them to your codebase, and tracking progress until resolved. You're always in control.
+          - paragraph [ref=e1131]: Built for speed & teams of any size
+          - generic [ref=e1132]:
+            - separator [ref=e1134]
+            - generic [ref=e1135]:
+              - paragraph [ref=e1136]: Multiplayer Collaboration
+              - paragraph [ref=e1137]: SAML/OIDC SSO
+              - paragraph [ref=e1138]: Offline-first Architecture
+              - paragraph [ref=e1139]: SCIM Provisioning
+              - paragraph [ref=e1140]: Custom Roles & Permissions
+              - paragraph [ref=e1141]: Domain Whitelisting
+        - generic [ref=e1153]:
+          - generic [ref=e1155]:
+            - paragraph [ref=e1160]: Inbox
+            - paragraph [ref=e1163]: "#120"
+          - generic [ref=e1165]:
+            - generic [ref=e1167]:
+              - paragraph [ref=e1169]: Activity
+              - paragraph [ref=e1171]: Sessions
+              - paragraph [ref=e1173]: Findings
+            - generic [ref=e1175]:
+              - generic [ref=e1183]:
+                - generic [ref=e1184]:
+                  - paragraph [ref=e1185]: Problem detected
+                  - paragraph [aria-hidden] [ref=e1186]: ·
+                  - paragraph [ref=e1187]: 4 min ago
+                - paragraph [ref=e1188]: Interfere detected a surge in failed password reset attempts. Users are clicking reset links but failing to complete the flow.
+              - generic [ref=e1210]:
+                - paragraph [ref=e1211]: Status updated to Investigating
+                - paragraph [aria-hidden] [ref=e1212]: ·
+                - paragraph [ref=e1213]: 4 min ago
+              - generic [ref=e1221]:
+                - generic [ref=e1222]:
+                  - paragraph [ref=e1223]: Finding
+                  - paragraph [aria-hidden] [ref=e1224]: ·
+                  - paragraph [ref=e1225]: 3 min ago
+                - paragraph [ref=e1226]: A recent change in auth/reset.ts may cause invalid token validation.
+                - generic [ref=e1227]:
+                  - generic [ref=e1228]:
+                    - paragraph [ref=e1234]: auth/reset.ts
+                    - paragraph [ref=e1236]: Open
+                  - generic [ref=e1237]:
+                    - generic [ref=e1238]:
+                      - generic [ref=e1240]: "7"
+                      - generic [ref=e1241]: "export function buildResetLink(userId: string) {"
+                    - generic [ref=e1242]:
+                      - generic [ref=e1244]: "8"
+                      - generic [ref=e1245]: "const token = sign<ResetTokenPayload>({ uid: userId });"
+                    - generic [ref=e1246]: "9"
+                    - generic [ref=e1250]:
+                      - generic [ref=e1252]: "10"
+                      - generic [ref=e1253]: const baseUrl = "https://staging.example.com";
+                    - generic [ref=e1254]:
+                      - generic [ref=e1256]: "11"
+                      - generic [ref=e1257]: const baseUrl = "https://example.com/reset-password";
+                    - generic [ref=e1258]: "12"
+                    - generic [ref=e1262]:
+                      - generic [ref=e1264]: "13"
+                      - generic [ref=e1265]: const path = "/reset-password";
+                    - generic [ref=e1266]:
+                      - generic [ref=e1268]: "14"
+                      - generic [ref=e1269]: const url = new URL(path, baseUrl);
+                    - generic [ref=e1270]:
+                      - generic [ref=e1272]: "15"
+                      - generic [ref=e1273]: url.searchParams.set("token", token);
+              - generic [ref=e1281]:
+                - generic [ref=e1282]:
+                  - paragraph [ref=e1283]: Fact
+                  - paragraph [aria-hidden] [ref=e1284]: ·
+                  - paragraph [ref=e1285]: 3 min ago
+                - paragraph [ref=e1286]: Error rate increased from 0.2% to 12% within 6 minutes after deployment.
+              - generic [ref=e1295]:
+                - paragraph [ref=e1296]: Assigned to Luke Shiels
+                - paragraph [aria-hidden] [ref=e1297]: ·
+                - paragraph [ref=e1298]: 3 min ago
+              - generic [ref=e1316]:
+                - paragraph [ref=e1317]: Priority set to High
+                - paragraph [aria-hidden] [ref=e1318]: ·
+                - paragraph [ref=e1319]: 3 min ago
+              - generic [ref=e1341]:
+                - paragraph [ref=e1342]: Status updated to Active
+                - paragraph [aria-hidden] [ref=e1343]: ·
+                - paragraph [ref=e1344]: 3 min ago
+              - generic [ref=e1349]:
+                - generic [ref=e1350]:
+                  - generic [ref=e1354]: Jakub Krehel commented
+                  - generic [aria-hidden] [ref=e1355]: ·
+                  - generic [ref=e1356]: 2h ago
+                - paragraph [ref=e1357]: Looks related to yesterday’s auth refactor.
+              - generic [ref=e1360]:
+                - status [ref=e1365]
+                - generic [ref=e1369]:
+                  - generic [ref=e1370]: Suggesting a fix...
+                  - paragraph [ref=e1371]: The reset link points to a route that no longer exists after the latest deployment. Users are redirected to a generic error page instead of the password reset form.
+      - generic [ref=e1374]:
+        - generic [ref=e1375]:
+          - generic [ref=e1376]:
+            - generic [ref=e1377]: Security
+            - heading "Secure by design. Safe by default." [level=2] [ref=e1378]: Secure by design.Safe by default.
+          - link [ref=e1380] [cursor=pointer]:
+            - /url: https://trust.interfere.com
+            - paragraph [ref=e1381]: Learn more
+        - generic [ref=e1384]:
+          - generic [ref=e1385]:
+            - separator [ref=e1387]
+            - generic [ref=e1393]:
+              - paragraph [ref=e1394]: SOC 2 Type II
+              - paragraph [ref=e1395]: We’re in our SOC 2 observation period, with estimated completion in Q3 2026.
+          - generic [ref=e1396]:
+            - separator [ref=e1398]
+            - generic [ref=e1415]:
+              - paragraph [ref=e1416]: GDPR & ISO 27001
+              - paragraph [ref=e1417]: We’re working on compliance with GDPR and ISO 27001, with additional auditing available upon request.
+      - generic [ref=e1419]:
+        - generic [ref=e1420]:
+          - generic [ref=e1421]: Changelog
+          - heading "The Latest" [level=2] [ref=e1422]
+        - generic [ref=e1424]:
+          - 'link "MAR 12, 2026 Introducing Consent Management We’ve added consent gating to our SDKs, giving you full control over which features activate based on your users’ consent preferences, with native support for all modern consent platforms: c15t, CookieYes, OneTrust, or your own." [ref=e1425] [cursor=pointer]':
+            - /url: /changelog/consent-management
+            - generic [ref=e1426]: MAR 12, 2026
+            - generic [ref=e1429]:
+              - paragraph [ref=e1430]: Introducing Consent Management
+              - paragraph [ref=e1431]: "We’ve added consent gating to our SDKs, giving you full control over which features activate based on your users’ consent preferences, with native support for all modern consent platforms: c15t, CookieYes, OneTrust, or your own."
+          - link "FEB 11, 2026 Timeline Improvements We’ve redesigned the problem timeline to better distinguish between agent findings, human actions, and external events like pull requests and CI runs, as well as new commenting features like threading." [ref=e1432] [cursor=pointer]:
+            - /url: /changelog/timeline-improvements
+            - generic [ref=e1433]: FEB 11, 2026
+            - generic [ref=e1436]:
+              - paragraph [ref=e1437]: Timeline Improvements
+              - paragraph [ref=e1438]: We’ve redesigned the problem timeline to better distinguish between agent findings, human actions, and external events like pull requests and CI runs, as well as new commenting features like threading.
+          - link "FEB 1, 2026 OAuth applications & scoped API keys Today, we’ve launched support for developers to create custom OAuth applications and API keys with granular scopes on Interfere." [ref=e1439] [cursor=pointer]:
+            - /url: /changelog/oauth-integrations
+            - generic [ref=e1440]: FEB 1, 2026
+            - generic [ref=e1443]:
+              - paragraph [ref=e1444]: OAuth applications & scoped API keys
+              - paragraph [ref=e1445]: Today, we’ve launched support for developers to create custom OAuth applications and API keys with granular scopes on Interfere.
+        - link [ref=e1447] [cursor=pointer]:
+          - /url: /changelog
+          - paragraph [ref=e1448]: See all releases
+    - contentinfo [ref=e1451]:
+      - generic [ref=e1452]:
+        - generic [ref=e1455]:
+          - heading "Ship software that never breaks" [level=2] [ref=e1456]:
+            - generic [ref=e1457]: Ship software that
+            - generic [ref=e1458]:
+              - generic [ref=e1459]: never
+              - generic [ref=e1460]: breaks
+          - generic [ref=e1461]:
+            - link "Sign up" [ref=e1462] [cursor=pointer]:
+              - /url: /join
+            - link "Contact sales" [ref=e1464] [cursor=pointer]:
+              - /url: /join
+        - generic [ref=e1466]:
+          - generic [ref=e1467]:
+            - paragraph [ref=e1468]: Ask about Interfere on
+            - generic [ref=e1469]:
+              - link "Ask about Interfere on ChatGPT" [ref=e1470] [cursor=pointer]:
+                - /url: https://chatgpt.com/?q=What+does+Interfere+%28the+startup%29+do%3F
+              - link "Ask about Interfere on Claude" [ref=e1474] [cursor=pointer]:
+                - /url: https://claude.ai/new?q=What+does+Interfere+%28the+startup%29+do%3F
+              - link "Ask about Interfere on Perplexity" [ref=e1478] [cursor=pointer]:
+                - /url: https://www.perplexity.ai/search?q=What+does+Interfere+%28the+startup%29+do%3F
+              - link "Ask about Interfere on Gemini" [ref=e1482] [cursor=pointer]:
+                - /url: https://gemini.google.com/share/1c5c7e9e887b
+              - link "Ask about Interfere on Grok" [ref=e1486] [cursor=pointer]:
+                - /url: https://grok.com/?q=What+does+Interfere+%28the+startup%29+do%3F
+          - link [ref=e1493] [cursor=pointer]:
+            - /url: https://status.interfere.com
+            - generic [ref=e1494]:
+              - img "Positive" [ref=e1495]
+              - paragraph [ref=e1516]: All systems operational
+        - separator [ref=e1518]
+        - generic [ref=e1519]:
+          - generic [ref=e1520]:
+            - generic [ref=e1521]:
+              - paragraph [ref=e1522]: Solutions
+              - generic [ref=e1523]:
+                - link [ref=e1524] [cursor=pointer]:
+                  - /url: /product/engineers
+                  - paragraph [ref=e1525]: Engineers
+                - link [ref=e1526] [cursor=pointer]:
+                  - /url: /product/designers
+                  - paragraph [ref=e1527]: Designers
+                - link [ref=e1528] [cursor=pointer]:
+                  - /url: /product/product-managers
+                  - paragraph [ref=e1529]: Product Managers
+                - link [ref=e1530] [cursor=pointer]:
+                  - /url: /product/gtm
+                  - paragraph [ref=e1531]: Customer Success
+            - generic [ref=e1532]:
+              - paragraph [ref=e1533]: Resources
+              - generic [ref=e1534]:
+                - link [ref=e1535] [cursor=pointer]:
+                  - /url: /changelog
+                  - paragraph [ref=e1536]: Changelog
+                - link "Docs (opens in a new tab)" [ref=e1537] [cursor=pointer]:
+                  - /url: https://interfere.com/docs
+                  - paragraph [ref=e1538]:
+                    - text: Docs
+                    - generic [ref=e1539]: (opens in a new tab)
+                - link [ref=e1540] [cursor=pointer]:
+                  - /url: /download
+                  - paragraph [ref=e1541]: Download
+            - generic [ref=e1542]:
+              - paragraph [ref=e1543]: Company
+              - generic [ref=e1544]:
+                - link [ref=e1545] [cursor=pointer]:
+                  - /url: /careers
+                  - paragraph [ref=e1546]: Careers
+                - link [ref=e1547] [cursor=pointer]:
+                  - /url: /join
+                  - paragraph [ref=e1548]: Contact
+                - link "Security (opens in a new tab)" [ref=e1549] [cursor=pointer]:
+                  - /url: https://trust.interfere.com/
+                  - paragraph [ref=e1550]:
+                    - text: Security
+                    - generic [ref=e1551]: (opens in a new tab)
+                - link "X (opens in a new tab)" [ref=e1552] [cursor=pointer]:
+                  - /url: https://x.com/interfere_
+                  - paragraph [ref=e1553]:
+                    - text: X
+                    - generic [ref=e1554]: (opens in a new tab)
+                - link "LinkedIn (opens in a new tab)" [ref=e1555] [cursor=pointer]:
+                  - /url: https://linkedin.com/company/interfere-inc
+                  - paragraph [ref=e1556]:
+                    - text: LinkedIn
+                    - generic [ref=e1557]: (opens in a new tab)
+                - link "Discord (opens in a new tab)" [ref=e1558] [cursor=pointer]:
+                  - /url: https://discord.gg/interfere
+                  - paragraph [ref=e1559]:
+                    - text: Discord
+                    - generic [ref=e1560]: (opens in a new tab)
+            - generic [ref=e1561]:
+              - paragraph [ref=e1562]: Legal
+              - generic [ref=e1563]:
+                - link [ref=e1564] [cursor=pointer]:
+                  - /url: /legal/cookie-policy
+                  - paragraph [ref=e1565]: Cookie Policy
+                - link [ref=e1566] [cursor=pointer]:
+                  - /url: /legal/privacy-policy
+                  - paragraph [ref=e1567]: Privacy Policy
+                - link [ref=e1568] [cursor=pointer]:
+                  - /url: /legal/terms-of-service
+                  - paragraph [ref=e1569]: Terms of Service
+          - link "Interfere" [ref=e1570] [cursor=pointer]:
+            - /url: /
+        - separator [ref=e1587]
+        - generic [ref=e1588]:
+          - paragraph [ref=e1589]: Copyright © 2026 Interfere, Inc. All rights reserved.
+          - paragraph [ref=e1590]: Interfere™ and the Interfere logo are trademarks of Interfere, Inc. Trademark applications are pending in the United States and other jurisdictions.
+  - region "Notifications alt+T"

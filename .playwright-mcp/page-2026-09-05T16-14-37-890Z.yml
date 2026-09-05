@@ -1,0 +1,272 @@
+- generic [active] [ref=f1e1]:
+  - banner [ref=f1e2]:
+    - link "OpenMerit" [ref=f1e3] [cursor=pointer]:
+      - /url: "#top"
+    - navigation "Main navigation" [ref=f1e14]:
+      - link "Product" [ref=f1e15] [cursor=pointer]:
+        - /url: "#product"
+      - link "How it works" [ref=f1e16] [cursor=pointer]:
+        - /url: "#how-it-works"
+      - link "For agents" [ref=f1e17] [cursor=pointer]:
+        - /url: "#agents"
+      - link "Free & premium" [ref=f1e18] [cursor=pointer]:
+        - /url: "#evals"
+    - link "Start with an eval" [ref=f1e19] [cursor=pointer]:
+      - /url: "#evals"
+  - main [ref=f1e23]:
+    - region [ref=f1e24]:
+      - generic [ref=f1e25]:
+        - paragraph [ref=f1e26]: MODEL DECISION INFRASTRUCTURE
+        - heading [level=1] [ref=f1e27]:
+          - text: Your stack has models.Give it
+          - emphasis [ref=f1e28]: context to choose.
+        - paragraph [ref=f1e29]: OpenMerit connects what runs your models with what measures them. Turn context from both into evidence for your next model decision.
+        - generic [ref=f1e30]:
+          - link "Start with an eval — free" [ref=f1e31] [cursor=pointer]:
+            - /url: "#evals"
+          - link "See a model decision" [ref=f1e35] [cursor=pointer]:
+            - /url: "#model-decision"
+      - figure "OpenMerit exchanges context with inference infrastructure and observability tools" [ref=f1e38]:
+        - generic [ref=f1e39]:
+          - paragraph [ref=f1e40]: INFERENCE INFRASTRUCTURE
+          - generic [ref=f1e41]:
+            - generic [ref=f1e42]: Routers
+            - generic [ref=f1e48]: Providers
+            - generic [ref=f1e52]: Inference clouds
+            - generic [ref=f1e55]: Endpoints
+        - generic [ref=f1e58]:
+          - generic [ref=f1e59]:
+            - generic [ref=f1e60]: Capabilities & constraints
+            - img "Into OpenMerit" [ref=f1e61]
+          - generic [ref=f1e63]:
+            - img "From OpenMerit" [ref=f1e64]
+            - generic [ref=f1e66]: Model & config decisions
+        - generic [ref=f1e67]:
+          - generic [ref=f1e79]: OpenMerit
+          - generic [ref=f1e80]: The model decision layer
+          - generic [ref=f1e81]: Compare. Decide. Explain.
+        - generic [ref=f1e82]:
+          - generic [ref=f1e83]:
+            - generic [ref=f1e84]: Traces & eval results
+            - img "Into OpenMerit" [ref=f1e85]
+          - generic [ref=f1e87]:
+            - img "From OpenMerit" [ref=f1e88]
+            - generic [ref=f1e90]: Decision & eval context
+        - generic [ref=f1e91]:
+          - paragraph [ref=f1e92]: OBSERVABILITY & EVALS
+          - generic [ref=f1e93]:
+            - generic [ref=f1e94]: Braintrust
+            - generic [ref=f1e97]: Langfuse
+            - generic [ref=f1e100]: LangSmith
+        - generic [ref=f1e108]: Context flows both ways. Your production requests stay on your infrastructure.
+    - region [ref=f1e109]:
+      - generic [ref=f1e110]:
+        - generic [ref=f1e111]:
+          - paragraph [ref=f1e112]: MODEL DECISION INFRASTRUCTURE
+          - heading [level=2] [ref=f1e113]:
+            - text: Use the right model.Prove
+            - emphasis [ref=f1e114]: why.
+        - generic [ref=f1e115]:
+          - paragraph [ref=f1e116]: Benchmark models against your actual task. Compare quality, latency, cost, and deployment constraints. Give humans and coding agents a defensible answer to which one to use.
+          - generic [ref=f1e117]:
+            - link "Start with an eval — free" [ref=f1e118] [cursor=pointer]:
+              - /url: "#evals"
+            - link "See a model decision" [ref=f1e122] [cursor=pointer]:
+              - /url: "#product"
+      - generic [ref=f1e126]:
+        - complementary [aria-hidden] [ref=f1e127]:
+          - generic [ref=f1e149]: om
+        - generic [ref=f1e150]:
+          - generic [ref=f1e151]:
+            - generic [ref=f1e152]:
+              - text: Workspace / Decisions /
+              - strong [ref=f1e153]: Invoice extraction
+            - generic [ref=f1e154]: Illustrative demo
+          - generic [ref=f1e155]:
+            - complementary [ref=f1e156]:
+              - paragraph [ref=f1e157]: YOUR TASKS
+              - button "Invoice extraction ↗" [pressed] [ref=f1e158] [cursor=pointer]:
+                - text: Invoice extraction
+                - generic [ref=f1e162]: ↗
+              - button "Support agent ↗" [ref=f1e163] [cursor=pointer]:
+                - text: Support agent
+                - generic [ref=f1e167]: ↗
+              - button "Repository bugfix ↗" [ref=f1e168] [cursor=pointer]:
+                - text: Repository bugfix
+                - generic [ref=f1e172]: ↗
+              - generic [ref=f1e173]: Your infrastructure.Your credentials. Your choice.
+            - generic [ref=f1e175]:
+              - generic [ref=f1e176]:
+                - generic [ref=f1e177]:
+                  - generic [ref=f1e178]:
+                    - text: DECISION RECORD
+                    - generic [ref=f1e179]: / 001
+                  - heading "Invoice extraction" [level=2] [ref=f1e180]
+                  - paragraph [ref=f1e181]: Extract 14 fields from scanned invoices.
+                - button "Download example decision record" [ref=f1e182] [cursor=pointer]:
+                  - generic [ref=f1e186]: Export
+              - generic [ref=f1e187]:
+                - tablist [ref=f1e188]:
+                  - tab "Decision" [selected] [ref=f1e189] [cursor=pointer]
+                  - tab "Evidence" [ref=f1e190] [cursor=pointer]
+                  - tab "Requirements" [ref=f1e191] [cursor=pointer]
+                - tabpanel [ref=f1e192]:
+                  - generic [ref=f1e193]:
+                    - generic [ref=f1e197]:
+                      - text: REPLACE THE INCUMBENT
+                      - heading "Qwen-VL 32B" [level=3] [ref=f1e198]
+                      - paragraph [ref=f1e199]: All critical thresholds pass. A 0.4pp quality gap does not justify 14.9× higher inference cost.
+                    - generic [ref=f1e200]: "Confidence: High"
+                  - generic [ref=f1e201]:
+                    - generic [ref=f1e202]:
+                      - text: Task quality
+                      - strong [ref=f1e203]:
+                        - text: 98.4%
+                        - generic [ref=f1e204]: qualified
+                    - generic [ref=f1e205]:
+                      - text: p95 latency
+                      - strong [ref=f1e206]:
+                        - text: 1.4s
+                        - generic [ref=f1e207]: within target
+                    - generic [ref=f1e208]:
+                      - text: Lower cost vs. Claude
+                      - strong [ref=f1e209]:
+                        - text: 93.3%
+                        - generic [ref=f1e210]: on this task
+                  - generic [ref=f1e211]:
+                    - text: Candidates compared
+                    - generic [ref=f1e212]: Cost per 1,000 requests
+                  - table [ref=f1e214]:
+                    - rowgroup [ref=f1e215]:
+                      - row [ref=f1e216]:
+                        - columnheader "Model" [ref=f1e217]
+                        - columnheader "Quality" [ref=f1e218]
+                        - columnheader "p95 latency" [ref=f1e219]
+                        - columnheader "Cost / 1k" [ref=f1e220]
+                    - rowgroup [ref=f1e221]:
+                      - row [ref=f1e222]:
+                        - cell "Q Qwen-VL 32B" [ref=f1e223]:
+                          - generic [ref=f1e224]: Q
+                          - text: Qwen-VL 32B
+                        - cell "98.4%" [ref=f1e227]
+                        - cell "1.4s" [ref=f1e228]
+                        - cell "$0.41" [ref=f1e229]
+                      - row [ref=f1e230]:
+                        - cell "G GPT mini" [ref=f1e231]:
+                          - generic [ref=f1e232]: G
+                          - text: GPT mini
+                        - cell "98.7%" [ref=f1e233]
+                        - cell "2.1s" [ref=f1e234]
+                        - cell "$4.20" [ref=f1e235]
+                      - row [ref=f1e236]:
+                        - cell "C Claude Sonnet" [ref=f1e237]:
+                          - generic [ref=f1e238]: C
+                          - text: Claude Sonnet
+                        - cell "98.8%" [ref=f1e239]
+                        - cell "2.8s" [ref=f1e240]
+                        - cell "$6.10" [ref=f1e241]
+              - generic [ref=f1e242]:
+                - generic [ref=f1e243]: Decision complete
+                - generic [ref=f1e245]: Evidence, not a leaderboard.
+      - generic [ref=f1e246]:
+        - paragraph [ref=f1e247]:
+          - text: Hosted, open, or internal.
+          - generic [ref=f1e248]: Compare model configurations on your workload.
+        - generic [ref=f1e249]:
+          - generic [ref=f1e250]: Provider APIs
+          - generic [ref=f1e251]: Local models
+          - generic [ref=f1e252]: Private endpoints
+    - generic [ref=f1e253]:
+      - paragraph [ref=f1e254]: THE DECISION LAYER BETWEEN MODELS AND APPLICATIONS
+      - heading [level=2] [ref=f1e255]:
+        - text: A leaderboard can tell youwhich model is impressive.
+        - generic [ref=f1e256]: We tell you which onebelongs in your product.
+      - generic [ref=f1e257]:
+        - article [ref=f1e258]:
+          - text: 01 / Define
+          - heading "Start with the job." [level=3] [ref=f1e259]
+          - paragraph [ref=f1e260]: Describe the job, hard requirements, and costly failures. Define scorers and representative cases in a portable .eval.md file.
+        - article [ref=f1e261]:
+          - text: 02 / Compare
+          - heading "Test what matters." [level=3] [ref=f1e262]
+          - paragraph [ref=f1e263]: Find plausible models and configurations within your privacy, licensing, and deployment limits. Benchmark them with your own runner.
+        - article [ref=f1e264]:
+          - text: 03 / Decide
+          - heading "Keep the reasoning." [level=3] [ref=f1e265]
+          - paragraph [ref=f1e266]: Compare qualified options on quality, cost, and latency. Keep a record of the tradeoffs, confidence, and rejected alternatives—even when the answer is to wait.
+    - generic [ref=f1e267]:
+      - generic [ref=f1e268]:
+        - generic [ref=f1e269]:
+          - paragraph [ref=f1e270]: THE TEST IS FREE. THE DECISION IS THE PRODUCT.
+          - heading [level=2] [ref=f1e271]:
+            - text: Define what good means.Keep it
+            - emphasis [ref=f1e272]: without us.
+        - paragraph [ref=f1e273]: Start with a task, not a model picker. Author the criteria, scorer definitions, and dataset plan. Your eval belongs in your repository.
+      - generic [ref=f1e274]:
+        - generic [ref=f1e275]:
+          - generic [ref=f1e276]:
+            - generic [ref=f1e277]: support-routing.eval.md
+            - generic [ref=f1e281]: portable starter template
+          - generic [ref=f1e282]: "# Support routing ## Objective Classify support requests into 14 queues. ## Hard constraints - valid JSON = 100% - security false-negative rate < 0.5% - billing false-negative rate < 1% - p95 latency < 700ms ## Priorities high-risk recall > accuracy > latency > cost ## Dataset plan 80 normal · 20 ambiguous · 20 high-risk 10 adversarial cases"
+          - link "Download the starter .eval.md" [ref=f1e287] [cursor=pointer]:
+            - /url: /support-routing.eval.md
+        - generic [ref=f1e288]:
+          - article [ref=f1e289]:
+            - text: Free / Eval authoring
+            - heading "A useful test you can take with you." [level=3] [ref=f1e290]
+            - paragraph [ref=f1e291]: Task definitions, rubrics, scorer scaffolds, dataset structure, local/manual execution, and portable exports.
+            - link "Start with the free template" [ref=f1e292] [cursor=pointer]:
+              - /url: /support-routing.eval.md
+          - article [ref=f1e296]:
+            - text: Premium / Decisions & automation
+            - heading "Know what to use. Know when to change." [level=3] [ref=f1e297]
+            - paragraph [ref=f1e298]: Candidate discovery, automated comparisons, statistical equivalence, Pareto analysis, and decision records. Continuous re-evaluation, team approvals, and agent/CI workflows maintain the decision over time.
+            - link "Explore a decision example" [ref=f1e299] [cursor=pointer]:
+              - /url: "#product"
+    - generic [ref=f1e303]:
+      - generic [ref=f1e304]:
+        - paragraph [ref=f1e305]: CODING AGENTS ARE FIRST-CLASS USERS.
+        - heading [level=2] [ref=f1e306]:
+          - text: “Can we cut the costof this feature?”
+          - emphasis [ref=f1e307]: Give your agent evidence.
+        - paragraph [ref=f1e308]: The same task and decision primitives serve the web UI, MCP, CLI, and CI. Your agent identifies the model call, creates an eval, and brings back a structured recommendation for review.
+        - link "Read the MCP tool specification" [ref=f1e309] [cursor=pointer]:
+          - /url: /agent-spec.md
+      - generic [ref=f1e313]:
+        - generic [ref=f1e314]:
+          - generic [ref=f1e315]: Repository → decision
+          - generic [ref=f1e318]: proposed MCP workflow
+        - generic [ref=f1e319]: // Define the task and what success means task.analyze eval.create // Find configurations worth testing models.search benchmark.plan // Your runner executes. Keys stay local. benchmark.submit_results decision.recommend decision.explain
+        - generic [ref=f1e320]: Recommendation, confidence, evidence, next actions.
+    - generic [ref=f1e323]:
+      - paragraph [ref=f1e324]: IN THE ARCHITECTURE. OUT OF THE HOT PATH.
+      - generic [ref=f1e325]:
+        - heading [level=2] [ref=f1e326]:
+          - text: The decision is ours.The control stays
+          - emphasis [ref=f1e327]: yours.
+        - generic [ref=f1e328]:
+          - generic [ref=f1e329]:
+            - heading "Your keys stay with you." [level=3] [ref=f1e330]
+            - paragraph [ref=f1e331]: A local or customer-controlled runner executes benchmarks. Provider keys and private endpoint credentials stay in your environment.
+          - generic [ref=f1e332]:
+            - heading "No routing. No token markup." [level=3] [ref=f1e333]
+            - paragraph [ref=f1e334]: Your application calls the chosen provider directly. Production keeps running even if OpenMerit is unavailable. There is no inference token markup.
+          - generic [ref=f1e335]:
+            - heading "Raw examples can stay local." [level=3] [ref=f1e336]
+            - paragraph [ref=f1e337]: Share metadata-only results when your privacy policy requires it. Compare internal models without exposing raw inputs, outputs, or endpoint credentials.
+    - generic [ref=f1e338]:
+      - generic [ref=f1e339]:
+        - paragraph [ref=f1e340]: CHOOSE ON EVIDENCE.
+        - heading [level=2] [ref=f1e341]:
+          - text: Need a model?Don’t
+          - emphasis [ref=f1e342]: guess.
+      - generic [ref=f1e343]:
+        - paragraph [ref=f1e344]: Describe what your model needs to do.
+        - link "Start with an eval — free" [ref=f1e345] [cursor=pointer]:
+          - /url: "#evals"
+  - contentinfo [ref=f1e349]:
+    - link "OpenMerit" [ref=f1e350] [cursor=pointer]:
+      - /url: "#top"
+    - generic [ref=f1e361]: The model decision layer.
+    - link "Back to top ↑" [ref=f1e362] [cursor=pointer]:
+      - /url: "#top"
