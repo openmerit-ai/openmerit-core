@@ -205,6 +205,8 @@ export default function Workbench() {
     [remoteImport, setRemoteImport] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null),
     resultRef = useRef<HTMLInputElement>(null);
+  /* oxlint-disable react/react-compiler -- These effects hydrate external browser
+     storage and invalidate results when their defining inputs change. */
   useEffect(() => {
     try {
       const draft = localStorage.getItem('openmerit:draft');
@@ -244,6 +246,7 @@ export default function Workbench() {
     setDeployPlan(null);
     setObservations([]);
   }, [spec, destination]);
+  /* oxlint-enable react/react-compiler */
   const health = spec ? validateEval(spec) : null;
   const readiness = spec ? destinationReadiness(spec, destination) : null;
   function update(patch: Partial<EvalSpec>) {
