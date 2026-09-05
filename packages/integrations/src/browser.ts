@@ -4,4 +4,4 @@ export {
   scorerCompatibility,
   type CompatibilityMode,
   type ScorerCompatibility,
-} from './awareness.ts';
+} from "./awareness.ts";

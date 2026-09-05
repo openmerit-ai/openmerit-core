@@ -1085,248 +1085,256 @@ export default function Workbench() {
                     {spec.scorers.map((s, i) => {
                       const compatibility = scorerCompatibility(s, destination);
                       return (
-                      <div className="studio-card" key={s.id}>
-                        <div className="studio-card-top">
-                          <span className="studio-pill neutral">
-                            {s.kind === 'judge' ? 'LLM JUDGE' : 'DETERMINISTIC'}
-                          </span>
-                          <span
-                            className={`studio-compat ${compatibility.mode}`}
-                            title={compatibility.reason}
-                          >
-                            <span className="studio-green-dot" />
-                            {compatibility.label}
-                          </span>
-                        </div>
-                        <input
-                          className="studio-grader-title"
-                          aria-label={`Grader name ${i + 1}`}
-                          value={s.name}
-                          onChange={(e) =>
-                            update({
-                              scorers: spec.scorers.map((x, j) =>
-                                i === j ? { ...x, name: e.target.value } : x,
-                              ),
-                            })
-                          }
-                        />
-                        <div className="studio-two-col">
-                          <label className="studio-field">
-                            Scoring method
-                            <select
-                              value={s.kind}
-                              onChange={(e) =>
-                                update({
-                                  scorers: spec.scorers.map((x, j) =>
-                                    i === j
-                                      ? {
-                                          ...x,
-                                          kind: e.target.value as typeof s.kind,
-                                        }
-                                      : x,
-                                  ),
-                                })
-                              }
+                        <div className="studio-card" key={s.id}>
+                          <div className="studio-card-top">
+                            <span className="studio-pill neutral">
+                              {s.kind === 'judge'
+                                ? 'LLM JUDGE'
+                                : 'DETERMINISTIC'}
+                            </span>
+                            <span
+                              className={`studio-compat ${compatibility.mode}`}
+                              title={compatibility.reason}
                             >
-                              {[
-                                'exact',
-                                'normalized',
-                                'contains',
-                                'regex',
-                                'numeric',
-                                'set',
-                                'json-schema',
-                                'judge',
-                                'custom',
-                              ].map((k) => (
-                                <option key={k}>{k}</option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="studio-field">
-                            Pass threshold
-                            <input
-                              type="number"
-                              min={0}
-                              max={1}
-                              step={0.05}
-                              value={s.threshold}
-                              onChange={(e) =>
-                                update({
-                                  scorers: spec.scorers.map((x, j) =>
-                                    i === j
-                                      ? {
-                                          ...x,
-                                          threshold: Math.max(
-                                            0,
-                                            Math.min(1, Number(e.target.value)),
-                                          ),
-                                        }
-                                      : x,
-                                  ),
-                                })
-                              }
-                            />
-                          </label>
-                        </div>
-                        <Label title="Measures" />
-                        <div className="studio-checks">
-                          {spec.requirements.map((r) => (
-                            <label key={r.id}>
-                              <input
-                                type="checkbox"
-                                checked={s.requirementIds.includes(r.id)}
+                              <span className="studio-green-dot" />
+                              {compatibility.label}
+                            </span>
+                          </div>
+                          <input
+                            className="studio-grader-title"
+                            aria-label={`Grader name ${i + 1}`}
+                            value={s.name}
+                            onChange={(e) =>
+                              update({
+                                scorers: spec.scorers.map((x, j) =>
+                                  i === j ? { ...x, name: e.target.value } : x,
+                                ),
+                              })
+                            }
+                          />
+                          <div className="studio-two-col">
+                            <label className="studio-field">
+                              Scoring method
+                              <select
+                                value={s.kind}
                                 onChange={(e) =>
                                   update({
                                     scorers: spec.scorers.map((x, j) =>
                                       i === j
                                         ? {
                                             ...x,
-                                            requirementIds: e.target.checked
-                                              ? [...x.requirementIds, r.id]
-                                              : x.requirementIds.filter(
-                                                  (id) => id !== r.id,
-                                                ),
+                                            kind: e.target
+                                              .value as typeof s.kind,
+                                          }
+                                        : x,
+                                    ),
+                                  })
+                                }
+                              >
+                                {[
+                                  'exact',
+                                  'normalized',
+                                  'contains',
+                                  'regex',
+                                  'numeric',
+                                  'set',
+                                  'json-schema',
+                                  'judge',
+                                  'custom',
+                                ].map((k) => (
+                                  <option key={k}>{k}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="studio-field">
+                              Pass threshold
+                              <input
+                                type="number"
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                value={s.threshold}
+                                onChange={(e) =>
+                                  update({
+                                    scorers: spec.scorers.map((x, j) =>
+                                      i === j
+                                        ? {
+                                            ...x,
+                                            threshold: Math.max(
+                                              0,
+                                              Math.min(
+                                                1,
+                                                Number(e.target.value),
+                                              ),
+                                            ),
                                           }
                                         : x,
                                     ),
                                   })
                                 }
                               />
-                              {r.text}
                             </label>
-                          ))}
-                        </div>
-                        {s.kind === 'judge' ? (
-                          <>
-                            <Label title="Judge instructions" />
-                            <textarea
-                              className="studio-textarea tall"
-                              value={s.rubric ?? ''}
-                              onChange={(e) =>
-                                update({
-                                  scorers: spec.scorers.map((x, j) =>
-                                    i === j
-                                      ? { ...x, rubric: e.target.value }
-                                      : x,
-                                  ),
-                                })
-                              }
-                            />
-                            <Label title="Score anchors" />
-                            <div className="studio-anchors">
-                              {s.anchors.map((a, j) => (
-                                <div key={j}>
-                                  <span>{a.score}</span>
-                                  <input
-                                    aria-label={`Anchor ${a.score}`}
-                                    value={a.description}
-                                    onChange={(e) =>
-                                      update({
-                                        scorers: spec.scorers.map((x, k) =>
-                                          i === k
-                                            ? {
-                                                ...x,
-                                                anchors: x.anchors.map(
-                                                  (v, l) =>
-                                                    j === l
-                                                      ? {
-                                                          ...v,
-                                                          description:
-                                                            e.target.value,
-                                                        }
-                                                      : v,
-                                                ),
-                                              }
-                                            : x,
-                                        ),
-                                      })
-                                    }
-                                  />
-                                </div>
-                              ))}
-                            </div>
+                          </div>
+                          <Label title="Measures" />
+                          <div className="studio-checks">
+                            {spec.requirements.map((r) => (
+                              <label key={r.id}>
+                                <input
+                                  type="checkbox"
+                                  checked={s.requirementIds.includes(r.id)}
+                                  onChange={(e) =>
+                                    update({
+                                      scorers: spec.scorers.map((x, j) =>
+                                        i === j
+                                          ? {
+                                              ...x,
+                                              requirementIds: e.target.checked
+                                                ? [...x.requirementIds, r.id]
+                                                : x.requirementIds.filter(
+                                                    (id) => id !== r.id,
+                                                  ),
+                                            }
+                                          : x,
+                                      ),
+                                    })
+                                  }
+                                />
+                                {r.text}
+                              </label>
+                            ))}
+                          </div>
+                          {s.kind === 'judge' ? (
+                            <>
+                              <Label title="Judge instructions" />
+                              <textarea
+                                className="studio-textarea tall"
+                                value={s.rubric ?? ''}
+                                onChange={(e) =>
+                                  update({
+                                    scorers: spec.scorers.map((x, j) =>
+                                      i === j
+                                        ? { ...x, rubric: e.target.value }
+                                        : x,
+                                    ),
+                                  })
+                                }
+                              />
+                              <Label title="Score anchors" />
+                              <div className="studio-anchors">
+                                {s.anchors.map((a, j) => (
+                                  <div key={j}>
+                                    <span>{a.score}</span>
+                                    <input
+                                      aria-label={`Anchor ${a.score}`}
+                                      value={a.description}
+                                      onChange={(e) =>
+                                        update({
+                                          scorers: spec.scorers.map((x, k) =>
+                                            i === k
+                                              ? {
+                                                  ...x,
+                                                  anchors: x.anchors.map(
+                                                    (v, l) =>
+                                                      j === l
+                                                        ? {
+                                                            ...v,
+                                                            description:
+                                                              e.target.value,
+                                                          }
+                                                        : v,
+                                                  ),
+                                                }
+                                              : x,
+                                          ),
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                              <button
+                                className="studio-text-button"
+                                onClick={() =>
+                                  update({
+                                    scorers: spec.scorers.map((x, j) =>
+                                      j === i
+                                        ? {
+                                            ...x,
+                                            anchors: [
+                                              ...x.anchors,
+                                              {
+                                                score: 1,
+                                                description:
+                                                  'Describe passing behavior',
+                                              },
+                                            ],
+                                          }
+                                        : x,
+                                    ),
+                                  })
+                                }
+                              >
+                                <Plus size={13} />
+                                Add anchor
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <Label
+                                title="Output field path"
+                                hint="Optional dot path, e.g. queue or invoice.total"
+                              />
+                              <input
+                                className="studio-input"
+                                value={s.path}
+                                onChange={(e) =>
+                                  update({
+                                    scorers: spec.scorers.map((x, j) =>
+                                      i === j
+                                        ? { ...x, path: e.target.value }
+                                        : x,
+                                    ),
+                                  })
+                                }
+                              />
+                              <Label
+                                title="Scorer configuration"
+                                hint="JSON schema, regex pattern, numeric tolerance, or contains value."
+                              />
+                              <JsonField
+                                value={s.config}
+                                onSave={(config) =>
+                                  update({
+                                    scorers: spec.scorers.map((x, j) =>
+                                      i === j ? { ...x, config } : x,
+                                    ),
+                                  })
+                                }
+                              />
+                            </>
+                          )}
+                          <div className="studio-grader-footer">
+                            <span>
+                              {
+                                spec.cases.filter(
+                                  (c) =>
+                                    c.split === 'calibration' &&
+                                    s.id in c.labels,
+                                ).length
+                              }{' '}
+                              human-labeled calibration cases
+                            </span>
                             <button
                               className="studio-text-button"
-                              onClick={() =>
-                                update({
-                                  scorers: spec.scorers.map((x, j) =>
-                                    j === i
-                                      ? {
-                                          ...x,
-                                          anchors: [
-                                            ...x.anchors,
-                                            {
-                                              score: 1,
-                                              description:
-                                                'Describe passing behavior',
-                                            },
-                                          ],
-                                        }
-                                      : x,
-                                  ),
-                                })
-                              }
+                              onClick={() => setTab('cases')}
                             >
-                              <Plus size={13} />
-                              Add anchor
+                              Add labels
+                              <ArrowRight size={13} />
                             </button>
-                          </>
-                        ) : (
-                          <>
-                            <Label
-                              title="Output field path"
-                              hint="Optional dot path, e.g. queue or invoice.total"
-                            />
-                            <input
-                              className="studio-input"
-                              value={s.path}
-                              onChange={(e) =>
-                                update({
-                                  scorers: spec.scorers.map((x, j) =>
-                                    i === j
-                                      ? { ...x, path: e.target.value }
-                                      : x,
-                                  ),
-                                })
-                              }
-                            />
-                            <Label
-                              title="Scorer configuration"
-                              hint="JSON schema, regex pattern, numeric tolerance, or contains value."
-                            />
-                            <JsonField
-                              value={s.config}
-                              onSave={(config) =>
-                                update({
-                                  scorers: spec.scorers.map((x, j) =>
-                                    i === j ? { ...x, config } : x,
-                                  ),
-                                })
-                              }
-                            />
-                          </>
-                        )}
-                        <div className="studio-grader-footer">
-                          <span>
-                            {
-                              spec.cases.filter(
-                                (c) =>
-                                  c.split === 'calibration' && s.id in c.labels,
-                              ).length
-                            }{' '}
-                            human-labeled calibration cases
-                          </span>
-                          <button
-                            className="studio-text-button"
-                            onClick={() => setTab('cases')}
-                          >
-                            Add labels
-                            <ArrowRight size={13} />
-                          </button>
+                          </div>
                         </div>
-                      </div>
-                    )})}
+                      );
+                    })}
                   </>
                 )}
                 {tab === 'review' && (

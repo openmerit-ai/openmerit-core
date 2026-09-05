@@ -1,6 +1,6 @@
-import type {Destination, EvalSpec, Scorer} from '../../core/src/index.ts';
+import type { Destination, EvalSpec, Scorer } from "../../core/src/index.ts";
 
-export type CompatibilityMode = 'native' | 'sdk-wrapper' | 'local-harness' | 'blocked';
+export type CompatibilityMode = "native" | "sdk-wrapper" | "local-harness" | "blocked";
 
 export type ScorerCompatibility = {
   mode: CompatibilityMode;
@@ -10,65 +10,62 @@ export type ScorerCompatibility = {
 
 export const destinationCapabilities = (destination: Destination) => ({
   destination,
-  scopes: ['output'] as const,
+  scopes: ["output"] as const,
   kinds: [
-    'exact',
-    'normalized',
-    'contains',
-    'regex',
-    'numeric',
-    'set',
-    'json-schema',
-    'judge',
+    "exact",
+    "normalized",
+    "contains",
+    "regex",
+    "numeric",
+    "set",
+    "json-schema",
+    "judge",
   ] as const,
-  execution: destination === 'local' ? ('local' as const) : ('sdk' as const),
-  selectedImports: destination !== 'local',
+  execution: destination === "local" ? ("local" as const) : ("sdk" as const),
+  selectedImports: destination !== "local",
   attachments: false,
   productionActivation: false,
 });
 
-export function scorerCompatibility(
-  scorer: Scorer,
-  destination: Destination,
-): ScorerCompatibility {
+export function scorerCompatibility(scorer: Scorer, destination: Destination): ScorerCompatibility {
   if (scorer.dependencies.length) {
     return {
-      mode: destination === 'local' ? 'local-harness' : 'blocked',
-      label: destination === 'local' ? 'Local harness' : 'Blocked',
-      reason: 'Unverified scorer dependencies require an explicit local harness.',
+      mode: destination === "local" ? "local-harness" : "blocked",
+      label: destination === "local" ? "Local harness" : "Blocked",
+      reason: "Unverified scorer dependencies require an explicit local harness.",
     };
   }
 
-  if (scorer.scope !== 'output') {
+  if (scorer.scope !== "output") {
     return {
-      mode: destination === 'local' ? 'local-harness' : 'blocked',
-      label: destination === 'local' ? 'Local harness' : 'Blocked',
+      mode: destination === "local" ? "local-harness" : "blocked",
+      label: destination === "local" ? "Local harness" : "Blocked",
       reason: `${scorer.scope} scope requires application context that portable destination SDKs do not provide.`,
     };
   }
 
-  if (scorer.kind === 'custom') {
+  if (scorer.kind === "custom") {
     return {
-      mode: destination === 'local' ? 'local-harness' : 'blocked',
-      label: destination === 'local' ? 'Local harness' : 'Blocked',
+      mode: destination === "local" ? "local-harness" : "blocked",
+      label: destination === "local" ? "Local harness" : "Blocked",
       reason:
-        destination === 'local'
-          ? 'Custom code runs only when explicitly enabled in your trusted environment.'
-          : 'Custom Python cannot be published by this destination adapter.',
+        destination === "local"
+          ? "Custom code runs only when explicitly enabled in your trusted environment."
+          : "Custom Python cannot be published by this destination adapter.",
     };
   }
 
-  if (destination === 'local') {
+  if (destination === "local") {
     return {
-      mode: 'native',
-      label: 'Portable local',
-      reason: 'Runs in the exported standalone Python runtime.',
+      mode: "native",
+      label: "Portable local",
+      reason: "Runs in the exported standalone Python runtime.",
     };
   }
 
   return {
-    mode: 'sdk-wrapper',
-    label: 'SDK wrapper',
+    mode: "sdk-wrapper",
+    label: "SDK wrapper",
     reason: `Runs through the exported ${destination} SDK package; no scorer semantics are dropped.`,
   };
 }
@@ -79,18 +76,18 @@ export function destinationReadiness(spec: EvalSpec, destination: Destination) {
     ...scorerCompatibility(scorer, destination),
   }));
   const mediaCases = spec.cases.filter(
-    (item) => item.attachments.length || JSON.stringify(item.input).includes('local://'),
+    (item) => item.attachments.length || JSON.stringify(item.input).includes("local://"),
   );
   const blockers = [
     ...scorers
-      .filter((item) => item.mode === 'blocked')
-      .map((item) => ({path: item.scorerId, message: item.reason})),
+      .filter((item) => item.mode === "blocked")
+      .map((item) => ({ path: item.scorerId, message: item.reason })),
     ...(mediaCases.length
       ? [
           {
-            path: 'cases',
+            path: "cases",
             message:
-              'Local document or image references require supplied outputs or a custom application harness.',
+              "Local document or image references require supplied outputs or a custom application harness.",
           },
         ]
       : []),
@@ -98,7 +95,7 @@ export function destinationReadiness(spec: EvalSpec, destination: Destination) {
 
   return {
     destination,
-    execution: destination === 'local' ? ('local' as const) : ('sdk' as const),
+    execution: destination === "local" ? ("local" as const) : ("sdk" as const),
     valid: blockers.length === 0,
     blockers,
     scorers,
