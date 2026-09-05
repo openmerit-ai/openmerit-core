@@ -1,10 +1,11 @@
 import {createHash} from 'node:crypto';
 import {EvalSpec,serialize,canonical,validateEval,type Destination,type Diagnostic} from '../../core/src/index.ts';
 import {runtimeSource} from './runtime-source.ts';
+import {destinationCapabilities} from './awareness.ts';
 import {z} from 'zod';
 export const pins={langfuse:'4.15.1',braintrust:'0.37.0',langsmith:'0.12.1'};
 export function hash(value:unknown){return createHash('sha256').update(canonical(value)).digest('hex');}
-export function capabilities(destination:Destination){return {destination,scopes:['output'],kinds:['exact','normalized','contains','regex','numeric','set','json-schema','judge'],execution:destination==='local'?'local':'sdk',nativeEvaluatorPublishing:false,selectedImports:destination!=='local',attachments:false,productionActivation:false};}
+export function capabilities(destination:Destination){return {...destinationCapabilities(destination),nativeEvaluatorPublishing:false};}
 export function validateTarget(spec:EvalSpec,destination:Destination){const diagnostics:Diagnostic[]=[...validateEval(spec).diagnostics];for(const s of spec.scorers){if(s.scope!=='output')diagnostics.push({code:'UNSUPPORTED_SCOPE',severity:'error',message:`${s.name}: ${s.scope} requires a custom application harness`,path:s.id,action:'Use a supported output-level scorer or supply a dedicated harness outside this compiler'});if(s.kind==='custom'&&destination!=='local')diagnostics.push({code:'CUSTOM_RUNTIME',severity:'error',message:'Custom Python code cannot be published by this adapter',path:s.id,action:'Use the local runner with an explicit trusted entrypoint'});if(s.dependencies.length)diagnostics.push({code:'DEPENDENCIES',severity:'error',message:'Unverified custom dependencies are not portable',path:s.id,action:'Package the scorer in a dedicated local harness'});if(s.config.schema&&JSON.stringify(s.config.schema).includes('"$ref"'))diagnostics.push({code:'SCHEMA_REF',severity:'error',message:'Schema references are not supported in portable bundles',path:s.id,action:'Inline the referenced schema'});}
 if(spec.cases.some(c=>c.attachments.length||JSON.stringify(c.input).includes('local://')))diagnostics.push({code:'ATTACHMENT_HARNESS',severity:'error',message:'Local document/image references require an application harness',path:'cases',action:'Supply outputs for local grading or implement a multimodal target harness'});
 return {destination,valid:!diagnostics.some(d=>d.severity==='error'),diagnostics,execution:capabilities(destination).execution};}

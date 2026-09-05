@@ -5,3 +5,4 @@ export * from './validation.ts';
 export * from './templates.ts';
 export * from './imports.ts';
 export * from './results.ts';
+export * from './benchmarks.ts';

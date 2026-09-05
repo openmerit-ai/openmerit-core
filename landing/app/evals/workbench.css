@@ -275,3 +275,57 @@
 .studio-history-item {
   color: #4f4654;
 }
+
+.studio-platform-strip > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #747474;
+  font-size: 10px;
+}
+.studio-platform-strip > button:hover,
+.studio-platform-strip > button.chosen {
+  border-color: #d9d9d9;
+  background: #fff;
+  color: #242424;
+}
+.studio-platform-strip > button.chosen {
+  box-shadow: 0 1px 2px #00000008;
+}
+.studio-compat.blocked .studio-green-dot {
+  background: #b56c6c;
+}
+.studio-compat.local-harness .studio-green-dot {
+  background: #aa874e;
+}
+.studio-readiness {
+  display: grid;
+  gap: 4px;
+  margin-top: 13px;
+  padding: 10px;
+  border: 1px solid #e4e4e4;
+  border-radius: 5px;
+  background: #fff;
+}
+.studio-readiness strong {
+  color: #555;
+  font-size: 9px;
+  font-weight: 600;
+}
+.studio-readiness span {
+  color: #747474;
+  font-size: 9px;
+  line-height: 1.5;
+}
+.studio-readiness.ready {
+  border-color: #dfe8df;
+  background: #f6f9f5;
+}
+.studio-readiness.blocked {
+  border-color: #eddede;
+  background: #fcf7f7;
+}

@@ -1,1 +1,10 @@
-{"name":"@openmerit/integrations","version":"0.1.0","private":true,"type":"module","exports":"./src/index.ts"}
+{
+  "name": "@openmerit/integrations",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./browser": "./src/browser.ts"
+  }
+}

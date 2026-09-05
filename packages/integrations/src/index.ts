@@ -2,6 +2,7 @@ import {z} from 'zod';
 import {Case,type EvalSpec,type Destination,type EvalCase} from '../../core/src/index.ts';
 import {compile,hash,capabilities,validateTarget} from './compiler.ts';
 export * from './compiler.ts';
+export * from './awareness.ts';
 export const Connection=z.object({id:z.string(),destination:z.enum(['langfuse','braintrust','langsmith']),baseUrl:z.string().url(),apiKey:z.string().min(1),publicKey:z.string().optional(),projectId:z.string().min(1),name:z.string().min(1)});
 export type Connection=z.infer<typeof Connection>;
 export type Checkpoint={id:string;destination:Destination;contentHash:string;status:'planned'|'publishing'|'sdk-required'|'failed';resourceId?:string;resourceName:string;completed:string[];url?:string;error?:string;createdAt:string};
