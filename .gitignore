@@ -1,0 +1,12 @@
+node_modules/
+.next/
+*.tsbuildinfo
+.env
+.env.local
+.env.production
+.openmerit/
+__pycache__/
+.venv/
+*.egg-info/
+coverage/
+.playwright-mcp/
