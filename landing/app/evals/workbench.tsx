@@ -18,18 +18,15 @@ import {
   SlidersHorizontal,
   Play,
   Send,
-  Settings2,
   CheckCircle2,
   AlertTriangle,
   X,
   Loader2,
   Sparkles,
   BookOpen,
-  Terminal,
   History,
   Link2,
   Trash2,
-  Copy,
   Code2,
   Eye,
   ExternalLink,
@@ -67,6 +64,27 @@ type Conn = {
   projectId: string;
   baseUrl: string;
 };
+type DiagnosticReport = {
+  valid: boolean;
+  diagnostics: Array<{
+    severity: 'error' | 'warning' | 'info';
+    message: string;
+    action: string;
+  }>;
+};
+type Deployment = {
+  id: string;
+  resourceName: string;
+  status: string;
+  url?: string;
+};
+type DeploymentPlan = { changes: string[] };
+type GenerationJob = {
+  id: string;
+  status: 'queued' | 'running' | 'failed' | 'complete';
+  error?: string;
+  proposal?: EvalSpec;
+};
 const destinations: {
   id: Destination;
   name: string;
@@ -101,13 +119,21 @@ const nav: { id: Tab; label: string; icon: typeof FileText }[] = [
   { id: 'review', label: 'Validate & test', icon: FlaskConical },
   { id: 'publish', label: 'Export & deploy', icon: Send },
 ];
-async function api(path: string, body?: unknown, method?: string) {
+async function api<T>(
+  path: string,
+  body?: unknown,
+  method?: string,
+): Promise<T> {
   const response = await fetch('/api/' + path, {
     method: method ?? (body ? 'POST' : 'GET'),
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
-  const result = await response.json();
+  const result = (await response.json()) as {
+    ok: boolean;
+    data: T;
+    error?: string;
+  };
   if (!response.ok || !result.ok) throw Error(result.error ?? 'Request failed');
   return result.data;
 }
@@ -172,9 +198,9 @@ export default function Workbench() {
       output: 'output',
     }),
     [observations, setObservations] = useState<Observation[]>([]),
-    [report, setReport] = useState<any>(null),
-    [deployPlan, setDeployPlan] = useState<any>(null),
-    [deployments, setDeployments] = useState<any[]>([]),
+    [report, setReport] = useState<DiagnosticReport | null>(null),
+    [deployPlan, setDeployPlan] = useState<DeploymentPlan | null>(null),
+    [deployments, setDeployments] = useState<Deployment[]>([]),
     [connectionId, setConnectionId] = useState(''),
     [remoteImport, setRemoteImport] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null),
@@ -192,13 +218,13 @@ export default function Workbench() {
       );
     }
     setLoaded(true);
-    api('workspace/me')
+    api<unknown>('workspace/me')
       .then(() => {
         setSignedIn(true);
-        api('workspace/connections')
+        api<Conn[]>('workspace/connections')
           .then(setConnections)
           .catch(() => {});
-        api('workspace/deployments')
+        api<Deployment[]>('workspace/deployments')
           .then(setDeployments)
           .catch(() => {});
       })
@@ -244,14 +270,14 @@ export default function Workbench() {
   async function generate() {
     if (!spec) return;
     await act('Designing your eval', async () => {
-      let result = await api('workspace/generate', {
+      let result = await api<GenerationJob>('workspace/generate', {
         description: spec.description,
         family: spec.family,
         current: spec,
       });
       while (result.status === 'queued' || result.status === 'running') {
         await new Promise((r) => setTimeout(r, 1500));
-        result = await api('workspace/jobs/' + result.id);
+        result = await api<GenerationJob>('workspace/jobs/' + result.id);
       }
       if (result.status === 'failed') throw Error(result.error);
       setProposal(EvalSpec.parse(result.proposal));
@@ -265,7 +291,7 @@ export default function Workbench() {
         ...saved.filter((s) => s.id === spec.id).map((s) => s.version + 1),
       );
       const snapshot = EvalSpec.parse({ ...spec, version });
-      if (signedIn) await api('workspace/evals', snapshot);
+      if (signedIn) await api<unknown>('workspace/evals', snapshot);
       const next = [snapshot, ...saved];
       localStorage.setItem('openmerit:versions', JSON.stringify(next));
       setSaved(next);
@@ -375,10 +401,10 @@ export default function Workbench() {
             <ArrowUpRight size={14} />
           </a>
           {!signedIn ? (
-            <a className="studio-nav" href="/api/auth/login">
+            <Link className="studio-nav" href="/api/auth/login">
               <span className="studio-avatar small">↗</span>Sign in to sync &
               connect
-            </a>
+            </Link>
           ) : (
             <div className="studio-nav">
               <span className="studio-avatar small">P</span>Personal workspace
@@ -414,7 +440,7 @@ export default function Workbench() {
           </div>
         </header>
         {notice && (
-          <div className="studio-notice" role="status">
+          <output className="studio-notice">
             <AlertTriangle size={16} />
             <span>{notice}</span>
             <button
@@ -423,7 +449,7 @@ export default function Workbench() {
             >
               <X size={16} />
             </button>
-          </div>
+          </output>
         )}
         {!spec ? (
           <main className="studio-onboarding">
@@ -447,7 +473,6 @@ export default function Workbench() {
                 Describe your task<span>01 / START WITH THE JOB</span>
               </div>
               <textarea
-                autoFocus
                 value={brief}
                 onChange={(e) => setBrief(e.target.value)}
                 placeholder="We classify support emails into 14 queues. Missing a security issue is much worse than an ordinary routing mistake. The output must be JSON…"
@@ -950,7 +975,7 @@ export default function Workbench() {
                               <th>SOURCE</th>
                               <th>SPLIT</th>
                               <th>COVERAGE</th>
-                              <th />
+                              <th>ACTIONS</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -959,6 +984,7 @@ export default function Workbench() {
                                 <td>
                                   <button
                                     className="studio-case-link"
+                                    aria-label={`Edit ${c.id}`}
                                     onClick={() => setEditingCase(c)}
                                   >
                                     <span className="studio-case-num">
@@ -1576,10 +1602,13 @@ export default function Workbench() {
                             act('Checking compatibility', async () =>
                               setReport(
                                 (
-                                  await api('eval/compile', {
-                                    spec,
-                                    destination,
-                                  })
+                                  await api<{ report: DiagnosticReport }>(
+                                    'eval/compile',
+                                    {
+                                      spec,
+                                      destination,
+                                    },
+                                  )
                                 ).report,
                               ),
                             )
@@ -1609,8 +1638,8 @@ export default function Workbench() {
                               : 'Resolve these compatibility issues'}
                           </strong>
                           {report.diagnostics
-                            .filter((d: any) => d.severity === 'error')
-                            .map((d: any, i: number) => (
+                            .filter((d) => d.severity === 'error')
+                            .map((d, i) => (
                               <p key={i}>
                                 {d.message} — {d.action}
                               </p>
@@ -1653,10 +1682,13 @@ export default function Workbench() {
                             onClick={() =>
                               act('Planning deployment', async () =>
                                 setDeployPlan(
-                                  await api('workspace/deploy/plan', {
-                                    connectionId,
-                                    spec,
-                                  }),
+                                  await api<DeploymentPlan>(
+                                    'workspace/deploy/plan',
+                                    {
+                                      connectionId,
+                                      spec,
+                                    },
+                                  ),
                                 ),
                               )
                             }
@@ -1679,10 +1711,13 @@ export default function Workbench() {
                               disabled={!!busy}
                               onClick={() =>
                                 act('Publishing dataset', async () => {
-                                  const result = await api('workspace/deploy', {
-                                    spec,
-                                    connectionId,
-                                  });
+                                  const result = await api<Deployment>(
+                                    'workspace/deploy',
+                                    {
+                                      spec,
+                                      connectionId,
+                                    },
+                                  );
                                   setDeployments([
                                     result,
                                     ...deployments.filter(
@@ -1860,10 +1895,10 @@ export default function Workbench() {
         </footer>
       </div>
       {busy && (
-        <div className="studio-busy" role="status">
+        <output className="studio-busy">
           <Loader2 className="spin" size={16} />
           {busy}…
-        </div>
+        </output>
       )}
       {showHistory && (
         <Modal title="Saved versions" onClose={() => setShowHistory(false)}>
@@ -2376,7 +2411,11 @@ function ConnectionModal({
             aria-label={`Revoke ${c.name}`}
             onClick={async () => {
               try {
-                await api('workspace/connections/' + c.id, undefined, 'DELETE');
+                await api<unknown>(
+                  'workspace/connections/' + c.id,
+                  undefined,
+                  'DELETE',
+                );
                 revoked(c.id);
               } catch (e) {
                 setError(String(e));
@@ -2388,10 +2427,10 @@ function ConnectionModal({
         </div>
       ))}
       {!signedIn ? (
-        <a className="studio-btn primary" href="/api/auth/login">
+        <Link className="studio-btn primary" href="/api/auth/login">
           Sign in to connect
           <ArrowRight size={15} />
-        </a>
+        </Link>
       ) : (
         <>
           <label className="studio-field">
@@ -2462,7 +2501,7 @@ function ConnectionModal({
               setBusy(true);
               setError('');
               try {
-                const c = await api('workspace/connections', {
+                const c = await api<Conn>('workspace/connections', {
                   id: crypto.randomUUID(),
                   destination: target,
                   name,
@@ -2555,7 +2594,7 @@ function RemoteImportModal({
           setBusy(true);
           try {
             setCases(
-              await api('workspace/import', {
+              await api<EvalCase[]>('workspace/import', {
                 connectionId,
                 selection: { kind, id },
                 requirementIds: spec.requirements.map((r) => r.id),
