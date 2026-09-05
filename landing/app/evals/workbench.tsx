@@ -77,8 +77,19 @@ type Deployment = {
   resourceName: string;
   status: string;
   url?: string;
+  error?: string;
+  completed?: string[];
+  nextActions?: string[];
 };
-type DeploymentPlan = { changes: string[] };
+type DeploymentPlan = {
+  changes: string[];
+  checkpoint: {
+    resourceName: string;
+    contentHash: string;
+    status: string;
+  };
+  productionRulesActivated: false;
+};
 type GenerationJob = {
   id: string;
   status: 'queued' | 'running' | 'failed' | 'complete';
@@ -180,6 +191,7 @@ export default function Workbench() {
     [notice, setNotice] = useState(''),
     [loaded, setLoaded] = useState(false),
     [signedIn, setSignedIn] = useState(false),
+    [aiAvailable, setAiAvailable] = useState(false),
     [saved, setSaved] = useState<EvalSpec[]>([]),
     [proposal, setProposal] = useState<EvalSpec | null>(null),
     [connections, setConnections] = useState<Conn[]>([]),
@@ -220,14 +232,30 @@ export default function Workbench() {
       );
     }
     setLoaded(true);
-    api<unknown>('workspace/me')
-      .then(() => {
+    api<{ aiAvailable: boolean }>('workspace/me')
+      .then((workspace) => {
         setSignedIn(true);
+        setAiAvailable(workspace.aiAvailable);
         api<Conn[]>('workspace/connections')
           .then(setConnections)
           .catch(() => {});
         api<Deployment[]>('workspace/deployments')
           .then(setDeployments)
+          .catch(() => {});
+        api<EvalSpec[]>('workspace/evals')
+          .then((remote) =>
+            setSaved((local) => {
+              const versions = new Map(
+                [...remote, ...local].map((item) => [
+                  `${item.id}:${item.version}`,
+                  EvalSpec.parse(item),
+                ]),
+              );
+              return [...versions.values()].sort(
+                (a, b) => b.version - a.version,
+              );
+            }),
+          )
           .catch(() => {});
       })
       .catch(() => {});
@@ -272,13 +300,26 @@ export default function Workbench() {
   }
   async function generate() {
     if (!spec) return;
+    if (!signedIn || !aiAvailable) {
+      setNotice(
+        !signedIn
+          ? 'Sign in to use sponsored AI authoring. Manual authoring and templates remain free.'
+          : 'Sponsored AI authoring is not configured. Manual authoring and templates remain available.',
+      );
+      return;
+    }
     await act('Designing your eval', async () => {
       let result = await api<GenerationJob>('workspace/generate', {
         description: spec.description,
         family: spec.family,
         current: spec,
       });
+      let polls = 0;
       while (result.status === 'queued' || result.status === 'running') {
+        if (++polls > 60)
+          throw Error(
+            'AI generation timed out. Verify that the background worker is running.',
+          );
         await new Promise((r) => setTimeout(r, 1500));
         result = await api<GenerationJob>('workspace/jobs/' + result.id);
       }
@@ -295,7 +336,13 @@ export default function Workbench() {
       );
       const snapshot = EvalSpec.parse({ ...spec, version });
       if (signedIn) await api<unknown>('workspace/evals', snapshot);
-      const next = [snapshot, ...saved];
+      const next = [
+        snapshot,
+        ...saved.filter(
+          (item) =>
+            item.id !== snapshot.id || item.version !== snapshot.version,
+        ),
+      ];
       localStorage.setItem('openmerit:versions', JSON.stringify(next));
       setSaved(next);
       setSpec({ ...snapshot, version: version + 1 });
@@ -660,13 +707,21 @@ export default function Workbench() {
                       <div>
                         <h3>Make the first draft sharper</h3>
                         <p>
-                          AI proposes criteria, graders, and a dataset plan. You
-                          review every change.
+                          {signedIn && aiAvailable
+                            ? 'AI proposes criteria, graders, and a dataset plan. You review every change.'
+                            : 'Manual authoring and templates are available. Sponsored AI requires sign-in and server configuration.'}
                         </p>
                       </div>
                       <button
                         className="studio-btn"
-                        disabled={!!busy}
+                        disabled={!!busy || !signedIn || !aiAvailable}
+                        title={
+                          !signedIn
+                            ? 'Sign in to use sponsored AI authoring'
+                            : !aiAvailable
+                              ? 'Sponsored AI is not configured'
+                              : undefined
+                        }
                         onClick={generate}
                       >
                         {busy === 'Designing your eval' ? (
@@ -1074,7 +1129,12 @@ export default function Workbench() {
                           <div key={s.name}>
                             <span>{s.name}</span>
                             <span className="studio-mono">
-                              ~{s.targetCount} cases
+                              {
+                                spec.cases.filter((c) =>
+                                  c.tags.includes(s.name),
+                                ).length
+                              }
+                              /{s.targetCount} tagged cases
                             </span>
                           </div>
                         ))}
@@ -1527,6 +1587,11 @@ export default function Workbench() {
                               <span>
                                 {c.fp} false positives · {c.fn} false negatives
                               </span>
+                              {c.disagreements.length > 0 && (
+                                <span>
+                                  Review: {c.disagreements.join(', ')}
+                                </span>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -1571,10 +1636,14 @@ export default function Workbench() {
                         {[
                           'eval.json',
                           'eval.eval.md',
+                          'eval.schema.json',
                           'cases.jsonl',
                           'openmerit_runtime.py',
                           'run.py',
                           'requirements.txt',
+                          'compatibility.json',
+                          'README.md',
+                          'deployment.json',
                         ].map((f) => (
                           <div key={f}>
                             <FileText size={15} />
@@ -1640,13 +1709,11 @@ export default function Workbench() {
                               ? 'Compatible SDK bundle'
                               : 'Resolve these compatibility issues'}
                           </strong>
-                          {report.diagnostics
-                            .filter((d) => d.severity === 'error')
-                            .map((d, i) => (
-                              <p key={i}>
-                                {d.message} — {d.action}
-                              </p>
-                            ))}
+                          {report.diagnostics.map((d, i) => (
+                            <p key={i}>
+                              [{d.severity}] {d.message} — {d.action}
+                            </p>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -1703,12 +1770,26 @@ export default function Workbench() {
                         {deployPlan && (
                           <div className="studio-deploy-preview">
                             <h3>Deployment preview</h3>
+                            <p>
+                              <ShieldCheck size={13} />
+                              Versioned resource:{' '}
+                              {deployPlan.checkpoint.resourceName}
+                            </p>
+                            <p>
+                              <Code2 size={13} />
+                              Content hash:{' '}
+                              {deployPlan.checkpoint.contentHash.slice(0, 16)}…
+                            </p>
                             {deployPlan.changes.map((x: string) => (
                               <p key={x}>
                                 <Plus size={13} />
                                 {x}
                               </p>
                             ))}
+                            <p>
+                              <Check size={13} />
+                              Production scoring rules remain inactive.
+                            </p>
                             <button
                               className="studio-btn primary"
                               disabled={!!busy}
@@ -1743,7 +1824,7 @@ export default function Workbench() {
                     )}
                     <div className="studio-card">
                       <Label title="For coding agents & your terminal" />
-                      <pre className="studio-code">{`npm run cli -- validate ./task.eval.md\nnpm run cli -- compile ./task.eval.md --target ${destination} --out ./eval-bundle\n${destination !== 'local' ? `npm run cli -- deploy ./task.eval.md --target ${destination} --project PROJECT_ID` : 'python ./eval-bundle/openmerit_runtime.py ./eval-bundle/eval.json --outputs outputs.jsonl'}`}</pre>
+                      <pre className="studio-code">{`npm run cli -- validate ./task.eval.md\nnpm run cli -- compile ./task.eval.md --target ${destination} --out ./eval-bundle\n${destination !== 'local' ? `npm run cli -- deploy ./task.eval.md --target ${destination} --project PROJECT_ID\nnpm run cli -- deploy ./task.eval.md --target ${destination} --project PROJECT_ID --apply` : 'python ./eval-bundle/openmerit_runtime.py ./eval-bundle/eval.json --outputs outputs.jsonl'}`}</pre>
                       <p className="studio-caption">
                         CLI credentials stay on your machine. Generated packages
                         have no OpenMerit runtime dependency.
@@ -1756,6 +1837,13 @@ export default function Workbench() {
                           <div className="studio-result-row" key={d.id}>
                             <strong>{d.resourceName}</strong>
                             <span>{d.status}</span>
+                            {d.completed && (
+                              <span>{d.completed.length} cases published</span>
+                            )}
+                            {d.error && <span>{d.error}</span>}
+                            {d.nextActions?.map((action) => (
+                              <span key={action}>{action}</span>
+                            ))}
                             {d.url && (
                               <a
                                 className="studio-text-button"
@@ -1916,15 +2004,7 @@ export default function Workbench() {
                 key={i}
                 className="studio-history-item"
                 onClick={() => {
-                  setSpec({
-                    ...s,
-                    version:
-                      Math.max(
-                        ...saved
-                          .filter((x) => x.id === s.id)
-                          .map((x) => x.version),
-                      ) + 1,
-                  });
+                  setSpec(s);
                   setShowHistory(false);
                 }}
               >
@@ -2556,6 +2636,7 @@ function RemoteImportModal({
     [cases, setCases] = useState<EvalCase[] | null>(null),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
+  const selectedConnection = connections.find((c) => c.id === connectionId);
   return (
     <Modal title="Import a selected snapshot" wide onClose={close}>
       <p className="studio-caption">
@@ -2567,7 +2648,14 @@ function RemoteImportModal({
         Connection
         <select
           value={connectionId}
-          onChange={(e) => setConnectionId(e.target.value)}
+          onChange={(e) => {
+            setConnectionId(e.target.value);
+            if (
+              connections.find((c) => c.id === e.target.value)?.destination ===
+              'braintrust'
+            )
+              setKind('dataset');
+          }}
         >
           <option value="">Choose a connection</option>
           {connections.map((c) => (
@@ -2582,7 +2670,12 @@ function RemoteImportModal({
           Source
           <select value={kind} onChange={(e) => setKind(e.target.value)}>
             <option value="dataset">Dataset</option>
-            <option value="trace">Trace / observation</option>
+            <option
+              value="trace"
+              disabled={selectedConnection?.destination === 'braintrust'}
+            >
+              Trace / observation
+            </option>
           </select>
         </label>
         <label className="studio-field">
