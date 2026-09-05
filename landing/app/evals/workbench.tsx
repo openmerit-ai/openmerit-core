@@ -7,12 +7,10 @@ import {
   ArrowRight,
   Plus,
   Check,
-  ChevronDown,
   ChevronRight,
   Download,
   Upload,
   FlaskConical,
-  Layers,
   FileText,
   ShieldCheck,
   Database,
@@ -24,7 +22,6 @@ import {
   X,
   Loader2,
   Sparkles,
-  BookOpen,
   History,
   Link2,
   Trash2,
@@ -128,8 +125,8 @@ const nav: { id: Tab; label: string; icon: typeof FileText }[] = [
   { id: 'criteria', label: 'Success criteria', icon: ShieldCheck },
   { id: 'cases', label: 'Dataset', icon: Database },
   { id: 'graders', label: 'Graders', icon: SlidersHorizontal },
-  { id: 'review', label: 'Validate & test', icon: FlaskConical },
-  { id: 'publish', label: 'Export & deploy', icon: Send },
+  { id: 'review', label: 'Validate', icon: FlaskConical },
+  { id: 'publish', label: 'Export', icon: Send },
 ];
 async function api<T>(
   path: string,
@@ -396,102 +393,41 @@ export default function Workbench() {
   const chosen = destinations.find((d) => d.id === destination)!;
   return (
     <div className="studio">
-      <aside className="studio-sidebar">
-        <Link className="studio-brand" href="/">
-          <StudioMark />
-          OpenMerit<span className="studio-beta">BETA</span>
-        </Link>
-        <div className="studio-space">
-          <span className="studio-avatar">P</span>
-          <div>
-            Personal workspace<small>Free plan · Eval Studio</small>
-          </div>
-          <ChevronDown size={14} />
-        </div>
-        <div className="studio-section-label">WORKSPACE</div>
-        <button className="studio-nav active" onClick={() => setTab('brief')}>
-          <Layers size={17} />
-          Eval Studio
-          <span className="studio-dot" />
-        </button>
-        <button className="studio-nav" onClick={() => setShowHistory(true)}>
-          <History size={17} />
-          Saved versions<span className="studio-count">{saved.length}</span>
-        </button>
-        <button className="studio-nav" onClick={() => setShowConnect(true)}>
-          <Link2 size={17} />
-          Connections<span className="studio-count">{connections.length}</span>
-        </button>
-        <div className="studio-sidebar-line" />
-        <div className="studio-section-label">YOUR EVAL</div>
-        {nav.map(({ id, label, icon: Icon }, i) => (
-          <button
-            key={id}
-            disabled={!spec}
-            className={`studio-nav ${spec && tab === id ? 'selected' : ''}`}
-            onClick={() => setTab(id)}
-          >
-            <Icon size={16} />
-            {label}
-            <span className="studio-nav-number">0{i + 1}</span>
-          </button>
-        ))}
-        <div className="studio-sidebar-bottom">
-          <div className="studio-portable">
-            <span className="studio-green-dot" /> Yours, everywhere.
-            <p>
-              Open format. Your infrastructure.
-              <br />
-              No lock-in.
-            </p>
-          </div>
-          <a
-            className="studio-nav"
-            href="https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents"
-            target="_blank"
-            rel="noreferrer"
-          >
-            <BookOpen size={16} />
-            Evaluation field guide
-            <ArrowUpRight size={14} />
-          </a>
-          {!signedIn ? (
-            <Link className="studio-nav" href="/api/auth/login">
-              <span className="studio-avatar small">↗</span>Sign in to sync &
-              connect
-            </Link>
-          ) : (
-            <div className="studio-nav">
-              <span className="studio-avatar small">P</span>Personal workspace
-              <Check size={14} />
-            </div>
-          )}
-        </div>
-      </aside>
       <div className="studio-body">
         <header className="studio-topbar">
-          <div className="studio-breadcrumb">
-            Workspace
-            <ChevronRight size={13} />
-            <span>Eval Studio</span>
+          <Link className="studio-brand" href="/">
+            <StudioMark />
+            OpenMerit
             {spec && (
-              <>
+              <span className="studio-breadcrumb">
                 <ChevronRight size={13} />
-                <span>{spec.name}</span>
-              </>
+                {spec.name}
+              </span>
             )}
-          </div>
+          </Link>
           <div className="studio-top-actions">
-            <span className="studio-free">FREE TOOL</span>
-            <a
-              href="https://github.com"
-              className="studio-icon-link"
-              aria-label="GitHub"
-              target="_blank"
-              rel="noreferrer"
+            <button
+              className="studio-top-action"
+              onClick={() => setShowHistory(true)}
             >
-              <Code2 size={17} />
-            </a>
+              <History size={15} />
+              Versions
+              {saved.length > 0 && <span>{saved.length}</span>}
+            </button>
+            <button
+              className="studio-top-action"
+              onClick={() => setShowConnect(true)}
+            >
+              <Link2 size={15} />
+              Connections
+              {connections.length > 0 && <span>{connections.length}</span>}
+            </button>
+            {!signedIn && (
+              <Link className="studio-top-action" href="/api/auth/login">
+                Sign in
+                <ArrowUpRight size={14} />
+              </Link>
+            )}
           </div>
         </header>
         {notice && (
@@ -551,7 +487,7 @@ export default function Workbench() {
               </div>
             </div>
             <div className="studio-platform-strip">
-              <span>DESIGNED TO TRAVEL</span>
+              <span>EXPORT TO</span>
               {destinations.map((d) => (
                 <button
                   type="button"
@@ -567,35 +503,6 @@ export default function Workbench() {
                 </button>
               ))}
             </div>
-            <div className="studio-template-heading">
-              <h2>Start with a proven structure</h2>
-              <span>10 task-specific templates</span>
-            </div>
-            <div className="studio-template-grid">
-              {templates.map((t, i) => (
-                <button
-                  key={t.id}
-                  className="studio-template"
-                  onClick={() => {
-                    setSpec(createEval(t.id));
-                    setTab('brief');
-                  }}
-                >
-                  <span className="studio-template-number">
-                    {String(i + 1).padStart(2, '0')} /
-                  </span>
-                  <h3>
-                    {t.name}
-                    <ArrowUpRight size={16} />
-                  </h3>
-                  <p>{t.description}</p>
-                </button>
-              ))}
-            </div>
-            <p className="studio-footnote">
-              Templates are starting points. Your examples and judgment make the
-              eval yours.
-            </p>
           </main>
         ) : (
           <>
@@ -647,6 +554,62 @@ export default function Workbench() {
                   {label}
                 </button>
               ))}
+            </div>
+            <div className="studio-context-bar">
+              <span>
+                <strong>{health?.coverage}%</strong> coverage
+              </span>
+              <span>
+                {spec.cases.length} cases · {spec.scorers.length} graders
+              </span>
+              <label>
+                Export to
+                <select
+                  value={destination}
+                  aria-label="Eval destination"
+                  onChange={(e) =>
+                    setDestination(e.target.value as Destination)
+                  }
+                >
+                  {destinations.map((d) => (
+                    <option value={d.id} key={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {readiness && (
+                <span
+                  className={`studio-context-status ${readiness.valid ? 'ready' : 'blocked'}`}
+                  title={
+                    readiness.valid
+                      ? 'No authored scorer semantics are dropped.'
+                      : readiness.blockers[0]?.message
+                  }
+                >
+                  {readiness.valid ? 'Compatible' : 'Needs changes'}
+                </span>
+              )}
+              <button
+                className="studio-context-action"
+                onClick={() => {
+                  setRawText(JSON.stringify(spec, null, 2));
+                  setRawEditor(true);
+                }}
+              >
+                <Code2 size={14} />
+                Definition
+              </button>
+              <button
+                className="studio-context-action"
+                onClick={() => {
+                  setSpec(null);
+                  localStorage.removeItem('openmerit:draft');
+                }}
+              >
+                <Plus size={14} />
+                New eval
+              </button>
             </div>
             <div className="studio-work-grid">
               <main className="studio-main">
@@ -1435,8 +1398,8 @@ export default function Workbench() {
                   <>
                     <Section
                       eyebrow="05 / EVIDENCE BEFORE CONFIDENCE"
-                      title="How strong is your eval?"
-                      description="Fix structural gaps, inspect evidence, and calibrate your graders before trusting the results."
+                      title="Is this ready to run?"
+                      description="Resolve structural gaps and check grader agreement before handing the eval to your stack."
                     />
                     <div className="studio-stats">
                       <Stat
@@ -1482,8 +1445,8 @@ export default function Workbench() {
                           <div>
                             <strong>Structural checks passed</strong>
                             <p>
-                              Validate grader agreement and representative
-                              coverage before deployment.
+                              The portable definition is ready for your
+                              execution platform.
                             </p>
                           </div>
                         </div>
@@ -1492,12 +1455,12 @@ export default function Workbench() {
                     <div className="studio-card">
                       <div className="studio-card-top">
                         <Label
-                          title="Test against observed outputs"
-                          hint="Deterministic preview runs in your browser. Judges and custom code run in your environment."
+                          title="Check supplied outputs"
+                          hint="Preview deterministic graders here. Judges, custom code, and full runs stay in your environment."
                         />
                         <button className="studio-btn" onClick={localTest}>
                           <Play size={14} />
-                          Run checks
+                          Preview checks
                         </button>
                       </div>
                       <button
@@ -1867,120 +1830,6 @@ export default function Workbench() {
                   </>
                 )}
               </main>
-              <aside className="studio-inspector">
-                <div className="studio-inspector-heading">
-                  <span>EVAL AT A GLANCE</span>
-                  <Eye size={15} />
-                </div>
-                <div className="studio-coverage">
-                  <div className="studio-coverage-number">
-                    {health?.coverage}
-                    <span>%</span>
-                  </div>
-                  <p>requirement coverage</p>
-                  <div className="studio-progress">
-                    <div style={{ width: `${health?.coverage}%` }} />
-                  </div>
-                  <small>Criteria linked to both graders and cases.</small>
-                </div>
-                <div className="studio-inspector-list">
-                  <div>
-                    <span>Requirements</span>
-                    <strong>{spec.requirements.length}</strong>
-                  </div>
-                  <div>
-                    <span>Critical failures</span>
-                    <strong>
-                      {
-                        spec.requirements.filter(
-                          (r) => r.severity === 'critical',
-                        ).length
-                      }
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Graders</span>
-                    <strong>{spec.scorers.length}</strong>
-                  </div>
-                  <div>
-                    <span>Dataset cases</span>
-                    <strong>{spec.cases.length}</strong>
-                  </div>
-                </div>
-                <div className="studio-inspector-target">
-                  <span className="studio-section-label">DESTINATION</span>
-                  <select
-                    value={destination}
-                    aria-label="Eval destination"
-                    onChange={(e) =>
-                      setDestination(e.target.value as Destination)
-                    }
-                  >
-                    {destinations.map((d) => (
-                      <option value={d.id} key={d.id}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </select>
-                  <p>Your definition stays platform-neutral.</p>
-                  {readiness && (
-                    <div
-                      className={`studio-readiness ${readiness.valid ? 'ready' : 'blocked'}`}
-                    >
-                      <strong>
-                        {readiness.valid
-                          ? readiness.execution === 'local'
-                            ? 'Portable local runtime'
-                            : 'Executable SDK package'
-                          : `${readiness.blockers.length} compatibility blocker${readiness.blockers.length === 1 ? '' : 's'}`}
-                      </strong>
-                      <span>
-                        {readiness.valid
-                          ? 'No authored scorer semantics are dropped.'
-                          : readiness.blockers[0]?.message}
-                      </span>
-                    </div>
-                  )}
-                </div>
-                <div className="studio-inspector-advice">
-                  <span className="studio-advice-icon">
-                    <BookOpen size={17} />
-                  </span>
-                  <h4>Test the test.</h4>
-                  <p>
-                    A grader is a hypothesis about quality. Check it against
-                    human judgment before relying on its scores.
-                  </p>
-                  <button
-                    className="studio-text-button"
-                    onClick={() => setTab('review')}
-                  >
-                    Review your eval
-                    <ArrowRight size={13} />
-                  </button>
-                </div>
-                <button
-                  className="studio-raw-button"
-                  onClick={() => {
-                    setRawText(JSON.stringify(spec, null, 2));
-                    setRawEditor(true);
-                  }}
-                >
-                  <Code2 size={15} />
-                  Edit portable definition
-                  <ArrowUpRight size={13} />
-                </button>
-                <button
-                  className="studio-raw-button"
-                  onClick={() => {
-                    setSpec(null);
-                    localStorage.removeItem('openmerit:draft');
-                  }}
-                >
-                  <Plus size={15} />
-                  Start another eval
-                </button>
-              </aside>
             </div>
           </>
         )}
