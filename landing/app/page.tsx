@@ -96,26 +96,14 @@ function RotatingCompany({
 }) {
   const [index, setIndex] = useState(0);
   useEffect(() => {
-    const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let timer: ReturnType<typeof setInterval> | undefined;
-    function sync() {
-      clearInterval(timer);
-      if (!motion.matches) {
-        timer = setInterval(
-          () => {
-            if (!document.hidden)
-              setIndex((current) => (current + 1) % group.brands.length);
-          },
-          2600 + order * 350,
-        );
-      }
-    }
-    sync();
-    motion.addEventListener('change', sync);
-    return () => {
-      clearInterval(timer);
-      motion.removeEventListener('change', sync);
-    };
+    const timer = setInterval(
+      () => {
+        if (!document.hidden)
+          setIndex((current) => (current + 1) % group.brands.length);
+      },
+      2200 + order * 250,
+    );
+    return () => clearInterval(timer);
   }, [group, order]);
   const brand = group.brands[index];
   return (
