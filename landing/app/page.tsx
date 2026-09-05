@@ -198,13 +198,17 @@ const tasks = [
     latency: '42s',
   },
 ];
-function Mark() {
+function Mark({ inverse = false }: { inverse?: boolean }) {
   return (
-    <span className="mark" aria-hidden="true">
-      {Array.from({ length: 9 }, (_, i) => (
-        <i key={i} />
-      ))}
-    </span>
+    <Image
+      className="brand-mark-image"
+      src={inverse ? '/openmerit-icon-inverse.png' : '/openmerit-icon.png'}
+      alt=""
+      width={29}
+      height={16}
+      unoptimized
+      aria-hidden="true"
+    />
   );
 }
 export default function Home() {
@@ -291,7 +295,7 @@ export default function Home() {
             </div>
             <div className="infra-core">
               <span className="infra-core-mark">
-                <Mark />
+                <Mark inverse />
               </span>
               <span className="infra-core-name">OpenMerit</span>
               <span className="infra-core-label">The model decision layer</span>
@@ -363,7 +367,7 @@ export default function Home() {
             <div className="workspace">
               <aside className="rail" aria-hidden="true">
                 <span className="rail-logo">
-                  <Mark />
+                  <Mark inverse />
                 </span>
                 <PanelLeft size={17} />
                 <span className="rail-active">

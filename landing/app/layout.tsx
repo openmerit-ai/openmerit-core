@@ -7,6 +7,9 @@ export const metadata: Metadata = {
   title: 'OpenMerit — Model Decision Infrastructure',
   description:
     'The decision layer between models and applications. Create portable evals for free; compare model configurations on quality, latency, cost, privacy, and deployment constraints.',
+  icons: {
+    icon: '/openmerit-icon.png',
+  },
 };
 export default function RootLayout({
   children,

@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   ArrowUpRight,
   ArrowRight,
@@ -173,11 +174,15 @@ function jsonOrText(value: string) {
 }
 function StudioMark() {
   return (
-    <span className="studio-logo-mark" aria-hidden="true">
-      {Array.from({ length: 9 }, (_, i) => (
-        <i key={i} />
-      ))}
-    </span>
+    <Image
+      className="studio-logo-mark"
+      src="/openmerit-icon.png"
+      alt=""
+      width={29}
+      height={16}
+      unoptimized
+      aria-hidden="true"
+    />
   );
 }
 

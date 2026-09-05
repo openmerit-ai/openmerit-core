@@ -34,23 +34,10 @@
   letter-spacing: -1px;
 }
 .studio-logo-mark {
-  display: grid;
-  width: 16px;
+  width: 29px;
   height: 16px;
-  grid-template-columns: repeat(3, 4px);
-  gap: 2px;
-  transform: rotate(-45deg);
-}
-.studio-logo-mark i {
-  background: currentColor;
-}
-.studio-logo-mark i:nth-child(2),
-.studio-logo-mark i:nth-child(8) {
-  opacity: 0.3;
-}
-.studio-logo-mark i:nth-child(1),
-.studio-logo-mark i:nth-child(9) {
-  opacity: 0;
+  flex-shrink: 0;
+  object-fit: contain;
 }
 .studio-beta {
   border-color: #e7e7e7;
