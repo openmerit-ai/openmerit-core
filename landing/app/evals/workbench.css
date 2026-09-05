@@ -2271,6 +2271,16 @@
 .studio-next {
   color: #aeb2bc;
 }
+.studio-start-label,
+.studio-start-bottom select,
+.studio-platform-strip,
+.studio-template-heading,
+.studio-eyebrow {
+  color: #c4c8d0;
+}
+.studio-start-card textarea::placeholder {
+  color: #9ca1ac;
+}
 .studio-ai-card h3,
 .studio-inspector-advice h4,
 .studio-grader-title,
