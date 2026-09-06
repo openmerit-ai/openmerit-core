@@ -15,525 +15,373 @@ function Mark() {
   );
 }
 
-function Arrow() {
-  return <span aria-hidden="true">↗</span>;
+function Arrow({ down = false }: { down?: boolean }) {
+  return <span aria-hidden="true">{down ? "↓" : "↗"}</span>;
 }
 
 function Check() {
   return <span className="check" aria-hidden="true">✓</span>;
 }
 
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <p className="section-label"><span />{children}</p>;
+}
+
 export default function Home() {
   return (
-    <main>
+    <main id="top">
       <header className="site-header">
         <a className="brand" href="#top" aria-label="OpenMerit home">
           <Mark />
           <span>OpenMerit</span>
         </a>
 
-        <nav className="nav" aria-label="Primary navigation">
+        <nav className="desktop-nav" aria-label="Primary navigation">
           <a href="#why">Why OpenMerit</a>
-          <a href="#control-loop">Control loop</a>
-          <a href="#protocols">Protocols</a>
+          <a href="#controller">Controller</a>
+          <a href="#architecture">Architecture</a>
           <a href={blueprintUrl}>Blueprint</a>
         </nav>
 
-        <a className="header-action" href={githubUrl}>
-          GitHub <Arrow />
+        <a className="header-cta" href={githubUrl}>
+          View on GitHub <Arrow />
         </a>
+
+        <details className="mobile-nav">
+          <summary aria-label="Open navigation"><span /><span /></summary>
+          <nav aria-label="Mobile navigation">
+            <a href="#why">Why OpenMerit</a>
+            <a href="#controller">Controller</a>
+            <a href="#architecture">Architecture</a>
+            <a href={blueprintUrl}>Blueprint</a>
+            <a className="mobile-nav-cta" href={githubUrl}>View on GitHub <Arrow /></a>
+          </nav>
+        </details>
       </header>
 
-      <section className="hero shell" id="top">
-        <div className="hero-copy">
-          <div className="eyebrow-row">
-            <span>Open source</span>
-            <span>Local first</span>
-            <span>Out of the hot path</span>
+      <section className="hero">
+        <div className="hero-orb hero-orb-one" />
+        <div className="hero-orb hero-orb-two" />
+        <div className="shell hero-grid">
+          <div className="hero-copy">
+            <span className="hero-pill"><i /> Open source · local first</span>
+            <h1>
+              The intelligence
+              <br />
+              control plane for
+              <br />
+              <em>autonomous agents.</em>
+            </h1>
           </div>
 
-          <h1>
-            Keep every agent on the
-            <em>right intelligence.</em>
-          </h1>
-        </div>
-
-        <div className="hero-aside">
-          <p>
-            OpenMerit is the intelligence control plane between agent harnesses,
-            production evidence, and inference infrastructure.
-          </p>
-          <p className="hero-detail">
-            You define what must remain true. The Controller continuously maintains
-            the best known qualified inference configuration for every role.
-          </p>
-          <div className="actions">
-            <a className="button button-primary" href={githubUrl}>
-              View on GitHub <Arrow />
-            </a>
-            <a className="button button-secondary" href="#control-loop">
-              See the control loop <span aria-hidden="true">↓</span>
-            </a>
-          </div>
-        </div>
-      </section>
-
-      <section className="product-stage shell" aria-label="OpenMerit controller preview">
-        <div className="stage-glow" />
-        <div className="control-panel">
-          <div className="panel-topbar">
-            <div className="panel-title">
-              <Mark />
-              <span>Controller</span>
-              <span className="status-pill"><i /> running</span>
-            </div>
-            <div className="panel-context">
-              <span>production</span>
-              <span>local</span>
-            </div>
-          </div>
-
-          <div className="panel-body">
-            <aside className="roles-pane">
-              <div className="pane-label">Intelligence roles</div>
-              <div className="role-row active">
-                <span className="role-glyph">⌘</span>
-                <span>
-                  <strong>coding.executor</strong>
-                  <small>healthy · high confidence</small>
-                </span>
-                <span className="live-dot" />
-              </div>
-              <div className="role-row">
-                <span className="role-glyph">◇</span>
-                <span>
-                  <strong>coding.reviewer</strong>
-                  <small>reconsidering</small>
-                </span>
-                <span className="row-state">02</span>
-              </div>
-              <div className="role-row">
-                <span className="role-glyph">◎</span>
-                <span>
-                  <strong>support.classifier</strong>
-                  <small>canary · 20%</small>
-                </span>
-                <span className="row-state accent">20</span>
-              </div>
-              <div className="role-row">
-                <span className="role-glyph">∴</span>
-                <span>
-                  <strong>memory.compactor</strong>
-                  <small>current</small>
-                </span>
-                <span className="row-state">04</span>
-              </div>
-              <div className="cached-state">
-                <span>Fallback</span>
-                <strong>Last known good</strong>
-                <small>Available offline</small>
-              </div>
-            </aside>
-
-            <div className="decision-pane">
-              <div className="decision-header">
-                <div>
-                  <span className="pane-label">Desired state</span>
-                  <h2>coding.executor</h2>
-                </div>
-                <span className="decision-id">dec_8291</span>
-              </div>
-
-              <div className="profile-switch">
-                <div>
-                  <span>Current</span>
-                  <strong>frontier-large</strong>
-                  <small>provider-a · high</small>
-                </div>
-                <span className="switch-arrow">→</span>
-                <div className="recommended">
-                  <span>Qualified challenger</span>
-                  <strong>code-open-32b</strong>
-                  <small>internal-vllm · fp8</small>
-                </div>
-              </div>
-
-              <div className="metrics-grid">
-                <div>
-                  <span>Task success</span>
-                  <strong>91.8%</strong>
-                  <small>within equivalence</small>
-                </div>
-                <div>
-                  <span>Cost / success</span>
-                  <strong>$0.38</strong>
-                  <small className="positive">−68.6%</small>
-                </div>
-                <div>
-                  <span>p95 duration</span>
-                  <strong>7.4m</strong>
-                  <small className="positive">−1.5m</small>
-                </div>
-                <div>
-                  <span>Confidence</span>
-                  <strong>High</strong>
-                  <small>n = 1,204</small>
-                </div>
-              </div>
-
-              <div className="rollout">
-                <div className="rollout-head">
-                  <span>Autonomous rollout</span>
-                  <strong>Canary verified</strong>
-                </div>
-                <div className="rollout-track" aria-label="Canary rollout at 20 percent">
-                  <span className="complete" />
-                  <span className="current" />
-                  <span />
-                  <span />
-                </div>
-                <div className="rollout-labels">
-                  <span>5%</span>
-                  <span>20%</span>
-                  <span>50%</span>
-                  <span>100%</span>
-                </div>
-              </div>
-            </div>
-
-            <aside className="activity-pane">
-              <div className="activity-head">
-                <span className="pane-label">Decision record</span>
-                <span>live</span>
-              </div>
-              <ol className="event-list">
-                <li className="done">
-                  <span className="event-node" />
-                  <div>
-                    <strong>Signals observed</strong>
-                    <small>Quality SLO breach detected</small>
-                  </div>
-                  <time>09:01</time>
-                </li>
-                <li className="done">
-                  <span className="event-node" />
-                  <div>
-                    <strong>Challengers benchmarked</strong>
-                    <small>3 qualified · 1 dominated</small>
-                  </div>
-                  <time>09:08</time>
-                </li>
-                <li className="done">
-                  <span className="event-node" />
-                  <div>
-                    <strong>Policy evaluated</strong>
-                    <small>All hard requirements pass</small>
-                  </div>
-                  <time>09:09</time>
-                </li>
-                <li className="active-event">
-                  <span className="event-node" />
-                  <div>
-                    <strong>Canary in progress</strong>
-                    <small>Observing production evidence</small>
-                  </div>
-                  <time>now</time>
-                </li>
-              </ol>
-              <div className="policy-chip">
-                <span>Policy</span>
-                <strong>coding-prod@17</strong>
-                <small>Reversible autonomy</small>
-              </div>
-            </aside>
-          </div>
-        </div>
-      </section>
-
-      <section className="boundary-strip" id="protocols">
-        <div className="shell boundary-grid">
-          <div className="boundary-intro">
-            <span>Three open interfaces</span>
-            <strong>One neutral control plane</strong>
-          </div>
-          <div className="boundary-group">
-            <small>Harness</small>
-            <span>Pi</span><span>Hermes</span><span>OpenClaw</span>
-          </div>
-          <div className="boundary-group">
-            <small>Signals + scores</small>
-            <span>OpenTelemetry</span><span>Langfuse</span><span>Braintrust</span>
-          </div>
-          <div className="boundary-group">
-            <small>Execution</small>
-            <span>LiteLLM</span><span>vLLM</span><span>Kubernetes</span>
-          </div>
-        </div>
-      </section>
-
-      <section className="thesis shell" id="why">
-        <p className="section-kicker">THE MISSING CONTROL LOOP</p>
-        <h2>
-          Harnesses declare <mark className="intent">intent<sup>01</sup></mark>.
-          Evidence reports <mark className="evidence">reality<sup>02</sup></mark>.
-          The Controller maintains <mark className="desired">desired state<sup>03</sup></mark>.
-        </h2>
-      </section>
-
-      <section className="steps shell" aria-label="How OpenMerit works">
-        <article className="step-card">
-          <div className="step-visual resolver-visual">
-            <div className="request-line">
-              <span>role</span>
-              <code>coding.executor</code>
-            </div>
-            <div className="request-line">
-              <span>workload</span>
-              <code>typescript · tools · 140k</code>
-            </div>
-            <div className="resolve-result">
-              <span>Resolved</span>
-              <strong>config_921</strong>
-              <small>TTL 24h · fallback cached</small>
-            </div>
-          </div>
-          <span className="step-number">01</span>
-          <h3>Resolve by role, not by habit.</h3>
-          <p>
-            A harness asks for the intelligence a role needs. The Model Resolver
-            returns an approved, cacheable inference configuration.
-          </p>
-        </article>
-
-        <article className="step-card">
-          <div className="step-visual evidence-visual">
-            <div className="signal-bars" aria-hidden="true">
-              <i style={{ height: "36%" }} />
-              <i style={{ height: "48%" }} />
-              <i style={{ height: "42%" }} />
-              <i style={{ height: "62%" }} />
-              <i style={{ height: "57%" }} />
-              <i style={{ height: "76%" }} />
-              <i className="breach" style={{ height: "92%" }} />
-              <i style={{ height: "68%" }} />
-              <i style={{ height: "59%" }} />
-              <i style={{ height: "52%" }} />
-              <span className="slo-line">quality floor</span>
-            </div>
-            <div className="signal-legend">
-              <span><i className="legend-dot" /> production evidence</span>
-              <strong>SLO breach</strong>
-            </div>
-          </div>
-          <span className="step-number">02</span>
-          <h3>Decide from evidence, not leaderboards.</h3>
-          <p>
-            Production signals and task-specific scores outweigh generic priors.
-            Hard requirements remain explicit and inspectable.
-          </p>
-        </article>
-
-        <article className="step-card">
-          <div className="step-visual controller-visual">
-            <div className="loop-ring">
-              <span className="ring-center">Controller</span>
-              <span className="ring-item ring-observe">observe</span>
-              <span className="ring-item ring-decide">decide</span>
-              <span className="ring-item ring-verify">verify</span>
-            </div>
-            <div className="controller-note">
-              <Check />
-              <span><strong>No change</strong><small>stability preferred</small></span>
-            </div>
-          </div>
-          <span className="step-number">03</span>
-          <h3>Maintain the best known state.</h3>
-          <p>
-            The Controller benchmarks, canaries, verifies, promotes, or rolls back.
-            No-op is a first-class decision.
-          </p>
-        </article>
-      </section>
-
-      <section className="hot-path-section shell" id="control-loop">
-        <div className="hot-path-copy">
-          <p className="section-kicker">NON-NEGOTIABLE BOUNDARY</p>
-          <h2>
-            In the architecture.
-            <em>Out of the hot path.</em>
-          </h2>
-          <p>
-            OpenMerit updates desired state. It never carries the production model
-            request. If the control plane is unavailable, the agent keeps running on
-            its last known good decision.
-          </p>
-          <ul className="principle-list">
-            <li><Check /> No proxy or request router</li>
-            <li><Check /> Provider credentials stay local</li>
-            <li><Check /> Raw production data can stay local</li>
-            <li><Check /> Every autonomous change is reversible</li>
-          </ul>
-        </div>
-
-        <div className="path-diagram">
-          <div className="path-label">Control plane</div>
-          <div className="control-path">
-            <div><span>Signals + scores</span><small>what happened</small></div>
-            <span className="path-arrow">→</span>
-            <div className="openmerit-node"><Mark /><span>OpenMerit</span><small>desired state</small></div>
-            <span className="path-arrow">→</span>
-            <div><span>Configuration</span><small>what should run</small></div>
-          </div>
-          <div className="path-separator"><span>never in request path</span></div>
-          <div className="path-label">Production inference</div>
-          <div className="production-path">
-            <div><span>Harness</span><small>owns behavior</small></div>
-            <span className="path-arrow">→</span>
-            <div><span>Inference</span><small>owns execution</small></div>
-            <span className="path-arrow">→</span>
-            <div><span>Model</span><small>serves request</small></div>
-          </div>
-          <div className="fallback-stack">
-            <span>Fallback order</span>
-            <div><b>01</b> fresh approved decision</div>
-            <div><b>02</b> cached approved decision</div>
-            <div><b>03</b> static project fallback</div>
-            <div><b>04</b> harness default</div>
-          </div>
-        </div>
-      </section>
-
-      <section className="decision-section">
-        <div className="shell decision-grid">
-          <div className="record-card">
-            <div className="record-top">
-              <span>DECISION RECORD</span>
-              <span>HIGH CONFIDENCE</span>
-            </div>
-            <div className="record-role">
-              <span>ROLE</span>
-              <strong>coding.executor</strong>
-            </div>
-            <div className="comparison-table" role="table" aria-label="Decision comparison">
-              <div className="table-row table-head" role="row">
-                <span role="columnheader">Metric</span>
-                <span role="columnheader">Incumbent</span>
-                <span role="columnheader">Challenger</span>
-              </div>
-              <div className="table-row" role="row">
-                <span role="cell">Task success</span><span role="cell">91.9%</span><span role="cell">91.8%</span>
-              </div>
-              <div className="table-row" role="row">
-                <span role="cell">Cost / success</span><span role="cell">$1.21</span><span role="cell" className="positive">$0.38</span>
-              </div>
-              <div className="table-row" role="row">
-                <span role="cell">p95 duration</span><span role="cell">8.9m</span><span role="cell" className="positive">7.4m</span>
-              </div>
-              <div className="table-row" role="row">
-                <span role="cell">Hard requirements</span><span role="cell">pass</span><span role="cell" className="positive">pass</span>
-              </div>
-            </div>
-            <div className="record-rationale">
-              <span>WHY</span>
-              <p>
-                Quality is inside the equivalence margin. Every hard requirement
-                passes. Cost per successful task falls by 68.6%.
-              </p>
-            </div>
-            <div className="record-footer">
-              <span>policy coding-prod@17</span>
-              <span>evidence n=9,333</span>
-              <span>immutable</span>
-            </div>
-          </div>
-
-          <div className="decision-copy">
-            <p className="section-kicker">HONEST BY DESIGN</p>
-            <h2>Not “the best model.” The best known qualified configuration.</h2>
-            <p>
-              Every decision is bound to current policy, evidence, confidence, and
-              workload. No universal score. No opaque recommendation. No vendor
-              incentive hidden in the answer.
+          <div className="hero-aside">
+            <p className="hero-lead">
+              Keep every agent role on the best known qualified inference
+              configuration—without putting another proxy in the request path.
             </p>
-            <a className="text-link" href={blueprintUrl}>
-              Read the product blueprint <Arrow />
-            </a>
+            <div className="hero-actions">
+              <a className="button button-dark" href={githubUrl}>
+                Explore OpenMerit <Arrow />
+              </a>
+              <a className="button button-light" href="#controller">
+                See how it works <Arrow down />
+              </a>
+            </div>
+            <div className="hero-notes">
+              <span><Check /> Provider-neutral</span>
+              <span><Check /> Reversible by design</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="shell product-wrap">
+          <div className="product-window" aria-label="OpenMerit controller interface preview">
+            <div className="window-bar">
+              <div className="window-brand"><Mark /><strong>OpenMerit</strong><span>/ Controller</span></div>
+              <div className="window-context"><i /> production <span>⌄</span></div>
+            </div>
+
+            <div className="product-layout">
+              <aside className="product-sidebar">
+                <span className="ui-label">Workspace</span>
+                <nav aria-label="Controller preview navigation">
+                  <span className="active"><b>⌁</b>Overview</span>
+                  <span><b>◇</b>Roles <i>4</i></span>
+                  <span><b>⌗</b>Policies</span>
+                  <span><b>◉</b>Evidence</span>
+                  <span><b>↺</b>Rollouts</span>
+                </nav>
+                <div className="sidebar-status">
+                  <span><i /> System healthy</span>
+                  <small>Last sync 12s ago</small>
+                </div>
+              </aside>
+
+              <div className="product-main">
+                <div className="product-heading">
+                  <div>
+                    <span className="ui-label">Intelligence role</span>
+                    <h2>coding.executor</h2>
+                  </div>
+                  <span className="confidence"><i /> High confidence</span>
+                </div>
+
+                <div className="model-change">
+                  <div>
+                    <span>Current</span>
+                    <strong>frontier-large</strong>
+                    <small>provider-a · high</small>
+                  </div>
+                  <span className="change-arrow">→</span>
+                  <div className="recommended-model">
+                    <span>Qualified challenger</span>
+                    <strong>code-open-32b</strong>
+                    <small>internal-vllm · fp8</small>
+                  </div>
+                </div>
+
+                <div className="metric-row">
+                  <div><span>Task success</span><strong>91.8%</strong><small>equivalent</small></div>
+                  <div><span>Cost / success</span><strong>$0.38</strong><small className="good">↓ 68.6%</small></div>
+                  <div><span>p95 duration</span><strong>7.4m</strong><small className="good">↓ 1.5m</small></div>
+                  <div><span>Evidence</span><strong>1,204</strong><small>qualified runs</small></div>
+                </div>
+
+                <div className="rollout-card">
+                  <div className="rollout-title">
+                    <div><span>Autonomous rollout</span><strong>Canary verified</strong></div>
+                    <span>20%</span>
+                  </div>
+                  <div className="progress"><i /><i className="current" /><i /><i /></div>
+                  <div className="progress-labels"><span>5%</span><span>20%</span><span>50%</span><span>100%</span></div>
+                </div>
+              </div>
+
+              <aside className="activity-panel">
+                <div className="activity-title"><span className="ui-label">Decision record</span><b><i /> Live</b></div>
+                <ol>
+                  <li className="done"><i /><div><strong>Signals observed</strong><small>Quality SLO breach detected</small></div><time>09:01</time></li>
+                  <li className="done"><i /><div><strong>Challengers tested</strong><small>3 qualified · 1 dominated</small></div><time>09:08</time></li>
+                  <li className="done"><i /><div><strong>Policy evaluated</strong><small>All hard requirements pass</small></div><time>09:09</time></li>
+                  <li className="live"><i /><div><strong>Canary running</strong><small>Observing production evidence</small></div><time>now</time></li>
+                </ol>
+                <div className="policy-card"><span>Active policy</span><strong>coding-prod@17</strong><small>Reversible autonomy</small></div>
+              </aside>
+            </div>
+          </div>
+          <p className="product-caption"><span>01</span> One control surface for every agent, model, and environment.</p>
+        </div>
+      </section>
+
+      <section className="integration-strip" aria-label="Open interfaces">
+        <div className="shell integration-grid">
+          <p>Works with the stack you already run.</p>
+          <div><span>Harnesses</span><strong>Pi</strong><strong>Hermes</strong><strong>OpenClaw</strong></div>
+          <div><span>Evidence</span><strong>OpenTelemetry</strong><strong>Langfuse</strong><strong>Braintrust</strong></div>
+          <div><span>Execution</span><strong>LiteLLM</strong><strong>vLLM</strong><strong>Kubernetes</strong></div>
+        </div>
+      </section>
+
+      <section className="shell thesis" id="why">
+        <SectionLabel>The missing control loop</SectionLabel>
+        <h2>
+          Your harness knows what it needs.
+          <span>Your telemetry knows what happened.</span>
+          <em>OpenMerit keeps the two in sync.</em>
+        </h2>
+        <p>
+          Models, providers, runtimes, and prices keep moving. OpenMerit turns
+          production evidence into safe, inspectable changes to desired state.
+        </p>
+      </section>
+
+      <section className="shell value-grid">
+        <article className="value-card value-blue">
+          <span className="value-number">01</span>
+          <div className="resolver-mini">
+            <span>role</span><code>coding.executor</code>
+            <span>workload</span><code>typescript · tools · 140k</code>
+            <div><small>Resolved configuration</small><strong>config_921</strong><i>approved</i></div>
+          </div>
+          <h3>Resolve by role.<br />Not by habit.</h3>
+          <p>Harnesses ask for capabilities. The resolver returns an approved, cacheable configuration.</p>
+        </article>
+
+        <article className="value-card value-coral">
+          <span className="value-number">02</span>
+          <div className="evidence-mini">
+            <div className="bars" aria-hidden="true">
+              <i /><i /><i /><i /><i /><i className="breach" /><i /><i />
+              <span>quality floor</span>
+            </div>
+            <div><span><i /> production evidence</span><strong>SLO breach</strong></div>
+          </div>
+          <h3>Decide from evidence.<br />Not leaderboards.</h3>
+          <p>Task-specific signals and hard requirements outweigh generic model priors.</p>
+        </article>
+
+        <article className="value-card value-mint">
+          <span className="value-number">03</span>
+          <div className="loop-mini">
+            <span className="loop-center">Controller</span>
+            <span className="loop-item observe">observe</span>
+            <span className="loop-item decide">decide</span>
+            <span className="loop-item verify">verify</span>
+          </div>
+          <h3>Change carefully.<br />Or do nothing.</h3>
+          <p>Benchmark, canary, verify, promote, or roll back. No-op is always a valid decision.</p>
+        </article>
+      </section>
+
+      <section className="feature-section" id="controller">
+        <div className="shell feature-row">
+          <div className="feature-copy">
+            <SectionLabel>Role-based resolution</SectionLabel>
+            <h2>Give every role an <em>intelligence contract.</em></h2>
+            <p>
+              Stop wiring model names into agent code. Define quality floors,
+              latency ceilings, tool requirements, and cost constraints once.
+            </p>
+            <ul>
+              <li><Check /> Stable role-based API</li>
+              <li><Check /> Cacheable, offline-safe decisions</li>
+              <li><Check /> Explicit fallback order</li>
+            </ul>
+          </div>
+
+          <div className="feature-visual resolver-board">
+            <div className="board-top"><span>RESOLVE REQUEST</span><span>req_8f21</span></div>
+            <div className="code-lines">
+              <span><b>role</b><code>&quot;coding.executor&quot;</code></span>
+              <span><b>context</b><code>&#123; language: &quot;typescript&quot; &#125;</code></span>
+              <span><b>requirements</b><code>[&quot;tools&quot;, &quot;vision&quot;]</code></span>
+            </div>
+            <div className="resolve-arrow">↓</div>
+            <div className="resolved-card">
+              <div><span>Approved configuration</span><i>fresh · ttl 24h</i></div>
+              <h3>code-open-32b</h3>
+              <p>internal-vllm <span>·</span> fp8 <span>·</span> tools-v4</p>
+              <div className="config-tags"><span>quality ≥ 0.91</span><span>p95 ≤ 8m</span><span>$ ≤ 0.50</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div className="shell feature-row feature-row-reverse">
+          <div className="feature-copy">
+            <SectionLabel>Continuous control</SectionLabel>
+            <h2>A controller that knows when <em>not to change.</em></h2>
+            <p>
+              OpenMerit watches production evidence, qualifies challengers, and
+              only changes desired state when the evidence clears your policy.
+            </p>
+            <a className="text-link" href={blueprintUrl}>Read the control-loop blueprint <Arrow /></a>
+          </div>
+
+          <div className="feature-visual timeline-board">
+            <div className="board-top"><span>CONTROLLER ACTIVITY</span><span><i /> observing</span></div>
+            <div className="timeline-chart">
+              <div className="chart-labels"><span>0.94</span><span>0.92</span><span>0.90</span></div>
+              <div className="chart-area">
+                <span className="threshold">quality floor</span>
+                <svg viewBox="0 0 600 170" role="img" aria-label="Quality evidence over time">
+                  <defs>
+                    <linearGradient id="chartFill" x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="0%" stopColor="#596fff" stopOpacity=".24" />
+                      <stop offset="100%" stopColor="#596fff" stopOpacity="0" />
+                    </linearGradient>
+                  </defs>
+                  <path className="chart-fill" d="M0 96 C60 82 96 74 140 88 S225 126 270 103 S352 50 400 62 S475 82 520 54 S570 44 600 30 V170 H0 Z" />
+                  <path className="chart-line" d="M0 96 C60 82 96 74 140 88 S225 126 270 103 S352 50 400 62 S475 82 520 54 S570 44 600 30" />
+                </svg>
+                <span className="chart-event event-one"><i />challenger qualified</span>
+                <span className="chart-event event-two"><i />canary promoted</span>
+              </div>
+            </div>
+            <div className="timeline-footer"><span>7d evidence window</span><strong>1,204 qualified runs</strong></div>
           </div>
         </div>
       </section>
 
-      <section className="open-section shell">
-        <div className="open-heading">
-          <p className="section-kicker">OPEN CORE, WITHOUT THE CATCH</p>
+      <section className="architecture-section" id="architecture">
+        <div className="architecture-orb" />
+        <div className="shell architecture-grid">
+          <div className="architecture-copy">
+            <SectionLabel>Non-negotiable boundary</SectionLabel>
+            <h2>In the architecture.<br /><em>Out of the hot path.</em></h2>
+            <p>
+              OpenMerit updates desired state. It never carries your production
+              model request. If the controller disappears, your agents keep running.
+            </p>
+            <div className="architecture-points">
+              <span><Check /><b>No proxy</b><small>Zero request-path dependency</small></span>
+              <span><Check /><b>Local credentials</b><small>Provider keys stay yours</small></span>
+              <span><Check /><b>Safe failure</b><small>Last known good is cached</small></span>
+            </div>
+          </div>
+
+          <div className="architecture-map">
+            <span className="map-label">Control plane</span>
+            <div className="map-row control-row">
+              <div><span>Signals + scores</span><small>what happened</small></div>
+              <b>→</b>
+              <div className="map-openmerit"><Mark /><span>OpenMerit</span><small>desired state</small></div>
+              <b>→</b>
+              <div><span>Configuration</span><small>what should run</small></div>
+            </div>
+            <div className="map-boundary"><span>never in request path</span></div>
+            <span className="map-label">Production inference</span>
+            <div className="map-row production-row">
+              <div><span>Agent harness</span><small>owns behavior</small></div>
+              <b>→</b>
+              <div><span>Inference runtime</span><small>owns execution</small></div>
+              <b>→</b>
+              <div><span>Model</span><small>serves request</small></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="shell principles-section">
+        <div className="principles-heading">
+          <SectionLabel>Open core, without the catch</SectionLabel>
           <h2>The complete local control loop stays open.</h2>
         </div>
-        <div className="open-principles">
-          <article>
-            <span>01 / LOCAL</span>
-            <h3>Run the whole loop in your environment.</h3>
-            <p>Resolver, Controller, evals, benchmarks, decisions, canaries, and rollback.</p>
-          </article>
-          <article>
-            <span>02 / NEUTRAL</span>
-            <h3>Use any harness, evidence source, or inference stack.</h3>
-            <p>Open protocols make each integration replaceable. OpenMerit never resells tokens.</p>
-          </article>
-          <article>
-            <span>03 / AUDITABLE</span>
-            <h3>Inspect why intelligence changed.</h3>
-            <p>Versioned policies, immutable decision records, and explicit rollout history.</p>
-          </article>
+        <div className="principle-cards">
+          <article><span>01</span><h3>Run it locally.</h3><p>Resolver, controller, evals, decisions, canaries, and rollback in your environment.</p></article>
+          <article><span>02</span><h3>Connect anything.</h3><p>Open interfaces keep every harness, evidence source, and inference stack replaceable.</p></article>
+          <article><span>03</span><h3>Inspect every change.</h3><p>Versioned policies and immutable records explain why intelligence changed.</p></article>
         </div>
       </section>
 
-      <section className="final-cta shell">
+      <section className="shell final-cta">
+        <div className="cta-orb cta-orb-one" />
+        <div className="cta-orb cta-orb-two" />
         <div>
-          <p className="section-kicker">BUILD THE CONTROL PLANE WITH US</p>
-          <h2>
-            Give every role an
-            <em>intelligence contract.</em>
-          </h2>
+          <SectionLabel>Build the control plane with us</SectionLabel>
+          <h2>Keep every agent on the <em>right intelligence.</em></h2>
         </div>
         <div className="final-actions">
-          <a className="button button-primary" href={githubUrl}>
-            Explore OpenMerit <Arrow />
-          </a>
-          <a className="button button-secondary" href={blueprintUrl}>
-            Read the blueprint
-          </a>
+          <a className="button button-dark" href={githubUrl}>Explore OpenMerit <Arrow /></a>
+          <a className="button button-light" href={blueprintUrl}>Read the blueprint</a>
         </div>
       </section>
 
       <footer className="site-footer">
-        <div className="shell footer-grid">
+        <div className="shell footer-main">
           <div className="footer-brand">
-            <a className="brand" href="#top">
-              <Mark />
-              <span>OpenMerit</span>
-            </a>
+            <a className="brand" href="#top"><Mark /><span>OpenMerit</span></a>
             <p>Open-source intelligence control infrastructure for autonomous agents.</p>
           </div>
           <div className="footer-links">
-            <div>
-              <span>Product</span>
-              <a href="#why">Why OpenMerit</a>
-              <a href="#control-loop">Control loop</a>
-              <a href="#protocols">Protocols</a>
-            </div>
-            <div>
-              <span>Project</span>
-              <a href={githubUrl}>GitHub</a>
-              <a href={blueprintUrl}>Blueprint</a>
-              <a href={`${githubUrl}/issues`}>Issues</a>
-            </div>
+            <div><span>Product</span><a href="#why">Why OpenMerit</a><a href="#controller">Controller</a><a href="#architecture">Architecture</a></div>
+            <div><span>Project</span><a href={githubUrl}>GitHub</a><a href={blueprintUrl}>Blueprint</a><a href={`${githubUrl}/issues`}>Issues</a></div>
           </div>
         </div>
         <div className="shell footer-bottom">
           <span>© 2026 OpenMerit contributors</span>
-          <span className="footer-status"><i /> local-first by default</span>
+          <span className="footer-status"><i /> Local-first by default</span>
         </div>
       </footer>
     </main>
   );
 }
-
