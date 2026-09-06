@@ -9,8 +9,8 @@
   --text: #f1f3ef;
   --muted: #9b9f9c;
   --dim: #666b68;
-  --accent: #d8ff5f;
-  --accent-soft: rgba(216, 255, 95, 0.12);
+  --accent: #6b7cff;
+  --accent-soft: rgba(107, 124, 255, 0.12);
   --blue: #79aaff;
   --blue-soft: rgba(121, 170, 255, 0.16);
   --violet: #b28bff;
@@ -321,7 +321,7 @@ a {
   gap: 6px;
   margin-left: 4px;
   padding: 3px 7px;
-  border: 1px solid rgba(216, 255, 95, 0.16);
+  border: 1px solid rgba(107, 124, 255, 0.16);
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent);
@@ -336,7 +336,7 @@ a {
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 4px rgba(216, 255, 95, 0.08);
+  box-shadow: 0 0 0 4px rgba(107, 124, 255, 0.08);
   animation: status-pulse 2.2s ease-in-out infinite;
 }
 
@@ -529,8 +529,8 @@ a {
 }
 
 .profile-switch > div.recommended {
-  border-color: rgba(216, 255, 95, 0.24);
-  background: linear-gradient(145deg, rgba(216, 255, 95, 0.07), rgba(216, 255, 95, 0.015));
+  border-color: rgba(107, 124, 255, 0.24);
+  background: linear-gradient(145deg, rgba(107, 124, 255, 0.07), rgba(107, 124, 255, 0.015));
 }
 
 .profile-switch span,
@@ -742,7 +742,7 @@ a {
 
 .event-list li.active-event .event-node {
   background: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 0 14px rgba(216, 255, 95, 0.35);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 14px rgba(107, 124, 255, 0.35);
 }
 
 .event-list strong,
@@ -903,7 +903,7 @@ a {
 
 .thesis .desired {
   background: var(--accent-soft);
-  box-shadow: inset 0 -2px 0 rgba(216, 255, 95, 0.38);
+  box-shadow: inset 0 -2px 0 rgba(107, 124, 255, 0.38);
 }
 
 .steps {
@@ -1131,7 +1131,7 @@ a {
   width: 220px;
   height: 220px;
   border-radius: 50%;
-  background: rgba(216, 255, 95, 0.045);
+  background: rgba(107, 124, 255, 0.045);
   content: "";
   filter: blur(30px);
 }
@@ -1161,7 +1161,7 @@ a {
   inset: 58px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(216, 255, 95, 0.25);
+  border: 1px solid rgba(107, 124, 255, 0.25);
   border-radius: 50%;
   background: var(--accent-soft);
   color: var(--accent);
@@ -1342,7 +1342,7 @@ a {
 .control-path .openmerit-node {
   display: grid;
   grid-template-columns: auto 1fr;
-  border-color: rgba(216, 255, 95, 0.24);
+  border-color: rgba(107, 124, 255, 0.24);
   background: var(--accent-soft);
 }
 
