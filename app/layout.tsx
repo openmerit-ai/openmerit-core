@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://openmerit.lazim.chatgpt.site"),
   title: "OpenMerit — Intelligence control plane for autonomous agents",
   description:
     "Open-source control infrastructure that keeps every agent role on the best known qualified inference configuration.",
@@ -15,9 +14,6 @@ export const metadata: Metadata = {
     "control plane",
     "open source",
   ],
-  alternates: {
-    canonical: "/",
-  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
