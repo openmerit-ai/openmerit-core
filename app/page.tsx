@@ -78,175 +78,71 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="product-stage shell" aria-label="OpenMerit controller preview">
+      <section className="system-map shell" aria-labelledby="system-map-title">
         <div className="stage-glow" />
-        <div className="control-panel">
-          <div className="panel-topbar">
-            <div className="panel-title">
-              <Mark />
-              <span>Controller</span>
-              <span className="status-pill"><i /> running</span>
-            </div>
-            <div className="panel-context">
-              <span>production</span>
-              <span>local</span>
-            </div>
+        <div className="map-heading">
+          <div>
+            <span className="concept-label">Conceptual system map</span>
+            <h2 id="system-map-title">A control loop, not another dashboard.</h2>
+          </div>
+          <p>
+            This diagram describes OpenMerit&apos;s intended system boundaries.
+            It is not a product screenshot.
+          </p>
+        </div>
+
+        <div className="map-flow">
+          <article className="map-domain map-harness">
+            <span>01 · Intent</span>
+            <div className="map-symbol">⌘</div>
+            <h3>Agent harness</h3>
+            <p>Declares the role, workload, and capabilities it needs.</p>
+            <ul>
+              <li>Role contract</li>
+              <li>Workload context</li>
+              <li>Static fallback</li>
+            </ul>
+          </article>
+
+          <div className="flow-connector">
+            <span>role + constraints</span>
+            <i aria-hidden="true">→</i>
           </div>
 
-          <div className="panel-body">
-            <aside className="roles-pane">
-              <div className="pane-label">Intelligence roles</div>
-              <div className="role-row active">
-                <span className="role-glyph">⌘</span>
-                <span>
-                  <strong>coding.executor</strong>
-                  <small>healthy · high confidence</small>
-                </span>
-                <span className="live-dot" />
-              </div>
-              <div className="role-row">
-                <span className="role-glyph">◇</span>
-                <span>
-                  <strong>coding.reviewer</strong>
-                  <small>reconsidering</small>
-                </span>
-                <span className="row-state">02</span>
-              </div>
-              <div className="role-row">
-                <span className="role-glyph">◎</span>
-                <span>
-                  <strong>support.classifier</strong>
-                  <small>canary · 20%</small>
-                </span>
-                <span className="row-state accent">20</span>
-              </div>
-              <div className="role-row">
-                <span className="role-glyph">∴</span>
-                <span>
-                  <strong>memory.compactor</strong>
-                  <small>current</small>
-                </span>
-                <span className="row-state">04</span>
-              </div>
-              <div className="cached-state">
-                <span>Fallback</span>
-                <strong>Last known good</strong>
-                <small>Available offline</small>
-              </div>
-            </aside>
+          <article className="map-domain map-controller">
+            <span>02 · Decision</span>
+            <div className="map-symbol"><Mark /></div>
+            <h3>OpenMerit</h3>
+            <p>Maintains the best known qualified configuration as desired state.</p>
+            <ul>
+              <li>Evaluate policy</li>
+              <li>Compare evidence</li>
+              <li>Decide or no-op</li>
+            </ul>
+          </article>
 
-            <div className="decision-pane">
-              <div className="decision-header">
-                <div>
-                  <span className="pane-label">Desired state</span>
-                  <h2>coding.executor</h2>
-                </div>
-                <span className="decision-id">dec_8291</span>
-              </div>
-
-              <div className="profile-switch">
-                <div>
-                  <span>Current</span>
-                  <strong>frontier-large</strong>
-                  <small>provider-a · high</small>
-                </div>
-                <span className="switch-arrow">→</span>
-                <div className="recommended">
-                  <span>Qualified challenger</span>
-                  <strong>code-open-32b</strong>
-                  <small>internal-vllm · fp8</small>
-                </div>
-              </div>
-
-              <div className="metrics-grid">
-                <div>
-                  <span>Task success</span>
-                  <strong>91.8%</strong>
-                  <small>within equivalence</small>
-                </div>
-                <div>
-                  <span>Cost / success</span>
-                  <strong>$0.38</strong>
-                  <small className="positive">−68.6%</small>
-                </div>
-                <div>
-                  <span>p95 duration</span>
-                  <strong>7.4m</strong>
-                  <small className="positive">−1.5m</small>
-                </div>
-                <div>
-                  <span>Confidence</span>
-                  <strong>High</strong>
-                  <small>n = 1,204</small>
-                </div>
-              </div>
-
-              <div className="rollout">
-                <div className="rollout-head">
-                  <span>Autonomous rollout</span>
-                  <strong>Canary verified</strong>
-                </div>
-                <div className="rollout-track" aria-label="Canary rollout at 20 percent">
-                  <span className="complete" />
-                  <span className="current" />
-                  <span />
-                  <span />
-                </div>
-                <div className="rollout-labels">
-                  <span>5%</span>
-                  <span>20%</span>
-                  <span>50%</span>
-                  <span>100%</span>
-                </div>
-              </div>
-            </div>
-
-            <aside className="activity-pane">
-              <div className="activity-head">
-                <span className="pane-label">Decision record</span>
-                <span>live</span>
-              </div>
-              <ol className="event-list">
-                <li className="done">
-                  <span className="event-node" />
-                  <div>
-                    <strong>Signals observed</strong>
-                    <small>Quality SLO breach detected</small>
-                  </div>
-                  <time>09:01</time>
-                </li>
-                <li className="done">
-                  <span className="event-node" />
-                  <div>
-                    <strong>Challengers benchmarked</strong>
-                    <small>3 qualified · 1 dominated</small>
-                  </div>
-                  <time>09:08</time>
-                </li>
-                <li className="done">
-                  <span className="event-node" />
-                  <div>
-                    <strong>Policy evaluated</strong>
-                    <small>All hard requirements pass</small>
-                  </div>
-                  <time>09:09</time>
-                </li>
-                <li className="active-event">
-                  <span className="event-node" />
-                  <div>
-                    <strong>Canary in progress</strong>
-                    <small>Observing production evidence</small>
-                  </div>
-                  <time>now</time>
-                </li>
-              </ol>
-              <div className="policy-chip">
-                <span>Policy</span>
-                <strong>coding-prod@17</strong>
-                <small>Reversible autonomy</small>
-              </div>
-            </aside>
+          <div className="flow-connector">
+            <span>approved config</span>
+            <i aria-hidden="true">→</i>
           </div>
+
+          <article className="map-domain map-inference">
+            <span>03 · Execution</span>
+            <div className="map-symbol">◇</div>
+            <h3>Inference stack</h3>
+            <p>Executes requests directly, with no OpenMerit hop in the hot path.</p>
+            <ul>
+              <li>Provider or runtime</li>
+              <li>Model + parameters</li>
+              <li>Local credentials</li>
+            </ul>
+          </article>
+        </div>
+
+        <div className="map-caption">
+          <span>Control-plane only</span>
+          <strong>Production requests remain direct</strong>
+          <p>Signals return asynchronously to inform the next decision.</p>
         </div>
       </section>
 
@@ -283,6 +179,7 @@ export default function Home() {
       <section className="steps shell" aria-label="How OpenMerit works">
         <article className="step-card">
           <div className="step-visual resolver-visual">
+            <span className="visual-label">Conceptual flow</span>
             <div className="request-line">
               <span>role</span>
               <code>coding.executor</code>
@@ -307,6 +204,7 @@ export default function Home() {
 
         <article className="step-card">
           <div className="step-visual evidence-visual">
+            <span className="visual-label">Illustrative signal</span>
             <div className="signal-bars" aria-hidden="true">
               <i style={{ height: "36%" }} />
               <i style={{ height: "48%" }} />
@@ -335,6 +233,7 @@ export default function Home() {
 
         <article className="step-card">
           <div className="step-visual controller-visual">
+            <span className="visual-label">Conceptual loop</span>
             <div className="loop-ring">
               <span className="ring-center">Controller</span>
               <span className="ring-item ring-observe">observe</span>
@@ -405,45 +304,44 @@ export default function Home() {
 
       <section className="decision-section">
         <div className="shell decision-grid">
-          <div className="record-card">
-            <div className="record-top">
-              <span>DECISION RECORD</span>
-              <span>HIGH CONFIDENCE</span>
+          <div className="decision-anatomy">
+            <div className="anatomy-heading">
+              <span className="concept-label">Conceptual schema</span>
+              <h3>What every decision must explain</h3>
             </div>
-            <div className="record-role">
-              <span>ROLE</span>
-              <strong>coding.executor</strong>
-            </div>
-            <div className="comparison-table" role="table" aria-label="Decision comparison">
-              <div className="table-row table-head" role="row">
-                <span role="columnheader">Metric</span>
-                <span role="columnheader">Incumbent</span>
-                <span role="columnheader">Challenger</span>
-              </div>
-              <div className="table-row" role="row">
-                <span role="cell">Task success</span><span role="cell">91.9%</span><span role="cell">91.8%</span>
-              </div>
-              <div className="table-row" role="row">
-                <span role="cell">Cost / success</span><span role="cell">$1.21</span><span role="cell" className="positive">$0.38</span>
-              </div>
-              <div className="table-row" role="row">
-                <span role="cell">p95 duration</span><span role="cell">8.9m</span><span role="cell" className="positive">7.4m</span>
-              </div>
-              <div className="table-row" role="row">
-                <span role="cell">Hard requirements</span><span role="cell">pass</span><span role="cell" className="positive">pass</span>
-              </div>
-            </div>
-            <div className="record-rationale">
-              <span>WHY</span>
-              <p>
-                Quality is inside the equivalence margin. Every hard requirement
-                passes. Cost per successful task falls by 68.6%.
-              </p>
-            </div>
-            <div className="record-footer">
-              <span>policy coding-prod@17</span>
-              <span>evidence n=9,333</span>
-              <span>immutable</span>
+            <ol className="anatomy-list">
+              <li>
+                <span>01</span>
+                <div>
+                  <strong>Policy</strong>
+                  <p>Which hard requirements and optimization preferences applied?</p>
+                </div>
+              </li>
+              <li>
+                <span>02</span>
+                <div>
+                  <strong>Evidence</strong>
+                  <p>Which production signals and task-specific scores supported it?</p>
+                </div>
+              </li>
+              <li>
+                <span>03</span>
+                <div>
+                  <strong>Confidence</strong>
+                  <p>Was the sample sufficient to justify a change—or a no-op?</p>
+                </div>
+              </li>
+              <li>
+                <span>04</span>
+                <div>
+                  <strong>Outcome</strong>
+                  <p>What changed, how was it verified, and how can it roll back?</p>
+                </div>
+              </li>
+            </ol>
+            <div className="anatomy-footer">
+              <Check />
+              <span>Inspectable, immutable, and reversible by design.</span>
             </div>
           </div>
 
