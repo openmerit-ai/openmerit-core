@@ -1,0 +1,38 @@
+{
+  "supplier_name": "Oak Property Management Ltd",
+  "customer_name": "John Doe",
+  "invoice_number": "RENT-2023-001",
+  "po_number": null,
+  "document_date": "2023-05-01",
+  "due_date": "2023-05-15",
+  "document_currency": "EUR",
+  "document_total_net": 1650.0,
+  "document_total_tax": 103.5,
+  "document_total_amount": 1753.5,
+  "line_items": [
+    {
+      "description": "Monthly Base Rent",
+      "quantity": 1.0,
+      "unit_price": 1200.0,
+      "amount": 1200.0
+    },
+    {
+      "description": "Utilities (Electricity/Gas)",
+      "quantity": 1.0,
+      "unit_price": 200.0,
+      "amount": 200.0
+    },
+    {
+      "description": "Property Tax",
+      "quantity": 1.0,
+      "unit_price": 150.0,
+      "amount": 150.0
+    },
+    {
+      "description": "Cleaning Service",
+      "quantity": 1.0,
+      "unit_price": 100.0,
+      "amount": 100.0
+    }
+  ]
+}

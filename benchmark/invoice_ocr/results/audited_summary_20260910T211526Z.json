@@ -1,0 +1,142 @@
+{
+  "raw_runs_file": "runs_20260910T211526Z.jsonl",
+  "run_count": 50,
+  "visibility_audit": {
+    "excluded_quality_fields": [
+      "po_number"
+    ],
+    "reason": "The selected images do not render latent PO metadata in four rows; a fifth image labels a PO-like value only as Reference."
+  },
+  "quality_metric": "micro-averaged strict JSON leaf-value match after excluding fields not visibly supported by the rendered images",
+  "summaries": [
+    {
+      "model": "qwen/qwen3.5-9b",
+      "successful_runs": 10,
+      "json_valid_rate": 1.0,
+      "exact_documents": 8,
+      "exact_document_rate": 0.8,
+      "exact_leaf_accuracy": 0.9903846153846154,
+      "mean_scalar_accuracy": 0.9777777777777779,
+      "mean_line_item_accuracy": 1.0,
+      "total_cost_usd": 0.00636045,
+      "mean_cost_usd": 0.000636045,
+      "mean_latency_seconds": 39.10237837077584,
+      "median_latency_seconds": 33.71189458295703,
+      "p95_latency_seconds": 72.41676447725621,
+      "prompt_tokens": 41286,
+      "completion_tokens": 14879,
+      "comparison_cost_usd": 0.00636045,
+      "comparison_cost_basis": "observed"
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash-vision-exp",
+      "successful_runs": 6,
+      "json_valid_rate": 0.6,
+      "exact_documents": 5,
+      "exact_document_rate": 0.5,
+      "exact_leaf_accuracy": 0.5913461538461539,
+      "mean_scalar_accuracy": 0.5888888888888889,
+      "mean_line_item_accuracy": 0.6,
+      "total_cost_usd": 0.006428906,
+      "mean_cost_usd": 0.0010714843333333333,
+      "mean_latency_seconds": 23.20844856253825,
+      "median_latency_seconds": 7.177368437522091,
+      "p95_latency_seconds": 81.8245683228597,
+      "prompt_tokens": 4735,
+      "completion_tokens": 8210,
+      "comparison_cost_usd": 0.010714843333333333,
+      "comparison_cost_basis": "projected from successful responses"
+    },
+    {
+      "model": "google/gemini-3.8-flash",
+      "successful_runs": 10,
+      "json_valid_rate": 1.0,
+      "exact_documents": 9,
+      "exact_document_rate": 0.9,
+      "exact_leaf_accuracy": 0.9951923076923077,
+      "mean_scalar_accuracy": 0.9888888888888889,
+      "mean_line_item_accuracy": 1.0,
+      "total_cost_usd": 0.021072,
+      "mean_cost_usd": 0.0021072,
+      "mean_latency_seconds": 4.561708196136169,
+      "median_latency_seconds": 4.1145597089780495,
+      "p95_latency_seconds": 7.144675292063035,
+      "prompt_tokens": 17016,
+      "completion_tokens": 2216,
+      "comparison_cost_usd": 0.021072,
+      "comparison_cost_basis": "observed"
+    },
+    {
+      "model": "openai/gpt-5.6-sol",
+      "successful_runs": 10,
+      "json_valid_rate": 1.0,
+      "exact_documents": 6,
+      "exact_document_rate": 0.6,
+      "exact_leaf_accuracy": 0.9807692307692307,
+      "mean_scalar_accuracy": 0.9555555555555555,
+      "mean_line_item_accuracy": 1.0,
+      "total_cost_usd": 0.14417750000000001,
+      "mean_cost_usd": 0.014417750000000002,
+      "mean_latency_seconds": 4.406073479098268,
+      "median_latency_seconds": 4.26433768752031,
+      "p95_latency_seconds": 5.926926193467807,
+      "prompt_tokens": 51505,
+      "completion_tokens": 1543,
+      "comparison_cost_usd": 0.14417750000000001,
+      "comparison_cost_basis": "observed"
+    },
+    {
+      "model": "anthropic/claude-sonnet-5",
+      "successful_runs": 10,
+      "json_valid_rate": 1.0,
+      "exact_documents": 8,
+      "exact_document_rate": 0.8,
+      "exact_leaf_accuracy": 0.9903846153846154,
+      "mean_scalar_accuracy": 0.9777777777777779,
+      "mean_line_item_accuracy": 1.0,
+      "total_cost_usd": 0.140616,
+      "mean_cost_usd": 0.014061599999999999,
+      "mean_latency_seconds": 6.8093745041172955,
+      "median_latency_seconds": 6.631521478993818,
+      "p95_latency_seconds": 8.526538354158397,
+      "prompt_tokens": 57848,
+      "completion_tokens": 2492,
+      "comparison_cost_usd": 0.140616,
+      "comparison_cost_basis": "observed"
+    }
+  ],
+  "rankings": {
+    "cost": [
+      "qwen/qwen3.5-9b",
+      "deepseek/deepseek-v4-flash-vision-exp",
+      "google/gemini-3.8-flash",
+      "anthropic/claude-sonnet-5",
+      "openai/gpt-5.6-sol"
+    ],
+    "latency": [
+      "google/gemini-3.8-flash",
+      "openai/gpt-5.6-sol",
+      "anthropic/claude-sonnet-5",
+      "deepseek/deepseek-v4-flash-vision-exp",
+      "qwen/qwen3.5-9b"
+    ],
+    "quality": [
+      "google/gemini-3.8-flash",
+      "qwen/qwen3.5-9b",
+      "anthropic/claude-sonnet-5",
+      "openai/gpt-5.6-sol",
+      "deepseek/deepseek-v4-flash-vision-exp"
+    ]
+  },
+  "pareto_layers": [
+    [
+      "qwen/qwen3.5-9b",
+      "deepseek/deepseek-v4-flash-vision-exp",
+      "google/gemini-3.8-flash"
+    ],
+    [
+      "anthropic/claude-sonnet-5",
+      "openai/gpt-5.6-sol"
+    ]
+  ]
+}

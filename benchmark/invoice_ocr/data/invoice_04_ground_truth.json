@@ -1,0 +1,26 @@
+{
+  "supplier_name": "Tech Solutions Ltd",
+  "customer_name": "Acme Construction Ltd",
+  "invoice_number": "INV-20230815-001",
+  "po_number": "PO-7654321",
+  "document_date": "2023-08-15",
+  "due_date": "2023-09-14",
+  "document_currency": "GBP",
+  "document_total_net": 1500.0,
+  "document_total_tax": 240.0,
+  "document_total_amount": 1740.0,
+  "line_items": [
+    {
+      "description": "High-performance laptop",
+      "quantity": 1.0,
+      "unit_price": 1200.0,
+      "amount": 1200.0
+    },
+    {
+      "description": "Office desk chair",
+      "quantity": 2.0,
+      "unit_price": 150.0,
+      "amount": 300.0
+    }
+  ]
+}
