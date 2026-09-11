@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "mode": "recommend",
+  "auto_apply": {
+    "enabled": false,
+    "min_score_gain": 0.1,
+    "max_price_ratio": 1.5,
+    "require_frontier": true
+  },
+  "budgets": {
+    "max_usd_per_trial": 0.25,
+    "max_trials_per_day": 20,
+    "max_usd_per_day": 5.0
+  },
+  "providers": {
+    "allow": ["*"],
+    "deny": []
+  },
+  "watch": {
+    "catalog_interval_min": 360,
+    "traces_interval_sec": 60,
+    "trial_interval_min": 30
+  },
+  "fallback": {
+    "auto_update": true,
+    "min_score": 0.6,
+    "apply_on_error": true
+  },
+  "judge_model": null,
+  "strategist_model": null,
+  "max_usd_per_m": 20.0
+}

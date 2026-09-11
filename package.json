@@ -1,0 +1,21 @@
+{
+  "name": "openmerit",
+  "version": "0.1.0",
+  "description": "External model-merit harness for pi: observes traces, builds per-task pareto frontiers, and recommends model swaps with reasoning.",
+  "type": "module",
+  "bin": {
+    "openmerit": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.85.1",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
