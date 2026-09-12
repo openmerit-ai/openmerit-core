@@ -36,6 +36,8 @@ export async function fetchCatalog(key: string): Promise<Map<string, CatalogEntr
 interface Snapshot {
   takenAt: string;
   ids: string[];
+  /** Full entries, so the pi extension can inject models pi's registry lacks. */
+  entries?: CatalogEntry[];
 }
 
 /** Diff the live catalog against the stored snapshot; returns newly appeared models. */
@@ -55,5 +57,6 @@ export function saveSnapshot(cat: Map<string, CatalogEntry>): void {
   writeJson(paths.catalogSnapshot(), {
     takenAt: new Date().toISOString(),
     ids: [...cat.keys()].sort(),
+    entries: [...cat.values()].sort((a, b) => a.id.localeCompare(b.id)),
   } satisfies Snapshot);
 }

@@ -171,7 +171,9 @@ function cmdFrontier(filter?: string): void {
 function cmdStatus(): void {
   const harness = readJson<{ currentModel?: string; updatedAt?: string }>(paths.harnessState(), {});
   const queue = readJson<{ newModels: { id: string; firstSeen: string }[] }>(paths.candidates(), { newModels: [] });
-  const recs = readJsonl<Recommendation>(paths.recommendations()).filter((r) => r.status === "pending");
+  const latestById = new Map<string, Recommendation>();
+  for (const r of readJsonl<Recommendation>(paths.recommendations())) latestById.set(r.id, r);
+  const recs = [...latestById.values()].filter((r) => r.status === "pending");
   const frontiers = loadFrontiers();
   console.log(`harness model : ${harness.currentModel ?? "unknown"} (as of ${harness.updatedAt ?? "n/a"})`);
   console.log(`tasks tracked : ${frontiers.length}`);

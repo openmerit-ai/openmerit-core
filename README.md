@@ -78,7 +78,7 @@ pi
 | file | contents |
 |---|---|
 | `policy.json` | the policy file (gate thresholds, budgets, intervals) |
-| `harness-state.json` | written by the pi extension: current model/session |
+| `harness-state.json` | written by the pi extension: current model, fallback, session |
 | `recommendations.jsonl` | the channel: swap recommendations + status updates |
 | `trials.jsonl` | every shadow-trial point (model, score, price, latency) |
 | `observations.jsonl` | task observations extracted from session traces |

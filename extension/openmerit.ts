@@ -87,6 +87,8 @@ function setStatus(rec: Recommendation, status: Recommendation["status"]): void 
   appendJsonl(RECS_FILE, { ...rec, status, ts: new Date().toISOString() });
 }
 
+let fallbackModel: string | null = null;
+
 function reportHarnessState(ctx: ExtensionContext): void {
   try {
     mkdirSync(HOME, { recursive: true });
@@ -95,6 +97,7 @@ function reportHarnessState(ctx: ExtensionContext): void {
       STATE_FILE,
       JSON.stringify({
         currentModel: model,
+        fallbackModel,
         sessionFile: ctx.sessionManager.getSessionFile() ?? null,
         cwd: ctx.cwd,
         updatedAt: new Date().toISOString(),
@@ -102,6 +105,16 @@ function reportHarnessState(ctx: ExtensionContext): void {
     );
   } catch {
     /* never break the host session over reporting */
+  }
+}
+
+/** Restore the persisted fallback so a fresh session keeps it even with no pending recs. */
+function restoreFallback(): void {
+  try {
+    const st = JSON.parse(readFileSync(STATE_FILE, "utf8")) as { fallbackModel?: string | null };
+    if (st.fallbackModel) fallbackModel = st.fallbackModel;
+  } catch {
+    /* no state yet */
   }
 }
 
@@ -126,13 +139,73 @@ function resolveModel(ctx: ExtensionContext, openrouterId: string) {
   return undefined;
 }
 
+interface CatalogEntryLite {
+  id: string;
+  name?: string;
+  ctx?: number;
+  pp?: number;
+  pc?: number;
+}
+
+const INJECT_PROVIDER = "openmerit-openrouter";
+const injectedModels: CatalogEntryLite[] = [];
+
+function catalogEntry(openrouterId: string): CatalogEntryLite | undefined {
+  try {
+    const snap = JSON.parse(readFileSync(join(HOME, "catalog", "snapshot.json"), "utf8")) as {
+      entries?: CatalogEntryLite[];
+    };
+    return (snap.entries ?? []).find((e) => e.id === openrouterId);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Ensure pi can use the model. pi's built-in registry lags the live
+ * OpenRouter catalog, so inject anything missing via registerProvider
+ * (takes effect immediately, no /reload needed).
+ */
+function ensureModel(pi: ExtensionAPI, ctx: ExtensionContext, openrouterId: string) {
+  const existing = resolveModel(ctx, openrouterId);
+  if (existing) return existing;
+
+  const entry = catalogEntry(openrouterId);
+  if (!entry) return undefined;
+  if (!injectedModels.some((m) => m.id === entry.id)) injectedModels.push(entry);
+
+  pi.registerProvider(INJECT_PROVIDER, {
+    baseUrl: "https://openrouter.ai/api/v1",
+    apiKey: "$OPENROUTER_API_KEY",
+    api: "openai-completions",
+    models: injectedModels.map((m) => ({
+      id: m.id,
+      name: m.name ?? m.id,
+      reasoning: false,
+      input: ["text"],
+      cost: {
+        input: (m.pp ?? 0) * 1e6,
+        output: (m.pc ?? 0) * 1e6,
+        cacheRead: 0,
+        cacheWrite: 0,
+      },
+      contextWindow: m.ctx && m.ctx > 0 ? m.ctx : 128000,
+      maxTokens: 16384,
+    })),
+  });
+
+  const reg = ctx.modelRegistry as unknown as {
+    find?: (provider: string, id: string) => unknown | undefined;
+  };
+  return reg.find?.(INJECT_PROVIDER, openrouterId);
+}
+
 export default function openmerit(pi: ExtensionAPI) {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
-  let fallbackModel: string | null = null;
   const notified = new Set<string>();
 
   async function applyRecommendation(ctx: ExtensionContext, rec: Recommendation): Promise<boolean> {
-    const model = resolveModel(ctx, rec.recommended.model);
+    const model = ensureModel(pi, ctx, rec.recommended.model);
     if (!model) {
       ctx.ui.notify(
         `openmerit: ${rec.recommended.model} not found in pi's model registry (add the provider/model first)`,
@@ -162,18 +235,21 @@ export default function openmerit(pi: ExtensionAPI) {
         await applyRecommendation(ctx, rec);
         continue;
       }
-      if (!ctx.hasUI) continue; // print/json mode: leave for /openmerit apply
-      const choice = await ctx.ui.select(
-        `openmerit recommends: ${rec.recommended.model}\n\n${rec.recommended.reason}\n\ngate: ${rec.policy.reasons.join("; ")}`,
-        ["Apply", "Dismiss", "Later"],
-      );
-      if (choice === "Apply") await applyRecommendation(ctx, rec);
-      else if (choice === "Dismiss") setStatus(rec, "dismissed");
-      else notified.delete(rec.id); // "Later": re-surface next poll
+      // Never block here: surface() runs during session_start and on a poll
+      // timer, where a modal dialog would deadlock RPC mode and stall TUI
+      // startup. Notify (fire-and-forget) and let the user act via /openmerit.
+      if (ctx.hasUI) {
+        ctx.ui.notify(
+          `openmerit recommends: ${rec.recommended.model}\n${rec.recommended.reason}\n` +
+            `gate: ${rec.policy.reasons.join("; ")}\n(/openmerit apply to switch, /openmerit dismiss to ignore)`,
+          "info",
+        );
+      }
     }
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    restoreFallback();
     reportHarnessState(ctx);
     await surface(ctx);
     if (pollTimer) clearInterval(pollTimer);
@@ -207,17 +283,25 @@ export default function openmerit(pi: ExtensionAPI) {
     const policy = loadPolicy();
     if (policy.fallback?.apply_on_error === false) return;
     const current = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "current model";
-    const model = resolveModel(ctx, fallbackModel);
+    const model = ensureModel(pi, ctx, fallbackModel);
     if (!model) return;
 
     const auto = policy.mode === "auto";
-    const ok =
-      auto ||
-      (ctx.hasUI &&
-        (await ctx.ui.confirm(
-          "openmerit fallback",
-          `${current} is failing. Switch to frontier fallback ${fallbackModel}?`,
-        )));
+    let ok = auto;
+    if (!ok && ctx.mode === "tui") {
+      // Modal confirm only in TUI; in RPC mode an unanswered dialog blocks
+      // the command stream.
+      ok = await ctx.ui.confirm(
+        "openmerit fallback",
+        `${current} is failing. Switch to frontier fallback ${fallbackModel}?`,
+      );
+    } else if (!ok && ctx.hasUI) {
+      ctx.ui.notify(
+        `openmerit: ${current} is failing; frontier fallback is ${fallbackModel} (/openmerit fallback to switch)`,
+        "warning",
+      );
+      return;
+    }
     if (!ok) return;
     if (await pi.setModel(model as Parameters<typeof pi.setModel>[0])) {
       ctx.ui.notify(`openmerit: fallback engaged -> ${fallbackModel}`, "warning");
@@ -243,6 +327,20 @@ export default function openmerit(pi: ExtensionAPI) {
       if (sub === "dismiss") {
         for (const r of pending) setStatus(r, "dismissed");
         ctx.ui.notify(`openmerit: dismissed ${pending.length} recommendation(s)`, "info");
+        return;
+      }
+      if (sub === "fallback") {
+        if (!fallbackModel) {
+          ctx.ui.notify("openmerit: no fallback set yet", "info");
+          return;
+        }
+        const model = ensureModel(pi, ctx, fallbackModel);
+        if (model && (await pi.setModel(model as Parameters<typeof pi.setModel>[0]))) {
+          ctx.ui.notify(`openmerit: switched to fallback ${fallbackModel}`, "info");
+          reportHarnessState(ctx);
+        } else {
+          ctx.ui.notify(`openmerit: could not switch to ${fallbackModel} (not in registry or no auth)`, "error");
+        }
         return;
       }
 
