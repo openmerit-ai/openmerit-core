@@ -32,7 +32,9 @@ unit price, and amount. The JSON Schema in
 - **Quality:** micro-averaged, strict typed exact match over the union of JSON
   leaf paths. This penalizes missing and hallucinated line items/fields.
 - **Exact document rate:** byte-independent deep JSON equality after parsing.
-- **Latency:** client-observed end-to-end request time; ranking uses the median.
+- **Latency:** client-observed time for the successful request attempt; ranking
+  uses the median. If a request succeeds after a retry, prior attempt and
+  backoff time are not included.
 - **Cost:** the `usage.cost` returned by OpenRouter, summed over the 10 runs.
 - **Pareto layers:** nondominated layers minimizing cost and median latency
   while maximizing exact-leaf quality.
@@ -41,3 +43,35 @@ Run `python3 benchmark/invoice_ocr/audit_results.py` after the benchmark to
 produce the visibility-audited summary. The audit excludes `po_number` from
 quality scoring because four selected source records contain latent PO metadata
 that their images do not render; the raw, unadjusted scores remain preserved.
+
+## Round two
+
+The second benchmark reuses the exact dataset, prompt, JSON Schema, request
+settings, scoring functions, and PO-visibility projection. It tests five model
+IDs that do not overlap with round one:
+
+- `google/gemma-4-26b-a4b-it` - very cheap open model
+- `qwen/qwen3-vl-235b-a22b-instruct` - document/OCR-oriented model
+- `xiaomi/mimo-v2.5` - strong general VLM
+- `x-ai/grok-4.6` - strong general VLM
+- `openai/gpt-6-astra` - frontier model
+
+Before paid calls, the runner queries OpenRouter's public model catalog and
+endpoint APIs. It requires image input plus at least one live endpoint that
+advertises both `response_format` and `structured_outputs`, and records the
+complete availability/pricing snapshot beside the run.
+
+```bash
+python3 benchmark/invoice_ocr/benchmark_round2.py --verify-only
+OPENROUTER_API_KEY=... python3 benchmark/invoice_ocr/benchmark_round2.py
+python3 benchmark/invoice_ocr/audit_round2.py \
+  benchmark/invoice_ocr/results/runs_round2_<timestamp>.jsonl
+```
+
+Round-two files use `*_round2_<timestamp>` names, so neither the first run nor
+later second-round runs are overwritten. The audited summary adds strict local
+schema validation and clean/faded/bad-scan quality slices without changing the
+quality score itself. `valid_output_rate` means a parseable JSON object;
+`schema_valid_rate` means the parsed object also conforms to the complete fixed
+schema; `failure_rate` includes requests that completed without usable message
+content.

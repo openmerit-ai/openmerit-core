@@ -1,0 +1,76 @@
+{
+  "benchmark": "deterministic SQLite analytical text-to-SQL",
+  "version": 1,
+  "tasks": [
+    {
+      "task_id": "regional_q1_net_revenue",
+      "difficulty": "medium",
+      "skills": ["multi-table join", "filtered aggregation", "arithmetic"],
+      "question": "For completed orders in Q1 2025 (order_date on or after 2025-01-01 and before 2025-04-01), return net revenue by customer region. Net revenue is quantity * unit_price * (1 - discount_pct / 100). Return exactly the columns region and net_revenue, round net_revenue to 2 decimals, and order by net_revenue descending then region ascending.",
+      "reference_sql": "SELECT c.region AS region, ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0)), 2) AS net_revenue FROM customers AS c JOIN orders AS o ON o.customer_id = c.customer_id JOIN order_items AS oi ON oi.order_id = o.order_id WHERE o.status = 'completed' AND o.order_date >= '2025-01-01' AND o.order_date < '2025-04-01' GROUP BY c.region ORDER BY net_revenue DESC, region ASC"
+    },
+    {
+      "task_id": "top_product_per_category",
+      "difficulty": "hard",
+      "skills": ["window function", "grouping", "top-N per group"],
+      "question": "Using completed orders only, find the single product with the greatest total units sold within each category. Break a units-sold tie by product_name ascending. Return exactly category, product_name, and units_sold, with one row per category, ordered by category ascending.",
+      "reference_sql": "WITH sales AS (SELECT p.category, p.product_name, SUM(oi.quantity) AS units_sold FROM products AS p JOIN order_items AS oi ON oi.product_id = p.product_id JOIN orders AS o ON o.order_id = oi.order_id WHERE o.status = 'completed' GROUP BY p.category, p.product_id, p.product_name), ranked AS (SELECT category, product_name, units_sold, ROW_NUMBER() OVER (PARTITION BY category ORDER BY units_sold DESC, product_name ASC) AS rn FROM sales) SELECT category, product_name, units_sold FROM ranked WHERE rn = 1 ORDER BY category ASC"
+    },
+    {
+      "task_id": "customers_without_completed_orders",
+      "difficulty": "easy",
+      "skills": ["anti-join", "NULL handling"],
+      "question": "List customers who have never had a completed order, including customers with no orders at all. Return exactly customer_id and customer_name, ordered by customer_id ascending.",
+      "reference_sql": "SELECT c.customer_id AS customer_id, c.customer_name AS customer_name FROM customers AS c WHERE NOT EXISTS (SELECT 1 FROM orders AS o WHERE o.customer_id = c.customer_id AND o.status = 'completed') ORDER BY customer_id ASC"
+    },
+    {
+      "task_id": "monthly_reconciliation",
+      "difficulty": "hard",
+      "skills": ["pre-aggregation", "multiple one-to-many joins", "date bucketing"],
+      "question": "For each order month from January through June 2025 that has at least one completed order, reconcile order value with payments. First compute each completed order's net value as quantity * unit_price * (1 - discount_pct / 100). Payments_received is the sum of all payments attached to those orders regardless of payment date. Return exactly order_month (YYYY-MM), gross_order_value, payments_received, and payment_gap (gross_order_value - payments_received), with all three numeric columns rounded to 2 decimals. Order by order_month ascending. Avoid multiplying payments when an order has multiple line items.",
+      "reference_sql": "WITH order_totals AS (SELECT o.order_id, substr(o.order_date, 1, 7) AS order_month, SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0)) AS order_value FROM orders AS o JOIN order_items AS oi ON oi.order_id = o.order_id WHERE o.status = 'completed' AND o.order_date >= '2025-01-01' AND o.order_date < '2025-07-01' GROUP BY o.order_id, order_month), payment_totals AS (SELECT p.order_id, SUM(p.amount) AS paid FROM payments AS p GROUP BY p.order_id) SELECT ot.order_month AS order_month, ROUND(SUM(ot.order_value), 2) AS gross_order_value, ROUND(SUM(COALESCE(pt.paid, 0)), 2) AS payments_received, ROUND(SUM(ot.order_value) - SUM(COALESCE(pt.paid, 0)), 2) AS payment_gap FROM order_totals AS ot LEFT JOIN payment_totals AS pt ON pt.order_id = ot.order_id GROUP BY ot.order_month ORDER BY order_month ASC"
+    },
+    {
+      "task_id": "customer_running_value",
+      "difficulty": "hard",
+      "skills": ["window function", "pre-aggregation", "running total"],
+      "question": "For every completed order, calculate its net order value and that customer's running completed-order value through the current order. Net value is quantity * unit_price * (1 - discount_pct / 100). Return exactly customer_name, order_id, order_date, order_value, and customer_running_value. Round both value columns to 2 decimals. The running window is ordered by order_date then order_id and includes all earlier rows plus the current row. Order the final output by customer_name, order_date, then order_id, all ascending.",
+      "reference_sql": "WITH order_totals AS (SELECT o.order_id, o.customer_id, o.order_date, SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0)) AS order_value FROM orders AS o JOIN order_items AS oi ON oi.order_id = o.order_id WHERE o.status = 'completed' GROUP BY o.order_id, o.customer_id, o.order_date), running AS (SELECT c.customer_name, ot.order_id, ot.order_date, ot.order_value, SUM(ot.order_value) OVER (PARTITION BY ot.customer_id ORDER BY ot.order_date, ot.order_id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS customer_running_value FROM order_totals AS ot JOIN customers AS c ON c.customer_id = ot.customer_id) SELECT customer_name, order_id, order_date, ROUND(order_value, 2) AS order_value, ROUND(customer_running_value, 2) AS customer_running_value FROM running ORDER BY customer_name ASC, order_date ASC, order_id ASC"
+    },
+    {
+      "task_id": "signup_activation_cohorts",
+      "difficulty": "hard",
+      "skills": ["cohort analysis", "correlated existence", "date arithmetic"],
+      "question": "Group customers by signup month. A customer is activated when they have at least one completed order on or after signup_date and no later than 30 days after signup_date, inclusive. Return exactly signup_month (YYYY-MM), customers, activated_customers, and activation_rate_pct. Round activation_rate_pct to 1 decimal. Return every signup cohort, including cohorts with zero activated customers, ordered by signup_month ascending.",
+      "reference_sql": "SELECT substr(c.signup_date, 1, 7) AS signup_month, COUNT(*) AS customers, SUM(CASE WHEN EXISTS (SELECT 1 FROM orders AS o WHERE o.customer_id = c.customer_id AND o.status = 'completed' AND o.order_date >= c.signup_date AND o.order_date <= date(c.signup_date, '+30 days')) THEN 1 ELSE 0 END) AS activated_customers, ROUND(100.0 * SUM(CASE WHEN EXISTS (SELECT 1 FROM orders AS o WHERE o.customer_id = c.customer_id AND o.status = 'completed' AND o.order_date >= c.signup_date AND o.order_date <= date(c.signup_date, '+30 days')) THEN 1 ELSE 0 END) / COUNT(*), 1) AS activation_rate_pct FROM customers AS c GROUP BY signup_month ORDER BY signup_month ASC"
+    },
+    {
+      "task_id": "category_discount_leakage",
+      "difficulty": "medium",
+      "skills": ["multi-table aggregation", "business arithmetic", "percentage"],
+      "question": "For completed orders only, quantify discount leakage by product category. List_value is quantity * products.list_price. Realized_value is quantity * order_items.unit_price * (1 - discount_pct / 100). Leakage_pct is 100 * (list_value - realized_value) / list_value. Return exactly category, list_value, realized_value, and leakage_pct. Round value columns to 2 decimals and leakage_pct to 1 decimal. Order by leakage_pct descending then category ascending.",
+      "reference_sql": "SELECT p.category AS category, ROUND(SUM(oi.quantity * p.list_price), 2) AS list_value, ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0)), 2) AS realized_value, ROUND(100.0 * (SUM(oi.quantity * p.list_price) - SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0))) / SUM(oi.quantity * p.list_price), 1) AS leakage_pct FROM products AS p JOIN order_items AS oi ON oi.product_id = p.product_id JOIN orders AS o ON o.order_id = oi.order_id WHERE o.status = 'completed' GROUP BY p.category ORDER BY leakage_pct DESC, category ASC"
+    },
+    {
+      "task_id": "support_sla_breaches",
+      "difficulty": "medium",
+      "skills": ["conditional aggregation", "CASE expression", "ratio"],
+      "question": "For closed support tickets, report SLA breach rates by customer region and priority. A ticket breaches when resolution_hours is greater than its priority threshold: urgent 8 hours, high 24, normal 72, low 120. Return exactly region, priority, ticket_count, breaches, and breach_rate_pct. Round breach_rate_pct to 1 decimal. Include only region-priority combinations that have a closed ticket, ordered by region ascending then priority ascending.",
+      "reference_sql": "SELECT c.region AS region, st.priority AS priority, COUNT(*) AS ticket_count, SUM(CASE WHEN st.resolution_hours > CASE st.priority WHEN 'urgent' THEN 8 WHEN 'high' THEN 24 WHEN 'normal' THEN 72 WHEN 'low' THEN 120 END THEN 1 ELSE 0 END) AS breaches, ROUND(100.0 * SUM(CASE WHEN st.resolution_hours > CASE st.priority WHEN 'urgent' THEN 8 WHEN 'high' THEN 24 WHEN 'normal' THEN 72 WHEN 'low' THEN 120 END THEN 1 ELSE 0 END) / COUNT(*), 1) AS breach_rate_pct FROM support_tickets AS st JOIN customers AS c ON c.customer_id = st.customer_id WHERE st.closed_date IS NOT NULL GROUP BY c.region, st.priority ORDER BY region ASC, priority ASC"
+    },
+    {
+      "task_id": "executive_team_rollup",
+      "difficulty": "hard",
+      "skills": ["recursive CTE", "hierarchy", "depth aggregation"],
+      "question": "For each top-level executive (an employee whose manager_id is NULL), recursively include every employee in that executive's management tree. Return exactly executive, report_count (all descendants, excluding the executive), total_team_salary (executive plus all descendants), and max_depth (executive is depth 0). Order by total_team_salary descending then executive ascending.",
+      "reference_sql": "WITH RECURSIVE org AS (SELECT e.employee_id, e.employee_name AS executive, e.employee_id AS member_id, 0 AS depth FROM employees AS e WHERE e.manager_id IS NULL UNION ALL SELECT org.employee_id, org.executive, child.employee_id, org.depth + 1 FROM org JOIN employees AS child ON child.manager_id = org.member_id) SELECT org.executive AS executive, COUNT(*) - 1 AS report_count, SUM(e.salary) AS total_team_salary, MAX(org.depth) AS max_depth FROM org JOIN employees AS e ON e.employee_id = org.member_id GROUP BY org.employee_id, org.executive ORDER BY total_team_salary DESC, executive ASC"
+    },
+    {
+      "task_id": "repeat_purchase_gap",
+      "difficulty": "hard",
+      "skills": ["LAG window function", "date arithmetic", "two-stage aggregation"],
+      "question": "For each customer with at least two completed orders, calculate the average number of days between consecutive completed orders. Return exactly customer_name, completed_orders, and avg_days_between_orders, rounded to 1 decimal. Order by avg_days_between_orders descending then customer_name ascending.",
+      "reference_sql": "WITH sequenced AS (SELECT o.customer_id, o.order_date, LAG(o.order_date) OVER (PARTITION BY o.customer_id ORDER BY o.order_date, o.order_id) AS previous_order_date, COUNT(*) OVER (PARTITION BY o.customer_id) AS completed_orders FROM orders AS o WHERE o.status = 'completed'), gaps AS (SELECT customer_id, completed_orders, julianday(order_date) - julianday(previous_order_date) AS gap_days FROM sequenced WHERE previous_order_date IS NOT NULL) SELECT c.customer_name AS customer_name, g.completed_orders AS completed_orders, ROUND(AVG(g.gap_days), 1) AS avg_days_between_orders FROM gaps AS g JOIN customers AS c ON c.customer_id = g.customer_id GROUP BY g.customer_id, c.customer_name, g.completed_orders ORDER BY avg_days_between_orders DESC, customer_name ASC"
+    }
+  ]
+}
