@@ -2,10 +2,18 @@
 
 import { readJson, paths, writeJson } from "./store.js";
 import type { CatalogEntry } from "./types.js";
+import type { CatalogProvider } from "./providers.js";
 
 const OR = "https://openrouter.ai/api/v1";
 
-export async function fetchCatalog(key: string): Promise<Map<string, CatalogEntry>> {
+export class OpenRouterCatalogProvider implements CatalogProvider {
+  readonly id = "openrouter";
+  constructor(private readonly key: string) {}
+  fetchCatalog(): Promise<Map<string, CatalogEntry>> { return fetchCatalog(this.key); }
+}
+
+export async function fetchCatalog(key: string, provider = "openrouter"): Promise<Map<string, CatalogEntry>> {
+  if (provider !== "openrouter") return new Map();
   const res = await fetch(`${OR}/models`, {
     headers: { Authorization: `Bearer ${key}` },
   });

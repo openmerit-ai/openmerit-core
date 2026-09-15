@@ -105,6 +105,12 @@ Keep that checkout available because pi loads a local package from its path.
    A ready configuration prints `{"status":"ready","provider":"openrouter",...}`.
    Older `model_search/.env` files are not read by the trial engine.
 
+   OpenRouter is the default provider. OpenAI and Gemini can also be used by
+   Pi for candidate runs. Direct judge/strategist calls require an explicit
+   `OPENMERIT_DIRECT_PROVIDER=openai` or `OPENMERIT_DIRECT_PROVIDER=google`
+   opt-in plus the corresponding provider key; OpenRouter model IDs remain on
+   OpenRouter by default.
+
 3. Verify the extension appears in `pi list`. The instruction file
    [`instructions/OPENMERIT.md`](instructions/OPENMERIT.md) can be added to a
    pi project's AGENTS.md for agent context, but the extension does
@@ -113,7 +119,7 @@ Keep that checkout available because pi loads a local package from its path.
 4. Start pi in one terminal with an OpenRouter model and tools disabled:
 
    ```bash
-   pi --provider openrouter --model openai/gpt-4o-mini --no-tools
+   pi --provider openrouter --model openai/gpt-4o-mini
    ```
 
    For a first text task, ask: “Give the shortest valid word ladder from cat
@@ -133,7 +139,7 @@ Keep that checkout available because pi loads a local package from its path.
 ### Try an invoice-to-JSON task
 
 Use the same one-terminal setup. Start pi with a vision-capable model, for
-example `openai/gpt-4o-mini`, and `--no-tools`. In pi, type `@` to select
+example `openai/gpt-4o-mini`. In pi, type `@` to select
 [`benchmark/invoice_ocr/data/invoice_01_row_2.jpg`](benchmark/invoice_ocr/data/invoice_01_row_2.jpg)
 and paste the **entire, unchanged** text from
 [`examples/invoice-prompt.txt`](examples/invoice-prompt.txt) into the same
