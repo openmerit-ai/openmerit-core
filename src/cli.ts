@@ -10,9 +10,9 @@ import { fetchCatalog } from "./catalog.js";
 import { paretoFrontier, pickBest, pickFallback } from "./frontier.js";
 import { buildRecommendation } from "./recommend.js";
 import { appendJsonl, paths, readJson, readJsonl, taskKey } from "./store.js";
-import { recommendTick, runDaemon, tickOnce } from "./daemon.js";
+import { autoTaskTick, recommendTick, runDaemon, tickOnce } from "./daemon.js";
 import { budgetOk, recordTrialSpend } from "./trials.js";
-import { availablePiModels, recordedActiveTask, runPiTrial, scorePiRun } from "./pi-trials.js";
+import { availablePiModels, recordedActiveTask, runPiTrial, scorePiRun, settledActiveTask } from "./pi-trials.js";
 import { pickNext, STRAT_PREFS } from "./strategist.js";
 import { JUDGE_PREFS } from "./judge.js";
 import { openRouterBenchmarkCandidates, relevantBenchmarks } from "./benchmarks.js";
@@ -40,7 +40,7 @@ function cmdInit(): void {
   }
   console.log(`instr.  -> ${join(ROOT, "instructions", "OPENMERIT.md")} (add to your harness's AGENTS.md/context)`);
   console.log(`ext.    -> ${join(ROOT, "extension", "openmerit.ts")} (install into pi: pi install ${ROOT})`);
-  console.log("\nNext: set OPENROUTER_API_KEY (env or ~/.openmerit/.env), install into pi, then run `openmerit watch` alongside pi.");
+  console.log("\nNext: set OPENROUTER_API_KEY (env or ~/.openmerit/.env), install into pi, then start pi; the extension launches comparisons automatically.");
 }
 
 async function cmdTrial(taskFile: string, rounds: number): Promise<void> {
@@ -207,6 +207,17 @@ async function main(): Promise<void> {
     case "init":
       cmdInit();
       break;
+    case "session-trial": {
+      const [sessionFile, settledAt, currentModel, settledTaskKey, cwd, bytesText] = args;
+      if (!sessionFile || !settledAt || !currentModel || !settledTaskKey || !cwd || !bytesText)
+        throw new Error("usage: openmerit session-trial <session-file> <settled-at> <model> <task-key> <cwd> <session-bytes>");
+      const sessionBytes = Number(bytesText);
+      if (!Number.isSafeInteger(sessionBytes) || sessionBytes <= 0) throw new Error("invalid session byte limit");
+      const task = settledActiveTask({ sessionFile, settledAt, currentModel, settledTaskKey, cwd, sessionBytes });
+      if (!task) throw new Error("the specified pi session has no completed, supported task matching this marker");
+      await autoTaskTick(loadKey(), policy, task);
+      break;
+    }
     case "watch":
       if (args.includes("--once")) await tickOnce(policy);
       else await runDaemon(policy);

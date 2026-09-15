@@ -1,8 +1,8 @@
 /**
  * OpenMerit pi extension — runs INSIDE the main harness.
  *
- * Install: copy/symlink this file to ~/.pi/agent/extensions/openmerit.ts
- * and run `openmerit watch` (the background track) alongside your session.
+ * Install: `pi install /path/to/openmerit` after `npm ci`.
+ * The extension launches session-bound comparisons after pi settles.
  *
  * What it does:
  *  - Reports this harness's current model to openmerit (~/.openmerit/harness-state.json).
@@ -21,12 +21,15 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const HOME = process.env.OPENMERIT_HOME ?? join(homedir(), ".openmerit");
 const RECS_FILE = join(HOME, "recommendations.jsonl");
 const TRIALS_FILE = join(HOME, "trials.jsonl");
 const STATE_FILE = join(HOME, "harness-state.json");
 const POLICY_FILE = join(HOME, "policy.json");
+const ENGINE_FILE = join(fileURLToPath(new URL("..", import.meta.url)), "dist", "cli.js");
 
 interface ExtensionPolicy {
   mode?: string;
@@ -299,8 +302,100 @@ function ensureModel(pi: ExtensionAPI, ctx: ExtensionContext, openrouterId: stri
 
 export default function openmerit(pi: ExtensionAPI) {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let trialJob: ChildProcessWithoutNullStreams | null = null;
+  const queuedJobs: { sessionFile: string; settledAt: string; model: string; key: string; cwd: string; bytes: number }[] = [];
+  const startedJobs = new Set<string>();
+  let activeSession: string | null = null;
+
+  function stopTrialJob(): void {
+    if (!trialJob) return;
+    const child = trialJob;
+    trialJob = null;
+    try {
+      if (child.pid && process.platform !== "win32") process.kill(-child.pid, "SIGTERM");
+      else child.kill("SIGTERM");
+    } catch { child.kill("SIGTERM"); }
+  }
   const notified = new Set<string>();
   const suggested = new Set<string>();
+
+  function startNextJob(ctx: ExtensionContext): void {
+    if (trialJob || queuedJobs.length === 0) return;
+    const job = queuedJobs.shift()!;
+    if (job.sessionFile !== activeSession) return startNextJob(ctx);
+    if (!existsSync(ENGINE_FILE)) {
+      ctx.ui.notify("openmerit: trial engine missing; run npm ci in the OpenMerit checkout", "error");
+      return;
+    }
+    const child = spawn(process.execPath, [ENGINE_FILE, "session-trial", job.sessionFile,
+      job.settledAt, job.model, job.key, job.cwd, String(job.bytes)], {
+      cwd: job.cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+    });
+    trialJob = child;
+    if (ctx.hasUI) ctx.ui.notify(`openmerit: comparing models for task ${job.key} (A=${job.model})`, "info");
+    let stdout = "";
+    let stderr = "";
+    function onLine(line: string): void {
+      if (ctx.hasUI && line.includes("[openmerit] task "))
+        ctx.ui.notify(line.trim(), "info");
+    }
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+      let end: number;
+      while ((end = stdout.indexOf("\n")) >= 0) {
+        onLine(stdout.slice(0, end));
+        stdout = stdout.slice(end + 1);
+      }
+    });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.on("error", (error) => {
+      if (ctx.hasUI && job.sessionFile === activeSession)
+        ctx.ui.notify(`openmerit: trial engine failed: ${error.message}`, "error");
+    });
+    child.on("close", (code) => {
+      if (trialJob !== child) return;
+      trialJob = null;
+      if (job.sessionFile === activeSession) {
+        if (code !== 0 && ctx.hasUI)
+          ctx.ui.notify(`openmerit: comparison failed: ${stderr.trim().slice(0, 240) || `exit ${code}`}`, "error");
+        else surface(ctx).catch(() => undefined);
+        startNextJob(ctx);
+      }
+    });
+  }
+
+  function queueSettledTask(ctx: ExtensionContext): void {
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    const model = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
+    if (!sessionFile || !model || !settledTaskKey || !existsSync(sessionFile)) return;
+    // The alpha compares completed response tasks. The engine validates images,
+    // tool use and the baseline answer before any provider calls.
+    let completed = false;
+    for (const line of readFileSync(sessionFile, "utf8").split("\n")) {
+      try {
+        const entry = JSON.parse(line) as { type?: string; message?: { role?: string; content?: unknown; stopReason?: string } };
+        if (entry.type !== "message") continue;
+        if (entry.message?.role === "user") completed = false;
+        if (entry.message?.role === "assistant" && entry.message.stopReason !== "error" &&
+            userTaskKeyFromAnswer(entry.message.content)) completed = true;
+      } catch { /* partial session line */ }
+    }
+    if (!completed) return;
+    const settledAt = new Date().toISOString();
+    const bytes = readFileSync(sessionFile).length;
+    const marker = `${sessionFile}:${settledTaskKey}:${model}:${bytes}`;
+    if (startedJobs.has(marker)) return;
+    startedJobs.add(marker);
+    queuedJobs.push({ sessionFile, settledAt, model, key: settledTaskKey, cwd: ctx.cwd, bytes });
+    startNextJob(ctx);
+  }
+
+  function userTaskKeyFromAnswer(content: unknown): boolean {
+    if (typeof content === "string") return !!content.trim();
+    return Array.isArray(content) && content.some((part) => part?.type === "text" &&
+      typeof part.text === "string" && part.text.trim());
+  }
 
   async function applyRecommendation(ctx: ExtensionContext, rec: Recommendation): Promise<boolean> {
     const current = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
@@ -361,6 +456,9 @@ export default function openmerit(pi: ExtensionAPI) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    activeSession = ctx.sessionManager.getSessionFile() ?? null;
+    stopTrialJob();
+    queuedJobs.length = 0;
     suggested.clear();
     restoreFallback();
     try {
@@ -380,6 +478,7 @@ export default function openmerit(pi: ExtensionAPI) {
 
   pi.on("agent_settled", async (_event, ctx) => {
     reportHarnessState(ctx, true);
+    queueSettledTask(ctx);
     await surface(ctx);
   });
 
@@ -394,6 +493,9 @@ export default function openmerit(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async () => {
+    activeSession = null;
+    queuedJobs.length = 0;
+    stopTrialJob();
     if (pollTimer) {
       clearInterval(pollTimer);
       pollTimer = null;

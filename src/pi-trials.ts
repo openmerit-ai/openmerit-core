@@ -40,13 +40,13 @@ interface SessionMessage extends PiMessage {
 }
 
 /** Use model A's completed result from the active pi session when it matches this task. */
-export function recordedActiveTask(task: string, model: string, images: TaskImage[] = []): PiRun | null {
-  const state = readJson<{ sessionFile?: string | null }>(paths.harnessState(), {});
-  const file = state.sessionFile;
+export function recordedActiveTask(task: string, model: string, images: TaskImage[] = [], sessionFile?: string, sessionBytes?: number): PiRun | null {
+  const state = sessionFile ? null : readJson<{ sessionFile?: string | null }>(paths.harnessState(), {});
+  const file = sessionFile ?? state?.sessionFile;
   if (!file || !existsSync(file)) return null;
   let user: SessionMessage | null = null;
   const assistants: SessionMessage[] = [];
-  for (const line of readFileSync(file, "utf8").split("\n")) {
+  for (const line of readFileSync(file).subarray(0, sessionBytes).toString("utf8").split("\n")) {
     if (!line.trim()) continue;
     let entry: { type?: string; message?: SessionMessage };
     try { entry = JSON.parse(line) as typeof entry; } catch { continue; }
@@ -79,20 +79,24 @@ export interface SettledTask {
   run: PiRun;
   sessionFile: string;
   settledAt: string;
+  sessionBytes?: number;
   cwd: string;
 }
 
 /** Read the exact latest completed text task from the pi extension's session marker. */
-export function settledActiveTask(): SettledTask | null {
-  const st = readJson<{
+export function settledActiveTask(snapshot?: {
+  currentModel?: string | null; sessionFile?: string | null;
+  settledTaskKey?: string | null; settledAt?: string | null; cwd?: string; sessionBytes?: number;
+}): SettledTask | null {
+  const st = snapshot ?? readJson<{
     currentModel?: string | null; sessionFile?: string | null;
-    settledTaskKey?: string | null; settledAt?: string | null; cwd?: string;
+    settledTaskKey?: string | null; settledAt?: string | null; cwd?: string; sessionBytes?: number;
   }>(paths.harnessState(), {});
   if (!st.currentModel || !st.sessionFile || !st.settledTaskKey || !st.settledAt ||
       !existsSync(st.sessionFile)) return null;
   let userContent: unknown = null;
   let usedTools = false;
-  for (const line of readFileSync(st.sessionFile, "utf8").split("\n")) {
+  for (const line of readFileSync(st.sessionFile).subarray(0, st.sessionBytes).toString("utf8").split("\n")) {
     if (!line.trim()) continue;
     let entry: { type?: string; message?: { role?: string; content?: unknown } };
     try { entry = JSON.parse(line) as typeof entry; } catch { continue; }
@@ -108,10 +112,10 @@ export function settledActiveTask(): SettledTask | null {
   if (!images) return null;
   const task = answerText(userContent);
   if (!task.trim() || taskInputKey(task, images) !== st.settledTaskKey) return null;
-  const run = recordedActiveTask(task, st.currentModel, images);
+  const run = recordedActiveTask(task, st.currentModel, images, st.sessionFile, st.sessionBytes);
   if (!run) return null;
   return { task, images, model: st.currentModel, run, sessionFile: st.sessionFile,
-    settledAt: st.settledAt, cwd: st.cwd ?? process.cwd() };
+    settledAt: st.settledAt, sessionBytes: st.sessionBytes, cwd: st.cwd ?? process.cwd() };
 }
 
 /** Limit candidates to models this installed pi can actually select. */

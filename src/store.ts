@@ -23,6 +23,7 @@ export const paths = {
   harnessState: () => join(stateDir(), "harness-state.json"),
   ledger: () => join(stateDir(), "ledger.json"),
   watchProcessed: () => join(stateDir(), "watch", "processed.json"),
+  sessionJob: (marker: string) => join(stateDir(), "watch", "jobs", sha1(marker) + ".json"),
   envFile: () => join(stateDir(), ".env"),
 };
 

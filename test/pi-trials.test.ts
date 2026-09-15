@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync, readFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executePiTask, settledActiveTask } from "../src/pi-trials.js";
@@ -61,6 +61,30 @@ console.log(JSON.stringify({ type: 'agent_settled' }));
       usage: { cost: { total: 0 } }, stopReason: "toolUse" } });
     writeFileSync(sessionFile, lines.map((x) => JSON.stringify(x)).join("\n") + "\n");
     expect(settledActiveTask()).toBeNull();
+  });
+
+  it("keeps model A bound to the settled session bytes when a later task arrives", () => {
+    fixtureDir = mkdtempSync(join(tmpdir(), "openmerit-session-snapshot-"));
+    process.env.OPENMERIT_HOME = fixtureDir;
+    const sessionFile = join(fixtureDir, "session.jsonl");
+    const first = "Convert café invoice to JSON";
+    writeFileSync(sessionFile, [
+      { type: "message", message: { role: "user", content: [{ type: "text", text: first }], timestamp: 1000 } },
+      { type: "message", message: { role: "assistant", provider: "openrouter", model: "vendor/a",
+        content: [{ type: "text", text: "{\"invoice\":1}" }], timestamp: 1200,
+        stopReason: "stop", usage: { cost: { total: 0.002 } } } },
+    ].map((x) => JSON.stringify(x)).join("\n") + "\n");
+    const sessionBytes = readFileSync(sessionFile).length;
+    appendFileSync(sessionFile, [
+      { type: "message", message: { role: "user", content: [{ type: "text", text: "Second task" }], timestamp: 2000 } },
+      { type: "message", message: { role: "assistant", provider: "openrouter", model: "vendor/b",
+        content: [{ type: "text", text: "second answer" }], timestamp: 2300, stopReason: "stop" } },
+    ].map((x) => JSON.stringify(x)).join("\n") + "\n");
+    const captured = settledActiveTask({ sessionFile, sessionBytes, currentModel: "vendor/a",
+      settledTaskKey: taskKey(first), settledAt: "2026-09-16T00:00:00Z", cwd: fixtureDir });
+    expect(captured?.task).toBe(first);
+    expect(captured?.run.answer).toBe('{"invoice":1}');
+    expect(captured?.run.costUsd).toBe(0.002);
   });
 
   it("replays the saved image as a pi image input and separates invoice task keys", async () => {

@@ -15,6 +15,31 @@ afterEach(() => {
 });
 
 describe("pi extension model handoff", () => {
+  it("starts a session-bound comparison after a completed pi response settles", async () => {
+    dir = mkdtempSync(join(tmpdir(), "openmerit-ext-trigger-"));
+    process.env.OPENMERIT_HOME = dir;
+    const session = join(dir, "session.jsonl");
+    writeFileSync(session, [
+      { type: "message", message: { role: "user", content: [{ type: "text", text: "Task A" }], timestamp: 1000 } },
+      { type: "message", message: { role: "assistant", provider: "openrouter", model: "vendor/a",
+        content: [{ type: "text", text: "Answer A" }], timestamp: 1500, stopReason: "stop" } },
+    ].map((x) => JSON.stringify(x)).join("\n") + "\n");
+    const notices: string[] = [];
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    const ctx = { model: { provider: "openrouter", id: "vendor/a" },
+      modelRegistry: { find: () => undefined },
+      sessionManager: { getSessionFile: () => session }, cwd: dir,
+      hasUI: true, isIdle: () => true, ui: { notify: (message: string) => notices.push(message) } };
+    const pi = { on: (name: string, fn: (...args: unknown[]) => Promise<void>) => handlers.set(name, fn),
+      registerCommand: () => undefined, setModel: async () => true };
+    const { default: extension } = await import("../extension/openmerit.js");
+    extension(pi as never);
+    await handlers.get("session_start")?.({}, ctx);
+    await handlers.get("agent_settled")?.({}, ctx);
+    expect(notices.some((x) => x.includes("comparing models for task"))).toBe(true);
+    await handlers.get("session_shutdown")?.();
+  });
+
   it("does not reuse a recommendation for a different invoice with the same prompt", async () => {
     dir = mkdtempSync(join(tmpdir(), "openmerit-ext-invoice-"));
     process.env.OPENMERIT_HOME = dir;

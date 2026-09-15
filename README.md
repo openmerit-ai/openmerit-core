@@ -1,13 +1,13 @@
 # openmerit
 
 An **experimental model-merit harness** for [pi](https://pi.dev). Start
-`openmerit watch`, run a task in pi with model A, and OpenMerit observes
+pi with model A, and the OpenMerit extension observes
 its completed trace, trials B and C sequentially through pi, compares quality,
 price, and latency, and swaps that pi session to the selected model before its
 next task when the policy gate permits it.
 
 ```text
-pi task A → saved pi trace → openmerit watch → pi trials B, C → scored frontier
+pi task A → saved pi trace → extension trial job → pi trials B, C → scored frontier
     ↑                                                     │
     └───────── pi.setModel() ← session-bound recommendation ┘
 ```
@@ -22,9 +22,9 @@ pi task A → saved pi trace → openmerit watch → pi trials B, C → scored f
    provider allow-lists. Public-benchmark relevance lives in
    [`src/benchmarks.ts`](src/benchmarks.ts) (task category → benchmarks that
    matter) plus a refreshable digest at `~/.openmerit/benchmarks/digest.json`.
-2. **Background track** — `openmerit watch` is a separate process. It reads the
-   latest completed pi task and compares candidates sequentially under daily
-   budget caps. Pi's traces and JSON event stream supply results, cost,
+2. **Trial workflow** — the pi extension starts a session-bound comparison
+   after a supported task settles. It runs candidate trials sequentially under
+   daily budget caps. `openmerit watch` remains an optional CLI mode. Pi's traces and JSON event stream supply results, cost,
    latency, and errors; a judge or known-ground-truth scorer measures quality.
 3. **Per-task pareto frontier** — trials are keyed by task signature
    ([`src/frontier.ts`](src/frontier.ts), 3 objectives: quality ↑, price ↓,
@@ -37,7 +37,7 @@ pi task A → saved pi trace → openmerit watch → pi trials B, C → scored f
    ([`src/catalog.ts`](src/catalog.ts) + [`src/daemon.ts`](src/daemon.ts)).
 5. **Informing the main harness** — recommendations land in
    `~/.openmerit/recommendations.jsonl`. The pi extension
-   ([`extension/openmerit.ts`](extension/openmerit.ts)) polls it and applies
+   ([`extension/openmerit.ts`](extension/openmerit.ts)) reports progress, polls it, and applies
    swaps with `pi.setModel()` — automatically when the policy gate passes,
    otherwise after user approval (`/openmerit`, `/openmerit apply`). The same
    recommendation carries the updated fallback, used when the active model
@@ -64,7 +64,7 @@ Node 22.18+, pi 0.85.1+, and an OpenRouter API key with available credits.
    policy**. For automatic swaps, check that the policy has `"mode": "auto"`
    and `"auto_apply": { "enabled": true, ... }`. The shipped policy does.
 
-2. Give **both** processes OpenRouter access. The watcher reads
+2. Give **Pi and the extension trial job** OpenRouter access. The job reads
    `OPENROUTER_API_KEY` from its environment or `~/.openmerit/.env`. If using
    the file, edit it to contain `OPENROUTER_API_KEY=your-key` and protect it:
 
@@ -96,20 +96,10 @@ Node 22.18+, pi 0.85.1+, and an OpenRouter API key with available credits.
    old copy out of the extensions directory before using `pi install`; two
    loaded copies produce duplicate notices. The instruction file
    [`instructions/OPENMERIT.md`](instructions/OPENMERIT.md) can be added to a
-   pi project's AGENTS.md for agent context, but the extension and watcher do
+   pi project's AGENTS.md for agent context, but the extension does
    not require it.
 
-4. In **terminal 1**, start the watcher before running a task; leave it open:
-
-   ```bash
-   cd /path/to/openmerit
-   node dist/cli.js watch
-   ```
-
-   It prints `[openmerit] background track started`. It runs A/B/C trials
-   only after pi has finished a supported task.
-
-5. In **terminal 2**, start pi with an OpenRouter model and tools disabled:
+4. Start pi in one terminal with an OpenRouter model and tools disabled:
 
    ```bash
    cd /path/to/openmerit
@@ -119,27 +109,27 @@ Node 22.18+, pi 0.85.1+, and an OpenRouter API key with available credits.
    For a first text task, ask: “Give the shortest valid word ladder from cat
    to dog. Each step changes one letter and must be a common English word.
    Return only the path.” Wait for A to finish and leave the pi session open.
-   The watcher will run B and C **sequentially through pi**, compare the
-   results, and write a recommendation for this exact session. If the policy
-   gate allows it, the extension calls `pi.setModel()` automatically. Use
-   `/openmerit` inside pi to inspect the choice, then send a second message to
-   see which model actually handles it. You do not need to run `trial` or
-   `/openmerit apply` for the normal automatic path.
+   The extension automatically starts B and C **sequentially through pi**,
+   reports each score in Pi, and writes a recommendation for this session.
+   If the policy gate allows it, the extension calls `pi.setModel()`.
+   Use `/openmerit` inside pi to inspect the choice, then send a second message
+   to see which model handles it. No watcher terminal or manual apply is needed
+   for the normal automatic path.
 
 ### Try an invoice-to-JSON task
 
-Use the same two-terminal setup. Start pi with a vision-capable model, for
+Use the same one-terminal setup. Start pi with a vision-capable model, for
 example `openai/gpt-4o-mini`, and `--no-tools`. In pi, type `@` to select
 [`benchmark/invoice_ocr/data/invoice_01_row_2.jpg`](benchmark/invoice_ocr/data/invoice_01_row_2.jpg)
 and paste the **entire, unchanged** text from
 [`examples/invoice-prompt.txt`](examples/invoice-prompt.txt) into the same
 message. Pi also accepts pasted or dragged images. Wait for the JSON answer;
-keep pi open while the watcher trials two other vision models. OpenMerit uses
+keep pi open while the extension trials two other vision models. OpenMerit uses
 the existing benchmark's visibility-audited exact-field scorer for that exact
 prompt and any of its 10 pinned images. Other uploaded invoices use a vision
 judge that sees the image and answer because they have no ground truth.
 
-A real pinned-invoice run produced this watcher output (models and scores will
+A real pinned-invoice run produced this trial output (models and scores will
 vary between runs):
 
 ```text
@@ -162,11 +152,11 @@ the current model, fallback, pending recommendation, and any exact-task result
 measured in another session. When the gate declines an automatic swap, it
 prints reasons and `/openmerit apply` remains available.
 
-If the watcher stays at its startup line, confirm that pi loaded the extension
+If no comparison starts after Pi settles, confirm that pi loaded the extension
 (`pi list`), the task finished, the pi session is saved (do not use
 `--no-session`), and the task used no tools. Image candidates must advertise
-image input in OpenRouter's current model catalog. The watcher tracks one
-latest active pi session at a time; run one task at a time for this alpha.
+image input in OpenRouter's current model catalog. The extension queues completed tasks from its current session and runs one
+comparison at a time. Closing or switching the session cancels the active job.
 Candidate runs use the same text and uploaded image bytes, but they do not
 replay earlier answers or file changes. An exact task in another session
 (including identical image bytes) appears as **advice**, not a pending swap;
@@ -185,7 +175,8 @@ remains for controlled text-task runs from a task JSON file.
 | `catalog/snapshot.json` + `candidates.json` | catalog snapshot (including input modalities) + new-model queue |
 | `benchmarks/digest.json` | public-benchmark scores per model (seed + refresh) |
 | `ledger.json` | daily trial spend (budget enforcement) |
-| `watch/processed.json` | latest task handled by the watcher (including retry status) |
+| `watch/processed.json` | latest task handled by optional CLI watcher |
+| `watch/jobs/*.json` | per-session comparison status and retry marker |
 
 ## Benchmarks
 

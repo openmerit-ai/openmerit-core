@@ -1,7 +1,7 @@
 /**
- * The background track. Never touches the main harness's process; it only
- * reads session files, calls providers for shadow trials, and writes
- * recommendations to the channel file the pi extension polls.
+ * Trial engine shared by the pi extension's session-bound jobs and the optional
+ * CLI watcher. It reads traces, runs pi candidates, and writes recommendations
+ * for the extension to apply in the active session.
  */
 
 import { fetchCatalog, diffNewModels, loadSnapshot, saveSnapshot } from "./catalog.js";
@@ -15,7 +15,7 @@ import {
 import { ingestNewTraces } from "./traces.js";
 import { budgetOk, ensureRubric, recordTrialSpend, runTrial } from "./trials.js";
 import { JUDGE_PREFS } from "./judge.js";
-import { availablePiModels, runPiTrial, scorePiRun, settledActiveTask } from "./pi-trials.js";
+import { availablePiModels, runPiTrial, scorePiRun, settledActiveTask, type SettledTask } from "./pi-trials.js";
 import { taskInputKey } from "./task-input.js";
 import { pickNext, STRAT_PREFS } from "./strategist.js";
 import type { CatalogEntry, Recommendation, TaskObservation, TrialPoint } from "./types.js";
@@ -140,16 +140,19 @@ export async function trialTick(key: string, policy: Policy): Promise<void> {
 }
 
 /** Compare the one completed active pi task, sequentially, then target its session. */
-export async function autoTaskTick(key: string, policy: Policy): Promise<Recommendation | null> {
-  const task = settledActiveTask();
+export async function autoTaskTick(key: string, policy: Policy, settledTask?: SettledTask | null): Promise<Recommendation | null> {
+  const task = settledTask === undefined ? settledActiveTask() : settledTask;
   if (!task) return null;
-  const marker = `${task.sessionFile}:${task.settledAt}`;
-  const prior = readJson<ProcessedTask | null>(paths.watchProcessed(), null);
+  const marker = settledTask === undefined
+    ? `${task.sessionFile}:${task.settledAt}`
+    : `${task.sessionFile}:${task.sessionBytes ?? task.settledAt}`;
+  const processedPath = settledTask === undefined ? paths.watchProcessed() : paths.sessionJob(marker);
+  const prior = readJson<ProcessedTask | null>(processedPath, null);
   if (prior?.marker === marker && prior.status !== "failed") return null;
   if (!budgetOk(policy).ok) return null;
 
   // Claim the settled turn before provider calls so the next poll cannot duplicate it.
-  writeJson(paths.watchProcessed(), { marker, status: "running", updatedAt: new Date().toISOString() } satisfies ProcessedTask);
+  writeJson(processedPath, { marker, status: "running", updatedAt: new Date().toISOString() } satisfies ProcessedTask);
   try {
   const cat = await fetchCatalog(key);
   const piModels = availablePiModels();
@@ -198,11 +201,11 @@ export async function autoTaskTick(key: string, policy: Policy): Promise<Recomme
     appendJsonl(paths.recommendations(), rec);
     console.log(`[openmerit] task ${tKey}: selected ${rec.recommended.model}; auto=${rec.policy.autoApply}`);
   } else console.log(`[openmerit] task ${tKey}: active model remains best`);
-  writeJson(paths.watchProcessed(), { marker, status: rec ? "complete" : "no_swap",
+  writeJson(processedPath, { marker, status: rec ? "complete" : "no_swap",
     updatedAt: new Date().toISOString() } satisfies ProcessedTask);
   return rec;
   } catch (error) {
-    writeJson(paths.watchProcessed(), { marker, status: "failed",
+    writeJson(processedPath, { marker, status: "failed",
       updatedAt: new Date().toISOString() } satisfies ProcessedTask);
     throw error;
   }
