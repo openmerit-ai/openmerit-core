@@ -9,6 +9,7 @@ import { judge, judgeWithImages } from "./judge.js";
 import { knownInvoiceScore } from "./invoice-eval.js";
 import { paths, readJson } from "./store.js";
 import { sessionFiles, sessionImages, taskInputKey, type TaskFile, type TaskImage } from "./task-input.js";
+import type { HarnessAdapter, HarnessTask, HarnessRun } from "./harness.js";
 import type { CatalogEntry, TrialPoint } from "./types.js";
 
 interface PiMessage {
@@ -26,17 +27,16 @@ function answerText(content: unknown): string {
     .map((x) => x.text ?? "").join("\n");
 }
 
-export interface PiRun {
-  answer: string;
-  costUsd: number;
-  latencyMs: number;
-  errors: number;
-  sessionId?: string;
-  toolCalls: number;
-  toolErrors: number;
-  changedFiles: number;
-  traceFile?: string;
+export type PiRun = HarnessRun;
+
+/** Pi-backed harness adapter. Future harnesses can implement the same seam. */
+export class PiHarnessAdapter implements HarnessAdapter {
+  runTask(model: string, input: HarnessTask): Promise<HarnessRun> {
+    return executePiTask(model, input.task, input.cwd, input.images, input.files);
+  }
 }
+
+const defaultHarness: HarnessAdapter = new PiHarnessAdapter();
 
 function fileSnapshot(root: string): Map<string, string> {
   const out = new Map<string, string>();
@@ -268,9 +268,10 @@ export async function executePiTask(
 export async function runPiTrial(
   key: string, judgeModel: string, task: string, rubric: string,
   model: string, entry: CatalogEntry | undefined, cwd = process.cwd(), images: TaskImage[] = [], files: TaskFile[] = [],
+  harness: HarnessAdapter = defaultHarness,
 ): Promise<{ point: TrialPoint; costUsd: number; error?: string; sessionId?: string }> {
   try {
-    const run = await executePiTask(model, task, cwd, images, files);
+    const run = await harness.runTask(model, { task, cwd, images, files });
     return await scorePiRun(key, judgeModel, task, rubric, model, entry, run, "pi_trial", images);
   } catch (e) {
     const error = String(e);
