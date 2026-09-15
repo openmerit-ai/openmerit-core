@@ -15,6 +15,44 @@ afterEach(() => {
 });
 
 describe("pi extension model handoff", () => {
+  it("reports a reached trial cap in Pi and skips the comparison", async () => {
+    dir = mkdtempSync(join(tmpdir(), "openmerit-ext-budget-"));
+    process.env.OPENMERIT_HOME = dir;
+    const session = join(dir, "session.jsonl");
+    writeFileSync(session, [
+      { type: "message", message: { role: "user", content: [{ type: "text", text: "Task A" }] } },
+      { type: "message", message: { role: "assistant", provider: "openrouter", model: "vendor/a",
+        content: [{ type: "text", text: "Answer A" }], stopReason: "stop" } },
+    ].map((x) => JSON.stringify(x)).join("\n") + "\n");
+    writeFileSync(join(dir, "policy.json"), JSON.stringify({ budgets: {
+      max_trials_per_day: 2, max_usd_per_day: 5,
+    } }));
+    writeFileSync(join(dir, "ledger.json"), JSON.stringify({
+      date: new Date().toISOString().slice(0, 10), trials: 2, usd: 0.0036,
+    }));
+    const notices: string[] = [];
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    let command: ((args: string, ctx: unknown) => Promise<void>) | null = null;
+    const ctx = { model: { provider: "openrouter", id: "vendor/a" },
+      modelRegistry: { find: () => undefined },
+      sessionManager: { getSessionFile: () => session }, cwd: dir,
+      hasUI: true, isIdle: () => true, ui: { notify: (message: string) => notices.push(message) } };
+    const pi = { on: (name: string, fn: (...args: unknown[]) => Promise<void>) => handlers.set(name, fn),
+      registerCommand: (_name: string, options: { handler: (args: string, ctx: unknown) => Promise<void> }) => {
+        command = options.handler;
+      }, setModel: async () => true };
+    const { default: extension } = await import("../extension/openmerit.js");
+    extension(pi as never);
+    await handlers.get("session_start")?.({}, ctx);
+    await handlers.get("agent_settled")?.({}, ctx);
+    expect(notices.some((x) => x.includes("comparison skipped: daily trial cap reached (2)"))).toBe(true);
+    expect(notices.some((x) => x.includes("comparing models for task"))).toBe(false);
+    await command!("", ctx);
+    expect(notices.at(-1)).toContain("comparison    : not started (daily trial cap reached (2))");
+    expect(notices.at(-1)).toContain("trial budget  : 2/2 trials, $0.0036/$5.00 today (UTC)");
+    await handlers.get("session_shutdown")?.();
+  });
+
   it("starts a session-bound comparison after a completed pi response settles", async () => {
     dir = mkdtempSync(join(tmpdir(), "openmerit-ext-trigger-"));
     process.env.OPENMERIT_HOME = dir;

@@ -125,9 +125,11 @@ and paste the **entire, unchanged** text from
 [`examples/invoice-prompt.txt`](examples/invoice-prompt.txt) into the same
 message. Pi also accepts pasted or dragged images. Wait for the JSON answer;
 keep pi open while the extension trials two other vision models. OpenMerit uses
-the existing benchmark's visibility-audited exact-field scorer for that exact
-prompt and any of its 10 pinned images. Other uploaded invoices use a vision
-judge that sees the image and answer because they have no ground truth.
+the existing benchmark's visibility-audited exact-field scorer when the saved
+task contains the exact example prompt and original bytes of a pinned JPEG.
+Pi may resize an attached image or add a file header to the prompt; in that
+case, the run uses the vision judge that sees the image and answer. Other
+uploaded invoices also use that judge because they have no ground truth.
 
 A real pinned-invoice run produced this trial output (models and scores will
 vary between runs):
@@ -148,9 +150,15 @@ schema, so its published scores are not directly comparable to these pi runs.
 `node dist/cli.js status` shows the latest pi model and pending
 recommendations; `node dist/cli.js frontier` shows measured quality, blended
 price, latency, and the chosen frontier per task. `/openmerit` inside pi shows
-the current model, fallback, pending recommendation, and any exact-task result
+the current model, fallback, current-session comparison status, trial budget,
+pending recommendation, and any exact-task result
 measured in another session. When the gate declines an automatic swap, it
 prints reasons and `/openmerit apply` remains available.
+
+The daily trial-count and dollar limits come from `~/.openmerit/policy.json`.
+If a limit is reached, the extension reports why it skipped the comparison;
+the count resets at midnight UTC. You may raise `budgets.max_trials_per_day`
+for local experiments while keeping `budgets.max_usd_per_day` as a spend cap.
 
 If no comparison starts after Pi settles, confirm that pi loaded the extension
 (`pi list`), the task finished, the pi session is saved (do not use

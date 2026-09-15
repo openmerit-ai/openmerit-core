@@ -17,7 +17,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -29,11 +29,43 @@ const RECS_FILE = join(HOME, "recommendations.jsonl");
 const TRIALS_FILE = join(HOME, "trials.jsonl");
 const STATE_FILE = join(HOME, "harness-state.json");
 const POLICY_FILE = join(HOME, "policy.json");
+const LEDGER_FILE = join(HOME, "ledger.json");
+const JOB_DIR = join(HOME, "watch", "jobs");
 const ENGINE_FILE = join(fileURLToPath(new URL("..", import.meta.url)), "dist", "cli.js");
 
 interface ExtensionPolicy {
   mode?: string;
   fallback?: { apply_on_error?: boolean };
+  budgets?: { max_trials_per_day?: number; max_usd_per_day?: number };
+}
+
+function trialBudget(): { summary: string; reason: string | null } {
+  const policy = loadPolicy();
+  const limit = policy.budgets?.max_trials_per_day ?? 20;
+  const usdLimit = policy.budgets?.max_usd_per_day ?? 5;
+  const today = new Date().toISOString().slice(0, 10);
+  let ledger: { date?: string; trials?: number; usd?: number } = {};
+  try { ledger = JSON.parse(readFileSync(LEDGER_FILE, "utf8")) as typeof ledger; }
+  catch { /* no trial spend yet */ }
+  const trials = ledger.date === today ? ledger.trials ?? 0 : 0;
+  const usd = ledger.date === today ? ledger.usd ?? 0 : 0;
+  const reason = trials >= limit ? `daily trial cap reached (${limit})`
+    : usd >= usdLimit ? `daily budget exhausted ($${usdLimit})` : null;
+  return { summary: `${trials}/${limit} trials, $${usd.toFixed(4)}/$${usdLimit.toFixed(2)} today (UTC)`, reason };
+}
+
+function latestSessionJob(sessionFile: string | undefined): string | null {
+  if (!sessionFile || !existsSync(JOB_DIR)) return null;
+  const jobs: { marker?: string; status?: string; updatedAt?: string }[] = [];
+  for (const file of readdirSync(JOB_DIR)) {
+    if (!file.endsWith(".json")) continue;
+    try {
+      const job = JSON.parse(readFileSync(join(JOB_DIR, file), "utf8")) as typeof jobs[number];
+      if (job.marker?.startsWith(`${sessionFile}:`)) jobs.push(job);
+    } catch { /* partial or unrelated job */ }
+  }
+  const latest = jobs.sort((a, b) => (a.updatedAt ?? "").localeCompare(b.updatedAt ?? "")).at(-1);
+  return latest?.status ?? null;
 }
 
 function loadPolicy(): ExtensionPolicy {
@@ -387,6 +419,11 @@ export default function openmerit(pi: ExtensionAPI) {
     const marker = `${sessionFile}:${settledTaskKey}:${model}:${bytes}`;
     if (startedJobs.has(marker)) return;
     startedJobs.add(marker);
+    const budget = trialBudget();
+    if (budget.reason) {
+      if (ctx.hasUI) ctx.ui.notify(`openmerit: comparison skipped: ${budget.reason}. ${budget.summary}`, "warning");
+      return;
+    }
     queuedJobs.push({ sessionFile, settledAt, model, key: settledTaskKey, cwd: ctx.cwd, bytes });
     startNextJob(ctx);
   }
@@ -579,10 +616,16 @@ export default function openmerit(pi: ExtensionAPI) {
       }
 
       const current = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : "unknown";
+      const budget = trialBudget();
+      const comparison = trialJob ? "running"
+        : queuedJobs.length ? `queued (${queuedJobs.length})`
+        : latestSessionJob(ctx.sessionManager.getSessionFile() ?? undefined) ?? "not started";
       const lines = [
         `current model : ${current}`,
         `fallback      : ${fallbackModel ?? "n/a"}`,
         `pending recs  : ${pending.length}`,
+        `comparison    : ${comparison}${budget.reason ? ` (${budget.reason})` : ""}`,
+        `trial budget  : ${budget.summary}`,
       ];
       if (prior) lines.push("", suggestionText(prior.recommendation, prior.trials));
       for (const r of pending.slice(-5)) {
