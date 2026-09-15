@@ -42,7 +42,7 @@ function cmdInit(): void {
   console.log(`ext.    -> ${join(ROOT, "extension", "openmerit.ts")}`);
   console.log(`pi npm  -> pi install npm:openmerit`);
   console.log(`pi local-> pi install "${ROOT}"`);
-  console.log("\nNext: set OPENROUTER_API_KEY (env or ~/.openmerit/.env), install one extension source into pi, then start pi; the extension launches comparisons automatically.");
+  console.log("\nNext: set OPENROUTER_API_KEY (env or ~/.openmerit/.env), install one extension source into pi, then start pi; the extension launches comparisons automatically with candidate tools disabled by default.");
 }
 
 async function cmdTrial(taskFile: string, rounds: number): Promise<void> {

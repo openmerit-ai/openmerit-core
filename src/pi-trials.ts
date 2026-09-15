@@ -38,6 +38,25 @@ export class PiHarnessAdapter implements HarnessAdapter {
 
 const defaultHarness: HarnessAdapter = new PiHarnessAdapter();
 
+const KNOWN_TRIAL_TOOLS = new Set([
+  "read", "grep", "find", "ls", "bash", "powershell", "edit", "write",
+]);
+
+/**
+ * Candidate runs have no tools by default. Users may explicitly opt into a
+ * list, but a copied cwd is not an OS sandbox for absolute paths or network.
+ */
+export function piTrialToolArgs(setting = process.env.OPENMERIT_PI_TRIAL_TOOLS): string[] {
+  if (!setting?.trim()) return ["--no-tools"];
+  const requested = [...new Set(setting.split(",").map((tool) => tool.trim()).filter(Boolean))];
+  if (requested.length === 1 && requested[0] === "none") return ["--no-tools"];
+  const unknown = requested.filter((tool) => !KNOWN_TRIAL_TOOLS.has(tool));
+  if (requested.length === 0 || unknown.length > 0) {
+    throw new Error(`invalid OPENMERIT_PI_TRIAL_TOOLS${unknown.length ? `: ${unknown.join(", ")}` : ""}`);
+  }
+  return ["--tools", requested.join(",")];
+}
+
 function fileSnapshot(root: string): Map<string, string> {
   const out = new Map<string, string>();
   function walk(dir: string): void {
@@ -185,83 +204,83 @@ export async function executePiTask(
     return `@${file}`;
   });
   const workspace = isolatedWorkspace(cwd);
-  const attachmentDir = join(workspace, ".openmerit-attachments");
-  mkdirSync(attachmentDir, { recursive: true });
-  const attachmentPaths = new Map<string, string>();
-  const fileArgs = files.map((file, i) => {
-    const safeName = `${String(i).padStart(3, "0")}-${file.name.replace(/[^A-Za-z0-9._-]/g, "_")}`;
-    const target = join(attachmentDir, safeName);
-    cpSync(file.path, target);
-    attachmentPaths.set(file.path, target);
-    return `@${target}`;
-  });
-  const candidateTask = [...attachmentPaths.entries()].reduce(
-    (text, [source, target]) => text.split(source).join(target), task,
-  );
-  const before = fileSnapshot(workspace);
-  const traceFile = paths.trialTrace(`${model}:${task}:${Date.now()}`);
-  const traceLines: string[] = [];
-  const child = spawn("pi", [
-    "--provider", "openrouter", "--model", model, "--mode", "json",
-    "--offline", "--no-extensions", "--approve", "--print", ...imageArgs, ...fileArgs, candidateTask,
-  ], { cwd: workspace, stdio: ["ignore", "pipe", "pipe"] });
-  let buffer = "";
-  let stderr = "";
-  let answer = "";
-  let costUsd = 0;
-  let errors = 0;
-  let sessionId: string | undefined;
-  let toolCalls = 0;
-  let toolErrors = 0;
-  const started = Date.now();
-
-  function consume(line: string): void {
-    if (!line.trim()) return;
-    traceLines.push(line);
-    let event: { type?: string; id?: string; message?: PiMessage };
-    try { event = JSON.parse(line) as typeof event; } catch { return; }
-    if (event.type === "session" && event.id) sessionId = event.id;
-    const content = event.message?.content;
-    if (event.message?.role === "assistant" && Array.isArray(content))
-      toolCalls += content.filter((part) => (part as { type?: string })?.type === "toolCall").length;
-    if (event.message?.role === "toolResult" && (event.message as PiMessage & { isError?: boolean }).isError) toolErrors++;
-    if (event.type !== "message_end" || event.message?.role !== "assistant") return;
-    answer = answerText(event.message.content) || answer;
-    costUsd += event.message.usage?.cost?.total ?? 0;
-    if (event.message.stopReason === "error") errors++;
-  }
-
-  child.stdout.on("data", (chunk: Buffer) => {
-    buffer += chunk.toString("utf8");
-    let n: number;
-    while ((n = buffer.indexOf("\n")) >= 0) {
-      consume(buffer.slice(0, n));
-      buffer = buffer.slice(n + 1);
-    }
-  });
-  child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
-  let exitCode: number;
   try {
-    exitCode = await new Promise<number>((resolve, reject) => {
+    const attachmentDir = join(workspace, ".openmerit-attachments");
+    mkdirSync(attachmentDir, { recursive: true });
+    const attachmentPaths = new Map<string, string>();
+    const fileArgs = files.map((file, i) => {
+      const safeName = `${String(i).padStart(3, "0")}-${file.name.replace(/[^A-Za-z0-9._-]/g, "_")}`;
+      const target = join(attachmentDir, safeName);
+      cpSync(file.path, target);
+      attachmentPaths.set(file.path, target);
+      return `@${target}`;
+    });
+    const candidateTask = [...attachmentPaths.entries()].reduce(
+      (text, [source, target]) => text.split(source).join(target), task,
+    );
+    const before = fileSnapshot(workspace);
+    const traceFile = paths.trialTrace(`${model}:${task}:${Date.now()}`);
+    const traceLines: string[] = [];
+    const child = spawn("pi", [
+      "--provider", "openrouter", "--model", model, "--mode", "json",
+      "--offline", "--no-extensions", "--approve", ...piTrialToolArgs(),
+      "--print", ...imageArgs, ...fileArgs, candidateTask,
+    ], { cwd: workspace, stdio: ["ignore", "pipe", "pipe"] });
+    let buffer = "";
+    let stderr = "";
+    let answer = "";
+    let costUsd = 0;
+    let errors = 0;
+    let sessionId: string | undefined;
+    let toolCalls = 0;
+    let toolErrors = 0;
+    const started = Date.now();
+
+    function consume(line: string): void {
+      if (!line.trim()) return;
+      traceLines.push(line);
+      let event: { type?: string; id?: string; message?: PiMessage };
+      try { event = JSON.parse(line) as typeof event; } catch { return; }
+      if (event.type === "session" && event.id) sessionId = event.id;
+      const content = event.message?.content;
+      if (event.message?.role === "assistant" && Array.isArray(content))
+        toolCalls += content.filter((part) => (part as { type?: string })?.type === "toolCall").length;
+      if (event.message?.role === "toolResult" && (event.message as PiMessage & { isError?: boolean }).isError) toolErrors++;
+      if (event.type !== "message_end" || event.message?.role !== "assistant") return;
+      answer = answerText(event.message.content) || answer;
+      costUsd += event.message.usage?.cost?.total ?? 0;
+      if (event.message.stopReason === "error") errors++;
+    }
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      buffer += chunk.toString("utf8");
+      let n: number;
+      while ((n = buffer.indexOf("\n")) >= 0) {
+        consume(buffer.slice(0, n));
+        buffer = buffer.slice(n + 1);
+      }
+    });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+    const exitCode = await new Promise<number>((resolve, reject) => {
       child.on("error", reject);
       child.on("close", (code) => resolve(code ?? 1));
     });
+    consume(buffer);
+    mkdirSync(dirname(traceFile), { recursive: true });
+    writeFileSync(traceFile, traceLines.join("\n") + (traceLines.length ? "\n" : ""));
+    const after = fileSnapshot(workspace);
+    let changedFiles = 0;
+    for (const [file, hash] of after) if (before.get(file) !== hash) changedFiles++;
+    for (const file of before.keys()) if (!after.has(file)) changedFiles++;
+    if (exitCode !== 0 || !answer.trim()) {
+      throw new Error(`pi trial ${model} failed: ${stderr.trim().slice(0, 180) || `exit ${exitCode}, empty answer`}`);
+    }
+    return { answer, costUsd, latencyMs: Date.now() - started, errors, sessionId,
+      toolCalls, toolErrors, changedFiles, traceFile };
   } finally {
     if (imageDir) rmSync(imageDir, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
   }
-  consume(buffer);
-  mkdirSync(dirname(traceFile), { recursive: true });
-  writeFileSync(traceFile, traceLines.join("\n") + (traceLines.length ? "\n" : ""));
-  const after = fileSnapshot(workspace);
-  let changedFiles = 0;
-  for (const [file, hash] of after) if (before.get(file) !== hash) changedFiles++;
-  for (const file of before.keys()) if (!after.has(file)) changedFiles++;
-  rmSync(workspace, { recursive: true, force: true });
-  if (exitCode !== 0 || !answer.trim()) {
-    throw new Error(`pi trial ${model} failed: ${stderr.trim().slice(0, 180) || `exit ${exitCode}, empty answer`}`);
-  }
-  return { answer, costUsd, latencyMs: Date.now() - started, errors, sessionId,
-    toolCalls, toolErrors, changedFiles, traceFile };
 }
 
 /** Quality uses the same OpenMerit judge; cost and latency come from pi itself. */

@@ -8,8 +8,9 @@ the best model for the task at hand, at the best price, with a vetted fallback.
 
 1. **Observes** this harness's session traces (models used, tokens, cost,
    latency, errors) without intercepting or slowing down your work.
-2. **Evaluates** candidate models for each completed text or image task sequentially
-   through pi and scores their outputs with a judge model.
+2. **Evaluates** candidate models for each completed task sequentially through
+   pi and scores their outputs with a judge model. Candidate tools are disabled
+   by default.
 3. **Maintains a pareto frontier** per task (quality vs. cost vs. latency) and
    an aggregate frontier across all of your tasks.
 4. **Watches for new model releases** (provider catalogs + public benchmarks)
@@ -43,9 +44,11 @@ the best model for the task at hand, at the best price, with a vetted fallback.
 
 ## Guarantees
 
-- Per-task comparisons send the task text, uploaded images (when present), and
-  candidate answers through pi/OpenRouter for model runs and judging. Use
-  non-sensitive examples while evaluating this alpha.
+- Per-task comparisons send the task text, uploaded files or images (when
+  present), and candidate answers through pi/OpenRouter for model runs and
+  judging. Candidate Pi runs default to no tools; any tool access is an
+  explicit user opt-in. Use non-sensitive examples while
+  evaluating this alpha.
 - The shipped policy is supervised. Swaps happen automatically only after the
   user opts in and the configured quality/cost guardrails pass; otherwise they
   remain recommendations for a human to approve.

@@ -2,30 +2,44 @@ import { afterEach, describe, expect, it } from "vitest";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync, readFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { executePiTask, settledActiveTask } from "../src/pi-trials.js";
+import { executePiTask, piTrialToolArgs, settledActiveTask } from "../src/pi-trials.js";
 import { paths, taskKey } from "../src/store.js";
 import { sessionFiles, taskInputKey } from "../src/task-input.js";
 
 const oldPath = process.env.PATH;
 const oldHome = process.env.OPENMERIT_HOME;
+const oldTrialTools = process.env.OPENMERIT_PI_TRIAL_TOOLS;
 let fixtureDir: string | null = null;
 
 afterEach(() => {
   process.env.PATH = oldPath;
   if (oldHome === undefined) delete process.env.OPENMERIT_HOME;
   else process.env.OPENMERIT_HOME = oldHome;
+  if (oldTrialTools === undefined) delete process.env.OPENMERIT_PI_TRIAL_TOOLS;
+  else process.env.OPENMERIT_PI_TRIAL_TOOLS = oldTrialTools;
   if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
   fixtureDir = null;
 });
 
 describe("pi-backed task measurement", () => {
+  it("disables candidate tools unless the user explicitly opts in", () => {
+    delete process.env.OPENMERIT_PI_TRIAL_TOOLS;
+    expect(piTrialToolArgs()).toEqual(["--no-tools"]);
+    process.env.OPENMERIT_PI_TRIAL_TOOLS = "read,bash,edit,write";
+    expect(piTrialToolArgs()).toEqual(["--tools", "read,bash,edit,write"]);
+    process.env.OPENMERIT_PI_TRIAL_TOOLS = "none";
+    expect(piTrialToolArgs()).toEqual(["--no-tools"]);
+    process.env.OPENMERIT_PI_TRIAL_TOOLS = "read,unknown";
+    expect(() => piTrialToolArgs()).toThrow(/invalid OPENMERIT_PI_TRIAL_TOOLS: unknown/);
+  });
+
   it("reads the result and observed cost from pi's event stream", async () => {
     fixtureDir = mkdtempSync(join(tmpdir(), "openmerit-pi-"));
     const bin = join(fixtureDir, "pi");
     writeFileSync(bin, `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2);
-if (!args.includes('--mode') || !args.includes('json') || !args.includes('--provider') || !args.includes('openrouter') || args.includes('--no-tools')) process.exit(2);
+if (!args.includes('--mode') || !args.includes('json') || !args.includes('--provider') || !args.includes('openrouter') || !args.includes('--no-tools')) process.exit(2);
 fs.writeFileSync('candidate-side-effect.txt', 'isolated');
 const model = args[args.indexOf('--model') + 1];
 const task = args.at(-1);

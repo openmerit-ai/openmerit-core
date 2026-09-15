@@ -1,4 +1,4 @@
-/** Minimal OpenRouter chat client for catalog and trial requests. */
+/** Minimal provider clients for judge and strategist requests. */
 
 import { existsSync, readFileSync } from "node:fs";
 import { paths } from "./store.js";
@@ -44,10 +44,7 @@ async function request<T>(key: string, path: string, body?: unknown, baseUrl = O
   throw new Error("unreachable");
 }
 
-export interface ChatResult {
-  content: string;
-  usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-}
+export type ChatResult = ProviderChatResult;
 
 class OpenAICompatibleProvider implements ModelProvider {
   constructor(public readonly id: string, private readonly baseUrl: string, private readonly key: string) {}

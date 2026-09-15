@@ -105,18 +105,20 @@ Keep that checkout available because pi loads a local package from its path.
    A ready configuration prints `{"status":"ready","provider":"openrouter",...}`.
    Older `model_search/.env` files are not read by the trial engine.
 
-   OpenRouter is the default provider. OpenAI and Gemini can also be used by
-   Pi for candidate runs. Direct judge/strategist calls require an explicit
-   `OPENMERIT_DIRECT_PROVIDER=openai` or `OPENMERIT_DIRECT_PROVIDER=google`
-   opt-in plus the corresponding provider key; OpenRouter model IDs remain on
-   OpenRouter by default.
+   OpenRouter is currently required for candidate runs and catalog discovery.
+   Judge and strategist calls can use OpenAI or Gemini directly, but require
+   `OPENMERIT_DIRECT_PROVIDER=openai` or
+   `OPENMERIT_DIRECT_PROVIDER=google` plus the corresponding provider key;
+   OpenRouter model IDs remain on OpenRouter by default. The harness and
+   provider interfaces are extension seams for future integrations, not a
+   claim that other harnesses already work.
 
 3. Verify the extension appears in `pi list`. The instruction file
    [`instructions/OPENMERIT.md`](instructions/OPENMERIT.md) can be added to a
    pi project's AGENTS.md for agent context, but the extension does
    not require it.
 
-4. Start pi in one terminal with an OpenRouter model and tools disabled:
+4. Start pi in one terminal with an OpenRouter model:
 
    ```bash
    pi --provider openrouter --model openai/gpt-4o-mini
@@ -131,6 +133,10 @@ Keep that checkout available because pi loads a local package from its path.
    `/openmerit` inside pi to inspect the evidence and `/openmerit apply` to
    switch. Then send a second message to see which model actually handles it.
    You do not need a watcher terminal or the standalone `trial` command.
+
+   Candidate comparisons have no tools by default, even when the observed task
+   used tools. See **Alpha boundaries** before explicitly enabling candidate
+   tools.
 
    To opt in to automatic swaps, edit `~/.openmerit/policy.json`, set
    `"mode": "auto"` and `"auto_apply.enabled": true`, review the score-gain
@@ -182,8 +188,8 @@ for local experiments while keeping `budgets.max_usd_per_day` as a conservative
 candidate-spend threshold.
 
 If no comparison starts after Pi settles, confirm that pi loaded the extension
-(`pi list`), the task finished, the pi session is saved (do not use
-`--no-session`), and the task used no tools. Image candidates must advertise
+(`pi list`), the task finished, and the pi session is saved (do not use
+`--no-session`). Image candidates must advertise
 image input in OpenRouter's current model catalog. The extension queues
 completed tasks from its current session and runs one comparison at a time.
 Closing or switching the session cancels the active job.
@@ -197,15 +203,22 @@ remains for controlled text-task runs from a task JSON file.
 
 - With the extension installed and an OpenRouter key configured, each supported
   settled task can start comparison calls automatically. Candidate, judge, and
-  strategist requests send the task text, attached images, and candidate output
-  to OpenRouter and can incur charges. Use non-sensitive test tasks and
-  conservative account limits while evaluating this alpha.
+  strategist requests send the task text, attached files or images, and
+  candidate output to OpenRouter and can incur charges. Use non-sensitive test
+  tasks and conservative account limits while evaluating this alpha.
 - The extension queues tasks from its current pi session and compares one at a
-  time. Tool-using candidates run with Pi tools enabled in isolated temporary
-  copies of the original working directory; their changes are discarded and
-  recorded as counts, and their raw Pi JSON event streams are saved under
-  `~/.openmerit/traces/trials/`. Candidate sessions replay the task text and
-  images, not earlier conversation context or workspace changes.
+  time. Candidate runs use isolated temporary copies of the original working
+  directory and have no Pi tools by default. Their temporary changes are
+  discarded and recorded as counts, and raw Pi JSON event streams are saved
+  under `~/.openmerit/traces/trials/`.
+  Candidate sessions replay the task text and images, not earlier conversation
+  context or workspace changes.
+- Set `OPENMERIT_PI_TRIAL_TOOLS` to an explicit comma-separated allowlist such
+  as `read,grep,find,ls` to let candidate models use tools; `none` keeps them
+  disabled. Any tool access is an advanced opt-in: the copied working directory
+  prevents ordinary project writes from touching the original, but it is not an
+  OS sandbox. Tools may accept absolute paths, and shell tools may access the
+  network. Keep the no-tools default for untrusted or sensitive projects.
 - File attachments that Pi records as `<file name="…">` are copied into every
   candidate sandbox and passed back to Pi as `@` file inputs. This covers PDFs,
   CSVs, spreadsheets, and other files that Pi can open; OpenMerit does not
@@ -216,6 +229,9 @@ remains for controlled text-task runs from a task JSON file.
 - Each comparison has one observed baseline plus a small candidate slate and
   one quality score per answer. Treat recommendations as experimental evidence,
   not a universal model ranking.
+- Candidate execution and catalog discovery currently use Pi through
+  OpenRouter. `HarnessAdapter`, `ModelProvider`, and `CatalogProvider` are
+  implementation boundaries for future harness/provider integrations.
 
 ## State layout (`~/.openmerit/`)
 
