@@ -33,6 +33,38 @@ const POLICY_FILE = join(HOME, "policy.json");
 const LEDGER_FILE = join(HOME, "ledger.json");
 const JOB_DIR = join(HOME, "watch", "jobs");
 const ENGINE_FILE = join(fileURLToPath(new URL("..", import.meta.url)), "dist", "cli.js");
+const PROGRESS_PREFIX = "[openmerit/progress] ";
+
+interface TrialProgress {
+  phase: "start" | "complete";
+  taskKey: string;
+  model: string;
+  index: number;
+  total: number;
+  score?: number;
+  price?: number;
+  latencyMs?: number;
+  costUsd?: number;
+  error?: string;
+}
+
+function parseTrialProgress(line: string): TrialProgress | null {
+  if (!line.startsWith(PROGRESS_PREFIX)) return null;
+  try {
+    const value = JSON.parse(line.slice(PROGRESS_PREFIX.length)) as TrialProgress;
+    if ((value.phase !== "start" && value.phase !== "complete") ||
+        typeof value.taskKey !== "string" || typeof value.model !== "string" ||
+        !Number.isInteger(value.index) || !Number.isInteger(value.total) ||
+        value.index < 1 || value.total < value.index) return null;
+    return value;
+  } catch { return null; }
+}
+
+function completedTrialText(trial: TrialProgress): string {
+  return `${trial.model}: quality ${(trial.score ?? 0).toFixed(2)}, ` +
+    `$${(trial.price ?? 0).toFixed(2)}/M, ${Math.round(trial.latencyMs ?? 0)}ms, ` +
+    `run $${(trial.costUsd ?? 0).toFixed(4)}` + (trial.error ? ` (failed: ${trial.error})` : "");
+}
 
 interface ExtensionPolicy {
   mode?: string;
@@ -339,6 +371,8 @@ export default function openmerit(pi: ExtensionAPI) {
   const queuedJobs: { sessionFile: string; settledAt: string; model: string; key: string; cwd: string; bytes: number }[] = [];
   const startedJobs = new Set<string>();
   let activeSession: string | null = null;
+  let progress: { sessionFile: string; taskKey: string; current: TrialProgress | null;
+    completed: TrialProgress[] } | null = null;
 
   function stopTrialJob(): void {
     if (!trialJob) return;
@@ -366,11 +400,29 @@ export default function openmerit(pi: ExtensionAPI) {
       detached: process.platform !== "win32",
     });
     trialJob = child;
+    progress = { sessionFile: job.sessionFile, taskKey: job.key, current: null, completed: [] };
     if (ctx.hasUI) ctx.ui.notify(`openmerit: comparing models for task ${job.key} (A=${job.model})`, "info");
     let stdout = "";
     let stderr = "";
     function onLine(line: string): void {
-      if (ctx.hasUI && line.includes("[openmerit] task "))
+      const trial = parseTrialProgress(line);
+      if (trial && job.sessionFile === activeSession && progress?.taskKey === trial.taskKey) {
+        if (trial.phase === "start") {
+          progress.current = trial;
+          if (ctx.hasUI) ctx.ui.notify(
+            `openmerit: trial ${trial.index}/${trial.total} comparing ${trial.model}` +
+              (trial.index === 1 ? " (scoring Pi trace)" : ""), "info",
+          );
+        } else {
+          progress.current = null;
+          progress.completed.push(trial);
+          if (ctx.hasUI) ctx.ui.notify(`openmerit: trial ${trial.index}/${trial.total} finished — ` +
+            completedTrialText(trial), trial.error ? "warning" : "info");
+        }
+        return;
+      }
+      if (ctx.hasUI && job.sessionFile === activeSession &&
+          (line.includes(": selected ") || line.includes(": active model remains best")))
         ctx.ui.notify(line.trim(), "info");
     }
     child.stdout.on("data", (chunk: Buffer) => {
@@ -497,6 +549,7 @@ export default function openmerit(pi: ExtensionAPI) {
     activeSession = ctx.sessionManager.getSessionFile() ?? null;
     stopTrialJob();
     queuedJobs.length = 0;
+    progress = null;
     suggested.clear();
     restoreFallback();
     try {
@@ -534,6 +587,7 @@ export default function openmerit(pi: ExtensionAPI) {
     activeSession = null;
     queuedJobs.length = 0;
     stopTrialJob();
+    progress = null;
     if (pollTimer) {
       clearInterval(pollTimer);
       pollTimer = null;
@@ -618,7 +672,10 @@ export default function openmerit(pi: ExtensionAPI) {
 
       const current = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : "unknown";
       const budget = trialBudget();
-      const comparison = trialJob ? "running"
+      const liveProgress = progress?.sessionFile === ctx.sessionManager.getSessionFile() ? progress : null;
+      const comparison = trialJob ? liveProgress?.current
+        ? `running — ${liveProgress.current.model} (trial ${liveProgress.current.index}/${liveProgress.current.total})`
+        : "running — selecting next model"
         : queuedJobs.length ? `queued (${queuedJobs.length})`
         : latestSessionJob(ctx.sessionManager.getSessionFile() ?? undefined) ?? "not started";
       const lines = [
@@ -628,6 +685,10 @@ export default function openmerit(pi: ExtensionAPI) {
         `comparison    : ${comparison}${budget.reason ? ` (${budget.reason})` : ""}`,
         `trial budget  : ${budget.summary}`,
       ];
+      if (liveProgress?.completed.length) {
+        lines.push("", "models tested:");
+        for (const trial of liveProgress.completed) lines.push(`  ${completedTrialText(trial)}`);
+      }
       if (prior) lines.push("", suggestionText(prior.recommendation, prior.trials));
       for (const r of pending.slice(-5)) {
         lines.push(
