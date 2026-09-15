@@ -16,6 +16,7 @@
  */
 
 import { paths, readJson, writeJson } from "./store.js";
+import type { CatalogEntry } from "./types.js";
 
 /** Task category -> public benchmarks that are predictive for it. */
 export const TASK_BENCHMARKS: Record<string, string[]> = {
@@ -85,4 +86,22 @@ export function benchmarkPrior(taskCategory: string, modelId: string, digest: Di
 export function relevantBenchmarks(taskText: string): { category: string; benchmarks: string[] } {
   const category = categorizeTask(taskText);
   return { category, benchmarks: TASK_BENCHMARKS[category] ?? TASK_BENCHMARKS.general };
+}
+
+/** Live OpenRouter benchmark scores shortlist candidates; task trials still decide quality. */
+export async function openRouterBenchmarkCandidates(
+  key: string, category: string, catalog: Map<string, CatalogEntry>,
+): Promise<string[]> {
+  const metric = category === "code" ? "coding_index"
+    : category === "agentic" ? "agentic_index" : "intelligence_index";
+  const response = await fetch("https://openrouter.ai/api/v1/benchmarks?source=artificial-analysis", {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  if (!response.ok) throw new Error(`OpenRouter benchmarks HTTP ${response.status}`);
+  const payload = await response.json() as { data?: Record<string, unknown>[] };
+  return (payload.data ?? [])
+    .map((row) => ({ id: String(row.model_permaslug ?? ""), score: Number(row[metric]) }))
+    .filter((row) => catalog.has(row.id) && Number.isFinite(row.score))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 20).map((row) => row.id);
 }

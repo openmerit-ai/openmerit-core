@@ -47,7 +47,7 @@ export async function pickNext(
     c.ctx >= 4096 &&
     !failedVendors.has(c.id.split("/")[0]);
 
-  // New releases queued by the catalog watcher get priority in the listing.
+  // Benchmark-shortlisted models get priority in the listing.
   const pool = [...cat.values()].filter(ok);
   if (pool.length === 0) return null;
   const priority = new Set(extraCandidates ?? []);
@@ -58,7 +58,7 @@ export async function pickNext(
   });
 
   const lines = pool
-    .map((c) => `${c.id} | ${c.price.toFixed(2)} | ${c.ctx}${priority.has(c.id) ? " | NEW" : ""}`)
+    .map((c) => `${c.id} | ${c.price.toFixed(2)} | ${c.ctx}${priority.has(c.id) ? " | BENCHMARK" : ""}`)
     .join("\n");
   const res =
     results

@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "External model-merit harness for pi: observes traces, builds per-task pareto frontiers, and recommends model swaps with reasoning.",
   "type": "module",
+  "keywords": ["pi-package", "model-routing", "evaluation"],
+  "pi": {
+    "extensions": ["./extension/openmerit.ts"]
+  },
   "bin": {
     "openmerit": "dist/cli.js"
   },
@@ -10,6 +14,7 @@
     "node": ">=22.18.0"
   },
   "scripts": {
+    "prepare": "npm run build",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit && tsc -p benchmark/tsconfig.json",
     "test": "vitest run",

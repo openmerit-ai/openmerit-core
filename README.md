@@ -1,10 +1,10 @@
 # openmerit
 
-An **external model-merit harness** for [pi](https://pi.dev). openmerit plugs into
-an existing agent harness (another pi instance) and improves it over time: it
-watches what the main harness does, evaluates candidate models on a background
-track, maintains a per-task pareto frontier, and tells the main harness — with
-reasoning — when to swap models and what its fallback should be.
+An **experimental model-merit harness** for [pi](https://pi.dev). Its first
+per-task loop observes model A's pi run, trials B and C sequentially through
+pi, maintains a quality/price/latency frontier, and recommends a model switch
+for that task. A background catalog watcher also exists, but first-run
+model discovery is not yet the primary alpha workflow.
 
 ```
 ┌────────────────────────┐         traces (session files)         ┌──────────────────────────┐
@@ -55,7 +55,7 @@ reasoning — when to swap models and what its fallback should be.
 npm install
 npm run build
 
-openmerit init                 # sets up ~/.openmerit (policy, state)
+node dist/cli.js init          # sets up ~/.openmerit (policy, state)
 export OPENROUTER_API_KEY=...  # or put it in ~/.openmerit/.env
 
 # one-shot model search on a task spec:
@@ -71,10 +71,55 @@ read. Move that key to `~/.openmerit/.env` or export it in the environment.
 In the main harness (pi):
 
 ```bash
-cp extension/openmerit.ts ~/.pi/agent/extensions/
+pi install /absolute/path/to/openmerit  # package manifest loads the extension
 # add instructions/OPENMERIT.md to your project/global AGENTS.md context
 pi
 ```
+
+## Per-task alpha loop
+
+The `trial` command first reuses model A's completed result from the active pi
+session trace when its latest task and model match the task file. It then runs
+models B and C **sequentially through pi**, rather than calling OpenRouter chat
+completions for the candidate answers. If the active trace does not match, A
+also runs in a fresh pi session and the CLI says so. Pi's traces and JSON event
+stream supply each model's result, estimated cost, latency, and errors. A
+separate OpenRouter judge scores the result against the same rubric, while
+OpenRouter's benchmark API helps shortlist candidates. OpenMerit keeps its
+existing choice rule: highest judged quality, then lower price and latency.
+
+This first loop supports text tasks with tools disabled during comparison. The
+candidate pi runs therefore share the same task and project context, but do
+not share previous answers or file changes. Their raw sessions remain in pi's
+session store; the CLI prints each trial session id. Tool-using tasks and exact workspace
+replay need further work. The background `watch` mode remains experimental and
+does not bootstrap an A/B/C comparison from a fresh catalog snapshot.
+
+From a clean checkout with Node 22.18+ and pi 0.85.1+ installed:
+
+```bash
+npm ci                         # runs the build via prepare
+node dist/cli.js init
+pi install /absolute/path/to/openmerit
+# Put OPENROUTER_API_KEY=... in ~/.openmerit/.env (chmod 600), and log in to
+# OpenRouter in pi with /login openrouter or an environment variable.
+```
+
+Copy `examples/task.example.json` and set `initial_model` to the OpenRouter
+model you will use in pi. In a pi TUI session, start with that model and the
+**exact** task text from the JSON file; use `--no-tools` for this text-only
+comparison. Wait until pi finishes task A. Keep that session open, then in
+another terminal run:
+
+```bash
+node dist/cli.js trial /path/to/your-task.json --rounds 3
+node dist/cli.js frontier
+```
+
+The extension polls for a recommendation tied to the most recent task in that
+pi session. Use `/openmerit` to inspect it and `/openmerit apply` to switch the
+session model. The next pi turn should show the selected OpenRouter model. The
+default policy is recommend-only; no swap occurs until you apply it.
 
 ## State layout (`~/.openmerit/`)
 
@@ -83,7 +128,7 @@ pi
 | `policy.json` | the policy file (gate thresholds, budgets, intervals) |
 | `harness-state.json` | written by the pi extension: current model, fallback, session |
 | `recommendations.jsonl` | the channel: swap recommendations + status updates |
-| `trials.jsonl` | every shadow-trial point (model, score, price, latency) |
+| `trials.jsonl` | every model trial point (source, score, price, latency) |
 | `observations.jsonl` | task observations extracted from session traces |
 | `catalog/snapshot.json` + `candidates.json` | catalog snapshot + new-model queue |
 | `benchmarks/digest.json` | public-benchmark scores per model (seed + refresh) |

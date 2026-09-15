@@ -8,9 +8,9 @@ the best model for the task at hand, at the best price, with a vetted fallback.
 
 1. **Observes** this harness's session traces (models used, tokens, cost,
    latency, errors) without intercepting or slowing down your work.
-2. **Evaluates** candidate models on a background track: it replays
-   representative tasks against candidate models and scores the outputs with a
-   judge model. You are never interrupted by these trials.
+2. **Evaluates** candidate models for a declared task sequentially through pi
+   and scores their outputs with a judge model. The background watcher is still
+   experimental.
 3. **Maintains a pareto frontier** per task (quality vs. cost vs. latency) and
    an aggregate frontier across all of your tasks.
 4. **Watches for new model releases** (provider catalogs + public benchmarks)
@@ -42,9 +42,9 @@ the best model for the task at hand, at the best price, with a vetted fallback.
 
 ## Guarantees
 
-- OpenMerit never reads or sends your conversation content anywhere except the
-  trial/eval calls required to score candidate models, and only within the
-  providers allowed by policy.
+- Per-task comparisons send the task text and candidate answers through
+  OpenRouter for model runs and judging. Use non-sensitive text tasks while
+  evaluating this alpha.
 - Swaps are policy-gated: they only happen automatically within the user's
   configured quality/cost guardrails; otherwise they are recommendations that a
   human approves.

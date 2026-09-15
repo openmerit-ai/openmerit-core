@@ -20,6 +20,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 
 const HOME = process.env.OPENMERIT_HOME ?? join(homedir(), ".openmerit");
 const RECS_FILE = join(HOME, "recommendations.jsonl");
@@ -79,8 +80,37 @@ function latestRecommendations(): Recommendation[] {
   return [...byId.values()];
 }
 
-function pendingRecommendations(): Recommendation[] {
-  return latestRecommendations().filter((r) => r.status === "pending");
+function taskKey(text: string): string {
+  return createHash("sha1").update(text.toLowerCase().replace(/\s+/g, " ").trim()).digest("hex").slice(0, 12);
+}
+
+function latestSessionTaskKey(ctx: ExtensionContext): string | null {
+  const file = ctx.sessionManager.getSessionFile();
+  if (!file || !existsSync(file)) return null;
+  let latest: string | null = null;
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const e = JSON.parse(line) as { type?: string; message?: { role?: string; content?: unknown } };
+      if (e.type !== "message" || e.message?.role !== "user") continue;
+      const content = e.message.content;
+      const text = typeof content === "string" ? content : Array.isArray(content)
+        ? content.filter((b) => b?.type === "text").map((b) => String(b.text ?? "")).join(" ") : "";
+      if (text.trim()) latest = taskKey(text);
+    } catch { /* partial/corrupt session line */ }
+  }
+  return latest;
+}
+
+function pendingRecommendations(ctx?: ExtensionContext): Recommendation[] {
+  const pending = latestRecommendations().filter((r) => r.status === "pending");
+  if (!ctx) return pending;
+  const key = latestSessionTaskKey(ctx);
+  return key ? pending.filter((r) => r.taskKey === key) : [];
+}
+
+function canonicalModel(provider: string, id: string): string {
+  return provider === "openrouter" ? id : `${provider}/${id}`;
 }
 
 function setStatus(rec: Recommendation, status: Recommendation["status"]): void {
@@ -92,7 +122,7 @@ let fallbackModel: string | null = null;
 function reportHarnessState(ctx: ExtensionContext): void {
   try {
     mkdirSync(HOME, { recursive: true });
-    const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : null;
+    const model = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
     writeFileSync(
       STATE_FILE,
       JSON.stringify({
@@ -205,6 +235,11 @@ export default function openmerit(pi: ExtensionAPI) {
   const notified = new Set<string>();
 
   async function applyRecommendation(ctx: ExtensionContext, rec: Recommendation): Promise<boolean> {
+    const current = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
+    if (rec.currentModel && current !== rec.currentModel) {
+      ctx.ui.notify(`openmerit: recommendation was measured against ${rec.currentModel}; current model is ${current ?? "unknown"}`, "warning");
+      return false;
+    }
     const model = ensureModel(pi, ctx, rec.recommended.model);
     if (!model) {
       ctx.ui.notify(
@@ -226,11 +261,9 @@ export default function openmerit(pi: ExtensionAPI) {
   }
 
   async function surface(ctx: ExtensionContext): Promise<void> {
-    for (const rec of pendingRecommendations()) {
+    for (const rec of pendingRecommendations(ctx)) {
       if (notified.has(rec.id)) continue;
       notified.add(rec.id);
-      if (rec.fallback) fallbackModel = rec.fallback.model;
-
       if (rec.policy.autoApply) {
         await applyRecommendation(ctx, rec);
         continue;
@@ -282,7 +315,7 @@ export default function openmerit(pi: ExtensionAPI) {
 
     const policy = loadPolicy();
     if (policy.fallback?.apply_on_error === false) return;
-    const current = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "current model";
+    const current = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : "current model";
     const model = ensureModel(pi, ctx, fallbackModel);
     if (!model) return;
 
@@ -312,7 +345,7 @@ export default function openmerit(pi: ExtensionAPI) {
   pi.registerCommand("openmerit", {
     description: "OpenMerit: status, pending recommendations, apply/dismiss",
     handler: async (args, ctx) => {
-      const pending = pendingRecommendations();
+      const pending = pendingRecommendations(ctx);
       const sub = args.trim().split(/\s+/)[0] ?? "";
 
       if (sub === "apply") {
@@ -344,7 +377,7 @@ export default function openmerit(pi: ExtensionAPI) {
         return;
       }
 
-      const current = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "unknown";
+      const current = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : "unknown";
       const lines = [
         `current model : ${current}`,
         `fallback      : ${fallbackModel ?? "n/a"}`,

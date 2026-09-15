@@ -117,6 +117,8 @@ export interface GateInput {
   onFrontier: boolean;
   /** Candidate passes provider allow/deny. */
   providerOk: boolean;
+  /** A real task trial of the current model exists. */
+  baselineMeasured?: boolean;
 }
 
 /**
@@ -128,6 +130,10 @@ export function gate(policy: Policy, input: GateInput): GateDecision {
   const reasons: string[] = [];
   if (!input.providerOk) {
     reasons.push("provider not allowed by policy");
+    return { autoApply: false, reasons };
+  }
+  if (input.baselineMeasured === false) {
+    reasons.push("current model has no measured baseline");
     return { autoApply: false, reasons };
   }
   if (policy.mode !== "auto" || !policy.auto_apply.enabled) {

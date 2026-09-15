@@ -13,7 +13,7 @@ export interface TrialPoint {
   /** ISO timestamp. */
   ts: string;
   /** Where this point came from. */
-  source: "shadow_trial" | "trace" | "benchmark";
+  source: "shadow_trial" | "pi_trial" | "trace" | "benchmark";
   /** One-line justification (judge/strategist). */
   why?: string;
 }
