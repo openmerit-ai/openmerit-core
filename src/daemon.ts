@@ -16,6 +16,7 @@ import { ingestNewTraces } from "./traces.js";
 import { budgetOk, ensureRubric, recordTrialSpend, runTrial } from "./trials.js";
 import { JUDGE_PREFS } from "./judge.js";
 import { availablePiModels, runPiTrial, scorePiRun, settledActiveTask } from "./pi-trials.js";
+import { taskInputKey } from "./task-input.js";
 import { pickNext, STRAT_PREFS } from "./strategist.js";
 import type { CatalogEntry, Recommendation, TaskObservation, TrialPoint } from "./types.js";
 
@@ -154,7 +155,8 @@ export async function autoTaskTick(key: string, policy: Policy): Promise<Recomme
   const piModels = availablePiModels();
   for (const id of [...cat.keys()]) {
     const e = cat.get(id)!;
-    if (!piModels.has(id) || e.price > policy.max_usd_per_m || !providerAllowed(policy, id)) cat.delete(id);
+    if (!piModels.has(id) || e.price > policy.max_usd_per_m || !providerAllowed(policy, id) ||
+        (task.images.length > 0 && !e.inputModalities?.includes("image"))) cat.delete(id);
   }
   if (!cat.has(task.model)) throw new Error(`active model ${task.model} is not trialable in pi/OpenRouter`);
   const judge = resolvePref(cat, [policy.judge_model, ...JUDGE_PREFS], "judge");
@@ -164,12 +166,12 @@ export async function autoTaskTick(key: string, policy: Policy): Promise<Recomme
   try { benchmarkCandidates = await openRouterBenchmarkCandidates(key, category, cat); }
   catch (e) { console.log(`[openmerit] benchmark shortlist unavailable: ${(e as Error).message}`); }
   const rubric = await ensureRubric(key, judge, task.task, new Map());
-  const tKey = taskKey(task.task);
+  const tKey = taskInputKey(task.task, task.images);
   const points: TrialPoint[] = [];
   const tried = new Set<string>();
   const failedVendors = new Set<string>();
 
-  const baseline = await scorePiRun(key, judge, task.task, rubric, task.model, cat.get(task.model), task.run, "trace");
+  const baseline = await scorePiRun(key, judge, task.task, rubric, task.model, cat.get(task.model), task.run, "trace", task.images);
   points.push(baseline.point);
   tried.add(task.model);
   appendJsonl(paths.trials(), { ...baseline.point, taskKey: tKey, sessionFile: task.sessionFile });
@@ -182,7 +184,7 @@ export async function autoTaskTick(key: string, policy: Policy): Promise<Recomme
       points, cat, tried, policy.max_usd_per_m, failedVendors, benchmarkCandidates);
     if (!pick) break;
     const { point, costUsd, error } = await runPiTrial(
-      key, judge, task.task, rubric, pick.model, cat.get(pick.model), task.cwd);
+      key, judge, task.task, rubric, pick.model, cat.get(pick.model), task.cwd, task.images);
     tried.add(pick.model);
     points.push(point);
     recordTrialSpend(costUsd);

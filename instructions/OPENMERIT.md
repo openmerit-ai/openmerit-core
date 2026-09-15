@@ -8,7 +8,7 @@ the best model for the task at hand, at the best price, with a vetted fallback.
 
 1. **Observes** this harness's session traces (models used, tokens, cost,
    latency, errors) without intercepting or slowing down your work.
-2. **Evaluates** candidate models for each completed text task sequentially
+2. **Evaluates** candidate models for each completed text or image task sequentially
    through pi and scores their outputs with a judge model.
 3. **Maintains a pareto frontier** per task (quality vs. cost vs. latency) and
    an aggregate frontier across all of your tasks.
@@ -42,9 +42,9 @@ the best model for the task at hand, at the best price, with a vetted fallback.
 
 ## Guarantees
 
-- Per-task comparisons send the task text and candidate answers through
-  OpenRouter for model runs and judging. Use non-sensitive text tasks while
-  evaluating this alpha.
+- Per-task comparisons send the task text, uploaded images (when present), and
+  candidate answers through pi/OpenRouter for model runs and judging. Use
+  non-sensitive examples while evaluating this alpha.
 - Swaps are policy-gated: they only happen automatically within the user's
   configured quality/cost guardrails; otherwise they are recommendations that a
   human approves.

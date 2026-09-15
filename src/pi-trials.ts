@@ -1,9 +1,13 @@
 /** Run a task through pi for each model, using pi's JSON event stream as the measurement source. */
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { judge } from "./judge.js";
-import { paths, readJson, taskKey } from "./store.js";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { judge, judgeWithImages } from "./judge.js";
+import { knownInvoiceScore } from "./invoice-eval.js";
+import { paths, readJson } from "./store.js";
+import { sessionImages, taskInputKey, type TaskImage } from "./task-input.js";
 import type { CatalogEntry, TrialPoint } from "./types.js";
 
 interface PiMessage {
@@ -36,7 +40,7 @@ interface SessionMessage extends PiMessage {
 }
 
 /** Use model A's completed result from the active pi session when it matches this task. */
-export function recordedActiveTask(task: string, model: string): PiRun | null {
+export function recordedActiveTask(task: string, model: string, images: TaskImage[] = []): PiRun | null {
   const state = readJson<{ sessionFile?: string | null }>(paths.harnessState(), {});
   const file = state.sessionFile;
   if (!file || !existsSync(file)) return null;
@@ -50,7 +54,9 @@ export function recordedActiveTask(task: string, model: string): PiRun | null {
     if (entry.message.role === "user") { user = entry.message; assistants.length = 0; }
     else if (user && entry.message.role === "assistant") assistants.push(entry.message);
   }
-  if (!user || taskKey(answerText(user.content)) !== taskKey(task)) return null;
+  const userImages = user ? sessionImages(user.content) : null;
+  if (!user || !userImages || taskInputKey(answerText(user.content), userImages) !==
+      taskInputKey(task, images)) return null;
   const matching = assistants.filter((m) =>
     (m.provider === "openrouter" ? m.model : `${m.provider}/${m.model}`) === model);
   if (matching.length === 0 || matching.some((m) => m.stopReason === "error")) return null;
@@ -68,6 +74,7 @@ export function recordedActiveTask(task: string, model: string): PiRun | null {
 
 export interface SettledTask {
   task: string;
+  images: TaskImage[];
   model: string;
   run: PiRun;
   sessionFile: string;
@@ -96,13 +103,14 @@ export function settledActiveTask(): SettledTask | null {
       Array.isArray(entry.message.content) && entry.message.content.some((b) => b?.type === "toolCall"))
       usedTools = true;
   }
-  if (!userContent || usedTools ||
-      (Array.isArray(userContent) && userContent.some((b) => b?.type !== "text"))) return null;
+  if (!userContent || usedTools) return null;
+  const images = sessionImages(userContent);
+  if (!images) return null;
   const task = answerText(userContent);
-  if (!task.trim() || taskKey(task) !== st.settledTaskKey) return null;
-  const run = recordedActiveTask(task, st.currentModel);
+  if (!task.trim() || taskInputKey(task, images) !== st.settledTaskKey) return null;
+  const run = recordedActiveTask(task, st.currentModel, images);
   if (!run) return null;
-  return { task, model: st.currentModel, run, sessionFile: st.sessionFile,
+  return { task, images, model: st.currentModel, run, sessionFile: st.sessionFile,
     settledAt: st.settledAt, cwd: st.cwd ?? process.cwd() };
 }
 
@@ -116,10 +124,22 @@ export function availablePiModels(): Set<string> {
 }
 
 /** Each invocation is a fresh pi run, so model B does not inherit model A's answer. */
-export async function executePiTask(model: string, task: string, cwd = process.cwd()): Promise<PiRun> {
+export async function executePiTask(
+  model: string, task: string, cwd = process.cwd(), images: TaskImage[] = [],
+): Promise<PiRun> {
+  const imageDir = images.length ? mkdtempSync(join(tmpdir(), "openmerit-pi-image-")) : null;
+  const suffix: Record<string, string> = {
+    "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
+  };
+  const imageArgs = images.map((image, i) => {
+    if (!imageDir || !suffix[image.mimeType]) throw new Error(`unsupported pi image: ${image.mimeType}`);
+    const file = join(imageDir, `image-${i}.${suffix[image.mimeType]}`);
+    writeFileSync(file, Buffer.from(image.data, "base64"));
+    return `@${file}`;
+  });
   const child = spawn("pi", [
     "--provider", "openrouter", "--model", model, "--mode", "json",
-    "--offline", "--no-extensions", "--no-tools", "--print", task,
+    "--offline", "--no-extensions", "--no-tools", "--print", ...imageArgs, task,
   ], { cwd, stdio: ["ignore", "pipe", "pipe"] });
   let buffer = "";
   let stderr = "";
@@ -149,10 +169,15 @@ export async function executePiTask(model: string, task: string, cwd = process.c
     }
   });
   child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
-  const exitCode = await new Promise<number>((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", (code) => resolve(code ?? 1));
-  });
+  let exitCode: number;
+  try {
+    exitCode = await new Promise<number>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (code) => resolve(code ?? 1));
+    });
+  } finally {
+    if (imageDir) rmSync(imageDir, { recursive: true, force: true });
+  }
   consume(buffer);
   if (exitCode !== 0 || !answer.trim()) {
     throw new Error(`pi trial ${model} failed: ${stderr.trim().slice(0, 180) || `exit ${exitCode}, empty answer`}`);
@@ -163,11 +188,11 @@ export async function executePiTask(model: string, task: string, cwd = process.c
 /** Quality uses the same OpenMerit judge; cost and latency come from pi itself. */
 export async function runPiTrial(
   key: string, judgeModel: string, task: string, rubric: string,
-  model: string, entry: CatalogEntry | undefined, cwd = process.cwd(),
+  model: string, entry: CatalogEntry | undefined, cwd = process.cwd(), images: TaskImage[] = [],
 ): Promise<{ point: TrialPoint; costUsd: number; error?: string; sessionId?: string }> {
   try {
-    const run = await executePiTask(model, task, cwd);
-    return await scorePiRun(key, judgeModel, task, rubric, model, entry, run, "pi_trial");
+    const run = await executePiTask(model, task, cwd, images);
+    return await scorePiRun(key, judgeModel, task, rubric, model, entry, run, "pi_trial", images);
   } catch (e) {
     const error = String(e);
     return {
@@ -181,12 +206,15 @@ export async function runPiTrial(
 export async function scorePiRun(
   key: string, judgeModel: string, task: string, rubric: string,
   model: string, entry: CatalogEntry | undefined, run: PiRun,
-  source: "pi_trial" | "trace",
+  source: "pi_trial" | "trace", images: TaskImage[] = [],
 ): Promise<{ point: TrialPoint; costUsd: number; error?: string; sessionId?: string }> {
     let score = 0;
     let why = "judge unavailable";
     try {
-      const j = await judge(key, judgeModel, task, rubric, run.answer);
+      const pinned = images.length ? await knownInvoiceScore(task, images, run.answer) : null;
+      const j = pinned ?? (images.length
+        ? await judgeWithImages(key, judgeModel, task, rubric, run.answer, images)
+        : await judge(key, judgeModel, task, rubric, run.answer));
       score = Math.max(0, Math.min(1, j.score));
       why = j.why;
     } catch (e) { why = `judge error: ${String(e).slice(0, 120)}`; }

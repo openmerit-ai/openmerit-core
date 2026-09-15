@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { taskKey } from "../src/store.js";
+import { taskInputKey } from "../src/task-input.js";
 
 let dir: string | null = null;
 const oldHome = process.env.OPENMERIT_HOME;
@@ -14,6 +15,46 @@ afterEach(() => {
 });
 
 describe("pi extension model handoff", () => {
+  it("does not reuse a recommendation for a different invoice with the same prompt", async () => {
+    dir = mkdtempSync(join(tmpdir(), "openmerit-ext-invoice-"));
+    process.env.OPENMERIT_HOME = dir;
+    const session = join(dir, "invoice-session.jsonl");
+    const source = join(dir, "source-session.jsonl");
+    const prompt = "Extract this invoice to JSON";
+    const imageA = { type: "image" as const, mimeType: "image/jpeg",
+      data: Buffer.from("invoice A").toString("base64") };
+    const imageB = { ...imageA, data: Buffer.from("invoice B").toString("base64") };
+    writeFileSync(session, JSON.stringify({ type: "message", message: {
+      role: "user", content: [{ type: "text", text: prompt }, imageB],
+    } }) + "\n");
+    writeFileSync(join(dir, "recommendations.jsonl"), JSON.stringify({
+      id: "image-A", ts: new Date().toISOString(), taskKey: taskInputKey(prompt, [imageA]),
+      taskLabel: prompt, sessionFile: source, currentModel: "vendor/a",
+      recommended: { model: "vendor/b", reason: "better" }, fallback: null,
+      evidence: { scoreGain: 0.2, priceRatio: 0.5, onFrontier: true, trials: 3 },
+      policy: { autoApply: true, reasons: [] }, status: "applied",
+    }) + "\n");
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    const notices: string[] = [];
+    const ctx = { model: { provider: "openrouter", id: "vendor/a" },
+      modelRegistry: { find: () => undefined },
+      sessionManager: { getSessionFile: () => session }, cwd: dir,
+      hasUI: true, isIdle: () => true, ui: { notify: (s: string) => notices.push(s) } };
+    const pi = { on: (name: string, fn: (...args: unknown[]) => Promise<void>) => handlers.set(name, fn),
+      registerCommand: () => undefined, setModel: async () => true };
+    const { default: extension } = await import("../extension/openmerit.js");
+    extension(pi as never);
+    await handlers.get("session_start")?.({}, ctx);
+    await handlers.get("agent_settled")?.({}, ctx);
+    expect(notices).toEqual([]);
+    writeFileSync(session, JSON.stringify({ type: "message", message: {
+      role: "user", content: [{ type: "text", text: prompt }, imageA],
+    } }) + "\n");
+    await handlers.get("agent_settled")?.({}, ctx);
+    expect(notices.filter((x) => x.includes("exact task was tested"))).toHaveLength(1);
+    await handlers.get("session_shutdown")?.();
+  });
+
   it("suggests an exact-task result from another session without switching this session", async () => {
     dir = mkdtempSync(join(tmpdir(), "openmerit-ext-reuse-"));
     process.env.OPENMERIT_HOME = dir;

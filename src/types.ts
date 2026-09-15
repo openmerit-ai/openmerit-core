@@ -73,6 +73,8 @@ export interface CatalogEntry {
   pc: number;
   /** Blended $/1M tokens. */
   price: number;
+  /** Live OpenRouter input modalities (used to avoid text-only image trials). */
+  inputModalities?: string[];
   /** Unix seconds, when the model was added to the catalog (if known). */
   created?: number;
 }

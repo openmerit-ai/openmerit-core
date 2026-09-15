@@ -1,7 +1,7 @@
 # openmerit
 
 An **experimental model-merit harness** for [pi](https://pi.dev). Start
-`openmerit watch`, run a text task in pi with model A, and OpenMerit observes
+`openmerit watch`, run a task in pi with model A, and OpenMerit observes
 its completed trace, trials B and C sequentially through pi, compares quality,
 price, and latency, and swaps that pi session to the selected model before its
 next task when the policy gate permits it.
@@ -84,10 +84,11 @@ separate OpenRouter judge scores the result against the same rubric, while
 OpenRouter's benchmark API helps shortlist candidates. OpenMerit keeps its
 existing choice rule: highest judged quality, then lower price and latency.
 
-This first loop supports text tasks with tools disabled during comparison. The
-candidate pi runs therefore share the same task and project context, but do
-not share previous answers or file changes. Their raw sessions remain in pi's
-session store; the CLI prints each trial session id. Tool-using tasks and exact workspace
+This loop supports text and uploaded image tasks with tools disabled during
+comparison. Candidate pi runs receive the original image bytes and task text,
+but do not share previous answers or file changes. Vision tasks only consider
+models whose OpenRouter catalog entry advertises image input. Their raw
+sessions remain in pi's session store. Tool-using tasks and exact workspace
 replay need further work. Only the latest active pi session is watched at a
 time; concurrent pi sessions are not yet tracked independently.
 
@@ -107,7 +108,7 @@ Start the watcher in one terminal before the task:
 node dist/cli.js watch
 ```
 
-In another terminal, start pi with an OpenRouter model and a text task (use
+In another terminal, start pi with an OpenRouter model and a task (use
 `--no-tools` for the initial comparison). Leave pi open after model A finishes.
 The watcher prints A/B/C trial measurements and its choice. The extension polls
 for a recommendation bound to that pi session and applies an eligible swap with
@@ -116,13 +117,30 @@ next pi turn should use the selected model. If the gate declines an automatic
 swap, `/openmerit apply` is still available. The existing `trial` command
 remains available for controlled runs from a task JSON file.
 
-When another pi session completes the **same text task** (ignoring case and
-whitespace), the extension shows the most recent earlier session's measured
+When another pi session completes the **same task** (ignoring text case and
+whitespace, and matching exact image bytes if present), the extension shows the most recent earlier session's measured
 choice and A/B/C quality, price, and latency in a notice and in `/openmerit`.
 That history is advice only: it does not become a pending swap in the new
 session. The watcher still compares the new session's own run before any
 automatic model change. Similar-task matching and context-aware reuse are
 future experiments.
+
+### Pinned invoice image example
+
+The existing invoice benchmark provides 10 pinned images and ground-truth JSON.
+For an end-to-end pi watcher test, start `node dist/cli.js watch`, then open pi
+with a vision-capable OpenRouter model such as `google/gemini-3.8-flash` and
+`--no-tools`. Upload
+[`invoice_01_row_2.jpg`](benchmark/invoice_ocr/data/invoice_01_row_2.jpg) with
+pi's `@path/to/image.jpg` input and paste the exact text from
+[`examples/invoice-prompt.txt`](examples/invoice-prompt.txt). Keep that pi
+session open while the watcher trials two other vision models. For these exact
+image/prompt pairs, the watcher reuses the benchmark's visibility-audited
+exact-leaf scorer. Other uploaded invoices use a vision judge that sees the
+image and answer, since no ground truth is available. Unlike the standalone
+benchmark, pi candidate runs rely on the explicit prompt for JSON structure;
+they do not send OpenRouter's strict `response_format` contract, so results
+are not directly comparable to the benchmark report.
 
 ## State layout (`~/.openmerit/`)
 
@@ -133,7 +151,7 @@ future experiments.
 | `recommendations.jsonl` | shared append-only channel: session-bound swap recommendations + status updates |
 | `trials.jsonl` | every model trial point (source, score, price, latency) |
 | `observations.jsonl` | task observations extracted from session traces |
-| `catalog/snapshot.json` + `candidates.json` | catalog snapshot + new-model queue |
+| `catalog/snapshot.json` + `candidates.json` | catalog snapshot (including input modalities) + new-model queue |
 | `benchmarks/digest.json` | public-benchmark scores per model (seed + refresh) |
 | `ledger.json` | daily trial spend (budget enforcement) |
 | `watch/processed.json` | latest task handled by the watcher (including retry status) |

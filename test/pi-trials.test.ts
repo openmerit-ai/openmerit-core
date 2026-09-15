@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executePiTask, settledActiveTask } from "../src/pi-trials.js";
 import { paths, taskKey } from "../src/store.js";
+import { taskInputKey } from "../src/task-input.js";
 
 const oldPath = process.env.PATH;
 const oldHome = process.env.OPENMERIT_HOME;
@@ -60,5 +61,39 @@ console.log(JSON.stringify({ type: 'agent_settled' }));
       usage: { cost: { total: 0 } }, stopReason: "toolUse" } });
     writeFileSync(sessionFile, lines.map((x) => JSON.stringify(x)).join("\n") + "\n");
     expect(settledActiveTask()).toBeNull();
+  });
+
+  it("replays the saved image as a pi image input and separates invoice task keys", async () => {
+    fixtureDir = mkdtempSync(join(tmpdir(), "openmerit-pi-image-"));
+    const bin = join(fixtureDir, "pi");
+    writeFileSync(bin, `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+const image = args.find(x => x.startsWith('@'));
+if (!image || fs.readFileSync(image.slice(1), 'utf8') !== 'invoice pixels') process.exit(3);
+console.log(JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'invoice JSON' }] } }));
+`);
+    chmodSync(bin, 0o755);
+    process.env.PATH = `${fixtureDir}:${oldPath}`;
+    const image = { type: "image" as const, data: Buffer.from("invoice pixels").toString("base64"),
+      mimeType: "image/jpeg" };
+    const other = { ...image, data: Buffer.from("different invoice").toString("base64") };
+    expect(taskInputKey("Extract invoice", [image])).not.toBe(taskInputKey("Extract invoice", [other]));
+    expect(taskInputKey("Extract invoice", [])).toBe(taskKey("Extract invoice"));
+    const result = await executePiTask("vendor/vision", "Extract invoice", fixtureDir, [image]);
+    expect(result.answer).toBe("invoice JSON");
+    process.env.OPENMERIT_HOME = fixtureDir;
+    const sessionFile = join(fixtureDir, "invoice-session.jsonl");
+    writeFileSync(sessionFile, [
+      { type: "message", message: { role: "user", timestamp: 1000,
+        content: [{ type: "text", text: "Extract invoice" }, image] } },
+      { type: "message", message: { role: "assistant", provider: "openrouter", model: "vendor/vision",
+        content: [{ type: "text", text: "invoice JSON" }], timestamp: 2200,
+        usage: { cost: { total: 0.002 } }, stopReason: "stop" } },
+    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+    writeFileSync(paths.harnessState(), JSON.stringify({ sessionFile, currentModel: "vendor/vision",
+      settledTaskKey: taskInputKey("Extract invoice", [image]), settledAt: "2026-09-16T00:00:00Z" }));
+    expect(settledActiveTask()?.images).toEqual([image]);
+    expect(settledActiveTask()?.run.answer).toBe("invoice JSON");
   });
 });

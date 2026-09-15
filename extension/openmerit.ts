@@ -95,6 +95,20 @@ function taskKey(text: string): string {
   return createHash("sha1").update(text.toLowerCase().replace(/\s+/g, " ").trim()).digest("hex").slice(0, 12);
 }
 
+function userTaskKey(content: unknown): string | null {
+  const parts = typeof content === "string" ? [{ type: "text", text: content }] : content;
+  if (!Array.isArray(parts)) return null;
+  const text = parts.filter((b) => b?.type === "text").map((b) => String(b.text ?? "")).join(" ");
+  if (!text.trim()) return null;
+  const images = parts.filter((b) => b?.type === "image");
+  if (parts.length !== parts.filter((b) => b?.type === "text" || b?.type === "image").length ||
+      images.some((b) => typeof b.data !== "string" || typeof b.mimeType !== "string")) return null;
+  if (images.length === 0) return taskKey(text);
+  const hashes = images.map((b) => `${b.mimeType}:` +
+    createHash("sha256").update(Buffer.from(b.data, "base64")).digest("hex"));
+  return taskKey(`${text.toLowerCase().replace(/\s+/g, " ").trim()}\nimages:${hashes.join(",")}`);
+}
+
 function latestSessionTaskKey(ctx: ExtensionContext): string | null {
   const file = ctx.sessionManager.getSessionFile();
   if (!file || !existsSync(file)) return null;
@@ -104,10 +118,7 @@ function latestSessionTaskKey(ctx: ExtensionContext): string | null {
     try {
       const e = JSON.parse(line) as { type?: string; message?: { role?: string; content?: unknown } };
       if (e.type !== "message" || e.message?.role !== "user") continue;
-      const content = e.message.content;
-      const text = typeof content === "string" ? content : Array.isArray(content)
-        ? content.filter((b) => b?.type === "text").map((b) => String(b.text ?? "")).join(" ") : "";
-      if (text.trim()) latest = taskKey(text);
+      latest = userTaskKey(e.message.content);
     } catch { /* partial/corrupt session line */ }
   }
   return latest;
@@ -230,6 +241,7 @@ interface CatalogEntryLite {
   ctx?: number;
   pp?: number;
   pc?: number;
+  inputModalities?: string[];
 }
 
 const INJECT_PROVIDER = "openmerit-openrouter";
@@ -267,7 +279,7 @@ function ensureModel(pi: ExtensionAPI, ctx: ExtensionContext, openrouterId: stri
       id: m.id,
       name: m.name ?? m.id,
       reasoning: false,
-      input: ["text"],
+      input: entry.inputModalities?.includes("image") ? ["text", "image"] : ["text"],
       cost: {
         input: (m.pp ?? 0) * 1e6,
         output: (m.pc ?? 0) * 1e6,
