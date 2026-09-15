@@ -1,13 +1,14 @@
 /** Run a task through pi for each model, using pi's JSON event stream as the measurement source. */
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
+import { createHash } from "node:crypto";
 import { judge, judgeWithImages } from "./judge.js";
 import { knownInvoiceScore } from "./invoice-eval.js";
 import { paths, readJson } from "./store.js";
-import { sessionImages, taskInputKey, type TaskImage } from "./task-input.js";
+import { sessionFiles, sessionImages, taskInputKey, type TaskFile, type TaskImage } from "./task-input.js";
 import type { CatalogEntry, TrialPoint } from "./types.js";
 
 interface PiMessage {
@@ -31,6 +32,35 @@ export interface PiRun {
   latencyMs: number;
   errors: number;
   sessionId?: string;
+  toolCalls: number;
+  toolErrors: number;
+  changedFiles: number;
+  traceFile?: string;
+}
+
+function fileSnapshot(root: string): Map<string, string> {
+  const out = new Map<string, string>();
+  function walk(dir: string): void {
+    for (const name of readdirSync(dir)) {
+      if (name === ".git" || name === "node_modules" || name === ".openmerit") continue;
+      const file = join(dir, name); const rel = relative(root, file);
+      const st = statSync(file);
+      if (st.isDirectory()) walk(file);
+      else if (st.isFile() && st.size < 20_000_000) {
+        out.set(rel, createHash("sha1").update(readFileSync(file)).digest("hex"));
+      }
+    }
+  }
+  walk(root); return out;
+}
+
+function isolatedWorkspace(cwd: string): string {
+  const root = mkdtempSync(join(tmpdir(), "openmerit-pi-workspace-"));
+  cpSync(cwd, root, { recursive: true, filter: (src) => {
+    const rel = relative(cwd, src);
+    return !rel.split("/").some((part) => part === ".git" || part === "node_modules" || part === ".openmerit");
+  }});
+  return root;
 }
 
 interface SessionMessage extends PiMessage {
@@ -46,13 +76,20 @@ export function recordedActiveTask(task: string, model: string, images: TaskImag
   if (!file || !existsSync(file)) return null;
   let user: SessionMessage | null = null;
   const assistants: SessionMessage[] = [];
+  let toolCalls = 0;
+  let toolErrors = 0;
   for (const line of readFileSync(file).subarray(0, sessionBytes).toString("utf8").split("\n")) {
     if (!line.trim()) continue;
     let entry: { type?: string; message?: SessionMessage };
     try { entry = JSON.parse(line) as typeof entry; } catch { continue; }
     if (entry.type !== "message" || !entry.message) continue;
-    if (entry.message.role === "user") { user = entry.message; assistants.length = 0; }
-    else if (user && entry.message.role === "assistant") assistants.push(entry.message);
+    if (entry.message.role === "user") { user = entry.message; assistants.length = 0; toolCalls = 0; toolErrors = 0; }
+    else if (user && entry.message.role === "assistant") {
+      assistants.push(entry.message);
+      if (Array.isArray(entry.message.content)) toolCalls += entry.message.content.filter((part) =>
+        (part as { type?: string })?.type === "toolCall").length;
+    } else if (user && entry.message.role === "toolResult" &&
+      (entry.message as PiMessage & { isError?: boolean }).isError) toolErrors++;
   }
   const userImages = user ? sessionImages(user.content) : null;
   if (!user || !userImages || taskInputKey(answerText(user.content), userImages) !==
@@ -69,6 +106,9 @@ export function recordedActiveTask(task: string, model: string, images: TaskImag
     costUsd: matching.reduce((n, m) => n + (m.usage?.cost?.total ?? 0), 0),
     latencyMs: Math.max(0, last - first),
     errors: 0,
+    toolCalls,
+    toolErrors,
+    changedFiles: 0,
   };
 }
 
@@ -81,6 +121,8 @@ export interface SettledTask {
   settledAt: string;
   sessionBytes?: number;
   cwd: string;
+  usedTools: boolean;
+  files: TaskFile[];
 }
 
 /** Read the exact latest completed text task from the pi extension's session marker. */
@@ -107,15 +149,16 @@ export function settledActiveTask(snapshot?: {
       Array.isArray(entry.message.content) && entry.message.content.some((b) => b?.type === "toolCall"))
       usedTools = true;
   }
-  if (!userContent || usedTools) return null;
+  if (!userContent) return null;
   const images = sessionImages(userContent);
   if (!images) return null;
   const task = answerText(userContent);
-  if (!task.trim() || taskInputKey(task, images) !== st.settledTaskKey) return null;
+  const files = sessionFiles(task);
+  if (!task.trim() || taskInputKey(task, images, files) !== st.settledTaskKey) return null;
   const run = recordedActiveTask(task, st.currentModel, images, st.sessionFile, st.sessionBytes);
   if (!run) return null;
   return { task, images, model: st.currentModel, run, sessionFile: st.sessionFile,
-    settledAt: st.settledAt, sessionBytes: st.sessionBytes, cwd: st.cwd ?? process.cwd() };
+    settledAt: st.settledAt, sessionBytes: st.sessionBytes, cwd: st.cwd ?? process.cwd(), usedTools, files };
 }
 
 /** Limit candidates to models this installed pi can actually select. */
@@ -129,7 +172,7 @@ export function availablePiModels(): Set<string> {
 
 /** Each invocation is a fresh pi run, so model B does not inherit model A's answer. */
 export async function executePiTask(
-  model: string, task: string, cwd = process.cwd(), images: TaskImage[] = [],
+  model: string, task: string, cwd = process.cwd(), images: TaskImage[] = [], files: TaskFile[] = [],
 ): Promise<PiRun> {
   const imageDir = images.length ? mkdtempSync(join(tmpdir(), "openmerit-pi-image-")) : null;
   const suffix: Record<string, string> = {
@@ -141,23 +184,47 @@ export async function executePiTask(
     writeFileSync(file, Buffer.from(image.data, "base64"));
     return `@${file}`;
   });
+  const workspace = isolatedWorkspace(cwd);
+  const attachmentDir = join(workspace, ".openmerit-attachments");
+  mkdirSync(attachmentDir, { recursive: true });
+  const attachmentPaths = new Map<string, string>();
+  const fileArgs = files.map((file, i) => {
+    const safeName = `${String(i).padStart(3, "0")}-${file.name.replace(/[^A-Za-z0-9._-]/g, "_")}`;
+    const target = join(attachmentDir, safeName);
+    cpSync(file.path, target);
+    attachmentPaths.set(file.path, target);
+    return `@${target}`;
+  });
+  const candidateTask = [...attachmentPaths.entries()].reduce(
+    (text, [source, target]) => text.split(source).join(target), task,
+  );
+  const before = fileSnapshot(workspace);
+  const traceFile = paths.trialTrace(`${model}:${task}:${Date.now()}`);
+  const traceLines: string[] = [];
   const child = spawn("pi", [
     "--provider", "openrouter", "--model", model, "--mode", "json",
-    "--offline", "--no-extensions", "--no-tools", "--print", ...imageArgs, task,
-  ], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    "--offline", "--no-extensions", "--approve", "--print", ...imageArgs, ...fileArgs, candidateTask,
+  ], { cwd: workspace, stdio: ["ignore", "pipe", "pipe"] });
   let buffer = "";
   let stderr = "";
   let answer = "";
   let costUsd = 0;
   let errors = 0;
   let sessionId: string | undefined;
+  let toolCalls = 0;
+  let toolErrors = 0;
   const started = Date.now();
 
   function consume(line: string): void {
     if (!line.trim()) return;
+    traceLines.push(line);
     let event: { type?: string; id?: string; message?: PiMessage };
     try { event = JSON.parse(line) as typeof event; } catch { return; }
     if (event.type === "session" && event.id) sessionId = event.id;
+    const content = event.message?.content;
+    if (event.message?.role === "assistant" && Array.isArray(content))
+      toolCalls += content.filter((part) => (part as { type?: string })?.type === "toolCall").length;
+    if (event.message?.role === "toolResult" && (event.message as PiMessage & { isError?: boolean }).isError) toolErrors++;
     if (event.type !== "message_end" || event.message?.role !== "assistant") return;
     answer = answerText(event.message.content) || answer;
     costUsd += event.message.usage?.cost?.total ?? 0;
@@ -183,25 +250,34 @@ export async function executePiTask(
     if (imageDir) rmSync(imageDir, { recursive: true, force: true });
   }
   consume(buffer);
+  mkdirSync(dirname(traceFile), { recursive: true });
+  writeFileSync(traceFile, traceLines.join("\n") + (traceLines.length ? "\n" : ""));
+  const after = fileSnapshot(workspace);
+  let changedFiles = 0;
+  for (const [file, hash] of after) if (before.get(file) !== hash) changedFiles++;
+  for (const file of before.keys()) if (!after.has(file)) changedFiles++;
+  rmSync(workspace, { recursive: true, force: true });
   if (exitCode !== 0 || !answer.trim()) {
     throw new Error(`pi trial ${model} failed: ${stderr.trim().slice(0, 180) || `exit ${exitCode}, empty answer`}`);
   }
-  return { answer, costUsd, latencyMs: Date.now() - started, errors, sessionId };
+  return { answer, costUsd, latencyMs: Date.now() - started, errors, sessionId,
+    toolCalls, toolErrors, changedFiles, traceFile };
 }
 
 /** Quality uses the same OpenMerit judge; cost and latency come from pi itself. */
 export async function runPiTrial(
   key: string, judgeModel: string, task: string, rubric: string,
-  model: string, entry: CatalogEntry | undefined, cwd = process.cwd(), images: TaskImage[] = [],
+  model: string, entry: CatalogEntry | undefined, cwd = process.cwd(), images: TaskImage[] = [], files: TaskFile[] = [],
 ): Promise<{ point: TrialPoint; costUsd: number; error?: string; sessionId?: string }> {
   try {
-    const run = await executePiTask(model, task, cwd, images);
+    const run = await executePiTask(model, task, cwd, images, files);
     return await scorePiRun(key, judgeModel, task, rubric, model, entry, run, "pi_trial", images);
   } catch (e) {
     const error = String(e);
     return {
       point: { model, score: 0, price: entry?.price ?? 0,
-        ts: new Date().toISOString(), source: "pi_trial", why: error.slice(0, 160) },
+        ts: new Date().toISOString(), source: "pi_trial", toolCalls: 0, toolErrors: 1,
+        changedFiles: 0, why: error.slice(0, 160) },
       costUsd: 0, error,
     };
   }
@@ -226,7 +302,9 @@ export async function scorePiRun(
       point: {
         model, score, price: entry?.price ?? 0,
         latencyMs: run.latencyMs, ts: new Date().toISOString(), source,
-        why: `${why}${run.errors ? `; pi errors: ${run.errors}` : ""}`,
+        why: `${why}${run.errors ? `; pi errors: ${run.errors}` : ""}; ` +
+          `tools=${run.toolCalls}, toolErrors=${run.toolErrors}, changedFiles=${run.changedFiles}`,
+        toolCalls: run.toolCalls, toolErrors: run.toolErrors, changedFiles: run.changedFiles,
       },
       costUsd: run.costUsd,
       sessionId: run.sessionId,

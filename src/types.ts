@@ -16,6 +16,10 @@ export interface TrialPoint {
   source: "shadow_trial" | "pi_trial" | "trace" | "benchmark";
   /** One-line justification (judge/strategist). */
   why?: string;
+  /** Tool activity observed during a Pi candidate run. */
+  toolCalls?: number;
+  toolErrors?: number;
+  changedFiles?: number;
 }
 
 /** Per-task pareto state. */

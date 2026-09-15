@@ -194,9 +194,16 @@ remains for controlled text-task runs from a task JSON file.
   strategist requests send the task text, attached images, and candidate output
   to OpenRouter and can incur charges. Use non-sensitive test tasks and
   conservative account limits while evaluating this alpha.
-- The extension queues tasks from its current pi session, compares one at a
-  time, and skips tasks that use tools. Candidate sessions replay the latest
-  text and images, not earlier conversation context or workspace changes.
+- The extension queues tasks from its current pi session and compares one at a
+  time. Tool-using candidates run with Pi tools enabled in isolated temporary
+  copies of the original working directory; their changes are discarded and
+  recorded as counts, and their raw Pi JSON event streams are saved under
+  `~/.openmerit/traces/trials/`. Candidate sessions replay the task text and
+  images, not earlier conversation context or workspace changes.
+- File attachments that Pi records as `<file name="…">` are copied into every
+  candidate sandbox and passed back to Pi as `@` file inputs. This covers PDFs,
+  CSVs, spreadsheets, and other files that Pi can open; OpenMerit does not
+  implement a separate parser for them.
 - `ledger.json` counts reported candidate-trial spend and the daily number of
   trials. It does not yet include rubric, judge, or strategist request cost,
   and `max_usd_per_trial` is not yet a hard provider-side cap.
@@ -213,6 +220,7 @@ remains for controlled text-task runs from a task JSON file.
 | `recommendations.jsonl` | shared append-only channel: session-bound swap recommendations + status updates |
 | `trials.jsonl` | every model trial point (source, score, price, latency) |
 | `observations.jsonl` | task observations extracted from session traces |
+| `traces/trials/*.jsonl` | raw Pi JSON event streams for candidate trials |
 | `catalog/snapshot.json` + `candidates.json` | catalog snapshot (including input modalities) + new-model queue |
 | `benchmarks/digest.json` | public-benchmark scores per model (seed + refresh) |
 | `ledger.json` | daily trial spend (budget enforcement) |

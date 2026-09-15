@@ -27,6 +27,7 @@ describe("active pi task trace", () => {
     ].map((x) => JSON.stringify(x)).join("\n") + "\n");
     expect(recordedActiveTask("task A", "vendor/model-a")).toEqual({
       answer: "Result A", costUsd: 0.004, latencyMs: 1400, errors: 0,
+      toolCalls: 0, toolErrors: 0, changedFiles: 0,
     });
     expect(recordedActiveTask("task B", "vendor/model-a")).toBeNull();
     expect(recordedActiveTask("task A", "vendor/model-b")).toBeNull();
