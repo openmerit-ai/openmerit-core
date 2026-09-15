@@ -63,10 +63,29 @@ class OpenAICompatibleProvider implements ModelProvider {
   }
 }
 
+class GeminiProvider implements ModelProvider {
+  readonly id = "google";
+  constructor(private readonly key: string) {}
+  private async call(model: string, prompt: string, images: TaskImage[] = [], maxTokens: number): Promise<ChatResult> {
+    const name = model.split("/", 2).at(-1) ?? model;
+    const parts: unknown[] = [{ text: prompt }, ...images.map((image) => ({ inline_data: { mime_type: image.mimeType, data: image.data } }))];
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(name)}:generateContent?key=${encodeURIComponent(this.key)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { maxOutputTokens: maxTokens, temperature: images.length ? 0 : undefined } }),
+    });
+    if (!res.ok) throw new Error(`Google Gemini HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    const raw = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[]; usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number } };
+    return { content: raw.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "", usage: { prompt_tokens: raw.usageMetadata?.promptTokenCount, completion_tokens: raw.usageMetadata?.candidatesTokenCount, total_tokens: raw.usageMetadata?.totalTokenCount } };
+  }
+  chat(model: string, prompt: string, maxTokens: number): Promise<ChatResult> { return this.call(model, prompt, [], maxTokens); }
+  chatWithImages(model: string, prompt: string, images: TaskImage[], maxTokens: number): Promise<ChatResult> { return this.call(model, prompt, images, maxTokens); }
+}
+
 export function providerFor(model: string, fallbackKey: string): ModelProvider {
   const id = model.split("/", 1)[0] || "openrouter";
   if (id === "openrouter") return new OpenAICompatibleProvider(id, OR, fallbackKey);
   if (id === "openai") return new OpenAICompatibleProvider(id, "https://api.openai.com/v1", process.env.OPENAI_API_KEY ?? fallbackKey);
+  if (id === "google") return new GeminiProvider(process.env.GEMINI_API_KEY ?? fallbackKey);
   throw new Error(`provider ${id} is not supported for judge/strategist requests yet`);
 }
 
