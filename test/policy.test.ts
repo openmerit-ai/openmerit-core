@@ -10,6 +10,11 @@ const autoPolicy: Policy = {
 };
 
 describe("gate", () => {
+  it("ships in supervised recommendation mode", () => {
+    expect(DEFAULT_POLICY.mode).toBe("recommend");
+    expect(DEFAULT_POLICY.auto_apply.enabled).toBe(false);
+  });
+
   it("blocks in recommend mode regardless of evidence", () => {
     const d = gate({ ...DEFAULT_POLICY, mode: "recommend" }, { scoreGain: 0.5, priceRatio: 1, onFrontier: true, providerOk: true });
     expect(d.autoApply).toBe(false);

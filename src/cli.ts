@@ -39,8 +39,10 @@ function cmdInit(): void {
     console.log(`policy  -> ${policyPath} (kept existing)`);
   }
   console.log(`instr.  -> ${join(ROOT, "instructions", "OPENMERIT.md")} (add to your harness's AGENTS.md/context)`);
-  console.log(`ext.    -> ${join(ROOT, "extension", "openmerit.ts")} (install into pi: pi install ${ROOT})`);
-  console.log("\nNext: set OPENROUTER_API_KEY (env or ~/.openmerit/.env), install into pi, then start pi; the extension launches comparisons automatically.");
+  console.log(`ext.    -> ${join(ROOT, "extension", "openmerit.ts")}`);
+  console.log(`pi npm  -> pi install npm:openmerit`);
+  console.log(`pi local-> pi install "${ROOT}"`);
+  console.log("\nNext: set OPENROUTER_API_KEY (env or ~/.openmerit/.env), install one extension source into pi, then start pi; the extension launches comparisons automatically.");
 }
 
 async function cmdTrial(taskFile: string, rounds: number): Promise<void> {

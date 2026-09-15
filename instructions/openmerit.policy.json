@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "mode": "auto",
+  "mode": "recommend",
   "auto_apply": {
-    "enabled": true,
-    "min_score_gain": 0,
-    "max_price_ratio": 1000000,
+    "enabled": false,
+    "min_score_gain": 0.1,
+    "max_price_ratio": 1.5,
     "require_frontier": true
   },
   "budgets": {

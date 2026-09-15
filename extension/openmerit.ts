@@ -21,7 +21,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, write
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 const HOME = process.env.OPENMERIT_HOME ?? join(homedir(), ".openmerit");
@@ -334,7 +335,7 @@ function ensureModel(pi: ExtensionAPI, ctx: ExtensionContext, openrouterId: stri
 
 export default function openmerit(pi: ExtensionAPI) {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
-  let trialJob: ChildProcessWithoutNullStreams | null = null;
+  let trialJob: ChildProcessByStdio<null, Readable, Readable> | null = null;
   const queuedJobs: { sessionFile: string; settledAt: string; model: string; key: string; cwd: string; bytes: number }[] = [];
   const startedJobs = new Set<string>();
   let activeSession: string | null = null;

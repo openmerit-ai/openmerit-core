@@ -19,12 +19,13 @@ the best model for the task at hand, at the best price, with a vetted fallback.
 
 ## What you should do
 
-- **Do not fight model changes.** If you notice your model identity change
-  mid-session, that is an OpenMerit swap. Continue the task; your instructions
-  and context are unchanged.
+- **Treat model changes as explicit routing decisions.** If you notice your
+  model identity change, it was approved by the user or passed their opt-in
+  auto-apply policy. Continue the task; your instructions and context are
+  unchanged.
 - **Respect the fallback.** If your current model errors, rate-limits, or is
-  retired, OpenMerit will switch you to the current fallback. Treat this as
-  normal operation.
+  retired, OpenMerit can offer the current fallback or apply it under an
+  opt-in automatic policy. Treat an approved fallback as normal operation.
 - **State your task clearly in your first message** of a session when possible.
   OpenMerit keys its pareto frontier to task signatures; clear task statements
   produce better model choices for you.
@@ -45,6 +46,6 @@ the best model for the task at hand, at the best price, with a vetted fallback.
 - Per-task comparisons send the task text, uploaded images (when present), and
   candidate answers through pi/OpenRouter for model runs and judging. Use
   non-sensitive examples while evaluating this alpha.
-- Swaps are policy-gated: they only happen automatically within the user's
-  configured quality/cost guardrails; otherwise they are recommendations that a
-  human approves.
+- The shipped policy is supervised. Swaps happen automatically only after the
+  user opts in and the configured quality/cost guardrails pass; otherwise they
+  remain recommendations for a human to approve.

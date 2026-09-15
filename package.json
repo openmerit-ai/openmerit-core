@@ -1,9 +1,24 @@
 {
   "name": "openmerit",
   "version": "0.1.0",
-  "description": "External model-merit harness for pi: observes traces, builds per-task pareto frontiers, and recommends model swaps with reasoning.",
+  "description": "Find better models for each pi task by comparing quality, cost, and latency.",
   "type": "module",
-  "keywords": ["pi-package", "model-routing", "evaluation"],
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "model-routing",
+    "llm",
+    "openrouter",
+    "evaluation"
+  ],
+  "files": [
+    "dist/",
+    "extension/openmerit.ts",
+    "instructions/",
+    "examples/",
+    "benchmark/invoice_ocr/data/"
+  ],
   "pi": {
     "extensions": ["./extension/openmerit.ts"]
   },
@@ -13,11 +28,25 @@
   "engines": {
     "node": ">=22.18.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/laz-aslam/openmerit.git"
+  },
+  "homepage": "https://github.com/laz-aslam/openmerit#readme",
+  "bugs": {
+    "url": "https://github.com/laz-aslam/openmerit/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "prepare": "npm run build",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit && tsc -p benchmark/tsconfig.json",
+    "typecheck:extension": "tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck extension/openmerit.ts",
     "test": "vitest run",
+    "check": "npm run typecheck && npm run typecheck:extension && npm test && npm run build && npm run benchmark:verify-recorded",
+    "prepublishOnly": "npm run check",
     "benchmark:invoice:prepare": "node benchmark/invoice_ocr/prepare_data.ts",
     "benchmark:invoice": "node benchmark/invoice_ocr/benchmark.ts",
     "benchmark:invoice:audit": "node benchmark/invoice_ocr/audit_results.ts",
@@ -31,6 +60,14 @@
     "benchmark:verify-recorded": "node benchmark/verify_recorded.ts"
   },
   "license": "MIT",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.85.1",
     "@types/node": "^22.10.0",

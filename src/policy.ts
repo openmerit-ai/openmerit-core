@@ -42,11 +42,11 @@ export interface Policy {
 
 export const DEFAULT_POLICY: Policy = {
   version: 1,
-  mode: "auto",
+  mode: "recommend",
   auto_apply: {
-    enabled: true,
-    min_score_gain: 0,
-    max_price_ratio: 1000000,
+    enabled: false,
+    min_score_gain: 0.1,
+    max_price_ratio: 1.5,
     require_frontier: true,
   },
   budgets: { max_usd_per_trial: 0.25, max_trials_per_day: 20, max_usd_per_day: 5.0 },
