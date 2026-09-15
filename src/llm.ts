@@ -84,10 +84,12 @@ class GeminiProvider implements ModelProvider {
 export function providerFor(model: string, fallbackKey: string): ModelProvider {
   const id = model.split("/", 1)[0] || "openrouter";
   // OpenRouter model IDs are vendor/model (for example openai/gpt-4o-mini).
-  // Direct providers are selected only when their own credential is present;
-  // otherwise the same ID remains an OpenRouter model.
-  if (id === "openai" && process.env.OPENAI_API_KEY) return new OpenAICompatibleProvider(id, "https://api.openai.com/v1", process.env.OPENAI_API_KEY);
-  if (id === "google" && process.env.GEMINI_API_KEY) return new GeminiProvider(process.env.GEMINI_API_KEY);
+  // Direct providers require an explicit opt-in to avoid routing those IDs
+  // away from OpenRouter when users have multiple credentials configured.
+  if (id === "openai" && process.env.OPENMERIT_DIRECT_PROVIDER === "openai" && process.env.OPENAI_API_KEY)
+    return new OpenAICompatibleProvider(id, "https://api.openai.com/v1", process.env.OPENAI_API_KEY);
+  if (id === "google" && process.env.OPENMERIT_DIRECT_PROVIDER === "google" && process.env.GEMINI_API_KEY)
+    return new GeminiProvider(process.env.GEMINI_API_KEY);
   return new OpenAICompatibleProvider("openrouter", OR, fallbackKey);
 }
 
