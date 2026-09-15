@@ -164,8 +164,8 @@ schema, so its published scores are not directly comparable to these pi runs.
 `npx openmerit status` shows the latest pi model and pending recommendations;
 `npx openmerit frontier` shows measured quality, blended price, latency, and
 the chosen frontier per task. `/openmerit` inside pi shows the current model,
-fallback, current-session comparison status, trial budget, pending
-recommendation, and any exact-task result
+fallback, the model currently being compared, completed models with quality,
+cost, and latency, trial budget, pending recommendations, and any exact-task result
 measured in another session. When the gate declines an automatic swap, it
 prints reasons and `/openmerit apply` remains available.
 

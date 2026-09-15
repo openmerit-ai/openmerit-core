@@ -37,6 +37,21 @@ interface ProcessedTask {
   updatedAt: string;
 }
 
+function emitTrialProgress(progress: {
+  phase: "start" | "complete";
+  taskKey: string;
+  model: string;
+  index: number;
+  total: number;
+  score?: number;
+  price?: number;
+  latencyMs?: number;
+  costUsd?: number;
+  error?: string;
+}): void {
+  console.log(`[openmerit/progress] ${JSON.stringify(progress)}`);
+}
+
 function resolvePref(cat: Map<string, CatalogEntry>, prefs: (string | null)[], label: string): string {
   for (const p of prefs) {
     if (p && cat.has(p)) return p;
@@ -173,19 +188,27 @@ export async function autoTaskTick(key: string, policy: Policy, settledTask?: Se
   const points: TrialPoint[] = [];
   const tried = new Set<string>();
   const failedVendors = new Set<string>();
+  const total = Math.max(1, Math.floor(policy.watch.models_per_task));
 
+  if (settledTask !== undefined) emitTrialProgress({ phase: "start", taskKey: tKey,
+    model: task.model, index: 1, total });
   const baseline = await scorePiRun(key, judge, task.task, rubric, task.model, cat.get(task.model), task.run, "trace", task.images);
   points.push(baseline.point);
   tried.add(task.model);
   appendJsonl(paths.trials(), { ...baseline.point, taskKey: tKey, sessionFile: task.sessionFile });
   console.log(`[openmerit] task ${tKey}: A=${task.model} score=${baseline.point.score.toFixed(2)} from pi trace`);
+  if (settledTask !== undefined) emitTrialProgress({ phase: "complete", taskKey: tKey,
+    model: task.model, index: 1, total, score: baseline.point.score,
+    price: baseline.point.price, latencyMs: baseline.point.latencyMs,
+    costUsd: baseline.costUsd });
 
-  const total = Math.max(1, Math.floor(policy.watch.models_per_task));
   for (let i = 1; i < total; i++) {
     if (!budgetOk(policy).ok) break;
     const pick = await pickNext(key, strategist, task.task, rubric, benchmarks,
       points, cat, tried, policy.max_usd_per_m, failedVendors, benchmarkCandidates);
     if (!pick) break;
+    if (settledTask !== undefined) emitTrialProgress({ phase: "start", taskKey: tKey,
+      model: pick.model, index: i + 1, total });
     const { point, costUsd, error } = await runPiTrial(
       key, judge, task.task, rubric, pick.model, cat.get(pick.model), task.cwd, task.images);
     tried.add(pick.model);
@@ -194,6 +217,9 @@ export async function autoTaskTick(key: string, policy: Policy, settledTask?: Se
     appendJsonl(paths.trials(), { ...point, taskKey: tKey, sessionFile: task.sessionFile });
     if (error) failedVendors.add(pick.model.split("/")[0]);
     console.log(`[openmerit] task ${tKey}: ${pick.model} score=${point.score.toFixed(2)} cost=$${costUsd.toFixed(4)}${error ? ` error=${error.slice(0, 80)}` : ""}`);
+    if (settledTask !== undefined) emitTrialProgress({ phase: "complete", taskKey: tKey,
+      model: pick.model, index: i + 1, total, score: point.score, price: point.price,
+      latencyMs: point.latencyMs, costUsd, error: error?.slice(0, 120) });
   }
 
   const rec = buildRecommendation(tKey, task.task.slice(0, 120), task.model, points, policy, task.sessionFile);
