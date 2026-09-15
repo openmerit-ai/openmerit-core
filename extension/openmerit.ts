@@ -24,6 +24,7 @@ import { createHash } from "node:crypto";
 
 const HOME = process.env.OPENMERIT_HOME ?? join(homedir(), ".openmerit");
 const RECS_FILE = join(HOME, "recommendations.jsonl");
+const TRIALS_FILE = join(HOME, "trials.jsonl");
 const STATE_FILE = join(HOME, "harness-state.json");
 const POLICY_FILE = join(HOME, "policy.json");
 
@@ -52,6 +53,15 @@ interface Recommendation {
   evidence: { scoreGain: number; priceRatio: number; onFrontier: boolean; trials: number };
   policy: { autoApply: boolean; reasons: string[] };
   status: "pending" | "applied" | "dismissed" | "expired";
+}
+
+interface RecordedTrial {
+  taskKey?: string;
+  sessionFile?: string;
+  model: string;
+  score: number;
+  price: number;
+  latencyMs?: number;
 }
 
 function readJsonl<T>(file: string): T[] {
@@ -113,6 +123,36 @@ function pendingRecommendations(ctx?: ExtensionContext): Recommendation[] {
   return pending.filter((r) => r.sessionFile
     ? r.sessionFile === file && r.taskKey === settledTaskKey
     : !!liveTaskKey && r.taskKey === liveTaskKey);
+}
+
+/** Earlier measured comparisons are advice in another session, never pending swaps. */
+function priorExactTaskSuggestion(ctx: ExtensionContext): {
+  recommendation: Recommendation; trials: RecordedTrial[];
+} | null {
+  const file = ctx.sessionManager.getSessionFile();
+  const key = latestSessionTaskKey(ctx);
+  if (!file || !key || key !== settledTaskKey) return null;
+  const prior = latestRecommendations().filter((r) =>
+    r.sessionFile && r.sessionFile !== file && r.taskKey === key &&
+    (r.status === "pending" || r.status === "applied") && r.evidence.trials >= 2);
+  const recommendation = prior.at(-1);
+  if (!recommendation) return null;
+  const byModel = new Map<string, RecordedTrial>();
+  for (const trial of readJsonl<RecordedTrial>(TRIALS_FILE)) {
+    if (trial.taskKey === key && trial.sessionFile === recommendation.sessionFile) {
+      byModel.set(trial.model, trial);
+    }
+  }
+  return { recommendation, trials: [...byModel.values()] };
+}
+
+function suggestionText(rec: Recommendation, trials: RecordedTrial[]): string {
+  const measured = trials.map((p) =>
+    `${p.model}: quality ${p.score.toFixed(2)}, $${p.price.toFixed(2)}/M` +
+      (p.latencyMs ? `, ${Math.round(p.latencyMs)}ms` : ""));
+  return `openmerit: exact task was tested in another pi session (${rec.evidence.trials} models). ` +
+    `Earlier choice: ${rec.recommended.model}. This session will run its own comparison before any swap.` +
+    (measured.length ? `\n${measured.join("\n")}` : `\n${rec.recommended.reason}`);
 }
 
 function canonicalModel(provider: string, id: string): string {
@@ -248,6 +288,7 @@ function ensureModel(pi: ExtensionAPI, ctx: ExtensionContext, openrouterId: stri
 export default function openmerit(pi: ExtensionAPI) {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   const notified = new Set<string>();
+  const suggested = new Set<string>();
 
   async function applyRecommendation(ctx: ExtensionContext, rec: Recommendation): Promise<boolean> {
     const current = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
@@ -276,6 +317,14 @@ export default function openmerit(pi: ExtensionAPI) {
   }
 
   async function surface(ctx: ExtensionContext): Promise<void> {
+    const prior = priorExactTaskSuggestion(ctx);
+    if (prior && ctx.hasUI) {
+      const key = `${ctx.sessionManager.getSessionFile()}:${prior.recommendation.id}:${settledTaskKey}`;
+      if (!suggested.has(key)) {
+        suggested.add(key);
+        ctx.ui.notify(suggestionText(prior.recommendation, prior.trials), "info");
+      }
+    }
     for (const rec of pendingRecommendations(ctx)) {
       if (notified.has(rec.id)) continue;
       if (rec.policy.autoApply) {
@@ -300,6 +349,7 @@ export default function openmerit(pi: ExtensionAPI) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    suggested.clear();
     restoreFallback();
     try {
       const st = JSON.parse(readFileSync(STATE_FILE, "utf8")) as {
@@ -382,6 +432,7 @@ export default function openmerit(pi: ExtensionAPI) {
     description: "OpenMerit: status, pending recommendations, apply/dismiss",
     handler: async (args, ctx) => {
       const pending = pendingRecommendations(ctx);
+      const prior = priorExactTaskSuggestion(ctx);
       const sub = args.trim().split(/\s+/)[0] ?? "";
 
       if (sub === "apply") {
@@ -419,6 +470,7 @@ export default function openmerit(pi: ExtensionAPI) {
         `fallback      : ${fallbackModel ?? "n/a"}`,
         `pending recs  : ${pending.length}`,
       ];
+      if (prior) lines.push("", suggestionText(prior.recommendation, prior.trials));
       for (const r of pending.slice(-5)) {
         lines.push(
           "",

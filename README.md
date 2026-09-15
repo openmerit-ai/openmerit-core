@@ -116,6 +116,14 @@ next pi turn should use the selected model. If the gate declines an automatic
 swap, `/openmerit apply` is still available. The existing `trial` command
 remains available for controlled runs from a task JSON file.
 
+When another pi session completes the **same text task** (ignoring case and
+whitespace), the extension shows the most recent earlier session's measured
+choice and A/B/C quality, price, and latency in a notice and in `/openmerit`.
+That history is advice only: it does not become a pending swap in the new
+session. The watcher still compares the new session's own run before any
+automatic model change. Similar-task matching and context-aware reuse are
+future experiments.
+
 ## State layout (`~/.openmerit/`)
 
 | file | contents |

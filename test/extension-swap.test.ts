@@ -14,6 +14,63 @@ afterEach(() => {
 });
 
 describe("pi extension model handoff", () => {
+  it("suggests an exact-task result from another session without switching this session", async () => {
+    dir = mkdtempSync(join(tmpdir(), "openmerit-ext-reuse-"));
+    process.env.OPENMERIT_HOME = dir;
+    const task = "Give a word ladder from cat to dog";
+    const currentSession = join(dir, "current.jsonl");
+    const priorSession = join(dir, "prior.jsonl");
+    writeFileSync(currentSession, JSON.stringify({ type: "message", message: {
+      role: "user", content: [{ type: "text", text: task }],
+    } }) + "\n");
+    writeFileSync(join(dir, "recommendations.jsonl"), JSON.stringify({
+      id: "prior-rec", ts: new Date().toISOString(), taskKey: taskKey(task), taskLabel: task,
+      sessionFile: priorSession, currentModel: "vendor/model-a",
+      recommended: { model: "vendor/model-b", reason: "quality tied; cheaper" },
+      fallback: null, evidence: { scoreGain: 0, priceRatio: 0.5, onFrontier: true, trials: 3 },
+      policy: { autoApply: true, reasons: ["all thresholds met"] }, status: "applied",
+    }) + "\n");
+    writeFileSync(join(dir, "trials.jsonl"), [
+      { taskKey: taskKey(task), sessionFile: priorSession, model: "vendor/model-a", score: 0.8, price: 1.2, latencyMs: 1200 },
+      { taskKey: taskKey(task), sessionFile: priorSession, model: "vendor/model-b", score: 0.8, price: 0.6, latencyMs: 900 },
+      { taskKey: taskKey(task), sessionFile: priorSession, model: "vendor/model-c", score: 0.6, price: 0.4, latencyMs: 500 },
+    ].map((p) => JSON.stringify(p)).join("\n") + "\n");
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    let command: ((args: string, ctx: unknown) => Promise<void>) | null = null;
+    const notices: string[] = [];
+    let swaps = 0;
+    const ctx = {
+      model: { provider: "openrouter", id: "vendor/model-a" },
+      modelRegistry: { find: () => undefined },
+      sessionManager: { getSessionFile: () => currentSession }, cwd: dir, hasUI: true,
+      isIdle: () => true, ui: { notify: (message: string) => notices.push(message) },
+    };
+    const pi = {
+      on: (name: string, fn: (...args: unknown[]) => Promise<void>) => handlers.set(name, fn),
+      registerCommand: (_name: string, options: { handler: (args: string, ctx: unknown) => Promise<void> }) => {
+        command = options.handler;
+      },
+      setModel: async () => { swaps++; return true; },
+    };
+    const { default: extension } = await import("../extension/openmerit.js");
+    extension(pi as never);
+    await handlers.get("session_start")?.({}, ctx);
+    await handlers.get("agent_settled")?.({}, ctx);
+    await handlers.get("agent_settled")?.({}, ctx);
+    expect(swaps).toBe(0);
+    expect(notices.filter((x) => x.includes("exact task was tested"))).toHaveLength(1);
+    expect(notices[0]).toContain("vendor/model-b: quality 0.80, $0.60/M, 900ms");
+    await command!("", ctx);
+    expect(notices.at(-1)).toContain("exact task was tested");
+    expect(notices.at(-1)).toContain("pending recs  : 0");
+    writeFileSync(currentSession, JSON.stringify({ type: "message", message: {
+      role: "user", content: [{ type: "text", text: "Give a word ladder from cat to fox" }],
+    } }) + "\n");
+    await handlers.get("agent_settled")?.({}, ctx);
+    expect(notices.filter((x) => x.includes("exact task was tested"))).toHaveLength(2);
+    await handlers.get("session_shutdown")?.();
+  });
+
   it("automatically applies only a recommendation bound to its settled session", async () => {
     dir = mkdtempSync(join(tmpdir(), "openmerit-ext-auto-"));
     process.env.OPENMERIT_HOME = dir;
