@@ -46,6 +46,9 @@ interface TrialProgress {
   latencyMs?: number;
   costUsd?: number;
   error?: string;
+  toolCalls?: number;
+  toolErrors?: number;
+  changedFiles?: number;
 }
 
 function parseTrialProgress(line: string): TrialProgress | null {
@@ -63,7 +66,9 @@ function parseTrialProgress(line: string): TrialProgress | null {
 function completedTrialText(trial: TrialProgress): string {
   return `${trial.model}: quality ${(trial.score ?? 0).toFixed(2)}, ` +
     `$${(trial.price ?? 0).toFixed(2)}/M, ${Math.round(trial.latencyMs ?? 0)}ms, ` +
-    `run $${(trial.costUsd ?? 0).toFixed(4)}` + (trial.error ? ` (failed: ${trial.error})` : "");
+    `run $${(trial.costUsd ?? 0).toFixed(4)}, tools ${trial.toolCalls ?? 0}` +
+    (trial.toolErrors || trial.changedFiles ? `, tool errors ${trial.toolErrors ?? 0}, changed files ${trial.changedFiles ?? 0}` : "") +
+    (trial.error ? ` (failed: ${trial.error})` : "");
 }
 
 interface ExtensionPolicy {

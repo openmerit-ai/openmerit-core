@@ -47,6 +47,9 @@ function emitTrialProgress(progress: {
   price?: number;
   latencyMs?: number;
   costUsd?: number;
+  toolCalls?: number;
+  toolErrors?: number;
+  changedFiles?: number;
   error?: string;
 }): void {
   console.log(`[openmerit/progress] ${JSON.stringify(progress)}`);
@@ -200,7 +203,8 @@ export async function autoTaskTick(key: string, policy: Policy, settledTask?: Se
   if (settledTask !== undefined) emitTrialProgress({ phase: "complete", taskKey: tKey,
     model: task.model, index: 1, total, score: baseline.point.score,
     price: baseline.point.price, latencyMs: baseline.point.latencyMs,
-    costUsd: baseline.costUsd });
+    costUsd: baseline.costUsd, toolCalls: baseline.point.toolCalls,
+    toolErrors: baseline.point.toolErrors, changedFiles: baseline.point.changedFiles });
 
   for (let i = 1; i < total; i++) {
     if (!budgetOk(policy).ok) break;
@@ -216,10 +220,13 @@ export async function autoTaskTick(key: string, policy: Policy, settledTask?: Se
     recordTrialSpend(costUsd);
     appendJsonl(paths.trials(), { ...point, taskKey: tKey, sessionFile: task.sessionFile });
     if (error) failedVendors.add(pick.model.split("/")[0]);
-    console.log(`[openmerit] task ${tKey}: ${pick.model} score=${point.score.toFixed(2)} cost=$${costUsd.toFixed(4)}${error ? ` error=${error.slice(0, 80)}` : ""}`);
+    console.log(`[openmerit] task ${tKey}: ${pick.model} score=${point.score.toFixed(2)} cost=$${costUsd.toFixed(4)} ` +
+      `tools=${point.toolCalls ?? 0} toolErrors=${point.toolErrors ?? 0} changedFiles=${point.changedFiles ?? 0}` +
+      `${error ? ` error=${error.slice(0, 80)}` : ""}`);
     if (settledTask !== undefined) emitTrialProgress({ phase: "complete", taskKey: tKey,
       model: pick.model, index: i + 1, total, score: point.score, price: point.price,
-      latencyMs: point.latencyMs, costUsd, error: error?.slice(0, 120) });
+      latencyMs: point.latencyMs, costUsd, error: error?.slice(0, 120),
+      toolCalls: point.toolCalls, toolErrors: point.toolErrors, changedFiles: point.changedFiles });
   }
 
   const rec = buildRecommendation(tKey, task.task.slice(0, 120), task.model, points, policy, task.sessionFile);

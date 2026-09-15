@@ -23,10 +23,14 @@ describe("pi-backed task measurement", () => {
     fixtureDir = mkdtempSync(join(tmpdir(), "openmerit-pi-"));
     const bin = join(fixtureDir, "pi");
     writeFileSync(bin, `#!/usr/bin/env node
+const fs = require('node:fs');
 const args = process.argv.slice(2);
-if (!args.includes('--mode') || !args.includes('json') || !args.includes('--provider') || !args.includes('openrouter')) process.exit(2);
+if (!args.includes('--mode') || !args.includes('json') || !args.includes('--provider') || !args.includes('openrouter') || args.includes('--no-tools')) process.exit(2);
+fs.writeFileSync('candidate-side-effect.txt', 'isolated');
 const model = args[args.indexOf('--model') + 1];
 const task = args.at(-1);
+console.log(JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'toolCall', name: 'write' }] } }));
+console.log(JSON.stringify({ type: 'message_end', message: { role: 'toolResult', isError: false, content: [{ type: 'text', text: 'ok' }] } }));
 console.log(JSON.stringify({ type: 'message_end', message: { role: 'assistant', model, content: [{ type: 'text', text: task + ' done' }], usage: { cost: { total: 0.0123 } } } }));
 console.log(JSON.stringify({ type: 'agent_settled' }));
 `);
@@ -36,6 +40,9 @@ console.log(JSON.stringify({ type: 'agent_settled' }));
     expect(result.answer).toBe("task A done");
     expect(result.costUsd).toBe(0.0123);
     expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(result.toolCalls).toBe(1);
+    expect(result.changedFiles).toBe(1);
+    expect(result.traceFile).toBeTruthy();
   });
 
   it("accepts only the settled latest text task and its measured A result", () => {
@@ -60,7 +67,8 @@ console.log(JSON.stringify({ type: 'agent_settled' }));
       model: "openai/gpt-4o-mini", content: [{ type: "toolCall", text: "write" }], timestamp: 1100,
       usage: { cost: { total: 0 } }, stopReason: "toolUse" } });
     writeFileSync(sessionFile, lines.map((x) => JSON.stringify(x)).join("\n") + "\n");
-    expect(settledActiveTask()).toBeNull();
+    expect(settledActiveTask()?.usedTools).toBe(true);
+    expect(settledActiveTask()?.run.toolCalls).toBe(1);
   });
 
   it("keeps model A bound to the settled session bytes when a later task arrives", () => {
