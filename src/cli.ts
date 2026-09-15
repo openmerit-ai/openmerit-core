@@ -40,7 +40,7 @@ function cmdInit(): void {
   }
   console.log(`instr.  -> ${join(ROOT, "instructions", "OPENMERIT.md")} (add to your harness's AGENTS.md/context)`);
   console.log(`ext.    -> ${join(ROOT, "extension", "openmerit.ts")} (install into pi: pi install ${ROOT})`);
-  console.log("\nNext: set OPENROUTER_API_KEY (env or ~/.openmerit/.env), then `openmerit trial <task.json> --rounds 3`.");
+  console.log("\nNext: set OPENROUTER_API_KEY (env or ~/.openmerit/.env), install into pi, then run `openmerit watch` alongside pi.");
 }
 
 async function cmdTrial(taskFile: string, rounds: number): Promise<void> {
@@ -233,7 +233,7 @@ async function main(): Promise<void> {
 usage: openmerit <command>
 
   init                 set up ~/.openmerit (policy, state dirs)
-  watch [--once]       run the background track (traces, catalog watch, shadow trials, recommendations)
+  watch [--once]       observe completed pi tasks, trial candidates sequentially, and recommend session swaps
   trial <task.json>    iterative model search on one task spec [--rounds N]
   frontier [taskKey]   print pareto frontier(s)
   recommend            emit recommendations now
