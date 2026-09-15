@@ -200,6 +200,10 @@ remains for controlled text-task runs from a task JSON file.
   recorded as counts, and their raw Pi JSON event streams are saved under
   `~/.openmerit/traces/trials/`. Candidate sessions replay the task text and
   images, not earlier conversation context or workspace changes.
+- File attachments that Pi records as `<file name="…">` are copied into every
+  candidate sandbox and passed back to Pi as `@` file inputs. This covers PDFs,
+  CSVs, spreadsheets, and other files that Pi can open; OpenMerit does not
+  implement a separate parser for them.
 - `ledger.json` counts reported candidate-trial spend and the daily number of
   trials. It does not yet include rubric, judge, or strategist request cost,
   and `max_usd_per_trial` is not yet a hard provider-side cap.

@@ -19,7 +19,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { createHash } from "node:crypto";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
@@ -176,10 +176,18 @@ function userTaskKey(content: unknown): string | null {
   const images = parts.filter((b) => b?.type === "image");
   if (parts.length !== parts.filter((b) => b?.type === "text" || b?.type === "image").length ||
       images.some((b) => typeof b.data !== "string" || typeof b.mimeType !== "string")) return null;
-  if (images.length === 0) return taskKey(text);
+  const files: string[] = [];
+  const fileRe = /<file\s+name=["']([^"']+)["'][^>]*>/g;
+  for (const match of text.matchAll(fileRe)) {
+    const file = match[1];
+    if (!file || !existsSync(file) || files.includes(file)) continue;
+    try { files.push(`${basename(file)}:` + createHash("sha256").update(readFileSync(file)).digest("hex")); }
+    catch { /* inaccessible attachment */ }
+  }
+  if (images.length === 0 && files.length === 0) return taskKey(text);
   const hashes = images.map((b) => `${b.mimeType}:` +
     createHash("sha256").update(Buffer.from(b.data, "base64")).digest("hex"));
-  return taskKey(`${text.toLowerCase().replace(/\s+/g, " ").trim()}\nimages:${hashes.join(",")}`);
+  return taskKey(`${text.toLowerCase().replace(/\s+/g, " ").trim()}\nimages:${hashes.join(",")}\nfiles:${files.join(",")}`);
 }
 
 function latestSessionTaskKey(ctx: ExtensionContext): string | null {

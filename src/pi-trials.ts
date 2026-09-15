@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { judge, judgeWithImages } from "./judge.js";
 import { knownInvoiceScore } from "./invoice-eval.js";
 import { paths, readJson } from "./store.js";
-import { sessionImages, taskInputKey, type TaskImage } from "./task-input.js";
+import { sessionFiles, sessionImages, taskInputKey, type TaskFile, type TaskImage } from "./task-input.js";
 import type { CatalogEntry, TrialPoint } from "./types.js";
 
 interface PiMessage {
@@ -122,6 +122,7 @@ export interface SettledTask {
   sessionBytes?: number;
   cwd: string;
   usedTools: boolean;
+  files: TaskFile[];
 }
 
 /** Read the exact latest completed text task from the pi extension's session marker. */
@@ -152,11 +153,12 @@ export function settledActiveTask(snapshot?: {
   const images = sessionImages(userContent);
   if (!images) return null;
   const task = answerText(userContent);
-  if (!task.trim() || taskInputKey(task, images) !== st.settledTaskKey) return null;
+  const files = sessionFiles(task);
+  if (!task.trim() || taskInputKey(task, images, files) !== st.settledTaskKey) return null;
   const run = recordedActiveTask(task, st.currentModel, images, st.sessionFile, st.sessionBytes);
   if (!run) return null;
   return { task, images, model: st.currentModel, run, sessionFile: st.sessionFile,
-    settledAt: st.settledAt, sessionBytes: st.sessionBytes, cwd: st.cwd ?? process.cwd(), usedTools };
+    settledAt: st.settledAt, sessionBytes: st.sessionBytes, cwd: st.cwd ?? process.cwd(), usedTools, files };
 }
 
 /** Limit candidates to models this installed pi can actually select. */
@@ -170,7 +172,7 @@ export function availablePiModels(): Set<string> {
 
 /** Each invocation is a fresh pi run, so model B does not inherit model A's answer. */
 export async function executePiTask(
-  model: string, task: string, cwd = process.cwd(), images: TaskImage[] = [],
+  model: string, task: string, cwd = process.cwd(), images: TaskImage[] = [], files: TaskFile[] = [],
 ): Promise<PiRun> {
   const imageDir = images.length ? mkdtempSync(join(tmpdir(), "openmerit-pi-image-")) : null;
   const suffix: Record<string, string> = {
@@ -183,12 +185,25 @@ export async function executePiTask(
     return `@${file}`;
   });
   const workspace = isolatedWorkspace(cwd);
+  const attachmentDir = join(workspace, ".openmerit-attachments");
+  mkdirSync(attachmentDir, { recursive: true });
+  const attachmentPaths = new Map<string, string>();
+  const fileArgs = files.map((file, i) => {
+    const safeName = `${String(i).padStart(3, "0")}-${file.name.replace(/[^A-Za-z0-9._-]/g, "_")}`;
+    const target = join(attachmentDir, safeName);
+    cpSync(file.path, target);
+    attachmentPaths.set(file.path, target);
+    return `@${target}`;
+  });
+  const candidateTask = [...attachmentPaths.entries()].reduce(
+    (text, [source, target]) => text.split(source).join(target), task,
+  );
   const before = fileSnapshot(workspace);
   const traceFile = paths.trialTrace(`${model}:${task}:${Date.now()}`);
   const traceLines: string[] = [];
   const child = spawn("pi", [
     "--provider", "openrouter", "--model", model, "--mode", "json",
-    "--offline", "--no-extensions", "--approve", "--print", ...imageArgs, task,
+    "--offline", "--no-extensions", "--approve", "--print", ...imageArgs, ...fileArgs, candidateTask,
   ], { cwd: workspace, stdio: ["ignore", "pipe", "pipe"] });
   let buffer = "";
   let stderr = "";
@@ -252,10 +267,10 @@ export async function executePiTask(
 /** Quality uses the same OpenMerit judge; cost and latency come from pi itself. */
 export async function runPiTrial(
   key: string, judgeModel: string, task: string, rubric: string,
-  model: string, entry: CatalogEntry | undefined, cwd = process.cwd(), images: TaskImage[] = [],
+  model: string, entry: CatalogEntry | undefined, cwd = process.cwd(), images: TaskImage[] = [], files: TaskFile[] = [],
 ): Promise<{ point: TrialPoint; costUsd: number; error?: string; sessionId?: string }> {
   try {
-    const run = await executePiTask(model, task, cwd, images);
+    const run = await executePiTask(model, task, cwd, images, files);
     return await scorePiRun(key, judgeModel, task, rubric, model, entry, run, "pi_trial", images);
   } catch (e) {
     const error = String(e);

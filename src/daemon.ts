@@ -214,7 +214,7 @@ export async function autoTaskTick(key: string, policy: Policy, settledTask?: Se
     if (settledTask !== undefined) emitTrialProgress({ phase: "start", taskKey: tKey,
       model: pick.model, index: i + 1, total });
     const { point, costUsd, error } = await runPiTrial(
-      key, judge, task.task, rubric, pick.model, cat.get(pick.model), task.cwd, task.images);
+      key, judge, task.task, rubric, pick.model, cat.get(pick.model), task.cwd, task.images, task.files);
     tried.add(pick.model);
     points.push(point);
     recordTrialSpend(costUsd);
