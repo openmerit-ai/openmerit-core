@@ -10,11 +10,12 @@ import { fetchCatalog } from "./catalog.js";
 import { paretoFrontier, pickBest, pickFallback } from "./frontier.js";
 import { buildRecommendation } from "./recommend.js";
 import { appendJsonl, paths, readJson, readJsonl, taskKey } from "./store.js";
-import { recommendTick, runDaemon, tickOnce } from "./daemon.js";
-import { budgetOk, recordTrialSpend, runTrial } from "./trials.js";
+import { autoTaskTick, recommendTick, runDaemon, tickOnce } from "./daemon.js";
+import { budgetOk, recordTrialSpend } from "./trials.js";
+import { availablePiModels, recordedActiveTask, runPiTrial, scorePiRun, settledActiveTask } from "./pi-trials.js";
 import { pickNext, STRAT_PREFS } from "./strategist.js";
 import { JUDGE_PREFS } from "./judge.js";
-import { relevantBenchmarks } from "./benchmarks.js";
+import { openRouterBenchmarkCandidates, relevantBenchmarks } from "./benchmarks.js";
 import type { CatalogEntry, Frontier, Recommendation, TaskObservation, TrialPoint } from "./types.js";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -38,8 +39,10 @@ function cmdInit(): void {
     console.log(`policy  -> ${policyPath} (kept existing)`);
   }
   console.log(`instr.  -> ${join(ROOT, "instructions", "OPENMERIT.md")} (add to your harness's AGENTS.md/context)`);
-  console.log(`ext.    -> ${join(ROOT, "extension", "openmerit.ts")} (install into pi: copy to ~/.pi/agent/extensions/)`);
-  console.log("\nNext: set OPENROUTER_API_KEY (env or ~/.openmerit/.env), then `openmerit watch`.");
+  console.log(`ext.    -> ${join(ROOT, "extension", "openmerit.ts")}`);
+  console.log(`pi npm  -> pi install npm:openmerit`);
+  console.log(`pi local-> pi install "${ROOT}"`);
+  console.log("\nNext: set OPENROUTER_API_KEY (env or ~/.openmerit/.env), install one extension source into pi, then start pi; the extension launches comparisons automatically.");
 }
 
 async function cmdTrial(taskFile: string, rounds: number): Promise<void> {
@@ -56,12 +59,22 @@ async function cmdTrial(taskFile: string, rounds: number): Promise<void> {
 
   console.log("fetching OpenRouter catalog...");
   const cat = await fetchCatalog(key);
-  console.log(`catalog: ${cat.size} models`);
+  const piModels = availablePiModels();
+  for (const id of [...cat.keys()]) if (!piModels.has(id)) cat.delete(id);
+  if (!cat.has(cfg.initial_model)) throw new Error(`initial_model ${cfg.initial_model} is unavailable in pi's OpenRouter registry`);
+  console.log(`catalog: ${cat.size} models selectable in pi`);
 
   const judge = resolvePref(cat, [cfg.judge_model ?? policy.judge_model, ...JUDGE_PREFS], "judge");
   const strat = resolvePref(cat, [cfg.strategist_model ?? policy.strategist_model, ...STRAT_PREFS], "strategist");
-  const { benchmarks } = relevantBenchmarks(cfg.task);
+  const { category, benchmarks } = relevantBenchmarks(cfg.task);
+  let benchmarkCandidates: string[] = [];
+  try {
+    benchmarkCandidates = await openRouterBenchmarkCandidates(key, category, cat);
+  } catch (e) {
+    console.log(`OpenRouter benchmark shortlist unavailable: ${(e as Error).message}`);
+  }
   console.log(`judge: ${judge} | strategist: ${strat} | benchmarks: ${benchmarks.join(", ")}`);
+  console.log(`OpenRouter benchmark candidates: ${benchmarkCandidates.slice(0, 5).join(", ") || "none"}`);
 
   const tKey = taskKey(cfg.task);
   const maxPrice = cfg.max_usd_per_m ?? policy.max_usd_per_m;
@@ -81,18 +94,23 @@ async function cmdTrial(taskFile: string, rounds: number): Promise<void> {
       model = cfg.initial_model;
       why = "initial model";
     } else {
-      const pick = await pickNext(key, strat, cfg.task, cfg.eval, benchmarks, results, cat, tried, maxPrice, failedVendors);
+      const pick = await pickNext(key, strat, cfg.task, cfg.eval, benchmarks, results, cat, tried, maxPrice, failedVendors, benchmarkCandidates);
       if (!pick) break;
       model = pick.model;
       why = pick.why;
     }
     if (tried.has(model)) break;
     console.log(`[round ${i + 1}/${rounds}] ${model} (${why}) ...`);
-    const { point, costUsd, error } = await runTrial(key, judge, cfg.task, cfg.eval, model, cat.get(model));
+    const observed = i === 0 ? recordedActiveTask(cfg.task, model) : null;
+    if (i === 0) console.log(observed ? "    using model A's active pi session trace" : "    active trace unavailable; running model A in a fresh pi session");
+    const { point, costUsd, error, sessionId } = observed
+      ? await scorePiRun(key, judge, cfg.task, cfg.eval, model, cat.get(model), observed, "trace")
+      : await runPiTrial(key, judge, cfg.task, cfg.eval, model, cat.get(model));
     tried.add(model);
     results.push(point);
     recordTrialSpend(costUsd);
     appendJsonl(paths.trials(), { ...point, taskKey: tKey });
+    if (sessionId) console.log(`    pi trace session: ${sessionId}`);
     if (error) {
       failedVendors.add(model.split("/")[0]);
       console.log(`    FAILED: ${error.slice(0, 160)}`);
@@ -115,7 +133,7 @@ async function cmdTrial(taskFile: string, rounds: number): Promise<void> {
   console.log(`\nBEST FIT : ${best.model}  (score ${best.score.toFixed(2)}, $${best.price.toFixed(2)}/M)`);
   console.log(fb ? `FALLBACK : ${fb.model}  (score ${fb.score.toFixed(2)}, $${fb.price.toFixed(2)}/M)` : "FALLBACK : n/a");
 
-  const rec = buildRecommendation(tKey, cfg.task.slice(0, 120), null, pts, policy);
+  const rec = buildRecommendation(tKey, cfg.task.slice(0, 120), cfg.initial_model, pts, policy);
   if (rec) {
     appendJsonl(paths.recommendations(), rec);
     console.log(`\nrecommendation -> ${paths.recommendations()} (auto=${rec.policy.autoApply})`);
@@ -191,6 +209,17 @@ async function main(): Promise<void> {
     case "init":
       cmdInit();
       break;
+    case "session-trial": {
+      const [sessionFile, settledAt, currentModel, settledTaskKey, cwd, bytesText] = args;
+      if (!sessionFile || !settledAt || !currentModel || !settledTaskKey || !cwd || !bytesText)
+        throw new Error("usage: openmerit session-trial <session-file> <settled-at> <model> <task-key> <cwd> <session-bytes>");
+      const sessionBytes = Number(bytesText);
+      if (!Number.isSafeInteger(sessionBytes) || sessionBytes <= 0) throw new Error("invalid session byte limit");
+      const task = settledActiveTask({ sessionFile, settledAt, currentModel, settledTaskKey, cwd, sessionBytes });
+      if (!task) throw new Error("the specified pi session has no completed, supported task matching this marker");
+      await autoTaskTick(loadKey(), policy, task);
+      break;
+    }
     case "watch":
       if (args.includes("--once")) await tickOnce(policy);
       else await runDaemon(policy);
@@ -217,7 +246,7 @@ async function main(): Promise<void> {
 usage: openmerit <command>
 
   init                 set up ~/.openmerit (policy, state dirs)
-  watch [--once]       run the background track (traces, catalog watch, shadow trials, recommendations)
+  watch [--once]       observe completed pi tasks, trial candidates sequentially, and recommend session swaps
   trial <task.json>    iterative model search on one task spec [--rounds N]
   frontier [taskKey]   print pareto frontier(s)
   recommend            emit recommendations now

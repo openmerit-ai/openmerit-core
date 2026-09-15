@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { paths } from "./store.js";
+import type { TaskImage } from "./task-input.js";
 
 const OR = "https://openrouter.ai/api/v1";
 
@@ -62,6 +63,26 @@ export async function chat(
     messages: [{ role: "user", content: prompt }],
     max_tokens: maxTokens,
     temperature,
+  });
+  return { content: r.choices[0]?.message?.content ?? "", usage: r.usage ?? {} };
+}
+
+/** Send a visual grading request through the same OpenRouter account. */
+export async function chatWithImages(
+  key: string, model: string, prompt: string, images: TaskImage[], maxTokens: number,
+): Promise<ChatResult> {
+  const r = await request<{
+    choices: { message?: { content?: string | null } }[];
+    usage?: ChatResult["usage"];
+  }>(key, "/chat/completions", {
+    model,
+    messages: [{ role: "user", content: [
+      { type: "text", text: prompt },
+      ...images.map((image) => ({ type: "image_url",
+        image_url: { url: `data:${image.mimeType};base64,${image.data}` } })),
+    ] }],
+    max_tokens: maxTokens,
+    temperature: 0,
   });
   return { content: r.choices[0]?.message?.content ?? "", usage: r.usage ?? {} };
 }

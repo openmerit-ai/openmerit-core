@@ -8,9 +8,8 @@ the best model for the task at hand, at the best price, with a vetted fallback.
 
 1. **Observes** this harness's session traces (models used, tokens, cost,
    latency, errors) without intercepting or slowing down your work.
-2. **Evaluates** candidate models on a background track: it replays
-   representative tasks against candidate models and scores the outputs with a
-   judge model. You are never interrupted by these trials.
+2. **Evaluates** candidate models for each completed text or image task sequentially
+   through pi and scores their outputs with a judge model.
 3. **Maintains a pareto frontier** per task (quality vs. cost vs. latency) and
    an aggregate frontier across all of your tasks.
 4. **Watches for new model releases** (provider catalogs + public benchmarks)
@@ -20,12 +19,13 @@ the best model for the task at hand, at the best price, with a vetted fallback.
 
 ## What you should do
 
-- **Do not fight model changes.** If you notice your model identity change
-  mid-session, that is an OpenMerit swap. Continue the task; your instructions
-  and context are unchanged.
+- **Treat model changes as explicit routing decisions.** If you notice your
+  model identity change, it was approved by the user or passed their opt-in
+  auto-apply policy. Continue the task; your instructions and context are
+  unchanged.
 - **Respect the fallback.** If your current model errors, rate-limits, or is
-  retired, OpenMerit will switch you to the current fallback. Treat this as
-  normal operation.
+  retired, OpenMerit can offer the current fallback or apply it under an
+  opt-in automatic policy. Treat an approved fallback as normal operation.
 - **State your task clearly in your first message** of a session when possible.
   OpenMerit keys its pareto frontier to task signatures; clear task statements
   produce better model choices for you.
@@ -36,15 +36,16 @@ the best model for the task at hand, at the best price, with a vetted fallback.
 
 - `/openmerit` — show current model, fallback, frontier position, and pending
   recommendations.
-- `/openmerit apply` / `/openmerit dismiss` — act on a pending recommendation.
+- `/openmerit apply` / `/openmerit dismiss` — act on a pending recommendation
+  when automatic application is declined by the policy gate.
 - Policy changes (auto-apply thresholds, budgets, provider allow-lists) are
   made by the user in `~/.openmerit/policy.json`, not by you.
 
 ## Guarantees
 
-- OpenMerit never reads or sends your conversation content anywhere except the
-  trial/eval calls required to score candidate models, and only within the
-  providers allowed by policy.
-- Swaps are policy-gated: they only happen automatically within the user's
-  configured quality/cost guardrails; otherwise they are recommendations that a
-  human approves.
+- Per-task comparisons send the task text, uploaded images (when present), and
+  candidate answers through pi/OpenRouter for model runs and judging. Use
+  non-sensitive examples while evaluating this alpha.
+- The shipped policy is supervised. Swaps happen automatically only after the
+  user opts in and the configured quality/cost guardrails pass; otherwise they
+  remain recommendations for a human to approve.

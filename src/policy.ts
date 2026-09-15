@@ -26,6 +26,8 @@ export interface Policy {
     catalog_interval_min: number;
     traces_interval_sec: number;
     trial_interval_min: number;
+    /** Compare the completed active pi task with this many total models. */
+    models_per_task: number;
   };
   fallback: {
     auto_update: boolean;
@@ -49,7 +51,7 @@ export const DEFAULT_POLICY: Policy = {
   },
   budgets: { max_usd_per_trial: 0.25, max_trials_per_day: 20, max_usd_per_day: 5.0 },
   providers: { allow: ["*"], deny: [] },
-  watch: { catalog_interval_min: 360, traces_interval_sec: 60, trial_interval_min: 30 },
+  watch: { catalog_interval_min: 360, traces_interval_sec: 5, trial_interval_min: 30, models_per_task: 3 },
   fallback: { auto_update: true, min_score: 0.6, apply_on_error: true },
   judge_model: null,
   strategist_model: null,
@@ -87,6 +89,7 @@ export function loadPolicy(path: string): Policy {
       catalog_interval_min: num(raw.watch?.catalog_interval_min, d.watch.catalog_interval_min),
       traces_interval_sec: num(raw.watch?.traces_interval_sec, d.watch.traces_interval_sec),
       trial_interval_min: num(raw.watch?.trial_interval_min, d.watch.trial_interval_min),
+      models_per_task: num(raw.watch?.models_per_task, d.watch.models_per_task),
     },
     fallback: {
       auto_update: Boolean(raw.fallback?.auto_update ?? d.fallback.auto_update),
@@ -117,6 +120,10 @@ export interface GateInput {
   onFrontier: boolean;
   /** Candidate passes provider allow/deny. */
   providerOk: boolean;
+  /** A real task trial of the current model exists. */
+  baselineMeasured?: boolean;
+  /** The recommendation targets one pi session. */
+  sessionBound?: boolean;
 }
 
 /**
@@ -128,6 +135,14 @@ export function gate(policy: Policy, input: GateInput): GateDecision {
   const reasons: string[] = [];
   if (!input.providerOk) {
     reasons.push("provider not allowed by policy");
+    return { autoApply: false, reasons };
+  }
+  if (input.baselineMeasured === false) {
+    reasons.push("current model has no measured baseline");
+    return { autoApply: false, reasons };
+  }
+  if (input.sessionBound === false) {
+    reasons.push("recommendation is not bound to a pi session");
     return { autoApply: false, reasons };
   }
   if (policy.mode !== "auto" || !policy.auto_apply.enabled) {

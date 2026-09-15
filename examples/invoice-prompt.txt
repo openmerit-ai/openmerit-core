@@ -1,0 +1,19 @@
+Extract the invoice into the required JSON schema using only the image.
+
+Return a JSON object with exactly these fields: supplier_name, customer_name,
+invoice_number, po_number, document_date, due_date, document_currency,
+document_total_net, document_total_tax, document_total_amount, and line_items.
+Scalar names, identifiers, dates, and currency are strings or null. Monetary
+totals are JSON numbers or null. line_items is an array of objects, each with
+exactly description (string or null), quantity (number or null), unit_price
+(number or null), and amount (number or null). Do not add any other fields.
+
+Rules:
+- Copy names, identifiers, and descriptions exactly as printed.
+- Return dates as YYYY-MM-DD, regardless of the printed date format.
+- Return currency as its three-letter ISO code.
+- Return monetary values and quantities as JSON numbers without currency symbols or grouping separators.
+- Preserve line-item order and include every printed line item exactly once.
+- Use null only when a scalar field is not present. Never infer a missing value.
+- document_total_net is the subtotal/net amount before tax; document_total_amount is the final amount including tax.
+- Return only the schema-conforming JSON object.

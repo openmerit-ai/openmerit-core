@@ -1,8 +1,8 @@
 /**
  * OpenMerit pi extension — runs INSIDE the main harness.
  *
- * Install: copy/symlink this file to ~/.pi/agent/extensions/openmerit.ts
- * and run `openmerit watch` (the background track) alongside your session.
+ * Install: `pi install /path/to/openmerit` after `npm ci`.
+ * The extension launches session-bound comparisons after pi settles.
  *
  * What it does:
  *  - Reports this harness's current model to openmerit (~/.openmerit/harness-state.json).
@@ -17,18 +17,56 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import type { Readable } from "node:stream";
+import { fileURLToPath } from "node:url";
 
 const HOME = process.env.OPENMERIT_HOME ?? join(homedir(), ".openmerit");
 const RECS_FILE = join(HOME, "recommendations.jsonl");
+const TRIALS_FILE = join(HOME, "trials.jsonl");
 const STATE_FILE = join(HOME, "harness-state.json");
 const POLICY_FILE = join(HOME, "policy.json");
+const LEDGER_FILE = join(HOME, "ledger.json");
+const JOB_DIR = join(HOME, "watch", "jobs");
+const ENGINE_FILE = join(fileURLToPath(new URL("..", import.meta.url)), "dist", "cli.js");
 
 interface ExtensionPolicy {
   mode?: string;
   fallback?: { apply_on_error?: boolean };
+  budgets?: { max_trials_per_day?: number; max_usd_per_day?: number };
+}
+
+function trialBudget(): { summary: string; reason: string | null } {
+  const policy = loadPolicy();
+  const limit = policy.budgets?.max_trials_per_day ?? 20;
+  const usdLimit = policy.budgets?.max_usd_per_day ?? 5;
+  const today = new Date().toISOString().slice(0, 10);
+  let ledger: { date?: string; trials?: number; usd?: number } = {};
+  try { ledger = JSON.parse(readFileSync(LEDGER_FILE, "utf8")) as typeof ledger; }
+  catch { /* no trial spend yet */ }
+  const trials = ledger.date === today ? ledger.trials ?? 0 : 0;
+  const usd = ledger.date === today ? ledger.usd ?? 0 : 0;
+  const reason = trials >= limit ? `daily trial cap reached (${limit})`
+    : usd >= usdLimit ? `daily budget exhausted ($${usdLimit})` : null;
+  return { summary: `${trials}/${limit} trials, $${usd.toFixed(4)}/$${usdLimit.toFixed(2)} today (UTC)`, reason };
+}
+
+function latestSessionJob(sessionFile: string | undefined): string | null {
+  if (!sessionFile || !existsSync(JOB_DIR)) return null;
+  const jobs: { marker?: string; status?: string; updatedAt?: string }[] = [];
+  for (const file of readdirSync(JOB_DIR)) {
+    if (!file.endsWith(".json")) continue;
+    try {
+      const job = JSON.parse(readFileSync(join(JOB_DIR, file), "utf8")) as typeof jobs[number];
+      if (job.marker?.startsWith(`${sessionFile}:`)) jobs.push(job);
+    } catch { /* partial or unrelated job */ }
+  }
+  const latest = jobs.sort((a, b) => (a.updatedAt ?? "").localeCompare(b.updatedAt ?? "")).at(-1);
+  return latest?.status ?? null;
 }
 
 function loadPolicy(): ExtensionPolicy {
@@ -44,12 +82,22 @@ interface Recommendation {
   ts: string;
   taskKey: string;
   taskLabel: string;
+  sessionFile?: string | null;
   currentModel: string | null;
   recommended: { model: string; reason: string };
   fallback: { model: string; reason: string } | null;
   evidence: { scoreGain: number; priceRatio: number; onFrontier: boolean; trials: number };
   policy: { autoApply: boolean; reasons: string[] };
   status: "pending" | "applied" | "dismissed" | "expired";
+}
+
+interface RecordedTrial {
+  taskKey?: string;
+  sessionFile?: string;
+  model: string;
+  score: number;
+  price: number;
+  latencyMs?: number;
 }
 
 function readJsonl<T>(file: string): T[] {
@@ -79,8 +127,83 @@ function latestRecommendations(): Recommendation[] {
   return [...byId.values()];
 }
 
-function pendingRecommendations(): Recommendation[] {
-  return latestRecommendations().filter((r) => r.status === "pending");
+function taskKey(text: string): string {
+  return createHash("sha1").update(text.toLowerCase().replace(/\s+/g, " ").trim()).digest("hex").slice(0, 12);
+}
+
+function userTaskKey(content: unknown): string | null {
+  const parts = typeof content === "string" ? [{ type: "text", text: content }] : content;
+  if (!Array.isArray(parts)) return null;
+  const text = parts.filter((b) => b?.type === "text").map((b) => String(b.text ?? "")).join(" ");
+  if (!text.trim()) return null;
+  const images = parts.filter((b) => b?.type === "image");
+  if (parts.length !== parts.filter((b) => b?.type === "text" || b?.type === "image").length ||
+      images.some((b) => typeof b.data !== "string" || typeof b.mimeType !== "string")) return null;
+  if (images.length === 0) return taskKey(text);
+  const hashes = images.map((b) => `${b.mimeType}:` +
+    createHash("sha256").update(Buffer.from(b.data, "base64")).digest("hex"));
+  return taskKey(`${text.toLowerCase().replace(/\s+/g, " ").trim()}\nimages:${hashes.join(",")}`);
+}
+
+function latestSessionTaskKey(ctx: ExtensionContext): string | null {
+  const file = ctx.sessionManager.getSessionFile();
+  if (!file || !existsSync(file)) return null;
+  let latest: string | null = null;
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const e = JSON.parse(line) as { type?: string; message?: { role?: string; content?: unknown } };
+      if (e.type !== "message" || e.message?.role !== "user") continue;
+      latest = userTaskKey(e.message.content);
+    } catch { /* partial/corrupt session line */ }
+  }
+  return latest;
+}
+
+let settledTaskKey: string | null = null;
+
+function pendingRecommendations(ctx?: ExtensionContext): Recommendation[] {
+  const pending = latestRecommendations().filter((r) => r.status === "pending");
+  if (!ctx) return pending;
+  const file = ctx.sessionManager.getSessionFile();
+  const liveTaskKey = latestSessionTaskKey(ctx);
+  return pending.filter((r) => r.sessionFile
+    ? r.sessionFile === file && r.taskKey === settledTaskKey
+    : !!liveTaskKey && r.taskKey === liveTaskKey);
+}
+
+/** Earlier measured comparisons are advice in another session, never pending swaps. */
+function priorExactTaskSuggestion(ctx: ExtensionContext): {
+  recommendation: Recommendation; trials: RecordedTrial[];
+} | null {
+  const file = ctx.sessionManager.getSessionFile();
+  const key = latestSessionTaskKey(ctx);
+  if (!file || !key || key !== settledTaskKey) return null;
+  const prior = latestRecommendations().filter((r) =>
+    r.sessionFile && r.sessionFile !== file && r.taskKey === key &&
+    (r.status === "pending" || r.status === "applied") && r.evidence.trials >= 2);
+  const recommendation = prior.at(-1);
+  if (!recommendation) return null;
+  const byModel = new Map<string, RecordedTrial>();
+  for (const trial of readJsonl<RecordedTrial>(TRIALS_FILE)) {
+    if (trial.taskKey === key && trial.sessionFile === recommendation.sessionFile) {
+      byModel.set(trial.model, trial);
+    }
+  }
+  return { recommendation, trials: [...byModel.values()] };
+}
+
+function suggestionText(rec: Recommendation, trials: RecordedTrial[]): string {
+  const measured = trials.map((p) =>
+    `${p.model}: quality ${p.score.toFixed(2)}, $${p.price.toFixed(2)}/M` +
+      (p.latencyMs ? `, ${Math.round(p.latencyMs)}ms` : ""));
+  return `openmerit: exact task was tested in another pi session (${rec.evidence.trials} models). ` +
+    `Earlier choice: ${rec.recommended.model}. This session will run its own comparison before any swap.` +
+    (measured.length ? `\n${measured.join("\n")}` : `\n${rec.recommended.reason}`);
+}
+
+function canonicalModel(provider: string, id: string): string {
+  return provider === "openrouter" ? id : `${provider}/${id}`;
 }
 
 function setStatus(rec: Recommendation, status: Recommendation["status"]): void {
@@ -89,16 +212,25 @@ function setStatus(rec: Recommendation, status: Recommendation["status"]): void 
 
 let fallbackModel: string | null = null;
 
-function reportHarnessState(ctx: ExtensionContext): void {
+function reportHarnessState(ctx: ExtensionContext, settled = false): void {
   try {
     mkdirSync(HOME, { recursive: true });
-    const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : null;
+    const model = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
+    if (settled) settledTaskKey = latestSessionTaskKey(ctx);
+    const prior = existsSync(STATE_FILE)
+      ? JSON.parse(readFileSync(STATE_FILE, "utf8")) as { sessionFile?: string | null; settledAt?: string }
+      : {};
+    const sessionFile = ctx.sessionManager.getSessionFile() ?? null;
+    const settledAt = settled ? new Date().toISOString()
+      : prior.sessionFile === sessionFile ? prior.settledAt ?? null : null;
     writeFileSync(
       STATE_FILE,
       JSON.stringify({
         currentModel: model,
         fallbackModel,
-        sessionFile: ctx.sessionManager.getSessionFile() ?? null,
+        sessionFile,
+        settledTaskKey,
+        settledAt,
         cwd: ctx.cwd,
         updatedAt: new Date().toISOString(),
       }) + "\n",
@@ -145,6 +277,7 @@ interface CatalogEntryLite {
   ctx?: number;
   pp?: number;
   pc?: number;
+  inputModalities?: string[];
 }
 
 const INJECT_PROVIDER = "openmerit-openrouter";
@@ -182,7 +315,7 @@ function ensureModel(pi: ExtensionAPI, ctx: ExtensionContext, openrouterId: stri
       id: m.id,
       name: m.name ?? m.id,
       reasoning: false,
-      input: ["text"],
+      input: entry.inputModalities?.includes("image") ? ["text", "image"] : ["text"],
       cost: {
         input: (m.pp ?? 0) * 1e6,
         output: (m.pc ?? 0) * 1e6,
@@ -202,9 +335,112 @@ function ensureModel(pi: ExtensionAPI, ctx: ExtensionContext, openrouterId: stri
 
 export default function openmerit(pi: ExtensionAPI) {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let trialJob: ChildProcessByStdio<null, Readable, Readable> | null = null;
+  const queuedJobs: { sessionFile: string; settledAt: string; model: string; key: string; cwd: string; bytes: number }[] = [];
+  const startedJobs = new Set<string>();
+  let activeSession: string | null = null;
+
+  function stopTrialJob(): void {
+    if (!trialJob) return;
+    const child = trialJob;
+    trialJob = null;
+    try {
+      if (child.pid && process.platform !== "win32") process.kill(-child.pid, "SIGTERM");
+      else child.kill("SIGTERM");
+    } catch { child.kill("SIGTERM"); }
+  }
   const notified = new Set<string>();
+  const suggested = new Set<string>();
+
+  function startNextJob(ctx: ExtensionContext): void {
+    if (trialJob || queuedJobs.length === 0) return;
+    const job = queuedJobs.shift()!;
+    if (job.sessionFile !== activeSession) return startNextJob(ctx);
+    if (!existsSync(ENGINE_FILE)) {
+      ctx.ui.notify("openmerit: trial engine missing; run npm ci in the OpenMerit checkout", "error");
+      return;
+    }
+    const child = spawn(process.execPath, [ENGINE_FILE, "session-trial", job.sessionFile,
+      job.settledAt, job.model, job.key, job.cwd, String(job.bytes)], {
+      cwd: job.cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+    });
+    trialJob = child;
+    if (ctx.hasUI) ctx.ui.notify(`openmerit: comparing models for task ${job.key} (A=${job.model})`, "info");
+    let stdout = "";
+    let stderr = "";
+    function onLine(line: string): void {
+      if (ctx.hasUI && line.includes("[openmerit] task "))
+        ctx.ui.notify(line.trim(), "info");
+    }
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+      let end: number;
+      while ((end = stdout.indexOf("\n")) >= 0) {
+        onLine(stdout.slice(0, end));
+        stdout = stdout.slice(end + 1);
+      }
+    });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.on("error", (error) => {
+      if (ctx.hasUI && job.sessionFile === activeSession)
+        ctx.ui.notify(`openmerit: trial engine failed: ${error.message}`, "error");
+    });
+    child.on("close", (code) => {
+      if (trialJob !== child) return;
+      trialJob = null;
+      if (job.sessionFile === activeSession) {
+        if (code !== 0 && ctx.hasUI)
+          ctx.ui.notify(`openmerit: comparison failed: ${stderr.trim().slice(0, 240) || `exit ${code}`}`, "error");
+        else surface(ctx).catch(() => undefined);
+        startNextJob(ctx);
+      }
+    });
+  }
+
+  function queueSettledTask(ctx: ExtensionContext): void {
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    const model = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
+    if (!sessionFile || !model || !settledTaskKey || !existsSync(sessionFile)) return;
+    // The alpha compares completed response tasks. The engine validates images,
+    // tool use and the baseline answer before any provider calls.
+    let completed = false;
+    for (const line of readFileSync(sessionFile, "utf8").split("\n")) {
+      try {
+        const entry = JSON.parse(line) as { type?: string; message?: { role?: string; content?: unknown; stopReason?: string } };
+        if (entry.type !== "message") continue;
+        if (entry.message?.role === "user") completed = false;
+        if (entry.message?.role === "assistant" && entry.message.stopReason !== "error" &&
+            userTaskKeyFromAnswer(entry.message.content)) completed = true;
+      } catch { /* partial session line */ }
+    }
+    if (!completed) return;
+    const settledAt = new Date().toISOString();
+    const bytes = readFileSync(sessionFile).length;
+    const marker = `${sessionFile}:${settledTaskKey}:${model}:${bytes}`;
+    if (startedJobs.has(marker)) return;
+    startedJobs.add(marker);
+    const budget = trialBudget();
+    if (budget.reason) {
+      if (ctx.hasUI) ctx.ui.notify(`openmerit: comparison skipped: ${budget.reason}. ${budget.summary}`, "warning");
+      return;
+    }
+    queuedJobs.push({ sessionFile, settledAt, model, key: settledTaskKey, cwd: ctx.cwd, bytes });
+    startNextJob(ctx);
+  }
+
+  function userTaskKeyFromAnswer(content: unknown): boolean {
+    if (typeof content === "string") return !!content.trim();
+    return Array.isArray(content) && content.some((part) => part?.type === "text" &&
+      typeof part.text === "string" && part.text.trim());
+  }
 
   async function applyRecommendation(ctx: ExtensionContext, rec: Recommendation): Promise<boolean> {
+    const current = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
+    if (rec.currentModel && current !== rec.currentModel) {
+      ctx.ui.notify(`openmerit: recommendation was measured against ${rec.currentModel}; current model is ${current ?? "unknown"}`, "warning");
+      return false;
+    }
     const model = ensureModel(pi, ctx, rec.recommended.model);
     if (!model) {
       ctx.ui.notify(
@@ -226,15 +462,24 @@ export default function openmerit(pi: ExtensionAPI) {
   }
 
   async function surface(ctx: ExtensionContext): Promise<void> {
-    for (const rec of pendingRecommendations()) {
+    const prior = priorExactTaskSuggestion(ctx);
+    if (prior && ctx.hasUI) {
+      const key = `${ctx.sessionManager.getSessionFile()}:${prior.recommendation.id}:${settledTaskKey}`;
+      if (!suggested.has(key)) {
+        suggested.add(key);
+        ctx.ui.notify(suggestionText(prior.recommendation, prior.trials), "info");
+      }
+    }
+    for (const rec of pendingRecommendations(ctx)) {
       if (notified.has(rec.id)) continue;
-      notified.add(rec.id);
-      if (rec.fallback) fallbackModel = rec.fallback.model;
-
       if (rec.policy.autoApply) {
+        if (!rec.sessionFile || rec.sessionFile !== ctx.sessionManager.getSessionFile()) continue;
+        if (!ctx.isIdle()) continue;
+        notified.add(rec.id);
         await applyRecommendation(ctx, rec);
         continue;
       }
+      notified.add(rec.id);
       // Never block here: surface() runs during session_start and on a poll
       // timer, where a modal dialog would deadlock RPC mode and stall TUI
       // startup. Notify (fire-and-forget) and let the user act via /openmerit.
@@ -249,13 +494,36 @@ export default function openmerit(pi: ExtensionAPI) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    activeSession = ctx.sessionManager.getSessionFile() ?? null;
+    stopTrialJob();
+    queuedJobs.length = 0;
+    suggested.clear();
     restoreFallback();
+    try {
+      const st = JSON.parse(readFileSync(STATE_FILE, "utf8")) as {
+        sessionFile?: string | null; settledTaskKey?: string | null;
+      };
+      settledTaskKey = st.sessionFile === ctx.sessionManager.getSessionFile()
+        ? st.settledTaskKey ?? null : null;
+    } catch { settledTaskKey = null; }
     reportHarnessState(ctx);
     await surface(ctx);
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(() => {
       surface(ctx).catch(() => undefined);
-    }, 30_000);
+    }, 5_000);
+  });
+
+  pi.on("agent_settled", async (_event, ctx) => {
+    reportHarnessState(ctx, true);
+    queueSettledTask(ctx);
+    await surface(ctx);
+  });
+
+  pi.on("input", async (_event, ctx) => {
+    // A ready comparison can switch the route before the next user task starts.
+    await surface(ctx);
+    return { action: "continue" };
   });
 
   pi.on("model_select", async (_event, ctx) => {
@@ -263,6 +531,9 @@ export default function openmerit(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async () => {
+    activeSession = null;
+    queuedJobs.length = 0;
+    stopTrialJob();
     if (pollTimer) {
       clearInterval(pollTimer);
       pollTimer = null;
@@ -282,7 +553,7 @@ export default function openmerit(pi: ExtensionAPI) {
 
     const policy = loadPolicy();
     if (policy.fallback?.apply_on_error === false) return;
-    const current = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "current model";
+    const current = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : "current model";
     const model = ensureModel(pi, ctx, fallbackModel);
     if (!model) return;
 
@@ -312,7 +583,8 @@ export default function openmerit(pi: ExtensionAPI) {
   pi.registerCommand("openmerit", {
     description: "OpenMerit: status, pending recommendations, apply/dismiss",
     handler: async (args, ctx) => {
-      const pending = pendingRecommendations();
+      const pending = pendingRecommendations(ctx);
+      const prior = priorExactTaskSuggestion(ctx);
       const sub = args.trim().split(/\s+/)[0] ?? "";
 
       if (sub === "apply") {
@@ -344,12 +616,19 @@ export default function openmerit(pi: ExtensionAPI) {
         return;
       }
 
-      const current = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "unknown";
+      const current = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : "unknown";
+      const budget = trialBudget();
+      const comparison = trialJob ? "running"
+        : queuedJobs.length ? `queued (${queuedJobs.length})`
+        : latestSessionJob(ctx.sessionManager.getSessionFile() ?? undefined) ?? "not started";
       const lines = [
         `current model : ${current}`,
         `fallback      : ${fallbackModel ?? "n/a"}`,
         `pending recs  : ${pending.length}`,
+        `comparison    : ${comparison}${budget.reason ? ` (${budget.reason})` : ""}`,
+        `trial budget  : ${budget.summary}`,
       ];
+      if (prior) lines.push("", suggestionText(prior.recommendation, prior.trials));
       for (const r of pending.slice(-5)) {
         lines.push(
           "",

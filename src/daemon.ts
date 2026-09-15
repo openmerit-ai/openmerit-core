@@ -1,11 +1,11 @@
 /**
- * The background track. Never touches the main harness's process; it only
- * reads session files, calls providers for shadow trials, and writes
- * recommendations to the channel file the pi extension polls.
+ * Trial engine shared by the pi extension's session-bound jobs and the optional
+ * CLI watcher. It reads traces, runs pi candidates, and writes recommendations
+ * for the extension to apply in the active session.
  */
 
 import { fetchCatalog, diffNewModels, loadSnapshot, saveSnapshot } from "./catalog.js";
-import { categorizeTask, loadDigest, relevantBenchmarks, benchmarkPrior } from "./benchmarks.js";
+import { categorizeTask, loadDigest, relevantBenchmarks, benchmarkPrior, openRouterBenchmarkCandidates } from "./benchmarks.js";
 import { loadKey } from "./llm.js";
 import { providerAllowed, type Policy } from "./policy.js";
 import { buildRecommendation } from "./recommend.js";
@@ -15,6 +15,9 @@ import {
 import { ingestNewTraces } from "./traces.js";
 import { budgetOk, ensureRubric, recordTrialSpend, runTrial } from "./trials.js";
 import { JUDGE_PREFS } from "./judge.js";
+import { availablePiModels, runPiTrial, scorePiRun, settledActiveTask, type SettledTask } from "./pi-trials.js";
+import { taskInputKey } from "./task-input.js";
+import { pickNext, STRAT_PREFS } from "./strategist.js";
 import type { CatalogEntry, Recommendation, TaskObservation, TrialPoint } from "./types.js";
 
 interface CandidateQueue {
@@ -26,6 +29,12 @@ interface HarnessState {
   currentModel?: string | null;
   sessionFile?: string | null;
   updatedAt?: string;
+}
+
+interface ProcessedTask {
+  marker: string;
+  status: "running" | "complete" | "no_swap" | "failed";
+  updatedAt: string;
 }
 
 function resolvePref(cat: Map<string, CatalogEntry>, prefs: (string | null)[], label: string): string {
@@ -130,6 +139,78 @@ export async function trialTick(key: string, policy: Policy): Promise<void> {
   }
 }
 
+/** Compare the one completed active pi task, sequentially, then target its session. */
+export async function autoTaskTick(key: string, policy: Policy, settledTask?: SettledTask | null): Promise<Recommendation | null> {
+  const task = settledTask === undefined ? settledActiveTask() : settledTask;
+  if (!task) return null;
+  const marker = settledTask === undefined
+    ? `${task.sessionFile}:${task.settledAt}`
+    : `${task.sessionFile}:${task.sessionBytes ?? task.settledAt}`;
+  const processedPath = settledTask === undefined ? paths.watchProcessed() : paths.sessionJob(marker);
+  const prior = readJson<ProcessedTask | null>(processedPath, null);
+  if (prior?.marker === marker && prior.status !== "failed") return null;
+  if (!budgetOk(policy).ok) return null;
+
+  // Claim the settled turn before provider calls so the next poll cannot duplicate it.
+  writeJson(processedPath, { marker, status: "running", updatedAt: new Date().toISOString() } satisfies ProcessedTask);
+  try {
+  const cat = await fetchCatalog(key);
+  const piModels = availablePiModels();
+  for (const id of [...cat.keys()]) {
+    const e = cat.get(id)!;
+    if (!piModels.has(id) || e.price > policy.max_usd_per_m || !providerAllowed(policy, id) ||
+        (task.images.length > 0 && !e.inputModalities?.includes("image"))) cat.delete(id);
+  }
+  if (!cat.has(task.model)) throw new Error(`active model ${task.model} is not trialable in pi/OpenRouter`);
+  const judge = resolvePref(cat, [policy.judge_model, ...JUDGE_PREFS], "judge");
+  const strategist = resolvePref(cat, [policy.strategist_model, ...STRAT_PREFS], "strategist");
+  const { category, benchmarks } = relevantBenchmarks(task.task);
+  let benchmarkCandidates: string[] = [];
+  try { benchmarkCandidates = await openRouterBenchmarkCandidates(key, category, cat); }
+  catch (e) { console.log(`[openmerit] benchmark shortlist unavailable: ${(e as Error).message}`); }
+  const rubric = await ensureRubric(key, judge, task.task, new Map());
+  const tKey = taskInputKey(task.task, task.images);
+  const points: TrialPoint[] = [];
+  const tried = new Set<string>();
+  const failedVendors = new Set<string>();
+
+  const baseline = await scorePiRun(key, judge, task.task, rubric, task.model, cat.get(task.model), task.run, "trace", task.images);
+  points.push(baseline.point);
+  tried.add(task.model);
+  appendJsonl(paths.trials(), { ...baseline.point, taskKey: tKey, sessionFile: task.sessionFile });
+  console.log(`[openmerit] task ${tKey}: A=${task.model} score=${baseline.point.score.toFixed(2)} from pi trace`);
+
+  const total = Math.max(1, Math.floor(policy.watch.models_per_task));
+  for (let i = 1; i < total; i++) {
+    if (!budgetOk(policy).ok) break;
+    const pick = await pickNext(key, strategist, task.task, rubric, benchmarks,
+      points, cat, tried, policy.max_usd_per_m, failedVendors, benchmarkCandidates);
+    if (!pick) break;
+    const { point, costUsd, error } = await runPiTrial(
+      key, judge, task.task, rubric, pick.model, cat.get(pick.model), task.cwd, task.images);
+    tried.add(pick.model);
+    points.push(point);
+    recordTrialSpend(costUsd);
+    appendJsonl(paths.trials(), { ...point, taskKey: tKey, sessionFile: task.sessionFile });
+    if (error) failedVendors.add(pick.model.split("/")[0]);
+    console.log(`[openmerit] task ${tKey}: ${pick.model} score=${point.score.toFixed(2)} cost=$${costUsd.toFixed(4)}${error ? ` error=${error.slice(0, 80)}` : ""}`);
+  }
+
+  const rec = buildRecommendation(tKey, task.task.slice(0, 120), task.model, points, policy, task.sessionFile);
+  if (rec) {
+    appendJsonl(paths.recommendations(), rec);
+    console.log(`[openmerit] task ${tKey}: selected ${rec.recommended.model}; auto=${rec.policy.autoApply}`);
+  } else console.log(`[openmerit] task ${tKey}: active model remains best`);
+  writeJson(processedPath, { marker, status: rec ? "complete" : "no_swap",
+    updatedAt: new Date().toISOString() } satisfies ProcessedTask);
+  return rec;
+  } catch (error) {
+    writeJson(processedPath, { marker, status: "failed",
+      updatedAt: new Date().toISOString() } satisfies ProcessedTask);
+    throw error;
+  }
+}
+
 /** Rebuild frontiers from trials and emit recommendations for the harness's current model. */
 export function recommendTick(policy: Policy): Recommendation[] {
   const harness = readJson<HarnessState>(paths.harnessState(), {});
@@ -185,9 +266,8 @@ export async function tickOnce(policy: Policy): Promise<void> {
   }
   if (key) {
     await catalogTick(key, policy);
-    await trialTick(key, policy);
+    await autoTaskTick(key, policy);
   }
-  recommendTick(policy);
 }
 
 /** Run forever, honoring policy watch intervals. */
@@ -195,7 +275,6 @@ export async function runDaemon(policy: Policy): Promise<void> {
   console.log("[openmerit] background track started");
   const tracesMs = Math.max(5, policy.watch.traces_interval_sec) * 1000;
   let lastCatalog = 0;
-  let lastTrials = 0;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -206,8 +285,7 @@ export async function runDaemon(policy: Policy): Promise<void> {
     }
     const now = Date.now();
     const wantCatalog = now - lastCatalog >= policy.watch.catalog_interval_min * 60_000;
-    const wantTrials = now - lastTrials >= policy.watch.trial_interval_min * 60_000;
-    if (wantCatalog || wantTrials) {
+    {
       let key: string | null = null;
       try {
         key = loadKey();
@@ -220,19 +298,11 @@ export async function runDaemon(policy: Policy): Promise<void> {
             await catalogTick(key, policy);
             lastCatalog = now;
           }
-          if (wantTrials) {
-            await trialTick(key, policy);
-            lastTrials = now;
-          }
+          await autoTaskTick(key, policy);
         } catch (e) {
           console.log(`[openmerit] provider tick failed: ${(e as Error).message}`);
         }
       }
-    }
-    try {
-      recommendTick(policy);
-    } catch (e) {
-      console.log(`[openmerit] recommend tick failed: ${(e as Error).message}`);
     }
     await new Promise((r) => setTimeout(r, tracesMs));
   }

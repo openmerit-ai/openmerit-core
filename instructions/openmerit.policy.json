@@ -18,8 +18,9 @@
   },
   "watch": {
     "catalog_interval_min": 360,
-    "traces_interval_sec": 60,
-    "trial_interval_min": 30
+    "traces_interval_sec": 5,
+    "trial_interval_min": 30,
+    "models_per_task": 3
   },
   "fallback": {
     "auto_update": true,

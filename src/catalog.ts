@@ -17,6 +17,8 @@ export async function fetchCatalog(key: string): Promise<Map<string, CatalogEntr
     const id = String(mm.id ?? "");
     if (!id || id.startsWith("openrouter/")) continue; // skip meta-routers
     const pricing = (mm.pricing ?? {}) as Record<string, unknown>;
+    const architecture = (mm.architecture ?? {}) as Record<string, unknown>;
+    const modalities = architecture.input_modalities;
     const pp = Number(pricing.prompt ?? 0);
     const pc = Number(pricing.completion ?? 0);
     if (!(pp >= 0 && pc >= 0)) continue; // skip bogus pricing
@@ -27,6 +29,7 @@ export async function fetchCatalog(key: string): Promise<Map<string, CatalogEntr
       pp,
       pc,
       price: Math.round((((pp + pc) / 2) * 1e6 + Number.EPSILON) * 1e4) / 1e4,
+      inputModalities: Array.isArray(modalities) ? modalities.map(String) : [],
       created: typeof mm.created === "number" ? mm.created : undefined,
     });
   }

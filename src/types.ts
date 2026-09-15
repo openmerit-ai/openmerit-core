@@ -13,7 +13,7 @@ export interface TrialPoint {
   /** ISO timestamp. */
   ts: string;
   /** Where this point came from. */
-  source: "shadow_trial" | "trace" | "benchmark";
+  source: "shadow_trial" | "pi_trial" | "trace" | "benchmark";
   /** One-line justification (judge/strategist). */
   why?: string;
 }
@@ -47,6 +47,8 @@ export interface Recommendation {
   ts: string;
   taskKey: string;
   taskLabel: string;
+  /** Target pi session for automatic swaps. */
+  sessionFile?: string | null;
   currentModel: string | null;
   recommended: { model: string; reason: string };
   fallback: { model: string; reason: string } | null;
@@ -71,6 +73,8 @@ export interface CatalogEntry {
   pc: number;
   /** Blended $/1M tokens. */
   price: number;
+  /** Live OpenRouter input modalities (used to avoid text-only image trials). */
+  inputModalities?: string[];
   /** Unix seconds, when the model was added to the catalog (if known). */
   created?: number;
 }

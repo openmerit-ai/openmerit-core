@@ -10,8 +10,13 @@ const autoPolicy: Policy = {
 };
 
 describe("gate", () => {
+  it("ships in supervised recommendation mode", () => {
+    expect(DEFAULT_POLICY.mode).toBe("recommend");
+    expect(DEFAULT_POLICY.auto_apply.enabled).toBe(false);
+  });
+
   it("blocks in recommend mode regardless of evidence", () => {
-    const d = gate(DEFAULT_POLICY, { scoreGain: 0.5, priceRatio: 1, onFrontier: true, providerOk: true });
+    const d = gate({ ...DEFAULT_POLICY, mode: "recommend" }, { scoreGain: 0.5, priceRatio: 1, onFrontier: true, providerOk: true });
     expect(d.autoApply).toBe(false);
     expect(d.reasons.join(" ")).toMatch(/recommend/);
   });
@@ -69,8 +74,24 @@ describe("buildRecommendation", () => {
     expect(buildRecommendation("t1", "task", "better", [pt("better", 0.9, 1), pt("worse", 0.8, 2)], DEFAULT_POLICY)).toBeNull();
   });
 
+  it("recommends the cheaper model when measured quality ties", () => {
+    const rec = buildRecommendation("t1", "task", "expensive", [
+      pt("expensive", 0.9, 1.0), pt("cheap", 0.9, 0.3),
+    ], DEFAULT_POLICY)!;
+    expect(rec.recommended.model).toBe("cheap");
+    expect(rec.evidence.scoreGain).toBe(0);
+    expect(rec.evidence.priceRatio).toBeCloseTo(0.3);
+    expect(rec.recommended.reason).toContain("equal measured quality");
+  });
+
+  it("does not auto-apply without a measured current-model baseline", () => {
+    const rec = buildRecommendation("t1", "task", "unmeasured", [pt("candidate", 0.9, 0.3)], autoPolicy)!;
+    expect(rec.policy.autoApply).toBe(false);
+    expect(rec.policy.reasons).toContain("current model has no measured baseline");
+  });
+
   it("auto-applies only when the gate passes", () => {
-    const rec = buildRecommendation("t1", "task", "cur", points, autoPolicy)!;
+    const rec = buildRecommendation("t1", "task", "cur", points, autoPolicy, "/tmp/pi-session.jsonl")!;
     expect(rec.policy.autoApply).toBe(true);
   });
 });
