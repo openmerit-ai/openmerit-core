@@ -1,19 +1,14 @@
-/** Minimal OpenRouter chat client (port of model_search/main.py's transport). */
+/** Minimal OpenRouter chat client for catalog and trial requests. */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { paths } from "./store.js";
 
 const OR = "https://openrouter.ai/api/v1";
 
-/** Load OPENROUTER_API_KEY from env, ~/.openmerit/.env, or the legacy model_search/.env. */
+/** Load OPENROUTER_API_KEY from env or ~/.openmerit/.env. */
 export function loadKey(): string {
-  for (const envFile of [
-    paths.envFile(),
-    join(dirname(dirname(fileURLToPath(import.meta.url))), "model_search", ".env"),
-  ]) {
-    if (!existsSync(envFile)) continue;
+  const envFile = paths.envFile();
+  if (existsSync(envFile)) {
     for (const line of readFileSync(envFile, "utf8").split("\n")) {
       const t = line.trim();
       if (!t || t.startsWith("#") || !t.includes("=")) continue;

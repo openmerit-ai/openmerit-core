@@ -143,9 +143,9 @@ before deployment.
 ## Reproduction
 
 ```bash
-python3 benchmark/text_to_sql/benchmark.py --verify-only
-OPENROUTER_API_KEY=... python3 benchmark/text_to_sql/benchmark.py
-python3 benchmark/text_to_sql/audit_results.py \
+npm run benchmark:text-to-sql -- --verify-only
+OPENROUTER_API_KEY=... npm run benchmark:text-to-sql
+npm run benchmark:text-to-sql:audit -- \
   benchmark/text_to_sql/results/runs_20260911T091053Z.jsonl
 ```
 
@@ -156,9 +156,9 @@ repository or result artifacts.
 
 - `data/schema.sql` and `data/seed.sql` - deterministic SQLite fixture
 - `data/tasks.json` - natural-language tasks and canonical reference queries
-- `benchmark.py` - live model validation, paid calls, safe execution, scoring,
+- `benchmark.ts` - live model validation, paid calls, safe execution, scoring,
   aggregation, and collision-safe output naming
-- `audit_results.py` - independent ground-truth regeneration and query replay
+- `audit_results.ts` - independent ground-truth regeneration and query replay
 - `results/runs_20260911T091053Z.jsonl` - all 50 per-model task observations
 - `results/summary_20260911T091053Z.json` - raw aggregate summary
 - `results/audited_summary_20260911T091053Z.json` - independently replayed metrics

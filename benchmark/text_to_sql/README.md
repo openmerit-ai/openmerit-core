@@ -35,14 +35,16 @@ of these model IDs overlaps either invoice benchmark slate.
 
 Predicted SQL is restricted to one read-only `SELECT`, `WITH`, or
 `WITH RECURSIVE` statement. It runs in a fresh in-memory database with SQLite
-query-only mode, a two-second execution timeout, and a 1,000-row limit.
+query-only mode, a two-second execution timeout, and a 1,000-row limit. The
+TypeScript runner isolates each query in a child process because Node's
+synchronous SQLite API does not expose an interrupt or progress handler.
 
 ## Reproduce
 
 ```bash
-python3 benchmark/text_to_sql/benchmark.py --verify-only
-OPENROUTER_API_KEY=... python3 benchmark/text_to_sql/benchmark.py
-python3 benchmark/text_to_sql/audit_results.py \
+npm run benchmark:text-to-sql -- --verify-only
+OPENROUTER_API_KEY=... npm run benchmark:text-to-sql
+npm run benchmark:text-to-sql:audit -- \
   benchmark/text_to_sql/results/runs_<timestamp>.jsonl
 ```
 

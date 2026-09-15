@@ -14,7 +14,7 @@ export function dominates(a: TrialPoint, b: TrialPoint): boolean {
 /**
  * Non-dominated set, cheapest first. When no point carries latency this
  * reduces to the classic "strictly increasing score as price rises" chain
- * from model_search.
+ * from the original model-search prototype.
  */
 export function paretoFrontier(points: TrialPoint[]): TrialPoint[] {
   const fr = points.filter(

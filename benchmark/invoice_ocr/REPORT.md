@@ -100,9 +100,9 @@ summary for transparency.
 ## Artifacts
 
 - `README.md` — reproduction instructions and metric definitions
-- `prepare_data.py` — pinned dataset preparation
-- `benchmark.py` — fixed schema, calls, scoring, and raw aggregation
-- `audit_results.py` — documented visibility audit and final ranking
+- `prepare_data.ts` — pinned dataset preparation
+- `benchmark.ts` — fixed schema, calls, scoring, and raw aggregation
+- `audit_results.ts` — documented visibility audit and final ranking
 - `data/manifest.json` — the exact 10 selected invoices
 - `results/runs_20260910T211526Z.jsonl` — all per-run predictions and metrics
 - `results/summary_20260910T211526Z.json` — untouched source-label summary

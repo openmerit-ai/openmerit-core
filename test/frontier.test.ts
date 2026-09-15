@@ -38,7 +38,7 @@ describe("paretoFrontier", () => {
     expect(fr).not.toContain("expensive-bad");
   });
 
-  it("scorePriceChain matches model_search semantics", () => {
+  it("scorePriceChain keeps the original model-search semantics", () => {
     expect(scorePriceChain(points).map((p) => p.model)).toEqual([
       "cheap-weak",
       "cheap-good",

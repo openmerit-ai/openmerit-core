@@ -58,12 +58,15 @@ npm run build
 openmerit init                 # sets up ~/.openmerit (policy, state)
 export OPENROUTER_API_KEY=...  # or put it in ~/.openmerit/.env
 
-# one-shot model search on a task spec (standalone, like model_search):
-node dist/cli.js trial model_search/task.example.json --rounds 5
+# one-shot model search on a task spec:
+node dist/cli.js trial examples/task.example.json --rounds 5
 
 # the background track:
 node dist/cli.js watch         # or --once for a single pass
 ```
+
+Older checkouts may still have a local `model_search/.env`; it is no longer
+read. Move that key to `~/.openmerit/.env` or export it in the environment.
 
 In the main harness (pi):
 
@@ -86,10 +89,29 @@ pi
 | `benchmarks/digest.json` | public-benchmark scores per model (seed + refresh) |
 | `ledger.json` | daily trial spend (budget enforcement) |
 
-## Prior art in this repo
+## Benchmarks
 
-- `model_search/` — the original Python iterative model-search loop
-  (judge + strategist + pareto frontier). `src/` is its TypeScript port,
-  extended with traces, the catalog watcher, and the policy gate.
-- `benchmark/invoice_ocr/` — a real 3-objective benchmark (quality/cost/
-  latency) with pareto analysis; the methodology the frontier follows.
+The benchmark runners are TypeScript and execute directly on Node 22.18+; no
+transpilation step or Python environment is required:
+
+```bash
+npm run benchmark:invoice -- --models google/gemini-3.8-flash
+npm run benchmark:invoice:round2 -- --verify-only
+npm run benchmark:text-to-sql -- --verify-only
+npm run benchmark:policy:validate
+npm run benchmark:policy -- --verify-only
+npm run benchmark:verify-recorded
+```
+
+- `benchmark/invoice_ocr/` — two real vision/OCR model slates over the same
+  pinned 10-invoice dataset.
+- `benchmark/text_to_sql/` — executable SQLite evaluation over 10 analytical
+  tasks.
+- `benchmark/policy_adjudication/` — 12 adversarial reimbursement-policy cases,
+  including prompt-injection cases and frozen input hashes.
+
+All three benchmark families preserve raw JSONL observations, audited summaries,
+cost/latency/quality rankings, and Pareto layers. `npm run typecheck` covers both
+the application and every benchmark runner. `npm run benchmark:verify-recorded`
+replays the checked-in raw results locally and compares them with their audited
+artifacts without making provider calls or writing new results.

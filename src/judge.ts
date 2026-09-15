@@ -1,4 +1,4 @@
-/** Judge: score a model's answer against a rubric (port of model_search JUDGE_PROMPT). */
+/** Judge: score a model's answer against a rubric. */
 
 import { chat } from "./llm.js";
 

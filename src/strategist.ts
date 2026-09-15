@@ -1,4 +1,4 @@
-/** Strategist: pick the next untried model to trial (port of model_search STRAT_PROMPT, benchmark-aware). */
+/** Strategist: pick the next untried model to trial, benchmark-aware. */
 
 import { chat } from "./llm.js";
 import { parseObj } from "./judge.js";

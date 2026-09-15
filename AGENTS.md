@@ -4,14 +4,16 @@
 
 openmerit is an external model-merit harness that plugs into pi agent
 harnesses. See README.md for the architecture. TypeScript (ESM, NodeNext),
-zero runtime dependencies (Node 22+ fetch only); the pi extension under
+zero runtime dependencies (Node 22.18+ native TypeScript and fetch); the pi extension under
 `extension/` is self-contained (pi loads it via jiti, no build).
 
 ## Commands
 
 - `npm run build` — compile `src/` to `dist/`
-- `npm run typecheck` — type-check without emitting
+- `npm run typecheck` — type-check `src/` and all benchmark TypeScript without emitting
 - `npm test` — vitest unit tests in `test/`
+- `npm run benchmark:verify-recorded` — replay checked-in benchmark runs and
+  compare them with the audited artifacts without provider calls
 
 ## Conventions
 
@@ -23,8 +25,11 @@ zero runtime dependencies (Node 22+ fetch only); the pi extension under
   swap may auto-apply. Recommendations must always carry the gate's reasons.
 - `recommendations.jsonl` is append-only; status changes are appended as new
   lines with the same `id` (latest line wins).
-- `model_search/` (Python) is the reference implementation for the trial
-  loop; `benchmark/` holds real benchmark data. Keep them working; port
-  improvements back into `src/` rather than rewriting them.
+- `benchmark/` holds real benchmark data and TypeScript runners. Benchmark
+  files execute directly with Node 22.18+, use explicit `.ts` imports, and must
+  remain compatible with `erasableSyntaxOnly`.
+- Preserve benchmark request contracts, scoring semantics, artifact layouts,
+  and overwrite guards when changing the runners. Port generally useful
+  improvements back into `src/`.
 - When changing state-file layouts or the policy schema, update README.md's
   state table and `instructions/openmerit.policy.json` together.

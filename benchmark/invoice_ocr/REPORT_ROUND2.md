@@ -149,9 +149,9 @@ invoice distributions, languages, layouts, and corruption modes.
 ## Reproduction
 
 ```bash
-python3 benchmark/invoice_ocr/benchmark_round2.py --verify-only
-OPENROUTER_API_KEY=... python3 benchmark/invoice_ocr/benchmark_round2.py
-python3 benchmark/invoice_ocr/audit_round2.py \
+npm run benchmark:invoice:round2 -- --verify-only
+OPENROUTER_API_KEY=... npm run benchmark:invoice:round2
+npm run benchmark:invoice:round2:audit -- \
   benchmark/invoice_ocr/results/runs_round2_20260910T231153Z.jsonl
 ```
 
@@ -160,9 +160,9 @@ the repository or any result artifact.
 
 ## Artifacts
 
-- `benchmark_round2.py` - fixed round-two slate, live catalog validation, calls,
+- `benchmark_round2.ts` - fixed round-two slate, live catalog validation, calls,
   raw aggregation, and collision-safe output naming
-- `audit_round2.py` - identical PO visibility projection, strict local schema
+- `audit_round2.ts` - identical PO visibility projection, strict local schema
   validation, degraded-scan slices, reliability metrics, and Pareto layers
 - `results/runs_round2_20260910T231153Z.jsonl` - all 50 per-invoice observations
 - `results/summary_round2_20260910T231153Z.json` - untouched source-label summary

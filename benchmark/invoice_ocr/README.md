@@ -13,8 +13,8 @@ with no repeated base invoice.
 ## Run
 
 ```bash
-python3 benchmark/invoice_ocr/prepare_data.py
-OPENROUTER_API_KEY=... python3 benchmark/invoice_ocr/benchmark.py
+npm run benchmark:invoice:prepare
+OPENROUTER_API_KEY=... npm run benchmark:invoice
 ```
 
 The key is read only from the process environment. Results are written as raw
@@ -25,7 +25,7 @@ JSONL responses plus an aggregate JSON summary under `results/`.
 The response contains 10 scalar fields (supplier, customer, identifiers,
 dates, currency, and totals) plus every line item with description, quantity,
 unit price, and amount. The JSON Schema in
-`benchmark.py` is sent to every model unchanged.
+`benchmark.ts` is sent to every model unchanged.
 
 ## Metrics
 
@@ -39,7 +39,7 @@ unit price, and amount. The JSON Schema in
 - **Pareto layers:** nondominated layers minimizing cost and median latency
   while maximizing exact-leaf quality.
 
-Run `python3 benchmark/invoice_ocr/audit_results.py` after the benchmark to
+Run `npm run benchmark:invoice:audit -- <runs.jsonl>` after the benchmark to
 produce the visibility-audited summary. The audit excludes `po_number` from
 quality scoring because four selected source records contain latent PO metadata
 that their images do not render; the raw, unadjusted scores remain preserved.
@@ -62,9 +62,9 @@ advertises both `response_format` and `structured_outputs`, and records the
 complete availability/pricing snapshot beside the run.
 
 ```bash
-python3 benchmark/invoice_ocr/benchmark_round2.py --verify-only
-OPENROUTER_API_KEY=... python3 benchmark/invoice_ocr/benchmark_round2.py
-python3 benchmark/invoice_ocr/audit_round2.py \
+npm run benchmark:invoice:round2 -- --verify-only
+OPENROUTER_API_KEY=... npm run benchmark:invoice:round2
+npm run benchmark:invoice:round2:audit -- \
   benchmark/invoice_ocr/results/runs_round2_<timestamp>.jsonl
 ```
 
