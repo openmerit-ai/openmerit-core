@@ -11,6 +11,7 @@ export function buildRecommendation(
   currentModel: string | null,
   points: TrialPoint[],
   policy: Policy,
+  sessionFile: string | null = null,
 ): Recommendation | null {
   const scored = points.filter((p) => p.score > 0);
   if (scored.length === 0) return null;
@@ -35,6 +36,7 @@ export function buildRecommendation(
     onFrontier,
     providerOk: providerAllowed(policy, best.model),
     baselineMeasured: !!current,
+    sessionBound: !!sessionFile,
   });
 
   const reason =
@@ -52,6 +54,7 @@ export function buildRecommendation(
     ts: new Date().toISOString(),
     taskKey,
     taskLabel,
+    sessionFile,
     currentModel,
     recommended: { model: best.model, reason },
     fallback: fb

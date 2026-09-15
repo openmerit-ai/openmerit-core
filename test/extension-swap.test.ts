@@ -14,6 +14,52 @@ afterEach(() => {
 });
 
 describe("pi extension model handoff", () => {
+  it("automatically applies only a recommendation bound to its settled session", async () => {
+    dir = mkdtempSync(join(tmpdir(), "openmerit-ext-auto-"));
+    process.env.OPENMERIT_HOME = dir;
+    const session = join(dir, "session.jsonl");
+    writeFileSync(session, JSON.stringify({ type: "message", message: {
+      role: "user", content: [{ type: "text", text: "task A" }],
+    } }) + "\n");
+    const base = { ts: new Date().toISOString(), taskKey: taskKey("task A"), taskLabel: "task A",
+      currentModel: "vendor/model-a", recommended: { model: "vendor/model-b", reason: "better" },
+      fallback: null, evidence: { scoreGain: 0.2, priceRatio: 0.5, onFrontier: true, trials: 3 },
+      policy: { autoApply: true, reasons: ["all auto-apply thresholds met"] }, status: "pending" };
+    writeFileSync(join(dir, "recommendations.jsonl"), [
+      { ...base, id: "wrong", sessionFile: join(dir, "other.jsonl") },
+      { ...base, id: "right", sessionFile: session },
+    ].map((r) => JSON.stringify(r)).join("\n") + "\n");
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    let switched = 0;
+    const ctx = {
+      model: { provider: "openrouter", id: "vendor/model-a" },
+      modelRegistry: { find: (provider: string, id: string) =>
+        provider === "openrouter" && id === "vendor/model-b" ? { provider, id } : undefined },
+      sessionManager: { getSessionFile: () => session }, cwd: dir, hasUI: false,
+      isIdle: () => true, ui: { notify: () => undefined },
+    };
+    const pi = {
+      on: (name: string, fn: (...args: unknown[]) => Promise<void>) => handlers.set(name, fn),
+      registerCommand: () => undefined,
+      setModel: async (model: { provider: string; id: string }) => {
+        switched++;
+        ctx.model = model;
+        return true;
+      },
+    };
+    const { default: extension } = await import("../extension/openmerit.js");
+    extension(pi as never);
+    await handlers.get("session_start")?.({}, ctx);
+    expect(switched).toBe(0);
+    await handlers.get("agent_settled")?.({}, ctx);
+    expect(switched).toBe(1);
+    expect(ctx.model.id).toBe("vendor/model-b");
+    const lines = readFileSync(join(dir, "recommendations.jsonl"), "utf8").trim().split("\n");
+    expect(JSON.parse(lines.at(-1)!).id).toBe("right");
+    expect(JSON.parse(lines.at(-1)!).status).toBe("applied");
+    await handlers.get("session_shutdown")?.();
+  });
+
   it("applies a recommendation for the active task and changes the session model", async () => {
     dir = mkdtempSync(join(tmpdir(), "openmerit-ext-"));
     process.env.OPENMERIT_HOME = dir;

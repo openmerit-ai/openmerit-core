@@ -66,6 +66,46 @@ export function recordedActiveTask(task: string, model: string): PiRun | null {
   };
 }
 
+export interface SettledTask {
+  task: string;
+  model: string;
+  run: PiRun;
+  sessionFile: string;
+  settledAt: string;
+  cwd: string;
+}
+
+/** Read the exact latest completed text task from the pi extension's session marker. */
+export function settledActiveTask(): SettledTask | null {
+  const st = readJson<{
+    currentModel?: string | null; sessionFile?: string | null;
+    settledTaskKey?: string | null; settledAt?: string | null; cwd?: string;
+  }>(paths.harnessState(), {});
+  if (!st.currentModel || !st.sessionFile || !st.settledTaskKey || !st.settledAt ||
+      !existsSync(st.sessionFile)) return null;
+  let userContent: unknown = null;
+  let usedTools = false;
+  for (const line of readFileSync(st.sessionFile, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    let entry: { type?: string; message?: { role?: string; content?: unknown } };
+    try { entry = JSON.parse(line) as typeof entry; } catch { continue; }
+    if (entry.type !== "message" || !entry.message) continue;
+    if (entry.message.role === "user") { userContent = entry.message.content; usedTools = false; }
+    else if (userContent && entry.message.role === "toolResult") usedTools = true;
+    else if (userContent && entry.message.role === "assistant" &&
+      Array.isArray(entry.message.content) && entry.message.content.some((b) => b?.type === "toolCall"))
+      usedTools = true;
+  }
+  if (!userContent || usedTools ||
+      (Array.isArray(userContent) && userContent.some((b) => b?.type !== "text"))) return null;
+  const task = answerText(userContent);
+  if (!task.trim() || taskKey(task) !== st.settledTaskKey) return null;
+  const run = recordedActiveTask(task, st.currentModel);
+  if (!run) return null;
+  return { task, model: st.currentModel, run, sessionFile: st.sessionFile,
+    settledAt: st.settledAt, cwd: st.cwd ?? process.cwd() };
+}
+
 /** Limit candidates to models this installed pi can actually select. */
 export function availablePiModels(): Set<string> {
   const result = spawnSync("pi", ["--offline", "--list-models", "openrouter"], { encoding: "utf8" });

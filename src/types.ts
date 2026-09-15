@@ -47,6 +47,8 @@ export interface Recommendation {
   ts: string;
   taskKey: string;
   taskLabel: string;
+  /** Target pi session for automatic swaps. */
+  sessionFile?: string | null;
   currentModel: string | null;
   recommended: { model: string; reason: string };
   fallback: { model: string; reason: string } | null;

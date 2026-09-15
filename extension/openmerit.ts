@@ -45,6 +45,7 @@ interface Recommendation {
   ts: string;
   taskKey: string;
   taskLabel: string;
+  sessionFile?: string | null;
   currentModel: string | null;
   recommended: { model: string; reason: string };
   fallback: { model: string; reason: string } | null;
@@ -102,11 +103,16 @@ function latestSessionTaskKey(ctx: ExtensionContext): string | null {
   return latest;
 }
 
+let settledTaskKey: string | null = null;
+
 function pendingRecommendations(ctx?: ExtensionContext): Recommendation[] {
   const pending = latestRecommendations().filter((r) => r.status === "pending");
   if (!ctx) return pending;
-  const key = latestSessionTaskKey(ctx);
-  return key ? pending.filter((r) => r.taskKey === key) : [];
+  const file = ctx.sessionManager.getSessionFile();
+  const liveTaskKey = latestSessionTaskKey(ctx);
+  return pending.filter((r) => r.sessionFile
+    ? r.sessionFile === file && r.taskKey === settledTaskKey
+    : !!liveTaskKey && r.taskKey === liveTaskKey);
 }
 
 function canonicalModel(provider: string, id: string): string {
@@ -119,16 +125,25 @@ function setStatus(rec: Recommendation, status: Recommendation["status"]): void 
 
 let fallbackModel: string | null = null;
 
-function reportHarnessState(ctx: ExtensionContext): void {
+function reportHarnessState(ctx: ExtensionContext, settled = false): void {
   try {
     mkdirSync(HOME, { recursive: true });
     const model = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
+    if (settled) settledTaskKey = latestSessionTaskKey(ctx);
+    const prior = existsSync(STATE_FILE)
+      ? JSON.parse(readFileSync(STATE_FILE, "utf8")) as { sessionFile?: string | null; settledAt?: string }
+      : {};
+    const sessionFile = ctx.sessionManager.getSessionFile() ?? null;
+    const settledAt = settled ? new Date().toISOString()
+      : prior.sessionFile === sessionFile ? prior.settledAt ?? null : null;
     writeFileSync(
       STATE_FILE,
       JSON.stringify({
         currentModel: model,
         fallbackModel,
-        sessionFile: ctx.sessionManager.getSessionFile() ?? null,
+        sessionFile,
+        settledTaskKey,
+        settledAt,
         cwd: ctx.cwd,
         updatedAt: new Date().toISOString(),
       }) + "\n",
@@ -263,11 +278,14 @@ export default function openmerit(pi: ExtensionAPI) {
   async function surface(ctx: ExtensionContext): Promise<void> {
     for (const rec of pendingRecommendations(ctx)) {
       if (notified.has(rec.id)) continue;
-      notified.add(rec.id);
       if (rec.policy.autoApply) {
+        if (!rec.sessionFile || rec.sessionFile !== ctx.sessionManager.getSessionFile()) continue;
+        if (!ctx.isIdle()) continue;
+        notified.add(rec.id);
         await applyRecommendation(ctx, rec);
         continue;
       }
+      notified.add(rec.id);
       // Never block here: surface() runs during session_start and on a poll
       // timer, where a modal dialog would deadlock RPC mode and stall TUI
       // startup. Notify (fire-and-forget) and let the user act via /openmerit.
@@ -283,12 +301,30 @@ export default function openmerit(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     restoreFallback();
+    try {
+      const st = JSON.parse(readFileSync(STATE_FILE, "utf8")) as {
+        sessionFile?: string | null; settledTaskKey?: string | null;
+      };
+      settledTaskKey = st.sessionFile === ctx.sessionManager.getSessionFile()
+        ? st.settledTaskKey ?? null : null;
+    } catch { settledTaskKey = null; }
     reportHarnessState(ctx);
     await surface(ctx);
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(() => {
       surface(ctx).catch(() => undefined);
-    }, 30_000);
+    }, 5_000);
+  });
+
+  pi.on("agent_settled", async (_event, ctx) => {
+    reportHarnessState(ctx, true);
+    await surface(ctx);
+  });
+
+  pi.on("input", async (_event, ctx) => {
+    // A ready comparison can switch the route before the next user task starts.
+    await surface(ctx);
+    return { action: "continue" };
   });
 
   pi.on("model_select", async (_event, ctx) => {

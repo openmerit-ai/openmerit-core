@@ -11,7 +11,7 @@ const autoPolicy: Policy = {
 
 describe("gate", () => {
   it("blocks in recommend mode regardless of evidence", () => {
-    const d = gate(DEFAULT_POLICY, { scoreGain: 0.5, priceRatio: 1, onFrontier: true, providerOk: true });
+    const d = gate({ ...DEFAULT_POLICY, mode: "recommend" }, { scoreGain: 0.5, priceRatio: 1, onFrontier: true, providerOk: true });
     expect(d.autoApply).toBe(false);
     expect(d.reasons.join(" ")).toMatch(/recommend/);
   });
@@ -86,7 +86,7 @@ describe("buildRecommendation", () => {
   });
 
   it("auto-applies only when the gate passes", () => {
-    const rec = buildRecommendation("t1", "task", "cur", points, autoPolicy)!;
+    const rec = buildRecommendation("t1", "task", "cur", points, autoPolicy, "/tmp/pi-session.jsonl")!;
     expect(rec.policy.autoApply).toBe(true);
   });
 });

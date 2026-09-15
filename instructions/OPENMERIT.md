@@ -8,9 +8,8 @@ the best model for the task at hand, at the best price, with a vetted fallback.
 
 1. **Observes** this harness's session traces (models used, tokens, cost,
    latency, errors) without intercepting or slowing down your work.
-2. **Evaluates** candidate models for a declared task sequentially through pi
-   and scores their outputs with a judge model. The background watcher is still
-   experimental.
+2. **Evaluates** candidate models for each completed text task sequentially
+   through pi and scores their outputs with a judge model.
 3. **Maintains a pareto frontier** per task (quality vs. cost vs. latency) and
    an aggregate frontier across all of your tasks.
 4. **Watches for new model releases** (provider catalogs + public benchmarks)
@@ -36,7 +35,8 @@ the best model for the task at hand, at the best price, with a vetted fallback.
 
 - `/openmerit` — show current model, fallback, frontier position, and pending
   recommendations.
-- `/openmerit apply` / `/openmerit dismiss` — act on a pending recommendation.
+- `/openmerit apply` / `/openmerit dismiss` — act on a pending recommendation
+  when automatic application is declined by the policy gate.
 - Policy changes (auto-apply thresholds, budgets, provider allow-lists) are
   made by the user in `~/.openmerit/policy.json`, not by you.
 

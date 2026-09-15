@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "mode": "recommend",
+  "mode": "auto",
   "auto_apply": {
-    "enabled": false,
-    "min_score_gain": 0.1,
-    "max_price_ratio": 1.5,
+    "enabled": true,
+    "min_score_gain": 0,
+    "max_price_ratio": 1000000,
     "require_frontier": true
   },
   "budgets": {
@@ -18,8 +18,9 @@
   },
   "watch": {
     "catalog_interval_min": 360,
-    "traces_interval_sec": 60,
-    "trial_interval_min": 30
+    "traces_interval_sec": 5,
+    "trial_interval_min": 30,
+    "models_per_task": 3
   },
   "fallback": {
     "auto_update": true,

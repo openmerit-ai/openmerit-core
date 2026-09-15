@@ -2,13 +2,17 @@ import { afterEach, describe, expect, it } from "vitest";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { executePiTask } from "../src/pi-trials.js";
+import { executePiTask, settledActiveTask } from "../src/pi-trials.js";
+import { paths, taskKey } from "../src/store.js";
 
 const oldPath = process.env.PATH;
+const oldHome = process.env.OPENMERIT_HOME;
 let fixtureDir: string | null = null;
 
 afterEach(() => {
   process.env.PATH = oldPath;
+  if (oldHome === undefined) delete process.env.OPENMERIT_HOME;
+  else process.env.OPENMERIT_HOME = oldHome;
   if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
   fixtureDir = null;
 });
@@ -31,5 +35,30 @@ console.log(JSON.stringify({ type: 'agent_settled' }));
     expect(result.answer).toBe("task A done");
     expect(result.costUsd).toBe(0.0123);
     expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("accepts only the settled latest text task and its measured A result", () => {
+    fixtureDir = mkdtempSync(join(tmpdir(), "openmerit-settled-"));
+    process.env.OPENMERIT_HOME = fixtureDir;
+    const sessionFile = join(fixtureDir, "session.jsonl");
+    const task = "Explain a simple word ladder.";
+    const lines = [
+      { type: "message", message: { role: "user", content: [{ type: "text", text: task }], timestamp: 1000 } },
+      { type: "message", message: { role: "assistant", provider: "openrouter", model: "openai/gpt-4o-mini",
+        content: [{ type: "text", text: "cat to cot to dot" }], timestamp: 2100,
+        usage: { cost: { total: 0.001 } }, stopReason: "stop" } },
+    ];
+    writeFileSync(sessionFile, lines.map((x) => JSON.stringify(x)).join("\n") + "\n");
+    writeFileSync(paths.harnessState(), JSON.stringify({ currentModel: "openai/gpt-4o-mini",
+      sessionFile, settledTaskKey: taskKey(task), settledAt: "2026-09-16T00:00:00Z", cwd: fixtureDir }));
+    const settled = settledActiveTask();
+    expect(settled?.task).toBe(task);
+    expect(settled?.run.answer).toBe("cat to cot to dot");
+    expect(settled?.run.costUsd).toBe(0.001);
+    lines.splice(1, 0, { type: "message", message: { role: "assistant", provider: "openrouter",
+      model: "openai/gpt-4o-mini", content: [{ type: "toolCall", text: "write" }], timestamp: 1100,
+      usage: { cost: { total: 0 } }, stopReason: "toolUse" } });
+    writeFileSync(sessionFile, lines.map((x) => JSON.stringify(x)).join("\n") + "\n");
+    expect(settledActiveTask()).toBeNull();
   });
 });

@@ -1,10 +1,10 @@
 # openmerit
 
-An **experimental model-merit harness** for [pi](https://pi.dev). Its first
-per-task loop observes model A's pi run, trials B and C sequentially through
-pi, maintains a quality/price/latency frontier, and recommends a model switch
-for that task. A background catalog watcher also exists, but first-run
-model discovery is not yet the primary alpha workflow.
+An **experimental model-merit harness** for [pi](https://pi.dev). Start
+`openmerit watch`, run a text task in pi with model A, and OpenMerit observes
+its completed trace, trials B and C sequentially through pi, compares quality,
+price, and latency, and swaps that pi session to the selected model before its
+next task when the policy gate permits it.
 
 ```
 ┌────────────────────────┐         traces (session files)         ┌──────────────────────────┐
@@ -26,13 +26,13 @@ model discovery is not yet the primary alpha workflow.
    goes into the main harness's context (AGENTS.md-style);
    [`instructions/openmerit.policy.json`](instructions/openmerit.policy.json)
    (copied to `~/.openmerit/policy.json` by `openmerit init`) gates autonomy:
-   recommend-only vs auto-apply, score-gain/price thresholds, budgets,
+   auto-apply by default for session-bound trials, score-gain/price thresholds, budgets,
    provider allow-lists. Public-benchmark relevance lives in
    [`src/benchmarks.ts`](src/benchmarks.ts) (task category → benchmarks that
    matter) plus a refreshable digest at `~/.openmerit/benchmarks/digest.json`.
-2. **Background track** — `openmerit watch` is a separate process. It never
-   blocks the main agent; it reads session files incrementally and runs
-   shadow trials under daily budget caps.
+2. **Background track** — `openmerit watch` is a separate process. It reads the
+   latest completed pi task and compares candidates sequentially under daily
+   budget caps.
 3. **Per-task pareto frontier** — trials are keyed by task signature
    ([`src/frontier.ts`](src/frontier.ts), 3 objectives: quality ↑, price ↓,
    latency ↓). The aggregate across all of an agent's tasks is the union of
@@ -58,11 +58,8 @@ npm run build
 node dist/cli.js init          # sets up ~/.openmerit (policy, state)
 export OPENROUTER_API_KEY=...  # or put it in ~/.openmerit/.env
 
-# one-shot model search on a task spec:
-node dist/cli.js trial examples/task.example.json --rounds 5
-
-# the background track:
-node dist/cli.js watch         # or --once for a single pass
+# automatic per-task comparison (leave this running):
+node dist/cli.js watch
 ```
 
 Older checkouts may still have a local `model_search/.env`; it is no longer
@@ -78,9 +75,8 @@ pi
 
 ## Per-task alpha loop
 
-The `trial` command first reuses model A's completed result from the active pi
-session trace when its latest task and model match the task file. It then runs
-models B and C **sequentially through pi**, rather than calling OpenRouter chat
+The watcher reuses model A's completed result from the active pi session trace.
+It then runs models B and C **sequentially through pi**, rather than calling OpenRouter chat
 completions for the candidate answers. If the active trace does not match, A
 also runs in a fresh pi session and the CLI says so. Pi's traces and JSON event
 stream supply each model's result, estimated cost, latency, and errors. A
@@ -92,8 +88,8 @@ This first loop supports text tasks with tools disabled during comparison. The
 candidate pi runs therefore share the same task and project context, but do
 not share previous answers or file changes. Their raw sessions remain in pi's
 session store; the CLI prints each trial session id. Tool-using tasks and exact workspace
-replay need further work. The background `watch` mode remains experimental and
-does not bootstrap an A/B/C comparison from a fresh catalog snapshot.
+replay need further work. Only the latest active pi session is watched at a
+time; concurrent pi sessions are not yet tracked independently.
 
 From a clean checkout with Node 22.18+ and pi 0.85.1+ installed:
 
@@ -105,34 +101,34 @@ pi install /absolute/path/to/openmerit
 # OpenRouter in pi with /login openrouter or an environment variable.
 ```
 
-Copy `examples/task.example.json` and set `initial_model` to the OpenRouter
-model you will use in pi. In a pi TUI session, start with that model and the
-**exact** task text from the JSON file; use `--no-tools` for this text-only
-comparison. Wait until pi finishes task A. Keep that session open, then in
-another terminal run:
+Start the watcher in one terminal before the task:
 
 ```bash
-node dist/cli.js trial /path/to/your-task.json --rounds 3
-node dist/cli.js frontier
+node dist/cli.js watch
 ```
 
-The extension polls for a recommendation tied to the most recent task in that
-pi session. Use `/openmerit` to inspect it and `/openmerit apply` to switch the
-session model. The next pi turn should show the selected OpenRouter model. The
-default policy is recommend-only; no swap occurs until you apply it.
+In another terminal, start pi with an OpenRouter model and a text task (use
+`--no-tools` for the initial comparison). Leave pi open after model A finishes.
+The watcher prints A/B/C trial measurements and its choice. The extension polls
+for a recommendation bound to that pi session and applies an eligible swap with
+`pi.setModel()`. `/openmerit` shows the recommendation and current model; the
+next pi turn should use the selected model. If the gate declines an automatic
+swap, `/openmerit apply` is still available. The existing `trial` command
+remains available for controlled runs from a task JSON file.
 
 ## State layout (`~/.openmerit/`)
 
 | file | contents |
 |---|---|
 | `policy.json` | the policy file (gate thresholds, budgets, intervals) |
-| `harness-state.json` | written by the pi extension: current model, fallback, session |
-| `recommendations.jsonl` | the channel: swap recommendations + status updates |
+| `harness-state.json` | written by the pi extension: current model, fallback, latest session and settled task |
+| `recommendations.jsonl` | shared append-only channel: session-bound swap recommendations + status updates |
 | `trials.jsonl` | every model trial point (source, score, price, latency) |
 | `observations.jsonl` | task observations extracted from session traces |
 | `catalog/snapshot.json` + `candidates.json` | catalog snapshot + new-model queue |
 | `benchmarks/digest.json` | public-benchmark scores per model (seed + refresh) |
 | `ledger.json` | daily trial spend (budget enforcement) |
+| `watch/processed.json` | latest task handled by the watcher (including retry status) |
 
 ## Benchmarks
 
