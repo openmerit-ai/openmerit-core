@@ -17,7 +17,9 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { createHash } from "node:crypto";
@@ -84,7 +86,12 @@ function trialBudget(): { summary: string; reason: string | null } {
   const today = new Date().toISOString().slice(0, 10);
   let ledger: { date?: string; trials?: number; usd?: number } = {};
   try { ledger = JSON.parse(readFileSync(LEDGER_FILE, "utf8")) as typeof ledger; }
-  catch { /* no trial spend yet */ }
+  catch {
+    if (existsSync(LEDGER_FILE)) return {
+      summary: "ledger unreadable",
+      reason: "trial ledger is malformed; run `openmerit doctor` before spending",
+    };
+  }
   const trials = ledger.date === today ? ledger.trials ?? 0 : 0;
   const usd = ledger.date === today ? ledger.usd ?? 0 : 0;
   const reason = trials >= limit ? `daily trial cap reached (${limit})`
@@ -107,10 +114,12 @@ function latestSessionJob(sessionFile: string | undefined): string | null {
 }
 
 function loadPolicy(): ExtensionPolicy {
+  if (!existsSync(POLICY_FILE)) return {};
   try {
     return JSON.parse(readFileSync(POLICY_FILE, "utf8")) as ExtensionPolicy;
   } catch {
-    return {};
+    return { mode: "recommend", fallback: { apply_on_error: false },
+      budgets: { max_trials_per_day: 0, max_usd_per_day: 0 } };
   }
 }
 
@@ -173,7 +182,17 @@ function appendJsonl(file: string, obj: unknown): void {
 function latestRecommendations(): Recommendation[] {
   const byId = new Map<string, Recommendation>();
   for (const r of readJsonl<Recommendation>(RECS_FILE)) byId.set(r.id, r);
-  return [...byId.values()];
+  let malformed = false;
+  if (existsSync(RECS_FILE)) {
+    for (const line of readFileSync(RECS_FILE, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      try { JSON.parse(line); } catch { malformed = true; break; }
+    }
+  }
+  return [...byId.values()].map((rec) => malformed && rec.status === "pending" && rec.policy.autoApply
+    ? { ...rec, policy: { autoApply: false,
+        reasons: [...rec.policy.reasons, "recommendation history contains a malformed line; manual review required"] } }
+    : rec);
 }
 
 function taskKey(text: string): string {
@@ -305,6 +324,16 @@ function eligibleRoutes(ctx: ExtensionContext): ModelRoute[] {
   return [...byRoute.values()];
 }
 
+function writeState(value: unknown): void {
+  const temp = `${STATE_FILE}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    writeFileSync(temp, JSON.stringify(value) + "\n");
+    renameSync(temp, STATE_FILE);
+  } finally {
+    if (existsSync(temp)) rmSync(temp, { force: true });
+  }
+}
+
 function reportHarnessState(ctx: ExtensionContext, settled = false): void {
   try {
     mkdirSync(HOME, { recursive: true });
@@ -317,9 +346,7 @@ function reportHarnessState(ctx: ExtensionContext, settled = false): void {
     const sessionFile = ctx.sessionManager.getSessionFile() ?? null;
     const settledAt = settled ? new Date().toISOString()
       : prior.sessionFile === sessionFile ? prior.settledAt ?? null : null;
-    writeFileSync(
-      STATE_FILE,
-      JSON.stringify({
+    writeState({
         schemaVersion: 1,
         currentModel: model,
         currentRoute,
@@ -331,8 +358,7 @@ function reportHarnessState(ctx: ExtensionContext, settled = false): void {
         settledAt,
         cwd: ctx.cwd,
         updatedAt: new Date().toISOString(),
-      }) + "\n",
-    );
+      });
   } catch {
     /* never break the host session over reporting */
   }

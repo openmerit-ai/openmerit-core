@@ -54,13 +54,14 @@ package into pi, then initialize its policy and state:
 ```bash
 pi install npm:openmerit
 npx --yes openmerit init
+npx --yes openmerit verify
 pi list
 ```
 
 `pi install` makes the extension and its trial engine available to pi. The
 one-off `npx` command creates `~/.openmerit/policy.json`; install OpenMerit
 globally with `npm install --global openmerit` only if you also want persistent
-shell access to `openmerit status`, `doctor`, `frontier`, or the optional watcher. Install
+shell access to `openmerit status`, `doctor`, `verify`, `frontier`, or the optional watcher. Install
 the extension from only one source—remove any older copied `openmerit.ts` first
 so pi does not load it twice.
 
@@ -120,8 +121,9 @@ Keep that checkout available because pi loads a local package from its path.
 3. Verify the extension appears in `pi list`. The instruction file
    [`instructions/OPENMERIT.md`](instructions/OPENMERIT.md) can be added to a
    pi project's AGENTS.md for agent context, but the extension does
-   not require it. Run `npx openmerit doctor` after starting Pi once to inspect
-   the eligible route snapshot and configuration without printing secrets.
+   not require it. Run `npx openmerit verify` for a provider-free core self-test,
+   then `npx openmerit doctor` after starting Pi once to inspect the eligible
+   route snapshot and configuration without printing secrets.
 
 4. Start pi in one terminal with any configured model. For example:
 
@@ -179,8 +181,13 @@ schema, so its published scores are not directly comparable to these pi runs.
 
 ### Inspect or troubleshoot a run
 
-`npx openmerit doctor` checks Pi, policy, eligible routes, and optional
-OpenRouter enrichment. `npx openmerit status` shows the latest pi model and pending recommendations;
+`npx openmerit doctor` checks Pi, policy, eligible routes and prices, saved
+session state, duplicate package sources, append-only files, and optional
+OpenRouter enrichment. Add `--json` for a sanitized diagnostic report suitable
+for a bug report; it contains no credentials, prompts, or trace contents.
+`npx openmerit verify` runs an offline self-test of atomic state, JSONL recovery,
+route preservation, policy evidence, and neutral events without contacting a
+provider. `npx openmerit status` shows the latest pi model and pending recommendations;
 `npx openmerit frontier` shows measured quality, blended price, latency, and
 the chosen frontier per task. `/openmerit` inside pi shows the current model,
 fallback, the model currently being compared, completed models with quality,
@@ -203,10 +210,21 @@ Closing or switching the session cancels the active job.
 Candidate runs use the same text and uploaded image bytes, but they do not
 replay earlier answers or file changes. An exact task in another session
 (including identical image bytes) appears as **advice**, not a pending swap;
-the new session still gets its own comparison. The optional `trial` command
-remains for controlled text-task runs from a task JSON file; that legacy
-standalone command is still OpenRouter-specific in 0.1.2. The automatic Pi
-session path is provider-neutral.
+the new session still gets its own comparison.
+
+The optional `trial` command runs controlled text-task comparisons through the
+same exact Pi provider routes and credential store as the automatic session
+path:
+
+```bash
+npx openmerit trial examples/task.example.json --rounds 3
+```
+
+`initial_model` is the stable `vendor/model` identity. When Pi exposes that
+model through more than one provider, set `initial_route` to
+`provider:model-id` (for example `openai:gpt-4o-mini` or
+`openrouter:openai/gpt-4o-mini`). Judge and strategist calls also run through
+Pi. An OpenRouter key only adds optional catalog and public-benchmark metadata.
 
 ## Alpha boundaries
 
@@ -251,6 +269,10 @@ session path is provider-neutral.
   configuration). A provider registered only at runtime by another extension
   is visible in the route snapshot but cannot yet be executed by the isolated
   subprocess.
+- JSON state snapshots are replaced atomically. Append-only readers skip and
+  report malformed or interrupted lines while retaining later valid records.
+  A job owned by a crashed process is reclaimable instead of remaining stuck
+  in `running`; completed jobs remain final.
 
 ## State layout (`~/.openmerit/`)
 

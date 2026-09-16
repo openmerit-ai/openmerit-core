@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync, readFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { executePiTask, piTrialToolArgs, settledActiveTask } from "../src/pi-trials.js";
+import { availablePiRoutes, executePiTask, piTrialToolArgs, settledActiveTask } from "../src/pi-trials.js";
 import { paths, taskKey } from "../src/store.js";
 import { sessionFiles, taskInputKey } from "../src/task-input.js";
 
@@ -22,6 +22,21 @@ afterEach(() => {
 });
 
 describe("pi-backed task measurement", () => {
+  it("preserves Pi list-model capabilities in provider routes", () => {
+    fixtureDir = mkdtempSync(join(tmpdir(), "openmerit-pi-list-"));
+    const bin = join(fixtureDir, "pi");
+    writeFileSync(bin, `#!/usr/bin/env node
+console.log('provider  model       context  max-out  thinking  images');
+console.log('native    model-a     128K     16.4K    no        yes');
+`);
+    chmodSync(bin, 0o755);
+    process.env.PATH = `${fixtureDir}:${oldPath}`;
+    expect(availablePiRoutes()).toEqual([{
+      provider: "native", modelId: "model-a", meritId: "native/model-a",
+      input: ["text", "image"], contextWindow: 128_000, maxTokens: 16_400,
+    }]);
+  });
+
   it("disables candidate tools unless the user explicitly opts in", () => {
     delete process.env.OPENMERIT_PI_TRIAL_TOOLS;
     expect(piTrialToolArgs()).toEqual(["--no-tools"]);

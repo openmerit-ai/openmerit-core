@@ -246,6 +246,42 @@ describe("pi extension model handoff", () => {
     await handlers.get("session_shutdown")?.();
   });
 
+  it("fails closed on auto-apply when recommendation history contains a partial line", async () => {
+    dir = mkdtempSync(join(tmpdir(), "openmerit-ext-corrupt-rec-"));
+    process.env.OPENMERIT_HOME = dir;
+    const session = join(dir, "session.jsonl");
+    writeFileSync(session, JSON.stringify({ type: "message", message: {
+      role: "user", content: [{ type: "text", text: "task A" }],
+    } }) + "\n");
+    const rec = {
+      id: "unsafe-auto", ts: new Date().toISOString(), taskKey: taskKey("task A"), taskLabel: "task A",
+      sessionFile: session, currentModel: "vendor/model-a",
+      recommended: { model: "vendor/model-b", reason: "better" }, fallback: null,
+      evidence: { scoreGain: 0.2, priceRatio: 0.5, onFrontier: true, trials: 3 },
+      policy: { autoApply: true, reasons: ["all auto-apply thresholds met"] }, status: "pending",
+    };
+    writeFileSync(join(dir, "recommendations.jsonl"), JSON.stringify(rec) + "\n{partial");
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    let swaps = 0;
+    const ctx = {
+      model: { provider: "openrouter", id: "vendor/model-a" },
+      modelRegistry: { find: () => ({ provider: "openrouter", id: "vendor/model-b" }) },
+      sessionManager: { getSessionFile: () => session }, cwd: dir, hasUI: false,
+      isIdle: () => true, ui: { notify: () => undefined },
+    };
+    const pi = {
+      on: (name: string, fn: (...args: unknown[]) => Promise<void>) => handlers.set(name, fn),
+      registerCommand: () => undefined,
+      setModel: async () => { swaps++; return true; },
+    };
+    const { default: extension } = await import("../extension/openmerit.js");
+    extension(pi as never);
+    await handlers.get("session_start")?.({}, ctx);
+    await handlers.get("agent_settled")?.({}, ctx);
+    expect(swaps).toBe(0);
+    await handlers.get("session_shutdown")?.();
+  });
+
   it("applies a recommendation for the active task and changes the session model", async () => {
     dir = mkdtempSync(join(tmpdir(), "openmerit-ext-"));
     process.env.OPENMERIT_HOME = dir;

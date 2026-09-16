@@ -92,7 +92,9 @@ interface SessionMessage extends PiMessage {
 }
 
 /** Use model A's completed result from the active pi session when it matches this task. */
-export function recordedActiveTask(task: string, model: string, images: TaskImage[] = [], sessionFile?: string, sessionBytes?: number): PiRun | null {
+export function recordedActiveTask(
+  task: string, model: string | ModelRoute, images: TaskImage[] = [], sessionFile?: string, sessionBytes?: number,
+): PiRun | null {
   const state = sessionFile ? null : readJson<{ sessionFile?: string | null }>(paths.harnessState(), {});
   const file = sessionFile ?? state?.sessionFile;
   if (!file || !existsSync(file)) return null;
@@ -117,7 +119,9 @@ export function recordedActiveTask(task: string, model: string, images: TaskImag
   const files = sessionFiles(task);
   if (!user || !userImages || taskInputKey(answerText(user.content), userImages, sessionFiles(answerText(user.content))) !==
       taskInputKey(task, images, files)) return null;
-  const matching = assistants.filter((m) => meritModelId(m.provider ?? "openrouter", m.model ?? "") === model);
+  const matching = assistants.filter((m) => typeof model === "string"
+    ? meritModelId(m.provider ?? "openrouter", m.model ?? "") === model
+    : m.provider === model.provider && m.model === model.modelId);
   if (matching.length === 0 || matching.some((m) => m.stopReason === "error")) return null;
   const answer = matching.map((m) => answerText(m.content)).filter(Boolean).at(-1) ?? "";
   if (!answer.trim()) return null;
@@ -181,9 +185,9 @@ export function settledActiveTask(snapshot?: {
   const task = answerText(userContent);
   const files = sessionFiles(task);
   if (!task.trim() || taskInputKey(task, images, files) !== st.settledTaskKey) return null;
-  const run = recordedActiveTask(task, st.currentModel, images, st.sessionFile, st.sessionBytes);
-  if (!run) return null;
   const route = st.currentRoute ?? legacyOpenRouterRoute(st.currentModel);
+  const run = recordedActiveTask(task, route, images, st.sessionFile, st.sessionBytes);
+  if (!run) return null;
   const routes = st.routes?.length ? st.routes : [route];
   return { task, images, model: st.currentModel, run, sessionFile: st.sessionFile,
     settledAt: st.settledAt, sessionBytes: st.sessionBytes, cwd: st.cwd ?? process.cwd(), usedTools, files,
@@ -194,6 +198,15 @@ export function piExecutable(): string {
   return process.env.OPENMERIT_PI_BIN?.trim() || "pi";
 }
 
+function compactNumber(value: string): number | undefined {
+  const match = value.match(/^(\d+(?:\.\d+)?)([KMG])?$/i);
+  if (!match) return undefined;
+  const scale = ({ K: 1_000, M: 1_000_000, G: 1_000_000_000 } as Record<string, number>)[
+    (match[2] ?? "").toUpperCase()
+  ] ?? 1;
+  return Math.round(Number(match[1]) * scale);
+}
+
 /** Read provider/model routes from pi when no live extension snapshot is available. */
 export function availablePiRoutes(snapshot?: ModelRoute[]): ModelRoute[] {
   if (snapshot?.length) return snapshot;
@@ -201,9 +214,13 @@ export function availablePiRoutes(snapshot?: ModelRoute[]): ModelRoute[] {
   if (result.error || result.status !== 0) throw new Error("could not list models from pi");
   const routes: ModelRoute[] = [];
   for (const line of result.stdout.split("\n").slice(1)) {
-    const [provider, id, , , , images] = line.trim().split(/\s+/);
+    const [provider, id, context, maxOut, , images] = line.trim().split(/\s+/);
     if (!provider || !id || id.startsWith("~")) continue;
-    routes.push(modelRoute(provider, id, { input: images === "yes" ? ["text", "image"] : ["text"] }));
+    routes.push(modelRoute(provider, id, {
+      input: images === "yes" ? ["text", "image"] : ["text"],
+      contextWindow: compactNumber(context),
+      maxTokens: compactNumber(maxOut),
+    }));
   }
   return routes;
 }

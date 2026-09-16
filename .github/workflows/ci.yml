@@ -39,6 +39,7 @@ jobs:
           installed="$package_root/node_modules/openmerit"
           node "$installed/dist/cli.js" --help
           OPENMERIT_HOME="$state_root" node "$installed/dist/cli.js" init
+          OPENMERIT_HOME="$state_root" node "$installed/dist/cli.js" verify
           test -f "$installed/extension/openmerit.ts"
           test -f "$installed/instructions/openmerit.policy.json"
           test -f "$installed/benchmark/invoice_ocr/data/manifest.json"

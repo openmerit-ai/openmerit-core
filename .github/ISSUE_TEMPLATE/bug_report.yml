@@ -1,0 +1,36 @@
+name: Bug report
+description: Report an OpenMerit installation, trial, or recommendation problem
+title: "[bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve OpenMerit. Please do not include API keys, task contents, or raw private traces.
+  - type: input
+    id: version
+    attributes:
+      label: OpenMerit version
+      placeholder: 0.1.3
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Paste the output of `npx openmerit doctor --json`. It does not include credentials, prompts, or trace contents.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include the command or Pi action, expected result, and actual result. Redact sensitive task data.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Provide the shortest safe sequence that reproduces the problem.

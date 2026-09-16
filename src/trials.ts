@@ -2,7 +2,7 @@
 
 import { directChatClient } from "./llm.js";
 import { judge, parseObj } from "./judge.js";
-import { paths, readJson, writeJson } from "./store.js";
+import { paths, readJsonReport, writeJson } from "./store.js";
 import type { Policy } from "./policy.js";
 import type { CatalogEntry, TrialPoint } from "./types.js";
 import type { ModelRoute } from "./types.js";
@@ -19,7 +19,9 @@ function today(): string {
 }
 
 export function budgetOk(policy: Policy): { ok: boolean; reason?: string } {
-  const ledger = readJson<Ledger>(paths.ledger(), { date: today(), trials: 0, usd: 0 });
+  const report = readJsonReport<Ledger>(paths.ledger(), { date: today(), trials: 0, usd: 0 });
+  if (!report.valid) return { ok: false, reason: "trial ledger is malformed; run `openmerit doctor`" };
+  const ledger = report.value;
   if (ledger.date !== today()) return { ok: true }; // new day resets
   if (ledger.trials >= policy.budgets.max_trials_per_day)
     return { ok: false, reason: `daily trial cap reached (${policy.budgets.max_trials_per_day})` };
@@ -47,7 +49,9 @@ export function trialBudgetOk(
 }
 
 export function recordTrialSpend(usd: number): void {
-  let ledger = readJson<Ledger>(paths.ledger(), { date: today(), trials: 0, usd: 0 });
+  const report = readJsonReport<Ledger>(paths.ledger(), { date: today(), trials: 0, usd: 0 });
+  if (!report.valid) throw new Error("trial ledger is malformed; refusing to reset spend");
+  let ledger = report.value;
   if (ledger.date !== today()) ledger = { date: today(), trials: 0, usd: 0 };
   ledger.trials += 1;
   ledger.usd = Math.round((ledger.usd + usd) * 1e6) / 1e6;
@@ -57,7 +61,9 @@ export function recordTrialSpend(usd: number): void {
 /** Record non-candidate merit-loop spend without consuming a trial slot. */
 export function recordMeritSpend(usd: number): void {
   if (!(usd > 0)) return;
-  let ledger = readJson<Ledger>(paths.ledger(), { date: today(), trials: 0, usd: 0 });
+  const report = readJsonReport<Ledger>(paths.ledger(), { date: today(), trials: 0, usd: 0 });
+  if (!report.valid) throw new Error("trial ledger is malformed; refusing to reset spend");
+  let ledger = report.value;
   if (ledger.date !== today()) ledger = { date: today(), trials: 0, usd: 0 };
   ledger.usd = Math.round((ledger.usd + usd) * 1e6) / 1e6;
   writeJson(paths.ledger(), ledger);

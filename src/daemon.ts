@@ -64,6 +64,27 @@ interface ProcessedTask {
   marker: string;
   status: "running" | "complete" | "no_swap" | "failed";
   updatedAt: string;
+  /** Lets a restarted process reclaim a job abandoned by a crash. */
+  ownerPid?: number;
+}
+
+function processIsAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** Completed jobs stay final; live owners retain their claim; abandoned claims can retry. */
+export function taskJobIsClaimed(prior: ProcessedTask | null, marker: string, now = Date.now()): boolean {
+  if (!prior || prior.marker !== marker || prior.status === "failed") return false;
+  if (prior.status !== "running") return true;
+  if (prior.ownerPid !== undefined) return processIsAlive(prior.ownerPid);
+  const updated = Date.parse(prior.updatedAt);
+  return Number.isFinite(updated) && now - updated < 15 * 60_000;
 }
 
 function emitTrialProgress(progress: {
@@ -208,11 +229,12 @@ export async function autoTaskTick(key: string | null, policy: Policy, settledTa
     : `${task.sessionFile}:${task.sessionBytes ?? task.settledAt}`;
   const processedPath = settledTask === undefined ? paths.watchProcessed() : paths.sessionJob(marker);
   const prior = readJson<ProcessedTask | null>(processedPath, null);
-  if (prior?.marker === marker && prior.status !== "failed") return null;
+  if (taskJobIsClaimed(prior, marker)) return null;
   if (!budgetOk(policy).ok) return null;
 
   // Claim the settled turn before provider calls so the next poll cannot duplicate it.
-  writeJson(processedPath, { marker, status: "running", updatedAt: new Date().toISOString() } satisfies ProcessedTask);
+  writeJson(processedPath, { marker, status: "running", ownerPid: process.pid,
+    updatedAt: new Date().toISOString() } satisfies ProcessedTask);
   try {
   let cat = routeCatalog(task.routes);
   if (!cat.has(routeKey(task.route))) cat.set(routeKey(task.route), routeCatalog([task.route]).values().next().value!);
@@ -296,11 +318,11 @@ export async function autoTaskTick(key: string | null, policy: Policy, settledTa
     console.log(`[openmerit] task ${tKey}: selected ${rec.recommended.model}; auto=${rec.policy.autoApply}`);
   } else console.log(`[openmerit] task ${tKey}: active model remains best`);
   writeJson(processedPath, { marker, status: rec ? "complete" : "no_swap",
-    updatedAt: new Date().toISOString() } satisfies ProcessedTask);
+    ownerPid: process.pid, updatedAt: new Date().toISOString() } satisfies ProcessedTask);
   return rec;
   } catch (error) {
     writeJson(processedPath, { marker, status: "failed",
-      updatedAt: new Date().toISOString() } satisfies ProcessedTask);
+      ownerPid: process.pid, updatedAt: new Date().toISOString() } satisfies ProcessedTask);
     throw error;
   }
 }

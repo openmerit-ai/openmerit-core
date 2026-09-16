@@ -47,7 +47,7 @@ export async function pickNext(
 ): Promise<StratPick | null> {
   const entryKey = (c: CatalogEntry) => c.route ? routeKey(c.route) : c.id;
   const ok = (c: CatalogEntry) =>
-    (c.priceKnown === false || c.price <= maxPrice) &&
+    c.priceKnown !== false && c.price <= maxPrice &&
     !tried.has(entryKey(c)) &&
     c.ctx >= 4096 &&
     !failedVendors.has(c.route?.provider ?? c.id.split("/")[0]);

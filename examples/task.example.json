@@ -2,5 +2,6 @@
   "task": "Write a Python function `def word_ladder(begin, end, words)` that returns the SHORTEST transformation sequence from `begin` to `end`, where consecutive words differ by exactly one character and every intermediate word must be in `words`. Return [] if no path exists. If begin == end return [begin]. All words are the same length, lowercase a-z. Output only runnable code, no explanation.",
   "eval": "Score 1.0 requires ALL of: (a) algorithm guaranteed to find a shortest path (BFS or equivalent, NOT DFS/greedy); (b) returned path starts with begin and ends with end with all intermediates in words; (c) returns [] when impossible; (d) begin==end returns [begin]; (e) begin need not be in words; (f) syntactically valid, runnable Python, no external imports, function named word_ladder; (g) output contains only code. Deduct ~0.2 per missing criterion; non-shortest-path algorithms score at most 0.5.",
   "initial_model": "openai/gpt-4o-mini",
+  "initial_route": "openai:gpt-4o-mini",
   "max_usd_per_m": 20
 }
