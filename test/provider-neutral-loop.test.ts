@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { autoTaskTick } from "../src/daemon.js";
+import { compareSettledTask } from "../src/comparison.js";
 import { DEFAULT_POLICY } from "../src/policy.js";
 import { modelRoute } from "../src/routes.js";
 import { paths } from "../src/store.js";
@@ -38,7 +38,6 @@ if (!args.includes('--no-extensions') || args[args.indexOf('--extension') + 1] !
 const prompt = args.at(-1);
 let text = 'better candidate answer';
 if (prompt.includes('Write a compact grading rubric')) text = '{"rubric":"correctness"}';
-else if (prompt.includes('finding the best configured model route')) text = '{"next_model":"local:b","why":"cheap and capable"}';
 else if (prompt.includes("You are grading")) text = prompt.includes('ANSWER: baseline')
   ? '{"score":0.5,"why":"baseline"}' : '{"score":0.9,"why":"better"}';
 console.log(JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text }],
@@ -58,8 +57,8 @@ console.log(JSON.stringify({ type: 'message_end', message: { role: 'assistant', 
     const task = `<file name="${attachment}">attachment bytes</file>\nsolve task`;
     const files = sessionFiles(task);
     const log = vi.spyOn(console, "log");
-    const rec = await autoTaskTick(null, { ...DEFAULT_POLICY,
-      watch: { ...DEFAULT_POLICY.watch, models_per_task: 2 },
+    const rec = await compareSettledTask({ ...DEFAULT_POLICY,
+      comparison: { max_routes: 2 },
       route_overrides: { "local:b": { input: ["text"], cost: { input: 0.1, output: 0.2 },
         context_window: 8192, max_tokens: 2048 } },
       pi: { provider_extensions: [providerExtension] },

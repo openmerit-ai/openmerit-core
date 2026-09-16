@@ -8,7 +8,7 @@ import { LocalJsonlEventSink, meritEvent } from "./integrations.js";
 import { piExecutable, availablePiRoutes } from "./pi-trials.js";
 import { DEFAULT_POLICY, loadPolicy, providerAllowed } from "./policy.js";
 import { buildRecommendation } from "./recommend.js";
-import { applyRouteOverrides, modelRoute, routeCatalog, routeKey, routeLabel } from "./routes.js";
+import { applyRouteOverrides, modelRoute, routeKey, routeLabel, routePrice } from "./routes.js";
 import { validatePiProviderExtensions } from "./pi-config.js";
 import {
   appendJsonl, paths, readJsonReport, readJsonlReport, writeJson,
@@ -145,7 +145,6 @@ export function collectDoctorReport(): DiagnosticReport {
   const jsonlFiles = [
     ["recommendations.jsonl", paths.recommendations()],
     ["trials.jsonl", paths.trials()],
-    ["traces/observations.jsonl", paths.observations()],
     ["events.jsonl", paths.events()],
   ] as const;
   const malformed = jsonlFiles.flatMap(([label, file]) => {
@@ -160,16 +159,6 @@ export function collectDoctorReport(): DiagnosticReport {
   checks.push(ledger.valid
     ? check("ledger", "pass", "Trial-spend ledger is readable")
     : check("ledger", "fail", "Trial-spend ledger is malformed; spending remains disabled until repaired"));
-
-  let openRouter = false;
-  try {
-    const env = process.env.OPENROUTER_API_KEY;
-    if (env?.trim()) openRouter = true;
-    else if (existsSync(paths.envFile())) openRouter = /^\s*OPENROUTER_API_KEY\s*=\s*\S+/m
-      .test(readFileSync(paths.envFile(), "utf8"));
-  } catch { /* optional */ }
-  checks.push(check("openrouter-enrichment", "pass",
-    openRouter ? "Optional OpenRouter enrichment is configured" : "Optional OpenRouter enrichment is not configured"));
 
   const activeRoute = stateRead.value.currentRoute ? routeLabel(stateRead.value.currentRoute) : null;
   return {
@@ -207,11 +196,10 @@ export function runOfflineVerify(): DiagnosticReport {
       ? check("atomic-json", "pass", "Atomic JSON state round-trip passed")
       : check("atomic-json", "fail", "Atomic JSON state round-trip failed"));
 
-    const entries = routeCatalog([active, candidate]);
     const point = (route: ModelRoute, score: number): TrialPoint => {
-      const entry = entries.get(routeKey(route))!;
-      return { schemaVersion: 1, model: route.meritId, route, score, price: entry.price,
-        priceKnown: entry.priceKnown, ts: new Date().toISOString(), source: "pi_trial" };
+      const priced = routePrice(route);
+      return { schemaVersion: 1, model: route.meritId, route, score, price: priced.price,
+        priceKnown: priced.known, ts: new Date().toISOString(), source: "pi_trial" };
     };
     const recommendation = buildRecommendation("verify-task", "offline verification", active.meritId,
       [point(active, 0.6), point(candidate, 0.9)], DEFAULT_POLICY, "/verify/session.jsonl", active);

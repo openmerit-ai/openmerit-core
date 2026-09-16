@@ -17,18 +17,11 @@ export const paths = {
   policy: () => join(stateDir(), "policy.json"),
   trials: () => join(stateDir(), "trials.jsonl"),
   recommendations: () => join(stateDir(), "recommendations.jsonl"),
-  catalogSnapshot: () => join(stateDir(), "catalog", "snapshot.json"),
-  candidates: () => join(stateDir(), "catalog", "candidates.json"),
-  benchmarksDigest: () => join(stateDir(), "benchmarks", "digest.json"),
-  traceCursor: () => join(stateDir(), "traces", "cursor.json"),
-  observations: () => join(stateDir(), "traces", "observations.jsonl"),
   events: () => join(stateDir(), "events.jsonl"),
   harnessState: () => join(stateDir(), "harness-state.json"),
   ledger: () => join(stateDir(), "ledger.json"),
-  watchProcessed: () => join(stateDir(), "watch", "processed.json"),
-  sessionJob: (marker: string) => join(stateDir(), "watch", "jobs", sha1(marker) + ".json"),
+  sessionJob: (marker: string) => join(stateDir(), "jobs", sha1(marker) + ".json"),
   trialTrace: (id: string) => join(stateDir(), "traces", "trials", `${sha1(id)}.jsonl`),
-  envFile: () => join(stateDir(), ".env"),
 };
 
 export function sha1(text: string): string {

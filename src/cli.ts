@@ -1,18 +1,16 @@
 #!/usr/bin/env node
-/** openmerit CLI: init / watch / trial / frontier / recommend / status / doctor / verify. */
+/** openmerit CLI: init / frontier / status / doctor / verify plus the internal session worker. */
 
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPolicy } from "./policy.js";
-import { loadKey } from "./llm.js";
 import { paretoFrontier, pickBest, pickFallback } from "./frontier.js";
 import { paths, readJson, readJsonl } from "./store.js";
-import { autoTaskTick, recommendTick, runDaemon, tickOnce } from "./daemon.js";
+import { compareSettledTask } from "./comparison.js";
 import { settledActiveTask } from "./pi-trials.js";
-import type { Frontier, ModelRoute, Recommendation, TaskObservation, TrialPoint } from "./types.js";
+import type { Frontier, ModelRoute, Recommendation, TrialPoint } from "./types.js";
 import { modelRoute, routeLabel } from "./routes.js";
-import { runStandaloneTrial } from "./standalone.js";
 import { collectDoctorReport, renderDiagnosticReport, runOfflineVerify } from "./diagnostics.js";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -30,11 +28,7 @@ function cmdInit(): void {
   console.log(`ext.    -> ${join(ROOT, "extension", "openmerit.ts")}`);
   console.log(`pi npm  -> pi install npm:openmerit`);
   console.log(`pi local-> pi install "${ROOT}"`);
-  console.log("\nNext: authenticate at least two models in pi, install one extension source, then start pi. OpenRouter is optional enrichment; candidate tools are disabled by default.");
-}
-
-function optionalOpenRouterKey(): string | null {
-  try { return loadKey(); } catch { return null; }
+  console.log("\nNext: authenticate at least two model routes in pi, install one extension source, then start pi. Candidate tools are disabled by default.");
 }
 
 function printReport(report: ReturnType<typeof collectDoctorReport>, json: boolean): void {
@@ -51,10 +45,15 @@ function cmdVerify(json: boolean): void {
 }
 
 function loadFrontiers(): Frontier[] {
-  const trials = readJsonl<TrialPoint & { taskKey?: string }>(paths.trials());
-  const observations = readJsonl<TaskObservation>(paths.observations());
+  const trials = readJsonl<TrialPoint>(paths.trials());
   const labelByTask = new Map<string, string>();
-  for (const o of observations) if (!labelByTask.has(o.taskKey)) labelByTask.set(o.taskKey, o.taskLabel);
+  for (const point of trials) {
+    if (point.taskKey && point.taskLabel && !labelByTask.has(point.taskKey))
+      labelByTask.set(point.taskKey, point.taskLabel);
+  }
+  for (const rec of readJsonl<Recommendation>(paths.recommendations())) {
+    if (!labelByTask.has(rec.taskKey)) labelByTask.set(rec.taskKey, rec.taskLabel);
+  }
   const byTask = new Map<string, TrialPoint[]>();
   for (const t of trials) {
     if (!t.taskKey) continue;
@@ -79,7 +78,7 @@ function loadFrontiers(): Frontier[] {
 function cmdFrontier(filter?: string): void {
   const frontiers = loadFrontiers().filter((f) => !filter || f.taskKey.startsWith(filter));
   if (frontiers.length === 0) {
-    console.log("no frontiers yet (run `openmerit trial` or let `openmerit watch` collect trials)");
+    console.log("no frontiers yet (complete a Pi task or use `/openmerit compare`)");
     return;
   }
   for (const f of frontiers) {
@@ -98,7 +97,6 @@ function cmdFrontier(filter?: string): void {
 
 function cmdStatus(): void {
   const harness = readJson<{ currentModel?: string; currentRoute?: ModelRoute; updatedAt?: string }>(paths.harnessState(), {});
-  const queue = readJson<{ newModels: { id: string; firstSeen: string }[] }>(paths.candidates(), { newModels: [] });
   const latestById = new Map<string, Recommendation>();
   for (const r of readJsonl<Recommendation>(paths.recommendations())) latestById.set(r.id, r);
   const recs = [...latestById.values()].filter((r) => r.status === "pending");
@@ -106,7 +104,6 @@ function cmdStatus(): void {
   console.log(`harness model : ${harness.currentRoute ? routeLabel(harness.currentRoute) : harness.currentModel ?? "unknown"} ` +
     `(as of ${harness.updatedAt ?? "n/a"})`);
   console.log(`tasks tracked : ${frontiers.length}`);
-  console.log(`new models queued for trial: ${queue.newModels.length}${queue.newModels.length ? " — " + queue.newModels.slice(0, 5).map((m) => m.id).join(", ") + (queue.newModels.length > 5 ? "…" : "") : ""}`);
   console.log(`pending recommendations: ${recs.length}`);
   for (const r of recs.slice(-5)) {
     console.log(`  - ${r.recommended.model} <- ${r.currentModel ?? "?"} (gain ${r.evidence.scoreGain}, auto=${r.policy.autoApply})`);
@@ -134,25 +131,11 @@ async function main(): Promise<void> {
       const task = settledActiveTask({ sessionFile, settledAt, currentModel, currentRoute,
         routes: state.routes, settledTaskKey, cwd, sessionBytes });
       if (!task) throw new Error("the specified pi session has no completed, supported task matching this marker");
-      await autoTaskTick(optionalOpenRouterKey(), policy, task);
-      break;
-    }
-    case "watch":
-      if (args.includes("--once")) await tickOnce(loadPolicy(paths.policy()));
-      else await runDaemon(loadPolicy(paths.policy()));
-      break;
-    case "trial": {
-      const file = args[0];
-      if (!file) throw new Error("usage: openmerit trial <task.json> [--rounds N]");
-      const rIdx = args.indexOf("--rounds");
-      await runStandaloneTrial(file, rIdx >= 0 ? Number(args[rIdx + 1]) : 5);
+      await compareSettledTask(policy, task);
       break;
     }
     case "frontier":
       cmdFrontier(args[0]);
-      break;
-    case "recommend":
-      recommendTick(loadPolicy(paths.policy()));
       break;
     case "status":
       cmdStatus();
@@ -164,16 +147,13 @@ async function main(): Promise<void> {
       cmdVerify(args.includes("--json"));
       break;
     default:
-      console.log(`openmerit — external model-merit harness
+      console.log(`openmerit — adaptive model decision layer
 
 usage: openmerit <command>
 
   init                 set up ~/.openmerit (policy, state dirs)
-  watch [--once]       observe completed pi tasks, trial candidates sequentially, and recommend session swaps
-  trial <task.json>    iterative model search on one task spec [--rounds N]
   frontier [taskKey]   print pareto frontier(s)
-  recommend            emit recommendations now
-  status               harness model, queued models, pending recommendations
+  status               active route, measured tasks, and pending recommendations
   doctor [--json]      diagnose pi, policy, routes, state, and installation
   verify [--json]      run an offline, provider-free core self-test`);
       if (cmd && cmd !== "help" && cmd !== "--help") process.exitCode = 1;

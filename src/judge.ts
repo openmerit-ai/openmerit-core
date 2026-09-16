@@ -1,11 +1,8 @@
 /** Judge: score a model's answer against a rubric. */
 
-import { directChatClient } from "./llm.js";
 import type { TaskImage } from "./task-input.js";
 import type { MeritChatClient } from "./providers.js";
 import type { ModelRoute } from "./types.js";
-
-export const JUDGE_PREFS = ["openai/gpt-4o-mini", "openai/gpt-4o"];
 
 const JUDGE_PROMPT = `You are grading a model's answer.
 TASK: {task}
@@ -26,12 +23,11 @@ export interface JudgeResult {
 }
 
 export async function judge(
-  key: string,
-  judgeModel: string | ModelRoute,
+  client: MeritChatClient,
+  judgeModel: ModelRoute,
   task: string,
   rubric: string,
   answer: string,
-  client: MeritChatClient = directChatClient(key),
 ): Promise<JudgeResult> {
   const { content } = await client.chat(
     judgeModel,
@@ -43,7 +39,9 @@ export async function judge(
   );
   try {
     const j = parseObj(content);
-    return { score: Number(j.score ?? 0), why: String(j.why ?? "") };
+    const score = Number(j.score ?? 0);
+    return { score: Number.isFinite(score) ? Math.max(0, Math.min(1, score)) : 0,
+      why: String(j.why ?? "") };
   } catch {
     return { score: 0, why: "unparseable judge output" };
   }
@@ -51,18 +49,20 @@ export async function judge(
 
 /** Grade OCR answers against the actual uploaded pixels, not answer text alone. */
 export async function judgeWithImages(
-  key: string, judgeModel: string | ModelRoute, task: string, rubric: string,
-  answer: string, images: TaskImage[], client: MeritChatClient = directChatClient(key),
+  client: MeritChatClient, judgeModel: ModelRoute, task: string, rubric: string,
+  answer: string, images: TaskImage[],
 ): Promise<JudgeResult> {
   const prompt = `You are grading an answer to a visual task. Inspect the attached image carefully.\n` +
     `TASK: ${task}\nRUBRIC: ${rubric}\nANSWER: ${answer.slice(0, 16000)}\n` +
-    `For invoice extraction, check every visible field and line item against the image. ` +
-    `Penalize missing, invented, or mistyped values and invalid JSON. ` +
+    `Check the answer against all relevant visible evidence. Penalize missing, invented, ` +
+    `mistyped, or structurally invalid content. ` +
     `Return ONLY json: {"score": <0..1>, "why": "<one line>"}`;
   const { content } = await client.chatWithImages(judgeModel, prompt, images, 1024);
   try {
     const j = parseObj(content);
-    return { score: Number(j.score ?? 0), why: String(j.why ?? "") };
+    const score = Number(j.score ?? 0);
+    return { score: Number.isFinite(score) ? Math.max(0, Math.min(1, score)) : 0,
+      why: String(j.why ?? "") };
   } catch {
     return { score: 0, why: "unparseable visual judge output" };
   }

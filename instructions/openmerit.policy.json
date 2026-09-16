@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "mode": "recommend",
   "auto_apply": {
     "enabled": false,
@@ -16,19 +16,15 @@
     "allow": ["*"],
     "deny": []
   },
-  "watch": {
-    "catalog_interval_min": 360,
-    "traces_interval_sec": 5,
-    "trial_interval_min": 30,
-    "models_per_task": 3
+  "comparison": {
+    "max_routes": 3
   },
   "fallback": {
     "auto_update": true,
     "min_score": 0.6,
     "apply_on_error": true
   },
-  "judge_model": null,
-  "strategist_model": null,
+  "evaluator_model": null,
   "max_usd_per_m": 20.0,
   "route_overrides": {},
   "pi": {

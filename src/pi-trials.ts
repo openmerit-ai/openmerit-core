@@ -6,14 +6,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { createHash } from "node:crypto";
 import { judge, judgeWithImages } from "./judge.js";
-import { knownInvoiceScore } from "./invoice-eval.js";
 import { paths, readJson } from "./store.js";
 import { sessionFiles, sessionImages, taskInputKey, type TaskFile, type TaskImage } from "./task-input.js";
 import type { HarnessAdapter, HarnessTask, HarnessRun } from "./harness.js";
-import type { CatalogEntry, ModelRoute, TrialPoint } from "./types.js";
-import { legacyOpenRouterRoute, meritModelId, modelRoute, routeKey } from "./routes.js";
+import type { ModelRoute, TrialPoint } from "./types.js";
+import { legacyOpenRouterRoute, meritModelId, modelRoute, routeKey, routePrice } from "./routes.js";
 import type { MeritChatClient } from "./providers.js";
-import { directChatClient } from "./llm.js";
 import { piProviderExtensionArgs } from "./pi-config.js";
 
 interface PiMessage {
@@ -37,8 +35,8 @@ export type PiRun = HarnessRun;
 export class PiHarnessAdapter implements HarnessAdapter {
   constructor(private readonly providerExtensions: string[] = []) {}
 
-  runTask(model: string | ModelRoute, input: HarnessTask): Promise<HarnessRun> {
-    return executePiTask(model, input.task, input.cwd, input.images, input.files, this.providerExtensions);
+  runTask(route: ModelRoute, input: HarnessTask): Promise<HarnessRun> {
+    return executePiTask(route, input.task, input.cwd, input.images, input.files, this.providerExtensions);
   }
 }
 
@@ -229,11 +227,6 @@ export function availablePiRoutes(snapshot?: ModelRoute[], providerExtensions: s
   return routes;
 }
 
-/** Backward-compatible logical-id view used by the standalone OpenRouter trial command. */
-export function availablePiModels(): Set<string> {
-  return new Set(availablePiRoutes().map((route) => route.meritId));
-}
-
 /** Each invocation is a fresh pi run, so model B does not inherit model A's answer. */
 export async function executePiTask(
   model: string | ModelRoute, task: string, cwd = process.cwd(), images: TaskImage[] = [], files: TaskFile[] = [],
@@ -333,19 +326,20 @@ export async function executePiTask(
 
 /** Quality uses the same OpenMerit judge; cost and latency come from pi itself. */
 export async function runPiTrial(
-  key: string, judgeModel: string | ModelRoute, task: string, rubric: string,
-  model: string, entry: CatalogEntry | undefined, cwd = process.cwd(), images: TaskImage[] = [], files: TaskFile[] = [],
+  judgeModel: ModelRoute, task: string, rubric: string,
+  route: ModelRoute, client: MeritChatClient,
+  cwd = process.cwd(), images: TaskImage[] = [], files: TaskFile[] = [],
   harness: HarnessAdapter = defaultHarness,
-  client: MeritChatClient = directChatClient(key),
 ): Promise<{ point: TrialPoint; costUsd: number; error?: string; sessionId?: string }> {
   try {
-    const run = await harness.runTask(entry?.route ?? model, { task, cwd, images, files });
-    return await scorePiRun(key, judgeModel, task, rubric, model, entry, run, "pi_trial", images, client);
+    const run = await harness.runTask(route, { task, cwd, images, files });
+    return await scorePiRun(judgeModel, task, rubric, route, run, client, "pi_trial", images);
   } catch (e) {
     const error = String(e);
+    const priced = routePrice(route);
     return {
-      point: { schemaVersion: 1, model, route: entry?.route, score: 0, price: entry?.price ?? 0,
-        priceKnown: entry?.priceKnown ?? !!entry,
+      point: { schemaVersion: 1, model: route.meritId, route, score: 0, price: priced.price,
+        priceKnown: priced.known,
         ts: new Date().toISOString(), source: "pi_trial", toolCalls: 0, toolErrors: 1,
         changedFiles: 0, why: error.slice(0, 160) },
       costUsd: 0, error,
@@ -354,25 +348,24 @@ export async function runPiTrial(
 }
 
 export async function scorePiRun(
-  key: string, judgeModel: string | ModelRoute, task: string, rubric: string,
-  model: string, entry: CatalogEntry | undefined, run: PiRun,
+  judgeModel: ModelRoute, task: string, rubric: string,
+  route: ModelRoute, run: PiRun, client: MeritChatClient,
   source: "pi_trial" | "trace", images: TaskImage[] = [],
-  client: MeritChatClient = directChatClient(key),
 ): Promise<{ point: TrialPoint; costUsd: number; error?: string; sessionId?: string }> {
     let score = 0;
     let why = "judge unavailable";
     try {
-      const pinned = images.length ? await knownInvoiceScore(task, images, run.answer) : null;
-      const j = pinned ?? (images.length
-        ? await judgeWithImages(key, judgeModel, task, rubric, run.answer, images, client)
-        : await judge(key, judgeModel, task, rubric, run.answer, client));
-      score = Math.max(0, Math.min(1, j.score));
+      const j = images.length
+        ? await judgeWithImages(client, judgeModel, task, rubric, run.answer, images)
+        : await judge(client, judgeModel, task, rubric, run.answer);
+      score = j.score;
       why = j.why;
     } catch (e) { why = `judge error: ${String(e).slice(0, 120)}`; }
+    const priced = routePrice(route);
     return {
       point: {
-        schemaVersion: 1, model, route: entry?.route, score, price: entry?.price ?? 0,
-        priceKnown: entry?.priceKnown ?? !!entry,
+        schemaVersion: 1, model: route.meritId, route, score, price: priced.price,
+        priceKnown: priced.known,
         latencyMs: run.latencyMs, ts: new Date().toISOString(), source,
         why: `${why}${run.errors ? `; pi errors: ${run.errors}` : ""}; ` +
           `tools=${run.toolCalls}, toolErrors=${run.toolErrors}, changedFiles=${run.changedFiles}`,

@@ -42,12 +42,16 @@ export interface TrialPoint {
   ts: string;
   /** Where this point came from. */
   source: "shadow_trial" | "pi_trial" | "trace" | "benchmark";
-  /** One-line justification (judge/strategist). */
+  /** One-line evaluation justification. */
   why?: string;
   /** Tool activity observed during a Pi candidate run. */
   toolCalls?: number;
   toolErrors?: number;
   changedFiles?: number;
+  /** Exact task and session that produced this measurement. */
+  taskKey?: string;
+  taskLabel?: string;
+  sessionFile?: string;
 }
 
 /** Per-task pareto state. */
@@ -95,40 +99,4 @@ export interface Recommendation {
   };
   policy: GateDecision;
   status: "pending" | "applied" | "dismissed" | "expired";
-}
-
-/** Normalized provider-route catalog entry; OpenRouter snapshots use the same shape. */
-export interface CatalogEntry {
-  id: string;
-  name: string;
-  ctx: number;
-  /** $/token prompt. */
-  pp: number;
-  /** $/token completion. */
-  pc: number;
-  /** Blended $/1M tokens. */
-  price: number;
-  /** False when the provider did not expose pricing. */
-  priceKnown?: boolean;
-  /** Exact route represented by this entry. */
-  route?: ModelRoute;
-  /** Live OpenRouter input modalities (used to avoid text-only image trials). */
-  inputModalities?: string[];
-  /** Unix seconds, when the model was added to the catalog (if known). */
-  created?: number;
-}
-
-/** Observation extracted from a main-harness session trace. */
-export interface TaskObservation {
-  schemaVersion?: 1;
-  taskKey: string;
-  taskLabel: string;
-  model: string | null;
-  route?: ModelRoute | null;
-  costUsd: number;
-  tokens: number;
-  latencyMs: number | null;
-  errors: number;
-  ts: string;
-  sessionFile: string;
 }

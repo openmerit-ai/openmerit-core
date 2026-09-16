@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { dominates, paretoFrontier, pickBest, pickFallback, scorePriceChain } from "../src/frontier.js";
+import { dominates, paretoFrontier, pickBest, pickFallback } from "../src/frontier.js";
 import type { TrialPoint } from "../src/types.js";
 
 function pt(model: string, score: number, price: number, latencyMs?: number): TrialPoint {
-  return { model, score, price, latencyMs, ts: "2026-09-11T00:00:00Z", source: "shadow_trial" };
+  return { model, score, price, latencyMs, ts: "2026-09-11T00:00:00Z", source: "pi_trial" };
 }
 
 describe("dominates", () => {
@@ -38,14 +38,6 @@ describe("paretoFrontier", () => {
     expect(fr).not.toContain("expensive-bad");
   });
 
-  it("scorePriceChain keeps the original model-search semantics", () => {
-    expect(scorePriceChain(points).map((p) => p.model)).toEqual([
-      "cheap-weak",
-      "cheap-good",
-      "mid",
-      "top",
-    ]);
-  });
 });
 
 describe("pickBest / pickFallback", () => {

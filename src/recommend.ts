@@ -31,7 +31,9 @@ export function buildRecommendation(
   if (current && scoreGain < 0) return null;
 
   const priceKnown = best.priceKnown !== false && (!current || current.priceKnown !== false);
-  const priceRatio = priceKnown && current && current.price > 0 ? best.price / current.price : 1;
+  const priceRatio = priceKnown && current
+    ? current.price > 0 ? best.price / current.price : best.price === 0 ? 1 : 1e12
+    : 1;
   const frontierModels = paretoFrontier(scored).map(pointKey);
   const onFrontier = frontierModels.includes(pointKey(best));
 

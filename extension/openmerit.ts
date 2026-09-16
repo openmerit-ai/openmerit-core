@@ -6,8 +6,8 @@
  *
  * What it does:
  *  - Reports this harness's current model to openmerit (~/.openmerit/harness-state.json).
- *  - Polls ~/.openmerit/recommendations.jsonl for model-swap recommendations
- *    produced by the background track.
+ *  - Queues one controlled, session-bound comparison after a task settles.
+ *  - Polls ~/.openmerit/recommendations.jsonl for completed route decisions.
  *  - Applies swaps with pi.setModel() when the policy gate says "auto",
  *    otherwise asks (Apply / Dismiss) or waits for /openmerit apply.
  *  - Keeps the fallback model: on provider errors/rate limits, offers to
@@ -33,7 +33,7 @@ const TRIALS_FILE = join(HOME, "trials.jsonl");
 const STATE_FILE = join(HOME, "harness-state.json");
 const POLICY_FILE = join(HOME, "policy.json");
 const LEDGER_FILE = join(HOME, "ledger.json");
-const JOB_DIR = join(HOME, "watch", "jobs");
+const JOB_DIR = join(HOME, "jobs");
 const ENGINE_FILE = join(fileURLToPath(new URL("..", import.meta.url)), "dist", "cli.js");
 const PROGRESS_PREFIX = "[openmerit/progress] ";
 
@@ -91,8 +91,16 @@ function completedTrialText(trial: TrialRunProgress): string {
 
 interface ExtensionPolicy {
   mode?: string;
-  fallback?: { apply_on_error?: boolean };
+  auto_apply?: {
+    enabled?: boolean;
+    min_score_gain?: number;
+    max_price_ratio?: number;
+    require_frontier?: boolean;
+  };
+  providers?: { allow?: string[]; deny?: string[] };
+  fallback?: { auto_update?: boolean; apply_on_error?: boolean };
   budgets?: { max_trials_per_day?: number; max_usd_per_day?: number };
+  max_usd_per_m?: number;
   route_overrides?: Record<string, {
     cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
     context_window?: number;
@@ -140,9 +148,52 @@ function loadPolicy(): ExtensionPolicy {
   try {
     return JSON.parse(readFileSync(POLICY_FILE, "utf8")) as ExtensionPolicy;
   } catch {
-    return { mode: "recommend", fallback: { apply_on_error: false },
+    return { mode: "recommend", auto_apply: { enabled: false },
+      fallback: { auto_update: false, apply_on_error: false },
       budgets: { max_trials_per_day: 0, max_usd_per_day: 0 } };
   }
+}
+
+function currentPolicyAllowsRoute(
+  policy: ExtensionPolicy, model: string, route: ModelRoute | null | undefined,
+): boolean {
+  if (!route || route.meritId !== model || !route.cost ||
+      !Number.isFinite(route.cost.input) || route.cost.input < 0 ||
+      !Number.isFinite(route.cost.output) || route.cost.output < 0) return false;
+  const maxPrice = policy.max_usd_per_m ?? 20;
+  if (typeof maxPrice !== "number" || !Number.isFinite(maxPrice) || maxPrice < 0) return false;
+  const price = (route.cost.input + route.cost.output) / 2;
+  if (price > maxPrice) return false;
+  const provider = route.provider;
+  const vendor = model.split("/")[0];
+  const matches = (pattern: string) => pattern === "*" || pattern === model || pattern === provider ||
+    (pattern.endsWith("/*") && (pattern.slice(0, -2) === vendor || pattern.slice(0, -2) === provider));
+  const allow = policy.providers?.allow ?? ["*"];
+  const deny = policy.providers?.deny ?? [];
+  if (!Array.isArray(allow) || !Array.isArray(deny) ||
+      allow.some((item) => typeof item !== "string" || !item.trim()) ||
+      deny.some((item) => typeof item !== "string" || !item.trim())) return false;
+  if (deny.some(matches)) return false;
+  return allow.some(matches);
+}
+
+function currentPolicyAllowsAuto(rec: Recommendation): boolean {
+  const policy = loadPolicy();
+  if (policy.mode !== "auto" || policy.auto_apply?.enabled !== true) return false;
+  if (rec.evidence.priceKnown === false ||
+      !currentPolicyAllowsRoute(policy, rec.recommended.model, rec.recommended.route)) return false;
+  const minGain = policy.auto_apply.min_score_gain ?? 0.1;
+  const maxRatio = policy.auto_apply.max_price_ratio ?? 1.5;
+  const requireFrontier = policy.auto_apply.require_frontier ?? true;
+  if (typeof minGain !== "number" || !Number.isFinite(minGain) || minGain < 0 || minGain > 1 ||
+      typeof maxRatio !== "number" || !Number.isFinite(maxRatio) || maxRatio < 0 ||
+      typeof requireFrontier !== "boolean" ||
+      typeof rec.evidence.scoreGain !== "number" || !Number.isFinite(rec.evidence.scoreGain) ||
+      typeof rec.evidence.priceRatio !== "number" || !Number.isFinite(rec.evidence.priceRatio)) return false;
+  if (rec.evidence.scoreGain < minGain) return false;
+  if (rec.evidence.priceRatio > maxRatio) return false;
+  if (requireFrontier && !rec.evidence.onFrontier) return false;
+  return true;
 }
 
 interface Recommendation {
@@ -429,92 +480,38 @@ function restoreFallback(): void {
   }
 }
 
-/** Resolve an OpenRouter-style "vendor/model" id against pi's model registry. */
-function resolveModel(ctx: ExtensionContext, openrouterId: string) {
-  const [vendor, ...rest] = openrouterId.split("/");
+/** Resolve a legacy logical "vendor/model" id against Pi's configured registry. */
+function resolveModel(ctx: ExtensionContext, meritId: string) {
+  const [vendor, ...rest] = meritId.split("/");
   const modelId = rest.join("/");
   const reg = ctx.modelRegistry as unknown as {
     find?: (provider: string, id: string) => unknown | undefined;
     getAvailable?: () => { provider: string; id: string }[];
   };
   // Prefer the OpenRouter provider entry itself.
-  const viaOpenRouter = reg.find?.("openrouter", openrouterId) ?? reg.find?.("openrouter", modelId);
+  const viaOpenRouter = reg.find?.("openrouter", meritId) ?? reg.find?.("openrouter", modelId);
   if (viaOpenRouter) return viaOpenRouter;
   // Then a native provider ("anthropic/claude-..." -> provider "anthropic").
   const native = reg.find?.(vendor, modelId);
   if (native) return native;
-  // Last resort: scan the catalogue for an id match.
+  // Last resort for old route-less records: scan configured routes for an id match.
   for (const m of reg.getAvailable?.() ?? []) {
-    if (m.id === openrouterId || m.id === modelId || m.id.endsWith(`/${modelId}`)) return m;
+    if (m.id === meritId || m.id === modelId || m.id.endsWith(`/${modelId}`)) return m;
   }
   return undefined;
 }
 
-interface CatalogEntryLite {
-  id: string;
-  name?: string;
-  ctx?: number;
-  pp?: number;
-  pc?: number;
-  inputModalities?: string[];
-}
-
-const INJECT_PROVIDER = "openmerit-openrouter";
-const injectedModels: CatalogEntryLite[] = [];
-
-function catalogEntry(openrouterId: string): CatalogEntryLite | undefined {
-  try {
-    const snap = JSON.parse(readFileSync(join(HOME, "catalog", "snapshot.json"), "utf8")) as {
-      entries?: CatalogEntryLite[];
-    };
-    return (snap.entries ?? []).find((e) => e.id === openrouterId);
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Ensure pi can use the model. pi's built-in registry lags the live
- * OpenRouter catalog, so inject anything missing via registerProvider
- * (takes effect immediately, no /reload needed).
- */
-function ensureModel(pi: ExtensionAPI, ctx: ExtensionContext, openrouterId: string, route?: ModelRoute) {
+/** Resolve only routes already configured in Pi; OpenMerit never registers a provider. */
+function ensureModel(_pi: ExtensionAPI, ctx: ExtensionContext, meritId: string, route?: ModelRoute) {
   const registry = ctx.modelRegistry as unknown as {
     find?: (provider: string, id: string) => unknown | undefined;
   };
   if (route) {
     const exact = registry.find?.(route.provider, route.modelId);
     if (exact) return exact;
-    if (route.provider !== "openrouter") return undefined;
+    return undefined;
   }
-  const existing = resolveModel(ctx, openrouterId);
-  if (existing) return existing;
-
-  const entry = catalogEntry(openrouterId);
-  if (!entry) return undefined;
-  if (!injectedModels.some((m) => m.id === entry.id)) injectedModels.push(entry);
-
-  pi.registerProvider(INJECT_PROVIDER, {
-    baseUrl: "https://openrouter.ai/api/v1",
-    apiKey: "$OPENROUTER_API_KEY",
-    api: "openai-completions",
-    models: injectedModels.map((m) => ({
-      id: m.id,
-      name: m.name ?? m.id,
-      reasoning: false,
-      input: entry.inputModalities?.includes("image") ? ["text", "image"] : ["text"],
-      cost: {
-        input: (m.pp ?? 0) * 1e6,
-        output: (m.pc ?? 0) * 1e6,
-        cacheRead: 0,
-        cacheWrite: 0,
-      },
-      contextWindow: m.ctx && m.ctx > 0 ? m.ctx : 128000,
-      maxTokens: 16384,
-    })),
-  });
-
-  return registry.find?.(INJECT_PROVIDER, openrouterId);
+  return resolveModel(ctx, meritId);
 }
 
 async function doctorSummary(): Promise<{ text: string; ok: boolean }> {
@@ -661,12 +658,12 @@ export default function openmerit(pi: ExtensionAPI) {
     const bytes = readFileSync(sessionFile).length;
     const marker = `${sessionFile}:${settledTaskKey}:${model}:${bytes}`;
     if (startedJobs.has(marker)) return "this task is already queued or was compared in this Pi session";
-    startedJobs.add(marker);
     const budget = trialBudget();
     if (budget.reason) {
       if (ctx.hasUI) ctx.ui.notify(`openmerit: comparison skipped: ${budget.reason}. ${budget.summary}`, "warning");
       return budget.reason;
     }
+    startedJobs.add(marker);
     queuedJobs.push({ sessionFile, settledAt, model, route, key: settledTaskKey, cwd: ctx.cwd, bytes });
     startNextJob(ctx);
     return "comparison queued";
@@ -702,7 +699,7 @@ export default function openmerit(pi: ExtensionAPI) {
     const ok = await pi.setModel(model as Parameters<typeof pi.setModel>[0]);
     if (ok) {
       setStatus(rec, "applied");
-      if (rec.fallback) {
+      if (rec.fallback && loadPolicy().fallback?.auto_update !== false) {
         fallbackModel = rec.fallback.model;
         fallbackRoute = rec.fallback.route ?? null;
       }
@@ -726,7 +723,7 @@ export default function openmerit(pi: ExtensionAPI) {
     }
     for (const rec of pendingRecommendations(ctx)) {
       if (notified.has(rec.id)) continue;
-      if (rec.policy.autoApply) {
+      if (rec.policy.autoApply && currentPolicyAllowsAuto(rec)) {
         if (!rec.sessionFile || rec.sessionFile !== ctx.sessionManager.getSessionFile()) continue;
         if (!ctx.isIdle()) continue;
         notified.add(rec.id);
@@ -809,12 +806,13 @@ export default function openmerit(pi: ExtensionAPI) {
     if (lastAssistant?.stopReason !== "error") return;
 
     const policy = loadPolicy();
-    if (policy.fallback?.apply_on_error === false) return;
+    if (policy.fallback?.apply_on_error !== undefined && policy.fallback.apply_on_error !== true) return;
     const current = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : "current model";
     const model = ensureModel(pi, ctx, fallbackModel, fallbackRoute ?? undefined);
     if (!model) return;
 
-    const auto = policy.mode === "auto";
+    const auto = policy.mode === "auto" && policy.auto_apply?.enabled === true &&
+      currentPolicyAllowsRoute(policy, fallbackModel, fallbackRoute);
     let ok = auto;
     if (!ok && ctx.mode === "tui") {
       // Modal confirm only in TUI; in RPC mode an unanswered dialog blocks

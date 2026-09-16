@@ -1,12 +1,12 @@
-/** Shadow trials: run candidate models against observed/declared tasks on the background track. */
+/** Budget accounting and rubric generation for controlled comparisons. */
 
-import { directChatClient } from "./llm.js";
-import { judge, parseObj } from "./judge.js";
+import { closeSync, existsSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { parseObj } from "./judge.js";
 import { paths, readJsonReport, writeJson } from "./store.js";
 import type { Policy } from "./policy.js";
-import type { CatalogEntry, TrialPoint } from "./types.js";
 import type { ModelRoute } from "./types.js";
 import type { MeritChatClient } from "./providers.js";
+import { estimateRouteCost } from "./routes.js";
 
 interface Ledger {
   date: string;
@@ -33,13 +33,14 @@ export function budgetOk(policy: Policy): { ok: boolean; reason?: string } {
 /** Conservative admission estimate for one candidate answer (rough input tokens + 4K output). */
 export function trialBudgetOk(
   policy: Policy,
-  entry: CatalogEntry,
-  inputChars: number,
+  route: ModelRoute,
+  inputBytes: number,
 ): { ok: boolean; estimatedUsd?: number; reason?: string } {
-  if (entry.priceKnown === false) return { ok: false, reason: "route price is unknown" };
-  const inputTokens = Math.ceil(inputChars / 4);
-  const outputTokens = Math.min(entry.route?.maxTokens ?? 4096, 4096);
-  const estimatedUsd = entry.pp * inputTokens + entry.pc * outputTokens;
+  const inputTokens = Math.ceil(inputBytes / 4);
+  const outputTokens = Math.min(route.maxTokens ?? 4096, 4096);
+  const estimate = estimateRouteCost(route, inputTokens, outputTokens);
+  if (!estimate.known) return { ok: false, reason: "route price is unknown" };
+  const estimatedUsd = estimate.usd;
   if (estimatedUsd > policy.budgets.max_usd_per_trial) return {
     ok: false,
     estimatedUsd,
@@ -48,25 +49,58 @@ export function trialBudgetOk(
   return { ok: true, estimatedUsd };
 }
 
+function withLedgerLock<T>(fn: () => T): T {
+  const lock = `${paths.ledger()}.lock`;
+  const token = `${process.pid}:${Date.now()}:${Math.random()}`;
+  const started = Date.now();
+  let fd: number | null = null;
+  while (fd === null) {
+    try {
+      fd = openSync(lock, "wx");
+      writeFileSync(fd, token);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST") throw error;
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > 30_000) unlinkSync(lock);
+      } catch { /* another process released it */ }
+      if (Date.now() - started > 2_000) throw new Error("trial ledger is busy; refusing an unlocked update");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    closeSync(fd);
+    try {
+      if (existsSync(lock) && readFileSync(lock, "utf8") === token) unlinkSync(lock);
+    } catch { /* a stale-lock recovery raced with cleanup */ }
+  }
+}
+
 export function recordTrialSpend(usd: number): void {
-  const report = readJsonReport<Ledger>(paths.ledger(), { date: today(), trials: 0, usd: 0 });
-  if (!report.valid) throw new Error("trial ledger is malformed; refusing to reset spend");
-  let ledger = report.value;
-  if (ledger.date !== today()) ledger = { date: today(), trials: 0, usd: 0 };
-  ledger.trials += 1;
-  ledger.usd = Math.round((ledger.usd + usd) * 1e6) / 1e6;
-  writeJson(paths.ledger(), ledger);
+  withLedgerLock(() => {
+    const report = readJsonReport<Ledger>(paths.ledger(), { date: today(), trials: 0, usd: 0 });
+    if (!report.valid) throw new Error("trial ledger is malformed; refusing to reset spend");
+    let ledger = report.value;
+    if (ledger.date !== today()) ledger = { date: today(), trials: 0, usd: 0 };
+    ledger.trials += 1;
+    ledger.usd = Math.round((ledger.usd + usd) * 1e6) / 1e6;
+    writeJson(paths.ledger(), ledger);
+  });
 }
 
 /** Record non-candidate merit-loop spend without consuming a trial slot. */
 export function recordMeritSpend(usd: number): void {
   if (!(usd > 0)) return;
-  const report = readJsonReport<Ledger>(paths.ledger(), { date: today(), trials: 0, usd: 0 });
-  if (!report.valid) throw new Error("trial ledger is malformed; refusing to reset spend");
-  let ledger = report.value;
-  if (ledger.date !== today()) ledger = { date: today(), trials: 0, usd: 0 };
-  ledger.usd = Math.round((ledger.usd + usd) * 1e6) / 1e6;
-  writeJson(paths.ledger(), ledger);
+  withLedgerLock(() => {
+    const report = readJsonReport<Ledger>(paths.ledger(), { date: today(), trials: 0, usd: 0 });
+    if (!report.valid) throw new Error("trial ledger is malformed; refusing to reset spend");
+    let ledger = report.value;
+    if (ledger.date !== today()) ledger = { date: today(), trials: 0, usd: 0 };
+    ledger.usd = Math.round((ledger.usd + usd) * 1e6) / 1e6;
+    writeJson(paths.ledger(), ledger);
+  });
 }
 
 const RUBRIC_PROMPT = `Write a compact grading rubric for answers to the task below.
@@ -76,11 +110,10 @@ Return ONLY json: {{"rubric": "<text>"}}`;
 
 /** Derive (and cache) a grading rubric for a task that came from traces. */
 export async function ensureRubric(
-  key: string,
-  judgeModel: string | ModelRoute,
+  client: MeritChatClient,
+  judgeModel: ModelRoute,
   task: string,
   cache: Map<string, string>,
-  client: MeritChatClient = directChatClient(key),
 ): Promise<string> {
   const hit = cache.get(task);
   if (hit) return hit;
@@ -99,71 +132,4 @@ export async function ensureRubric(
   }
   cache.set(task, rubric);
   return rubric;
-}
-
-/** Run one shadow trial: generate with `model`, judge the output, return a frontier point + cost. */
-export async function runTrial(
-  key: string,
-  judgeModel: string | ModelRoute,
-  task: string,
-  rubric: string,
-  model: string,
-  entry: CatalogEntry | undefined,
-  client: MeritChatClient = directChatClient(key),
-): Promise<{ point: TrialPoint; costUsd: number; error?: string }> {
-  const started = Date.now();
-  let gen: string;
-  let usage: { prompt_tokens?: number; completion_tokens?: number } = {};
-  try {
-    const r = await client.chat(entry?.route ?? model, task, 4096, 0.2);
-    gen = r.content;
-    usage = r.usage;
-  } catch (e) {
-    return {
-      point: {
-        schemaVersion: 1, model, route: entry?.route, score: 0, price: entry?.price ?? 0,
-        priceKnown: entry?.priceKnown ?? !!entry,
-        ts: new Date().toISOString(), source: "shadow_trial", why: String(e).slice(0, 160),
-      },
-      costUsd: 0,
-      error: String(e),
-    };
-  }
-  const latencyMs = Date.now() - started;
-  const costUsd =
-    (entry?.pp ?? 0) * (usage.prompt_tokens ?? 0) + (entry?.pc ?? 0) * (usage.completion_tokens ?? 0);
-  if (!gen.trim()) {
-    return {
-      point: {
-        schemaVersion: 1, model, route: entry?.route, score: 0, price: entry?.price ?? 0,
-        priceKnown: entry?.priceKnown ?? !!entry, latencyMs,
-        ts: new Date().toISOString(), source: "shadow_trial", why: "empty response",
-      },
-      costUsd,
-    };
-  }
-  let score = 0;
-  let why = "judge error";
-  try {
-    const j = await judge(key, judgeModel, task, rubric, gen, client);
-    score = j.score;
-    why = j.why;
-  } catch (e) {
-    why = `judge error: ${String(e).slice(0, 120)}`;
-  }
-  return {
-    point: {
-      schemaVersion: 1,
-      model,
-      route: entry?.route,
-      score,
-      price: entry?.price ?? 0,
-      priceKnown: entry?.priceKnown ?? !!entry,
-      latencyMs,
-      ts: new Date().toISOString(),
-      source: "shadow_trial",
-      why,
-    },
-    costUsd,
-  };
 }

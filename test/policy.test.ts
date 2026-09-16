@@ -52,7 +52,7 @@ describe("providerAllowed", () => {
 });
 
 function pt(model: string, score: number, price: number): TrialPoint {
-  return { model, score, price, ts: "2026-09-11T00:00:00Z", source: "shadow_trial" };
+  return { model, score, price, ts: "2026-09-11T00:00:00Z", source: "pi_trial" };
 }
 
 describe("buildRecommendation", () => {
@@ -97,6 +97,14 @@ describe("buildRecommendation", () => {
     const rec = buildRecommendation("t1", "task", "cur", points, autoPolicy, "/tmp/pi-session.jsonl")!;
     expect(rec.policy.autoApply).toBe(true);
   });
+
+  it("does not treat a paid candidate as price-equivalent to a free baseline", () => {
+    const rec = buildRecommendation("t1", "task", "free", [
+      pt("free", 0.7, 0), pt("paid", 0.95, 0.1),
+    ], autoPolicy, "/tmp/pi-session.jsonl")!;
+    expect(rec.evidence.priceRatio).toBeGreaterThan(autoPolicy.auto_apply.max_price_ratio);
+    expect(rec.policy.autoApply).toBe(false);
+  });
 });
 
 describe("loadPolicy", () => {
@@ -120,6 +128,16 @@ describe("loadPolicy", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("normalizes legacy comparison and evaluator fields", () => {
+    const dir = mkdtempSync(join(tmpdir(), "openmerit-policy-legacy-"));
+    const file = join(dir, "policy.json");
+    writeFileSync(file, JSON.stringify({ watch: { models_per_task: 4 }, judge_model: "native:evaluator" }));
+    const policy = loadPolicy(file);
+    expect(policy.comparison.max_routes).toBe(4);
+    expect(policy.evaluator_model).toBe("native:evaluator");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("rejects unsafe route metadata instead of guessing", () => {
     const dir = mkdtempSync(join(tmpdir(), "openmerit-policy-invalid-"));
     const file = join(dir, "policy.json");
@@ -127,6 +145,18 @@ describe("loadPolicy", () => {
       "local:model": { cost: { input: -1, output: 0 } },
     } }));
     expect(() => loadPolicy(file)).toThrow(/cost.input/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("rejects invalid budget and comparison values", () => {
+    const dir = mkdtempSync(join(tmpdir(), "openmerit-policy-values-"));
+    const file = join(dir, "policy.json");
+    writeFileSync(file, JSON.stringify({ budgets: { max_usd_per_day: -1 } }));
+    expect(() => loadPolicy(file)).toThrow(/max_usd_per_day/);
+    writeFileSync(file, JSON.stringify({ comparison: { max_routes: 1 } }));
+    expect(() => loadPolicy(file)).toThrow(/max_routes/);
+    writeFileSync(file, JSON.stringify({ auto_apply: { enabled: "yes" } }));
+    expect(() => loadPolicy(file)).toThrow(/enabled/);
     rmSync(dir, { recursive: true, force: true });
   });
 });
