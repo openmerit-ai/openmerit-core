@@ -32,10 +32,10 @@ pi task A → saved pi trace → extension trial job → pi trials B, C → scor
    ([`src/frontier.ts`](src/frontier.ts), 3 objectives: quality ↑, price ↓,
    latency ↓). The aggregate across all of an agent's tasks is the union of
    its task frontiers (`openmerit frontier`).
-4. **Model discovery** — the OpenRouter catalog is snapshotted and diffed;
-   newly appeared models are queued for future release experiments. The
-   per-task loop shortlists currently available pi/OpenRouter models with
-   OpenRouter benchmark signals and the existing strategist
+4. **Model discovery** — the active Pi session's scoped models (or Pi's
+   authenticated available-model registry when unscoped) are the candidate
+   pool. OpenRouter is an optional route and enrichment source: its catalog can
+   be snapshotted and its benchmark signals can improve the shortlist
    ([`src/catalog.ts`](src/catalog.ts) + [`src/daemon.ts`](src/daemon.ts)).
 5. **Informing the main harness** — recommendations land in
    `~/.openmerit/recommendations.jsonl`. The pi extension
@@ -47,8 +47,9 @@ pi task A → saved pi trace → extension trial job → pi trials B, C → scor
 
 ## Install from npm
 
-You need Node 22.18+, pi 0.85.1+, and an OpenRouter API key with available
-credits. Install the package into pi, then initialize its policy and state:
+You need Node 22.18+, pi 0.85.1+, and at least two eligible model routes
+authenticated in Pi. OpenRouter is supported but not required. Install the
+package into pi, then initialize its policy and state:
 
 ```bash
 pi install npm:openmerit
@@ -59,7 +60,7 @@ pi list
 `pi install` makes the extension and its trial engine available to pi. The
 one-off `npx` command creates `~/.openmerit/policy.json`; install OpenMerit
 globally with `npm install --global openmerit` only if you also want persistent
-shell access to `openmerit status`, `frontier`, or the optional watcher. Install
+shell access to `openmerit status`, `doctor`, `frontier`, or the optional watcher. Install
 the extension from only one source—remove any older copied `openmerit.ts` first
 so pi does not load it twice.
 
@@ -85,40 +86,44 @@ Keep that checkout available because pi loads a local package from its path.
    policy**. The shipped policy uses `"mode": "recommend"` and does not change
    the active model without approval.
 
-2. Give **Pi and the extension trial job** OpenRouter access. The job reads
-   `OPENROUTER_API_KEY` from its environment or `~/.openmerit/.env`. If using
-   the file, edit it to contain `OPENROUTER_API_KEY=your-key` and protect it:
+2. Authenticate the providers you want to compare in Pi, using `/login` or
+   Pi's normal environment/model configuration. OpenMerit takes its eligible
+   model routes, capabilities, prices, and credentials from Pi; judge and
+   strategist calls use the same routes and do not require duplicate keys.
+
+   For example, verify one provider without printing its credential:
+
+   ```bash
+   pi auth check --provider openai --json
+   ```
+
+   Add an OpenRouter route the same way if you want its routed catalog:
+
+   ```bash
+   pi auth check --provider openrouter --json
+   ```
+
+   An `OPENROUTER_API_KEY` in the process environment or
+   `~/.openmerit/.env` additionally enables OpenRouter catalog and public-
+   benchmark enrichment. It is optional for native-provider comparisons. If
+   using the file, protect it:
 
    ```bash
    nano ~/.openmerit/.env
    chmod 600 ~/.openmerit/.env
    ```
 
-   Pi does **not** read OpenMerit's `.env` file. Log in to OpenRouter with
-   `/login openrouter` inside pi, or export `OPENROUTER_API_KEY` in the shell
-   that starts pi. Verify pi's side without printing the key:
-
-   ```bash
-   pi auth check --provider openrouter --json
-   ```
-
-   A ready configuration prints `{"status":"ready","provider":"openrouter",...}`.
-   Older `model_search/.env` files are not read by the trial engine.
-
-   OpenRouter is currently required for candidate runs and catalog discovery.
-   Judge and strategist calls can use OpenAI or Gemini directly, but require
-   `OPENMERIT_DIRECT_PROVIDER=openai` or
-   `OPENMERIT_DIRECT_PROVIDER=google` plus the corresponding provider key;
-   OpenRouter model IDs remain on OpenRouter by default. The harness and
-   provider interfaces are extension seams for future integrations, not a
-   claim that other harnesses already work.
+   Pi does not read OpenMerit's `.env` file for its ordinary sessions, so an
+   OpenRouter route still needs Pi authentication. Older `model_search/.env`
+   files are not read.
 
 3. Verify the extension appears in `pi list`. The instruction file
    [`instructions/OPENMERIT.md`](instructions/OPENMERIT.md) can be added to a
    pi project's AGENTS.md for agent context, but the extension does
-   not require it.
+   not require it. Run `npx openmerit doctor` after starting Pi once to inspect
+   the eligible route snapshot and configuration without printing secrets.
 
-4. Start pi in one terminal with an OpenRouter model:
+4. Start pi in one terminal with any configured model. For example:
 
    ```bash
    pi --provider openrouter --model openai/gpt-4o-mini
@@ -127,7 +132,8 @@ Keep that checkout available because pi loads a local package from its path.
    For a first text task, ask: “Give the shortest valid word ladder from cat
    to dog. Each step changes one letter and must be a common English word.
    Return only the path.” Wait for A to finish and leave the pi session open.
-   The extension automatically starts B and C **sequentially through pi**,
+   The extension automatically starts B and C **sequentially through their
+   selected Pi routes**,
    reports each score in Pi, and writes a recommendation for this exact
    session. With the shipped supervised policy, use
    `/openmerit` inside pi to inspect the evidence and `/openmerit apply` to
@@ -173,7 +179,8 @@ schema, so its published scores are not directly comparable to these pi runs.
 
 ### Inspect or troubleshoot a run
 
-`npx openmerit status` shows the latest pi model and pending recommendations;
+`npx openmerit doctor` checks Pi, policy, eligible routes, and optional
+OpenRouter enrichment. `npx openmerit status` shows the latest pi model and pending recommendations;
 `npx openmerit frontier` shows measured quality, blended price, latency, and
 the chosen frontier per task. `/openmerit` inside pi shows the current model,
 fallback, the model currently being compared, completed models with quality,
@@ -189,23 +196,26 @@ candidate-spend threshold.
 
 If no comparison starts after Pi settles, confirm that pi loaded the extension
 (`pi list`), the task finished, and the pi session is saved (do not use
-`--no-session`). Image candidates must advertise
-image input in OpenRouter's current model catalog. The extension queues
+`--no-session`). Image candidates must advertise image input in Pi's model
+registry. The extension queues
 completed tasks from its current session and runs one comparison at a time.
 Closing or switching the session cancels the active job.
 Candidate runs use the same text and uploaded image bytes, but they do not
 replay earlier answers or file changes. An exact task in another session
 (including identical image bytes) appears as **advice**, not a pending swap;
 the new session still gets its own comparison. The optional `trial` command
-remains for controlled text-task runs from a task JSON file.
+remains for controlled text-task runs from a task JSON file; that legacy
+standalone command is still OpenRouter-specific in 0.1.2. The automatic Pi
+session path is provider-neutral.
 
 ## Alpha boundaries
 
-- With the extension installed and an OpenRouter key configured, each supported
-  settled task can start comparison calls automatically. Candidate, judge, and
-  strategist requests send the task text, attached files or images, and
-  candidate output to OpenRouter and can incur charges. Use non-sensitive test
-  tasks and conservative account limits while evaluating this alpha.
+- With the extension installed and at least two eligible Pi routes, each
+  supported settled task can start comparison calls automatically. Candidate,
+  judge, and strategist requests send the task text, attached files or images,
+  and candidate output to the configured providers and can incur charges. Use
+  non-sensitive test tasks and conservative account limits while evaluating
+  this alpha.
 - The extension queues tasks from its current pi session and compares one at a
   time. Candidate runs use isolated temporary copies of the original working
   directory and have no Pi tools by default. Their temporary changes are
@@ -223,25 +233,35 @@ remains for controlled text-task runs from a task JSON file.
   candidate sandbox and passed back to Pi as `@` file inputs. This covers PDFs,
   CSVs, spreadsheets, and other files that Pi can open; OpenMerit does not
   implement a separate parser for them.
-- `ledger.json` counts reported candidate-trial spend and the daily number of
-  trials. It does not yet include rubric, judge, or strategist request cost,
-  and `max_usd_per_trial` is not yet a hard provider-side cap.
+- `ledger.json` counts reported candidate, rubric, judge, and strategist spend
+  for automatic session comparisons plus the daily candidate count.
+  `max_usd_per_trial` is a conservative admission estimate based on known Pi
+  prices and a 4K answer; it is not a provider-side hard cap. Routes without
+  known pricing are excluded from automatic comparisons and cannot auto-apply.
 - Each comparison has one observed baseline plus a small candidate slate and
   one quality score per answer. Treat recommendations as experimental evidence,
   not a universal model ranking.
-- Candidate execution and catalog discovery currently use Pi through
-  OpenRouter. `HarnessAdapter`, `ModelProvider`, and `CatalogProvider` are
-  implementation boundaries for future harness/provider integrations.
+- Candidate execution, judging, and strategy use the provider/model routes
+  exposed by Pi. OpenRouter remains an optional route plus catalog/benchmark
+  enrichment source. `HarnessAdapter`, `ModelProviderAdapter`,
+  `ObservationSource`, and `EventSink` remain separate integration boundaries;
+  Pi and local JSONL are the implementations shipped in this release.
+- Candidate subprocesses can use Pi built-ins and custom/local routes available
+  without loading extensions (for example routes from Pi's model
+  configuration). A provider registered only at runtime by another extension
+  is visible in the route snapshot but cannot yet be executed by the isolated
+  subprocess.
 
 ## State layout (`~/.openmerit/`)
 
 | file | contents |
 |---|---|
 | `policy.json` | the policy file (gate thresholds, budgets, intervals) |
-| `harness-state.json` | written by the pi extension: current model, fallback, latest session and settled task |
-| `recommendations.jsonl` | shared append-only channel: session-bound swap recommendations + status updates |
-| `trials.jsonl` | every model trial point (source, score, price, latency) |
-| `observations.jsonl` | task observations extracted from session traces |
+| `harness-state.json` | current/fallback routes, Pi's eligible route snapshot, latest session and settled task |
+| `recommendations.jsonl` | append-only session-bound recommendations, routes, evidence, gate reasons, and status updates |
+| `trials.jsonl` | every model trial point, including its provider route when known |
+| `traces/observations.jsonl` | task observations extracted from session traces |
+| `events.jsonl` | versioned provider-neutral observation, trial, and recommendation events for future sinks |
 | `traces/trials/*.jsonl` | raw Pi JSON event streams for candidate trials |
 | `catalog/snapshot.json` + `candidates.json` | catalog snapshot (including input modalities) + new-model queue |
 | `benchmarks/digest.json` | public-benchmark scores per model (seed + refresh) |

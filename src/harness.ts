@@ -1,5 +1,6 @@
 /** Stable seam between OpenMerit's merit loop and an agent harness. */
 import type { TaskFile, TaskImage } from "./task-input.js";
+import type { ModelRoute } from "./types.js";
 
 export interface HarnessTask {
   task: string;
@@ -22,5 +23,5 @@ export interface HarnessRun {
 
 /** A coding harness executes a candidate and exposes normalized observations. */
 export interface HarnessAdapter {
-  runTask(model: string, input: HarnessTask): Promise<HarnessRun>;
+  runTask(model: string | ModelRoute, input: HarnessTask): Promise<HarnessRun>;
 }

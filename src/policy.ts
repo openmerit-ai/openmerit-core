@@ -102,11 +102,12 @@ export function loadPolicy(path: string): Policy {
   };
 }
 
-/** Is a model id allowed by the provider allow/deny lists? ("*" matches all; "vendor/*" matches a vendor.) */
-export function providerAllowed(policy: Policy, modelId: string): boolean {
+/** Match either a logical vendor/model id or its concrete route provider. */
+export function providerAllowed(policy: Policy, modelId: string, routeProvider?: string): boolean {
   const vendor = modelId.split("/")[0];
   const match = (pat: string) =>
-    pat === "*" || pat === modelId || (pat.endsWith("/*") && pat.slice(0, -2) === vendor);
+    pat === "*" || pat === modelId || pat === routeProvider ||
+    (pat.endsWith("/*") && (pat.slice(0, -2) === vendor || pat.slice(0, -2) === routeProvider));
   if (policy.providers.deny.some(match)) return false;
   return policy.providers.allow.some(match);
 }
@@ -116,6 +117,8 @@ export interface GateInput {
   scoreGain: number;
   /** candidate price / current price (1 if unknown). */
   priceRatio: number;
+  /** Both candidate and baseline exposed trustworthy pricing. */
+  priceKnown?: boolean;
   /** Is the candidate on the task's pareto frontier? */
   onFrontier: boolean;
   /** Candidate passes provider allow/deny. */
@@ -143,6 +146,10 @@ export function gate(policy: Policy, input: GateInput): GateDecision {
   }
   if (input.sessionBound === false) {
     reasons.push("recommendation is not bound to a pi session");
+    return { autoApply: false, reasons };
+  }
+  if (input.priceKnown === false) {
+    reasons.push("candidate or current-model price is unknown");
     return { autoApply: false, reasons };
   }
   if (policy.mode !== "auto" || !policy.auto_apply.enabled) {

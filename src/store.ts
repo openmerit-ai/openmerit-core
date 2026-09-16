@@ -20,6 +20,7 @@ export const paths = {
   benchmarksDigest: () => join(stateDir(), "benchmarks", "digest.json"),
   traceCursor: () => join(stateDir(), "traces", "cursor.json"),
   observations: () => join(stateDir(), "traces", "observations.jsonl"),
+  events: () => join(stateDir(), "events.jsonl"),
   harnessState: () => join(stateDir(), "harness-state.json"),
   ledger: () => join(stateDir(), "ledger.json"),
   watchProcessed: () => join(stateDir(), "watch", "processed.json"),

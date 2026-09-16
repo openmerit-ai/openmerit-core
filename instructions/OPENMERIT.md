@@ -45,8 +45,8 @@ the best model for the task at hand, at the best price, with a vetted fallback.
 ## Guarantees
 
 - Per-task comparisons send the task text, uploaded files or images (when
-  present), and candidate answers through pi/OpenRouter for model runs and
-  judging. Candidate Pi runs default to no tools; any tool access is an
+  present), and candidate answers through the model routes configured in Pi
+  for model runs and judging. Candidate Pi runs default to no tools; any tool access is an
   explicit user opt-in. Use non-sensitive examples while
   evaluating this alpha.
 - The shipped policy is supervised. Swaps happen automatically only after the

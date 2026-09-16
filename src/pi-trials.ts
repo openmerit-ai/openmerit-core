@@ -10,7 +10,10 @@ import { knownInvoiceScore } from "./invoice-eval.js";
 import { paths, readJson } from "./store.js";
 import { sessionFiles, sessionImages, taskInputKey, type TaskFile, type TaskImage } from "./task-input.js";
 import type { HarnessAdapter, HarnessTask, HarnessRun } from "./harness.js";
-import type { CatalogEntry, TrialPoint } from "./types.js";
+import type { CatalogEntry, ModelRoute, TrialPoint } from "./types.js";
+import { legacyOpenRouterRoute, meritModelId, modelRoute, routeKey } from "./routes.js";
+import type { MeritChatClient } from "./providers.js";
+import { directChatClient } from "./llm.js";
 
 interface PiMessage {
   role?: string;
@@ -31,7 +34,7 @@ export type PiRun = HarnessRun;
 
 /** Pi-backed harness adapter. Future harnesses can implement the same seam. */
 export class PiHarnessAdapter implements HarnessAdapter {
-  runTask(model: string, input: HarnessTask): Promise<HarnessRun> {
+  runTask(model: string | ModelRoute, input: HarnessTask): Promise<HarnessRun> {
     return executePiTask(model, input.task, input.cwd, input.images, input.files);
   }
 }
@@ -111,10 +114,10 @@ export function recordedActiveTask(task: string, model: string, images: TaskImag
       (entry.message as PiMessage & { isError?: boolean }).isError) toolErrors++;
   }
   const userImages = user ? sessionImages(user.content) : null;
-  if (!user || !userImages || taskInputKey(answerText(user.content), userImages) !==
-      taskInputKey(task, images)) return null;
-  const matching = assistants.filter((m) =>
-    (m.provider === "openrouter" ? m.model : `${m.provider}/${m.model}`) === model);
+  const files = sessionFiles(task);
+  if (!user || !userImages || taskInputKey(answerText(user.content), userImages, sessionFiles(answerText(user.content))) !==
+      taskInputKey(task, images, files)) return null;
+  const matching = assistants.filter((m) => meritModelId(m.provider ?? "openrouter", m.model ?? "") === model);
   if (matching.length === 0 || matching.some((m) => m.stopReason === "error")) return null;
   const answer = matching.map((m) => answerText(m.content)).filter(Boolean).at(-1) ?? "";
   if (!answer.trim()) return null;
@@ -142,15 +145,19 @@ export interface SettledTask {
   cwd: string;
   usedTools: boolean;
   files: TaskFile[];
+  route: ModelRoute;
+  routes: ModelRoute[];
 }
 
 /** Read the exact latest completed text task from the pi extension's session marker. */
 export function settledActiveTask(snapshot?: {
   currentModel?: string | null; sessionFile?: string | null;
+  currentRoute?: ModelRoute | null; routes?: ModelRoute[];
   settledTaskKey?: string | null; settledAt?: string | null; cwd?: string; sessionBytes?: number;
 }): SettledTask | null {
   const st = snapshot ?? readJson<{
     currentModel?: string | null; sessionFile?: string | null;
+    currentRoute?: ModelRoute | null; routes?: ModelRoute[];
     settledTaskKey?: string | null; settledAt?: string | null; cwd?: string; sessionBytes?: number;
   }>(paths.harnessState(), {});
   if (!st.currentModel || !st.sessionFile || !st.settledTaskKey || !st.settledAt ||
@@ -176,23 +183,41 @@ export function settledActiveTask(snapshot?: {
   if (!task.trim() || taskInputKey(task, images, files) !== st.settledTaskKey) return null;
   const run = recordedActiveTask(task, st.currentModel, images, st.sessionFile, st.sessionBytes);
   if (!run) return null;
+  const route = st.currentRoute ?? legacyOpenRouterRoute(st.currentModel);
+  const routes = st.routes?.length ? st.routes : [route];
   return { task, images, model: st.currentModel, run, sessionFile: st.sessionFile,
-    settledAt: st.settledAt, sessionBytes: st.sessionBytes, cwd: st.cwd ?? process.cwd(), usedTools, files };
+    settledAt: st.settledAt, sessionBytes: st.sessionBytes, cwd: st.cwd ?? process.cwd(), usedTools, files,
+    route, routes };
 }
 
-/** Limit candidates to models this installed pi can actually select. */
+export function piExecutable(): string {
+  return process.env.OPENMERIT_PI_BIN?.trim() || "pi";
+}
+
+/** Read provider/model routes from pi when no live extension snapshot is available. */
+export function availablePiRoutes(snapshot?: ModelRoute[]): ModelRoute[] {
+  if (snapshot?.length) return snapshot;
+  const result = spawnSync(piExecutable(), ["--offline", "--list-models"], { encoding: "utf8" });
+  if (result.error || result.status !== 0) throw new Error("could not list models from pi");
+  const routes: ModelRoute[] = [];
+  for (const line of result.stdout.split("\n").slice(1)) {
+    const [provider, id, , , , images] = line.trim().split(/\s+/);
+    if (!provider || !id || id.startsWith("~")) continue;
+    routes.push(modelRoute(provider, id, { input: images === "yes" ? ["text", "image"] : ["text"] }));
+  }
+  return routes;
+}
+
+/** Backward-compatible logical-id view used by the standalone OpenRouter trial command. */
 export function availablePiModels(): Set<string> {
-  const result = spawnSync("pi", ["--offline", "--list-models", "openrouter"], { encoding: "utf8" });
-  if (result.error || result.status !== 0) throw new Error("could not list pi OpenRouter models");
-  return new Set(result.stdout.split("\n").slice(1)
-    .map((line) => line.trim().split(/\s+/)[1])
-    .filter((id): id is string => !!id && !id.startsWith("~")));
+  return new Set(availablePiRoutes().map((route) => route.meritId));
 }
 
 /** Each invocation is a fresh pi run, so model B does not inherit model A's answer. */
 export async function executePiTask(
-  model: string, task: string, cwd = process.cwd(), images: TaskImage[] = [], files: TaskFile[] = [],
+  model: string | ModelRoute, task: string, cwd = process.cwd(), images: TaskImage[] = [], files: TaskFile[] = [],
 ): Promise<PiRun> {
+  const route = typeof model === "string" ? legacyOpenRouterRoute(model) : model;
   const imageDir = images.length ? mkdtempSync(join(tmpdir(), "openmerit-pi-image-")) : null;
   const suffix: Record<string, string> = {
     "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
@@ -219,10 +244,10 @@ export async function executePiTask(
       (text, [source, target]) => text.split(source).join(target), task,
     );
     const before = fileSnapshot(workspace);
-    const traceFile = paths.trialTrace(`${model}:${task}:${Date.now()}`);
+    const traceFile = paths.trialTrace(`${routeKey(route)}:${task}:${Date.now()}`);
     const traceLines: string[] = [];
-    const child = spawn("pi", [
-      "--provider", "openrouter", "--model", model, "--mode", "json",
+    const child = spawn(piExecutable(), [
+      "--provider", route.provider, "--model", route.modelId, "--mode", "json",
       "--offline", "--no-extensions", "--approve", ...piTrialToolArgs(),
       "--print", ...imageArgs, ...fileArgs, candidateTask,
     ], { cwd: workspace, stdio: ["ignore", "pipe", "pipe"] });
@@ -273,7 +298,7 @@ export async function executePiTask(
     for (const [file, hash] of after) if (before.get(file) !== hash) changedFiles++;
     for (const file of before.keys()) if (!after.has(file)) changedFiles++;
     if (exitCode !== 0 || !answer.trim()) {
-      throw new Error(`pi trial ${model} failed: ${stderr.trim().slice(0, 180) || `exit ${exitCode}, empty answer`}`);
+      throw new Error(`pi trial ${route.meritId} via ${route.provider} failed: ${stderr.trim().slice(0, 180) || `exit ${exitCode}, empty answer`}`);
     }
     return { answer, costUsd, latencyMs: Date.now() - started, errors, sessionId,
       toolCalls, toolErrors, changedFiles, traceFile };
@@ -285,17 +310,19 @@ export async function executePiTask(
 
 /** Quality uses the same OpenMerit judge; cost and latency come from pi itself. */
 export async function runPiTrial(
-  key: string, judgeModel: string, task: string, rubric: string,
+  key: string, judgeModel: string | ModelRoute, task: string, rubric: string,
   model: string, entry: CatalogEntry | undefined, cwd = process.cwd(), images: TaskImage[] = [], files: TaskFile[] = [],
   harness: HarnessAdapter = defaultHarness,
+  client: MeritChatClient = directChatClient(key),
 ): Promise<{ point: TrialPoint; costUsd: number; error?: string; sessionId?: string }> {
   try {
-    const run = await harness.runTask(model, { task, cwd, images, files });
-    return await scorePiRun(key, judgeModel, task, rubric, model, entry, run, "pi_trial", images);
+    const run = await harness.runTask(entry?.route ?? model, { task, cwd, images, files });
+    return await scorePiRun(key, judgeModel, task, rubric, model, entry, run, "pi_trial", images, client);
   } catch (e) {
     const error = String(e);
     return {
-      point: { model, score: 0, price: entry?.price ?? 0,
+      point: { schemaVersion: 1, model, route: entry?.route, score: 0, price: entry?.price ?? 0,
+        priceKnown: entry?.priceKnown ?? !!entry,
         ts: new Date().toISOString(), source: "pi_trial", toolCalls: 0, toolErrors: 1,
         changedFiles: 0, why: error.slice(0, 160) },
       costUsd: 0, error,
@@ -304,23 +331,25 @@ export async function runPiTrial(
 }
 
 export async function scorePiRun(
-  key: string, judgeModel: string, task: string, rubric: string,
+  key: string, judgeModel: string | ModelRoute, task: string, rubric: string,
   model: string, entry: CatalogEntry | undefined, run: PiRun,
   source: "pi_trial" | "trace", images: TaskImage[] = [],
+  client: MeritChatClient = directChatClient(key),
 ): Promise<{ point: TrialPoint; costUsd: number; error?: string; sessionId?: string }> {
     let score = 0;
     let why = "judge unavailable";
     try {
       const pinned = images.length ? await knownInvoiceScore(task, images, run.answer) : null;
       const j = pinned ?? (images.length
-        ? await judgeWithImages(key, judgeModel, task, rubric, run.answer, images)
-        : await judge(key, judgeModel, task, rubric, run.answer));
+        ? await judgeWithImages(key, judgeModel, task, rubric, run.answer, images, client)
+        : await judge(key, judgeModel, task, rubric, run.answer, client));
       score = Math.max(0, Math.min(1, j.score));
       why = j.why;
     } catch (e) { why = `judge error: ${String(e).slice(0, 120)}`; }
     return {
       point: {
-        model, score, price: entry?.price ?? 0,
+        schemaVersion: 1, model, route: entry?.route, score, price: entry?.price ?? 0,
+        priceKnown: entry?.priceKnown ?? !!entry,
         latencyMs: run.latencyMs, ts: new Date().toISOString(), source,
         why: `${why}${run.errors ? `; pi errors: ${run.errors}` : ""}; ` +
           `tools=${run.toolCalls}, toolErrors=${run.toolErrors}, changedFiles=${run.changedFiles}`,

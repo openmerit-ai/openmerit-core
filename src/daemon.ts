@@ -12,13 +12,16 @@ import { buildRecommendation } from "./recommend.js";
 import {
   appendJsonl, paths, readJson, readJsonl, taskKey, writeJson,
 } from "./store.js";
-import { ingestNewTraces } from "./traces.js";
-import { budgetOk, ensureRubric, recordTrialSpend, runTrial } from "./trials.js";
+import { budgetOk, ensureRubric, recordMeritSpend, recordTrialSpend, runTrial, trialBudgetOk } from "./trials.js";
 import { JUDGE_PREFS } from "./judge.js";
-import { availablePiModels, runPiTrial, scorePiRun, settledActiveTask, type SettledTask } from "./pi-trials.js";
+import { runPiTrial, scorePiRun, settledActiveTask, type SettledTask } from "./pi-trials.js";
 import { taskInputKey } from "./task-input.js";
 import { pickNext, STRAT_PREFS } from "./strategist.js";
-import type { CatalogEntry, Recommendation, TaskObservation, TrialPoint } from "./types.js";
+import type { CatalogEntry, ModelRoute, Recommendation, TaskObservation, TrialPoint } from "./types.js";
+import { enrichRouteEntry, routeCatalog, routeKey, routeLabel } from "./routes.js";
+import { PiCliChatClient } from "./llm.js";
+import { LocalJsonlEventSink, PiTraceObservationSource, meritEvent,
+  type EventSink, type ObservationSource } from "./integrations.js";
 
 interface CandidateQueue {
   /** Newly released models not yet trialed for each task. */
@@ -27,8 +30,34 @@ interface CandidateQueue {
 
 interface HarnessState {
   currentModel?: string | null;
+  currentRoute?: ModelRoute | null;
+  routes?: ModelRoute[];
   sessionFile?: string | null;
   updatedAt?: string;
+}
+
+function resolveRoutePref(
+  cat: Map<string, CatalogEntry>, prefs: (string | null)[], label: string, requireImages = false,
+): CatalogEntry {
+  const available = [...cat.values()].filter((entry) =>
+    !!entry.route && entry.priceKnown !== false &&
+    (!requireImages || entry.inputModalities?.includes("image")));
+  for (const pref of prefs) {
+    if (!pref) continue;
+    const routed = cat.get(pref);
+    if (routed && available.includes(routed)) return routed;
+    const exact = available.find((entry) => entry.id === pref);
+    if (exact) return exact;
+  }
+  for (const pref of prefs) {
+    if (!pref) continue;
+    const fuzzy = available.find((entry) => entry.id.includes(pref));
+    if (fuzzy) return fuzzy;
+  }
+  const fallback = available.sort((a, b) =>
+    (a.priceKnown === false ? 1 : 0) - (b.priceKnown === false ? 1 : 0) || a.price - b.price)[0];
+  if (fallback) return fallback;
+  throw new Error(`could not resolve ${label} route from Pi's eligible models`);
 }
 
 interface ProcessedTask {
@@ -55,6 +84,11 @@ function emitTrialProgress(progress: {
   console.log(`[openmerit/progress] ${JSON.stringify(progress)}`);
 }
 
+function persistTrial(point: TrialPoint & { taskKey?: string; sessionFile?: string }, sink: EventSink): void {
+  appendJsonl(paths.trials(), point);
+  sink.emit(meritEvent("trial.completed", point));
+}
+
 function resolvePref(cat: Map<string, CatalogEntry>, prefs: (string | null)[], label: string): string {
   for (const p of prefs) {
     if (p && cat.has(p)) return p;
@@ -69,9 +103,15 @@ function resolvePref(cat: Map<string, CatalogEntry>, prefs: (string | null)[], l
 }
 
 /** Ingest new session-trace bytes into the observation log. */
-export function tracesTick(): TaskObservation[] {
-  const fresh = ingestNewTraces();
-  for (const o of fresh) appendJsonl(paths.observations(), o);
+export function tracesTick(
+  source: ObservationSource = new PiTraceObservationSource(),
+  sink: EventSink = new LocalJsonlEventSink(),
+): TaskObservation[] {
+  const fresh = source.read();
+  for (const o of fresh) {
+    appendJsonl(paths.observations(), o);
+    sink.emit(meritEvent("observation.recorded", o, source.id));
+  }
   if (fresh.length > 0) console.log(`[openmerit] traces: ${fresh.length} new observation(s)`);
   return fresh;
 }
@@ -106,6 +146,7 @@ export async function catalogTick(key: string, policy: Policy): Promise<string[]
  * thin). Budget-capped per policy.
  */
 export async function trialTick(key: string, policy: Policy): Promise<void> {
+  const sink = new LocalJsonlEventSink();
   const budget = budgetOk(policy);
   if (!budget.ok) {
     console.log(`[openmerit] trials paused: ${budget.reason}`);
@@ -151,14 +192,15 @@ export async function trialTick(key: string, policy: Policy): Promise<void> {
       key, judge, obs.taskLabel, rubric, candidate.id, cat.get(candidate.id),
     );
     recordTrialSpend(costUsd);
-    appendJsonl(paths.trials(), { ...point, taskKey: tKey });
+    persistTrial({ ...point, taskKey: tKey }, sink);
     if (error) console.log(`[openmerit] trial failed: ${error.slice(0, 120)}`);
     else console.log(`[openmerit] trial: ${candidate.id} score=${point.score.toFixed(2)} $${point.price.toFixed(2)}/M`);
   }
 }
 
 /** Compare the one completed active pi task, sequentially, then target its session. */
-export async function autoTaskTick(key: string, policy: Policy, settledTask?: SettledTask | null): Promise<Recommendation | null> {
+export async function autoTaskTick(key: string | null, policy: Policy, settledTask?: SettledTask | null): Promise<Recommendation | null> {
+  const sink = new LocalJsonlEventSink();
   const task = settledTask === undefined ? settledActiveTask() : settledTask;
   if (!task) return null;
   const marker = settledTask === undefined
@@ -172,66 +214,85 @@ export async function autoTaskTick(key: string, policy: Policy, settledTask?: Se
   // Claim the settled turn before provider calls so the next poll cannot duplicate it.
   writeJson(processedPath, { marker, status: "running", updatedAt: new Date().toISOString() } satisfies ProcessedTask);
   try {
-  const cat = await fetchCatalog(key);
-  const piModels = availablePiModels();
-  for (const id of [...cat.keys()]) {
-    const e = cat.get(id)!;
-    if (!piModels.has(id) || e.price > policy.max_usd_per_m || !providerAllowed(policy, id) ||
-        (task.images.length > 0 && !e.inputModalities?.includes("image"))) cat.delete(id);
+  let cat = routeCatalog(task.routes);
+  if (!cat.has(routeKey(task.route))) cat.set(routeKey(task.route), routeCatalog([task.route]).values().next().value!);
+  if (key) {
+    try {
+      const live = await fetchCatalog(key);
+      saveSnapshot(live);
+      cat = new Map([...cat].map(([id, entry]) => [id,
+        entry.route?.provider === "openrouter" ? enrichRouteEntry(entry, live.get(entry.id)) : entry]));
+    } catch (error) {
+      console.log(`[openmerit] OpenRouter enrichment unavailable: ${(error as Error).message}`);
+    }
   }
-  if (!cat.has(task.model)) throw new Error(`active model ${task.model} is not trialable in pi/OpenRouter`);
-  const judge = resolvePref(cat, [policy.judge_model, ...JUDGE_PREFS], "judge");
-  const strategist = resolvePref(cat, [policy.strategist_model, ...STRAT_PREFS], "strategist");
+  for (const [id, entry] of [...cat]) {
+    if ((entry.priceKnown !== false && entry.price > policy.max_usd_per_m) ||
+        !providerAllowed(policy, entry.id, entry.route?.provider) ||
+        (task.images.length > 0 && !entry.inputModalities?.includes("image")) ||
+        (id !== routeKey(task.route) && !trialBudgetOk(policy, entry, task.task.length).ok)) cat.delete(id);
+  }
+  const activeEntry = cat.get(routeKey(task.route));
+  if (!activeEntry) throw new Error(`active route ${task.route.provider}/${task.route.modelId} is excluded by policy or task capabilities`);
+  if (cat.size < 2) throw new Error("Pi exposes no eligible alternate model route for this task");
+  const judge = resolveRoutePref(cat, [policy.judge_model, ...JUDGE_PREFS, task.model], "judge", task.images.length > 0);
+  const strategist = resolveRoutePref(cat, [policy.strategist_model, ...STRAT_PREFS, task.model], "strategist");
+  const client = new PiCliChatClient(undefined, recordMeritSpend);
   const { category, benchmarks } = relevantBenchmarks(task.task);
   let benchmarkCandidates: string[] = [];
-  try { benchmarkCandidates = await openRouterBenchmarkCandidates(key, category, cat); }
+  try { if (key) benchmarkCandidates = await openRouterBenchmarkCandidates(key, category,
+    new Map([...cat.values()].map((entry) => [entry.id, entry]))); }
   catch (e) { console.log(`[openmerit] benchmark shortlist unavailable: ${(e as Error).message}`); }
-  const rubric = await ensureRubric(key, judge, task.task, new Map());
-  const tKey = taskInputKey(task.task, task.images);
+  const rubric = await ensureRubric(key ?? "", judge.route!, task.task, new Map(), client);
+  const tKey = taskInputKey(task.task, task.images, task.files);
   const points: TrialPoint[] = [];
   const tried = new Set<string>();
   const failedVendors = new Set<string>();
   const total = Math.max(1, Math.floor(policy.watch.models_per_task));
 
   if (settledTask !== undefined) emitTrialProgress({ phase: "start", taskKey: tKey,
-    model: task.model, index: 1, total });
-  const baseline = await scorePiRun(key, judge, task.task, rubric, task.model, cat.get(task.model), task.run, "trace", task.images);
+    model: routeLabel(task.route), index: 1, total });
+  const baseline = await scorePiRun(key ?? "", judge.route!, task.task, rubric, task.model, activeEntry,
+    task.run, "trace", task.images, client);
   points.push(baseline.point);
-  tried.add(task.model);
-  appendJsonl(paths.trials(), { ...baseline.point, taskKey: tKey, sessionFile: task.sessionFile });
+  tried.add(routeKey(task.route));
+  persistTrial({ ...baseline.point, taskKey: tKey, sessionFile: task.sessionFile }, sink);
   console.log(`[openmerit] task ${tKey}: A=${task.model} score=${baseline.point.score.toFixed(2)} from pi trace`);
   if (settledTask !== undefined) emitTrialProgress({ phase: "complete", taskKey: tKey,
-    model: task.model, index: 1, total, score: baseline.point.score,
+    model: routeLabel(task.route), index: 1, total, score: baseline.point.score,
     price: baseline.point.price, latencyMs: baseline.point.latencyMs,
     costUsd: baseline.costUsd, toolCalls: baseline.point.toolCalls,
     toolErrors: baseline.point.toolErrors, changedFiles: baseline.point.changedFiles });
 
   for (let i = 1; i < total; i++) {
     if (!budgetOk(policy).ok) break;
-    const pick = await pickNext(key, strategist, task.task, rubric, benchmarks,
-      points, cat, tried, policy.max_usd_per_m, failedVendors, benchmarkCandidates);
+    const pick = await pickNext(key ?? "", strategist.route!, task.task, rubric, benchmarks,
+      points, cat, tried, policy.max_usd_per_m, failedVendors, benchmarkCandidates, client);
     if (!pick) break;
     if (settledTask !== undefined) emitTrialProgress({ phase: "start", taskKey: tKey,
-      model: pick.model, index: i + 1, total });
+      model: pick.route ? routeLabel(pick.route) : pick.model, index: i + 1, total });
+    const entry = pick.route ? cat.get(routeKey(pick.route)) : cat.get(pick.model);
     const { point, costUsd, error } = await runPiTrial(
-      key, judge, task.task, rubric, pick.model, cat.get(pick.model), task.cwd, task.images, task.files);
-    tried.add(pick.model);
+      key ?? "", judge.route!, task.task, rubric, pick.model, entry, task.cwd, task.images, task.files,
+      undefined, client);
+    tried.add(pick.route ? routeKey(pick.route) : pick.model);
     points.push(point);
     recordTrialSpend(costUsd);
-    appendJsonl(paths.trials(), { ...point, taskKey: tKey, sessionFile: task.sessionFile });
-    if (error) failedVendors.add(pick.model.split("/")[0]);
+    persistTrial({ ...point, taskKey: tKey, sessionFile: task.sessionFile }, sink);
+    if (error) failedVendors.add(pick.route?.provider ?? pick.model.split("/")[0]);
     console.log(`[openmerit] task ${tKey}: ${pick.model} score=${point.score.toFixed(2)} cost=$${costUsd.toFixed(4)} ` +
       `tools=${point.toolCalls ?? 0} toolErrors=${point.toolErrors ?? 0} changedFiles=${point.changedFiles ?? 0}` +
       `${error ? ` error=${error.slice(0, 80)}` : ""}`);
     if (settledTask !== undefined) emitTrialProgress({ phase: "complete", taskKey: tKey,
-      model: pick.model, index: i + 1, total, score: point.score, price: point.price,
+      model: pick.route ? routeLabel(pick.route) : pick.model, index: i + 1, total, score: point.score, price: point.price,
       latencyMs: point.latencyMs, costUsd, error: error?.slice(0, 120),
       toolCalls: point.toolCalls, toolErrors: point.toolErrors, changedFiles: point.changedFiles });
   }
 
-  const rec = buildRecommendation(tKey, task.task.slice(0, 120), task.model, points, policy, task.sessionFile);
+  const rec = buildRecommendation(tKey, task.task.slice(0, 120), task.model, points, policy, task.sessionFile, task.route);
   if (rec) {
     appendJsonl(paths.recommendations(), rec);
+    sink.emit(meritEvent("recommendation.created", rec));
     console.log(`[openmerit] task ${tKey}: selected ${rec.recommended.model}; auto=${rec.policy.autoApply}`);
   } else console.log(`[openmerit] task ${tKey}: active model remains best`);
   writeJson(processedPath, { marker, status: rec ? "complete" : "no_swap",
@@ -246,8 +307,10 @@ export async function autoTaskTick(key: string, policy: Policy, settledTask?: Se
 
 /** Rebuild frontiers from trials and emit recommendations for the harness's current model. */
 export function recommendTick(policy: Policy): Recommendation[] {
+  const sink = new LocalJsonlEventSink();
   const harness = readJson<HarnessState>(paths.harnessState(), {});
   const currentModel = harness.currentModel ?? null;
+  const currentRoute = harness.currentRoute ?? null;
 
   const trials = readJsonl<TrialPoint & { taskKey?: string }>(paths.trials());
   const observations = readJsonl<TaskObservation>(paths.observations());
@@ -269,16 +332,18 @@ export function recommendTick(policy: Policy): Recommendation[] {
   const existing = new Set(
     [...latestById.values()]
       .filter((r) => r.status === "pending" || r.status === "dismissed")
-      .map((r) => `${r.taskKey}:${r.recommended.model}`),
+      .map((r) => `${r.taskKey}:${r.recommended.route ? routeKey(r.recommended.route) : `openrouter:${r.recommended.model}`}`),
   );
 
   const emitted: Recommendation[] = [];
   for (const [tKey, points] of byTask) {
-    const rec = buildRecommendation(tKey, labelByTask.get(tKey) ?? tKey, currentModel, points, policy);
+    const rec = buildRecommendation(tKey, labelByTask.get(tKey) ?? tKey, currentModel, points, policy,
+      null, currentRoute);
     if (!rec) continue;
-    const dedupeKey = `${rec.taskKey}:${rec.recommended.model}`;
+    const dedupeKey = `${rec.taskKey}:${rec.recommended.route ? routeKey(rec.recommended.route) : `openrouter:${rec.recommended.model}`}`;
     if (existing.has(dedupeKey)) continue;
     appendJsonl(paths.recommendations(), rec);
+    sink.emit(meritEvent("recommendation.created", rec));
     emitted.push(rec);
     console.log(
       `[openmerit] recommendation: ${rec.recommended.model} <- ${currentModel ?? "unknown"} ` +
@@ -295,12 +360,12 @@ export async function tickOnce(policy: Policy): Promise<void> {
   try {
     key = loadKey();
   } catch (e) {
-    console.log(`[openmerit] ${(e as Error).message}; skipping provider ticks`);
+    console.log(`[openmerit] ${(e as Error).message}; OpenRouter enrichment disabled`);
   }
   if (key) {
     await catalogTick(key, policy);
-    await autoTaskTick(key, policy);
   }
+  await autoTaskTick(key, policy);
 }
 
 /** Run forever, honoring policy watch intervals. */
@@ -325,9 +390,8 @@ export async function runDaemon(policy: Policy): Promise<void> {
       } catch {
         /* no key; skip provider ticks */
       }
-      if (key) {
-        try {
-          if (wantCatalog) {
+      try {
+          if (key && wantCatalog) {
             await catalogTick(key, policy);
             lastCatalog = now;
           }
@@ -335,7 +399,6 @@ export async function runDaemon(policy: Policy): Promise<void> {
         } catch (e) {
           console.log(`[openmerit] provider tick failed: ${(e as Error).message}`);
         }
-      }
     }
     await new Promise((r) => setTimeout(r, tracesMs));
   }

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** openmerit CLI: init / watch / trial / frontier / recommend / status. */
+/** openmerit CLI: init / watch / trial / frontier / recommend / status / doctor. */
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -12,11 +12,13 @@ import { buildRecommendation } from "./recommend.js";
 import { appendJsonl, paths, readJson, readJsonl, taskKey } from "./store.js";
 import { autoTaskTick, recommendTick, runDaemon, tickOnce } from "./daemon.js";
 import { budgetOk, recordTrialSpend } from "./trials.js";
-import { availablePiModels, recordedActiveTask, runPiTrial, scorePiRun, settledActiveTask } from "./pi-trials.js";
+import { availablePiModels, availablePiRoutes, piExecutable, recordedActiveTask, runPiTrial, scorePiRun, settledActiveTask } from "./pi-trials.js";
 import { pickNext, STRAT_PREFS } from "./strategist.js";
 import { JUDGE_PREFS } from "./judge.js";
 import { openRouterBenchmarkCandidates, relevantBenchmarks } from "./benchmarks.js";
-import type { CatalogEntry, Frontier, Recommendation, TaskObservation, TrialPoint } from "./types.js";
+import type { CatalogEntry, Frontier, ModelRoute, Recommendation, TaskObservation, TrialPoint } from "./types.js";
+import { modelRoute, routeLabel } from "./routes.js";
+import { spawnSync } from "node:child_process";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -42,7 +44,39 @@ function cmdInit(): void {
   console.log(`ext.    -> ${join(ROOT, "extension", "openmerit.ts")}`);
   console.log(`pi npm  -> pi install npm:openmerit`);
   console.log(`pi local-> pi install "${ROOT}"`);
-  console.log("\nNext: set OPENROUTER_API_KEY (env or ~/.openmerit/.env), install one extension source into pi, then start pi; the extension launches comparisons automatically with candidate tools disabled by default.");
+  console.log("\nNext: authenticate at least two models in pi, install one extension source, then start pi. OpenRouter is optional enrichment; candidate tools are disabled by default.");
+}
+
+function optionalOpenRouterKey(): string | null {
+  try { return loadKey(); } catch { return null; }
+}
+
+function cmdDoctor(): void {
+  const executable = piExecutable();
+  const version = spawnSync(executable, ["--version"], { encoding: "utf8" });
+  const state = readJson<{ currentRoute?: ModelRoute | null; routes?: ModelRoute[] }>(paths.harnessState(), {});
+  console.log(`pi executable : ${executable}`);
+  console.log(`pi detected   : ${version.status === 0 ? `yes (${version.stdout.trim()})` : "no"}`);
+  try {
+    const policy = loadPolicy(paths.policy());
+    console.log(`policy        : valid (v${policy.version}, ${policy.mode})`);
+  } catch (error) {
+    console.log(`policy        : invalid (${(error as Error).message})`);
+  }
+  let routes: ModelRoute[] = state.routes ?? [];
+  const hasLiveSnapshot = routes.length > 0;
+  if (routes.length === 0 && version.status === 0) {
+    try { routes = availablePiRoutes(); } catch { /* reported below */ }
+  }
+  console.log(`eligible routes: ${routes.length}`);
+  for (const route of routes.slice(0, 8)) console.log(`  - ${routeLabel(route)}${route.cost ? "" : " (price unknown)"}`);
+  if (routes.length > 8) console.log(`  … ${routes.length - 8} more`);
+  console.log(`active route  : ${state.currentRoute ? routeLabel(state.currentRoute) : "not reported; start pi once"}`);
+  const pricedRoutes = routes.filter((route) => !!route.cost).length;
+  console.log(`alternates    : ${hasLiveSnapshot
+    ? pricedRoutes >= 2 ? "ready" : "need at least two priced eligible pi routes"
+    : "start Pi once to capture route prices and capabilities"}`);
+  console.log(`OpenRouter enrichment: ${optionalOpenRouterKey() ? "available" : "not configured (optional)"}`);
 }
 
 async function cmdTrial(taskFile: string, rounds: number): Promise<void> {
@@ -187,13 +221,14 @@ function cmdFrontier(filter?: string): void {
 }
 
 function cmdStatus(): void {
-  const harness = readJson<{ currentModel?: string; updatedAt?: string }>(paths.harnessState(), {});
+  const harness = readJson<{ currentModel?: string; currentRoute?: ModelRoute; updatedAt?: string }>(paths.harnessState(), {});
   const queue = readJson<{ newModels: { id: string; firstSeen: string }[] }>(paths.candidates(), { newModels: [] });
   const latestById = new Map<string, Recommendation>();
   for (const r of readJsonl<Recommendation>(paths.recommendations())) latestById.set(r.id, r);
   const recs = [...latestById.values()].filter((r) => r.status === "pending");
   const frontiers = loadFrontiers();
-  console.log(`harness model : ${harness.currentModel ?? "unknown"} (as of ${harness.updatedAt ?? "n/a"})`);
+  console.log(`harness model : ${harness.currentRoute ? routeLabel(harness.currentRoute) : harness.currentModel ?? "unknown"} ` +
+    `(as of ${harness.updatedAt ?? "n/a"})`);
   console.log(`tasks tracked : ${frontiers.length}`);
   console.log(`new models queued for trial: ${queue.newModels.length}${queue.newModels.length ? " — " + queue.newModels.slice(0, 5).map((m) => m.id).join(", ") + (queue.newModels.length > 5 ? "…" : "") : ""}`);
   console.log(`pending recommendations: ${recs.length}`);
@@ -210,14 +245,20 @@ async function main(): Promise<void> {
       cmdInit();
       break;
     case "session-trial": {
-      const [sessionFile, settledAt, currentModel, settledTaskKey, cwd, bytesText] = args;
+      const [sessionFile, settledAt, currentModel, settledTaskKey, cwd, bytesText, provider, providerModelId] = args;
       if (!sessionFile || !settledAt || !currentModel || !settledTaskKey || !cwd || !bytesText)
         throw new Error("usage: openmerit session-trial <session-file> <settled-at> <model> <task-key> <cwd> <session-bytes>");
       const sessionBytes = Number(bytesText);
       if (!Number.isSafeInteger(sessionBytes) || sessionBytes <= 0) throw new Error("invalid session byte limit");
-      const task = settledActiveTask({ sessionFile, settledAt, currentModel, settledTaskKey, cwd, sessionBytes });
+      const state = readJson<{ routes?: ModelRoute[]; currentRoute?: ModelRoute | null }>(paths.harnessState(), {});
+      const currentRoute = provider && providerModelId
+        ? state.routes?.find((route) => route.provider === provider && route.modelId === providerModelId) ??
+          modelRoute(provider, providerModelId)
+        : state.currentRoute;
+      const task = settledActiveTask({ sessionFile, settledAt, currentModel, currentRoute,
+        routes: state.routes, settledTaskKey, cwd, sessionBytes });
       if (!task) throw new Error("the specified pi session has no completed, supported task matching this marker");
-      await autoTaskTick(loadKey(), policy, task);
+      await autoTaskTick(optionalOpenRouterKey(), policy, task);
       break;
     }
     case "watch":
@@ -240,6 +281,9 @@ async function main(): Promise<void> {
     case "status":
       cmdStatus();
       break;
+    case "doctor":
+      cmdDoctor();
+      break;
     default:
       console.log(`openmerit — external model-merit harness
 
@@ -250,7 +294,8 @@ usage: openmerit <command>
   trial <task.json>    iterative model search on one task spec [--rounds N]
   frontier [taskKey]   print pareto frontier(s)
   recommend            emit recommendations now
-  status               harness model, queued models, pending recommendations`);
+  status               harness model, queued models, pending recommendations
+  doctor               verify pi, policy, routes, and optional enrichment`);
       if (cmd && cmd !== "help" && cmd !== "--help") process.exitCode = 1;
   }
 }

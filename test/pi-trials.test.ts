@@ -59,6 +59,22 @@ console.log(JSON.stringify({ type: 'agent_settled' }));
     expect(result.traceFile).toBeTruthy();
   });
 
+  it("passes a native provider route to pi instead of forcing OpenRouter", async () => {
+    fixtureDir = mkdtempSync(join(tmpdir(), "openmerit-pi-native-"));
+    const bin = join(fixtureDir, "pi");
+    writeFileSync(bin, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[args.indexOf('--provider') + 1] !== 'anthropic' || args[args.indexOf('--model') + 1] !== 'claude-test') process.exit(7);
+console.log(JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'native answer' }], usage: { cost: { total: 0.002 } } } }));
+`);
+    chmodSync(bin, 0o755);
+    process.env.PATH = `${fixtureDir}:${oldPath}`;
+    const result = await executePiTask({ provider: "anthropic", modelId: "claude-test",
+      meritId: "anthropic/claude-test", input: ["text"] }, "task", fixtureDir);
+    expect(result.answer).toBe("native answer");
+    expect(result.costUsd).toBe(0.002);
+  });
+
   it("forwards an attached PDF into the isolated tool workspace", async () => {
     fixtureDir = mkdtempSync(join(tmpdir(), "openmerit-pi-file-"));
     const pdf = join(fixtureDir, "invoice.pdf");

@@ -15,6 +15,31 @@ afterEach(() => {
 });
 
 describe("pi extension model handoff", () => {
+  it("persists Pi's scoped provider routes without collapsing equivalent models", async () => {
+    dir = mkdtempSync(join(tmpdir(), "openmerit-ext-routes-"));
+    process.env.OPENMERIT_HOME = dir;
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    const direct = { provider: "anthropic", id: "claude-test", input: ["text"],
+      cost: { input: 3, output: 15, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100_000, maxTokens: 4096 };
+    const routed = { ...direct, provider: "openrouter", id: "anthropic/claude-test" };
+    const ctx = { model: direct, scopedModels: [{ model: direct }, { model: routed }],
+      modelRegistry: { find: () => undefined, getAvailable: () => [direct, routed] },
+      sessionManager: { getSessionFile: () => null }, cwd: dir,
+      hasUI: false, isIdle: () => true, ui: { notify: () => undefined } };
+    const pi = { on: (name: string, fn: (...args: unknown[]) => Promise<void>) => handlers.set(name, fn),
+      registerCommand: () => undefined, setModel: async () => true };
+    const { default: extension } = await import("../extension/openmerit.js");
+    extension(pi as never);
+    await handlers.get("session_start")?.({}, ctx);
+    const state = JSON.parse(readFileSync(join(dir, "harness-state.json"), "utf8"));
+    expect(state.currentRoute).toMatchObject({ provider: "anthropic", modelId: "claude-test",
+      meritId: "anthropic/claude-test" });
+    expect(state.routes).toHaveLength(2);
+    expect(new Set(state.routes.map((route: { provider: string }) => route.provider)))
+      .toEqual(new Set(["anthropic", "openrouter"]));
+    await handlers.get("session_shutdown")?.();
+  });
+
   it("reports a reached trial cap in Pi and skips the comparison", async () => {
     dir = mkdtempSync(join(tmpdir(), "openmerit-ext-budget-"));
     process.env.OPENMERIT_HOME = dir;

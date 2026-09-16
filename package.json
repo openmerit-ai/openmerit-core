@@ -1,6 +1,6 @@
 {
   "name": "openmerit",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Find better models for each pi task by comparing quality, cost, and latency.",
   "type": "module",
   "keywords": [
@@ -17,10 +17,13 @@
     "extension/openmerit.ts",
     "instructions/",
     "examples/",
+    "rules.md",
     "benchmark/invoice_ocr/data/"
   ],
   "pi": {
-    "extensions": ["./extension/openmerit.ts"]
+    "extensions": [
+      "./extension/openmerit.ts"
+    ]
   },
   "bin": {
     "openmerit": "dist/cli.js"

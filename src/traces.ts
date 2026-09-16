@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { paths, readJson, taskKey, writeJson } from "./store.js";
 import type { TaskObservation } from "./types.js";
+import { meritModelId, modelRoute } from "./routes.js";
 
 export function defaultSessionsDir(): string {
   return join(homedir(), ".pi", "agent", "sessions");
@@ -73,6 +74,7 @@ export function observationsFromEntries(entries: SessionEntry[], sessionFile: st
         continue;
       }
       current = {
+        schemaVersion: 1,
         taskKey: taskKey(text),
         taskLabel: text.replace(/\s+/g, " ").trim().slice(0, 120),
         model: null,
@@ -89,7 +91,10 @@ export function observationsFromEntries(entries: SessionEntry[], sessionFile: st
     if (!current) continue;
 
     if (m.role === "assistant") {
-      if (!current.model && m.provider && m.model) current.model = `${m.provider}/${m.model}`;
+      if (!current.model && m.provider && m.model) {
+        current.model = meritModelId(m.provider, m.model);
+        current.route = modelRoute(m.provider, m.model);
+      }
       current.costUsd += m.usage?.cost?.total ?? 0;
       current.tokens += m.usage?.totalTokens ?? 0;
       if (m.stopReason === "error") current.errors += 1;

@@ -115,17 +115,29 @@ function loadPolicy(): ExtensionPolicy {
 }
 
 interface Recommendation {
+  schemaVersion?: 1;
   id: string;
   ts: string;
   taskKey: string;
   taskLabel: string;
   sessionFile?: string | null;
   currentModel: string | null;
-  recommended: { model: string; reason: string };
-  fallback: { model: string; reason: string } | null;
-  evidence: { scoreGain: number; priceRatio: number; onFrontier: boolean; trials: number };
+  currentRoute?: ModelRoute | null;
+  recommended: { model: string; route?: ModelRoute; reason: string };
+  fallback: { model: string; route?: ModelRoute; reason: string } | null;
+  evidence: { scoreGain: number; priceRatio: number; priceKnown?: boolean; onFrontier: boolean; trials: number };
   policy: { autoApply: boolean; reasons: string[] };
   status: "pending" | "applied" | "dismissed" | "expired";
+}
+
+interface ModelRoute {
+  provider: string;
+  modelId: string;
+  meritId: string;
+  input: ("text" | "image")[];
+  cost?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
+  contextWindow?: number;
+  maxTokens?: number;
 }
 
 interface RecordedTrial {
@@ -248,7 +260,11 @@ function suggestionText(rec: Recommendation, trials: RecordedTrial[]): string {
 }
 
 function canonicalModel(provider: string, id: string): string {
-  return provider === "openrouter" ? id : `${provider}/${id}`;
+  return provider === "openrouter" || id.startsWith(`${provider}/`) ? id : `${provider}/${id}`;
+}
+
+function routeDisplay(route: ModelRoute | undefined, fallback: string): string {
+  return route && route.provider !== "openrouter" ? `${route.meritId} via ${route.provider}` : fallback;
 }
 
 function setStatus(rec: Recommendation, status: Recommendation["status"]): void {
@@ -256,11 +272,44 @@ function setStatus(rec: Recommendation, status: Recommendation["status"]): void 
 }
 
 let fallbackModel: string | null = null;
+let fallbackRoute: ModelRoute | null = null;
+
+function routeFor(model: { provider: string; id: string; input?: ("text" | "image")[];
+  cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+  contextWindow?: number; maxTokens?: number }): ModelRoute {
+  return {
+    provider: model.provider,
+    modelId: model.id,
+    meritId: canonicalModel(model.provider, model.id),
+    input: model.input ?? ["text"],
+    cost: model.cost && typeof model.cost.input === "number" && typeof model.cost.output === "number"
+      ? { input: model.cost.input, output: model.cost.output,
+          cacheRead: model.cost.cacheRead, cacheWrite: model.cost.cacheWrite }
+      : undefined,
+    contextWindow: model.contextWindow,
+    maxTokens: model.maxTokens,
+  };
+}
+
+function eligibleRoutes(ctx: ExtensionContext): ModelRoute[] {
+  const registry = ctx.modelRegistry as unknown as { getAvailable?: () => Array<Parameters<typeof routeFor>[0]> };
+  const scoped = (ctx.scopedModels ?? []) as readonly { model: Parameters<typeof routeFor>[0] }[];
+  const models = scoped.length ? scoped.map((item) => item.model) : registry.getAvailable?.() ?? [];
+  if (ctx.model && !models.some((model) => model.provider === ctx.model!.provider && model.id === ctx.model!.id))
+    models.unshift(ctx.model);
+  const byRoute = new Map<string, ModelRoute>();
+  for (const model of models) {
+    const route = routeFor(model);
+    byRoute.set(`${route.provider}:${route.modelId}`, route);
+  }
+  return [...byRoute.values()];
+}
 
 function reportHarnessState(ctx: ExtensionContext, settled = false): void {
   try {
     mkdirSync(HOME, { recursive: true });
     const model = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
+    const currentRoute = ctx.model ? routeFor(ctx.model) : null;
     if (settled) settledTaskKey = latestSessionTaskKey(ctx);
     const prior = existsSync(STATE_FILE)
       ? JSON.parse(readFileSync(STATE_FILE, "utf8")) as { sessionFile?: string | null; settledAt?: string }
@@ -271,8 +320,12 @@ function reportHarnessState(ctx: ExtensionContext, settled = false): void {
     writeFileSync(
       STATE_FILE,
       JSON.stringify({
+        schemaVersion: 1,
         currentModel: model,
+        currentRoute,
+        routes: eligibleRoutes(ctx),
         fallbackModel,
+        fallbackRoute,
         sessionFile,
         settledTaskKey,
         settledAt,
@@ -288,8 +341,11 @@ function reportHarnessState(ctx: ExtensionContext, settled = false): void {
 /** Restore the persisted fallback so a fresh session keeps it even with no pending recs. */
 function restoreFallback(): void {
   try {
-    const st = JSON.parse(readFileSync(STATE_FILE, "utf8")) as { fallbackModel?: string | null };
+    const st = JSON.parse(readFileSync(STATE_FILE, "utf8")) as {
+      fallbackModel?: string | null; fallbackRoute?: ModelRoute | null;
+    };
     if (st.fallbackModel) fallbackModel = st.fallbackModel;
+    if (st.fallbackRoute) fallbackRoute = st.fallbackRoute;
   } catch {
     /* no state yet */
   }
@@ -344,7 +400,15 @@ function catalogEntry(openrouterId: string): CatalogEntryLite | undefined {
  * OpenRouter catalog, so inject anything missing via registerProvider
  * (takes effect immediately, no /reload needed).
  */
-function ensureModel(pi: ExtensionAPI, ctx: ExtensionContext, openrouterId: string) {
+function ensureModel(pi: ExtensionAPI, ctx: ExtensionContext, openrouterId: string, route?: ModelRoute) {
+  const registry = ctx.modelRegistry as unknown as {
+    find?: (provider: string, id: string) => unknown | undefined;
+  };
+  if (route) {
+    const exact = registry.find?.(route.provider, route.modelId);
+    if (exact) return exact;
+    if (route.provider !== "openrouter") return undefined;
+  }
   const existing = resolveModel(ctx, openrouterId);
   if (existing) return existing;
 
@@ -372,16 +436,14 @@ function ensureModel(pi: ExtensionAPI, ctx: ExtensionContext, openrouterId: stri
     })),
   });
 
-  const reg = ctx.modelRegistry as unknown as {
-    find?: (provider: string, id: string) => unknown | undefined;
-  };
-  return reg.find?.(INJECT_PROVIDER, openrouterId);
+  return registry.find?.(INJECT_PROVIDER, openrouterId);
 }
 
 export default function openmerit(pi: ExtensionAPI) {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let trialJob: ChildProcessByStdio<null, Readable, Readable> | null = null;
-  const queuedJobs: { sessionFile: string; settledAt: string; model: string; key: string; cwd: string; bytes: number }[] = [];
+  const queuedJobs: { sessionFile: string; settledAt: string; model: string; route: ModelRoute;
+    key: string; cwd: string; bytes: number }[] = [];
   const startedJobs = new Set<string>();
   let activeSession: string | null = null;
   let progress: { sessionFile: string; taskKey: string; current: TrialProgress | null;
@@ -408,7 +470,7 @@ export default function openmerit(pi: ExtensionAPI) {
       return;
     }
     const child = spawn(process.execPath, [ENGINE_FILE, "session-trial", job.sessionFile,
-      job.settledAt, job.model, job.key, job.cwd, String(job.bytes)], {
+      job.settledAt, job.model, job.key, job.cwd, String(job.bytes), job.route.provider, job.route.modelId], {
       cwd: job.cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32",
     });
@@ -466,7 +528,8 @@ export default function openmerit(pi: ExtensionAPI) {
   function queueSettledTask(ctx: ExtensionContext): void {
     const sessionFile = ctx.sessionManager.getSessionFile();
     const model = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
-    if (!sessionFile || !model || !settledTaskKey || !existsSync(sessionFile)) return;
+    const route = ctx.model ? routeFor(ctx.model) : null;
+    if (!sessionFile || !model || !route || !settledTaskKey || !existsSync(sessionFile)) return;
     // The alpha compares completed response tasks. The engine validates images,
     // tool use and the baseline answer before any provider calls.
     let completed = false;
@@ -490,7 +553,7 @@ export default function openmerit(pi: ExtensionAPI) {
       if (ctx.hasUI) ctx.ui.notify(`openmerit: comparison skipped: ${budget.reason}. ${budget.summary}`, "warning");
       return;
     }
-    queuedJobs.push({ sessionFile, settledAt, model, key: settledTaskKey, cwd: ctx.cwd, bytes });
+    queuedJobs.push({ sessionFile, settledAt, model, route, key: settledTaskKey, cwd: ctx.cwd, bytes });
     startNextJob(ctx);
   }
 
@@ -502,11 +565,18 @@ export default function openmerit(pi: ExtensionAPI) {
 
   async function applyRecommendation(ctx: ExtensionContext, rec: Recommendation): Promise<boolean> {
     const current = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
-    if (rec.currentModel && current !== rec.currentModel) {
+    const currentRoute = ctx.model ? routeFor(ctx.model) : null;
+    if (rec.currentRoute && currentRoute &&
+        (rec.currentRoute.provider !== currentRoute.provider || rec.currentRoute.modelId !== currentRoute.modelId)) {
+      ctx.ui.notify(`openmerit: recommendation targets ${rec.currentRoute.provider}/${rec.currentRoute.modelId}; ` +
+        `current route is ${currentRoute.provider}/${currentRoute.modelId}`, "warning");
+      return false;
+    }
+    if (!rec.currentRoute && rec.currentModel && current !== rec.currentModel) {
       ctx.ui.notify(`openmerit: recommendation was measured against ${rec.currentModel}; current model is ${current ?? "unknown"}`, "warning");
       return false;
     }
-    const model = ensureModel(pi, ctx, rec.recommended.model);
+    const model = ensureModel(pi, ctx, rec.recommended.model, rec.recommended.route);
     if (!model) {
       ctx.ui.notify(
         `openmerit: ${rec.recommended.model} not found in pi's model registry (add the provider/model first)`,
@@ -517,8 +587,12 @@ export default function openmerit(pi: ExtensionAPI) {
     const ok = await pi.setModel(model as Parameters<typeof pi.setModel>[0]);
     if (ok) {
       setStatus(rec, "applied");
-      if (rec.fallback) fallbackModel = rec.fallback.model;
-      ctx.ui.notify(`openmerit: switched to ${rec.recommended.model}\n${rec.recommended.reason}`, "info");
+      if (rec.fallback) {
+        fallbackModel = rec.fallback.model;
+        fallbackRoute = rec.fallback.route ?? null;
+      }
+      ctx.ui.notify(`openmerit: switched to ${routeDisplay(rec.recommended.route, rec.recommended.model)}\n` +
+        rec.recommended.reason, "info");
       reportHarnessState(ctx);
     } else {
       ctx.ui.notify(`openmerit: no auth for ${rec.recommended.model}`, "error");
@@ -550,7 +624,7 @@ export default function openmerit(pi: ExtensionAPI) {
       // startup. Notify (fire-and-forget) and let the user act via /openmerit.
       if (ctx.hasUI) {
         ctx.ui.notify(
-          `openmerit recommends: ${rec.recommended.model}\n${rec.recommended.reason}\n` +
+          `openmerit recommends: ${routeDisplay(rec.recommended.route, rec.recommended.model)}\n${rec.recommended.reason}\n` +
             `gate: ${rec.policy.reasons.join("; ")}\n(/openmerit apply to switch, /openmerit dismiss to ignore)`,
           "info",
         );
@@ -621,7 +695,7 @@ export default function openmerit(pi: ExtensionAPI) {
     const policy = loadPolicy();
     if (policy.fallback?.apply_on_error === false) return;
     const current = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : "current model";
-    const model = ensureModel(pi, ctx, fallbackModel);
+    const model = ensureModel(pi, ctx, fallbackModel, fallbackRoute ?? undefined);
     if (!model) return;
 
     const auto = policy.mode === "auto";
@@ -673,7 +747,7 @@ export default function openmerit(pi: ExtensionAPI) {
           ctx.ui.notify("openmerit: no fallback set yet", "info");
           return;
         }
-        const model = ensureModel(pi, ctx, fallbackModel);
+        const model = ensureModel(pi, ctx, fallbackModel, fallbackRoute ?? undefined);
         if (model && (await pi.setModel(model as Parameters<typeof pi.setModel>[0]))) {
           ctx.ui.notify(`openmerit: switched to fallback ${fallbackModel}`, "info");
           reportHarnessState(ctx);
@@ -683,7 +757,8 @@ export default function openmerit(pi: ExtensionAPI) {
         return;
       }
 
-      const current = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : "unknown";
+      const currentRoute = ctx.model ? routeFor(ctx.model) : undefined;
+      const current = currentRoute ? routeDisplay(currentRoute, currentRoute.meritId) : "unknown";
       const budget = trialBudget();
       const liveProgress = progress?.sessionFile === ctx.sessionManager.getSessionFile() ? progress : null;
       const comparison = trialJob ? liveProgress?.current
@@ -706,7 +781,8 @@ export default function openmerit(pi: ExtensionAPI) {
       for (const r of pending.slice(-5)) {
         lines.push(
           "",
-          `-> ${r.recommended.model} (gain ${r.evidence.scoreGain}, ${r.evidence.priceRatio}x price, frontier=${r.evidence.onFrontier})`,
+          `-> ${routeDisplay(r.recommended.route, r.recommended.model)} (gain ${r.evidence.scoreGain}, ` +
+            `${r.evidence.priceKnown === false ? "price unknown" : `${r.evidence.priceRatio}x price`}, frontier=${r.evidence.onFrontier})`,
           `   ${r.recommended.reason}`,
           `   gate: ${r.policy.reasons.join("; ") || "n/a"}`,
         );

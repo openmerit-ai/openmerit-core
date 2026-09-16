@@ -1,13 +1,20 @@
 /** Pareto frontier over (score up, price down, latency down) + best-fit/fallback picks. */
 
 import type { TrialPoint } from "./types.js";
+import { pointKey } from "./routes.js";
+
+function effectivePrice(point: TrialPoint): number {
+  return point.priceKnown === false ? Number.POSITIVE_INFINITY : point.price;
+}
 
 /** a dominates b if a is no worse on every objective and strictly better on one. */
 export function dominates(a: TrialPoint, b: TrialPoint): boolean {
   const aLat = a.latencyMs ?? Number.POSITIVE_INFINITY;
   const bLat = b.latencyMs ?? Number.POSITIVE_INFINITY;
-  const noWorse = a.score >= b.score && a.price <= b.price && aLat <= bLat;
-  const better = a.score > b.score || a.price < b.price || aLat < bLat;
+  const aPrice = effectivePrice(a);
+  const bPrice = effectivePrice(b);
+  const noWorse = a.score >= b.score && aPrice <= bPrice && aLat <= bLat;
+  const better = a.score > b.score || aPrice < bPrice || aLat < bLat;
   return noWorse && better;
 }
 
@@ -20,12 +27,12 @@ export function paretoFrontier(points: TrialPoint[]): TrialPoint[] {
   const fr = points.filter(
     (p) => !points.some((q) => q !== p && dominates(q, p)),
   );
-  return fr.sort((a, b) => a.price - b.price || b.score - a.score);
+  return fr.sort((a, b) => effectivePrice(a) - effectivePrice(b) || b.score - a.score);
 }
 
 /** Simple 2-objective chain (score vs price only), cheapest first. */
 export function scorePriceChain(points: TrialPoint[]): TrialPoint[] {
-  const pts = [...points].sort((a, b) => a.price - b.price || b.score - a.score);
+  const pts = [...points].sort((a, b) => effectivePrice(a) - effectivePrice(b) || b.score - a.score);
   const chain: TrialPoint[] = [];
   let best = -1;
   for (const p of pts) {
@@ -40,7 +47,8 @@ export function scorePriceChain(points: TrialPoint[]): TrialPoint[] {
 /** Highest score; ties broken by lower price then lower latency. */
 export function pickBest(points: TrialPoint[]): TrialPoint | undefined {
   return [...points].sort(
-    (a, b) => b.score - a.score || a.price - b.price || (a.latencyMs ?? 1e18) - (b.latencyMs ?? 1e18),
+    (a, b) => b.score - a.score || effectivePrice(a) - effectivePrice(b) ||
+      (a.latencyMs ?? 1e18) - (b.latencyMs ?? 1e18),
   )[0];
 }
 
@@ -54,7 +62,7 @@ export function pickFallback(
   best: TrialPoint,
   minScore: number,
 ): TrialPoint | undefined {
-  const others = points.filter((p) => p.model !== best.model);
+  const others = points.filter((p) => pointKey(p) !== pointKey(best));
   if (others.length === 0) return undefined;
   const fr = paretoFrontier(others).filter((p) => p.score >= minScore);
   if (fr.length > 0) return fr[0]; // cheapest adequate frontier point
