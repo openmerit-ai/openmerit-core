@@ -142,6 +142,12 @@ Keep that checkout available because pi loads a local package from its path.
    switch. Then send a second message to see which model actually handles it.
    You do not need a watcher terminal or the standalone `trial` command.
 
+   Use `/openmerit pause` to stop the active comparison and suppress automatic
+   comparisons, `/openmerit resume` to enable them for future completed tasks,
+   and `/openmerit compare` to explicitly compare the latest completed task
+   even while automatic comparisons are paused. `/openmerit doctor` runs the
+   sanitized setup checks without leaving Pi.
+
    Candidate comparisons have no tools by default, even when the observed task
    used tools. See **Alpha boundaries** before explicitly enabling candidate
    tools.
@@ -149,6 +155,57 @@ Keep that checkout available because pi loads a local package from its path.
    To opt in to automatic swaps, edit `~/.openmerit/policy.json`, set
    `"mode": "auto"` and `"auto_apply.enabled": true`, review the score-gain
    and price-ratio thresholds, and run the next task.
+
+### Configure custom or local routes
+
+Pi normally supplies each route's price, context window, output limit, and
+modalities. Some custom and local providers omit that metadata. OpenMerit does
+not guess that a local model is free: add an override keyed by the exact
+`provider:modelId` route in `~/.openmerit/policy.json` instead:
+
+```json
+{
+  "route_overrides": {
+    "ollama:qwen3:8b": {
+      "cost": { "input": 0, "output": 0 },
+      "context_window": 32768,
+      "max_tokens": 4096,
+      "input": ["text"]
+    }
+  }
+}
+```
+
+All fields are optional, but both `cost.input` and `cost.output` are required
+when declaring cost. Prices use Pi's dollars-per-million-token units. The
+override applies only to that exact route; it does not change the stable
+`vendor/model` identity or another provider's route to the same model.
+
+If the provider itself is registered at runtime by a Pi extension, explicitly
+allow that provider-registration file in the same policy. Paths must be
+absolute, existing files:
+
+```json
+{
+  "pi": {
+    "provider_extensions": [
+      "/absolute/path/to/ollama-provider.ts"
+    ]
+  }
+}
+```
+
+OpenMerit still launches subprocesses with extension discovery disabled, then
+loads only these explicit files. Do not add OpenMerit's own extension. An
+allowlisted extension executes code in every candidate, judge, and strategist
+Pi subprocess, so list only provider extensions you trust. Run
+`npx openmerit doctor` or `/openmerit doctor` to validate the files and confirm
+that route overrides match Pi's visible routes.
+
+Existing `0.1.x` policy files remain valid: missing `route_overrides` and
+`pi.provider_extensions` fields normalize to empty safe defaults. `openmerit init`
+continues to preserve an existing policy, so add these fields manually
+only when you need them.
 
 ### Try an invoice-to-JSON task
 
@@ -193,7 +250,9 @@ the chosen frontier per task. `/openmerit` inside pi shows the current model,
 fallback, the model currently being compared, completed models with quality,
 cost, and latency, trial budget, pending recommendations, and any exact-task result
 measured in another session. When the gate declines an automatic swap, it
-prints reasons and `/openmerit apply` remains available.
+prints reasons and `/openmerit apply` remains available. It also lists every
+route skipped during the current comparison with the relevant policy, pricing,
+modality, or per-trial budget reason.
 
 The daily trial-count and dollar limits come from `~/.openmerit/policy.json`.
 If a limit is reached, the extension reports why it skipped the comparison;
@@ -255,7 +314,9 @@ Pi. An OpenRouter key only adds optional catalog and public-benchmark metadata.
   for automatic session comparisons plus the daily candidate count.
   `max_usd_per_trial` is a conservative admission estimate based on known Pi
   prices and a 4K answer; it is not a provider-side hard cap. Routes without
-  known pricing are excluded from automatic comparisons and cannot auto-apply.
+  known pricing are excluded as candidates and cannot auto-apply. Use an exact
+  `route_overrides` entry for a custom/local route whose price is known; zero
+  cost must be stated explicitly.
 - Each comparison has one observed baseline plus a small candidate slate and
   one quality score per answer. Treat recommendations as experimental evidence,
   not a universal model ranking.
@@ -264,11 +325,10 @@ Pi. An OpenRouter key only adds optional catalog and public-benchmark metadata.
   enrichment source. `HarnessAdapter`, `ModelProviderAdapter`,
   `ObservationSource`, and `EventSink` remain separate integration boundaries;
   Pi and local JSONL are the implementations shipped in this release.
-- Candidate subprocesses can use Pi built-ins and custom/local routes available
-  without loading extensions (for example routes from Pi's model
-  configuration). A provider registered only at runtime by another extension
-  is visible in the route snapshot but cannot yet be executed by the isolated
-  subprocess.
+- Candidate subprocesses can use Pi built-ins, configured custom/local routes,
+  and providers registered by explicitly allowlisted extension files. Normal
+  extension discovery remains disabled, and OpenMerit refuses to load its own
+  extension recursively.
 - JSON state snapshots are replaced atomically. Append-only readers skip and
   report malformed or interrupted lines while retaining later valid records.
   A job owned by a crashed process is reclaimable instead of remaining stuck
@@ -278,8 +338,8 @@ Pi. An OpenRouter key only adds optional catalog and public-benchmark metadata.
 
 | file | contents |
 |---|---|
-| `policy.json` | the policy file (gate thresholds, budgets, intervals) |
-| `harness-state.json` | current/fallback routes, Pi's eligible route snapshot, latest session and settled task |
+| `policy.json` | gate thresholds, budgets, intervals, exact-route metadata overrides, and allowlisted Pi provider extensions |
+| `harness-state.json` | current/fallback routes, Pi's eligible route snapshot, pause state, latest session and settled task |
 | `recommendations.jsonl` | append-only session-bound recommendations, routes, evidence, gate reasons, and status updates |
 | `trials.jsonl` | every model trial point, including its provider route when known |
 | `traces/observations.jsonl` | task observations extracted from session traces |

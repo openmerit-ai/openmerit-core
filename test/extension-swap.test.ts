@@ -18,6 +18,9 @@ describe("pi extension model handoff", () => {
   it("persists Pi's scoped provider routes without collapsing equivalent models", async () => {
     dir = mkdtempSync(join(tmpdir(), "openmerit-ext-routes-"));
     process.env.OPENMERIT_HOME = dir;
+    writeFileSync(join(dir, "policy.json"), JSON.stringify({ route_overrides: {
+      "anthropic:claude-test": { cost: { input: 1, output: 2 }, context_window: 64000 },
+    } }));
     const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
     const direct = { provider: "anthropic", id: "claude-test", input: ["text"],
       cost: { input: 3, output: 15, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100_000, maxTokens: 4096 };
@@ -33,7 +36,7 @@ describe("pi extension model handoff", () => {
     await handlers.get("session_start")?.({}, ctx);
     const state = JSON.parse(readFileSync(join(dir, "harness-state.json"), "utf8"));
     expect(state.currentRoute).toMatchObject({ provider: "anthropic", modelId: "claude-test",
-      meritId: "anthropic/claude-test" });
+      meritId: "anthropic/claude-test", cost: { input: 1, output: 2 }, contextWindow: 64000 });
     expect(state.routes).toHaveLength(2);
     expect(new Set(state.routes.map((route: { provider: string }) => route.provider)))
       .toEqual(new Set(["anthropic", "openrouter"]));
@@ -75,6 +78,39 @@ describe("pi extension model handoff", () => {
     await command!("", ctx);
     expect(notices.at(-1)).toContain("comparison    : not started (daily trial cap reached (2))");
     expect(notices.at(-1)).toContain("trial budget  : 2/2 trials, $0.0036/$5.00 today (UTC)");
+    await handlers.get("session_shutdown")?.();
+  });
+
+  it("supports pause, resume, and an explicit compare command inside Pi", async () => {
+    dir = mkdtempSync(join(tmpdir(), "openmerit-ext-controls-"));
+    process.env.OPENMERIT_HOME = dir;
+    const session = join(dir, "session.jsonl");
+    writeFileSync(session, JSON.stringify({ type: "message", message: {
+      role: "user", content: [{ type: "text", text: "unfinished task" }],
+    } }) + "\n");
+    const notices: string[] = [];
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    let command: ((args: string, ctx: unknown) => Promise<void>) | null = null;
+    const ctx = { model: { provider: "openrouter", id: "vendor/a" },
+      modelRegistry: { find: () => undefined, getAvailable: () => [] },
+      sessionManager: { getSessionFile: () => session }, cwd: dir,
+      hasUI: true, isIdle: () => true, ui: { notify: (message: string) => notices.push(message) } };
+    const pi = { on: (name: string, fn: (...args: unknown[]) => Promise<void>) => handlers.set(name, fn),
+      registerCommand: (_name: string, options: { handler: (args: string, ctx: unknown) => Promise<void> }) => {
+        command = options.handler;
+      }, setModel: async () => true };
+    const { default: extension } = await import("../extension/openmerit.js");
+    extension(pi as never);
+    await handlers.get("session_start")?.({}, ctx);
+    await command!("pause", ctx);
+    await command!("", ctx);
+    expect(notices.at(-1)).toContain("comparison    : paused");
+    expect(JSON.parse(readFileSync(join(dir, "harness-state.json"), "utf8")).comparisonsPaused).toBe(true);
+    await command!("compare", ctx);
+    expect(notices.at(-1)).toContain("latest task has not completed successfully");
+    await command!("resume", ctx);
+    expect(notices.at(-1)).toContain("resumed for future completed tasks");
+    expect(JSON.parse(readFileSync(join(dir, "harness-state.json"), "utf8")).comparisonsPaused).toBe(false);
     await handlers.get("session_shutdown")?.();
   });
 

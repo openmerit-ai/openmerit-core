@@ -14,6 +14,7 @@ import type { CatalogEntry, ModelRoute, TrialPoint } from "./types.js";
 import { legacyOpenRouterRoute, meritModelId, modelRoute, routeKey } from "./routes.js";
 import type { MeritChatClient } from "./providers.js";
 import { directChatClient } from "./llm.js";
+import { piProviderExtensionArgs } from "./pi-config.js";
 
 interface PiMessage {
   role?: string;
@@ -34,8 +35,10 @@ export type PiRun = HarnessRun;
 
 /** Pi-backed harness adapter. Future harnesses can implement the same seam. */
 export class PiHarnessAdapter implements HarnessAdapter {
+  constructor(private readonly providerExtensions: string[] = []) {}
+
   runTask(model: string | ModelRoute, input: HarnessTask): Promise<HarnessRun> {
-    return executePiTask(model, input.task, input.cwd, input.images, input.files);
+    return executePiTask(model, input.task, input.cwd, input.images, input.files, this.providerExtensions);
   }
 }
 
@@ -208,9 +211,10 @@ function compactNumber(value: string): number | undefined {
 }
 
 /** Read provider/model routes from pi when no live extension snapshot is available. */
-export function availablePiRoutes(snapshot?: ModelRoute[]): ModelRoute[] {
+export function availablePiRoutes(snapshot?: ModelRoute[], providerExtensions: string[] = []): ModelRoute[] {
   if (snapshot?.length) return snapshot;
-  const result = spawnSync(piExecutable(), ["--offline", "--list-models"], { encoding: "utf8" });
+  const result = spawnSync(piExecutable(), ["--offline", "--no-extensions",
+    ...piProviderExtensionArgs(providerExtensions), "--list-models"], { encoding: "utf8" });
   if (result.error || result.status !== 0) throw new Error("could not list models from pi");
   const routes: ModelRoute[] = [];
   for (const line of result.stdout.split("\n").slice(1)) {
@@ -233,6 +237,7 @@ export function availablePiModels(): Set<string> {
 /** Each invocation is a fresh pi run, so model B does not inherit model A's answer. */
 export async function executePiTask(
   model: string | ModelRoute, task: string, cwd = process.cwd(), images: TaskImage[] = [], files: TaskFile[] = [],
+  providerExtensions: string[] = [],
 ): Promise<PiRun> {
   const route = typeof model === "string" ? legacyOpenRouterRoute(model) : model;
   const imageDir = images.length ? mkdtempSync(join(tmpdir(), "openmerit-pi-image-")) : null;
@@ -265,7 +270,8 @@ export async function executePiTask(
     const traceLines: string[] = [];
     const child = spawn(piExecutable(), [
       "--provider", route.provider, "--model", route.modelId, "--mode", "json",
-      "--offline", "--no-extensions", "--approve", ...piTrialToolArgs(),
+      "--offline", "--no-extensions", ...piProviderExtensionArgs(providerExtensions),
+      "--approve", ...piTrialToolArgs(),
       "--print", ...imageArgs, ...fileArgs, candidateTask,
     ], { cwd: workspace, stdio: ["ignore", "pipe", "pipe"] });
     let buffer = "";

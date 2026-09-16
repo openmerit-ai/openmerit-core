@@ -1,6 +1,6 @@
 /** Provider-neutral model-route normalization. */
 
-import type { CatalogEntry, ModelRoute, TrialPoint } from "./types.js";
+import type { CatalogEntry, ModelRoute, RouteMetadataOverride, TrialPoint } from "./types.js";
 
 export function meritModelId(provider: string, modelId: string): string {
   if (provider === "openrouter") return modelId;
@@ -27,6 +27,23 @@ export function legacyOpenRouterRoute(meritId: string): ModelRoute {
 
 export function routeKey(route: ModelRoute): string {
   return `${route.provider}:${route.modelId}`;
+}
+
+/** Apply user metadata only to the exact provider route it names. */
+export function applyRouteOverrides(
+  routes: ModelRoute[], overrides: Record<string, RouteMetadataOverride>,
+): ModelRoute[] {
+  return routes.map((route) => {
+    const override = overrides[routeKey(route)];
+    if (!override) return route;
+    return {
+      ...route,
+      ...(override.cost ? { cost: { ...override.cost } } : {}),
+      ...(override.context_window === undefined ? {} : { contextWindow: override.context_window }),
+      ...(override.max_tokens === undefined ? {} : { maxTokens: override.max_tokens }),
+      ...(override.input ? { input: [...override.input] } : {}),
+    };
+  });
 }
 
 export function pointKey(point: Pick<TrialPoint, "model" | "route">): string {

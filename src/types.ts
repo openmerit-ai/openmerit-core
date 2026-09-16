@@ -15,6 +15,14 @@ export interface ModelRoute {
   maxTokens?: number;
 }
 
+/** User-supplied metadata for one exact provider:modelId route. */
+export interface RouteMetadataOverride {
+  cost?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
+  context_window?: number;
+  max_tokens?: number;
+  input?: ("text" | "image")[];
+}
+
 /** A single measured point for a model on a task. */
 export interface TrialPoint {
   schemaVersion?: 1;

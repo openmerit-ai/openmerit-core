@@ -9,6 +9,7 @@ import type { TaskImage } from "./task-input.js";
 import type { MeritChatClient, ModelProvider, ModelProviderAdapter, ProviderChatResult } from "./providers.js";
 import type { ModelRoute } from "./types.js";
 import { legacyOpenRouterRoute } from "./routes.js";
+import { piProviderExtensionArgs } from "./pi-config.js";
 
 const OR = "https://openrouter.ai/api/v1";
 
@@ -142,6 +143,7 @@ export class PiCliChatClient implements ModelProviderAdapter {
   constructor(
     private readonly executable = process.env.OPENMERIT_PI_BIN?.trim() || "pi",
     private readonly onSpend?: (usd: number) => void,
+    private readonly providerExtensions: string[] = [],
   ) {}
 
   chat(model: string | ModelRoute, prompt: string, _maxTokens: number, _temperature: number): Promise<ProviderChatResult> {
@@ -165,7 +167,8 @@ export class PiCliChatClient implements ModelProviderAdapter {
       });
       const child = spawn(this.executable, [
         "--provider", route.provider, "--model", route.modelId, "--mode", "json", "--offline",
-        "--no-extensions", "--no-tools", "--print", ...imageArgs, prompt,
+        "--no-extensions", ...piProviderExtensionArgs(this.providerExtensions),
+        "--no-tools", "--print", ...imageArgs, prompt,
       ], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
       let stdout = "";
       let stderr = "";

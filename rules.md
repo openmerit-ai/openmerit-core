@@ -16,6 +16,8 @@
 
 - **Respect the harness's eligible model pool.** Prefer models already available and configured in the active harness; external catalogs may enrich or expand discovery but must not silently override harness scope or credentials.
 
+- **Require explicit metadata instead of price guesses.** Missing price, context, output, or modality data for a custom route may be supplied by an exact-route override; never assume a local route is free or copy metadata across providers.
+
 - **Treat public benchmarks as priors, not proof.** Benchmarks help shortlist candidates, but merit comes from trials on the user's actual task.
 
 - **Keep four integration boundaries distinct.** Model execution (`ModelProviderAdapter`), agent execution (`HarnessAdapter`), incoming traces (`ObservationSource`), and outgoing telemetry (`EventSink`) solve different problems and must not be coupled.
@@ -29,6 +31,8 @@
 - **Keep policy as the sole auto-swap authority.** Trials and strategists may recommend changes, but only the policy gate may approve automatic application, and every recommendation must retain its gate reasons.
 
 - **Default to safe, explicit trials.** Candidate tool access stays off unless deliberately allowed, trials remain isolated, and temporary workspaces are cleaned up because trying a model must not expose or damage a user's project by surprise.
+
+- **Allowlist subprocess extensions.** Keep Pi extension discovery disabled in isolated trials and load only explicitly named provider-registration files; never recursively load OpenMerit or inherit unrelated harness extensions.
 
 - **Keep the shadow track isolated, not necessarily concurrent.** Candidate trials may run sequentially to respect cost, rate, and safety limits while remaining separate from the user's live task.
 

@@ -6,10 +6,10 @@ import { fetchCatalog, saveSnapshot } from "./catalog.js";
 import { paretoFrontier, pickBest, pickFallback } from "./frontier.js";
 import { JUDGE_PREFS } from "./judge.js";
 import { loadKey, PiCliChatClient } from "./llm.js";
-import { availablePiRoutes, recordedActiveTask, runPiTrial, scorePiRun } from "./pi-trials.js";
-import { loadPolicy, providerAllowed } from "./policy.js";
+import { availablePiRoutes, PiHarnessAdapter, recordedActiveTask, runPiTrial, scorePiRun } from "./pi-trials.js";
+import { loadPolicy, providerAllowed, type Policy } from "./policy.js";
 import { buildRecommendation } from "./recommend.js";
-import { enrichRouteEntry, routeCatalog, routeKey, routeLabel } from "./routes.js";
+import { applyRouteOverrides, enrichRouteEntry, routeCatalog, routeKey, routeLabel } from "./routes.js";
 import { appendJsonl, paths, readJson, taskKey } from "./store.js";
 import { pickNext, STRAT_PREFS } from "./strategist.js";
 import { budgetOk, recordMeritSpend, recordTrialSpend, trialBudgetOk } from "./trials.js";
@@ -37,13 +37,16 @@ function optionalOpenRouterKey(): string | null {
   try { return loadKey(); } catch { return null; }
 }
 
-function configuredRoutes(): { routes: ModelRoute[]; currentRoute: ModelRoute | null } {
+function configuredRoutes(policy: Policy): { routes: ModelRoute[]; currentRoute: ModelRoute | null } {
   const state = readJson<{ routes?: ModelRoute[]; currentRoute?: ModelRoute | null }>(paths.harnessState(), {});
-  let routes = state.routes?.length ? state.routes : availablePiRoutes();
+  let routes = state.routes?.length ? state.routes : availablePiRoutes(undefined, policy.pi.provider_extensions);
   if (state.currentRoute && !routes.some((route) => routeKey(route) === routeKey(state.currentRoute!)))
     routes = [state.currentRoute, ...routes];
+  routes = applyRouteOverrides(routes, policy.route_overrides);
   const unique = new Map(routes.map((route) => [routeKey(route), route]));
-  return { routes: [...unique.values()], currentRoute: state.currentRoute ?? null };
+  const currentRoute = state.currentRoute
+    ? applyRouteOverrides([state.currentRoute], policy.route_overrides)[0] : null;
+  return { routes: [...unique.values()], currentRoute };
 }
 
 function selectorKey(selector: StandaloneTrialConfig["initial_route"]): string | null {
@@ -126,7 +129,7 @@ export async function runStandaloneTrial(taskFile: string, rounds: number): Prom
 
   const policy = loadPolicy(paths.policy());
   const key = optionalOpenRouterKey();
-  const { routes, currentRoute } = configuredRoutes();
+  const { routes, currentRoute } = configuredRoutes(policy);
   let cat = await buildCatalog(routes, key);
   for (const [id, entry] of [...cat]) {
     if (!entry.route || !providerAllowed(policy, entry.id, entry.route.provider) ||
@@ -138,7 +141,8 @@ export async function runStandaloneTrial(taskFile: string, rounds: number): Prom
   const judge = resolveMeritRoute(cat, [cfg.judge_model, policy.judge_model, ...JUDGE_PREFS, initial.id], "judge");
   const strategist = resolveMeritRoute(cat,
     [cfg.strategist_model, policy.strategist_model, ...STRAT_PREFS, initial.id], "strategist");
-  const client = new PiCliChatClient(undefined, recordMeritSpend);
+  const client = new PiCliChatClient(undefined, recordMeritSpend, policy.pi.provider_extensions);
+  const harness = new PiHarnessAdapter(policy.pi.provider_extensions);
   const { category, benchmarks } = relevantBenchmarks(cfg.task);
   let benchmarkCandidates: string[] = [];
   if (key) {
@@ -197,7 +201,7 @@ export async function runStandaloneTrial(taskFile: string, rounds: number): Prom
       ? await scorePiRun(key ?? "", judge.route!, cfg.task, cfg.eval, entry.id, entry,
           observed, "trace", [], client)
       : await runPiTrial(key ?? "", judge.route!, cfg.task, cfg.eval, entry.id, entry,
-          cfg.cwd ?? process.cwd(), [], [], undefined, client);
+          cfg.cwd ?? process.cwd(), [], [], harness, client);
     tried.add(keyForRoute);
     results.push(outcome.point);
     // Reusing the active Pi answer is observation, not a new candidate call.

@@ -1,14 +1,15 @@
 /** Read-only diagnostics plus a provider-free self-test for first-run support. */
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { LocalJsonlEventSink, meritEvent } from "./integrations.js";
 import { piExecutable, availablePiRoutes } from "./pi-trials.js";
 import { DEFAULT_POLICY, loadPolicy, providerAllowed } from "./policy.js";
 import { buildRecommendation } from "./recommend.js";
-import { modelRoute, routeCatalog, routeKey, routeLabel } from "./routes.js";
+import { applyRouteOverrides, modelRoute, routeCatalog, routeKey, routeLabel } from "./routes.js";
+import { validatePiProviderExtensions } from "./pi-config.js";
 import {
   appendJsonl, paths, readJsonReport, readJsonlReport, writeJson,
 } from "./store.js";
@@ -66,12 +67,31 @@ export function collectDoctorReport(): DiagnosticReport {
     ? check("pi", "pass", `Pi detected (${piVersion})`)
     : check("pi", "fail", "Pi is not executable"));
 
+  let policy = DEFAULT_POLICY;
   try {
-    const policy = loadPolicy(paths.policy());
+    policy = loadPolicy(paths.policy());
     checks.push(check("policy", "pass", `Policy is valid (v${policy.version}, ${policy.mode})`));
   } catch (error) {
     checks.push(check("policy", "fail", `Policy is invalid: ${(error as Error).message}`));
   }
+
+  const extensions = validatePiProviderExtensions(policy.pi.provider_extensions);
+  const safeExtensionErrors = extensions.errors.map((message) => {
+    const configured = policy.pi.provider_extensions.find((file) => message.startsWith(`${file}:`));
+    return configured ? message.replace(configured, `local:${basename(configured)}`) : message;
+  });
+  let isolatedExtensionRoutes: ModelRoute[] | null = null;
+  let extensionLoadError: string | null = null;
+  if (!safeExtensionErrors.length && policy.pi.provider_extensions.length && piVersion) {
+    try { isolatedExtensionRoutes = availablePiRoutes(undefined, extensions.valid); }
+    catch { extensionLoadError = "Pi could not load the allowlisted provider extensions in isolated mode"; }
+  }
+  checks.push(safeExtensionErrors.length || extensionLoadError
+    ? check("provider-extensions", "fail", "One or more allowlisted Pi provider extensions are unavailable",
+        [...safeExtensionErrors, ...(extensionLoadError ? [extensionLoadError] : [])])
+    : check("provider-extensions", "pass", policy.pi.provider_extensions.length
+      ? `${policy.pi.provider_extensions.length} explicit Pi provider extension${policy.pi.provider_extensions.length === 1 ? " loads" : "s load"} in isolated mode`
+      : "No Pi provider extensions are allowlisted"));
 
   const stateRead = readJsonReport<HarnessState>(paths.harnessState(), {});
   checks.push(!stateRead.valid
@@ -83,11 +103,16 @@ export function collectDoctorReport(): DiagnosticReport {
   let routes = stateRead.value.routes ?? [];
   const liveSnapshot = routes.length > 0;
   if (!routes.length && piVersion) {
-    try { routes = availablePiRoutes(); } catch { /* the check below explains it */ }
+    try { routes = isolatedExtensionRoutes ?? availablePiRoutes(undefined, extensions.valid); }
+    catch { /* the check below explains it */ }
   }
-  let policy = DEFAULT_POLICY;
-  try { policy = loadPolicy(paths.policy()); } catch { /* already reported */ }
+  routes = applyRouteOverrides(routes, policy.route_overrides);
+  const visibleRouteKeys = new Set(routes.map(routeKey));
   routes = routes.filter((route) => providerAllowed(policy, route.meritId, route.provider));
+  const unusedOverrides = Object.keys(policy.route_overrides).filter((key) => !visibleRouteKeys.has(key));
+  checks.push(unusedOverrides.length
+    ? check("route-overrides", "warn", `${unusedOverrides.length} route metadata override${unusedOverrides.length === 1 ? " does" : "s do"} not match a visible route`, unusedOverrides)
+    : check("route-overrides", "pass", `${Object.keys(policy.route_overrides).length} route metadata override${Object.keys(policy.route_overrides).length === 1 ? "" : "s"} applied or ready`));
   const priced = routes.filter((route) => !!route.cost);
   checks.push(routes.length >= 2
     ? check("routes", "pass", `${routes.length} Pi model routes are visible`,
@@ -194,6 +219,17 @@ export function runOfflineVerify(): DiagnosticReport {
       recommendation.policy.reasons.length > 0
       ? check("provider-neutral", "pass", "Exact provider routes and policy reasons survive recommendation")
       : check("provider-neutral", "fail", "Provider route or policy evidence was lost"));
+
+    const configured = applyRouteOverrides([modelRoute("custom", "model-c")], {
+      "custom:model-c": { cost: { input: 0, output: 0 }, context_window: 4096,
+        max_tokens: 1024, input: ["text"] },
+    })[0];
+    const providerExtension = join(root, "custom-provider.ts");
+    writeFileSync(providerExtension, "export default function provider() {}\n");
+    const extension = validatePiProviderExtensions([providerExtension]);
+    checks.push(configured.cost?.input === 0 && configured.contextWindow === 4096 && extension.valid.length === 1
+      ? check("custom-routes", "pass", "Exact route metadata and allowlisted provider extensions validate")
+      : check("custom-routes", "fail", "Custom route or provider-extension configuration failed"));
 
     if (recommendation) appendJsonl(paths.recommendations(), recommendation);
     appendJsonl(paths.recommendations(), { schemaVersion: 0, id: "legacy", status: "dismissed" });

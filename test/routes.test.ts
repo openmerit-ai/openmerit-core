@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildRecommendation } from "../src/recommend.js";
-import { modelRoute, routeCatalog, routeKey } from "../src/routes.js";
+import { applyRouteOverrides, modelRoute, routeCatalog, routeKey } from "../src/routes.js";
 import { DEFAULT_POLICY, type Policy } from "../src/policy.js";
 import { trialBudgetOk } from "../src/trials.js";
 import type { TrialPoint } from "../src/types.js";
@@ -49,5 +49,19 @@ describe("provider-neutral model routes", () => {
       input: ["text"], cost: { input: 100, output: 100 }, contextWindow: 8192, maxTokens: 4096,
     })]).values().next().value!;
     expect(trialBudgetOk(DEFAULT_POLICY, expensive, 4000)).toMatchObject({ ok: false });
+  });
+
+  it("applies metadata only to the exact provider route", () => {
+    const local = modelRoute("local", "qwen:8b");
+    const other = modelRoute("openrouter", "local/qwen:8b");
+    const [overridden, untouched] = applyRouteOverrides([local, other], {
+      "local:qwen:8b": {
+        cost: { input: 0, output: 0 }, context_window: 32_768, max_tokens: 4096,
+        input: ["text", "image"],
+      },
+    });
+    expect(overridden).toMatchObject({ cost: { input: 0, output: 0 }, contextWindow: 32_768,
+      maxTokens: 4096, input: ["text", "image"] });
+    expect(untouched.cost).toBeUndefined();
   });
 });

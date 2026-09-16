@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync, readFileSync, appendFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync, readFileSync, appendFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { availablePiRoutes, executePiTask, piTrialToolArgs, settledActiveTask } from "../src/pi-trials.js";
 import { paths, taskKey } from "../src/store.js";
 import { sessionFiles, taskInputKey } from "../src/task-input.js";
+import { piProviderExtensionArgs } from "../src/pi-config.js";
 
 const oldPath = process.env.PATH;
 const oldHome = process.env.OPENMERIT_HOME;
@@ -46,6 +47,17 @@ console.log('native    model-a     128K     16.4K    no        yes');
     expect(piTrialToolArgs()).toEqual(["--no-tools"]);
     process.env.OPENMERIT_PI_TRIAL_TOOLS = "read,unknown";
     expect(() => piTrialToolArgs()).toThrow(/invalid OPENMERIT_PI_TRIAL_TOOLS: unknown/);
+  });
+
+  it("loads only explicit provider extension files and refuses recursive OpenMerit", () => {
+    fixtureDir = mkdtempSync(join(tmpdir(), "openmerit-provider-extension-"));
+    const provider = join(fixtureDir, "ollama-provider.ts");
+    writeFileSync(provider, "export default function provider() {}\n");
+    expect(piProviderExtensionArgs([provider])).toEqual(["--extension", realpathSync(provider)]);
+    expect(() => piProviderExtensionArgs(["relative-provider.ts"])).toThrow(/not absolute/);
+    const recursive = join(fixtureDir, "openmerit.ts");
+    writeFileSync(recursive, "export default function openmerit() {}\n");
+    expect(() => piProviderExtensionArgs([recursive])).toThrow(/recursively/);
   });
 
   it("reads the result and observed cost from pi's event stream", async () => {

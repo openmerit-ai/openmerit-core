@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { appendFileSync, chmodSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -78,6 +78,10 @@ describe("state reliability", () => {
   it("redacts local package paths from shareable doctor output", () => {
     dir = mkdtempSync(join(tmpdir(), "openmerit-doctor-"));
     process.env.OPENMERIT_HOME = join(dir, "state");
+    mkdirSync(process.env.OPENMERIT_HOME, { recursive: true });
+    writeFileSync(join(process.env.OPENMERIT_HOME, "policy.json"), JSON.stringify({
+      pi: { provider_extensions: ["/Users/private/extensions/missing-provider.ts"] },
+    }));
     const bin = join(dir, "pi");
     writeFileSync(bin, `#!/usr/bin/env node
 const cmd = process.argv[2];
@@ -92,6 +96,7 @@ else if (process.argv.includes('--list-models')) console.log(['provider model co
     const report = collectDoctorReport();
     const rendered = JSON.stringify(report);
     expect(rendered).toContain("npm:local/openmerit-0.1.3.tgz");
+    expect(rendered).toContain("local:missing-provider.ts");
     expect(rendered).not.toContain("/Users/private");
   });
 });

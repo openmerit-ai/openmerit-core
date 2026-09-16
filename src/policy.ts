@@ -1,7 +1,7 @@
 /** Policy loading, validation, and the swap gate. */
 
 import { existsSync, readFileSync } from "node:fs";
-import type { GateDecision } from "./types.js";
+import type { GateDecision, RouteMetadataOverride } from "./types.js";
 
 export interface Policy {
   version: number;
@@ -38,10 +38,14 @@ export interface Policy {
   strategist_model: string | null;
   /** Global price ceiling (blended $/1M) for any considered model. */
   max_usd_per_m: number;
+  /** Exact provider:modelId metadata for routes whose registry data is incomplete. */
+  route_overrides: Record<string, RouteMetadataOverride>;
+  /** Provider-registration extension files explicitly allowed in isolated Pi subprocesses. */
+  pi: { provider_extensions: string[] };
 }
 
 export const DEFAULT_POLICY: Policy = {
-  version: 1,
+  version: 2,
   mode: "recommend",
   auto_apply: {
     enabled: false,
@@ -56,10 +60,79 @@ export const DEFAULT_POLICY: Policy = {
   judge_model: null,
   strategist_model: null,
   max_usd_per_m: 20.0,
+  route_overrides: {},
+  pi: { provider_extensions: [] },
 };
 
 function num(v: unknown, fallback: number): number {
   return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
+function finiteAtLeast(value: unknown, min: number, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < min)
+    throw new Error(`${label} must be a finite number >= ${min}`);
+  return value;
+}
+
+function positiveInteger(value: unknown, label: string): number {
+  const result = finiteAtLeast(value, 1, label);
+  if (!Number.isInteger(result)) throw new Error(`${label} must be an integer`);
+  return result;
+}
+
+function routeOverrides(value: unknown): Record<string, RouteMetadataOverride> {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("route_overrides must be an object keyed by provider:modelId");
+  const result: Record<string, RouteMetadataOverride> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    const separator = key.indexOf(":");
+    if (separator <= 0 || separator === key.length - 1)
+      throw new Error(`route override ${key} must use provider:modelId`);
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+      throw new Error(`route override ${key} must be an object`);
+    const input = (raw as { input?: unknown }).input;
+    if (input !== undefined && (!Array.isArray(input) || input.length === 0 ||
+        input.some((item) => item !== "text" && item !== "image")))
+      throw new Error(`route override ${key}.input must contain only text or image`);
+    const cost = (raw as { cost?: unknown }).cost;
+    let normalizedCost: RouteMetadataOverride["cost"];
+    if (cost !== undefined) {
+      if (!cost || typeof cost !== "object" || Array.isArray(cost))
+        throw new Error(`route override ${key}.cost must be an object`);
+      const c = cost as Record<string, unknown>;
+      normalizedCost = {
+        input: finiteAtLeast(c.input, 0, `route override ${key}.cost.input`),
+        output: finiteAtLeast(c.output, 0, `route override ${key}.cost.output`),
+        ...(c.cacheRead === undefined ? {} : {
+          cacheRead: finiteAtLeast(c.cacheRead, 0, `route override ${key}.cost.cacheRead`),
+        }),
+        ...(c.cacheWrite === undefined ? {} : {
+          cacheWrite: finiteAtLeast(c.cacheWrite, 0, `route override ${key}.cost.cacheWrite`),
+        }),
+      };
+    }
+    const contextWindow = (raw as { context_window?: unknown }).context_window;
+    const maxTokens = (raw as { max_tokens?: unknown }).max_tokens;
+    result[key] = {
+      ...(normalizedCost ? { cost: normalizedCost } : {}),
+      ...(contextWindow === undefined ? {} : {
+        context_window: positiveInteger(contextWindow, `route override ${key}.context_window`),
+      }),
+      ...(maxTokens === undefined ? {} : {
+        max_tokens: positiveInteger(maxTokens, `route override ${key}.max_tokens`),
+      }),
+      ...(input === undefined ? {} : { input: [...new Set(input)] as ("text" | "image")[] }),
+    };
+  }
+  return result;
+}
+
+function providerExtensions(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim()))
+    throw new Error("pi.provider_extensions must be an array of non-empty file paths");
+  return [...new Set(value.map((item) => String(item).trim()))];
 }
 
 /** Load a policy file, filling defaults for missing keys. Throws on invalid JSON. */
@@ -99,6 +172,8 @@ export function loadPolicy(path: string): Policy {
     judge_model: raw.judge_model ?? null,
     strategist_model: raw.strategist_model ?? null,
     max_usd_per_m: num(raw.max_usd_per_m, d.max_usd_per_m),
+    route_overrides: routeOverrides(raw.route_overrides),
+    pi: { provider_extensions: providerExtensions(raw.pi?.provider_extensions) },
   };
 }
 

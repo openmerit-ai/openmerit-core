@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "mode": "recommend",
   "auto_apply": {
     "enabled": false,
@@ -29,5 +29,9 @@
   },
   "judge_model": null,
   "strategist_model": null,
-  "max_usd_per_m": 20.0
+  "max_usd_per_m": 20.0,
+  "route_overrides": {},
+  "pi": {
+    "provider_extensions": []
+  }
 }

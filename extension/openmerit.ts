@@ -37,7 +37,7 @@ const JOB_DIR = join(HOME, "watch", "jobs");
 const ENGINE_FILE = join(fileURLToPath(new URL("..", import.meta.url)), "dist", "cli.js");
 const PROGRESS_PREFIX = "[openmerit/progress] ";
 
-interface TrialProgress {
+interface TrialRunProgress {
   phase: "start" | "complete";
   taskKey: string;
   model: string;
@@ -53,19 +53,35 @@ interface TrialProgress {
   changedFiles?: number;
 }
 
+interface TrialSelectionProgress {
+  phase: "selection";
+  taskKey: string;
+  eligible: string[];
+  excluded: { model: string; reasons: string[] }[];
+}
+
+type TrialProgress = TrialRunProgress | TrialSelectionProgress;
+
 function parseTrialProgress(line: string): TrialProgress | null {
   if (!line.startsWith(PROGRESS_PREFIX)) return null;
   try {
     const value = JSON.parse(line.slice(PROGRESS_PREFIX.length)) as TrialProgress;
-    if ((value.phase !== "start" && value.phase !== "complete") ||
-        typeof value.taskKey !== "string" || typeof value.model !== "string" ||
+    if (typeof value.taskKey !== "string") return null;
+    if (value.phase === "selection") {
+      if (!Array.isArray(value.eligible) || !Array.isArray(value.excluded) ||
+          value.eligible.some((item) => typeof item !== "string") ||
+          value.excluded.some((item) => typeof item?.model !== "string" || !Array.isArray(item.reasons) ||
+            item.reasons.some((reason) => typeof reason !== "string"))) return null;
+      return value;
+    }
+    if ((value.phase !== "start" && value.phase !== "complete") || typeof value.model !== "string" ||
         !Number.isInteger(value.index) || !Number.isInteger(value.total) ||
         value.index < 1 || value.total < value.index) return null;
     return value;
   } catch { return null; }
 }
 
-function completedTrialText(trial: TrialProgress): string {
+function completedTrialText(trial: TrialRunProgress): string {
   return `${trial.model}: quality ${(trial.score ?? 0).toFixed(2)}, ` +
     `$${(trial.price ?? 0).toFixed(2)}/M, ${Math.round(trial.latencyMs ?? 0)}ms, ` +
     `run $${(trial.costUsd ?? 0).toFixed(4)}, tools ${trial.toolCalls ?? 0}` +
@@ -77,6 +93,12 @@ interface ExtensionPolicy {
   mode?: string;
   fallback?: { apply_on_error?: boolean };
   budgets?: { max_trials_per_day?: number; max_usd_per_day?: number };
+  route_overrides?: Record<string, {
+    cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+    context_window?: number;
+    max_tokens?: number;
+    input?: ("text" | "image")[];
+  }>;
 }
 
 function trialBudget(): { summary: string; reason: string | null } {
@@ -237,6 +259,7 @@ function latestSessionTaskKey(ctx: ExtensionContext): string | null {
 }
 
 let settledTaskKey: string | null = null;
+let comparisonsPaused = false;
 
 function pendingRecommendations(ctx?: ExtensionContext): Recommendation[] {
   const pending = latestRecommendations().filter((r) => r.status === "pending");
@@ -295,8 +318,8 @@ let fallbackRoute: ModelRoute | null = null;
 
 function routeFor(model: { provider: string; id: string; input?: ("text" | "image")[];
   cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
-  contextWindow?: number; maxTokens?: number }): ModelRoute {
-  return {
+  contextWindow?: number; maxTokens?: number }, overrides = loadPolicy().route_overrides ?? {}): ModelRoute {
+  const route: ModelRoute = {
     provider: model.provider,
     modelId: model.id,
     meritId: canonicalModel(model.provider, model.id),
@@ -308,6 +331,33 @@ function routeFor(model: { provider: string; id: string; input?: ("text" | "imag
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,
   };
+  const override = overrides[`${route.provider}:${route.modelId}`];
+  if (!override) return route;
+  const finite = (value: unknown, min: number) =>
+    typeof value === "number" && Number.isFinite(value) && value >= min ? value : undefined;
+  const integer = (value: unknown) => {
+    const normalized = finite(value, 1);
+    return normalized !== undefined && Number.isInteger(normalized) ? normalized : undefined;
+  };
+  const input = Array.isArray(override.input) && override.input.length > 0 &&
+    override.input.every((item) => item === "text" || item === "image")
+    ? [...new Set(override.input)] : undefined;
+  const costInput = finite(override.cost?.input, 0);
+  const costOutput = finite(override.cost?.output, 0);
+  return {
+    ...route,
+    ...(costInput === undefined || costOutput === undefined ? {} : { cost: {
+      input: costInput,
+      output: costOutput,
+      cacheRead: finite(override.cost?.cacheRead, 0),
+      cacheWrite: finite(override.cost?.cacheWrite, 0),
+    }}),
+    ...(integer(override.context_window) === undefined ? {} : {
+      contextWindow: integer(override.context_window),
+    }),
+    ...(integer(override.max_tokens) === undefined ? {} : { maxTokens: integer(override.max_tokens) }),
+    ...(input ? { input } : {}),
+  };
 }
 
 function eligibleRoutes(ctx: ExtensionContext): ModelRoute[] {
@@ -317,8 +367,9 @@ function eligibleRoutes(ctx: ExtensionContext): ModelRoute[] {
   if (ctx.model && !models.some((model) => model.provider === ctx.model!.provider && model.id === ctx.model!.id))
     models.unshift(ctx.model);
   const byRoute = new Map<string, ModelRoute>();
+  const overrides = loadPolicy().route_overrides ?? {};
   for (const model of models) {
-    const route = routeFor(model);
+    const route = routeFor(model, overrides);
     byRoute.set(`${route.provider}:${route.modelId}`, route);
   }
   return [...byRoute.values()];
@@ -347,7 +398,7 @@ function reportHarnessState(ctx: ExtensionContext, settled = false): void {
     const settledAt = settled ? new Date().toISOString()
       : prior.sessionFile === sessionFile ? prior.settledAt ?? null : null;
     writeState({
-        schemaVersion: 1,
+        schemaVersion: 2,
         currentModel: model,
         currentRoute,
         routes: eligibleRoutes(ctx),
@@ -356,6 +407,7 @@ function reportHarnessState(ctx: ExtensionContext, settled = false): void {
         sessionFile,
         settledTaskKey,
         settledAt,
+        comparisonsPaused,
         cwd: ctx.cwd,
         updatedAt: new Date().toISOString(),
       });
@@ -465,6 +517,34 @@ function ensureModel(pi: ExtensionAPI, ctx: ExtensionContext, openrouterId: stri
   return registry.find?.(INJECT_PROVIDER, openrouterId);
 }
 
+async function doctorSummary(): Promise<{ text: string; ok: boolean }> {
+  if (!existsSync(ENGINE_FILE)) return {
+    text: "trial engine missing; reinstall OpenMerit or run npm ci in the checkout",
+    ok: false,
+  };
+  const child = spawn(process.execPath, [ENGINE_FILE, "doctor", "--json"], {
+    env: process.env, stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+  child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+  const code = await new Promise<number>((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", (value) => resolve(value ?? 1));
+  });
+  try {
+    const report = JSON.parse(stdout) as { ok?: boolean; checks?: {
+      id?: string; status?: string; message?: string;
+    }[] };
+    const lines = (report.checks ?? []).map((item) =>
+      `${(item.status ?? "?").toUpperCase().padEnd(4)} ${item.id ?? "check"}: ${item.message ?? ""}`);
+    return { text: lines.join("\n") || "doctor returned no checks", ok: report.ok === true };
+  } catch {
+    return { text: stderr.trim().slice(0, 500) || stdout.trim().slice(0, 500) || `doctor exited ${code}`, ok: false };
+  }
+}
+
 export default function openmerit(pi: ExtensionAPI) {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let trialJob: ChildProcessByStdio<null, Readable, Readable> | null = null;
@@ -472,8 +552,8 @@ export default function openmerit(pi: ExtensionAPI) {
     key: string; cwd: string; bytes: number }[] = [];
   const startedJobs = new Set<string>();
   let activeSession: string | null = null;
-  let progress: { sessionFile: string; taskKey: string; current: TrialProgress | null;
-    completed: TrialProgress[] } | null = null;
+  let progress: { sessionFile: string; taskKey: string; current: TrialRunProgress | null;
+    completed: TrialRunProgress[]; eligible: string[]; excluded: TrialSelectionProgress["excluded"] } | null = null;
 
   function stopTrialJob(): void {
     if (!trialJob) return;
@@ -501,14 +581,20 @@ export default function openmerit(pi: ExtensionAPI) {
       detached: process.platform !== "win32",
     });
     trialJob = child;
-    progress = { sessionFile: job.sessionFile, taskKey: job.key, current: null, completed: [] };
+    progress = { sessionFile: job.sessionFile, taskKey: job.key, current: null, completed: [],
+      eligible: [], excluded: [] };
     if (ctx.hasUI) ctx.ui.notify(`openmerit: comparing models for task ${job.key} (A=${job.model})`, "info");
     let stdout = "";
     let stderr = "";
     function onLine(line: string): void {
       const trial = parseTrialProgress(line);
       if (trial && job.sessionFile === activeSession && progress?.taskKey === trial.taskKey) {
-        if (trial.phase === "start") {
+        if (trial.phase === "selection") {
+          progress.eligible = trial.eligible;
+          progress.excluded = trial.excluded;
+          if (ctx.hasUI) ctx.ui.notify(`openmerit: ${trial.eligible.length} routes eligible; ` +
+            `${trial.excluded.length} skipped (/openmerit for reasons)`, "info");
+        } else if (trial.phase === "start") {
           progress.current = trial;
           if (ctx.hasUI) ctx.ui.notify(
             `openmerit: trial ${trial.index}/${trial.total} comparing ${trial.model}` +
@@ -551,11 +637,13 @@ export default function openmerit(pi: ExtensionAPI) {
     });
   }
 
-  function queueSettledTask(ctx: ExtensionContext): void {
+  function queueSettledTask(ctx: ExtensionContext, force = false): string {
+    if (comparisonsPaused && !force) return "comparisons are paused";
     const sessionFile = ctx.sessionManager.getSessionFile();
     const model = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
     const route = ctx.model ? routeFor(ctx.model) : null;
-    if (!sessionFile || !model || !route || !settledTaskKey || !existsSync(sessionFile)) return;
+    if (!sessionFile || !model || !route || !settledTaskKey || !existsSync(sessionFile))
+      return "no saved completed task is available";
     // The alpha compares completed response tasks. The engine validates images,
     // tool use and the baseline answer before any provider calls.
     let completed = false;
@@ -568,19 +656,20 @@ export default function openmerit(pi: ExtensionAPI) {
             userTaskKeyFromAnswer(entry.message.content)) completed = true;
       } catch { /* partial session line */ }
     }
-    if (!completed) return;
+    if (!completed) return "the latest task has not completed successfully";
     const settledAt = new Date().toISOString();
     const bytes = readFileSync(sessionFile).length;
     const marker = `${sessionFile}:${settledTaskKey}:${model}:${bytes}`;
-    if (startedJobs.has(marker)) return;
+    if (startedJobs.has(marker)) return "this task is already queued or was compared in this Pi session";
     startedJobs.add(marker);
     const budget = trialBudget();
     if (budget.reason) {
       if (ctx.hasUI) ctx.ui.notify(`openmerit: comparison skipped: ${budget.reason}. ${budget.summary}`, "warning");
-      return;
+      return budget.reason;
     }
     queuedJobs.push({ sessionFile, settledAt, model, route, key: settledTaskKey, cwd: ctx.cwd, bytes });
     startNextJob(ctx);
+    return "comparison queued";
   }
 
   function userTaskKeyFromAnswer(content: unknown): boolean {
@@ -667,11 +756,12 @@ export default function openmerit(pi: ExtensionAPI) {
     restoreFallback();
     try {
       const st = JSON.parse(readFileSync(STATE_FILE, "utf8")) as {
-        sessionFile?: string | null; settledTaskKey?: string | null;
+        sessionFile?: string | null; settledTaskKey?: string | null; comparisonsPaused?: boolean;
       };
+      comparisonsPaused = st.comparisonsPaused === true;
       settledTaskKey = st.sessionFile === ctx.sessionManager.getSessionFile()
         ? st.settledTaskKey ?? null : null;
-    } catch { settledTaskKey = null; }
+    } catch { settledTaskKey = null; comparisonsPaused = false; }
     reportHarnessState(ctx);
     await surface(ctx);
     if (pollTimer) clearInterval(pollTimer);
@@ -748,7 +838,7 @@ export default function openmerit(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("openmerit", {
-    description: "OpenMerit: status, pending recommendations, apply/dismiss",
+    description: "OpenMerit: status, compare, pause/resume, doctor, apply/dismiss",
     handler: async (args, ctx) => {
       const pending = pendingRecommendations(ctx);
       const prior = priorExactTaskSuggestion(ctx);
@@ -782,6 +872,37 @@ export default function openmerit(pi: ExtensionAPI) {
         }
         return;
       }
+      if (sub === "pause") {
+        comparisonsPaused = true;
+        queuedJobs.length = 0;
+        stopTrialJob();
+        startedJobs.clear();
+        progress = null;
+        reportHarnessState(ctx);
+        ctx.ui.notify("openmerit: automatic comparisons paused; `/openmerit compare` remains available", "info");
+        return;
+      }
+      if (sub === "resume") {
+        comparisonsPaused = false;
+        reportHarnessState(ctx);
+        ctx.ui.notify("openmerit: automatic comparisons resumed for future completed tasks", "info");
+        return;
+      }
+      if (sub === "compare") {
+        settledTaskKey = latestSessionTaskKey(ctx);
+        const result = queueSettledTask(ctx, true);
+        if (result !== "comparison queued") ctx.ui.notify(`openmerit: ${result}`, "warning");
+        return;
+      }
+      if (sub === "doctor") {
+        try {
+          const result = await doctorSummary();
+          ctx.ui.notify(`openmerit doctor:\n${result.text}`, result.ok ? "info" : "warning");
+        } catch (error) {
+          ctx.ui.notify(`openmerit doctor failed: ${(error as Error).message}`, "error");
+        }
+        return;
+      }
 
       const currentRoute = ctx.model ? routeFor(ctx.model) : undefined;
       const current = currentRoute ? routeDisplay(currentRoute, currentRoute.meritId) : "unknown";
@@ -791,6 +912,7 @@ export default function openmerit(pi: ExtensionAPI) {
         ? `running — ${liveProgress.current.model} (trial ${liveProgress.current.index}/${liveProgress.current.total})`
         : "running — selecting next model"
         : queuedJobs.length ? `queued (${queuedJobs.length})`
+        : comparisonsPaused ? "paused"
         : latestSessionJob(ctx.sessionManager.getSessionFile() ?? undefined) ?? "not started";
       const lines = [
         `current model : ${current}`,
@@ -802,6 +924,11 @@ export default function openmerit(pi: ExtensionAPI) {
       if (liveProgress?.completed.length) {
         lines.push("", "models tested:");
         for (const trial of liveProgress.completed) lines.push(`  ${completedTrialText(trial)}`);
+      }
+      if (liveProgress?.excluded.length) {
+        lines.push("", "routes skipped:");
+        for (const route of liveProgress.excluded)
+          lines.push(`  ${route.model}: ${route.reasons.join("; ")}`);
       }
       if (prior) lines.push("", suggestionText(prior.recommendation, prior.trials));
       for (const r of pending.slice(-5)) {

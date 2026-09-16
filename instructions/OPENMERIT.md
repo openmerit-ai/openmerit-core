@@ -39,6 +39,12 @@ the best model for the task at hand, at the best price, with a vetted fallback.
   recommendations.
 - `/openmerit apply` / `/openmerit dismiss` — act on a pending recommendation
   when automatic application is declined by the policy gate.
+- `/openmerit pause` / `/openmerit resume` — stop or restart automatic task
+  comparisons without changing the saved policy.
+- `/openmerit compare` — explicitly compare the latest completed task, even
+  while automatic comparisons are paused.
+- `/openmerit doctor` — inspect sanitized installation, route, pricing, state,
+  and provider-extension diagnostics inside Pi.
 - Policy changes (auto-apply thresholds, budgets, provider allow-lists) are
   made by the user in `~/.openmerit/policy.json`, not by you.
 
@@ -52,3 +58,6 @@ the best model for the task at hand, at the best price, with a vetted fallback.
 - The shipped policy is supervised. Swaps happen automatically only after the
   user opts in and the configured quality/cost guardrails pass; otherwise they
   remain recommendations for a human to approve.
+- Isolated subprocesses disable extension discovery. Provider-registration
+  extensions run only when the user lists their absolute file paths in
+  `policy.json`; OpenMerit refuses to load itself recursively.

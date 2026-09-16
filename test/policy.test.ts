@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DEFAULT_POLICY, gate, loadPolicy, providerAllowed, type Policy } from "../src/policy.js";
 import { buildRecommendation } from "../src/recommend.js";
 import type { TrialPoint } from "../src/types.js";
@@ -99,5 +102,31 @@ describe("buildRecommendation", () => {
 describe("loadPolicy", () => {
   it("returns defaults for a missing file", () => {
     expect(loadPolicy("/nonexistent/policy.json")).toEqual(DEFAULT_POLICY);
+  });
+
+  it("normalizes additive route metadata and provider extension settings", () => {
+    const dir = mkdtempSync(join(tmpdir(), "openmerit-policy-"));
+    const file = join(dir, "policy.json");
+    writeFileSync(file, JSON.stringify({
+      route_overrides: { "local:qwen:8b": {
+        cost: { input: 0, output: 0 }, context_window: 32768, max_tokens: 4096, input: ["text"],
+      } },
+      pi: { provider_extensions: ["/tmp/local-provider.ts", "/tmp/local-provider.ts"] },
+    }));
+    const policy = loadPolicy(file);
+    expect(policy.route_overrides["local:qwen:8b"]).toMatchObject({ cost: { input: 0, output: 0 },
+      context_window: 32768, max_tokens: 4096, input: ["text"] });
+    expect(policy.pi.provider_extensions).toEqual(["/tmp/local-provider.ts"]);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("rejects unsafe route metadata instead of guessing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "openmerit-policy-invalid-"));
+    const file = join(dir, "policy.json");
+    writeFileSync(file, JSON.stringify({ route_overrides: {
+      "local:model": { cost: { input: -1, output: 0 } },
+    } }));
+    expect(() => loadPolicy(file)).toThrow(/cost.input/);
+    rmSync(dir, { recursive: true, force: true });
   });
 });
