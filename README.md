@@ -93,6 +93,54 @@ Install OpenMerit from only one source so pi does not load the extension twice.
 
 ## Use it
 
+### End-to-end quick start
+
+Run these commands from the workspace where you want Pi to work. The source
+checkout command is useful for testing a local change; users of the published
+package can use the npm form instead.
+
+```bash
+mkdir -p "$HOME/openmerit-test-workspace"
+cd "$HOME/openmerit-test-workspace"
+export OPENMERIT_HOME="$PWD/.openmerit"
+export OPENMERIT_LOG_LEVEL=info
+
+# Choose one extension source:
+pi install npm:openmerit
+# or: pi install "/absolute/path/to/openmerit"
+
+npx --yes openmerit init
+pi
+```
+
+Pi supplies the authenticated routes and its normal trace/tool capabilities.
+Give Pi a concrete task that has a measurable model response, such as a
+classification, extraction, or summarization task. After Pi settles the task,
+OpenMerit classifies it, records the active route as the baseline, runs eligible
+candidate routes sequentially, scores the results, and writes a recommendation.
+The comparison is session-bound and uses the task context captured when the
+task began; later conversational turns do not replace it.
+
+While Pi is running, inspect the status with `/openmerit`. From another shell,
+watch the audit log and inspect persisted state:
+
+```bash
+tail -F "$OPENMERIT_HOME/openmerit.log.jsonl"
+npx --yes openmerit status
+npx --yes openmerit frontier
+```
+
+`/openmerit apply` applies a pending recommendation only when the policy gate
+allows it. A successful comparison that does not justify a switch leaves the
+active route in place and records that outcome. Use `/openmerit compare` to
+explicitly compare the latest completed task, or `/openmerit doctor` to inspect
+sanitized Pi route and installation diagnostics.
+
+The workflow in detail, including the boundary between Pi and OpenMerit, is in
+[`docs/runtime-workflow.md`](docs/runtime-workflow.md). For a product workflow
+that calls an LLM from application code, see
+[`docs/application-workflows.md`](docs/application-workflows.md).
+
 Start pi with any configured model and complete a task. Once the response
 settles, the extension queues one session-bound comparison. The shipped policy
 never changes the active model without approval.
@@ -168,6 +216,12 @@ For refreshes when Pi is not open, invoke `openmerit refresh` from a user-owned
 cron, launchd, or CI schedule. Use `openmerit refresh <job-id>` to run one
 specific job. OpenMerit performs the comparison through Pi's configured routes;
 the scheduler only decides when to invoke it.
+
+The scheduler is opt-in because every refresh can spend provider credits. Set a
+positive `benchmark_refresh_minutes` after the initial task has produced a
+baseline. With Pi open, the extension polls and runs due jobs. With Pi closed,
+an external scheduler must invoke the CLI; OpenMerit does not run a background
+daemon or wake a closed harness.
 
 OpenRouter public benchmark snapshots can be imported with:
 
@@ -286,6 +340,8 @@ are not deleted; 0.1.5 simply stops reading or writing them.
 
 The reasoning behind the 0.1.5 boundary is recorded in
 [`docs/0.1.5-architecture-decisions.md`](docs/0.1.5-architecture-decisions.md).
+The complete technical documentation map is in
+[`docs/README.md`](docs/README.md).
 
 ## Development and benchmarks
 
