@@ -353,14 +353,6 @@ function userTaskKey(content: unknown): string | null {
   return taskKey(`${text.toLowerCase().replace(/\s+/g, " ").trim()}\nimages:${hashes.join(",")}\nfiles:${files.join(",")}`);
 }
 
-function invocationForPrompt(prompt: string): { purpose: string; context: Record<string, unknown> } {
-  const llm = /\b(llm|language model|model|embedding|rag|ocr|classification|summar|extract)/i.test(prompt);
-  const builds = /\b(build|create|implement|add|write|develop|update)\b/i.test(prompt);
-  return llm && builds
-    ? { purpose: "select-model-for-application", context: { source: "pi-task-context" } }
-    : { purpose: "select-model-for-session", context: { source: "pi-task-context" } };
-}
-
 function latestSessionTaskKey(ctx: ExtensionContext): string | null {
   const file = ctx.sessionManager.getSessionFile();
   if (!file || !existsSync(file)) return null;
@@ -409,7 +401,7 @@ function latestTaskLooksIntelligenceDriven(ctx: ExtensionContext): boolean {
   return /\b(llm|large language model|language model|agent|prompt|embedding|rag|classification|classify|extract|ocr|summarize|structured json|generate text|evaluate|model)\b/i.test(latest);
 }
 
-async function classifyTaskWithHarness(ctx: ExtensionContext, taskOverride?: string | null): Promise<boolean | null> {
+async function classifyTaskWithHarness(ctx: ExtensionContext, taskOverride?: string | null): Promise<{ eligible: boolean; purpose?: string } | null> {
   if (!existsSync(ENGINE_FILE) || !ctx.model) return null;
   const task = taskOverride?.trim() || latestUserTaskText(ctx);
   if (!task) return null;
@@ -424,10 +416,10 @@ async function classifyTaskWithHarness(ctx: ExtensionContext, taskOverride?: str
   });
   if (code !== 0) { extensionLog("warn", "eligibility", "classifier_failed", "semantic classifier exited unsuccessfully"); return null; }
   try {
-    const result = JSON.parse(stdout.trim().split("\n").at(-1) ?? "") as { eligible?: boolean; confidence?: number };
+    const result = JSON.parse(stdout.trim().split("\n").at(-1) ?? "") as { eligible?: boolean; confidence?: number; purpose?: string };
     if (typeof result.eligible !== "boolean" || !(Number(result.confidence) >= 0.7)) return null;
     extensionLog("info", "eligibility", "classified", `semantic eligibility=${result.eligible}`);
-    return result.eligible;
+    return { eligible: result.eligible, purpose: typeof result.purpose === "string" ? result.purpose : undefined };
   } catch { extensionLog("warn", "eligibility", "invalid_result", "semantic classifier returned invalid JSON"); return null; }
 }
 
@@ -702,13 +694,11 @@ export default function openmerit(pi: ExtensionAPI) {
   // should provide the equivalent prompt in their SettledHarnessTask.
   let capturedTaskPrompt: string | null = null;
   let capturedTaskKey: string | null = null;
-  let capturedInvocation: { purpose: string; context?: Record<string, unknown> } | null = null;
   // The package owns the instruction source of truth; inject it through Pi's
   // supported per-turn system-prompt hook so users need not copy it manually.
   pi.on("before_agent_start", async (event) => {
     if (!capturedTaskPrompt) {
       capturedTaskPrompt = event.prompt.trim() || null;
-      capturedInvocation = capturedTaskPrompt ? invocationForPrompt(capturedTaskPrompt) : null;
       capturedTaskKey = userTaskKey(event.images?.length
         ? [{ type: "text", text: event.prompt }, ...event.images]
         : event.prompt);
@@ -967,16 +957,17 @@ export default function openmerit(pi: ExtensionAPI) {
 
   pi.on("agent_settled", async (_event, ctx) => {
     const taskPrompt = capturedTaskPrompt;
-    reportHarnessState(ctx, true, capturedTaskKey, capturedInvocation);
+    const semantic = taskPrompt ? await classifyTaskWithHarness(ctx, taskPrompt) : null;
+    reportHarnessState(ctx, true, capturedTaskKey, semantic?.purpose
+      ? { purpose: semantic.purpose, context: { source: "pi-task-classifier" } } : null);
     // Semantic classification is only meaningful for the prompt captured from
     // the harness lifecycle. If an older Pi host lacks that event, retain the
     // local heuristic rather than classifying an unrelated latest transcript
     // turn.
-    const semantic = taskPrompt ? await classifyTaskWithHarness(ctx, taskPrompt) : null;
-    const eligible = semantic ?? (taskPrompt
+    const eligible = semantic?.eligible ?? (taskPrompt
       ? /\b(llm|large language model|language model|agent|prompt|embedding|rag|classification|classify|extract|ocr|summarize|structured json|generate text|evaluate|model)\b/i.test(taskPrompt)
       : latestTaskLooksIntelligenceDriven(ctx));
-    extensionLog("info", "eligibility", "decision", `task eligible=${eligible} source=${semantic === null ? "heuristic" : "semantic"}`);
+    extensionLog("info", "eligibility", "decision", `task eligible=${eligible} source=${semantic === null ? "heuristic-fallback" : "semantic"}`);
     if (eligible) {
       registerBenchmark(ctx);
       queueSettledTask(ctx);
@@ -984,7 +975,6 @@ export default function openmerit(pi: ExtensionAPI) {
     else if (ctx.hasUI) ctx.ui.notify("openmerit: task looks like ordinary coding work; comparison skipped (use /openmerit compare to override)", "info");
     capturedTaskPrompt = null;
     capturedTaskKey = null;
-    capturedInvocation = null;
     await surface(ctx);
   });
 

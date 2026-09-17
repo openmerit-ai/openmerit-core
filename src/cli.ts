@@ -137,12 +137,15 @@ async function cmdClassify(provider?: string, modelId?: string, task?: string): 
   const client = new PiCliChatClient(undefined, recordMeritSpend);
   const result = await client.chat(route,
     `Decide whether this task materially involves building, operating, or evaluating an LLM or agent. ` +
-    `Return ONLY JSON: {"eligible":true|false,"confidence":0..1,"reason":"brief reason"}.\nTASK:\n${task.slice(0, 12000)}`);
+    `If eligible, state the harness invocation purpose in a short opaque string (for example ` +
+    `"select-model-for-application" or "select-model-for-session"). ` +
+    `Return ONLY JSON: {"eligible":true|false,"confidence":0..1,"purpose":"...","reason":"brief reason"}.\nTASK:\n${task.slice(0, 12000)}`);
   const match = result.content.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("classifier returned no JSON");
-  const parsed = JSON.parse(match[0]) as { eligible?: unknown; confidence?: unknown; reason?: unknown };
+  const parsed = JSON.parse(match[0]) as { eligible?: unknown; confidence?: unknown; purpose?: unknown; reason?: unknown };
   log("info", "eligibility", "classified", "task eligibility classified", { provider, modelId, eligible: parsed.eligible === true, confidence: Number(parsed.confidence ?? 0) });
-  console.log(JSON.stringify({ eligible: parsed.eligible === true, confidence: Number(parsed.confidence ?? 0), reason: String(parsed.reason ?? "") }));
+  console.log(JSON.stringify({ eligible: parsed.eligible === true, confidence: Number(parsed.confidence ?? 0),
+    purpose: typeof parsed.purpose === "string" ? parsed.purpose : undefined, reason: String(parsed.reason ?? "") }));
 }
 
 function cmdLogs(level?: string): void {
