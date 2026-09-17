@@ -3,6 +3,12 @@
   "version": "0.1.5",
   "description": "Open, vendor-neutral model decisions for every task at runtime.",
   "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./types": "./dist/types.js",
+    "./harness": "./dist/harness.js",
+    "./instructions": "./instructions/OPENMERIT.md"
+  },
   "keywords": [
     "pi-package",
     "pi-extension",
@@ -21,7 +27,7 @@
     "examples/",
     "rules.md",
     "CHANGELOG.md",
-    "docs/0.1.5-architecture-decisions.md"
+    "docs/"
   ],
   "pi": {
     "extensions": [

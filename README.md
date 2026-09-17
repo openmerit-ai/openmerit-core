@@ -59,6 +59,10 @@ providers. OpenMerit runs only its explicit comparison and evaluation calls.
 - It is not a universal leaderboard.
 - It does not inject unconfigured models or own provider credentials.
 
+Harness authors can integrate through the stable npm exports (`openmerit` and
+`openmerit/harness`). See [`docs/harness-integration.md`](docs/harness-integration.md)
+for the adapter contract and ownership boundaries.
+
 Local JSONL files are an auditable default evidence store, not a requirement
 that future integrations use local storage.
 

@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { judge, judgeWithImages } from "./judge.js";
 import { paths, readJson } from "./store.js";
 import { sessionFiles, sessionImages, taskInputKey, type TaskFile, type TaskImage } from "./task-input.js";
-import type { HarnessAdapter, HarnessTask, HarnessRun, HarnessScore } from "./harness.js";
+import type { HarnessAdapter, HarnessTask, HarnessRun, HarnessScore, SettledHarnessTask } from "./harness.js";
 import type { ModelRoute, TrialPoint } from "./types.js";
 import { legacyOpenRouterRoute, meritModelId, modelRoute, routeKey, routePrice } from "./routes.js";
 import type { MeritChatClient } from "./providers.js";
@@ -151,21 +151,7 @@ export function recordedActiveTask(
   };
 }
 
-export interface SettledTask {
-  task: string;
-  images: TaskImage[];
-  model: string;
-  run: PiRun;
-  sessionFile: string;
-  settledAt: string;
-  sessionBytes?: number;
-  cwd: string;
-  usedTools: boolean;
-  files: TaskFile[];
-  route: ModelRoute;
-  routes: ModelRoute[];
-  comparisonNonce?: string;
-}
+export type SettledTask = SettledHarnessTask;
 
 /** Read the exact latest completed text task from the pi extension's session marker. */
 export function settledActiveTask(snapshot?: {

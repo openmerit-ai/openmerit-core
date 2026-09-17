@@ -29,6 +29,23 @@ export interface HarnessScore {
   sessionId?: string;
 }
 
+/** Completed task snapshot supplied by a harness integration. */
+export interface SettledHarnessTask {
+  task: string;
+  images: TaskImage[];
+  files: TaskFile[];
+  model: string;
+  route: ModelRoute;
+  routes: ModelRoute[];
+  run: HarnessRun;
+  sessionFile: string;
+  settledAt: string;
+  sessionBytes?: number;
+  cwd: string;
+  usedTools: boolean;
+  comparisonNonce?: string;
+}
+
 /** A coding harness executes a candidate and exposes normalized observations. */
 export interface HarnessAdapter {
   runTask(route: ModelRoute, input: HarnessTask): Promise<HarnessRun>;
