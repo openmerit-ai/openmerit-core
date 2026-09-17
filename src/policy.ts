@@ -149,6 +149,9 @@ function routeOverrides(value: unknown): Record<string, RouteMetadataOverride> {
     }
     const contextWindow = (raw as { context_window?: unknown }).context_window;
     const maxTokens = (raw as { max_tokens?: unknown }).max_tokens;
+    const availability = (raw as { availability?: unknown }).availability;
+    if (availability !== undefined && !["active", "preview", "deprecated", "retired"].includes(String(availability)))
+      throw new Error(`route override ${key}.availability must be active, preview, deprecated, or retired`);
     result[key] = {
       ...(normalizedCost ? { cost: normalizedCost } : {}),
       ...(contextWindow === undefined ? {} : {
@@ -158,6 +161,7 @@ function routeOverrides(value: unknown): Record<string, RouteMetadataOverride> {
         max_tokens: positiveInteger(maxTokens, `route override ${key}.max_tokens`),
       }),
       ...(input === undefined ? {} : { input: [...new Set(input)] as ("text" | "image")[] }),
+      ...(availability === undefined ? {} : { availability: availability as RouteMetadataOverride["availability"] }),
     };
   }
   return result;

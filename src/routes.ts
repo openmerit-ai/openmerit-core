@@ -42,6 +42,7 @@ export function applyRouteOverrides(
       ...(override.context_window === undefined ? {} : { contextWindow: override.context_window }),
       ...(override.max_tokens === undefined ? {} : { maxTokens: override.max_tokens }),
       ...(override.input ? { input: [...override.input] } : {}),
+      ...(override.availability ? { availability: override.availability } : {}),
     };
   });
 }

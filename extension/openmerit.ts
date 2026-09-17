@@ -493,7 +493,8 @@ let fallbackRoute: ModelRoute | null = null;
 
 function routeFor(model: { provider: string; id: string; input?: ("text" | "image")[];
   cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
-  contextWindow?: number; maxTokens?: number }, overrides = loadPolicy().route_overrides ?? {}): ModelRoute {
+  contextWindow?: number; maxTokens?: number;
+  availability?: "active" | "preview" | "deprecated" | "retired" }, overrides = loadPolicy().route_overrides ?? {}): ModelRoute {
   const route: ModelRoute = {
     provider: model.provider,
     modelId: model.id,
@@ -507,6 +508,7 @@ function routeFor(model: { provider: string; id: string; input?: ("text" | "imag
       : undefined,
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,
+    availability: model.availability,
   };
   const override = overrides[`${route.provider}:${route.modelId}`];
   if (!override) return route;
@@ -534,6 +536,7 @@ function routeFor(model: { provider: string; id: string; input?: ("text" | "imag
     }),
     ...(integer(override.max_tokens) === undefined ? {} : { maxTokens: integer(override.max_tokens) }),
     ...(input ? { input } : {}),
+    ...(override.availability ? { availability: override.availability } : {}),
   };
 }
 

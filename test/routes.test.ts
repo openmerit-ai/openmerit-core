@@ -64,4 +64,9 @@ describe("provider-neutral model routes", () => {
       maxTokens: 4096, input: ["text", "image"] });
     expect(untouched.cost).toBeUndefined();
   });
+
+  it("treats provider unknown-price sentinels as unknown", () => {
+    const route = modelRoute("openrouter", "auto", { cost: { input: -1_000_000, output: -1_000_000 } });
+    expect(routePrice(route)).toEqual({ price: 0, known: false });
+  });
 });

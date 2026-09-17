@@ -13,6 +13,8 @@ export interface ModelRoute {
   cost?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
   contextWindow?: number;
   maxTokens?: number;
+  /** Provider-reported lifecycle state. Unknown means no lifecycle signal was available. */
+  availability?: "active" | "preview" | "deprecated" | "retired";
 }
 
 /** User-supplied metadata for one exact provider:modelId route. */
@@ -21,6 +23,7 @@ export interface RouteMetadataOverride {
   context_window?: number;
   max_tokens?: number;
   input?: ("text" | "image")[];
+  availability?: "active" | "preview" | "deprecated" | "retired";
 }
 
 /** A single measured point for a model on a task. */

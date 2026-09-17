@@ -156,6 +156,8 @@ export async function compareSettledTask(
       if (routeKey(route) === routeKey(active)) continue;
       const reasons: string[] = [];
       const priced = routePrice(route);
+      if (route.availability === "deprecated" || route.availability === "retired" || route.availability === "preview")
+        reasons.push(`route is marked ${route.availability}`);
       if (!priced.known) reasons.push("route price is unknown");
       else if (priced.price > policy.max_usd_per_m)
         reasons.push(`price $${priced.price.toFixed(2)}/M exceeds $${policy.max_usd_per_m.toFixed(2)}/M policy limit`);

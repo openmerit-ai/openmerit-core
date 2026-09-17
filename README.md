@@ -213,6 +213,20 @@ override for the exact route:
 }
 ```
 
+Provider lifecycle metadata can also be supplied for a route. Routes marked
+`preview`, `deprecated`, or `retired` are excluded from candidate comparisons;
+use `availability: "active"` only when the provider has omitted that signal:
+
+```json
+{
+  "route_overrides": {
+    "openrouter:openai/gpt-4-turbo-preview": {
+      "availability": "deprecated"
+    }
+  }
+}
+```
+
 If a custom provider is registered by a pi extension, allowlist that exact
 absolute file under `pi.provider_extensions`. Isolated subprocesses disable
 ordinary extension discovery and refuse to load OpenMerit recursively.

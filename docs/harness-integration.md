@@ -45,6 +45,11 @@ The generic `runTask` method remains the fallback for adapters that do not
 declare a specialized mode, preserving compatibility with existing Pi
 integrations.
 
+Adapters should copy provider lifecycle metadata into `ModelRoute.availability`
+when available. Routes marked `preview`, `deprecated`, or `retired` are excluded
+from candidate comparisons; a route with unknown lifecycle remains eligible for
+backward compatibility and is still subject to pricing and policy checks.
+
 Call the engine only after the harness has a completed task and a measured
 baseline. Load `openmerit/instructions` into the harness's instruction context
 using that harness's supported plugin or middleware hook.
