@@ -694,10 +694,11 @@ export default function openmerit(pi: ExtensionAPI) {
   // should provide the equivalent prompt in their SettledHarnessTask.
   let capturedTaskPrompt: string | null = null;
   let capturedTaskKey: string | null = null;
+  let applicationActionTurn = false;
   // The package owns the instruction source of truth; inject it through Pi's
   // supported per-turn system-prompt hook so users need not copy it manually.
   pi.on("before_agent_start", async (event) => {
-    if (!capturedTaskPrompt) {
+    if (!applicationActionTurn && !capturedTaskPrompt) {
       capturedTaskPrompt = event.prompt.trim() || null;
       capturedTaskKey = userTaskKey(event.images?.length
         ? [{ type: "text", text: event.prompt }, ...event.images]
@@ -915,6 +916,16 @@ export default function openmerit(pi: ExtensionAPI) {
         await applyRecommendation(ctx, rec);
         continue;
       }
+      if (targetsApplication && rec.harnessAction && ctx.isIdle() && !applicationActionTurn) {
+        applicationActionTurn = true;
+        notified.add(rec.id);
+        pi.sendUserMessage(
+          `Apply this OpenMerit recommendation to the application target. ${rec.harnessAction.instruction} ` +
+          `Selected model: ${rec.harnessAction.model}. Do not change Pi's session model.`,
+          { deliverAs: "followUp" },
+        );
+        continue;
+      }
       notified.add(rec.id);
       // Never block here: surface() runs during session_start and on a poll
       // timer, where a modal dialog would deadlock RPC mode and stall TUI
@@ -956,6 +967,11 @@ export default function openmerit(pi: ExtensionAPI) {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
+    if (applicationActionTurn) {
+      applicationActionTurn = false;
+      await surface(ctx);
+      return;
+    }
     const taskPrompt = capturedTaskPrompt;
     const semantic = taskPrompt ? await classifyTaskWithHarness(ctx, taskPrompt) : null;
     reportHarnessState(ctx, true, capturedTaskKey, semantic?.purpose
