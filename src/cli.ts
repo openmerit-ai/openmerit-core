@@ -25,7 +25,7 @@ function cmdInit(): void {
   } else {
     console.log(`policy  -> ${policyPath} (kept existing)`);
   }
-  console.log(`instr.  -> ${join(ROOT, "instructions", "OPENMERIT.md")} (add to your harness's AGENTS.md/context)`);
+  console.log(`instr.  -> ${join(ROOT, "instructions", "OPENMERIT.md")} (Pi extension injects this automatically; other harness adapters should load it)`);
   console.log(`ext.    -> ${join(ROOT, "extension", "openmerit.ts")}`);
   console.log(`pi npm  -> pi install npm:openmerit`);
   console.log(`pi local-> pi install "${ROOT}"`);
