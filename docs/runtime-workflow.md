@@ -13,7 +13,7 @@ harness's normal model call.
 4. If eligible, the active run becomes the baseline. The engine admits a
    deterministic slate of currently available, policy-eligible routes.
 5. The adapter runs each candidate using the task's declared mode: direct
-   inference, an agent run, or an application workflow. Candidate runs are
+   inference or an agent run. Candidate runs are
    isolated by the adapter and return normalized output, tool outcomes, and
    side-effect observations.
 6. The configured evaluator scores each result against the task rubric. Cost,

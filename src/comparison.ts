@@ -218,11 +218,9 @@ export async function compareSettledTask(
       try {
         const input = {
           task: task.task, cwd: task.cwd, images: task.images, files: task.files,
-          mode: task.mode, workflow: task.workflow,
+          mode: task.mode,
         };
-        const run = task.mode === "application" && harness.runApplication
-          ? await harness.runApplication(route, input)
-          : task.mode === "inference" && harness.runInference
+        const run = task.mode === "inference" && harness.runInference
             ? await harness.runInference(route, input)
             : await harness.runTask(route, input);
         outcome = await harness.scoreRun(evaluator, task.task, rubric, route, run, client, "pi_trial", task.images);

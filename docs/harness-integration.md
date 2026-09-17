@@ -20,12 +20,6 @@ const adapter: HarnessAdapter = {
 };
 ```
 
-If the harness supports product workflows, implement `runApplication(route,
-input)` to execute the real application in an isolated environment. The
-recommendation's `harnessAction` gives the harness the selected route and the
-instruction to make it active; the harness decides how to update configuration,
-validate the result, or create a patch or PR.
-
 Candidate execution can be selected explicitly per task:
 
 ```ts
@@ -34,18 +28,17 @@ const task: HarnessTask = {
   cwd,
   images: [],
   files: [],
-  mode: "inference", // "agent" (default) or "application"
+  mode: "inference", // "agent" (default) or "inference"
 };
 ```
 
 For `inference` tasks, implement `runInference` when the harness can invoke a
 model directly without creating files or running an agent loop. For product
-workflows, set `mode: "application"` and implement `runApplication`; that
-method injects the candidate route into an isolated copy of the application,
-executes its real wrapper/orchestration, and returns normalized output and
-side-effect observations. OpenMerit does not assume a provider SDK, framework,
-configuration format, or deployment mechanism. A harness decides how to inject
-the route and can prepare a patch or PR after a recommendation is accepted.
+workflows, the harness uses its own execution and workspace capabilities.
+OpenMerit does not define an application runner, provider SDK, framework,
+configuration format, or deployment mechanism. The recommendation's
+`harnessAction` tells the harness which route to activate and asks it to run
+normal validation.
 
 The generic `runTask` method remains the fallback for adapters that do not
 declare a specialized mode, preserving compatibility with existing Pi

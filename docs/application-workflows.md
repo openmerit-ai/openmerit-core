@@ -1,7 +1,7 @@
 # Application and agent workflows
 
-OpenMerit supports two useful shapes of LLM-backed work without owning an
-application's framework or provider SDK.
+OpenMerit does not own application execution. It benchmarks whatever task the
+harness supplies and returns a structured action for the harness to interpret.
 
 ## Direct inference
 
@@ -20,13 +20,10 @@ allows it for trials.
 
 ## Product workflow
 
-Use `mode: "application"` when Pi is helping build or exercise a product whose
-own code invokes an LLM. The adapter's `runApplication` method is responsible
-for preparing an isolated copy, injecting the candidate route through the
-product's supported configuration, executing its real wrapper, and collecting
-the product result and side effects. This is how an invoice extractor, an
-application classifier, or a multi-step agent can be evaluated using the
-actual workflow.
+When Pi is helping build or exercise a product whose own code invokes an LLM,
+the harness decides how to run that product. OpenMerit supplies the selected
+route and the `harnessAction` instruction; Pi can inspect the project, update
+configuration or code, validate the workflow, and create a patch or PR.
 
 After the recommendation is accepted, the harness consumes the recommendation's
 `harnessAction` instruction. It owns the durable change: it can update an
