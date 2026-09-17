@@ -56,3 +56,7 @@ purpose plus `applyMode` (`session`, `application`, or `ask_user`). If that
 context is unavailable, skip automatic comparison and let the user invoke it
 explicitly. Load `openmerit/instructions` into the harness's instruction
 context using that harness's supported plugin or middleware hook.
+
+Pi integrations may declare context during a task with the
+`openmerit_set_invocation` tool. This is an adapter feature; the core engine
+only receives the resulting `HarnessInvocation`.

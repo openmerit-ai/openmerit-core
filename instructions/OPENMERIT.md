@@ -31,6 +31,11 @@ does not provide that context, automatic comparison is skipped; the user can
 run `/openmerit compare` explicitly. OpenMerit never guesses an application
 target from task keywords.
 
+Pi also exposes the `openmerit_set_invocation` tool. When the harness knows the
+task intent directly, it should call this tool during the task; that explicit
+declaration takes precedence over semantic classification. Other harnesses can
+provide the same `HarnessInvocation` fields through their own extension seam.
+
 OpenMerit is not the harness, provider, or observability system. It does not
 intercept normal traffic or own provider credentials.
 

@@ -660,6 +660,29 @@ async function doctorSummary(): Promise<{ text: string; ok: boolean }> {
 }
 
 export default function openmerit(pi: ExtensionAPI) {
+  let explicitInvocation: { purpose: string; applyMode: "session" | "application" | "ask_user"; context?: Record<string, unknown> } | null = null;
+
+  pi.registerTool?.({
+    name: "openmerit_set_invocation",
+    label: "Set OpenMerit invocation",
+    description: "Declare why this harness task is invoking OpenMerit and how a recommendation should be applied. Use this before completing an eligible LLM task.",
+    promptSnippet: "Declare OpenMerit task intent and route application mode",
+    parameters: {
+      type: "object",
+      properties: {
+        purpose: { type: "string", description: "Harness-owned reason for invoking OpenMerit" },
+        applyMode: { type: "string", enum: ["session", "application", "ask_user"] },
+        context: { type: "object", additionalProperties: true },
+      },
+      required: ["purpose", "applyMode"],
+    } as never,
+    async execute(_id: string, params: { purpose: string; applyMode: "session" | "application" | "ask_user"; context?: Record<string, unknown> }) {
+      explicitInvocation = { purpose: params.purpose, applyMode: params.applyMode, context: params.context };
+      extensionLog("info", "invocation", "declared", "harness declared OpenMerit invocation", explicitInvocation);
+      return { content: [{ type: "text", text: "OpenMerit invocation context recorded for this task." }], details: {} };
+    },
+  } as never);
+
   // Pi supplies the prompt that started an agent run directly through this
   // lifecycle event. Keep it separate from the session transcript so a later
   // follow-up cannot replace the task being settled. Other harness adapters
@@ -946,11 +969,14 @@ export default function openmerit(pi: ExtensionAPI) {
       return;
     }
     const taskPrompt = capturedTaskPrompt;
-    const semantic = taskPrompt ? await classifyTaskWithHarness(ctx, taskPrompt) : null;
-    reportHarnessState(ctx, true, capturedTaskKey, semantic?.purpose
-      ? { purpose: semantic.purpose, applyMode: semantic.applyMode, context: { source: "pi-task-classifier" } } : null);
+    const explicit = explicitInvocation;
+    const semantic = explicit ? { eligible: true, purpose: explicit.purpose, applyMode: explicit.applyMode } :
+      (taskPrompt ? await classifyTaskWithHarness(ctx, taskPrompt) : null);
+    const invocation = semantic?.purpose
+      ? { purpose: semantic.purpose, applyMode: semantic.applyMode, context: explicit ? explicit.context : { source: "pi-task-classifier" } } : null;
+    reportHarnessState(ctx, true, capturedTaskKey, invocation);
     const eligible = semantic?.eligible === true;
-    extensionLog("info", "eligibility", "decision", `task eligible=${eligible} source=${semantic ? "semantic" : "unavailable"}`);
+    extensionLog("info", "eligibility", "decision", `task eligible=${eligible} source=${explicitInvocation ? "harness" : semantic ? "semantic" : "unavailable"}`);
     if (eligible) {
       registerBenchmark(ctx);
       queueSettledTask(ctx);
@@ -960,6 +986,7 @@ export default function openmerit(pi: ExtensionAPI) {
         "openmerit: harness eligibility is unavailable; comparison skipped (use /openmerit compare to override)", "info");
     capturedTaskPrompt = null;
     capturedTaskKey = null;
+    explicitInvocation = null;
     await surface(ctx);
   });
 
