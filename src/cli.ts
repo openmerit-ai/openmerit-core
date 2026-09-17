@@ -12,6 +12,7 @@ import { settledActiveTask } from "./pi-trials.js";
 import type { Frontier, ModelRoute, Recommendation, TrialPoint } from "./types.js";
 import { modelRoute, routeLabel } from "./routes.js";
 import { collectDoctorReport, renderDiagnosticReport, runOfflineVerify } from "./diagnostics.js";
+import { listBenchmarkJobs, listBenchmarks } from "./benchmark-jobs.js";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -110,6 +111,15 @@ function cmdStatus(): void {
   }
 }
 
+function cmdBenchmarks(): void {
+  const benchmarks = listBenchmarks();
+  const jobs = listBenchmarkJobs();
+  console.log(`benchmarks: ${benchmarks.length}`);
+  for (const b of benchmarks) console.log(`  ${b.id}  task=${b.taskKey}  ${b.taskLabel}`);
+  console.log(`enabled jobs: ${jobs.length}`);
+  for (const j of jobs) console.log(`  ${j.id}  benchmark=${j.benchmarkId}  trigger=${j.trigger}  action=${j.action}`);
+}
+
 async function main(): Promise<void> {
   const [cmd, ...args] = process.argv.slice(2);
   switch (cmd) {
@@ -140,6 +150,9 @@ async function main(): Promise<void> {
     case "status":
       cmdStatus();
       break;
+    case "benchmarks":
+      cmdBenchmarks();
+      break;
     case "doctor":
       cmdDoctor(args.includes("--json"));
       break;
@@ -154,6 +167,7 @@ usage: openmerit <command>
   init                 set up ~/.openmerit (policy, state dirs)
   frontier [taskKey]   print pareto frontier(s)
   status               active route, measured tasks, and pending recommendations
+  benchmarks           list registered benchmarks and enabled refresh jobs
   doctor [--json]      diagnose pi, policy, routes, state, and installation
   verify [--json]      run an offline, provider-free core self-test`);
       if (cmd && cmd !== "help" && cmd !== "--help") process.exitCode = 1;
