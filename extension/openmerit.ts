@@ -18,7 +18,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
-  appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync,
+  appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -39,6 +39,7 @@ const BENCHMARK_JOBS_FILE = join(HOME, "benchmark-jobs.jsonl");
 const LOG_FILE = join(HOME, "openmerit.log.jsonl");
 const ENGINE_FILE = join(fileURLToPath(new URL("..", import.meta.url)), "dist", "cli.js");
 const INSTRUCTION_FILE = join(fileURLToPath(new URL("..", import.meta.url)), "instructions", "OPENMERIT.md");
+const POLICY_TEMPLATE_FILE = join(fileURLToPath(new URL("..", import.meta.url)), "instructions", "openmerit.policy.json");
 const PROGRESS_PREFIX = "[openmerit/progress] ";
 
 interface TrialRunProgress {
@@ -261,6 +262,15 @@ function extensionLog(level: "error" | "warn" | "info" | "debug", component: str
   const rank = { error: 0, warn: 1, info: 2, debug: 3 } as const;
   if (rank[level] > (rank[configured as keyof typeof rank] ?? rank.info)) return;
   appendJsonl(LOG_FILE, { ts: new Date().toISOString(), level, component, event, message });
+}
+
+/** Initialize only the state needed by the extension; never overwrite user policy. */
+function ensureState(): void {
+  mkdirSync(HOME, { recursive: true });
+  if (!existsSync(POLICY_FILE) && existsSync(POLICY_TEMPLATE_FILE)) {
+    copyFileSync(POLICY_TEMPLATE_FILE, POLICY_FILE);
+    extensionLog("info", "lifecycle", "state_initialized", "created default policy");
+  }
 }
 
 function registerBenchmark(ctx: ExtensionContext): void {
@@ -906,6 +916,7 @@ export default function openmerit(pi: ExtensionAPI) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    ensureState();
     activeSession = ctx.sessionManager.getSessionFile() ?? null;
     stopTrialJob();
     queuedJobs.length = 0;
