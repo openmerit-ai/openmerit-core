@@ -30,20 +30,6 @@ export function paretoFrontier(points: TrialPoint[]): TrialPoint[] {
   return fr.sort((a, b) => effectivePrice(a) - effectivePrice(b) || b.score - a.score);
 }
 
-/** Simple 2-objective chain (score vs price only), cheapest first. */
-export function scorePriceChain(points: TrialPoint[]): TrialPoint[] {
-  const pts = [...points].sort((a, b) => effectivePrice(a) - effectivePrice(b) || b.score - a.score);
-  const chain: TrialPoint[] = [];
-  let best = -1;
-  for (const p of pts) {
-    if (p.score > best) {
-      chain.push(p);
-      best = p.score;
-    }
-  }
-  return chain;
-}
-
 /** Highest score; ties broken by lower price then lower latency. */
 export function pickBest(points: TrialPoint[]): TrialPoint | undefined {
   return [...points].sort(

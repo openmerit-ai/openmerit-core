@@ -22,20 +22,16 @@ export interface Policy {
     max_usd_per_day: number;
   };
   providers: { allow: string[]; deny: string[] };
-  watch: {
-    catalog_interval_min: number;
-    traces_interval_sec: number;
-    trial_interval_min: number;
-    /** Compare the completed active pi task with this many total models. */
-    models_per_task: number;
+  comparison: {
+    /** Compare the completed active task with this many total routes, including baseline. */
+    max_routes: number;
   };
   fallback: {
     auto_update: boolean;
     min_score: number;
     apply_on_error: boolean;
   };
-  judge_model: string | null;
-  strategist_model: string | null;
+  evaluator_model: string | null;
   /** Global price ceiling (blended $/1M) for any considered model. */
   max_usd_per_m: number;
   /** Exact provider:modelId metadata for routes whose registry data is incomplete. */
@@ -45,7 +41,7 @@ export interface Policy {
 }
 
 export const DEFAULT_POLICY: Policy = {
-  version: 2,
+  version: 3,
   mode: "recommend",
   auto_apply: {
     enabled: false,
@@ -55,18 +51,13 @@ export const DEFAULT_POLICY: Policy = {
   },
   budgets: { max_usd_per_trial: 0.25, max_trials_per_day: 20, max_usd_per_day: 5.0 },
   providers: { allow: ["*"], deny: [] },
-  watch: { catalog_interval_min: 360, traces_interval_sec: 5, trial_interval_min: 30, models_per_task: 3 },
+  comparison: { max_routes: 3 },
   fallback: { auto_update: true, min_score: 0.6, apply_on_error: true },
-  judge_model: null,
-  strategist_model: null,
+  evaluator_model: null,
   max_usd_per_m: 20.0,
   route_overrides: {},
   pi: { provider_extensions: [] },
 };
-
-function num(v: unknown, fallback: number): number {
-  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
-}
 
 function finiteAtLeast(value: unknown, min: number, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < min)
@@ -74,8 +65,49 @@ function finiteAtLeast(value: unknown, min: number, label: string): number {
   return value;
 }
 
+function optionalNumber(
+  value: unknown, fallback: number, min: number, label: string, max = Number.POSITIVE_INFINITY,
+): number {
+  if (value === undefined) return fallback;
+  const result = finiteAtLeast(value, min, label);
+  if (result > max) throw new Error(`${label} must be <= ${max}`);
+  return result;
+}
+
+function booleanValue(value: unknown, fallback: boolean, label: string): boolean {
+  if (value === undefined) return fallback;
+  if (typeof value !== "boolean") throw new Error(`${label} must be a boolean`);
+  return value;
+}
+
+function stringList(value: unknown, fallback: string[], label: string): string[] {
+  if (value === undefined) return [...fallback];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim()))
+    throw new Error(`${label} must be an array of non-empty strings`);
+  return [...new Set(value.map((item) => item.trim()))];
+}
+
+function optionalModel(value: unknown, label: string): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${label} must be null or a model/route id`);
+  return value.trim();
+}
+
 function positiveInteger(value: unknown, label: string): number {
   const result = finiteAtLeast(value, 1, label);
+  if (!Number.isInteger(result)) throw new Error(`${label} must be an integer`);
+  return result;
+}
+
+function integerAtLeast(value: unknown, min: number, label: string): number {
+  const result = finiteAtLeast(value, min, label);
+  if (!Number.isInteger(result)) throw new Error(`${label} must be an integer`);
+  return result;
+}
+
+function positiveIntegerOrZero(value: unknown, fallback: number, label: string): number {
+  if (value === undefined) return fallback;
+  const result = finiteAtLeast(value, 0, label);
   if (!Number.isInteger(result)) throw new Error(`${label} must be an integer`);
   return result;
 }
@@ -138,40 +170,51 @@ function providerExtensions(value: unknown): string[] {
 /** Load a policy file, filling defaults for missing keys. Throws on invalid JSON. */
 export function loadPolicy(path: string): Policy {
   if (!existsSync(path)) return structuredClone(DEFAULT_POLICY);
-  const raw = JSON.parse(readFileSync(path, "utf8"));
+  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new Error("policy must be a JSON object");
+  const raw = parsed as Record<string, any>;
   const d = DEFAULT_POLICY;
+  const legacyMaxRoutes = raw.watch?.models_per_task;
   return {
-    version: num(raw.version, d.version),
+    version: raw.version === undefined ? d.version : positiveInteger(raw.version, "version"),
     mode: raw.mode === "auto" ? "auto" : "recommend",
     auto_apply: {
-      enabled: Boolean(raw.auto_apply?.enabled ?? d.auto_apply.enabled),
-      min_score_gain: num(raw.auto_apply?.min_score_gain, d.auto_apply.min_score_gain),
-      max_price_ratio: num(raw.auto_apply?.max_price_ratio, d.auto_apply.max_price_ratio),
-      require_frontier: Boolean(raw.auto_apply?.require_frontier ?? d.auto_apply.require_frontier),
+      enabled: booleanValue(raw.auto_apply?.enabled, d.auto_apply.enabled, "auto_apply.enabled"),
+      min_score_gain: optionalNumber(raw.auto_apply?.min_score_gain, d.auto_apply.min_score_gain,
+        0, "auto_apply.min_score_gain", 1),
+      max_price_ratio: optionalNumber(raw.auto_apply?.max_price_ratio, d.auto_apply.max_price_ratio,
+        0, "auto_apply.max_price_ratio"),
+      require_frontier: booleanValue(raw.auto_apply?.require_frontier,
+        d.auto_apply.require_frontier, "auto_apply.require_frontier"),
     },
     budgets: {
-      max_usd_per_trial: num(raw.budgets?.max_usd_per_trial, d.budgets.max_usd_per_trial),
-      max_trials_per_day: num(raw.budgets?.max_trials_per_day, d.budgets.max_trials_per_day),
-      max_usd_per_day: num(raw.budgets?.max_usd_per_day, d.budgets.max_usd_per_day),
+      max_usd_per_trial: optionalNumber(raw.budgets?.max_usd_per_trial,
+        d.budgets.max_usd_per_trial, 0, "budgets.max_usd_per_trial"),
+      max_trials_per_day: positiveIntegerOrZero(raw.budgets?.max_trials_per_day,
+        d.budgets.max_trials_per_day, "budgets.max_trials_per_day"),
+      max_usd_per_day: optionalNumber(raw.budgets?.max_usd_per_day,
+        d.budgets.max_usd_per_day, 0, "budgets.max_usd_per_day"),
     },
     providers: {
-      allow: Array.isArray(raw.providers?.allow) ? raw.providers.allow.map(String) : d.providers.allow,
-      deny: Array.isArray(raw.providers?.deny) ? raw.providers.deny.map(String) : d.providers.deny,
+      allow: stringList(raw.providers?.allow, d.providers.allow, "providers.allow"),
+      deny: stringList(raw.providers?.deny, d.providers.deny, "providers.deny"),
     },
-    watch: {
-      catalog_interval_min: num(raw.watch?.catalog_interval_min, d.watch.catalog_interval_min),
-      traces_interval_sec: num(raw.watch?.traces_interval_sec, d.watch.traces_interval_sec),
-      trial_interval_min: num(raw.watch?.trial_interval_min, d.watch.trial_interval_min),
-      models_per_task: num(raw.watch?.models_per_task, d.watch.models_per_task),
+    comparison: {
+      max_routes: integerAtLeast(raw.comparison?.max_routes ?? legacyMaxRoutes ?? d.comparison.max_routes,
+        2, "comparison.max_routes"),
     },
     fallback: {
-      auto_update: Boolean(raw.fallback?.auto_update ?? d.fallback.auto_update),
-      min_score: num(raw.fallback?.min_score, d.fallback.min_score),
-      apply_on_error: Boolean(raw.fallback?.apply_on_error ?? d.fallback.apply_on_error),
+      auto_update: booleanValue(raw.fallback?.auto_update, d.fallback.auto_update, "fallback.auto_update"),
+      min_score: optionalNumber(raw.fallback?.min_score, d.fallback.min_score, 0, "fallback.min_score", 1),
+      apply_on_error: booleanValue(raw.fallback?.apply_on_error,
+        d.fallback.apply_on_error, "fallback.apply_on_error"),
     },
-    judge_model: raw.judge_model ?? null,
-    strategist_model: raw.strategist_model ?? null,
-    max_usd_per_m: num(raw.max_usd_per_m, d.max_usd_per_m),
+    evaluator_model: optionalModel(
+      raw.evaluator_model !== undefined ? raw.evaluator_model : raw.judge_model,
+      "evaluator_model",
+    ),
+    max_usd_per_m: optionalNumber(raw.max_usd_per_m, d.max_usd_per_m, 0, "max_usd_per_m"),
     route_overrides: routeOverrides(raw.route_overrides),
     pi: { provider_extensions: providerExtensions(raw.pi?.provider_extensions) },
   };

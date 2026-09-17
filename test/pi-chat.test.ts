@@ -12,7 +12,7 @@ afterEach(() => {
 });
 
 describe("Pi-backed merit calls", () => {
-  it("uses Pi credentials/routes and reports judge or strategist spend", async () => {
+  it("uses Pi credentials/routes and reports evaluator spend", async () => {
     dir = mkdtempSync(join(tmpdir(), "openmerit-pi-chat-test-"));
     const bin = join(dir, "pi");
     writeFileSync(bin, `#!/usr/bin/env node

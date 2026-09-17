@@ -1,43 +1,85 @@
 # OpenMerit product and architecture rules
 
-- **Optimize for useful model choices.** OpenMerit exists to find better task-specific tradeoffs between quality, cost, and latency—not to become a general-purpose agent or telemetry platform.
+- **Be the decision layer.** OpenMerit answers which configured model route or
+  route plan offers the highest expected value for this task under the user's
+  current constraints.
 
-- **Act as a control plane, not a gateway.** Normal traffic stays between the harness and provider; OpenMerit observes evidence, runs explicit trials, and returns recommendations without intercepting ordinary work.
+- **Do not become the adjacent layers.** Harnesses execute agent work,
+  providers supply inference, and observability systems collect operational
+  telemetry. OpenMerit consumes normalized inputs from them and returns route
+  decisions; it does not replace them.
 
-- **Make Pi plug-and-play first.** Pi and Pi-based harnesses are the first supported user experience because that is where early users already work; broader harness support can follow without weakening this path.
+- **Serve only users and their users.** No provider, reseller, benchmark owner,
+  or hosted operator may influence routing through hidden commercial priority.
+  Open source and auditable evidence are part of the correctness model.
 
-- **Keep the core harness-neutral.** Pi is the first `HarnessAdapter`, not a permanent assumption in scoring, recommendations, policy, or stored data, so other harnesses can be added without rewriting the merit loop.
+- **Optimize user-defined value.** Quality, price, latency, reliability,
+  privacy, locality, capacity, and other objectives remain explicit. Do not
+  hide product policy inside a universal proprietary score.
 
-- **Keep model providers interchangeable.** OpenRouter is a first-class provider and discovery source, not the foundation of the domain model; provider-specific behavior belongs behind a `ModelProviderAdapter`.
+- **Separate model identity from execution route.** Keep stable logical model
+  IDs in `vendor/model` form and record the exact provider route independently.
+  Equivalent models through different providers are different executable
+  options.
 
-- **Require end-to-end provider neutrality.** Discovery, authentication, execution, scoring, and swapping must preserve the selected route; a feature is not provider-neutral if only its API client is abstracted.
+- **Preserve exact routes end to end.** Discovery, admission, execution,
+  evaluation, recommendation, fallback, and application must never silently
+  substitute another provider.
 
-- **Separate model identity from execution route.** Keep logical model IDs in stable `vendor/model` form, while recording the actual provider or route separately, so the same model can be compared through OpenRouter, a native provider, or a local provider.
+- **Respect the harness's eligible pool.** OpenMerit may enrich or recommend
+  routes, but it executes and applies only routes explicitly configured and
+  available in the active harness.
 
-- **Respect the harness's eligible model pool.** Prefer models already available and configured in the active harness; external catalogs may enrich or expand discovery but must not silently override harness scope or credentials.
+- **Never own universal provider credentials.** Inference for comparisons and
+  evaluation runs through an integration's credential and route system.
+  Optional catalog connectors provide signals, not covert execution paths.
 
-- **Require explicit metadata instead of price guesses.** Missing price, context, output, or modality data for a custom route may be supplied by an exact-route override; never assume a local route is free or copy metadata across providers.
+- **Treat public benchmarks as priors, never proof.** Merit comes from the
+  user's workload and outcomes. Every prior must retain source, scope,
+  timestamp, and confidence.
 
-- **Treat public benchmarks as priors, not proof.** Benchmarks help shortlist candidates, but merit comes from trials on the user's actual task.
+- **Keep the kernel integration-neutral.** Candidate execution and evaluator
+  inference are explicit interfaces. Pi is the first integration and reference
+  implementation, not a permanent domain assumption.
 
-- **Keep four integration boundaries distinct.** Model execution (`ModelProviderAdapter`), agent execution (`HarnessAdapter`), incoming traces (`ObservationSource`), and outgoing telemetry (`EventSink`) solve different problems and must not be coupled.
+- **Make decisions reproducible and auditable.** Candidate selection, evidence
+  normalization, frontier computation, and policy application must be
+  deterministic for the same inputs unless exploration randomness is explicit,
+  seeded, and recorded.
 
-- **Use provider-neutral core records.** Normalize integrations into stable concepts such as `TaskObservation`, `CandidateRun`, `TrialScore`, `Frontier`, `Recommendation`, and `MeritEvent`, so integrations do not leak their schemas into the decision engine.
+- **Keep policy as the only automatic-application authority.** Recheck current
+  policy immediately before acting. Recommendations always retain gate reasons,
+  evidence, baseline route, task identity, target session, and timestamp.
 
-- **Optimize per task before aggregating per agent.** Agent-level conclusions must be built from measured task evidence rather than assumed from global model rankings.
+- **Prefer route plans over isolated winners.** Every production decision should
+  converge on a primary plus ordered, task-qualified fallbacks, escalation
+  conditions, and expiry or reevaluation rules.
 
-- **Version persisted events and evolve them additively.** Existing 0.1.x state must remain readable, and append-only recommendation history must stay intact; migrations should normalize old records rather than invalidate them.
+- **Design for continuous change.** Price drift, latency drift, quality drift,
+  outages, capacity limits, rate limits, deprecation, and new routes are normal
+  state transitions—not exceptional manual maintenance.
 
-- **Keep policy as the sole auto-swap authority.** Trials and strategists may recommend changes, but only the policy gate may approve automatic application, and every recommendation must retain its gate reasons.
+- **Fail safely and degrade automatically.** Never claim absolute availability.
+  Maintain and apply the next best acceptable route whenever one remains
+  available under policy.
 
-- **Default to safe, explicit trials.** Candidate tool access stays off unless deliberately allowed, trials remain isolated, and temporary workspaces are cleaned up because trying a model must not expose or damage a user's project by surprise.
+- **Require explicit metadata rather than guesses.** Unknown route price,
+  context, output limits, or modalities must be supplied by an exact-route
+  override or remain unknown. Never assume a local model is free.
 
-- **Allowlist subprocess extensions.** Keep Pi extension discovery disabled in isolated trials and load only explicitly named provider-registration files; never recursively load OpenMerit or inherit unrelated harness extensions.
+- **Default comparisons to least privilege.** Candidate tools are off by
+  default, provider extensions are explicit allowlists, temporary workspaces
+  are cleaned, and OpenMerit never recursively launches itself.
 
-- **Keep the shadow track isolated, not necessarily concurrent.** Candidate trials may run sequentially to respect cost, rate, and safety limits while remaining separate from the user's live task.
+- **Keep evidence durable and portable.** Version persisted records, evolve
+  schemas additively, keep append-only decision history, and preserve old
+  evidence even when obsolete execution paths are removed.
 
-- **Treat local JSONL as the default integration, not a lock-in.** Local traces and events should work without an external service; systems such as Langfuse can later plug in as observation sources or event sinks.
+- **Keep benchmarks outside runtime behavior.** Checked-in benchmarks verify
+  scorers and regressions. Product code must not special-case a benchmark,
+  package its private fixtures, or mistake benchmark performance for current
+  workload value.
 
-- **Keep integrations optional and the core lightweight.** New providers, harnesses, and observability services should not impose credentials, network calls, or heavy dependencies on users who do not enable them.
-
-- **Keep 0.1.x focused.** The near-term bar is reliable, provider-neutral use for Pi tinkerers and solo hackers; additional harnesses and hosted observability integrations belong in later releases unless required to prove the boundaries work.
+- **Keep the core lightweight.** Integrations and signal sources remain
+  optional. Users who do not enable a provider, catalog, or observability
+  connector must not inherit its credentials, network calls, or dependencies.

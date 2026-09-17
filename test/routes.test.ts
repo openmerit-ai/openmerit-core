@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildRecommendation } from "../src/recommend.js";
-import { applyRouteOverrides, modelRoute, routeCatalog, routeKey } from "../src/routes.js";
+import { applyRouteOverrides, modelRoute, routeKey, routePrice } from "../src/routes.js";
 import { DEFAULT_POLICY, type Policy } from "../src/policy.js";
 import { trialBudgetOk } from "../src/trials.js";
 import type { TrialPoint } from "../src/types.js";
@@ -13,9 +13,9 @@ const routed = modelRoute("openrouter", "anthropic/claude-sonnet", {
 });
 
 function point(route: typeof direct, score: number): TrialPoint {
-  const entry = routeCatalog([route]).get(routeKey(route))!;
-  return { schemaVersion: 1, model: route.meritId, route, score, price: entry.price,
-    priceKnown: entry.priceKnown, ts: "2026-09-16T00:00:00Z", source: "pi_trial" };
+  const priced = routePrice(route);
+  return { schemaVersion: 1, model: route.meritId, route, score, price: priced.price,
+    priceKnown: priced.known, ts: "2026-09-16T00:00:00Z", source: "pi_trial" };
 }
 
 describe("provider-neutral model routes", () => {
@@ -45,9 +45,9 @@ describe("provider-neutral model routes", () => {
   });
 
   it("rejects a candidate whose conservative cost estimate exceeds the per-trial limit", () => {
-    const expensive = routeCatalog([modelRoute("native", "expensive", {
+    const expensive = modelRoute("native", "expensive", {
       input: ["text"], cost: { input: 100, output: 100 }, contextWindow: 8192, maxTokens: 4096,
-    })]).values().next().value!;
+    });
     expect(trialBudgetOk(DEFAULT_POLICY, expensive, 4000)).toMatchObject({ ok: false });
   });
 

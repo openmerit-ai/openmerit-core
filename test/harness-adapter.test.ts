@@ -4,12 +4,9 @@ vi.mock("../src/judge.js", () => ({
   judge: vi.fn(async () => ({ score: 0.75, why: "adapter result judged" })),
   judgeWithImages: vi.fn(async () => ({ score: 0.75, why: "adapter result judged" })),
 }));
-vi.mock("../src/invoice-eval.js", () => ({
-  knownInvoiceScore: vi.fn(async () => null),
-}));
-
 import type { HarnessAdapter } from "../src/harness.js";
 import { runPiTrial } from "../src/pi-trials.js";
+import { modelRoute } from "../src/routes.js";
 
 describe("harness adapter boundary", () => {
   it("scores a normalized run supplied by a non-Pi adapter", async () => {
@@ -26,13 +23,13 @@ describe("harness adapter boundary", () => {
       })),
     };
 
-    const result = await runPiTrial(
-      "provider-key", "judge/model", "task", "rubric", "vendor/model",
-      { id: "vendor/model", name: "Model", ctx: 1000, pp: 0.000001, pc: 0.000002, price: 1.5 },
-      "/tmp", [], [], harness,
-    );
+    const route = modelRoute("vendor", "model", { cost: { input: 1, output: 2 } });
+    const evaluator = modelRoute("vendor", "evaluator", { cost: { input: 1, output: 2 } });
+    const client = { chat: vi.fn(), chatWithImages: vi.fn() };
+    const result = await runPiTrial(evaluator, "task", "rubric", route, client,
+      "/tmp", [], [], harness);
 
-    expect(harness.runTask).toHaveBeenCalledWith("vendor/model", {
+    expect(harness.runTask).toHaveBeenCalledWith(route, {
       task: "task", cwd: "/tmp", images: [], files: [],
     });
     expect(result).toMatchObject({ costUsd: 0.004, sessionId: "external-session" });

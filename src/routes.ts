@@ -1,6 +1,6 @@
 /** Provider-neutral model-route normalization. */
 
-import type { CatalogEntry, ModelRoute, RouteMetadataOverride, TrialPoint } from "./types.js";
+import type { ModelRoute, RouteMetadataOverride, TrialPoint } from "./types.js";
 
 export function meritModelId(provider: string, modelId: string): string {
   if (provider === "openrouter") return modelId;
@@ -61,29 +61,13 @@ export function routePrice(route: ModelRoute): { price: number; known: boolean }
     known: true };
 }
 
-export function catalogEntryFromRoute(route: ModelRoute): CatalogEntry {
-  const priced = routePrice(route);
+/** Estimate one request from Pi's dollars-per-million-token route metadata. */
+export function estimateRouteCost(
+  route: ModelRoute, inputTokens: number, outputTokens: number,
+): { known: boolean; usd: number } {
+  if (!route.cost) return { known: false, usd: 0 };
   return {
-    id: route.meritId,
-    name: routeLabel(route),
-    ctx: route.contextWindow ?? 0,
-    pp: route.cost ? route.cost.input / 1e6 : 0,
-    pc: route.cost ? route.cost.output / 1e6 : 0,
-    price: priced.price,
-    priceKnown: priced.known,
-    inputModalities: route.input,
-    route,
+    known: true,
+    usd: (route.cost.input * inputTokens + route.cost.output * outputTokens) / 1_000_000,
   };
-}
-
-export function routeCatalog(routes: ModelRoute[]): Map<string, CatalogEntry> {
-  const out = new Map<string, CatalogEntry>();
-  for (const route of routes) out.set(routeKey(route), catalogEntryFromRoute(route));
-  return out;
-}
-
-/** Preserve the route while enriching an OpenRouter entry with its live catalog metadata. */
-export function enrichRouteEntry(entry: CatalogEntry, live?: CatalogEntry): CatalogEntry {
-  if (!live) return entry;
-  return { ...live, route: entry.route, id: entry.id, name: entry.name, priceKnown: true };
 }

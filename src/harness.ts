@@ -23,5 +23,5 @@ export interface HarnessRun {
 
 /** A coding harness executes a candidate and exposes normalized observations. */
 export interface HarnessAdapter {
-  runTask(model: string | ModelRoute, input: HarnessTask): Promise<HarnessRun>;
+  runTask(route: ModelRoute, input: HarnessTask): Promise<HarnessRun>;
 }

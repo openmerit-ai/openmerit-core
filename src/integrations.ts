@@ -1,14 +1,8 @@
-/** Stable boundaries for trace inputs and telemetry outputs. */
+/** Stable audit-event boundary for decision evidence. */
 
 import { randomUUID } from "node:crypto";
 import { appendJsonl, paths } from "./store.js";
-import { ingestNewTraces } from "./traces.js";
-import type { Recommendation, TaskObservation, TrialPoint } from "./types.js";
-
-export interface ObservationSource {
-  readonly id: string;
-  read(): TaskObservation[];
-}
+import type { Recommendation, TrialPoint } from "./types.js";
 
 export type MeritEvent = {
   schemaVersion: 1;
@@ -16,20 +10,13 @@ export type MeritEvent = {
   ts: string;
   source: string;
 } & (
-  | { type: "observation.recorded"; payload: TaskObservation }
-  | { type: "trial.completed"; payload: TrialPoint & { taskKey?: string; sessionFile?: string } }
+  | { type: "trial.completed"; payload: TrialPoint }
   | { type: "recommendation.created"; payload: Recommendation }
 );
 
 export interface EventSink {
   readonly id: string;
   emit(event: MeritEvent): void;
-}
-
-export class PiTraceObservationSource implements ObservationSource {
-  readonly id = "pi-jsonl";
-  constructor(private readonly sessionsDir?: string) {}
-  read(): TaskObservation[] { return ingestNewTraces(this.sessionsDir); }
 }
 
 export class LocalJsonlEventSink implements EventSink {

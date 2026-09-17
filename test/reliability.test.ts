@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { collectDoctorReport, runOfflineVerify } from "../src/diagnostics.js";
-import { taskJobIsClaimed } from "../src/daemon.js";
+import { taskJobIsClaimed } from "../src/comparison.js";
 import { DEFAULT_POLICY } from "../src/policy.js";
 import { appendJsonl, readJson, readJsonReport, readJsonlReport, writeJson } from "../src/store.js";
 import { budgetOk, recordTrialSpend } from "../src/trials.js";

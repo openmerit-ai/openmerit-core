@@ -1,24 +1,25 @@
 {
   "name": "openmerit",
-  "version": "0.1.4",
-  "description": "Find better models for each pi task by comparing quality, cost, and latency.",
+  "version": "0.1.5",
+  "description": "Open, vendor-neutral model decisions for every task at runtime.",
   "type": "module",
   "keywords": [
     "pi-package",
     "pi-extension",
     "pi-coding-agent",
     "model-routing",
+    "inference-routing",
+    "vendor-neutral",
     "llm",
-    "openrouter",
     "evaluation"
   ],
   "files": [
     "dist/",
     "extension/openmerit.ts",
     "instructions/",
-    "examples/",
     "rules.md",
-    "benchmark/invoice_ocr/data/"
+    "CHANGELOG.md",
+    "docs/0.1.5-architecture-decisions.md"
   ],
   "pi": {
     "extensions": [
@@ -44,7 +45,7 @@
   },
   "scripts": {
     "prepare": "npm run build",
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit && tsc -p benchmark/tsconfig.json",
     "typecheck:extension": "tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck extension/openmerit.ts",
     "test": "vitest run",

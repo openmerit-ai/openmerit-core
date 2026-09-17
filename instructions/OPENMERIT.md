@@ -1,63 +1,44 @@
-# OpenMerit — Model Merit Harness
+# OpenMerit — adaptive model decision layer
 
-You are running under a main agent harness that is observed by **OpenMerit**, an
-external merit harness. OpenMerit's job is to make sure you are always running on
-the best model for the task at hand, at the best price, with a vetted fallback.
+This harness is integrated with OpenMerit. OpenMerit compares eligible model
+routes on completed tasks and maintains evidence for the best available route
+and fallback under the user's policy.
 
 ## What OpenMerit does
 
-1. **Observes** this harness's session traces (models used, tokens, cost,
-   latency, errors) without intercepting or slowing down your work.
-2. **Evaluates** candidate models for each completed task sequentially through
-   pi and scores their outputs with a judge model. Candidate tools are disabled
-   by default.
-3. **Maintains a pareto frontier** per task (quality vs. cost vs. latency) and
-   an aggregate frontier across all of your tasks.
-4. **Watches for new model releases** (provider catalogs + public benchmarks)
-   and queues promising releases for trial against your existing frontier.
-5. **Recommends or applies model swaps**, with reasoning, and keeps your
-   fallback model up to date.
+1. Receives the latest completed task, its measured outcome, and the exact model
+   routes configured in this harness.
+2. Runs a small sequential comparison through those configured routes.
+3. Measures quality, price, latency, errors, and tool activity.
+4. Builds a per-task Pareto frontier and recommends a primary and fallback.
+5. Applies a route automatically only when the user's current policy authorizes
+   it; otherwise the decision remains supervised.
 
-## What you should do
+OpenMerit is not the harness, provider, or observability system. It does not
+intercept normal traffic or own provider credentials.
 
-- **Treat model changes as explicit routing decisions.** If you notice your
-  model identity change, it was approved by the user or passed their opt-in
-  auto-apply policy. Continue the task; your instructions and context are
-  unchanged.
-- **Respect the fallback.** If your current model errors, rate-limits, or is
-  retired, OpenMerit can offer the current fallback or apply it under an
-  opt-in automatic policy. Treat an approved fallback as normal operation.
-- **State your task clearly in your first message** of a session when possible.
-  OpenMerit keys its pareto frontier to task signatures; clear task statements
-  produce better model choices for you.
-- **Do not edit OpenMerit state files** (`~/.openmerit/`). If something looks
-  wrong, tell the user.
+## How to interact with it
 
-## What you can ask the user for
+- `/openmerit` — route, fallback, comparison status, budget, and evidence
+- `/openmerit apply` / `/openmerit dismiss` — act on supervised decisions
+- `/openmerit compare` — compare the latest completed task explicitly
+- `/openmerit pause` / `/openmerit resume` — control future comparisons
+- `/openmerit fallback` — switch to the current vetted fallback
+- `/openmerit doctor` — sanitized installation and route diagnostics
 
-- `/openmerit` — show current model, fallback, frontier position, and pending
-  recommendations.
-- `/openmerit apply` / `/openmerit dismiss` — act on a pending recommendation
-  when automatic application is declined by the policy gate.
-- `/openmerit pause` / `/openmerit resume` — stop or restart automatic task
-  comparisons without changing the saved policy.
-- `/openmerit compare` — explicitly compare the latest completed task, even
-  while automatic comparisons are paused.
-- `/openmerit doctor` — inspect sanitized installation, route, pricing, state,
-  and provider-extension diagnostics inside Pi.
-- Policy changes (auto-apply thresholds, budgets, provider allow-lists) are
-  made by the user in `~/.openmerit/policy.json`, not by you.
+Policy changes belong to the user in `~/.openmerit/policy.json`.
 
-## Guarantees
+## Operating guarantees
 
-- Per-task comparisons send the task text, uploaded files or images (when
-  present), and candidate answers through the model routes configured in Pi
-  for model runs and judging. Candidate Pi runs default to no tools; any tool access is an
-  explicit user opt-in. Use non-sensitive examples while
-  evaluating this alpha.
-- The shipped policy is supervised. Swaps happen automatically only after the
-  user opts in and the configured quality/cost guardrails pass; otherwise they
-  remain recommendations for a human to approve.
-- Isolated subprocesses disable extension discovery. Provider-registration
-  extensions run only when the user lists their absolute file paths in
-  `policy.json`; OpenMerit refuses to load itself recursively.
+- Logical model identity and exact provider route remain separate throughout
+  measurement and application.
+- Candidate tools are disabled unless the user explicitly enables an allowlist.
+- Candidate subprocesses disable ordinary extension discovery and load only
+  explicitly allowlisted provider-registration files.
+- The default policy is supervised. Automatic decisions require both auto mode
+  and auto-apply enablement and are rechecked immediately before application.
+- Task text, attachments, candidate answers, and evaluation requests are sent
+  through the configured routes. Treat this alpha accordingly for sensitive
+  workloads.
+- OpenMerit records decision evidence locally by default. Do not edit its state
+  files while it is running; use `/openmerit doctor` when state appears invalid.

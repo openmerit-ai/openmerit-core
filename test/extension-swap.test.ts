@@ -239,12 +239,22 @@ describe("pi extension model handoff", () => {
   it("automatically applies only a recommendation bound to its settled session", async () => {
     dir = mkdtempSync(join(tmpdir(), "openmerit-ext-auto-"));
     process.env.OPENMERIT_HOME = dir;
+    writeFileSync(join(dir, "policy.json"), JSON.stringify({
+      mode: "auto", auto_apply: { enabled: true, min_score_gain: 0.1,
+        max_price_ratio: 1.5, require_frontier: true },
+      providers: { allow: ["*"], deny: [] },
+    }));
     const session = join(dir, "session.jsonl");
     writeFileSync(session, JSON.stringify({ type: "message", message: {
       role: "user", content: [{ type: "text", text: "task A" }],
     } }) + "\n");
     const base = { ts: new Date().toISOString(), taskKey: taskKey("task A"), taskLabel: "task A",
-      currentModel: "vendor/model-a", recommended: { model: "vendor/model-b", reason: "better" },
+      currentModel: "vendor/model-a",
+      currentRoute: { provider: "openrouter", modelId: "vendor/model-a", meritId: "vendor/model-a",
+        input: ["text"], cost: { input: 1, output: 1 } },
+      recommended: { model: "vendor/model-b", reason: "better",
+        route: { provider: "openrouter", modelId: "vendor/model-b", meritId: "vendor/model-b",
+          input: ["text"], cost: { input: 0.5, output: 0.5 } } },
       fallback: null, evidence: { scoreGain: 0.2, priceRatio: 0.5, onFrontier: true, trials: 3 },
       policy: { autoApply: true, reasons: ["all auto-apply thresholds met"] }, status: "pending" };
     writeFileSync(join(dir, "recommendations.jsonl"), [
@@ -282,9 +292,95 @@ describe("pi extension model handoff", () => {
     await handlers.get("session_shutdown")?.();
   });
 
+  it("rechecks the current policy before applying an older automatic recommendation", async () => {
+    dir = mkdtempSync(join(tmpdir(), "openmerit-ext-stale-policy-"));
+    process.env.OPENMERIT_HOME = dir;
+    writeFileSync(join(dir, "policy.json"), JSON.stringify({
+      mode: "recommend", auto_apply: { enabled: false },
+      providers: { allow: ["*"], deny: [] },
+    }));
+    const session = join(dir, "session.jsonl");
+    writeFileSync(session, JSON.stringify({ type: "message", message: {
+      role: "user", content: [{ type: "text", text: "task A" }],
+    } }) + "\n");
+    writeFileSync(join(dir, "recommendations.jsonl"), JSON.stringify({
+      id: "stale-auto", ts: new Date().toISOString(), taskKey: taskKey("task A"), taskLabel: "task A",
+      sessionFile: session, currentModel: "vendor/model-a",
+      recommended: { model: "vendor/model-b", reason: "better" }, fallback: null,
+      evidence: { scoreGain: 0.2, priceRatio: 0.5, priceKnown: true, onFrontier: true, trials: 3 },
+      policy: { autoApply: true, reasons: ["all auto-apply thresholds met"] }, status: "pending",
+    }) + "\n");
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    let swaps = 0;
+    const ctx = {
+      model: { provider: "openrouter", id: "vendor/model-a" },
+      modelRegistry: { find: () => ({ provider: "openrouter", id: "vendor/model-b" }) },
+      sessionManager: { getSessionFile: () => session }, cwd: dir, hasUI: false,
+      isIdle: () => true, ui: { notify: () => undefined },
+    };
+    const pi = {
+      on: (name: string, fn: (...args: unknown[]) => Promise<void>) => handlers.set(name, fn),
+      registerCommand: () => undefined,
+      setModel: async () => { swaps++; return true; },
+    };
+    const { default: extension } = await import("../extension/openmerit.js");
+    extension(pi as never);
+    await handlers.get("session_start")?.({}, ctx);
+    expect(swaps).toBe(0);
+    await handlers.get("session_shutdown")?.();
+  });
+
+  it("automatically engages only an exact fallback still allowed by current policy", async () => {
+    dir = mkdtempSync(join(tmpdir(), "openmerit-ext-fallback-policy-"));
+    process.env.OPENMERIT_HOME = dir;
+    const fallbackRoute = { provider: "local", modelId: "model-c", meritId: "local/model-c",
+      input: ["text"], cost: { input: 0, output: 0 } };
+    writeFileSync(join(dir, "harness-state.json"), JSON.stringify({
+      fallbackModel: "local/model-c", fallbackRoute,
+    }));
+    writeFileSync(join(dir, "policy.json"), JSON.stringify({
+      mode: "auto", auto_apply: { enabled: true }, max_usd_per_m: 20,
+      providers: { allow: ["*"], deny: ["local"] }, fallback: { apply_on_error: true },
+    }));
+    const session = join(dir, "session.jsonl");
+    writeFileSync(session, "");
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    let switchedTo: string | null = null;
+    const ctx = {
+      model: { provider: "openrouter", id: "vendor/model-a" },
+      modelRegistry: { find: (provider: string, id: string) =>
+        provider === "local" && id === "model-c" ? { provider, id } : undefined },
+      sessionManager: { getSessionFile: () => session }, cwd: dir, hasUI: false,
+      isIdle: () => true, ui: { notify: () => undefined },
+    };
+    const pi = {
+      on: (name: string, fn: (...args: unknown[]) => Promise<void>) => handlers.set(name, fn),
+      registerCommand: () => undefined,
+      setModel: async (model: { id: string }) => { switchedTo = model.id; return true; },
+    };
+    const { default: extension } = await import("../extension/openmerit.js");
+    extension(pi as never);
+    await handlers.get("session_start")?.({}, ctx);
+    const failure = { willRetry: false, messages: [{ role: "assistant", stopReason: "error" }] };
+    await handlers.get("agent_end")?.(failure, ctx);
+    expect(switchedTo).toBeNull();
+    writeFileSync(join(dir, "policy.json"), JSON.stringify({
+      mode: "auto", auto_apply: { enabled: true }, max_usd_per_m: 20,
+      providers: { allow: ["*"], deny: [] }, fallback: { apply_on_error: true },
+    }));
+    await handlers.get("agent_end")?.(failure, ctx);
+    expect(switchedTo).toBe("model-c");
+    await handlers.get("session_shutdown")?.();
+  });
+
   it("fails closed on auto-apply when recommendation history contains a partial line", async () => {
     dir = mkdtempSync(join(tmpdir(), "openmerit-ext-corrupt-rec-"));
     process.env.OPENMERIT_HOME = dir;
+    writeFileSync(join(dir, "policy.json"), JSON.stringify({
+      mode: "auto", auto_apply: { enabled: true, min_score_gain: 0.1,
+        max_price_ratio: 1.5, require_frontier: true },
+      providers: { allow: ["*"], deny: [] },
+    }));
     const session = join(dir, "session.jsonl");
     writeFileSync(session, JSON.stringify({ type: "message", message: {
       role: "user", content: [{ type: "text", text: "task A" }],
@@ -321,6 +417,7 @@ describe("pi extension model handoff", () => {
   it("applies a recommendation for the active task and changes the session model", async () => {
     dir = mkdtempSync(join(tmpdir(), "openmerit-ext-"));
     process.env.OPENMERIT_HOME = dir;
+    writeFileSync(join(dir, "policy.json"), JSON.stringify({ fallback: { auto_update: false } }));
     const session = join(dir, "session.jsonl");
     writeFileSync(session, JSON.stringify({ type: "message", message: {
       role: "user", content: [{ type: "text", text: "task A" }],
@@ -328,7 +425,8 @@ describe("pi extension model handoff", () => {
     const rec = {
       id: "rec-a", ts: new Date().toISOString(), taskKey: taskKey("task A"), taskLabel: "task A",
       currentModel: "vendor/model-a", recommended: { model: "vendor/model-b", reason: "better" },
-      fallback: null, evidence: { scoreGain: 0.2, priceRatio: 0.5, onFrontier: true, trials: 3 },
+      fallback: { model: "vendor/model-c", reason: "reliable alternate" },
+      evidence: { scoreGain: 0.2, priceRatio: 0.5, onFrontier: true, trials: 3 },
       policy: { autoApply: false, reasons: ["recommend mode"] }, status: "pending",
     };
     writeFileSync(join(dir, "recommendations.jsonl"), JSON.stringify(rec) + "\n");
@@ -356,6 +454,7 @@ describe("pi extension model handoff", () => {
     expect(ctx.model.id).toBe("vendor/model-b");
     const lines = readFileSync(join(dir, "recommendations.jsonl"), "utf8").trim().split("\n");
     expect(JSON.parse(lines.at(-1)!).status).toBe("applied");
+    expect(JSON.parse(readFileSync(join(dir, "harness-state.json"), "utf8")).fallbackModel).toBeNull();
     await handlers.get("session_shutdown")?.();
   });
 });
