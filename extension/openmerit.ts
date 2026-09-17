@@ -720,7 +720,10 @@ export default function openmerit(pi: ExtensionAPI) {
     if (!existsSync(INSTRUCTION_FILE)) return;
     const instructions = readFileSync(INSTRUCTION_FILE, "utf8").trim();
     if (!instructions) return;
-    const action = latestRecommendations().find((rec) => rec.status === "pending");
+    let activeSessionFile: string | null = null;
+    try { activeSessionFile = (JSON.parse(readFileSync(STATE_FILE, "utf8")) as { sessionFile?: string }).sessionFile ?? null; } catch { /* state may not exist yet */ }
+    const action = latestRecommendations().find((rec) => rec.status === "pending" &&
+      (!activeSessionFile || !rec.sessionFile || rec.sessionFile === activeSessionFile));
     const actionContext = action?.harnessAction
       ? `\n\n# OpenMerit pending action\n${JSON.stringify({ invocation: action.invocation, ...action.harnessAction })}`
       : "";
