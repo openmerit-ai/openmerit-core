@@ -35,6 +35,7 @@ const POLICY_FILE = join(HOME, "policy.json");
 const LEDGER_FILE = join(HOME, "ledger.json");
 const JOB_DIR = join(HOME, "jobs");
 const ENGINE_FILE = join(fileURLToPath(new URL("..", import.meta.url)), "dist", "cli.js");
+const INSTRUCTION_FILE = join(fileURLToPath(new URL("..", import.meta.url)), "instructions", "OPENMERIT.md");
 const PROGRESS_PREFIX = "[openmerit/progress] ";
 
 interface TrialRunProgress {
@@ -576,6 +577,14 @@ async function doctorSummary(): Promise<{ text: string; ok: boolean }> {
 }
 
 export default function openmerit(pi: ExtensionAPI) {
+  // The package owns the instruction source of truth; inject it through Pi's
+  // supported per-turn system-prompt hook so users need not copy it manually.
+  pi.on("before_agent_start", async (event) => {
+    if (!existsSync(INSTRUCTION_FILE)) return;
+    const instructions = readFileSync(INSTRUCTION_FILE, "utf8").trim();
+    if (!instructions) return;
+    return { systemPrompt: `${event.systemPrompt}\n\n# OpenMerit integration context\n${instructions}` };
+  });
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let trialJob: ChildProcessByStdio<null, Readable, Readable> | null = null;
   const queuedJobs: { sessionFile: string; settledAt: string; model: string; route: ModelRoute;
