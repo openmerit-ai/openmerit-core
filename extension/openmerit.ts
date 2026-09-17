@@ -387,9 +387,9 @@ function latestTaskLooksIntelligenceDriven(ctx: ExtensionContext): boolean {
   return /\b(llm|large language model|language model|agent|prompt|embedding|rag|classification|classify|extract|ocr|summarize|structured json|generate text|evaluate|model)\b/i.test(latest);
 }
 
-async function classifyTaskWithHarness(ctx: ExtensionContext): Promise<boolean | null> {
+async function classifyTaskWithHarness(ctx: ExtensionContext, taskOverride?: string | null): Promise<boolean | null> {
   if (!existsSync(ENGINE_FILE) || !ctx.model) return null;
-  const task = latestUserTaskText(ctx);
+  const task = taskOverride?.trim() || latestUserTaskText(ctx);
   if (!task) return null;
   const child = spawn(process.execPath, [ENGINE_FILE, "classify", ctx.model.provider, ctx.model.id, task], {
     cwd: ctx.cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"],
@@ -560,12 +560,12 @@ function writeState(value: unknown): void {
   }
 }
 
-function reportHarnessState(ctx: ExtensionContext, settled = false): void {
+function reportHarnessState(ctx: ExtensionContext, settled = false, settledKeyOverride?: string | null): void {
   try {
     mkdirSync(HOME, { recursive: true });
     const model = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
     const currentRoute = ctx.model ? routeFor(ctx.model) : null;
-    if (settled) settledTaskKey = latestSessionTaskKey(ctx);
+    if (settled) settledTaskKey = settledKeyOverride ?? latestSessionTaskKey(ctx);
     const prior = existsSync(STATE_FILE)
       ? JSON.parse(readFileSync(STATE_FILE, "utf8")) as { sessionFile?: string | null; settledAt?: string }
       : {};
@@ -667,9 +667,25 @@ async function doctorSummary(): Promise<{ text: string; ok: boolean }> {
 }
 
 export default function openmerit(pi: ExtensionAPI) {
+  // Pi supplies the prompt that started an agent run directly through this
+  // lifecycle event. Keep it separate from the session transcript so a later
+  // follow-up cannot replace the task being settled. Other harness adapters
+  // should provide the equivalent prompt in their SettledHarnessTask.
+  let capturedTaskPrompt: string | null = null;
+  let capturedTaskKey: string | null = null;
   // The package owns the instruction source of truth; inject it through Pi's
   // supported per-turn system-prompt hook so users need not copy it manually.
   pi.on("before_agent_start", async (event) => {
+    if (!capturedTaskPrompt) {
+      capturedTaskPrompt = event.prompt.trim() || null;
+      capturedTaskKey = userTaskKey(event.images?.length
+        ? [{ type: "text", text: event.prompt }, ...event.images]
+        : event.prompt);
+      extensionLog("debug", "lifecycle", "task_captured", "captured harness task prompt", {
+        chars: capturedTaskPrompt?.length ?? 0,
+        images: event.images?.length ?? 0,
+      });
+    }
     if (!existsSync(INSTRUCTION_FILE)) return;
     const instructions = readFileSync(INSTRUCTION_FILE, "utf8").trim();
     if (!instructions) return;
@@ -910,15 +926,24 @@ export default function openmerit(pi: ExtensionAPI) {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
-    reportHarnessState(ctx, true);
-    const semantic = await classifyTaskWithHarness(ctx);
-    const eligible = semantic ?? latestTaskLooksIntelligenceDriven(ctx);
+    const taskPrompt = capturedTaskPrompt;
+    reportHarnessState(ctx, true, capturedTaskKey);
+    // Semantic classification is only meaningful for the prompt captured from
+    // the harness lifecycle. If an older Pi host lacks that event, retain the
+    // local heuristic rather than classifying an unrelated latest transcript
+    // turn.
+    const semantic = taskPrompt ? await classifyTaskWithHarness(ctx, taskPrompt) : null;
+    const eligible = semantic ?? (taskPrompt
+      ? /\b(llm|large language model|language model|agent|prompt|embedding|rag|classification|classify|extract|ocr|summarize|structured json|generate text|evaluate|model)\b/i.test(taskPrompt)
+      : latestTaskLooksIntelligenceDriven(ctx));
     extensionLog("info", "eligibility", "decision", `task eligible=${eligible} source=${semantic === null ? "heuristic" : "semantic"}`);
     if (eligible) {
       registerBenchmark(ctx);
       queueSettledTask(ctx);
     }
     else if (ctx.hasUI) ctx.ui.notify("openmerit: task looks like ordinary coding work; comparison skipped (use /openmerit compare to override)", "info");
+    capturedTaskPrompt = null;
+    capturedTaskKey = null;
     await surface(ctx);
   });
 
