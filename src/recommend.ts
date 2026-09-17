@@ -70,6 +70,13 @@ export function buildRecommendation(
     currentModel,
     currentRoute,
     recommended: { model: best.model, route: best.route, reason },
+    harnessAction: {
+      type: "select_model_route",
+      model: best.model,
+      ...(best.route ? { route: best.route } : {}),
+      instruction: "Make this route the active model for the completed task's harness or application workflow, then run the workflow's normal validation.",
+      validate: true,
+    },
     fallback: fb
       ? {
           model: fb.model,

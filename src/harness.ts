@@ -68,6 +68,4 @@ export interface HarnessAdapter {
   ): Promise<HarnessScore>;
   listRoutes?(): Promise<ModelRoute[]>;
   applyRoute?(route: ModelRoute): Promise<void>;
-  /** Apply a selected route to the declared application workflow. */
-  applyApplicationRoute?(route: ModelRoute, input: HarnessTask): Promise<void>;
 }

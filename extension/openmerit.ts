@@ -213,6 +213,7 @@ interface Recommendation {
   currentModel: string | null;
   currentRoute?: ModelRoute | null;
   recommended: { model: string; route?: ModelRoute; reason: string };
+  harnessAction?: { type: "select_model_route"; model: string; route?: ModelRoute; instruction: string; validate: boolean };
   fallback: { model: string; route?: ModelRoute; reason: string } | null;
   evidence: { scoreGain: number; priceRatio: number; priceKnown?: boolean; onFrontier: boolean; trials: number };
   policy: { autoApply: boolean; reasons: string[] };

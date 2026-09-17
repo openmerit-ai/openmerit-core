@@ -124,6 +124,14 @@ export interface Recommendation {
   currentModel: string | null;
   currentRoute?: ModelRoute | null;
   recommended: { model: string; route?: ModelRoute; reason: string };
+  /** Provider-neutral instruction for the harness to make the selected route active. */
+  harnessAction?: {
+    type: "select_model_route";
+    model: string;
+    route?: ModelRoute;
+    instruction: string;
+    validate: boolean;
+  };
   fallback: { model: string; route?: ModelRoute; reason: string } | null;
   evidence: {
     scoreGain: number;

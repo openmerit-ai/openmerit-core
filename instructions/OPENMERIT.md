@@ -14,6 +14,12 @@ and fallback under the user's policy.
 5. Applies a route automatically only when the user's current policy authorizes
    it; otherwise the decision remains supervised.
 
+When a recommendation is created, the harness receives a structured
+`harnessAction` containing the selected model route, an instruction to make it
+active for the relevant task or application workflow, and a request to run its
+normal validation. The harness decides how that means a runtime switch,
+configuration edit, patch, or PR.
+
 For a task that builds or exercises a product's own LLM feature, carry the
 application workflow context into the comparison. OpenMerit runs candidates
 through the harness's application adapter and returns the same route decision.

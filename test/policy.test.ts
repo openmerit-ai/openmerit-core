@@ -67,6 +67,11 @@ describe("buildRecommendation", () => {
     expect(rec.fallback?.model).toBe("cheap");
     expect(rec.status).toBe("pending");
     expect(rec.recommended.reason).toContain("better");
+    expect(rec.harnessAction).toMatchObject({
+      type: "select_model_route",
+      model: "better",
+      validate: true,
+    });
   });
 
   it("stays silent when already on the best model", () => {
