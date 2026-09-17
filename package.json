@@ -17,6 +17,8 @@
     "dist/",
     "extension/openmerit.ts",
     "instructions/",
+    "benchmark/",
+    "examples/",
     "rules.md",
     "CHANGELOG.md",
     "docs/0.1.5-architecture-decisions.md"
