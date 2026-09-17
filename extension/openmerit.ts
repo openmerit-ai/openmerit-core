@@ -353,6 +353,14 @@ function userTaskKey(content: unknown): string | null {
   return taskKey(`${text.toLowerCase().replace(/\s+/g, " ").trim()}\nimages:${hashes.join(",")}\nfiles:${files.join(",")}`);
 }
 
+function invocationForPrompt(prompt: string): { purpose: string; context: Record<string, unknown> } {
+  const llm = /\b(llm|language model|model|embedding|rag|ocr|classification|summar|extract)/i.test(prompt);
+  const builds = /\b(build|create|implement|add|write|develop|update)\b/i.test(prompt);
+  return llm && builds
+    ? { purpose: "select-model-for-application", context: { source: "pi-task-context" } }
+    : { purpose: "select-model-for-session", context: { source: "pi-task-context" } };
+}
+
 function latestSessionTaskKey(ctx: ExtensionContext): string | null {
   const file = ctx.sessionManager.getSessionFile();
   if (!file || !existsSync(file)) return null;
@@ -579,14 +587,15 @@ function writeState(value: unknown): void {
   }
 }
 
-function reportHarnessState(ctx: ExtensionContext, settled = false, settledKeyOverride?: string | null): void {
+function reportHarnessState(ctx: ExtensionContext, settled = false, settledKeyOverride?: string | null,
+  invocation?: { purpose: string; context?: Record<string, unknown> } | null): void {
   try {
     mkdirSync(HOME, { recursive: true });
     const model = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
     const currentRoute = ctx.model ? routeFor(ctx.model) : null;
     if (settled) settledTaskKey = settledKeyOverride ?? latestSessionTaskKey(ctx);
     const prior = existsSync(STATE_FILE)
-      ? JSON.parse(readFileSync(STATE_FILE, "utf8")) as { sessionFile?: string | null; settledAt?: string }
+      ? JSON.parse(readFileSync(STATE_FILE, "utf8")) as { sessionFile?: string | null; settledAt?: string; invocation?: { purpose: string; context?: Record<string, unknown> } }
       : {};
     const sessionFile = ctx.sessionManager.getSessionFile() ?? null;
     const settledAt = settled ? new Date().toISOString()
@@ -600,6 +609,7 @@ function reportHarnessState(ctx: ExtensionContext, settled = false, settledKeyOv
         fallbackRoute,
         sessionFile,
         settledTaskKey,
+        invocation: settled ? invocation : prior.invocation,
         settledAt,
         comparisonsPaused,
         cwd: ctx.cwd,
@@ -692,11 +702,13 @@ export default function openmerit(pi: ExtensionAPI) {
   // should provide the equivalent prompt in their SettledHarnessTask.
   let capturedTaskPrompt: string | null = null;
   let capturedTaskKey: string | null = null;
+  let capturedInvocation: { purpose: string; context?: Record<string, unknown> } | null = null;
   // The package owns the instruction source of truth; inject it through Pi's
   // supported per-turn system-prompt hook so users need not copy it manually.
   pi.on("before_agent_start", async (event) => {
     if (!capturedTaskPrompt) {
       capturedTaskPrompt = event.prompt.trim() || null;
+      capturedInvocation = capturedTaskPrompt ? invocationForPrompt(capturedTaskPrompt) : null;
       capturedTaskKey = userTaskKey(event.images?.length
         ? [{ type: "text", text: event.prompt }, ...event.images]
         : event.prompt);
@@ -708,7 +720,11 @@ export default function openmerit(pi: ExtensionAPI) {
     if (!existsSync(INSTRUCTION_FILE)) return;
     const instructions = readFileSync(INSTRUCTION_FILE, "utf8").trim();
     if (!instructions) return;
-    return { systemPrompt: `${event.systemPrompt}\n\n# OpenMerit integration context\n${instructions}` };
+    const action = latestRecommendations().find((rec) => rec.status === "pending");
+    const actionContext = action?.harnessAction
+      ? `\n\n# OpenMerit pending action\n${JSON.stringify({ invocation: action.invocation, ...action.harnessAction })}`
+      : "";
+    return { systemPrompt: `${event.systemPrompt}\n\n# OpenMerit integration context\n${instructions}${actionContext}` };
   });
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let trialJob: ChildProcessByStdio<null, Readable, Readable> | null = null;
@@ -898,7 +914,8 @@ export default function openmerit(pi: ExtensionAPI) {
     }
     for (const rec of pendingRecommendations(ctx)) {
       if (notified.has(rec.id)) continue;
-      if (rec.policy.autoApply && currentPolicyAllowsAuto(rec)) {
+      const targetsApplication = rec.invocation?.purpose === "select-model-for-application";
+      if (rec.policy.autoApply && !targetsApplication && currentPolicyAllowsAuto(rec)) {
         if (!rec.sessionFile || rec.sessionFile !== ctx.sessionManager.getSessionFile()) continue;
         if (!ctx.isIdle()) continue;
         notified.add(rec.id);
@@ -947,7 +964,7 @@ export default function openmerit(pi: ExtensionAPI) {
 
   pi.on("agent_settled", async (_event, ctx) => {
     const taskPrompt = capturedTaskPrompt;
-    reportHarnessState(ctx, true, capturedTaskKey);
+    reportHarnessState(ctx, true, capturedTaskKey, capturedInvocation);
     // Semantic classification is only meaningful for the prompt captured from
     // the harness lifecycle. If an older Pi host lacks that event, retain the
     // local heuristic rather than classifying an unrelated latest transcript
@@ -964,6 +981,7 @@ export default function openmerit(pi: ExtensionAPI) {
     else if (ctx.hasUI) ctx.ui.notify("openmerit: task looks like ordinary coding work; comparison skipped (use /openmerit compare to override)", "info");
     capturedTaskPrompt = null;
     capturedTaskKey = null;
+    capturedInvocation = null;
     await surface(ctx);
   });
 

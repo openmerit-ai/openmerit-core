@@ -159,11 +159,13 @@ export function settledActiveTask(snapshot?: {
   currentModel?: string | null; sessionFile?: string | null;
   currentRoute?: ModelRoute | null; routes?: ModelRoute[];
   settledTaskKey?: string | null; settledAt?: string | null; cwd?: string; sessionBytes?: number; comparisonNonce?: string;
+  invocation?: { purpose: string; context?: Record<string, unknown> };
 }): SettledTask | null {
   const st = snapshot ?? readJson<{
     currentModel?: string | null; sessionFile?: string | null;
     currentRoute?: ModelRoute | null; routes?: ModelRoute[];
     settledTaskKey?: string | null; settledAt?: string | null; cwd?: string; sessionBytes?: number; comparisonNonce?: string;
+    invocation?: { purpose: string; context?: Record<string, unknown> };
   }>(paths.harnessState(), {});
   if (!st.currentModel || !st.sessionFile || !st.settledTaskKey || !st.settledAt ||
       !existsSync(st.sessionFile)) return null;
@@ -192,7 +194,7 @@ export function settledActiveTask(snapshot?: {
   const routes = st.routes?.length ? st.routes : [route];
   return { task, images, model: st.currentModel, run, sessionFile: st.sessionFile,
     settledAt: st.settledAt, sessionBytes: st.sessionBytes, cwd: st.cwd ?? process.cwd(), usedTools, files,
-    route, routes, comparisonNonce: st.comparisonNonce };
+    route, routes, comparisonNonce: st.comparisonNonce, invocation: st.invocation };
 }
 
 export function piExecutable(): string {
