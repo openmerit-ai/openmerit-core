@@ -2,8 +2,11 @@
 
 OpenMerit does not own application execution. It benchmarks whatever task the
 harness supplies and returns a structured action for the harness to interpret.
-The harness should provide an invocation purpose and context so the resulting
-action is applied to the intended application or session.
+The harness should provide an invocation purpose, context, and `applyMode` so
+the resulting action is applied to the intended application or session.
+`applyMode` is harness-owned metadata: `session` permits a session route
+switch, `application` asks the harness to update the product workflow, and
+`ask_user` prevents an automatic mutation.
 
 ## Direct inference
 

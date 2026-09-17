@@ -6,6 +6,8 @@ import type { ModelRoute, TrialPoint } from "./types.js";
 /** Opaque purpose/context supplied by the harness that invoked OpenMerit. */
 export interface HarnessInvocation {
   purpose: string;
+  /** Harness-owned application of a selected route. */
+  applyMode?: "session" | "application" | "ask_user";
   context?: Record<string, unknown>;
 }
 

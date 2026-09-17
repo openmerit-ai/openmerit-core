@@ -50,5 +50,9 @@ from candidate comparisons; a route with unknown lifecycle remains eligible for
 backward compatibility and is still subject to pricing and policy checks.
 
 Call the engine only after the harness has a completed task and a measured
-baseline. Load `openmerit/instructions` into the harness's instruction context
-using that harness's supported plugin or middleware hook.
+baseline. Before automatic comparison, the harness should classify the task
+using the supplied OpenMerit instructions and pass an invocation with a
+purpose plus `applyMode` (`session`, `application`, or `ask_user`). If that
+context is unavailable, skip automatic comparison and let the user invoke it
+explicitly. Load `openmerit/instructions` into the harness's instruction
+context using that harness's supported plugin or middleware hook.

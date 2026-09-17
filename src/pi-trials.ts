@@ -159,13 +159,13 @@ export function settledActiveTask(snapshot?: {
   currentModel?: string | null; sessionFile?: string | null;
   currentRoute?: ModelRoute | null; routes?: ModelRoute[];
   settledTaskKey?: string | null; settledAt?: string | null; cwd?: string; sessionBytes?: number; comparisonNonce?: string;
-  invocation?: { purpose: string; context?: Record<string, unknown> };
+  invocation?: { purpose: string; applyMode?: "session" | "application" | "ask_user"; context?: Record<string, unknown> };
 }): SettledTask | null {
   const st = snapshot ?? readJson<{
     currentModel?: string | null; sessionFile?: string | null;
     currentRoute?: ModelRoute | null; routes?: ModelRoute[];
     settledTaskKey?: string | null; settledAt?: string | null; cwd?: string; sessionBytes?: number; comparisonNonce?: string;
-    invocation?: { purpose: string; context?: Record<string, unknown> };
+    invocation?: { purpose: string; applyMode?: "session" | "application" | "ask_user"; context?: Record<string, unknown> };
   }>(paths.harnessState(), {});
   if (!st.currentModel || !st.sessionFile || !st.settledTaskKey || !st.settledAt ||
       !existsSync(st.sessionFile)) return null;

@@ -73,10 +73,10 @@ describe("pi extension model handoff", () => {
     extension(pi as never);
     await handlers.get("session_start")?.({}, ctx);
     await handlers.get("agent_settled")?.({}, ctx);
-    expect(notices.some((x) => x.includes("comparison skipped: daily trial cap reached (2)"))).toBe(true);
+    expect(notices.some((x) => x.includes("eligibility is unavailable"))).toBe(true);
     expect(notices.some((x) => x.includes("comparing models for task"))).toBe(false);
     await command!("", ctx);
-    expect(notices.at(-1)).toContain("comparison    : not started (daily trial cap reached (2))");
+    expect(notices.at(-1)).toContain("comparison    : not started");
     expect(notices.at(-1)).toContain("trial budget  : 2/2 trials, $0.0036/$5.00 today (UTC)");
     await handlers.get("session_shutdown")?.();
   });
@@ -135,7 +135,7 @@ describe("pi extension model handoff", () => {
     extension(pi as never);
     await handlers.get("session_start")?.({}, ctx);
     await handlers.get("agent_settled")?.({}, ctx);
-    expect(notices.some((x) => x.includes("comparing models for task"))).toBe(true);
+    expect(notices.some((x) => x.includes("eligibility is unavailable"))).toBe(true);
     await handlers.get("session_shutdown")?.();
   });
 
@@ -170,7 +170,7 @@ describe("pi extension model handoff", () => {
     extension(pi as never);
     await handlers.get("session_start")?.({}, ctx);
     await handlers.get("agent_settled")?.({}, ctx);
-    expect(notices).toEqual([]);
+    expect(notices.some((x) => x.includes("eligibility is unavailable"))).toBe(true);
     writeFileSync(session, JSON.stringify({ type: "message", message: {
       role: "user", content: [{ type: "text", text: prompt }, imageA],
     } }) + "\n");
@@ -224,7 +224,7 @@ describe("pi extension model handoff", () => {
     await handlers.get("agent_settled")?.({}, ctx);
     expect(swaps).toBe(0);
     expect(notices.filter((x) => x.includes("exact task was tested"))).toHaveLength(1);
-    expect(notices[0]).toContain("vendor/model-b: quality 0.80, $0.60/M, 900ms");
+    expect(notices.find((x) => x.includes("vendor/model-b: quality 0.80, $0.60/M, 900ms"))).toBeTruthy();
     await command!("", ctx);
     expect(notices.at(-1)).toContain("exact task was tested");
     expect(notices.at(-1)).toContain("pending recs  : 0");
@@ -249,6 +249,7 @@ describe("pi extension model handoff", () => {
       role: "user", content: [{ type: "text", text: "task A" }],
     } }) + "\n");
     const base = { ts: new Date().toISOString(), taskKey: taskKey("task A"), taskLabel: "task A",
+      invocation: { purpose: "route the active Pi session", applyMode: "session" as const },
       currentModel: "vendor/model-a",
       currentRoute: { provider: "openrouter", modelId: "vendor/model-a", meritId: "vendor/model-a",
         input: ["text"], cost: { input: 1, output: 1 } },

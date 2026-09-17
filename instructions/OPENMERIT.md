@@ -25,10 +25,11 @@ location, or validation command is missing, ask the user before making a
 durable change.
 
 Before automatic comparison, the Pi integration asks the active harness model
-for a structured eligibility decision and invocation purpose. If that
-classifier is unavailable, OpenMerit may retain its legacy eligibility-only
-fallback, but it must not guess an application target or automatically apply a
-route without a classified purpose.
+for a structured eligibility decision, invocation purpose, and application mode
+(`session`, `application`, or `ask_user`). If the classifier is unavailable or
+does not provide that context, automatic comparison is skipped; the user can
+run `/openmerit compare` explicitly. OpenMerit never guesses an application
+target from task keywords.
 
 OpenMerit is not the harness, provider, or observability system. It does not
 intercept normal traffic or own provider credentials.

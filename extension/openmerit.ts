@@ -209,7 +209,7 @@ interface Recommendation {
   ts: string;
   taskKey: string;
   taskLabel: string;
-  invocation?: { purpose: string; context?: Record<string, unknown> };
+  invocation?: { purpose: string; applyMode?: "session" | "application" | "ask_user"; context?: Record<string, unknown> };
   sessionFile?: string | null;
   currentModel: string | null;
   currentRoute?: ModelRoute | null;
@@ -368,40 +368,7 @@ function latestSessionTaskKey(ctx: ExtensionContext): string | null {
   return latest;
 }
 
-/** Pi-side heuristic: skip ordinary one-off coding tasks unless they mention an
- * LLM/agent workload or a measurable extraction/classification task. Users can
- * always override this with `/openmerit compare`. */
-function latestTaskLooksIntelligenceDriven(ctx: ExtensionContext): boolean {
-  const manager = ctx.sessionManager as ExtensionContext["sessionManager"] & {
-    getEntries?: () => { type?: string; message?: { role?: string; content?: unknown } }[];
-  };
-  const entries = manager.getEntries?.();
-  if (entries) {
-    let latest = "";
-    for (const entry of entries) {
-      if (entry.type !== "message" || entry.message?.role !== "user") continue;
-      const content = entry.message.content;
-      latest = typeof content === "string" ? content : Array.isArray(content)
-        ? content.filter((part) => part?.type === "text").map((part) => String(part.text ?? "")).join(" ") : "";
-    }
-    return /\b(llm|large language model|language model|agent|prompt|embedding|rag|classification|classify|extract|ocr|summarize|structured json|generate text|evaluate|model)\b/i.test(latest);
-  }
-  const file = ctx.sessionManager.getSessionFile();
-  if (!file || !existsSync(file)) return false;
-  let latest = "";
-  for (const line of readFileSync(file, "utf8").split("\n")) {
-    try {
-      const e = JSON.parse(line) as { type?: string; message?: { role?: string; content?: unknown } };
-      if (e.type !== "message" || e.message?.role !== "user") continue;
-      const content = e.message.content;
-      latest = typeof content === "string" ? content : Array.isArray(content)
-        ? content.filter((part) => part?.type === "text").map((part) => String(part.text ?? "")).join(" ") : "";
-    } catch { /* partial session line */ }
-  }
-  return /\b(llm|large language model|language model|agent|prompt|embedding|rag|classification|classify|extract|ocr|summarize|structured json|generate text|evaluate|model)\b/i.test(latest);
-}
-
-async function classifyTaskWithHarness(ctx: ExtensionContext, taskOverride?: string | null): Promise<{ eligible: boolean; purpose?: string } | null> {
+async function classifyTaskWithHarness(ctx: ExtensionContext, taskOverride?: string | null): Promise<{ eligible: boolean; purpose?: string; applyMode?: "session" | "application" | "ask_user" } | null> {
   if (!existsSync(ENGINE_FILE) || !ctx.model) return null;
   const task = taskOverride?.trim() || latestUserTaskText(ctx);
   if (!task) return null;
@@ -416,10 +383,15 @@ async function classifyTaskWithHarness(ctx: ExtensionContext, taskOverride?: str
   });
   if (code !== 0) { extensionLog("warn", "eligibility", "classifier_failed", "semantic classifier exited unsuccessfully"); return null; }
   try {
-    const result = JSON.parse(stdout.trim().split("\n").at(-1) ?? "") as { eligible?: boolean; confidence?: number; purpose?: string };
+    const result = JSON.parse(stdout.trim().split("\n").at(-1) ?? "") as {
+      eligible?: boolean; confidence?: number; purpose?: string;
+      applyMode?: "session" | "application" | "ask_user";
+    };
     if (typeof result.eligible !== "boolean" || !(Number(result.confidence) >= 0.7)) return null;
+    if (result.eligible && (typeof result.purpose !== "string" || !result.purpose.trim() ||
+      !["session", "application", "ask_user"].includes(result.applyMode ?? ""))) return null;
     extensionLog("info", "eligibility", "classified", `semantic eligibility=${result.eligible}`);
-    return { eligible: result.eligible, purpose: typeof result.purpose === "string" ? result.purpose : undefined };
+    return { eligible: result.eligible, purpose: typeof result.purpose === "string" ? result.purpose : undefined, applyMode: result.applyMode };
   } catch { extensionLog("warn", "eligibility", "invalid_result", "semantic classifier returned invalid JSON"); return null; }
 }
 
@@ -580,14 +552,14 @@ function writeState(value: unknown): void {
 }
 
 function reportHarnessState(ctx: ExtensionContext, settled = false, settledKeyOverride?: string | null,
-  invocation?: { purpose: string; context?: Record<string, unknown> } | null): void {
+  invocation?: { purpose: string; applyMode?: "session" | "application" | "ask_user"; context?: Record<string, unknown> } | null): void {
   try {
     mkdirSync(HOME, { recursive: true });
     const model = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
     const currentRoute = ctx.model ? routeFor(ctx.model) : null;
     if (settled) settledTaskKey = settledKeyOverride ?? latestSessionTaskKey(ctx);
     const prior = existsSync(STATE_FILE)
-      ? JSON.parse(readFileSync(STATE_FILE, "utf8")) as { sessionFile?: string | null; settledAt?: string; invocation?: { purpose: string; context?: Record<string, unknown> } }
+      ? JSON.parse(readFileSync(STATE_FILE, "utf8")) as { sessionFile?: string | null; settledAt?: string; invocation?: { purpose: string; applyMode?: "session" | "application" | "ask_user"; context?: Record<string, unknown> } }
       : {};
     const sessionFile = ctx.sessionManager.getSessionFile() ?? null;
     const settledAt = settled ? new Date().toISOString()
@@ -908,8 +880,8 @@ export default function openmerit(pi: ExtensionAPI) {
     }
     for (const rec of pendingRecommendations(ctx)) {
       if (notified.has(rec.id)) continue;
-      const targetsApplication = rec.invocation?.purpose === "select-model-for-application";
-      if (rec.policy.autoApply && !targetsApplication && currentPolicyAllowsAuto(rec)) {
+      const targetsApplication = rec.invocation?.applyMode === "application";
+      if (rec.policy.autoApply && rec.invocation?.applyMode === "session" && currentPolicyAllowsAuto(rec)) {
         if (!rec.sessionFile || rec.sessionFile !== ctx.sessionManager.getSessionFile()) continue;
         if (!ctx.isIdle()) continue;
         notified.add(rec.id);
@@ -976,20 +948,16 @@ export default function openmerit(pi: ExtensionAPI) {
     const taskPrompt = capturedTaskPrompt;
     const semantic = taskPrompt ? await classifyTaskWithHarness(ctx, taskPrompt) : null;
     reportHarnessState(ctx, true, capturedTaskKey, semantic?.purpose
-      ? { purpose: semantic.purpose, context: { source: "pi-task-classifier" } } : null);
-    // Semantic classification is only meaningful for the prompt captured from
-    // the harness lifecycle. If an older Pi host lacks that event, retain the
-    // local heuristic rather than classifying an unrelated latest transcript
-    // turn.
-    const eligible = semantic?.eligible ?? (taskPrompt
-      ? /\b(llm|large language model|language model|agent|prompt|embedding|rag|classification|classify|extract|ocr|summarize|structured json|generate text|evaluate|model)\b/i.test(taskPrompt)
-      : latestTaskLooksIntelligenceDriven(ctx));
-    extensionLog("info", "eligibility", "decision", `task eligible=${eligible} source=${semantic === null ? "heuristic-fallback" : "semantic"}`);
+      ? { purpose: semantic.purpose, applyMode: semantic.applyMode, context: { source: "pi-task-classifier" } } : null);
+    const eligible = semantic?.eligible === true;
+    extensionLog("info", "eligibility", "decision", `task eligible=${eligible} source=${semantic ? "semantic" : "unavailable"}`);
     if (eligible) {
       registerBenchmark(ctx);
       queueSettledTask(ctx);
     }
-    else if (ctx.hasUI) ctx.ui.notify("openmerit: task looks like ordinary coding work; comparison skipped (use /openmerit compare to override)", "info");
+    else if (ctx.hasUI) ctx.ui.notify(
+      semantic ? "openmerit: harness classified this task as ineligible; comparison skipped (use /openmerit compare to override)" :
+        "openmerit: harness eligibility is unavailable; comparison skipped (use /openmerit compare to override)", "info");
     capturedTaskPrompt = null;
     capturedTaskKey = null;
     await surface(ctx);
