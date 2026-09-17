@@ -130,7 +130,7 @@ export async function compareSettledTask(
   const active = applyRouteOverrides([settledTask.route], policy.route_overrides)[0];
   const task = { ...settledTask, routes, route: active };
   const tKey = taskInputKey(task.task, task.images, task.files);
-  const marker = `${task.sessionFile}:${task.sessionBytes ?? task.settledAt}`;
+  const marker = `${task.sessionFile}:${task.sessionBytes ?? task.settledAt}:${task.comparisonNonce ?? "initial"}`;
   const processedPath = paths.sessionJob(marker);
   const prior = readJson<ProcessedTask | null>(processedPath, null);
   if (taskJobIsClaimed(prior, marker)) return null;
