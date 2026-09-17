@@ -921,7 +921,8 @@ export default function openmerit(pi: ExtensionAPI) {
         notified.add(rec.id);
         pi.sendUserMessage(
           `Apply this OpenMerit recommendation to the application target. ${rec.harnessAction.instruction} ` +
-          `Selected model: ${rec.harnessAction.model}. Do not change Pi's session model.`,
+          `Selected model: ${rec.harnessAction.model}. Do not change Pi's session model. ` +
+          `If the application target, model configuration location, or validation command is unclear, ask the user before editing.`,
           { deliverAs: "followUp" },
         );
         continue;

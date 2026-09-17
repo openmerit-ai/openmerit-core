@@ -20,18 +20,15 @@ active for the original invocation target, and a request to run its normal
 validation. The recommendation preserves the harness-provided invocation
 purpose and context. The harness decides how that means a runtime switch,
 configuration edit, patch, or PR; it must not change the Pi session model when
-the original invocation targeted an application.
-
-For a task that builds or exercises a product's own LLM feature, carry the
-application workflow context into the comparison. OpenMerit runs candidates
-through the harness's application adapter and returns the same route decision.
-The harness owns injecting the route into application configuration, validating
-the workflow, and creating a patch or PR when the user accepts the decision.
-OpenMerit never edits arbitrary product source files or assumes a provider SDK.
+the original invocation targeted an application. If the target, configuration
+location, or validation command is missing, ask the user before making a
+durable change.
 
 Before automatic comparison, the Pi integration asks the active harness model
-for a structured eligibility decision. Low-confidence or unavailable classifier
-responses fall back to the integration's local heuristic.
+for a structured eligibility decision and invocation purpose. If that
+classifier is unavailable, OpenMerit may retain its legacy eligibility-only
+fallback, but it must not guess an application target or automatically apply a
+route without a classified purpose.
 
 OpenMerit is not the harness, provider, or observability system. It does not
 intercept normal traffic or own provider credentials.
