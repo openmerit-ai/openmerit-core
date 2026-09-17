@@ -135,16 +135,17 @@ export function recordedActiveTask(
   const matching = assistants.filter((m) => typeof model === "string"
     ? meritModelId(m.provider ?? "openrouter", m.model ?? "") === model
     : m.provider === model.provider && m.model === model.modelId);
-  if (matching.length === 0 || matching.some((m) => m.stopReason === "error")) return null;
-  const answer = matching.map((m) => answerText(m.content)).filter(Boolean).at(-1) ?? "";
+  const successful = matching.filter((m) => m.stopReason !== "error");
+  if (successful.length === 0) return null;
+  const answer = successful.map((m) => answerText(m.content)).filter(Boolean).at(-1) ?? "";
   if (!answer.trim()) return null;
   const first = user.timestamp ?? 0;
-  const last = matching.at(-1)?.timestamp ?? first;
+  const last = successful.at(-1)?.timestamp ?? first;
   return {
     answer,
     costUsd: matching.reduce((n, m) => n + (m.usage?.cost?.total ?? 0), 0),
     latencyMs: Math.max(0, last - first),
-    errors: 0,
+    errors: matching.filter((m) => m.stopReason === "error").length,
     toolCalls,
     toolErrors,
     changedFiles: 0,
