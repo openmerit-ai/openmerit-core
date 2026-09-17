@@ -57,8 +57,6 @@ context is unavailable, skip automatic comparison and let the user invoke it
 explicitly. Load `openmerit/instructions` into the harness's instruction
 context using that harness's supported plugin or middleware hook.
 
-Pi integrations may declare context during a task with the
-`openmerit_set_invocation` tool. This is an adapter feature; the core engine
-only receives the resulting `HarnessInvocation`. A deterministic wrapper can
-instead set `OPENMERIT_INVOCATION_JSON` or call the Pi command
-`/openmerit context '{...}'` before starting the task.
+Each harness keeps its invocation intent locally when deciding how to apply a
+recommendation. The core engine only receives the normalized task and outcome;
+it does not require a harness-specific invocation protocol.
