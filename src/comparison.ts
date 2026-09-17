@@ -11,6 +11,7 @@ import { applyRouteOverrides, routeKey, routeLabel, routePrice } from "./routes.
 import type { MeritChatClient } from "./providers.js";
 import { LocalJsonlEventSink, meritEvent, type EventSink } from "./integrations.js";
 import { publicPriorModels } from "./public-benchmarks.js";
+import { log } from "./logger.js";
 
 interface ProcessedTask {
   marker: string;
@@ -140,6 +141,7 @@ export async function compareSettledTask(
   const prior = readJson<ProcessedTask | null>(processedPath, null);
   if (taskJobIsClaimed(prior, marker)) return null;
   if (!budgetOk(policy).ok) return null;
+  log("info", "comparison", "started", "comparison started", { taskKey: tKey, routes: routes.length });
 
   writeJson(processedPath, { marker, status: "running", ownerPid: process.pid,
     updatedAt: new Date().toISOString() } satisfies ProcessedTask);
@@ -173,6 +175,7 @@ export async function compareSettledTask(
     const eligible = [active, ...alternates];
     emitTrialProgress({ phase: "selection", taskKey: tKey,
       eligible: eligible.map(routeLabel), excluded });
+    log("info", "comparison", "selection", "candidate routes selected", { taskKey: tKey, eligible: eligible.map(routeLabel), excluded: excluded.length });
     if (alternates.length === 0) throw new Error("the harness exposes no eligible alternate route for this task");
 
     const evaluator = resolveEvaluator([...byRoute.values()], policy, active, task.images.length > 0);
@@ -237,10 +240,12 @@ export async function compareSettledTask(
     }
     writeJson(processedPath, { marker, status: recommendation ? "complete" : "no_swap",
       ownerPid: process.pid, updatedAt: new Date().toISOString() } satisfies ProcessedTask);
+    log("info", "comparison", "completed", recommendation ? "recommendation created" : "active route remains best", { taskKey: tKey });
     return recommendation;
   } catch (error) {
     writeJson(processedPath, { marker, status: "failed", ownerPid: process.pid,
       updatedAt: new Date().toISOString() } satisfies ProcessedTask);
+    log("error", "comparison", "failed", String(error), { taskKey: tKey });
     throw error;
   }
 }

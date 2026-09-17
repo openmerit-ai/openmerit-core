@@ -16,6 +16,7 @@ import { collectDoctorReport, renderDiagnosticReport, runOfflineVerify } from ".
 import { dueBenchmarkJobs, listBenchmarkJobs, listBenchmarks, saveBenchmarkJob } from "./benchmark-jobs.js";
 import { listPublicBenchmarks, OpenRouterBenchmarkSource, savePublicBenchmark } from "./public-benchmarks.js";
 import { PiCliChatClient } from "./llm.js";
+import { log, readLogs, type LogLevel } from "./logger.js";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -140,7 +141,13 @@ async function cmdClassify(provider?: string, modelId?: string, task?: string): 
   const match = result.content.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("classifier returned no JSON");
   const parsed = JSON.parse(match[0]) as { eligible?: unknown; confidence?: unknown; reason?: unknown };
+  log("info", "eligibility", "classified", "task eligibility classified", { provider, modelId, eligible: parsed.eligible === true, confidence: Number(parsed.confidence ?? 0) });
   console.log(JSON.stringify({ eligible: parsed.eligible === true, confidence: Number(parsed.confidence ?? 0), reason: String(parsed.reason ?? "") }));
+}
+
+function cmdLogs(level?: string): void {
+  const selected = level as LogLevel | undefined;
+  for (const entry of readLogs(selected)) console.log(JSON.stringify(entry));
 }
 
 async function cmdRefresh(jobId?: string): Promise<void> {
@@ -213,6 +220,9 @@ async function main(): Promise<void> {
     case "classify":
       await cmdClassify(args[0], args[1], args.slice(2).join(" "));
       break;
+    case "logs":
+      cmdLogs(args[0]);
+      break;
     case "doctor":
       cmdDoctor(args.includes("--json"));
       break;
@@ -231,6 +241,7 @@ usage: openmerit <command>
   benchmarks sync       fetch OpenRouter public benchmark snapshots [task type optional]
   refresh [job-id]     run due benchmark refresh jobs (for cron/system schedulers)
   classify <provider> <model> <task>  classify task eligibility through the harness
+  logs [level]         print persisted leveled OpenMerit logs
   doctor [--json]      diagnose pi, policy, routes, state, and installation
   verify [--json]      run an offline, provider-free core self-test`);
       if (cmd && cmd !== "help" && cmd !== "--help") process.exitCode = 1;

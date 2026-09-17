@@ -36,6 +36,7 @@ const LEDGER_FILE = join(HOME, "ledger.json");
 const JOB_DIR = join(HOME, "jobs");
 const BENCHMARKS_FILE = join(HOME, "benchmarks.jsonl");
 const BENCHMARK_JOBS_FILE = join(HOME, "benchmark-jobs.jsonl");
+const LOG_FILE = join(HOME, "openmerit.log.jsonl");
 const ENGINE_FILE = join(fileURLToPath(new URL("..", import.meta.url)), "dist", "cli.js");
 const INSTRUCTION_FILE = join(fileURLToPath(new URL("..", import.meta.url)), "instructions", "OPENMERIT.md");
 const PROGRESS_PREFIX = "[openmerit/progress] ";
@@ -255,6 +256,13 @@ function appendJsonl(file: string, obj: unknown): void {
   appendFileSync(file, JSON.stringify(obj) + "\n");
 }
 
+function extensionLog(level: "error" | "warn" | "info" | "debug", component: string, event: string, message: string): void {
+  const configured = process.env.OPENMERIT_LOG_LEVEL ?? "info";
+  const rank = { error: 0, warn: 1, info: 2, debug: 3 } as const;
+  if (rank[level] > (rank[configured as keyof typeof rank] ?? rank.info)) return;
+  appendJsonl(LOG_FILE, { ts: new Date().toISOString(), level, component, event, message });
+}
+
 function registerBenchmark(ctx: ExtensionContext): void {
   const policy = loadPolicy();
   const everyMinutes = policy.benchmark_refresh_minutes ?? 0;
@@ -392,12 +400,13 @@ async function classifyTaskWithHarness(ctx: ExtensionContext): Promise<boolean |
     const timer = setTimeout(() => { try { child.kill("SIGTERM"); } catch { /* already closed */ } }, 30_000);
     child.on("close", (value) => { clearTimeout(timer); resolve(value ?? 1); });
   });
-  if (code !== 0) return null;
+  if (code !== 0) { extensionLog("warn", "eligibility", "classifier_failed", "semantic classifier exited unsuccessfully"); return null; }
   try {
     const result = JSON.parse(stdout.trim().split("\n").at(-1) ?? "") as { eligible?: boolean; confidence?: number };
     if (typeof result.eligible !== "boolean" || !(Number(result.confidence) >= 0.7)) return null;
+    extensionLog("info", "eligibility", "classified", `semantic eligibility=${result.eligible}`);
     return result.eligible;
-  } catch { return null; }
+  } catch { extensionLog("warn", "eligibility", "invalid_result", "semantic classifier returned invalid JSON"); return null; }
 }
 
 function latestUserTaskText(ctx: ExtensionContext): string | null {
@@ -904,6 +913,7 @@ export default function openmerit(pi: ExtensionAPI) {
     reportHarnessState(ctx, true);
     const semantic = await classifyTaskWithHarness(ctx);
     const eligible = semantic ?? latestTaskLooksIntelligenceDriven(ctx);
+    extensionLog("info", "eligibility", "decision", `task eligible=${eligible} source=${semantic === null ? "heuristic" : "semantic"}`);
     if (eligible) {
       registerBenchmark(ctx);
       queueSettledTask(ctx);
