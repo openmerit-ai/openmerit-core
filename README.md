@@ -178,6 +178,10 @@ OPENROUTER_API_KEY=... openmerit benchmarks sync intelligence
 Snapshots are stored separately from task trials and are priors for model
 discovery; they do not replace a task-local evaluation.
 
+Leveled runtime logs are stored in `~/.openmerit/openmerit.log.jsonl`. Set
+`OPENMERIT_LOG_LEVEL=debug` for additional diagnostics and inspect them with
+`openmerit logs`, or filter severe entries with `openmerit logs error`.
+
 `mode: "auto"` and `auto_apply.enabled: true` are both required for automatic
 primary-route changes. The extension reevaluates the saved evidence against the
 current policy before switching, so changing the policy to supervised mode also
