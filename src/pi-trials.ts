@@ -8,10 +8,11 @@ import { createHash } from "node:crypto";
 import { judge, judgeWithImages } from "./judge.js";
 import { paths, readJson } from "./store.js";
 import { sessionFiles, sessionImages, taskInputKey, type TaskFile, type TaskImage } from "./task-input.js";
-import type { HarnessAdapter, HarnessTask, HarnessRun } from "./harness.js";
+import type { HarnessAdapter, HarnessTask, HarnessRun, HarnessScore } from "./harness.js";
 import type { ModelRoute, TrialPoint } from "./types.js";
 import { legacyOpenRouterRoute, meritModelId, modelRoute, routeKey, routePrice } from "./routes.js";
 import type { MeritChatClient } from "./providers.js";
+import { PiCliChatClient } from "./llm.js";
 import { piProviderExtensionArgs } from "./pi-config.js";
 
 interface PiMessage {
@@ -37,6 +38,17 @@ export class PiHarnessAdapter implements HarnessAdapter {
 
   runTask(route: ModelRoute, input: HarnessTask): Promise<HarnessRun> {
     return executePiTask(route, input.task, input.cwd, input.images, input.files, this.providerExtensions);
+  }
+
+  createInferenceClient(onSpend?: (usd: number) => void): MeritChatClient {
+    return new PiCliChatClient(undefined, onSpend, this.providerExtensions);
+  }
+
+  scoreRun(
+    judgeModel: ModelRoute, task: string, rubric: string, route: ModelRoute,
+    run: HarnessRun, client: MeritChatClient, source: "pi_trial" | "trace", images: TaskImage[] = [],
+  ): Promise<HarnessScore> {
+    return scorePiRun(judgeModel, task, rubric, route, run, client, source, images);
   }
 }
 

@@ -3,6 +3,9 @@ import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compareSettledTask } from "../src/comparison.js";
+import { PiHarnessAdapter } from "../src/pi-trials.js";
+import { PiCliChatClient } from "../src/llm.js";
+import { recordMeritSpend } from "../src/trials.js";
 import { DEFAULT_POLICY } from "../src/policy.js";
 import { modelRoute } from "../src/routes.js";
 import { paths } from "../src/store.js";
@@ -57,6 +60,7 @@ console.log(JSON.stringify({ type: 'message_end', message: { role: 'assistant', 
     const task = `<file name="${attachment}">attachment bytes</file>\nsolve task`;
     const files = sessionFiles(task);
     const log = vi.spyOn(console, "log");
+    const harness = new PiHarnessAdapter([providerExtension]);
     const rec = await compareSettledTask({ ...DEFAULT_POLICY,
       comparison: { max_routes: 2 },
       route_overrides: { "local:b": { input: ["text"], cost: { input: 0.1, output: 0.2 },
@@ -67,7 +71,7 @@ console.log(JSON.stringify({ type: 'message_end', message: { role: 'assistant', 
       routes: [active, candidate, unknownPrice], run: { answer: "baseline", costUsd: 0.002, latencyMs: 10,
         errors: 0, toolCalls: 0, toolErrors: 0, changedFiles: 0 }, sessionFile,
       settledAt: "2026-09-16T00:00:00Z", sessionBytes: 1, cwd: dir, usedTools: false,
-    });
+    }, { harness, client: new PiCliChatClient(undefined, recordMeritSpend, [providerExtension]) });
 
     expect(rec?.recommended).toMatchObject({ model: "local/b", route: { provider: "local", modelId: "b" } });
     expect(rec?.recommended.route?.cost).toEqual({ input: 0.1, output: 0.2 });

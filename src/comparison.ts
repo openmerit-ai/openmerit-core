@@ -3,12 +3,13 @@
 import { providerAllowed, type Policy } from "./policy.js";
 import { buildRecommendation } from "./recommend.js";
 import { appendJsonl, paths, readJson, writeJson } from "./store.js";
-import { budgetOk, ensureRubric, recordMeritSpend, recordTrialSpend, trialBudgetOk } from "./trials.js";
-import { PiHarnessAdapter, runPiTrial, scorePiRun, type SettledTask } from "./pi-trials.js";
+import { budgetOk, ensureRubric, recordTrialSpend, trialBudgetOk } from "./trials.js";
+import type { SettledTask } from "./pi-trials.js";
+import type { HarnessAdapter, HarnessScore } from "./harness.js";
 import { taskInputKey } from "./task-input.js";
 import type { ModelRoute, Recommendation, TrialPoint } from "./types.js";
 import { applyRouteOverrides, routeKey, routeLabel, routePrice } from "./routes.js";
-import { PiCliChatClient } from "./llm.js";
+import type { MeritChatClient } from "./providers.js";
 import { LocalJsonlEventSink, meritEvent, type EventSink } from "./integrations.js";
 
 interface ProcessedTask {
@@ -122,6 +123,7 @@ function selectAlternates(routes: ModelRoute[], count: number): ModelRoute[] {
 /** Compare one completed task, sequentially, and emit a session-bound route recommendation. */
 export async function compareSettledTask(
   policy: Policy, settledTask: SettledTask,
+  integration: { harness: HarnessAdapter; client: MeritChatClient },
 ): Promise<Recommendation | null> {
   const sink = new LocalJsonlEventSink();
   const routes = applyRouteOverrides(settledTask.routes, policy.route_overrides);
@@ -168,14 +170,14 @@ export async function compareSettledTask(
     if (alternates.length === 0) throw new Error("the harness exposes no eligible alternate route for this task");
 
     const evaluator = resolveEvaluator([...byRoute.values()], policy, active, task.images.length > 0);
-    const client = new PiCliChatClient(undefined, recordMeritSpend, policy.pi.provider_extensions);
-    const harness = new PiHarnessAdapter(policy.pi.provider_extensions);
+    const { harness, client } = integration;
+    if (!harness.scoreRun) throw new Error("harness adapter does not provide scoreRun");
     const rubric = await ensureRubric(client, evaluator, task.task, new Map());
     const points: TrialPoint[] = [];
     const total = eligible.length;
 
     emitTrialProgress({ phase: "start", taskKey: tKey, model: routeLabel(active), index: 1, total });
-    const baseline = await scorePiRun(evaluator, task.task, rubric, active, task.run, client,
+    const baseline = await harness.scoreRun(evaluator, task.task, rubric, active, task.run, client,
       "trace", task.images);
     const baselinePoint = { ...baseline.point, taskKey: tKey, taskLabel: task.task.slice(0, 120),
       sessionFile: task.sessionFile };
@@ -191,8 +193,17 @@ export async function compareSettledTask(
       if (!budgetOk(policy).ok) break;
       const index = offset + 2;
       emitTrialProgress({ phase: "start", taskKey: tKey, model: routeLabel(route), index, total });
-      const outcome = await runPiTrial(evaluator, task.task, rubric, route, client,
-        task.cwd, task.images, task.files, harness);
+      let outcome: HarnessScore;
+      try {
+        const run = await harness.runTask(route, { task: task.task, cwd: task.cwd, images: task.images, files: task.files });
+        outcome = await harness.scoreRun(evaluator, task.task, rubric, route, run, client, "pi_trial", task.images);
+      } catch (error) {
+        const priced = routePrice(route);
+        outcome = { point: { schemaVersion: 1 as const, model: route.meritId, route, score: 0,
+          price: priced.price, priceKnown: priced.known, ts: new Date().toISOString(), source: "pi_trial" as const,
+          toolCalls: 0, toolErrors: 1, changedFiles: 0, why: String(error).slice(0, 160) }, costUsd: 0,
+          error: String(error) };
+      }
       const point = { ...outcome.point, taskKey: tKey, taskLabel: task.task.slice(0, 120),
         sessionFile: task.sessionFile };
       points.push(point);

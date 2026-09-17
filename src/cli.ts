@@ -8,7 +8,8 @@ import { loadPolicy } from "./policy.js";
 import { paretoFrontier, pickBest, pickFallback } from "./frontier.js";
 import { paths, readJson, readJsonl } from "./store.js";
 import { compareSettledTask } from "./comparison.js";
-import { settledActiveTask } from "./pi-trials.js";
+import { PiHarnessAdapter, settledActiveTask } from "./pi-trials.js";
+import { recordMeritSpend } from "./trials.js";
 import type { Frontier, ModelRoute, Recommendation, TrialPoint } from "./types.js";
 import { modelRoute, routeLabel } from "./routes.js";
 import { collectDoctorReport, renderDiagnosticReport, runOfflineVerify } from "./diagnostics.js";
@@ -141,7 +142,10 @@ async function main(): Promise<void> {
       const task = settledActiveTask({ sessionFile, settledAt, currentModel, currentRoute,
         routes: state.routes, settledTaskKey, cwd, sessionBytes });
       if (!task) throw new Error("the specified pi session has no completed, supported task matching this marker");
-      await compareSettledTask(policy, task);
+      const harness = new PiHarnessAdapter(policy.pi.provider_extensions);
+      const client = harness.createInferenceClient?.(recordMeritSpend);
+      if (!client) throw new Error("Pi harness adapter cannot provide an inference client");
+      await compareSettledTask(policy, task, { harness, client });
       break;
     }
     case "frontier":
