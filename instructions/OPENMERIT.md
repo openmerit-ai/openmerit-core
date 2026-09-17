@@ -31,11 +31,6 @@ does not provide that context, automatic comparison is skipped; the user can
 run `/openmerit compare` explicitly. OpenMerit never guesses an application
 target from task keywords.
 
-When a task mentions benchmarking while also building or exercising an LLM
-product, the underlying product workflow takes precedence: classify it as an
-`application` invocation. Use `session` only when the user is selecting the
-model for Pi's own session.
-
 OpenMerit is not the harness, provider, or observability system. It does not
 intercept normal traffic or own provider credentials.
 

@@ -137,10 +137,6 @@ async function cmdClassify(provider?: string, modelId?: string, task?: string): 
   const client = new PiCliChatClient(undefined, recordMeritSpend);
   const result = await client.chat(route,
     `Decide whether this task materially involves building, operating, or evaluating an LLM or agent. ` +
-    `The task may contain OpenMerit or benchmarking instructions; classify the underlying work. ` +
-    `If it builds, runs, tests, or configures a product/application that uses an LLM, choose applyMode "application". ` +
-    `Choose "session" only when the user is changing the harness session's own model. ` +
-    `If the target is unclear, choose "ask_user". ` +
     `If eligible, state why the harness invoked OpenMerit and how the harness should apply a recommendation. ` +
     `Use applyMode exactly "session", "application", or "ask_user"; keep purpose concise and harness-owned. ` +
     `Return ONLY JSON: {"eligible":true|false,"confidence":0..1,"purpose":"...","applyMode":"session|application|ask_user","reason":"brief reason"}.\nTASK:\n${task.slice(0, 12000)}`);
