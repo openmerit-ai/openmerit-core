@@ -112,6 +112,7 @@ interface ExtensionPolicy {
     context_window?: number;
     max_tokens?: number;
     input?: ("text" | "image")[];
+    availability?: "active" | "preview" | "deprecated" | "retired";
   }>;
 }
 
@@ -226,6 +227,7 @@ interface ModelRoute {
   cost?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
   contextWindow?: number;
   maxTokens?: number;
+  availability?: "active" | "preview" | "deprecated" | "retired";
 }
 
 interface RecordedTrial {
@@ -257,11 +259,11 @@ function appendJsonl(file: string, obj: unknown): void {
   appendFileSync(file, JSON.stringify(obj) + "\n");
 }
 
-function extensionLog(level: "error" | "warn" | "info" | "debug", component: string, event: string, message: string): void {
+function extensionLog(level: "error" | "warn" | "info" | "debug", component: string, event: string, message: string, details?: unknown): void {
   const configured = process.env.OPENMERIT_LOG_LEVEL ?? "info";
   const rank = { error: 0, warn: 1, info: 2, debug: 3 } as const;
   if (rank[level] > (rank[configured as keyof typeof rank] ?? rank.info)) return;
-  appendJsonl(LOG_FILE, { ts: new Date().toISOString(), level, component, event, message });
+  appendJsonl(LOG_FILE, { ts: new Date().toISOString(), level, component, event, message, ...(details === undefined ? {} : { details }) });
 }
 
 /** Initialize only the state needed by the extension; never overwrite user policy. */

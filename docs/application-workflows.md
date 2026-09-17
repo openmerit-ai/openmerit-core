@@ -28,6 +28,12 @@ the product result and side effects. This is how an invoice extractor, an
 application classifier, or a multi-step agent can be evaluated using the
 actual workflow.
 
+After the recommendation is accepted, the harness calls
+`applyApplicationRoute(route, input)`. That hook owns the durable change: it
+can update an environment or configuration value, run validation, and create
+a patch or PR. The comparison engine remains unchanged when the product uses
+a different framework or provider.
+
 OpenMerit does not edit arbitrary source files, choose a product framework, or
 assume that changing a model means changing code. If the product needs a
 configuration patch, the harness can prepare that patch and later create a PR

@@ -14,6 +14,13 @@ and fallback under the user's policy.
 5. Applies a route automatically only when the user's current policy authorizes
    it; otherwise the decision remains supervised.
 
+For a task that builds or exercises a product's own LLM feature, carry the
+application workflow context into the comparison. OpenMerit runs candidates
+through the harness's application adapter and returns the same route decision.
+The harness owns injecting the route into application configuration, validating
+the workflow, and creating a patch or PR when the user accepts the decision.
+OpenMerit never edits arbitrary product source files or assumes a provider SDK.
+
 Before automatic comparison, the Pi integration asks the active harness model
 for a structured eligibility decision. Low-confidence or unavailable classifier
 responses fall back to the integration's local heuristic.
@@ -50,3 +57,6 @@ Policy changes belong to the user in `~/.openmerit/policy.json`.
   workloads.
 - OpenMerit records decision evidence locally by default. Do not edit its state
   files while it is running; use `/openmerit doctor` when state appears invalid.
+- Application candidates must report their final output, validation or
+  evaluation signals, tool outcomes, and relevant side effects. A runtime Pi
+  model switch alone does not update a product's persisted model configuration.

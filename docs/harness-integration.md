@@ -20,6 +20,13 @@ const adapter: HarnessAdapter = {
 };
 ```
 
+If the harness supports product workflows, also implement
+`runApplication(route, input)` and `applyApplicationRoute(route, input)`. The
+first executes the real application in an isolated environment; the second
+updates the harness-owned configuration after an accepted recommendation. It
+may create a patch or PR, but that decision belongs to the harness and its
+user-facing workflow.
+
 Candidate execution can be selected explicitly per task:
 
 ```ts
