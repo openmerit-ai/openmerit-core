@@ -404,13 +404,22 @@ function latestUserTaskText(ctx: ExtensionContext): string | null {
   const entries = (ctx.sessionManager as ExtensionContext["sessionManager"] & {
     getEntries?: () => { type?: string; message?: { role?: string; content?: unknown } }[];
   }).getEntries?.();
-  if (!entries) return null;
   let latest = "";
-  for (const entry of entries) {
-    if (entry.type !== "message" || entry.message?.role !== "user") continue;
+  const consume = (entry: { type?: string; message?: { role?: string; content?: unknown } }) => {
+    if (entry.type !== "message" || entry.message?.role !== "user") return;
     const content = entry.message.content;
     latest = typeof content === "string" ? content : Array.isArray(content)
       ? content.filter((part) => part?.type === "text").map((part) => String(part.text ?? "")).join(" ") : "";
+  };
+  if (entries) {
+    for (const entry of entries) consume(entry);
+  } else {
+    const file = ctx.sessionManager.getSessionFile();
+    if (!file || !existsSync(file)) return null;
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      try { consume(JSON.parse(line) as { type?: string; message?: { role?: string; content?: unknown } }); }
+      catch { /* partial session line */ }
+    }
   }
   return latest.trim() || null;
 }
