@@ -313,6 +313,20 @@ function latestSessionTaskKey(ctx: ExtensionContext): string | null {
  * LLM/agent workload or a measurable extraction/classification task. Users can
  * always override this with `/openmerit compare`. */
 function latestTaskLooksIntelligenceDriven(ctx: ExtensionContext): boolean {
+  const manager = ctx.sessionManager as ExtensionContext["sessionManager"] & {
+    getEntries?: () => { type?: string; message?: { role?: string; content?: unknown } }[];
+  };
+  const entries = manager.getEntries?.();
+  if (entries) {
+    let latest = "";
+    for (const entry of entries) {
+      if (entry.type !== "message" || entry.message?.role !== "user") continue;
+      const content = entry.message.content;
+      latest = typeof content === "string" ? content : Array.isArray(content)
+        ? content.filter((part) => part?.type === "text").map((part) => String(part.text ?? "")).join(" ") : "";
+    }
+    return /\b(llm|large language model|language model|agent|prompt|embedding|rag|classification|classify|extract|ocr|summarize|structured json|generate text|evaluate|model)\b/i.test(latest);
+  }
   const file = ctx.sessionManager.getSessionFile();
   if (!file || !existsSync(file)) return false;
   let latest = "";
