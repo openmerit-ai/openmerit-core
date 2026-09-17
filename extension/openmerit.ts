@@ -390,7 +390,9 @@ async function classifyTaskWithHarness(ctx: ExtensionContext, taskOverride?: str
     if (typeof result.eligible !== "boolean" || !(Number(result.confidence) >= 0.7)) return null;
     if (result.eligible && (typeof result.purpose !== "string" || !result.purpose.trim() ||
       !["session", "application", "ask_user"].includes(result.applyMode ?? ""))) return null;
-    extensionLog("info", "eligibility", "classified", `semantic eligibility=${result.eligible}`);
+    extensionLog("info", "eligibility", "classified", `semantic eligibility=${result.eligible}`, {
+      purpose: result.purpose, applyMode: result.applyMode,
+    });
     return { eligible: result.eligible, purpose: typeof result.purpose === "string" ? result.purpose : undefined, applyMode: result.applyMode };
   } catch { extensionLog("warn", "eligibility", "invalid_result", "semantic classifier returned invalid JSON"); return null; }
 }
