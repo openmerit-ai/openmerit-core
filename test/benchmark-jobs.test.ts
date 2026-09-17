@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { listBenchmarkJobs, listBenchmarks, saveBenchmark, saveBenchmarkJob } from "../src/benchmark-jobs.js";
+import { dueBenchmarkJobs, listBenchmarkJobs, listBenchmarks, saveBenchmark, saveBenchmarkJob } from "../src/benchmark-jobs.js";
 
 describe("benchmark job registry", () => {
   it("persists versioned definitions and validates schedules", () => {
@@ -12,5 +12,6 @@ describe("benchmark job registry", () => {
     expect(listBenchmarks()).toHaveLength(1);
     expect(listBenchmarkJobs()[0]?.benchmarkId).toBe("invoice-v1");
     expect(() => saveBenchmarkJob({ schemaVersion: 1, id: "bad", benchmarkId: "invoice-v1", trigger: "interval", schedule: { everyMinutes: 0 }, action: "report", enabled: true, updatedAt: "now" })).toThrow();
+    expect(dueBenchmarkJobs(Date.parse("2026-01-01T02:00:00Z"))).toHaveLength(1);
   });
 });
