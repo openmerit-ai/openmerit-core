@@ -71,6 +71,31 @@ export interface Frontier {
   updatedAt: string;
 }
 
+/** Versioned benchmark definition for one measurable task invocation. */
+export interface BenchmarkDefinition {
+  schemaVersion: 1;
+  id: string;
+  taskKey: string;
+  taskLabel: string;
+  instructions: string;
+  evaluator?: { kind: "rubric" | "validator" | "human"; definition: string };
+  inputModalities: ("text" | "image" | "file")[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A durable request for a harness or external scheduler to refresh a benchmark. */
+export interface BenchmarkJob {
+  schemaVersion: 1;
+  id: string;
+  benchmarkId: string;
+  trigger: "manual" | "interval" | "route_changed" | "route_deprecated";
+  schedule?: { everyMinutes: number };
+  action: "report" | "ask_harness" | "open_pr" | "apply";
+  enabled: boolean;
+  updatedAt: string;
+}
+
 /** Gate decision from the policy engine. */
 export interface GateDecision {
   autoApply: boolean;
