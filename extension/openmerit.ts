@@ -379,6 +379,42 @@ function latestTaskLooksIntelligenceDriven(ctx: ExtensionContext): boolean {
   return /\b(llm|large language model|language model|agent|prompt|embedding|rag|classification|classify|extract|ocr|summarize|structured json|generate text|evaluate|model)\b/i.test(latest);
 }
 
+async function classifyTaskWithHarness(ctx: ExtensionContext): Promise<boolean | null> {
+  if (!existsSync(ENGINE_FILE) || !ctx.model) return null;
+  const task = latestUserTaskText(ctx);
+  if (!task) return null;
+  const child = spawn(process.execPath, [ENGINE_FILE, "classify", ctx.model.provider, ctx.model.id, task], {
+    cwd: ctx.cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+  const code = await new Promise<number>((resolve) => {
+    const timer = setTimeout(() => { try { child.kill("SIGTERM"); } catch { /* already closed */ } }, 30_000);
+    child.on("close", (value) => { clearTimeout(timer); resolve(value ?? 1); });
+  });
+  if (code !== 0) return null;
+  try {
+    const result = JSON.parse(stdout.trim().split("\n").at(-1) ?? "") as { eligible?: boolean; confidence?: number };
+    if (typeof result.eligible !== "boolean" || !(Number(result.confidence) >= 0.7)) return null;
+    return result.eligible;
+  } catch { return null; }
+}
+
+function latestUserTaskText(ctx: ExtensionContext): string | null {
+  const entries = (ctx.sessionManager as ExtensionContext["sessionManager"] & {
+    getEntries?: () => { type?: string; message?: { role?: string; content?: unknown } }[];
+  }).getEntries?.();
+  if (!entries) return null;
+  let latest = "";
+  for (const entry of entries) {
+    if (entry.type !== "message" || entry.message?.role !== "user") continue;
+    const content = entry.message.content;
+    latest = typeof content === "string" ? content : Array.isArray(content)
+      ? content.filter((part) => part?.type === "text").map((part) => String(part.text ?? "")).join(" ") : "";
+  }
+  return latest.trim() || null;
+}
+
 let settledTaskKey: string | null = null;
 let comparisonsPaused = false;
 
@@ -857,7 +893,9 @@ export default function openmerit(pi: ExtensionAPI) {
 
   pi.on("agent_settled", async (_event, ctx) => {
     reportHarnessState(ctx, true);
-    if (latestTaskLooksIntelligenceDriven(ctx)) {
+    const semantic = await classifyTaskWithHarness(ctx);
+    const eligible = semantic ?? latestTaskLooksIntelligenceDriven(ctx);
+    if (eligible) {
       registerBenchmark(ctx);
       queueSettledTask(ctx);
     }

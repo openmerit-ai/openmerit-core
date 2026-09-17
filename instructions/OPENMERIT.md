@@ -14,6 +14,10 @@ and fallback under the user's policy.
 5. Applies a route automatically only when the user's current policy authorizes
    it; otherwise the decision remains supervised.
 
+Before automatic comparison, the Pi integration asks the active harness model
+for a structured eligibility decision. Low-confidence or unavailable classifier
+responses fall back to the integration's local heuristic.
+
 OpenMerit is not the harness, provider, or observability system. It does not
 intercept normal traffic or own provider credentials.
 

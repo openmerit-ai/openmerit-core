@@ -15,6 +15,7 @@ import { modelRoute, routeKey, routeLabel } from "./routes.js";
 import { collectDoctorReport, renderDiagnosticReport, runOfflineVerify } from "./diagnostics.js";
 import { dueBenchmarkJobs, listBenchmarkJobs, listBenchmarks, saveBenchmarkJob } from "./benchmark-jobs.js";
 import { listPublicBenchmarks, OpenRouterBenchmarkSource, savePublicBenchmark } from "./public-benchmarks.js";
+import { PiCliChatClient } from "./llm.js";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -129,6 +130,19 @@ async function cmdBenchmarksSync(taskType?: string): Promise<void> {
   console.log(`saved ${points.length} OpenRouter public benchmark points`);
 }
 
+async function cmdClassify(provider?: string, modelId?: string, task?: string): Promise<void> {
+  if (!provider || !modelId || !task) throw new Error("usage: classify <provider> <model> <task>");
+  const route = modelRoute(provider, modelId);
+  const client = new PiCliChatClient(undefined, recordMeritSpend);
+  const result = await client.chat(route,
+    `Decide whether this task materially involves building, operating, or evaluating an LLM or agent. ` +
+    `Return ONLY JSON: {"eligible":true|false,"confidence":0..1,"reason":"brief reason"}.\nTASK:\n${task.slice(0, 12000)}`);
+  const match = result.content.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("classifier returned no JSON");
+  const parsed = JSON.parse(match[0]) as { eligible?: unknown; confidence?: unknown; reason?: unknown };
+  console.log(JSON.stringify({ eligible: parsed.eligible === true, confidence: Number(parsed.confidence ?? 0), reason: String(parsed.reason ?? "") }));
+}
+
 async function cmdRefresh(jobId?: string): Promise<void> {
   const jobs = (jobId ? listBenchmarkJobs().filter((job) => job.id === jobId) : dueBenchmarkJobs())
     .filter((job) => job.sessionFile && job.route && job.taskKey);
@@ -196,6 +210,9 @@ async function main(): Promise<void> {
     case "refresh":
       await cmdRefresh(args[0]);
       break;
+    case "classify":
+      await cmdClassify(args[0], args[1], args.slice(2).join(" "));
+      break;
     case "doctor":
       cmdDoctor(args.includes("--json"));
       break;
@@ -213,6 +230,7 @@ usage: openmerit <command>
   benchmarks           list registered benchmarks and enabled refresh jobs
   benchmarks sync       fetch OpenRouter public benchmark snapshots [task type optional]
   refresh [job-id]     run due benchmark refresh jobs (for cron/system schedulers)
+  classify <provider> <model> <task>  classify task eligibility through the harness
   doctor [--json]      diagnose pi, policy, routes, state, and installation
   verify [--json]      run an offline, provider-free core self-test`);
       if (cmd && cmd !== "help" && cmd !== "--help") process.exitCode = 1;
