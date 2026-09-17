@@ -11,6 +11,7 @@ import type { ModelRoute, Recommendation, TrialPoint } from "./types.js";
 import { applyRouteOverrides, routeKey, routeLabel, routePrice } from "./routes.js";
 import type { MeritChatClient } from "./providers.js";
 import { LocalJsonlEventSink, meritEvent, type EventSink } from "./integrations.js";
+import { publicPriorModels } from "./public-benchmarks.js";
 
 interface ProcessedTask {
   marker: string;
@@ -104,7 +105,7 @@ function resolveEvaluator(
 }
 
 /** Pick a deterministic price-spread slate. Production routing must remain reproducible and auditable. */
-function selectAlternates(routes: ModelRoute[], count: number): ModelRoute[] {
+function selectAlternates(routes: ModelRoute[], count: number, priorKeys: string[] = []): ModelRoute[] {
   if (count <= 0 || routes.length === 0) return [];
   const sorted = [...routes].sort((a, b) => {
     const ap = routePrice(a); const bp = routePrice(b);
@@ -113,6 +114,11 @@ function selectAlternates(routes: ModelRoute[], count: number): ModelRoute[] {
   if (sorted.length <= count) return sorted;
   if (count === 1) return [sorted[0]];
   const selected: ModelRoute[] = [];
+  for (const key of priorKeys) {
+    const route = sorted.find((candidate) => routeKey(candidate) === key);
+    if (route && !selected.some((item) => routeKey(item) === key)) selected.push(route);
+    if (selected.length === count) return selected;
+  }
   for (let i = 0; i < count; i++) {
     const index = Math.round(i * (sorted.length - 1) / (count - 1));
     if (!selected.some((route) => routeKey(route) === routeKey(sorted[index]))) selected.push(sorted[index]);
@@ -163,7 +169,8 @@ export async function compareSettledTask(
       if (reasons.length) excluded.push({ model: routeLabel(route), reasons });
       else candidateRoutes.push(route);
     }
-    const alternates = selectAlternates(candidateRoutes, Math.max(0, policy.comparison.max_routes - 1));
+    const alternates = selectAlternates(candidateRoutes, Math.max(0, policy.comparison.max_routes - 1),
+      publicPriorModels(candidateRoutes, task.task));
     const eligible = [active, ...alternates];
     emitTrialProgress({ phase: "selection", taskKey: tKey,
       eligible: eligible.map(routeLabel), excluded });

@@ -1,5 +1,7 @@
 /** Provider-neutral public benchmark snapshots. */
 import { appendJsonl, paths, readJsonl } from "./store.js";
+import type { ModelRoute } from "./types.js";
+import { routeKey } from "./routes.js";
 
 export interface PublicBenchmarkPoint {
   schemaVersion: 1;
@@ -59,4 +61,19 @@ export function savePublicBenchmark(points: PublicBenchmarkPoint[]): void {
 
 export function listPublicBenchmarks(): PublicBenchmarkPoint[] {
   return readJsonl<PublicBenchmarkPoint>(paths.publicBenchmarks());
+}
+
+/** Return deterministic public-prior ordering for routes already available in the harness. */
+export function publicPriorModels(routes: ModelRoute[], task: string): string[] {
+  const type = /image|invoice|ocr|visual/i.test(task) ? "intelligence" :
+    /code|coding|typescript|javascript|sql/i.test(task) ? "coding" : undefined;
+  const scores = new Map<string, number>();
+  for (const point of listPublicBenchmarks()) {
+    if (type && point.taskType && point.taskType !== type) continue;
+    const score = Math.max(0, ...Object.values(point.scores));
+    if (score > (scores.get(point.model) ?? -Infinity)) scores.set(point.model, score);
+  }
+  return routes.filter((route) => scores.has(route.meritId))
+    .sort((a, b) => (scores.get(b.meritId)! - scores.get(a.meritId)!) || a.meritId.localeCompare(b.meritId))
+    .map((route) => routeKey(route));
 }

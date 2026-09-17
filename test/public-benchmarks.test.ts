@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { OpenRouterBenchmarkSource, listPublicBenchmarks, savePublicBenchmark } from "../src/public-benchmarks.js";
+import { OpenRouterBenchmarkSource, listPublicBenchmarks, publicPriorModels, savePublicBenchmark } from "../src/public-benchmarks.js";
+import { modelRoute } from "../src/routes.js";
 
 afterEach(() => { vi.unstubAllGlobals(); delete process.env.OPENMERIT_HOME; });
 
@@ -17,5 +18,7 @@ describe("public benchmark sources", () => {
     savePublicBenchmark(points);
     expect(points[0]).toMatchObject({ model: "openai/gpt-4o", scores: { intelligence_index: 71.2 }, benchmark: "artificial-analysis" });
     expect(listPublicBenchmarks()).toHaveLength(1);
+    expect(publicPriorModels([modelRoute("openai", "gpt-4o"), modelRoute("other", "x")], "intelligence task"))
+      .toEqual(["openai:gpt-4o"]);
   });
 });
