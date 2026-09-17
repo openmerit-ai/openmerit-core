@@ -6,7 +6,7 @@
  *
  * What it does:
  *  - Reports this harness's current model to openmerit (~/.openmerit/harness-state.json).
- *  - Queues one controlled, session-bound comparison after a task settles.
+ *  - Queues one controlled, session-bound comparison after an eligible task settles.
  *  - Polls ~/.openmerit/recommendations.jsonl for completed route decisions.
  *  - Applies swaps with pi.setModel() when the policy gate says "auto",
  *    otherwise asks (Apply / Dismiss) or waits for /openmerit apply.
@@ -307,6 +307,25 @@ function latestSessionTaskKey(ctx: ExtensionContext): string | null {
     } catch { /* partial/corrupt session line */ }
   }
   return latest;
+}
+
+/** Pi-side heuristic: skip ordinary one-off coding tasks unless they mention an
+ * LLM/agent workload or a measurable extraction/classification task. Users can
+ * always override this with `/openmerit compare`. */
+function latestTaskLooksIntelligenceDriven(ctx: ExtensionContext): boolean {
+  const file = ctx.sessionManager.getSessionFile();
+  if (!file || !existsSync(file)) return false;
+  let latest = "";
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    try {
+      const e = JSON.parse(line) as { type?: string; message?: { role?: string; content?: unknown } };
+      if (e.type !== "message" || e.message?.role !== "user") continue;
+      const content = e.message.content;
+      latest = typeof content === "string" ? content : Array.isArray(content)
+        ? content.filter((part) => part?.type === "text").map((part) => String(part.text ?? "")).join(" ") : "";
+    } catch { /* partial session line */ }
+  }
+  return /\b(llm|large language model|language model|agent|prompt|embedding|rag|classification|classify|extract|ocr|summarize|structured json|generate text|evaluate|model)\b/i.test(latest);
 }
 
 let settledTaskKey: string | null = null;
@@ -769,7 +788,8 @@ export default function openmerit(pi: ExtensionAPI) {
 
   pi.on("agent_settled", async (_event, ctx) => {
     reportHarnessState(ctx, true);
-    queueSettledTask(ctx);
+    if (latestTaskLooksIntelligenceDriven(ctx)) queueSettledTask(ctx);
+    else if (ctx.hasUI) ctx.ui.notify("openmerit: task looks like ordinary coding work; comparison skipped (use /openmerit compare to override)", "info");
     await surface(ctx);
   });
 

@@ -48,7 +48,7 @@ describe("pi extension model handoff", () => {
     process.env.OPENMERIT_HOME = dir;
     const session = join(dir, "session.jsonl");
     writeFileSync(session, [
-      { type: "message", message: { role: "user", content: [{ type: "text", text: "Task A" }] } },
+      { type: "message", message: { role: "user", content: [{ type: "text", text: "Evaluate this model task A" }] } },
       { type: "message", message: { role: "assistant", provider: "openrouter", model: "vendor/a",
         content: [{ type: "text", text: "Answer A" }], stopReason: "stop" } },
     ].map((x) => JSON.stringify(x)).join("\n") + "\n");
@@ -119,7 +119,7 @@ describe("pi extension model handoff", () => {
     process.env.OPENMERIT_HOME = dir;
     const session = join(dir, "session.jsonl");
     writeFileSync(session, [
-      { type: "message", message: { role: "user", content: [{ type: "text", text: "Task A" }], timestamp: 1000 } },
+      { type: "message", message: { role: "user", content: [{ type: "text", text: "Evaluate this model task A" }], timestamp: 1000 } },
       { type: "message", message: { role: "assistant", provider: "openrouter", model: "vendor/a",
         content: [{ type: "text", text: "Answer A" }], timestamp: 1500, stopReason: "stop" } },
     ].map((x) => JSON.stringify(x)).join("\n") + "\n");
@@ -182,7 +182,7 @@ describe("pi extension model handoff", () => {
   it("suggests an exact-task result from another session without switching this session", async () => {
     dir = mkdtempSync(join(tmpdir(), "openmerit-ext-reuse-"));
     process.env.OPENMERIT_HOME = dir;
-    const task = "Give a word ladder from cat to dog";
+    const task = "Use an LLM to give a word ladder from cat to dog";
     const currentSession = join(dir, "current.jsonl");
     const priorSession = join(dir, "prior.jsonl");
     writeFileSync(currentSession, JSON.stringify({ type: "message", message: {
