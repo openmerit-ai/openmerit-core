@@ -3,6 +3,12 @@ import type { TaskFile, TaskImage } from "./task-input.js";
 import type { MeritChatClient } from "./providers.js";
 import type { ModelRoute, TrialPoint } from "./types.js";
 
+/** Opaque purpose/context supplied by the harness that invoked OpenMerit. */
+export interface HarnessInvocation {
+  purpose: string;
+  context?: Record<string, unknown>;
+}
+
 export interface HarnessTask {
   task: string;
   cwd: string;
@@ -10,6 +16,7 @@ export interface HarnessTask {
   files: TaskFile[];
   /** How the harness should execute candidate runs. */
   mode?: "agent" | "inference";
+  invocation?: HarnessInvocation;
 }
 
 export interface HarnessRun {
@@ -47,6 +54,7 @@ export interface SettledHarnessTask {
   usedTools: boolean;
   comparisonNonce?: string;
   mode?: "agent" | "inference";
+  invocation?: HarnessInvocation;
 }
 
 /** A coding harness executes a candidate and exposes normalized observations. */

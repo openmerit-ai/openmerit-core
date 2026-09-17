@@ -218,7 +218,7 @@ export async function compareSettledTask(
       try {
         const input = {
           task: task.task, cwd: task.cwd, images: task.images, files: task.files,
-          mode: task.mode,
+          mode: task.mode, invocation: task.invocation,
         };
         const run = task.mode === "inference" && harness.runInference
             ? await harness.runInference(route, input)
@@ -247,7 +247,7 @@ export async function compareSettledTask(
     }
 
     const recommendation = buildRecommendation(tKey, task.task.slice(0, 120), active.meritId,
-      points, policy, task.sessionFile, active);
+      points, policy, task.sessionFile, active, task.invocation);
     if (recommendation) {
       appendJsonl(paths.recommendations(), recommendation);
       sink.emit(meritEvent("recommendation.created", recommendation));

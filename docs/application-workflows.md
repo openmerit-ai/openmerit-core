@@ -2,6 +2,8 @@
 
 OpenMerit does not own application execution. It benchmarks whatever task the
 harness supplies and returns a structured action for the harness to interpret.
+The harness should provide an invocation purpose and context so the resulting
+action is applied to the intended application or session.
 
 ## Direct inference
 

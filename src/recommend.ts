@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { paretoFrontier, pickBest, pickFallback } from "./frontier.js";
 import { gate, providerAllowed, type Policy } from "./policy.js";
 import type { Recommendation, TrialPoint } from "./types.js";
+import type { HarnessInvocation } from "./harness.js";
 import { pointKey, routeLabel } from "./routes.js";
 
 export function buildRecommendation(
@@ -14,6 +15,7 @@ export function buildRecommendation(
   policy: Policy,
   sessionFile: string | null = null,
   currentRoute = currentModel ? points.find((p) => p.model === currentModel)?.route ?? null : null,
+  invocation?: HarnessInvocation,
 ): Recommendation | null {
   const scored = points.filter((p) => p.score > 0);
   if (scored.length === 0) return null;
@@ -66,6 +68,7 @@ export function buildRecommendation(
     ts: new Date().toISOString(),
     taskKey,
     taskLabel,
+    invocation,
     sessionFile,
     currentModel,
     currentRoute,
@@ -74,7 +77,7 @@ export function buildRecommendation(
       type: "select_model_route",
       model: best.model,
       ...(best.route ? { route: best.route } : {}),
-      instruction: "Make this route the active model for the completed task's harness or application workflow, then run the workflow's normal validation.",
+      instruction: "Apply this route to the original target and purpose in the invocation context. Do not change the harness session model unless the invocation was for session routing. Run the target's normal validation and report the result.",
       validate: true,
     },
     fallback: fb

@@ -119,6 +119,8 @@ export interface Recommendation {
   ts: string;
   taskKey: string;
   taskLabel: string;
+  /** Harness-owned purpose and context that caused this evaluation. */
+  invocation?: { purpose: string; context?: Record<string, unknown> };
   /** Target pi session for automatic swaps. */
   sessionFile?: string | null;
   currentModel: string | null;

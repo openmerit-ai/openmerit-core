@@ -16,9 +16,11 @@ and fallback under the user's policy.
 
 When a recommendation is created, the harness receives a structured
 `harnessAction` containing the selected model route, an instruction to make it
-active for the relevant task or application workflow, and a request to run its
-normal validation. The harness decides how that means a runtime switch,
-configuration edit, patch, or PR.
+active for the original invocation target, and a request to run its normal
+validation. The recommendation preserves the harness-provided invocation
+purpose and context. The harness decides how that means a runtime switch,
+configuration edit, patch, or PR; it must not change the Pi session model when
+the original invocation targeted an application.
 
 For a task that builds or exercises a product's own LLM feature, carry the
 application workflow context into the comparison. OpenMerit runs candidates

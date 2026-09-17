@@ -209,6 +209,7 @@ interface Recommendation {
   ts: string;
   taskKey: string;
   taskLabel: string;
+  invocation?: { purpose: string; context?: Record<string, unknown> };
   sessionFile?: string | null;
   currentModel: string | null;
   currentRoute?: ModelRoute | null;

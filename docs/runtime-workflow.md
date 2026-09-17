@@ -6,7 +6,8 @@ harness's normal model call.
 
 1. The harness starts a task and captures its task context.
 2. The harness completes the task and exposes a settled task containing the
-   prompt, working directory, attachments, active route, and normalized trace.
+   prompt, working directory, attachments, active route, normalized trace, and
+   the purpose/context that caused the OpenMerit invocation.
 3. The integration loads OpenMerit's instruction context and asks the engine
    whether the task is eligible. A harness may provide a semantic eligibility
    decision; the engine retains a deterministic fallback.
