@@ -35,6 +35,8 @@ Pi also exposes the `openmerit_set_invocation` tool. When the harness knows the
 task intent directly, it should call this tool during the task; that explicit
 declaration takes precedence over semantic classification. Other harnesses can
 provide the same `HarnessInvocation` fields through their own extension seam.
+For deterministic wrapper integrations, Pi also accepts
+`OPENMERIT_INVOCATION_JSON` or `/openmerit context '{...}'` before the task.
 
 OpenMerit is not the harness, provider, or observability system. It does not
 intercept normal traffic or own provider credentials.

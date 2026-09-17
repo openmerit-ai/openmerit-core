@@ -661,6 +661,22 @@ async function doctorSummary(): Promise<{ text: string; ok: boolean }> {
 
 export default function openmerit(pi: ExtensionAPI) {
   let explicitInvocation: { purpose: string; applyMode: "session" | "application" | "ask_user"; context?: Record<string, unknown> } | null = null;
+  const parseInvocation = (value: unknown): typeof explicitInvocation => {
+    if (typeof value !== "object" || value === null) return null;
+    const item = value as { purpose?: unknown; applyMode?: unknown; context?: unknown };
+    if (typeof item.purpose !== "string" || !item.purpose.trim() ||
+      !["session", "application", "ask_user"].includes(String(item.applyMode))) return null;
+    return {
+      purpose: item.purpose.trim(),
+      applyMode: item.applyMode as "session" | "application" | "ask_user",
+      context: typeof item.context === "object" && item.context !== null ? item.context as Record<string, unknown> : undefined,
+    };
+  };
+  const configuredInvocation = (): typeof explicitInvocation => {
+    const raw = process.env.OPENMERIT_INVOCATION_JSON?.trim();
+    if (!raw) return null;
+    try { return parseInvocation(JSON.parse(raw)); } catch { return null; }
+  };
 
   pi.registerTool?.({
     name: "openmerit_set_invocation",
@@ -693,6 +709,7 @@ export default function openmerit(pi: ExtensionAPI) {
   // The package owns the instruction source of truth; inject it through Pi's
   // supported per-turn system-prompt hook so users need not copy it manually.
   pi.on("before_agent_start", async (event) => {
+    if (!explicitInvocation) explicitInvocation = configuredInvocation();
     if (!applicationActionTurn && !capturedTaskPrompt) {
       capturedTaskPrompt = event.prompt.trim() || null;
       capturedTaskKey = userTaskKey(event.images?.length
@@ -1085,6 +1102,16 @@ export default function openmerit(pi: ExtensionAPI) {
         } else {
           ctx.ui.notify(`openmerit: could not switch to ${fallbackModel} (not in registry or no auth)`, "error");
         }
+        return;
+      }
+      if (sub === "context") {
+        const raw = args.trim().slice("context".length).trim();
+        try {
+          explicitInvocation = parseInvocation(JSON.parse(raw));
+        } catch { explicitInvocation = null; }
+        ctx.ui.notify(explicitInvocation
+          ? `openmerit: invocation context set (${explicitInvocation.applyMode})`
+          : "openmerit: invalid invocation context; expected JSON with purpose and applyMode", explicitInvocation ? "info" : "warning");
         return;
       }
       if (sub === "pause") {

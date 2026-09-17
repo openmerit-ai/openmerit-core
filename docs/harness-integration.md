@@ -59,4 +59,6 @@ context using that harness's supported plugin or middleware hook.
 
 Pi integrations may declare context during a task with the
 `openmerit_set_invocation` tool. This is an adapter feature; the core engine
-only receives the resulting `HarnessInvocation`.
+only receives the resulting `HarnessInvocation`. A deterministic wrapper can
+instead set `OPENMERIT_INVOCATION_JSON` or call the Pi command
+`/openmerit context '{...}'` before starting the task.
