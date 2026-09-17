@@ -2,7 +2,7 @@
 
 OpenMerit does not own application execution. It benchmarks whatever task the
 harness supplies and returns a structured action for the harness to interpret.
-The harness should provide an invocation purpose, context, and `applyMode` so
+The harness keeps its invocation purpose, context, and `applyMode` locally so
 the resulting action is applied to the intended application or session.
 `applyMode` is harness-owned metadata: `session` permits a session route
 switch, `application` asks the harness to update the product workflow, and
@@ -25,9 +25,9 @@ allows it for trials.
 
 ## Product workflow
 
-When Pi is helping build or exercise a product whose own code invokes an LLM,
+When a harness is helping build or exercise a product whose own code invokes an LLM,
 the harness decides how to run that product. OpenMerit supplies the selected
-route and the `harnessAction` instruction; Pi can inspect the project, update
+route and the `harnessAction` instruction; the harness can inspect the project, update
 configuration or code, validate the workflow, and create a patch or PR.
 
 After the recommendation is accepted, the harness consumes the recommendation's

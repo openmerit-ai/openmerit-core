@@ -207,8 +207,8 @@ existing file. The 0.1.5 policy schema is:
 }
 ```
 
-Set `benchmark_refresh_minutes` to a positive interval to register eligible Pi
-tasks as durable benchmark refresh jobs. The Pi extension runs due refreshes in
+Set `benchmark_refresh_minutes` to a positive interval to register eligible harness
+tasks as durable benchmark refresh jobs. The host harness runs due refreshes in
 the active session and surfaces the resulting recommendation for the harness
 to apply according to policy. `0` disables recurring refreshes.
 

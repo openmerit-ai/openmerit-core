@@ -41,8 +41,8 @@ intercept normal traffic or own provider credentials.
 - `/openmerit doctor` — sanitized installation and route diagnostics
 
 Recurring benchmark refreshes are configured with `benchmark_refresh_minutes`.
-Pi runs due jobs while it is open; an external scheduler may invoke
-`openmerit refresh` when Pi is not running.
+The host harness runs due jobs while it is open; an external scheduler may invoke
+its refresh entrypoint when the harness is not running.
 
 Policy changes belong to the user in `~/.openmerit/policy.json`.
 
