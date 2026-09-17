@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** openmerit CLI: init / frontier / status / doctor / verify plus the internal session worker. */
 
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPolicy } from "./policy.js";
@@ -13,7 +13,7 @@ import { recordMeritSpend } from "./trials.js";
 import type { Frontier, ModelRoute, Recommendation, TrialPoint } from "./types.js";
 import { modelRoute, routeLabel } from "./routes.js";
 import { collectDoctorReport, renderDiagnosticReport, runOfflineVerify } from "./diagnostics.js";
-import { listBenchmarkJobs, listBenchmarks } from "./benchmark-jobs.js";
+import { dueBenchmarkJobs, listBenchmarkJobs, listBenchmarks, saveBenchmarkJob } from "./benchmark-jobs.js";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -121,6 +121,28 @@ function cmdBenchmarks(): void {
   for (const j of jobs) console.log(`  ${j.id}  benchmark=${j.benchmarkId}  trigger=${j.trigger}  action=${j.action}`);
 }
 
+async function cmdRefresh(jobId?: string): Promise<void> {
+  const jobs = (jobId ? listBenchmarkJobs().filter((job) => job.id === jobId) : dueBenchmarkJobs())
+    .filter((job) => job.sessionFile && job.route && job.taskKey);
+  if (!jobs.length) { console.log("no due benchmark jobs"); return; }
+  const policy = loadPolicy(paths.policy());
+  for (const job of jobs) {
+    if (!job.sessionFile || !job.route || !job.taskKey) continue;
+    if (!existsSync(job.sessionFile)) { console.error(`skip ${job.id}: session file is unavailable`); continue; }
+    const sessionBytes = statSync(job.sessionFile).size;
+    const task = settledActiveTask({ sessionFile: job.sessionFile, settledAt: job.updatedAt,
+      currentModel: job.route.meritId, currentRoute: job.route, routes: job.routes,
+      settledTaskKey: job.taskKey, cwd: job.cwd, sessionBytes,
+      comparisonNonce: `scheduled-${Date.now()}` });
+    if (!task) { console.error(`skip ${job.id}: completed task no longer matches its session marker`); continue; }
+    const harness = new PiHarnessAdapter(policy.pi.provider_extensions);
+    const client = harness.createInferenceClient?.(recordMeritSpend);
+    if (!client) throw new Error("Pi harness adapter cannot provide an inference client");
+    await compareSettledTask(policy, task, { harness, client });
+    saveBenchmarkJob({ ...job, lastRunAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+  }
+}
+
 async function main(): Promise<void> {
   const [cmd, ...args] = process.argv.slice(2);
   switch (cmd) {
@@ -157,6 +179,9 @@ async function main(): Promise<void> {
     case "benchmarks":
       cmdBenchmarks();
       break;
+    case "refresh":
+      await cmdRefresh(args[0]);
+      break;
     case "doctor":
       cmdDoctor(args.includes("--json"));
       break;
@@ -172,6 +197,7 @@ usage: openmerit <command>
   frontier [taskKey]   print pareto frontier(s)
   status               active route, measured tasks, and pending recommendations
   benchmarks           list registered benchmarks and enabled refresh jobs
+  refresh [job-id]     run due benchmark refresh jobs (for cron/system schedulers)
   doctor [--json]      diagnose pi, policy, routes, state, and installation
   verify [--json]      run an offline, provider-free core self-test`);
       if (cmd && cmd !== "help" && cmd !== "--help") process.exitCode = 1;

@@ -271,7 +271,8 @@ function registerBenchmark(ctx: ExtensionContext): void {
   appendJsonl(BENCHMARK_JOBS_FILE, {
     schemaVersion: 1, id: `refresh-${benchmarkId}`, benchmarkId,
     trigger: "interval", schedule: { everyMinutes }, action: "ask_harness", enabled: true,
-    taskKey: settledTaskKey, sessionFile, updatedAt: now,
+    taskKey: settledTaskKey, sessionFile, route: ctx.model ? routeFor(ctx.model) : undefined,
+    routes: eligibleRoutes(ctx), cwd: ctx.cwd, updatedAt: now,
   });
 }
 
@@ -746,7 +747,8 @@ export default function openmerit(pi: ExtensionAPI) {
     if (refresh) appendJsonl(BENCHMARK_JOBS_FILE, {
       schemaVersion: 1, id: `refresh-task-${settledTaskKey}`, benchmarkId: `task-${settledTaskKey}`,
       trigger: "interval", schedule: { everyMinutes: interval }, action: "ask_harness", enabled: true,
-      taskKey: settledTaskKey, sessionFile, lastRunAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      taskKey: settledTaskKey, sessionFile, route, routes: eligibleRoutes(ctx), cwd: ctx.cwd,
+      lastRunAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
     queuedJobs.push({ sessionFile, settledAt, model, route, key: settledTaskKey, cwd: ctx.cwd, bytes });
     startNextJob(ctx);

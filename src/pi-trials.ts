@@ -164,18 +164,19 @@ export interface SettledTask {
   files: TaskFile[];
   route: ModelRoute;
   routes: ModelRoute[];
+  comparisonNonce?: string;
 }
 
 /** Read the exact latest completed text task from the pi extension's session marker. */
 export function settledActiveTask(snapshot?: {
   currentModel?: string | null; sessionFile?: string | null;
   currentRoute?: ModelRoute | null; routes?: ModelRoute[];
-  settledTaskKey?: string | null; settledAt?: string | null; cwd?: string; sessionBytes?: number;
+  settledTaskKey?: string | null; settledAt?: string | null; cwd?: string; sessionBytes?: number; comparisonNonce?: string;
 }): SettledTask | null {
   const st = snapshot ?? readJson<{
     currentModel?: string | null; sessionFile?: string | null;
     currentRoute?: ModelRoute | null; routes?: ModelRoute[];
-    settledTaskKey?: string | null; settledAt?: string | null; cwd?: string; sessionBytes?: number;
+    settledTaskKey?: string | null; settledAt?: string | null; cwd?: string; sessionBytes?: number; comparisonNonce?: string;
   }>(paths.harnessState(), {});
   if (!st.currentModel || !st.sessionFile || !st.settledTaskKey || !st.settledAt ||
       !existsSync(st.sessionFile)) return null;
@@ -204,7 +205,7 @@ export function settledActiveTask(snapshot?: {
   const routes = st.routes?.length ? st.routes : [route];
   return { task, images, model: st.currentModel, run, sessionFile: st.sessionFile,
     settledAt: st.settledAt, sessionBytes: st.sessionBytes, cwd: st.cwd ?? process.cwd(), usedTools, files,
-    route, routes };
+    route, routes, comparisonNonce: st.comparisonNonce };
 }
 
 export function piExecutable(): string {

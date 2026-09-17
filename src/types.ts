@@ -96,6 +96,9 @@ export interface BenchmarkJob {
   /** Optional harness-owned task locator used by refresh runners. */
   taskKey?: string;
   sessionFile?: string;
+  route?: ModelRoute;
+  routes?: ModelRoute[];
+  cwd?: string;
   lastRunAt?: string;
   updatedAt: string;
 }

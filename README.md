@@ -160,6 +160,11 @@ tasks as durable benchmark refresh jobs. The Pi extension runs due refreshes in
 the active session and surfaces the resulting recommendation for the harness
 to apply according to policy. `0` disables recurring refreshes.
 
+For refreshes when Pi is not open, invoke `openmerit refresh` from a user-owned
+cron, launchd, or CI schedule. Use `openmerit refresh <job-id>` to run one
+specific job. OpenMerit performs the comparison through Pi's configured routes;
+the scheduler only decides when to invoke it.
+
 `mode: "auto"` and `auto_apply.enabled: true` are both required for automatic
 primary-route changes. The extension reevaluates the saved evidence against the
 current policy before switching, so changing the policy to supervised mode also

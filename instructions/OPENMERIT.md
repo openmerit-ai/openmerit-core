@@ -26,6 +26,10 @@ intercept normal traffic or own provider credentials.
 - `/openmerit fallback` — switch to the current vetted fallback
 - `/openmerit doctor` — sanitized installation and route diagnostics
 
+Recurring benchmark refreshes are configured with `benchmark_refresh_minutes`.
+Pi runs due jobs while it is open; an external scheduler may invoke
+`openmerit refresh` when Pi is not running.
+
 Policy changes belong to the user in `~/.openmerit/policy.json`.
 
 ## Operating guarantees
