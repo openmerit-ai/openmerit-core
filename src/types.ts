@@ -93,6 +93,10 @@ export interface BenchmarkJob {
   schedule?: { everyMinutes: number };
   action: "report" | "ask_harness" | "open_pr" | "apply";
   enabled: boolean;
+  /** Optional harness-owned task locator used by refresh runners. */
+  taskKey?: string;
+  sessionFile?: string;
+  lastRunAt?: string;
   updatedAt: string;
 }
 

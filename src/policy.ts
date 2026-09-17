@@ -26,6 +26,8 @@ export interface Policy {
     /** Compare the completed active task with this many total routes, including baseline. */
     max_routes: number;
   };
+  /** 0 disables recurring benchmark refreshes. */
+  benchmark_refresh_minutes: number;
   fallback: {
     auto_update: boolean;
     min_score: number;
@@ -52,6 +54,7 @@ export const DEFAULT_POLICY: Policy = {
   budgets: { max_usd_per_trial: 0.25, max_trials_per_day: 20, max_usd_per_day: 5.0 },
   providers: { allow: ["*"], deny: [] },
   comparison: { max_routes: 3 },
+  benchmark_refresh_minutes: 0,
   fallback: { auto_update: true, min_score: 0.6, apply_on_error: true },
   evaluator_model: null,
   max_usd_per_m: 20.0,
@@ -204,6 +207,7 @@ export function loadPolicy(path: string): Policy {
       max_routes: integerAtLeast(raw.comparison?.max_routes ?? legacyMaxRoutes ?? d.comparison.max_routes,
         2, "comparison.max_routes"),
     },
+    benchmark_refresh_minutes: integerAtLeast(raw.benchmark_refresh_minutes ?? 0, 0, "benchmark_refresh_minutes"),
     fallback: {
       auto_update: booleanValue(raw.fallback?.auto_update, d.fallback.auto_update, "fallback.auto_update"),
       min_score: optionalNumber(raw.fallback?.min_score, d.fallback.min_score, 0, "fallback.min_score", 1),

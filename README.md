@@ -140,6 +140,7 @@ existing file. The 0.1.5 policy schema is:
   "comparison": {
     "max_routes": 3
   },
+  "benchmark_refresh_minutes": 0,
   "fallback": {
     "auto_update": true,
     "min_score": 0.6,
@@ -153,6 +154,11 @@ existing file. The 0.1.5 policy schema is:
   }
 }
 ```
+
+Set `benchmark_refresh_minutes` to a positive interval to register eligible Pi
+tasks as durable benchmark refresh jobs. The Pi extension runs due refreshes in
+the active session and surfaces the resulting recommendation for the harness
+to apply according to policy. `0` disables recurring refreshes.
 
 `mode: "auto"` and `auto_apply.enabled: true` are both required for automatic
 primary-route changes. The extension reevaluates the saved evidence against the
@@ -220,6 +226,8 @@ ordinary extension discovery and refuse to load OpenMerit recursively.
 | `events.jsonl` | versioned audit events for trials and recommendations |
 | `ledger.json` | UTC daily comparison and evaluation spend |
 | `jobs/*.json` | session-bound comparison ownership and completion markers |
+| `benchmarks.jsonl` | versioned per-task benchmark definitions |
+| `benchmark-jobs.jsonl` | durable refresh requests consumed by the harness extension |
 | `traces/trials/*.jsonl` | raw Pi event streams for candidate executions |
 
 Atomic snapshots are replaced by rename. JSONL readers retain valid later

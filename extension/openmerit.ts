@@ -34,6 +34,8 @@ const STATE_FILE = join(HOME, "harness-state.json");
 const POLICY_FILE = join(HOME, "policy.json");
 const LEDGER_FILE = join(HOME, "ledger.json");
 const JOB_DIR = join(HOME, "jobs");
+const BENCHMARKS_FILE = join(HOME, "benchmarks.jsonl");
+const BENCHMARK_JOBS_FILE = join(HOME, "benchmark-jobs.jsonl");
 const ENGINE_FILE = join(fileURLToPath(new URL("..", import.meta.url)), "dist", "cli.js");
 const INSTRUCTION_FILE = join(fileURLToPath(new URL("..", import.meta.url)), "instructions", "OPENMERIT.md");
 const PROGRESS_PREFIX = "[openmerit/progress] ";
@@ -102,6 +104,7 @@ interface ExtensionPolicy {
   fallback?: { auto_update?: boolean; apply_on_error?: boolean };
   budgets?: { max_trials_per_day?: number; max_usd_per_day?: number };
   max_usd_per_m?: number;
+  benchmark_refresh_minutes?: number;
   route_overrides?: Record<string, {
     cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
     context_window?: number;
@@ -250,6 +253,38 @@ function readJsonl<T>(file: string): T[] {
 function appendJsonl(file: string, obj: unknown): void {
   mkdirSync(HOME, { recursive: true });
   appendFileSync(file, JSON.stringify(obj) + "\n");
+}
+
+function registerBenchmark(ctx: ExtensionContext): void {
+  const policy = loadPolicy();
+  const everyMinutes = policy.benchmark_refresh_minutes ?? 0;
+  if (!Number.isInteger(everyMinutes) || everyMinutes <= 0 || !settledTaskKey) return;
+  const sessionFile = ctx.sessionManager.getSessionFile();
+  if (!sessionFile) return;
+  const now = new Date().toISOString();
+  const benchmarkId = `task-${settledTaskKey}`;
+  appendJsonl(BENCHMARKS_FILE, {
+    schemaVersion: 1, id: benchmarkId, taskKey: settledTaskKey,
+    taskLabel: "Pi task benchmark", instructions: "Reuse the completed task and its harness trace.",
+    inputModalities: ["text"], createdAt: now, updatedAt: now,
+  });
+  appendJsonl(BENCHMARK_JOBS_FILE, {
+    schemaVersion: 1, id: `refresh-${benchmarkId}`, benchmarkId,
+    trigger: "interval", schedule: { everyMinutes }, action: "ask_harness", enabled: true,
+    taskKey: settledTaskKey, sessionFile, updatedAt: now,
+  });
+}
+
+function dueRefresh(ctx: ExtensionContext): boolean {
+  const policy = loadPolicy();
+  const everyMinutes = policy.benchmark_refresh_minutes ?? 0;
+  if (!Number.isInteger(everyMinutes) || everyMinutes <= 0 || !existsSync(BENCHMARK_JOBS_FILE)) return false;
+  const sessionFile = ctx.sessionManager.getSessionFile();
+  if (!sessionFile || !settledTaskKey) return false;
+  const jobs = readJsonl<{ taskKey?: string; sessionFile?: string; schedule?: { everyMinutes?: number }; lastRunAt?: string }>(BENCHMARK_JOBS_FILE);
+  const job = jobs.filter((j) => j.taskKey === settledTaskKey && j.sessionFile === sessionFile).at(-1);
+  if (!job?.schedule?.everyMinutes) return false;
+  return !job.lastRunAt || Date.now() - Date.parse(job.lastRunAt) >= job.schedule.everyMinutes * 60_000;
 }
 
 /** Latest status per recommendation id. */
@@ -676,7 +711,7 @@ export default function openmerit(pi: ExtensionAPI) {
     });
   }
 
-  function queueSettledTask(ctx: ExtensionContext, force = false): string {
+  function queueSettledTask(ctx: ExtensionContext, force = false, refresh = false): string {
     if (comparisonsPaused && !force) return "comparisons are paused";
     const sessionFile = ctx.sessionManager.getSessionFile();
     const model = ctx.model ? canonicalModel(ctx.model.provider, ctx.model.id) : null;
@@ -698,7 +733,9 @@ export default function openmerit(pi: ExtensionAPI) {
     if (!completed) return "the latest task has not completed successfully";
     const settledAt = new Date().toISOString();
     const bytes = readFileSync(sessionFile).length;
-    const marker = `${sessionFile}:${settledTaskKey}:${model}:${bytes}`;
+    const interval = loadPolicy().benchmark_refresh_minutes ?? 0;
+    const refreshSlot = refresh && interval > 0 ? Math.floor(Date.now() / (interval * 60_000)) : "initial";
+    const marker = `${sessionFile}:${settledTaskKey}:${model}:${bytes}:${refreshSlot}`;
     if (startedJobs.has(marker)) return "this task is already queued or was compared in this Pi session";
     const budget = trialBudget();
     if (budget.reason) {
@@ -706,6 +743,11 @@ export default function openmerit(pi: ExtensionAPI) {
       return budget.reason;
     }
     startedJobs.add(marker);
+    if (refresh) appendJsonl(BENCHMARK_JOBS_FILE, {
+      schemaVersion: 1, id: `refresh-task-${settledTaskKey}`, benchmarkId: `task-${settledTaskKey}`,
+      trigger: "interval", schedule: { everyMinutes: interval }, action: "ask_harness", enabled: true,
+      taskKey: settledTaskKey, sessionFile, lastRunAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
     queuedJobs.push({ sessionFile, settledAt, model, route, key: settledTaskKey, cwd: ctx.cwd, bytes });
     startNextJob(ctx);
     return "comparison queued";
@@ -805,13 +847,18 @@ export default function openmerit(pi: ExtensionAPI) {
     await surface(ctx);
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(() => {
+      if (dueRefresh(ctx) && !trialJob && queuedJobs.length === 0)
+        queueSettledTask(ctx, false, true);
       surface(ctx).catch(() => undefined);
     }, 5_000);
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
     reportHarnessState(ctx, true);
-    if (latestTaskLooksIntelligenceDriven(ctx)) queueSettledTask(ctx);
+    if (latestTaskLooksIntelligenceDriven(ctx)) {
+      registerBenchmark(ctx);
+      queueSettledTask(ctx);
+    }
     else if (ctx.hasUI) ctx.ui.notify("openmerit: task looks like ordinary coding work; comparison skipped (use /openmerit compare to override)", "info");
     await surface(ctx);
   });

@@ -23,3 +23,12 @@ export function listBenchmarkJobs(): BenchmarkJob[] {
   for (const item of readJsonl<BenchmarkJob>(paths.benchmarkJobs())) latest.set(item.id, item);
   return [...latest.values()].filter((job) => job.enabled);
 }
+
+export function dueBenchmarkJobs(now = Date.now()): BenchmarkJob[] {
+  return listBenchmarkJobs().filter((job) => {
+    if (job.trigger !== "interval" || !job.schedule) return false;
+    if (!job.lastRunAt) return true;
+    const last = Date.parse(job.lastRunAt);
+    return Number.isFinite(last) && now - last >= job.schedule.everyMinutes * 60_000;
+  });
+}

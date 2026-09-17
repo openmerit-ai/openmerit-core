@@ -19,6 +19,7 @@
   "comparison": {
     "max_routes": 3
   },
+  "benchmark_refresh_minutes": 0,
   "fallback": {
     "auto_update": true,
     "min_score": 0.6,
