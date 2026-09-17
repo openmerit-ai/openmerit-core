@@ -165,6 +165,15 @@ cron, launchd, or CI schedule. Use `openmerit refresh <job-id>` to run one
 specific job. OpenMerit performs the comparison through Pi's configured routes;
 the scheduler only decides when to invoke it.
 
+OpenRouter public benchmark snapshots can be imported with:
+
+```bash
+OPENROUTER_API_KEY=... openmerit benchmarks sync intelligence
+```
+
+Snapshots are stored separately from task trials and are priors for model
+discovery; they do not replace a task-local evaluation.
+
 `mode: "auto"` and `auto_apply.enabled: true` are both required for automatic
 primary-route changes. The extension reevaluates the saved evidence against the
 current policy before switching, so changing the policy to supervised mode also
@@ -233,6 +242,7 @@ ordinary extension discovery and refuse to load OpenMerit recursively.
 | `jobs/*.json` | session-bound comparison ownership and completion markers |
 | `benchmarks.jsonl` | versioned per-task benchmark definitions |
 | `benchmark-jobs.jsonl` | durable refresh requests consumed by the harness extension |
+| `public-benchmarks.jsonl` | imported public benchmark snapshots and provenance |
 | `traces/trials/*.jsonl` | raw Pi event streams for candidate executions |
 
 Atomic snapshots are replaced by rename. JSONL readers retain valid later

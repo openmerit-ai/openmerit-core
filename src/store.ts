@@ -22,6 +22,7 @@ export const paths = {
   ledger: () => join(stateDir(), "ledger.json"),
   benchmarks: () => join(stateDir(), "benchmarks.jsonl"),
   benchmarkJobs: () => join(stateDir(), "benchmark-jobs.jsonl"),
+  publicBenchmarks: () => join(stateDir(), "public-benchmarks.jsonl"),
   sessionJob: (marker: string) => join(stateDir(), "jobs", sha1(marker) + ".json"),
   trialTrace: (id: string) => join(stateDir(), "traces", "trials", `${sha1(id)}.jsonl`),
 };

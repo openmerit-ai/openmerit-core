@@ -14,6 +14,7 @@ import type { Frontier, ModelRoute, Recommendation, TrialPoint } from "./types.j
 import { modelRoute, routeKey, routeLabel } from "./routes.js";
 import { collectDoctorReport, renderDiagnosticReport, runOfflineVerify } from "./diagnostics.js";
 import { dueBenchmarkJobs, listBenchmarkJobs, listBenchmarks, saveBenchmarkJob } from "./benchmark-jobs.js";
+import { listPublicBenchmarks, OpenRouterBenchmarkSource, savePublicBenchmark } from "./public-benchmarks.js";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -119,6 +120,13 @@ function cmdBenchmarks(): void {
   for (const b of benchmarks) console.log(`  ${b.id}  task=${b.taskKey}  ${b.taskLabel}`);
   console.log(`enabled jobs: ${jobs.length}`);
   for (const j of jobs) console.log(`  ${j.id}  benchmark=${j.benchmarkId}  trigger=${j.trigger}  action=${j.action}`);
+  console.log(`public snapshots: ${listPublicBenchmarks().length}`);
+}
+
+async function cmdBenchmarksSync(taskType?: string): Promise<void> {
+  const points = await new OpenRouterBenchmarkSource().fetch({ taskType });
+  savePublicBenchmark(points);
+  console.log(`saved ${points.length} OpenRouter public benchmark points`);
 }
 
 async function cmdRefresh(jobId?: string): Promise<void> {
@@ -182,7 +190,8 @@ async function main(): Promise<void> {
       cmdStatus();
       break;
     case "benchmarks":
-      cmdBenchmarks();
+      if (args[0] === "sync") await cmdBenchmarksSync(args[1]);
+      else cmdBenchmarks();
       break;
     case "refresh":
       await cmdRefresh(args[0]);
@@ -202,6 +211,7 @@ usage: openmerit <command>
   frontier [taskKey]   print pareto frontier(s)
   status               active route, measured tasks, and pending recommendations
   benchmarks           list registered benchmarks and enabled refresh jobs
+  benchmarks sync       fetch OpenRouter public benchmark snapshots [task type optional]
   refresh [job-id]     run due benchmark refresh jobs (for cron/system schedulers)
   doctor [--json]      diagnose pi, policy, routes, state, and installation
   verify [--json]      run an offline, provider-free core self-test`);
