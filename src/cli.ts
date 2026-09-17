@@ -8,10 +8,10 @@ import { loadPolicy } from "./policy.js";
 import { paretoFrontier, pickBest, pickFallback } from "./frontier.js";
 import { paths, readJson, readJsonl } from "./store.js";
 import { compareSettledTask } from "./comparison.js";
-import { PiHarnessAdapter, settledActiveTask } from "./pi-trials.js";
+import { PiHarnessAdapter, availablePiRoutes, settledActiveTask } from "./pi-trials.js";
 import { recordMeritSpend } from "./trials.js";
 import type { Frontier, ModelRoute, Recommendation, TrialPoint } from "./types.js";
-import { modelRoute, routeLabel } from "./routes.js";
+import { modelRoute, routeKey, routeLabel } from "./routes.js";
 import { collectDoctorReport, renderDiagnosticReport, runOfflineVerify } from "./diagnostics.js";
 import { dueBenchmarkJobs, listBenchmarkJobs, listBenchmarks, saveBenchmarkJob } from "./benchmark-jobs.js";
 
@@ -128,10 +128,15 @@ async function cmdRefresh(jobId?: string): Promise<void> {
   const policy = loadPolicy(paths.policy());
   for (const job of jobs) {
     if (!job.sessionFile || !job.route || !job.taskKey) continue;
+    const baselineRoute = job.route;
     if (!existsSync(job.sessionFile)) { console.error(`skip ${job.id}: session file is unavailable`); continue; }
     const sessionBytes = statSync(job.sessionFile).size;
+    let routes = job.routes;
+    try { routes = availablePiRoutes(undefined, policy.pi.provider_extensions); }
+    catch { /* retain the last harness snapshot when pi is unavailable */ }
+    if (!routes?.some((route) => routeKey(route) === routeKey(baselineRoute))) routes = [baselineRoute, ...(routes ?? [])];
     const task = settledActiveTask({ sessionFile: job.sessionFile, settledAt: job.updatedAt,
-      currentModel: job.route.meritId, currentRoute: job.route, routes: job.routes,
+      currentModel: baselineRoute.meritId, currentRoute: baselineRoute, routes,
       settledTaskKey: job.taskKey, cwd: job.cwd, sessionBytes,
       comparisonNonce: `scheduled-${Date.now()}` });
     if (!task) { console.error(`skip ${job.id}: completed task no longer matches its session marker`); continue; }
