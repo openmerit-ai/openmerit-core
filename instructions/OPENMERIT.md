@@ -16,24 +16,17 @@ and fallback under the user's policy.
 
 When a recommendation is created, the harness receives a structured
 `harnessAction` containing the selected model route, an instruction to make it
-active for the original invocation target, and a request to run its normal
-validation. The recommendation preserves the harness-provided invocation
-purpose and context. The harness decides how that means a runtime switch,
-configuration edit, patch, or PR; it must not change the Pi session model when
-the original invocation targeted an application. If the target, configuration
-location, or validation command is missing, ask the user before making a
-durable change.
+active for the original target, and a request to run normal validation. The
+harness decides whether that means a runtime switch, configuration edit, patch,
+or PR. It keeps invocation intent locally and never asks OpenMerit to infer a
+target from task keywords. If the target, configuration location, or validation
+command is missing, the harness asks the user before making a durable change.
 
-Before automatic comparison, the Pi integration asks the active harness model
-for a structured eligibility decision, invocation purpose, and application mode
-(`session`, `application`, or `ask_user`). If the classifier is unavailable or
-does not provide that context, automatic comparison is skipped; the user can
-run `/openmerit compare` explicitly. OpenMerit never guesses an application
-target from task keywords.
-
-The Pi adapter keeps the harness's intent locally for applying the resulting
-recommendation. Other harnesses can use their own local context mechanism; the
-OpenMerit core does not require a Pi-specific invocation protocol.
+Before automatic comparison, the host harness decides whether the task is
+eligible and records its purpose and application mode in its own context. If it
+cannot make that decision, it skips automatic comparison; an explicit user
+command may still request one. The host loads this instruction context through
+its supported extension, plugin, or middleware mechanism.
 
 OpenMerit is not the harness, provider, or observability system. It does not
 intercept normal traffic or own provider credentials.
