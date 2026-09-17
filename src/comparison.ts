@@ -204,7 +204,15 @@ export async function compareSettledTask(
       emitTrialProgress({ phase: "start", taskKey: tKey, model: routeLabel(route), index, total });
       let outcome: HarnessScore;
       try {
-        const run = await harness.runTask(route, { task: task.task, cwd: task.cwd, images: task.images, files: task.files });
+        const input = {
+          task: task.task, cwd: task.cwd, images: task.images, files: task.files,
+          mode: task.mode, workflow: task.workflow,
+        };
+        const run = task.mode === "application" && harness.runApplication
+          ? await harness.runApplication(route, input)
+          : task.mode === "inference" && harness.runInference
+            ? await harness.runInference(route, input)
+            : await harness.runTask(route, input);
         outcome = await harness.scoreRun(evaluator, task.task, rubric, route, run, client, "pi_trial", task.images);
       } catch (error) {
         const priced = routePrice(route);
