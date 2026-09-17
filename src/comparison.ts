@@ -198,6 +198,16 @@ export async function compareSettledTask(
       costUsd: baseline.costUsd, toolCalls: baselinePoint.toolCalls,
       toolErrors: baselinePoint.toolErrors, changedFiles: baselinePoint.changedFiles });
 
+    // A failed evaluator cannot establish a baseline for a meaningful model
+    // comparison. Preserve the trial record for diagnostics, but do not let a
+    // candidate win by default when the active route was never scored.
+    if (baselinePoint.score <= 0 && /judge (?:error|unavailable)/i.test(baselinePoint.why ?? "")) {
+      writeJson(processedPath, { marker, status: "failed", ownerPid: process.pid,
+        updatedAt: new Date().toISOString() } satisfies ProcessedTask);
+      log("warn", "comparison", "baseline_unmeasured", "comparison stopped because the baseline could not be scored", { taskKey: tKey });
+      return null;
+    }
+
     for (const [offset, route] of alternates.entries()) {
       if (!budgetOk(policy).ok) break;
       const index = offset + 2;

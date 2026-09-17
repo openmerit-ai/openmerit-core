@@ -55,7 +55,8 @@ export function routeLabel(route: ModelRoute): string {
 }
 
 export function routePrice(route: ModelRoute): { price: number; known: boolean } {
-  if (!route.cost || !Number.isFinite(route.cost.input) || !Number.isFinite(route.cost.output))
+  if (!route.cost || !Number.isFinite(route.cost.input) || !Number.isFinite(route.cost.output) ||
+      route.cost.input < 0 || route.cost.output < 0)
     return { price: 0, known: false };
   return { price: Math.round(((route.cost.input + route.cost.output) / 2 + Number.EPSILON) * 1e4) / 1e4,
     known: true };

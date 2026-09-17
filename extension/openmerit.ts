@@ -499,7 +499,9 @@ function routeFor(model: { provider: string; id: string; input?: ("text" | "imag
     modelId: model.id,
     meritId: canonicalModel(model.provider, model.id),
     input: model.input ?? ["text"],
-    cost: model.cost && typeof model.cost.input === "number" && typeof model.cost.output === "number"
+    cost: model.cost && typeof model.cost.input === "number" && typeof model.cost.output === "number" &&
+      Number.isFinite(model.cost.input) && Number.isFinite(model.cost.output) &&
+      model.cost.input >= 0 && model.cost.output >= 0
       ? { input: model.cost.input, output: model.cost.output,
           cacheRead: model.cost.cacheRead, cacheWrite: model.cost.cacheWrite }
       : undefined,
