@@ -113,6 +113,7 @@ interface ExtensionPolicy {
     max_tokens?: number;
     input?: ("text" | "image")[];
     availability?: "active" | "preview" | "deprecated" | "retired";
+    availabilitySource?: "provider" | "inferred";
   }>;
 }
 
@@ -203,6 +204,14 @@ function currentPolicyAllowsAuto(rec: Recommendation): boolean {
   return true;
 }
 
+interface HarnessActionResult {
+  success: boolean;
+  changedTargets?: string[];
+  validation?: { ok: boolean; command?: string; output?: string };
+  error?: string;
+  appliedAt?: string;
+}
+
 interface Recommendation {
   schemaVersion?: 1;
   id: string;
@@ -218,7 +227,8 @@ interface Recommendation {
   fallback: { model: string; route?: ModelRoute; reason: string } | null;
   evidence: { scoreGain: number; priceRatio: number; priceKnown?: boolean; onFrontier: boolean; trials: number };
   policy: { autoApply: boolean; reasons: string[] };
-  status: "pending" | "applied" | "dismissed" | "expired";
+  status: "pending" | "dispatched" | "applied" | "dismissed" | "failed" | "expired";
+  actionResult?: HarnessActionResult;
 }
 
 interface ModelRoute {
@@ -230,6 +240,7 @@ interface ModelRoute {
   contextWindow?: number;
   maxTokens?: number;
   availability?: "active" | "preview" | "deprecated" | "retired";
+  availabilitySource?: "provider" | "inferred";
 }
 
 interface RecordedTrial {
@@ -277,7 +288,7 @@ function ensureState(): void {
   }
 }
 
-function registerBenchmark(ctx: ExtensionContext): void {
+function registerBenchmark(ctx: ExtensionContext, invocation?: { purpose?: string; applyMode?: string } | null): void {
   const policy = loadPolicy();
   const everyMinutes = policy.benchmark_refresh_minutes ?? 0;
   if (!Number.isInteger(everyMinutes) || everyMinutes <= 0 || !settledTaskKey) return;
@@ -285,10 +296,71 @@ function registerBenchmark(ctx: ExtensionContext): void {
   if (!sessionFile) return;
   const now = new Date().toISOString();
   const benchmarkId = `task-${settledTaskKey}`;
+  const taskText = latestUserTaskText(ctx) ?? "";
+  const taskLabel = invocation?.purpose ?? (taskText.split("\n")[0].trim().slice(0, 80) || "Pi task benchmark");
+
+  const modalities: ("text" | "image" | "file")[] = ["text"];
+  const attachments: { name: string; mimeType: string; contentHash: string; byteLength: number }[] = [];
+  const entries = (ctx.sessionManager as ExtensionContext["sessionManager"] & {
+    getEntries?: () => { type?: string; message?: { role?: string; content?: unknown } }[];
+  }).getEntries?.();
+  let latestContent: unknown = null;
+  if (entries) {
+    for (const e of entries) {
+      if (e.type === "message" && e.message?.role === "user") latestContent = e.message.content;
+    }
+  } else if (existsSync(sessionFile)) {
+    for (const line of readFileSync(sessionFile, "utf8").split("\n")) {
+      try {
+        const e = JSON.parse(line) as { type?: string; message?: { role?: string; content?: unknown } };
+        if (e.type === "message" && e.message?.role === "user") latestContent = e.message.content;
+      } catch { /* ignore */ }
+    }
+  }
+
+  if (Array.isArray(latestContent)) {
+    for (const part of latestContent) {
+      if (part?.type === "image" && typeof part.data === "string") {
+        if (!modalities.includes("image")) modalities.push("image");
+        const buf = Buffer.from(part.data, "base64");
+        attachments.push({
+          name: "image",
+          mimeType: String(part.mimeType || "image/png"),
+          contentHash: createHash("sha256").update(buf).digest("hex"),
+          byteLength: buf.length,
+        });
+      }
+    }
+  }
+  const fileMatches = taskText.matchAll(/<file\s+name=["']([^"']+)["'][^>]*>/g);
+  for (const match of fileMatches) {
+    const file = match[1];
+    if (file && existsSync(file)) {
+      if (!modalities.includes("file")) modalities.push("file");
+      try {
+        const buf = readFileSync(file);
+        attachments.push({
+          name: basename(file),
+          mimeType: "application/octet-stream",
+          contentHash: createHash("sha256").update(buf).digest("hex"),
+          byteLength: buf.length,
+        });
+      } catch { /* inaccessible */ }
+    }
+  }
+
   appendJsonl(BENCHMARKS_FILE, {
-    schemaVersion: 1, id: benchmarkId, taskKey: settledTaskKey,
-    taskLabel: "Pi task benchmark", instructions: "Reuse the completed task and its harness trace.",
-    inputModalities: ["text"], createdAt: now, updatedAt: now,
+    schemaVersion: 1,
+    id: benchmarkId,
+    taskKey: settledTaskKey,
+    taskLabel,
+    taskText: taskText || undefined,
+    instructions: taskText || "Reuse the completed task and its harness trace.",
+    inputModalities: modalities,
+    ...(attachments.length ? { attachments } : {}),
+    inputRef: { sessionFile, taskKey: settledTaskKey },
+    createdAt: now,
+    updatedAt: now,
   });
   appendJsonl(BENCHMARK_JOBS_FILE, {
     schemaVersion: 1, id: `refresh-${benchmarkId}`, benchmarkId,
@@ -422,14 +494,24 @@ function latestUserTaskText(ctx: ExtensionContext): string | null {
 let settledTaskKey: string | null = null;
 let comparisonsPaused = false;
 
-function pendingRecommendations(ctx?: ExtensionContext): Recommendation[] {
-  const pending = latestRecommendations().filter((r) => r.status === "pending");
+function pendingRecommendations(ctx?: ExtensionContext, includeFailed = false): Recommendation[] {
+  const pending = latestRecommendations().filter((r) => r.status === "pending" || (includeFailed && r.status === "failed"));
   if (!ctx) return pending;
   const file = ctx.sessionManager.getSessionFile();
   const liveTaskKey = latestSessionTaskKey(ctx);
   return pending.filter((r) => r.sessionFile
     ? r.sessionFile === file && r.taskKey === settledTaskKey
     : !!liveTaskKey && r.taskKey === liveTaskKey);
+}
+
+function activeDispatchedRecommendation(ctx?: ExtensionContext): Recommendation | undefined {
+  const dispatched = latestRecommendations().filter((r) => r.status === "dispatched");
+  if (!ctx) return dispatched.at(-1);
+  const file = ctx.sessionManager.getSessionFile();
+  const liveTaskKey = latestSessionTaskKey(ctx);
+  return dispatched.filter((r) => r.sessionFile
+    ? r.sessionFile === file && r.taskKey === settledTaskKey
+    : !!liveTaskKey && r.taskKey === liveTaskKey).at(-1);
 }
 
 /** Earlier measured comparisons are advice in another session, never pending swaps. */
@@ -474,6 +556,16 @@ function setStatus(rec: Recommendation, status: Recommendation["status"]): void 
   appendJsonl(RECS_FILE, { ...rec, status, ts: new Date().toISOString() });
 }
 
+function recordHarnessActionResult(rec: Recommendation, result: HarnessActionResult): void {
+  const status: Recommendation["status"] = result.success ? "applied" : "failed";
+  appendJsonl(RECS_FILE, {
+    ...rec,
+    status,
+    actionResult: result,
+    ts: new Date().toISOString(),
+  });
+}
+
 let fallbackModel: string | null = null;
 let fallbackRoute: ModelRoute | null = null;
 
@@ -502,6 +594,7 @@ function routeFor(model: { provider: string; id: string; input?: ("text" | "imag
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,
     availability: model.availability ?? inferRouteAvailability(model.id),
+    availabilitySource: model.availability !== undefined ? "provider" : inferRouteAvailability(model.id) !== undefined ? "inferred" : undefined,
   };
   const override = overrides[`${route.provider}:${route.modelId}`];
   if (!override) return route;
@@ -529,7 +622,10 @@ function routeFor(model: { provider: string; id: string; input?: ("text" | "imag
     }),
     ...(integer(override.max_tokens) === undefined ? {} : { maxTokens: integer(override.max_tokens) }),
     ...(input ? { input } : {}),
-    ...(override.availability ? { availability: override.availability } : {}),
+    ...(override.availability ? {
+      availability: override.availability,
+      availabilitySource: override.availabilitySource ?? "provider",
+    } : {}),
   };
 }
 
@@ -880,8 +976,11 @@ export default function openmerit(pi: ExtensionAPI) {
     return ok;
   }
 
+  let inFlightActionRec: Recommendation | null = null;
+
   function dispatchApplicationAction(ctx: ExtensionContext, rec: Recommendation): void {
-    setStatus(rec, "applied");
+    setStatus(rec, "dispatched");
+    inFlightActionRec = rec;
     applicationActionTurn = true;
     pi.sendUserMessage(
       `Apply this OpenMerit recommendation to the application target. ${rec.harnessAction?.instruction ?? ""} ` +
@@ -907,26 +1006,28 @@ export default function openmerit(pi: ExtensionAPI) {
       if (notified.has(rec.id)) continue;
       const intent = localIntents.get(rec.taskKey) ?? rec.invocation;
       const targetsApplication = intent?.applyMode === "application";
-      if (rec.policy.autoApply && intent?.applyMode === "session" && currentPolicyAllowsAuto(rec)) {
+      const autoAllowed = rec.policy.autoApply && currentPolicyAllowsAuto(rec);
+      if (autoAllowed && intent?.applyMode === "session") {
         if (!rec.sessionFile || rec.sessionFile !== ctx.sessionManager.getSessionFile()) continue;
         if (ctx.isIdle && !ctx.isIdle()) continue;
         notified.add(rec.id);
         await applyRecommendation(ctx, rec);
         continue;
       }
-      if (targetsApplication && rec.harnessAction && (!ctx.isIdle || ctx.isIdle()) && !applicationActionTurn) {
+      if (autoAllowed && targetsApplication && rec.harnessAction && (!ctx.isIdle || ctx.isIdle()) && !applicationActionTurn) {
         notified.add(rec.id);
         dispatchApplicationAction(ctx, rec);
         continue;
       }
       notified.add(rec.id);
-      // Never block here: surface() runs during session_start and on a poll
-      // timer, where a modal dialog would deadlock RPC mode and stall TUI
-      // startup. Notify (fire-and-forget) and let the user act via /openmerit.
+      // In recommend mode or when autoApply gate fails, only notify:
       if (ctx.hasUI) {
+        const actionPrompt = targetsApplication
+          ? "(/openmerit apply to dispatch code edit, /openmerit dismiss to ignore)"
+          : "(/openmerit apply to switch, /openmerit dismiss to ignore)";
         ctx.ui.notify(
           `openmerit recommends: ${routeDisplay(rec.recommended.route, rec.recommended.model)}\n${rec.recommended.reason}\n` +
-            `gate: ${rec.policy.reasons.join("; ")}\n(/openmerit apply to switch, /openmerit dismiss to ignore)`,
+            `gate: ${rec.policy.reasons.join("; ")}\n${actionPrompt}`,
           "info",
         );
       }
@@ -977,7 +1078,7 @@ export default function openmerit(pi: ExtensionAPI) {
     const eligible = semantic?.eligible === true;
     extensionLog("info", "eligibility", "decision", `task eligible=${eligible} source=${semantic ? "semantic" : "unavailable"}`);
     if (eligible) {
-      registerBenchmark(ctx);
+      registerBenchmark(ctx, invocation);
       queueSettledTask(ctx);
     }
     else if (ctx.hasUI) ctx.ui.notify(
@@ -1011,6 +1112,35 @@ export default function openmerit(pi: ExtensionAPI) {
 
   // Fallback swap when the active model finished with an error.
   pi.on("agent_end", async (event, ctx) => {
+    if (applicationActionTurn && inFlightActionRec) {
+      const e = event as unknown as {
+        willRetry?: boolean;
+        messages?: { role?: string; stopReason?: string }[];
+      };
+      if (!e.willRetry) {
+        const lastAssistant = [...(e.messages ?? [])].reverse().find((m) => m.role === "assistant");
+        if (lastAssistant?.stopReason === "error") {
+          recordHarnessActionResult(inFlightActionRec, {
+            success: false,
+            error: "Agent turn ended with error",
+          });
+          inFlightActionRec = null;
+          applicationActionTurn = false;
+        }
+      }
+    }
+    const resultFile = join(HOME, "harness-action-result.json");
+    if (existsSync(resultFile)) {
+      try {
+        const res = JSON.parse(readFileSync(resultFile, "utf8")) as HarnessActionResult;
+        if (inFlightActionRec) {
+          recordHarnessActionResult(inFlightActionRec, res);
+          inFlightActionRec = null;
+          applicationActionTurn = false;
+        }
+        rmSync(resultFile, { force: true });
+      } catch { /* ignore malformed */ }
+    }
     if (!fallbackModel) return;
     const e = event as unknown as {
       willRetry?: boolean;
@@ -1051,13 +1181,48 @@ export default function openmerit(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("openmerit", {
-    description: "OpenMerit: status, compare, pause/resume, doctor, apply/dismiss",
+    description: "OpenMerit: status, compare, pause/resume, doctor, apply/dismiss, result",
     handler: async (args, ctx) => {
-      const pending = pendingRecommendations(ctx);
+      const pending = pendingRecommendations(ctx, true);
       const prior = priorExactTaskSuggestion(ctx);
       const sub = args.trim().split(/\s+/)[0] ?? "";
 
+      if (sub === "result" || sub === "action-result") {
+        const rest = args.trim().slice(sub.length).trim();
+        const inFlight = inFlightActionRec ?? activeDispatchedRecommendation(ctx);
+        if (!inFlight) {
+          ctx.ui.notify("openmerit: no dispatched recommendation awaiting an action result", "info");
+          return;
+        }
+        let result: HarnessActionResult;
+        if (rest.startsWith("{")) {
+          try {
+            result = JSON.parse(rest);
+          } catch {
+            ctx.ui.notify("openmerit: invalid JSON for action result", "error");
+            return;
+          }
+        } else if (rest.startsWith("success")) {
+          result = { success: true, appliedAt: new Date().toISOString() };
+        } else if (rest.startsWith("fail") || rest.startsWith("error")) {
+          result = { success: false, error: rest.replace(/^(fail|failed|error):?\s*/, "") || "Action failed" };
+        } else {
+          ctx.ui.notify("openmerit: usage: /openmerit result success | failed <reason> | <json>", "info");
+          return;
+        }
+        recordHarnessActionResult(inFlight, result);
+        inFlightActionRec = null;
+        applicationActionTurn = false;
+        ctx.ui.notify(`openmerit: recorded action result -> ${result.success ? "applied" : "failed"}`, "info");
+        reportHarnessState(ctx);
+        return;
+      }
       if (sub === "apply") {
+        const inFlight = activeDispatchedRecommendation(ctx);
+        if (inFlight && !args.includes("--force")) {
+          ctx.ui.notify("openmerit: application action is currently in flight. Wait for agent result, or retry with /openmerit apply --force", "warning");
+          return;
+        }
         const target = pending[pending.length - 1];
         if (!target) {
           ctx.ui.notify("openmerit: no pending recommendations", "info");

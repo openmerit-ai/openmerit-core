@@ -15,6 +15,8 @@ export interface ModelRoute {
   maxTokens?: number;
   /** Provider-reported lifecycle state. Unknown means no lifecycle signal was available. */
   availability?: "active" | "preview" | "deprecated" | "retired";
+  /** Whether availability was directly reported by the provider or inferred from naming. */
+  availabilitySource?: "provider" | "inferred";
 }
 
 /** User-supplied metadata for one exact provider:modelId route. */
@@ -24,6 +26,7 @@ export interface RouteMetadataOverride {
   max_tokens?: number;
   input?: ("text" | "image")[];
   availability?: "active" | "preview" | "deprecated" | "retired";
+  availabilitySource?: "provider" | "inferred";
 }
 
 /** A single measured point for a model on a task. */
@@ -74,15 +77,27 @@ export interface Frontier {
   updatedAt: string;
 }
 
+/** Structured intent provided by the harness for a task invocation. */
+export interface TaskIntent {
+  purpose: string;
+  applyMode?: "session" | "application" | "ask_user";
+  category?: "coding" | "extraction" | "classification" | "agent" | string;
+  inputModalities?: ("text" | "image" | "file")[];
+  context?: Record<string, unknown>;
+}
+
 /** Versioned benchmark definition for one measurable task invocation. */
 export interface BenchmarkDefinition {
   schemaVersion: 1;
   id: string;
   taskKey: string;
   taskLabel: string;
+  taskText?: string;
   instructions: string;
   evaluator?: { kind: "rubric" | "validator" | "human"; definition: string };
   inputModalities: ("text" | "image" | "file")[];
+  attachments?: { name: string; mimeType: string; contentHash: string; byteLength: number }[];
+  inputRef?: { sessionFile?: string; taskKey?: string; locator?: string };
   createdAt: string;
   updatedAt: string;
 }
@@ -112,6 +127,17 @@ export interface GateDecision {
   reasons: string[];
 }
 
+/** Result of applying an action in the harness. */
+export interface HarnessActionResult {
+  success: boolean;
+  changedTargets?: string[];
+  validation?: { ok: boolean; command?: string; output?: string };
+  error?: string;
+  appliedAt?: string;
+}
+
+export type RecommendationStatus = "pending" | "dispatched" | "applied" | "dismissed" | "failed" | "expired";
+
 /** A recommendation emitted to the main harness. */
 export interface Recommendation {
   schemaVersion?: 1;
@@ -120,7 +146,7 @@ export interface Recommendation {
   taskKey: string;
   taskLabel: string;
   /** Harness-owned purpose and context that caused this evaluation. */
-  invocation?: { purpose: string; applyMode?: "session" | "application" | "ask_user"; context?: Record<string, unknown> };
+  invocation?: TaskIntent;
   /** Target harness session for automatic swaps. */
   sessionFile?: string | null;
   currentModel: string | null;
@@ -143,5 +169,6 @@ export interface Recommendation {
     trials: number;
   };
   policy: GateDecision;
-  status: "pending" | "applied" | "dismissed" | "expired";
+  status: RecommendationStatus;
+  actionResult?: HarnessActionResult;
 }

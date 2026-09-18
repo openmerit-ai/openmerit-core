@@ -29,6 +29,26 @@ its supported extension, plugin, or middleware mechanism.
 OpenMerit is not the harness, provider, or observability system. It does not
 intercept normal traffic or own provider credentials.
 
+## Route execution and credentials
+
+The host harness owns every provider route and credential used by a comparison.
+It must execute the original task first, then rerun the same task through each
+candidate route using the same task input, attachments, tool policy, and
+application environment. OpenMerit compares the normalized outcomes; it does
+not invoke provider SDKs itself.
+
+A route may be backed by a native provider integration or by a configured
+gateway such as OpenRouter. The harness should prefer a native route when it is
+available, use a configured gateway when appropriate, and ask the user or skip
+the route when credentials are missing. Never write credentials into OpenMerit
+state, benchmark artifacts, source files, or prompts.
+
+For application workflows, the harness must make the application's required
+runtime credentials available to isolated candidate runs through its secure
+environment or secret-store mechanism. A missing credential is a harness
+configuration state: pause or skip the affected route, report what is needed,
+and retry after the user configures it.
+
 ## How to interact with it
 
 - `/openmerit` — route, fallback, comparison status, budget, and evidence

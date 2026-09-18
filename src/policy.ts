@@ -34,6 +34,10 @@ export interface Policy {
     apply_on_error: boolean;
   };
   evaluator_model: string | null;
+  /** Whether to exclude routes with inferred (name-based) preview/deprecated availability. */
+  filter_inferred_lifecycle: boolean;
+  /** Whether routes with preview availability are allowed as candidates. */
+  allow_preview_models: boolean;
   /** Global price ceiling (blended $/1M) for any considered model. */
   max_usd_per_m: number;
   /** Exact provider:modelId metadata for routes whose registry data is incomplete. */
@@ -57,6 +61,8 @@ export const DEFAULT_POLICY: Policy = {
   benchmark_refresh_minutes: 0,
   fallback: { auto_update: true, min_score: 0.6, apply_on_error: true },
   evaluator_model: null,
+  filter_inferred_lifecycle: false,
+  allow_preview_models: false,
   max_usd_per_m: 20.0,
   route_overrides: {},
   pi: { provider_extensions: [] },
@@ -222,6 +228,8 @@ export function loadPolicy(path: string): Policy {
       raw.evaluator_model !== undefined ? raw.evaluator_model : raw.judge_model,
       "evaluator_model",
     ),
+    filter_inferred_lifecycle: booleanValue(raw.filter_inferred_lifecycle, d.filter_inferred_lifecycle, "filter_inferred_lifecycle"),
+    allow_preview_models: booleanValue(raw.allow_preview_models, d.allow_preview_models, "allow_preview_models"),
     max_usd_per_m: optionalNumber(raw.max_usd_per_m, d.max_usd_per_m, 0, "max_usd_per_m"),
     route_overrides: routeOverrides(raw.route_overrides),
     pi: { provider_extensions: providerExtensions(raw.pi?.provider_extensions) },

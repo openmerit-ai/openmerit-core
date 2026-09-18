@@ -164,4 +164,17 @@ describe("loadPolicy", () => {
     expect(() => loadPolicy(file)).toThrow(/enabled/);
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("loads lifecycle policy options with expected defaults and overrides", () => {
+    const dir = mkdtempSync(join(tmpdir(), "openmerit-policy-lifecycle-"));
+    const file = join(dir, "policy.json");
+    writeFileSync(file, JSON.stringify({
+      filter_inferred_lifecycle: true,
+      allow_preview_models: true,
+    }));
+    const policy = loadPolicy(file);
+    expect(policy.filter_inferred_lifecycle).toBe(true);
+    expect(policy.allow_preview_models).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
 });

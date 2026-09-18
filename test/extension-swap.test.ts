@@ -512,9 +512,13 @@ describe("pi extension model handoff", () => {
     expect(ctx.model.id).toBe("vendor/model-a");
     expect(sentMessages).toHaveLength(1);
     expect(sentMessages[0]).toContain("Apply this OpenMerit recommendation to the application target");
-    expect(sentMessages[0]).toContain("Do not change Pi's session model");
     const lines = readFileSync(join(dir, "recommendations.jsonl"), "utf8").trim().split("\n");
-    expect(JSON.parse(lines.at(-1)!).status).toBe("applied");
+    expect(JSON.parse(lines.at(-1)!).status).toBe("dispatched");
+    // Action result transitions status to applied
+    await command!("result success", ctx);
+    const updatedLines = readFileSync(join(dir, "recommendations.jsonl"), "utf8").trim().split("\n");
+    expect(JSON.parse(updatedLines.at(-1)!).status).toBe("applied");
+    expect(JSON.parse(updatedLines.at(-1)!).actionResult?.success).toBe(true);
     await handlers.get("session_shutdown")?.();
   });
 
@@ -575,6 +579,111 @@ describe("pi extension model handoff", () => {
     expect(command).not.toBeNull();
     await command!("apply", ctx);
     expect(appliedModel).toEqual({ provider: "openrouter", id: "anthropic/claude-3-7-sonnet" });
+    await handlers.get("session_shutdown")?.();
+  });
+
+  it("does not dispatch application action automatically under default recommend mode", async () => {
+    dir = mkdtempSync(join(tmpdir(), "openmerit-ext-app-gate-"));
+    process.env.OPENMERIT_HOME = dir;
+    writeFileSync(join(dir, "policy.json"), JSON.stringify({ mode: "recommend" }));
+    const session = join(dir, "session.jsonl");
+    writeFileSync(session, JSON.stringify({ type: "message", message: {
+      role: "user", content: [{ type: "text", text: "task A" }],
+    } }) + "\n");
+    const rec = {
+      id: "rec-app-rec-mode", ts: new Date().toISOString(), taskKey: taskKey("task A"), taskLabel: "task A",
+      sessionFile: session, currentModel: "vendor/model-a",
+      recommended: { model: "vendor/model-b", reason: "better" },
+      harnessAction: {
+        type: "select_model_route", model: "vendor/model-b",
+        instruction: "Update config", validate: true,
+      },
+      invocation: { purpose: "update config", applyMode: "application" as const },
+      evidence: { scoreGain: 0.2, priceRatio: 0.5, onFrontier: true, trials: 3 },
+      policy: { autoApply: true, reasons: ["all auto-apply thresholds met"] }, status: "pending",
+    };
+    writeFileSync(join(dir, "recommendations.jsonl"), JSON.stringify(rec) + "\n");
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    let dispatched = false;
+    const ctx = {
+      model: { provider: "openrouter", id: "vendor/model-a" },
+      modelRegistry: { find: () => undefined },
+      sessionManager: { getSessionFile: () => session }, cwd: dir, hasUI: false,
+      isIdle: () => true, ui: { notify: () => undefined },
+    };
+    const pi = {
+      on: (name: string, fn: (...args: unknown[]) => Promise<void>) => handlers.set(name, fn),
+      registerCommand: () => undefined,
+      sendUserMessage: () => { dispatched = true; },
+      setModel: async () => true,
+    };
+    const { default: extension } = await import("../extension/openmerit.js");
+    extension(pi as never);
+    await handlers.get("session_start")?.({}, ctx);
+    // In recommend mode, application action MUST NOT be dispatched automatically
+    expect(dispatched).toBe(false);
+    await handlers.get("session_shutdown")?.();
+  });
+
+  it("records failed action result on agent error and allows retrying on /openmerit apply", async () => {
+    dir = mkdtempSync(join(tmpdir(), "openmerit-ext-app-fail-"));
+    process.env.OPENMERIT_HOME = dir;
+    const session = join(dir, "session.jsonl");
+    writeFileSync(session, JSON.stringify({ type: "message", message: {
+      role: "user", content: [{ type: "text", text: "task A" }],
+    } }) + "\n");
+    const rec = {
+      id: "rec-fail-retry", ts: new Date().toISOString(), taskKey: taskKey("task A"), taskLabel: "task A",
+      currentModel: "vendor/model-a",
+      recommended: { model: "vendor/model-b", reason: "better" },
+      harnessAction: {
+        type: "select_model_route", model: "vendor/model-b",
+        instruction: "Update config", validate: true,
+      },
+      invocation: { purpose: "update config", applyMode: "application" as const },
+      evidence: { scoreGain: 0.2, priceRatio: 0.5, onFrontier: true, trials: 3 },
+      policy: { autoApply: false, reasons: ["recommend mode"] }, status: "pending",
+    };
+    writeFileSync(join(dir, "recommendations.jsonl"), JSON.stringify(rec) + "\n");
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    let command: ((args: string, ctx: unknown) => Promise<void>) | null = null;
+    let dispatchCount = 0;
+    const ctx = {
+      model: { provider: "openrouter", id: "vendor/model-a" },
+      modelRegistry: { find: () => undefined },
+      sessionManager: { getSessionFile: () => session }, cwd: dir, hasUI: false,
+      isIdle: () => true, ui: { notify: () => undefined },
+    };
+    const pi = {
+      on: (name: string, fn: (...args: unknown[]) => Promise<void>) => handlers.set(name, fn),
+      registerCommand: (_name: string, options: { handler: (args: string, ctx: unknown) => Promise<void> }) => {
+        command = options.handler;
+      },
+      sendUserMessage: () => { dispatchCount++; },
+      setModel: async () => true,
+    };
+    const { default: extension } = await import("../extension/openmerit.js");
+    extension(pi as never);
+    await handlers.get("session_start")?.({}, ctx);
+
+    // Initial manual apply
+    await command!("apply", ctx);
+    expect(dispatchCount).toBe(1);
+
+    // Agent ends with error -> transitions to failed
+    await handlers.get("agent_end")?.({
+      messages: [{ role: "assistant", stopReason: "error" }],
+    }, ctx);
+
+    const lines = readFileSync(join(dir, "recommendations.jsonl"), "utf8").trim().split("\n");
+    const lastRec = JSON.parse(lines.at(-1)!);
+    expect(lastRec.status).toBe("failed");
+    expect(lastRec.actionResult?.success).toBe(false);
+
+    // Retry via apply
+    await command!("apply", ctx);
+    expect(dispatchCount).toBe(2);
+
     await handlers.get("session_shutdown")?.();
   });
 });

@@ -1,6 +1,7 @@
 /** Provider-neutral public benchmark snapshots. */
 import { appendJsonl, paths, readJsonl } from "./store.js";
-import type { ModelRoute } from "./types.js";
+import { log } from "./logger.js";
+import type { ModelRoute, TaskIntent } from "./types.js";
 import { routeKey } from "./routes.js";
 
 export interface PublicBenchmarkPoint {
@@ -64,9 +65,25 @@ export function listPublicBenchmarks(): PublicBenchmarkPoint[] {
 }
 
 /** Return deterministic public-prior ordering for routes already available in the harness. */
-export function publicPriorModels(routes: ModelRoute[], task: string): string[] {
-  const type = /image|invoice|ocr|visual/i.test(task) ? "intelligence" :
-    /code|coding|typescript|javascript|sql/i.test(task) ? "coding" : undefined;
+export function publicPriorModels(routes: ModelRoute[], taskOrIntent: string | TaskIntent): string[] {
+  let type: string | undefined;
+  if (typeof taskOrIntent === "object" && taskOrIntent !== null) {
+    const category = taskOrIntent.category?.toLowerCase();
+    const modalities = taskOrIntent.inputModalities ?? [];
+    if (category === "coding") {
+      type = "coding";
+    } else if (category === "extraction" || category === "classification" || modalities.includes("image")) {
+      type = "intelligence";
+    } else if (taskOrIntent.purpose) {
+      log("debug", "public_benchmarks", "fallback_regex", "inferring task type from intent purpose string", { purpose: taskOrIntent.purpose });
+      type = /image|invoice|ocr|visual/i.test(taskOrIntent.purpose) ? "intelligence" :
+        /code|coding|typescript|javascript|sql/i.test(taskOrIntent.purpose) ? "coding" : undefined;
+    }
+  } else if (typeof taskOrIntent === "string") {
+    log("debug", "public_benchmarks", "fallback_regex", "inferring task type from raw task text", { task: taskOrIntent });
+    type = /image|invoice|ocr|visual/i.test(taskOrIntent) ? "intelligence" :
+      /code|coding|typescript|javascript|sql/i.test(taskOrIntent) ? "coding" : undefined;
+  }
   const scores = new Map<string, number>();
   for (const point of listPublicBenchmarks()) {
     if (type && point.taskType && point.taskType !== type) continue;

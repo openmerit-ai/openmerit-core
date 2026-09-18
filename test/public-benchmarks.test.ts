@@ -20,5 +20,15 @@ describe("public benchmark sources", () => {
     expect(listPublicBenchmarks()).toHaveLength(1);
     expect(publicPriorModels([modelRoute("openai", "gpt-4o"), modelRoute("other", "x")], "intelligence task"))
       .toEqual(["openai:gpt-4o"]);
+    // Structured intent with inputModalities: ["image"] maps to intelligence
+    expect(publicPriorModels([modelRoute("openai", "gpt-4o"), modelRoute("other", "x")], {
+      purpose: "process document",
+      inputModalities: ["image"],
+    })).toEqual(["openai:gpt-4o"]);
+    // Structured intent with category: "coding" does not match intelligence
+    expect(publicPriorModels([modelRoute("openai", "gpt-4o"), modelRoute("other", "x")], {
+      purpose: "process document",
+      category: "coding",
+    })).toEqual([]);
   });
 });

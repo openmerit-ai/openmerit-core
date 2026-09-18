@@ -71,21 +71,29 @@ describe("provider-neutral model routes", () => {
   });
 
   it("infers route availability from preview and deprecated model naming conventions", () => {
-    expect(modelRoute("openai", "o1-preview").availability).toBe("preview");
+    const o1 = modelRoute("openai", "o1-preview");
+    expect(o1.availability).toBe("preview");
+    expect(o1.availabilitySource).toBe("inferred");
     expect(modelRoute("openai", "gpt-4o-2024-preview").availability).toBe("preview");
     expect(modelRoute("google", "gemini-2.5-flash-experimental").availability).toBe("preview");
     expect(modelRoute("anthropic", "claude-3-beta").availability).toBe("preview");
     expect(modelRoute("meta", "llama-2-70b-deprecated").availability).toBe("deprecated");
     expect(modelRoute("meta", "llama-retired").availability).toBe("deprecated");
     expect(modelRoute("anthropic", "claude-3-5-sonnet").availability).toBeUndefined();
+
+    const explicit = modelRoute("vendor", "active-preview-slug", { availability: "active" });
+    expect(explicit.availability).toBe("active");
+    expect(explicit.availabilitySource).toBe("provider");
   });
 
   it("allows policy route overrides to explicitly re-enable preview models", () => {
     const preview = modelRoute("openai", "o1-preview");
     expect(preview.availability).toBe("preview");
+    expect(preview.availabilitySource).toBe("inferred");
     const [overridden] = applyRouteOverrides([preview], {
       "openai:o1-preview": { availability: "active" },
     });
     expect(overridden.availability).toBe("active");
+    expect(overridden.availabilitySource).toBe("provider");
   });
 });

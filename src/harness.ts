@@ -1,15 +1,10 @@
 /** Stable seam between OpenMerit's merit loop and an agent harness. */
 import type { TaskFile, TaskImage } from "./task-input.js";
 import type { MeritChatClient } from "./providers.js";
-import type { ModelRoute, TrialPoint } from "./types.js";
+import type { ModelRoute, TaskIntent, TrialPoint } from "./types.js";
 
 /** Opaque purpose/context supplied by the harness that invoked OpenMerit. */
-export interface HarnessInvocation {
-  purpose: string;
-  /** Harness-owned application of a selected route. */
-  applyMode?: "session" | "application" | "ask_user";
-  context?: Record<string, unknown>;
-}
+export type HarnessInvocation = TaskIntent;
 
 export interface HarnessTask {
   task: string;

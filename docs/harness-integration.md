@@ -8,6 +8,30 @@ task execution, traces, and applying a selected route. OpenMerit owns candidate
 selection, evaluation orchestration, budgets, Pareto evidence, and policy
 decisions.
 
+## Route execution and credential cascade
+
+The adapter must run the completed task once with the active route before it
+calls OpenMerit. That baseline result should include the final answer, trace,
+cost, latency, tool activity, validation signals, and relevant side effects.
+For every admitted candidate, the adapter reruns the same logical task with the
+same prompt, attachments, tool policy, and application environment, changing
+only the selected route. OpenMerit receives those normalized outcomes through
+`HarnessRun` and does not call provider SDKs directly.
+
+Routes can use a native provider integration or a configured gateway such as
+OpenRouter. The adapter should resolve credentials in this order:
+
+1. use the native provider route when its credential and integration are
+   available;
+2. use a configured gateway route when the gateway can execute that model;
+3. ask the user for the missing credential or skip the route.
+
+The cascade is an adapter concern, not a provider-specific rule in OpenMerit
+core. Credentials must remain in the harness environment or secret store and
+must be made available to isolated application trials without being copied into
+OpenMerit state, prompts, source files, or benchmark artifacts. After the user
+configures a missing credential, the harness may retry the affected trial.
+
 At minimum, implement:
 
 ```ts

@@ -19,12 +19,18 @@ export function modelRoute(
   modelId: string,
   details: Partial<Omit<ModelRoute, "provider" | "modelId" | "meritId">> = {},
 ): ModelRoute {
+  const inferred = inferRouteAvailability(modelId);
+  const availability = details.availability ?? inferred;
+  const availabilitySource = details.availabilitySource ?? (
+    details.availability !== undefined ? "provider" : inferred !== undefined ? "inferred" : undefined
+  );
   return {
     provider,
     modelId,
     meritId: meritModelId(provider, modelId),
     input: details.input ?? ["text"],
-    availability: details.availability ?? inferRouteAvailability(modelId),
+    ...(availability ? { availability } : {}),
+    ...(availabilitySource ? { availabilitySource } : {}),
     ...details,
   };
 }
@@ -50,7 +56,10 @@ export function applyRouteOverrides(
       ...(override.context_window === undefined ? {} : { contextWindow: override.context_window }),
       ...(override.max_tokens === undefined ? {} : { maxTokens: override.max_tokens }),
       ...(override.input ? { input: [...override.input] } : {}),
-      ...(override.availability ? { availability: override.availability } : {}),
+      ...(override.availability ? {
+        availability: override.availability,
+        availabilitySource: override.availabilitySource ?? "provider",
+      } : {}),
     };
   });
 }

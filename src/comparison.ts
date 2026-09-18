@@ -156,8 +156,27 @@ export async function compareSettledTask(
       if (routeKey(route) === routeKey(active)) continue;
       const reasons: string[] = [];
       const priced = routePrice(route);
-      if (route.availability === "deprecated" || route.availability === "retired" || route.availability === "preview")
-        reasons.push(`route is marked ${route.availability}`);
+      const isProviderLifecycle = route.availabilitySource === "provider";
+      const isInferredLifecycle = route.availabilitySource === "inferred";
+      if (isProviderLifecycle) {
+        if (route.availability === "deprecated" || route.availability === "retired") {
+          reasons.push(`route is marked ${route.availability} by provider`);
+        } else if (route.availability === "preview" && !policy.allow_preview_models) {
+          reasons.push("route is marked preview by provider");
+        }
+      } else if (isInferredLifecycle && policy.filter_inferred_lifecycle) {
+        if (route.availability === "deprecated" || route.availability === "retired") {
+          reasons.push(`route has inferred ${route.availability} lifecycle`);
+        } else if (route.availability === "preview" && !policy.allow_preview_models) {
+          reasons.push("route has inferred preview lifecycle");
+        }
+      } else if (!route.availabilitySource && route.availability) {
+        if (route.availability === "deprecated" || route.availability === "retired") {
+          reasons.push(`route is marked ${route.availability}`);
+        } else if (route.availability === "preview" && !policy.allow_preview_models) {
+          reasons.push("route is marked preview");
+        }
+      }
       if (!priced.known) reasons.push("route price is unknown");
       else if (priced.price > policy.max_usd_per_m)
         reasons.push(`price $${priced.price.toFixed(2)}/M exceeds $${policy.max_usd_per_m.toFixed(2)}/M policy limit`);
@@ -173,7 +192,7 @@ export async function compareSettledTask(
       else candidateRoutes.push(route);
     }
     const alternates = selectAlternates(candidateRoutes, Math.max(0, policy.comparison.max_routes - 1),
-      publicPriorModels(candidateRoutes, task.task));
+      publicPriorModels(candidateRoutes, task.invocation ?? task.task));
     const eligible = [active, ...alternates];
     emitTrialProgress({ phase: "selection", taskKey: tKey,
       eligible: eligible.map(routeLabel), excluded });

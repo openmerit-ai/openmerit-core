@@ -199,6 +199,8 @@ existing file. The 0.1.5 policy schema is:
     "apply_on_error": true
   },
   "evaluator_model": null,
+  "filter_inferred_lifecycle": true,
+  "allow_preview_models": false,
   "max_usd_per_m": 20,
   "route_overrides": {},
   "pi": {
