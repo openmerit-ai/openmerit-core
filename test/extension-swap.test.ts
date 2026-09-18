@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { taskKey } from "../src/store.js";
@@ -7,8 +7,14 @@ import { taskInputKey } from "../src/task-input.js";
 
 let dir: string | null = null;
 const oldHome = process.env.OPENMERIT_HOME;
+const oldPiBin = process.env.OPENMERIT_PI_BIN;
+const oldClassifierArgs = process.env.OPENMERIT_TEST_CLASSIFIER_ARGS;
 afterEach(() => {
   process.env.OPENMERIT_HOME = oldHome;
+  if (oldPiBin === undefined) delete process.env.OPENMERIT_PI_BIN;
+  else process.env.OPENMERIT_PI_BIN = oldPiBin;
+  if (oldClassifierArgs === undefined) delete process.env.OPENMERIT_TEST_CLASSIFIER_ARGS;
+  else process.env.OPENMERIT_TEST_CLASSIFIER_ARGS = oldClassifierArgs;
   if (dir) rmSync(dir, { recursive: true, force: true });
   dir = null;
   vi.resetModules();
@@ -136,6 +142,60 @@ describe("pi extension model handoff", () => {
     await handlers.get("session_start")?.({}, ctx);
     await handlers.get("agent_settled")?.({}, ctx);
     expect(notices.some((x) => x.includes("eligibility is unavailable"))).toBe(true);
+    await handlers.get("session_shutdown")?.();
+  });
+
+  it("classifies a follow-up using the surrounding harness session context", async () => {
+    dir = mkdtempSync(join(tmpdir(), "openmerit-ext-context-"));
+    process.env.OPENMERIT_HOME = dir;
+    const argsFile = join(dir, "classifier-args.json");
+    const fakePi = join(dir, "pi");
+    writeFileSync(fakePi, [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "const args = process.argv.slice(2);",
+      "if (args[0] === 'auth') {",
+      "  process.stdout.write(JSON.stringify({ status: 'ready', provider: args[2] }) + String.fromCharCode(10));",
+      "} else {",
+      "  fs.writeFileSync(process.env.OPENMERIT_TEST_CLASSIFIER_ARGS, JSON.stringify(args));",
+      "  process.stdout.write(JSON.stringify({ type: 'message_end', message: {",
+      "    role: 'assistant', content: [{ type: 'text', text: JSON.stringify({",
+      "      eligible: true, confidence: 1, purpose: 'build and operate the sentiment CLI',",
+      "      applyMode: 'application', reason: 'the earlier task uses an LLM'",
+      "    }) }], stopReason: 'stop'",
+      "  }}) + String.fromCharCode(10));",
+      "}",
+      "",
+    ].join("\n"));
+    chmodSync(fakePi, 0o755);
+    process.env.OPENMERIT_PI_BIN = fakePi;
+    process.env.OPENMERIT_TEST_CLASSIFIER_ARGS = argsFile;
+    writeFileSync(join(dir, "policy.json"), JSON.stringify({ budgets: { max_trials_per_day: 0 } }));
+    const session = join(dir, "session.jsonl");
+    writeFileSync(session, [
+      { type: "message", message: { role: "user", content: [{ type: "text", text: "Build a sentiment CLI backed by an LLM" }] } },
+      { type: "message", message: { role: "assistant", content: [{ type: "text", text: "I created the CLI." }], stopReason: "stop" } },
+      { type: "message", message: { role: "user", content: [{ type: "text", text: "Set the key and try it again" }] } },
+      { type: "message", message: { role: "assistant", content: [{ type: "text", text: "The CLI is ready to retry." }], stopReason: "stop" } },
+    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+    const notices: string[] = [];
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    const ctx = { model: { provider: "openrouter", id: "vendor/a" },
+      modelRegistry: { find: () => undefined },
+      sessionManager: { getSessionFile: () => session }, cwd: dir, hasUI: true,
+      isIdle: () => true, ui: { notify: (message: string) => notices.push(message) } };
+    const pi = { on: (name: string, fn: (...args: unknown[]) => Promise<void>) => handlers.set(name, fn),
+      registerCommand: () => undefined, setModel: async () => true };
+    const { default: extension } = await import("../extension/openmerit.js");
+    extension(pi as never);
+    await handlers.get("session_start")?.({}, ctx);
+    await handlers.get("before_agent_start")?.({ prompt: "Set the key and try it again", systemPrompt: "" }, ctx);
+    await handlers.get("agent_settled")?.({}, ctx);
+    const classifierArgs = JSON.parse(readFileSync(argsFile, "utf8")) as string[];
+    const prompt = classifierArgs.at(-1) ?? "";
+    expect(prompt).toContain("Build a sentiment CLI backed by an LLM");
+    expect(prompt).toContain("Set the key and try it again");
+    expect(notices.some((message) => message.includes("harness eligibility is unavailable"))).toBe(false);
     await handlers.get("session_shutdown")?.();
   });
 

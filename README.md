@@ -118,8 +118,11 @@ Give Pi a concrete task that has a measurable model response, such as a
 classification, extraction, or summarization task. After Pi settles the task,
 OpenMerit classifies it, records the active route as the baseline, runs eligible
 candidate routes sequentially, scores the results, and writes a recommendation.
-The comparison is session-bound and uses the task context captured when the
-task began; later conversational turns do not replace it.
+The Pi extension sends the current turn together with recent session context to
+the harness classifier, so credential setup, retries, and other operational
+follow-ups can remain attached to the underlying LLM workload. The classifier
+uses a Pi-authenticated route and can fall back to another configured route if
+the active route has no usable credentials.
 
 While Pi is running, inspect the status with `/openmerit`. From another shell,
 watch the audit log and inspect persisted state:

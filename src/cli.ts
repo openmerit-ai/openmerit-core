@@ -136,10 +136,11 @@ async function cmdClassify(provider?: string, modelId?: string, task?: string): 
   const route = modelRoute(provider, modelId);
   const client = new PiCliChatClient(undefined, recordMeritSpend);
   const result = await client.chat(route,
-    `Decide whether this task materially involves building, operating, or evaluating an LLM or agent. ` +
-    `If eligible, state why the harness invoked OpenMerit and how the harness should apply a recommendation. ` +
+    `Decide whether the underlying task in this harness context materially involves building, operating, or evaluating an LLM or agent. ` +
+    `The context may contain a current follow-up plus earlier turns from the same project. Treat operational follow-ups such as configuring a key, retrying a command, or checking results as continuations of the underlying task when the earlier context shows an LLM-backed workflow. ` +
+    `Do not classify only from the final sentence. If eligible, state why the harness invoked OpenMerit and how the harness should apply a recommendation. ` +
     `Use applyMode exactly "session", "application", or "ask_user"; keep purpose concise and harness-owned. ` +
-    `Return ONLY JSON: {"eligible":true|false,"confidence":0..1,"purpose":"...","applyMode":"session|application|ask_user","reason":"brief reason"}.\nTASK:\n${task.slice(0, 12000)}`);
+    `Return ONLY JSON: {"eligible":true|false,"confidence":0..1,"purpose":"...","applyMode":"session|application|ask_user","reason":"brief reason"}.\nHARNESS CONTEXT:\n${task.slice(0, 12000)}`);
   const match = result.content.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("classifier returned no JSON");
   const parsed = JSON.parse(match[0]) as { eligible?: unknown; confidence?: unknown; purpose?: unknown; applyMode?: unknown; reason?: unknown };

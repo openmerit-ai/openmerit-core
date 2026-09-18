@@ -21,10 +21,13 @@ When an OpenMerit recommendation is delivered, the host agent/harness decides ho
    Notify the user or update this host agent's active model so subsequent turns benefit from the higher-merit route.
 
 Before automatic comparison, the host harness decides whether the task is
-eligible and records its purpose and application mode in its own context. If it
-cannot make that decision, it skips automatic comparison; an explicit user
-command may still request one. The host loads this instruction context through
-its supported extension, plugin, or middleware mechanism.
+eligible and records its purpose and application mode in its own context. The
+harness must provide the current turn together with the relevant settled task
+context, so operational follow-ups such as configuring a credential or retrying
+an application command can be evaluated as continuations of the same workload.
+If it cannot make that decision, it skips automatic comparison; an explicit
+user command may still request one. The host loads this instruction context
+through its supported extension, plugin, or middleware mechanism.
 
 OpenMerit is not the harness, provider, or observability system. It does not
 intercept normal traffic or own provider credentials.
@@ -38,10 +41,12 @@ application environment. OpenMerit compares the normalized outcomes; it does
 not invoke provider SDKs itself.
 
 A route may be backed by a native provider integration or by a configured
-gateway such as OpenRouter. The harness should prefer a native route when it is
-available, use a configured gateway when appropriate, and ask the user or skip
-the route when credentials are missing. Never write credentials into OpenMerit
-state, benchmark artifacts, source files, or prompts.
+gateway such as OpenRouter. The harness should verify route readiness through
+its own auth/credential facilities before invoking the classifier or a
+candidate. If the active route is unavailable, it may use another already
+authenticated configured route for the harness-owned classifier; it must never
+copy or inspect secret values. Never write credentials into OpenMerit state,
+benchmark artifacts, source files, or prompts.
 
 For application workflows, the harness must make the application's required
 runtime credentials available to isolated candidate runs through its secure

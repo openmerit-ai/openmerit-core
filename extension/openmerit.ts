@@ -23,7 +23,7 @@ import {
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { createHash } from "node:crypto";
-import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { spawn, spawnSync, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
@@ -440,20 +440,98 @@ function latestSessionTaskKey(ctx: ExtensionContext): string | null {
   return latest;
 }
 
+function piAuthStatus(route: ModelRoute): boolean | undefined {
+  const executable = process.env.OPENMERIT_PI_BIN?.trim() || "pi";
+  try {
+    const result = spawnSync(executable, ["auth", "check", "--provider", route.provider,
+      "--model", route.modelId, "--json", "--no-refresh"], {
+      encoding: "utf8", timeout: 5_000, env: process.env,
+    });
+    if (result.error || result.status !== 0) return undefined;
+    const line = result.stdout.trim().split("\n").at(-1) ?? "";
+    const parsed = JSON.parse(line) as { status?: unknown };
+    return parsed.status === "ready";
+  } catch {
+    return undefined;
+  }
+}
+
+/** Pick a route Pi can authenticate for OpenMerit's own classifier. */
+function classifierRoute(ctx: ExtensionContext): ModelRoute | null {
+  if (!ctx.model) return null;
+  const current = routeFor(ctx.model);
+  const currentStatus = piAuthStatus(current);
+  if (currentStatus !== false) return current;
+  for (const route of eligibleRoutes(ctx)) {
+    if (route.provider === current.provider && route.modelId === current.modelId) continue;
+    if (piAuthStatus(route) === true) return route;
+  }
+  return null;
+}
+
+function sessionClassificationContext(ctx: ExtensionContext, currentTask: string): string {
+  const entries = (ctx.sessionManager as ExtensionContext["sessionManager"] & {
+    getEntries?: () => { type?: string; message?: { role?: string; content?: unknown } }[];
+  }).getEntries?.();
+  const lines: string[] = [];
+  const add = (role: string, content: unknown) => {
+    const text = typeof content === "string" ? content : Array.isArray(content)
+      ? content.filter((part) => part?.type === "text").map((part) => String(part.text ?? "")).join(" ") : "";
+    if (text.trim()) lines.push(`${role}: ${text.trim()}`);
+  };
+  if (entries) {
+    for (const entry of entries) {
+      if (entry.type === "message" && entry.message &&
+          (entry.message.role === "user" || entry.message.role === "assistant"))
+        add(entry.message.role, entry.message.content);
+    }
+  } else {
+    const file = ctx.sessionManager.getSessionFile();
+    if (file && existsSync(file)) {
+      for (const line of readFileSync(file, "utf8").split("\n")) {
+        try {
+          const entry = JSON.parse(line) as { type?: string; message?: { role?: string; content?: unknown } };
+          if (entry.type === "message" && entry.message &&
+              (entry.message.role === "user" || entry.message.role === "assistant"))
+            add(entry.message.role, entry.message.content);
+        } catch { /* ignore partial session lines */ }
+      }
+    }
+  }
+  const context = lines.slice(-12).join("\n");
+  return `CURRENT TURN:\n${currentTask}\n\nRECENT HARNESS SESSION CONTEXT:\n${context || "(none)"}`.slice(0, 12_000);
+}
+
 async function classifyTaskWithHarness(ctx: ExtensionContext, taskOverride?: string | null): Promise<{ eligible: boolean; purpose?: string; applyMode?: "session" | "application" | "ask_user" } | null> {
   if (!existsSync(ENGINE_FILE) || !ctx.model) return null;
   const task = taskOverride?.trim() || latestUserTaskText(ctx);
   if (!task) return null;
-  const child = spawn(process.execPath, [ENGINE_FILE, "classify", ctx.model.provider, ctx.model.id, task], {
+  const route = classifierRoute(ctx);
+  if (!route) {
+    extensionLog("warn", "eligibility", "no_authenticated_route", "no authenticated Pi route is available for semantic classification");
+    return null;
+  }
+  extensionLog("debug", "eligibility", "classifier_route", "using authenticated harness route", {
+    provider: route.provider, modelId: route.modelId,
+  });
+  const context = sessionClassificationContext(ctx, task);
+  const child = spawn(process.execPath, [ENGINE_FILE, "classify", route.provider, route.modelId, context], {
     cwd: ctx.cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";
+  let stderr = "";
   child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+  child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
   const code = await new Promise<number>((resolve) => {
     const timer = setTimeout(() => { try { child.kill("SIGTERM"); } catch { /* already closed */ } }, 30_000);
     child.on("close", (value) => { clearTimeout(timer); resolve(value ?? 1); });
   });
-  if (code !== 0) { extensionLog("warn", "eligibility", "classifier_failed", "semantic classifier exited unsuccessfully"); return null; }
+  if (code !== 0) {
+    extensionLog("warn", "eligibility", "classifier_failed", "semantic classifier exited unsuccessfully", {
+      code, stderr: stderr.trim().slice(0, 500),
+    });
+    return null;
+  }
   try {
     const result = JSON.parse(stdout.trim().split("\n").at(-1) ?? "") as {
       eligible?: boolean; confidence?: number; purpose?: string;
