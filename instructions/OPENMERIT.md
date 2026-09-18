@@ -14,13 +14,11 @@ and fallback under the user's policy.
 5. Applies a route automatically only when the user's current policy authorizes
    it; otherwise the decision remains supervised.
 
-When a recommendation is created, the harness receives a structured
-`harnessAction` containing the selected model route, an instruction to make it
-active for the original target, and a request to run normal validation. The
-harness decides whether that means a runtime switch, configuration edit, patch,
-or PR. It keeps invocation intent locally and never asks OpenMerit to infer a
-target from task keywords. If the target, configuration location, or validation
-command is missing, the harness asks the user before making a durable change.
+When an OpenMerit recommendation is delivered, the host agent/harness decides how to act on it based on its current running context:
+1. **If the task involved building, configuring, or modifying an LLM workload in the codebase**:
+   Apply the recommended model route to the project's code, configuration, or environment files, and run the project's validation tests. Do not alter this host agent's own active session model.
+2. **If the task was directly executed by this host agent for the user**:
+   Notify the user or update this host agent's active model so subsequent turns benefit from the higher-merit route.
 
 Before automatic comparison, the host harness decides whether the task is
 eligible and records its purpose and application mode in its own context. If it
@@ -61,5 +59,5 @@ Policy changes belong to the user in `~/.openmerit/policy.json`.
 - OpenMerit records decision evidence locally by default. Do not edit its state
   files while it is running; use `/openmerit doctor` when state appears invalid.
 - Application candidates must report their final output, validation or
-  evaluation signals, tool outcomes, and relevant side effects. A runtime Pi
-  model switch alone does not update a product's persisted model configuration.
+  evaluation signals, tool outcomes, and relevant side effects. A runtime host
+  agent model switch alone does not update a product's persisted model configuration.

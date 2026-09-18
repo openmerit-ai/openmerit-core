@@ -870,6 +870,20 @@ export default function openmerit(pi: ExtensionAPI) {
     return ok;
   }
 
+  function dispatchApplicationAction(ctx: ExtensionContext, rec: Recommendation): void {
+    setStatus(rec, "applied");
+    applicationActionTurn = true;
+    pi.sendUserMessage(
+      `Apply this OpenMerit recommendation to the application target. ${rec.harnessAction?.instruction ?? ""} ` +
+      `Selected model: ${rec.harnessAction?.model ?? rec.recommended.model}. Do not change Pi's session model. ` +
+      `If the application target, model configuration location, or validation command is unclear, ask the user before editing.`,
+      { deliverAs: "followUp" },
+    );
+    if (ctx.hasUI) {
+      ctx.ui.notify(`openmerit: dispatched recommendation application to agent (${rec.recommended.model})`, "info");
+    }
+  }
+
   async function surface(ctx: ExtensionContext): Promise<void> {
     const prior = priorExactTaskSuggestion(ctx);
     if (prior && ctx.hasUI) {
@@ -885,20 +899,14 @@ export default function openmerit(pi: ExtensionAPI) {
       const targetsApplication = intent?.applyMode === "application";
       if (rec.policy.autoApply && intent?.applyMode === "session" && currentPolicyAllowsAuto(rec)) {
         if (!rec.sessionFile || rec.sessionFile !== ctx.sessionManager.getSessionFile()) continue;
-        if (!ctx.isIdle()) continue;
+        if (ctx.isIdle && !ctx.isIdle()) continue;
         notified.add(rec.id);
         await applyRecommendation(ctx, rec);
         continue;
       }
-      if (targetsApplication && rec.harnessAction && ctx.isIdle() && !applicationActionTurn) {
-        applicationActionTurn = true;
+      if (targetsApplication && rec.harnessAction && (!ctx.isIdle || ctx.isIdle()) && !applicationActionTurn) {
         notified.add(rec.id);
-        pi.sendUserMessage(
-          `Apply this OpenMerit recommendation to the application target. ${rec.harnessAction.instruction} ` +
-          `Selected model: ${rec.harnessAction.model}. Do not change Pi's session model. ` +
-          `If the application target, model configuration location, or validation command is unclear, ask the user before editing.`,
-          { deliverAs: "followUp" },
-        );
+        dispatchApplicationAction(ctx, rec);
         continue;
       }
       notified.add(rec.id);
@@ -949,9 +957,13 @@ export default function openmerit(pi: ExtensionAPI) {
     }
     const taskPrompt = capturedTaskPrompt;
     const semantic = taskPrompt ? await classifyTaskWithHarness(ctx, taskPrompt) : null;
-    if (capturedTaskKey && semantic?.purpose && semantic.applyMode)
-      localIntents.set(capturedTaskKey, { purpose: semantic.purpose, applyMode: semantic.applyMode });
-    reportHarnessState(ctx, true, capturedTaskKey, null);
+    const invocation = semantic?.purpose && semantic.applyMode ? {
+      purpose: semantic.purpose,
+      applyMode: semantic.applyMode,
+    } : null;
+    if (capturedTaskKey && invocation)
+      localIntents.set(capturedTaskKey, invocation);
+    reportHarnessState(ctx, true, capturedTaskKey, invocation);
     const eligible = semantic?.eligible === true;
     extensionLog("info", "eligibility", "decision", `task eligible=${eligible} source=${semantic ? "semantic" : "unavailable"}`);
     if (eligible) {
@@ -1039,6 +1051,21 @@ export default function openmerit(pi: ExtensionAPI) {
         const target = pending[pending.length - 1];
         if (!target) {
           ctx.ui.notify("openmerit: no pending recommendations", "info");
+          return;
+        }
+        const intent = localIntents.get(target.taskKey) ?? target.invocation;
+        let mode = intent?.applyMode;
+        if (!mode && ctx.mode === "tui") {
+          const choice = await ctx.ui.select("Apply OpenMerit Recommendation", [
+            "Switch Pi session model",
+            "Apply to application codebase (agent task)",
+          ]);
+          if (choice === "Apply to application codebase (agent task)") mode = "application";
+          else if (choice === "Switch Pi session model") mode = "session";
+          else return;
+        }
+        if (mode === "application") {
+          dispatchApplicationAction(ctx, target);
           return;
         }
         await applyRecommendation(ctx, target);
