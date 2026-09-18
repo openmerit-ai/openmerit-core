@@ -517,4 +517,64 @@ describe("pi extension model handoff", () => {
     expect(JSON.parse(lines.at(-1)!).status).toBe("applied");
     await handlers.get("session_shutdown")?.();
   });
+
+  it("falls back to OpenRouter when candidate model has no native provider configured", async () => {
+    dir = mkdtempSync(join(tmpdir(), "openmerit-ext-router-fallback-"));
+    process.env.OPENMERIT_HOME = dir;
+    writeFileSync(join(dir, "policy.json"), JSON.stringify({ fallback: { auto_update: false } }));
+    const session = join(dir, "session.jsonl");
+    writeFileSync(session, JSON.stringify({ type: "message", message: {
+      role: "user", content: [{ type: "text", text: "task A" }],
+    } }) + "\n");
+    const rec = {
+      id: "rec-fallback", ts: new Date().toISOString(), taskKey: taskKey("task A"), taskLabel: "task A",
+      currentModel: "openai/gpt-4o",
+      recommended: {
+        model: "anthropic/claude-3-7-sonnet",
+        route: {
+          provider: "anthropic",
+          modelId: "claude-3-7-sonnet",
+          meritId: "anthropic/claude-3-7-sonnet",
+        },
+        reason: "better code generation",
+      },
+      fallback: null,
+      evidence: { scoreGain: 0.2, priceRatio: 0.8, onFrontier: true, trials: 3 },
+      policy: { autoApply: false, reasons: ["recommend mode"] }, status: "pending",
+    };
+    writeFileSync(join(dir, "recommendations.jsonl"), JSON.stringify(rec) + "\n");
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    let command: ((args: string, ctx: unknown) => Promise<void>) | null = null;
+    let appliedModel: unknown = null;
+    const ctx = {
+      model: { provider: "openai", id: "gpt-4o" },
+      modelRegistry: {
+        find: (provider: string, id: string) => {
+          // Native "anthropic" provider is NOT configured, but "openrouter" is!
+          if (provider === "openrouter" && id === "anthropic/claude-3-7-sonnet") {
+            return { provider: "openrouter", id: "anthropic/claude-3-7-sonnet" };
+          }
+          return undefined;
+        },
+      },
+      sessionManager: { getSessionFile: () => session }, cwd: dir, hasUI: false,
+      isIdle: () => true,
+      ui: { notify: () => undefined },
+    };
+    const pi = {
+      on: (name: string, fn: (...args: unknown[]) => Promise<void>) => handlers.set(name, fn),
+      registerCommand: (_name: string, options: { handler: (args: string, ctx: unknown) => Promise<void> }) => {
+        command = options.handler;
+      },
+      setModel: async (model: unknown) => { appliedModel = model; return true; },
+      sendUserMessage: () => undefined,
+    };
+    const { default: extension } = await import("../extension/openmerit.js");
+    extension(pi as never);
+    await handlers.get("session_start")?.({}, ctx);
+    expect(command).not.toBeNull();
+    await command!("apply", ctx);
+    expect(appliedModel).toEqual({ provider: "openrouter", id: "anthropic/claude-3-7-sonnet" });
+    await handlers.get("session_shutdown")?.();
+  });
 });

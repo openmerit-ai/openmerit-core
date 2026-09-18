@@ -7,6 +7,13 @@ export function meritModelId(provider: string, modelId: string): string {
   return modelId.startsWith(`${provider}/`) ? modelId : `${provider}/${modelId}`;
 }
 
+export function inferRouteAvailability(modelId: string): "preview" | "deprecated" | "retired" | undefined {
+  const lower = modelId.toLowerCase();
+  if (/(?:^|[-_/])(deprecated|retired)(?:$|[-_/])/i.test(lower)) return "deprecated";
+  if (/(?:^|[-_/])(preview|beta|experimental)(?:$|[-_/])/i.test(lower)) return "preview";
+  return undefined;
+}
+
 export function modelRoute(
   provider: string,
   modelId: string,
@@ -17,6 +24,7 @@ export function modelRoute(
     modelId,
     meritId: meritModelId(provider, modelId),
     input: details.input ?? ["text"],
+    availability: details.availability ?? inferRouteAvailability(modelId),
     ...details,
   };
 }

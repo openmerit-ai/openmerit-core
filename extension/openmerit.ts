@@ -477,6 +477,13 @@ function setStatus(rec: Recommendation, status: Recommendation["status"]): void 
 let fallbackModel: string | null = null;
 let fallbackRoute: ModelRoute | null = null;
 
+function inferRouteAvailability(modelId: string): "preview" | "deprecated" | "retired" | undefined {
+  const lower = modelId.toLowerCase();
+  if (/(?:^|[-_/])(deprecated|retired)(?:$|[-_/])/i.test(lower)) return "deprecated";
+  if (/(?:^|[-_/])(preview|beta|experimental)(?:$|[-_/])/i.test(lower)) return "preview";
+  return undefined;
+}
+
 function routeFor(model: { provider: string; id: string; input?: ("text" | "image")[];
   cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
   contextWindow?: number; maxTokens?: number;
@@ -494,7 +501,7 @@ function routeFor(model: { provider: string; id: string; input?: ("text" | "imag
       : undefined,
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,
-    availability: model.availability,
+    availability: model.availability ?? inferRouteAvailability(model.id),
   };
   const override = overrides[`${route.provider}:${route.modelId}`];
   if (!override) return route;
@@ -626,6 +633,9 @@ function ensureModel(_pi: ExtensionAPI, ctx: ExtensionContext, meritId: string, 
   if (route) {
     const exact = registry.find?.(route.provider, route.modelId);
     if (exact) return exact;
+    // If native provider route is not found, check OpenRouter fallback before giving up
+    const viaOpenRouter = registry.find?.("openrouter", route.meritId) ?? registry.find?.("openrouter", route.modelId);
+    if (viaOpenRouter) return viaOpenRouter;
     return undefined;
   }
   return resolveModel(ctx, meritId);

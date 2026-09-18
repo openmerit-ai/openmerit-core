@@ -69,4 +69,23 @@ describe("provider-neutral model routes", () => {
     const route = modelRoute("openrouter", "auto", { cost: { input: -1_000_000, output: -1_000_000 } });
     expect(routePrice(route)).toEqual({ price: 0, known: false });
   });
+
+  it("infers route availability from preview and deprecated model naming conventions", () => {
+    expect(modelRoute("openai", "o1-preview").availability).toBe("preview");
+    expect(modelRoute("openai", "gpt-4o-2024-preview").availability).toBe("preview");
+    expect(modelRoute("google", "gemini-2.5-flash-experimental").availability).toBe("preview");
+    expect(modelRoute("anthropic", "claude-3-beta").availability).toBe("preview");
+    expect(modelRoute("meta", "llama-2-70b-deprecated").availability).toBe("deprecated");
+    expect(modelRoute("meta", "llama-retired").availability).toBe("deprecated");
+    expect(modelRoute("anthropic", "claude-3-5-sonnet").availability).toBeUndefined();
+  });
+
+  it("allows policy route overrides to explicitly re-enable preview models", () => {
+    const preview = modelRoute("openai", "o1-preview");
+    expect(preview.availability).toBe("preview");
+    const [overridden] = applyRouteOverrides([preview], {
+      "openai:o1-preview": { availability: "active" },
+    });
+    expect(overridden.availability).toBe("active");
+  });
 });
