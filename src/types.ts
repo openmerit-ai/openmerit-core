@@ -121,7 +121,7 @@ export interface Recommendation {
   taskLabel: string;
   /** Harness-owned purpose and context that caused this evaluation. */
   invocation?: { purpose: string; applyMode?: "session" | "application" | "ask_user"; context?: Record<string, unknown> };
-  /** Target pi session for automatic swaps. */
+  /** Target harness session for automatic swaps. */
   sessionFile?: string | null;
   currentModel: string | null;
   currentRoute?: ModelRoute | null;

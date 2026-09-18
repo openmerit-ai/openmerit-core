@@ -251,7 +251,7 @@ export interface GateInput {
   providerOk: boolean;
   /** A real task trial of the current model exists. */
   baselineMeasured?: boolean;
-  /** The recommendation targets one pi session. */
+  /** The recommendation targets one harness session. */
   sessionBound?: boolean;
 }
 
@@ -271,7 +271,7 @@ export function gate(policy: Policy, input: GateInput): GateDecision {
     return { autoApply: false, reasons };
   }
   if (input.sessionBound === false) {
-    reasons.push("recommendation is not bound to a pi session");
+    reasons.push("recommendation is not bound to a harness session");
     return { autoApply: false, reasons };
   }
   if (input.priceKnown === false) {

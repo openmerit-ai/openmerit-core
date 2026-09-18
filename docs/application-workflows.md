@@ -23,6 +23,23 @@ workspace with an explicit tool policy and returns the final answer plus trace
 and side-effect summary. Tool access is disabled unless the user explicitly
 allows it for trials.
 
+## Credential and route cascade
+
+When benchmarking alternatives for an application or task, the harness should
+evaluate availability using a multi-tier cascade to minimize user friction:
+
+1. **Native Provider Credentials**: If direct credentials (e.g. `ANTHROPIC_API_KEY`,
+   `OPENAI_API_KEY`) exist in the environment or credential store, use the direct
+   native route for lowest latency and native feature parity.
+2. **Unified Gateway (OpenRouter)**: When native credentials for a candidate model
+   are not configured, check whether a unified provider like OpenRouter is authenticated.
+   If so, route the candidate through OpenRouter with zero user intervention.
+3. **User Prompt (Last Resort)**: If a promising candidate route has neither native
+   credentials nor a configured gateway, the harness may prompt the user or skip the route.
+
+When rewriting application code to use a newly selected model, an OpenAI-compatible
+client can often be repointed to OpenRouter's endpoint with no new SDK dependencies.
+
 ## Product workflow
 
 When a harness is helping build or exercise a product whose own code invokes an LLM,
