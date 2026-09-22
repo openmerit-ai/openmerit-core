@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
+import { Check } from "typebox/value";
 
 import type {
   ExtensionAPI,
@@ -31,6 +32,7 @@ function loadCommand() {
   const messages: Array<{ message: unknown; options: unknown }> = [];
   const eventHandlers = new Map<string, (event: unknown, ctx: ExtensionContext) => Promise<void>>();
   let completionTool: {
+    parameters?: unknown;
     execute: (
       toolCallId: string,
       input: CompletionInputForTest,
@@ -39,6 +41,7 @@ function loadCommand() {
       ctx?: ExtensionCommandContext,
     ) => Promise<unknown>;
   } | undefined;
+  const completionTools: Array<NonNullable<typeof completionTool>> = [];
 
   const pi = {
     registerCommand(name: string, definition: { handler: typeof handler }) {
@@ -50,6 +53,7 @@ function loadCommand() {
     },
     registerTool(definition: typeof completionTool) {
       completionTool = definition;
+      if (definition) completionTools.push(definition);
     },
     appendEntry(customType: string, data: unknown) {
       entries.push({ customType, data });
@@ -62,7 +66,7 @@ function loadCommand() {
   openMeritExtension(pi);
   assert.ok(handler);
   assert.ok(completionTool);
-  return { handler, completionTool, entries, messages, eventHandlers };
+  return { handler, completionTool, completionTools, entries, messages, eventHandlers };
 }
 
 interface CompletionInputForTest {
@@ -181,6 +185,45 @@ test("setup dispatches a private typed intent", async () => {
   assert.equal(messages.length, 1);
   assert.equal((messages[0]?.message as { display?: boolean }).display, false);
   assert.deepEqual(messages[0]?.options, { deliverAs: "followUp", triggerTurn: true });
+});
+
+test("Pi replaces the completion tool with the active intent schema", async () => {
+  rmSync(join(testProjectRoot, ".openmerit"), { recursive: true, force: true });
+  const notifications: Notification[] = [];
+  const { handler, completionTools } = loadCommand();
+
+  await handler("assess", commandContext(notifications));
+
+  assert.equal(completionTools.length, 2);
+  const activeTool = completionTools.at(-1);
+  assert.ok(activeTool?.parameters);
+  assert.equal(Check(activeTool.parameters as never, {
+    intentId: "intent-1",
+    status: "succeeded",
+    summary: "Baseline is ready",
+    evidence: [{ id: "trace", source: "harness_trace", uri: "file:///trace.json" }],
+    outputs: { baselineEvidenceSufficient: true },
+  }), true);
+  assert.equal(Check(activeTool.parameters as never, {
+    intentId: "intent-1",
+    status: "succeeded",
+    summary: "Guessed the contract",
+    evidence: [{ id: "trace", source: "harness_trace", uri: "file:///trace.json" }],
+    outputs: { baseline_ready: "yes" },
+  }), false);
+  assert.equal(Check(activeTool.parameters as never, {
+    intentId: "intent-1",
+    status: "succeeded",
+    summary: "Forgot the output",
+    evidence: [{ id: "trace", source: "harness_trace", uri: "file:///trace.json" }],
+  }), false);
+  assert.equal(Check(activeTool.parameters as never, {
+    intentId: "intent-1",
+    status: "succeeded",
+    summary: "Forgot the proof",
+    evidence: [],
+    outputs: { baselineEvidenceSufficient: true },
+  }), false);
 });
 
 test("completion requires evidence for success and persists the result", async () => {

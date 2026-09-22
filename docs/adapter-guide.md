@@ -90,6 +90,18 @@ await coordinator.acceptResult(result);
 
 The coordinator validates the active intent, version, evidence, intent-specific output, frontier conformance, mutation authorization, and lifecycle transition. Adapters must not duplicate this logic.
 
+### Present the canonical result schema
+
+Import `completionToolSchemaFor(intent.kind)` from `@openmerit-v2/protocol` and present it through the harness's strongest structured-output mechanism. Do not recreate result schemas inside an adapter. A harness that supports changing tool definitions should specialize the completion tool whenever an intent becomes active; other harnesses may expose intent-specific tools or perform adapter-side validation.
+
+Declare the behavior in `HarnessDescriptor.structuredOutput`:
+
+- `schemaDialect` identifies the canonical OpenMerit JSON Schema dialect;
+- `presentation` states whether the adapter uses a dynamic tool, a static union, or adapter validation;
+- `enforcement` states whether validation occurs at the provider and harness, harness only, or adapter only.
+
+Schema validation catches malformed structure. The coordinator still owns semantic checks such as authorized candidate identity, evidence sufficiency, lifecycle consistency, and Pareto conformance.
+
 ## Reporting normal work and catalogue changes
 
 After a real product task completes:
@@ -135,4 +147,3 @@ An adapter is ready when it:
 8. proves the requested side effect, not merely a generated description.
 
 The fake non-Pi adapter in `packages/core/test/adapter-conformance.test.ts` is the executable reference.
-

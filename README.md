@@ -24,6 +24,7 @@ It distinguishes:
 - Baseline-first evidence collection followed by budgeted candidate discovery and controlled challenger trials.
 - A normative, uncertainty-aware Pareto definition owned by OpenMerit.
 - Harness-calculated frontier results independently checked by OpenMerit's conformance verifier.
+- Versioned result schemas for all ten intents, reusable across harness adapters and exposed dynamically by Pi.
 - Supervised graduation: early swaps require approval, every swap requires verification, and regressions can trigger rollback.
 - Project-local snapshots, append-only audit events, and evidence manifests under `.openmerit/`.
 - Model-catalog change detection that can nudge the harness to reassess a mature baseline.
@@ -48,7 +49,7 @@ Requirements:
 - a Pi-supported model provider configured in Pi
 
 ```sh
-git clone https://github.com/gksoriginals/openmerit.git
+git clone https://github.com/laz-aslam/openmerit.git
 cd openmerit
 npm install
 ./node_modules/.bin/pi -e ./packages/pi/src/index.ts

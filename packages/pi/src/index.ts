@@ -12,6 +12,8 @@ import {
   type HarnessAdapter,
 } from "@openmerit-v2/core";
 import {
+  completionToolSchemaFor,
+  OPENMERIT_SCHEMA_DIALECT,
   PROTOCOL_VERSION,
   type AnyIntentResult,
   type EvidenceReference,
@@ -45,6 +47,11 @@ export const PI_HARNESS_DESCRIPTOR: HarnessDescriptor = {
     "rollback",
   ],
   executionModes: ["interactive", "non_interactive"],
+  structuredOutput: {
+    schemaDialect: OPENMERIT_SCHEMA_DIALECT,
+    presentation: "dynamic_tool",
+    enforcement: "harness",
+  },
 };
 
 export interface OpenMeritUiState {
@@ -168,12 +175,14 @@ async function dispatchIntent(
   state: OpenMeritUiState,
   store: ProjectStore,
   kind: IntentKind,
+  prepareCompletionTool: (kind: IntentKind) => void,
 ): Promise<void> {
   if (state.activeIntent) {
     ctx.ui.notify(`openmerit: work is already active (${state.activeIntent})`, "warning");
     return;
   }
 
+  prepareCompletionTool(kind);
   const issued = await new OpenMeritCoordinator(store, piHarnessAdapter(pi)).issue(kind);
   const { intent } = issued;
   state.activeIntent = intent.id;
@@ -195,12 +204,111 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
   let store: ProjectStore | undefined;
   let suppressNextSettledObservation = false;
 
+  const registerCompletionTool = (kind?: IntentKind): void => {
+    const parameters = kind
+      ? completionToolSchemaFor(kind)
+      : Type.Object({
+          intentId: Type.String(),
+          status: StringEnum(["failed", "cancelled"] as const),
+          summary: Type.String(),
+          evidence: Type.Array(Type.Object({
+            id: Type.String(),
+            source: StringEnum([
+              "harness_trace", "evaluation_artifact", "observability_record", "external_source", "user_feedback",
+            ] as const),
+            uri: Type.String(),
+            mediaType: Type.Optional(Type.String()),
+            digest: Type.Optional(Type.String()),
+          })),
+          errorCode: Type.Optional(Type.String()),
+          errorMessage: Type.Optional(Type.String()),
+          retryable: Type.Optional(Type.Boolean()),
+        }, { additionalProperties: false });
+
+    pi.registerTool({
+      name: "openmerit_complete_intent",
+      label: "Complete OpenMerit Intent",
+      description: kind
+        ? `Complete the active ${kind} OpenMerit intent with its required structured output and durable evidence references.`
+        : "Complete the active OpenMerit intent. A successful result is available only after an intent-specific schema is activated.",
+      promptSnippet: "Complete the active OpenMerit intent with structured evidence",
+      promptGuidelines: [
+        "Call openmerit_complete_intent exactly once after completing OpenMerit-requested work.",
+        "Never use openmerit_complete_intent to claim success without verified evidence references.",
+      ],
+      parameters,
+      constrainedSampling: { type: "json_schema", strict: "prefer" },
+      async execute(_toolCallId, input: CompletionInput, _signal, _onUpdate, ctx) {
+        if (!state.activeIntent) throw new Error("No OpenMerit intent is active.");
+        if (input.intentId !== state.activeIntent) {
+          throw new Error(`Intent ${input.intentId} is not active.`);
+        }
+        if (input.status === "succeeded" && input.evidence.length === 0) {
+          throw new Error("A successful OpenMerit intent requires at least one evidence reference.");
+        }
+
+        store ??= new ProjectStore(ctx.cwd);
+        const outputs = input.outputs ?? {};
+
+        const result = {
+          protocolVersion: PROTOCOL_VERSION,
+          intentId: input.intentId,
+          status: input.status,
+          completedAt: new Date().toISOString(),
+          summary: input.summary,
+          evidence: input.evidence,
+          outputs,
+          ...(input.status === "failed"
+            ? {
+                error: {
+                  code: input.errorCode ?? "harness_work_failed",
+                  message: input.errorMessage ?? input.summary,
+                  retryable: input.retryable ?? false,
+                },
+              }
+            : {}),
+        } as unknown as AnyIntentResult;
+
+        const accepted = await new OpenMeritCoordinator(store, piHarnessAdapter(pi)).acceptResult(result);
+        pi.appendEntry(RESULT_ENTRY_TYPE, { result } satisfies StoredResultEntry);
+        suppressNextSettledObservation = true;
+        const { intentKind, state: nextState } = accepted;
+        const stage = nextState.cycle.stage;
+        state.activeIntent = null;
+        state.lifecycleStage = stage;
+        registerCompletionTool();
+        if (input.status === "succeeded" && intentKind === "establish_evals") {
+          state.taskProfile = "configured";
+          state.metricReadiness = "assessed";
+          state.evaluationReadiness = "assessed";
+        }
+
+        if (input.status === "succeeded" && !state.proactiveNudgesPaused) {
+          const decision = nextImprovementAction(nextState.cycle);
+          if (decision.action === "issue_intent") {
+            await dispatchIntent(pi, ctx, state, store, decision.intentKind, registerCompletionTool);
+          } else if (decision.action === "await_user") {
+            ctx.ui.notify(`openmerit: ${decision.reason}`, "warning");
+          }
+        }
+
+        return {
+          content: [{ type: "text", text: `Recorded OpenMerit intent ${input.intentId} as ${input.status}.` }],
+          details: { result },
+        };
+      },
+    });
+  };
+
+  registerCompletionTool();
+
   pi.on("session_start", async (_event, ctx) => {
     store = new ProjectStore(ctx.cwd);
     let projectState = await store.readState();
     if (projectState) {
       state.lifecycleStage = projectState.cycle.stage;
       state.activeIntent = projectState.activeIntent?.id ?? null;
+      if (projectState.activeIntent) registerCompletionTool(projectState.activeIntent.kind);
       state.taskProfile = projectState.cycle.taskProfileId ? "configured" : "not_configured";
       const fingerprint = modelCatalogFingerprint(ctx);
       const catalog = await new OpenMeritCoordinator(store, piHarnessAdapter(pi))
@@ -208,11 +316,11 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
       projectState = catalog.state;
       if (catalog.changed) {
         ctx.ui.notify("openmerit: the available model catalogue changed; reassessment is due", "info");
-        if (catalog.reassessmentDue) await dispatchIntent(pi, ctx, state, store, "discover_candidates");
+        if (catalog.reassessmentDue) await dispatchIntent(pi, ctx, state, store, "discover_candidates", registerCompletionTool);
       }
     } else if (ctx.hasUI && !state.proactiveNudgesPaused) {
       ctx.ui.notify("openmerit: no frontier profile found; asking Pi to establish evals and observability", "info");
-      await dispatchIntent(pi, ctx, state, store, "establish_evals");
+      await dispatchIntent(pi, ctx, state, store, "establish_evals", registerCompletionTool);
     }
     restoreState(ctx, state);
   });
@@ -229,98 +337,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
       modelId: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "unknown",
       contextTokens: ctx.getContextUsage()?.tokens ?? null,
     });
-    if (observation.assessmentDue) await dispatchIntent(pi, ctx, state, store, "run_assessment");
-  });
-
-  pi.registerTool({
-    name: "openmerit_complete_intent",
-    label: "Complete OpenMerit Intent",
-    description: "Complete the active OpenMerit intent with structured outputs and durable evidence references.",
-    promptSnippet: "Complete the active OpenMerit intent with structured evidence",
-    promptGuidelines: [
-      "Call openmerit_complete_intent exactly once after completing OpenMerit-requested work.",
-      "Never use openmerit_complete_intent to claim success without verified evidence references.",
-    ],
-    parameters: Type.Object({
-      intentId: Type.String(),
-      status: StringEnum(["succeeded", "failed", "cancelled"] as const),
-      summary: Type.String(),
-      evidence: Type.Array(Type.Object({
-        id: Type.String(),
-        source: StringEnum([
-          "harness_trace",
-          "evaluation_artifact",
-          "observability_record",
-          "external_source",
-          "user_feedback",
-        ] as const),
-        uri: Type.String(),
-        mediaType: Type.Optional(Type.String()),
-        digest: Type.Optional(Type.String()),
-      })),
-      outputs: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
-      errorCode: Type.Optional(Type.String()),
-      errorMessage: Type.Optional(Type.String()),
-      retryable: Type.Optional(Type.Boolean()),
-    }),
-    async execute(_toolCallId, input: CompletionInput, _signal, _onUpdate, ctx) {
-      if (!state.activeIntent) throw new Error("No OpenMerit intent is active.");
-      if (input.intentId !== state.activeIntent) {
-        throw new Error(`Intent ${input.intentId} is not active.`);
-      }
-      if (input.status === "succeeded" && input.evidence.length === 0) {
-        throw new Error("A successful OpenMerit intent requires at least one evidence reference.");
-      }
-
-      store ??= new ProjectStore(ctx.cwd);
-      const outputs = input.outputs ?? {};
-
-      const result = {
-        protocolVersion: PROTOCOL_VERSION,
-        intentId: input.intentId,
-        status: input.status,
-        completedAt: new Date().toISOString(),
-        summary: input.summary,
-        evidence: input.evidence,
-        outputs,
-        ...(input.status === "failed"
-          ? {
-              error: {
-                code: input.errorCode ?? "harness_work_failed",
-                message: input.errorMessage ?? input.summary,
-                retryable: input.retryable ?? false,
-              },
-            }
-          : {}),
-      } as unknown as AnyIntentResult;
-
-      const accepted = await new OpenMeritCoordinator(store, piHarnessAdapter(pi)).acceptResult(result);
-      pi.appendEntry(RESULT_ENTRY_TYPE, { result } satisfies StoredResultEntry);
-      suppressNextSettledObservation = true;
-      const { intentKind, state: nextState } = accepted;
-      const stage = nextState.cycle.stage;
-      state.activeIntent = null;
-      state.lifecycleStage = stage;
-      if (input.status === "succeeded" && intentKind === "establish_evals") {
-        state.taskProfile = "configured";
-        state.metricReadiness = "assessed";
-        state.evaluationReadiness = "assessed";
-      }
-
-      if (input.status === "succeeded" && !state.proactiveNudgesPaused) {
-        const decision = nextImprovementAction(nextState.cycle);
-        if (decision.action === "issue_intent") {
-          await dispatchIntent(pi, ctx, state, store, decision.intentKind);
-        } else if (decision.action === "await_user") {
-          ctx.ui.notify(`openmerit: ${decision.reason}`, "warning");
-        }
-      }
-
-      return {
-        content: [{ type: "text", text: `Recorded OpenMerit intent ${input.intentId} as ${input.status}.` }],
-        details: { result },
-      };
-    },
+    if (observation.assessmentDue) await dispatchIntent(pi, ctx, state, store, "run_assessment", registerCompletionTool);
   });
 
   pi.registerCommand("openmerit", {
@@ -334,15 +351,15 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
           return;
         case "setup":
           store ??= new ProjectStore(ctx.cwd);
-          await dispatchIntent(pi, ctx, state, store, "establish_evals");
+          await dispatchIntent(pi, ctx, state, store, "establish_evals", registerCompletionTool);
           return;
         case "assess":
           store ??= new ProjectStore(ctx.cwd);
-          await dispatchIntent(pi, ctx, state, store, "run_assessment");
+          await dispatchIntent(pi, ctx, state, store, "run_assessment", registerCompletionTool);
           return;
         case "frontier":
           store ??= new ProjectStore(ctx.cwd);
-          await dispatchIntent(pi, ctx, state, store, "calculate_frontier");
+          await dispatchIntent(pi, ctx, state, store, "calculate_frontier", registerCompletionTool);
           return;
         case "approve": {
           store ??= new ProjectStore(ctx.cwd);
@@ -366,7 +383,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
             data: { stage: "swap_approved", candidateId: projectState.cycle.proposedCandidateId },
           });
           state.lifecycleStage = "swap_approved";
-          await dispatchIntent(pi, ctx, state, store, "apply_model_swap");
+          await dispatchIntent(pi, ctx, state, store, "apply_model_swap", registerCompletionTool);
           return;
         }
         case "pause":

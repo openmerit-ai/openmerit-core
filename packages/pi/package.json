@@ -11,6 +11,11 @@
       "./src/index.ts"
     ]
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/laz-aslam/openmerit.git",
+    "directory": "packages/pi"
+  },
   "dependencies": {
     "@earendil-works/pi-ai": "0.87.0",
     "@openmerit-v2/core": "0.1.0",

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { HarnessDescriptor, IntentResult } from "@openmerit-v2/protocol";
+import { OPENMERIT_SCHEMA_DIALECT, type HarnessDescriptor, type IntentResult } from "@openmerit-v2/protocol";
 import {
   createOpenMeritIntent,
   dispatchToHarness,
@@ -34,6 +34,11 @@ const descriptor: HarnessDescriptor = {
     "rollback",
   ],
   executionModes: ["remote"],
+  structuredOutput: {
+    schemaDialect: OPENMERIT_SCHEMA_DIALECT,
+    presentation: "adapter_validation",
+    enforcement: "adapter",
+  },
 };
 
 test("a non-Pi harness can receive canonical OpenMerit intents", async () => {
@@ -119,6 +124,27 @@ test("shared core validates and interprets setup results from any harness", () =
   assert.equal(interpreted.nextStage, "collecting_baseline");
   assert.equal(interpreted.config?.activeTaskProfileId, "profile-portable");
   assert.equal(interpreted.cyclePatch?.taskProfileId, "profile-portable");
+});
+
+test("shared core rejects structurally invalid successful outputs from any harness", () => {
+  const intent = createOpenMeritIntent("run_assessment", { id: "intent-invalid-output" });
+  const interpreted = interpretIntentResult(
+    intent,
+    {
+      protocolVersion: "0.1",
+      intentId: intent.id,
+      status: "succeeded",
+      completedAt: "2026-09-22T00:01:00.000Z",
+      summary: "Guessed the result shape",
+      evidence: [{ id: "trace", source: "harness_trace", uri: "artifact://fake/trace" }],
+      outputs: { baseline_ready: "yes" },
+    } as unknown as IntentResult<"run_assessment">,
+    { id: "cycle", stage: "collecting_baseline", verifiedSwapCount: 0, baselineEvidenceSufficient: false },
+    { schemaVersion: 1, taskProfiles: [] },
+  );
+
+  assert.equal(interpreted.valid, false);
+  assert.match(interpreted.errors.join("; "), /baselineEvidenceSufficient/);
 });
 
 test("the coordinator runs a durable job through a non-Pi harness", async () => {
