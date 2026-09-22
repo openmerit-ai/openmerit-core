@@ -3,7 +3,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
+import { makeStrictJsonSchema } from "@earendil-works/pi-ai/api/constrained-sampling";
 import { Check } from "typebox/value";
+import {
+  completionToolSchemaFor,
+  INTENT_OUTPUT_SCHEMAS,
+  type IntentKind,
+} from "@openmerit-v2/protocol";
 
 import type {
   ExtensionAPI,
@@ -187,7 +193,7 @@ test("setup dispatches a private typed intent", async () => {
   assert.deepEqual(messages[0]?.options, { deliverAs: "followUp", triggerTurn: true });
 });
 
-test("Pi replaces the completion tool with the active intent schema", async () => {
+test("Pi replaces the completion tool with a strict-compatible active intent schema", async () => {
   rmSync(join(testProjectRoot, ".openmerit"), { recursive: true, force: true });
   const notifications: Notification[] = [];
   const { handler, completionTools } = loadCommand();
@@ -197,6 +203,7 @@ test("Pi replaces the completion tool with the active intent schema", async () =
   assert.equal(completionTools.length, 2);
   const activeTool = completionTools.at(-1);
   assert.ok(activeTool?.parameters);
+  assert.doesNotThrow(() => makeStrictJsonSchema(activeTool.parameters as never));
   assert.equal(Check(activeTool.parameters as never, {
     intentId: "intent-1",
     status: "succeeded",
@@ -216,22 +223,30 @@ test("Pi replaces the completion tool with the active intent schema", async () =
     status: "succeeded",
     summary: "Forgot the output",
     evidence: [{ id: "trace", source: "harness_trace", uri: "file:///trace.json" }],
-  }), false);
+  }), true);
   assert.equal(Check(activeTool.parameters as never, {
     intentId: "intent-1",
     status: "succeeded",
     summary: "Forgot the proof",
     evidence: [],
     outputs: { baselineEvidenceSufficient: true },
-  }), false);
+  }), true);
+});
+
+test("every intent completion schema supports Pi strict sampling", () => {
+  for (const kind of Object.keys(INTENT_OUTPUT_SCHEMAS) as IntentKind[]) {
+    assert.doesNotThrow(() => makeStrictJsonSchema(completionToolSchemaFor(kind)), kind);
+  }
 });
 
 test("completion requires evidence for success and persists the result", async () => {
   rmSync(join(testProjectRoot, ".openmerit"), { recursive: true, force: true });
   const notifications: Notification[] = [];
-  const { handler, completionTool, entries } = loadCommand();
+  const { handler, completionTools, entries } = loadCommand();
   await handler("setup", commandContext(notifications));
   const intent = (entries[0]?.data as { intent: { id: string } }).intent;
+  const completionTool = completionTools.at(-1);
+  assert.ok(completionTool);
 
   await assert.rejects(
     completionTool.execute("tool-1", {
@@ -243,7 +258,21 @@ test("completion requires evidence for success and persists the result", async (
     /requires at least one evidence reference/,
   );
 
-  await completionTool.execute("tool-2", {
+  await assert.rejects(
+    completionTool.execute("tool-2", {
+      intentId: intent.id,
+      status: "succeeded",
+      summary: "Done without structured outputs",
+      evidence: [{
+        id: "eval-1",
+        source: "evaluation_artifact",
+        uri: "file:///workspace/evals/task.test.ts",
+      }],
+    }, undefined, undefined, commandContext(notifications)),
+    /result outputs/,
+  );
+
+  await completionTool.execute("tool-3", {
     intentId: intent.id,
     status: "succeeded",
     summary: "Eval created and verified",
