@@ -12,7 +12,7 @@ OpenMerit does not require or accept an LLM provider credential. Provider access
 ## Install from source
 
 ```sh
-git clone https://github.com/gksoriginals/openmerit.git
+git clone https://github.com/laz-aslam/openmerit.git
 cd openmerit
 npm install
 ```

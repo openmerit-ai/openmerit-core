@@ -20,6 +20,8 @@ The extension persists each intent as a custom Pi session entry, sends private e
 
 Pi must finish by calling `openmerit_complete_intent` exactly once. Success without evidence is rejected. Setup, assessment, and frontier intents receive additional structured-output checks.
 
+The extension replaces the completion tool definition whenever an intent becomes active. Its `outputs` property therefore exposes the canonical schema for that exact intent instead of untyped JSON. Pi validates the arguments before execution and requests provider-side JSON Schema constrained sampling when supported. OpenMerit validates the canonical schema and semantic rules again when accepting the result.
+
 ## Model changes
 
 The extension does not use Pi's model setter as a substitute for harness work. After policy authorization, it sends a bounded `apply_model_swap` intent. Pi performs the change and returns configuration proof.

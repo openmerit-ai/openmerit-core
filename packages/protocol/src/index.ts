@@ -1,5 +1,23 @@
 export const PROTOCOL_VERSION = "0.1" as const;
 
+export {
+  CandidateAssessmentSchema,
+  CandidateDescriptorSchema,
+  completionToolSchemaFor,
+  EvidenceReferenceSchema,
+  FrontierRecommendationSchema,
+  FrontierSnapshotSchema,
+  INTENT_OUTPUT_SCHEMAS,
+  intentOutputSchemaFor,
+  MetricObjectiveSchema,
+  MetricRecordSchema,
+  OPENMERIT_RESULT_SCHEMA_VERSION,
+  OPENMERIT_SCHEMA_DIALECT,
+  SupervisedGraduationPolicySchema,
+  TaskProfileSchema,
+  validateIntentOutputSchema,
+} from "./schemas.ts";
+
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue =
   | JsonPrimitive
@@ -37,6 +55,11 @@ export interface HarnessDescriptor {
   readonly protocolVersions: readonly string[];
   readonly capabilities: readonly HarnessCapability[];
   readonly executionModes: readonly ("interactive" | "non_interactive" | "remote")[];
+  readonly structuredOutput: {
+    readonly schemaDialect: typeof import("./schemas.ts").OPENMERIT_SCHEMA_DIALECT;
+    readonly presentation: "dynamic_tool" | "static_tool_union" | "adapter_validation";
+    readonly enforcement: "provider_and_harness" | "harness" | "adapter";
+  };
 }
 
 export interface HarnessDispatchReceipt {

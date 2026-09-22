@@ -18,7 +18,13 @@ import type {
   JsonValue,
   SupervisedGraduationPolicy,
 } from "@openmerit-v2/protocol";
-import { METRIC_CATALOG, PROTOCOL_VERSION, REQUIRED_CAPABILITIES } from "@openmerit-v2/protocol";
+import {
+  METRIC_CATALOG,
+  OPENMERIT_SCHEMA_DIALECT,
+  PROTOCOL_VERSION,
+  REQUIRED_CAPABILITIES,
+  validateIntentOutputSchema,
+} from "@openmerit-v2/protocol";
 import type { OpenMeritStore } from "./store.ts";
 
 export { OPENMERIT_DIRECTORY, ProjectStore, type OpenMeritStore } from "./store.ts";
@@ -103,6 +109,11 @@ export function validateHarnessDescriptor(descriptor: HarnessDescriptor): Verifi
     errors.push("harness capabilities contain duplicates");
   }
   if (descriptor.executionModes.length === 0) errors.push("at least one execution mode is required");
+  if (!descriptor.structuredOutput) {
+    errors.push("harness must declare structured-output behavior");
+  } else if (descriptor.structuredOutput.schemaDialect !== OPENMERIT_SCHEMA_DIALECT) {
+    errors.push(`harness does not support OpenMerit schema dialect ${OPENMERIT_SCHEMA_DIALECT}`);
+  }
   return { valid: errors.length === 0, errors };
 }
 
@@ -222,6 +233,10 @@ export function interpretIntentResult(
   }
 
   const output: unknown = result.outputs;
+  errors.push(...validateIntentOutputSchema(intent.kind, output).map((error) => `result outputs ${error}`));
+  if (errors.length) {
+    return { valid: false, errors, nextStage: completedStage(intent.kind, false) };
+  }
   let nextStage = completedStage(intent.kind, true);
   let nextConfig: OpenMeritProjectConfig | undefined;
   let cyclePatch: Partial<ImprovementCycleState> | undefined;

@@ -13,6 +13,12 @@ The metric contract includes the complete initial catalogue, normalized metric r
 
 `HarnessDescriptor` and `HarnessCapability` support capability negotiation. `IntentOutputMap` defines the required output for every intent kind so adapters do not rely on Pi-specific undocumented JSON.
 
+## Runtime result schemas
+
+`INTENT_OUTPUT_SCHEMAS` is the versioned, harness-neutral runtime contract for all ten intent outputs. `intentOutputSchemaFor(kind)` returns the canonical schema for an adapter, while `completionToolSchemaFor(kind)` composes it into the standard completion-tool envelope. The schemas use a conservative JSON Schema-compatible subset and are checked against `IntentOutputMap` at compile time.
+
+Adapters should present the active intent's schema through their strongest available structured-output mechanism. They must report that mechanism in `HarnessDescriptor.structuredOutput`. OpenMerit validates the same canonical schema again when accepting a successful result; harness validation does not replace authorization, evidence, lifecycle, or Pareto-conformance checks.
+
 ## Initial intent kinds
 
 - `establish_evals`
