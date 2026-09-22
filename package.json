@@ -1,19 +1,68 @@
 {
-  "name": "openmerit-v2",
-  "version": "0.0.0",
-  "private": true,
+  "name": "openmerit",
+  "version": "0.1.5",
+  "description": "Evidence-driven model decisions for coding harnesses.",
   "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package", "pi-extension", "model-routing", "evaluation", "pareto-frontier"],
+  "files": ["dist/", "docs/", "CHANGELOG.md", "LICENSE", "README.md"],
+  "exports": {
+    ".": {
+      "types": "./dist/core/src/index.d.ts",
+      "default": "./dist/core/src/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/src/index.d.ts",
+      "default": "./dist/core/src/index.js"
+    },
+    "./protocol": {
+      "types": "./dist/protocol/src/index.d.ts",
+      "default": "./dist/protocol/src/index.js"
+    },
+    "./pi": {
+      "types": "./dist/pi/src/index.d.ts",
+      "default": "./dist/pi/src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "pi": {
+    "extensions": ["./dist/pi/src/index.js"]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/laz-aslam/openmerit.git"
+  },
+  "homepage": "https://github.com/laz-aslam/openmerit#readme",
+  "bugs": {
+    "url": "https://github.com/laz-aslam/openmerit/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "workspaces": [
     "packages/*"
   ],
   "engines": {
-    "node": ">=22.18.0"
+    "node": ">=22.19.0"
   },
   "scripts": {
     "check": "npm run check --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "tsc -p tsconfig.json",
-    "verify": "npm test && npm run check && npm run typecheck && git diff --check"
+    "build": "node scripts/build.mjs",
+    "prepare": "npm run build",
+    "verify": "npm test && npm run check && npm run typecheck && npm run build && git diff --check",
+    "prepublishOnly": "npm run verify"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.87.0",
+    "typebox": "1.3.27"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.87.0 <0.88.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": { "optional": true }
   },
   "devDependencies": {
     "@types/node": "^22.18.6",

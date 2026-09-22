@@ -7,7 +7,7 @@ import type {
   MetricId,
   MetricRecord,
   TaskProfile,
-} from "@openmerit-v2/protocol";
+} from "@openmerit/protocol";
 import { verifyFrontierSnapshot } from "../src/index.ts";
 
 const profile: TaskProfile = {

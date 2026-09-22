@@ -24,14 +24,14 @@ import type {
   ObservabilityCoverage,
   JsonValue,
   SupervisedGraduationPolicy,
-} from "@openmerit-v2/protocol";
+} from "../../protocol/src/index.ts";
 import {
   METRIC_CATALOG,
   OPENMERIT_SCHEMA_DIALECT,
   PROTOCOL_VERSION,
   REQUIRED_CAPABILITIES,
   validateIntentOutputSchema,
-} from "@openmerit-v2/protocol";
+} from "../../protocol/src/index.ts";
 import type { OpenMeritStore } from "./store.ts";
 
 export {

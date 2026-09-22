@@ -6,7 +6,7 @@ import type {
   OpenMeritAuditEvent,
   OpenMeritProjectConfig,
   OpenMeritProjectState,
-} from "@openmerit-v2/protocol";
+} from "../../protocol/src/index.ts";
 
 export const OPENMERIT_DIRECTORY = ".openmerit";
 

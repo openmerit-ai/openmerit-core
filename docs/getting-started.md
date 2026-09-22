@@ -2,19 +2,28 @@
 
 ## Prerequisites
 
-- Node.js 22.18 or newer.
+- Node.js 22.19 or newer.
 - npm.
 - Pi 0.87-compatible provider authentication.
 - A product repository in which Pi can create and verify evaluation and observability artifacts.
 
 OpenMerit does not require or accept an LLM provider credential. Provider access belongs to the coding harness.
 
+## Install from npm
+
+```sh
+pi install npm:openmerit
+pi list
+```
+
+Run `/openmerit doctor` inside Pi to confirm that the extension is available.
+
 ## Install from source
 
 ```sh
 git clone https://github.com/laz-aslam/openmerit.git
 cd openmerit
-npm install
+npm ci
 ```
 
 Start Pi with the extension:

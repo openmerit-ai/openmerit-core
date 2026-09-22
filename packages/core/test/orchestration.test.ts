@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ImprovementCycleState, SupervisedGraduationPolicy } from "@openmerit-v2/protocol";
+import type { ImprovementCycleState, SupervisedGraduationPolicy } from "@openmerit/protocol";
 import { nextImprovementAction } from "../src/index.ts";
 
 const policy: SupervisedGraduationPolicy = {

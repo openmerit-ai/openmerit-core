@@ -26,13 +26,13 @@ An automatic OpenMerit action means automatic issuance of an approved intent. Op
 
 ## Packages
 
-### `@openmerit-v2/protocol`
+### `openmerit/protocol`
 
 Defines the JSON-safe boundary: durable intents, evidence references, metrics, task profiles, candidate assessments, frontier snapshots, budgets, policies, state, and audit events.
 
 It also owns the versioned runtime schema registry for all intent results. Harness adapters consume these schemas rather than defining their own result shapes, report their structured-output capabilities, and may present the active schema using harness-native tools or adapter validation.
 
-### `@openmerit-v2/core`
+### `openmerit/core`
 
 Contains deterministic behavior: choosing the next lifecycle intent, persisting state, checking harness-produced frontiers against the normative definition, and enforcing confirmation or rollback policy. The verifier rejects invalid harness results; it is not a model-selection engine.
 
@@ -40,7 +40,7 @@ Contains deterministic behavior: choosing the next lifecycle intent, persisting 
 
 The coordinator also accepts idempotent automation signals and evaluates the user-confirmed `AutomationCheckPolicy`. `buildAutomationPlan` tells an adapter which signals and wakeups are required and reports unsupported persistent scheduling honestly. OpenMerit never installs a scheduler or creates a paid cloud worker itself.
 
-### `@openmerit-v2/pi`
+### `openmerit/pi`
 
 Exposes the command surface, supplies private typed intent context, triggers Pi, accepts one structured completion for the active intent, records evidence, advances the lifecycle, and detects model-catalog changes.
 

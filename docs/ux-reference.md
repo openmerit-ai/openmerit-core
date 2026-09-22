@@ -1,6 +1,6 @@
 # Pi UX behavioral reference
 
-This document records only user-visible behaviors observed in the original OpenMerit. It is not an implementation specification, and no source code, storage schema, internal contract, or architecture is carried into v2.
+This document records user-visible behaviors from the earlier OpenMerit implementation. It is not an implementation specification; the current implementation carries forward only the behaviors listed below, rather than its source code, storage schema, or internal contracts.
 
 ## Behaviors worth preserving
 
@@ -18,9 +18,9 @@ This document records only user-visible behaviors observed in the original OpenM
 
 The command shell can carry a proposal through an authorized model change, but only after baseline evidence, budgeted challenger trials, a harness-calculated and OpenMerit-verified frontier, policy approval, and post-swap verification.
 
-## Fresh v2 direction
+## Current direction
 
-The v2 command surface should be about evidence readiness rather than model switching. Its status view should answer:
+The command surface centers on evidence readiness. Its status view should answer:
 
 1. What task profile is active?
 2. Which required metrics are observable?

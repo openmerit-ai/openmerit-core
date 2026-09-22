@@ -6,6 +6,9 @@ The adapter targets Pi 0.87 and declares `>=0.87.0 <0.88.0`. Development uses 0.
 
 ## Loading
 
+Install the published package with `pi install npm:openmerit`. For development
+from a checkout, load the source extension with:
+
 ```sh
 ./node_modules/.bin/pi -e ./packages/pi/src/index.ts
 ```

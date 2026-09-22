@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { OPENMERIT_SCHEMA_DIALECT, type HarnessDescriptor, type IntentResult } from "@openmerit-v2/protocol";
+import { OPENMERIT_SCHEMA_DIALECT, type HarnessDescriptor, type IntentResult } from "@openmerit/protocol";
 import {
   createOpenMeritIntent,
   dispatchToHarness,

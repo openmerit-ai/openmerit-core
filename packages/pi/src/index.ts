@@ -10,7 +10,7 @@ import {
   OpenMeritCoordinator,
   ProjectStore,
   type HarnessAdapter,
-} from "@openmerit-v2/core";
+} from "../../core/src/index.ts";
 import {
   completionToolSchemaFor,
   OPENMERIT_SCHEMA_DIALECT,
@@ -25,12 +25,12 @@ import {
   type MetricRecord,
   MetricRecordSchema,
   type OpenMeritIntent,
-} from "@openmerit-v2/protocol";
+} from "../../protocol/src/index.ts";
 import { Type } from "typebox";
 
-const INTENT_ENTRY_TYPE = "openmerit-v2.intent";
-const RESULT_ENTRY_TYPE = "openmerit-v2.result";
-const INTENT_MESSAGE_TYPE = "openmerit-v2.intent-context";
+const INTENT_ENTRY_TYPE = "openmerit.intent";
+const RESULT_ENTRY_TYPE = "openmerit.result";
+const INTENT_MESSAGE_TYPE = "openmerit.intent-context";
 
 export const PI_HARNESS_DESCRIPTOR: HarnessDescriptor = {
   id: "pi",
