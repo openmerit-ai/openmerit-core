@@ -48,6 +48,7 @@ function loadCommand() {
     ) => Promise<unknown>;
   } | undefined;
   const completionTools: Array<NonNullable<typeof completionTool>> = [];
+  const tools = new Map<string, NonNullable<typeof completionTool>>();
 
   const pi = {
     registerCommand(name: string, definition: { handler: typeof handler }) {
@@ -58,8 +59,13 @@ function loadCommand() {
       eventHandlers.set(event, callback);
     },
     registerTool(definition: typeof completionTool) {
-      completionTool = definition;
-      if (definition) completionTools.push(definition);
+      if (!definition) return;
+      const named = definition as typeof definition & { name: string };
+      tools.set(named.name, named);
+      if (named.name === "openmerit_complete_intent") {
+        completionTool = named;
+        completionTools.push(named);
+      }
     },
     appendEntry(customType: string, data: unknown) {
       entries.push({ customType, data });
@@ -72,7 +78,7 @@ function loadCommand() {
   openMeritExtension(pi);
   assert.ok(handler);
   assert.ok(completionTool);
-  return { handler, completionTool, completionTools, entries, messages, eventHandlers };
+  return { handler, completionTool, completionTools, tools, entries, messages, eventHandlers };
 }
 
 interface CompletionInputForTest {
@@ -105,6 +111,14 @@ function confirmedSetupOutputs() {
       confirmationRequiredUntilVerifiedSwaps: 3,
       requirePostSwapVerification: true,
       rollbackOnRegression: true,
+      checkPolicy: {
+        baselineAssessment: { afterCompletedTasks: 3 },
+        frontierReassessment: { afterCompletedTasks: 100, afterElapsedSeconds: 2592000, onModelCatalogChange: true },
+        regressionCheck: { afterCompletedTasks: 25, thresholds: [{ metricId: "task_success", relativeChangeAtLeast: 0.1 }] },
+        postSwapVerification: { afterCompletedTasks: 20, afterElapsedSeconds: 86400 },
+        cooldownSeconds: 3600,
+        execution: { mode: "active_session_only", infrastructureChangesAllowed: false },
+      },
     },
   };
 }
@@ -132,6 +146,7 @@ function sessionContext(projectRoot: string, notifications: Notification[]): Ext
     },
     sessionManager: { getEntries: () => [] },
     modelRegistry: { getAvailable: () => [] },
+    getContextUsage: () => ({ tokens: 100 }),
   } as unknown as ExtensionContext;
 }
 
@@ -287,7 +302,61 @@ test("completion requires evidence for success and persists the result", async (
   assert.equal(entries[1]?.customType, "openmerit-v2.result");
 });
 
+test("Pi turns completed work into durable signals and dispatches a due assessment", async () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-v2-signals-"));
+  const notifications: Notification[] = [];
+  const { handler, completionTool, entries, eventHandlers } = loadCommand();
+  const ctx = sessionContext(projectRoot, notifications);
+  const settled = eventHandlers.get("agent_settled");
+  assert.ok(settled);
+
+  try {
+    await handler("setup", { ...commandContext(notifications), cwd: projectRoot } as ExtensionCommandContext);
+    const intent = (entries[0]?.data as { intent: { id: string } }).intent;
+    await completionTool.execute("tool-setup", {
+      intentId: intent.id,
+      status: "succeeded",
+      summary: "Configured evals, observability, and automation policy",
+      evidence: [{ id: "eval", source: "evaluation_artifact", uri: "file:///eval.json" }],
+      outputs: confirmedSetupOutputs(),
+    }, undefined, undefined, ctx as unknown as ExtensionCommandContext);
+
+    await settled({ type: "agent_settled" }, ctx); // completion turn is deliberately suppressed
+    await settled({ type: "agent_settled" }, ctx);
+    await settled({ type: "agent_settled" }, ctx);
+    await settled({ type: "agent_settled" }, ctx);
+
+    const intentKinds = entries
+      .filter((entry) => entry.customType === "openmerit-v2.intent")
+      .map((entry) => (entry.data as { intent: { kind: string } }).intent.kind);
+    assert.deepEqual(intentKinds, ["establish_evals", "run_assessment"]);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("initial state renders without model-changing behavior", () => {
   const status = renderStatus(createInitialUiState());
   assert.doesNotMatch(status, /current model|recommended model|apply model/i);
+});
+
+test("Pi exposes a typed ingress for observability and verification signals", () => {
+  const { tools } = loadCommand();
+  const signalTool = tools.get("openmerit_report_signal");
+  assert.ok(signalTool?.parameters);
+  assert.equal(Check(signalTool.parameters as never, {
+    signalId: "window-1",
+    type: "metric_window_available",
+    metrics: [{
+      metricId: "task_success",
+      state: "measured",
+      scope: "sample_window",
+      direction: "maximize",
+      method: "observed",
+      value: 0.95,
+      unit: "ratio",
+      sampleCount: 20,
+      evidence: [{ id: "obs", source: "observability_record", uri: "file:///metrics.json" }],
+    }],
+  }), true);
 });

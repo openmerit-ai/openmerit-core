@@ -38,6 +38,8 @@ Contains deterministic behavior: choosing the next lifecycle intent, persisting 
 
 `OpenMeritCoordinator` is the reusable adapter boundary. It constructs canonical intents, negotiates capabilities, records lifecycle progress and observations, validates results, and advances durable state. `OpenMeritStore` makes persistence replaceable; `ProjectStore` is the bundled filesystem backend.
 
+The coordinator also accepts idempotent automation signals and evaluates the user-confirmed `AutomationCheckPolicy`. `buildAutomationPlan` tells an adapter which signals and wakeups are required and reports unsupported persistent scheduling honestly. OpenMerit never installs a scheduler or creates a paid cloud worker itself.
+
 ### `@openmerit-v2/pi`
 
 Exposes the command surface, supplies private typed intent context, triggers Pi, accepts one structured completion for the active intent, records evidence, advances the lifecycle, and detects model-catalog changes.

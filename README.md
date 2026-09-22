@@ -28,6 +28,8 @@ It distinguishes:
 - Supervised graduation: early swaps require approval, every swap requires verification, and regressions can trigger rollback.
 - Project-local snapshots, append-only audit events, and evidence manifests under `.openmerit/`.
 - Model-catalog change detection that can nudge the harness to reassess a mature baseline.
+- User-confirmed task-count, elapsed-time, regression, catalogue-change, and post-swap check policies.
+- Idempotent harness signals, durable pending work, native wakeup planning, and explicit scheduler capability gaps.
 
 ## Responsibility boundary
 
@@ -73,6 +75,7 @@ When Pi enters an unconfigured product with an interactive UI, OpenMerit automat
 - [Architecture and responsibility boundary](docs/architecture.md)
 - [Metrics and evidence](docs/metrics-and-evidence.md)
 - [Improvement lifecycle](docs/lifecycle.md)
+- [Harness-neutral automation](docs/automation.md)
 - [Pi extension guide](docs/pi-extension.md)
 - [Building another harness adapter](docs/adapter-guide.md)
 - [Pareto conformance specification](docs/pareto-spec.md)

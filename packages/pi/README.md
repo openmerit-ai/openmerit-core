@@ -19,3 +19,5 @@ The adapter persists typed intents in Pi's session, supplies them as private ext
 Pi owns the work behind every intent, including use of harness-configured Jev System One access. This adapter deliberately contains no Jev API client and accepts no Jev credential.
 
 The adapter does not select or directly set a model. It issues a bounded mutation intent only after the policy gate authorizes one; Pi performs and proves the change.
+
+Pi reports active-session ticks, catalogue observations, and completed ordinary work. `openmerit_report_signal` provides typed metric-window and verification-window ingress. Pi declares that it cannot provision persistent background wakeups, allowing OpenMerit to report the need for an external scheduler without overstating automation readiness.

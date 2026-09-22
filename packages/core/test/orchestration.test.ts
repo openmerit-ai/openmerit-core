@@ -11,6 +11,14 @@ const policy: SupervisedGraduationPolicy = {
   confirmationRequiredUntilVerifiedSwaps: 2,
   requirePostSwapVerification: true,
   rollbackOnRegression: true,
+  checkPolicy: {
+    baselineAssessment: { afterCompletedTasks: 3 },
+    frontierReassessment: { afterCompletedTasks: 100, afterElapsedSeconds: 2592000, onModelCatalogChange: true },
+    regressionCheck: { afterCompletedTasks: 25, thresholds: [{ metricId: "task_success", relativeChangeAtLeast: 0.1 }] },
+    postSwapVerification: { afterCompletedTasks: 20, afterElapsedSeconds: 86400 },
+    cooldownSeconds: 3600,
+    execution: { mode: "persistent", infrastructureChangesAllowed: false },
+  },
 };
 
 function state(overrides: Partial<ImprovementCycleState>): ImprovementCycleState {
@@ -69,8 +77,7 @@ test("automatic swaps require explicit opt-in and enough verified swaps", () => 
 test("every applied swap is verified and regressions can trigger rollback", () => {
   const verify = nextImprovementAction(state({ stage: "swap_applied" }));
   const rollback = nextImprovementAction(state({ stage: "verification_failed" }));
-  assert.equal(verify.action, "issue_intent");
+  assert.equal(verify.action, "observe");
   assert.equal(rollback.action, "issue_intent");
-  if (verify.action === "issue_intent") assert.equal(verify.intentKind, "verify_model_swap");
   if (rollback.action === "issue_intent") assert.equal(rollback.intentKind, "rollback_model_swap");
 });

@@ -39,6 +39,12 @@ const descriptor: HarnessDescriptor = {
     presentation: "adapter_validation",
     enforcement: "adapter",
   },
+  automation: {
+    supportedSignals: ["product_task_completed", "metric_window_available", "scheduled_tick", "model_catalog_changed", "verification_window_completed"],
+    persistentScheduling: true,
+    backgroundExecution: true,
+    wakeupProvisioning: "native",
+  },
 };
 
 test("a non-Pi harness can receive canonical OpenMerit intents", async () => {
@@ -110,6 +116,14 @@ test("shared core validates and interprets setup results from any harness", () =
         confirmationRequiredUntilVerifiedSwaps: 2,
         requirePostSwapVerification: true,
         rollbackOnRegression: true,
+        checkPolicy: {
+          baselineAssessment: { afterCompletedTasks: 3 },
+          frontierReassessment: { afterCompletedTasks: 100, afterElapsedSeconds: 2592000, onModelCatalogChange: true },
+          regressionCheck: { afterCompletedTasks: 25, thresholds: [{ metricId: "task_success", relativeChangeAtLeast: 0.1 }] },
+          postSwapVerification: { afterCompletedTasks: 20, afterElapsedSeconds: 86400 },
+          cooldownSeconds: 3600,
+          execution: { mode: "persistent", infrastructureChangesAllowed: false },
+        },
       },
     },
   };

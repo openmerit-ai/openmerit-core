@@ -28,6 +28,11 @@ const evidenceSources = [
 const stringEnum = <T extends readonly string[]>(values: T) =>
   Type.Union(values.map((value) => Type.Literal(value)));
 
+const cadenceSchema = () => strictObject({
+  afterCompletedTasks: Type.Optional(Type.Integer({ minimum: 1 })),
+  afterElapsedSeconds: Type.Optional(Type.Integer({ minimum: 1 })),
+});
+
 export const EvidenceReferenceSchema = strictObject({
   id: Type.String({ minLength: 1 }),
   source: stringEnum(evidenceSources),
@@ -75,6 +80,28 @@ export const SupervisedGraduationPolicySchema = strictObject({
   confirmationRequiredUntilVerifiedSwaps: Type.Integer({ minimum: 0 }),
   requirePostSwapVerification: Type.Literal(true),
   rollbackOnRegression: Type.Boolean(),
+  checkPolicy: strictObject({
+    baselineAssessment: cadenceSchema(),
+    frontierReassessment: strictObject({
+      afterCompletedTasks: Type.Optional(Type.Integer({ minimum: 1 })),
+      afterElapsedSeconds: Type.Optional(Type.Integer({ minimum: 1 })),
+      onModelCatalogChange: Type.Boolean(),
+    }),
+    regressionCheck: strictObject({
+      afterCompletedTasks: Type.Optional(Type.Integer({ minimum: 1 })),
+      afterElapsedSeconds: Type.Optional(Type.Integer({ minimum: 1 })),
+      thresholds: Type.Array(strictObject({
+        metricId: stringEnum(metricIds),
+        relativeChangeAtLeast: Type.Number({ exclusiveMinimum: 0 }),
+      })),
+    }),
+    postSwapVerification: cadenceSchema(),
+    cooldownSeconds: Type.Integer({ minimum: 0 }),
+    execution: strictObject({
+      mode: stringEnum(["active_session_only", "persistent"] as const),
+      infrastructureChangesAllowed: Type.Boolean(),
+    }),
+  }),
 });
 
 export const MetricRecordSchema = strictObject({

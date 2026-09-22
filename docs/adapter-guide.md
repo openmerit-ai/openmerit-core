@@ -118,6 +118,12 @@ if (observation.assessmentDue) {
 
 When the harness's available model catalogue changes, compute a stable fingerprint and call `recordModelCatalogFingerprint`. The returned `reassessmentDue` flag tells the adapter whether the lifecycle justifies candidate discovery.
 
+New adapters should use `recordAutomationSignal` for product tasks, metric windows, scheduled ticks, catalogue observations, and verification windows. Signal IDs must remain stable across delivery retries. If the returned decision issues an intent, dispatch it through the coordinator. `recordTaskObservation` and `recordModelCatalogFingerprint` remain compatibility helpers.
+
+Call `reconcileAutomation` after configuration changes or when restoring a project. It returns an `AutomationPlan`. Implement `scheduleWakeup` only when the harness can genuinely arrange the requested wakeup. Declare persistent scheduling, background execution, supported signal sources, and provisioning requirements accurately in `HarnessDescriptor.automation`.
+
+If persistent scheduling is unavailable, expose the plan's active-session or external-scheduler fallback. Do not report a seven-day schedule as configured merely because the adapter checks policy when an interactive session starts.
+
 ## Capability mapping
 
 | Intent | Required capability |

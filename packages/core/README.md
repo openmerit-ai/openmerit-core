@@ -9,3 +9,5 @@ The core does not calculate a Pareto frontier or change a model. It orchestrates
 `verifyFrontierSnapshot` is a conformance verifier. It checks a harness-produced snapshot against OpenMerit's normative Pareto rules; it does not discover candidates, run evaluations, select a model, or apply a swap.
 
 `HarnessAdapter` declares identity, supported protocol versions, capabilities, execution modes, and a dispatch transport. `OpenMeritCoordinator` owns durable intent issuance, progress, observations, result validation, and state transitions. `OpenMeritStore` is replaceable; `ProjectStore` provides local filesystem persistence.
+
+Adapters also declare supported automation signals, background execution, and wakeup provisioning. `recordAutomationSignal` applies the user-confirmed cadence idempotently, `buildAutomationPlan` exposes required signals and capability gaps, and `reconcileAutomation` requests only authorized native wakeups.
