@@ -235,6 +235,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
       promptGuidelines: [
         "Call openmerit_complete_intent exactly once after completing OpenMerit-requested work.",
         "Never use openmerit_complete_intent to claim success without verified evidence references.",
+        "A succeeded result must include intent-specific outputs and at least one evidence reference; failed or cancelled results may omit outputs and use an empty evidence list.",
       ],
       parameters,
       constrainedSampling: { type: "json_schema", strict: "prefer" },

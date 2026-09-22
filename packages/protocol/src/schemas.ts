@@ -218,13 +218,5 @@ export function completionToolSchemaFor(kind: IntentKind): TSchema {
     errorCode: Type.Optional(Type.String({ minLength: 1 })),
     errorMessage: Type.Optional(Type.String({ minLength: 1 })),
     retryable: Type.Optional(Type.Boolean()),
-  }, {
-    allOf: [{
-      if: { properties: { status: { const: "succeeded" } }, required: ["status"] },
-      then: {
-        required: ["outputs"],
-        properties: { evidence: { minItems: 1 } },
-      },
-    }],
   });
 }
