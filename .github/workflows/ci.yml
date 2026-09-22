@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+
+  package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - run: npm ci
+      - name: Install and load the npm artifact
+        shell: bash
+        run: |
+          package_file="$(npm pack --silent)"
+          package_root="$(mktemp -d)"
+          npm install --prefix "$package_root" "./$package_file"
+          cat > "$package_root/smoke.mjs" <<'EOF'
+          import assert from "node:assert/strict";
+          import { OpenMeritCoordinator } from "openmerit/core";
+          import { PROTOCOL_VERSION, completionToolSchemaFor } from "openmerit/protocol";
+          import extension from "openmerit/pi";
+          assert.equal(PROTOCOL_VERSION, "0.1");
+          assert.equal(typeof OpenMeritCoordinator, "function");
+          assert.equal(typeof completionToolSchemaFor("establish_evals"), "object");
+          assert.equal(typeof extension, "function");
+          EOF
+          node "$package_root/smoke.mjs"
+          ./node_modules/.bin/pi --no-session \
+            -e "$package_root/node_modules/openmerit/dist/pi/src/index.js" \
+            --list-models > /dev/null

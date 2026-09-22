@@ -10,7 +10,7 @@ import {
   type HarnessDescriptor,
   type OpenMeritProjectState,
   type SupervisedGraduationPolicy,
-} from "@openmerit-v2/protocol";
+} from "@openmerit/protocol";
 import {
   buildAutomationPlan,
   OpenMeritCoordinator,

@@ -4,6 +4,10 @@ OpenMerit is a harness-neutral orchestration layer that helps a coding harness c
 
 OpenMerit does not perform the intelligent work. It nudges a connected coding harness, such as Pi, with typed outcome requests. The harness understands the project, establishes evaluations and observability, gathers evidence, discovers and tests candidates, calculates the Pareto frontier, and performs an authorized model change. OpenMerit validates the returned contracts, preserves evidence and preferences, and advances the approved lifecycle.
 
+The npm package `openmerit` contains the Pi extension, the reusable coordinator,
+and the protocol in one install. The Pi adapter is the first integration; other
+harnesses can use the same core and protocol exports.
+
 ## Why OpenMerit
 
 The cheapest model, fastest model, and highest-quality model are often different. Public benchmarks are useful before product evidence exists, but they cannot establish which model is best for a particular workload. OpenMerit connects the initial choice to production evidence and repeated reassessment.
@@ -43,21 +47,24 @@ It distinguishes:
 
 Jev System One, when configured, belongs to the coding harness. Pi may use it aggressively for bounded ranking, triage, and fast judgment. OpenMerit contains no Jev client and accepts no Jev credential.
 
-## Quick start with Pi
+## Install with Pi
 
 Requirements:
 
-- Node.js 22.18 or newer
-- a Pi-supported model provider configured in Pi
+- Node.js 22.19 or newer
+- Pi 0.87 with a supported model provider configured
 
 ```sh
-git clone https://github.com/laz-aslam/openmerit.git
-cd openmerit
-npm install
-./node_modules/.bin/pi -e ./packages/pi/src/index.ts
+pi install npm:openmerit
+pi list
 ```
 
 When Pi enters an unconfigured product with an interactive UI, OpenMerit automatically issues the setup nudge. Pi infers a task profile, asks the user to confirm requirements and an evaluation budget, establishes task-specific eval and observability artifacts, verifies them, and reports evidence to OpenMerit. `/openmerit setup` remains available as an explicit recovery or rerun command.
+
+Run `/openmerit doctor` inside Pi to check the installation. OpenMerit keeps
+project evidence under `.openmerit/` in the product repository. Version 0.1.5
+replaces the 0.1.4 background watcher and standalone CLI with this
+harness-driven lifecycle; it does not migrate the earlier home-directory state.
 
 ## Commands
 
@@ -92,13 +99,15 @@ When Pi enters an unconfigured product with an interactive UI, OpenMerit automat
 - `packages/pi` — Pi extension that turns OpenMerit intents into harness work.
 - `docs` — user, operator, architecture, and normative documentation.
 
-## Development
+The workspace modules are private development boundaries. The published
+package exposes `openmerit/core`, `openmerit/protocol`, and `openmerit/pi`.
+
+## Development from source
 
 ```sh
-npm install
-npm test
-npm run check
+npm ci
 npm run verify
+./node_modules/.bin/pi -e ./packages/pi/src/index.ts
 ```
 
 Credentials must never be committed. The repository intentionally contains no provider or Jev API key.

@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { OpenMeritProjectConfig, OpenMeritProjectState } from "@openmerit-v2/protocol";
+import type { OpenMeritProjectConfig, OpenMeritProjectState } from "@openmerit/protocol";
 import { ProjectStore } from "../src/index.ts";
 
 test("persists project-local snapshots, audit events, and evidence manifests", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "openmerit-v2-store-"));
+  const root = await mkdtemp(join(tmpdir(), "openmerit-store-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const store = new ProjectStore(root);
   const config: OpenMeritProjectConfig = { schemaVersion: 1, taskProfiles: [] };
@@ -52,7 +52,7 @@ test("persists project-local snapshots, audit events, and evidence manifests", a
 });
 
 test("rejects unsafe evidence manifest identifiers", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "openmerit-v2-store-"));
+  const root = await mkdtemp(join(tmpdir(), "openmerit-store-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const store = new ProjectStore(root);
   await assert.rejects(() => store.writeEvidenceManifest({
@@ -65,7 +65,7 @@ test("rejects unsafe evidence manifest identifiers", async (context) => {
 });
 
 test("writes canonical redacted events and best-effort exporter failures", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "openmerit-v2-store-"));
+  const root = await mkdtemp(join(tmpdir(), "openmerit-store-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const exported: unknown[] = [];
   const store = new ProjectStore(root, {

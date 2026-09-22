@@ -17,8 +17,8 @@ import {
   OpenMeritCoordinator,
   ProjectStore,
   type HarnessAdapter,
-} from "@openmerit-v2/core";
-import { PROTOCOL_VERSION } from "@openmerit-v2/protocol";
+} from "openmerit/core";
+import { PROTOCOL_VERSION } from "openmerit/protocol";
 
 const adapter: HarnessAdapter = {
   descriptor: {
@@ -109,7 +109,7 @@ The coordinator validates the active intent, version, evidence, intent-specific 
 
 ### Present the canonical result schema
 
-Import `completionToolSchemaFor(intent.kind)` from `@openmerit-v2/protocol` and present it through the harness's strongest structured-output mechanism. Do not recreate result schemas inside an adapter. A harness that supports changing tool definitions should specialize the completion tool whenever an intent becomes active; other harnesses may expose intent-specific tools or perform adapter-side validation.
+Import `completionToolSchemaFor(intent.kind)` from `openmerit/protocol` and present it through the harness's strongest structured-output mechanism. Do not recreate result schemas inside an adapter. A harness that supports changing tool definitions should specialize the completion tool whenever an intent becomes active; other harnesses may expose intent-specific tools or perform adapter-side validation.
 
 Declare the behavior in `HarnessDescriptor.structuredOutput`:
 

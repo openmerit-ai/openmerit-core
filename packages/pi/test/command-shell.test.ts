@@ -9,7 +9,7 @@ import {
   completionToolSchemaFor,
   INTENT_OUTPUT_SCHEMAS,
   type IntentKind,
-} from "@openmerit-v2/protocol";
+} from "@openmerit/protocol";
 
 import type {
   ExtensionAPI,
@@ -27,7 +27,7 @@ interface Notification {
   level: string;
 }
 
-const testProjectRoot = mkdtempSync(join(tmpdir(), "openmerit-v2-pi-test-"));
+const testProjectRoot = mkdtempSync(join(tmpdir(), "openmerit-pi-test-"));
 after(() => rmSync(testProjectRoot, { recursive: true, force: true }));
 
 function loadCommand() {
@@ -158,7 +158,7 @@ function sessionContext(projectRoot: string, notifications: Notification[]): Ext
 }
 
 test("Pi automatically starts setup for an unconfigured interactive project", async () => {
-  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-v2-auto-setup-"));
+  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-auto-setup-"));
   const notifications: Notification[] = [];
   const { eventHandlers, entries, messages } = loadCommand();
   const sessionStart = eventHandlers.get("session_start");
@@ -167,7 +167,7 @@ test("Pi automatically starts setup for an unconfigured interactive project", as
   try {
     await sessionStart({ type: "session_start" }, sessionContext(projectRoot, notifications));
     assert.match(notifications[0]?.message ?? "", /asking Pi to establish evals and observability/);
-    assert.equal(entries[0]?.customType, "openmerit-v2.intent");
+    assert.equal(entries[0]?.customType, "openmerit.intent");
     assert.equal((entries[0]?.data as { intent: { kind: string } }).intent.kind, "establish_evals");
     assert.equal(messages.length, 1);
     assert.deepEqual(messages[0]?.options, { deliverAs: "followUp", triggerTurn: true });
@@ -209,7 +209,7 @@ test("setup dispatches a private typed intent", async () => {
   await handler("setup", commandContext(notifications));
 
   assert.match(notifications[0]?.message ?? "", /setup started/);
-  assert.equal(entries[0]?.customType, "openmerit-v2.intent");
+  assert.equal(entries[0]?.customType, "openmerit.intent");
   assert.equal(messages.length, 1);
   assert.equal((messages[0]?.message as { display?: boolean }).display, false);
   assert.deepEqual(messages[0]?.options, { deliverAs: "followUp", triggerTurn: true });
@@ -306,11 +306,11 @@ test("completion requires evidence for success and persists the result", async (
     outputs: confirmedSetupOutputs(),
   }, undefined, undefined, commandContext(notifications));
 
-  assert.equal(entries[1]?.customType, "openmerit-v2.result");
+  assert.equal(entries[1]?.customType, "openmerit.result");
 });
 
 test("Pi turns completed work into durable signals and dispatches a due assessment", async () => {
-  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-v2-signals-"));
+  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-signals-"));
   const notifications: Notification[] = [];
   const { handler, completionTool, entries, eventHandlers } = loadCommand();
   const ctx = sessionContext(projectRoot, notifications);
@@ -334,7 +334,7 @@ test("Pi turns completed work into durable signals and dispatches a due assessme
     await settled({ type: "agent_settled" }, ctx);
 
     const intentKinds = entries
-      .filter((entry) => entry.customType === "openmerit-v2.intent")
+      .filter((entry) => entry.customType === "openmerit.intent")
       .map((entry) => (entry.data as { intent: { kind: string } }).intent.kind);
     assert.deepEqual(intentKinds, ["establish_evals", "run_assessment"]);
   } finally {
@@ -343,7 +343,7 @@ test("Pi turns completed work into durable signals and dispatches a due assessme
 });
 
 test("Pi automatically requests instrumentation when setup reports a required metric gap", async () => {
-  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-v2-instrumentation-"));
+  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-instrumentation-"));
   const notifications: Notification[] = [];
   const { handler, completionTool, entries } = loadCommand();
   const ctx = sessionContext(projectRoot, notifications);
@@ -367,7 +367,7 @@ test("Pi automatically requests instrumentation when setup reports a required me
     }, undefined, undefined, ctx as unknown as ExtensionCommandContext);
 
     const intentKinds = entries
-      .filter((entry) => entry.customType === "openmerit-v2.intent")
+      .filter((entry) => entry.customType === "openmerit.intent")
       .map((entry) => (entry.data as { intent: { kind: string } }).intent.kind);
     assert.deepEqual(intentKinds, ["establish_evals", "instrument_observability"]);
     const events = readFileSync(join(projectRoot, ".openmerit", "events.jsonl"), "utf8");

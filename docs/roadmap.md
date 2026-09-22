@@ -12,7 +12,8 @@ OpenMerit is ready for an initial supervised product trial with Pi. Its protocol
 - Pi reports active-session signals and typed metric windows but cannot provision persistent background wakeups; persistent policies require an external scheduler until a capable adapter is added.
 - Pause state is process-local rather than persisted.
 - External evidence authenticity depends on the referenced system.
-- Workspace packages are not published to npm.
+- The core and protocol workspaces are private; the single `openmerit` npm
+  package exposes their public entry points.
 
 ## Next validation milestones
 

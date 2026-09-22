@@ -7,6 +7,7 @@ npm install
 npm test
 npm run check
 npm run verify
+npm pack --dry-run
 ```
 
 Tests cover protocol contracts, lifecycle decisions, baseline sufficiency, candidate/frontier/swap sequencing, conservative Pareto verification, persistence, audit events, safe evidence identifiers, Pi commands, private intent delivery, evidence requirements, and mutation boundaries.
@@ -20,6 +21,10 @@ Automation tests additionally cover task and elapsed cadence, idempotent signal 
 ```
 
 This proves the real Pi runtime loads the extension and enumerates its available catalogue. It does not prove a provider can complete an end-to-end product intent.
+
+CI also packs `openmerit`, installs the tarball in a temporary directory,
+imports its public core and protocol entry points, and loads the installed Pi
+extension. This checks the published artifact rather than only the workspace.
 
 ## Evidence levels
 
