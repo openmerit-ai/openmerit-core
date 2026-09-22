@@ -26,7 +26,7 @@ It distinguishes:
 - Harness-calculated frontier results independently checked by OpenMerit's conformance verifier.
 - Versioned result schemas for all ten intents, reusable across harness adapters and exposed dynamically by Pi.
 - Supervised graduation: early swaps require approval, every swap requires verification, and regressions can trigger rollback.
-- Project-local snapshots, append-only audit events, and evidence manifests under `.openmerit/`.
+- Project-local snapshots, redacted append-only audit events, evidence manifests, and optional best-effort event exporters under `.openmerit/`.
 - Model-catalog change detection that can nudge the harness to reassess a mature baseline.
 - User-confirmed task-count, elapsed-time, regression, catalogue-change, and post-swap check policies.
 - Idempotent harness signals, durable pending work, native wakeup planning, and explicit scheduler capability gaps.
@@ -64,6 +64,7 @@ When Pi enters an unconfigured product with an interactive UI, OpenMerit automat
 - `/openmerit` or `/openmerit status` — show evidence readiness and lifecycle stage.
 - `/openmerit setup` — explicitly rerun or recover automatic setup.
 - `/openmerit assess` — request an evidence-sufficiency assessment now.
+- `/openmerit logs` — show the canonical audit, exporter-error, evidence, and state paths.
 - `/openmerit frontier` — ask the harness to calculate a frontier now; OpenMerit verifies it.
 - `/openmerit approve` — approve a verified proposal during supervised graduation.
 - `/openmerit pause` and `/openmerit resume` — control proactive nudges.

@@ -59,6 +59,13 @@ const validOutputs: Readonly<Record<IntentKind, unknown>> = {
         execution: { mode: "persistent", infrastructureChangesAllowed: false },
       },
     },
+    observability: {
+      status: "ready",
+      requiredMetricIds: ["task_success"],
+      coveredMetricIds: ["task_success"],
+      missingMetricIds: [],
+      checkedAt: "2026-09-22T00:00:00.000Z",
+    },
   },
   instrument_observability: { coveredMetricIds: ["task_success"], missingMetricIds: [] },
   run_assessment: { baselineEvidenceSufficient: true, metrics: [metric] },

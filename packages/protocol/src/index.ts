@@ -11,6 +11,7 @@ export {
   intentOutputSchemaFor,
   MetricObjectiveSchema,
   MetricRecordSchema,
+  ObservabilityCoverageSchema,
   OPENMERIT_RESULT_SCHEMA_VERSION,
   OPENMERIT_SCHEMA_DIALECT,
   SupervisedGraduationPolicySchema,
@@ -340,6 +341,16 @@ export interface TaskProfile {
   readonly confirmedAt?: string;
 }
 
+export type ObservabilityReadinessStatus = "ready" | "incomplete";
+
+export interface ObservabilityCoverage {
+  readonly status: ObservabilityReadinessStatus;
+  readonly requiredMetricIds: readonly MetricId[];
+  readonly coveredMetricIds: readonly MetricId[];
+  readonly missingMetricIds: readonly MetricId[];
+  readonly checkedAt: string;
+}
+
 export interface CandidateAssessment {
   readonly id: string;
   readonly taskProfileId: string;
@@ -397,6 +408,7 @@ export interface IntentOutputMap {
   readonly establish_evals: {
     readonly taskProfile: TaskProfile;
     readonly policy: SupervisedGraduationPolicy;
+    readonly observability: ObservabilityCoverage;
   };
   readonly instrument_observability: {
     readonly coveredMetricIds: readonly MetricId[];
@@ -482,6 +494,7 @@ export interface ImprovementCycleState {
   readonly proposedCandidateId?: string;
   readonly verifiedSwapCount: number;
   readonly baselineEvidenceSufficient: boolean;
+  readonly observabilityReady?: boolean;
   readonly policy?: SupervisedGraduationPolicy;
 }
 
@@ -497,6 +510,7 @@ export interface OpenMeritProjectState {
   readonly cycle: ImprovementCycleState;
   readonly activeIntent?: OpenMeritIntent;
   readonly lastResult?: IntentResult;
+  readonly observability?: ObservabilityCoverage;
   readonly automation: {
     readonly setupNudgeShown: boolean;
     readonly observedCompletedTasks: number;
@@ -534,7 +548,8 @@ export type AuditEventType =
   | "model_catalog_changed"
   | "automation_signal_recorded"
   | "automation_signal_duplicate"
-  | "automation_check_due";
+  | "automation_check_due"
+  | "observability_readiness_checked";
 
 interface AutomationSignalBase {
   readonly protocolVersion: typeof PROTOCOL_VERSION;

@@ -4,7 +4,7 @@ import { Check, Errors } from "typebox/value";
 import type { IntentKind, IntentOutputMap } from "./index.ts";
 
 export const OPENMERIT_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema" as const;
-export const OPENMERIT_RESULT_SCHEMA_VERSION = "0.1" as const;
+export const OPENMERIT_RESULT_SCHEMA_VERSION = "0.2" as const;
 
 const strictObject = <T extends Record<string, TSchema>>(
   properties: T,
@@ -60,6 +60,14 @@ export const TaskProfileSchema = strictObject({
   objectives: Type.Array(MetricObjectiveSchema, { minItems: 1 }),
   createdAt: Type.String({ minLength: 1 }),
   confirmedAt: Type.Optional(Type.String({ minLength: 1 })),
+});
+
+export const ObservabilityCoverageSchema = strictObject({
+  status: stringEnum(["ready", "incomplete"] as const),
+  requiredMetricIds: Type.Array(stringEnum(metricIds)),
+  coveredMetricIds: Type.Array(stringEnum(metricIds)),
+  missingMetricIds: Type.Array(stringEnum(metricIds)),
+  checkedAt: Type.String({ minLength: 1 }),
 });
 
 const ConfirmedTaskProfileSchema = strictObject({
@@ -179,6 +187,7 @@ export const INTENT_OUTPUT_SCHEMAS = {
   establish_evals: strictObject({
     taskProfile: ConfirmedTaskProfileSchema,
     policy: SupervisedGraduationPolicySchema,
+    observability: ObservabilityCoverageSchema,
   }),
   instrument_observability: strictObject({
     coveredMetricIds: Type.Array(stringEnum(metricIds)),

@@ -17,9 +17,11 @@ import type {
   ImprovementCycleState,
   IntentLifecycleUpdate,
   IntentKind,
+  IntentOutputMap,
   OpenMeritIntent,
   OpenMeritProjectConfig,
   OpenMeritProjectState,
+  ObservabilityCoverage,
   JsonValue,
   SupervisedGraduationPolicy,
 } from "@openmerit-v2/protocol";
@@ -32,7 +34,13 @@ import {
 } from "@openmerit-v2/protocol";
 import type { OpenMeritStore } from "./store.ts";
 
-export { OPENMERIT_DIRECTORY, ProjectStore, type OpenMeritStore } from "./store.ts";
+export {
+  OPENMERIT_DIRECTORY,
+  ProjectStore,
+  type AuditEventExporter,
+  type OpenMeritStore,
+  type ProjectStoreOptions,
+} from "./store.ts";
 
 export interface HarnessAdapter {
   readonly descriptor: HarnessDescriptor;
@@ -223,6 +231,41 @@ function validateSetupOutput(output: unknown): string[] {
       policy.requirePostSwapVerification !== true || typeof policy.rollbackOnRegression !== "boolean") {
     errors.push("policy must be a valid supervised-graduation policy with an evaluation budget");
   }
+  if (!isRecord(output.observability)) {
+    errors.push("setup output requires an observability coverage report");
+  } else if (Array.isArray(profile.objectives)) {
+    errors.push(...validateObservabilityCoverage(
+      profile as unknown as TaskProfile,
+      output.observability as unknown as ObservabilityCoverage,
+      false,
+    ));
+  }
+  return errors;
+}
+
+export function validateObservabilityCoverage(
+  profile: TaskProfile,
+  coverage: ObservabilityCoverage,
+  requireReady: boolean,
+): readonly string[] {
+  const required = new Set(profile.objectives.filter((item) => item.required).map((item) => item.metricId));
+  const declaredRequired = new Set(coverage.requiredMetricIds);
+  const covered = new Set(coverage.coveredMetricIds);
+  const missing = new Set(coverage.missingMetricIds);
+  const errors: string[] = [];
+  for (const metricId of required) {
+    if (!declaredRequired.has(metricId)) errors.push(`observability omits required metric ${metricId}`);
+    if (!covered.has(metricId) && !missing.has(metricId)) errors.push(`observability does not classify required metric ${metricId}`);
+  }
+  for (const metricId of covered) {
+    if (missing.has(metricId)) errors.push(`observability marks ${metricId} as both covered and missing`);
+  }
+  const requiredMissing = [...required].filter((metricId) => !covered.has(metricId));
+  const expectedStatus = requiredMissing.length === 0 ? "ready" : "incomplete";
+  if (coverage.status !== expectedStatus) errors.push(`observability status must be ${expectedStatus}`);
+  if (requireReady && requiredMissing.length) {
+    errors.push(`required observability remains missing: ${requiredMissing.join(", ")}`);
+  }
   return errors;
 }
 
@@ -259,19 +302,39 @@ export function interpretIntentResult(
       if (!errors.length && isRecord(output)) {
         const taskProfile = output.taskProfile as unknown as TaskProfile;
         const policy = output.policy as unknown as SupervisedGraduationPolicy;
+        const observability = output.observability as unknown as ObservabilityCoverage;
         nextConfig = {
           schemaVersion: 1,
           activeTaskProfileId: taskProfile.id,
           taskProfiles: [...config.taskProfiles.filter((item) => item.id !== taskProfile.id), taskProfile],
           policy,
         };
-        cyclePatch = { taskProfileId: taskProfile.id, policy };
+        cyclePatch = {
+          taskProfileId: taskProfile.id,
+          policy,
+          observabilityReady: observability.status === "ready",
+        };
+        if (observability.status !== "ready") nextStage = "establishing_evidence";
       }
       break;
     }
     case "instrument_observability":
       if (!isRecord(output) || !Array.isArray(output.coveredMetricIds) || !Array.isArray(output.missingMetricIds)) {
         errors.push("observability result requires coveredMetricIds and missingMetricIds");
+      } else {
+        const profile = config.taskProfiles.find((item) => item.id === config.activeTaskProfileId);
+        if (!profile) errors.push("no confirmed task profile exists for observability verification");
+        else {
+          const coverage: ObservabilityCoverage = {
+            status: output.missingMetricIds.length ? "incomplete" : "ready",
+            requiredMetricIds: profile.objectives.filter((item) => item.required).map((item) => item.metricId),
+            coveredMetricIds: output.coveredMetricIds as MetricId[],
+            missingMetricIds: output.missingMetricIds as MetricId[],
+            checkedAt: result.completedAt,
+          };
+          errors.push(...validateObservabilityCoverage(profile, coverage, true));
+          cyclePatch = { observabilityReady: errors.length === 0 };
+        }
       }
       break;
     case "run_assessment":
@@ -371,7 +434,9 @@ export function nextImprovementAction(state: ImprovementCycleState): Orchestrati
     case "unconfigured":
       return { action: "issue_intent", intentKind: "establish_evals", reason: "Task profile, evaluations, and observability are not configured." };
     case "establishing_evidence":
-      return { action: "observe", reason: "The harness is establishing evaluations and observability." };
+      return state.observabilityReady
+        ? { action: "observe", reason: "The harness is establishing evaluations and observability." }
+        : { action: "issue_intent", intentKind: "instrument_observability", reason: "Required metric instrumentation is incomplete." };
     case "collecting_baseline":
       return state.baselineEvidenceSufficient
         ? { action: "issue_intent", intentKind: "run_assessment", reason: "Baseline evidence has reached the approved sufficiency threshold." }
@@ -836,6 +901,38 @@ function dueDecision(
   return { action: "observe", reason: "No user-confirmed automation check is due." };
 }
 
+function auditSignalData(signal: AutomationSignal): Readonly<Record<string, JsonValue>> {
+  switch (signal.type) {
+    case "product_task_completed":
+      return {
+        modelId: signal.modelId,
+        contextTokens: signal.contextTokens ?? null,
+        evidenceIds: (signal.evidence ?? []).map((item) => item.id),
+      };
+    case "metric_window_available":
+    case "verification_window_completed":
+      return {
+        metrics: (signal.metrics ?? []).map((metric) => ({
+          metricId: metric.metricId,
+          state: metric.state,
+          scope: metric.scope,
+          direction: metric.direction,
+          method: metric.method,
+          value: metric.value ?? null,
+          unit: metric.unit,
+          sampleCount: metric.sampleCount,
+          ...(metric.interval ? { interval: metric.interval } : {}),
+          ...(metric.window ? { window: metric.window } : {}),
+          evidenceIds: metric.evidence.map((item) => item.id),
+        })),
+      };
+    case "model_catalog_changed":
+      return { fingerprint: signal.fingerprint };
+    case "scheduled_tick":
+      return {};
+  }
+}
+
 /** Harness-neutral durable coordinator. Adapters transport jobs; this class owns lifecycle state. */
 export class OpenMeritCoordinator {
   private readonly store: OpenMeritStore;
@@ -882,6 +979,7 @@ export class OpenMeritCoordinator {
             stage: startedStage(kind),
             verifiedSwapCount: 0,
             baselineEvidenceSufficient: false,
+            observabilityReady: false,
           },
           activeIntent: intent,
           automation: {
@@ -971,6 +1069,23 @@ export class OpenMeritCoordinator {
 
     if (interpretation.config) await this.store.writeConfig(interpretation.config);
     const now = new Date().toISOString();
+    let observability = state.observability;
+    if (result.status === "succeeded" && state.activeIntent.kind === "establish_evals") {
+      observability = (result.outputs as IntentOutputMap["establish_evals"]).observability;
+    } else if (result.status === "succeeded" && state.activeIntent.kind === "instrument_observability") {
+      const profile = config.taskProfiles.find((item) => item.id === config.activeTaskProfileId);
+      if (profile) {
+        const output = result.outputs as IntentOutputMap["instrument_observability"];
+        const requiredMetricIds = profile.objectives.filter((item) => item.required).map((item) => item.metricId);
+        observability = {
+          status: "ready",
+          requiredMetricIds,
+          coveredMetricIds: output.coveredMetricIds,
+          missingMetricIds: output.missingMetricIds,
+          checkedAt: result.completedAt,
+        };
+      }
+    }
     const nextState: OpenMeritProjectState = {
       ...state,
       cycle: {
@@ -980,6 +1095,7 @@ export class OpenMeritCoordinator {
       },
       activeIntent: undefined,
       lastResult: result,
+      ...(observability ? { observability } : {}),
       automation: {
         ...state.automation,
         ...(state.activeIntent.kind === "run_assessment"
@@ -1020,8 +1136,26 @@ export class OpenMeritCoordinator {
         status: result.status,
         nextStage: interpretation.nextStage,
         harnessId: this.adapter.descriptor.id,
+        summary: result.summary,
+        evidence: result.evidence.map((item) => ({ id: item.id, source: item.source })),
       },
     });
+    if (observability && (state.activeIntent.kind === "establish_evals" || state.activeIntent.kind === "instrument_observability")) {
+      await this.store.appendEvent({
+        schemaVersion: 1,
+        id: `event-${crypto.randomUUID()}`,
+        type: "observability_readiness_checked",
+        occurredAt: now,
+        cycleId: nextState.cycle.id,
+        intentId: result.intentId,
+        data: {
+          status: observability.status,
+          requiredMetricIds: observability.requiredMetricIds,
+          coveredMetricIds: observability.coveredMetricIds,
+          missingMetricIds: observability.missingMetricIds,
+        },
+      });
+    }
     const automation = await this.reconcileAutomation(now);
     return { intentKind: state.activeIntent.kind, state: nextState, interpretation, automation };
   }
@@ -1124,7 +1258,13 @@ export class OpenMeritCoordinator {
       type: "automation_signal_recorded",
       occurredAt: signal.occurredAt,
       cycleId: state.cycle.id,
-      data: { signalId: signal.id, signalType: signal.type, decision: decision.action },
+      data: {
+        signalId: signal.id,
+        signalType: signal.type,
+        decision: decision.action,
+        decisionReason: decision.reason,
+        ...auditSignalData(signal),
+      },
     });
     if (decision.action === "issue_intent") {
       await this.store.appendEvent({

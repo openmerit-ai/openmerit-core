@@ -12,6 +12,8 @@ The adapter targets Pi 0.87 and declares `>=0.87.0 <0.88.0`. Development uses 0.
 
 Use `/openmerit doctor` to confirm that the adapter and intent executor are available.
 
+Use `/openmerit logs` to locate the project-local audit stream, exporter failures, evidence manifests, and state while testing an end-to-end run.
+
 On `session_start`, an interactive unconfigured project automatically receives one `establish_evals` intent. Durable active-intent state prevents the setup nudge from being reissued on every session. Non-interactive runs do not attempt a confirmation flow; `/openmerit setup` remains an explicit recovery command.
 
 For configured projects, session start reports the current model catalogue and a scheduled tick. Ordinary settled product work reports an idempotent completed-task signal. OpenMerit evaluates the confirmed policy before issuing work. Pi currently declares no persistent scheduling or background execution, so persistent policies require an external scheduler to start Pi; the adapter reports that gap explicitly.

@@ -31,3 +31,10 @@ Two forms of repetition may be needed: repeat the same input to measure stochast
 
 Results point to durable evidence rather than embedding arbitrary traces. Sources include harness traces, evaluation artifacts, observability records, external sources, and user feedback. References may contain a URI, media type, and digest. Successful intents require evidence; frontier certification also requires calculation evidence and exact assessment IDs.
 
+## Readiness contract
+
+Setup must return an explicit observability coverage report containing every required metric, which metrics are covered, which remain missing, and when the check occurred. OpenMerit derives readiness from those sets; a harness cannot label coverage `ready` while a required metric is absent.
+
+If setup reports a required gap, OpenMerit issues `instrument_observability`. A successful instrumentation result is accepted only when every required metric is covered. This prevents a configured task profile from being mistaken for working telemetry.
+
+Product instrumentation and OpenMerit auditing are separate. The product emits measurements such as quality, success, tokens, cost, latency, retries, tool calls, and intervention. OpenMerit records the signals, policy decision, intent lifecycle, evidence identifiers, and readiness or frontier decision that followed.

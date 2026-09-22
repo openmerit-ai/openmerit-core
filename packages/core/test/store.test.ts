@@ -63,3 +63,36 @@ test("rejects unsafe evidence manifest identifiers", async (context) => {
     references: [],
   }), /not file-safe/);
 });
+
+test("writes canonical redacted events and best-effort exporter failures", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "openmerit-v2-store-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const exported: unknown[] = [];
+  const store = new ProjectStore(root, {
+    eventExporters: [
+      { id: "working", async export(event) { exported.push(event); } },
+      { id: "broken", async export() { throw new Error(`failed with ${"apikey_"}${"abcdefghijklmnopqrstuvwxyz"}`); } },
+    ],
+  });
+
+  await store.appendEvent({
+    schemaVersion: 1,
+    id: "event-redacted",
+    type: "automation_signal_recorded",
+    occurredAt: "2026-09-22T00:00:00.000Z",
+    cycleId: "cycle-1",
+    data: {
+      apiKey: `${"apikey_"}${"abcdefghijklmnopqrstuvwxyz"}`,
+      message: `Authorization ${"sk-"}${"abcdefghijklmnopqrstuvwxyz"}`,
+    },
+  });
+
+  const canonical = await readFile(store.eventsPath, "utf8");
+  const exportErrors = await readFile(store.exportErrorsPath, "utf8");
+  assert.doesNotMatch(canonical, /abcdefghijklmnopqrstuvwxyz/);
+  assert.match(canonical, /\[REDACTED\]/);
+  assert.equal(exported.length, 1);
+  assert.doesNotMatch(JSON.stringify(exported), /abcdefghijklmnopqrstuvwxyz/);
+  assert.match(exportErrors, /"exporterId":"broken"/);
+  assert.doesNotMatch(exportErrors, /abcdefghijklmnopqrstuvwxyz/);
+});
