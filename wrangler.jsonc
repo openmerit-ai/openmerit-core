@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "openmerit-site",
+  "compatibility_date": "2026-09-22",
+  "workers_dev": true,
+  "preview_urls": true,
+  "routes": [
+    {
+      "pattern": "openmerit.site/*",
+      "zone_id": "f4eb6a0586e7778ec5e6fa37bb8fa9e7"
+    },
+    {
+      "pattern": "www.openmerit.site/*",
+      "zone_id": "f4eb6a0586e7778ec5e6fa37bb8fa9e7"
+    }
+  ],
+  "assets": {
+    "directory": "./site",
+    "not_found_handling": "404-page"
+  }
+}
