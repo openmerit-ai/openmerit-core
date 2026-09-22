@@ -146,6 +146,7 @@ function privateIntentMessage(intent: OpenMeritIntent): string {
     "Perform the intelligent work using the current project, session context, and available tools.",
     "Use harness-configured fast decision resources such as Jev System One aggressively for bounded ranking, triage, and judgment when available; OpenMerit does not call those services itself.",
     "You, the coding harness, own all research, evaluation design, instrumentation, measurement, Pareto calculation, and authorized configuration work. OpenMerit only validates the returned contract and evidence.",
+    "Instrument every required metric selected by the user. Report explicit covered and missing metric IDs; never describe observability as ready while a required metric is missing.",
     intent.constraints.modelMutationAllowed
       ? "This intent authorizes only the model mutation described by the active OpenMerit cycle."
       : "Do not change Pi's model or application model configuration.",
@@ -318,8 +319,10 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
         }
         if (input.status === "succeeded" && intentKind === "establish_evals") {
           state.taskProfile = "configured";
-          state.metricReadiness = "assessed";
+          state.metricReadiness = nextState.observability?.status === "ready" ? "assessed" : "pending";
           state.evaluationReadiness = "assessed";
+        } else if (input.status === "succeeded" && intentKind === "instrument_observability") {
+          state.metricReadiness = nextState.observability?.status === "ready" ? "assessed" : "pending";
         }
 
         if (input.status === "succeeded" && !state.proactiveNudgesPaused) {
@@ -381,6 +384,8 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
       state.activeIntent = projectState.activeIntent?.id ?? null;
       if (projectState.activeIntent) registerCompletionTool(projectState.activeIntent.kind);
       state.taskProfile = projectState.cycle.taskProfileId ? "configured" : "not_configured";
+      state.metricReadiness = projectState.observability?.status === "ready" ? "assessed" : "pending";
+      state.evaluationReadiness = projectState.cycle.taskProfileId ? "assessed" : "not_assessed";
       const automation = await new OpenMeritCoordinator(store, piHarnessAdapter(pi)).reconcileAutomation();
       state.nextAssessment = automation.plan.nextWakeupAt ??
         (automation.plan.scheduling === "external_scheduler_required" ? "external scheduler required" : "signal driven");
@@ -429,7 +434,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("openmerit", {
-    description: "OpenMerit: status, setup, assess, frontier, approve, pause/resume, doctor",
+    description: "OpenMerit: status, setup, assess, frontier, approve, pause/resume, logs, doctor",
     handler: async (args, ctx) => {
       const subcommand = args.trim().split(/\s+/)[0]?.toLowerCase() || "status";
 
@@ -488,6 +493,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
               "OpenMerit doctor",
               "Pi adapter        : loaded",
               "intent executor   : connected",
+              `audit log          : ${store?.eventsPath ?? `${ctx.cwd}/.openmerit/events.jsonl`}`,
               "model mutation    : disabled",
               "persistent schedule: unavailable (active-session ticks only)",
               `interactive UI     : ${ctx.hasUI ? "available" : "unavailable"}`,
@@ -495,9 +501,22 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
             "info",
           );
           return;
+        case "logs":
+          store ??= new ProjectStore(ctx.cwd);
+          ctx.ui.notify(
+            [
+              "OpenMerit observability files",
+              `audit events : ${store.eventsPath}`,
+              `export errors: ${store.exportErrorsPath}`,
+              `evidence     : ${store.evidenceDirectory}`,
+              `state        : ${store.statePath}`,
+            ].join("\n"),
+            "info",
+          );
+          return;
         default:
           ctx.ui.notify(
-            "openmerit: usage: /openmerit [status|setup|assess|frontier|approve|pause|resume|doctor]",
+            "openmerit: usage: /openmerit [status|setup|assess|frontier|approve|pause|resume|logs|doctor]",
             "warning",
           );
       }

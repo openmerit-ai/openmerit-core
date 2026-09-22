@@ -12,6 +12,7 @@ It translates OpenMerit intents into intelligent Pi work and returns structured 
 - `/openmerit frontier` — request and verify a harness-calculated frontier.
 - `/openmerit approve` — authorize the currently proposed supervised swap.
 - `/openmerit pause` and `/openmerit resume` — control proactive nudges.
+- `/openmerit logs` — show canonical audit, exporter-error, evidence, and state paths.
 - `/openmerit doctor` — show sanitized adapter diagnostics.
 
 The adapter persists typed intents in Pi's session, supplies them as private extension-authored context, and triggers Pi to perform the work. Pi completes each intent through `openmerit_complete_intent`, returning structured outputs and durable evidence references.

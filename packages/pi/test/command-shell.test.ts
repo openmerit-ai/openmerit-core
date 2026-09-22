@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
@@ -119,6 +119,13 @@ function confirmedSetupOutputs() {
         cooldownSeconds: 3600,
         execution: { mode: "active_session_only", infrastructureChangesAllowed: false },
       },
+    },
+    observability: {
+      status: "ready",
+      requiredMetricIds: ["task_success"] as string[],
+      coveredMetricIds: ["task_success"] as string[],
+      missingMetricIds: [] as string[],
+      checkedAt: new Date().toISOString(),
     },
   };
 }
@@ -330,6 +337,42 @@ test("Pi turns completed work into durable signals and dispatches a due assessme
       .filter((entry) => entry.customType === "openmerit-v2.intent")
       .map((entry) => (entry.data as { intent: { kind: string } }).intent.kind);
     assert.deepEqual(intentKinds, ["establish_evals", "run_assessment"]);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("Pi automatically requests instrumentation when setup reports a required metric gap", async () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-v2-instrumentation-"));
+  const notifications: Notification[] = [];
+  const { handler, completionTool, entries } = loadCommand();
+  const ctx = sessionContext(projectRoot, notifications);
+
+  try {
+    await handler("setup", { ...commandContext(notifications), cwd: projectRoot } as ExtensionCommandContext);
+    const intent = (entries[0]?.data as { intent: { id: string } }).intent;
+    const outputs = confirmedSetupOutputs();
+    outputs.observability = {
+      ...outputs.observability,
+      status: "incomplete",
+      coveredMetricIds: [] as string[],
+      missingMetricIds: ["task_success"] as string[],
+    };
+    await completionTool.execute("tool-setup", {
+      intentId: intent.id,
+      status: "succeeded",
+      summary: "Configured evals but found a required instrumentation gap",
+      evidence: [{ id: "eval", source: "evaluation_artifact", uri: "file:///eval.json" }],
+      outputs,
+    }, undefined, undefined, ctx as unknown as ExtensionCommandContext);
+
+    const intentKinds = entries
+      .filter((entry) => entry.customType === "openmerit-v2.intent")
+      .map((entry) => (entry.data as { intent: { kind: string } }).intent.kind);
+    assert.deepEqual(intentKinds, ["establish_evals", "instrument_observability"]);
+    const events = readFileSync(join(projectRoot, ".openmerit", "events.jsonl"), "utf8");
+    assert.match(events, /"type":"observability_readiness_checked"/);
+    assert.match(events, /"missingMetricIds":\["task_success"\]/);
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }

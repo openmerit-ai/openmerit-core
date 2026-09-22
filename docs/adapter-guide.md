@@ -54,6 +54,23 @@ const coordinator = new OpenMeritCoordinator(
 
 `ProjectStore` is the included local-filesystem backend. A remote or hosted integration can implement the `OpenMeritStore` interface instead.
 
+## External telemetry export
+
+OpenMerit always writes its canonical, redacted audit stream locally. A host integration may pass `eventExporters` to `ProjectStore` to mirror those same safe events to OpenTelemetry, Langfuse, LangSmith, or another observability backend:
+
+```ts
+const store = new ProjectStore(projectRoot, {
+  eventExporters: [{
+    id: "my-otel-bridge",
+    async export(event) {
+      await telemetry.emit("openmerit.audit", event);
+    },
+  }],
+});
+```
+
+Exporters are not the durable source of truth. They are best effort, and failures are recorded locally without blocking OpenMerit decisions.
+
 ## Dispatching work
 
 ```ts

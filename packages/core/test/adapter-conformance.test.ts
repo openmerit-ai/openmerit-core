@@ -13,6 +13,7 @@ import {
   OpenMeritCoordinator,
   ProjectStore,
   validateHarnessDescriptor,
+  validateObservabilityCoverage,
   type HarnessAdapter,
 } from "../src/index.ts";
 
@@ -125,6 +126,13 @@ test("shared core validates and interprets setup results from any harness", () =
           execution: { mode: "persistent", infrastructureChangesAllowed: false },
         },
       },
+      observability: {
+        status: "ready",
+        requiredMetricIds: ["task_success"],
+        coveredMetricIds: ["task_success"],
+        missingMetricIds: [],
+        checkedAt: "2026-09-22T00:00:30.000Z",
+      },
     },
   };
   const interpreted = interpretIntentResult(
@@ -159,6 +167,30 @@ test("shared core rejects structurally invalid successful outputs from any harne
 
   assert.equal(interpreted.valid, false);
   assert.match(interpreted.errors.join("; "), /baselineEvidenceSufficient/);
+});
+
+test("observability readiness cannot hide a required metric gap", () => {
+  const profile = {
+    id: "profile-observability",
+    revision: 1,
+    name: "Observed task",
+    goal: "Verify required metrics",
+    objectives: [
+      { metricId: "task_success" as const, required: true, minimumSamples: 3, tolerance: 0 },
+      { metricId: "total_task_cost" as const, required: true, minimumSamples: 3, tolerance: 0 },
+    ],
+    createdAt: "2026-09-22T00:00:00.000Z",
+    confirmedAt: "2026-09-22T00:00:01.000Z",
+  };
+  const errors = validateObservabilityCoverage(profile, {
+    status: "ready",
+    requiredMetricIds: ["task_success", "total_task_cost"],
+    coveredMetricIds: ["task_success"],
+    missingMetricIds: ["total_task_cost"],
+    checkedAt: "2026-09-22T00:01:00.000Z",
+  }, false);
+
+  assert.match(errors.join("; "), /status must be incomplete/);
 });
 
 test("the coordinator runs a durable job through a non-Pi harness", async () => {
