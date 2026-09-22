@@ -11,6 +11,8 @@ npm run verify
 
 Tests cover protocol contracts, lifecycle decisions, baseline sufficiency, candidate/frontier/swap sequencing, conservative Pareto verification, persistence, audit events, safe evidence identifiers, Pi commands, private intent delivery, evidence requirements, and mutation boundaries.
 
+Automation tests additionally cover task and elapsed cadence, idempotent signal delivery, durable pending work, catalogue changes, metric regression thresholds, native wakeup requests, unsupported-scheduler fallbacks, delayed post-swap verification, and Pi conversion of settled work into a due assessment.
+
 ## Pi load smoke test
 
 ```sh
@@ -27,4 +29,3 @@ This proves the real Pi runtime loads the extension and enumerates its available
 - **Production verified** — representative repeated runs support reliability and distribution claims.
 
 The current repository is unit- and runtime-smoke-verified. Product and production claims require target-product evidence.
-

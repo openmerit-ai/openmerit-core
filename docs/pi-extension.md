@@ -14,6 +14,10 @@ Use `/openmerit doctor` to confirm that the adapter and intent executor are avai
 
 On `session_start`, an interactive unconfigured project automatically receives one `establish_evals` intent. Durable active-intent state prevents the setup nudge from being reissued on every session. Non-interactive runs do not attempt a confirmation flow; `/openmerit setup` remains an explicit recovery command.
 
+For configured projects, session start reports the current model catalogue and a scheduled tick. Ordinary settled product work reports an idempotent completed-task signal. OpenMerit evaluates the confirmed policy before issuing work. Pi currently declares no persistent scheduling or background execution, so persistent policies require an external scheduler to start Pi; the adapter reports that gap explicitly.
+
+Pi also exposes `openmerit_report_signal` for verified `metric_window_available` and `verification_window_completed` events. Evals or observability work performed by Pi can submit measured metric records through this typed ingress using stable signal IDs. This does not create a background scheduler; it gives the active harness a validated way to connect the infrastructure it built to OpenMerit's due-check engine.
+
 ## Intent delivery
 
 The extension persists each intent as a custom Pi session entry, sends private extension-authored context with `display: false`, and triggers a follow-up Pi turn. The intent describes the outcome, constraints, evidence, task profile, and authorization boundary without prescribing Pi's method.

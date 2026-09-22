@@ -1,12 +1,17 @@
 import type {
   AnyIntentResult,
+  AutomationPlan,
+  AutomationSignal,
+  AutomationSignalType,
   CandidateAssessment,
   DominanceComparison,
   FrontierSnapshot,
   HarnessCapability,
   HarnessDescriptor,
   HarnessDispatchReceipt,
+  HarnessWakeupRequest,
   MetricObjective,
+  MetricId,
   MetricRecord,
   TaskProfile,
   ImprovementCycleState,
@@ -32,6 +37,7 @@ export { OPENMERIT_DIRECTORY, ProjectStore, type OpenMeritStore } from "./store.
 export interface HarnessAdapter {
   readonly descriptor: HarnessDescriptor;
   dispatch(intent: OpenMeritIntent): Promise<HarnessDispatchReceipt>;
+  scheduleWakeup?(request: HarnessWakeupRequest): Promise<HarnessDispatchReceipt>;
 }
 
 export interface IntentFactoryOptions {
@@ -43,7 +49,7 @@ export interface IntentFactoryOptions {
 }
 
 const outcomes: Readonly<Record<IntentKind, string>> = {
-  establish_evals: "Infer the current task profile and metric objectives, ask the user to confirm requirements and an evaluation budget, establish applicable evals and observability, verify them, and return the confirmed taskProfile and policy. Do not change model configuration.",
+  establish_evals: "Infer the current task profile and metric objectives, ask the user to confirm requirements, evaluation budget, check cadence, thresholds, scheduling mode, and automation permissions, establish applicable evals and observability, verify them, and return the confirmed taskProfile and policy. Do not change model configuration.",
   instrument_observability: "Establish and verify the missing observability required by the confirmed task profile.",
   run_assessment: "Assess whether current baseline evidence satisfies every required metric and sample threshold. Return measured, missing, and insufficient-evidence metrics explicitly.",
   discover_candidates: "Discover credible model candidates for the confirmed task profile using current capability, reputation, price, availability, and benchmark signals without exceeding the approved evaluation budget.",
@@ -68,6 +74,7 @@ export function createOpenMeritIntent(kind: IntentKind, options: IntentFactoryOp
       requireVerifiedArtifacts: true,
       distinguishSingleRunFromMultiRunClaims: true,
       ...(options.policy ? { evaluationBudget: options.policy.evaluationBudget as unknown as JsonValue } : {}),
+      ...(options.policy ? { checkPolicy: options.policy.checkPolicy as unknown as JsonValue } : {}),
     },
     requiredEvidence: kind === "establish_evals"
       ? [
@@ -113,6 +120,11 @@ export function validateHarnessDescriptor(descriptor: HarnessDescriptor): Verifi
     errors.push("harness must declare structured-output behavior");
   } else if (descriptor.structuredOutput.schemaDialect !== OPENMERIT_SCHEMA_DIALECT) {
     errors.push(`harness does not support OpenMerit schema dialect ${OPENMERIT_SCHEMA_DIALECT}`);
+  }
+  if (!descriptor.automation || descriptor.automation.supportedSignals.length === 0) {
+    errors.push("harness must declare at least one supported automation signal");
+  } else if (descriptor.automation.persistentScheduling && descriptor.automation.wakeupProvisioning === "none") {
+    errors.push("persistent scheduling requires a wakeup provisioning mechanism");
   }
   return { valid: errors.length === 0, errors };
 }
@@ -393,7 +405,7 @@ export function nextImprovementAction(state: ImprovementCycleState): Orchestrati
     case "swap_approved":
       return { action: "issue_intent", intentKind: "apply_model_swap", reason: "The user approved the proposed model swap." };
     case "swap_applied":
-      return { action: "issue_intent", intentKind: "verify_model_swap", reason: "Every applied swap requires post-swap verification." };
+      return { action: "observe", reason: "Collect the user-confirmed post-swap verification window before verification." };
     case "swap_verified":
     case "monitoring":
       return { action: "observe", reason: "Monitor production evidence until reassessment is due." };
@@ -609,6 +621,10 @@ export interface AcceptedIntentResult {
   readonly intentKind: IntentKind;
   readonly state: OpenMeritProjectState;
   readonly interpretation: ResultInterpretation;
+  readonly automation: {
+    readonly plan: AutomationPlan;
+    readonly receipt?: HarnessDispatchReceipt;
+  };
 }
 
 export interface ObservationResult {
@@ -620,6 +636,204 @@ export interface CatalogChangeResult {
   readonly state: OpenMeritProjectState;
   readonly changed: boolean;
   readonly reassessmentDue: boolean;
+}
+
+export interface AutomationSignalResult {
+  readonly state: OpenMeritProjectState;
+  readonly duplicate: boolean;
+  readonly decision: OrchestrationDecision;
+}
+
+const MAX_PROCESSED_SIGNAL_IDS = 256;
+
+function nextAt(anchor: string, seconds?: number): string | undefined {
+  if (seconds === undefined) return undefined;
+  return new Date(Date.parse(anchor) + seconds * 1000).toISOString();
+}
+
+function earliest(values: readonly (string | undefined)[]): string | undefined {
+  return values.filter((value): value is string => value !== undefined)
+    .sort((left, right) => Date.parse(left) - Date.parse(right))[0];
+}
+
+export function buildAutomationPlan(
+  state: OpenMeritProjectState,
+  descriptor: HarnessDescriptor,
+): AutomationPlan {
+  const policy = state.cycle.policy?.checkPolicy;
+  if (!policy) {
+    return {
+      mode: "active_session_only",
+      requiredSignals: [],
+      scheduling: "active_session_fallback",
+      gaps: ["No user-confirmed automation policy exists."],
+    };
+  }
+
+  const required = new Set<AutomationSignalType>();
+  const cadences = [
+    policy.baselineAssessment,
+    policy.frontierReassessment,
+    policy.regressionCheck,
+    policy.postSwapVerification,
+  ];
+  if (cadences.some((cadence) => cadence.afterCompletedTasks !== undefined)) required.add("product_task_completed");
+  if (cadences.some((cadence) => cadence.afterElapsedSeconds !== undefined)) required.add("scheduled_tick");
+  if (policy.frontierReassessment.onModelCatalogChange) required.add("model_catalog_changed");
+  if (policy.regressionCheck.thresholds.length) required.add("metric_window_available");
+  if (policy.postSwapVerification.afterCompletedTasks === undefined &&
+      policy.postSwapVerification.afterElapsedSeconds === undefined) {
+    required.add("verification_window_completed");
+  }
+
+  const nextWakeupAt = state.cycle.stage === "collecting_baseline"
+    ? nextAt(state.automation.lastAssessmentAt ?? state.updatedAt, policy.baselineAssessment.afterElapsedSeconds)
+    : ["monitoring", "swap_verified"].includes(state.cycle.stage)
+      ? earliest([
+          nextAt(state.automation.lastReassessmentAt ?? state.updatedAt, policy.frontierReassessment.afterElapsedSeconds),
+          nextAt(state.automation.lastRegressionCheckAt ?? state.updatedAt, policy.regressionCheck.afterElapsedSeconds),
+        ])
+      : state.cycle.stage === "swap_applied"
+        ? nextAt(state.automation.swapAppliedAt ?? state.updatedAt, policy.postSwapVerification.afterElapsedSeconds)
+        : undefined;
+
+  const supported = new Set(descriptor.automation.supportedSignals);
+  const gaps = [...required]
+    .filter((signal) => !supported.has(signal))
+    .map((signal) => `Harness does not report ${signal}.`);
+  let scheduling: AutomationPlan["scheduling"] = "active_session_fallback";
+  if (policy.execution.mode === "persistent") {
+    scheduling = descriptor.automation.persistentScheduling && descriptor.automation.backgroundExecution
+      ? "native"
+      : "external_scheduler_required";
+    if (scheduling === "external_scheduler_required") {
+      gaps.push("Persistent scheduling or background execution is unavailable; configure an external scheduler.");
+    }
+    if (descriptor.automation.wakeupProvisioning === "infrastructure_change" &&
+        !policy.execution.infrastructureChangesAllowed) {
+      scheduling = "external_scheduler_required";
+      gaps.push("Wakeup provisioning requires an infrastructure change that the user has not authorized.");
+    }
+  }
+
+  return {
+    mode: policy.execution.mode,
+    requiredSignals: [...required],
+    ...(nextWakeupAt ? { nextWakeupAt } : {}),
+    scheduling,
+    gaps,
+  };
+}
+
+function cadenceDue(
+  cadence: { readonly afterCompletedTasks?: number; readonly afterElapsedSeconds?: number },
+  completedTasks: number,
+  lastTaskCount: number,
+  lastAt: string,
+  now: string,
+): boolean {
+  const taskDue = cadence.afterCompletedTasks !== undefined &&
+    completedTasks - lastTaskCount >= cadence.afterCompletedTasks;
+  const elapsedDue = cadence.afterElapsedSeconds !== undefined &&
+    Date.parse(now) - Date.parse(lastAt) >= cadence.afterElapsedSeconds * 1000;
+  return taskDue || elapsedDue;
+}
+
+function regressionMetric(
+  signal: AutomationSignal,
+  previous: Readonly<Partial<Record<MetricId, number>>>,
+  policy: SupervisedGraduationPolicy,
+): MetricId | undefined {
+  if (signal.type !== "metric_window_available") return undefined;
+  const directions = new Map(METRIC_CATALOG.map((metric) => [metric.id, metric.direction]));
+  for (const threshold of policy.checkPolicy.regressionCheck.thresholds) {
+    const current = signal.metrics.find((metric) =>
+      metric.metricId === threshold.metricId && metric.state === "measured" && metric.value !== undefined);
+    const prior = previous[threshold.metricId];
+    if (!current || current.value === undefined || prior === undefined) continue;
+    const denominator = Math.max(Math.abs(prior), Number.EPSILON);
+    const deterioration = directions.get(threshold.metricId) === "minimize"
+      ? (current.value - prior) / denominator
+      : (prior - current.value) / denominator;
+    if (deterioration >= threshold.relativeChangeAtLeast) return threshold.metricId;
+  }
+  return undefined;
+}
+
+function dueDecision(
+  state: OpenMeritProjectState,
+  signal: AutomationSignal,
+  now: string,
+): OrchestrationDecision {
+  if (state.activeIntent) return { action: "observe", reason: "Harness work is already active." };
+  if (state.automation.pendingIntentKind) {
+    return {
+      action: "issue_intent",
+      intentKind: state.automation.pendingIntentKind,
+      reason: state.automation.pendingIntentReason ?? "A previously detected automation check remains due.",
+    };
+  }
+  const policy = state.cycle.policy;
+  if (!policy) return { action: "observe", reason: "No user-confirmed automation policy exists." };
+  const completed = state.automation.observedCompletedTasks;
+  const cooldownAnchor = [state.automation.lastReassessmentAt, state.automation.lastRegressionCheckAt]
+    .filter((value): value is string => value !== undefined)
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0];
+  const cooldownSatisfied = !cooldownAnchor ||
+    Date.parse(now) - Date.parse(cooldownAnchor) >= policy.checkPolicy.cooldownSeconds * 1000;
+
+  if (state.cycle.stage === "collecting_baseline" && cadenceDue(
+    policy.checkPolicy.baselineAssessment,
+    completed,
+    state.automation.lastAssessmentTaskCount,
+    state.automation.lastAssessmentAt ?? state.updatedAt,
+    now,
+  )) {
+    return { action: "issue_intent", intentKind: "run_assessment", reason: "The user-confirmed baseline assessment cadence is due." };
+  }
+
+  if (["monitoring", "swap_verified"].includes(state.cycle.stage) && cooldownSatisfied) {
+    const regressedMetric = regressionMetric(signal, state.automation.latestMetricValues ?? {}, policy);
+    if (regressedMetric) {
+      return { action: "issue_intent", intentKind: "investigate_regression", reason: `${regressedMetric} crossed its user-confirmed regression threshold.` };
+    }
+    if (cadenceDue(
+      policy.checkPolicy.regressionCheck,
+      completed,
+      state.automation.lastRegressionCheckTaskCount ?? 0,
+      state.automation.lastRegressionCheckAt ?? state.updatedAt,
+      now,
+    )) {
+      return { action: "issue_intent", intentKind: "investigate_regression", reason: "The user-confirmed regression check cadence is due." };
+    }
+    if (signal.type === "model_catalog_changed" && policy.checkPolicy.frontierReassessment.onModelCatalogChange &&
+        state.automation.modelCatalogFingerprint !== undefined &&
+        state.automation.modelCatalogFingerprint !== signal.fingerprint) {
+      return { action: "issue_intent", intentKind: "discover_candidates", reason: "The model catalogue changed and the user enabled catalogue-triggered reassessment." };
+    }
+    if (cadenceDue(
+      policy.checkPolicy.frontierReassessment,
+      completed,
+      state.automation.lastReassessmentTaskCount ?? 0,
+      state.automation.lastReassessmentAt ?? state.updatedAt,
+      now,
+    )) {
+      return { action: "issue_intent", intentKind: "discover_candidates", reason: "The user-confirmed frontier reassessment cadence is due." };
+    }
+  }
+
+  if (state.cycle.stage === "swap_applied" &&
+      (signal.type === "verification_window_completed" || cadenceDue(
+        policy.checkPolicy.postSwapVerification,
+        completed,
+        state.automation.swapAppliedTaskCount ?? completed,
+        state.automation.swapAppliedAt ?? state.updatedAt,
+        now,
+      ))) {
+    return { action: "issue_intent", intentKind: "verify_model_swap", reason: "The user-confirmed post-swap verification window is complete." };
+  }
+
+  return { action: "observe", reason: "No user-confirmed automation check is due." };
 }
 
 /** Harness-neutral durable coordinator. Adapters transport jobs; this class owns lifecycle state. */
@@ -653,6 +867,12 @@ export class OpenMeritCoordinator {
           ...existing,
           cycle: { ...existing.cycle, stage: startedStage(kind) },
           activeIntent: intent,
+          automation: {
+            ...existing.automation,
+            ...(existing.automation.pendingIntentKind === kind
+              ? { pendingIntentKind: undefined, pendingIntentReason: undefined }
+              : {}),
+          },
           updatedAt: now,
         }
       : {
@@ -668,6 +888,7 @@ export class OpenMeritCoordinator {
             setupNudgeShown: kind === "establish_evals",
             observedCompletedTasks: 0,
             lastAssessmentTaskCount: 0,
+            processedSignalIds: [],
           },
           updatedAt: now,
         };
@@ -700,11 +921,43 @@ export class OpenMeritCoordinator {
         ...state,
         cycle: { ...state.cycle, stage: existing?.cycle.stage ?? "unconfigured" },
         activeIntent: undefined,
+        automation: {
+          ...state.automation,
+          pendingIntentKind: kind,
+          pendingIntentReason: "Harness dispatch failed; the due intent remains pending.",
+        },
         updatedAt: new Date().toISOString(),
       });
       throw new Error(receipt.reason ?? "Harness rejected the OpenMerit intent.");
     }
     return { intent, state, receipt };
+  }
+
+  async reconcileAutomation(now = new Date().toISOString()): Promise<{
+    readonly plan: AutomationPlan;
+    readonly receipt?: HarnessDispatchReceipt;
+  }> {
+    const state = await this.store.readState();
+    if (!state) throw new Error("OpenMerit project is not initialized.");
+    const plan = buildAutomationPlan(state, this.adapter.descriptor);
+    if (plan.scheduling !== "native" || !plan.nextWakeupAt || Date.parse(plan.nextWakeupAt) <= Date.parse(now)) {
+      return { plan };
+    }
+    if (!this.adapter.scheduleWakeup) {
+      return {
+        plan: {
+          ...plan,
+          scheduling: "external_scheduler_required",
+          gaps: [...plan.gaps, "Harness declared native scheduling but did not implement scheduleWakeup."],
+        },
+      };
+    }
+    const receipt = await this.adapter.scheduleWakeup({
+      at: plan.nextWakeupAt,
+      signal: "scheduled_tick",
+      reason: "Wake the harness so OpenMerit can evaluate the user-confirmed check policy.",
+    });
+    return { plan, receipt };
   }
 
   async acceptResult(result: AnyIntentResult): Promise<AcceptedIntentResult> {
@@ -730,8 +983,18 @@ export class OpenMeritCoordinator {
       automation: {
         ...state.automation,
         ...(state.activeIntent.kind === "run_assessment"
-          ? { lastAssessmentTaskCount: state.automation.observedCompletedTasks }
+          ? { lastAssessmentTaskCount: state.automation.observedCompletedTasks, lastAssessmentAt: now }
           : {}),
+        ...(state.activeIntent.kind === "calculate_frontier"
+          ? { lastReassessmentTaskCount: state.automation.observedCompletedTasks, lastReassessmentAt: now }
+          : {}),
+        ...(state.activeIntent.kind === "investigate_regression"
+          ? { lastRegressionCheckTaskCount: state.automation.observedCompletedTasks, lastRegressionCheckAt: now }
+          : {}),
+        ...(state.activeIntent.kind === "apply_model_swap"
+          ? { swapAppliedTaskCount: state.automation.observedCompletedTasks, swapAppliedAt: now }
+          : {}),
+        ...(state.activeIntent.kind === "verify_model_swap" ? { lastVerificationAt: now } : {}),
       },
       updatedAt: now,
     };
@@ -759,7 +1022,8 @@ export class OpenMeritCoordinator {
         harnessId: this.adapter.descriptor.id,
       },
     });
-    return { intentKind: state.activeIntent.kind, state: nextState, interpretation };
+    const automation = await this.reconcileAutomation(now);
+    return { intentKind: state.activeIntent.kind, state: nextState, interpretation, automation };
   }
 
   async recordLifecycle(update: IntentLifecycleUpdate): Promise<void> {
@@ -786,34 +1050,93 @@ export class OpenMeritCoordinator {
   async recordTaskObservation(
     details: Readonly<Record<string, JsonValue>> = {},
   ): Promise<ObservationResult> {
+    const now = new Date().toISOString();
+    const result = await this.recordAutomationSignal({
+      protocolVersion: PROTOCOL_VERSION,
+      id: `legacy-task-${crypto.randomUUID()}`,
+      type: "product_task_completed",
+      occurredAt: now,
+      modelId: typeof details.modelId === "string" ? details.modelId : "unknown",
+      contextTokens: typeof details.contextTokens === "number" || details.contextTokens === null
+        ? details.contextTokens
+        : undefined,
+    });
+    return {
+      state: result.state,
+      assessmentDue: result.decision.action === "issue_intent" && result.decision.intentKind === "run_assessment",
+    };
+  }
+
+  async recordAutomationSignal(signal: AutomationSignal): Promise<AutomationSignalResult> {
     const state = await this.store.readState();
     if (!state) throw new Error("OpenMerit project is not initialized.");
-    if (state.activeIntent) return { state, assessmentDue: false };
-    const observedCompletedTasks = state.automation.observedCompletedTasks + 1;
-    const now = new Date().toISOString();
-    const nextState: OpenMeritProjectState = {
+    if (signal.protocolVersion !== PROTOCOL_VERSION) throw new Error("Automation signal protocol version does not match.");
+    if (!signal.id.trim()) throw new Error("Automation signal ID is required.");
+    const processed = state.automation.processedSignalIds ?? [];
+    if (processed.includes(signal.id)) {
+      await this.store.appendEvent({
+        schemaVersion: 1,
+        id: `event-${crypto.randomUUID()}`,
+        type: "automation_signal_duplicate",
+        occurredAt: signal.occurredAt,
+        cycleId: state.cycle.id,
+        data: { signalId: signal.id, signalType: signal.type },
+      });
+      return { state, duplicate: true, decision: dueDecision(state, signal, signal.occurredAt) };
+    }
+
+    const completedTasks = state.automation.observedCompletedTasks +
+      (signal.type === "product_task_completed" ? 1 : 0);
+    const decisionState: OpenMeritProjectState = {
       ...state,
-      automation: { ...state.automation, observedCompletedTasks },
-      updatedAt: now,
+      automation: { ...state.automation, observedCompletedTasks: completedTasks },
+    };
+    const decision = dueDecision(decisionState, signal, signal.occurredAt);
+    const latestMetricValues = { ...(state.automation.latestMetricValues ?? {}) };
+    if (signal.type === "metric_window_available" || signal.type === "verification_window_completed") {
+      for (const metric of signal.metrics ?? []) {
+        if (metric.state === "measured" && metric.value !== undefined) latestMetricValues[metric.metricId] = metric.value;
+      }
+    }
+    const nextState: OpenMeritProjectState = {
+      ...decisionState,
+      automation: {
+        ...decisionState.automation,
+        processedSignalIds: [...processed, signal.id].slice(-MAX_PROCESSED_SIGNAL_IDS),
+        latestMetricValues,
+        ...(signal.type === "model_catalog_changed" ? {
+          modelCatalogFingerprint: signal.fingerprint,
+          ...(state.automation.modelCatalogFingerprint && state.automation.modelCatalogFingerprint !== signal.fingerprint
+            ? { modelCatalogChangedAt: signal.occurredAt }
+            : {}),
+        } : {}),
+        ...(decision.action === "issue_intent" ? {
+          pendingIntentKind: decision.intentKind,
+          pendingIntentReason: decision.reason,
+        } : {}),
+      },
+      updatedAt: signal.occurredAt,
     };
     await this.store.writeState(nextState);
     await this.store.appendEvent({
       schemaVersion: 1,
       id: `event-${crypto.randomUUID()}`,
-      type: "task_observed",
-      occurredAt: now,
+      type: "automation_signal_recorded",
+      occurredAt: signal.occurredAt,
       cycleId: state.cycle.id,
-      data: { observedCompletedTasks, ...details },
+      data: { signalId: signal.id, signalType: signal.type, decision: decision.action },
     });
-
-    const config = await this.store.readConfig();
-    const profile = config?.taskProfiles.find((item) => item.id === config.activeTaskProfileId);
-    const requiredSamples = profile
-      ? Math.max(1, ...profile.objectives.filter((item) => item.required).map((item) => item.minimumSamples))
-      : undefined;
-    const assessmentDue = state.cycle.stage === "collecting_baseline" && requiredSamples !== undefined &&
-      observedCompletedTasks - state.automation.lastAssessmentTaskCount >= requiredSamples;
-    return { state: nextState, assessmentDue };
+    if (decision.action === "issue_intent") {
+      await this.store.appendEvent({
+        schemaVersion: 1,
+        id: `event-${crypto.randomUUID()}`,
+        type: "automation_check_due",
+        occurredAt: signal.occurredAt,
+        cycleId: state.cycle.id,
+        data: { signalId: signal.id, intentKind: decision.intentKind, reason: decision.reason },
+      });
+    }
+    return { state: nextState, duplicate: false, decision };
   }
 
   async recordModelCatalogFingerprint(fingerprint: string): Promise<CatalogChangeResult> {
@@ -825,28 +1148,17 @@ export class OpenMeritCoordinator {
       return { state, changed: false, reassessmentDue: false };
     }
     const now = new Date().toISOString();
-    const nextState: OpenMeritProjectState = {
-      ...state,
-      automation: {
-        ...state.automation,
-        modelCatalogFingerprint: fingerprint,
-        ...(changed ? { modelCatalogChangedAt: now } : {}),
-      },
-      updatedAt: now,
+    const result = await this.recordAutomationSignal({
+      protocolVersion: PROTOCOL_VERSION,
+      id: `legacy-catalog-${crypto.randomUUID()}`,
+      type: "model_catalog_changed",
+      occurredAt: now,
+      fingerprint,
+    });
+    return {
+      state: result.state,
+      changed,
+      reassessmentDue: result.decision.action === "issue_intent" && result.decision.intentKind === "discover_candidates",
     };
-    await this.store.writeState(nextState);
-    if (changed) {
-      await this.store.appendEvent({
-        schemaVersion: 1,
-        id: `event-${crypto.randomUUID()}`,
-        type: "model_catalog_changed",
-        occurredAt: now,
-        cycleId: state.cycle.id,
-        data: { previousFingerprint, fingerprint },
-      });
-    }
-    const reassessmentDue = changed && !state.activeIntent && state.cycle.baselineEvidenceSufficient &&
-      ["monitoring", "swap_verified"].includes(state.cycle.stage);
-    return { state: nextState, changed, reassessmentDue };
   }
 }

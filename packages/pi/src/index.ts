@@ -16,11 +16,14 @@ import {
   OPENMERIT_SCHEMA_DIALECT,
   PROTOCOL_VERSION,
   type AnyIntentResult,
+  type AutomationSignal,
   type EvidenceReference,
   type HarnessDescriptor,
   type IntentKind,
   type IntentResult,
   type ImprovementStage,
+  type MetricRecord,
+  MetricRecordSchema,
   type OpenMeritIntent,
 } from "@openmerit-v2/protocol";
 import { Type } from "typebox";
@@ -51,6 +54,15 @@ export const PI_HARNESS_DESCRIPTOR: HarnessDescriptor = {
     schemaDialect: OPENMERIT_SCHEMA_DIALECT,
     presentation: "dynamic_tool",
     enforcement: "harness",
+  },
+  automation: {
+    supportedSignals: [
+      "product_task_completed", "metric_window_available", "scheduled_tick",
+      "model_catalog_changed", "verification_window_completed",
+    ],
+    persistentScheduling: false,
+    backgroundExecution: false,
+    wakeupProvisioning: "none",
   },
 };
 
@@ -106,6 +118,13 @@ interface CompletionInput {
   errorCode?: string;
   errorMessage?: string;
   retryable?: boolean;
+}
+
+interface ObservationSignalInput {
+  signalId: string;
+  type: "metric_window_available" | "verification_window_completed";
+  occurredAt?: string;
+  metrics: MetricRecord[];
 }
 
 function modelCatalogFingerprint(ctx: ExtensionContext): string {
@@ -199,6 +218,20 @@ async function dispatchIntent(
   ctx.ui.notify(`openmerit: ${label} started (${intent.id})`, "info");
 }
 
+async function reportAutomationSignal(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  state: OpenMeritUiState,
+  store: ProjectStore,
+  signal: AutomationSignal,
+  prepareCompletionTool: (kind: IntentKind) => void,
+): Promise<void> {
+  const result = await new OpenMeritCoordinator(store, piHarnessAdapter(pi)).recordAutomationSignal(signal);
+  if (result.decision.action === "issue_intent" && !state.activeIntent) {
+    await dispatchIntent(pi, ctx, state, store, result.decision.intentKind, prepareCompletionTool);
+  }
+}
+
 export default function openMeritExtension(pi: ExtensionAPI): void {
   const state = createInitialUiState();
   let store: ProjectStore | undefined;
@@ -277,6 +310,11 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
         state.activeIntent = null;
         state.lifecycleStage = stage;
         registerCompletionTool();
+        state.nextAssessment = accepted.automation.plan.nextWakeupAt ??
+          (accepted.automation.plan.scheduling === "external_scheduler_required" ? "external scheduler required" : "signal driven");
+        if (accepted.automation.plan.gaps.length) {
+          ctx.ui.notify(`openmerit automation: ${accepted.automation.plan.gaps.join(" ")}`, "warning");
+        }
         if (input.status === "succeeded" && intentKind === "establish_evals") {
           state.taskProfile = "configured";
           state.metricReadiness = "assessed";
@@ -302,6 +340,38 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
 
   registerCompletionTool();
 
+  pi.registerTool({
+    name: "openmerit_report_signal",
+    label: "Report OpenMerit Signal",
+    description: "Report a verified observability metric window or completed post-swap verification window to OpenMerit.",
+    promptSnippet: "Report verified OpenMerit observability signals",
+    promptGuidelines: [
+      "Use stable signalId values so retried deliveries remain idempotent.",
+      "Report only measured metrics backed by the referenced observability or evaluation artifacts.",
+    ],
+    parameters: Type.Object({
+      signalId: Type.String({ minLength: 1 }),
+      type: StringEnum(["metric_window_available", "verification_window_completed"] as const),
+      occurredAt: Type.Optional(Type.String({ minLength: 1 })),
+      metrics: Type.Array(MetricRecordSchema),
+    }, { additionalProperties: false }),
+    constrainedSampling: { type: "json_schema", strict: "prefer" },
+    async execute(_toolCallId, input: ObservationSignalInput, _signal, _onUpdate, ctx) {
+      store ??= new ProjectStore(ctx.cwd);
+      await reportAutomationSignal(pi, ctx, state, store, {
+        protocolVersion: PROTOCOL_VERSION,
+        id: input.signalId,
+        type: input.type,
+        occurredAt: input.occurredAt ?? new Date().toISOString(),
+        metrics: input.metrics,
+      }, registerCompletionTool);
+      return {
+        content: [{ type: "text", text: `Recorded OpenMerit automation signal ${input.signalId}.` }],
+        details: { signalId: input.signalId, type: input.type },
+      };
+    },
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     store = new ProjectStore(ctx.cwd);
     let projectState = await store.readState();
@@ -310,13 +380,27 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
       state.activeIntent = projectState.activeIntent?.id ?? null;
       if (projectState.activeIntent) registerCompletionTool(projectState.activeIntent.kind);
       state.taskProfile = projectState.cycle.taskProfileId ? "configured" : "not_configured";
+      const automation = await new OpenMeritCoordinator(store, piHarnessAdapter(pi)).reconcileAutomation();
+      state.nextAssessment = automation.plan.nextWakeupAt ??
+        (automation.plan.scheduling === "external_scheduler_required" ? "external scheduler required" : "signal driven");
+      if (automation.plan.gaps.length) {
+        ctx.ui.notify(`openmerit automation: ${automation.plan.gaps.join(" ")}`, "warning");
+      }
       const fingerprint = modelCatalogFingerprint(ctx);
-      const catalog = await new OpenMeritCoordinator(store, piHarnessAdapter(pi))
-        .recordModelCatalogFingerprint(fingerprint);
-      projectState = catalog.state;
-      if (catalog.changed) {
-        ctx.ui.notify("openmerit: the available model catalogue changed; reassessment is due", "info");
-        if (catalog.reassessmentDue) await dispatchIntent(pi, ctx, state, store, "discover_candidates", registerCompletionTool);
+      await reportAutomationSignal(pi, ctx, state, store, {
+        protocolVersion: PROTOCOL_VERSION,
+        id: `signal-${crypto.randomUUID()}`,
+        type: "model_catalog_changed",
+        occurredAt: new Date().toISOString(),
+        fingerprint,
+      }, registerCompletionTool);
+      if (!state.activeIntent) {
+        await reportAutomationSignal(pi, ctx, state, store, {
+          protocolVersion: PROTOCOL_VERSION,
+          id: `signal-${crypto.randomUUID()}`,
+          type: "scheduled_tick",
+          occurredAt: new Date().toISOString(),
+        }, registerCompletionTool);
       }
     } else if (ctx.hasUI && !state.proactiveNudgesPaused) {
       ctx.ui.notify("openmerit: no frontier profile found; asking Pi to establish evals and observability", "info");
@@ -333,11 +417,14 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
     store ??= new ProjectStore(ctx.cwd);
     const current = await store.readState();
     if (!current || current.activeIntent) return;
-    const observation = await new OpenMeritCoordinator(store, piHarnessAdapter(pi)).recordTaskObservation({
+    await reportAutomationSignal(pi, ctx, state, store, {
+      protocolVersion: PROTOCOL_VERSION,
+      id: `signal-${crypto.randomUUID()}`,
+      type: "product_task_completed",
+      occurredAt: new Date().toISOString(),
       modelId: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "unknown",
       contextTokens: ctx.getContextUsage()?.tokens ?? null,
-    });
-    if (observation.assessmentDue) await dispatchIntent(pi, ctx, state, store, "run_assessment", registerCompletionTool);
+    }, registerCompletionTool);
   });
 
   pi.registerCommand("openmerit", {
@@ -401,6 +488,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
               "Pi adapter        : loaded",
               "intent executor   : connected",
               "model mutation    : disabled",
+              "persistent schedule: unavailable (active-session ticks only)",
               `interactive UI     : ${ctx.hasUI ? "available" : "unavailable"}`,
             ].join("\n"),
             "info",

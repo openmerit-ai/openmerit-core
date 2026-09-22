@@ -29,7 +29,7 @@ Run `/openmerit doctor` inside Pi to confirm that the adapter and intent executo
 
 Open the product repository in interactive Pi with the extension loaded. If the project has no OpenMerit state, setup begins automatically. `/openmerit setup` is only needed to explicitly rerun or recover setup.
 
-OpenMerit sends Pi a private, typed `establish_evals` intent. Pi must understand the product task, infer objectives, ask the user to confirm requirements and an evaluation budget, create and verify the necessary infrastructure, and complete the intent with durable evidence.
+OpenMerit sends Pi a private, typed `establish_evals` intent. Pi must understand the product task, infer objectives, ask the user to confirm requirements, an evaluation budget, check cadence, thresholds, scheduling mode, and automation permissions, create and verify the necessary infrastructure, and complete the intent with durable evidence.
 
 OpenMerit rejects successful setup without a confirmed task profile, at least one valid objective, a supervised-graduation policy, a budget, and evidence.
 

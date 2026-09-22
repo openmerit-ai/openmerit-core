@@ -9,6 +9,7 @@ OpenMerit is ready for an initial supervised product trial with Pi. Its protocol
 - No second harness adapter exists.
 - Jev must be configured and invoked by the harness; OpenMerit intentionally provides no client.
 - Generic Pi task checkpoints do not replace product telemetry. Setup must create the infrastructure required by the profile.
+- Pi reports active-session signals and typed metric windows but cannot provision persistent background wakeups; persistent policies require an external scheduler until a capable adapter is added.
 - Pause state is process-local rather than persisted.
 - External evidence authenticity depends on the referenced system.
 - Workspace packages are not published to npm.
@@ -22,4 +23,3 @@ OpenMerit is ready for an initial supervised product trial with Pi. Its protocol
 5. Validate the harness-calculated frontier and recommendation.
 6. Perform a supervised swap, post-swap verification, and rollback drill.
 7. Repeat with a materially different product task before broad readiness claims.
-

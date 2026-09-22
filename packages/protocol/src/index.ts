@@ -60,6 +60,12 @@ export interface HarnessDescriptor {
     readonly presentation: "dynamic_tool" | "static_tool_union" | "adapter_validation";
     readonly enforcement: "provider_and_harness" | "harness" | "adapter";
   };
+  readonly automation: {
+    readonly supportedSignals: readonly AutomationSignalType[];
+    readonly persistentScheduling: boolean;
+    readonly backgroundExecution: boolean;
+    readonly wakeupProvisioning: "none" | "native" | "infrastructure_change";
+  };
 }
 
 export interface HarnessDispatchReceipt {
@@ -83,6 +89,34 @@ export interface SupervisedGraduationPolicy {
   readonly confirmationRequiredUntilVerifiedSwaps: number;
   readonly requirePostSwapVerification: true;
   readonly rollbackOnRegression: boolean;
+  readonly checkPolicy: AutomationCheckPolicy;
+}
+
+export interface CheckCadence {
+  readonly afterCompletedTasks?: number;
+  readonly afterElapsedSeconds?: number;
+}
+
+export interface MetricRegressionThreshold {
+  readonly metricId: MetricId;
+  /** Fractional deterioration from the last measured value; 0.1 means 10%. */
+  readonly relativeChangeAtLeast: number;
+}
+
+export interface AutomationCheckPolicy {
+  readonly baselineAssessment: CheckCadence;
+  readonly frontierReassessment: CheckCadence & {
+    readonly onModelCatalogChange: boolean;
+  };
+  readonly regressionCheck: CheckCadence & {
+    readonly thresholds: readonly MetricRegressionThreshold[];
+  };
+  readonly postSwapVerification: CheckCadence;
+  readonly cooldownSeconds: number;
+  readonly execution: {
+    readonly mode: "active_session_only" | "persistent";
+    readonly infrastructureChangesAllowed: boolean;
+  };
 }
 
 export type IntentStatus =
@@ -469,6 +503,18 @@ export interface OpenMeritProjectState {
     readonly lastAssessmentTaskCount: number;
     readonly modelCatalogFingerprint?: string;
     readonly modelCatalogChangedAt?: string;
+    readonly processedSignalIds?: readonly string[];
+    readonly pendingIntentKind?: IntentKind;
+    readonly pendingIntentReason?: string;
+    readonly lastAssessmentAt?: string;
+    readonly lastReassessmentTaskCount?: number;
+    readonly lastReassessmentAt?: string;
+    readonly lastRegressionCheckTaskCount?: number;
+    readonly lastRegressionCheckAt?: string;
+    readonly swapAppliedTaskCount?: number;
+    readonly swapAppliedAt?: string;
+    readonly lastVerificationAt?: string;
+    readonly latestMetricValues?: Readonly<Partial<Record<MetricId, number>>>;
   };
   readonly updatedAt: string;
 }
@@ -485,7 +531,55 @@ export type AuditEventType =
   | "cycle_advanced"
   | "setup_nudged"
   | "task_observed"
-  | "model_catalog_changed";
+  | "model_catalog_changed"
+  | "automation_signal_recorded"
+  | "automation_signal_duplicate"
+  | "automation_check_due";
+
+interface AutomationSignalBase {
+  readonly protocolVersion: typeof PROTOCOL_VERSION;
+  readonly id: string;
+  readonly occurredAt: string;
+  readonly evidence?: readonly EvidenceReference[];
+}
+
+export type AutomationSignal =
+  | (AutomationSignalBase & {
+      readonly type: "product_task_completed";
+      readonly modelId: string;
+      readonly contextTokens?: number | null;
+    })
+  | (AutomationSignalBase & {
+      readonly type: "metric_window_available";
+      readonly metrics: readonly MetricRecord[];
+    })
+  | (AutomationSignalBase & {
+      readonly type: "scheduled_tick";
+    })
+  | (AutomationSignalBase & {
+      readonly type: "model_catalog_changed";
+      readonly fingerprint: string;
+    })
+  | (AutomationSignalBase & {
+      readonly type: "verification_window_completed";
+      readonly metrics?: readonly MetricRecord[];
+    });
+
+export type AutomationSignalType = AutomationSignal["type"];
+
+export interface HarnessWakeupRequest {
+  readonly at: string;
+  readonly signal: "scheduled_tick";
+  readonly reason: string;
+}
+
+export interface AutomationPlan {
+  readonly mode: AutomationCheckPolicy["execution"]["mode"];
+  readonly requiredSignals: readonly AutomationSignalType[];
+  readonly nextWakeupAt?: string;
+  readonly scheduling: "native" | "active_session_fallback" | "external_scheduler_required";
+  readonly gaps: readonly string[];
+}
 
 export interface OpenMeritAuditEvent {
   readonly schemaVersion: 1;

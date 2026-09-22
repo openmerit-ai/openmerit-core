@@ -19,6 +19,8 @@ The metric contract includes the complete initial catalogue, normalized metric r
 
 Adapters should present the active intent's schema through their strongest available structured-output mechanism. They must report that mechanism in `HarnessDescriptor.structuredOutput`. OpenMerit validates the same canonical schema again when accepting a successful result; harness validation does not replace authorization, evidence, lifecycle, or Pareto-conformance checks.
 
+`AutomationCheckPolicy`, `AutomationSignal`, `AutomationPlan`, and `HarnessWakeupRequest` define the portable automation boundary. Users confirm the policy; adapters declare event and scheduling capabilities; OpenMerit evaluates idempotent signals and determines due intents; harnesses provision authorized native wakeups and execute the work.
+
 ## Initial intent kinds
 
 - `establish_evals`
