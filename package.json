@@ -1,81 +1,22 @@
 {
-  "name": "openmerit",
-  "version": "0.1.5",
-  "description": "Open, vendor-neutral model decisions for every task at runtime.",
+  "name": "openmerit-v2",
+  "version": "0.0.0",
+  "private": true,
   "type": "module",
-  "keywords": [
-    "pi-package",
-    "pi-extension",
-    "pi-coding-agent",
-    "model-routing",
-    "inference-routing",
-    "vendor-neutral",
-    "llm",
-    "evaluation"
+  "workspaces": [
+    "packages/*"
   ],
-  "files": [
-    "dist/",
-    "extension/openmerit.ts",
-    "instructions/",
-    "rules.md",
-    "CHANGELOG.md",
-    "docs/0.1.5-architecture-decisions.md"
-  ],
-  "pi": {
-    "extensions": [
-      "./extension/openmerit.ts"
-    ]
-  },
-  "bin": {
-    "openmerit": "dist/cli.js"
-  },
   "engines": {
     "node": ">=22.18.0"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/laz-aslam/openmerit.git"
-  },
-  "homepage": "https://github.com/laz-aslam/openmerit#readme",
-  "bugs": {
-    "url": "https://github.com/laz-aslam/openmerit/issues"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
-    "prepare": "npm run build",
-    "build": "node scripts/build.mjs",
-    "typecheck": "tsc --noEmit && tsc -p benchmark/tsconfig.json",
-    "typecheck:extension": "tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck extension/openmerit.ts",
-    "test": "vitest run",
-    "check": "npm run typecheck && npm run typecheck:extension && npm test && npm run build && npm run benchmark:verify-recorded",
-    "prepublishOnly": "npm run check",
-    "benchmark:invoice:prepare": "node benchmark/invoice_ocr/prepare_data.ts",
-    "benchmark:invoice": "node benchmark/invoice_ocr/benchmark.ts",
-    "benchmark:invoice:audit": "node benchmark/invoice_ocr/audit_results.ts",
-    "benchmark:invoice:round2": "node benchmark/invoice_ocr/benchmark_round2.ts",
-    "benchmark:invoice:round2:audit": "node benchmark/invoice_ocr/audit_round2.ts",
-    "benchmark:text-to-sql": "node benchmark/text_to_sql/benchmark.ts",
-    "benchmark:text-to-sql:audit": "node benchmark/text_to_sql/audit_results.ts",
-    "benchmark:policy": "node benchmark/policy_adjudication/benchmark.ts",
-    "benchmark:policy:audit": "node benchmark/policy_adjudication/audit_results.ts",
-    "benchmark:policy:validate": "node benchmark/policy_adjudication/validate_eval.ts",
-    "benchmark:verify-recorded": "node benchmark/verify_recorded.ts"
-  },
-  "license": "MIT",
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
-  },
-  "peerDependenciesMeta": {
-    "@earendil-works/pi-coding-agent": {
-      "optional": true
-    }
+    "check": "npm run check --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "tsc -p tsconfig.json",
+    "verify": "npm test && npm run check && npm run typecheck && git diff --check"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.85.1",
-    "@types/node": "^22.10.0",
-    "typescript": "^5.7.0",
-    "vitest": "^2.1.0"
+    "@types/node": "^22.18.6",
+    "typescript": "^5.9.3"
   }
 }

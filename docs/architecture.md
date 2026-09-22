@@ -1,0 +1,51 @@
+# Architecture
+
+## Design principle
+
+OpenMerit is an orchestrator, not an intelligence layer.
+
+```text
+User or lifecycle event
+        |
+        v
+OpenMerit deterministic orchestration
+        |
+        | typed intent: outcome, constraints, evidence
+        v
+Coding harness such as Pi
+        |
+        | intelligent work, tools, evals, calculation
+        v
+Typed result and durable evidence references
+        |
+        v
+OpenMerit validation, policy, persistence, next nudge
+```
+
+An automatic OpenMerit action means automatic issuance of an approved intent. OpenMerit does not perform candidate research, evaluate quality, calculate a frontier, or mutate model configuration.
+
+## Packages
+
+### `@openmerit-v2/protocol`
+
+Defines the JSON-safe boundary: durable intents, evidence references, metrics, task profiles, candidate assessments, frontier snapshots, budgets, policies, state, and audit events.
+
+### `@openmerit-v2/core`
+
+Contains deterministic behavior: choosing the next lifecycle intent, persisting state, checking harness-produced frontiers against the normative definition, and enforcing confirmation or rollback policy. The verifier rejects invalid harness results; it is not a model-selection engine.
+
+`OpenMeritCoordinator` is the reusable adapter boundary. It constructs canonical intents, negotiates capabilities, records lifecycle progress and observations, validates results, and advances durable state. `OpenMeritStore` makes persistence replaceable; `ProjectStore` is the bundled filesystem backend.
+
+### `@openmerit-v2/pi`
+
+Exposes the command surface, supplies private typed intent context, triggers Pi, accepts one structured completion for the active intent, records evidence, advances the lifecycle, and detects model-catalog changes.
+
+The Pi package implements `HarnessAdapter`. It does not define canonical intents, per-intent result contracts, stage transitions, or validation rules.
+
+## Intelligence resources
+
+Models, web research, tools, evaluators, and fast decision systems such as Jev System One are harness resources. They are configured and invoked by Pi. This keeps OpenMerit provider-neutral and lets future adapters choose their own implementation.
+
+## Trust boundary
+
+The harness is trusted to perform the work and return honest evidence. OpenMerit reduces unsupported claims through structured outputs, evidence references, compatible profile revisions, complete comparisons, and conservative uncertainty handling. It cannot prove that an arbitrary external evidence URI contains truthful data.

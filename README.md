@@ -1,262 +1,99 @@
-# openmerit
+# OpenMerit
 
-OpenMerit is the open, vendor-neutral decision layer for choosing the best
-available model route for a task at a given moment.
+OpenMerit is a harness-neutral orchestration layer that helps a coding harness continuously find and maintain the Pareto frontier of models for a real product task.
 
-It works with agent harnesses, model providers, and observability systems. It
-does not replace any of them. A harness supplies a completed task and the model
-routes it can execute; OpenMerit measures alternatives, preserves the evidence,
-applies the user's policy, and returns a better primary route with a vetted
-fallback.
+OpenMerit does not perform the intelligent work. It nudges a connected coding harness, such as Pi, with typed outcome requests. The harness understands the project, establishes evaluations and observability, gathers evidence, discovers and tests candidates, calculates the Pareto frontier, and performs an authorized model change. OpenMerit validates the returned contracts, preserves evidence and preferences, and advances the approved lifecycle.
 
-> No model keeps its place by configuration. It earns traffic through current,
-> measured merit.
+## Why OpenMerit
 
-The first integration is [pi](https://pi.dev). The domain records and decision
-engine preserve exact provider routes so the same logical model can be compared
-through native, routed, custom, or local providers.
+The cheapest model, fastest model, and highest-quality model are often different. Public benchmarks are useful before product evidence exists, but they cannot establish which model is best for a particular workload. OpenMerit connects the initial choice to production evidence and repeated reassessment.
 
-```text
-completed harness task + eligible routes
-                    │
-                    ▼
-       controlled route comparison
-                    │
-                    ▼
- quality + cost + latency evidence
-                    │
-                    ▼
-      pareto frontier + policy gate
-                    │
-                    ▼
- recommendation / primary route + fallback
-```
+It distinguishes:
 
-## What 0.1.5 does
+- one-run observations from rate, percentile, consistency, and reliability claims;
+- missing evidence from poor performance;
+- feasible candidates from dominated, unresolved, or ineligible candidates;
+- an automatic nudge from an intelligent action performed by the harness;
+- a recommendation from an authorized, verified model swap.
 
-- Uses the active harness response as the measured baseline.
-- Selects a small, deterministic price-spread slate from routes already
-  configured and eligible in the harness.
-- Executes alternatives sequentially through their exact routes.
-- Scores every answer with a configured evaluator route using the harness's
-  credential store.
-- Records quality, price, latency, cost, errors, and tool activity.
-- Builds a per-task Pareto frontier and chooses a primary and fallback.
-- Recommends changes by default; automatic application is an explicit opt-in.
-- Rechecks the current policy, task, session, and baseline route immediately
-  before an automatic switch.
-- Offers or automatically engages the task's fallback after a final model
-  error, after rechecking its exact route against current policy.
+## Current capabilities
 
-Normal application traffic still flows directly between the harness and its
-providers. OpenMerit runs only its explicit comparison and evaluation calls.
+- Pi 0.87 extension with a single `/openmerit` command surface.
+- Confirmed task profiles, objectives, constraints, sample requirements, and evaluation budgets.
+- The complete initial quality, reliability, cost, latency, efficiency, and human-intervention metric catalogue.
+- Baseline-first evidence collection followed by budgeted candidate discovery and controlled challenger trials.
+- A normative, uncertainty-aware Pareto definition owned by OpenMerit.
+- Harness-calculated frontier results independently checked by OpenMerit's conformance verifier.
+- Supervised graduation: early swaps require approval, every swap requires verification, and regressions can trigger rollback.
+- Project-local snapshots, append-only audit events, and evidence manifests under `.openmerit/`.
+- Model-catalog change detection that can nudge the harness to reassess a mature baseline.
 
-## What OpenMerit is not
+## Responsibility boundary
 
-- It is not an agent harness.
-- It is not a model provider, reseller, proxy, or API gateway.
-- It is not a general observability product.
-- It is not a universal leaderboard.
-- It does not inject unconfigured models or own provider credentials.
+| OpenMerit | Coding harness |
+| --- | --- |
+| Defines typed outcomes and Pareto conformance rules | Understands the product and user task |
+| Tracks lifecycle, policy, budget, and evidence references | Builds evals and observability |
+| Determines which approved nudge is due | Collects and calculates metrics |
+| Verifies returned structure and frontier conformance | Discovers candidates and calculates the frontier |
+| Enforces confirmation and rollback policy | Applies and verifies an authorized model change |
 
-Local JSONL files are an auditable default evidence store, not a requirement
-that future integrations use local storage.
+Jev System One, when configured, belongs to the coding harness. Pi may use it aggressively for bounded ranking, triage, and fast judgment. OpenMerit contains no Jev client and accepts no Jev credential.
 
-## Install with pi
+## Quick start with Pi
 
 Requirements:
 
-- Node 22.18 or newer
-- pi 0.85.1 or newer
-- At least two authenticated, policy-eligible routes in pi
+- Node.js 22.18 or newer
+- a Pi-supported model provider configured in Pi
 
-```bash
-pi install npm:openmerit
-npx --yes openmerit init
-npx --yes openmerit verify
-pi list
+```sh
+git clone https://github.com/gksoriginals/openmerit.git
+cd openmerit
+npm install
+./node_modules/.bin/pi -e ./packages/pi/src/index.ts
 ```
 
-For development from a checkout:
+When Pi enters an unconfigured product with an interactive UI, OpenMerit automatically issues the setup nudge. Pi infers a task profile, asks the user to confirm requirements and an evaluation budget, establishes task-specific eval and observability artifacts, verifies them, and reports evidence to OpenMerit. `/openmerit setup` remains available as an explicit recovery or rerun command.
 
-```bash
-npm ci
-npm run check
-pi install "$PWD"
-```
+## Commands
 
-Install OpenMerit from only one source so pi does not load the extension twice.
+- `/openmerit` or `/openmerit status` — show evidence readiness and lifecycle stage.
+- `/openmerit setup` — explicitly rerun or recover automatic setup.
+- `/openmerit assess` — request an evidence-sufficiency assessment now.
+- `/openmerit frontier` — ask the harness to calculate a frontier now; OpenMerit verifies it.
+- `/openmerit approve` — approve a verified proposal during supervised graduation.
+- `/openmerit pause` and `/openmerit resume` — control proactive nudges.
+- `/openmerit doctor` — show sanitized adapter diagnostics.
 
-## Use it
+## Documentation
 
-Start pi with any configured model and complete a task. Once the response
-settles, the extension queues one session-bound comparison. The shipped policy
-never changes the active model without approval.
+- [Getting started](docs/getting-started.md)
+- [Architecture and responsibility boundary](docs/architecture.md)
+- [Metrics and evidence](docs/metrics-and-evidence.md)
+- [Improvement lifecycle](docs/lifecycle.md)
+- [Pi extension guide](docs/pi-extension.md)
+- [Building another harness adapter](docs/adapter-guide.md)
+- [Pareto conformance specification](docs/pareto-spec.md)
+- [Project state and operations](docs/operations.md)
+- [Security](docs/security.md)
+- [Testing](docs/testing.md)
+- [Current limitations and roadmap](docs/roadmap.md)
 
-Inside pi:
+## Repository layout
 
-- `/openmerit` — current route, fallback, comparison status, budget, and evidence
-- `/openmerit apply` — apply the latest recommendation for the active task
-- `/openmerit dismiss` — dismiss pending recommendations for the active task
-- `/openmerit compare` — compare the latest completed task explicitly
-- `/openmerit pause` — stop automatic comparisons and cancel the active one
-- `/openmerit resume` — enable comparisons for future completed tasks
-- `/openmerit fallback` — switch to the current vetted fallback
-- `/openmerit doctor` — sanitized installation and route diagnostics
+- `packages/protocol` — harness-neutral types for intents, results, metrics, policies, and frontier evidence.
+- `packages/core` — adapter SDK, durable coordinator, pluggable persistence, policy, and frontier conformance verification.
+- `packages/pi` — Pi extension that turns OpenMerit intents into harness work.
+- `docs` — user, operator, architecture, and normative documentation.
 
-Shell commands:
+## Development
 
-```bash
-npx openmerit status
-npx openmerit frontier
-npx openmerit doctor
-npx openmerit verify
-```
-
-## Policy
-
-`openmerit init` creates `~/.openmerit/policy.json` without replacing an
-existing file. The 0.1.5 policy schema is:
-
-```json
-{
-  "version": 3,
-  "mode": "recommend",
-  "auto_apply": {
-    "enabled": false,
-    "min_score_gain": 0.1,
-    "max_price_ratio": 1.5,
-    "require_frontier": true
-  },
-  "budgets": {
-    "max_usd_per_trial": 0.25,
-    "max_trials_per_day": 20,
-    "max_usd_per_day": 5
-  },
-  "providers": {
-    "allow": ["*"],
-    "deny": []
-  },
-  "comparison": {
-    "max_routes": 3
-  },
-  "fallback": {
-    "auto_update": true,
-    "min_score": 0.6,
-    "apply_on_error": true
-  },
-  "evaluator_model": null,
-  "max_usd_per_m": 20,
-  "route_overrides": {},
-  "pi": {
-    "provider_extensions": []
-  }
-}
-```
-
-`mode: "auto"` and `auto_apply.enabled: true` are both required for automatic
-primary-route changes. The extension reevaluates the saved evidence against the
-current policy before switching, so changing the policy to supervised mode also
-stops a previously generated automatic recommendation.
-
-`evaluator_model` may be an exact `provider:modelId` route or a stable logical
-model ID. When it is null, OpenMerit uses the active route when capable. For
-high-stakes deployments, configure an evaluator route deliberately.
-
-Policies written for 0.1.x remain readable: `watch.models_per_task` normalizes
-to `comparison.max_routes`, and `judge_model` normalizes to
-`evaluator_model`. Removed watcher fields are ignored.
-
-### Custom and local routes
-
-OpenMerit never guesses that a local route is free. If pi omits metadata, add an
-override for the exact route:
-
-```json
-{
-  "route_overrides": {
-    "ollama:qwen3:8b": {
-      "cost": { "input": 0, "output": 0 },
-      "context_window": 32768,
-      "max_tokens": 4096,
-      "input": ["text"]
-    }
-  }
-}
-```
-
-If a custom provider is registered by a pi extension, allowlist that exact
-absolute file under `pi.provider_extensions`. Isolated subprocesses disable
-ordinary extension discovery and refuse to load OpenMerit recursively.
-
-## Safety boundaries
-
-- Candidate tools are disabled by default. Set `OPENMERIT_PI_TRIAL_TOOLS` to an
-  explicit comma-separated allowlist such as `read,grep,find,ls` only when the
-  comparison genuinely requires tools.
-- Candidate runs use temporary copies of the working directory. This protects
-  ordinary relative project writes, but it is not an OS sandbox. Tool-enabled
-  shell commands can access absolute paths or the network.
-- Task text, attached files or images, candidate answers, rubric requests, and
-  evaluation requests are sent through the selected configured routes. Use
-  non-sensitive tasks while evaluating this alpha.
-- Unknown-price routes are not admitted as candidates and cannot auto-apply.
-- The per-trial budget is an admission estimate using route metadata, input
-  bytes, and up to 4K output tokens. It is not a provider-side hard cap.
-- Ledger updates are process-locked so simultaneous pi sessions cannot silently
-  overwrite one another's recorded spend.
-- One evaluator score is evidence, not truth. 0.1.5 remains an alpha; repeated
-  evaluation, outcome-based scoring, and richer reliability evidence are future
-  decision inputs.
-
-## State (`~/.openmerit/`)
-
-| Path | Purpose |
-|---|---|
-| `policy.json` | user-owned decision, budget, provider, and fallback policy |
-| `harness-state.json` | active Pi route, eligible routes, session, fallback, and pause state |
-| `trials.jsonl` | append-only route measurements with task and session identity |
-| `recommendations.jsonl` | append-only decisions and status changes; latest ID wins |
-| `events.jsonl` | versioned audit events for trials and recommendations |
-| `ledger.json` | UTC daily comparison and evaluation spend |
-| `jobs/*.json` | session-bound comparison ownership and completion markers |
-| `traces/trials/*.jsonl` | raw Pi event streams for candidate executions |
-
-Atomic snapshots are replaced by rename. JSONL readers retain valid later
-records after an interrupted line, and automatic application fails closed when
-recommendation history is malformed. Files left by pre-0.1.5 watcher features
-are not deleted; 0.1.5 simply stops reading or writing them.
-
-## Architecture
-
-- `src/comparison.ts` — session-bound orchestration and candidate selection
-- `src/policy.ts` — the only automatic-application authority
-- `src/frontier.ts` — quality/price/latency Pareto evidence
-- `src/recommend.ts` — primary and fallback recommendation construction
-- `src/harness.ts` — provider-neutral candidate execution contract
-- `src/providers.ts` — inference contract used by evaluators
-- `src/pi-trials.ts` and `src/llm.ts` — first-party Pi integration
-- `extension/openmerit.ts` — thin in-session lifecycle and route-application adapter
-- `src/store.ts` and `src/integrations.ts` — local audit persistence
-
-The reasoning behind the 0.1.5 boundary is recorded in
-[`docs/0.1.5-architecture-decisions.md`](docs/0.1.5-architecture-decisions.md).
-
-## Development and benchmarks
-
-```bash
-npm run typecheck
-npm run typecheck:extension
+```sh
+npm install
 npm test
-npm run build
-npm run benchmark:verify-recorded
 npm run check
+npm run verify
 ```
 
-`benchmark/` remains in the repository to verify evaluation artifacts and
-scoring semantics. It is not shipped as runtime product behavior or bundled in
-the npm package.
-
-## License
-
-MIT
+Credentials must never be committed. The repository intentionally contains no provider or Jev API key.

@@ -1,0 +1,35 @@
+{
+  "specVersion": "0.1",
+  "cases": [
+    {
+      "id": "tradeoffs-preserve-three-frontier-points",
+      "description": "Quality, cost, and latency tradeoffs leave A, B, and C non-dominated while B dominates D.",
+      "expected": {
+        "frontierCandidateIds": ["model-a", "model-b", "model-c"],
+        "dominatedCandidateIds": ["model-d"],
+        "ineligibleCandidateIds": [],
+        "unresolvedCandidateIds": []
+      }
+    },
+    {
+      "id": "hard-cost-limit-removes-candidate",
+      "description": "A candidate whose lower cost bound exceeds the maximum is ineligible even when its quality is higher.",
+      "expected": {
+        "frontierCandidateIds": ["model-a"],
+        "dominatedCandidateIds": [],
+        "ineligibleCandidateIds": ["model-x"],
+        "unresolvedCandidateIds": []
+      }
+    },
+    {
+      "id": "missing-required-metric-is-unresolved",
+      "description": "Missing required latency evidence cannot be interpreted as zero latency or frontier membership.",
+      "expected": {
+        "frontierCandidateIds": ["model-a"],
+        "dominatedCandidateIds": [],
+        "ineligibleCandidateIds": [],
+        "unresolvedCandidateIds": ["model-u"]
+      }
+    }
+  ]
+}

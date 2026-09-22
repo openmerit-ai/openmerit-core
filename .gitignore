@@ -1,7 +1,17 @@
 node_modules/
 dist/
+coverage/
+*.tsbuildinfo
+
+# Local credentials and configuration
 .env
-*.local
+.env.*
+!.env.example
+
+# OpenMerit operational state for this repository
+.openmerit/
+
+# Editor and operating-system files
 .DS_Store
-__pycache__/
-/model_search/results.json
+.idea/
+.vscode/
