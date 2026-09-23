@@ -38,3 +38,5 @@ Setup must return an explicit observability coverage report containing every req
 If setup reports a required gap, OpenMerit issues `instrument_observability`. A successful instrumentation result is accepted only when every required metric is covered. This prevents a configured task profile from being mistaken for working telemetry.
 
 Product instrumentation and OpenMerit auditing are separate. The product emits measurements such as quality, success, tokens, cost, latency, retries, tool calls, and intervention. OpenMerit records the signals, policy decision, intent lifecycle, evidence identifiers, and readiness or frontier decision that followed.
+
+In the unreleased Pi adapter, provider cost, input and output tokens, and end-to-end task latency come directly from Pi's completed assistant messages and task boundaries. Evaluator-authored signals cannot override those fields. Tool-use performance requires harness-trace evidence; code coverage alone is not evidence of tool-use quality. Quality and task-specific behavior can still come from verified project evaluators.

@@ -54,6 +54,7 @@ export interface IntentFactoryOptions {
   readonly policy?: SupervisedGraduationPolicy;
   readonly id?: string;
   readonly requestedAt?: string;
+  readonly evaluationSpend?: number;
 }
 
 const outcomes: Readonly<Record<IntentKind, string>> = {
@@ -82,6 +83,13 @@ export function createOpenMeritIntent(kind: IntentKind, options: IntentFactoryOp
       requireVerifiedArtifacts: true,
       distinguishSingleRunFromMultiRunClaims: true,
       ...(options.policy ? { evaluationBudget: options.policy.evaluationBudget as unknown as JsonValue } : {}),
+      ...(options.policy ? {
+        evaluationSpend: options.evaluationSpend ?? 0,
+        remainingEvaluationBudget: Math.max(
+          0,
+          options.policy.evaluationBudget.maximumSpend - (options.evaluationSpend ?? 0),
+        ),
+      } : {}),
       ...(options.policy ? { checkPolicy: options.policy.checkPolicy as unknown as JsonValue } : {}),
     },
     requiredEvidence: kind === "establish_evals"
@@ -349,7 +357,19 @@ export function interpretIntentResult(
       if (!isRecord(output) || !Array.isArray(output.candidates)) errors.push("candidate discovery requires candidates");
       break;
     case "run_challenger_trials":
-      if (!isRecord(output) || !Array.isArray(output.assessments)) errors.push("challenger trials require assessments");
+      if (!isRecord(output) || !Array.isArray(output.assessments)) {
+        errors.push("challenger trials require assessments");
+      } else {
+        for (const assessment of output.assessments as unknown as CandidateAssessment[]) {
+          const costs = assessment.metrics.filter((metric) =>
+            metric.metricId === "total_task_cost" && metric.state === "measured" &&
+            metric.value !== undefined && metric.value >= 0 && metric.evidence.length > 0
+          );
+          if (costs.length !== 1) {
+            errors.push(`challenger assessment ${assessment.id} requires exactly one measured total_task_cost with evidence`);
+          }
+        }
+      }
       break;
     case "calculate_frontier": {
       if (!isRecord(output) || !Array.isArray(output.assessments) || !isRecord(output.frontierSnapshot)) {
@@ -907,6 +927,7 @@ function auditSignalData(signal: AutomationSignal): Readonly<Record<string, Json
       return {
         modelId: signal.modelId,
         contextTokens: signal.contextTokens ?? null,
+        ...(signal.telemetry ? { telemetry: signal.telemetry as unknown as JsonValue } : {}),
         evidenceIds: (signal.evidence ?? []).map((item) => item.id),
       };
     case "metric_window_available":
@@ -953,10 +974,20 @@ export class OpenMeritCoordinator {
     const config = await this.store.readConfig() ?? { schemaVersion: 1, taskProfiles: [] };
     const existing = await this.store.readState();
     if (existing?.activeIntent) throw new Error(`OpenMerit intent ${existing.activeIntent.id} is already active.`);
+    if (kind === "run_challenger_trials" && config.policy) {
+      const spent = existing?.automation.evaluationSpend ?? 0;
+      const limit = config.policy.evaluationBudget.maximumSpend;
+      if (spent >= limit) {
+        throw new Error(
+          `Evaluation budget exhausted: ${spent.toFixed(6)} ${config.policy.evaluationBudget.currency} spent of ${limit.toFixed(6)}.`,
+        );
+      }
+    }
 
     const intent = createOpenMeritIntent(kind, {
       taskProfileId: config.activeTaskProfileId,
       policy: config.policy,
+      evaluationSpend: existing?.automation.evaluationSpend,
     });
     const now = new Date().toISOString();
     const state: OpenMeritProjectState = existing
@@ -1069,6 +1100,22 @@ export class OpenMeritCoordinator {
 
     if (interpretation.config) await this.store.writeConfig(interpretation.config);
     const now = new Date().toISOString();
+    const evaluationSpend = result.status === "succeeded" && state.activeIntent.kind === "run_challenger_trials"
+      ? (result.outputs as IntentOutputMap["run_challenger_trials"]).assessments.reduce(
+          (sum, assessment) => sum + assessment.metrics
+            .filter((metric) => metric.metricId === "total_task_cost" && metric.state === "measured")
+            .reduce((metricSum, metric) => metricSum + (metric.value ?? 0), 0),
+          state.automation.evaluationSpend ?? 0,
+        )
+      : state.automation.evaluationSpend;
+    if (config.policy && evaluationSpend !== undefined &&
+        evaluationSpend > config.policy.evaluationBudget.maximumSpend) {
+      throw new Error(
+        `OpenMerit rejected challenger results: evaluation spend ${evaluationSpend.toFixed(6)} ` +
+        `${config.policy.evaluationBudget.currency} exceeds the approved limit ` +
+        `${config.policy.evaluationBudget.maximumSpend.toFixed(6)}.`,
+      );
+    }
     let observability = state.observability;
     if (result.status === "succeeded" && state.activeIntent.kind === "establish_evals") {
       observability = (result.outputs as IntentOutputMap["establish_evals"]).observability;
@@ -1098,6 +1145,7 @@ export class OpenMeritCoordinator {
       ...(observability ? { observability } : {}),
       automation: {
         ...state.automation,
+        ...(evaluationSpend !== undefined ? { evaluationSpend } : {}),
         ...(state.activeIntent.kind === "run_assessment"
           ? { lastAssessmentTaskCount: state.automation.observedCompletedTasks, lastAssessmentAt: now }
           : {}),
@@ -1227,6 +1275,12 @@ export class OpenMeritCoordinator {
     };
     const decision = dueDecision(decisionState, signal, signal.occurredAt);
     const latestMetricValues = { ...(state.automation.latestMetricValues ?? {}) };
+    if (signal.type === "product_task_completed" && signal.telemetry) {
+      latestMetricValues.input_token_consumption = signal.telemetry.inputTokens;
+      latestMetricValues.output_token_consumption = signal.telemetry.outputTokens;
+      latestMetricValues.total_task_cost = signal.telemetry.cost;
+      latestMetricValues.end_to_end_task_latency = signal.telemetry.durationMs;
+    }
     if (signal.type === "metric_window_available" || signal.type === "verification_window_completed") {
       for (const metric of signal.metrics ?? []) {
         if (metric.state === "measured" && metric.value !== undefined) latestMetricValues[metric.metricId] = metric.value;

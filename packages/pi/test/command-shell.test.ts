@@ -36,6 +36,7 @@ function loadCommand() {
     | undefined;
   const entries: Array<{ customType: string; data: unknown }> = [];
   const messages: Array<{ message: unknown; options: unknown }> = [];
+  const userMessages: Array<{ content: unknown; options: unknown }> = [];
   const eventHandlers = new Map<string, (event: unknown, ctx: ExtensionContext) => Promise<void>>();
   let completionTool: {
     parameters?: unknown;
@@ -73,12 +74,15 @@ function loadCommand() {
     sendMessage(message: unknown, options: unknown) {
       messages.push({ message, options });
     },
+    sendUserMessage(content: unknown, options: unknown) {
+      userMessages.push({ content, options });
+    },
   } as unknown as ExtensionAPI;
 
   openMeritExtension(pi);
   assert.ok(handler);
   assert.ok(completionTool);
-  return { handler, completionTool, completionTools, tools, entries, messages, eventHandlers };
+  return { handler, completionTool, completionTools, tools, entries, messages, userMessages, eventHandlers };
 }
 
 interface CompletionInputForTest {
@@ -151,9 +155,10 @@ function sessionContext(projectRoot: string, notifications: Notification[]): Ext
         notifications.push({ message, level });
       },
     },
-    sessionManager: { getEntries: () => [] },
+    sessionManager: { getEntries: () => [], getSessionFile: () => undefined },
     modelRegistry: { getAvailable: () => [] },
     getContextUsage: () => ({ tokens: 100 }),
+    isIdle: () => false,
   } as unknown as ExtensionContext;
 }
 
@@ -402,4 +407,134 @@ test("Pi exposes a typed ingress for observability and verification signals", ()
       evidence: [{ id: "obs", source: "observability_record", uri: "file:///metrics.json" }],
     }],
   }), true);
+});
+
+test("Pi queues interactive input while setup is active and releases it after completion", async () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-queued-input-"));
+  const notifications: Notification[] = [];
+  const { handler, completionTool, entries, userMessages, eventHandlers } = loadCommand();
+  const input = eventHandlers.get("input");
+  assert.ok(input);
+
+  try {
+    await handler("setup", { ...commandContext(notifications), cwd: projectRoot } as ExtensionCommandContext);
+    const handled = await input({ type: "input", text: "Build the requested feature", source: "interactive" }, sessionContext(projectRoot, notifications));
+    assert.deepEqual(handled, { action: "handled" });
+    const intent = (entries[0]?.data as { intent: { id: string } }).intent;
+    await completionTool.execute("tool-setup", {
+      intentId: intent.id,
+      status: "succeeded",
+      summary: "Configured",
+      evidence: [{ id: "eval", source: "evaluation_artifact", uri: "file:///eval.json" }],
+      outputs: confirmedSetupOutputs(),
+    }, undefined, undefined, sessionContext(projectRoot, notifications) as unknown as ExtensionCommandContext);
+
+    assert.deepEqual(userMessages, [{
+      content: "Build the requested feature",
+      options: { deliverAs: "followUp" },
+    }]);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("Pi allows user replies when an active intent is waiting at the prompt", async () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-intent-reply-"));
+  const notifications: Notification[] = [];
+  const { handler, eventHandlers, userMessages } = loadCommand();
+  const input = eventHandlers.get("input");
+  assert.ok(input);
+  try {
+    await handler("setup", { ...commandContext(notifications), cwd: projectRoot } as ExtensionCommandContext);
+    const ctx = { ...sessionContext(projectRoot, notifications), isIdle: () => true } as ExtensionContext;
+    const result = await input({ type: "input", text: "I approve the proposed policy", source: "interactive" }, ctx);
+    assert.equal(result, undefined);
+    assert.equal(userMessages.length, 0);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("cancel records interrupted work as cancelled and clears durable active state", async () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-cancel-"));
+  const notifications: Notification[] = [];
+  const { handler } = loadCommand();
+  try {
+    const ctx = { ...commandContext(notifications), cwd: projectRoot } as ExtensionCommandContext;
+    await handler("setup", ctx);
+    await handler("cancel", ctx);
+    const state = JSON.parse(readFileSync(join(projectRoot, ".openmerit", "state.json"), "utf8"));
+    assert.equal(state.activeIntent, undefined);
+    assert.equal(state.lastResult.status, "cancelled");
+    assert.match(notifications.at(-1)?.message ?? "", /cancelled/);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("Pi records provider cost, tokens, and wall-clock task telemetry", async () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-task-telemetry-"));
+  const notifications: Notification[] = [];
+  const { handler, completionTool, entries, eventHandlers } = loadCommand();
+  const ctx = sessionContext(projectRoot, notifications);
+  const started = eventHandlers.get("agent_start");
+  const messageEnd = eventHandlers.get("message_end");
+  const settled = eventHandlers.get("agent_settled");
+  assert.ok(started && messageEnd && settled);
+
+  try {
+    await handler("setup", { ...commandContext(notifications), cwd: projectRoot } as ExtensionCommandContext);
+    const intent = (entries[0]?.data as { intent: { id: string } }).intent;
+    await completionTool.execute("tool-setup", {
+      intentId: intent.id,
+      status: "succeeded",
+      summary: "Configured",
+      evidence: [{ id: "eval", source: "evaluation_artifact", uri: "file:///eval.json" }],
+      outputs: confirmedSetupOutputs(),
+    }, undefined, undefined, ctx as unknown as ExtensionCommandContext);
+    await settled({ type: "agent_settled" }, ctx);
+    await started({ type: "agent_start" }, ctx);
+    await messageEnd({
+      type: "message_end",
+      message: {
+        role: "assistant", provider: "openrouter", model: "test/model", content: [], api: "openai-completions",
+        timestamp: Date.now(), stopReason: "stop",
+        usage: { input: 120, output: 30, cacheRead: 40, cacheWrite: 0, totalTokens: 190,
+          cost: { input: 0.01, output: 0.02, cacheRead: 0.003, cacheWrite: 0, total: 0.033 } },
+      },
+    }, ctx);
+    await settled({ type: "agent_settled" }, ctx);
+
+    const state = JSON.parse(readFileSync(join(projectRoot, ".openmerit", "state.json"), "utf8"));
+    assert.equal(state.automation.observedCompletedTasks, 1);
+    assert.equal(state.automation.latestMetricValues.total_task_cost, 0.033);
+    assert.equal(state.automation.latestMetricValues.input_token_consumption, 120);
+    assert.equal(state.automation.latestMetricValues.output_token_consumption, 30);
+    assert.equal(typeof state.automation.latestMetricValues.end_to_end_task_latency, "number");
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("Pi rejects evaluator-supplied provider telemetry and coverage-only tool-use claims", async () => {
+  const { tools } = loadCommand();
+  const signalTool = tools.get("openmerit_report_signal");
+  assert.ok(signalTool);
+  const base = {
+    state: "measured", scope: "single_run", direction: "minimize", method: "evaluator",
+    value: 0, unit: "usd", sampleCount: 1,
+    evidence: [{ id: "eval", source: "evaluation_artifact", uri: "file:///coverage.json" }],
+  };
+  await assert.rejects(
+    signalTool.execute("signal", { signalId: "bad-cost", type: "metric_window_available", metrics: [
+      { ...base, metricId: "total_task_cost" },
+    ] } as never, undefined, undefined, commandContext([])),
+    /captured directly by Pi/,
+  );
+  await assert.rejects(
+    signalTool.execute("signal", { signalId: "bad-tools", type: "metric_window_available", metrics: [
+      { ...base, metricId: "tool_use_performance", direction: "maximize", unit: "score" },
+    ] } as never, undefined, undefined, commandContext([])),
+    /requires harness-trace evidence/,
+  );
 });

@@ -4,7 +4,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum, type AssistantMessage, type ImageContent } from "@earendil-works/pi-ai";
 import {
   nextImprovementAction,
   OpenMeritCoordinator,
@@ -127,6 +127,38 @@ interface ObservationSignalInput {
   metrics: MetricRecord[];
 }
 
+interface TaskTelemetryAccumulator {
+  startedAt: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  cost: number;
+  assistantTurns: number;
+}
+
+const PI_OWNED_METRICS = new Set([
+  "input_token_consumption",
+  "output_token_consumption",
+  "total_task_cost",
+  "end_to_end_task_latency",
+]);
+
+function validateReportedMetrics(metrics: readonly MetricRecord[]): void {
+  for (const metric of metrics) {
+    if (metric.state === "measured" && (!metric.evidence.length || metric.value === undefined)) {
+      throw new Error(`Measured metric ${metric.metricId} requires a numeric value and evidence.`);
+    }
+    if (PI_OWNED_METRICS.has(metric.metricId) && metric.state === "measured") {
+      throw new Error(`${metric.metricId} is captured directly by Pi and cannot be supplied by an evaluator.`);
+    }
+    if (metric.metricId === "tool_use_performance" && metric.state === "measured" &&
+        !metric.evidence.some((item) => item.source === "harness_trace")) {
+      throw new Error("tool_use_performance requires harness-trace evidence; test coverage is not tool-use evidence.");
+    }
+  }
+}
+
 function modelCatalogFingerprint(ctx: ExtensionContext): string {
   const catalogue = ctx.modelRegistry.getAvailable().map((model) => ({
     provider: model.provider,
@@ -147,6 +179,8 @@ function privateIntentMessage(intent: OpenMeritIntent): string {
     "Use harness-configured fast decision resources such as Jev System One aggressively for bounded ranking, triage, and judgment when available; OpenMerit does not call those services itself.",
     "You, the coding harness, own all research, evaluation design, instrumentation, measurement, Pareto calculation, and authorized configuration work. OpenMerit only validates the returned contract and evidence.",
     "Instrument every required metric selected by the user. Report explicit covered and missing metric IDs; never describe observability as ready while a required metric is missing.",
+    "Pi records provider cost, token use, and task latency directly. Do not estimate those metrics in project scripts or substitute zero for unavailable provider telemetry.",
+    "Tool-use performance must be derived from tool-call traces and outcomes; code coverage is not tool-use evidence.",
     intent.constraints.modelMutationAllowed
       ? "This intent authorizes only the model mutation described by the active OpenMerit cycle."
       : "Do not change Pi's model or application model configuration.",
@@ -172,21 +206,6 @@ function piHarnessAdapter(pi: ExtensionAPI): HarnessAdapter {
       return { accepted: true, harnessJobId: intent.id };
     },
   };
-}
-
-function restoreState(ctx: ExtensionContext, state: OpenMeritUiState): void {
-  state.activeIntent = null;
-  for (const entry of ctx.sessionManager.getEntries()) {
-    if (entry.type !== "custom") continue;
-    if (entry.customType === INTENT_ENTRY_TYPE) {
-      const stored = entry.data as StoredIntentEntry | undefined;
-      if (stored?.intent?.id) state.activeIntent = stored.intent.id;
-    }
-    if (entry.customType === RESULT_ENTRY_TYPE) {
-      const stored = entry.data as StoredResultEntry | undefined;
-      if (stored?.result?.intentId === state.activeIntent) state.activeIntent = null;
-    }
-  }
 }
 
 async function dispatchIntent(
@@ -237,6 +256,16 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
   const state = createInitialUiState();
   let store: ProjectStore | undefined;
   let suppressNextSettledObservation = false;
+  let taskTelemetry: TaskTelemetryAccumulator | null = null;
+  const queuedUserInputs: Array<{ text: string; images?: ImageContent[] }> = [];
+
+  const releaseQueuedUserInput = (): void => {
+    if (state.activeIntent || !queuedUserInputs.length) return;
+    const queued = queuedUserInputs.splice(0);
+    const text = queued.map((item) => item.text).join("\n\n");
+    const images = queued.flatMap((item) => item.images ?? []);
+    pi.sendUserMessage(images.length ? [{ type: "text", text }, ...images] : text, { deliverAs: "followUp" });
+  };
 
   const registerCompletionTool = (kind?: IntentKind): void => {
     const parameters = kind
@@ -312,6 +341,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
         state.activeIntent = null;
         state.lifecycleStage = stage;
         registerCompletionTool();
+        releaseQueuedUserInput();
         state.nextAssessment = accepted.automation.plan.nextWakeupAt ??
           (accepted.automation.plan.scheduling === "external_scheduler_required" ? "external scheduler required" : "signal driven");
         if (accepted.automation.plan.gaps.length) {
@@ -361,6 +391,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
     }, { additionalProperties: false }),
     constrainedSampling: { type: "json_schema", strict: "prefer" },
     async execute(_toolCallId, input: ObservationSignalInput, _signal, _onUpdate, ctx) {
+      validateReportedMetrics(input.metrics);
       store ??= new ProjectStore(ctx.cwd);
       await reportAutomationSignal(pi, ctx, state, store, {
         protocolVersion: PROTOCOL_VERSION,
@@ -374,6 +405,40 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
         details: { signalId: input.signalId, type: input.type },
       };
     },
+  });
+
+  pi.on("input", (event, ctx) => {
+    if (!state.activeIntent || event.source !== "interactive" || ctx.isIdle()) return;
+    queuedUserInputs.push({ text: event.text, ...(event.images ? { images: event.images } : {}) });
+    ctx.ui.notify(`openmerit: queued your request until active setup work finishes (${state.activeIntent})`, "info");
+    return { action: "handled" };
+  });
+
+  pi.on("agent_start", () => {
+    if (state.activeIntent) {
+      taskTelemetry = null;
+      return;
+    }
+    taskTelemetry = {
+      startedAt: Date.now(),
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cost: 0,
+      assistantTurns: 0,
+    };
+  });
+
+  pi.on("message_end", (event) => {
+    if (!taskTelemetry || event.message.role !== "assistant") return;
+    const message = event.message as AssistantMessage;
+    taskTelemetry.inputTokens += message.usage.input;
+    taskTelemetry.outputTokens += message.usage.output;
+    taskTelemetry.cacheReadTokens += message.usage.cacheRead;
+    taskTelemetry.cacheWriteTokens += message.usage.cacheWrite;
+    taskTelemetry.cost += message.usage.cost.total;
+    taskTelemetry.assistantTurns += 1;
   });
 
   pi.on("session_start", async (_event, ctx) => {
@@ -412,7 +477,12 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
       ctx.ui.notify("openmerit: no frontier profile found; asking Pi to establish evals and observability", "info");
       await dispatchIntent(pi, ctx, state, store, "establish_evals", registerCompletionTool);
     }
-    restoreState(ctx, state);
+    if (projectState?.activeIntent) {
+      ctx.ui.notify(
+        `openmerit: recovered interrupted work (${projectState.activeIntent.id}); use /openmerit cancel to abandon it`,
+        "warning",
+      );
+    }
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
@@ -423,6 +493,21 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
     store ??= new ProjectStore(ctx.cwd);
     const current = await store.readState();
     if (!current || current.activeIntent) return;
+    const completedAt = Date.now();
+    const telemetry = taskTelemetry ? {
+      startedAt: new Date(taskTelemetry.startedAt).toISOString(),
+      completedAt: new Date(completedAt).toISOString(),
+      durationMs: Math.max(0, completedAt - taskTelemetry.startedAt),
+      inputTokens: taskTelemetry.inputTokens,
+      outputTokens: taskTelemetry.outputTokens,
+      cacheReadTokens: taskTelemetry.cacheReadTokens,
+      cacheWriteTokens: taskTelemetry.cacheWriteTokens,
+      cost: taskTelemetry.cost,
+      currency: "USD" as const,
+      assistantTurns: taskTelemetry.assistantTurns,
+    } : undefined;
+    taskTelemetry = null;
+    const sessionFile = ctx.sessionManager.getSessionFile();
     await reportAutomationSignal(pi, ctx, state, store, {
       protocolVersion: PROTOCOL_VERSION,
       id: `signal-${crypto.randomUUID()}`,
@@ -430,11 +515,17 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
       occurredAt: new Date().toISOString(),
       modelId: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "unknown",
       contextTokens: ctx.getContextUsage()?.tokens ?? null,
+      ...(telemetry ? { telemetry } : {}),
+      ...(sessionFile ? { evidence: [{
+        id: `pi-session-${crypto.randomUUID()}`,
+        source: "harness_trace",
+        uri: `file://${sessionFile}`,
+      }] } : {}),
     }, registerCompletionTool);
   });
 
   pi.registerCommand("openmerit", {
-    description: "OpenMerit: status, setup, assess, frontier, approve, pause/resume, logs, doctor",
+    description: "OpenMerit: status, setup, assess, frontier, approve, cancel, pause/resume, logs, doctor",
     handler: async (args, ctx) => {
       const subcommand = args.trim().split(/\s+/)[0]?.toLowerCase() || "status";
 
@@ -479,6 +570,28 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
           await dispatchIntent(pi, ctx, state, store, "apply_model_swap", registerCompletionTool);
           return;
         }
+        case "cancel": {
+          store ??= new ProjectStore(ctx.cwd);
+          const projectState = await store.readState();
+          if (!projectState?.activeIntent) {
+            ctx.ui.notify("openmerit: there is no active work to cancel", "warning");
+            return;
+          }
+          const cancelled = await new OpenMeritCoordinator(store, piHarnessAdapter(pi)).acceptResult({
+            protocolVersion: PROTOCOL_VERSION,
+            intentId: projectState.activeIntent.id,
+            status: "cancelled",
+            completedAt: new Date().toISOString(),
+            summary: "Cancelled explicitly by the user after an interrupted harness run.",
+            evidence: [],
+          } as AnyIntentResult);
+          state.activeIntent = null;
+          state.lifecycleStage = cancelled.state.cycle.stage;
+          registerCompletionTool();
+          releaseQueuedUserInput();
+          ctx.ui.notify(`openmerit: cancelled ${projectState.activeIntent.id}`, "info");
+          return;
+        }
         case "pause":
           state.proactiveNudgesPaused = true;
           ctx.ui.notify("openmerit: proactive nudges paused", "info");
@@ -516,7 +629,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
           return;
         default:
           ctx.ui.notify(
-            "openmerit: usage: /openmerit [status|setup|assess|frontier|approve|pause|resume|logs|doctor]",
+            "openmerit: usage: /openmerit [status|setup|assess|frontier|approve|cancel|pause|resume|logs|doctor]",
             "warning",
           );
       }

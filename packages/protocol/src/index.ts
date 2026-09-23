@@ -529,6 +529,8 @@ export interface OpenMeritProjectState {
     readonly swapAppliedAt?: string;
     readonly lastVerificationAt?: string;
     readonly latestMetricValues?: Readonly<Partial<Record<MetricId, number>>>;
+    /** Spend from controlled challenger trials; ordinary product work is excluded. */
+    readonly evaluationSpend?: number;
   };
   readonly updatedAt: string;
 }
@@ -563,6 +565,19 @@ export type AutomationSignal =
       readonly type: "product_task_completed";
       readonly modelId: string;
       readonly contextTokens?: number | null;
+      /** Provider telemetry captured directly by the harness for this task. */
+      readonly telemetry?: {
+        readonly startedAt: string;
+        readonly completedAt: string;
+        readonly durationMs: number;
+        readonly inputTokens: number;
+        readonly outputTokens: number;
+        readonly cacheReadTokens: number;
+        readonly cacheWriteTokens: number;
+        readonly cost: number;
+        readonly currency: "USD";
+        readonly assistantTurns: number;
+      };
     })
   | (AutomationSignalBase & {
       readonly type: "metric_window_available";

@@ -68,6 +68,28 @@ test("a non-Pi harness can receive canonical OpenMerit intents", async () => {
   assert.match(intent.requestedOutcome, /Discover credible model candidates/);
 });
 
+test("challenger intents expose only the remaining evaluation allowance", () => {
+  const policy = {
+    mode: "supervised_graduation" as const,
+    evaluationBudget: { currency: "USD", maximumSpend: 0.5 },
+    automaticSwapsEnabled: false,
+    confirmationRequiredUntilVerifiedSwaps: 1,
+    requirePostSwapVerification: true as const,
+    rollbackOnRegression: true,
+    checkPolicy: {
+      baselineAssessment: { afterCompletedTasks: 5 },
+      frontierReassessment: { afterCompletedTasks: 5, onModelCatalogChange: true },
+      regressionCheck: { afterCompletedTasks: 3, thresholds: [] },
+      postSwapVerification: { afterCompletedTasks: 1 },
+      cooldownSeconds: 60,
+      execution: { mode: "active_session_only" as const, infrastructureChangesAllowed: false },
+    },
+  };
+  const intent = createOpenMeritIntent("run_challenger_trials", { policy, evaluationSpend: 0.2 });
+  assert.equal(intent.constraints.evaluationSpend, 0.2);
+  assert.equal(intent.constraints.remainingEvaluationBudget, 0.3);
+});
+
 test("capability negotiation rejects unsupported jobs before dispatch", async () => {
   let dispatched = false;
   const adapter: HarnessAdapter = {

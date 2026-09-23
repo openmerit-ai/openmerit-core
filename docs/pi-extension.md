@@ -21,6 +21,8 @@ On `session_start`, an interactive unconfigured project automatically receives o
 
 For configured projects, session start reports the current model catalogue and a scheduled tick. Ordinary settled product work reports an idempotent completed-task signal. OpenMerit evaluates the confirmed policy before issuing work. Pi currently declares no persistent scheduling or background execution, so persistent policies require an external scheduler to start Pi; the adapter reports that gap explicitly.
 
+The unreleased development adapter also records each ordinary task's provider-reported USD cost, token counts, assistant-turn count, and wall-clock latency with a reference to the Pi session trace. If automatic setup is active when interactive input arrives, the input is queued and released after setup completes instead of racing the setup turn.
+
 Pi also exposes `openmerit_report_signal` for verified `metric_window_available` and `verification_window_completed` events. Evals or observability work performed by Pi can submit measured metric records through this typed ingress using stable signal IDs. This does not create a background scheduler; it gives the active harness a validated way to connect the infrastructure it built to OpenMerit's due-check engine.
 
 ## Intent delivery
@@ -28,6 +30,8 @@ Pi also exposes `openmerit_report_signal` for verified `metric_window_available`
 The extension persists each intent as a custom Pi session entry, sends private extension-authored context with `display: false`, and triggers a follow-up Pi turn. The intent describes the outcome, constraints, evidence, task profile, and authorization boundary without prescribing Pi's method.
 
 Pi must finish by calling `openmerit_complete_intent` exactly once. Success without evidence is rejected. Setup, assessment, and frontier intents receive additional structured-output checks.
+
+If Pi exits while an intent is active, the next session reports the recovered intent. Use `/openmerit cancel` to record an explicit cancellation before retrying; OpenMerit does not silently reinterpret interrupted work as success.
 
 The extension replaces the completion tool definition whenever an intent becomes active. Its `outputs` property therefore exposes the canonical schema for that exact intent instead of untyped JSON. Pi validates the arguments before execution and requests provider-side JSON Schema constrained sampling when supported. OpenMerit validates the canonical schema and semantic rules again when accepting the result.
 

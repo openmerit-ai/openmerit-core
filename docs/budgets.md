@@ -4,7 +4,7 @@ Setup asks you to confirm the limits and permissions for evaluation work. OpenMe
 
 ## Evaluation costs
 
-OpenMerit is MIT-licensed, free to install, and has no OpenMerit subscription. Model-provider charges still apply to setup, assessments, challenger trials, and verification. Paid tools, telemetry, or infrastructure used by your harness may add costs.
+OpenMerit is MIT-licensed, free to install, and has no OpenMerit subscription. Model-provider charges still apply to setup, assessments, challenger trials, and verification. Paid tools, telemetry, or infrastructure used by your harness may add costs. Pi records ordinary task cost separately as production evidence; it is not charged to the challenger-evaluation budget.
 
 ## Budget fields
 
@@ -16,7 +16,9 @@ OpenMerit is MIT-licensed, free to install, and has no OpenMerit subscription. M
 | `maximumRunsPerCandidate` | Optional limit on runs per candidate. |
 | `expiresAt` | Optional expiration for the evaluation budget. |
 
-These values are constraints supplied to the harness. OpenMerit 0.1.5 does not independently meter provider spending or cut off requests at the budget limit. Use provider or infrastructure spending controls where available, and inspect usage during a trial.
+In the unreleased development version, OpenMerit keeps a separate ledger for controlled challenger trials. Each challenger intent receives the amount already spent and the remaining allowance. Challenger results that exceed the approved limit are rejected, and another challenger intent cannot start after the limit is exhausted. Provider-side spending controls remain the strongest protection against a request that exceeds its estimate while it is running.
+
+Setup, baseline product work, assessments, and swap verification remain visible costs, but do not consume `evaluationBudget.maximumSpend`. This separation prevents normal product usage from silently exhausting the allowance reserved for comparing challengers.
 
 ## Model changes
 

@@ -19,6 +19,14 @@ Both show the task profile, metric readiness, evaluation status, active work, ne
 
 Request setup explicitly when recovering or rerunning it. An unconfigured project normally starts setup automatically in an interactive Pi session. OpenMerit refuses another intent while work is active.
 
+## Cancel interrupted work
+
+```text
+/openmerit cancel
+```
+
+Record the active intent as cancelled after an interrupted or abandoned harness run. This clears durable active-work state without claiming success and releases any interactive request that was queued behind setup.
+
 ## Request an assessment
 
 ```text
