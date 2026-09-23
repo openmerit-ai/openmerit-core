@@ -12,6 +12,8 @@ npm pack --dry-run
 
 Tests cover protocol contracts, lifecycle decisions, baseline sufficiency, candidate/frontier/swap sequencing, conservative Pareto verification, persistence, audit events, safe evidence identifiers, Pi commands, private intent delivery, evidence requirements, and mutation boundaries.
 
+The routine `packages/pi/test/live-wakeup.test.ts` test uses a disposable project to verify that a due, insufficient baseline is checked and recorded without starting Pi. A prior opt-in live OpenRouter run proved the former harness-driven assessment could issue an intent and call tools, but Pi did not complete it within the bounded test. Candidate discovery and model changes still require a representative headless end-to-end trial before claiming unattended operation.
+
 Automation tests additionally cover task and elapsed cadence, idempotent target-bound signal delivery, durable pending work, catalogue changes, metric regression thresholds, native wakeup requests, unsupported-scheduler fallbacks, delayed post-swap verification, and Pi dispatch from explicit application-task signals. Pi's own settled-turn telemetry is not a product-observation test path.
 
 ## Pi load smoke test

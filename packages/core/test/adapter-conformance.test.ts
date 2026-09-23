@@ -87,7 +87,8 @@ test("a non-Pi harness can receive canonical OpenMerit intents", async () => {
 
   assert.equal(receipt.accepted, true);
   assert.deepEqual(received, ["discover_candidates"]);
-  assert.match(intent.requestedOutcome, /Discover credible model candidates/);
+  assert.match(intent.requestedOutcome, /discover other credible candidates/);
+  assert.match(createOpenMeritIntent("establish_evals").requestedOutcome, /Mark any metric missing if its collector or grader cannot produce a value/);
 });
 
 test("challenger intents expose only the remaining evaluation allowance", () => {
@@ -172,6 +173,18 @@ test("shared core validates and interprets setup results from any harness", () =
         missingMetricIds: [],
         checkedAt: "2026-09-22T00:00:30.000Z",
       },
+      preliminaryModelLeads: [{
+        targetId: applicationTarget.id,
+        modelId: "vendor/model-a",
+        estimatedPrice: {
+          currency: "USD", inputPerMillionTokens: 1, outputPerMillionTokens: 2,
+          sourceUri: "https://vendor.example/pricing", checkedAt: "2026-09-22T00:00:00.000Z",
+        },
+        reputation: {
+          summary: "Promising for this task type", sourceUri: "https://vendor.example/evals",
+          checkedAt: "2026-09-22T00:00:00.000Z",
+        },
+      }],
     },
   };
   const interpreted = interpretIntentResult(
@@ -185,6 +198,63 @@ test("shared core validates and interprets setup results from any harness", () =
   assert.equal(interpreted.nextStage, "collecting_baseline");
   assert.equal(interpreted.config?.activeTaskProfileId, "profile-portable");
   assert.equal(interpreted.cyclePatch?.taskProfileId, "profile-portable");
+  assert.equal(interpreted.config?.preliminaryModelLeads?.[0]?.modelId, "vendor/model-a");
+  assert.equal(interpreted.cyclePatch?.baselineEvidenceSufficient, false);
+});
+
+test("preliminary leads cannot name another target or duplicate a model", () => {
+  const intent = createOpenMeritIntent("establish_evals", { id: "intent-leads" });
+  const outputs = {
+    taskProfile: portableProfile,
+    policy: {
+      mode: "supervised_graduation" as const,
+      evaluationBudget: { currency: "USD", maximumSpend: 5 },
+      automaticSwapsEnabled: false,
+      confirmationRequiredUntilVerifiedSwaps: 2,
+      requirePostSwapVerification: true as const,
+      rollbackOnRegression: true,
+      checkPolicy: {
+        baselineAssessment: { afterCompletedTasks: 3 },
+        frontierReassessment: { afterCompletedTasks: 100, onModelCatalogChange: true },
+        regressionCheck: { afterCompletedTasks: 25, thresholds: [] },
+        postSwapVerification: { afterCompletedTasks: 20 },
+        cooldownSeconds: 3600,
+        execution: { mode: "active_session_only" as const, infrastructureChangesAllowed: false },
+      },
+    },
+    observability: {
+      targetId: applicationTarget.id,
+      status: "ready" as const,
+      requiredMetricIds: ["task_success" as const],
+      coveredMetricIds: ["task_success" as const],
+      missingMetricIds: [],
+      checkedAt: "2026-09-22T00:01:00.000Z",
+    },
+    preliminaryModelLeads: [{
+      targetId: "wrong-target",
+      modelId: "vendor/model-a",
+      estimatedPrice: {
+        currency: "USD", inputPerMillionTokens: 1, outputPerMillionTokens: 2,
+        sourceUri: "https://vendor.example/pricing", checkedAt: "2026-09-22T00:00:00.000Z",
+      },
+      reputation: {
+        summary: "Promising", sourceUri: "https://vendor.example/evals",
+        checkedAt: "2026-09-22T00:00:00.000Z",
+      },
+    }],
+  };
+  const result: IntentResult<"establish_evals"> = {
+    protocolVersion: "0.1", intentId: intent.id, status: "succeeded",
+    completedAt: "2026-09-22T00:01:00.000Z", summary: "Configured",
+    evidence: [{ id: "eval", source: "evaluation_artifact", uri: "artifact://fake/eval" }],
+    outputs,
+  };
+  const cycle = { id: "cycle", stage: "establishing_evidence" as const, verifiedSwapCount: 0, baselineEvidenceSufficient: false };
+  const config = { schemaVersion: 1 as const, taskProfiles: [] };
+  assert.match(interpretIntentResult(intent, result, cycle, config).errors.join("; "), /preliminary lead.*target/);
+  const duplicate = { ...outputs.preliminaryModelLeads[0], targetId: applicationTarget.id };
+  const duplicated = { ...result, outputs: { ...outputs, preliminaryModelLeads: [duplicate, duplicate] } };
+  assert.match(interpretIntentResult(intent, duplicated, cycle, config).errors.join("; "), /duplicate preliminary model lead/);
 });
 
 test("shared core rejects structurally invalid successful outputs from any harness", () => {
@@ -250,6 +320,18 @@ test("the coordinator runs a durable job through a non-Pi harness", async () => 
       schemaVersion: 1,
       activeTaskProfileId: portableProfile.id,
       taskProfiles: [portableProfile],
+      preliminaryModelLeads: [{
+        targetId: applicationTarget.id,
+        modelId: "vendor/model-a",
+        estimatedPrice: {
+          currency: "USD", inputPerMillionTokens: 1, outputPerMillionTokens: 2,
+          sourceUri: "https://vendor.example/pricing", checkedAt: "2026-09-22T00:00:00.000Z",
+        },
+        reputation: {
+          summary: "Promising", sourceUri: "https://vendor.example/evals",
+          checkedAt: "2026-09-22T00:00:00.000Z",
+        },
+      }],
     }, {
       schemaVersion: 1,
       cycle: {
@@ -265,6 +347,8 @@ test("the coordinator runs a durable job through a non-Pi harness", async () => 
     });
     const coordinator = new OpenMeritCoordinator(store, adapter);
     const issued = await coordinator.issue("discover_candidates");
+    assert.equal((issued.intent.constraints.taskProfile as { goal: string }).goal, portableProfile.goal);
+    assert.equal((issued.intent.constraints.preliminaryModelLeads as Array<{ modelId: string }>)[0]?.modelId, "vendor/model-a");
     const result: IntentResult<"discover_candidates"> = {
       protocolVersion: "0.1",
       intentId: issued.intent.id,

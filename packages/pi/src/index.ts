@@ -6,6 +6,7 @@ import type {
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { basename, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { StringEnum, type ImageContent } from "@earendil-works/pi-ai";
 import {
   nextImprovementAction,
@@ -28,8 +29,10 @@ import {
   type MetricRecord,
   MetricRecordSchema,
   type OpenMeritIntent,
+  type OpenMeritProjectState,
 } from "../../protocol/src/index.ts";
 import { Type } from "typebox";
+import { piWakeupPlistPath, provisionPiWakeup, removePiWakeup } from "./scheduler.ts";
 
 const INTENT_ENTRY_TYPE = "openmerit.intent";
 const RESULT_ENTRY_TYPE = "openmerit.result";
@@ -63,9 +66,9 @@ export const PI_HARNESS_DESCRIPTOR: HarnessDescriptor = {
       "product_task_completed", "metric_window_available", "scheduled_tick",
       "model_catalog_changed", "verification_window_completed",
     ],
-    persistentScheduling: false,
-    backgroundExecution: false,
-    wakeupProvisioning: "none",
+    persistentScheduling: process.platform === "darwin",
+    backgroundExecution: process.platform === "darwin",
+    wakeupProvisioning: process.platform === "darwin" ? "infrastructure_change" : "none",
   },
 };
 
@@ -273,7 +276,7 @@ function privateIntentMessage(intent: OpenMeritIntent): string {
     intent.targetId
       ? `Every result and metric must reference application target ${intent.targetId}.`
       : "Before setup succeeds, identify an actual application LLM call or shared application route and ask the user to confirm its stable target ID, call sites, and route key.",
-    "Instrument every required metric selected by the user. Report explicit covered and missing metric IDs; never describe observability as ready while a required metric is missing.",
+    "Instrument every required metric selected by the user. For setup or instrumentation, actually run each task-specific grader and collector through the application path with working provider authentication, inspect the resulting metric values, and cite the run artifacts. Report explicit covered and missing metric IDs; never describe observability as ready when a required metric cannot be produced. A setup smoke run is verification, not a production baseline sample.",
     "Capture cost, token use, and task latency from the application LLM provider or application observability. Do not substitute Pi provider telemetry or zero for unavailable application telemetry.",
     "Tool-use performance must be derived from tool-call traces and outcomes; code coverage is not tool-use evidence.",
     intent.constraints.modelMutationAllowed
@@ -284,21 +287,38 @@ function privateIntentMessage(intent: OpenMeritIntent): string {
   ].join("\n\n");
 }
 
-function piHarnessAdapter(pi: ExtensionAPI): HarnessAdapter {
+function piHarnessAdapter(pi: ExtensionAPI, ctx: ExtensionContext): HarnessAdapter {
   return {
     descriptor: PI_HARNESS_DESCRIPTOR,
     async dispatch(intent) {
       pi.appendEntry(INTENT_ENTRY_TYPE, { intent } satisfies StoredIntentEntry);
-      pi.sendMessage(
-        {
-          customType: INTENT_MESSAGE_TYPE,
-          content: privateIntentMessage(intent),
-          display: false,
-          details: { intentId: intent.id, kind: intent.kind },
-        },
-        { deliverAs: "followUp", triggerTurn: true },
-      );
+      if (ctx.mode === "tui" || ctx.mode === "rpc") {
+        pi.sendMessage(
+          {
+            customType: INTENT_MESSAGE_TYPE,
+            content: privateIntentMessage(intent),
+            display: false,
+            details: { intentId: intent.id, kind: intent.kind },
+          },
+          { deliverAs: "followUp", triggerTurn: true },
+        );
+      }
       return { accepted: true, harnessJobId: intent.id };
+    },
+    async scheduleWakeup(request) {
+      if (request.signal !== "scheduled_tick") return { accepted: false, reason: "Pi only schedules OpenMerit ticks." };
+      if (!ctx.model) return { accepted: false, reason: "Select an authenticated Pi model before enabling background checks." };
+      try {
+        const path = await provisionPiWakeup({
+          projectRoot: ctx.cwd,
+          extensionPath: fileURLToPath(import.meta.url),
+          provider: ctx.model.provider,
+          modelId: ctx.model.id,
+        });
+        return { accepted: true, harnessJobId: path };
+      } catch (error) {
+        return { accepted: false, reason: error instanceof Error ? error.message : String(error) };
+      }
     },
   };
 }
@@ -318,7 +338,7 @@ async function dispatchIntent(
   }
 
   prepareCompletionTool(kind);
-  const issued = await new OpenMeritCoordinator(store, piHarnessAdapter(pi)).issue(kind, { additionalConstraints });
+  const issued = await new OpenMeritCoordinator(store, piHarnessAdapter(pi, ctx)).issue(kind, { additionalConstraints });
   const { intent } = issued;
   state.activeIntent = intent.id;
   if (kind === "establish_evals") {
@@ -343,7 +363,7 @@ async function reportAutomationSignal(
   signal: AutomationSignal,
   prepareCompletionTool: (kind: IntentKind) => void,
 ): Promise<void> {
-  const result = await new OpenMeritCoordinator(store, piHarnessAdapter(pi)).recordAutomationSignal(signal);
+  const result = await new OpenMeritCoordinator(store, piHarnessAdapter(pi, ctx)).recordAutomationSignal(signal);
   if (result.decision.action === "issue_intent" && !state.activeIntent) {
     await dispatchIntent(pi, ctx, state, store, result.decision.intentKind, prepareCompletionTool);
   }
@@ -428,7 +448,14 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
             : {}),
         } as unknown as AnyIntentResult;
 
-        const accepted = await new OpenMeritCoordinator(store, piHarnessAdapter(pi)).acceptResult(result);
+        const accepted = await new OpenMeritCoordinator(store, piHarnessAdapter(pi, ctx)).acceptResult(result);
+        if (accepted.intentKind === "establish_evals" &&
+            (accepted.state.cycle.policy?.checkPolicy.execution.mode !== "persistent" ||
+              !accepted.state.cycle.policy?.checkPolicy.execution.infrastructureChangesAllowed)) {
+          try { await removePiWakeup(ctx.cwd); } catch (error) {
+            ctx.ui.notify(`openmerit: could not remove prior wakeup: ${error instanceof Error ? error.message : String(error)}`, "warning");
+          }
+        }
         pi.appendEntry(RESULT_ENTRY_TYPE, { result } satisfies StoredResultEntry);
         const { intentKind, state: nextState } = accepted;
         const stage = nextState.cycle.stage;
@@ -545,7 +572,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("input", (event, ctx) => {
-    if (!state.activeIntent || event.source !== "interactive" || ctx.isIdle()) return;
+    if (ctx.mode !== "tui" || !state.activeIntent || event.source !== "interactive" || ctx.isIdle()) return;
     queuedUserInputs.push({ text: event.text, ...(event.images ? { images: event.images } : {}) });
     ctx.ui.notify(`openmerit: queued your request until active setup work finishes (${state.activeIntent})`, "info");
     return { action: "handled" };
@@ -556,6 +583,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
     let projectState = await store.readState();
     if (projectState) {
       state.lifecycleStage = projectState.cycle.stage;
+      state.proactiveNudgesPaused = projectState.automation.paused === true;
       state.activeIntent = projectState.activeIntent?.id ?? null;
       if (projectState.activeIntent) registerCompletionTool(projectState.activeIntent.kind);
       state.applicationTarget = projectState.cycle.targetId ? "confirmed" : "not_detected";
@@ -563,10 +591,28 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
       state.metricReadiness = projectState.observability?.status === "ready" ? "assessed" : "pending";
       state.evaluationReadiness = projectState.cycle.taskProfileId ? "assessed" : "not_assessed";
       if (!projectState.cycle.targetId) {
-        ctx.ui.notify("openmerit: existing state has no confirmed application LLM target; automation is blocked until /openmerit setup succeeds", "warning");
+        if (ctx.hasUI && !state.proactiveNudgesPaused && projectState.cycle.stage === "unconfigured") {
+          const detectedApplicationTargets = detectApplicationLlmTargets(ctx.cwd);
+          if (detectedApplicationTargets.length) {
+            await dispatchIntent(pi, ctx, state, store, "establish_evals", registerCompletionTool, {
+              applicationTargetRequired: true,
+              detectedApplicationTargets: detectedTargetsConstraint(detectedApplicationTargets),
+            });
+          }
+        } else if (state.proactiveNudgesPaused) {
+          ctx.ui.notify("openmerit: proactive checks remain paused; use /openmerit resume to re-enable them", "info");
+        } else {
+          ctx.ui.notify("openmerit: existing state has no confirmed application LLM target; use /openmerit setup", "warning");
+        }
         return;
       }
-      const automation = await new OpenMeritCoordinator(store, piHarnessAdapter(pi)).reconcileAutomation();
+      if (state.proactiveNudgesPaused || projectState.cycle.policy?.checkPolicy.execution.mode !== "persistent" ||
+          !projectState.cycle.policy?.checkPolicy.execution.infrastructureChangesAllowed) {
+        try { await removePiWakeup(ctx.cwd); } catch (error) {
+          ctx.ui.notify(`openmerit: could not remove prior wakeup: ${error instanceof Error ? error.message : String(error)}`, "warning");
+        }
+      }
+      const automation = await new OpenMeritCoordinator(store, piHarnessAdapter(pi, ctx)).reconcileAutomation();
       state.nextAssessment = automation.plan.nextWakeupAt ??
         (automation.plan.scheduling === "external_scheduler_required" ? "external scheduler required" : "signal driven");
       if (automation.plan.gaps.length) {
@@ -628,7 +674,16 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
           return;
         case "assess":
           store ??= new ProjectStore(ctx.cwd);
-          await dispatchIntent(pi, ctx, state, store, "run_assessment", registerCompletionTool);
+          {
+            const assessment = await new OpenMeritCoordinator(store, piHarnessAdapter(pi, ctx)).assessBaseline();
+            state.lifecycleStage = assessment.state.cycle.stage;
+            ctx.ui.notify(assessment.errors.length
+              ? `openmerit: baseline is not ready: ${assessment.errors.join("; ")}`
+              : "openmerit: baseline meets the required metric thresholds; starting candidate discovery", assessment.errors.length ? "warning" : "info");
+            if (assessment.decision.action === "issue_intent") {
+              await dispatchIntent(pi, ctx, state, store, assessment.decision.intentKind, registerCompletionTool);
+            }
+          }
           return;
         case "frontier":
           store ??= new ProjectStore(ctx.cwd);
@@ -666,7 +721,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
             ctx.ui.notify("openmerit: there is no active work to cancel", "warning");
             return;
           }
-          const cancelled = await new OpenMeritCoordinator(store, piHarnessAdapter(pi)).acceptResult({
+          const cancelled = await new OpenMeritCoordinator(store, piHarnessAdapter(pi, ctx)).acceptResult({
             protocolVersion: PROTOCOL_VERSION,
             intentId: projectState.activeIntent.id,
             status: "cancelled",
@@ -681,14 +736,45 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
           ctx.ui.notify(`openmerit: cancelled ${projectState.activeIntent.id}`, "info");
           return;
         }
-        case "pause":
+        case "pause": {
+          store ??= new ProjectStore(ctx.cwd);
+          const existing = await store.readState();
+          const now = new Date().toISOString();
+          const paused: OpenMeritProjectState = existing
+            ? { ...existing, automation: { ...existing.automation, paused: true }, updatedAt: now }
+            : {
+                schemaVersion: 1,
+                cycle: { id: `cycle-${crypto.randomUUID()}`, stage: "unconfigured", verifiedSwapCount: 0, baselineEvidenceSufficient: false },
+                automation: { setupNudgeShown: false, observedCompletedTasks: 0, lastAssessmentTaskCount: 0, paused: true },
+                updatedAt: now,
+              };
+          await store.writeState(paused);
           state.proactiveNudgesPaused = true;
+          state.nextAssessment = "paused";
+          try { await removePiWakeup(ctx.cwd); } catch (error) {
+            ctx.ui.notify(`openmerit: could not unload wakeup: ${error instanceof Error ? error.message : String(error)}`, "warning");
+          }
           ctx.ui.notify("openmerit: proactive nudges paused", "info");
           return;
-        case "resume":
+        }
+        case "resume": {
+          store ??= new ProjectStore(ctx.cwd);
+          const existing = await store.readState();
+          if (existing) {
+            await store.writeState({ ...existing, automation: { ...existing.automation, paused: false }, updatedAt: new Date().toISOString() });
+          }
           state.proactiveNudgesPaused = false;
+          if (existing?.cycle.targetId) {
+            const automation = await new OpenMeritCoordinator(store, piHarnessAdapter(pi, ctx)).reconcileAutomation();
+            state.nextAssessment = automation.plan.nextWakeupAt ??
+              (automation.plan.scheduling === "external_scheduler_required" ? "external scheduler required" : "signal driven");
+            if (automation.plan.gaps.length) {
+              ctx.ui.notify(`openmerit automation: ${automation.plan.gaps.join(" ")}`, "warning");
+            }
+          }
           ctx.ui.notify("openmerit: proactive nudges resumed", "info");
           return;
+        }
         case "doctor":
           ctx.ui.notify(
             [
@@ -698,7 +784,9 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
               `audit log          : ${store?.eventsPath ?? `${ctx.cwd}/.openmerit/events.jsonl`}`,
               "Pi model mutation : prohibited",
               "application swap  : target-bound after approval",
-              "persistent schedule: unavailable (active-session ticks only)",
+              `persistent schedule: ${process.platform === "darwin" ? "opt-in LaunchAgent when policy permits" : "unavailable on this platform"}`,
+              `schedule file     : ${piWakeupPlistPath(ctx.cwd)}`,
+              `schedule status   : ${ctx.cwd}/.openmerit/scheduler-status.json`,
               `interactive UI     : ${ctx.hasUI ? "available" : "unavailable"}`,
             ].join("\n"),
             "info",

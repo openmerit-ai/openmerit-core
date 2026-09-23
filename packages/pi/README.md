@@ -8,7 +8,7 @@ It translates OpenMerit intents into intelligent Pi work and returns structured 
 
 - `/openmerit` and `/openmerit status` — show evidence readiness and current activity.
 - `/openmerit setup` — explicitly rerun or recover setup; interactive startup only begins automatically after bounded source detection finds an application LLM call.
-- `/openmerit assess` — run an evidence-backed assessment.
+- `/openmerit assess` — in the unreleased source checkout, check stored baseline metric windows locally; published `0.1.5` delegates assessment to Pi.
 - `/openmerit frontier` — request and verify a harness-calculated frontier.
 - `/openmerit approve` — authorize the currently proposed supervised swap.
 - `/openmerit pause` and `/openmerit resume` — control proactive nudges.

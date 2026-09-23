@@ -12,6 +12,10 @@ Most intents carry `modelMutationAllowed: false`. Only application-target apply-
 
 Persistent wakeup provisioning is a separate authorization boundary. An adapter that needs to install a system scheduler, create a paid cloud agent, or change infrastructure must declare `wakeupProvisioning: "infrastructure_change"`; OpenMerit will not request that provisioning unless the confirmed check policy sets `infrastructureChangesAllowed: true`.
 
+The unreleased macOS Pi adapter installs a user LaunchAgent only under that authorization and persistent execution mode. The plist stores the project path, selected Pi model identifier, and executable paths, but no API key. It verifies that Pi authentication works without shell-only credentials before installing. The agent launches Pi headlessly only for due elapsed-time checks, so the configured model provider may receive project context and incur charges under the confirmed policy. Pause unloads the agent; already-running work is not cancelled.
+
+The source runner imposes a 15-minute wall-clock limit and records a nonzero status if Pi fails to complete a due intent. This is a safety bound, not a provider-spend cap. Headless completion remains unverified in the current live test.
+
 ## Local state
 
 `.openmerit/` may reveal task names, candidate identifiers, evidence locations, budgets, or model choices. Treat it as sensitive project metadata even though it must not contain credentials.

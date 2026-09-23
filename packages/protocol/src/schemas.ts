@@ -155,6 +155,24 @@ export const CandidateDescriptorSchema = strictObject({
   reasons: Type.Array(Type.String()),
 });
 
+export const PreliminaryModelLeadSchema = strictObject({
+  targetId: Type.String({ minLength: 1 }),
+  modelId: Type.String({ minLength: 1 }),
+  modelVersion: Type.Optional(Type.String({ minLength: 1 })),
+  estimatedPrice: strictObject({
+    currency: Type.String({ minLength: 1 }),
+    inputPerMillionTokens: Type.Number({ minimum: 0 }),
+    outputPerMillionTokens: Type.Number({ minimum: 0 }),
+    sourceUri: Type.String({ minLength: 1 }),
+    checkedAt: Type.String({ minLength: 1 }),
+  }),
+  reputation: strictObject({
+    summary: Type.String({ minLength: 1 }),
+    sourceUri: Type.String({ minLength: 1 }),
+    checkedAt: Type.String({ minLength: 1 }),
+  }),
+});
+
 export const CandidateAssessmentSchema = strictObject({
   id: Type.String({ minLength: 1 }),
   targetId: Type.String({ minLength: 1 }),
@@ -205,6 +223,7 @@ export const INTENT_OUTPUT_SCHEMAS = {
     taskProfile: ConfirmedTaskProfileSchema,
     policy: SupervisedGraduationPolicySchema,
     observability: ObservabilityCoverageSchema,
+    preliminaryModelLeads: Type.Optional(Type.Array(PreliminaryModelLeadSchema)),
   }),
   instrument_observability: strictObject({
     targetId: Type.String({ minLength: 1 }),

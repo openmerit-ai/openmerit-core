@@ -67,6 +67,8 @@ const coordinator = new OpenMeritCoordinator(
 
 The confirmed task profile identifies the application LLM call under evaluation. Every metric, assessment, candidate, frontier artifact, and automation signal must carry that target ID; the harness's own model usage is orchestration data and must not be reported as product evidence. Application-provider cost, token, and latency telemetry belongs on the application signal or metric record.
 
+In the unreleased source checkout, setup may return `preliminaryModelLeads`: model IDs with sourced price estimates and reputation summaries. The field is optional under protocol 0.1 for older adapters. Core stores the leads and includes both the confirmed task profile and these leads in later discovery intent constraints, so a headless harness run does not depend on prior chat context. Leads are research priors, never measured candidate assessments.
+
 ## External telemetry export
 
 OpenMerit always writes its canonical, redacted audit stream locally. A host integration may pass `eventExporters` to `ProjectStore` to mirror those same safe events to OpenTelemetry, Langfuse, LangSmith, or another observability backend:
@@ -137,13 +139,13 @@ Schema validation catches malformed structure. The coordinator still owns semant
 After a real product task completes:
 
 ```ts
-const observation = await coordinator.recordTaskObservation({
+await coordinator.recordTaskObservation({
   modelId: "vendor/model",
 });
 
-if (observation.assessmentDue) {
-  await coordinator.issue("run_assessment");
-}
+// In the unreleased source checkout, core has already checked baseline
+// sufficiency when the confirmed cadence became due. Inspect durable state
+// and dispatch only a pending downstream intent, if any.
 ```
 
 `recordTaskObservation` resolves the confirmed application target from project state. New adapters should prefer `recordAutomationSignal` so the task signal can carry the explicit `targetId`, durable evidence, and application-provider telemetry.

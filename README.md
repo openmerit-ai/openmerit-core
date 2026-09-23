@@ -25,7 +25,7 @@ It distinguishes:
 - Pi 0.87 extension with a single `/openmerit` command surface.
 - Confirmed task profiles, objectives, constraints, sample requirements, and evaluation budgets.
 - The complete initial quality, reliability, cost, latency, efficiency, and human-intervention metric catalogue.
-- Baseline-first evidence collection followed by budgeted candidate discovery and controlled challenger trials.
+- Setup-time preliminary model research in the source checkout, followed by baseline evidence collection, refreshed candidate discovery, and controlled challenger trials. The published `0.1.5` package still begins candidate discovery after the baseline.
 - A normative, uncertainty-aware Pareto definition owned by OpenMerit.
 - Harness-calculated frontier results independently checked by OpenMerit's conformance verifier.
 - Versioned result schemas for all ten intents, reusable across harness adapters and exposed dynamically by Pi.
@@ -34,6 +34,7 @@ It distinguishes:
 - Model-catalog change detection that can nudge the harness to reassess a mature baseline.
 - User-confirmed task-count, elapsed-time, regression, catalogue-change, and post-swap check policies.
 - Idempotent harness signals, durable pending work, native wakeup planning, and explicit scheduler capability gaps.
+- In the unreleased source checkout, an opt-in macOS Pi LaunchAgent for time-based checks and a durable pause; published `0.1.5` still requires an external scheduler and has a partial, session-local pause.
 
 ## Responsibility boundary
 
@@ -70,7 +71,7 @@ harness-driven lifecycle; it does not migrate the earlier home-directory state.
 
 - `/openmerit` or `/openmerit status` — show evidence readiness and lifecycle stage.
 - `/openmerit setup` — explicitly rerun or recover automatic setup.
-- `/openmerit assess` — request an evidence-sufficiency assessment now.
+- `/openmerit assess` — check stored application metric windows against the baseline thresholds now (in the unreleased source checkout); start candidate discovery only when ready. Published `0.1.5` still asks Pi to assess.
 - `/openmerit logs` — show the canonical audit, exporter-error, evidence, and state paths.
 - `/openmerit frontier` — ask the harness to calculate a frontier now; OpenMerit verifies it.
 - `/openmerit approve` — approve a verified proposal during supervised graduation.

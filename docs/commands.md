@@ -33,7 +33,7 @@ Record the active intent as cancelled after an interrupted or abandoned harness 
 /openmerit assess
 ```
 
-Ask the harness to assess baseline evidence now. This does not create missing measurements or override sample requirements.
+In the unreleased source checkout, ask OpenMerit core to check stored baseline metric windows now. It reports missing or immature required metrics without starting Pi, or starts candidate discovery when they pass. Published `openmerit@0.1.5` still asks Pi to assess. Neither path creates missing measurements or overrides sample requirements.
 
 ## Request a frontier
 

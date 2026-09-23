@@ -3,10 +3,10 @@
 ## Stages
 
 1. **Unconfigured** — no confirmed profile exists.
-2. **Establishing evidence** — Pi creates and verifies evals and observability.
+2. **Establishing evidence** — Pi creates and verifies evals and observability. In the unreleased source checkout, setup can also record sourced preliminary price and reputation leads; published `openmerit@0.1.5` does not yet do this.
 3. **Collecting baseline** — normal product work accumulates evidence.
-4. **Baseline ready** — Pi establishes sufficiency for every required objective.
-5. **Discovering candidates** — Pi researches credible candidates within budget.
+4. **Baseline ready** — in the unreleased source checkout, OpenMerit core checks stored application metric windows against every required objective and its sample threshold. Pi still authors graders and collectors and reports the measurements.
+5. **Discovering candidates** — Pi researches credible candidates within budget, refreshing any preliminary setup leads and considering new ones. This stage still follows baseline sufficiency.
 6. **Running challenger trials** — Pi runs comparable controlled trials.
 7. **Calculating frontier** — Pi calculates and explains the Pareto frontier.
 8. **Frontier ready** — OpenMerit verifies the returned snapshot.

@@ -142,12 +142,14 @@ function confirmedSetupOutputs() {
       missingMetricIds: [] as string[],
       checkedAt: new Date().toISOString(),
     },
+    preliminaryModelLeads: [],
   };
 }
 
 function commandContext(notifications: Notification[]): ExtensionCommandContext {
   return {
     cwd: testProjectRoot,
+    mode: "tui",
     hasUI: true,
     ui: {
       notify(message: string, level: string) {
@@ -160,6 +162,7 @@ function commandContext(notifications: Notification[]): ExtensionCommandContext 
 function sessionContext(projectRoot: string, notifications: Notification[]): ExtensionContext {
   return {
     cwd: projectRoot,
+    mode: "tui",
     hasUI: true,
     ui: {
       notify(message: string, level: string) {
@@ -191,9 +194,28 @@ test("Pi automatically starts setup only when an application LLM call is detecte
     assert.equal((intent.constraints.detectedApplicationTargets as Array<{ kind: string }>)[0]?.kind, "application_llm_call");
     assert.equal(messages.length, 1);
     assert.deepEqual(messages[0]?.options, { deliverAs: "followUp", triggerTurn: true });
+    const setupMessage = (messages[0]?.message as { content: string }).content;
+    assert.match(setupMessage, /run each task-specific grader and collector/);
+    assert.match(setupMessage, /setup smoke run is verification, not a production baseline sample/);
+    assert.match(setupMessage, /preliminary model shortlist/);
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
+});
+
+test("Pi does not queue the headless wakeup prompt behind an active intent", async () => {
+  rmSync(join(testProjectRoot, ".openmerit"), { recursive: true, force: true });
+  const notifications: Notification[] = [];
+  const { handler, eventHandlers, entries, messages } = loadCommand();
+  await handler("setup", { ...commandContext(notifications), mode: "print", hasUI: false });
+  assert.equal(entries.length, 1);
+  assert.equal(messages.length, 0);
+  const input = eventHandlers.get("input");
+  assert.ok(input);
+  const result = await input({ type: "input", text: "Complete the scheduled intent", source: "interactive" }, {
+    ...sessionContext(testProjectRoot, notifications), mode: "print",
+  });
+  assert.equal(result, undefined);
 });
 
 test("Pi remains idle for an unconfigured project without an application LLM call", async () => {
@@ -223,6 +245,7 @@ test("status emphasizes evidence readiness", async () => {
 });
 
 test("pause and resume control proactive nudges", async () => {
+  rmSync(join(testProjectRoot, ".openmerit"), { recursive: true, force: true });
   const notifications: Notification[] = [];
   const { handler } = loadCommand();
   const ctx = commandContext(notifications);
@@ -234,6 +257,26 @@ test("pause and resume control proactive nudges", async () => {
 
   assert.match(notifications[1]?.message ?? "", /proactive nudges\s+: paused/);
   assert.match(notifications[3]?.message ?? "", /proactive nudges\s+: enabled/);
+  const saved = JSON.parse(readFileSync(join(testProjectRoot, ".openmerit", "state.json"), "utf8")) as { automation: { paused: boolean } };
+  assert.equal(saved.automation.paused, false);
+});
+
+test("pause survives a new Pi session and prevents automatic setup", async () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-paused-"));
+  writeFileSync(join(projectRoot, "app.ts"), "await client.chat.completions.create({ model: 'app-model' });\n");
+  const notifications: Notification[] = [];
+  const first = loadCommand();
+  const ctx = { ...commandContext(notifications), cwd: projectRoot };
+  try {
+    await first.handler("pause", ctx);
+    const second = loadCommand();
+    await second.eventHandlers.get("session_start")?.({ type: "session_start" }, sessionContext(projectRoot, notifications));
+    assert.equal(second.entries.length, 0);
+    await second.handler("status", ctx);
+    assert.match(notifications.at(-1)?.message ?? "", /proactive nudges\s+: paused/);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
 });
 
 test("setup dispatches a private typed intent", async () => {
@@ -250,7 +293,7 @@ test("setup dispatches a private typed intent", async () => {
   assert.deepEqual(messages[0]?.options, { deliverAs: "followUp", triggerTurn: true });
 });
 
-test("Pi replaces the completion tool with a strict-compatible active intent schema", async () => {
+test("manual assessment checks stored metrics without starting Pi when baseline is insufficient", async () => {
   rmSync(join(testProjectRoot, ".openmerit"), { recursive: true, force: true });
   const notifications: Notification[] = [];
   const { handler, completionTools, entries } = loadCommand();
@@ -266,54 +309,16 @@ test("Pi replaces the completion tool with a strict-compatible active intent sch
     evidence: [{ id: "setup", source: "evaluation_artifact", uri: "file:///setup.json" }],
     outputs: confirmedSetupOutputs(),
   }, undefined, undefined, commandContext(notifications));
+  const registeredBeforeAssessment = completionTools.length;
   await handler("assess", commandContext(notifications));
 
-  assert.ok(completionTools.length >= 2);
-  const activeTool = completionTools.at(-1);
-  assert.ok(activeTool?.parameters);
-  assert.doesNotThrow(() => makeStrictJsonSchema(activeTool.parameters as never));
-  assert.equal(Check(activeTool.parameters as never, {
-    intentId: "intent-1",
-    status: "succeeded",
-    summary: "Baseline is ready",
-    evidence: [{ id: "trace", source: "harness_trace", uri: "file:///trace.json" }],
-    outputs: {
-      targetId: "app-target-test",
-      baselineEvidenceSufficient: true,
-      metrics: [{
-        targetId: "app-target-test",
-        metricId: "task_success",
-        state: "measured",
-        scope: "sample_window",
-        direction: "maximize",
-        method: "observed",
-        value: 1,
-        unit: "ratio",
-        sampleCount: 1,
-        evidence: [{ id: "metrics", source: "observability_record", uri: "file:///metrics.json" }],
-      }],
-    },
-  }), true);
-  assert.equal(Check(activeTool.parameters as never, {
-    intentId: "intent-1",
-    status: "succeeded",
-    summary: "Guessed the contract",
-    evidence: [{ id: "trace", source: "harness_trace", uri: "file:///trace.json" }],
-    outputs: { baseline_ready: "yes" },
-  }), false);
-  assert.equal(Check(activeTool.parameters as never, {
-    intentId: "intent-1",
-    status: "succeeded",
-    summary: "Forgot the output",
-    evidence: [{ id: "trace", source: "harness_trace", uri: "file:///trace.json" }],
-  }), true);
-  assert.equal(Check(activeTool.parameters as never, {
-    intentId: "intent-1",
-    status: "succeeded",
-    summary: "Forgot the proof",
-    evidence: [],
-    outputs: { baselineEvidenceSufficient: true },
-  }), false);
+  assert.equal(completionTools.length, registeredBeforeAssessment);
+  assert.ok(notifications.some((item) => item.message.includes("baseline is not ready")));
+  const savedState = JSON.parse(readFileSync(join(testProjectRoot, ".openmerit", "state.json"), "utf8")) as {
+    cycle: { stage: string }; activeIntent?: unknown;
+  };
+  assert.equal(savedState.cycle.stage, "collecting_baseline");
+  assert.equal(savedState.activeIntent, undefined);
 });
 
 test("every intent completion schema supports Pi strict sampling", () => {
@@ -402,7 +407,11 @@ test("Pi dispatches assessment only from application-target signals", async () =
     const intentKinds = entries
       .filter((entry) => entry.customType === "openmerit.intent")
       .map((entry) => (entry.data as { intent: { kind: string } }).intent.kind);
-    assert.deepEqual(intentKinds, ["establish_evals", "run_assessment"]);
+    assert.deepEqual(intentKinds, ["establish_evals"]);
+    const savedState = JSON.parse(readFileSync(join(projectRoot, ".openmerit", "state.json"), "utf8")) as {
+      automation: { lastAssessmentTaskCount: number };
+    };
+    assert.equal(savedState.automation.lastAssessmentTaskCount, 3);
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }

@@ -78,6 +78,18 @@ const validOutputs: Readonly<Record<IntentKind, unknown>> = {
       missingMetricIds: [],
       checkedAt: "2026-09-22T00:00:00.000Z",
     },
+    preliminaryModelLeads: [{
+      targetId: "app-target-1",
+      modelId: "vendor/model-a",
+      estimatedPrice: {
+        currency: "USD", inputPerMillionTokens: 1, outputPerMillionTokens: 2,
+        sourceUri: "https://vendor.example/pricing", checkedAt: "2026-09-22T00:00:00.000Z",
+      },
+      reputation: {
+        summary: "Promising for this task type", sourceUri: "https://vendor.example/evals",
+        checkedAt: "2026-09-22T00:00:00.000Z",
+      },
+    }],
   },
   instrument_observability: { targetId: "app-target-1", coveredMetricIds: ["task_success"], missingMetricIds: [] },
   run_assessment: { targetId: "app-target-1", baselineEvidenceSufficient: true, metrics: [metric] },
@@ -126,4 +138,16 @@ test("intent schemas reject guessed fields and wrong primitive types", () => {
     regressionDetected: false,
     inventedField: true,
   }).join("; "), /additional properties/);
+});
+
+test("setup accepts a sourced preliminary shortlist or an older 0.1 result without one", () => {
+  const setup = validOutputs.establish_evals as Record<string, unknown>;
+  const { preliminaryModelLeads: _omitted, ...legacySetup } = setup;
+  assert.deepEqual(validateIntentOutputSchema("establish_evals", legacySetup), []);
+  assert.deepEqual(validateIntentOutputSchema("establish_evals", { ...setup, preliminaryModelLeads: [] }), []);
+  const leads = setup.preliminaryModelLeads as Array<Record<string, unknown>>;
+  assert.match(validateIntentOutputSchema("establish_evals", {
+    ...setup,
+    preliminaryModelLeads: [{ ...leads[0], reputation: { summary: "Unsourced" } }],
+  }).join("; "), /sourceUri/);
 });

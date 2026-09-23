@@ -424,11 +424,31 @@ export interface CandidateDescriptor {
   readonly reasons: readonly string[];
 }
 
+/** Research priors only. These are never MetricRecords or frontier evidence. */
+export interface PreliminaryModelLead {
+  readonly targetId: string;
+  readonly modelId: string;
+  readonly modelVersion?: string;
+  readonly estimatedPrice: {
+    readonly currency: string;
+    readonly inputPerMillionTokens: number;
+    readonly outputPerMillionTokens: number;
+    readonly sourceUri: string;
+    readonly checkedAt: string;
+  };
+  readonly reputation: {
+    readonly summary: string;
+    readonly sourceUri: string;
+    readonly checkedAt: string;
+  };
+}
+
 export interface IntentOutputMap {
   readonly establish_evals: {
     readonly taskProfile: TaskProfile;
     readonly policy: SupervisedGraduationPolicy;
     readonly observability: ObservabilityCoverage;
+    readonly preliminaryModelLeads?: readonly PreliminaryModelLead[];
   };
   readonly instrument_observability: {
     readonly targetId: string;
@@ -533,6 +553,7 @@ export interface OpenMeritProjectConfig {
   readonly activeTaskProfileId?: string;
   readonly taskProfiles: readonly TaskProfile[];
   readonly policy?: SupervisedGraduationPolicy;
+  readonly preliminaryModelLeads?: readonly PreliminaryModelLead[];
 }
 
 export interface OpenMeritProjectState {
@@ -542,6 +563,7 @@ export interface OpenMeritProjectState {
   readonly lastResult?: IntentResult;
   readonly observability?: ObservabilityCoverage;
   readonly automation: {
+    readonly paused?: boolean;
     readonly setupNudgeShown: boolean;
     readonly observedCompletedTasks: number;
     readonly lastAssessmentTaskCount: number;
@@ -551,6 +573,7 @@ export interface OpenMeritProjectState {
     readonly pendingIntentKind?: IntentKind;
     readonly pendingIntentReason?: string;
     readonly lastAssessmentAt?: string;
+    readonly baselineStartedAt?: string;
     readonly lastReassessmentTaskCount?: number;
     readonly lastReassessmentAt?: string;
     readonly lastRegressionCheckTaskCount?: number;
@@ -559,6 +582,8 @@ export interface OpenMeritProjectState {
     readonly swapAppliedAt?: string;
     readonly lastVerificationAt?: string;
     readonly latestMetricValues?: Readonly<Partial<Record<MetricId, number>>>;
+    /** Latest reported aggregate application-run window per metric; overlapping windows are never summed. */
+    readonly baselineMetricWindows?: readonly MetricRecord[];
     /** Spend from controlled challenger trials; ordinary product work is excluded. */
     readonly evaluationSpend?: number;
   };
@@ -581,6 +606,7 @@ export type AuditEventType =
   | "automation_signal_recorded"
   | "automation_signal_duplicate"
   | "automation_check_due"
+  | "baseline_sufficiency_checked"
   | "observability_readiness_checked";
 
 interface AutomationSignalBase {

@@ -60,10 +60,10 @@ export interface IntentFactoryOptions {
 }
 
 const outcomes: Readonly<Record<IntentKind, string>> = {
-  establish_evals: "Identify the real application LLM call or shared application route under evaluation, ask the user to confirm that target and the task objectives, evaluation budget, check cadence, thresholds, scheduling mode, and automation permissions, establish applicable evals and observability, verify them, and return the confirmed taskProfile and policy. The coding harness model is not an evaluation target. Do not change model configuration.",
-  instrument_observability: "Establish and verify the missing observability required by the confirmed task profile.",
-  run_assessment: "Assess whether current baseline evidence satisfies every required metric and sample threshold. Return measured, missing, and insufficient-evidence metrics explicitly.",
-  discover_candidates: "Discover credible model candidates for the confirmed task profile using current capability, reputation, price, availability, and benchmark signals without exceeding the approved evaluation budget.",
+  establish_evals: "Identify the real application LLM call or shared application route under evaluation, ask the user to confirm that target and the task objectives, evaluation budget, check cadence, thresholds, scheduling mode, and automation permissions. Build runnable task-specific evaluation cases and application-call collectors for every required metric. Execute a representative smoke run through the same application authentication and runtime path, run the grader, and inspect actual quality, cost, token, latency, and other required outputs. Preserve the commands and resulting artifacts as setup evidence. Mark any metric missing if its collector or grader cannot produce a value; do not declare coverage ready based only on code existing. Do not count a setup smoke run as a production baseline sample. Return the confirmed taskProfile and policy. During setup, research a preliminary model shortlist with current sourced price estimates and reputation; report an empty list if no credible leads are available. These are research priors only: do not treat them as measured task results or change model configuration. The coding harness model is not an evaluation target.",
+  instrument_observability: "Establish the missing observability required by the confirmed task profile. Exercise each collector and task-specific grader through a representative application run with the same authentication and runtime path, inspect actual metric outputs, and preserve verification artifacts. Report a metric covered only if that path produced its value; otherwise keep it missing. Do not count a setup smoke run as a production baseline sample.",
+  run_assessment: "Assess existing application-target baseline metric windows against every required metric and sample threshold. Do not synthesize samples, count setup smoke runs as production data, or wait for new data during this check. If a required window is absent or immature, promptly return baselineEvidenceSufficient false with measured, missing, and insufficient-evidence metrics explicitly and cite the records inspected.",
+  discover_candidates: "Refresh the preliminary model leads collected at setup and discover other credible candidates for the confirmed task profile using current capability, reputation, price, availability, and benchmark signals without exceeding the approved evaluation budget. Preliminary leads are research priors, not measured task evidence.",
   run_challenger_trials: "Run comparable controlled challenger trials under the approved budget and return candidate assessments with durable evidence.",
   calculate_frontier: "Calculate the Pareto frontier using the OpenMerit conformance definition, explain every candidate classification, and return a FrontierSnapshot with calculation evidence.",
   investigate_regression: "Investigate the observed regression and return its likely cause, affected metrics, and supporting evidence.",
@@ -104,6 +104,7 @@ export function createOpenMeritIntent(kind: IntentKind, options: IntentFactoryOp
           { id: "application-target", description: "The user-confirmed application LLM call or shared route, including stable call-site and route identifiers." },
           { id: "evaluation-artifacts", description: "Runnable evaluation artifacts and verification results." },
           { id: "observability-coverage", description: "The observable metrics and explicit coverage gaps." },
+          { id: "preliminary-model-research", description: "Sources for preliminary model pricing and reputation, or an explanation that no credible leads were found." },
         ]
       : kind === "calculate_frontier"
         ? [
@@ -264,6 +265,16 @@ function validateSetupOutput(output: unknown): string[] {
       false,
     ));
   }
+  if (Array.isArray(output.preliminaryModelLeads) && isRecord(profile.applicationTarget)) {
+    const seen = new Set<string>();
+    for (const lead of output.preliminaryModelLeads) {
+      if (!isRecord(lead)) continue;
+      errors.push(...validateTargetId(lead.targetId, profile.applicationTarget.id as string, `preliminary lead ${String(lead.modelId)}`));
+      const identity = `${String(lead.modelId)}@${String(lead.modelVersion ?? "")}`;
+      if (seen.has(identity)) errors.push(`duplicate preliminary model lead ${identity}`);
+      seen.add(identity);
+    }
+  }
   return errors;
 }
 
@@ -347,16 +358,19 @@ export function interpretIntentResult(
         const taskProfile = output.taskProfile as unknown as TaskProfile;
         const policy = output.policy as unknown as SupervisedGraduationPolicy;
         const observability = output.observability as unknown as ObservabilityCoverage;
+        const preliminaryModelLeads = (output.preliminaryModelLeads ?? []) as unknown as NonNullable<IntentOutputMap["establish_evals"]["preliminaryModelLeads"]>;
         nextConfig = {
           schemaVersion: 1,
           activeTaskProfileId: taskProfile.id,
           taskProfiles: [...config.taskProfiles.filter((item) => item.id !== taskProfile.id), taskProfile],
           policy,
+          preliminaryModelLeads,
         };
         cyclePatch = {
           targetId: taskProfile.applicationTarget.id,
           taskProfileId: taskProfile.id,
           policy,
+          baselineEvidenceSufficient: false,
           observabilityReady: observability.status === "ready",
         };
         if (observability.status !== "ready") nextStage = "establishing_evidence";
@@ -392,20 +406,8 @@ export function interpretIntentResult(
           errors.push(...validateTargetId(output.targetId, target.id, "baseline assessment"));
           errors.push(...validateMetricTargets(output.metrics as unknown as MetricRecord[], target.id, "baseline assessment"));
           const profile = config.taskProfiles.find((item) => item.id === config.activeTaskProfileId);
-          if (output.baselineEvidenceSufficient && profile) {
-            errors.push(...readinessErrors(profile, {
-              id: "baseline",
-              targetId: target.id,
-              taskProfileId: profile.id,
-              taskProfileRevision: profile.revision,
-              candidateId: "baseline",
-              modelId: "baseline",
-              productRevision: "baseline",
-              harnessId: "baseline",
-              startedAt: result.completedAt,
-              completedAt: result.completedAt,
-              metrics: output.metrics as unknown as MetricRecord[],
-            }));
+          if (output.baselineEvidenceSufficient) {
+            errors.push(...baselineReadinessErrors(profile, output.metrics as unknown as MetricRecord[]));
           }
         }
         cyclePatch = { baselineEvidenceSufficient: output.baselineEvidenceSufficient };
@@ -538,7 +540,7 @@ export function nextImprovementAction(state: ImprovementCycleState): Orchestrati
         : { action: "issue_intent", intentKind: "instrument_observability", reason: "Required metric instrumentation is incomplete." };
     case "collecting_baseline":
       return state.baselineEvidenceSufficient
-        ? { action: "issue_intent", intentKind: "run_assessment", reason: "Baseline evidence has reached the approved sufficiency threshold." }
+        ? { action: "issue_intent", intentKind: "discover_candidates", reason: "The baseline is ready for candidate discovery." }
         : { action: "observe", reason: "Continue collecting baseline production evidence." };
     case "baseline_ready":
       return { action: "issue_intent", intentKind: "discover_candidates", reason: "The baseline is ready for budgeted candidate discovery." };
@@ -608,6 +610,47 @@ function readinessErrors(profile: TaskProfile, assessment: CandidateAssessment):
     }
   }
   return errors;
+}
+
+function baselineReadinessErrors(profile: TaskProfile | undefined, metrics: readonly MetricRecord[]): string[] {
+  if (!profile) return ["confirmed task profile is missing"];
+  const errors: string[] = [];
+  if (!profile.objectives.some((objective) => objective.required)) {
+    errors.push("task profile has no required metric objectives");
+  }
+  for (const objective of profile.objectives) {
+    if (!objective.required) continue;
+    const metric = metrics.find((item) => item.metricId === objective.metricId &&
+      item.targetId === profile.applicationTarget.id);
+    if (!metric) errors.push(`${objective.metricId}: missing`);
+    else if (metric.state !== "measured") errors.push(`${objective.metricId}: ${metric.state}`);
+    else if (metric.value === undefined || !Number.isFinite(metric.value)) errors.push(`${objective.metricId}: no finite numeric value`);
+    else if (metric.sampleCount < objective.minimumSamples) {
+      errors.push(`${objective.metricId}: ${metric.sampleCount}/${objective.minimumSamples} samples`);
+    } else if (!metric.evidence.length) errors.push(`${objective.metricId}: no evidence reference`);
+  }
+  return errors;
+}
+
+function baselineAssessmentErrors(
+  state: OpenMeritProjectState,
+  profile: TaskProfile | undefined,
+  metrics: readonly MetricRecord[],
+): string[] {
+  return [
+    ...(state.cycle.observabilityReady ? [] : ["required evaluation and observability setup is not ready"]),
+    ...baselineReadinessErrors(profile, metrics),
+  ];
+}
+
+function updatedBaselineWindows(
+  previous: readonly MetricRecord[] | undefined,
+  signal: AutomationSignal,
+): readonly MetricRecord[] {
+  if (signal.type !== "metric_window_available") return previous ?? [];
+  const windows = new Map((previous ?? []).map((metric) => [metric.metricId, metric]));
+  for (const metric of signal.metrics) windows.set(metric.metricId, metric);
+  return [...windows.values()];
 }
 
 function feasibility(profile: TaskProfile, assessment: CandidateAssessment): Feasibility {
@@ -839,6 +882,14 @@ export function buildAutomationPlan(
   state: OpenMeritProjectState,
   descriptor: HarnessDescriptor,
 ): AutomationPlan {
+  if (state.automation.paused) {
+    return {
+      mode: state.cycle.policy?.checkPolicy.execution.mode ?? "active_session_only",
+      requiredSignals: [],
+      scheduling: "active_session_fallback",
+      gaps: ["Proactive OpenMerit checks are paused."],
+    };
+  }
   const policy = state.cycle.policy?.checkPolicy;
   if (!policy) {
     return {
@@ -866,7 +917,8 @@ export function buildAutomationPlan(
   }
 
   const nextWakeupAt = state.cycle.stage === "collecting_baseline"
-    ? nextAt(state.automation.lastAssessmentAt ?? state.updatedAt, policy.baselineAssessment.afterElapsedSeconds)
+    ? nextAt(state.automation.lastAssessmentAt ?? state.automation.baselineStartedAt ?? state.lastResult?.completedAt ?? state.updatedAt,
+      policy.baselineAssessment.afterElapsedSeconds)
     : ["monitoring", "swap_verified"].includes(state.cycle.stage)
       ? earliest([
           nextAt(state.automation.lastReassessmentAt ?? state.updatedAt, policy.frontierReassessment.afterElapsedSeconds),
@@ -944,6 +996,7 @@ function dueDecision(
   signal: AutomationSignal,
   now: string,
 ): OrchestrationDecision {
+  if (state.automation.paused) return { action: "observe", reason: "Proactive OpenMerit checks are paused." };
   if (state.activeIntent) return { action: "observe", reason: "Harness work is already active." };
   if (state.automation.pendingIntentKind) {
     return {
@@ -965,7 +1018,7 @@ function dueDecision(
     policy.checkPolicy.baselineAssessment,
     completed,
     state.automation.lastAssessmentTaskCount,
-    state.automation.lastAssessmentAt ?? state.updatedAt,
+    state.automation.lastAssessmentAt ?? state.automation.baselineStartedAt ?? state.lastResult?.completedAt ?? state.updatedAt,
     now,
   )) {
     return { action: "issue_intent", intentKind: "run_assessment", reason: "The user-confirmed baseline assessment cadence is due." };
@@ -1081,6 +1134,7 @@ export class OpenMeritCoordinator {
     }
 
     const targetId = activeTarget(config)?.id;
+    const confirmedProfile = config.taskProfiles.find((item) => item.id === config.activeTaskProfileId);
     if (kind !== "establish_evals" && !targetId) {
       throw new Error(`OpenMerit cannot issue ${kind} without a confirmed application LLM target.`);
     }
@@ -1089,7 +1143,13 @@ export class OpenMeritCoordinator {
       policy: config.policy,
       evaluationSpend: existing?.automation.evaluationSpend,
       targetId,
-      additionalConstraints: options.additionalConstraints,
+      additionalConstraints: {
+        ...options.additionalConstraints,
+        ...(confirmedProfile ? { taskProfile: confirmedProfile as unknown as JsonValue } : {}),
+        ...(kind === "discover_candidates"
+          ? { preliminaryModelLeads: (config.preliminaryModelLeads ?? []) as unknown as JsonValue }
+          : {}),
+      },
     });
     const now = new Date().toISOString();
     const state: OpenMeritProjectState = existing
@@ -1188,6 +1248,16 @@ export class OpenMeritCoordinator {
       signal: "scheduled_tick",
       reason: "Wake the harness so OpenMerit can evaluate the user-confirmed check policy.",
     });
+    if (!receipt.accepted) {
+      return {
+        plan: {
+          ...plan,
+          scheduling: "external_scheduler_required",
+          gaps: [...plan.gaps, `Harness wakeup provisioning failed: ${receipt.reason ?? "unknown reason"}`],
+        },
+        receipt,
+      };
+    }
     return { plan, receipt };
   }
 
@@ -1248,6 +1318,15 @@ export class OpenMeritCoordinator {
       ...(observability ? { observability } : {}),
       automation: {
         ...state.automation,
+        ...(result.status === "succeeded" && ["establish_evals", "instrument_observability"].includes(state.activeIntent.kind) &&
+          interpretation.nextStage === "collecting_baseline"
+          ? {
+              baselineStartedAt: now,
+              lastAssessmentAt: undefined,
+              lastAssessmentTaskCount: state.automation.observedCompletedTasks,
+              baselineMetricWindows: [],
+            }
+          : {}),
         ...(evaluationSpend !== undefined ? { evaluationSpend } : {}),
         ...(state.activeIntent.kind === "run_assessment"
           ? { lastAssessmentTaskCount: state.automation.observedCompletedTasks, lastAssessmentAt: now }
@@ -1349,8 +1428,45 @@ export class OpenMeritCoordinator {
     });
     return {
       state: result.state,
-      assessmentDue: result.decision.action === "issue_intent" && result.decision.intentKind === "run_assessment",
+      assessmentDue: result.state.automation.lastAssessmentAt === now,
     };
+  }
+
+  async assessBaseline(now = new Date().toISOString()): Promise<{
+    readonly state: OpenMeritProjectState;
+    readonly errors: readonly string[];
+    readonly decision: OrchestrationDecision;
+  }> {
+    const state = await this.store.readState();
+    if (!state || state.cycle.stage !== "collecting_baseline" || state.activeIntent) {
+      throw new Error("Baseline assessment requires an idle collecting-baseline cycle.");
+    }
+    const config = await this.store.readConfig();
+    const profile = config?.taskProfiles.find((item) => item.id === config.activeTaskProfileId);
+    const errors = baselineAssessmentErrors(state, profile, state.automation.baselineMetricWindows ?? []);
+    const sufficient = errors.length === 0;
+    const decision: OrchestrationDecision = sufficient
+      ? { action: "issue_intent", intentKind: "discover_candidates", reason: "Required baseline metric windows meet the confirmed sample thresholds; discover candidates." }
+      : { action: "observe", reason: `Baseline evidence remains insufficient: ${errors.join("; ")}.` };
+    const nextState: OpenMeritProjectState = {
+      ...state,
+      cycle: { ...state.cycle, baselineEvidenceSufficient: sufficient, stage: sufficient ? "baseline_ready" : "collecting_baseline" },
+      automation: {
+        ...state.automation,
+        lastAssessmentAt: now,
+        lastAssessmentTaskCount: state.automation.observedCompletedTasks,
+        pendingIntentKind: decision.action === "issue_intent" ? decision.intentKind : undefined,
+        pendingIntentReason: decision.action === "issue_intent" ? decision.reason : undefined,
+      },
+      updatedAt: now,
+    };
+    await this.store.writeState(nextState);
+    await this.store.appendEvent({
+      schemaVersion: 1, id: `event-${crypto.randomUUID()}`, type: "baseline_sufficiency_checked",
+      occurredAt: now, cycleId: state.cycle.id,
+      data: { sufficient, errors, metricIds: (state.automation.baselineMetricWindows ?? []).map((metric) => metric.metricId), source: "manual" },
+    });
+    return { state: nextState, errors, decision };
   }
 
   async recordAutomationSignal(signal: AutomationSignal): Promise<AutomationSignalResult> {
@@ -1380,11 +1496,24 @@ export class OpenMeritCoordinator {
 
     const completedTasks = state.automation.observedCompletedTasks +
       (signal.type === "product_task_completed" ? 1 : 0);
+    const baselineMetricWindows = state.cycle.stage === "collecting_baseline"
+      ? updatedBaselineWindows(state.automation.baselineMetricWindows, signal)
+      : state.automation.baselineMetricWindows ?? [];
     const decisionState: OpenMeritProjectState = {
       ...state,
-      automation: { ...state.automation, observedCompletedTasks: completedTasks },
+      automation: { ...state.automation, observedCompletedTasks: completedTasks, baselineMetricWindows },
     };
-    const decision = dueDecision(decisionState, signal, signal.occurredAt);
+    const due = dueDecision(decisionState, signal, signal.occurredAt);
+    const baselineCheckDue = due.action === "issue_intent" && due.intentKind === "run_assessment";
+    const config = baselineCheckDue ? await this.store.readConfig() : undefined;
+    const profile = config?.taskProfiles.find((item) => item.id === config.activeTaskProfileId);
+    const baselineErrors = baselineCheckDue ? baselineAssessmentErrors(state, profile, baselineMetricWindows) : [];
+    const baselineReady = baselineCheckDue && baselineErrors.length === 0;
+    const decision: OrchestrationDecision = baselineCheckDue
+      ? baselineReady
+        ? { action: "issue_intent", intentKind: "discover_candidates", reason: "Required baseline metric windows meet the confirmed sample thresholds; discover candidates." }
+        : { action: "observe", reason: `Baseline evidence remains insufficient: ${baselineErrors.join("; ")}.` }
+      : due;
     const latestMetricValues = { ...(state.automation.latestMetricValues ?? {}) };
     if (signal.type === "product_task_completed" && signal.telemetry) {
       latestMetricValues.input_token_consumption = signal.telemetry.inputTokens;
@@ -1399,10 +1528,19 @@ export class OpenMeritCoordinator {
     }
     const nextState: OpenMeritProjectState = {
       ...decisionState,
+      cycle: baselineCheckDue
+        ? { ...decisionState.cycle, baselineEvidenceSufficient: baselineReady, stage: baselineReady ? "baseline_ready" : "collecting_baseline" }
+        : decisionState.cycle,
       automation: {
         ...decisionState.automation,
         processedSignalIds: [...processed, signal.id].slice(-MAX_PROCESSED_SIGNAL_IDS),
         latestMetricValues,
+        ...(baselineCheckDue ? {
+          lastAssessmentAt: signal.occurredAt,
+          lastAssessmentTaskCount: completedTasks,
+          pendingIntentKind: decision.action === "issue_intent" ? decision.intentKind : undefined,
+          pendingIntentReason: decision.action === "issue_intent" ? decision.reason : undefined,
+        } : {}),
         ...(signal.type === "model_catalog_changed" ? {
           modelCatalogFingerprint: signal.fingerprint,
           ...(state.automation.modelCatalogFingerprint && state.automation.modelCatalogFingerprint !== signal.fingerprint
@@ -1431,6 +1569,21 @@ export class OpenMeritCoordinator {
         ...auditSignalData(signal),
       },
     });
+    if (baselineCheckDue) {
+      await this.store.appendEvent({
+        schemaVersion: 1,
+        id: `event-${crypto.randomUUID()}`,
+        type: "baseline_sufficiency_checked",
+        occurredAt: signal.occurredAt,
+        cycleId: state.cycle.id,
+        data: {
+          sufficient: baselineReady,
+          errors: baselineErrors,
+          metricIds: baselineMetricWindows.map((metric) => metric.metricId),
+          sourceSignalId: signal.id,
+        },
+      });
+    }
     if (decision.action === "issue_intent") {
       await this.store.appendEvent({
         schemaVersion: 1,

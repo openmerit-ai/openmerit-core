@@ -36,8 +36,8 @@ test("observes the baseline until sufficiency is reported", () => {
   assert.deepEqual(nextImprovementAction(state({ stage: "collecting_baseline" })).action, "observe");
   assert.deepEqual(nextImprovementAction(state({ stage: "collecting_baseline", baselineEvidenceSufficient: true })), {
     action: "issue_intent",
-    intentKind: "run_assessment",
-    reason: "Baseline evidence has reached the approved sufficiency threshold.",
+    intentKind: "discover_candidates",
+    reason: "The baseline is ready for candidate discovery.",
   });
 });
 

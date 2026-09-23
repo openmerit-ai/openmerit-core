@@ -35,7 +35,7 @@ These commands help locate readiness and evidence. They do not independently cer
 
 Use the product normally while its evaluations collect representative measurements. OpenMerit also records completed-work checkpoints; these checkpoints alone do not establish product quality.
 
-When enough evidence is available, the workflow asks the harness to assess the baseline, discover candidates, run challenger trials, and calculate a comparison. You can request an assessment explicitly:
+In the unreleased source checkout, OpenMerit core checks baseline sufficiency from reported metric windows; when they pass, it asks Pi to discover candidates, run challenger trials, and calculate a comparison. Published `openmerit@0.1.5` still asks Pi to assess the baseline. You can request a check explicitly:
 
 ```text
 /openmerit assess

@@ -4,6 +4,8 @@ The public FAQ lives in `site/index.html`. Its answers describe the published pa
 
 Last factual review: 2026-09-23, against npm `openmerit@0.1.5`, the Pi 0.87 adapter, and the current source. The FAQ contains 13 questions. The earlier audit reproduced a task-triggered assessment while `/openmerit status` reported paused and confirmed the same dispatch path in the published package.
 
+Source review on 2026-09-24: unreleased setup-time model leads, deterministic core baseline-window checks, macOS Pi LaunchAgent provisioning, and durable pause are under development. The `faq-background`, `faq-evidence`, and `faq-pause` answers intentionally continue to describe published npm `openmerit@0.1.5`; update them only when a release containing those changes is published and verified.
+
 ## Sources to review when behavior changes
 
 | FAQ anchor | Claims to verify | Primary sources |

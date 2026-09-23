@@ -93,6 +93,7 @@ function state(stage: OpenMeritProjectState["cycle"]["stage"]): OpenMeritProject
       stage,
       verifiedSwapCount: 0,
       baselineEvidenceSufficient: stage !== "collecting_baseline",
+      observabilityReady: true,
       policy,
     },
     automation: {
@@ -129,12 +130,55 @@ test("completed-task cadence is durable and duplicate signals are idempotent", a
     assert.equal(duplicate.state.automation.observedCompletedTasks, 1);
 
     const due = await coordinator.recordAutomationSignal(taskSignal("task-2", "2026-09-22T00:02:00.000Z"));
-    assert.equal(due.decision.action, "issue_intent");
-    if (due.decision.action === "issue_intent") assert.equal(due.decision.intentKind, "run_assessment");
-    assert.equal((await store.readState())?.automation.pendingIntentKind, "run_assessment");
-
-    await coordinator.issue("run_assessment");
+    assert.equal(due.decision.action, "observe");
+    assert.match(due.decision.reason, /task_success: missing/);
+    assert.equal((await store.readState())?.automation.lastAssessmentTaskCount, 2);
     assert.equal((await store.readState())?.automation.pendingIntentKind, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("baseline sufficiency uses stored aggregate windows, evidence, and required samples", async () => {
+  const { root, store, coordinator } = await fixture("collecting_baseline");
+  const metric = (sampleCount: number, evidence: boolean) => ({
+    targetId: target.id, metricId: "task_success" as const, state: "measured" as const,
+    scope: "sample_window" as const, direction: "maximize" as const, method: "evaluator" as const,
+    value: 0.8, unit: "ratio", sampleCount,
+    evidence: evidence ? [{ id: "graded-run", source: "evaluation_artifact" as const, uri: "file:///graded-run.json" }] : [],
+  });
+  try {
+    const config = await store.readConfig();
+    assert.ok(config);
+    await store.writeConfig({
+      ...config,
+      taskProfiles: [{ ...profile, objectives: [{ ...profile.objectives[0]!, minimumSamples: 2 }] }],
+    });
+    await coordinator.recordAutomationSignal({
+      protocolVersion: "0.1", id: "window-empty-evidence", type: "metric_window_available",
+      occurredAt: "2026-09-22T00:01:00.000Z", targetId: target.id, metrics: [metric(2, false)],
+    });
+    await coordinator.recordAutomationSignal(taskSignal("task-1", "2026-09-22T00:02:00.000Z"));
+    const insufficient = await coordinator.recordAutomationSignal(taskSignal("task-2", "2026-09-22T00:03:00.000Z"));
+    assert.equal(insufficient.decision.action, "observe");
+    assert.match(insufficient.decision.reason, /no evidence reference/);
+    assert.equal(insufficient.state.cycle.stage, "collecting_baseline");
+
+    await coordinator.recordAutomationSignal({
+      protocolVersion: "0.1", id: "window-graded", type: "metric_window_available",
+      occurredAt: "2026-09-22T00:04:00.000Z", targetId: target.id, metrics: [metric(1, true)],
+    });
+    const immature = await coordinator.assessBaseline("2026-09-22T00:05:00.000Z");
+    assert.match(immature.errors.join("; "), /task_success: 1\/2 samples/);
+    await coordinator.recordAutomationSignal({
+      protocolVersion: "0.1", id: "window-mature", type: "metric_window_available",
+      occurredAt: "2026-09-22T00:06:00.000Z", targetId: target.id, metrics: [metric(2, true)],
+    });
+    const ready = await coordinator.assessBaseline("2026-09-22T00:07:00.000Z");
+    assert.deepEqual(ready.errors, []);
+    assert.equal(ready.state.cycle.stage, "baseline_ready");
+    assert.equal(ready.state.automation.pendingIntentKind, "discover_candidates");
+    assert.equal((await store.readState())?.automation.baselineMetricWindows?.[0]?.sampleCount, 2);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -226,6 +270,63 @@ test("automation planning reports native wakeups and honest fallbacks", async ()
     });
     assert.equal(unauthorizedInfrastructure.scheduling, "external_scheduler_required");
     assert.ok(unauthorizedInfrastructure.gaps.some((gap) => gap.includes("not authorized")));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a rejected wakeup receipt is reported as a real scheduling gap", async () => {
+  const adapter: HarnessAdapter = {
+    descriptor,
+    async dispatch(intent) { return { accepted: true, harnessJobId: intent.id }; },
+    async scheduleWakeup() { return { accepted: false, reason: "Pi authentication unavailable" }; },
+  };
+  const { root, coordinator } = await fixture("collecting_baseline", adapter);
+  try {
+    const result = await coordinator.reconcileAutomation("2026-09-22T00:30:00.000Z");
+    assert.equal(result.plan.scheduling, "external_scheduler_required");
+    assert.match(result.plan.gaps.join("; "), /Pi authentication unavailable/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a durable pause records signals but blocks due work and wakeups", async () => {
+  const { root, store, coordinator } = await fixture("collecting_baseline");
+  try {
+    const current = await store.readState();
+    assert.ok(current);
+    await store.writeState({ ...current, automation: { ...current.automation, paused: true } });
+    const plan = await coordinator.reconcileAutomation("2026-09-22T01:00:00.000Z");
+    assert.equal(plan.plan.nextWakeupAt, undefined);
+    for (const index of [1, 2]) {
+      const result = await coordinator.recordAutomationSignal({
+        protocolVersion: "0.1", id: `paused-task-${index}`, type: "product_task_completed",
+        occurredAt: `2026-09-22T0${index}:00:00.000Z`, targetId: target.id, modelId: "app-model",
+      });
+      assert.equal(result.decision.action, "observe");
+    }
+    assert.equal((await store.readState())?.automation.observedCompletedTasks, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("baseline elapsed cadence stays anchored while unrelated signals arrive", async () => {
+  const { root, store, coordinator } = await fixture("collecting_baseline");
+  try {
+    const current = await store.readState();
+    assert.ok(current);
+    await store.writeState({ ...current, automation: { ...current.automation, baselineStartedAt: "2026-09-22T00:00:00.000Z" } });
+    await coordinator.recordAutomationSignal(taskSignal("early-task", "2026-09-22T00:30:00.000Z"));
+    const plan = buildAutomationPlan((await store.readState())!, descriptor);
+    assert.equal(plan.nextWakeupAt, "2026-09-22T01:00:00.000Z");
+    const due = await coordinator.recordAutomationSignal({
+      protocolVersion: "0.1", id: "baseline-tick", type: "scheduled_tick",
+      occurredAt: "2026-09-22T01:00:00.000Z", targetId: target.id,
+    });
+    assert.equal(due.decision.action, "observe");
+    assert.equal(due.state.automation.lastAssessmentAt, "2026-09-22T01:00:00.000Z");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
