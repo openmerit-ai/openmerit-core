@@ -34,7 +34,7 @@ It also owns the versioned runtime schema registry for all intent results. Harne
 
 ### `openmerit/core`
 
-Contains deterministic behavior: choosing the next lifecycle intent, persisting state, checking harness-produced frontiers against the normative definition, and enforcing confirmation or rollback policy. The verifier rejects invalid harness results; it is not a model-selection engine.
+Contains deterministic behavior: choosing the next lifecycle intent according to confirmation and rollback policy, persisting state, and checking harness-produced frontiers against the normative definition. The verifier rejects invalid harness results; it is not a model-selection engine.
 
 `OpenMeritCoordinator` is the reusable adapter boundary. It constructs canonical intents, negotiates capabilities, records lifecycle progress and observations, validates results, and advances durable state. `OpenMeritStore` makes persistence replaceable; `ProjectStore` is the bundled filesystem backend.
 

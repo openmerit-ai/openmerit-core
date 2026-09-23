@@ -16,7 +16,7 @@ Snapshot writes are atomic. Files use owner-only permissions where POSIX modes a
 
 Start with `/openmerit status`, which reports profile, metric and evaluation readiness, active work, next assessment, lifecycle, and pause state. `/openmerit doctor` confirms adapter loading without printing secrets.
 
-`/openmerit pause` stops proactive nudges for the current process; explicit commands still work. `/openmerit resume` re-enables them.
+In version 0.1.5, `/openmerit pause` suppresses lifecycle follow-up nudges but does not gate the automation-signal dispatch path. Task, measurement, and session-start signals can still issue due work while status says paused. The setting is process-local, resets on restart, and does not cancel active work. Explicit commands still work. `/openmerit resume` clears the pause flag. Do not rely on this version's pause command to stop all OpenMerit work.
 
 `/openmerit logs` prints the exact local paths to the audit log, exporter failures, evidence manifests, and current state. During an end-to-end run, `tail -f .openmerit/events.jsonl | jq .` shows signals and decisions as they occur.
 

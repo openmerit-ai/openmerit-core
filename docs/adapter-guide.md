@@ -18,7 +18,7 @@ import {
   ProjectStore,
   type HarnessAdapter,
 } from "openmerit/core";
-import { PROTOCOL_VERSION } from "openmerit/protocol";
+import { PROTOCOL_VERSION, OPENMERIT_SCHEMA_DIALECT } from "openmerit/protocol";
 
 const adapter: HarnessAdapter = {
   descriptor: {
@@ -39,6 +39,17 @@ const adapter: HarnessAdapter = {
       "rollback",
     ],
     executionModes: ["interactive"],
+    structuredOutput: {
+      schemaDialect: OPENMERIT_SCHEMA_DIALECT,
+      presentation: "adapter_validation",
+      enforcement: "adapter",
+    },
+    automation: {
+      supportedSignals: ["product_task_completed", "metric_window_available", "scheduled_tick", "model_catalog_changed", "verification_window_completed"],
+      persistentScheduling: false,
+      backgroundExecution: false,
+      wakeupProvisioning: "none",
+    },
   },
   async dispatch(intent) {
     await myHarness.enqueue(intent);
@@ -105,7 +116,7 @@ Each intent kind has a typed output in `IntentOutputMap`. Return an `IntentResul
 await coordinator.acceptResult(result);
 ```
 
-The coordinator validates the active intent, version, evidence, intent-specific output, frontier conformance, mutation authorization, and lifecycle transition. Adapters must not duplicate this logic.
+The coordinator validates the active intent, protocol version, evidence references, and intent-specific output, including applicable frontier and candidate-identity checks, before updating lifecycle state. Adapters must not duplicate this logic. The harness remains responsible for performing only the authorized work; result validation does not sandbox its tools or authenticate external evidence.
 
 ### Present the canonical result schema
 
@@ -117,7 +128,7 @@ Declare the behavior in `HarnessDescriptor.structuredOutput`:
 - `presentation` states whether the adapter uses a dynamic tool, a static union, or adapter validation;
 - `enforcement` states whether validation occurs at the provider and harness, harness only, or adapter only.
 
-Schema validation catches malformed structure. The coordinator still owns semantic checks such as authorized candidate identity, evidence sufficiency, lifecycle consistency, and Pareto conformance.
+Schema validation catches malformed structure. The coordinator still owns semantic checks such as authorized candidate identity, metric readiness for frontier comparisons, lifecycle consistency, and Pareto conformance.
 
 ## Reporting normal work and catalogue changes
 

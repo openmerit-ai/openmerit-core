@@ -11,9 +11,9 @@
 7. **Calculating frontier** — Pi calculates and explains the Pareto frontier.
 8. **Frontier ready** — OpenMerit verifies the returned snapshot.
 9. **Approval or swap** — policy decides whether confirmation is required.
-10. **Verifying swap** — every applied change receives post-swap evaluation.
+10. **Verifying swap** — the harness is asked to evaluate the applied change.
 11. **Monitoring** — production evidence continues to accumulate.
-12. **Rollback** — a covered regression restores the prior verified route.
+12. **Rollback** — the harness is asked to restore the prior configuration when regression policy permits it.
 
 ## Event-driven nudges
 
@@ -23,8 +23,8 @@ Every signal has an idempotency key. A due intent is persisted before dispatch s
 
 ## Evaluation budget
 
-Candidate work can cost money but is bounded by the confirmed policy. The contract can constrain currency, spend, candidate count, runs per candidate, and expiration. Pi decides how to work within those limits and must return evidence.
+Candidate work can cost money. The contract passes the confirmed currency, spend, candidate count, runs per candidate, and expiration constraints to Pi. The harness is responsible for staying within those limits; OpenMerit does not independently meter spending or cut off provider requests. See [budgets and permissions](budgets.md).
 
 ## Supervised graduation
 
-Early proposals wait for `/openmerit approve`. A policy may enable bounded automatic swaps only after the configured number of verified swaps. Post-swap verification remains mandatory.
+Proposals wait for `/openmerit approve` unless automatic swaps are enabled and the configured number of verified swaps has been reached. That number can be zero. Post-swap evaluation remains part of the workflow and depends on the harness reporting its results. A reported post-swap regression can trigger a rollback request when policy permits it.

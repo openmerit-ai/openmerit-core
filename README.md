@@ -29,7 +29,7 @@ It distinguishes:
 - A normative, uncertainty-aware Pareto definition owned by OpenMerit.
 - Harness-calculated frontier results independently checked by OpenMerit's conformance verifier.
 - Versioned result schemas for all ten intents, reusable across harness adapters and exposed dynamically by Pi.
-- Supervised graduation: early swaps require approval, every swap requires verification, and regressions can trigger rollback.
+- Configurable swap approval, post-swap verification requests, and policy-based rollback requests. Automatic swaps can begin immediately if explicitly enabled with a zero verified-swap threshold.
 - Project-local snapshots, redacted append-only audit events, evidence manifests, and optional best-effort event exporters under `.openmerit/`.
 - Model-catalog change detection that can nudge the harness to reassess a mature baseline.
 - User-confirmed task-count, elapsed-time, regression, catalogue-change, and post-swap check policies.
@@ -43,7 +43,7 @@ It distinguishes:
 | Tracks lifecycle, policy, budget, and evidence references | Builds evals and observability |
 | Determines which approved nudge is due | Collects and calculates metrics |
 | Verifies returned structure and frontier conformance | Discovers candidates and calculates the frontier |
-| Enforces confirmation and rollback policy | Applies and verifies an authorized model change |
+| Selects intents according to confirmation and rollback policy | Applies and verifies an authorized model change |
 
 Jev System One, when configured, belongs to the coding harness. Pi may use it aggressively for bounded ranking, triage, and fast judgment. OpenMerit contains no Jev client and accepts no Jev credential.
 
@@ -74,12 +74,18 @@ harness-driven lifecycle; it does not migrate the earlier home-directory state.
 - `/openmerit logs` — show the canonical audit, exporter-error, evidence, and state paths.
 - `/openmerit frontier` — ask the harness to calculate a frontier now; OpenMerit verifies it.
 - `/openmerit approve` — approve a verified proposal during supervised graduation.
-- `/openmerit pause` and `/openmerit resume` — control proactive nudges.
+- `/openmerit pause` and `/openmerit resume` — control some proactive nudges in the current Pi session; task-triggered checks can still run in 0.1.5. See [pause limitations](docs/commands.md#pause-and-resume).
 - `/openmerit doctor` — show sanitized adapter diagnostics.
 
 ## Documentation
 
+Read the searchable [OpenMerit documentation](https://openmerit.site/docs/). The Markdown sources below also ship with the package.
+
 - [Getting started](docs/getting-started.md)
+- [Your first trial](docs/first-trial.md)
+- [Command reference](docs/commands.md)
+- [Budgets and permissions](docs/budgets.md)
+- [Troubleshooting](docs/troubleshooting.md)
 - [Architecture and responsibility boundary](docs/architecture.md)
 - [Metrics and evidence](docs/metrics-and-evidence.md)
 - [Improvement lifecycle](docs/lifecycle.md)
@@ -91,6 +97,10 @@ harness-driven lifecycle; it does not migrate the earlier home-directory state.
 - [Security](docs/security.md)
 - [Testing](docs/testing.md)
 - [Current limitations and roadmap](docs/roadmap.md)
+
+### Maintaining documentation
+
+Edit the Markdown in `docs/` alongside product changes. The public documentation is generated from these same files; there is no separate article copy to update in `site/`. Run `npm run check:docs` to rebuild and validate it. The normal Cloudflare deployment rebuilds and publishes the documentation. See [the documentation workflow](docs/site-documentation.md) for adding guides and previewing changes.
 
 ## Repository layout
 

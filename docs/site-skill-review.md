@@ -1,5 +1,17 @@
 # Focused design and motion review
 
+## Current illustration implementation
+
+On 2026-09-23 the user rejected the displacement effect because it visibly stretched a single illustration. It has been removed and replaced with [separately generated pose sequences](site-illustration-sequences.md). The earlier filter reviews below are historical and do not describe the current player.
+
+| Before | After | Why |
+| --- | --- | --- |
+| SVG displacement stretched the same pixels to simulate gestures. | Canvas playback selects complete, separately illustrated poses from a sprite atlas. | Hands, tools, and bodies change their actual pose and silhouette. |
+| A rendering loop ran at approximately 30Hz. | Timers wake only at illustrated frame boundaries, with holds at each end. | Deliberate stop-motion pacing with fewer redraws. |
+| Pausing reset the illustration to the source image. | Pausing freezes the current pose; reduced motion uses a matching static poster. | Pause behaves as expected while preserving the static accessibility fallback. |
+
+## Earlier implementation
+
 Reviewed 2026-09-22 using three selected skills from [emilkowalski/skills](https://github.com/emilkowalski/skills), installed with Codex's skill-installer:
 
 - [emil-design-eng](https://github.com/emilkowalski/skills/blob/main/skills/emil-design-eng/SKILL.md): interaction decisions, restraint, and press feedback.

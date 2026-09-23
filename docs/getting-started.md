@@ -52,4 +52,6 @@ When Pi reports a sufficient baseline, OpenMerit issues the next approved nudges
 
 ## Approve an early swap
 
-During supervised graduation, a verified model proposal pauses for `/openmerit approve`. That authorizes Pi to apply only the proposed change. OpenMerit then requires post-swap verification; the approved policy determines rollback behavior.
+With automatic swaps disabled, a model proposal that passes frontier validation waits for `/openmerit approve`. That authorizes Pi to apply only the proposed change. OpenMerit then requires post-swap evaluation; the approved policy determines rollback behavior. Automatic swaps may bypass per-proposal approval when enabled and the configured verified-swap threshold is reached, including when that threshold is zero.
+
+Continue with [your first supervised trial](first-trial.md) for a practical walkthrough.

@@ -10,7 +10,7 @@ OpenMerit is ready for an initial supervised product trial with Pi. Its protocol
 - Jev must be configured and invoked by the harness; OpenMerit intentionally provides no client.
 - Generic Pi task checkpoints do not replace product telemetry. Setup must create the infrastructure required by the profile.
 - Pi reports active-session signals and typed metric windows but cannot provision persistent background wakeups; persistent policies require an external scheduler until a capable adapter is added.
-- Pause state is process-local rather than persisted.
+- In 0.1.5, pause does not block automatic dispatch from task, measurement, or session-start signals. It also resets on process restart and does not cancel active work.
 - External evidence authenticity depends on the referenced system.
 - The core and protocol workspaces are private; the single `openmerit` npm
   package exposes their public entry points.
