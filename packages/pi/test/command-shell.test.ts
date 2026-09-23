@@ -350,11 +350,14 @@ test("Pi turns completed work into durable signals and dispatches a due assessme
 test("Pi automatically requests instrumentation when setup reports a required metric gap", async () => {
   const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-instrumentation-"));
   const notifications: Notification[] = [];
-  const { handler, completionTool, entries } = loadCommand();
+  const { handler, completionTool, completionTools, entries, userMessages, eventHandlers } = loadCommand();
   const ctx = sessionContext(projectRoot, notifications);
+  const input = eventHandlers.get("input");
+  assert.ok(input);
 
   try {
     await handler("setup", { ...commandContext(notifications), cwd: projectRoot } as ExtensionCommandContext);
+    await input({ type: "input", text: "Build the product after setup", source: "interactive" }, ctx);
     const intent = (entries[0]?.data as { intent: { id: string } }).intent;
     const outputs = confirmedSetupOutputs();
     outputs.observability = {
@@ -375,6 +378,19 @@ test("Pi automatically requests instrumentation when setup reports a required me
       .filter((entry) => entry.customType === "openmerit.intent")
       .map((entry) => (entry.data as { intent: { kind: string } }).intent.kind);
     assert.deepEqual(intentKinds, ["establish_evals", "instrument_observability"]);
+    assert.equal(userMessages.length, 0);
+    const instrumentationEntry = [...entries].reverse().find((entry) => entry.customType === "openmerit.intent");
+    const instrumentationIntent = (instrumentationEntry?.data as { intent: { id: string } }).intent;
+    const instrumentationTool = completionTools.at(-1);
+    assert.ok(instrumentationTool);
+    await instrumentationTool.execute("tool-instrument", {
+      intentId: instrumentationIntent.id,
+      status: "succeeded",
+      summary: "Instrumentation completed",
+      evidence: [{ id: "trace", source: "evaluation_artifact", uri: "file:///trace.json" }],
+      outputs: { coveredMetricIds: ["task_success"], missingMetricIds: [] },
+    }, undefined, undefined, ctx as unknown as ExtensionCommandContext);
+    assert.equal(userMessages[0]?.content, "Build the product after setup");
     const events = readFileSync(join(projectRoot, ".openmerit", "events.jsonl"), "utf8");
     assert.match(events, /"type":"observability_readiness_checked"/);
     assert.match(events, /"missingMetricIds":\["task_success"\]/);

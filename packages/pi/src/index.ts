@@ -341,7 +341,6 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
         state.activeIntent = null;
         state.lifecycleStage = stage;
         registerCompletionTool();
-        releaseQueuedUserInput();
         state.nextAssessment = accepted.automation.plan.nextWakeupAt ??
           (accepted.automation.plan.scheduling === "external_scheduler_required" ? "external scheduler required" : "signal driven");
         if (accepted.automation.plan.gaps.length) {
@@ -363,6 +362,10 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
             ctx.ui.notify(`openmerit: ${decision.reason}`, "warning");
           }
         }
+        // A successful result can immediately issue another OpenMerit intent
+        // (for example, setup -> instrumentation). Release product work only
+        // after that chain has no active follow-up.
+        releaseQueuedUserInput();
 
         return {
           content: [{ type: "text", text: `Recorded OpenMerit intent ${input.intentId} as ${input.status}.` }],
