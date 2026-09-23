@@ -1,6 +1,7 @@
 export const PROTOCOL_VERSION = "0.1" as const;
 
 export {
+  ApplicationLlmTargetSchema,
   CandidateAssessmentSchema,
   CandidateDescriptorSchema,
   completionToolSchemaFor,
@@ -151,6 +152,7 @@ export interface OpenMeritIntent {
   readonly protocolVersion: typeof PROTOCOL_VERSION;
   readonly id: string;
   readonly kind: IntentKind;
+  readonly targetId?: string;
   readonly taskProfileId: string;
   readonly authorizationPolicyId: string;
   readonly requestedOutcome: string;
@@ -299,6 +301,7 @@ export const METRIC_CATALOG: readonly MetricDefinition[] = [
 ] as const;
 
 export interface MetricRecord {
+  readonly targetId: string;
   readonly metricId: MetricId;
   readonly state: MetricState;
   readonly scope: MetricScope;
@@ -331,11 +334,23 @@ export interface MetricObjective {
   };
 }
 
+/** A user-confirmed application LLM route. The coding harness itself is never an evaluation target. */
+export interface ApplicationLlmTarget {
+  readonly id: string;
+  readonly kind: "application_llm_call";
+  readonly name: string;
+  readonly applicationId: string;
+  readonly callSites: readonly string[];
+  readonly routeKey: string;
+  readonly confirmedAt: string;
+}
+
 export interface TaskProfile {
   readonly id: string;
   readonly revision: number;
   readonly name: string;
   readonly goal: string;
+  readonly applicationTarget: ApplicationLlmTarget;
   readonly objectives: readonly MetricObjective[];
   readonly createdAt: string;
   readonly confirmedAt?: string;
@@ -344,6 +359,7 @@ export interface TaskProfile {
 export type ObservabilityReadinessStatus = "ready" | "incomplete";
 
 export interface ObservabilityCoverage {
+  readonly targetId: string;
   readonly status: ObservabilityReadinessStatus;
   readonly requiredMetricIds: readonly MetricId[];
   readonly coveredMetricIds: readonly MetricId[];
@@ -353,6 +369,7 @@ export interface ObservabilityCoverage {
 
 export interface CandidateAssessment {
   readonly id: string;
+  readonly targetId: string;
   readonly taskProfileId: string;
   readonly taskProfileRevision: number;
   readonly candidateId: string;
@@ -376,6 +393,7 @@ export interface DominanceComparison {
 
 export interface FrontierSnapshot {
   readonly id: string;
+  readonly targetId: string;
   readonly taskProfileId: string;
   readonly taskProfileRevision: number;
   readonly productRevision: string;
@@ -390,6 +408,7 @@ export interface FrontierSnapshot {
 }
 
 export interface FrontierRecommendation {
+  readonly targetId: string;
   readonly frontierSnapshotId: string;
   readonly selectedCandidateId: string;
   readonly currentCandidateId: string;
@@ -398,6 +417,7 @@ export interface FrontierRecommendation {
 }
 
 export interface CandidateDescriptor {
+  readonly targetId: string;
   readonly candidateId: string;
   readonly modelId: string;
   readonly modelVersion?: string;
@@ -411,38 +431,47 @@ export interface IntentOutputMap {
     readonly observability: ObservabilityCoverage;
   };
   readonly instrument_observability: {
+    readonly targetId: string;
     readonly coveredMetricIds: readonly MetricId[];
     readonly missingMetricIds: readonly MetricId[];
   };
   readonly run_assessment: {
+    readonly targetId: string;
     readonly baselineEvidenceSufficient: boolean;
-    readonly metrics?: readonly MetricRecord[];
+    readonly metrics: readonly MetricRecord[];
   };
   readonly discover_candidates: {
+    readonly targetId: string;
     readonly candidates: readonly CandidateDescriptor[];
   };
   readonly run_challenger_trials: {
+    readonly targetId: string;
     readonly assessments: readonly CandidateAssessment[];
   };
   readonly calculate_frontier: {
+    readonly targetId: string;
     readonly assessments: readonly CandidateAssessment[];
     readonly frontierSnapshot: FrontierSnapshot;
     readonly recommendation?: FrontierRecommendation;
   };
   readonly investigate_regression: {
+    readonly targetId: string;
     readonly regressionDetected: boolean;
     readonly affectedMetricIds: readonly MetricId[];
     readonly likelyCause?: string;
   };
   readonly apply_model_swap: {
+    readonly targetId: string;
     readonly appliedCandidateId: string;
     readonly previousCandidateId?: string;
   };
   readonly verify_model_swap: {
+    readonly targetId: string;
     readonly verified: boolean;
     readonly regressionDetected: boolean;
   };
   readonly rollback_model_swap: {
+    readonly targetId: string;
     readonly restoredCandidateId: string;
   };
 }
@@ -487,6 +516,7 @@ export type ImprovementStage =
 
 export interface ImprovementCycleState {
   readonly id: string;
+  readonly targetId?: string;
   readonly taskProfileId?: string;
   readonly stage: ImprovementStage;
   readonly activeCandidateId?: string;
@@ -557,15 +587,16 @@ interface AutomationSignalBase {
   readonly protocolVersion: typeof PROTOCOL_VERSION;
   readonly id: string;
   readonly occurredAt: string;
+  readonly targetId: string;
   readonly evidence?: readonly EvidenceReference[];
 }
 
 export type AutomationSignal =
   | (AutomationSignalBase & {
       readonly type: "product_task_completed";
+      /** The model used by the application target, never the coding harness model. */
       readonly modelId: string;
-      readonly contextTokens?: number | null;
-      /** Provider telemetry captured directly by the harness for this task. */
+      /** Provider telemetry captured from the application LLM call. */
       readonly telemetry?: {
         readonly startedAt: string;
         readonly completedAt: string;
@@ -576,7 +607,6 @@ export type AutomationSignal =
         readonly cacheWriteTokens: number;
         readonly cost: number;
         readonly currency: "USD";
-        readonly assistantTurns: number;
       };
     })
   | (AutomationSignalBase & {

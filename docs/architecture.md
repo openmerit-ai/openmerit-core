@@ -2,7 +2,7 @@
 
 ## Design principle
 
-OpenMerit is an orchestrator, not an intelligence layer.
+OpenMerit is an orchestrator, not an intelligence layer. The product application LLM call is the system under test; the coding harness is the evaluator and execution environment.
 
 ```text
 User or lifecycle event
@@ -30,7 +30,7 @@ An automatic OpenMerit action means automatic issuance of an approved intent. Op
 
 Defines the JSON-safe boundary: durable intents, evidence references, metrics, task profiles, candidate assessments, frontier snapshots, budgets, policies, state, and audit events.
 
-It also owns the versioned runtime schema registry for all intent results. Harness adapters consume these schemas rather than defining their own result shapes, report their structured-output capabilities, and may present the active schema using harness-native tools or adapter validation.
+It also owns the versioned runtime schema registry for all intent results. Harness adapters consume these schemas rather than defining their own result shapes, report their structured-output capabilities, and may present the active schema using harness-native tools or adapter validation. A confirmed application LLM target is carried through profiles, metrics, candidates, frontier results, automation signals, and swaps; the harness model is not a valid substitute target.
 
 ### `openmerit/core`
 
@@ -38,7 +38,7 @@ Contains deterministic behavior: choosing the next lifecycle intent according to
 
 `OpenMeritCoordinator` is the reusable adapter boundary. It constructs canonical intents, negotiates capabilities, records lifecycle progress and observations, validates results, and advances durable state. `OpenMeritStore` makes persistence replaceable; `ProjectStore` is the bundled filesystem backend.
 
-The coordinator also accepts idempotent automation signals and evaluates the user-confirmed `AutomationCheckPolicy`. `buildAutomationPlan` tells an adapter which signals and wakeups are required and reports unsupported persistent scheduling honestly. OpenMerit never installs a scheduler or creates a paid cloud worker itself.
+The coordinator also accepts idempotent application-target automation signals and evaluates the user-confirmed `AutomationCheckPolicy`. `buildAutomationPlan` tells an adapter which signals and wakeups are required and reports unsupported persistent scheduling honestly. OpenMerit never installs a scheduler or creates a paid cloud worker itself.
 
 ### `openmerit/pi`
 

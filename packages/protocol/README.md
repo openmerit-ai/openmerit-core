@@ -11,6 +11,8 @@ The first contract slice models an intent as a durable job:
 
 The metric contract includes the complete initial catalogue, normalized metric records, task objectives, candidate assessments, dominance comparisons, and versioned frontier snapshots. Missing evidence is represented explicitly and never coerced to zero.
 
+Every profile confirms the application LLM call under evaluation. Metrics, candidates, assessments, frontier artifacts, swaps, and automation signals carry that target identity; a harness's own model usage is orchestration data rather than application evidence.
+
 `HarnessDescriptor` and `HarnessCapability` support capability negotiation. `IntentOutputMap` defines the required output for every intent kind so adapters do not rely on Pi-specific undocumented JSON.
 
 ## Runtime result schemas

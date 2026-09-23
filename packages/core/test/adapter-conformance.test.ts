@@ -48,6 +48,27 @@ const descriptor: HarnessDescriptor = {
   },
 };
 
+const applicationTarget = {
+  id: "app-target-1",
+  kind: "application_llm_call" as const,
+  name: "Application response route",
+  applicationId: "portable-app",
+  callSites: ["src/respond.ts#respond"],
+  routeKey: "RESPONSE_MODEL",
+  confirmedAt: "2026-09-22T00:00:30.000Z",
+};
+
+const portableProfile = {
+  id: "profile-portable",
+  revision: 1,
+  name: "Portable task",
+  goal: "Prove a second harness can integrate",
+  applicationTarget,
+  objectives: [{ metricId: "task_success" as const, required: true, minimumSamples: 3, tolerance: 0 }],
+  createdAt: "2026-09-22T00:00:00.000Z",
+  confirmedAt: "2026-09-22T00:00:30.000Z",
+};
+
 test("a non-Pi harness can receive canonical OpenMerit intents", async () => {
   const received: string[] = [];
   const adapter: HarnessAdapter = {
@@ -60,6 +81,7 @@ test("a non-Pi harness can receive canonical OpenMerit intents", async () => {
   const intent = createOpenMeritIntent("discover_candidates", {
     id: "intent-portable",
     requestedAt: "2026-09-22T00:00:00.000Z",
+    targetId: applicationTarget.id,
   });
   const receipt = await dispatchToHarness(adapter, intent);
 
@@ -124,13 +146,7 @@ test("shared core validates and interprets setup results from any harness", () =
     evidence: [{ id: "eval", source: "evaluation_artifact", uri: "artifact://fake/eval" }],
     outputs: {
       taskProfile: {
-        id: "profile-portable",
-        revision: 1,
-        name: "Portable task",
-        goal: "Prove a second harness can integrate",
-        objectives: [{ metricId: "task_success", required: true, minimumSamples: 3, tolerance: 0 }],
-        createdAt: "2026-09-22T00:00:00.000Z",
-        confirmedAt: "2026-09-22T00:00:30.000Z",
+        ...portableProfile,
       },
       policy: {
         mode: "supervised_graduation",
@@ -149,6 +165,7 @@ test("shared core validates and interprets setup results from any harness", () =
         },
       },
       observability: {
+        targetId: applicationTarget.id,
         status: "ready",
         requiredMetricIds: ["task_success"],
         coveredMetricIds: ["task_success"],
@@ -197,6 +214,7 @@ test("observability readiness cannot hide a required metric gap", () => {
     revision: 1,
     name: "Observed task",
     goal: "Verify required metrics",
+    applicationTarget,
     objectives: [
       { metricId: "task_success" as const, required: true, minimumSamples: 3, tolerance: 0 },
       { metricId: "total_task_cost" as const, required: true, minimumSamples: 3, tolerance: 0 },
@@ -205,6 +223,7 @@ test("observability readiness cannot hide a required metric gap", () => {
     confirmedAt: "2026-09-22T00:00:01.000Z",
   };
   const errors = validateObservabilityCoverage(profile, {
+    targetId: applicationTarget.id,
     status: "ready",
     requiredMetricIds: ["task_success", "total_task_cost"],
     coveredMetricIds: ["task_success"],
@@ -227,6 +246,23 @@ test("the coordinator runs a durable job through a non-Pi harness", async () => 
   };
   try {
     const store = new ProjectStore(root);
+    await store.initialize({
+      schemaVersion: 1,
+      activeTaskProfileId: portableProfile.id,
+      taskProfiles: [portableProfile],
+    }, {
+      schemaVersion: 1,
+      cycle: {
+        id: "cycle-portable",
+        targetId: applicationTarget.id,
+        taskProfileId: portableProfile.id,
+        stage: "baseline_ready",
+        verifiedSwapCount: 0,
+        baselineEvidenceSufficient: true,
+      },
+      automation: { setupNudgeShown: true, observedCompletedTasks: 3, lastAssessmentTaskCount: 3 },
+      updatedAt: "2026-09-22T00:01:00.000Z",
+    });
     const coordinator = new OpenMeritCoordinator(store, adapter);
     const issued = await coordinator.issue("discover_candidates");
     const result: IntentResult<"discover_candidates"> = {
@@ -237,7 +273,8 @@ test("the coordinator runs a durable job through a non-Pi harness", async () => 
       summary: "Candidates discovered by fake harness",
       evidence: [{ id: "catalog", source: "external_source", uri: "fake://catalog" }],
       outputs: {
-        candidates: [{ candidateId: "candidate-a", modelId: "vendor/model-a", reasons: ["task fit"] }],
+        targetId: applicationTarget.id,
+        candidates: [{ targetId: applicationTarget.id, candidateId: "candidate-a", modelId: "vendor/model-a", reasons: ["task fit"] }],
       },
     };
     const accepted = await coordinator.acceptResult(result);

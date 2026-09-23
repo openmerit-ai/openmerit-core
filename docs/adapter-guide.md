@@ -65,6 +65,8 @@ const coordinator = new OpenMeritCoordinator(
 
 `ProjectStore` is the included local-filesystem backend. A remote or hosted integration can implement the `OpenMeritStore` interface instead.
 
+The confirmed task profile identifies the application LLM call under evaluation. Every metric, assessment, candidate, frontier artifact, and automation signal must carry that target ID; the harness's own model usage is orchestration data and must not be reported as product evidence. Application-provider cost, token, and latency telemetry belongs on the application signal or metric record.
+
 ## External telemetry export
 
 OpenMerit always writes its canonical, redacted audit stream locally. A host integration may pass `eventExporters` to `ProjectStore` to mirror those same safe events to OpenTelemetry, Langfuse, LangSmith, or another observability backend:
@@ -143,6 +145,8 @@ if (observation.assessmentDue) {
   await coordinator.issue("run_assessment");
 }
 ```
+
+`recordTaskObservation` resolves the confirmed application target from project state. New adapters should prefer `recordAutomationSignal` so the task signal can carry the explicit `targetId`, durable evidence, and application-provider telemetry.
 
 When the harness's available model catalogue changes, compute a stable fingerprint and call `recordModelCatalogFingerprint`. The returned `reassessmentDue` flag tells the adapter whether the lifecycle justifies candidate discovery.
 

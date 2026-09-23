@@ -55,17 +55,19 @@ export interface IntentFactoryOptions {
   readonly id?: string;
   readonly requestedAt?: string;
   readonly evaluationSpend?: number;
+  readonly targetId?: string;
+  readonly additionalConstraints?: Readonly<Record<string, JsonValue>>;
 }
 
 const outcomes: Readonly<Record<IntentKind, string>> = {
-  establish_evals: "Infer the current task profile and metric objectives, ask the user to confirm requirements, evaluation budget, check cadence, thresholds, scheduling mode, and automation permissions, establish applicable evals and observability, verify them, and return the confirmed taskProfile and policy. Do not change model configuration.",
+  establish_evals: "Identify the real application LLM call or shared application route under evaluation, ask the user to confirm that target and the task objectives, evaluation budget, check cadence, thresholds, scheduling mode, and automation permissions, establish applicable evals and observability, verify them, and return the confirmed taskProfile and policy. The coding harness model is not an evaluation target. Do not change model configuration.",
   instrument_observability: "Establish and verify the missing observability required by the confirmed task profile.",
   run_assessment: "Assess whether current baseline evidence satisfies every required metric and sample threshold. Return measured, missing, and insufficient-evidence metrics explicitly.",
   discover_candidates: "Discover credible model candidates for the confirmed task profile using current capability, reputation, price, availability, and benchmark signals without exceeding the approved evaluation budget.",
   run_challenger_trials: "Run comparable controlled challenger trials under the approved budget and return candidate assessments with durable evidence.",
   calculate_frontier: "Calculate the Pareto frontier using the OpenMerit conformance definition, explain every candidate classification, and return a FrontierSnapshot with calculation evidence.",
   investigate_regression: "Investigate the observed regression and return its likely cause, affected metrics, and supporting evidence.",
-  apply_model_swap: "Apply the approved model change in the harness or product target and return proof of the resulting configuration. Do not broaden the authorized change.",
+  apply_model_swap: "Apply the approved model change only to the bound application LLM target and return proof of the resulting application configuration. Never change the coding harness model and do not broaden the authorized change.",
   verify_model_swap: "Verify the applied model against the approved post-swap evaluation window and report any material regression.",
   rollback_model_swap: "Restore the previously verified model configuration and validate the rollback.",
 };
@@ -75,11 +77,14 @@ export function createOpenMeritIntent(kind: IntentKind, options: IntentFactoryOp
     protocolVersion: PROTOCOL_VERSION,
     id: options.id ?? `intent-${crypto.randomUUID()}`,
     kind,
+    ...(options.targetId ? { targetId: options.targetId } : {}),
     taskProfileId: options.taskProfileId ?? "current-project",
     authorizationPolicyId: options.authorizationPolicyId ?? "observe-and-evaluate-only",
     requestedOutcome: outcomes[kind],
     constraints: {
       modelMutationAllowed: kind === "apply_model_swap" || kind === "rollback_model_swap",
+      harnessModelMutationAllowed: false,
+      mutationTarget: "application_llm_call",
       requireVerifiedArtifacts: true,
       distinguishSingleRunFromMultiRunClaims: true,
       ...(options.policy ? { evaluationBudget: options.policy.evaluationBudget as unknown as JsonValue } : {}),
@@ -91,10 +96,12 @@ export function createOpenMeritIntent(kind: IntentKind, options: IntentFactoryOp
         ),
       } : {}),
       ...(options.policy ? { checkPolicy: options.policy.checkPolicy as unknown as JsonValue } : {}),
+      ...(options.additionalConstraints ?? {}),
     },
     requiredEvidence: kind === "establish_evals"
       ? [
           { id: "task-profile", description: "The inferred task profile and the user constraints it represents." },
+          { id: "application-target", description: "The user-confirmed application LLM call or shared route, including stable call-site and route identifiers." },
           { id: "evaluation-artifacts", description: "Runnable evaluation artifacts and verification results." },
           { id: "observability-coverage", description: "The observable metrics and explicit coverage gaps." },
         ]
@@ -231,6 +238,15 @@ function validateSetupOutput(output: unknown): string[] {
       }
     }
   }
+  if (!isRecord(profile.applicationTarget) || profile.applicationTarget.kind !== "application_llm_call" ||
+      typeof profile.applicationTarget.id !== "string" || !profile.applicationTarget.id.trim() ||
+      typeof profile.applicationTarget.applicationId !== "string" || !profile.applicationTarget.applicationId.trim() ||
+      typeof profile.applicationTarget.routeKey !== "string" || !profile.applicationTarget.routeKey.trim() ||
+      typeof profile.applicationTarget.confirmedAt !== "string" ||
+      !Array.isArray(profile.applicationTarget.callSites) || profile.applicationTarget.callSites.length === 0 ||
+      profile.applicationTarget.callSites.some((callSite) => typeof callSite !== "string" || !callSite.trim())) {
+    errors.push("taskProfile requires a user-confirmed application LLM target with stable call sites and route key");
+  }
   const budget = policy.evaluationBudget;
   if (policy.mode !== "supervised_graduation" || !isRecord(budget) ||
       typeof budget.currency !== "string" || typeof budget.maximumSpend !== "number" ||
@@ -261,6 +277,9 @@ export function validateObservabilityCoverage(
   const covered = new Set(coverage.coveredMetricIds);
   const missing = new Set(coverage.missingMetricIds);
   const errors: string[] = [];
+  if (coverage.targetId !== profile.applicationTarget.id) {
+    errors.push("observability target does not match the confirmed application LLM target");
+  }
   for (const metricId of required) {
     if (!declaredRequired.has(metricId)) errors.push(`observability omits required metric ${metricId}`);
     if (!covered.has(metricId) && !missing.has(metricId)) errors.push(`observability does not classify required metric ${metricId}`);
@@ -275,6 +294,18 @@ export function validateObservabilityCoverage(
     errors.push(`required observability remains missing: ${requiredMissing.join(", ")}`);
   }
   return errors;
+}
+
+function activeTarget(config: OpenMeritProjectConfig): TaskProfile["applicationTarget"] | undefined {
+  return config.taskProfiles.find((item) => item.id === config.activeTaskProfileId)?.applicationTarget;
+}
+
+function validateTargetId(actual: unknown, expected: string, subject: string): string[] {
+  return actual === expected ? [] : [`${subject} target does not match the confirmed application LLM target`];
+}
+
+function validateMetricTargets(metrics: readonly MetricRecord[], targetId: string, subject: string): string[] {
+  return metrics.flatMap((metric) => validateTargetId(metric.targetId, targetId, `${subject} metric ${metric.metricId}`));
 }
 
 export function interpretIntentResult(
@@ -297,6 +328,11 @@ export function interpretIntentResult(
 
   const output: unknown = result.outputs;
   errors.push(...validateIntentOutputSchema(intent.kind, output).map((error) => `result outputs ${error}`));
+  const target = activeTarget(config);
+  if (intent.kind !== "establish_evals") {
+    if (!target) errors.push("no confirmed application LLM target exists");
+    else errors.push(...validateTargetId(intent.targetId, target.id, "intent"));
+  }
   if (errors.length) {
     return { valid: false, errors, nextStage: completedStage(intent.kind, false) };
   }
@@ -318,6 +354,7 @@ export function interpretIntentResult(
           policy,
         };
         cyclePatch = {
+          targetId: taskProfile.applicationTarget.id,
           taskProfileId: taskProfile.id,
           policy,
           observabilityReady: observability.status === "ready",
@@ -333,7 +370,9 @@ export function interpretIntentResult(
         const profile = config.taskProfiles.find((item) => item.id === config.activeTaskProfileId);
         if (!profile) errors.push("no confirmed task profile exists for observability verification");
         else {
+          errors.push(...validateTargetId(output.targetId, profile.applicationTarget.id, "observability result"));
           const coverage: ObservabilityCoverage = {
+            targetId: profile.applicationTarget.id,
             status: output.missingMetricIds.length ? "incomplete" : "ready",
             requiredMetricIds: profile.objectives.filter((item) => item.required).map((item) => item.metricId),
             coveredMetricIds: output.coveredMetricIds as MetricId[],
@@ -346,21 +385,52 @@ export function interpretIntentResult(
       }
       break;
     case "run_assessment":
-      if (!isRecord(output) || typeof output.baselineEvidenceSufficient !== "boolean") {
+      if (!isRecord(output) || typeof output.baselineEvidenceSufficient !== "boolean" || !Array.isArray(output.metrics)) {
         errors.push("assessment result requires baselineEvidenceSufficient");
       } else {
+        if (target) {
+          errors.push(...validateTargetId(output.targetId, target.id, "baseline assessment"));
+          errors.push(...validateMetricTargets(output.metrics as unknown as MetricRecord[], target.id, "baseline assessment"));
+          const profile = config.taskProfiles.find((item) => item.id === config.activeTaskProfileId);
+          if (output.baselineEvidenceSufficient && profile) {
+            errors.push(...readinessErrors(profile, {
+              id: "baseline",
+              targetId: target.id,
+              taskProfileId: profile.id,
+              taskProfileRevision: profile.revision,
+              candidateId: "baseline",
+              modelId: "baseline",
+              productRevision: "baseline",
+              harnessId: "baseline",
+              startedAt: result.completedAt,
+              completedAt: result.completedAt,
+              metrics: output.metrics as unknown as MetricRecord[],
+            }));
+          }
+        }
         cyclePatch = { baselineEvidenceSufficient: output.baselineEvidenceSufficient };
         if (!output.baselineEvidenceSufficient) nextStage = "collecting_baseline";
       }
       break;
     case "discover_candidates":
       if (!isRecord(output) || !Array.isArray(output.candidates)) errors.push("candidate discovery requires candidates");
+      else if (target) {
+        errors.push(...validateTargetId(output.targetId, target.id, "candidate discovery"));
+        for (const candidate of output.candidates) {
+          if (isRecord(candidate)) errors.push(...validateTargetId(candidate.targetId, target.id, `candidate ${String(candidate.candidateId)}`));
+        }
+      }
       break;
     case "run_challenger_trials":
       if (!isRecord(output) || !Array.isArray(output.assessments)) {
         errors.push("challenger trials require assessments");
       } else {
+        if (target) errors.push(...validateTargetId(output.targetId, target.id, "challenger trials"));
         for (const assessment of output.assessments as unknown as CandidateAssessment[]) {
+          if (target) {
+            errors.push(...validateTargetId(assessment.targetId, target.id, `challenger assessment ${assessment.id}`));
+            errors.push(...validateMetricTargets(assessment.metrics, target.id, `challenger assessment ${assessment.id}`));
+          }
           const costs = assessment.metrics.filter((metric) =>
             metric.metricId === "total_task_cost" && metric.state === "measured" &&
             metric.value !== undefined && metric.value >= 0 && metric.evidence.length > 0
@@ -381,6 +451,7 @@ export function interpretIntentResult(
         errors.push("no confirmed task profile exists for frontier verification");
         break;
       }
+      errors.push(...validateTargetId(output.targetId, profile.applicationTarget.id, "frontier result"));
       const verification = verifyFrontierSnapshot(
         profile,
         output.assessments as unknown as CandidateAssessment[],
@@ -394,6 +465,8 @@ export function interpretIntentResult(
           output.recommendation.selectedCandidateId as string,
         )) {
           errors.push("recommended candidate is not on the verified frontier");
+        } else if (output.recommendation.targetId !== profile.applicationTarget.id) {
+          errors.push("frontier recommendation target does not match the confirmed application LLM target");
         } else {
           cyclePatch = { proposedCandidateId: output.recommendation.selectedCandidateId as string };
         }
@@ -403,11 +476,13 @@ export function interpretIntentResult(
     case "investigate_regression":
       if (!isRecord(output) || typeof output.regressionDetected !== "boolean" || !Array.isArray(output.affectedMetricIds)) {
         errors.push("regression result requires regressionDetected and affectedMetricIds");
-      }
+      } else if (target) errors.push(...validateTargetId(output.targetId, target.id, "regression investigation"));
       break;
     case "apply_model_swap":
       if (!isRecord(output) || typeof output.appliedCandidateId !== "string") {
         errors.push("swap result requires appliedCandidateId");
+      } else if (target && output.targetId !== target.id) {
+        errors.push("swap target does not match the confirmed application LLM target");
       } else if (cycle.proposedCandidateId && output.appliedCandidateId !== cycle.proposedCandidateId) {
         errors.push("applied candidate does not match the authorized proposal");
       } else {
@@ -420,6 +495,8 @@ export function interpretIntentResult(
     case "verify_model_swap":
       if (!isRecord(output) || typeof output.verified !== "boolean" || typeof output.regressionDetected !== "boolean") {
         errors.push("swap verification requires verified and regressionDetected");
+      } else if (target && output.targetId !== target.id) {
+        errors.push("swap verification target does not match the confirmed application LLM target");
       } else if (!output.verified || output.regressionDetected) {
         nextStage = "verification_failed";
       } else {
@@ -429,6 +506,8 @@ export function interpretIntentResult(
     case "rollback_model_swap":
       if (!isRecord(output) || typeof output.restoredCandidateId !== "string") {
         errors.push("rollback result requires restoredCandidateId");
+      } else if (target && output.targetId !== target.id) {
+        errors.push("rollback target does not match the confirmed application LLM target");
       } else if (cycle.previousCandidateId && output.restoredCandidateId !== cycle.previousCandidateId) {
         errors.push("rollback did not restore the previous verified candidate");
       } else {
@@ -515,6 +594,9 @@ function bounds(metric: MetricRecord): Bounds | undefined {
 
 function readinessErrors(profile: TaskProfile, assessment: CandidateAssessment): string[] {
   const errors: string[] = [];
+  if (assessment.targetId !== profile.applicationTarget.id) {
+    errors.push("assessment target does not match the confirmed application LLM target");
+  }
   for (const objective of profile.objectives) {
     if (!objective.required) continue;
     const metric = metricFor(assessment, objective);
@@ -625,6 +707,9 @@ export function verifyFrontierSnapshot(
   if (snapshot.taskProfileId !== profile.id || snapshot.taskProfileRevision !== profile.revision) {
     errors.push("snapshot task profile does not match");
   }
+  if (snapshot.targetId !== profile.applicationTarget.id) {
+    errors.push("snapshot target does not match the confirmed application LLM target");
+  }
   if (snapshot.calculationEvidence.length === 0) errors.push("calculation evidence is required");
   if (!sameMembers(snapshot.assessmentIds, assessments.map((assessment) => assessment.id))) {
     errors.push("snapshot assessment IDs do not match the supplied assessments");
@@ -634,6 +719,11 @@ export function verifyFrontierSnapshot(
   const expectedIneligible: string[] = [];
   const expectedUnresolved = new Set<string>();
   for (const assessment of assessments) {
+    if (assessment.targetId !== profile.applicationTarget.id) {
+      errors.push(`${assessment.candidateId}: application target mismatch`);
+      continue;
+    }
+    errors.push(...validateMetricTargets(assessment.metrics, profile.applicationTarget.id, assessment.candidateId));
     if (assessment.taskProfileId !== profile.id || assessment.taskProfileRevision !== profile.revision) {
       errors.push(`${assessment.candidateId}: task profile revision mismatch`);
       continue;
@@ -700,6 +790,10 @@ export interface IssuedIntent {
   readonly intent: OpenMeritIntent;
   readonly state: OpenMeritProjectState;
   readonly receipt: HarnessDispatchReceipt;
+}
+
+export interface CoordinatorIssueOptions {
+  readonly additionalConstraints?: Readonly<Record<string, JsonValue>>;
 }
 
 export interface AcceptedIntentResult {
@@ -925,15 +1019,17 @@ function auditSignalData(signal: AutomationSignal): Readonly<Record<string, Json
   switch (signal.type) {
     case "product_task_completed":
       return {
+        targetId: signal.targetId,
         modelId: signal.modelId,
-        contextTokens: signal.contextTokens ?? null,
         ...(signal.telemetry ? { telemetry: signal.telemetry as unknown as JsonValue } : {}),
         evidenceIds: (signal.evidence ?? []).map((item) => item.id),
       };
     case "metric_window_available":
     case "verification_window_completed":
       return {
+        targetId: signal.targetId,
         metrics: (signal.metrics ?? []).map((metric) => ({
+          targetId: metric.targetId,
           metricId: metric.metricId,
           state: metric.state,
           scope: metric.scope,
@@ -948,9 +1044,9 @@ function auditSignalData(signal: AutomationSignal): Readonly<Record<string, Json
         })),
       };
     case "model_catalog_changed":
-      return { fingerprint: signal.fingerprint };
+      return { targetId: signal.targetId, fingerprint: signal.fingerprint };
     case "scheduled_tick":
-      return {};
+      return { targetId: signal.targetId };
   }
 }
 
@@ -967,7 +1063,7 @@ export class OpenMeritCoordinator {
     this.adapter = adapter;
   }
 
-  async issue(kind: IntentKind): Promise<IssuedIntent> {
+  async issue(kind: IntentKind, options: CoordinatorIssueOptions = {}): Promise<IssuedIntent> {
     const missing = missingHarnessCapabilities(this.adapter.descriptor, kind);
     if (missing.length) throw new Error(`Harness lacks required capabilities: ${missing.join(", ")}`);
 
@@ -984,10 +1080,16 @@ export class OpenMeritCoordinator {
       }
     }
 
+    const targetId = activeTarget(config)?.id;
+    if (kind !== "establish_evals" && !targetId) {
+      throw new Error(`OpenMerit cannot issue ${kind} without a confirmed application LLM target.`);
+    }
     const intent = createOpenMeritIntent(kind, {
       taskProfileId: config.activeTaskProfileId,
       policy: config.policy,
       evaluationSpend: existing?.automation.evaluationSpend,
+      targetId,
+      additionalConstraints: options.additionalConstraints,
     });
     const now = new Date().toISOString();
     const state: OpenMeritProjectState = existing
@@ -1125,6 +1227,7 @@ export class OpenMeritCoordinator {
         const output = result.outputs as IntentOutputMap["instrument_observability"];
         const requiredMetricIds = profile.objectives.filter((item) => item.required).map((item) => item.metricId);
         observability = {
+          targetId: profile.applicationTarget.id,
           status: "ready",
           requiredMetricIds,
           coveredMetricIds: output.coveredMetricIds,
@@ -1197,6 +1300,7 @@ export class OpenMeritCoordinator {
         cycleId: nextState.cycle.id,
         intentId: result.intentId,
         data: {
+          targetId: observability.targetId,
           status: observability.status,
           requiredMetricIds: observability.requiredMetricIds,
           coveredMetricIds: observability.coveredMetricIds,
@@ -1233,15 +1337,15 @@ export class OpenMeritCoordinator {
     details: Readonly<Record<string, JsonValue>> = {},
   ): Promise<ObservationResult> {
     const now = new Date().toISOString();
+    const state = await this.store.readState();
+    if (!state?.cycle.targetId) throw new Error("A confirmed application LLM target is required.");
     const result = await this.recordAutomationSignal({
       protocolVersion: PROTOCOL_VERSION,
       id: `legacy-task-${crypto.randomUUID()}`,
       type: "product_task_completed",
       occurredAt: now,
+      targetId: state.cycle.targetId,
       modelId: typeof details.modelId === "string" ? details.modelId : "unknown",
-      contextTokens: typeof details.contextTokens === "number" || details.contextTokens === null
-        ? details.contextTokens
-        : undefined,
     });
     return {
       state: result.state,
@@ -1254,6 +1358,13 @@ export class OpenMeritCoordinator {
     if (!state) throw new Error("OpenMerit project is not initialized.");
     if (signal.protocolVersion !== PROTOCOL_VERSION) throw new Error("Automation signal protocol version does not match.");
     if (!signal.id.trim()) throw new Error("Automation signal ID is required.");
+    if (!state.cycle.targetId || signal.targetId !== state.cycle.targetId) {
+      throw new Error("Automation signal target does not match the confirmed application LLM target.");
+    }
+    if (signal.type === "metric_window_available" || signal.type === "verification_window_completed") {
+      const mismatched = (signal.metrics ?? []).find((metric) => metric.targetId !== state.cycle.targetId);
+      if (mismatched) throw new Error(`Metric ${mismatched.metricId} target does not match the confirmed application LLM target.`);
+    }
     const processed = state.automation.processedSignalIds ?? [];
     if (processed.includes(signal.id)) {
       await this.store.appendEvent({
@@ -1336,6 +1447,7 @@ export class OpenMeritCoordinator {
   async recordModelCatalogFingerprint(fingerprint: string): Promise<CatalogChangeResult> {
     const state = await this.store.readState();
     if (!state) throw new Error("OpenMerit project is not initialized.");
+    if (!state.cycle.targetId) throw new Error("A confirmed application LLM target is required.");
     const previousFingerprint = state.automation.modelCatalogFingerprint;
     const changed = previousFingerprint !== undefined && previousFingerprint !== fingerprint;
     if (previousFingerprint === fingerprint) {
@@ -1347,6 +1459,7 @@ export class OpenMeritCoordinator {
       id: `legacy-catalog-${crypto.randomUUID()}`,
       type: "model_catalog_changed",
       occurredAt: now,
+      targetId: state.cycle.targetId,
       fingerprint,
     });
     return {

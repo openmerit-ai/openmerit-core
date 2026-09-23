@@ -24,7 +24,7 @@ In version 0.1.5, `/openmerit pause` suppresses lifecycle follow-up nudges but d
 
 OpenMerit records initialization, intent requests and completions, automation signals and duplicates, due checks, task checkpoints, catalogue changes, frontier validation, confirmation boundaries, and lifecycle advancement.
 
-Automation-signal records include safe measurement summaries: model ID and token context for completed tasks; or metric ID, state, scope, direction, method, value, unit, sample count, interval/window, and evidence IDs for metric windows. Intent completions record their kind, status, next stage, harness, summary, and evidence IDs/sources. Secret-shaped keys and common API-key patterns are redacted before local persistence or export.
+Automation-signal records include safe application measurement summaries: application model ID and application-reported token/cost/latency fields for completed tasks; or metric ID, state, scope, direction, method, value, unit, sample count, interval/window, and evidence IDs for metric windows. Pi's own model usage is not recorded as product-task evidence. Intent completions record their kind, status, next stage, harness, summary, and evidence IDs/sources. Secret-shaped keys and common API-key patterns are redacted before local persistence or export.
 
 The local JSONL file is the canonical source of truth. `ProjectStore` can also receive optional event exporters for OpenTelemetry or vendor-specific adapters. Export is best effort: a failed exporter is written to `audit-export-errors.jsonl` and does not interrupt lifecycle state or canonical logging.
 

@@ -15,6 +15,15 @@ const profile: TaskProfile = {
   revision: 1,
   name: "Task",
   goal: "Maximize quality while controlling cost and latency.",
+  applicationTarget: {
+    id: "app-target-1",
+    kind: "application_llm_call",
+    name: "Application generation route",
+    applicationId: "test-app",
+    callSites: ["src/generate.ts#generate"],
+    routeKey: "GENERATION_MODEL",
+    confirmedAt: "2026-09-22T00:01:00.000Z",
+  },
   createdAt: "2026-09-22T00:00:00.000Z",
   confirmedAt: "2026-09-22T00:01:00.000Z",
   objectives: [
@@ -26,6 +35,7 @@ const profile: TaskProfile = {
 
 function metric(id: MetricId, value: number): MetricRecord {
   return {
+    targetId: profile.applicationTarget.id,
     metricId: id,
     state: "measured",
     scope: "sample_window",
@@ -41,6 +51,7 @@ function metric(id: MetricId, value: number): MetricRecord {
 function assessment(candidateId: string, quality: number, cost: number, latency: number): CandidateAssessment {
   return {
     id: `assessment-${candidateId}`,
+    targetId: profile.applicationTarget.id,
     taskProfileId: profile.id,
     taskProfileRevision: profile.revision,
     candidateId,
@@ -79,6 +90,7 @@ function validSnapshot(): FrontierSnapshot {
     }));
   return {
     id: "frontier-1",
+    targetId: profile.applicationTarget.id,
     taskProfileId: profile.id,
     taskProfileRevision: profile.revision,
     productRevision: "git:abc",
@@ -117,4 +129,13 @@ test("rejects an otherwise correct result without calculation evidence", () => {
   });
   assert.equal(result.valid, false);
   assert.ok(result.errors.includes("calculation evidence is required"));
+});
+
+test("rejects evidence bound to a different application target", () => {
+  const result = verifyFrontierSnapshot(profile, assessments, {
+    ...validSnapshot(),
+    targetId: "pi-harness-model",
+  });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.includes("snapshot target does not match the confirmed application LLM target"));
 });

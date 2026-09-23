@@ -17,13 +17,13 @@ Use `/openmerit doctor` to confirm that the adapter and intent executor are avai
 
 Use `/openmerit logs` to locate the project-local audit stream, exporter failures, evidence manifests, and state while testing an end-to-end run.
 
-On `session_start`, an interactive unconfigured project automatically receives one `establish_evals` intent. Durable active-intent state prevents the setup nudge from being reissued on every session. Non-interactive runs do not attempt a confirmation flow; `/openmerit setup` remains an explicit recovery command.
+On `session_start`, an interactive unconfigured project receives a bounded source preflight. The adapter automatically issues one `establish_evals` intent only when it detects an actual application LLM call pattern; otherwise it stays idle and reports that `/openmerit setup` is available for custom integrations. Durable active-intent state prevents the setup nudge from being reissued on every session. Non-interactive runs do not attempt a confirmation flow.
 
-For configured projects, session start reports the current model catalogue and a scheduled tick. Ordinary settled product work reports an idempotent completed-task signal. OpenMerit evaluates the confirmed policy before issuing work. Pi currently declares no persistent scheduling or background execution, so persistent policies require an external scheduler to start Pi; the adapter reports that gap explicitly.
+For configured projects with a confirmed application target, session start reports the available model catalogue and a scheduled tick. Application instrumentation reports idempotent completed-task and metric-window signals. OpenMerit evaluates the confirmed policy before issuing work. Pi currently declares no persistent scheduling or background execution, so persistent policies require an external scheduler to start Pi; the adapter reports that gap explicitly.
 
-The unreleased development adapter also records each ordinary task's provider-reported USD cost, token counts, assistant-turn count, and wall-clock latency with a reference to the Pi session trace. If automatic setup is active when interactive input arrives, the input is queued and released after setup completes instead of racing the setup turn.
+The adapter does not convert Pi's own provider usage into application metrics. Application-task signals must carry the application model, target ID, and durable evidence; application telemetry may include provider-reported USD cost, token counts, and wall-clock latency. If automatic setup is active when interactive input arrives, the input is queued and released after setup completes instead of racing the setup turn.
 
-Pi also exposes `openmerit_report_signal` for verified `metric_window_available` and `verification_window_completed` events. Evals or observability work performed by Pi can submit measured metric records through this typed ingress using stable signal IDs. This does not create a background scheduler; it gives the active harness a validated way to connect the infrastructure it built to OpenMerit's due-check engine.
+Pi also exposes `openmerit_report_signal` for verified `product_task_completed`, `metric_window_available`, and `verification_window_completed` events. Evals or observability work performed by Pi can submit measured application-target metric records through this typed ingress using stable signal IDs. This does not create a background scheduler; it gives the active harness a validated way to connect the infrastructure it built to OpenMerit's due-check engine.
 
 ## Intent delivery
 
@@ -37,7 +37,7 @@ The extension replaces the completion tool definition whenever an intent becomes
 
 ## Model changes
 
-The extension does not use Pi's model setter as a substitute for harness work. After policy authorization, it sends a bounded `apply_model_swap` intent. Pi performs the change and returns configuration proof.
+The extension never treats Pi's model as the application target. After policy authorization, it sends a bounded, target-bound `apply_model_swap` intent. Pi performs the application-route change and returns configuration proof; the target ID must match the confirmed application LLM target, and Pi's own model must remain unchanged.
 
 ## Jev System One
 

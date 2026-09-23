@@ -17,7 +17,7 @@
 
 ## Event-driven nudges
 
-OpenMerit remains quiet when no action is justified. On first interactive entry to an unconfigured product, it automatically nudges Pi to establish the user-confirmed profile, evals, observability, check policy, and automation permission. Later nudges become due when durable harness signals satisfy the configured task-count or elapsed-time cadence, a metric crosses a regression threshold, the model catalogue changes under an enabled policy, a post-swap window completes, an intent enables the next stage, rollback policy covers a regression, or the user invokes a command.
+OpenMerit remains quiet when no action is justified. On first interactive entry to an unconfigured project, the Pi adapter performs a bounded source preflight and automatically nudges Pi to establish the profile only when an application LLM call pattern is detected. A project without a detected target remains idle until `/openmerit setup` is invoked. Later nudges become due when durable application-target signals satisfy the configured task-count or elapsed-time cadence, a metric crosses a regression threshold, the model catalogue changes under an enabled policy, a post-swap window completes, an intent enables the next stage, rollback policy covers a regression, or the user invokes a command.
 
 Every signal has an idempotency key. A due intent is persisted before dispatch so duplicate webhooks, restarts, and retrying adapters do not double-count tasks or silently lose pending work.
 

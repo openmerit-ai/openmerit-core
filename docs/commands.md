@@ -17,7 +17,7 @@ Both show the task profile, metric readiness, evaluation status, active work, ne
 /openmerit setup
 ```
 
-Request setup explicitly when recovering or rerunning it. An unconfigured project normally starts setup automatically in an interactive Pi session. OpenMerit refuses another intent while work is active.
+Request setup explicitly when recovering, rerunning, or configuring a custom integration. An unconfigured project starts setup automatically in an interactive Pi session only when bounded source detection finds an application LLM call; otherwise it stays idle. OpenMerit refuses another intent while work is active.
 
 ## Cancel interrupted work
 

@@ -9,6 +9,7 @@ import {
 
 const evidence = [{ id: "evidence-1", source: "harness_trace", uri: "file:///trace.json" }];
 const metric = {
+  targetId: "app-target-1",
   metricId: "task_success",
   state: "measured",
   scope: "sample_window",
@@ -21,6 +22,7 @@ const metric = {
 };
 const assessment = {
   id: "assessment-a",
+  targetId: "app-target-1",
   taskProfileId: "profile-1",
   taskProfileRevision: 1,
   candidateId: "candidate-a",
@@ -39,6 +41,15 @@ const validOutputs: Readonly<Record<IntentKind, unknown>> = {
       revision: 1,
       name: "Representative task",
       goal: "Complete the representative task",
+      applicationTarget: {
+        id: "app-target-1",
+        kind: "application_llm_call",
+        name: "Support answer generation",
+        applicationId: "support-app",
+        callSites: ["src/answer.ts#generate"],
+        routeKey: "SUPPORT_MODEL",
+        confirmedAt: "2026-09-22T00:00:00.000Z",
+      },
       objectives: [{ metricId: "task_success", required: true, minimumSamples: 3, tolerance: 0 }],
       createdAt: "2026-09-22T00:00:00.000Z",
       confirmedAt: "2026-09-22T00:00:00.000Z",
@@ -60,6 +71,7 @@ const validOutputs: Readonly<Record<IntentKind, unknown>> = {
       },
     },
     observability: {
+      targetId: "app-target-1",
       status: "ready",
       requiredMetricIds: ["task_success"],
       coveredMetricIds: ["task_success"],
@@ -67,16 +79,19 @@ const validOutputs: Readonly<Record<IntentKind, unknown>> = {
       checkedAt: "2026-09-22T00:00:00.000Z",
     },
   },
-  instrument_observability: { coveredMetricIds: ["task_success"], missingMetricIds: [] },
-  run_assessment: { baselineEvidenceSufficient: true, metrics: [metric] },
+  instrument_observability: { targetId: "app-target-1", coveredMetricIds: ["task_success"], missingMetricIds: [] },
+  run_assessment: { targetId: "app-target-1", baselineEvidenceSufficient: true, metrics: [metric] },
   discover_candidates: {
-    candidates: [{ candidateId: "candidate-a", modelId: "vendor/model-a", reasons: ["Strong task fit"] }],
+    targetId: "app-target-1",
+    candidates: [{ targetId: "app-target-1", candidateId: "candidate-a", modelId: "vendor/model-a", reasons: ["Strong task fit"] }],
   },
-  run_challenger_trials: { assessments: [assessment] },
+  run_challenger_trials: { targetId: "app-target-1", assessments: [assessment] },
   calculate_frontier: {
+    targetId: "app-target-1",
     assessments: [assessment],
     frontierSnapshot: {
       id: "frontier-1",
+      targetId: "app-target-1",
       taskProfileId: "profile-1",
       taskProfileRevision: 1,
       productRevision: "revision-1",
@@ -90,10 +105,10 @@ const validOutputs: Readonly<Record<IntentKind, unknown>> = {
       calculationEvidence: evidence,
     },
   },
-  investigate_regression: { regressionDetected: true, affectedMetricIds: ["task_success"], likelyCause: "Provider change" },
-  apply_model_swap: { appliedCandidateId: "candidate-a", previousCandidateId: "candidate-old" },
-  verify_model_swap: { verified: true, regressionDetected: false },
-  rollback_model_swap: { restoredCandidateId: "candidate-old" },
+  investigate_regression: { targetId: "app-target-1", regressionDetected: true, affectedMetricIds: ["task_success"], likelyCause: "Provider change" },
+  apply_model_swap: { targetId: "app-target-1", appliedCandidateId: "candidate-a", previousCandidateId: "candidate-old" },
+  verify_model_swap: { targetId: "app-target-1", verified: true, regressionDetected: false },
+  rollback_model_swap: { targetId: "app-target-1", restoredCandidateId: "candidate-old" },
 };
 
 test("the schema registry covers every intent kind", () => {

@@ -4,7 +4,7 @@ Setup asks you to confirm the limits and permissions for evaluation work. OpenMe
 
 ## Evaluation costs
 
-OpenMerit is MIT-licensed, free to install, and has no OpenMerit subscription. Model-provider charges still apply to setup, assessments, challenger trials, and verification. Paid tools, telemetry, or infrastructure used by your harness may add costs. Pi records ordinary task cost separately as production evidence; it is not charged to the challenger-evaluation budget.
+OpenMerit is MIT-licensed, free to install, and has no OpenMerit subscription. Model-provider charges still apply to setup, assessments, challenger trials, and verification. Paid tools, telemetry, or infrastructure used by your harness may add costs. Application-provider cost for ordinary product tasks can be reported separately as production evidence; Pi's own orchestration usage is not application cost and is not charged to the challenger-evaluation budget.
 
 ## Budget fields
 

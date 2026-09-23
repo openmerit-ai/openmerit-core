@@ -59,7 +59,7 @@ pi install npm:openmerit
 pi list
 ```
 
-When Pi enters an unconfigured product with an interactive UI, OpenMerit automatically issues the setup nudge. Pi infers a task profile, asks the user to confirm requirements and an evaluation budget, establishes task-specific eval and observability artifacts, verifies them, and reports evidence to OpenMerit. `/openmerit setup` remains available as an explicit recovery or rerun command.
+When Pi enters an unconfigured project with an interactive UI, the adapter first looks for an actual application LLM call pattern. It automatically issues the setup nudge only when a target is detected; otherwise it stays idle until `/openmerit setup` is requested. Pi confirms the application target, infers a task profile, asks the user to confirm requirements and an evaluation budget, establishes task-specific eval and observability artifacts, verifies them, and reports evidence to OpenMerit. Pi's own model is never the application target.
 
 Run `/openmerit doctor` inside Pi to check the installation. OpenMerit keeps
 project evidence under `.openmerit/` in the product repository. Version 0.1.5

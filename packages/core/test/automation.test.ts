@@ -38,6 +38,27 @@ const policy: SupervisedGraduationPolicy = {
   },
 };
 
+const target = {
+  id: "app-target-1",
+  kind: "application_llm_call" as const,
+  name: "Application generation route",
+  applicationId: "automation-test-app",
+  callSites: ["src/generate.ts#generate"],
+  routeKey: "GENERATION_MODEL",
+  confirmedAt: "2026-09-22T00:00:00.000Z",
+};
+
+const profile = {
+  id: "profile-automation",
+  revision: 1,
+  name: "Automation task",
+  goal: "Evaluate the application generation route",
+  applicationTarget: target,
+  objectives: [{ metricId: "task_success" as const, required: true, minimumSamples: 1, tolerance: 0 }],
+  createdAt: "2026-09-22T00:00:00.000Z",
+  confirmedAt: "2026-09-22T00:00:00.000Z",
+};
+
 const descriptor: HarnessDescriptor = {
   id: "automation-test",
   name: "Automation test harness",
@@ -67,6 +88,8 @@ function state(stage: OpenMeritProjectState["cycle"]["stage"]): OpenMeritProject
     schemaVersion: 1,
     cycle: {
       id: "cycle-automation",
+      targetId: target.id,
+      taskProfileId: profile.id,
       stage,
       verifiedSwapCount: 0,
       baselineEvidenceSufficient: stage !== "collecting_baseline",
@@ -88,12 +111,12 @@ async function fixture(stage: OpenMeritProjectState["cycle"]["stage"], adapter: 
 }) {
   const root = await mkdtemp(join(tmpdir(), "openmerit-automation-"));
   const store = new ProjectStore(root);
-  await store.initialize({ schemaVersion: 1, taskProfiles: [], policy }, state(stage));
+  await store.initialize({ schemaVersion: 1, activeTaskProfileId: profile.id, taskProfiles: [profile], policy }, state(stage));
   return { root, store, coordinator: new OpenMeritCoordinator(store, adapter) };
 }
 
 function taskSignal(id: string, occurredAt: string): AutomationSignal {
-  return { protocolVersion: "0.1", id, type: "product_task_completed", occurredAt, modelId: "vendor/model" };
+  return { protocolVersion: "0.1", id, type: "product_task_completed", occurredAt, targetId: target.id, modelId: "vendor/model" };
 }
 
 test("completed-task cadence is durable and duplicate signals are idempotent", async () => {
@@ -122,12 +145,12 @@ test("catalogue changes and metric regressions produce the correct intents", asy
   try {
     const first = await catalogFixture.coordinator.recordAutomationSignal({
       protocolVersion: "0.1", id: "catalog-1", type: "model_catalog_changed",
-      occurredAt: "2026-09-22T00:01:00.000Z", fingerprint: "one",
+      occurredAt: "2026-09-22T00:01:00.000Z", targetId: target.id, fingerprint: "one",
     });
     assert.equal(first.decision.action, "observe");
     const changed = await catalogFixture.coordinator.recordAutomationSignal({
       protocolVersion: "0.1", id: "catalog-2", type: "model_catalog_changed",
-      occurredAt: "2026-09-22T00:02:00.000Z", fingerprint: "two",
+      occurredAt: "2026-09-22T00:02:00.000Z", targetId: target.id, fingerprint: "two",
     });
     assert.equal(changed.decision.action, "issue_intent");
     if (changed.decision.action === "issue_intent") assert.equal(changed.decision.intentKind, "discover_candidates");
@@ -137,6 +160,7 @@ test("catalogue changes and metric regressions produce the correct intents", asy
 
   const metricFixture = await fixture("monitoring");
   const metric = (value: number) => ({
+    targetId: target.id,
     metricId: "task_success" as const,
     state: "measured" as const,
     scope: "sample_window" as const,
@@ -150,11 +174,11 @@ test("catalogue changes and metric regressions produce the correct intents", asy
   try {
     await metricFixture.coordinator.recordAutomationSignal({
       protocolVersion: "0.1", id: "metrics-1", type: "metric_window_available",
-      occurredAt: "2026-09-22T00:01:00.000Z", metrics: [metric(1)],
+      occurredAt: "2026-09-22T00:01:00.000Z", targetId: target.id, metrics: [metric(1)],
     });
     const regressed = await metricFixture.coordinator.recordAutomationSignal({
       protocolVersion: "0.1", id: "metrics-2", type: "metric_window_available",
-      occurredAt: "2026-09-22T00:02:00.000Z", metrics: [metric(0.8)],
+      occurredAt: "2026-09-22T00:02:00.000Z", targetId: target.id, metrics: [metric(0.8)],
     });
     assert.equal(regressed.decision.action, "issue_intent");
     if (regressed.decision.action === "issue_intent") assert.equal(regressed.decision.intentKind, "investigate_regression");
@@ -215,6 +239,7 @@ test("post-swap verification waits for the configured window signal", async () =
       id: "verification-window-1",
       type: "verification_window_completed",
       occurredAt: "2026-09-22T00:10:00.000Z",
+      targetId: target.id,
     });
     assert.equal(due.decision.action, "issue_intent");
     if (due.decision.action === "issue_intent") assert.equal(due.decision.intentKind, "verify_model_swap");

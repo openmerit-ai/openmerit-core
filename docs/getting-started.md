@@ -36,15 +36,15 @@ Run `/openmerit doctor` inside Pi to confirm that the adapter and intent executo
 
 ## Establish a product profile
 
-Open the product repository in interactive Pi with the extension loaded. If the project has no OpenMerit state, setup begins automatically. `/openmerit setup` is only needed to explicitly rerun or recover setup.
+Open the product repository in interactive Pi with the extension loaded. If the project has no OpenMerit state, the Pi adapter performs a bounded source preflight. Setup begins automatically only when it detects an actual application LLM call pattern. A repository without such a target remains idle; use `/openmerit setup` to inspect and configure a custom integration explicitly.
 
-OpenMerit sends Pi a private, typed `establish_evals` intent. Pi must understand the product task, infer objectives, ask the user to confirm requirements, an evaluation budget, check cadence, thresholds, scheduling mode, and automation permissions, create and verify the necessary infrastructure, and complete the intent with durable evidence.
+OpenMerit sends Pi a private, typed `establish_evals` intent. Pi must identify the application LLM call or shared route under evaluation and ask you to confirm its stable target ID, call sites, and route key. It then understands the product task, infers objectives, asks you to confirm requirements, an evaluation budget, check cadence, thresholds, scheduling mode, and automation permissions, creates and verifies the necessary infrastructure, and completes the intent with durable evidence. Pi's own model is never an application target.
 
 OpenMerit rejects successful setup without a confirmed task profile, at least one valid objective, a supervised-graduation policy, a budget, and evidence.
 
 ## Collect the baseline
 
-After setup, use Pi normally. OpenMerit records completed-task checkpoints without treating its own orchestration turn as product evidence. At the required sample threshold, OpenMerit nudges Pi to assess the baseline. Missing evidence is not treated as zero or failure.
+After setup, instrument the confirmed application target and use the product normally. Report application-task completions and metric windows through Pi's typed signal tool, including the application model and durable evidence. Pi's own model, tokens, cost, and latency are orchestration telemetry and do not satisfy product metrics. At the required sample threshold, OpenMerit nudges Pi to assess the baseline. Missing evidence is not treated as zero or failure.
 
 ## Find the frontier
 

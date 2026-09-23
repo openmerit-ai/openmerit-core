@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
@@ -19,6 +19,7 @@ import type {
 
 import openMeritExtension, {
   createInitialUiState,
+  detectApplicationLlmTargets,
   renderStatus,
 } from "../src/index.ts";
 
@@ -91,7 +92,7 @@ interface CompletionInputForTest {
   summary: string;
   evidence: Array<{
     id: string;
-    source: "evaluation_artifact";
+    source: "harness_trace" | "evaluation_artifact" | "observability_record" | "external_source" | "user_feedback";
     uri: string;
   }>;
   outputs?: Record<string, unknown>;
@@ -104,6 +105,15 @@ function confirmedSetupOutputs() {
       revision: 1,
       name: "Test task",
       goal: "Complete the representative project task",
+      applicationTarget: {
+        id: "app-target-test",
+        kind: "application_llm_call",
+        name: "Test application LLM route",
+        applicationId: "test-app",
+        callSites: ["src/llm.ts:1"],
+        routeKey: "TEST_MODEL",
+        confirmedAt: new Date().toISOString(),
+      },
       objectives: [{ metricId: "task_success", required: true, minimumSamples: 3, tolerance: 0 }],
       createdAt: new Date().toISOString(),
       confirmedAt: new Date().toISOString(),
@@ -125,6 +135,7 @@ function confirmedSetupOutputs() {
       },
     },
     observability: {
+      targetId: "app-target-test",
       status: "ready",
       requiredMetricIds: ["task_success"] as string[],
       coveredMetricIds: ["task_success"] as string[],
@@ -162,8 +173,9 @@ function sessionContext(projectRoot: string, notifications: Notification[]): Ext
   } as unknown as ExtensionContext;
 }
 
-test("Pi automatically starts setup for an unconfigured interactive project", async () => {
+test("Pi automatically starts setup only when an application LLM call is detected", async () => {
   const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-auto-setup-"));
+  writeFileSync(join(projectRoot, "app.ts"), "await client.chat.completions.create({ model: 'app-model' });\n");
   const notifications: Notification[] = [];
   const { eventHandlers, entries, messages } = loadCommand();
   const sessionStart = eventHandlers.get("session_start");
@@ -171,11 +183,29 @@ test("Pi automatically starts setup for an unconfigured interactive project", as
 
   try {
     await sessionStart({ type: "session_start" }, sessionContext(projectRoot, notifications));
-    assert.match(notifications[0]?.message ?? "", /asking Pi to establish evals and observability/);
+    assert.match(notifications[0]?.message ?? "", /detected 1 application LLM target/);
     assert.equal(entries[0]?.customType, "openmerit.intent");
-    assert.equal((entries[0]?.data as { intent: { kind: string } }).intent.kind, "establish_evals");
+    const intent = (entries[0]?.data as { intent: { kind: string; constraints: Record<string, unknown> } }).intent;
+    assert.equal(intent.kind, "establish_evals");
+    assert.equal(intent.constraints.applicationTargetRequired, true);
+    assert.equal((intent.constraints.detectedApplicationTargets as Array<{ kind: string }>)[0]?.kind, "application_llm_call");
     assert.equal(messages.length, 1);
     assert.deepEqual(messages[0]?.options, { deliverAs: "followUp", triggerTurn: true });
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("Pi remains idle for an unconfigured project without an application LLM call", async () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-auto-idle-"));
+  const notifications: Notification[] = [];
+  const { eventHandlers, entries } = loadCommand();
+  const sessionStart = eventHandlers.get("session_start");
+  assert.ok(sessionStart);
+  try {
+    await sessionStart({ type: "session_start" }, sessionContext(projectRoot, notifications));
+    assert.match(notifications[0]?.message ?? "", /no application LLM call detected/);
+    assert.equal(entries.length, 0);
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
@@ -223,11 +253,22 @@ test("setup dispatches a private typed intent", async () => {
 test("Pi replaces the completion tool with a strict-compatible active intent schema", async () => {
   rmSync(join(testProjectRoot, ".openmerit"), { recursive: true, force: true });
   const notifications: Notification[] = [];
-  const { handler, completionTools } = loadCommand();
+  const { handler, completionTools, entries } = loadCommand();
 
+  await handler("setup", commandContext(notifications));
+  const setupTool = completionTools.at(-1);
+  assert.ok(setupTool);
+  const setupIntent = (entries[0]?.data as { intent: { id: string } }).intent.id;
+  await setupTool.execute("tool-setup", {
+    intentId: setupIntent,
+    status: "succeeded",
+    summary: "Configured",
+    evidence: [{ id: "setup", source: "evaluation_artifact", uri: "file:///setup.json" }],
+    outputs: confirmedSetupOutputs(),
+  }, undefined, undefined, commandContext(notifications));
   await handler("assess", commandContext(notifications));
 
-  assert.equal(completionTools.length, 2);
+  assert.ok(completionTools.length >= 2);
   const activeTool = completionTools.at(-1);
   assert.ok(activeTool?.parameters);
   assert.doesNotThrow(() => makeStrictJsonSchema(activeTool.parameters as never));
@@ -236,7 +277,22 @@ test("Pi replaces the completion tool with a strict-compatible active intent sch
     status: "succeeded",
     summary: "Baseline is ready",
     evidence: [{ id: "trace", source: "harness_trace", uri: "file:///trace.json" }],
-    outputs: { baselineEvidenceSufficient: true },
+    outputs: {
+      targetId: "app-target-test",
+      baselineEvidenceSufficient: true,
+      metrics: [{
+        targetId: "app-target-test",
+        metricId: "task_success",
+        state: "measured",
+        scope: "sample_window",
+        direction: "maximize",
+        method: "observed",
+        value: 1,
+        unit: "ratio",
+        sampleCount: 1,
+        evidence: [{ id: "metrics", source: "observability_record", uri: "file:///metrics.json" }],
+      }],
+    },
   }), true);
   assert.equal(Check(activeTool.parameters as never, {
     intentId: "intent-1",
@@ -257,7 +313,7 @@ test("Pi replaces the completion tool with a strict-compatible active intent sch
     summary: "Forgot the proof",
     evidence: [],
     outputs: { baselineEvidenceSufficient: true },
-  }), true);
+  }), false);
 });
 
 test("every intent completion schema supports Pi strict sampling", () => {
@@ -314,13 +370,13 @@ test("completion requires evidence for success and persists the result", async (
   assert.equal(entries[1]?.customType, "openmerit.result");
 });
 
-test("Pi turns completed work into durable signals and dispatches a due assessment", async () => {
+test("Pi dispatches assessment only from application-target signals", async () => {
   const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-signals-"));
   const notifications: Notification[] = [];
-  const { handler, completionTool, entries, eventHandlers } = loadCommand();
+  const { handler, completionTool, entries, tools } = loadCommand();
   const ctx = sessionContext(projectRoot, notifications);
-  const settled = eventHandlers.get("agent_settled");
-  assert.ok(settled);
+  const signalTool = tools.get("openmerit_report_signal");
+  assert.ok(signalTool);
 
   try {
     await handler("setup", { ...commandContext(notifications), cwd: projectRoot } as ExtensionCommandContext);
@@ -333,10 +389,15 @@ test("Pi turns completed work into durable signals and dispatches a due assessme
       outputs: confirmedSetupOutputs(),
     }, undefined, undefined, ctx as unknown as ExtensionCommandContext);
 
-    await settled({ type: "agent_settled" }, ctx); // completion turn is deliberately suppressed
-    await settled({ type: "agent_settled" }, ctx);
-    await settled({ type: "agent_settled" }, ctx);
-    await settled({ type: "agent_settled" }, ctx);
+    for (let index = 0; index < 3; index += 1) {
+      await signalTool.execute(`tool-task-${index}`, {
+        signalId: `application-task-${index}`,
+        type: "product_task_completed",
+        targetId: "app-target-test",
+        modelId: "provider/application-model",
+        evidence: [{ id: `trace-${index}`, source: "harness_trace", uri: `file:///app-task-${index}.json` }],
+      } as never, undefined, undefined, ctx as unknown as ExtensionCommandContext);
+    }
 
     const intentKinds = entries
       .filter((entry) => entry.customType === "openmerit.intent")
@@ -388,7 +449,7 @@ test("Pi automatically requests instrumentation when setup reports a required me
       status: "succeeded",
       summary: "Instrumentation completed",
       evidence: [{ id: "trace", source: "evaluation_artifact", uri: "file:///trace.json" }],
-      outputs: { coveredMetricIds: ["task_success"], missingMetricIds: [] },
+      outputs: { targetId: "app-target-test", coveredMetricIds: ["task_success"], missingMetricIds: [] },
     }, undefined, undefined, ctx as unknown as ExtensionCommandContext);
     assert.equal(userMessages[0]?.content, "Build the product after setup");
     const events = readFileSync(join(projectRoot, ".openmerit", "events.jsonl"), "utf8");
@@ -411,7 +472,9 @@ test("Pi exposes a typed ingress for observability and verification signals", ()
   assert.equal(Check(signalTool.parameters as never, {
     signalId: "window-1",
     type: "metric_window_available",
+    targetId: "app-target-test",
     metrics: [{
+      targetId: "app-target-test",
       metricId: "task_success",
       state: "measured",
       scope: "sample_window",
@@ -488,69 +551,51 @@ test("cancel records interrupted work as cancelled and clears durable active sta
   }
 });
 
-test("Pi records provider cost, tokens, and wall-clock task telemetry", async () => {
+test("Pi does not turn its own model telemetry into application evidence", async () => {
   const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-task-telemetry-"));
   const notifications: Notification[] = [];
-  const { handler, completionTool, entries, eventHandlers } = loadCommand();
-  const ctx = sessionContext(projectRoot, notifications);
-  const started = eventHandlers.get("agent_start");
-  const messageEnd = eventHandlers.get("message_end");
-  const settled = eventHandlers.get("agent_settled");
-  assert.ok(started && messageEnd && settled);
+  const { eventHandlers } = loadCommand();
 
   try {
-    await handler("setup", { ...commandContext(notifications), cwd: projectRoot } as ExtensionCommandContext);
-    const intent = (entries[0]?.data as { intent: { id: string } }).intent;
-    await completionTool.execute("tool-setup", {
-      intentId: intent.id,
-      status: "succeeded",
-      summary: "Configured",
-      evidence: [{ id: "eval", source: "evaluation_artifact", uri: "file:///eval.json" }],
-      outputs: confirmedSetupOutputs(),
-    }, undefined, undefined, ctx as unknown as ExtensionCommandContext);
-    await settled({ type: "agent_settled" }, ctx);
-    await started({ type: "agent_start" }, ctx);
-    await messageEnd({
-      type: "message_end",
-      message: {
-        role: "assistant", provider: "openrouter", model: "test/model", content: [], api: "openai-completions",
-        timestamp: Date.now(), stopReason: "stop",
-        usage: { input: 120, output: 30, cacheRead: 40, cacheWrite: 0, totalTokens: 190,
-          cost: { input: 0.01, output: 0.02, cacheRead: 0.003, cacheWrite: 0, total: 0.033 } },
-      },
-    }, ctx);
-    await settled({ type: "agent_settled" }, ctx);
-
-    const state = JSON.parse(readFileSync(join(projectRoot, ".openmerit", "state.json"), "utf8"));
-    assert.equal(state.automation.observedCompletedTasks, 1);
-    assert.equal(state.automation.latestMetricValues.total_task_cost, 0.033);
-    assert.equal(state.automation.latestMetricValues.input_token_consumption, 120);
-    assert.equal(state.automation.latestMetricValues.output_token_consumption, 30);
-    assert.equal(typeof state.automation.latestMetricValues.end_to_end_task_latency, "number");
+    assert.equal(eventHandlers.has("agent_start"), false);
+    assert.equal(eventHandlers.has("message_end"), false);
+    assert.equal(eventHandlers.has("agent_settled"), false);
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });
 
-test("Pi rejects evaluator-supplied provider telemetry and coverage-only tool-use claims", async () => {
+test("Pi accepts application cost telemetry and rejects coverage-only tool-use claims", async () => {
   const { tools } = loadCommand();
   const signalTool = tools.get("openmerit_report_signal");
   assert.ok(signalTool);
+  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-application-metrics-"));
+  const notifications: Notification[] = [];
+  const { handler, completionTools, entries } = loadCommand();
+  const ctx = { ...commandContext(notifications), cwd: projectRoot } as ExtensionCommandContext;
+  await handler("setup", ctx);
+  const setupIntent = (entries[0]?.data as { intent: { id: string } }).intent;
+  await completionTools.at(-1)!.execute("tool-setup", {
+    intentId: setupIntent.id,
+    status: "succeeded",
+    summary: "Configured",
+    evidence: [{ id: "eval", source: "evaluation_artifact", uri: "file:///eval.json" }],
+    outputs: confirmedSetupOutputs(),
+  }, undefined, undefined, ctx);
   const base = {
+    targetId: "app-target-test",
     state: "measured", scope: "single_run", direction: "minimize", method: "evaluator",
     value: 0, unit: "usd", sampleCount: 1,
     evidence: [{ id: "eval", source: "evaluation_artifact", uri: "file:///coverage.json" }],
   };
+  await signalTool.execute("signal", { signalId: "app-cost", type: "metric_window_available", targetId: "app-target-test", metrics: [
+    { ...base, metricId: "total_task_cost" },
+  ] } as never, undefined, undefined, ctx);
   await assert.rejects(
-    signalTool.execute("signal", { signalId: "bad-cost", type: "metric_window_available", metrics: [
-      { ...base, metricId: "total_task_cost" },
-    ] } as never, undefined, undefined, commandContext([])),
-    /captured directly by Pi/,
-  );
-  await assert.rejects(
-    signalTool.execute("signal", { signalId: "bad-tools", type: "metric_window_available", metrics: [
+    signalTool.execute("signal", { signalId: "bad-tools", type: "metric_window_available", targetId: "app-target-test", metrics: [
       { ...base, metricId: "tool_use_performance", direction: "maximize", unit: "score" },
-    ] } as never, undefined, undefined, commandContext([])),
+    ] } as never, undefined, undefined, ctx),
     /requires harness-trace evidence/,
   );
+  rmSync(projectRoot, { recursive: true, force: true });
 });

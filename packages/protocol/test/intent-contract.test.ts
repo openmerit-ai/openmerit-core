@@ -63,6 +63,7 @@ test("terminal results carry evidence references", () => {
       },
     ],
     outputs: {
+      targetId: "app-target-1",
       coveredMetricIds: ["task_quality", "task_success"],
       missingMetricIds: [],
     },

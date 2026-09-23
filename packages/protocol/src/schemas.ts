@@ -52,17 +52,29 @@ export const MetricObjectiveSchema = strictObject({
   })),
 });
 
+export const ApplicationLlmTargetSchema = strictObject({
+  id: Type.String({ minLength: 1 }),
+  kind: Type.Literal("application_llm_call"),
+  name: Type.String({ minLength: 1 }),
+  applicationId: Type.String({ minLength: 1 }),
+  callSites: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+  routeKey: Type.String({ minLength: 1 }),
+  confirmedAt: Type.String({ minLength: 1 }),
+});
+
 export const TaskProfileSchema = strictObject({
   id: Type.String({ minLength: 1 }),
   revision: Type.Integer({ minimum: 1 }),
   name: Type.String({ minLength: 1 }),
   goal: Type.String({ minLength: 1 }),
+  applicationTarget: ApplicationLlmTargetSchema,
   objectives: Type.Array(MetricObjectiveSchema, { minItems: 1 }),
   createdAt: Type.String({ minLength: 1 }),
   confirmedAt: Type.Optional(Type.String({ minLength: 1 })),
 });
 
 export const ObservabilityCoverageSchema = strictObject({
+  targetId: Type.String({ minLength: 1 }),
   status: stringEnum(["ready", "incomplete"] as const),
   requiredMetricIds: Type.Array(stringEnum(metricIds)),
   coveredMetricIds: Type.Array(stringEnum(metricIds)),
@@ -113,6 +125,7 @@ export const SupervisedGraduationPolicySchema = strictObject({
 });
 
 export const MetricRecordSchema = strictObject({
+  targetId: Type.String({ minLength: 1 }),
   metricId: stringEnum(metricIds),
   state: stringEnum(["measured", "not_applicable", "not_configured", "insufficient_evidence"] as const),
   scope: stringEnum(["single_run", "sample_window"] as const),
@@ -135,6 +148,7 @@ export const MetricRecordSchema = strictObject({
 });
 
 export const CandidateDescriptorSchema = strictObject({
+  targetId: Type.String({ minLength: 1 }),
   candidateId: Type.String({ minLength: 1 }),
   modelId: Type.String({ minLength: 1 }),
   modelVersion: Type.Optional(Type.String({ minLength: 1 })),
@@ -143,6 +157,7 @@ export const CandidateDescriptorSchema = strictObject({
 
 export const CandidateAssessmentSchema = strictObject({
   id: Type.String({ minLength: 1 }),
+  targetId: Type.String({ minLength: 1 }),
   taskProfileId: Type.String({ minLength: 1 }),
   taskProfileRevision: Type.Integer({ minimum: 1 }),
   candidateId: Type.String({ minLength: 1 }),
@@ -157,6 +172,7 @@ export const CandidateAssessmentSchema = strictObject({
 
 export const FrontierSnapshotSchema = strictObject({
   id: Type.String({ minLength: 1 }),
+  targetId: Type.String({ minLength: 1 }),
   taskProfileId: Type.String({ minLength: 1 }),
   taskProfileRevision: Type.Integer({ minimum: 1 }),
   productRevision: Type.String({ minLength: 1 }),
@@ -176,6 +192,7 @@ export const FrontierSnapshotSchema = strictObject({
 });
 
 export const FrontierRecommendationSchema = strictObject({
+  targetId: Type.String({ minLength: 1 }),
   frontierSnapshotId: Type.String({ minLength: 1 }),
   selectedCandidateId: Type.String({ minLength: 1 }),
   currentCandidateId: Type.String({ minLength: 1 }),
@@ -190,38 +207,47 @@ export const INTENT_OUTPUT_SCHEMAS = {
     observability: ObservabilityCoverageSchema,
   }),
   instrument_observability: strictObject({
+    targetId: Type.String({ minLength: 1 }),
     coveredMetricIds: Type.Array(stringEnum(metricIds)),
     missingMetricIds: Type.Array(stringEnum(metricIds)),
   }),
   run_assessment: strictObject({
+    targetId: Type.String({ minLength: 1 }),
     baselineEvidenceSufficient: Type.Boolean(),
-    metrics: Type.Optional(Type.Array(MetricRecordSchema)),
+    metrics: Type.Array(MetricRecordSchema),
   }),
   discover_candidates: strictObject({
+    targetId: Type.String({ minLength: 1 }),
     candidates: Type.Array(CandidateDescriptorSchema),
   }),
   run_challenger_trials: strictObject({
+    targetId: Type.String({ minLength: 1 }),
     assessments: Type.Array(CandidateAssessmentSchema),
   }),
   calculate_frontier: strictObject({
+    targetId: Type.String({ minLength: 1 }),
     assessments: Type.Array(CandidateAssessmentSchema),
     frontierSnapshot: FrontierSnapshotSchema,
     recommendation: Type.Optional(FrontierRecommendationSchema),
   }),
   investigate_regression: strictObject({
+    targetId: Type.String({ minLength: 1 }),
     regressionDetected: Type.Boolean(),
     affectedMetricIds: Type.Array(stringEnum(metricIds)),
     likelyCause: Type.Optional(Type.String()),
   }),
   apply_model_swap: strictObject({
+    targetId: Type.String({ minLength: 1 }),
     appliedCandidateId: Type.String({ minLength: 1 }),
     previousCandidateId: Type.Optional(Type.String({ minLength: 1 })),
   }),
   verify_model_swap: strictObject({
+    targetId: Type.String({ minLength: 1 }),
     verified: Type.Boolean(),
     regressionDetected: Type.Boolean(),
   }),
   rollback_model_swap: strictObject({
+    targetId: Type.String({ minLength: 1 }),
     restoredCandidateId: Type.String({ minLength: 1 }),
   }),
 } as const satisfies Readonly<Record<IntentKind, TSchema>>;

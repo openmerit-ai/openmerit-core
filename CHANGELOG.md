@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Bind task profiles, metrics, assessments, frontier artifacts, swaps, and
+  automation signals to a confirmed application LLM target; Pi's own model
+  telemetry cannot satisfy application evidence or become a swap target.
+- Make Pi's automatic setup conditional on bounded source detection of an
+  application LLM call. Projects without a detected target remain idle until
+  `/openmerit setup` is requested.
+
 ## 0.1.5 — 2026-09-23
 
 OpenMerit now ships as one npm package with a Pi extension, a reusable

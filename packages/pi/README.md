@@ -7,7 +7,7 @@ It translates OpenMerit intents into intelligent Pi work and returns structured 
 ## Initial command surface
 
 - `/openmerit` and `/openmerit status` — show evidence readiness and current activity.
-- `/openmerit setup` — explicitly rerun or recover setup; normal interactive setup starts automatically.
+- `/openmerit setup` — explicitly rerun or recover setup; interactive startup only begins automatically after bounded source detection finds an application LLM call.
 - `/openmerit assess` — run an evidence-backed assessment.
 - `/openmerit frontier` — request and verify a harness-calculated frontier.
 - `/openmerit approve` — authorize the currently proposed supervised swap.
@@ -21,4 +21,4 @@ Pi owns the work behind every intent, including use of harness-configured Jev Sy
 
 The adapter does not select or directly set a model. It issues a bounded mutation intent only after the policy gate authorizes one; Pi performs and proves the change.
 
-Pi reports active-session ticks, catalogue observations, and completed ordinary work. `openmerit_report_signal` provides typed metric-window and verification-window ingress. Pi declares that it cannot provision persistent background wakeups, allowing OpenMerit to report the need for an external scheduler without overstating automation readiness.
+Pi reports active-session ticks and catalogue observations. Application instrumentation submits completed-task, metric-window, and verification-window records through `openmerit_report_signal`; Pi's own model telemetry is never application evidence. Pi declares that it cannot provision persistent background wakeups, allowing OpenMerit to report the need for an external scheduler without overstating automation readiness.
