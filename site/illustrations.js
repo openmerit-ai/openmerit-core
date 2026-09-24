@@ -1,7 +1,16 @@
-// Each cell is a separately illustrated pose. Playback only selects whole frames;
+// Each image or atlas cell is a separately illustrated pose. Playback selects whole frames;
 // it never distorts an image or interpolates between poses.
 const scenes = [
-  { selector: '.hero-art', source: 'hero', columns: 2, rows: 2, step: 180, rest: 1100, hold: 700 },
+  {
+    selector: '.hero-art', source: 'hero', minimumWidth: 2172,
+    frameUrls: [
+      '/assets/motion/hero-frame-0-v2.webp',
+      '/assets/motion/hero-frame-1-v2.webp',
+      '/assets/motion/hero-frame-2-v2.webp',
+      '/assets/motion/hero-frame-3-v2.webp',
+    ],
+    step: 180, rest: 1100, hold: 700,
+  },
   { selector: '.setup-art', source: 'setup', columns: 4, rows: 2, step: 120, rest: 1400, hold: 600 },
   { selector: '.questions-art', source: 'questions', columns: 4, rows: 2, step: 140, rest: 1400, hold: 1000 },
   { selector: '.footer-art', source: 'rest', columns: 4, rows: 2, step: 180, rest: 2400, hold: 1600 },
@@ -13,7 +22,7 @@ let motionPaused = false;
 try { motionPaused = localStorage.getItem('openmerit-motion-paused') === 'true'; } catch { /* Storage is optional. */ }
 
 function makeSequence(scene) {
-  const last = scene.columns * scene.rows - 1;
+  const last = (scene.frameUrls?.length ?? scene.columns * scene.rows) - 1;
   const sequence = [{ frame: 0, duration: scene.rest }];
   for (let frame = 1; frame <= last; frame++) {
     sequence.push({ frame, duration: frame === last ? scene.hold : scene.step });
@@ -24,21 +33,35 @@ function makeSequence(scene) {
 }
 
 function drawFrame(scene, frame) {
+  scene.context.clearRect(0, 0, scene.width, scene.height);
+  if (scene.images) {
+    scene.context.drawImage(scene.images[frame], 0, 0);
+    return;
+  }
   const x = (frame % scene.columns) * scene.width;
   const y = Math.floor(frame / scene.columns) * scene.height;
-  scene.context.clearRect(0, 0, scene.width, scene.height);
   scene.context.drawImage(scene.atlas, x, y, scene.width, scene.height, 0, 0, scene.width, scene.height);
 }
 
+async function loadFrame(source) {
+  const image = new Image();
+  image.decoding = 'async';
+  image.src = source;
+  await image.decode();
+  return image;
+}
+
 async function prepareScene(scene) {
-  const atlas = new Image();
-  atlas.decoding = 'async';
-  atlas.src = `/assets/motion/${scene.source}-sequence-v1.webp`;
-  await atlas.decode();
-  const width = atlas.naturalWidth / scene.columns;
-  const height = atlas.naturalHeight / scene.rows;
+  // The wide hero needs a full-size image per pose, not a quarter of one atlas.
+  const images = scene.frameUrls ? await Promise.all(scene.frameUrls.map(loadFrame)) : null;
+  const atlas = images ? null : await loadFrame(`/assets/motion/${scene.source}-sequence-v1.webp`);
+  const width = images ? images[0].naturalWidth : atlas.naturalWidth / scene.columns;
+  const height = images ? images[0].naturalHeight : atlas.naturalHeight / scene.rows;
   if (!width || !height || !Number.isInteger(width) || !Number.isInteger(height)) {
     throw new Error('Invalid illustration frame dimensions');
+  }
+  if (images && (width < scene.minimumWidth || images.some(image => image.naturalWidth !== width || image.naturalHeight !== height))) {
+    throw new Error('Illustration frames must retain their full, matching resolution');
   }
 
   const layer = document.createElement('canvas');
@@ -49,7 +72,7 @@ async function prepareScene(scene) {
   layer.setAttribute('aria-hidden', 'true');
   const context = layer.getContext('2d');
   if (!context) throw new Error('Illustration canvas unavailable');
-  Object.assign(scene, { atlas, layer, context, width, height });
+  Object.assign(scene, { images, atlas, layer, context, width, height });
   drawFrame(scene, 0);
   scene.figure.append(layer);
 }
@@ -86,7 +109,7 @@ async function playScene(scene) {
     scene.ready ??= prepareScene(scene);
     await scene.ready;
   } catch {
-    // A failed atlas load leaves the real first-frame poster intact.
+    // A failed frame load leaves the full-resolution first-frame poster intact.
     scene.failed = true;
     return;
   } finally {

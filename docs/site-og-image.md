@@ -1,5 +1,7 @@
 # OpenMerit social sharing image
 
+This is the shared default image for the homepage and all documentation pages. [Separate page cards](site-dynamic-og.md) are disabled for now at the user's request.
+
 Final asset: `site/assets/openmerit-og-v1.png` (1200 × 630 pixels, PNG).
 
 Public URL: https://openmerit.site/assets/openmerit-og-v1.png

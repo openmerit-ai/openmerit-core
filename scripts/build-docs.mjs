@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import MarkdownIt from 'markdown-it';
 import MiniSearch from 'minisearch';
 import { groups, pages } from './docs.config.mjs';
+import { createSocialImage } from './social-image.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const out = join(root, 'site/docs');
@@ -16,6 +17,13 @@ const markdown = new MarkdownIt({ html: false, typographer: false });
 const plain = token => (token.children ?? []).map(child => ['text', 'code_inline', 'image'].includes(child.type) ? child.content : ['softbreak', 'hardbreak'].includes(child.type) ? ' ' : '').join('');
 const links = [];
 const searchDocuments = [];
+const icons = {
+  link: '<path d="m10 13 4-4M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M12 4l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/>',
+  source: '<path d="m7 5-5 5 5 5m6-10 5 5-5 5m-2-12-2 14"/>',
+  edit: '<path d="m13 3 4 4M3 17l4-1L18 5a2.8 2.8 0 0 0-4-4L3 12z"/>',
+  markdown: '<path d="M11 2H4a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8zM11 2v6h6M6 11v4m0-4 2 2 2-2v4m3-4v4m-1-1 1 1 1-1"/>',
+};
+const icon = name => `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`;
 
 function resolveLink(href, page) {
   if (/^(https?:|mailto:)/i.test(href)) return href;
@@ -36,7 +44,7 @@ markdown.renderer.rules.link_open = (tokens, idx, options, env, self) => {
 markdown.renderer.rules.heading_close = (tokens, idx, options, env, self) => {
   const id = tokens[idx - 2].attrGet('id');
   const title = plain(tokens[idx - 1]);
-  return `<a class="heading-anchor" href="#${escape(id)}" aria-label="Link to ${escape(title)}">#</a>${self.renderToken(tokens, idx, options)}`;
+  return `<a class="heading-anchor" href="#${escape(id)}" aria-label="Link to ${escape(title)}" title="Link to this section" data-section-link>${icon('link')}<span class="heading-copy-feedback" aria-hidden="true">Copied</span></a>${self.renderToken(tokens, idx, options)}`;
 };
 markdown.renderer.rules.fence = (tokens, idx) => {
   const token = tokens[idx];
@@ -78,12 +86,19 @@ const docs = await Promise.all(pages.map(async page => {
 const miniSearchFile = fileURLToPath(import.meta.resolve('minisearch'));
 const revision = createHash('sha256').update(JSON.stringify([pkg.version, groups, ...docs.map(doc => doc.sourceText),
   await readFile(join(root, 'site/docs.css'), 'utf8'), await readFile(join(root, 'site/docs.js'), 'utf8'),
+  await readFile(join(root, 'site/docs-search.js'), 'utf8'),
   await readFile(join(root, 'site/styles.css'), 'utf8'), await readFile(miniSearchFile, 'utf8'),
+  await readFile(join(root, 'scripts/social-image.mjs'), 'utf8'), await readFile(join(root, 'site/assets/inter-latin.woff2')),
+  createHash('sha256').update(await readFile(join(root, 'site/assets/openmerit-og-workshop-v1.png'))).digest('hex'),
   await readFile(fileURLToPath(import.meta.url), 'utf8'),
 ])).digest('hex').slice(0, 12);
 const indexUrl = `/docs/search-index.${revision}.json`;
 const searchLibrary = `/docs/minisearch.${revision}.js`;
 const sourceUrl = doc => `${doc.url}source.md`;
+const defaultSocialImage = {
+  url: 'https://openmerit.site/assets/openmerit-og-v1.png', type: 'image/png', width: 1200, height: 630,
+  alt: 'Good models prove themselves in the work. Three miniature makers compare tools at a wooden workbench.',
+};
 const brand = '<svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M4 24V8l12 10L28 8v16M4 8l12 16L28 8" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg><span>openmerit</span>';
 function navigation(doc, label) {
   return `<nav aria-label="${label}">${groups.map(group => `<div class="docs-nav-group"><p>${escape(group.title)}</p><ul>${group.pages.map(item => {
@@ -94,14 +109,22 @@ function navigation(doc, label) {
 function outline(doc, label) {
   return `<nav aria-label="${label}"><ul>${doc.headings.filter(h => h.depth <= 3).map(h => `<li class="toc-level-${h.depth}"><a href="#${escape(h.id)}">${escape(h.label)}</a></li>`).join('')}</ul></nav>`;
 }
-function pagination(doc) {
-  const index = docs.indexOf(doc);
-  return `<nav class="docs-pagination" aria-label="Next and previous pages">${[[-1, 'Previous'], [1, 'Next']].map(([offset, label]) => {
-    const other = docs[index + offset];
-    return other ? `<a class="${offset > 0 ? 'next' : 'previous'}" href="${other.url}"><span>${label}</span>${escape(other.title)} <span aria-hidden="true">${offset > 0 ? '→' : '←'}</span></a>` : '<span></span>';
-  }).join('')}</nav>`;
+function articleActions(doc) {
+  const path = doc.source.split('/').map(encodeURIComponent).join('/');
+  return `<div class="doc-meta"><span>v${escape(pkg.version)}</span>${[
+    [`${repository}/blob/main/docs/${path}`, 'View source on GitHub', 'source'],
+    [`${repository}/edit/main/docs/${path}`, 'Edit this page on GitHub', 'edit'],
+    [sourceUrl(doc), 'Read as Markdown', 'markdown'],
+  ].map(([href, label, symbol]) => `<a class="doc-action" href="${href}" aria-label="${label}" title="${label}">${icon(symbol)}</a>`).join('')}</div>`;
+}
+function mobileNavigation(doc) {
+  return `<details class="docs-mobile-nav"><summary>Navigation <span aria-hidden="true">+</span></summary><div class="docs-mobile-nav-body">
+    ${doc.headings.length ? `<div class="docs-mobile-outline"><p>On this page</p>${outline(doc, 'On this page on mobile')}</div>` : ''}
+    <details class="docs-mobile-pages"><summary>Documentation <span aria-hidden="true">+</span></summary>${navigation(doc, 'Documentation on mobile')}</details>
+  </div></details>`;
 }
 function layout(doc) {
+  const socialImage = doc.socialImage || defaultSocialImage;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -113,9 +136,19 @@ function layout(doc) {
   <link rel="canonical" href="https://openmerit.site${doc.url}">
   <meta property="og:title" content="${escape(doc.title)} · OpenMerit docs">
   <meta property="og:description" content="${escape(doc.description)}">
-  <meta property="og:type" content="article">
+  <meta property="og:type" content="${doc.slug ? 'article' : 'website'}">
   <meta property="og:url" content="https://openmerit.site${doc.url}">
-  <meta property="og:image" content="https://openmerit.site/assets/openmerit-og-v1.png">
+  <meta property="og:site_name" content="OpenMerit">
+  <meta property="og:image" content="${escape(socialImage.url)}">
+  <meta property="og:image:type" content="${socialImage.type}">
+  <meta property="og:image:width" content="${socialImage.width}">
+  <meta property="og:image:height" content="${socialImage.height}">
+  <meta property="og:image:alt" content="${escape(socialImage.alt)}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="${escape(doc.title)}">
+  <meta name="twitter:description" content="${escape(doc.description)}">
+  <meta name="twitter:image" content="${escape(socialImage.url)}">
+  <meta name="twitter:image:alt" content="${escape(socialImage.alt)}">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="preload" href="/assets/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css?v=${revision}">
@@ -126,26 +159,25 @@ function layout(doc) {
   <a class="skip-link" href="#doc-content">Skip to content</a>
   <header class="docs-header"><div class="docs-header-inner">
     <a class="brand" href="/" aria-label="OpenMerit home">${brand}</a>
-    <a class="docs-header-label" href="/docs/">Documentation</a>
     <nav class="docs-header-links" aria-label="Primary navigation"><a href="/">Home</a><a href="${repository}">GitHub <span aria-hidden="true">↗</span></a></nav>
   </div></header>
+  <div class="docs-intro"><p class="docs-intro-title">Documentation</p><p>Guides and reference for using and extending OpenMerit.</p></div>
   <div class="docs-layout">
-    <aside class="docs-sidebar"><a class="docs-home" href="/docs/">Documentation</a>${navigation(doc, 'Documentation')}<p class="docs-release">OpenMerit ${escape(pkg.version)}<br><a href="/docs/roadmap/">Early development</a></p></aside>
+    <aside class="docs-sidebar"><div class="docs-sidebar-body">${navigation(doc, 'Documentation')}<p class="docs-release">OpenMerit ${escape(pkg.version)}</p></div></aside>
     <main class="docs-main">
-      <details class="docs-mobile-nav"><summary>Browse documentation <span aria-hidden="true">+</span></summary>${navigation(doc, 'Documentation on mobile')}</details>
+      ${mobileNavigation(doc)}
       <section class="docs-search" aria-label="Search documentation" hidden data-index-url="${indexUrl}" data-library-url="${searchLibrary}">
         <form role="search"><label class="sr-only" for="doc-search">Search documentation</label><span class="search-icon" aria-hidden="true">⌕</span><input id="doc-search" type="search" placeholder="Search documentation…" autocomplete="off" spellcheck="false" autocapitalize="none" enterkeyhint="search" aria-controls="search-results"><kbd>⌘ K</kbd><button type="button" class="search-clear" aria-label="Clear search" hidden>×</button></form>
         <div class="search-panel" hidden><p class="search-status" role="status" aria-live="polite"></p><ul id="search-results"></ul></div>
       </section>
-      <article id="doc-content" tabindex="-1">
-        <header class="doc-heading"><p class="eyebrow">${escape(doc.group)}</p><h1>${escape(doc.title)}</h1><p class="doc-description">${escape(doc.description)}</p><div class="doc-meta"><span>Version ${escape(pkg.version)}</span><a href="${sourceUrl(doc)}">Markdown <span aria-hidden="true">↗</span></a><a href="${repository}/issues/new?title=${encodeURIComponent("Docs: " + doc.title)}">Suggest an edit <span aria-hidden="true">↗</span></a></div></header>
-        ${doc.headings.length ? `<details class="docs-mobile-toc"><summary>On this page <span aria-hidden="true">+</span></summary>${outline(doc, 'On this page on mobile')}</details>` : ''}
+      ${doc.headings.length ? `<details class="docs-mobile-toc"><summary>On this page <span aria-hidden="true">+</span></summary>${outline(doc, 'On this page on tablet')}</details>` : ''}
+      <article class="docs-article" id="doc-content" tabindex="-1">
+        <header class="doc-heading"><div class="doc-title-row"><h1>${escape(doc.title)}</h1>${articleActions(doc)}</div><p class="doc-description">${escape(doc.description)}</p></header>
         <div class="doc-prose">${doc.html}</div>
       </article>
-      ${pagination(doc)}
-      <footer class="docs-footer"><span>An open-source project, in the making.</span><a href="/docs/roadmap/">Current limitations <span aria-hidden="true">↗</span></a></footer>
+      <footer class="docs-footer"><a href="/docs/roadmap/">Current limitations <span aria-hidden="true">↗</span></a></footer>
     </main>
-    <aside class="docs-toc"><p>On this page</p>${outline(doc, 'On this page')}<div class="docs-toc-footer"><a href="${sourceUrl(doc)}">Read as Markdown ↗</a><a href="${repository}/issues">Report an issue ↗</a></div></aside>
+    <aside class="docs-toc"><p class="docs-panel-heading">On this page</p><div class="docs-toc-body">${outline(doc, 'On this page')}<div class="docs-toc-footer"><a href="${repository}/issues">Report an issue ↗</a></div></div></aside>
   </div>
   <div class="sr-only" id="copy-status" role="status" aria-live="polite"></div>
 </body>
@@ -171,11 +203,19 @@ await mkdir(out, { recursive: true });
 for (const doc of docs) {
   const directory = join(out, doc.slug);
   await mkdir(directory, { recursive: true });
+  if (doc.socialImage) {
+    const { png, svg, revision, ...metadata } = createSocialImage(doc);
+    await writeFile(join(directory, 'og.png'), png);
+    doc.socialImage = { ...metadata, url: `https://openmerit.site${doc.url}og.png?v=${revision}` };
+  } else if (!doc.slug) {
+    // Keep previously shared docs-image URLs working with the default artwork.
+    await copyFile(join(root, 'site', new URL(defaultSocialImage.url).pathname), join(directory, 'og.png'));
+  }
   await writeFile(join(directory, 'index.html'), layout(doc));
   await writeFile(join(directory, 'source.md'), doc.sourceText);
 }
 await writeFile(join(root, 'site', indexUrl), JSON.stringify({ options, index: index.toJSON() }));
 await copyFile(miniSearchFile, join(root, 'site', searchLibrary));
 await copyFile(join(dirname(miniSearchFile), '../../LICENSE.txt'), join(out, 'minisearch-LICENSE.txt'));
-await writeFile(join(out, 'manifest.json'), JSON.stringify({ version: pkg.version, revision, pages: docs.map(doc => ({ url: doc.url, source: doc.source, title: doc.title, headings: doc.headings })), searchIndex: indexUrl, searchLibrary }, null, 2));
+await writeFile(join(out, 'manifest.json'), JSON.stringify({ version: pkg.version, revision, pages: docs.map(doc => ({ url: doc.url, source: doc.source, title: doc.title, headings: doc.headings, ...(doc.socialImage && { socialImage: doc.socialImage }) })), searchIndex: indexUrl, searchLibrary }, null, 2));
 console.log(`Built ${docs.length} documentation pages and ${searchDocuments.length} searchable sections (${revision}).`);

@@ -5,6 +5,8 @@ const panel = search.querySelector('.search-panel');
 const status = search.querySelector('.search-status');
 const results = search.querySelector('#search-results');
 const clear = search.querySelector('.search-clear');
+const searchLoaderUrl = new URL('./docs-search.js', document.currentScript.src);
+searchLoaderUrl.search = new URL(document.currentScript.src).search;
 let searchPromise;
 let queryRevision = 0;
 let timer;
@@ -21,14 +23,13 @@ function closeSearch() {
 
 function loadSearch() {
   if (!searchPromise) {
-    searchPromise = Promise.all([
-      import(search.dataset.libraryUrl),
-      fetch(search.dataset.indexUrl).then(response => {
-        if (!response.ok) throw new Error('Search index unavailable');
-        return response.json();
-      }),
-    ]).then(([{ default: MiniSearch }, bundle]) => MiniSearch.loadJSON(JSON.stringify(bundle.index), bundle.options))
-      .catch(error => { searchPromise = undefined; throw error; });
+    searchPromise = import(searchLoaderUrl.href)
+      .then(({ loadSearchIndex }) => loadSearchIndex({ libraryUrl: search.dataset.libraryUrl, indexUrl: search.dataset.indexUrl }))
+      .catch(error => {
+        searchPromise = undefined;
+        searchLoaderUrl.searchParams.set('recovery', Date.now());
+        throw error;
+      });
   }
   return searchPromise;
 }
@@ -120,7 +121,7 @@ document.addEventListener('keydown', event => {
     input.select();
   }
   if (event.key === 'Escape') {
-    for (const details of document.querySelectorAll('.docs-mobile-nav[open], .docs-mobile-toc[open]')) {
+    for (const details of [...document.querySelectorAll('.docs-mobile-nav[open], .docs-mobile-pages[open], .docs-mobile-toc[open]')].reverse()) {
       if (details.contains(document.activeElement)) details.querySelector('summary').focus();
       details.open = false;
     }
@@ -133,6 +134,24 @@ document.addEventListener('focusin', event => {
 });
 
 const copyStatus = document.querySelector('#copy-status');
+for (const link of document.querySelectorAll('[data-section-link]')) {
+  link.setAttribute('aria-label', link.getAttribute('aria-label').replace(/^Link to /, 'Copy link to '));
+  link.title = 'Copy link to this section';
+  let reset;
+  link.addEventListener('click', async event => {
+    // Preserve native anchor navigation and modified-click browser actions.
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+    clearTimeout(reset);
+    try {
+      await navigator.clipboard.writeText(link.href);
+      link.classList.add('is-copied');
+      copyStatus.textContent = 'Section link copied to clipboard.';
+    } catch {
+      copyStatus.textContent = 'Section link is available in the address bar.';
+    }
+    reset = setTimeout(() => { link.classList.remove('is-copied'); copyStatus.textContent = ''; }, 2500);
+  });
+}
 for (const block of document.querySelectorAll('.code-block')) {
   const button = document.createElement('button');
   button.type = 'button';
@@ -164,7 +183,7 @@ for (const block of document.querySelectorAll('.code-block')) {
 
 // Keep the article outline in sync without intercepting native anchor navigation.
 const headings = [...document.querySelectorAll('.doc-prose h2, .doc-prose h3')];
-const outlineLinks = [...document.querySelectorAll('.docs-toc nav a')];
+const outlineLinks = [...document.querySelectorAll('.docs-toc nav a, .docs-mobile-outline nav a, .docs-mobile-toc nav a')];
 let scheduled = false;
 function updateOutline() {
   scheduled = false;

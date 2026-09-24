@@ -4,6 +4,10 @@ import { readFile, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import MiniSearch from 'minisearch';
+import { loadSearchIndex } from '../site/docs-search.js';
+import { createSocialImage } from './social-image.mjs';
+import { pages } from './docs.config.mjs';
+import { createHash } from 'node:crypto';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const site = join(root, 'site');
@@ -62,4 +66,126 @@ test('search finds operational topics and produces valid section destinations', 
     }
   }
   assert.equal(index.search('zzzxnonexistenttopic').length, 0);
+});
+
+const searchUrls = { indexUrl: manifest.searchIndex, libraryUrl: manifest.searchLibrary };
+const searchBundle = JSON.parse(await readFile(join(site, manifest.searchIndex), 'utf8'));
+const jsonResponse = value => new Response(JSON.stringify(value));
+
+test('search loads the page’s index without an extra manifest request', async () => {
+  const fetched = [];
+  const imported = [];
+  const index = await loadSearchIndex(searchUrls, {
+    fetch: async url => { fetched.push(url); return jsonResponse(searchBundle); },
+    importModule: async url => { imported.push(url); return { default: MiniSearch }; },
+  });
+  assert.deepEqual(fetched, [manifest.searchIndex]);
+  assert.deepEqual(imported, [manifest.searchLibrary]);
+  assert.ok(index.search('budget').some(result => result.url === '/docs/budgets/#budget-fields'));
+});
+
+test('search recovers when deployment removes an open page’s index or library', async () => {
+  for (const missing of ['index', 'library', 'both']) {
+    const fetched = [];
+    const imported = [];
+    const oldUrls = { indexUrl: '/docs/search-index.000000000000.json', libraryUrl: '/docs/minisearch.000000000000.js' };
+    const index = await loadSearchIndex(oldUrls, {
+      fetch: async (url, options) => {
+        fetched.push([url, options]);
+        if (url === '/docs/manifest.json') return jsonResponse(manifest);
+        if (url === oldUrls.indexUrl && missing !== 'library') return new Response(null, { status: 404 });
+        assert.ok([oldUrls.indexUrl, manifest.searchIndex].includes(url));
+        return jsonResponse(searchBundle);
+      },
+      importModule: async url => {
+        imported.push(url);
+        if (url === oldUrls.libraryUrl && missing !== 'index') throw new TypeError('Failed to fetch dynamically imported module');
+        return { default: MiniSearch };
+      },
+    });
+    assert.deepEqual(fetched.find(([url]) => url === '/docs/manifest.json'), ['/docs/manifest.json', { cache: 'no-store' }]);
+    assert.equal(fetched.at(-1)[0], manifest.searchIndex);
+    assert.ok(imported.at(-1).startsWith(`${manifest.searchLibrary}?recovery=`));
+    assert.ok(index.search('pause').some(result => result.url === '/docs/commands/#pause-and-resume'));
+  }
+});
+
+test('search stops after one failed recovery so the UI can offer another attempt', async () => {
+  const fetched = [];
+  await assert.rejects(loadSearchIndex(searchUrls, {
+    fetch: async url => {
+      fetched.push(url);
+      if (url === '/docs/manifest.json') return jsonResponse(manifest);
+      return new Response(null, { status: 503 });
+    },
+    importModule: async () => ({ default: MiniSearch }),
+  }), /Search index unavailable/);
+  assert.deepEqual(fetched, [manifest.searchIndex, '/docs/manifest.json', manifest.searchIndex]);
+});
+
+test('search recovery rejects invalid or external asset locations', async () => {
+  for (const invalid of [
+    {},
+    { ...manifest, searchLibrary: 'https://example.com/search.js' },
+    { ...manifest, searchIndex: '//example.com/search.json' },
+  ]) {
+    const imported = [];
+    await assert.rejects(loadSearchIndex(searchUrls, {
+      fetch: async url => url === '/docs/manifest.json' ? jsonResponse(invalid) : new Response(null, { status: 404 }),
+      importModule: async url => { imported.push(url); return { default: MiniSearch }; },
+    }), /Invalid search manifest/);
+    assert.deepEqual(imported, [manifest.searchLibrary]);
+  }
+});
+
+test('pages assign the default or enabled custom image to Open Graph and Twitter cards', async () => {
+  const defaultUrl = html[0].text.match(/property="og:image" content="([^"]+)"/)[1];
+  for (const page of manifest.pages) {
+    const tags = html.find(doc => doc.url === page.url).text;
+    const image = page.socialImage ?? { url: defaultUrl, width: 1200, height: 630, type: 'image/png' };
+    assert.ok(image, page.url);
+    const url = new URL(image.url);
+    assert.equal(url.origin, 'https://openmerit.site');
+    if (page.socialImage) assert.equal(url.pathname, `${page.url}og.png`);
+    const png = await readFile(join(site, url.pathname));
+    assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    assert.equal(png.readUInt32BE(16), 1200);
+    assert.equal(png.readUInt32BE(20), 630);
+    assert.equal(image.width, 1200);
+    assert.equal(image.height, 630);
+    assert.equal(image.type, 'image/png');
+    if (page.socialImage) assert.equal(url.searchParams.get('v'), createHash('sha256').update(png).digest('hex').slice(0, 12));
+    assert.ok(tags.includes(`<meta property="og:image" content="${image.url}">`));
+    assert.ok(tags.includes(`<meta name="twitter:image" content="${image.url}">`));
+    assert.ok(tags.includes('<meta name="twitter:card" content="summary_large_image">'));
+    for (const field of ['type', 'width', 'height', 'alt']) assert.ok(tags.includes(`property="og:image:${field}"`));
+    if (page.socialImage) {
+      assert.ok(image.alt.includes(page.title));
+      assert.ok(image.alt.includes('Three miniature makers'));
+    }
+  }
+  if (!manifest.pages.find(page => page.url === '/docs/').socialImage) {
+    assert.deepEqual(await readFile(join(site, 'docs/og.png')), await readFile(join(site, new URL(defaultUrl).pathname)));
+  }
+});
+
+test('social images are reproducible and change with the maintained page heading', () => {
+  const page = { title: 'OpenMerit documentation', description: pages[0].description, url: '/docs/', version: manifest.version };
+  const original = createSocialImage(page);
+  assert.deepEqual(createSocialImage(page).png, original.png);
+  const updated = createSocialImage({ ...page, title: 'Installation & setup' });
+  assert.notEqual(updated.revision, original.revision);
+  assert.notDeepEqual(updated.png, original.png);
+  // Details absent from the artwork should not invalidate the cached image.
+  const sameArtwork = createSocialImage({ ...page, description: 'Updated page summary.', version: '0.1.6' });
+  assert.deepEqual(sameArtwork.png, original.png);
+});
+
+test('social image text escapes markup and rejects copy that cannot fit', () => {
+  const page = { title: 'Metrics & evidence <guide>', description: 'Use "measured" results.', url: '/docs/', version: manifest.version };
+  const image = createSocialImage(page);
+  assert.ok(image.svg.includes('Metrics &amp; evidence'));
+  assert.ok(image.svg.includes('&lt;guide&gt;'));
+  assert.throws(() => createSocialImage({ ...page, title: 'Very long documentation title '.repeat(20) }), /too long to fit/);
+  assert.throws(() => createSocialImage({ ...page, title: '' }), /nonempty text/);
 });

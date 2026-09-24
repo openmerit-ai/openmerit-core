@@ -6,16 +6,20 @@ Generated with the built-in image generation tool on 2026-09-23. These replace t
 
 | Scene | Atlas | Grid | Frame size | Action |
 | --- | --- | --- | --- | --- |
-| Hero | `site/assets/motion/hero-sequence-v1.webp` | 2 × 2 | 1086 × 362 | Seated maker raises and examines a hand plane. |
+| Hero | `site/assets/motion/hero-frame-{0..3}-v2.webp` | Four individual images | 2172 × 724 | Seated maker raises and examines a hand plane. |
 | Setup | `site/assets/motion/setup-sequence-v1.webp` | 4 × 2 | 543 × 362 | Toolbox lid rotates toward closed and opens again. |
 | Questions | `site/assets/motion/questions-sequence-v1.webp` | 4 × 2 | 543 × 362 | The makers move their hands across the notebook. |
 | Footer | `site/assets/motion/rest-sequence-v1.webp` | 4 × 2 | 543 × 362 | The dog opens its eyes and lifts its head. |
 
-Matching `*-poster-v1.webp` images use the first cell. They remain available without JavaScript, under reduced motion, or when an atlas fails to load. The original illustrations remain in `site/assets/` as references.
+Matching `*-poster-v1.webp` images use the first cell for the supporting scenes. The hero uses its full-size `hero-frame-0-v2.webp` as its poster. They remain available without JavaScript, under reduced motion, or when animation assets fail to load. The original illustrations remain in `site/assets/` as references.
 
-Frames are read left-to-right, top-to-bottom, then played in reverse through the intermediate poses. Scene-specific holds at the endpoints produce deliberate stop-motion timing. Pausing freezes the current pose; reduced motion shows the poster. Timers stop offscreen and while the document is hidden. Atlases load only when motion is allowed and the illustration is visible. The four atlases together are approximately 714 KiB; the posters total approximately 122 KiB.
+Frames are played in order, then in reverse through the intermediate poses. Atlas cells are read left-to-right, top-to-bottom. Scene-specific holds at the endpoints produce deliberate stop-motion timing. Pausing freezes the current pose; reduced motion shows the poster. Timers stop offscreen and while the document is hidden. Animation assets load only when motion is allowed and the illustration is visible. The four full-size hero frames total approximately 906 KiB, including its poster; the three supporting atlases total approximately 486 KiB.
 
 ## Packaging
+
+The hero's original grid reduced every pose to 1086 × 362 and was visibly soft at the website's display size. It has been replaced with four standalone 2172 × 724 images. The first is the original sharp artwork and the others were generated separately at full resolution. See [the correction, sources, and new prompts](site-hero-resolution.md). The v1 hero atlas and poster remain as superseded assets and are not loaded by the site.
+
+The following grid-packaging and prompt notes describe the original generation; they still apply to the three supporting scenes.
 
 Generated PNG grids were split into equal cells for alignment and poster extraction, then encoded as WebP at quality 88. Whole-cell translations of at most five source pixels compensate for slight grid-placement drift, using white padding. No frame is scaled, warped, interpolated or blended during this registration. Generated textures still have some natural frame-to-frame variation.
 
