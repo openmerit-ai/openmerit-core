@@ -60,11 +60,11 @@ export interface IntentFactoryOptions {
 }
 
 const outcomes: Readonly<Record<IntentKind, string>> = {
-  establish_evals: "Identify the real application LLM call or shared application route under evaluation, ask the user to confirm that target and the task objectives, evaluation budget, check cadence, thresholds, scheduling mode, and automation permissions. Build runnable task-specific evaluation cases and application-call collectors for every required metric. Execute a representative smoke run through the same application authentication and runtime path, run the grader, and inspect actual quality, cost, token, latency, and other required outputs. Preserve the commands and resulting artifacts as setup evidence. Mark any metric missing if its collector or grader cannot produce a value; do not declare coverage ready based only on code existing. Do not count a setup smoke run as a production baseline sample. Return the confirmed taskProfile and policy. During setup, research a preliminary model shortlist with current sourced price estimates and reputation; report an empty list if no credible leads are available. These are research priors only: do not treat them as measured task results or change model configuration. The coding harness model is not an evaluation target.",
+  establish_evals: "Identify the real application LLM call or shared application route under evaluation and its exact incumbent application model. Infer the metrics required for that application's task from its outputs, tools, failure modes, and representative work. Before running setup, tell the user which metrics will be collected, why each matters, whether it uses repeated identical inputs, representative task instances, both, or load testing, the case and repetition counts, aggregation, any true performance threshold, and estimated evaluation cost; ask the user to confirm or edit that plan together with the target, budget, check cadence, scheduling mode, and automation permissions. Never turn a sample-count requirement into a metric-value constraint. Rate, distribution, reliability, percentile, variance, and average claims require multiple runs. Build runnable task-specific evaluation cases and application-call collectors for every confirmed metric. Execute a representative smoke run through the same application authentication and runtime path, run the grader, and inspect actual outputs. Preserve the commands and resulting artifacts as setup evidence. Mark any metric missing if its collector or grader cannot produce a value; do not declare coverage ready based only on code existing. Do not count a setup smoke run as a production baseline sample. Return the confirmed taskProfile, incumbent, and policy. During setup, research a preliminary model shortlist with current sourced price estimates and reputation; report an empty list if no credible leads are available. These are research priors only: do not treat them as measured task results or change model configuration. The coding harness model is not an evaluation target.",
   instrument_observability: "Establish the missing observability required by the confirmed task profile. Exercise each collector and task-specific grader through a representative application run with the same authentication and runtime path, inspect actual metric outputs, and preserve verification artifacts. Report a metric covered only if that path produced its value; otherwise keep it missing. Do not count a setup smoke run as a production baseline sample.",
   run_assessment: "Assess existing application-target baseline metric windows against every required metric and sample threshold. Do not synthesize samples, count setup smoke runs as production data, or wait for new data during this check. If a required window is absent or immature, promptly return baselineEvidenceSufficient false with measured, missing, and insufficient-evidence metrics explicitly and cite the records inspected.",
   discover_candidates: "Refresh the preliminary model leads collected at setup and discover other credible candidates for the confirmed task profile using current capability, reputation, price, availability, and benchmark signals without exceeding the approved evaluation budget. Preliminary leads are research priors, not measured task evidence.",
-  run_challenger_trials: "Run comparable controlled challenger trials under the approved budget and return candidate assessments with durable evidence.",
+  run_challenger_trials: "Run a balanced, reproducible comparison of the frozen incumbent and challenger set under the approved budget. Use the same evaluation cases, application revision, prompt, tools, grader, and run count for every usable model; use a recorded seed to shuffle execution order. Attribute every run to the exact application model, preserve per-run quality, cost, token, and latency evidence, and return candidate assessments plus one durable experiment manifest. Never substitute catalogue prices for measured application-call cost.",
   calculate_frontier: "Calculate the Pareto frontier using the OpenMerit conformance definition, explain every candidate classification, and return a FrontierSnapshot with calculation evidence.",
   investigate_regression: "Investigate the observed regression and return its likely cause, affected metrics, and supporting evidence.",
   apply_model_swap: "Apply the approved model change only to the bound application LLM target and return proof of the resulting application configuration. Never change the coding harness model and do not broaden the authorized change.",
@@ -102,10 +102,16 @@ export function createOpenMeritIntent(kind: IntentKind, options: IntentFactoryOp
       ? [
           { id: "task-profile", description: "The inferred task profile and the user constraints it represents." },
           { id: "application-target", description: "The user-confirmed application LLM call or shared route, including stable call-site and route identifiers." },
+          { id: "incumbent-model", description: "The exact application model configured before challenger trials." },
           { id: "evaluation-artifacts", description: "Runnable evaluation artifacts and verification results." },
           { id: "observability-coverage", description: "The observable metrics and explicit coverage gaps." },
           { id: "preliminary-model-research", description: "Sources for preliminary model pricing and reputation, or an explanation that no credible leads were found." },
         ]
+      : kind === "run_challenger_trials"
+        ? [
+            { id: "experiment-manifest", description: "A durable manifest containing the seed, frozen cases, application revision, exact model IDs, and per-run evidence." },
+            { id: "assessment-results", description: "Comparable candidate assessments tied to the active task profile." },
+          ]
       : kind === "calculate_frontier"
         ? [
             { id: "frontier-snapshot", description: "A complete harness-calculated FrontierSnapshot." },
@@ -216,13 +222,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function validateSetupOutput(output: unknown): string[] {
-  if (!isRecord(output) || !isRecord(output.taskProfile) || !isRecord(output.policy)) {
-    return ["setup output requires taskProfile and policy"];
+function validateSetupOutput(output: unknown, expectedIncumbentModelId?: string): string[] {
+  if (!isRecord(output) || !isRecord(output.taskProfile) || !isRecord(output.incumbent) || !isRecord(output.policy)) {
+    return ["setup output requires taskProfile, incumbent, and policy"];
   }
   const profile = output.taskProfile;
   const policy = output.policy;
   const errors: string[] = [];
+  if (expectedIncumbentModelId && output.incumbent.modelId !== expectedIncumbentModelId) {
+    errors.push(`incumbent model ${String(output.incumbent.modelId)} does not match the application source model ${expectedIncumbentModelId}`);
+  }
   if (typeof profile.id !== "string" || typeof profile.name !== "string" ||
       typeof profile.goal !== "string" || !Number.isInteger(profile.revision) ||
       typeof profile.confirmedAt !== "string" || !Array.isArray(profile.objectives) ||
@@ -237,6 +246,35 @@ function validateSetupOutput(output: unknown): string[] {
         errors.push("taskProfile contains an invalid metric objective");
         break;
       }
+      const samplingPlan = objective.samplingPlan;
+      if (!isRecord(samplingPlan) || typeof samplingPlan.strategy !== "string" ||
+          !Number.isInteger(samplingPlan.representativeCaseCount) || (samplingPlan.representativeCaseCount as number) < 1 ||
+          !Number.isInteger(samplingPlan.repetitionsPerCase) || (samplingPlan.repetitionsPerCase as number) < 1 ||
+          typeof samplingPlan.aggregation !== "string" || typeof samplingPlan.rationale !== "string" ||
+          !samplingPlan.rationale.trim()) {
+        errors.push(`${objective.metricId} requires a complete sampling plan`);
+        continue;
+      }
+      const plannedSamples = (samplingPlan.representativeCaseCount as number) *
+        (samplingPlan.repetitionsPerCase as number);
+      if ((objective.minimumSamples as number) < plannedSamples) {
+        errors.push(`${objective.metricId} minimumSamples must cover its sampling plan`);
+      }
+      const aggregateClaim = ["mean", "rate", "distribution", "percentile"].includes(
+        samplingPlan.aggregation as string,
+      );
+      const metricDefinition = METRIC_CATALOG.find((metric) => metric.id === objective.metricId);
+      if ((aggregateClaim || metricDefinition?.requiresRepeatedRuns) && plannedSamples < 2) {
+        errors.push(`${objective.metricId} requires multiple planned runs for its ${String(samplingPlan.aggregation)} claim`);
+      }
+      if ((aggregateClaim || metricDefinition?.requiresRepeatedRuns) && samplingPlan.strategy === "single_run") {
+        errors.push(`${objective.metricId} cannot use single_run for a repeated-run claim`);
+      }
+      if (isRecord(objective.constraint) &&
+          ["task_success", "structured_output_reliability", "hallucination_rate", "retry_rate", "recovery_ability", "human_intervention_rate"].includes(objective.metricId) &&
+          (typeof objective.constraint.value !== "number" || objective.constraint.value < 0 || objective.constraint.value > 1)) {
+        errors.push(`${objective.metricId} ratio constraint must be between 0 and 1`);
+      }
     }
   }
   if (!isRecord(profile.applicationTarget) || profile.applicationTarget.kind !== "application_llm_call" ||
@@ -248,6 +286,13 @@ function validateSetupOutput(output: unknown): string[] {
       profile.applicationTarget.callSites.some((callSite) => typeof callSite !== "string" || !callSite.trim())) {
     errors.push("taskProfile requires a user-confirmed application LLM target with stable call sites and route key");
   }
+  if (isRecord(profile.applicationTarget)) {
+    errors.push(...validateTargetId(output.incumbent.targetId, profile.applicationTarget.id as string, "incumbent"));
+    if (typeof output.incumbent.candidateId !== "string" || !output.incumbent.candidateId.trim() ||
+        typeof output.incumbent.modelId !== "string" || !output.incumbent.modelId.trim()) {
+      errors.push("incumbent requires stable candidateId and exact modelId");
+    }
+  }
   const budget = policy.evaluationBudget;
   if (policy.mode !== "supervised_graduation" || !isRecord(budget) ||
       typeof budget.currency !== "string" || typeof budget.maximumSpend !== "number" ||
@@ -255,6 +300,17 @@ function validateSetupOutput(output: unknown): string[] {
       !Number.isInteger(policy.confirmationRequiredUntilVerifiedSwaps) ||
       policy.requirePostSwapVerification !== true || typeof policy.rollbackOnRegression !== "boolean") {
     errors.push("policy must be a valid supervised-graduation policy with an evaluation budget");
+  }
+  const checkPolicy = policy.checkPolicy;
+  if (!isRecord(checkPolicy) || !isRecord(checkPolicy.baselineAssessment) ||
+      (typeof checkPolicy.baselineAssessment.afterCompletedTasks !== "number" &&
+        typeof checkPolicy.baselineAssessment.afterElapsedSeconds !== "number")) {
+    errors.push("policy requires a baseline assessment cadence");
+  }
+  if (!isRecord(checkPolicy) || !isRecord(checkPolicy.postSwapVerification) ||
+      (typeof checkPolicy.postSwapVerification.afterCompletedTasks !== "number" &&
+        typeof checkPolicy.postSwapVerification.afterElapsedSeconds !== "number")) {
+    errors.push("policy requires a post-swap verification cadence");
   }
   if (!isRecord(output.observability)) {
     errors.push("setup output requires an observability coverage report");
@@ -276,6 +332,32 @@ function validateSetupOutput(output: unknown): string[] {
     }
   }
   return errors;
+}
+
+function validateMetricAggregation(metric: MetricRecord, objective?: MetricObjective): string[] {
+  const errors: string[] = [];
+  if (metric.metricId === "total_task_cost" && metric.state === "measured" &&
+      metric.scope === "sample_window" && metric.aggregation !== "sum") {
+    errors.push("total_task_cost sample windows must use sum aggregation because the value is used for evaluation-budget accounting");
+  }
+  if (objective?.samplingPlan && metric.state === "measured" &&
+      metric.aggregation !== objective.samplingPlan.aggregation &&
+      !(objective.metricId === "total_task_cost" && metric.aggregation === "sum")) {
+    errors.push(`${objective.metricId} aggregation ${metric.aggregation} does not match its sampling plan ${objective.samplingPlan.aggregation}`);
+  }
+  return errors;
+}
+
+function validateMetricWindow(metric: MetricRecord, startedAt: string, completedAt: string): string[] {
+  if (!metric.window) return [];
+  const start = Date.parse(metric.window.startedAt);
+  const end = Date.parse(metric.window.endedAt);
+  const intentStart = Date.parse(startedAt);
+  const intentEnd = Date.parse(completedAt);
+  if (![start, end, intentStart, intentEnd].every(Number.isFinite) || end < start || start < intentStart || end > intentEnd) {
+    return [`${metric.metricId} window must be valid and contained within the intent execution window`];
+  }
+  return [];
 }
 
 export function validateObservabilityCoverage(
@@ -339,6 +421,25 @@ export function interpretIntentResult(
 
   const output: unknown = result.outputs;
   errors.push(...validateIntentOutputSchema(intent.kind, output).map((error) => `result outputs ${error}`));
+  if (isRecord(output) && (intent.kind === "run_assessment" || intent.kind === "run_challenger_trials")) {
+    const profile = config.taskProfiles.find((item) => item.id === config.activeTaskProfileId);
+    const objectives = new Map((profile?.objectives ?? []).map((objective) => [objective.metricId, objective]));
+    const metricGroups = intent.kind === "run_assessment"
+      ? [{ metrics: output.metrics, startedAt: undefined, completedAt: undefined }]
+      : (Array.isArray(output.assessments) ? output.assessments.map((assessment) => isRecord(assessment)
+        ? { metrics: assessment.metrics, startedAt: assessment.startedAt, completedAt: assessment.completedAt }
+        : { metrics: undefined, startedAt: undefined, completedAt: undefined }) : []);
+    for (const group of metricGroups) {
+      const metrics = group.metrics;
+      if (!Array.isArray(metrics)) continue;
+      for (const metric of metrics) {
+        if (!isRecord(metric)) continue;
+        const typedMetric = metric as unknown as MetricRecord;
+        errors.push(...validateMetricAggregation(typedMetric, objectives.get(typedMetric.metricId)));
+        if (group.startedAt && group.completedAt) errors.push(...validateMetricWindow(typedMetric, String(group.startedAt), String(group.completedAt)));
+      }
+    }
+  }
   const target = activeTarget(config);
   if (intent.kind !== "establish_evals") {
     if (!target) errors.push("no confirmed application LLM target exists");
@@ -353,11 +454,13 @@ export function interpretIntentResult(
 
   switch (intent.kind) {
     case "establish_evals": {
-      errors.push(...validateSetupOutput(output));
+      errors.push(...validateSetupOutput(output, typeof intent.constraints.expectedIncumbentModelId === "string"
+        ? intent.constraints.expectedIncumbentModelId : undefined));
       if (!errors.length && isRecord(output)) {
         const taskProfile = output.taskProfile as unknown as TaskProfile;
         const policy = output.policy as unknown as SupervisedGraduationPolicy;
         const observability = output.observability as unknown as ObservabilityCoverage;
+        const incumbent = output.incumbent as unknown as IntentOutputMap["establish_evals"]["incumbent"];
         const preliminaryModelLeads = (output.preliminaryModelLeads ?? []) as unknown as NonNullable<IntentOutputMap["establish_evals"]["preliminaryModelLeads"]>;
         nextConfig = {
           schemaVersion: 1,
@@ -369,6 +472,7 @@ export function interpretIntentResult(
         cyclePatch = {
           targetId: taskProfile.applicationTarget.id,
           taskProfileId: taskProfile.id,
+          activeCandidateId: incumbent.candidateId,
           policy,
           baselineEvidenceSufficient: false,
           observabilityReady: observability.status === "ready",
@@ -418,17 +522,39 @@ export function interpretIntentResult(
       if (!isRecord(output) || !Array.isArray(output.candidates)) errors.push("candidate discovery requires candidates");
       else if (target) {
         errors.push(...validateTargetId(output.targetId, target.id, "candidate discovery"));
+        const candidateIds = new Set<string>();
         for (const candidate of output.candidates) {
-          if (isRecord(candidate)) errors.push(...validateTargetId(candidate.targetId, target.id, `candidate ${String(candidate.candidateId)}`));
+          if (isRecord(candidate)) {
+            errors.push(...validateTargetId(candidate.targetId, target.id, `candidate ${String(candidate.candidateId)}`));
+            if (typeof candidate.candidateId === "string") {
+              if (candidateIds.has(candidate.candidateId)) errors.push(`duplicate candidate ${candidate.candidateId}`);
+              candidateIds.add(candidate.candidateId);
+            }
+          }
+        }
+        if (cycle.activeCandidateId && !candidateIds.has(cycle.activeCandidateId)) {
+          errors.push("candidate discovery must include the incumbent application model");
+        }
+        const maximum = config.policy?.evaluationBudget.maximumCandidateCount;
+        if (maximum !== undefined && output.candidates.length > maximum) {
+          errors.push(`candidate discovery exceeds maximumCandidateCount ${maximum}`);
         }
       }
       break;
     case "run_challenger_trials":
-      if (!isRecord(output) || !Array.isArray(output.assessments)) {
-        errors.push("challenger trials require assessments");
+      if (!isRecord(output) || !Array.isArray(output.assessments) || !isRecord(output.experimentManifest)) {
+        errors.push("challenger trials require assessments and an experimentManifest");
       } else {
         if (target) errors.push(...validateTargetId(output.targetId, target.id, "challenger trials"));
+        const expectedCandidateIds = Array.isArray(intent.constraints.candidates)
+          ? new Set(intent.constraints.candidates.flatMap((candidate) =>
+              isRecord(candidate) && typeof candidate.candidateId === "string" ? [candidate.candidateId] : []))
+          : undefined;
+        const assessedCandidateIds = new Set<string>();
+        const productRevisions = new Set<string>();
         for (const assessment of output.assessments as unknown as CandidateAssessment[]) {
+          assessedCandidateIds.add(assessment.candidateId);
+          productRevisions.add(assessment.productRevision);
           if (target) {
             errors.push(...validateTargetId(assessment.targetId, target.id, `challenger assessment ${assessment.id}`));
             errors.push(...validateMetricTargets(assessment.metrics, target.id, `challenger assessment ${assessment.id}`));
@@ -441,6 +567,12 @@ export function interpretIntentResult(
             errors.push(`challenger assessment ${assessment.id} requires exactly one measured total_task_cost with evidence`);
           }
         }
+        if (expectedCandidateIds &&
+            (expectedCandidateIds.size !== assessedCandidateIds.size ||
+              [...expectedCandidateIds].some((candidateId) => !assessedCandidateIds.has(candidateId)))) {
+          errors.push("challenger assessments must exactly cover the frozen candidate set");
+        }
+        if (productRevisions.size !== 1) errors.push("challenger assessments must use one application product revision");
       }
       break;
     case "calculate_frontier": {
@@ -454,6 +586,16 @@ export function interpretIntentResult(
         break;
       }
       errors.push(...validateTargetId(output.targetId, profile.applicationTarget.id, "frontier result"));
+      const expectedAssessmentIds = Array.isArray(intent.constraints.assessments)
+        ? new Set(intent.constraints.assessments.flatMap((assessment) =>
+            isRecord(assessment) && typeof assessment.id === "string" ? [assessment.id] : []))
+        : undefined;
+      const suppliedAssessmentIds = new Set((output.assessments as unknown as CandidateAssessment[]).map((assessment) => assessment.id));
+      if (expectedAssessmentIds &&
+          (expectedAssessmentIds.size !== suppliedAssessmentIds.size ||
+            [...expectedAssessmentIds].some((assessmentId) => !suppliedAssessmentIds.has(assessmentId)))) {
+        errors.push("frontier calculation must use exactly the accepted challenger assessments");
+      }
       const verification = verifyFrontierSnapshot(
         profile,
         output.assessments as unknown as CandidateAssessment[],
@@ -469,6 +611,8 @@ export function interpretIntentResult(
           errors.push("recommended candidate is not on the verified frontier");
         } else if (output.recommendation.targetId !== profile.applicationTarget.id) {
           errors.push("frontier recommendation target does not match the confirmed application LLM target");
+        } else if (cycle.activeCandidateId && output.recommendation.currentCandidateId !== cycle.activeCandidateId) {
+          errors.push("frontier recommendation current candidate does not match the incumbent application model");
         } else {
           cyclePatch = { proposedCandidateId: output.recommendation.selectedCandidateId as string };
         }
@@ -603,10 +747,13 @@ function readinessErrors(profile: TaskProfile, assessment: CandidateAssessment):
     if (!objective.required) continue;
     const metric = metricFor(assessment, objective);
     if (!metric) errors.push(`${objective.metricId}: missing`);
-    else if (metric.state !== "measured") errors.push(`${objective.metricId}: ${metric.state}`);
-    else if (metric.value === undefined) errors.push(`${objective.metricId}: no numeric value`);
-    else if (metric.sampleCount < objective.minimumSamples) {
-      errors.push(`${objective.metricId}: ${metric.sampleCount}/${objective.minimumSamples} samples`);
+    else {
+      if (metric.state !== "measured") errors.push(`${objective.metricId}: ${metric.state}`);
+      else if (metric.value === undefined) errors.push(`${objective.metricId}: no numeric value`);
+      errors.push(...validateMetricAggregation(metric, objective));
+      if (metric.sampleCount < objective.minimumSamples) {
+        errors.push(`${objective.metricId}: ${metric.sampleCount}/${objective.minimumSamples} samples`);
+      }
     }
   }
   return errors;
@@ -623,11 +770,14 @@ function baselineReadinessErrors(profile: TaskProfile | undefined, metrics: read
     const metric = metrics.find((item) => item.metricId === objective.metricId &&
       item.targetId === profile.applicationTarget.id);
     if (!metric) errors.push(`${objective.metricId}: missing`);
-    else if (metric.state !== "measured") errors.push(`${objective.metricId}: ${metric.state}`);
-    else if (metric.value === undefined || !Number.isFinite(metric.value)) errors.push(`${objective.metricId}: no finite numeric value`);
-    else if (metric.sampleCount < objective.minimumSamples) {
-      errors.push(`${objective.metricId}: ${metric.sampleCount}/${objective.minimumSamples} samples`);
-    } else if (!metric.evidence.length) errors.push(`${objective.metricId}: no evidence reference`);
+    else {
+      if (metric.state !== "measured") errors.push(`${objective.metricId}: ${metric.state}`);
+      else if (metric.value === undefined || !Number.isFinite(metric.value)) errors.push(`${objective.metricId}: no finite numeric value`);
+      errors.push(...validateMetricAggregation(metric, objective));
+      if (metric.sampleCount < objective.minimumSamples) {
+        errors.push(`${objective.metricId}: ${metric.sampleCount}/${objective.minimumSamples} samples`);
+      } else if (!metric.evidence.length) errors.push(`${objective.metricId}: no evidence reference`);
+    }
   }
   return errors;
 }
@@ -1147,7 +1297,29 @@ export class OpenMeritCoordinator {
         ...options.additionalConstraints,
         ...(confirmedProfile ? { taskProfile: confirmedProfile as unknown as JsonValue } : {}),
         ...(kind === "discover_candidates"
-          ? { preliminaryModelLeads: (config.preliminaryModelLeads ?? []) as unknown as JsonValue }
+          ? {
+              preliminaryModelLeads: (config.preliminaryModelLeads ?? []) as unknown as JsonValue,
+              incumbentCandidate: (existing?.candidates?.find((candidate) =>
+                candidate.candidateId === existing.cycle.activeCandidateId) ?? existing?.candidates?.[0]) as unknown as JsonValue,
+              candidateSelection: {
+                totalCandidateCount: Math.min(3, config.policy?.evaluationBudget.maximumCandidateCount ?? 3),
+                includeIncumbent: true,
+                requireAvailabilityProbe: true,
+                requireExactModelIds: true,
+                requirePriceAndCapabilitySources: true,
+              },
+            }
+          : {}),
+        ...(kind === "run_challenger_trials"
+          ? { candidates: (existing?.candidates ?? []) as unknown as JsonValue }
+          : {}),
+        ...(kind === "calculate_frontier"
+          ? {
+              assessments: (existing?.assessments ?? []) as unknown as JsonValue,
+              ...(existing?.experimentManifest
+                ? { experimentManifest: existing.experimentManifest as unknown as JsonValue }
+                : {}),
+            }
           : {}),
       },
     });
@@ -1155,8 +1327,30 @@ export class OpenMeritCoordinator {
     const state: OpenMeritProjectState = existing
       ? {
           ...existing,
-          cycle: { ...existing.cycle, stage: startedStage(kind) },
+          cycle: kind === "establish_evals"
+            ? {
+                ...existing.cycle,
+                id: `cycle-${crypto.randomUUID()}`,
+                targetId: undefined,
+                taskProfileId: undefined,
+                activeCandidateId: undefined,
+                previousCandidateId: undefined,
+                proposedCandidateId: undefined,
+                stage: startedStage(kind),
+                verifiedSwapCount: 0,
+                baselineEvidenceSufficient: false,
+                observabilityReady: false,
+                policy: undefined,
+              }
+            : { ...existing.cycle, stage: startedStage(kind) },
           activeIntent: intent,
+          ...(kind === "establish_evals" ? {
+            candidates: undefined,
+            assessments: undefined,
+            experimentManifest: undefined,
+            observability: undefined,
+            lastResult: undefined,
+          } : {}),
           automation: {
             ...existing.automation,
             ...(existing.automation.pendingIntentKind === kind
@@ -1315,6 +1509,18 @@ export class OpenMeritCoordinator {
       },
       activeIntent: undefined,
       lastResult: result,
+      ...(result.status === "succeeded" && state.activeIntent.kind === "establish_evals"
+        ? { candidates: [(result.outputs as IntentOutputMap["establish_evals"]).incumbent] }
+        : {}),
+      ...(result.status === "succeeded" && state.activeIntent.kind === "discover_candidates"
+        ? { candidates: (result.outputs as IntentOutputMap["discover_candidates"]).candidates }
+        : {}),
+      ...(result.status === "succeeded" && state.activeIntent.kind === "run_challenger_trials"
+        ? {
+            assessments: (result.outputs as IntentOutputMap["run_challenger_trials"]).assessments,
+            experimentManifest: (result.outputs as IntentOutputMap["run_challenger_trials"]).experimentManifest,
+          }
+        : {}),
       ...(observability ? { observability } : {}),
       automation: {
         ...state.automation,

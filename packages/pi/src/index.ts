@@ -81,6 +81,11 @@ export interface OpenMeritUiState {
   activeIntent: string | null;
   nextAssessment: string | null;
   lifecycleStage: ImprovementStage | "not_initialized";
+  incumbentCandidate: string | null;
+  candidateCount: number;
+  assessmentCount: number;
+  evaluationSpend: number;
+  proposedCandidate: string | null;
 }
 
 export function createInitialUiState(): OpenMeritUiState {
@@ -93,6 +98,11 @@ export function createInitialUiState(): OpenMeritUiState {
     activeIntent: null,
     nextAssessment: null,
     lifecycleStage: "not_initialized",
+    incumbentCandidate: null,
+    candidateCount: 0,
+    assessmentCount: 0,
+    evaluationSpend: 0,
+    proposedCandidate: null,
   };
 }
 
@@ -106,6 +116,11 @@ export function renderStatus(state: OpenMeritUiState): string {
     `active work        : ${state.activeIntent ?? "none"}`,
     `next assessment    : ${state.nextAssessment ?? "not scheduled"}`,
     `frontier lifecycle : ${state.lifecycleStage.replaceAll("_", " ")}`,
+    `incumbent candidate: ${state.incumbentCandidate ?? "not confirmed"}`,
+    `candidate set      : ${state.candidateCount}`,
+    `assessments        : ${state.assessmentCount}`,
+    `evaluation spend   : $${state.evaluationSpend.toFixed(6)}`,
+    `proposed candidate : ${state.proposedCandidate ?? "none"}`,
     `proactive nudges   : ${state.proactiveNudgesPaused ? "paused" : "enabled"}`,
   ].join("\n");
 }
@@ -117,6 +132,7 @@ export interface DetectedApplicationLlmTarget {
   readonly applicationId: string;
   readonly callSites: readonly string[];
   readonly routeKey: string;
+  readonly configuredModelId?: string;
 }
 
 const DETECTION_IGNORES = new Set([
@@ -129,7 +145,7 @@ const APPLICATION_CALL_PATTERNS = [
   { provider: "google", pattern: /\bgenerateContent(?:Stream)?\s*\(/ },
   { provider: "vercel-ai", pattern: /\b(?:generateText|streamText|generateObject|streamObject)\s*\(/ },
   { provider: "langchain", pattern: /\b(?:ChatOpenAI|ChatAnthropic|ChatGoogleGenerativeAI)\s*\(/ },
-  { provider: "openrouter", pattern: /openrouter\.ai\/api\/v1\/(?:chat\/completions|responses)/ },
+  { provider: "openrouter", pattern: /openrouter\.ai\/api\/v1[\s\S]{0,5000}\/(?:chat\/completions|responses)/ },
 ] as const;
 
 function extensionOf(path: string): string {
@@ -181,6 +197,9 @@ export function detectApplicationLlmTargets(projectRoot: string): readonly Detec
         applicationId,
         callSites: [`${projectPath}:${line}`],
         routeKey: `${projectPath}#${provider}`,
+        ...((source.match(/(?:DEFAULT_MODEL|defaultModel|model)\s*=\s*["'`]([^"'`]+)["'`]/)?.[1])
+          ? { configuredModelId: source.match(/(?:DEFAULT_MODEL|defaultModel|model)\s*=\s*["'`]([^"'`]+)["'`]/)![1] }
+          : {}),
       });
     }
   }
@@ -195,6 +214,7 @@ function detectedTargetsConstraint(targets: readonly DetectedApplicationLlmTarge
     applicationId: target.applicationId,
     callSites: [...target.callSites],
     routeKey: target.routeKey,
+    ...(target.configuredModelId ? { configuredModelId: target.configuredModelId } : {}),
   }));
 }
 
@@ -276,8 +296,11 @@ function privateIntentMessage(intent: OpenMeritIntent): string {
     intent.targetId
       ? `Every result and metric must reference application target ${intent.targetId}.`
       : "Before setup succeeds, identify an actual application LLM call or shared application route and ask the user to confirm its stable target ID, call sites, and route key.",
-    "Instrument every required metric selected by the user. For setup or instrumentation, actually run each task-specific grader and collector through the application path with working provider authentication, inspect the resulting metric values, and cite the run artifacts. Report explicit covered and missing metric IDs; never describe observability as ready when a required metric cannot be produced. A setup smoke run is verification, not a production baseline sample.",
+    "For setup, infer task-relevant metrics from the application rather than requiring the user to invent them. Before any setup run, show the user the proposed metrics, rationale, sampling strategy, representative case count, repetitions per case, aggregation, true performance thresholds if any, and estimated cost, then obtain confirmation or edits. Rate, reliability, distribution, percentile, variance, and average claims require multiple runs. Distinguish repeating the same input for stochastic variance from running representative task instances for category performance; use both when the claim needs both. minimumSamples is evidence quantity and must never be copied into constraint.value. A constraint is optional and represents only a real metric threshold in that metric's unit. For an active-session demo, default baselineAssessment and postSwapVerification to afterCompletedTasks: 1 unless the user changes the cadence; never return an empty cadence. Instrument every confirmed required metric. For setup or instrumentation, actually run each task-specific grader and collector through the application path with working provider authentication, inspect the resulting metric values, and cite the run artifacts. Report explicit covered and missing metric IDs; never describe observability as ready when a required metric cannot be produced. A setup smoke run is verification, not a production baseline sample.",
     "Capture cost, token use, and task latency from the application LLM provider or application observability. Do not substitute Pi provider telemetry or zero for unavailable application telemetry.",
+    intent.kind === "instrument_observability"
+      ? "For instrumentation, execute the confirmed application target itself and return one measured MetricRecord for every covered required metric. Map provider/application usage fields to input_token_consumption and cost_per_successful_task, use the exact metric IDs and objective aggregation, include sampleCount and valid startedAt/completedAt windows, and attach durable observability_record or harness_trace evidence. Do not merely describe telemetry or add arbitrary fields to the application response; those do not count until converted into MetricRecords in the completion result."
+      : "",
     "Tool-use performance must be derived from tool-call traces and outcomes; code coverage is not tool-use evidence.",
     intent.constraints.modelMutationAllowed
       ? `This intent authorizes only the application model mutation for target ${intent.targetId ?? "(missing target)"}. Never change Pi's model.`
@@ -364,6 +387,37 @@ async function reportAutomationSignal(
   prepareCompletionTool: (kind: IntentKind) => void,
 ): Promise<void> {
   const result = await new OpenMeritCoordinator(store, piHarnessAdapter(pi, ctx)).recordAutomationSignal(signal);
+  const persistedState = state.activeIntent ? await store.readState() : undefined;
+  if (state.activeIntent && persistedState?.activeIntent?.kind === "instrument_observability" && signal.type === "metric_window_available") {
+    const projectConfig = await store.readConfig();
+    const profile = projectConfig?.taskProfiles.find((item) => item.id === projectConfig.activeTaskProfileId);
+    const requiredObjectives = profile?.objectives.filter((item) => item.required) ?? [];
+    const measuredMetricIds = new Set(signal.metrics
+      .filter((metric) => metric.targetId === signal.targetId && metric.state === "measured" && metric.value !== undefined && metric.sampleCount > 0 && metric.evidence.length > 0)
+      .map((metric) => metric.metricId));
+    const coveredMetricIds = requiredObjectives.filter((objective) => measuredMetricIds.has(objective.metricId)).map((objective) => objective.metricId);
+    const missingMetricIds = requiredObjectives.filter((objective) => !measuredMetricIds.has(objective.metricId)).map((objective) => objective.metricId);
+    const evidence = [...new Map(signal.metrics.flatMap((metric) => metric.evidence).map((item) => [item.id, item])).values()];
+    const completion = {
+      protocolVersion: PROTOCOL_VERSION,
+      intentId: state.activeIntent,
+      status: "succeeded" as const,
+      completedAt: new Date().toISOString(),
+      summary: `Instrumentation verified ${coveredMetricIds.length} required metric(s); ${missingMetricIds.length} remain missing.`,
+      evidence,
+      outputs: {
+        targetId: signal.targetId,
+        coveredMetricIds,
+        missingMetricIds,
+      },
+    } as unknown as AnyIntentResult;
+    const accepted = await new OpenMeritCoordinator(store, piHarnessAdapter(pi, ctx)).acceptResult(completion);
+    state.activeIntent = null;
+    state.lifecycleStage = accepted.state.cycle.stage;
+    state.metricReadiness = accepted.state.observability?.status === "ready" ? "assessed" : "pending";
+    prepareCompletionTool("instrument_observability");
+    return;
+  }
   if (result.decision.action === "issue_intent" && !state.activeIntent) {
     await dispatchIntent(pi, ctx, state, store, result.decision.intentKind, prepareCompletionTool);
   }
@@ -461,6 +515,11 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
         const stage = nextState.cycle.stage;
         state.activeIntent = null;
         state.lifecycleStage = stage;
+        state.incumbentCandidate = nextState.cycle.activeCandidateId ?? null;
+        state.candidateCount = nextState.candidates?.length ?? 0;
+        state.assessmentCount = nextState.assessments?.length ?? 0;
+        state.evaluationSpend = nextState.automation.evaluationSpend ?? 0;
+        state.proposedCandidate = nextState.cycle.proposedCandidateId ?? null;
         registerCompletionTool();
         state.nextAssessment = accepted.automation.plan.nextWakeupAt ??
           (accepted.automation.plan.scheduling === "external_scheduler_required" ? "external scheduler required" : "signal driven");
@@ -578,6 +637,27 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
     return { action: "handled" };
   });
 
+  // A fresh demo can start in an empty directory. Re-scan only after Pi has
+  // settled the user's build turn, so setup sees a complete application call
+  // instead of racing partially written files.
+  pi.on("turn_end", async (_event, ctx) => {
+    if (!ctx.hasUI || state.proactiveNudgesPaused || state.activeIntent) return;
+    store ??= new ProjectStore(ctx.cwd);
+    const projectState = await store.readState();
+    if (projectState?.cycle.targetId || (projectState && projectState.cycle.stage !== "unconfigured")) return;
+    const detectedApplicationTargets = detectApplicationLlmTargets(ctx.cwd);
+    if (!detectedApplicationTargets.length) return;
+    ctx.ui.notify(
+      `openmerit: detected ${detectedApplicationTargets.length} application LLM target candidate(s) after the build; starting evidence setup`,
+      "info",
+    );
+    await dispatchIntent(pi, ctx, state, store, "establish_evals", registerCompletionTool, {
+      applicationTargetRequired: true,
+      detectedApplicationTargets: detectedTargetsConstraint(detectedApplicationTargets),
+      ...(detectedApplicationTargets.length === 1 && detectedApplicationTargets[0].configuredModelId ? { expectedIncumbentModelId: detectedApplicationTargets[0].configuredModelId } : {}),
+    });
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     store = new ProjectStore(ctx.cwd);
     let projectState = await store.readState();
@@ -585,11 +665,26 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
       state.lifecycleStage = projectState.cycle.stage;
       state.proactiveNudgesPaused = projectState.automation.paused === true;
       state.activeIntent = projectState.activeIntent?.id ?? null;
-      if (projectState.activeIntent) registerCompletionTool(projectState.activeIntent.kind);
+      if (projectState.activeIntent) {
+        registerCompletionTool(projectState.activeIntent.kind);
+        if (ctx.hasUI || ctx.mode === "rpc") {
+          pi.sendMessage({
+            customType: INTENT_MESSAGE_TYPE,
+            content: privateIntentMessage(projectState.activeIntent),
+            display: false,
+            details: { intentId: projectState.activeIntent.id, kind: projectState.activeIntent.kind, resumed: true },
+          }, { deliverAs: "followUp", triggerTurn: true });
+        }
+      }
       state.applicationTarget = projectState.cycle.targetId ? "confirmed" : "not_detected";
       state.taskProfile = projectState.cycle.taskProfileId ? "configured" : "not_configured";
       state.metricReadiness = projectState.observability?.status === "ready" ? "assessed" : "pending";
       state.evaluationReadiness = projectState.cycle.taskProfileId ? "assessed" : "not_assessed";
+      state.incumbentCandidate = projectState.cycle.activeCandidateId ?? null;
+      state.candidateCount = projectState.candidates?.length ?? 0;
+      state.assessmentCount = projectState.assessments?.length ?? 0;
+      state.evaluationSpend = projectState.automation.evaluationSpend ?? 0;
+      state.proposedCandidate = projectState.cycle.proposedCandidateId ?? null;
       if (!projectState.cycle.targetId) {
         if (ctx.hasUI && !state.proactiveNudgesPaused && projectState.cycle.stage === "unconfigured") {
           const detectedApplicationTargets = detectApplicationLlmTargets(ctx.cwd);
@@ -597,6 +692,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
             await dispatchIntent(pi, ctx, state, store, "establish_evals", registerCompletionTool, {
               applicationTargetRequired: true,
               detectedApplicationTargets: detectedTargetsConstraint(detectedApplicationTargets),
+              ...(detectedApplicationTargets.length === 1 && detectedApplicationTargets[0].configuredModelId ? { expectedIncumbentModelId: detectedApplicationTargets[0].configuredModelId } : {}),
             });
           }
         } else if (state.proactiveNudgesPaused) {
@@ -643,9 +739,10 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
         await dispatchIntent(pi, ctx, state, store, "establish_evals", registerCompletionTool, {
           applicationTargetRequired: true,
           detectedApplicationTargets: detectedTargetsConstraint(detectedApplicationTargets),
+          ...(detectedApplicationTargets.length === 1 && detectedApplicationTargets[0].configuredModelId ? { expectedIncumbentModelId: detectedApplicationTargets[0].configuredModelId } : {}),
         });
       } else {
-        ctx.ui.notify("openmerit: no application LLM call detected; automatic setup remains idle (use /openmerit setup to inspect manually)", "info");
+        ctx.ui.notify("openmerit: no application LLM call detected yet; automatic setup will check again after Pi finishes a build turn (/openmerit setup is available for recovery)", "info");
       }
     }
     if (projectState?.activeIntent) {
@@ -667,10 +764,14 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
           return;
         case "setup":
           store ??= new ProjectStore(ctx.cwd);
-          await dispatchIntent(pi, ctx, state, store, "establish_evals", registerCompletionTool, {
+          {
+            const detectedApplicationTargets = detectApplicationLlmTargets(ctx.cwd);
+            await dispatchIntent(pi, ctx, state, store, "establish_evals", registerCompletionTool, {
             applicationTargetRequired: true,
-            detectedApplicationTargets: detectedTargetsConstraint(detectApplicationLlmTargets(ctx.cwd)),
-          });
+            detectedApplicationTargets: detectedTargetsConstraint(detectedApplicationTargets),
+            ...(detectedApplicationTargets.length === 1 && detectedApplicationTargets[0].configuredModelId ? { expectedIncumbentModelId: detectedApplicationTargets[0].configuredModelId } : {}),
+            });
+          }
           return;
         case "assess":
           store ??= new ProjectStore(ctx.cwd);

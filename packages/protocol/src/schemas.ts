@@ -46,6 +46,16 @@ export const MetricObjectiveSchema = strictObject({
   required: Type.Boolean(),
   minimumSamples: Type.Integer({ minimum: 1 }),
   tolerance: Type.Number({ minimum: 0 }),
+  samplingPlan: strictObject({
+    strategy: stringEnum([
+      "single_run", "repeated_same_input", "representative_task_set",
+      "repeated_representative_task_set", "load_test",
+    ] as const),
+    representativeCaseCount: Type.Integer({ minimum: 1 }),
+    repetitionsPerCase: Type.Integer({ minimum: 1 }),
+    aggregation: stringEnum(["single_value", "mean", "rate", "distribution", "percentile"] as const),
+    rationale: Type.String({ minLength: 1 }),
+  }),
   constraint: Type.Optional(strictObject({
     operator: stringEnum(["at_least", "at_most"] as const),
     value: Type.Number(),
@@ -131,6 +141,7 @@ export const MetricRecordSchema = strictObject({
   scope: stringEnum(["single_run", "sample_window"] as const),
   direction: stringEnum(["maximize", "minimize"] as const),
   method: stringEnum(["observed", "derived", "evaluator", "human", "external"] as const),
+  aggregation: stringEnum(["single_value", "sum", "mean", "rate", "distribution", "percentile"] as const),
   value: Type.Optional(Type.Number()),
   unit: Type.String({ minLength: 1 }),
   sampleCount: Type.Integer({ minimum: 0 }),
@@ -221,6 +232,7 @@ export const FrontierRecommendationSchema = strictObject({
 export const INTENT_OUTPUT_SCHEMAS = {
   establish_evals: strictObject({
     taskProfile: ConfirmedTaskProfileSchema,
+    incumbent: CandidateDescriptorSchema,
     policy: SupervisedGraduationPolicySchema,
     observability: ObservabilityCoverageSchema,
     preliminaryModelLeads: Type.Optional(Type.Array(PreliminaryModelLeadSchema)),
@@ -242,6 +254,7 @@ export const INTENT_OUTPUT_SCHEMAS = {
   run_challenger_trials: strictObject({
     targetId: Type.String({ minLength: 1 }),
     assessments: Type.Array(CandidateAssessmentSchema),
+    experimentManifest: EvidenceReferenceSchema,
   }),
   calculate_frontier: strictObject({
     targetId: Type.String({ minLength: 1 }),

@@ -9,9 +9,9 @@ The first contract slice models an intent as a durable job:
 - Terminal results refer to durable evidence rather than embedding arbitrary traces.
 - All cross-boundary values remain JSON-safe.
 
-The metric contract includes the complete initial catalogue, normalized metric records, task objectives, candidate assessments, dominance comparisons, and versioned frontier snapshots. Missing evidence is represented explicitly and never coerced to zero.
+The metric contract includes the complete initial catalogue, normalized metric records, task objectives with explicit sampling plans, candidate assessments, dominance comparisons, and versioned frontier snapshots. Sampling plans distinguish single runs, repeated identical inputs, representative task sets, repeated representative sets, and load tests. Every metric record declares its aggregation; total cost windows use `sum` for budget accounting. Missing evidence is represented explicitly and never coerced to zero.
 
-Every profile confirms the application LLM call under evaluation. Metrics, candidates, assessments, frontier artifacts, swaps, and automation signals carry that target identity; a harness's own model usage is orchestration data rather than application evidence.
+Every profile confirms the application LLM call under evaluation. Setup also identifies the exact incumbent application candidate. Metrics, candidates, assessments, frontier artifacts, swaps, and automation signals carry that target identity; a harness's own model usage is orchestration data rather than application evidence. Challenger results include a durable experiment manifest so later frontier calculation can use the accepted comparison rather than reconstructing it from conversation history.
 
 `HarnessDescriptor` and `HarnessCapability` support capability negotiation. `IntentOutputMap` defines the required output for every intent kind so adapters do not rely on Pi-specific undocumented JSON.
 

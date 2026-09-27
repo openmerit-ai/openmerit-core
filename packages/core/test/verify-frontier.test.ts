@@ -27,9 +27,12 @@ const profile: TaskProfile = {
   createdAt: "2026-09-22T00:00:00.000Z",
   confirmedAt: "2026-09-22T00:01:00.000Z",
   objectives: [
-    { metricId: "task_quality", required: true, minimumSamples: 5, tolerance: 0 },
-    { metricId: "total_task_cost", required: true, minimumSamples: 5, tolerance: 0 },
-    { metricId: "end_to_end_task_latency", required: true, minimumSamples: 5, tolerance: 0 },
+    { metricId: "task_quality", required: true, minimumSamples: 5, tolerance: 0,
+      samplingPlan: { strategy: "representative_task_set", representativeCaseCount: 5, repetitionsPerCase: 1, aggregation: "mean", rationale: "Measure quality across representative tasks." } },
+    { metricId: "total_task_cost", required: true, minimumSamples: 5, tolerance: 0,
+      samplingPlan: { strategy: "representative_task_set", representativeCaseCount: 5, repetitionsPerCase: 1, aggregation: "mean", rationale: "Measure average task cost." } },
+    { metricId: "end_to_end_task_latency", required: true, minimumSamples: 5, tolerance: 0,
+      samplingPlan: { strategy: "representative_task_set", representativeCaseCount: 5, repetitionsPerCase: 1, aggregation: "mean", rationale: "Measure average task latency." } },
   ],
 };
 
@@ -41,6 +44,7 @@ function metric(id: MetricId, value: number): MetricRecord {
     scope: "sample_window",
     direction: id === "task_quality" ? "maximize" : "minimize",
     method: "derived",
+    aggregation: id === "total_task_cost" ? "sum" : "mean",
     value,
     unit: id === "task_quality" ? "score" : id === "total_task_cost" ? "usd" : "milliseconds",
     sampleCount: 10,

@@ -64,9 +64,17 @@ const portableProfile = {
   name: "Portable task",
   goal: "Prove a second harness can integrate",
   applicationTarget,
-  objectives: [{ metricId: "task_success" as const, required: true, minimumSamples: 3, tolerance: 0 }],
+  objectives: [{ metricId: "task_success" as const, required: true, minimumSamples: 3, tolerance: 0,
+    samplingPlan: { strategy: "representative_task_set" as const, representativeCaseCount: 3, repetitionsPerCase: 1, aggregation: "rate" as const, rationale: "Measure representative task success." } }],
   createdAt: "2026-09-22T00:00:00.000Z",
   confirmedAt: "2026-09-22T00:00:30.000Z",
+};
+
+const incumbent = {
+  targetId: applicationTarget.id,
+  candidateId: "candidate-a",
+  modelId: "vendor/model-a",
+  reasons: ["Configured application model"],
 };
 
 test("a non-Pi harness can receive canonical OpenMerit intents", async () => {
@@ -149,6 +157,7 @@ test("shared core validates and interprets setup results from any harness", () =
       taskProfile: {
         ...portableProfile,
       },
+      incumbent,
       policy: {
         mode: "supervised_graduation",
         evaluationBudget: { currency: "USD", maximumSpend: 5 },
@@ -198,14 +207,80 @@ test("shared core validates and interprets setup results from any harness", () =
   assert.equal(interpreted.nextStage, "collecting_baseline");
   assert.equal(interpreted.config?.activeTaskProfileId, "profile-portable");
   assert.equal(interpreted.cyclePatch?.taskProfileId, "profile-portable");
+  assert.equal(interpreted.cyclePatch?.activeCandidateId, "candidate-a");
   assert.equal(interpreted.config?.preliminaryModelLeads?.[0]?.modelId, "vendor/model-a");
   assert.equal(interpreted.cyclePatch?.baselineEvidenceSufficient, false);
+});
+
+test("setup rejects sample counts reused as impossible ratio thresholds", () => {
+  const intent = createOpenMeritIntent("establish_evals", { id: "intent-invalid-ratio-threshold" });
+  const malformedProfile = {
+    ...portableProfile,
+    objectives: [{
+      ...portableProfile.objectives[0]!,
+      minimumSamples: 1,
+      samplingPlan: {
+        strategy: "single_run" as const,
+        representativeCaseCount: 1,
+        repetitionsPerCase: 1,
+        aggregation: "rate" as const,
+        rationale: "Invalid single-run rate claim used to exercise validation.",
+      },
+      constraint: { operator: "at_least" as const, value: 3 },
+    }],
+  };
+  const result = {
+    protocolVersion: "0.1" as const,
+    intentId: intent.id,
+    status: "succeeded" as const,
+    completedAt: "2026-09-22T00:01:00.000Z",
+    summary: "Configured",
+    evidence: [{ id: "eval", source: "evaluation_artifact" as const, uri: "artifact://fake/eval" }],
+    outputs: {
+      taskProfile: malformedProfile,
+      incumbent,
+      policy: {
+        mode: "supervised_graduation" as const,
+        evaluationBudget: { currency: "USD", maximumSpend: 5 },
+        automaticSwapsEnabled: false,
+        confirmationRequiredUntilVerifiedSwaps: 2,
+        requirePostSwapVerification: true as const,
+        rollbackOnRegression: true,
+        checkPolicy: {
+          baselineAssessment: { afterCompletedTasks: 1 },
+          frontierReassessment: { onModelCatalogChange: false },
+          regressionCheck: { thresholds: [] },
+          postSwapVerification: { afterCompletedTasks: 1 },
+          cooldownSeconds: 0,
+          execution: { mode: "active_session_only" as const, infrastructureChangesAllowed: false },
+        },
+      },
+      observability: {
+        targetId: applicationTarget.id,
+        status: "ready" as const,
+        requiredMetricIds: ["task_success" as const],
+        coveredMetricIds: ["task_success" as const],
+        missingMetricIds: [],
+        checkedAt: "2026-09-22T00:00:30.000Z",
+      },
+    },
+  };
+  const interpreted = interpretIntentResult(
+    intent,
+    result,
+    { id: "cycle", stage: "establishing_evidence", verifiedSwapCount: 0, baselineEvidenceSufficient: false },
+    { schemaVersion: 1, taskProfiles: [] },
+  );
+  assert.match(interpreted.errors.join("; "), /requires multiple planned runs/);
+  assert.match(interpreted.errors.join("; "), /cannot use single_run/);
+  assert.match(interpreted.errors.join("; "), /ratio constraint must be between 0 and 1/);
 });
 
 test("preliminary leads cannot name another target or duplicate a model", () => {
   const intent = createOpenMeritIntent("establish_evals", { id: "intent-leads" });
   const outputs = {
     taskProfile: portableProfile,
+    incumbent,
     policy: {
       mode: "supervised_graduation" as const,
       evaluationBudget: { currency: "USD", maximumSpend: 5 },
@@ -286,8 +361,10 @@ test("observability readiness cannot hide a required metric gap", () => {
     goal: "Verify required metrics",
     applicationTarget,
     objectives: [
-      { metricId: "task_success" as const, required: true, minimumSamples: 3, tolerance: 0 },
-      { metricId: "total_task_cost" as const, required: true, minimumSamples: 3, tolerance: 0 },
+      { metricId: "task_success" as const, required: true, minimumSamples: 3, tolerance: 0,
+        samplingPlan: { strategy: "representative_task_set" as const, representativeCaseCount: 3, repetitionsPerCase: 1, aggregation: "rate" as const, rationale: "Measure representative task success." } },
+      { metricId: "total_task_cost" as const, required: true, minimumSamples: 3, tolerance: 0,
+        samplingPlan: { strategy: "representative_task_set" as const, representativeCaseCount: 3, repetitionsPerCase: 1, aggregation: "mean" as const, rationale: "Measure average cost across representative tasks." } },
     ],
     createdAt: "2026-09-22T00:00:00.000Z",
     confirmedAt: "2026-09-22T00:00:01.000Z",
@@ -338,6 +415,7 @@ test("the coordinator runs a durable job through a non-Pi harness", async () => 
         id: "cycle-portable",
         targetId: applicationTarget.id,
         taskProfileId: portableProfile.id,
+        activeCandidateId: "candidate-a",
         stage: "baseline_ready",
         verifiedSwapCount: 0,
         baselineEvidenceSufficient: true,
@@ -358,7 +436,11 @@ test("the coordinator runs a durable job through a non-Pi harness", async () => 
       evidence: [{ id: "catalog", source: "external_source", uri: "fake://catalog" }],
       outputs: {
         targetId: applicationTarget.id,
-        candidates: [{ targetId: applicationTarget.id, candidateId: "candidate-a", modelId: "vendor/model-a", reasons: ["task fit"] }],
+        candidates: [
+          incumbent,
+          { targetId: applicationTarget.id, candidateId: "candidate-b", modelId: "vendor/model-b", reasons: ["lower cost"] },
+          { targetId: applicationTarget.id, candidateId: "candidate-c", modelId: "vendor/model-c", reasons: ["lower latency"] },
+        ],
       },
     };
     const accepted = await coordinator.acceptResult(result);
@@ -366,7 +448,13 @@ test("the coordinator runs a durable job through a non-Pi harness", async () => 
     assert.deepEqual(dispatched, [issued.intent.id]);
     assert.equal(accepted.state.cycle.stage, "candidates_ready");
     assert.equal(accepted.state.activeIntent, undefined);
+    assert.equal(accepted.state.candidates?.length, 3);
     assert.equal((await store.readState())?.lastResult?.intentId, issued.intent.id);
+    const trials = await coordinator.issue("run_challenger_trials");
+    assert.deepEqual(
+      (trials.intent.constraints.candidates as Array<{ candidateId: string }>).map((candidate) => candidate.candidateId),
+      ["candidate-a", "candidate-b", "candidate-c"],
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

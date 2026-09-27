@@ -54,7 +54,8 @@ const profile = {
   name: "Automation task",
   goal: "Evaluate the application generation route",
   applicationTarget: target,
-  objectives: [{ metricId: "task_success" as const, required: true, minimumSamples: 1, tolerance: 0 }],
+  objectives: [{ metricId: "task_success" as const, required: true, minimumSamples: 1, tolerance: 0,
+    samplingPlan: { strategy: "repeated_same_input" as const, representativeCaseCount: 1, repetitionsPerCase: 2, aggregation: "rate" as const, rationale: "Test fixture for repeated observed tasks." } }],
   createdAt: "2026-09-22T00:00:00.000Z",
   confirmedAt: "2026-09-22T00:00:00.000Z",
 };
@@ -143,7 +144,7 @@ test("baseline sufficiency uses stored aggregate windows, evidence, and required
   const { root, store, coordinator } = await fixture("collecting_baseline");
   const metric = (sampleCount: number, evidence: boolean) => ({
     targetId: target.id, metricId: "task_success" as const, state: "measured" as const,
-    scope: "sample_window" as const, direction: "maximize" as const, method: "evaluator" as const,
+    scope: "sample_window" as const, aggregation: "rate" as const, direction: "maximize" as const, method: "evaluator" as const,
     value: 0.8, unit: "ratio", sampleCount,
     evidence: evidence ? [{ id: "graded-run", source: "evaluation_artifact" as const, uri: "file:///graded-run.json" }] : [],
   });
@@ -210,6 +211,7 @@ test("catalogue changes and metric regressions produce the correct intents", asy
     scope: "sample_window" as const,
     direction: "maximize" as const,
     method: "observed" as const,
+    aggregation: "rate" as const,
     value,
     unit: "ratio",
     sampleCount: 20,

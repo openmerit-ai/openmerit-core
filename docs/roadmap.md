@@ -11,6 +11,7 @@ OpenMerit is ready for an initial supervised product trial with Pi. Its protocol
 - Generic Pi task checkpoints do not replace product telemetry. Setup must create the infrastructure required by the profile.
 - Published 0.1.5 reports active-session signals and typed metric windows but cannot provision persistent background wakeups. The unreleased source checkout adds an opt-in macOS user LaunchAgent; non-macOS platforms still need an external scheduler.
 - The source LaunchAgent now performs a deterministic core baseline check without Pi when evidence is insufficient. This has a local runner test, not a representative product trial. Earlier headless Pi assessment attempts timed out; unattended candidate discovery and model decisions are not yet validated.
+- The source checkout can detect an application call created during a settled interactive Pi build turn, records the incumbent, and durably hands candidates and assessments between comparison stages. These paths have deterministic adapter tests but still need the representative live sandbox trial below.
 - In published 0.1.5, pause does not block automatic dispatch from task, measurement, or session-start signals and resets on process restart. The unreleased source checkout persists pause and gates automatic work; neither version cancels already-active work.
 - External evidence authenticity depends on the referenced system.
 - The core and protocol workspaces are private; the single `openmerit` npm

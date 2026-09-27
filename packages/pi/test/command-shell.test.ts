@@ -114,9 +114,16 @@ function confirmedSetupOutputs() {
         routeKey: "TEST_MODEL",
         confirmedAt: new Date().toISOString(),
       },
-      objectives: [{ metricId: "task_success", required: true, minimumSamples: 3, tolerance: 0 }],
+      objectives: [{ metricId: "task_success", required: true, minimumSamples: 3, tolerance: 0,
+        samplingPlan: { strategy: "representative_task_set", representativeCaseCount: 3, repetitionsPerCase: 1, aggregation: "rate", rationale: "Measure success across representative tasks." } }],
       createdAt: new Date().toISOString(),
       confirmedAt: new Date().toISOString(),
+    },
+    incumbent: {
+      targetId: "app-target-test",
+      candidateId: "candidate-incumbent",
+      modelId: "vendor/incumbent-model",
+      reasons: ["Configured application model"],
     },
     policy: {
       mode: "supervised_graduation",
@@ -203,6 +210,18 @@ test("Pi automatically starts setup only when an application LLM call is detecte
   }
 });
 
+test("application target detection carries the source-configured incumbent model", () => {
+  const root = mkdtempSync(join(tmpdir(), "openmerit-model-detection-"));
+  try {
+    writeFileSync(join(root, "app.js"), "const DEFAULT_MODEL = 'vendor/slow-model';\nclient.chat.completions.create({ model: getModel() });\n");
+    const targets = detectApplicationLlmTargets(root);
+    assert.equal(targets.length, 1);
+    assert.equal(targets[0]?.configuredModelId, "vendor/slow-model");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Pi does not queue the headless wakeup prompt behind an active intent", async () => {
   rmSync(join(testProjectRoot, ".openmerit"), { recursive: true, force: true });
   const notifications: Notification[] = [];
@@ -228,6 +247,58 @@ test("Pi remains idle for an unconfigured project without an application LLM cal
     await sessionStart({ type: "session_start" }, sessionContext(projectRoot, notifications));
     assert.match(notifications[0]?.message ?? "", /no application LLM call detected/);
     assert.equal(entries.length, 0);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("Pi starts OpenMerit setup after a settled build turn creates an application LLM call", async () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-post-build-"));
+  const notifications: Notification[] = [];
+  const { entries, eventHandlers } = loadCommand();
+  const ctx = sessionContext(projectRoot, notifications);
+  try {
+    await eventHandlers.get("session_start")?.({ type: "session_start" }, ctx);
+    assert.equal(entries.length, 0);
+
+    writeFileSync(join(projectRoot, "app.ts"), [
+      "const baseUrl = 'https://openrouter.ai/api/v1';",
+      "await fetch(`${baseUrl}/chat/completions`, { method: 'POST' });",
+      "",
+    ].join("\n"));
+    await eventHandlers.get("turn_end")?.({ type: "turn_end" }, ctx);
+
+    const intents = entries.filter((entry) => entry.customType === "openmerit.intent");
+    assert.equal(intents.length, 1);
+    assert.equal((intents[0]?.data as { intent: { kind: string } }).intent.kind, "establish_evals");
+    assert.ok(notifications.some((item) => item.message.includes("after the build")));
+
+    await eventHandlers.get("turn_end")?.({ type: "turn_end" }, ctx);
+    assert.equal(entries.filter((entry) => entry.customType === "openmerit.intent").length, 1);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("Pi resumes a persisted active intent in a new interactive session", async () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-resume-intent-"));
+  const notifications: Notification[] = [];
+  const firstSession = loadCommand();
+  try {
+    await firstSession.handler("setup", { ...commandContext(notifications), cwd: projectRoot } as ExtensionCommandContext);
+    const activeIntent = (firstSession.entries[0]?.data as { intent: { id: string; kind: string } }).intent;
+    const resumedSession = loadCommand();
+    const sessionStart = resumedSession.eventHandlers.get("session_start");
+    assert.ok(sessionStart);
+    await sessionStart({ type: "session_start" }, sessionContext(projectRoot, notifications));
+    assert.equal(resumedSession.messages.length, 1);
+    const resumedMessage = resumedSession.messages[0];
+    assert.deepEqual(resumedMessage?.options, { deliverAs: "followUp", triggerTurn: true });
+    const message = resumedMessage?.message as { details: { intentId: string; kind: string; resumed: boolean }; content: string };
+    assert.equal(message.details.intentId, activeIntent.id);
+    assert.equal(message.details.kind, activeIntent.kind);
+    assert.equal(message.details.resumed, true);
+    assert.match(message.content, /OpenMerit has issued the typed intent below/);
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
@@ -289,7 +360,11 @@ test("setup dispatches a private typed intent", async () => {
   assert.match(notifications[0]?.message ?? "", /setup started/);
   assert.equal(entries[0]?.customType, "openmerit.intent");
   assert.equal(messages.length, 1);
-  assert.equal((messages[0]?.message as { display?: boolean }).display, false);
+  const privateMessage = messages[0]?.message as { display?: boolean; content?: string };
+  assert.equal(privateMessage.display, false);
+  assert.match(privateMessage.content ?? "", /infer task-relevant metrics/);
+  assert.match(privateMessage.content ?? "", /minimumSamples is evidence quantity/);
+  assert.match(privateMessage.content ?? "", /estimated cost/);
   assert.deepEqual(messages[0]?.options, { deliverAs: "followUp", triggerTurn: true });
 });
 
@@ -469,6 +544,60 @@ test("Pi automatically requests instrumentation when setup reports a required me
   }
 });
 
+test("application task telemetry alone cannot mark instrumentation ready", async () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "openmerit-instrumentation-signal-"));
+  const notifications: Notification[] = [];
+  const { handler, completionTool, tools, entries } = loadCommand();
+  const signalTool = tools.get("openmerit_report_signal");
+  assert.ok(signalTool);
+  const ctx = { ...commandContext(notifications), cwd: projectRoot } as ExtensionCommandContext;
+
+  try {
+    await handler("setup", ctx);
+    const setupIntent = (entries[0]?.data as { intent: { id: string } }).intent;
+    const outputs = confirmedSetupOutputs();
+    outputs.observability = {
+      ...outputs.observability,
+      status: "incomplete",
+      coveredMetricIds: [] as string[],
+      missingMetricIds: ["task_success"] as string[],
+    };
+    await completionTool.execute("tool-setup", {
+      intentId: setupIntent.id,
+      status: "succeeded",
+      summary: "Setup needs instrumentation",
+      evidence: [{ id: "eval", source: "evaluation_artifact", uri: "file:///eval.json" }],
+      outputs,
+    }, undefined, undefined, ctx);
+
+    const activeIntent = (entries.at(-1)?.data as { intent: { id: string } }).intent;
+    await signalTool.execute("task-signal", {
+      signalId: "task-with-telemetry",
+      type: "product_task_completed",
+      targetId: "app-target-test",
+      modelId: "incumbent-model",
+      evidence: [{ id: "run", source: "observability_record", uri: "file:///run.json" }],
+      telemetry: {
+        startedAt: "2026-09-27T10:00:00.000Z",
+        completedAt: "2026-09-27T10:00:01.000Z",
+        durationMs: 1000,
+        inputTokens: 12,
+        outputTokens: 8,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        cost: 0.001,
+        currency: "USD",
+      },
+    } as never, undefined, undefined, ctx);
+
+    const saved = JSON.parse(readFileSync(join(projectRoot, ".openmerit", "state.json"), "utf8")) as { activeIntent?: { id: string }; observability?: { status: string } };
+    assert.equal(saved.activeIntent?.id, activeIntent.id);
+    assert.equal(saved.observability?.status, "incomplete");
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("initial state renders without model-changing behavior", () => {
   const status = renderStatus(createInitialUiState());
   assert.doesNotMatch(status, /current model|recommended model|apply model/i);
@@ -487,6 +616,7 @@ test("Pi exposes a typed ingress for observability and verification signals", ()
       metricId: "task_success",
       state: "measured",
       scope: "sample_window",
+      aggregation: "rate",
       direction: "maximize",
       method: "observed",
       value: 0.95,
@@ -593,7 +723,7 @@ test("Pi accepts application cost telemetry and rejects coverage-only tool-use c
   }, undefined, undefined, ctx);
   const base = {
     targetId: "app-target-test",
-    state: "measured", scope: "single_run", direction: "minimize", method: "evaluator",
+    state: "measured", scope: "single_run", aggregation: "single_value", direction: "minimize", method: "evaluator",
     value: 0, unit: "usd", sampleCount: 1,
     evidence: [{ id: "eval", source: "evaluation_artifact", uri: "file:///coverage.json" }],
   };

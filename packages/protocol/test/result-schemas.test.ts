@@ -15,6 +15,7 @@ const metric = {
   scope: "sample_window",
   direction: "maximize",
   method: "observed",
+  aggregation: "rate",
   value: 0.9,
   unit: "ratio",
   sampleCount: 10,
@@ -50,9 +51,16 @@ const validOutputs: Readonly<Record<IntentKind, unknown>> = {
         routeKey: "SUPPORT_MODEL",
         confirmedAt: "2026-09-22T00:00:00.000Z",
       },
-      objectives: [{ metricId: "task_success", required: true, minimumSamples: 3, tolerance: 0 }],
+      objectives: [{ metricId: "task_success", required: true, minimumSamples: 3, tolerance: 0,
+        samplingPlan: { strategy: "representative_task_set", representativeCaseCount: 3, repetitionsPerCase: 1, aggregation: "rate", rationale: "Measure success across representative tasks." } }],
       createdAt: "2026-09-22T00:00:00.000Z",
       confirmedAt: "2026-09-22T00:00:00.000Z",
+    },
+    incumbent: {
+      targetId: "app-target-1",
+      candidateId: "candidate-incumbent",
+      modelId: "vendor/incumbent",
+      reasons: ["Configured application model"],
     },
     policy: {
       mode: "supervised_graduation",
@@ -97,7 +105,11 @@ const validOutputs: Readonly<Record<IntentKind, unknown>> = {
     targetId: "app-target-1",
     candidates: [{ targetId: "app-target-1", candidateId: "candidate-a", modelId: "vendor/model-a", reasons: ["Strong task fit"] }],
   },
-  run_challenger_trials: { targetId: "app-target-1", assessments: [assessment] },
+  run_challenger_trials: {
+    targetId: "app-target-1",
+    assessments: [assessment],
+    experimentManifest: evidence[0],
+  },
   calculate_frontier: {
     targetId: "app-target-1",
     assessments: [assessment],
@@ -140,8 +152,10 @@ test("intent schemas reject guessed fields and wrong primitive types", () => {
   }).join("; "), /additional properties/);
 });
 
-test("setup accepts a sourced preliminary shortlist or an older 0.1 result without one", () => {
+test("setup requires an incumbent and accepts an optional sourced preliminary shortlist", () => {
   const setup = validOutputs.establish_evals as Record<string, unknown>;
+  const { incumbent: _incumbent, ...missingIncumbent } = setup;
+  assert.match(validateIntentOutputSchema("establish_evals", missingIncumbent).join("; "), /incumbent/);
   const { preliminaryModelLeads: _omitted, ...legacySetup } = setup;
   assert.deepEqual(validateIntentOutputSchema("establish_evals", legacySetup), []);
   assert.deepEqual(validateIntentOutputSchema("establish_evals", { ...setup, preliminaryModelLeads: [] }), []);
@@ -150,4 +164,15 @@ test("setup accepts a sourced preliminary shortlist or an older 0.1 result witho
     ...setup,
     preliminaryModelLeads: [{ ...leads[0], reputation: { summary: "Unsourced" } }],
   }).join("; "), /sourceUri/);
+});
+
+test("setup objectives require an explicit sampling plan", () => {
+  const setup = validOutputs.establish_evals as Record<string, unknown>;
+  const taskProfile = setup.taskProfile as Record<string, unknown>;
+  const [objective] = taskProfile.objectives as Array<Record<string, unknown>>;
+  const { samplingPlan: _samplingPlan, ...withoutSamplingPlan } = objective!;
+  assert.match(validateIntentOutputSchema("establish_evals", {
+    ...setup,
+    taskProfile: { ...taskProfile, objectives: [withoutSamplingPlan] },
+  }).join("; "), /samplingPlan/);
 });

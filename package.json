@@ -64,6 +64,7 @@
     "test": "npm run test --workspaces --if-present",
     "typecheck": "tsc -p tsconfig.json",
     "build": "node scripts/build.mjs",
+    "demo": "node scripts/demo.mjs",
     "build:docs": "node scripts/build-docs.mjs",
     "check:docs": "npm run build:docs && node --test scripts/docs.test.mjs",
     "prepare": "npm run build",

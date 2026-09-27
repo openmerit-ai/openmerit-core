@@ -9,7 +9,7 @@ Run these slash commands inside Pi with the OpenMerit extension loaded. Shell co
 /openmerit status
 ```
 
-Both show the task profile, metric readiness, evaluation status, active work, next assessment, lifecycle stage, and pause flag. A readiness label is based on the harness’s structured reports; inspect the evidence for the underlying measurements.
+Both show the task profile, metric readiness, evaluation status, active work, next assessment, lifecycle stage, incumbent candidate, candidate and assessment counts, challenger spend, proposed candidate, and pause flag. A readiness label is based on the harness’s structured reports; inspect the evidence for the underlying measurements.
 
 ## Start or recover setup
 
@@ -17,7 +17,9 @@ Both show the task profile, metric readiness, evaluation status, active work, ne
 /openmerit setup
 ```
 
-Request setup explicitly when recovering, rerunning, or configuring a custom integration. An unconfigured project starts setup automatically in an interactive Pi session only when bounded source detection finds an application LLM call; otherwise it stays idle. OpenMerit refuses another intent while work is active.
+Requests setup explicitly or reopens setup to correct stale target/incumbent state. Accepted replacement setup clears prior candidate, assessment, frontier, and baseline handoffs while retaining the audit log.
+
+Request setup explicitly only when recovering, rerunning, or configuring a custom integration. In the unreleased source checkout, an unconfigured project starts setup when bounded source detection finds an application LLM call at session start or after a settled Pi build turn. OpenMerit refuses another intent while work is active.
 
 ## Cancel interrupted work
 

@@ -40,7 +40,8 @@ test("headless wakeup checks an insufficient baseline without starting Pi", { ti
         name: "Support classifier", applicationId: "support-app",
         callSites: ["app.ts#classify"], routeKey: "SUPPORT_MODEL", confirmedAt: previous,
       },
-      objectives: [{ metricId: "task_success" as const, required: true, minimumSamples: 2, tolerance: 0 }],
+      objectives: [{ metricId: "task_success" as const, required: true, minimumSamples: 2, tolerance: 0,
+        samplingPlan: { strategy: "repeated_same_input" as const, representativeCaseCount: 1, repetitionsPerCase: 2, aggregation: "rate" as const, rationale: "Measure repeated task success." } }],
       createdAt: previous, confirmedAt: previous,
     };
     await store.initialize({ schemaVersion: 1, activeTaskProfileId: profile.id, taskProfiles: [profile], policy }, {
@@ -74,7 +75,7 @@ test("headless wakeup checks an insufficient baseline without starting Pi", { ti
       occurredAt: new Date(Date.parse(previous) + 1_000).toISOString(), targetId: profile.applicationTarget.id,
       metrics: [{
         targetId: profile.applicationTarget.id, metricId: "task_success", state: "measured", scope: "sample_window",
-        direction: "maximize", method: "observed", value: 1, unit: "ratio", sampleCount: 1,
+        direction: "maximize", method: "observed", aggregation: "rate", value: 1, unit: "ratio", sampleCount: 1,
         evidence: [{ id: "one-sample", source: "evaluation_artifact", uri: `file://${samplePath}` }],
       }],
     });

@@ -22,7 +22,7 @@ The published extension targets Pi 0.87 and Node.js 22.19 or newer. Follow [gett
 
 Automatic setup requires an unconfigured project, an interactive Pi UI, and a bounded source-detection match for an application LLM call. Non-interactive runs do not start the confirmation flow, and a project without a detected target remains idle until `/openmerit setup` is requested. Existing project state or active work may also prevent a fresh setup request.
 
-Inspect status first. If no intent is active, use `/openmerit setup` to request setup explicitly. Do not delete `.openmerit/` as a routine reset: it contains your policy, lifecycle state, evidence references, and audit history.
+Inspect status first. If no intent is active, use `/openmerit setup` to request setup explicitly; this is also the supported correction path when source detection or a prior setup recorded the wrong incumbent. A new setup preserves audit history but replaces the active task profile, candidate/assessment handoffs, frontier, and baseline state after the new result is accepted. Do not delete `.openmerit/` as a routine reset: it contains your policy, lifecycle state, evidence references, and audit history.
 
 ## Evidence is missing or incomplete
 

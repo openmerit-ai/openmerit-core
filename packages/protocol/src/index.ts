@@ -307,6 +307,7 @@ export interface MetricRecord {
   readonly scope: MetricScope;
   readonly direction: MetricDirection;
   readonly method: MeasurementMethod;
+  readonly aggregation: "single_value" | "sum" | "mean" | "rate" | "distribution" | "percentile";
   readonly value?: number;
   readonly unit: string;
   readonly sampleCount: number;
@@ -328,6 +329,18 @@ export interface MetricObjective {
   readonly required: boolean;
   readonly minimumSamples: number;
   readonly tolerance: number;
+  readonly samplingPlan: {
+    readonly strategy:
+      | "single_run"
+      | "repeated_same_input"
+      | "representative_task_set"
+      | "repeated_representative_task_set"
+      | "load_test";
+    readonly representativeCaseCount: number;
+    readonly repetitionsPerCase: number;
+    readonly aggregation: "single_value" | "mean" | "rate" | "distribution" | "percentile";
+    readonly rationale: string;
+  };
   readonly constraint?: {
     readonly operator: "at_least" | "at_most";
     readonly value: number;
@@ -446,6 +459,8 @@ export interface PreliminaryModelLead {
 export interface IntentOutputMap {
   readonly establish_evals: {
     readonly taskProfile: TaskProfile;
+    /** The application model configured before any challenger trial. */
+    readonly incumbent: CandidateDescriptor;
     readonly policy: SupervisedGraduationPolicy;
     readonly observability: ObservabilityCoverage;
     readonly preliminaryModelLeads?: readonly PreliminaryModelLead[];
@@ -467,6 +482,7 @@ export interface IntentOutputMap {
   readonly run_challenger_trials: {
     readonly targetId: string;
     readonly assessments: readonly CandidateAssessment[];
+    readonly experimentManifest: EvidenceReference;
   };
   readonly calculate_frontier: {
     readonly targetId: string;
@@ -561,6 +577,10 @@ export interface OpenMeritProjectState {
   readonly cycle: ImprovementCycleState;
   readonly activeIntent?: OpenMeritIntent;
   readonly lastResult?: IntentResult;
+  /** Durable handoffs between discovery, trials, and frontier calculation. */
+  readonly candidates?: readonly CandidateDescriptor[];
+  readonly assessments?: readonly CandidateAssessment[];
+  readonly experimentManifest?: EvidenceReference;
   readonly observability?: ObservabilityCoverage;
   readonly automation: {
     readonly paused?: boolean;

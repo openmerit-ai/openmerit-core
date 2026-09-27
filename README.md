@@ -23,7 +23,7 @@ It distinguishes:
 ## Current capabilities
 
 - Pi 0.87 extension with a single `/openmerit` command surface.
-- Confirmed task profiles, objectives, constraints, sample requirements, and evaluation budgets.
+- Harness-inferred, user-confirmed task profiles with explicit metrics, sampling designs, constraints, and evaluation budgets.
 - The complete initial quality, reliability, cost, latency, efficiency, and human-intervention metric catalogue.
 - Setup-time preliminary model research in the source checkout, followed by baseline evidence collection, refreshed candidate discovery, and controlled challenger trials. The published `0.1.5` package still begins candidate discovery after the baseline.
 - A normative, uncertainty-aware Pareto definition owned by OpenMerit.
@@ -60,7 +60,7 @@ pi install npm:openmerit
 pi list
 ```
 
-When Pi enters an unconfigured project with an interactive UI, the adapter first looks for an actual application LLM call pattern. It automatically issues the setup nudge only when a target is detected; otherwise it stays idle until `/openmerit setup` is requested. Pi confirms the application target, infers a task profile, asks the user to confirm requirements and an evaluation budget, establishes task-specific eval and observability artifacts, verifies them, and reports evidence to OpenMerit. Pi's own model is never the application target.
+When Pi enters an unconfigured project with an interactive UI, the adapter first looks for an actual application LLM call pattern. If the project starts empty, the unreleased source checkout scans again after each settled build turn and automatically begins setup when Pi creates the application call. `/openmerit setup` remains a recovery command rather than a required demo step. Pi confirms the application target and exact incumbent application model, infers task-relevant metrics and their repeated-input or representative-case sampling designs, explains the proposed collection plan and estimated cost, and asks the user to confirm or edit it. It then establishes task-specific eval and observability artifacts, verifies them, and reports evidence to OpenMerit. Pi's own model is never the application target.
 
 Run `/openmerit doctor` inside Pi to check the installation. OpenMerit keeps
 project evidence under `.openmerit/` in the product repository. Version 0.1.5
@@ -118,7 +118,7 @@ package exposes `openmerit/core`, `openmerit/protocol`, and `openmerit/pi`.
 ```sh
 npm ci
 npm run verify
-./node_modules/.bin/pi -e ./packages/pi/src/index.ts
+./node_modules/.bin/pi --no-extensions -e ./packages/pi/src/index.ts
 ```
 
-Credentials must never be committed. The repository intentionally contains no provider or Jev API key.
+`--no-extensions` prevents an installed npm copy of OpenMerit from registering the same tools as the source extension. Credentials must never be committed. The repository intentionally contains no provider or Jev API key.
