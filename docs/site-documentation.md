@@ -1,6 +1,6 @@
 # Website documentation
 
-The public documentation lives at https://openmerit.site/docs/. It uses the homepage's typography, colors, and Cloudflare hosting. Sixteen curated product guides are generated from Markdown in `docs/`; internal website design and maintenance notes are excluded.
+The public documentation lives at https://openmerit.site/docs/. It uses the homepage's typography, colors, and Cloudflare hosting. Twenty-two curated guides, including a dedicated Demo group with an overview and five example walkthroughs, are generated from Markdown in `docs/`; internal website design and maintenance notes are excluded.
 
 Article content has one maintained source: `docs/*.md`. Update those files alongside product changes, then rebuild and deploy. Do not edit the generated `site/docs/` files. The repository's `AGENTS.md` records this rule for future coding work.
 

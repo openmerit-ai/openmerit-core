@@ -6,6 +6,7 @@ import MarkdownIt from 'markdown-it';
 import MiniSearch from 'minisearch';
 import { groups, pages } from './docs.config.mjs';
 import { createSocialImage } from './social-image.mjs';
+import { buildMemo } from './build-memo.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const out = join(root, 'site/docs');
@@ -219,3 +220,4 @@ await copyFile(miniSearchFile, join(root, 'site', searchLibrary));
 await copyFile(join(dirname(miniSearchFile), '../../LICENSE.txt'), join(out, 'minisearch-LICENSE.txt'));
 await writeFile(join(out, 'manifest.json'), JSON.stringify({ version: pkg.version, revision, pages: docs.map(doc => ({ url: doc.url, source: doc.source, title: doc.title, headings: doc.headings, ...(doc.socialImage && { socialImage: doc.socialImage }) })), searchIndex: indexUrl, searchLibrary }, null, 2));
 console.log(`Built ${docs.length} documentation pages and ${searchDocuments.length} searchable sections (${revision}).`);
+await buildMemo(root);

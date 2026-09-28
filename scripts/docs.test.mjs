@@ -6,13 +6,14 @@ import { fileURLToPath } from 'node:url';
 import MiniSearch from 'minisearch';
 import { loadSearchIndex } from '../site/docs-search.js';
 import { createSocialImage } from './social-image.mjs';
-import { pages } from './docs.config.mjs';
+import { pages, memo } from './docs.config.mjs';
 import { createHash } from 'node:crypto';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const site = join(root, 'site');
 const manifest = JSON.parse(await readFile(join(site, 'docs/manifest.json'), 'utf8'));
-const html = await Promise.all(['/', ...manifest.pages.map(page => page.url)].map(async url => ({
+const publishedPages = [...manifest.pages, memo];
+const html = await Promise.all(['/', ...publishedPages.map(page => page.url)].map(async url => ({
   url, text: await readFile(join(site, url, 'index.html'), 'utf8'),
 })));
 
@@ -44,7 +45,7 @@ test('pages have one H1, distinct section IDs, and a canonical address', () => {
 });
 
 test('downloadable Markdown matches the maintained source and excludes internal site notes', async () => {
-  for (const page of manifest.pages) {
+  for (const page of publishedPages) {
     assert.ok(!page.source.startsWith('site-'), `Internal site notes published: ${page.source}`);
     const original = await readFile(join(root, 'docs', page.source), 'utf8');
     const downloadable = await readFile(join(site, page.url, 'source.md'), 'utf8');
@@ -140,7 +141,7 @@ test('search recovery rejects invalid or external asset locations', async () => 
 
 test('pages assign the default or enabled custom image to Open Graph and Twitter cards', async () => {
   const defaultUrl = html[0].text.match(/property="og:image" content="([^"]+)"/)[1];
-  for (const page of manifest.pages) {
+  for (const page of publishedPages) {
     const tags = html.find(doc => doc.url === page.url).text;
     const image = page.socialImage ?? { url: defaultUrl, width: 1200, height: 630, type: 'image/png' };
     assert.ok(image, page.url);

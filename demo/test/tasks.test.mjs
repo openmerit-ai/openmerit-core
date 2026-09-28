@@ -1,0 +1,55 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { taskDefinition } from '../runtime/task.mjs';
+import { decisionRequest, inferenceRequest } from '../security.mjs';
+import { classify } from '../runtime/application.mjs';
+import { getTask, confirmedProfile } from '../runtime/config.mjs';
+
+const jev = 'typesafe/jev-1.13';
+test('tasks have separate targets, fixtures and model sets; unknown task IDs fail closed',()=>{
+  const support=taskDefinition('support'), spam=taskDefinition('spam');
+  assert.notEqual(support.targetId,spam.targetId);
+  assert.equal(support.models.length,3); assert.deepEqual(spam.models.map(m=>m.id),['openai/gpt-4.1-mini',jev]);
+  assert.throws(()=>getTask('__proto__'),/Unknown/); assert.throws(()=>getTask('unconfigured'),/Unknown/);
+  const all=[spam.smoke,...spam.fixtures,...spam.verification];
+  assert.equal(spam.fixtures.length,24);assert.equal(spam.verification.length,6);
+  assert.equal(new Set(all.map(f=>f.id)).size,all.length);assert.equal(new Set(all.map(f=>f.input)).size,all.length);
+  assert.equal(spam.fixtures.filter(f=>f.expected.decision==='publish').length,12);
+  assert.ok(all.every(f=>spam.grade(f.expected,f.expected)));
+  assert.equal(spam.grade({decision:'hold',extra:true},{decision:'hold'}),false);
+  assert.equal(spam.grade({decision:'unknown'},{decision:'unknown'}),false);
+  assert.equal(spam.grade({decision:'publish'},{decision:'hold'}),false);
+  const p=confirmedProfile('2026-09-28T00:00:00.000Z',24,'spam');
+  assert.equal(p.applicationTarget.id,spam.targetId);assert.equal(p.objectives[0].constraint.value,.9);
+});
+test('Jev proxy binds one task, model, short input, question, and price; arbitrary routing is stripped',()=>{
+  const input={model:jev,state:{comment:'Please buy my course.',extra:'discard'},questions:{injected:{type:'choice'}},provider:{max_price:{prompt:999}},trace:{destination:'discard'}};
+  const {body,reservation}=decisionRequest(input,300,'spam');
+  assert.deepEqual(Object.keys(body.questions),['decision']);
+  assert.deepEqual(Object.keys(body.questions.decision.criteria),['publish','hold']);
+  assert.deepEqual(body.state,{comment:input.state.comment});
+  assert.deepEqual(body.provider.max_price,{prompt:'0.05',completion:'0'});
+  assert.equal(body.trace,undefined);assert.ok(reservation>0 && reservation<.001);
+  assert.throws(()=>decisionRequest(input,300,'support'),/not allowed/);
+  assert.throws(()=>decisionRequest({...input,model:'typesafe/jev-router'},300,'spam'),/not allowed/);
+  assert.throws(()=>decisionRequest(input,6001,'spam'),/oversized/);
+  assert.throws(()=>decisionRequest({...input,state:{comment:'x'.repeat(1201)}},2000,'spam'),/oversized/);
+  assert.throws(()=>inferenceRequest({model:jev,messages:[{role:'user',content:'test'}]},100,'spam'),/not allowed/);
+  assert.throws(()=>inferenceRequest({model:'google/gemini-2.5-flash-lite',messages:[{role:'user',content:'test'}]},100,'spam'),/not allowed/);
+  assert.equal(inferenceRequest({model:'openai/gpt-4.1-mini',messages:[{role:'user',content:'test'}]},100,'spam').body.model,'openai/gpt-4.1-mini');
+});
+test('prepared Jev adapter normalizes typed choice, retains native evidence, and refuses missing cost',async t=>{
+  let data={id:'gen-test',model:'typesafe/jev-1.13-dated',provider:'TypeSafe',answers:{decision:{type:'choice',choice:'hold',confidence:.99,probabilities:{publish:0,hold:1}}},usage:{cost:.00001,input_tokens:240,output_tokens:30}};
+  let sent;
+  t.mock.method(globalThis,'fetch',async(url,options)=>{sent={url,body:JSON.parse(options.body)};return Response.json(data);});
+  const result=await classify('Buy my course today.',jev,{task:'spam',key:'dummy'});
+  assert.equal(sent.url,'https://openrouter.ai/api/alpha/decisions');
+  assert.deepEqual(sent.body.state,{comment:'Buy my course today.'});
+  assert.deepEqual(result.output,{decision:'hold'});assert.equal(result.inputTokens,240);assert.equal(result.cost,.00001);
+  assert.equal(result.servedModel,'typesafe/jev-1.13-dated');assert.equal(result.decision.confidence,.99);
+  data={...data,answers:{decision:{type:'choice',choice:'invented'}}};
+  assert.equal((await classify('test input',jev,{task:'spam',key:'dummy'})).output,null);
+  data={...data,usage:{input_tokens:240,output_tokens:30}};
+  await assert.rejects(classify('test input',jev,{task:'spam',key:'dummy'}),/cost was missing/);
+  await assert.rejects(classify('test input',jev,{task:'support',key:'dummy'}),/not available/);
+});

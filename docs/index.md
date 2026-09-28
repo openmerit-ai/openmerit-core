@@ -14,6 +14,10 @@ pi install npm:openmerit
 
 Interactive setup asks Pi to establish your task requirements, evaluation budget, automation permissions, and measurements. Follow the [getting started guide](getting-started.md), then work through a [first supervised trial](first-trial.md).
 
+## Explore the demos
+
+The [Demo section](demo.md) explains how each prepared example works, from a single ticket-classification call to a multi-model agent workflow. Watch the recorded comparisons and inspect their inputs, grading rules, model routes, and evidence.
+
 ## Understand the decisions
 
 OpenMerit compares candidates against the objectives you confirm, such as quality, cost, and latency. Several models may offer useful tradeoffs. A cheaper model is not automatically a better fit.

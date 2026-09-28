@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "task": "spam",
+  "recordedAt": "2026-09-28T10:27:21.821Z",
+  "sourceBuild": "demo-20260928-jev-v1",
+  "sourceSha256": "4d6b4c85e65604633d8affc292758fbb206e2dbe80618e470bb2c21cf9e25855",
+  "duration": 36,
+  "selectedMeasurement": "trial-1",
+  "measurements": {
+    "baseline": {
+      "model": "openai/gpt-4.1-mini",
+      "name": "GPT-4.1 mini",
+      "matches": 22,
+      "samples": 24,
+      "costPerInput": 0.00007383333333333334,
+      "latencyMs": 780.75
+    },
+    "trial-1": {
+      "model": "typesafe/jev-1.13",
+      "name": "Jev 1.13",
+      "matches": 24,
+      "samples": 24,
+      "costPerInput": 0.000018441500000000003,
+      "latencyMs": 387
+    }
+  },
+  "verification": {
+    "matches": 6,
+    "samples": 6
+  },
+  "example": {
+    "input": "Please remove the posts promising to double our money. They are spam.",
+    "fixtureId": "spam-08",
+    "expected": {
+      "decision": "publish"
+    },
+    "before": {
+      "decision": "hold"
+    },
+    "after": {
+      "decision": "publish"
+    },
+    "nativeDecision": {
+      "type": "choice",
+      "choice": "publish",
+      "probabilities": {
+        "hold": 0.01,
+        "publish": 0.99
+      },
+      "confidence": 0.98
+    }
+  },
+  "frames": [
+    {
+      "at": 0,
+      "phase": "setup",
+      "message": "Check the prepared rubric, application adapters, and measurement collectors.",
+      "measured": [],
+      "tone": "neutral"
+    },
+    {
+      "at": 4,
+      "phase": "baseline",
+      "message": "GPT-4.1 mini: 22/24 fixture matches.",
+      "measured": [
+        "baseline"
+      ],
+      "tone": "neutral"
+    },
+    {
+      "at": 11,
+      "phase": "trials",
+      "message": "Jev 1.13: 24/24 fixture matches at lower measured cost.",
+      "measured": [
+        "baseline",
+        "trial-1"
+      ],
+      "tone": "good"
+    },
+    {
+      "at": 18,
+      "phase": "proposal",
+      "message": "OpenMerit proposes Jev 1.13. The original application remains on GPT-4.1 mini.",
+      "measured": [
+        "baseline",
+        "trial-1"
+      ],
+      "tone": "neutral"
+    },
+    {
+      "at": 23,
+      "phase": "approved",
+      "message": "The operator approved this change in the recorded run.",
+      "measured": [
+        "baseline",
+        "trial-1"
+      ],
+      "tone": "neutral"
+    },
+    {
+      "at": 27,
+      "phase": "applied",
+      "message": "Pi changes the managed application configuration to Jev 1.13.",
+      "measured": [
+        "baseline",
+        "trial-1"
+      ],
+      "tone": "good"
+    },
+    {
+      "at": 31,
+      "phase": "verified",
+      "message": "The changed application passes 6/6 separate verification fixtures.",
+      "measured": [
+        "baseline",
+        "trial-1"
+      ],
+      "tone": "good"
+    },
+    {
+      "at": 36,
+      "phase": "complete",
+      "message": "GPT-4.1 mini stays fixed; the managed application now uses Jev 1.13.",
+      "measured": [
+        "baseline",
+        "trial-1"
+      ],
+      "tone": "good"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+**
+!package.json
+!package-lock.json
+!packages
+!packages/*
+!packages/*/package.json
+!dist
+!dist/**
+!demo
+!demo/Dockerfile
+!demo/runtime
+!demo/runtime/**

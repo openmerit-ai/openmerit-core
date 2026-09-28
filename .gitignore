@@ -1,6 +1,7 @@
 node_modules/
 dist/
 site/docs/
+site/memo/
 coverage/
 *.tsbuildinfo
 

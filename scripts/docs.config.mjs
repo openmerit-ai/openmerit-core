@@ -5,6 +5,14 @@ export const groups = [
     { source: 'getting-started.md', slug: 'getting-started', title: 'Installation & setup', description: 'Install OpenMerit in Pi and establish your first product profile.' },
     { source: 'first-trial.md', slug: 'first-trial', title: 'Your first trial', description: 'Collect evidence, compare candidates, and validate a supervised model change.' },
   ] },
+  { title: 'Demo', pages: [
+    { source: 'demo.md', slug: 'demo', title: 'Overview', description: 'Watch recorded comparisons and understand their structure, measurements, and limits.' },
+    { source: 'demo-support.md', slug: 'demo-support', title: 'Support tickets', description: 'Compare three models on email-to-ticket extraction with exact-match grading.' },
+    { source: 'demo-spam.md', slug: 'demo-spam', title: 'Spam filter · Jev', description: 'Compare a chat model with a typed-decision specialist on promotional spam.' },
+    { source: 'demo-backfill.md', slug: 'demo-backfill', title: 'Backfill recovery', description: 'Follow a three-task agent through incident inspection, checkpoint lookup, and recovery planning.' },
+    { source: 'demo-placement.md', slug: 'demo-placement', title: 'GPU placement', description: 'See how a three-task model route chooses a GPU pool under six constraints.' },
+    { source: 'demo-fieldkit.md', slug: 'demo-fieldkit', title: 'Field kit · Six tasks', description: 'Explore a prepared six-model workflow spanning translation, vision, extraction, code, reasoning, and writing.' },
+  ] },
   { title: 'Using OpenMerit', pages: [
     { source: 'metrics-and-evidence.md', slug: 'metrics-and-evidence', title: 'Metrics & evidence', description: 'Understand measurements, sample requirements, and evidence readiness.' },
     { source: 'lifecycle.md', slug: 'lifecycle', title: 'Comparisons & swaps', description: 'Follow the improvement lifecycle from baseline to post-swap evaluation.' },
@@ -29,3 +37,10 @@ export const groups = [
 export const pages = groups.flatMap(group => group.pages.map(page => ({
   ...page, group: group.title, url: `/docs/${page.slug ? `${page.slug}/` : ''}`,
 })));
+
+// The founding memo is a standalone article, outside the product guides and search.
+export const memo = {
+  source: 'memo.md',
+  url: '/memo/',
+  description: 'How can we accelerate the distribution of intelligence? A memo by Lazim on optimum inference and the direction of OpenMerit.',
+};

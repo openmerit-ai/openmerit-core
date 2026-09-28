@@ -67,8 +67,9 @@
     "demo": "node scripts/demo.mjs",
     "build:docs": "node scripts/build-docs.mjs",
     "check:docs": "npm run build:docs && node --test scripts/docs.test.mjs",
+    "check:demo": "node --test demo/test/*.test.mjs",
     "prepare": "npm run build",
-    "verify": "npm test && npm run check && npm run typecheck && npm run build && npm run check:docs && git diff --check",
+    "verify": "npm test && npm run check && npm run typecheck && npm run build && npm run check:demo && npm run check:docs && git diff --check",
     "prepublishOnly": "npm run verify"
   },
   "dependencies": {

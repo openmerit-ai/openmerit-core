@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#111311">
+  <meta name="description" content="Watch recorded model comparisons and learn how each demo is structured, evaluated, and verified.">
+  <meta property="og:title" content="OpenMerit / demo">
+  <meta property="og:description" content="Real recorded model comparisons, from a single task to an agent workflow.">
+  <meta property="og:url" content="https://openmerit.site/demo">
+  <meta property="og:image" content="https://openmerit.site/assets/openmerit-og-v1.png">
+  <link rel="canonical" href="https://openmerit.site/demo">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/assets/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/demo/demo.css?v=11">
+  <script type="module" src="/demo/demo.js?v=14"></script>
+  <title>OpenMerit / demo</title>
+</head>
+<body>
+  <a class="skip" href="#demo">Skip to demo</a>
+  <main class="shell">
+    <header class="page-header"><a href="/" class="brand">openmerit<span> / demo</span></a><a id="demo-guide" href="/docs/demo-support/">How it works <span aria-hidden="true">↗</span></a></header>
+    <div class="level-tabs" role="tablist" aria-label="Demo scope"><button id="level-single" role="tab" aria-selected="true" aria-controls="experience" data-level="single">Tasks</button><button id="level-agent" role="tab" aria-selected="false" aria-controls="experience" data-level="agent" tabindex="-1">Agents</button></div>
+    <div id="experience" role="tabpanel" aria-labelledby="level-single">
+    <div id="task-tabs" class="task-tabs" role="tablist" aria-label="Demo task"><button id="tab-support" role="tab" aria-selected="true" aria-controls="demo" data-task="support">Support tickets</button><button id="tab-spam" role="tab" aria-selected="false" aria-controls="demo" data-task="spam" tabindex="-1">Spam filter <span>Jev</span></button></div>
+    <div id="agent-tabs" class="task-tabs" role="tablist" aria-label="Agent workflow example" hidden><button id="tab-backfill" role="tab" aria-selected="false" aria-controls="demo" data-task="backfill" tabindex="-1">Backfill recovery</button><button id="tab-placement" role="tab" aria-selected="false" aria-controls="demo" data-task="placement" tabindex="-1">GPU placement</button><button id="tab-fieldkit" role="tab" aria-selected="false" aria-controls="demo" data-task="fieldkit" tabindex="-1">Field kit <span>6 tasks</span></button></div>
+    <p id="task-description" class="task-description">Turn a customer email into a ticket with a category, urgency, and order ID. The same emails test whether a cheaper model can produce the required result.</p>
+    <section id="demo" class="terminal" role="tabpanel" aria-labelledby="tab-support" aria-describedby="task-description" tabindex="0">
+      <div class="titlebar"><span class="command"><span class="prompt" aria-hidden="true">›_</span> <span id="task-command">support email → ticket</span></span><span id="mode-label" class="mode">Recorded run</span></div>
+      <div class="story" aria-live="polite" aria-atomic="true">
+        <p id="status" class="eyebrow">Starting playback</p>
+        <h1 id="headline">One task. Three models.</h1>
+        <p id="result" class="result">Turn support emails into tickets. Find a cheaper model that passes the checks.</p>
+      </div>
+      <section id="workflow-context" class="workflow-context" aria-labelledby="workflow-title" hidden>
+        <h2 id="workflow-title" class="sr-only">Backfill recovery workflow</h2>
+        <p class="workflow-constraints"><span id="workflow-requirements">Required: 8/8 goals · no committed data replayed · all evidence cited</span><br><span id="workflow-limits">Mean: ≤8s · ≤$0.003 per goal · read-only tools</span></p>
+      </section>
+      <div id="comparison" class="paths">
+        <section class="path" aria-labelledby="without-title">
+          <h2 id="without-title">Without OpenMerit</h2>
+          <p id="before-model" class="model">GPT-4.1 mini</p>
+          <ol id="before-route" class="model-route" aria-label="Models for each task without OpenMerit" hidden></ol>
+          <dl class="metrics"><div class="cost"><dt id="before-unit">per 1,000 emails</dt><dd id="before-cost">—</dd></div><div class="latency"><dt>mean latency</dt><dd id="before-latency">—</dd></div><div class="quality"><dt>fixture matches</dt><dd id="before-quality">—</dd></div></dl>
+        </section>
+        <section class="path managed" aria-labelledby="with-title">
+          <h2 id="with-title">With OpenMerit</h2>
+          <p id="after-model" class="model">GPT-4.1 mini</p>
+          <ol id="after-route" class="model-route" aria-label="Models for each task with OpenMerit" hidden></ol>
+          <dl class="metrics"><div class="cost"><dt id="after-unit">per 1,000 emails</dt><dd id="after-cost">—</dd></div><div class="latency"><dt>mean latency</dt><dd id="after-latency">—</dd></div><div class="quality"><dt>fixture matches</dt><dd id="after-quality">—</dd></div></dl>
+        </section>
+      </div>
+      <p id="error" class="error" role="alert" hidden></p>
+      <div class="player">
+        <div id="playback-track" class="playback-track"><label class="sr-only" for="seek">Recording position in seconds</label><input id="seek" type="range" min="0" max="36" value="0" step="0.1"></div>
+        <div class="transport" aria-label="Demo controls">
+          <div class="transport-group">
+            <button id="pause" class="play-button" aria-label="Pause recording"><svg class="pause-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3v10M11 3v10"/></svg><svg class="play-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5Z"/></svg><span id="pause-label">Pause</span></button>
+            <button id="replay" class="icon-button" aria-label="Replay recording" title="Replay"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 6a5.4 5.4 0 1 1-.1 4M3 2v4h4"/></svg></button>
+            <span id="time">00:00 / 00:36</span>
+          </div>
+          <div class="transport-group"><button id="reset" class="quiet-button">Reset</button></div>
+        </div>
+      </div>
+      <section class="activity" aria-labelledby="trace-title"><h2 id="trace-title">Run trace</h2><ol id="log"></ol></section>
+      <details id="run-details" class="run-details">
+        <summary><span>Run details <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg></span><span class="details-hint">Policy &amp; evidence</span></summary>
+        <div class="details-content">
+          <div class="detail-heading"><h2>Evaluation policy</h2><span id="managed-state">evaluating</span></div>
+          <p id="policy-copy" class="detail-copy">24 test emails · ≥90% exact matches · ≤10s mean latency · lowest eligible cost.</p>
+          <p id="task-note" class="detail-copy">Prepared prompt, exact-match grader, and model shortlist.</p><p id="jev-docs" class="detail-copy" hidden><a href="https://openrouter.ai/docs/guides/community/jev">Jev API and capabilities ↗</a></p>
+          <div id="model-releases" class="detail-copy" hidden></div>
+          <p class="detail-copy">Cost is the observed mean × 1,000, rounded to $0.001. Application calls only; excludes Pi and infrastructure.</p>
+          <p class="detail-copy measurement-note">Latency is mean end-to-end application request time. Percentage changes use the original unrounded measurements.</p>
+          <section aria-label="Sample input and output"><h2 id="sample-label">Sample email</h2><p id="sample-email" class="sample-email">I was charged twice for ORD-1201. Please refund the duplicate.</p><p id="sample-expected" class="detail-copy" hidden></p><div class="outputs"><div><h3>Without OpenMerit</h3><pre id="before-output" class="output" aria-label="Original application output">No sample output yet.</pre></div><div><h3>With OpenMerit</h3><pre id="after-output" class="output" aria-label="Managed application output">No sample output yet.</pre></div></div></section>
+          <div class="terminal-footer"><span id="source-note">Recorded 28 Sep 2026 · timing compressed · no live calls</span><button id="evidence" class="link-button" disabled>Download evidence ↓</button></div>
+        </div>
+      </details>
+    </section>
+    </div>
+    <p id="footnote" class="footnote">This is a demo. It's not intended to show what a real workload should look like.</p>
+    <noscript><p>This demo needs JavaScript. <a href="/docs/demo/">Read the walkthrough.</a></p></noscript>
+  </main>
+</body>
+</html>

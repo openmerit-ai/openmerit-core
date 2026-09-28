@@ -1,6 +1,8 @@
 # OpenMerit website
 
-The static website lives in `site/` and uses the existing Cloudflare asset configuration in `wrangler.jsonc`. The homepage is plain HTML, CSS, and JavaScript. The [documentation section](site-documentation.md) is generated from curated Markdown at build time; no browser framework is required.
+The website lives in `site/` and uses the existing Cloudflare asset configuration in `wrangler.jsonc`. The homepage is plain HTML, CSS, and JavaScript. The [documentation section](site-documentation.md) is generated from curated Markdown at build time; no browser framework is required. The [guided demo](site-demo.md) adds a Worker API and temporary Cloudflare Containers; Docker must be running for deployment.
+
+The playback-only revision is published as Worker `31c181c9-c083-4eb4-85a4-f47516eba877`, build `demo-20260928-fieldkit-v1`. It removes live sandbox controls, disables public session creation, adds a dedicated Demo documentation group, and adds the six-task Field kit recording. Each of the five examples has a persistent two-sentence description below its tabs. Both Field kit paths already use six distinct models; five assignments change while the feasibility model is retained. The recorded comparison shows 22% lower observed cost and 13% lower mean latency, with 4/4 evaluation and 4/4 separate verification goals passing. The deployment history below describes earlier published behavior.
 
 ## Local preview
 
@@ -14,6 +16,8 @@ python3 -m http.server 45831 --bind 127.0.0.1 --directory site
 Open http://127.0.0.1:45831/. This port avoids another local project's cached service worker on ports 4173 and 4174.
 
 ## Cloudflare deployment
+
+The 2026-09-28 guided demo was introduced as Worker version `db7f39aa-aca8-47c6-b4a3-5681d91b1bfd`. The preceding version `4a68a965-108a-4154-9f44-2fa229202988` includes top-level Single task and Agent workflow tabs. Single task retains support tickets and the Jev spam filter; Agent workflow contains Backfill recovery and GPU placement examples, each with three dependent tasks and stricter constraints. GPU placement uses application models released within March 28–September 28, 2026, with dated source links in Run details. The mixed-route revision displays the model assigned to each task in both columns, with aggregate whole-goal metrics. Both show mean latency alongside cost, with percentage changes after a verified swap. The run trace is visible below the controls; policy, outputs, and evidence stay in the collapsed details section. It retains the homepage and generated documentation assets; `/demo` plays real recorded runs by default and starts bounded Cloudflare Containers on demand. See [demo architecture and live validation](site-demo.md). The following record describes the preceding static-site release.
 
 Published on 2026-09-23 to https://openmerit.site/ and https://www.openmerit.site/ using the existing `openmerit-site` Worker and routes in `wrangler.jsonc`:
 
@@ -29,7 +33,8 @@ Production verification: 54 URLs across both domains match the checked local fil
 
 - Reference: https://kobbe.io/ — quiet typography, warm neutral surfaces, a wide illustration, and generous whitespace. Copy and artwork are original to OpenMerit.
 - The page contains the hero, getting-started section, FAQ, and footer.
-- The [documentation section](site-documentation.md) publishes 16 product guides with grouped navigation, section outlines, lazy-loaded browser search, copyable examples, and mobile disclosures. It builds from maintained Markdown and validates local links before deployment.
+- The standalone [memo](site-memo.md) is generated from `docs/memo.md` at `/memo/`, with a homepage navigation link and a reading layout using the site's typography and colors. It describes the company's direction separately from released product documentation. The memo, header artwork, and navigation link are published through the existing Cloudflare workflow.
+- The [documentation section](site-documentation.md) publishes 22 guides with grouped navigation, section outlines, lazy-loaded browser search, copyable examples, and mobile disclosures. It builds from maintained Markdown and validates local links before deployment.
 - The FAQ has 13 questions covering the harness boundary, supported adapters, evaluations, model tradeoffs, evidence, approvals, regressions, background checks, pause, data, cost, budget enforcement, and readiness. Claims are reviewed against the published release using the [FAQ maintenance procedure](site-faq-maintenance.md). The 0.1.5 pause limitation is explicit; budget and evidence checks are described without implying independent enforcement or evidence authentication.
 - Small miniature vignettes accompany setup (prepared tools), the FAQ (two makers comparing notes), and the footer (the workshop dog at rest). See [assets and generation prompts](site-section-artwork.md). They are decorative, lazy-loaded, and deliberately much smaller than the hero.
 - `site/illustrations.js` plays sequences of separately generated poses: the seated maker raises a hand plane, the toolbox lid closes and opens, the FAQ makers point across their notebook, and the dog lifts its head. The hero uses four individual 2172 × 724 images; eight poses for each supporting scene are packed into WebP atlases. A canvas copies complete frames with no displacement filters, morphing, crossfades, or procedural deformation. See [the sequence assets, exact prompts, and packaging notes](site-illustration-sequences.md) and [the hero resolution correction](site-hero-resolution.md).
@@ -83,3 +88,7 @@ Generated with the built-in imagegen tool. The uncompressed original is retained
 > Composition: ultra-wide landscape 3:1 aspect ratio. The entire scene lives in the bottom 55% of the frame. Full figures, heads and feet in frame. Broad empty paper above and very generous empty paper at left and right edges. Delicate fine lines, lots of negative space, no enclosing scenery or buildings. Thin continuous ground under the figures. The art should remain readable as a shallow panoramic strip at the bottom of a web hero.
 > Color palette: background flat warm almost-white paper #f8f7f4, ink warm charcoal, very sparse washes of muted olive, faded terracotta, parchment. Mostly monochrome. No paper edge, no vignette, no noisy texture.
 > Text: none. No lettering, logo, typography, watermark, UI, charts, robots, glowing effects, bright colors, gradients, 3D, flat vector blobs, or corporate cartoon style. This should look commissioned and drawn by an editorial illustrator, with subtle imperfections and varied poses.
+
+## Full-site publication, September 28, 2026
+
+All current website changes were deployed as Worker `6b9dfbd1-d9a0-4f13-9120-4e754774998a`. `npm run verify` passed before publishing, and Cloudflare repeated its build, demo, and documentation checks. All 95 public files matched the local build on both domains (190 byte-for-byte checks), covering the homepage, memo and artwork, 22 documentation guides and their source downloads, all five demo recordings, scripts, styles, fonts, and image assets. Both demo configuration responses report `enabled: false`; no inference session was started. The existing container image was unchanged and reused.

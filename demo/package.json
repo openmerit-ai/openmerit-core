@@ -1,0 +1,12 @@
+{
+  "name": "openmerit-hosted-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "local": "node runtime/server.mjs"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7"
+  }
+}
