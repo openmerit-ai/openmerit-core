@@ -4,6 +4,12 @@ The Inference Terminal is an unreleased addition in the source checkout. It give
 
 The terminal reads existing metadata independently of inference. It does not call a model, change a route, run evaluations, load or unload models, or store prompts and responses. Closing it does not stop your workloads. Collection consumes a small amount of local CPU, memory, and runtime API capacity; it is not zero-overhead monitoring.
 
+## Share the sample
+
+The [hosted sample preview](https://dash.openmerit.site/) lets you explore the fictional enterprise environment in a browser without installing the terminal. It includes 40 agents, 140 tasks, and 21 models, with the same tabs and inspectors as the local interface. All identities, requests, costs, and hardware readings are illustrative.
+
+The preview is accessible to anyone with the link and asks search engines not to index it. It does not connect to your machine, accept project uploads, make inference calls, or expose the local snapshot API. Its read-only `/api/sample` endpoint returns fictional data. Real environment collection still runs locally through the source-build commands below; sharing this preview does not publish the npm command.
+
 ## Start the terminal
 
 From the source checkout, with dependencies installed:

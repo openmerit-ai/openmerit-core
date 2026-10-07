@@ -75,7 +75,9 @@
     "check:demo": "node --test demo/test/*.test.mjs",
     "prepare": "npm run build",
     "verify": "npm test && npm run check && npm run typecheck && npm run build && npm run check:demo && npm run check:docs && git diff --check",
-    "prepublishOnly": "npm run verify"
+    "prepublishOnly": "npm run verify",
+    "build:dash-preview": "node scripts/build-terminal-preview.mjs",
+    "deploy:dash-preview": "npx --yes wrangler@4.136.3 deploy --config wrangler.terminal.jsonc"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.87.0",
