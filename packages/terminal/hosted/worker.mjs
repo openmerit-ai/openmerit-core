@@ -8,6 +8,20 @@ const headers = {
   'X-Robots-Tag': 'noindex, nofollow',
   'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 };
+// Link-preview crawlers may read the card while general crawling stays excluded.
+const robots = `User-agent: Twitterbot
+User-agent: facebookexternalhit
+User-agent: LinkedInBot
+User-agent: Slackbot
+User-agent: Discordbot
+User-agent: TelegramBot
+User-agent: WhatsApp
+Disallow: /api/
+Allow: /
+
+User-agent: *
+Disallow: /
+`;
 let sampleBody;
 let sampleTime;
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
@@ -23,7 +37,7 @@ export default {
       if (!sampleBody || sampleTime !== now) { sampleBody = JSON.stringify(sampleSnapshot(now)); sampleTime = now; }
       response = new Response(sampleBody, { headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
     } else if (path.startsWith('/api/')) response = json({ error: 'This preview contains fictional sample data only.' }, 404);
-    else if (path === '/robots.txt') response = new Response('User-agent: *\nDisallow: /\n', { headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' } });
+    else if (path === '/robots.txt') response = new Response(robots, { headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' } });
     else {
       const asset = await env.ASSETS.fetch(request);
       response = new Response(asset.body, asset);
