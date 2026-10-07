@@ -17,3 +17,4 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+packages/terminal/public/app.js

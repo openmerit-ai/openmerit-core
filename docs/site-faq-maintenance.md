@@ -42,3 +42,11 @@ The experimental `npm run demo` sandbox is a repository-local live-provider demo
 - Describe verification as post-swap evaluation, not a guarantee that a change is safe before it is applied.
 - Claim local storage only for the relevant OpenMerit files; account for Pi session history and configured external systems.
 - Keep ordinary coding checkpoints distinct from task-specific product measurements.
+
+## Inference Terminal — unreleased source, 7 October 2026
+
+Reviewed the homepage evidence, background, data, cost, and readiness claims against the new terminal. It reads existing project metadata and loopback runtime inventory on a bounded interval and samples whole-machine CPU/memory. It makes no inference calls, routes no traffic, runs no evaluations, and stops collecting when its CLI exits. Sample data is labeled and separate. Credential-variable detection reveals provider names only; it never uses credentials for provider calls.
+
+Deployments, reported path hops, shared pools, additional hosts, sites, and racks come from explicit configuration or bounded exports. Source timestamps determine freshness. Agent/task names come only from recorded metadata; source code alone does not establish execution. Full local hostnames are system-reported. Missing identities and readings remain explicit. No network discovery, model verification, routing enforcement, available-headroom guarantee, or per-agent resource attribution is implied.
+
+Top navigation, shared dropdowns, model/service images, path colors, chart interactions, and denser source rows change presentation only. Images and animation libraries are bundled locally. This remains an unreleased command; published package behavior and homepage FAQ claims are unchanged. No homepage wording changes are needed before release.

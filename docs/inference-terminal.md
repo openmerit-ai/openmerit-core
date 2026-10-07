@@ -1,0 +1,324 @@
+# Inference Terminal
+
+The Inference Terminal is an unreleased addition in the source checkout. It gives people and agents a local overview of models, providers, connections, inference activity, and compute. Published `openmerit@0.1.5` does not include this command.
+
+The terminal reads existing metadata independently of inference. It does not call a model, change a route, run evaluations, load or unload models, or store prompts and responses. Closing it does not stop your workloads. Collection consumes a small amount of local CPU, memory, and runtime API capacity; it is not zero-overhead monitoring.
+
+## Start the terminal
+
+From the source checkout, with dependencies installed:
+
+```sh
+npm run dash
+npm run dash -- /path/to/your/project
+```
+
+Open the printed local URL, normally `http://127.0.0.1:4310`. The page uses dark mode only, with neutral graphite surfaces and silver accents. The browser is not opened automatically. Node.js 22.19 or newer is required.
+
+The built package provides the following shell command when installed from this source build:
+
+```sh
+openmerit dash
+openmerit dash /path/to/your/project --port 4311 --interval 20
+```
+
+`npm run dash` bundles the browser interface before starting the server. `npm run build` includes the executable and the local web assets under `dist/terminal/`. Torph and Liveline are bundled locally, with no browser requests to package CDNs. To install that build for shell use, run `npm install -g .` from the checkout. This is a local source installation, not an npm release.
+
+| Option | Behavior |
+| --- | --- |
+| `[path]` | Project directory; defaults to the current working directory |
+| `--port <number>` | Loopback port; defaults to 4310 |
+| `--interval <seconds>` | Collection interval from 10 to 30 seconds; defaults to 15 |
+| `--json` | Print one snapshot and exit without starting an HTTP server |
+| `--demo` | Use an explicitly fictional environment; no local collectors run |
+| `--help` | Show usage |
+
+Use Ctrl+C to close the terminal. There is no persistent daemon or background scheduler. Collection runs only while the command is running. The terminal is separate from Pi's `/openmerit pause` and other orchestration commands.
+
+## Explore the environment
+
+Pages, detail panels, and inventory cards lead directly with their title. Supporting context appears below the title; there are no small uppercase labels above headings.
+
+- **Overview:** inventory counts, observed usage, a map of recorded workload-to-deployment connections, shared capacity, and recent activity.
+- **Models:** filter by self-hosted (local or private) or cloud location, search models, and inspect their available measurements. Rows lead with the model name, followed by provider, location, and observed request paths. Select the name to open its details.
+- **Connections:** a deployment-aware map, an agent focus selector, model deployments, shared capacity pools, and declared providers, gateways, routers, and runtimes. Selecting an agent opens Deployments, Paths, and Capacity views. Selecting an entry connection reveals its reported hop sequence; deployment and capacity nodes open their evidence and shared dependencies. A path is a source-reported connection, not a network inspection or an enforced routing policy.
+- **Activity:** a request-volume chart stacked in the five request-path colors, with selectable path totals and the most recent 100 request summaries in the selected 1-, 6-, or 24-hour window. Aggregate totals include all retained records in that window. Selecting a path isolates its chart series while the activity table keeps the full window. Chart bins support pointer inspection and Left/Right or Home/End keyboard navigation; map nodes also support keyboard inspection.
+- **Local compute:** this machine and exported self-hosted servers, grouped by supplied site and rack labels, a reported-site filter when site labels exist, and per-host CPU, system RAM, accelerator readings, loaded models, and optional vLLM counters. Select a host to inspect its resources. Missing measurements and stale readings remain explicit. This does not attribute machine usage to an individual request.
+- **Sources:** successful connections, unavailable sources, collection gaps, and setup instructions.
+
+Use Command+K or Control+K to find a view, model, source, or reported agent/task. Escape closes details. Keyboard actions remain immediate, and reduced-motion preferences disable movement transitions.
+
+Dropdowns share a dark menu, inset chevron, and neutral focus and selection states. For the agent and host-location selectors, use Enter, Space, or an arrow key to open; arrows, Home/End, or typing a name prefix move through options. Enter or Space confirms, Escape cancels, and Tab confirms and continues through the page. Clicking outside dismisses the menu. An open menu preserves its options and position during passive polling; underlying collection continues.
+
+When request metadata includes stable agent or task IDs, the overview leads directly with their counts for the selected window, without an “Observed” prefix. Select a count to browse those agents or tasks and inspect their request totals, models, connections, and available measurements. Records without these IDs do not contribute to those counts. These are activity summaries, not an agent registry or a task lifecycle tracker; a completed inference request does not establish that its task is complete. The overview previews up to twelve models and ten recent requests. The Models view contains the full retained model inventory; Activity lists the latest 100 requests.
+
+### Where names come from
+
+The terminal does not infer agent roles, task descriptions, service identities, or physical locations from arbitrary source code, prompts, or model output. Being present in a repository does not establish that an agent ran. This build reads supported metadata exports, explicit configuration, runtime inventory, and the operating system. A codebase integration must export its existing identifiers; it should not generate nicer descriptions to fill gaps.
+
+| Identity | Source and fallback |
+| --- | --- |
+| Project | The selected directory’s basename |
+| Agent / task | `agent` / `task` from activity metadata; otherwise the corresponding `agentId` / `taskId`. Without an ID, the record does not establish a counted agent or task. |
+| Workload | The exported `workload`, or the target ID in an OpenMerit audit summary. Missing values display “Unattributed workload.” |
+| Connection | The exported `route` or first reported path hop; inventory names are explicitly declared in `.openmerit/terminal.json`. No name means an unattributed route. |
+| Runtime | Its configured name; an unnamed compatible runtime displays its validated loopback address. The built-in Ollama collector names the protocol it queries. |
+| This machine | The full hostname reported by the operating system, without stripping its domain suffix |
+| Exported host | Explicit `name`, then `hostname`, then `id` from the hardware export |
+| Site / rack | Only the export’s `site` / `rack` fields. Missing placement stays unspecified; neither hostname nor IP address establishes a physical location. |
+
+Agent and task inspectors include “Where this name comes from,” with the ID, supplied display name or fallback, metadata field, and source. Activity details keep IDs and display names separate. Local compute shows each host’s name source. “Agents recorded on this deployment” is based on agent IDs joined to matching deployment metadata in the selected window; it is not an assertion about currently running processes.
+
+A sticky top header contains the environment selector, search, and six text tabs: Overview, Models, Connections, Activity, Local compute, and Sources. A thin underline marks the selected view. Source coverage is a compact link at the right on desktop. There is no sidebar or collapse setting. On narrow screens, tabs scroll horizontally and the selected tab is brought into view when navigating. The environment selector and search remain available.
+
+The tab row is one keyboard stop. Left/Right arrows move focus between tabs, Home/End reach the first/last tab, and Enter/Space selects a view. Keyboard selection is immediate. Focus and horizontal tab position survive passive refreshes. Direct hash URLs still open the corresponding view; Command+K or Control+K continues to open search.
+
+Request paths use the same colors, custom icons, and text labels across the overview counts, map nodes and legend, model badges, connection cards, and activity chart legend. Map threads retain the matching path color. Icons accompany labels rather than replacing them:
+
+| Path | Color | Icon | Meaning |
+| --- | --- | --- | --- |
+| Direct API | Royal blue | Two endpoints joined by a straight line | A reported direct connection to a provider's API |
+| Local runtime | Amber | Processor chip | A reported connection to a local or private inference runtime |
+| Router | Violet | One path branching into two | A reported routing service |
+| Gateway | Cyan | An arrow passing through a frame | A reported gateway connection |
+| Unclassified | Gray | Broken ring | The metadata does not establish the path type |
+
+Path counts use the selected activity window, counting each retained request once. The short bars show each category's share of those requests. Models reached through multiple kinds of connection display each observed type. A loaded or configured model without recorded activity says “No path observed.” Model location remains a separate field: a local model can be reached through a gateway, and a cloud provider does not by itself establish a direct path. The map displays up to four workloads, four entry connections, and six deployment identities, with workload, request, and deployment-identity coverage counts. Focusing an agent allows up to six entry connections and eight deployment identities. It prioritizes workloads by recorded volume, represents distinct entry-path types where the cap allows, and includes a deployment reached through each selected path before filling remaining slots. The middle column shows each entry connection once, with a hop count or the number of distinct reported sequences. Select it to inspect those sequences and their recorded hops. An unidentified deployment remains an explicit gap. Full lists and inspectors remain available beyond these map caps.
+
+An explicit `routeKind` determines the category. Otherwise, the terminal matches the route name against declared inventory or local runtime source names, ignoring case and surrounding whitespace. A matching provider is direct; a matching router or gateway retains that type; a runtime must be declared local or private. The “Local runtime” path category includes self-hosted private runtimes; the model location and host placement distinguish them from this machine. Conflicting inventory types remain unclassified. The literal route names `Direct` and `Direct API` are also treated as direct connections. It does not guess from provider names, model location, or arbitrary substrings. The category describes the entry connection once per request. An optional ordered `path` supplies additional reported hops; the terminal never infers hidden intermediaries. When `route` or `routeKind` is omitted, a valid path supplies its first-hop value. A path contradicting an explicit entry name or type is discarded, preserving that explicit entry metadata.
+
+Local compute uses Liveline for CPU and memory history. These are passive readings on the configured collection interval, not a live inference stream. The curve interpolates between recorded points and holds the latest value between polls. Hovering provides chart inspection; the readout below it identifies the nearest **actual sample**, with its timestamp. Focus that readout and use Left/Right, Home, or End to inspect recorded samples with the keyboard. Missing readings or missed collection windows break the history; the chart resumes from the latest uninterrupted run. Reduced motion uses a static chart. Whole-machine usage is not attributed to individual inference requests.
+
+Torph animates changed totals, table measurements, status labels, and source counts while preserving the surrounding interface between polls. Neither animation library changes the collection interval or makes inference calls.
+
+The environment selector opens `inference-sample`, a fictional enterprise workspace with 40 agents, 140 tasks, 21 models, and 9,600 requests over 24 hours. It includes all five path classifications, traffic bursts, running and failed requests, missing measurements, partial and unavailable sources, three self-hosted runtimes, 27 distinct deployments, 12 shared capacity pools, and an hour of host history. Its six hosts include a workstation and five rack servers across two racks, with eleven accelerators listed. Four hosts have recent readings, one is stale, and one has no measurement. Seven loaded models are placed explicitly across three hosts. Six cloud models have separate `us-1` and `eu-1` example deployments. The capacity sample includes ten recent readings, one stale reading, and one missing reading. Shared gateway pools connect consumers across reported agent IDs. Names resemble exported configuration keys (for example, `support.review` and `llm-gateway`); some agent/task display names are absent and the UI uses their IDs. These identifiers are fictional, not discovered in the current repository. The sample workstation has no site label; server sites and racks are fictional exporter fields. Model rates, latency, allocation, and utilization values are illustrative; the sample is for inspecting the interface at scale, not a performance benchmark. Sample data never enters the real snapshot or project files. A command started with `--demo` only exposes a sample workspace; restart without that flag to collect real data.
+
+## Collection sources
+
+### OpenMerit evidence
+
+The terminal reads `.openmerit/events.jsonl` for recorded `product_task_completed` automation signals. It imports the model and target identifiers and available cost, token, and duration measurements. It does not treat generic Pi activity as application evidence.
+
+The existing audit redactor may have replaced token-shaped fields with `[REDACTED]`. These remain unknown in the terminal. The terminal does not reconstruct missing counts from cost or other fields.
+
+### Existing activity exports
+
+Export request metadata from an application, agent, router, gateway, or existing evidence system to `.openmerit/inference.jsonl`. Each record must occupy one newline-terminated JSON line. The file is an optional import contract, not an instrumentation SDK or an inline proxy.
+
+```json
+{"id":"request-123","occurredAt":"2026-10-07T08:00:00Z","workload":"your-service-id","scope":"application","model":"your-model","provider":"your-provider","route":"your-gateway","routeKind":"gateway","location":"cloud","status":"completed","inputTokens":120,"outputTokens":40,"cacheReadTokens":0,"durationMs":850,"cost":0.002,"costKind":"reported","currency":"USD"}
+```
+
+Required fields are `id`, `occurredAt` (a valid timestamp), and `model`. Optional fields have the following meanings:
+
+| Field | Meaning |
+| --- | --- |
+| `workload` | Application, agent, or evaluation name |
+| `agentId`, `agent` | Optional stable agent ID and display name; the ID enables grouping and observed-agent counts. Without a name, the ID is displayed. |
+| `taskId`, `task` | Optional stable task ID and display name; the ID enables grouping and observed-task counts. These fields carry no task lifecycle or execution trace. |
+| `scope` | `application`, `agent`, or `evaluation`; defaults to `application` |
+| `provider` | Provider or runtime name; otherwise unattributed |
+| `route` | Reported gateway, router, or direct connection name; otherwise unattributed |
+| `routeKind` | Optional `direct`, `local`, `router`, `gateway`, or `unknown`; explicit values take precedence over name matching. Omitted/invalid values become `null` in the snapshot and permit the fallback classification above. |
+| `deploymentId` | Optional stable deployment identity. Joins only when the declared/discovered deployment ID, model, and provider all match. No join is inferred from a model name alone. |
+| `path` | Optional ordered array of 1–8 `{ "name": "connection", "kind": "gateway" }` hops. Kinds use the same values as `routeKind`. Invalid/oversized paths are discarded as a whole; unsupported kinds become `unknown`. The first hop must agree with explicit entry metadata. |
+| `location` | `local`, `private`, `cloud`, or `unknown`; defaults to `unknown` |
+| `status` | `running`, `completed`, or `failed`; defaults to `completed` |
+| `inputTokens`, `outputTokens`, `cacheReadTokens` | Nonnegative measured counts, when available |
+| `durationMs` | Nonnegative measured duration in milliseconds |
+| `cost` | Nonnegative source-supplied cost |
+| `costKind` | `reported` or `estimated`; defaults to `reported` |
+| `currency` | `USD` is supported; other currencies are excluded from dollar totals |
+| `requestId` | Optional correlation metadata; not used for automatic cross-source joining |
+
+Use a stable `id` to append updates to an ongoing request. A later complete record with that ID replaces the prior record, so updates must include all fields you want retained. Use different IDs for separately charged attempts or retries. IDs must be unique within the activity feed. Correlate and deduplicate upstream when exporting overlapping systems.
+
+Missing, invalid, negative, or redacted measurements remain unknown. Numeric zero is preserved. Only allowlisted metadata fields are projected into the terminal; prompts, completions, headers, and other arbitrary payload fields are omitted. Do not put secrets in metadata names or identifiers.
+
+When the explicit activity file contains valid records, it is the sole source for request totals. OpenMerit audit summaries are not added to that file's totals, avoiding overlap. This is source precedence, not automatic cross-system request matching. Until the explicit feed contains valid records, the terminal can use audit summaries.
+
+### Local model runtimes
+
+Ollama is read at `http://127.0.0.1:11434` using `GET /api/tags` and `GET /api/ps`. This provides installed models, loaded models, and available model-allocation metadata. It does not supply request history. Loaded means resident in memory, not necessarily generating.
+
+Other local servers can be declared in `.openmerit/terminal.json`:
+
+```json
+{
+  "activityFile": ".openmerit/inference.jsonl",
+  "ollama": "http://127.0.0.1:11434",
+  "runtimes": [
+    { "name": "LM Studio", "type": "openai-compatible", "url": "http://127.0.0.1:1234" },
+    { "name": "vLLM", "type": "vllm", "url": "http://127.0.0.1:8000" }
+  ],
+  "inventory": [
+    { "name": "Your gateway", "kind": "gateway", "location": "cloud" },
+    { "name": "Your model", "kind": "model", "provider": "Your provider", "location": "cloud" }
+  ]
+}
+```
+
+Restart the terminal after configuration changes. Set `ollama` to `false` to disable its discovery. Runtime URLs must be HTTP loopback origins with no credentials, path, query, or fragment. Remote and authenticated runtime endpoints are not supported in this initial version. The runtime list is limited to eight entries.
+
+`openai-compatible` reads `GET /v1/models`. Models are labeled available; the list does not prove they are loaded. `vllm` also reads `GET /metrics` for running/waiting requests, inference cache usage, and cumulative input-token, output-token, and finished-request counters. Cache usage is the highest valid `vllm:kv_cache_usage_perc` series, expressed as a percentage; percentages are not summed across workers. These runtime aggregates are displayed separately from imported request totals and are not attributed to projects. Counters can reset when a runtime restarts.
+
+The optional `inventory` accepts `model`, `provider`, `gateway`, `router`, and `runtime` entries. Entries are declared configuration until supported by observations. Names of known provider credential variables present in the terminal process can also identify configured services. Their values are not returned or used to call those services. The terminal does not scan `.env` files, credential stores, arbitrary processes, or home-directory agent histories.
+
+### Deployments and shared capacity
+
+A model identity is separate from a deployment of that model. Declare deployment identities and shared resource pools in `.openmerit/terminal.json`. These are metadata declarations, not credentials or endpoints to call:
+
+```json
+{
+  "deployments": [
+    {
+      "id": "assistant-primary",
+      "name": "US East / primary",
+      "model": "your-model",
+      "provider": "your-provider",
+      "location": "cloud",
+      "poolIds": ["provider-account"]
+    }
+  ],
+  "capacityPools": [
+    { "id": "provider-account", "name": "Provider / shared account", "kind": "quota", "windowSeconds": 60 },
+    { "id": "llm-gateway-pool", "name": "llm-gateway", "kind": "gateway" }
+  ],
+  "inventory": [
+    { "name": "llm-gateway", "kind": "gateway", "location": "cloud", "poolIds": ["llm-gateway-pool"] }
+  ],
+  "capacityFile": ".openmerit/capacity.json"
+}
+```
+
+Deployment locations accept `local`, `private`, `cloud`, or `unknown`. Pool kinds accept `quota`, `runtime`, `gateway`, or `unknown`. Limits are 200 deployments, 100 pools, and 16 pool references per entry; labels and IDs are capped at 160 characters. Duplicate IDs are excluded rather than resolved arbitrarily. IDs beginning with `runtime:` are reserved for discovery. An optional deployment `hostId` links to the exact host ID in Local compute; an absent or unmatched ID stays unplaced. Configuration changes require restarting the terminal.
+
+Activity exports can add `"deploymentId":"assistant-primary"` to a record with the same model and provider. An optional `path` can report ordered router/gateway/runtime connections. Connection-to-pool links use exact, unambiguous name and kind matches in inventory; deployment-to-pool links use explicit IDs. These dependencies are declarations, not independently verified network paths. One request may touch several pools; repeated links to the same pool count it only once. Pool request counts must not be summed as a total of unique requests.
+
+Local runtime inventories also create deployment identities and a shared runtime pool. Discovered deployments use `hostId: "this-machine"`. Discovered IDs are `runtime:<model inventory id>` for deployments and `runtime:<source id>` for pools; inspect the snapshot to obtain them. Existing activity must explicitly reference those IDs to join to discovered deployments. No association is guessed from an equal model name. A loaded model means resident memory, not available concurrency. Declared and discovered instances are not automatically merged.
+
+Export existing capacity measurements to the project-local JSON file (defaults to `.openmerit/capacity.json`):
+
+```json
+{
+  "pools": [
+    {
+      "id": "provider-account",
+      "observedAt": "2026-10-07T08:00:00Z",
+      "resetAt": "2026-10-07T08:01:00Z",
+      "metrics": { "requestsUsed": 842, "requestsLimit": 1000, "tokensUsed": 630000, "tokensLimit": 1000000 }
+    },
+    {
+      "id": "llm-gateway-pool",
+      "observedAt": "2026-10-07T08:00:00Z",
+      "metrics": { "running": 46, "concurrencyLimit": 50, "waiting": 4 }
+    }
+  ]
+}
+```
+
+The file is read on the normal passive interval. Write a complete JSON object, preferably by atomic replacement. It is limited to 128 KiB and must resolve to a regular file within the project. Only declared pool IDs and allowlisted fields are used. Invalid or unavailable files clear exported readings; no old measurement is silently marked current. Only the first 100 entries are considered. Duplicate IDs and invalid/future timestamps are excluded. The terminal does not call cloud account APIs to populate these measurements.
+
+Supported nonnegative numeric metrics are `running`, `waiting`, `concurrencyLimit`, `requestsUsed`, `requestsLimit`, `tokensUsed`, `tokensLimit`, `cachePercent` (0–100), `memoryUsedBytes`, and `memoryTotalBytes`. Missing or invalid values stay unknown; zero stays zero. Limit bars require both a usage value and a positive limit. Counts may exceed a limit; text retains the measurement while bar width caps at 100%. A pool's declared `windowSeconds` describes the exported quota window; it is independent of the selected activity window. `resetAt` is source-reported metadata and does not trigger a reset or action.
+
+The inspector shows the source timestamp and marks readings older than three collection intervals stale. Checking a file does not refresh the measurement's age. vLLM running/waiting and cache readings populate its discovered runtime pool; Ollama and compatible inventory alone provide no capacity measurement. Pool totals cover all consumers of that resource, including other projects. Shared agents are identified from retained activity in the selected window, not from pool counters. These readings do not establish agent-level resource attribution, bottleneck causality, remaining headroom, or guaranteed readiness.
+
+The overview previews three pools, prioritizing recent measured utilization fractions. The full list includes stale and missing readings. Agent inspectors offer separate Deployments, Paths, and Capacity views. Capacity inspectors show shared agents, and selecting one returns to that agent's environment. Inspector contents refresh on the normal poll without resetting scroll or keyboard focus. Unknown deployment identities, missing pool links, and unavailable readings remain visible gaps.
+
+### This machine
+
+CPU utilization is sampled from operating-system CPU time deltas and is unknown until two samples exist. Memory is total physical memory minus reported free memory. These measurements describe the whole machine. macOS cache and reclaimable-memory behavior can differ from Activity Monitor's presentation.
+
+The terminal retains up to 240 samples per host in memory. The operating-system collector does not collect GPU utilization; additional accelerator readings can come from the hardware export below. Energy and hardware costs are not inferred. Ollama's reported VRAM allocation can overlap system memory on unified-memory machines; these values must not be added together.
+
+### Additional hosts and racks
+
+The **Local compute** inventory includes this machine automatically, with the reserved ID `this-machine`. Its display name is the full operating-system hostname. Additional hosts are supplied by an existing exporter through `.openmerit/hosts.json`. An optional `hardwareFile` in `.openmerit/terminal.json` changes that project-local path. The terminal reads this file on its normal 10–30-second polling interval; it does not connect to remote hosts, scan networks, or install collectors. Each host may supply `name` and/or `hostname`; display precedence is `name`, `hostname`, then `id`. Snapshots expose the selected field as `nameField`. Site and rack are optional export labels, not discovered locations. The site filter is hidden when no host reports a site.
+
+For example, an exporter can atomically replace this JSON file with its latest measurements:
+
+```json
+{
+  "hosts": [{
+    "id": "gpu-01",
+    "name": "Inference 01",
+    "site": "Primary",
+    "rack": "Rack A",
+    "observedAt": "2026-10-07T12:00:00Z",
+    "chip": "AMD EPYC",
+    "cores": 64,
+    "platform": "linux",
+    "arch": "x64",
+    "cpuPercent": 32.4,
+    "memoryTotal": 274877906944,
+    "memoryUsed": 137438953472,
+    "accelerators": [{
+      "id": "gpu-0",
+      "name": "NVIDIA H100",
+      "utilization": 72,
+      "memoryTotal": 85899345920,
+      "memoryUsed": 42949672960
+    }],
+    "loadedModels": [{
+      "id": "model-instance-1",
+      "name": "example-model",
+      "provider": "Private runtime",
+      "runtime": "vLLM",
+      "deploymentId": "private-model-primary",
+      "memoryBytes": 38654705664,
+      "memoryKind": "accelerator"
+    }]
+  }]
+}
+```
+
+Replace the example timestamp with the actual measurement time. Each host retains its own timestamp; reading the file again does not refresh it or create a new history sample. A reading older than three collection intervals is marked stale. Future or absent timestamps cannot establish utilization or model residency. Static inventory such as processor name and memory capacity can still be listed. A removed host, invalid file, oversized file, or failed read clears imported hosts and their histories; this machine remains available.
+
+The export is bounded to 256 KiB, 64 hosts, 16 accelerators per host, and 100 loaded-model entries per host. Labels and IDs are capped at 160 characters. Duplicate IDs within each list are excluded, and exported `this-machine` entries are rejected. Files must be regular files inside the project after symlink resolution. Unsupported fields are discarded. Only supplied metadata is retained; endpoints, credentials, prompts, and responses are not imported.
+
+CPU and accelerator utilization are percentages from 0 to 100; memory fields are nonnegative bytes, displayed as GiB. Used memory exceeding a supplied total is discarded. Missing metrics remain unknown, and zero remains zero. System RAM, accelerator memory, and model allocations are displayed separately and are never added into a misleading fleet total. Hosts can contain mixed accelerator types. Fleet counts describe listed inventory, not usable capacity.
+
+**Loaded models** means source-reported residency, not an active request or guaranteed readiness. `memoryKind` accepts `accelerator`, `system`, `unified`, or `unknown`; it identifies the allocation being reported. An omitted `loadedModels` field means residency is unknown; an empty array means the source explicitly reported no loaded models. Stale hosts show their last reported models. Exported model names also enter the model inventory as private models, with unknown current state when their host reading is stale. Replicas are kept separate in each host's residency list. Model identity matches do not establish deployment placement: declare the matching `hostId` on a deployment to make that link.
+
+The operating-system view currently receives loaded-model evidence from Ollama's `/api/ps`. A compatible `/v1/models` catalog establishes availability, not residency. Runtime counters remain associated with their host and retain their separate lifetime scope.
+
+### Model and service identities
+
+Small, locally bundled official marks identify recognized services and model families throughout the terminal: the overview and Models table, environment-map nodes, deployment lists, activity rows, loaded models, runtime counters, source rows, shared-capacity panels, search results, and detail inspectors. Marks are unframed and scaled to the surrounding text. The custom colored path-type icons remain separate: a service's identity and its routing role convey different information.
+
+Service names use an exact curated registry, including supported “API” aliases. It covers OpenAI, Anthropic, Google AI, DeepSeek, Mistral, Cohere, Qwen, Meta, Nomic, BAAI, Ollama, vLLM, LM Studio, OpenRouter, and OpenMerit's own mark. Custom services remain text-only beside their path-type icons. An OpenAI-compatible endpoint does not inherit OpenAI branding merely because it supports that protocol.
+
+Model marks identify the recognized family independently of where the model runs. For example, Qwen models carry Qwen's mark while their Ollama runtime carries Ollama's; Llama carries Meta's while vLLM retains its own identity. The registry recognizes GPT and selected OpenAI reasoning/embedding families, Claude, Gemini/Gemma, DeepSeek, Mistral families, Cohere Command/Embed, Qwen, Llama, Nomic Embed, and BGE. Family matching is anchored at the start of a model name. Namespaced IDs must use a recognized official namespace for that family; arbitrary namespaces and unfamiliar names receive no model mark or placeholder. Display names and the reported provider/runtime remain unchanged. A family mark is a visual aid, not verification of model weights or provenance.
+
+All 21 models in the enterprise sample have a consistent identity across inventory, requests, deployments, and host residency. Shared pools receive a service mark only when their declared links resolve unambiguously to one recognized service, or their own exact name is recognized. Decorative images are hidden from assistive technology so a model or service name is announced once; text labels and keyboard behavior remain available.
+
+There are no favicon lookups, third-party image services, or remote asset requests while using the terminal. Asset origins and hashes are recorded in `packages/terminal/brand-assets.json` in the source checkout. The additional model-family references are the publishers' model cards for [Qwen3](https://huggingface.co/Qwen/Qwen3-8B), [Llama 3.3](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct), [Nomic Embed](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5), and [BGE](https://huggingface.co/BAAI/bge-reranker-v2-m3). Marks identify their respective makers or services and do not imply affiliation.
+
+
+## Freshness, retention, and limits
+
+Collectors run once per interval with no overlapping collection cycles. Each runtime request has a timeout and a response-size bound. Browser refreshes read the cached snapshot, so additional tabs do not multiply runtime polling. The interface shows a delayed-collection notice when its snapshot is older than three intervals. A successful source check does not mean that source has recent inference activity.
+
+File readers handle partial lines, split UTF-8 writes, and ordinary file rotation. Each file read is bounded to 4 MiB, and each reader retains up to 10,000 unique records. A large initial file imports its tail. Truncation and malformed records are disclosed in source details. Results are limited to the most recent 24 hours and exclude future timestamps. An unavailable or removed file is not kept looking connected.
+
+Nothing collected by the terminal is persisted to a new database. Machine history and imported-record caches are process-local and disappear when the terminal closes. Existing source files remain under their owner's retention policy.
+
+The map is a bounded selection of workloads, reported paths, and deployment identities; its footer discloses represented requests and deployment-identity coverage. Full retained request metadata is available through the JSON API. There is no inferred quality score, provider billing verification, automatic cloud account connection, or universal inference discovery.
+
+## Agent access
+
+```sh
+openmerit dash --json
+```
+
+From the checkout:
+
+```sh
+node packages/terminal/src/cli.mjs dash /path/to/project --json
+```
+
+While the server is running, `GET /api/snapshot` returns the cached JSON object. Schema version 1 contains `mode`, `observedAt`, `interval`, `project`, `models`, `inventory`, `records`, `sources`, `runtimeStats`, `deployments`, `capacityPools`, `hosts`, and `machine`. The host, deployment, and pool fields extend the unreleased version-1 snapshot; older snapshots without them show unknown coverage. `machine` remains the current host for compatibility; `hosts` is the full hardware inventory. Fields containing unsupported measurements use `null` or are absent. `GET /api/sample` returns only fictional data. `GET /api/info` describes the process's mode and interval.
+
+The server binds to `127.0.0.1`, accepts read-only GET requests, checks Host and Origin, rejects cross-site browser requests, and serves only its bundled assets and explicit API routes. It provides no general file-serving endpoint. Local processes and other users with access to this machine may still reach the loopback service; this is not a multi-user authentication boundary.
+
+See [security and data](security.md) for the separate OpenMerit orchestration and harness data boundaries.

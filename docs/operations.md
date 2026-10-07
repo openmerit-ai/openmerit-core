@@ -10,8 +10,12 @@ Operational data lives under `.openmerit/` in the target product repository. It 
 - `audit-export-errors.jsonl` — failures from optional external event exporters; these failures never replace or erase the canonical local event.
 - `evidence/*.json` — evidence-reference manifests.
 - `scheduler-status.json` — last headless wakeup time and exit code in the unreleased macOS source implementation, when a wakeup actually ran.
+- `terminal.json` — optional source configuration and declared inventory for the unreleased Inference Terminal.
+- `inference.jsonl` — optional request-metadata export supplied by your existing tools for the terminal. The terminal reads this file; it does not instrument your application or create the feed.
 
 Snapshot writes are atomic. Files use owner-only permissions where POSIX modes are supported.
+
+The [Inference Terminal](inference-terminal.md) runs independently of the orchestration lifecycle. Its collector caches are memory-only and stop when the command exits. Permissions and retention for imported source files remain the responsibility of the tool that writes them.
 
 ## Diagnostics
 

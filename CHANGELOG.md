@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add the Inference Terminal: `openmerit dash` serves a local, read-only view of models, request metadata, connections, capacity, and compute, sampled every 10–30 seconds. Agent and task identities come from supplied metadata; the terminal does not intercept inference or discover every call automatically.
 - Bind task profiles, metrics, assessments, frontier artifacts, swaps, and
   automation signals to a confirmed application LLM target; Pi's own model
   telemetry cannot satisfy application evidence or become a swap target.

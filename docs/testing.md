@@ -16,6 +16,20 @@ The routine `packages/pi/test/live-wakeup.test.ts` test uses a disposable projec
 
 Automation tests additionally cover task and elapsed cadence, idempotent target-bound signal delivery, durable pending work, catalogue changes, metric regression thresholds, native wakeup requests, unsupported-scheduler fallbacks, delayed post-swap verification, and Pi dispatch from explicit application-task signals. Pi's own settled-turn telemetry is not a product-observation test path.
 
+## Inference Terminal verification (unreleased)
+
+`npm test --workspace=@openmerit/terminal` tests metadata projection, unknown/redacted values, incremental UTF-8 imports, stable-ID updates, rotation, truncation, project boundaries, source precedence, local runtime contracts, aggregate counter scope, CLI arguments, sample isolation, chart sample gaps and inspection, and the loopback read-only API. Local HTTP fixtures prove which endpoints the collectors call; they do not prove every external runtime version is compatible.
+
+The source UI was also reviewed in a browser at desktop and 390-pixel widths, including all six views, model search and location filters, time windows, node inspection, the command palette, Escape dismissal, and a real empty project. The full `npm run verify` command includes terminal tests and syntax checks through the workspace scripts. See the [terminal guide](inference-terminal.md) for current collection coverage and limitations.
+
+The enterprise sample tests assert 40 reported agents, 140 tasks, 21 used models, 9,600 unique requests, consistent task-to-agent assignments, all path classifications, and unknown measurements on running requests. Browser checks cover the larger inventories, agent/task lists and nested details, command search, map coverage, and desktop/mobile layouts. This fixture exercises interface density; it does not establish production throughput or hardware performance.
+
+The sidebar and animation revision was additionally checked for persistent chart/DOM identity across polls, CPU/memory selection, exact-sample keyboard inspection, compact navigation, Torph transitions, immediate keyboard updates, and static charts under reduced motion. These are browser checks, not a committed browser automation suite. Browser source lives in `packages/terminal/client/`; `scripts/build-terminal.mjs` bundles it into the ignored `public/app.js` before `npm run dash` and during the package build.
+
+Path-category tests cover explicit metadata precedence, unknown/invalid types, case-insensitive inventory/source matching, conflicting declarations, and mixed paths without double counting. They verify that endpoint location alone never establishes a request path. Sample data exercises direct, local, router, and gateway paths, including one model reached through multiple types.
+
+Deployment and capacity tests cover strict identity matching, duplicate-ID rejection, ordered path projection and entry conflicts, shared-pool deduplication, stale/future/missing/zero readings, positive-limit ratios, safe project-local capacity files, export failure clearing, and highest-series vLLM cache usage. The enterprise fixture checks 27 deployments, 12 pools, 9,479 identified requests, and explicit stale/missing capacity coverage.
+
 ## Pi load smoke test
 
 ```sh
@@ -52,3 +66,27 @@ Pi builds a small sentiment-classification app and infers a task/evaluation plan
 The default baseline is `openai/gpt-4.1-mini`, with `openai/gpt-4o-mini` as the challenger. Override the selection with `OPENMERIT_DEMO_BASELINE_MODEL` and comma-separated `OPENMERIT_DEMO_CANDIDATE_MODELS`; candidates must be available in the current OpenRouter catalogue. `OPENMERIT_DEMO_PI_MODEL` selects the Pi coding model. `OPENMERIT_DEMO_REPETITIONS` accepts 2–5, `OPENMERIT_DEMO_MAX_SPEND_USD` accepts a cap up to $5, and `OPENMERIT_DEMO_SEED` supplies a repeatable ordering seed.
 
 The temporary directory path is printed at startup and completion. It contains the generated app and inferred plan, `.openmerit/` lifecycle state and redacted event log, per-call `artifacts/application-runs.jsonl`, comparison manifest, and summary. The runner executes application calls serially. Its spend threshold measures application calls only; Pi's coding-model spend is not measured or included. Its tiny task set and sample count are a mechanics demo only: do not present its observed rates, average latency, or frontier as representative reliability, quality, or performance claims.
+
+### Inference Terminal hardware checks (unreleased)
+
+`npm test --workspace=@openmerit/terminal` covers bounded and project-contained hardware exports, duplicate/reserved host IDs, future and stale timestamps, missing versus empty residency, per-host history deduplication/reset, sample placement, and the hashes of locally bundled official favicons. Browser verification covers path-series selection and keyboard bin inspection, enlarged table headers, host and location selection, separate host chart histories, stale/missing hardware, exact-name connection icons, and narrow-screen layouts. These checks exercise passive metadata; they do not run inference or discover remote hardware.
+
+The terminal identity checks additionally cover all 21 sample models across inventory, requests, deployments and residency; official versus arbitrary model namespaces; unknown-name fallbacks; runtime/maker separation; and consistent HTML/SVG asset selection. Browser checks cover model and service marks on all six views, search results, deployment/path/source/model inspectors, and loaded-model rows, plus image loading without external requests, mobile overflow, and nonduplicated accessible names.
+
+
+The terminal naming tests cover source-supplied IDs without display names, absent workload labels, configured-address fallback for unnamed runtimes, full system hostnames, exported host name/hostname/ID precedence, and missing site/rack metadata. Browser checks cover colored all-path stacks and isolated paths, readable activity subtitles, compact Sources rows, name provenance inspectors, and host filters that appear only for reported sites. Sample naming is explicitly fictional.
+
+
+Top-navigation browser checks cover all six tabs, manual arrow/Home/End activation, panel labels, direct hash views, source coverage, environment switching, command search, sticky positioning, responsive tab overflow, and focus/scroll preservation through a passive poll. The old sidebar and collapse controls are absent. Desktop and narrow layouts retain readable content with no page-level horizontal overflow.
+
+### Installed terminal smoke test
+
+The package-smoke CI job installs the npm tarball into a fresh directory, then runs `scripts/terminal-package-smoke.mjs` against its installed executable. It checks the CLI, packaged browser assets, cached passive collection, request-update deduplication, source loss/recovery, sample separation, read-only HTTP boundary, and shutdown. Its default runtime is a deterministic fixture; that test makes no inference calls.
+
+For a separate real-runtime check, supply a disposable Ollama server with `smollm2:135m` already installed and unloaded:
+
+```sh
+node scripts/terminal-package-smoke.mjs /path/to/install/node_modules/.bin/openmerit --ollama-url http://127.0.0.1:11434 --output /tmp/terminal-evidence
+```
+
+This opt-in test application makes four real local generation calls. The terminal itself still reads only inventory endpoints and a temporary metadata export. Two requests are exported with Ollama's actual token and timing measurements. A separate, explicitly synthetic running-to-completed record tests update semantics. A generation without an export must produce no invented request or agent history. The test removes its temporary project and stops its terminal process; the caller owns the disposable runtime's lifecycle. The JSON report excludes prompts and generated text. No cloud credentials are needed.

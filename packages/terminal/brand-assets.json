@@ -1,0 +1,79 @@
+{
+  "retrieved": "2026-10-07",
+  "assets": [
+    {
+      "file": "ollama.png",
+      "source": "https://ollama.com/public/icon-64x64.png",
+      "sha256": "8f38edfb007d7b74f03d2ad7a57c023daa678031795ad11836df593970764a0b"
+    },
+    {
+      "file": "lm-studio.png",
+      "source": "https://lmstudio.ai/assets/marketing/logo-192x192.png",
+      "sha256": "e79ff2ac0fece5c0a76fcb8b20a29226794d11824ee7c7a2f521dcde0f88e12b"
+    },
+    {
+      "file": "vllm.png",
+      "source": "https://vllm.ai/vLLM-Logo.png",
+      "sha256": "ed27498812163f4031d40aa8a685da732a2d83e0a98b702036d80b118cb5a790"
+    },
+    {
+      "file": "anthropic.png",
+      "source": "https://cdn.prod.website-files.com/67ce28cfec624e2b733f8a52/681d52619fec35886a7f1a70_favicon.png",
+      "sha256": "47718065aeeb968b381b070c66c90d9c3ae95b09a0ee24e78b9e12ae5c4f11c7"
+    },
+    {
+      "file": "google.png",
+      "source": "https://www.gstatic.com/devrel-devsite/prod/vc572093a046b25fad0d22bd3210637939b9c971bea06a064d6f48a166bf893c5/googledevai/images/favicon-new.png",
+      "sha256": "f123996a1aa1109c1a6c60c3a30777411b0d57662f11c7dd301557251fa7b594"
+    },
+    {
+      "file": "deepseek.ico",
+      "source": "https://www.deepseek.com/favicon.ico",
+      "sha256": "30a4420e6e4dcb17fd7de560c5004346c2bc8cd971d2d5f5ee15326603e51321"
+    },
+    {
+      "file": "cohere.png",
+      "source": "https://cohere.com/favicon-32x32.png",
+      "sha256": "5fd55b86633d4a9534e914993ce8bad0a4079065254917497c5704c370c3939e"
+    },
+    {
+      "file": "openai.png",
+      "source": "https://developers.openai.com/favicon.png",
+      "sha256": "8d5575ee667ff715cd3e3074d5296edc68d5aadd89720d203e13131b68b22a04"
+    },
+    {
+      "file": "mistral.png",
+      "source": "https://docs.mistral.ai/favicons/favicon-32x32.png",
+      "sha256": "9aa9c4453458ebe0159f9cc9c9dc44431380f70248a2672f4022b86b111b8395"
+    },
+    {
+      "file": "openrouter.png",
+      "source": "https://openrouter.ai/favicon/glyph.png",
+      "sha256": "e6ce76bf956ac68569a7b1456fe0310fb9cc22bc1bc0fd8defd5daae099480b8"
+    },
+    {
+      "file": "qwen.png",
+      "source": "https://img.alicdn.com/imgextra/i4/O1CN01OXv3EM1FN8t9W4P79_!!6000000000474-2-tps-80-80.png",
+      "declaredBy": "https://qwen.ai",
+      "sha256": "cd9390bc4209c319121d111f3a1f535b3c7dd909b8f860d41acc9744138d58df"
+    },
+    {
+      "file": "meta.ico",
+      "source": "https://static.xx.fbcdn.net/rsrc.php/y5/r/m4nf26cLQxS.ico",
+      "declaredBy": "https://ai.meta.com",
+      "sha256": "b96d739c3a8ac4ef0b34212c8a2b7f23dcb7b039e0dd14ef170d8e9232972bf7"
+    },
+    {
+      "file": "nomic.png",
+      "source": "https://www.nomic.ai/favicon-48x48.png",
+      "declaredBy": "https://www.nomic.ai",
+      "sha256": "4328f702bb8975631c90da2ef530aef614b60b31310fb1998ff424b5b20df4c2"
+    },
+    {
+      "file": "baai.png",
+      "source": "https://www.baai.ac.cn/Upfile/File/2025-02-26/c843bcbb-5278-418d-bda6-f199bd9797f9..png",
+      "declaredBy": "https://www.baai.ac.cn/zh-cn/",
+      "sha256": "b1c24ca0026c12f68633126d6833b58bc37ddbb401d0a9f2b5590668fd235b20"
+    }
+  ]
+}

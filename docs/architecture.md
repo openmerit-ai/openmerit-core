@@ -46,6 +46,10 @@ Exposes the command surface, supplies private typed intent context, triggers Pi,
 
 The Pi package implements `HarnessAdapter`. It does not define canonical intents, per-intent result contracts, stage transitions, or validation rules.
 
+### Inference Terminal (unreleased)
+
+`packages/terminal` supplies a standalone `openmerit dash` executable, passive collectors, a loopback read-only HTTP API, and bundled dark-only browser assets. It does not invoke the coordinator or harness. One collector cycle reads existing metadata and runtime inventory; browser clients receive the same cached snapshot. Imported activity, runtime counters, and sampled whole-machine resources retain their separate scopes. Missing measurements remain unknown, and fictional sample data is isolated from the real snapshot. See the [terminal guide](inference-terminal.md) for the supported sources and JSON contract.
+
 ## Intelligence resources
 
 Models, web research, tools, evaluators, and fast decision systems such as Jev System One are harness resources. They are configured and invoked by Pi. This keeps OpenMerit provider-neutral and lets future adapters choose their own implementation.

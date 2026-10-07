@@ -78,6 +78,10 @@ harness-driven lifecycle; it does not migrate the earlier home-directory state.
 - `/openmerit pause` and `/openmerit resume` — control some proactive nudges in the current Pi session; task-triggered checks can still run in 0.1.5. See [pause limitations](docs/commands.md#pause-and-resume).
 - `/openmerit doctor` — show sanitized adapter diagnostics.
 
+## Inference Terminal (unreleased source build)
+
+The source checkout includes a local, dark-only overview of inference inventory, connections, activity, and compute. It reads existing metadata passively and makes no model calls. Start it with `npm run dash`, or explore fictional data with `npm run dash -- --demo`. The built package adds the `openmerit dash` shell command; published `0.1.5` does not include it. See the [Inference Terminal guide](docs/inference-terminal.md) for installation, supported sources, and read-only agent access.
+
 ## Documentation
 
 Read the searchable [OpenMerit documentation](https://openmerit.site/docs/). The Markdown sources below also ship with the package.

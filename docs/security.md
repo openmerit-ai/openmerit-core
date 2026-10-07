@@ -27,3 +27,9 @@ Pi also records OpenMerit requests and results in its session history. Project c
 OpenMerit validates structure and deterministic Pareto conformance, not the truth of arbitrary external evidence. Use authenticated observability, immutable artifacts, and digests where stronger provenance is required.
 
 Do not include credentials, private traces, or proprietary evaluation data in public issues.
+
+## Inference Terminal (unreleased)
+
+The source-only terminal reads selected project metadata, configured loopback runtime inventory/metrics endpoints, and whole-machine CPU and memory. It calls no inference endpoint and exposes no mutation API. Source files must remain inside the selected project, including after symlink resolution. It does not scan home-directory agent histories or `.env` files. Known credential-variable presence can identify a configured provider; values are neither returned nor used for provider calls.
+
+The local web service binds to `127.0.0.1` and rejects unexpected Host, Origin, and cross-site browser requests. It only serves bundled assets and specific read-only JSON routes. It is not authenticated against other local processes or machine users. Imported records contain only allowlisted metadata; names and identifiers must still be kept free of secrets. No prompts or completions are collected, and its memory caches disappear when the process exits. See [terminal data handling and limits](inference-terminal.md) for source precedence, retention bounds, and sample-data separation.
