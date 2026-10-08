@@ -153,7 +153,7 @@ Tabs use manual keyboard activation: arrows, Home, and End move focus; Enter/Spa
 | Before | After | Why |
 | --- | --- | --- |
 | Four representative workloads and a small model selection under “All” | Every workload, connection, model/service pair, and request represented in collapsible groups | “All” must describe the data, not a hidden display selection |
-| More nodes compressed into a tall diagram | Expand individual groups or all groups, with scrolling and persistent column headings | Keep detail reachable without sacrificing label size |
+| Full-width groups enlarged the diagram and replaced actual names | Restore the original SVG scale, columns, typography, and subdued cards; show a named front card with two thin backing cards and a `+N` count | Preserve the established appearance while keeping every member accessible |
 | Repeated “Deployment unidentified” captions | Reported service names on model nodes; deployment evidence in the inspector | Lead with known facts while keeping attribution limits accessible |
 
 Groups use identical recorded entry-connection sets, never inferred agent roles. Disclosure is immediate for keyboard users and reduced motion. Stable identities preserve expansion across passive refreshes.
