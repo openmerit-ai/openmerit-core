@@ -61,3 +61,39 @@ export function poolUsage(pool, snapshot, records) {
   const deployments = (snapshot.deployments ?? []).filter(item => item.poolIds?.includes(pool.id) || deploymentIds.has(item.id));
   return { items, agents, deployments };
 }
+
+// Targets keep small environments compact, but never exclude an entry connection.
+export function selectMapRecords(candidates, snapshot, { focused = false } = {}) {
+  const workKey = item => item.agentId ? `agent:${item.agentId}` : `workload:${item.workload}`;
+  const pathKey = item => JSON.stringify([reportedPath(item, snapshot)[0]]);
+  const deployKey = item => deploymentFor(item, snapshot)?.id ?? JSON.stringify(['unknown', item.provider, item.model]);
+  const rank = (items, key) => {
+    const counts = new Map();
+    for (const item of items) { const value = key(item); counts.set(value, (counts.get(value) ?? 0) + 1); }
+    return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([value]) => value);
+  };
+  const group = (items, key) => {
+    const groups = new Map();
+    for (const item of items) { const value = key(item); if (!groups.has(value)) groups.set(value, []); groups.get(value).push(item); }
+    return groups;
+  };
+  const byPath = group(candidates, pathKey);
+  const selectedPaths = rank(candidates, pathKey);
+  const workloadOrder = rank(candidates, workKey);
+  // Reserve a real workload for every connection before filling by request volume.
+  const workloadSet = new Set(selectedPaths.map(key => rank(byPath.get(key), workKey)[0]));
+  for (const key of workloadOrder) { if (workloadSet.size >= 4) break; workloadSet.add(key); }
+  const workloads = workloadOrder.filter(key => workloadSet.has(key));
+  const workRecords = candidates.filter(item => workloadSet.has(workKey(item)));
+  // Both ends need a surviving record: selecting models must not orphan a
+  // low-volume connection or a workload that uses a different model on it.
+  const deploymentSet = new Set();
+  for (const groups of [group(workRecords, pathKey), group(workRecords, workKey)]) {
+    for (const items of groups.values()) deploymentSet.add(rank(items, deployKey)[0]);
+  }
+  const deploymentOrder = rank(workRecords, deployKey);
+  for (const key of deploymentOrder) { if (deploymentSet.size >= (focused ? 8 : 6)) break; deploymentSet.add(key); }
+  const deployments = deploymentOrder.filter(key => deploymentSet.has(key));
+  const scoped = workRecords.filter(item => deploymentSet.has(deployKey(item)));
+  return { workloadOrder, workloads, selectedPaths, deployments, workRecords, scoped, workKey, pathKey, deployKey };
+}

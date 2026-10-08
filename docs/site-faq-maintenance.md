@@ -78,3 +78,8 @@ Reviewed evidence and readiness claims after the dedicated Linux VM run. Overvie
 ## Pi connection names — unreleased source, 9 October 2026
 
 Reviewed evidence and data claims. Pi's existing assistant-message provider ID now supplies its recorded connection name; classification uses the existing unambiguous inventory/runtime matcher. Generic serving-provider fields still do not establish routes, and physical deployments, hidden hops, timing, and agent names remain uninferred. No additional files, credentials, inference calls, or permissions are introduced. Published-package and homepage FAQ claims remain unchanged.
+
+
+## Environment map coverage — unreleased source, 9 October 2026
+
+Reviewed evidence and readiness claims. The map now selects representatives around every recorded entry connection in the selected window or agent scope. It no longer drops connections behind workload or model layout caps. Larger maps scroll, and represented request/workload coverage remains explicit. This changes presentation only; no inference, discovery, permission, billing, or published-package behavior changes. Homepage FAQ wording is unchanged.
