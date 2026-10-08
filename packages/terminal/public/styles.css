@@ -743,7 +743,7 @@ body.keyboard .terminal-tabs [role=tab]{transition:none}
 .service-types .route-badge{font-size:11px}
 .service-evidence span,.service-capacity span{font-family:var(--sans);font-size:12px}
 .service-evidence small,.service-capacity small{display:block;margin-top:5px;font-family:var(--sans);font-size:11px;color:var(--quiet)}
-.service-capacity small{max-width:170px;white-space:normal;line-height:1.5}
+.service-capacity small{max-width:170px;margin-inline-start:auto;white-space:normal;line-height:1.5}
 .service-model-list{display:grid;gap:0}
 .service-model-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 0;border:0;border-bottom:1px solid var(--line-soft);background:none;text-align:left;color:var(--text)}
 .service-model-row>span:last-child{color:var(--quiet)}
