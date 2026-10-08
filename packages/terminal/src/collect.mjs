@@ -124,6 +124,7 @@ export async function loadConfig(root) {
   const inventory = Array.isArray(raw.inventory) ? raw.inventory.slice(0, 100).filter(item => item && typeof item === 'object').map(item => ({
     name: text(item.name), modelCreator: text(item.modelCreator) || null, provider: text(item.provider, 'Unattributed'),
     kind: ['model', 'provider', 'gateway', 'router', 'runtime'].includes(item.kind) ? item.kind : 'model',
+    serviceType: ['model-api', 'inference-cloud'].includes(item.serviceType) ? item.serviceType : null,
     location: ['local', 'private', 'cloud'].includes(item.location) ? item.location : 'unknown',
     poolIds: poolIds(item.poolIds),
   })).filter(item => item.name) : [];

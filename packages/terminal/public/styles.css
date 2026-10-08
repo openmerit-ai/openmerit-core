@@ -725,3 +725,34 @@ body.keyboard .terminal-tabs [role=tab]{transition:none}
 @media(max-width:700px){:root{--page-gutter:20px;--header-height:104px}.terminal-masthead{height:60px;gap:16px}.terminal-identity{gap:0}.brand .wordmark{font-size:18px}.brand svg{width:20px;height:23px}.header-actions{gap:10px;flex:1;justify-content:flex-end}.environment-switch{max-width:220px;gap:5px;font-size:11px;padding-inline:4px}.environment-mode{display:none}.header-search{width:32px;justify-content:center}.header-search span,.header-search kbd{display:none}.terminal-navigation{gap:0}.terminal-tabs{gap:24px;width:100%}.terminal-tabs [role=tab]{height:44px;font-size:12px}.source-status{display:none}.main{padding-top:22px}.sample-disclosure{font-size:10px}.terminal-header-inner{padding-right:0}.terminal-masthead{padding-right:var(--page-gutter)}.terminal-tabs{padding-right:var(--page-gutter)}}
 @media(max-width:380px){.brand .wordmark{display:none}.environment-switch{max-width:230px}}
 @media(prefers-reduced-motion:reduce){.terminal-tabs [role=tab]{transition:none}}
+
+/* Services: quiet inventory first, with topology one step away. */
+.service-view-bar{display:flex;justify-content:space-between;align-items:center;gap:16px;padding-bottom:24px;border-bottom:1px solid var(--line);margin-bottom:24px}
+.service-view-bar .segmented button{padding:7px 12px;font-size:12px}
+.service-filter-bar{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:24px}
+.service-filter-bar .filter-tabs{gap:3px;align-items:center}
+.service-filter-bar .filter-tabs button{font-size:12px;padding:7px 9px;display:flex;gap:8px;align-items:center;white-space:nowrap}
+.service-filter-bar .filter-tabs button span{font-family:var(--mono);font-size:10px;color:var(--quiet)}
+.service-filter-bar .filter-input{min-width:190px;max-width:240px}
+.service-table{min-width:970px}
+.service-table td{padding-top:19px;padding-bottom:19px;font-size:12px}
+.service-table td:nth-child(2),.service-table th:nth-child(2),.service-table td:last-child,.service-table th:last-child{text-align:left}
+.service-table .model-name strong{font-size:13px}
+.service-table .model-name small{font-size:11px;margin-top:6px;max-width:235px;overflow:hidden;text-overflow:ellipsis}
+.service-types{display:flex;flex-direction:column;align-items:flex-start;gap:7px}
+.service-types .route-badge{font-size:11px}
+.service-evidence span,.service-capacity span{font-family:var(--sans);font-size:12px}
+.service-evidence small,.service-capacity small{display:block;margin-top:5px;font-family:var(--sans);font-size:11px;color:var(--quiet)}
+.service-capacity small{max-width:170px;white-space:normal;line-height:1.5}
+.service-model-list{display:grid;gap:0}
+.service-model-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 0;border:0;border-bottom:1px solid var(--line-soft);background:none;text-align:left;color:var(--text)}
+.service-model-row>span:last-child{color:var(--quiet)}
+.service-model-row small{display:block;font-size:11px;color:var(--muted);margin:6px 0 0 24px}
+.service-model-row:disabled{cursor:default;opacity:1}
+.service-evidence-list>div{padding:13px 0;border-bottom:1px solid var(--line-soft);display:grid;gap:5px;overflow-wrap:anywhere}
+.service-evidence-list strong{font-size:12px;font-weight:450}
+.service-evidence-list span,.service-evidence-list small{font-size:11px;color:var(--muted)}
+.service-evidence-list .text-button{justify-self:start;text-align:left;white-space:normal}
+@media(hover:hover) and (pointer:fine){.service-model-row:not(:disabled):hover{color:white;background:var(--raised)}.service-table tbody tr:hover{background:rgba(255,255,255,.015)}}
+@media(max-width:1100px){.service-filter-bar{flex-wrap:wrap}.service-filter-bar .filter-input{width:240px}.service-filter-bar .filter-tabs{flex:1 1 100%}}
+@media(max-width:700px){.service-view-bar{align-items:flex-start;flex-wrap:wrap;gap:13px}.service-view-bar .quiet{font-size:11px}.service-filter-bar{gap:14px}.service-filter-bar .filter-tabs{gap:3px}.service-filter-bar .filter-tabs button{padding:7px 8px;font-size:11px}.service-filter-bar .filter-input{max-width:none;width:100%}.service-table td{padding-top:16px;padding-bottom:16px}}

@@ -22,8 +22,8 @@ test('custom endpoint overrides identify the service rather than the SDK or cred
   for (const [endpoint, name] of [['https://api.groq.com/openai/v1', 'Groq'], ['https://api.cerebras.ai/v1', 'Cerebras'], ['https://inference.baseten.co/v1?token=private', 'Baseten'], ['https://model-ab12.api.baseten.co/deployment/private/predict', 'Baseten']]) {
     const result = configuredServices({ OPENAI_API_KEY: 'private-key', OPENAI_BASE_URL: endpoint });
     assert.equal(result.services.length, 1); assert.equal(result.services[0].name, name);
-    assert.deepEqual(result.services[0].evidence, [{ field: 'OPENAI_BASE_URL', basis: 'endpoint-host' }]);
-    assert.doesNotMatch(JSON.stringify(result), /private|https:|api\./);
+    assert.deepEqual(result.services[0].evidence, [{ field: 'OPENAI_BASE_URL', basis: 'endpoint-host', endpointHost: new URL(endpoint).hostname.replace('model-ab12.', 'model-….') }]);
+    assert.doesNotMatch(JSON.stringify(result), /private|https:|ab12|predict|token=/);
   }
   for (const endpoint of ['https://api.groq.com.attacker.test/v1', 'https://notgroq.com/v1', 'https://secret@api.groq.com', 'http://api.groq.com/v1', 'https://api.groq.com:8443', 'http://localhost:1234/v1', 'broken']) {
     assert.equal(serviceFromEndpoint(endpoint), null);
@@ -61,7 +61,7 @@ test('collector joins explicit creator evidence and surfaces declared models wit
   const before = process.env.GROQ_API_KEY, endpoint = process.env.GROQ_BASE_URL;
   process.env.GROQ_API_KEY = 'private-fixture-key'; delete process.env.GROQ_BASE_URL;
   t.after(() => { if (before === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = before; if (endpoint !== undefined) process.env.GROQ_BASE_URL = endpoint; });
-  await writeFile(join(root, '.openmerit/terminal.json'), JSON.stringify({ ollama: false, inventory: [{ name: 'Groq', kind: 'provider', poolIds: ['groq-quota'] }], capacityPools: [{ id: 'groq-quota', kind: 'quota' }], deployments: [{ id: 'dedicated-1', name: 'deployment-from-config', model: 'custom-model', modelCreator: 'Our lab', provider: 'Baseten', servingMode: 'dedicated', location: 'cloud' }] }));
+  await writeFile(join(root, '.openmerit/terminal.json'), JSON.stringify({ ollama: false, inventory: [{ name: 'Groq', kind: 'provider', serviceType: 'inference-cloud', poolIds: ['groq-quota'] }], capacityPools: [{ id: 'groq-quota', kind: 'quota' }], deployments: [{ id: 'dedicated-1', name: 'deployment-from-config', model: 'custom-model', modelCreator: 'Our lab', provider: 'Baseten', servingMode: 'dedicated', location: 'cloud' }] }));
   await writeFile(join(root, '.openmerit/inference.jsonl'), JSON.stringify({ id: 'r', occurredAt: new Date().toISOString(), model: 'gpt-oss-120b', modelCreator: 'OpenAI', provider: 'Groq', routeKind: 'gateway', route: 'our-gateway', location: 'cloud' }) + '\n');
   const network = t.mock.method(globalThis, 'fetch', () => { assert.fail('Passive configuration detection must not make a network request.'); });
   const snapshot = await createCollector(root, await loadConfig(root))();
@@ -73,7 +73,7 @@ test('collector joins explicit creator evidence and surfaces declared models wit
   assert.equal(snapshot.records[0].routeKind, 'gateway');
   assert.equal(snapshot.deployments[0].hostId, null);
   const entries = snapshot.inventory.filter(item => item.name === 'Groq');
-  assert.equal(entries.length, 1); assert.deepEqual(entries[0].poolIds, ['groq-quota']);
+  assert.equal(entries.length, 1); assert.equal(entries[0].serviceType, 'inference-cloud'); assert.deepEqual(entries[0].poolIds, ['groq-quota']);
   assert.equal(entries[0].evidence[0].field, 'GROQ_API_KEY');
   assert.doesNotMatch(JSON.stringify(snapshot), /private-fixture-key/);
   assert.equal(snapshot.hosts.length, 1); assert.equal(snapshot.hosts[0].accelerators.length, 0);

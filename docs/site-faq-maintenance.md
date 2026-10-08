@@ -60,3 +60,7 @@ The hosted preview’s dedicated sharing card and `Inference Terminal by OpenMer
 ## Inference service identity — unreleased source, 8 October 2026
 
 Baseten and Cerebras credential-name detection joins Groq and the existing services. Known HTTPS endpoint overrides identify configuration independently of SDK vendor; unknown overrides suppress credential-name attribution. Only inherited variables are checked, and no credential values or raw URLs reach the snapshot. No cloud calls, account access, source-code scanning, `.env` loading, or physical hardware inference is introduced. Model creators, deployment modes, and accelerator vendor/kind come from explicit metadata. Configured services remain distinct from observed requests. The hosted sample uses fictional examples; package and homepage claims remain unchanged.
+
+## Services inventory — unreleased source, 8 October 2026
+
+Reviewed the new Services view against evidence, background, data, and readiness claims. It reorganizes existing metadata into a service inventory and a secondary environment map. Model creators alone never establish service connections; registry roles are subordinate to explicit roles. Selected-window service counts are nonadditive and configured-only entries remain distinct from activity. Recognized endpoint hostnames can now appear as evidence; deployment identifiers, URL paths, queries, and credential values remain excluded. Collection stays passive. This does not release the CLI or change the homepage FAQ's published-package claims.

@@ -27,7 +27,7 @@ export function configuredServices(env = process.env) {
   const present = key => typeof env[key] === 'string' && env[key].trim().length > 0;
   const add = (name, field, basis) => {
     const item = found.get(name) ?? { name, kind: name === 'OpenRouter' ? 'gateway' : 'provider', location: 'cloud', state: 'configured', sourceId: 'environment', evidence: [] };
-    item.evidence.push({ field, basis }); found.set(name, item);
+    item.evidence.push({ field, basis, ...(basis === 'endpoint-host' ? { endpointHost: new URL(env[field]).hostname.replace(/^model-[a-z0-9-]+(?=\.api\.baseten\.co$)/, 'model-…') } : {}) }); found.set(name, item);
   };
   for (const [name, credentials, endpoints] of groups) {
     const overrides = endpoints.filter(present);
