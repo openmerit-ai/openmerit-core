@@ -9,14 +9,17 @@ export function piUsageRecord(entry, session, normalize) {
   const message = entry?.message, usage = message?.usage;
   if (entry?.type !== 'message' || (typeof entry.id !== 'string' || entry.id.length > 64) || message?.role !== 'assistant' || !usage || !message.model || !message.provider || !['stop', 'length', 'toolUse', 'error', 'aborted'].includes(message.stopReason)) return null;
   const input = [usage.input, usage.cacheRead, usage.cacheWrite].map(nonnegative);
-  return normalize({ id: `pi:${session}:${entry.id}`, occurredAt: entry.timestamp, model: message.model, provider: message.provider, workload: 'Pi', scope: 'agent', inputTokens: input.every(value => value != null) ? input.reduce((sum, value) => sum + value, 0) : null, outputTokens: nonnegative(usage.output), cacheReadTokens: nonnegative(usage.cacheRead), cost: nonnegative(usage.cost?.total), costKind: 'estimated', currency: 'USD', status: ['error', 'aborted'].includes(message.stopReason) ? 'failed' : 'completed' }, 'pi-history');
+  // Pi records the selected provider connection ID on each assistant message.
+  // Preserve that source identity; category resolution stays with the existing
+  // inventory/runtime matcher. Generic activity.provider is not a connection.
+  return normalize({ id: `pi:${session}:${entry.id}`, occurredAt: entry.timestamp, model: message.model, provider: message.provider, route: message.provider, workload: 'Pi', scope: 'agent', inputTokens: input.every(value => value != null) ? input.reduce((sum, value) => sum + value, 0) : null, outputTokens: nonnegative(usage.output), cacheReadTokens: nonnegative(usage.cacheRead), cost: nonnegative(usage.cost?.total), costKind: 'estimated', currency: 'USD', status: ['error', 'aborted'].includes(message.stopReason) ? 'failed' : 'completed' }, 'pi-history');
 }
 
 export function createPiHistory(access, normalize) {
   const readers = new Map();
   return async function read() {
     const permission = await access.status();
-    const source = { id: 'pi-history', name: 'Pi usage history', kind: 'Local application', state: permission.state === 'denied' ? 'disabled' : permission.state, detail: permission.path, coverage: ['Models', 'Recorded requests', 'Tokens', 'Estimated cost'], access: permission.state === 'allowed' ? 'Allowed for this project' : permission.state === 'denied' ? 'Not allowed' : 'Permission required', accessCommand: 'openmerit dash --access', note: 'Optional Pi session usage for this project. Session files can contain conversation text; only assistant usage metadata is retained. No task or agent identity is inferred from a session. SDK cost is an estimate; request timing and paths remain unknown.' };
+    const source = { id: 'pi-history', name: 'Pi usage history', kind: 'Local application', state: permission.state === 'denied' ? 'disabled' : permission.state, detail: permission.path, coverage: ['Models', 'Recorded requests', 'Connection names', 'Tokens', 'Estimated cost'], access: permission.state === 'allowed' ? 'Allowed for this project' : permission.state === 'denied' ? 'Not allowed' : 'Permission required', accessCommand: 'openmerit dash --access', note: 'Optional Pi session usage for this project. Session files can contain conversation text; only assistant usage metadata is retained. No task or agent identity is inferred from a session. Connection names use Pi’s recorded provider ID; types require matching inventory or runtime evidence. SDK cost is an estimate; request timing, hidden hops, and deployments remain unknown.' };
     if (permission.state !== 'allowed') { readers.clear(); return { source, records: [] }; }
     const files = []; let omitted = false, invalid = false, budget = TOTAL_BYTES;
     try {

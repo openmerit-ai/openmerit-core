@@ -73,3 +73,8 @@ Reviewed data, evidence, approval, background, and readiness claims. The termina
 ## Native-history request counts — unreleased source, 8 October 2026
 
 Reviewed evidence and readiness claims after the dedicated Linux VM run. Overview and model request counts now recognize approved Pi history and retained requests from partially covered sources. Collection and permissions are unchanged. The real run is bounded local-model test evidence, not a claim of universal discovery or production readiness. Published-package and homepage FAQ claims remain unchanged.
+
+
+## Pi connection names — unreleased source, 9 October 2026
+
+Reviewed evidence and data claims. Pi's existing assistant-message provider ID now supplies its recorded connection name; classification uses the existing unambiguous inventory/runtime matcher. Generic serving-provider fields still do not establish routes, and physical deployments, hidden hops, timing, and agent names remain uninferred. No additional files, credentials, inference calls, or permissions are introduced. Published-package and homepage FAQ claims remain unchanged.

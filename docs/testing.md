@@ -102,6 +102,11 @@ The installed-package smoke also starts with no terminal configuration and prove
 
 On 8 October 2026, the preview was built and installed in a dedicated Ubuntu 24.04.5 ARM64 VM with four virtual CPUs and 4 GiB of RAM, using Node 22.23.1, Ollama 0.40.1, and Pi 0.87.0. Eighteen actual Pi requests ran across `smollm2:135m`, `qwen2.5:0.5b`, and `smollm2:360m`. After explicit project-scoped history consent, the installed dashboard collected all 18 completed requests and their reported 1,402 input and 587 output tokens directly from native Pi sessions. No activity export supplied those requests.
 
-This was a controlled local-model workload, not a production-traffic test. Pi's configured local-model rates were zero; displayed cost does not measure hardware or electricity. Routes, deployments, agent/task identities, and request durations stayed unknown because the history did not report them. The VM had no host-directory mounts or forwarded host credentials, and its dashboard was forwarded only to host loopback.
+This was a controlled local-model workload, not a production-traffic test. Pi's configured local-model rates were zero; displayed cost does not measure hardware or electricity. In that initial build, route names remained unknown because the adapter omitted Pi’s recorded provider connection ID. Deployments, agent/task identities, and request durations were not reported by the history. The VM had no host-directory mounts or forwarded host credentials, and its dashboard was forwarded only to host loopback.
 
 The real browser check exposed an overview coverage check that omitted native history. A regression test now covers Pi-only usage, connected empty sources, retained partial history, and inventory without request evidence. The same count check is used by the overview, path summary, and model table.
+
+
+### Pi connection identity (unreleased, 9 October 2026)
+
+The adapter now preserves Pi's recorded provider connection ID as the route name. Regression coverage includes Ollama, an arbitrarily named local runtime, a declared gateway, unknown connection types, conflicting declarations, and an end-to-end approved-history collector check. Generic activity records still do not acquire a route from their serving-provider name. These checks do not infer physical deployments or reconstruct historical endpoints from mutable credentials or current Pi model configuration.
