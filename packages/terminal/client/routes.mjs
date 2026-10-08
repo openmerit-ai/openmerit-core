@@ -32,3 +32,10 @@ export function routeBreakdown(records, snapshot) {
   for (const record of records) counts[routeKind(record, snapshot)]++;
   return counts;
 }
+
+// Retained requests establish a count even when a source reports partial coverage.
+// A connected, empty request source establishes zero; inventory alone does not.
+export function requestCountKnown(snapshot) {
+  return Boolean(snapshot.records?.length) || (snapshot.sources ?? []).some(source =>
+    ['activity', 'openmerit', 'sample-activity', 'pi-history'].includes(source.id) && source.state === 'connected');
+}

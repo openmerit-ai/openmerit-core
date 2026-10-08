@@ -9,7 +9,7 @@ import { createCollector, JsonlReader, loadConfig, normalizeRecord, parseRuntime
 import { startTerminal } from '../src/server.mjs';
 import { sampleSnapshot } from '../src/sample.mjs';
 import { contiguousSamples, nearestSample } from '../client/samples.mjs';
-import { routeKind, routeBreakdown } from '../client/routes.mjs';
+import { routeKind, routeBreakdown, requestCountKnown } from '../client/routes.mjs';
 
 async function fixture(t) { const root = await mkdtemp(join(tmpdir(), 'openmerit-terminal-')); await mkdir(join(root, '.openmerit')); t.after(() => rm(root, { recursive: true, force: true })); return root; }
 const record = (overrides = {}) => ({ id: 'call-1', occurredAt: new Date().toISOString(), model: 'test-model', provider: 'test-provider', workload: 'test-workload', ...overrides });
@@ -253,4 +253,13 @@ test('all client scripts and styling ship locally; dark mode and reduced motion 
   const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
   assert.doesNotMatch(html, /(?:src|href)="https?:/);
   assert.match(css, /prefers-reduced-motion:reduce/); assert.match(css, /color-scheme:dark/);
+});
+
+
+test('native request coverage includes retained partial history without inventing inventory usage', () => {
+  assert.equal(requestCountKnown({ records: [record()], sources: [{ id: 'pi-history', state: 'partial' }] }), true);
+  assert.equal(requestCountKnown({ records: [], sources: [{ id: 'pi-history', state: 'connected' }] }), true);
+  assert.equal(requestCountKnown({ records: [], sources: [{ id: 'pi-history', state: 'needs_access' }, { id: 'ollama', state: 'connected' }] }), false);
+  assert.equal(requestCountKnown({ records: [], sources: [{ id: 'pi-history', state: 'partial' }] }), false);
+  assert.equal(requestCountKnown({ records: [], sources: [{ id: 'activity', state: 'connected' }] }), true);
 });

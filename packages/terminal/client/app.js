@@ -1,5 +1,5 @@
 import { reconcile, reconcileInspector, morphText } from './interface.js';
-import { ROUTES, routeKind, routeBreakdown } from './routes.mjs';
+import { ROUTES, routeKind, routeBreakdown, requestCountKnown } from './routes.mjs';
 import { routeIcon } from './route-icons.mjs';
 import { selectControl, selectIsOpen, closeSelect } from './select.js';
 import { hostState } from '../src/hardware.mjs';
@@ -109,7 +109,7 @@ function routeBadges(items) { const kinds = routeKinds(items); return kinds.leng
 function routeLegend() { const counts = routeBreakdown(records(), state.data); return `<div class="route-legend" aria-label="Request path types">${Object.keys(ROUTES).filter(kind => kind !== 'unknown' || counts.unknown).map(kind => routeBadge(kind, true)).join('')}</div>`; }
 function pathSummary() {
   const items = records(), counts = routeBreakdown(items, state.data);
-  const known = state.data.sources.some(source => ['activity', 'openmerit', 'sample-activity'].includes(source.id) && source.state === 'connected');
+  const known = requestCountKnown(state.data);
   return `<section class="path-summary" aria-label="Requests by path"><div class="path-summary-title"><h2>Request paths</h2><p>Last ${state.hours}h · recorded only</p></div><div class="path-summary-items">${Object.entries(ROUTES).filter(([kind]) => kind !== 'unknown' || counts.unknown).map(([kind, route]) => `<div class="path-summary-item" style="--route-color:${route.color}"><div>${routeBadge(kind, true)}${morphText(`path-total-${kind}`, known ? integer(counts[kind]) : '—', 'path-total')}</div><span class="path-share-track" aria-hidden="true"><i style="width:${items.length ? counts[kind] / items.length * 100 : 0}%"></i></span></div>`).join('')}</div></section>`;
 }
 
@@ -132,7 +132,7 @@ function summary() {
   const data = stats();
   const active = new Set(records().map(item => `${item.provider}:${item.model}`)).size;
   const local = state.data.models.filter(model => ['local', 'private'].includes(model.location)).length;
-  const countKnown = state.data.sources.some(source => ['activity', 'openmerit', 'sample-activity'].includes(source.id) && source.state === 'connected');
+  const countKnown = requestCountKnown(state.data);
   const series = buckets().map(item => countKnown ? item.cloud + item.local + item.unknown : null);
   const values = [
     ['Models in view', state.data.models.length.toString().padStart(2, '0'), `${local} self-hosted · ${state.data.models.length - local} cloud / other`, null],
@@ -218,7 +218,7 @@ function modelTable(overview = false) {
   if (!models.length) return `<div class="empty-small">${state.search || state.filter !== 'all' ? 'No models match this view. Try another filter.' : 'No models observed yet. Start Ollama, declare an inventory, or connect an activity source to bring your environment into view.'}</div>`;
   return `<div class="table-wrap"><table class="data-table model-table"><thead><tr><th scope="col">Model / service</th><th class="state-column" scope="col">State</th><th scope="col">Requests</th><th class="trend-column" scope="col">Activity</th><th class="latency-column" scope="col">Median latency</th><th scope="col">Spend</th></tr></thead><tbody>${models.map(model => {
     const items = records().filter(item => item.model === model.name && item.provider === model.provider), metrics = stats(items);
-    const hasSource = state.data.sources.some(source => ['activity', 'openmerit', 'sample-activity'].includes(source.id) && source.state === 'connected');
+    const hasSource = requestCountKnown(state.data);
     return `<tr><td><button class="model-name" data-inspect="model" data-key="${escape(model.id)}">${identityIcon(modelIdentity(model))}<span><strong>${escape(model.name)}</strong><small>Served by ${hostingLabel(model)} · ${escape(model.location)}</small></span></button><div class="model-routes">${routeBadges(items)}</div></td><td class="state-column">${stateBadge(model.state)}</td><td>${morphText(`model-requests-${model.id}`, items.length ? integer(items.length) : hasSource ? '0' : '—')}</td><td class="trend-column">${spark(buckets(items, 18).map(bin => bin.cloud + bin.local + bin.unknown), { className: 'table-spark', color: routeKinds(items).length === 1 ? ROUTES[routeKinds(items)[0]].color : '#9e9e9e' })}</td><td class="latency-column">${morphText(`model-latency-${model.id}`, duration(metrics.latency))}</td><td>${morphText(`model-cost-${model.id}`, money(metrics.cost))}${metrics.estimated ? '<span title="Includes estimated cost">*</span>' : ''}</td></tr>`;
   }).join('')}</tbody></table></div><p class="table-foot">${overview ? `Showing ${models.length} of ${state.data.models.length} models. Configured, loaded, or observed.` : 'Usage is limited to connected sources and the selected window. A dash means the measurement is unavailable.'}</p>`;
 }

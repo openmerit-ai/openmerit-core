@@ -68,3 +68,8 @@ Reviewed the new Services view against evidence, background, data, and readiness
 ## Automatic terminal discovery — unreleased source, 8 October 2026
 
 Reviewed data, evidence, approval, background, and readiness claims. The terminal now checks four fixed project declaration files and bounded known loopback API candidates automatically. SDK presence never establishes usage. Optional Pi session-format-3 metadata needs explicit CLI consent saved outside the repository and tied to canonical project/source paths; session files containing conversation text are parsed only after consent, and only usage metadata is retained. Revocation clears it on the next poll. Activity exports, Pi history, and audit summaries use precedence rather than additive totals. There are no cloud usage calls or general filesystem/process scans. This supersedes the earlier source-only note that `.env` and home history were never read. Published-package behavior, hosted-sample isolation, and homepage claims remain unchanged; no FAQ wording change is needed before release.
+
+
+## Native-history request counts — unreleased source, 8 October 2026
+
+Reviewed evidence and readiness claims after the dedicated Linux VM run. Overview and model request counts now recognize approved Pi history and retained requests from partially covered sources. Collection and permissions are unchanged. The real run is bounded local-model test evidence, not a claim of universal discovery or production readiness. Published-package and homepage FAQ claims remain unchanged.
