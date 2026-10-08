@@ -8,6 +8,7 @@ import { serviceInventory, SERVICE_TYPES } from './services.mjs';
 import { reportedPath, deploymentFor, poolsFor, capacityState, capacityReadings, poolUsage } from './environment.mjs';
 
 import { buildEnvironmentMap } from './map.mjs';
+import { syncFlowMap } from './flow-loader.js';
 
 const $ = selector => document.querySelector(selector);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
@@ -29,6 +30,7 @@ const hostedSample = document.documentElement.hasAttribute('data-sample-preview'
 const state = { data: null, page: location.hash === '#connections' ? 'services' : pages.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview', hours: 24, filter: 'all', search: '', mode: hostedSample || new URLSearchParams(location.search).has('sample') ? 'sample' : 'live', info: hostedSample ? { defaultMode: 'sample', hostedSample: true } : {}, error: '', fetching: false, timer: null };
 let returnFocus = null;
 let mapAgent = '';
+let flowPreview = new URLSearchParams(location.search).get('map') === 'flow';
 let mapExpandAll = false;
 const mapGroupExpansion = new Map();
 let serviceView = location.hash === '#connections' ? 'map' : 'inventory';
@@ -148,6 +150,10 @@ function summary() {
 }
 
 function environmentMap(expanded = false) {
+  if (flowPreview) {
+    if (mapAgent && !observedEntities('agent').some(agent => agent.id === mapAgent)) mapAgent = '';
+    return `<section class="panel environment-panel flow-environment-panel"><div class="panel-head"><div><h2>Environment map</h2><p>Preview · React Flow + ELK</p></div><button class="text-button" data-map-version="original">Original map ↗</button></div><div class="environment-toolbar"><label for="map-agent">Focus${selectControl({ id: 'map-agent', label: 'Focus environment on an agent', value: mapAgent, options: [{ value: '', label: 'All agents & workloads' }, ...observedEntities('agent').map(agent => ({ value: agent.id, label: agent.name }))] })}</label><button class="text-button" data-inspect="deployment-list" data-key="all">Deployments ↗</button></div><div data-flow-map="preview" data-ui-key="flow-map"><p class="empty-small">Opening map preview…</p></div></section>`;
+  }
   const all = records(), agents = observedEntities('agent');
   if (mapAgent && !agents.some(agent => agent.id === mapAgent)) mapAgent = '';
   const candidates = mapAgent ? all.filter(item => item.agentId === mapAgent) : all;
@@ -358,12 +364,17 @@ function render({ focusMain = false, focusTab = false } = {}) {
   const filterButton = active?.dataset?.filter;
   const scroll = window.scrollY;
   reconcile(shell(), state.data, state.error);
+  syncFlowMap({ snapshot: state.data, records: mapAgent ? records().filter(item => item.agentId === mapAgent) : records(), hours: state.hours, onInspect: entity => {
+    const type = entity.type === 'path' ? 'entry' : entity.type === 'model' ? 'map-model' : entity.type;
+    inspect(type, entity.inspectKey ?? entity.key);
+  } });
   if (firstRender) revealTab($(`#tab-${state.page}`));
   if (focusTab) { const tab = $(`#tab-${state.page}`); tab?.focus({ preventScroll: true }); revealTab(tab); window.scrollTo(0, 0); }
   else if (focusMain) { $('#main').focus({ preventScroll: true }); revealTab($(`#tab-${state.page}`)); window.scrollTo(0, 0); }
   else { if (pageButton) { document.querySelectorAll('.terminal-tabs [role="tab"]').forEach(tab => { tab.tabIndex = tab.dataset.page === pageButton ? 0 : -1; }); $(`#tab-${pageButton}`)?.focus({ preventScroll: true }); } if (hoursButton) $(`[data-hours="${hoursButton}"]`)?.focus({ preventScroll: true }); if (filterButton) $(`[data-filter="${filterButton}"]`)?.focus({ preventScroll: true }); window.scrollTo(0, scroll); }
 }
-function navigate(page, { focusTab = false } = {}) { if (page === 'connections') { page = 'services'; serviceView = 'map'; } if (!pages.includes(page)) return; state.page = page; state.filter = 'all'; state.search = ''; history.replaceState(null, '', `${location.pathname}${state.mode === 'sample' ? '?sample=1' : ''}#${page}`); render({ focusMain: !focusTab, focusTab }); }
+function terminalQuery(mode) { const params = new URLSearchParams(); if (mode === 'sample') params.set('sample', '1'); if (flowPreview) params.set('map', 'flow'); return params.size ? `?${params}` : ''; }
+function navigate(page, { focusTab = false } = {}) { if (page === 'connections') { page = 'services'; serviceView = 'map'; } if (!pages.includes(page)) return; state.page = page; state.filter = 'all'; state.search = ''; history.replaceState(null, '', `${location.pathname}${terminalQuery(state.mode)}#${page}`); render({ focusMain: !focusTab, focusTab }); }
 function revealTab(tab) {
   if (!tab) return;
   const nav = tab.closest('.terminal-tabs'), left = tab.offsetLeft, right = left + tab.offsetWidth;
@@ -466,7 +477,7 @@ function agentLinks(agents) { return agents.size ? `<div class="agent-links">${[
 function closeDialog() { const dialog = $('dialog[open]'); if (dialog) dialog.close(); }
 function connect() { closeDialog(); openInspector('Connect your environment.', 'Read existing evidence. Keep inference independent.', `<p class="detail-note" style="margin-top:0">Project declarations and supported local runtime APIs are discovered automatically. Run <code>openmerit dash --access</code> from this project to review optional Pi usage history. For other request sources, export one metadata record per line to <code>.openmerit/inference.jsonl</code>. Do not include prompts, responses, or secrets.</p><pre class="detail-code">${escape(JSON.stringify({ id: 'request-123', occurredAt: new Date().toISOString(), workload: 'your-service-id', scope: 'application', model: 'your-model', provider: 'your-provider', route: 'your-gateway', routeKind: 'gateway', location: 'cloud', status: 'completed', inputTokens: 120, outputTokens: 40, durationMs: 850, cost: 0.002, costKind: 'reported', currency: 'USD' }, null, 2))}</pre><p class="detail-note">Use a stable ID to update an ongoing request. Keep retries under separate IDs. Missing fields stay unknown. The activity feed takes precedence over OpenMerit audit summaries.</p><p class="detail-caption">Other local servers</p><p class="detail-note" style="margin-top:0">For LM Studio or vLLM, add a local runtime to <code>.openmerit/terminal.json</code>. Only model inventory and supported counters are read.</p><pre class="detail-code">${escape(JSON.stringify({ runtimes: [{ name: 'LM Studio', type: 'openai-compatible', url: 'http://127.0.0.1:1234' }, { name: 'vLLM', type: 'vllm', url: 'http://127.0.0.1:8000' }] }, null, 2))}</pre><p class="detail-caption">Optional inventory</p><p class="detail-note" style="margin-top:0">Create <code>.openmerit/terminal.json</code> and restart the terminal:</p><pre class="detail-code">${escape(JSON.stringify({ inventory: [{ name: 'Your gateway', kind: 'gateway', location: 'cloud' }, { name: 'Your model', kind: 'model', provider: 'Your provider', location: 'cloud' }] }, null, 2))}</pre>`, 'Source setup'); }
 function workspace() { openInspector(state.info.hostedSample ? 'Sample environment' : 'Choose your view.', state.info.hostedSample ? 'A fictional workspace. No connection to your machine.' : 'Keep your environment and the example separate.', `<div class="workspace-options">${state.info.defaultMode !== 'sample' ? `<button class="workspace-option ${state.mode === 'live' ? 'selected' : ''}" data-action="live"><strong>Your environment</strong><span>Real inventory and evidence from this project.</span></button>` : ''}<button class="workspace-option ${state.mode === 'sample' ? 'selected' : ''}" data-action="sample"><strong>Sample environment</strong><span>40 agents, 140 tasks, and 21 models in a fictional enterprise workspace.</span></button></div><p class="detail-note">The sample makes no inference calls and never contributes to your project's totals.</p>`, 'Environment'); }
-async function changeMode(mode) { if (state.info.hostedSample && mode !== 'sample') return; closeDialog(); state.mode = mode; state.error = ''; state.search = ''; state.filter = 'all'; mapAgent = ''; mapExpandAll = false; mapGroupExpansion.clear(); serviceSearch = ''; serviceFilter = 'all'; serviceView = 'inventory'; await refresh(true); history.replaceState(null, '', `${location.pathname}${mode === 'sample' ? '?sample=1' : ''}#${state.page}`); $('#announcement').textContent = mode === 'sample' ? 'Showing the fictional sample environment.' : 'Showing your project environment.'; }
+async function changeMode(mode) { if (state.info.hostedSample && mode !== 'sample') return; closeDialog(); state.mode = mode; state.error = ''; state.search = ''; state.filter = 'all'; mapAgent = ''; mapExpandAll = false; mapGroupExpansion.clear(); serviceSearch = ''; serviceFilter = 'all'; serviceView = 'inventory'; await refresh(true); history.replaceState(null, '', `${location.pathname}${terminalQuery(mode)}#${state.page}`); $('#announcement').textContent = mode === 'sample' ? 'Showing the fictional sample environment.' : 'Showing your project environment.'; }
 
 let commandEntries = [];
 function commandResults(query = '') {
@@ -476,8 +487,9 @@ function commandResults(query = '') {
 function openCommand() { closeDialog(); returnFocus = document.activeElement; $('#command').innerHTML = `<div class="command-input-row">${icon('search')}<input id="command-input" type="search" placeholder="Find a service, model, agent, or source…" aria-label="Search your environment" autocomplete="off"><kbd>esc</kbd></div><div id="command-results"></div><div class="command-footer">↑ ↓ to move · enter to open</div>`; commandResults(); $('#command').showModal(); $('#command-input').focus(); }
 
 document.addEventListener('click', event => {
-  const element = event.target.closest('[data-map-group],[data-map-expand],[data-page],[data-hours],[data-filter],[data-inspect],[data-action],[data-command],[data-focus-agent],[data-inspector-tab],[data-host],[data-activity-path],[data-service-view],[data-service-filter],[data-service-reset]'); if (!element) return;
-  if (element.hasAttribute('data-map-group')) { toggleMapGroup(element); }
+  const element = event.target.closest('[data-map-version],[data-map-group],[data-map-expand],[data-page],[data-hours],[data-filter],[data-inspect],[data-action],[data-command],[data-focus-agent],[data-inspector-tab],[data-host],[data-activity-path],[data-service-view],[data-service-filter],[data-service-reset]'); if (!element) return;
+  if (element.dataset.mapVersion) { flowPreview = false; history.replaceState(null, '', `${location.pathname}${terminalQuery(state.mode)}#${state.page}`); render(); $('#map-agent')?.focus({ preventScroll: true }); }
+  else if (element.hasAttribute('data-map-group')) { toggleMapGroup(element); }
   else if (element.dataset.mapExpand) { mapExpandAll = element.dataset.mapExpand === 'expand'; mapGroupExpansion.clear(); render(); $('[data-map-expand]')?.focus({ preventScroll: true }); }
   else if (element.hasAttribute('data-service-reset')) { serviceFilter = 'all'; serviceSearch = ''; render(); $('#service-search')?.focus({ preventScroll: true }); }
   else if (element.dataset.serviceView) { serviceView = element.dataset.serviceView; if (state.page !== 'services') navigate('services'); else render(); }

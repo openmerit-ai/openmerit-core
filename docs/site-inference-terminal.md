@@ -157,3 +157,18 @@ Tabs use manual keyboard activation: arrows, Home, and End move focus; Enter/Spa
 | Repeated “Deployment unidentified” captions | Reported service names on model nodes; deployment evidence in the inspector | Lead with known facts while keeping attribution limits accessible |
 
 Groups use identical recorded entry-connection sets, never inferred agent roles. Disclosure is immediate for keyboard users and reduced motion. Stable identities preserve expansion across passive refreshes.
+
+
+## Reversible graph component experiment
+
+The map remains a quiet local inventory for someone exploring their inference environment. The user's preferred card scale and restrained styling are the baseline. The prototype is isolated behind `map=flow`, and the Original map action restores the existing component.
+
+| Before | After | Why |
+| --- | --- | --- |
+| Expanding a stack stretches the full diagram | A complete searchable member browser; selected records spotlight existing stacks | Keep the overview stable while making every member reachable |
+| Member names on collapsed stacks can be unrelated to the selected agent | Selected or directly related members become the front cards | Highlight only recorded relationships |
+| Hand-arranged vertical positions | ELK vertical arrangement with fixed column widths and fixed viewport scale | Test automatic layout without changing the visual language |
+| Every poll could trigger a new graph layout | Layout signature includes only stable node and edge identities | Counts can refresh without moving the map |
+| Graph engine would increase all dashboard loads | A separate local bundle loaded only for the opt-in preview | Keep rollback and comparison cheap |
+
+The desktop member browser uses the space alongside the map and does not dim the page. At narrower widths it sits beneath the graph. Colors continue to identify path types; original service marks, subtle borders, and existing inspector behavior are reused. Search and keyboard interactions are immediate. Only opacity and border colors transition, with transitions disabled for keyboard use and reduced motion. The remaining evaluation is whether automatic layout and browsing help the user enough to justify the additional bundle size; the experiment is not the default.

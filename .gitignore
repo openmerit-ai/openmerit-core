@@ -19,3 +19,7 @@ coverage/
 .vscode/
 packages/terminal/public/app.js
 .wrangler/
+
+# Opt-in environment-map prototype bundles
+packages/terminal/public/flow.js
+packages/terminal/public/flow.css
