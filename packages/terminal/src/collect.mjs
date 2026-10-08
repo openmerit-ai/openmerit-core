@@ -1,6 +1,9 @@
 import { open, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import os from 'node:os';
+import { discoverProject, discoveryCandidates } from './discovery.mjs';
+import { createAccess } from './access.mjs';
+import { createPiHistory } from './pi-history.mjs';
 import { configuredServices, modelCreators } from './services.mjs';
 import { normalizeHosts, retainHostHistory, hostState } from './hardware.mjs';
 import { StringDecoder } from 'node:string_decoder';
@@ -128,7 +131,7 @@ export async function loadConfig(root) {
     location: ['local', 'private', 'cloud'].includes(item.location) ? item.location : 'unknown',
     poolIds: poolIds(item.poolIds),
   })).filter(item => item.name) : [];
-  return { activityFile, capacityFile, hardwareFile, ollama: endpoint, inventory, runtimes, deployments: normalizeDeployments(raw.deployments), capacityPools: normalizePools(raw.capacityPools) };
+  return { discovery: raw.discovery !== false, activityFile, capacityFile, hardwareFile, ollama: endpoint, inventory, runtimes, deployments: normalizeDeployments(raw.deployments), capacityPools: normalizePools(raw.capacityPools) };
 }
 
 async function exportSnapshot(root, path, key, normalize, limit = 128 * 1024) {
@@ -173,13 +176,14 @@ export function parseRuntimeMetrics(body) {
 }
 
 async function runtimeSnapshot(runtime) {
-  const [catalog, metrics] = await Promise.allSettled([fetchJson(`${runtime.url}/v1/models`), runtime.type === 'vllm' ? fetchText(`${runtime.url}/metrics`) : Promise.resolve(null)]);
+  const [catalog, metrics] = await Promise.allSettled([fetchJson(`${runtime.url}/v1/models`), ['vllm', 'discover'].includes(runtime.type) ? fetchText(`${runtime.url}/metrics`) : Promise.resolve(null)]);
   const connected = catalog.status === 'fulfilled' && Array.isArray(catalog.value?.data);
   const counters = metrics.status === 'fulfilled' && metrics.value ? parseRuntimeMetrics(metrics.value) : {};
+  const name = runtime.identifiedName || (runtime.type === 'discover' && Object.keys(counters).length ? `vLLM · ${new URL(runtime.url).host}` : runtime.name);
   return {
-    source: { id: runtime.id, name: runtime.name, kind: 'Local runtime', state: connected ? (runtime.type === 'vllm' && metrics.status === 'rejected' ? 'partial' : 'connected') : Object.keys(counters).length ? 'partial' : 'unavailable', detail: runtime.url, note: 'Available model inventory. Runtime counters, when present, are separate from recorded request totals.' },
-    models: connected ? catalog.value.data.slice(0, 100).filter(item => item && text(item.id)).map(item => ({ id: `${runtime.id}:${text(item.id)}`, name: text(item.id), provider: runtime.name, location: 'local', state: 'available', sourceId: runtime.id, memoryBytes: null })) : [],
-    stats: Object.keys(counters).length ? { name: runtime.name, sourceId: runtime.id, ...counters } : null,
+    source: { id: runtime.id, name, kind: 'Local runtime', state: connected ? ((runtime.type === 'vllm' || runtime.identifiedName?.startsWith('vLLM · ')) && !Object.keys(counters).length ? 'partial' : 'connected') : Object.keys(counters).length ? 'partial' : 'unavailable', detail: runtime.url, note: 'Available model inventory. Runtime counters, when present, are separate from recorded request totals.', coverage: ['Model catalog', ...(Object.keys(counters).length ? ['Runtime counters'] : [])], access: runtime.discoverySource ? 'Automatic local discovery' : 'Project configuration', discoverySource: runtime.discoverySource },
+    models: connected ? catalog.value.data.slice(0, 100).filter(item => item && text(item.id)).map(item => ({ id: `${runtime.id}:${text(item.id)}`, name: text(item.id), provider: name, location: 'local', state: 'available', sourceId: runtime.id, memoryBytes: null })) : [],
+    stats: Object.keys(counters).length ? { name, sourceId: runtime.id, ...counters } : null,
   };
 }
 
@@ -201,18 +205,31 @@ async function ollamaSnapshot(endpoint) {
 
 function cpuTotals() { return os.cpus().reduce((all, cpu) => ({ idle: all.idle + cpu.times.idle, total: all.total + Object.values(cpu.times).reduce((a, b) => a + b, 0) }), { idle: 0, total: 0 }); }
 
-export function createCollector(root, config, interval = 15) {
+export function createCollector(root, config, interval = 15, { access = createAccess(root) } = {}) {
   const activityReader = new JsonlReader(root, resolve(root, config.activityFile));
   const auditReader = new JsonlReader(root, resolve(root, '.openmerit/events.jsonl'));
   let previousCpu = null;
   const hardwareHistory = [];
   const hostHistories = new Map();
+  const piHistory = createPiHistory(access, normalizeRecord);
+  let projectDiscovery = { sources: [], inventory: [], runtimes: [] }, discoveredAt = 0;
+  const knownRuntimes = new Map();
   return async function collect() {
-    const [activity, audit, ollama, runtimes, capacity, hardware] = await Promise.all([activityReader.read(), auditReader.read(true), ollamaSnapshot(config.ollama), Promise.all((config.runtimes ?? []).map(runtimeSnapshot)), exportSnapshot(root, config.capacityFile ?? '.openmerit/capacity.json', 'pools', normalizeCapacity), exportSnapshot(root, config.hardwareFile ?? '.openmerit/hosts.json', 'hosts', normalizeHosts, 256 * 1024)]);
+    const scan = Boolean(config.discovery) && Date.now() - discoveredAt >= 60_000;
+    if (scan) { projectDiscovery = await discoverProject(root); discoveredAt = Date.now(); }
+    const candidates = config.discovery ? discoveryCandidates(projectDiscovery, config.runtimes, config.ollama) : [];
+    const candidateIds = new Set(candidates.map(item => item.id));
+    for (const id of knownRuntimes.keys()) if (!candidateIds.has(id)) knownRuntimes.delete(id);
+    const autoRuntimes = candidates.filter(item => scan || knownRuntimes.has(item.id)).map(item => ({ ...item, identifiedName: knownRuntimes.get(item.id) }));
+    const history = config.discovery ? await piHistory() : { records: [], source: null };
+    const [activity, audit, ollama, runtimes, capacity, hardware] = await Promise.all([activityReader.read(), auditReader.read(true), ollamaSnapshot(config.ollama), Promise.all([...(config.runtimes ?? []), ...autoRuntimes].map(runtimeSnapshot)), exportSnapshot(root, config.capacityFile ?? '.openmerit/capacity.json', 'pools', normalizeCapacity), exportSnapshot(root, config.hardwareFile ?? '.openmerit/hosts.json', 'hosts', normalizeHosts, 256 * 1024)]);
+    for (const runtime of runtimes) if (runtime.source.discoverySource && ['connected', 'partial'].includes(runtime.source.state)) knownRuntimes.set(runtime.source.id, runtime.source.name);
+    // Empty standard addresses are candidates, not configured services.
+    for (let i = runtimes.length - 1; i >= 0; i--) if (runtimes[i].source.discoverySource && !knownRuntimes.has(runtimes[i].source.id)) runtimes.splice(i, 1);
     const now = new Date().toISOString();
     // An explicit activity feed is authoritative. Do not add overlapping audit
     // summaries to it: they often describe the very same application request.
-    const records = (activity.records.length ? activity.records : audit.records).filter(item => Date.parse(item.occurredAt) <= Date.now() && Date.parse(item.occurredAt) >= Date.now() - 86_400_000);
+    const records = (activity.records.length ? activity.records : history.records.length ? history.records : audit.records).filter(item => Date.parse(item.occurredAt) <= Date.now() && Date.parse(item.occurredAt) >= Date.now() - 86_400_000);
     const models = new Map([...ollama.models, ...runtimes.flatMap(runtime => runtime.models)].map(item => [`${item.provider}:${item.name}`, item]));
     for (const host of hardware.hosts) for (const model of host.loadedModels) {
       const key = `${model.provider || 'Unattributed'}:${model.name}`;
@@ -235,10 +252,14 @@ export function createCollector(root, config, interval = 15) {
     if (hardwareHistory.length > 240) hardwareHistory.shift();
     const sources = [
       { id: 'activity', name: 'Inference activity', kind: 'Local file', state: activity.state, updatedAt: activity.state === 'connected' ? now : null, detail: config.activityFile, note: activity.truncated ? 'Showing a bounded recent window; older records are omitted.' : activity.invalid ? `${activity.invalid} invalid records skipped.` : 'Optional metadata export from your applications, agents, or gateway.', records: activity.records.length },
-      { id: 'openmerit', name: 'OpenMerit', kind: 'Project evidence', state: audit.state, updatedAt: audit.state === 'connected' ? now : null, detail: '.openmerit/events.jsonl', note: activity.records.length ? 'Activity totals use the explicit feed to avoid counting requests twice.' : 'Completed application summaries. Redacted or absent measurements stay unknown.', records: audit.records.length },
+      { id: 'openmerit', name: 'OpenMerit', kind: 'Project evidence', state: audit.state, updatedAt: audit.state === 'connected' ? now : null, detail: '.openmerit/events.jsonl', note: activity.records.length || history.records.length ? 'Activity totals use the higher-priority activity feed or Pi usage history to avoid counting requests twice.' : 'Completed application summaries. Redacted or absent measurements stay unknown.', records: audit.records.length },
       { id: 'ollama', name: 'Ollama', kind: 'Local runtime', state: ollama.state, updatedAt: ['connected', 'partial'].includes(ollama.state) ? now : null, detail: config.ollama ?? 'Disabled', note: ollama.note },
       { id: 'machine', name: 'This machine', kind: 'Operating system', state: 'connected', updatedAt: now, detail: `${os.platform()} · ${os.arch()}`, note: 'CPU and memory describe the whole machine, not individual inference requests.' },
     ];
+    if (config.discovery) {
+      sources.push(...projectDiscovery.sources);
+      if (history.source) sources.push({ ...history.source, note: history.source.note + (activity.records.length ? ' The explicit activity feed takes precedence in request totals.' : '') });
+    }
     sources.push({ id: 'hardware', name: 'Hardware export', kind: 'Local file', state: hardware.state, updatedAt: hardware.state === 'connected' ? now : null, detail: config.hardwareFile ?? '.openmerit/hosts.json', note: 'Hosts, racks, accelerators, and loaded models from an existing exporter. Host timestamps determine freshness; no network discovery.' });
     sources.push(...runtimes.map(runtime => ({ ...runtime.source, updatedAt: ['connected', 'partial'].includes(runtime.source.state) ? now : null })));
     sources.push({ id: 'capacity', name: 'Capacity export', kind: 'Local file', state: capacity.state, updatedAt: capacity.state === 'connected' ? now : null, detail: config.capacityFile ?? '.openmerit/capacity.json', note: 'Pool readings retain their source timestamps. A file check does not refresh a measurement. Only declared pool IDs are accepted.' });
@@ -256,14 +277,15 @@ export function createCollector(root, config, interval = 15) {
     const hosts = [machine, ...retainHostHistory(hardware.hosts, hostHistories)];
     const environment = configuredServices();
     if (environment.services.length || environment.unrecognizedEndpoints.length) sources.push({ id: 'environment', name: 'Service configuration', kind: 'Process environment', state: environment.unrecognizedEndpoints.length ? 'partial' : 'connected', updatedAt: now, detail: [...environment.services.flatMap(item => item.evidence.map(entry => entry.field)), ...environment.unrecognizedEndpoints].join(' · '), note: 'Configuration evidence only, not verified connectivity or usage. Credential values are never exported or used. Endpoint overrides are matched by known HTTPS hosts; raw URLs are not retained.' + (environment.unrecognizedEndpoints.length ? ' Unrecognized endpoint variables: ' + environment.unrecognizedEndpoints.join(', ') + '. Declare those services explicitly if needed.' : '') });
-    const inventory = config.inventory.filter(item => item.kind !== 'model').map(item => {
+    const inventory = [...config.inventory.filter(item => item.kind !== 'model'), ...projectDiscovery.inventory].map(item => {
       const detected = environment.services.find(service => service.kind === item.kind && service.name === item.name);
-      return { ...item, sourceId: 'inventory', ...(detected ? { evidence: detected.evidence } : {}) };
+      return { ...item, sourceId: item.sourceId || 'inventory', evidence: [...(item.evidence ?? []), ...(detected?.evidence ?? []).map(entry => ({ ...entry, sourceId: 'environment' }))] };
     });
     for (const service of environment.services) if (!inventory.some(item => item.kind === service.kind && item.name === service.name)) inventory.push(service);
     const creatorReports = [...records, ...(config.deployments ?? []), ...config.inventory.filter(item => item.kind === 'model').map(item => ({ ...item, sourceId: 'inventory' })), ...hardware.hosts.flatMap(host => host.loadedModels.map(model => ({ ...model, sourceId: 'hardware' })))];
     return {
       schemaVersion: 1, mode: 'live', observedAt: now, interval,
+      discovery: { enabled: Boolean(config.discovery), checkedAt: discoveredAt ? new Date(discoveredAt).toISOString() : null, intervalSeconds: 60, runtimeCandidates: candidates.length, requestSource: activity.records.length ? 'activity' : history.records.length ? 'pi-history' : audit.records.length ? 'openmerit' : null },
       project: { name: basename(root), scope: 'Current project' },
       models: modelCreators([...models.values()], creatorReports), inventory: [...inventory, ...(config.runtimes ?? []).map(runtime => ({ name: runtime.name, kind: 'runtime', location: 'local', state: 'configured' }))],
       records, sources, deployments, capacityPools, runtimeStats: runtimes.map(runtime => runtime.stats && ({ ...runtime.stats, hostId: 'this-machine' })).filter(Boolean),

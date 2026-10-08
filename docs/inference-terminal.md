@@ -35,11 +35,47 @@ openmerit dash /path/to/your/project --port 4311 --interval 20
 | `[path]` | Project directory; defaults to the current working directory |
 | `--port <number>` | Loopback port; defaults to 4310 |
 | `--interval <seconds>` | Collection interval from 10 to 30 seconds; defaults to 15 |
+| `--no-discovery` | Skip project-file discovery, additional runtime discovery, and optional Pi history for this run; existing OS, Ollama, declared sources, and process-environment metadata remain available |
+| `--access` | Review Pi history access for this project in an interactive terminal, then exit; works while another terminal process is running |
+| `--revoke-access` | Revoke Pi history access for this project and exit; running collectors apply it on the next poll |
 | `--json` | Print one snapshot and exit without starting an HTTP server |
 | `--demo` | Use an explicitly fictional environment; no local collectors run |
 | `--help` | Show usage |
 
 Use Ctrl+C to close the terminal. There is no persistent daemon or background scheduler. Collection runs only while the command is running. The terminal is separate from Pi's `/openmerit pause` and other orchestration commands.
+
+## Automatic discovery and access
+
+Discovery runs as part of `openmerit dash`; no separate audit command or exporter is needed for supported sources. The first snapshot checks the selected project and known loopback runtime addresses. Project declarations and previously unresponsive addresses are checked again every 60 seconds. Responding runtimes, OS readings, supported usage history, and existing exports refresh at the normal 10–30-second collection interval.
+
+The project scan reads only four fixed files: `.env`, `.env.local`, `package.json`, and `requirements.txt`, each limited to 128 KiB and required to resolve to a regular file inside the project. It does not recursively index source code, execute project code, source shell files, or expand environment expressions. Supported SDK declarations are shown as **Detected** source hints; an installed SDK is not proof of a service connection or request. Supported literal `.env` declarations provide the same service identity evidence as inherited environment variables. Each file is independent evidence; discovery does not pretend to know an application's loading order. Credential contents and unrelated settings are discarded before metadata is retained or returned.
+
+Alongside Ollama's existing default address, discovery checks `http://127.0.0.1:1234` and `http://127.0.0.1:8000`, plus safe HTTP loopback origins in the supported endpoint variables listed below. Endpoint paths must be empty or `/v1`; credentials, queries, fragments, and non-loopback hosts are rejected. At most eight additional origins are checked with read-only `GET /v1/models` and `GET /metrics`, without authentication or redirects. Unknown or nonresponding candidates do not become service rows. Configured origins are not probed twice. A compatible catalog supplies model availability; recognized vLLM counters can also identify vLLM. A port number alone never establishes LM Studio or vLLM identity, so an otherwise unidentified compatible runtime is named by its loopback origin. This is bounded discovery on this machine, not network or remote-host scanning.
+
+**Sources** shows automatic discovery status, per-source coverage, and any access required. Configuration, responding inventory APIs, and recorded activity remain distinct. Missing usage, identities, paths, and measurements stay unknown.
+
+Set `"discovery": false` in `.openmerit/terminal.json`, or pass `--no-discovery`, to skip these additional scans and the optional history reader. Existing explicit exports, declared runtimes, inherited service configuration, machine readings, and Ollama's existing collector remain available. Set `"ollama": false` separately to disable that collector. Restart after changing `terminal.json`; supported declaration files are reread automatically.
+
+### Optional Pi usage history
+
+When the project's standard Pi history directory exists, interactive startup offers a single access choice. The server starts first, so other sources are already available. Until approval, the terminal checks only whether that exact directory exists; it does not enumerate or read session files. Noninteractive runs, including `--json`, never prompt or grant access implicitly. They use an existing grant or report **Needs access**.
+
+Pi sessions can contain conversation text. Approval permits the reader to parse those files, but only assistant usage metadata is retained in memory and exposed: model, reported provider, request timestamp, terminal status, tokens, and estimated USD cost. Prompts, completions, tool results, and arbitrary message fields are discarded. No source file is modified. This adapter supports Pi session format version 3, verified against Pi 0.87. It reads the current project's directory under `~/.pi/agent/sessions`, respecting an inherited `PI_CODING_AGENT_DIR`. Custom per-session directories and other tools' private history formats are not supported.
+
+The reader verifies each session header's canonical project path. It counts terminal assistant entries, including tool-use completions and failed/aborted entries with usage; pending entries are excluded. Stable session/entry IDs replace duplicates. Input tokens include recorded input, cache reads, and cache writes only when all three values are present. Pi's SDK cost is marked **estimated**, not a verified provider bill. Workload is identified as **Pi**, the source application. Session IDs do not become invented agent/task identities, and the adapter does not infer duration, deployment, route, model creator, or per-request hardware.
+
+Choices are stored outside the repository in `~/.openmerit/terminal-access.json`, keyed to the canonical project and history-directory paths. The file is created with owner-only permissions where supported. Repository configuration cannot grant access; selecting a different canonical history directory requires a new choice. Review or revoke from the project directory:
+
+```sh
+openmerit dash --access
+openmerit dash --revoke-access
+```
+
+`--access` requires an interactive terminal and exits after the choice; it does not bind another server port. Revocation is checked on every collection and clears cached Pi metadata. The browser has no permission-granting API. The operating system may still deny access; this choice cannot override OS permissions. Access storage must remain outside the selected project.
+
+Pi reads are bounded to 512 directory entries, the newest 32 recently modified regular session files, 512 KiB of new session data per file, and 4 MiB of session data per poll, plus an at-most-8-KiB header check for each newly opened or replaced file. Each file retains at most 312 usage records; results cover at most the last 24 hours. Unsupported, unreadable, malformed, and truncated histories are disclosed as partial coverage. Symbolic-link session files are skipped. Source files retain their owner's original retention policy.
+
+This first discovery layer does not read Codex or Claude Code histories, retrieve cloud account usage, inspect arbitrary processes, or invent missing application metadata. Supported local runtime inventory does not expose historical requests by itself. Applications without a supported history source can still use the optional activity export below.
 
 ## Explore the environment
 
@@ -66,7 +102,7 @@ The terminal does not infer agent roles, task descriptions, service identities, 
 | --- | --- |
 | Project | The selected directory’s basename |
 | Agent / task | `agent` / `task` from activity metadata; otherwise the corresponding `agentId` / `taskId`. Without an ID, the record does not establish a counted agent or task. |
-| Workload | The exported `workload`, or the target ID in an OpenMerit audit summary. Missing values display “Unattributed workload.” |
+| Workload | The exported `workload`, the target ID in an OpenMerit audit summary, or `Pi` for the Pi history adapter. Missing values display “Unattributed workload.” |
 | Connection | The exported `route` or first reported path hop; inventory names are explicitly declared in `.openmerit/terminal.json`. No name means an unattributed route. |
 | Runtime | Its configured name; an unnamed compatible runtime displays its validated loopback address. The built-in Ollama collector names the protocol it queries. |
 | This machine | The full hostname reported by the operating system, without stripping its domain suffix |
@@ -142,7 +178,7 @@ Use a stable `id` to append updates to an ongoing request. A later complete reco
 
 Missing, invalid, negative, or redacted measurements remain unknown. Numeric zero is preserved. Only allowlisted metadata fields are projected into the terminal; prompts, completions, headers, and other arbitrary payload fields are omitted. Do not put secrets in metadata names or identifiers.
 
-When the explicit activity file contains valid records, it is the sole source for request totals. OpenMerit audit summaries are not added to that file's totals, avoiding overlap. This is source precedence, not automatic cross-system request matching. Until the explicit feed contains valid records, the terminal can use audit summaries.
+When the explicit activity file contains valid records, it is the sole source for request totals. OpenMerit audit summaries are not added to that file's totals, avoiding overlap. This is source precedence, not automatic cross-system request matching. Without valid explicit records, approved Pi usage history takes precedence, then OpenMerit audit summaries. Sources are never summed together. The snapshot identifies the selected request source in `discovery.requestSource`; this precedence can intentionally leave unrelated activity from lower-priority sources out of totals.
 
 ### Local model runtimes
 
@@ -169,7 +205,7 @@ Restart the terminal after configuration changes. Set `ollama` to `false` to dis
 
 `openai-compatible` reads `GET /v1/models`. Models are labeled available; the list does not prove they are loaded. `vllm` also reads `GET /metrics` for running/waiting requests, inference cache usage, and cumulative input-token, output-token, and finished-request counters. Cache usage is the highest valid `vllm:kv_cache_usage_perc` series, expressed as a percentage; percentages are not summed across workers. These runtime aggregates are displayed separately from imported request totals and are not attributed to projects. Counters can reset when a runtime restarts.
 
-The optional `inventory` accepts `model`, `provider`, `gateway`, `router`, and `runtime` entries. Entries are declared configuration until supported by observations. Known process-environment variables can also identify configured services, as described below. Their credential values are not returned or used to call those services. The terminal does not scan `.env` files, credential stores, arbitrary processes, or home-directory agent histories.
+The optional `inventory` accepts `model`, `provider`, `gateway`, `router`, and `runtime` entries. Entries are declared configuration until supported by observations. Known process-environment variables can also identify configured services, as described below. Their credential values are not returned or used to call those services. Automatic discovery additionally reads the supported project declarations and optional, approved Pi history described above. Credential stores and arbitrary processes are not scanned.
 
 ### Service inventory
 
@@ -185,7 +221,7 @@ Configuration, inventory, and activity evidence are distinct. A configured servi
 
 ### Inference services and model creators
 
-The terminal recognizes configuration evidence for Baseten, Groq, and Cerebras alongside the existing services. Only variables inherited by the terminal process are inspected; `.env` files, shell histories, arbitrary source files, and credential stores are not scanned. A configured service does not establish an active connection, model inventory, usage, available capacity, or a hardware allocation.
+The terminal recognizes configuration evidence for Baseten, Groq, and Cerebras alongside the existing services. Inherited variables and supported literal declarations in the selected project’s `.env` and `.env.local` files provide evidence. Shell histories, arbitrary source files, and credential stores are not scanned. A configured service does not establish an active connection, model inventory, usage, available capacity, or a hardware allocation.
 
 | Service | Credential-variable names | Optional endpoint-variable names |
 | --- | --- | --- |
@@ -199,7 +235,7 @@ The terminal recognizes configuration evidence for Baseten, Groq, and Cerebras a
 
 Nonempty credential variables identify a configured service by variable name. Endpoint overrides take precedence for that SDK's group: for example, `OPENAI_BASE_URL=https://api.groq.com/openai/v1` identifies Groq rather than OpenAI. Recognized HTTPS hosts are `api.openai.com`, `api.anthropic.com`, `openrouter.ai`, `api.groq.com`, `api.cerebras.ai`, `inference.baseten.co`, and Baseten's `model-<id>.api.baseten.co` hosts. User information and nonstandard ports are rejected. Unknown, local, or malformed overrides suppress that group's credential-name fallback; the source reports only the unrecognized variable name. Multiple configured endpoints do not establish which one an application uses.
 
-Service details show the identifying variable and whether the evidence was a credential name or a recognized endpoint. **Sources → Service configuration** explains the evidence and any unknown endpoints. Credential values and raw endpoint URLs, including their paths and queries, never enter the snapshot. Recognized endpoint hostnames may appear in service evidence; Baseten deployment identifiers are redacted as `model-….api.baseten.co`. Configured local runtimes can display their validated loopback host and port. No arbitrary endpoint URL becomes a link. Detection makes no cloud requests and does not assign a request path or rewrite recorded providers from ambient environment configuration.
+Service details show the identifying variable and whether the evidence was a credential name or a recognized endpoint. **Sources → Service configuration** explains inherited variables; project-file sources identify declarations from each file and any unknown endpoints. Credential values and raw endpoint URLs, including their paths and queries, never enter the snapshot. Recognized endpoint hostnames may appear in service evidence; Baseten deployment identifiers are redacted as `model-….api.baseten.co`. Configured local runtimes can display their validated loopback host and port. No arbitrary endpoint URL becomes a link. Detection makes no cloud requests and does not assign a request path or rewrite recorded providers from ambient environment configuration.
 
 Supply `modelCreator` in activity metadata, model inventory, deployments, or exported loaded-model entries when that identity is available. The model inspector shows the reported creator separately from **Served by**, including its source. Conflicting creator reports for the same model/service leave the inventory creator unresolved. Existing family icons are visual recognition only; they do not populate creator metadata. An explicit creator takes precedence over family icon matching. Baseten, Groq, and Cerebras service icons are bundled locally.
 
@@ -346,9 +382,9 @@ There are no favicon lookups, third-party image services, or remote asset reques
 
 Collectors run once per interval with no overlapping collection cycles. Each runtime request has a timeout and a response-size bound. Browser refreshes read the cached snapshot, so additional tabs do not multiply runtime polling. The interface shows a delayed-collection notice when its snapshot is older than three intervals. A successful source check does not mean that source has recent inference activity.
 
-File readers handle partial lines, split UTF-8 writes, and ordinary file rotation. Each file read is bounded to 4 MiB, and each reader retains up to 10,000 unique records. A large initial file imports its tail. Truncation and malformed records are disclosed in source details. Results are limited to the most recent 24 hours and exclude future timestamps. An unavailable or removed file is not kept looking connected.
+File readers handle partial lines, split UTF-8 writes, and ordinary file rotation. Activity and audit file reads are bounded to 4 MiB, and each reader retains up to 10,000 unique records. Pi history has the stricter per-file and aggregate limits described above. A large initial file imports its tail. Truncation and malformed records are disclosed in source details. Results are limited to the most recent 24 hours and exclude future timestamps. An unavailable or removed file is not kept looking connected.
 
-Nothing collected by the terminal is persisted to a new database. Machine history and imported-record caches are process-local and disappear when the terminal closes. Existing source files remain under their owner's retention policy.
+Collected usage is not persisted to a new database. Optional access choices are stored separately in the user-level permissions file. Machine history and imported-record caches are process-local and disappear when the terminal closes. Existing source files remain under their owner's retention policy.
 
 The map is a bounded selection of workloads, reported paths, and deployment identities; its footer discloses represented requests and deployment-identity coverage. Full retained request metadata is available through the JSON API. There is no inferred quality score, provider billing verification, automatic cloud account connection, or universal inference discovery.
 
@@ -364,7 +400,7 @@ From the checkout:
 node packages/terminal/src/cli.mjs dash /path/to/project --json
 ```
 
-While the server is running, `GET /api/snapshot` returns the cached JSON object. Schema version 1 contains `mode`, `observedAt`, `interval`, `project`, `models`, `inventory`, `records`, `sources`, `runtimeStats`, `deployments`, `capacityPools`, `hosts`, and `machine`. The host, deployment, and pool fields extend the unreleased version-1 snapshot; older snapshots without them show unknown coverage. `machine` remains the current host for compatibility; `hosts` is the full hardware inventory. Fields containing unsupported measurements use `null` or are absent. `GET /api/sample` returns only fictional data. `GET /api/info` describes the process's mode and interval.
+While the server is running, `GET /api/snapshot` returns the cached JSON object. Schema version 1 contains `mode`, `observedAt`, `interval`, `project`, `models`, `inventory`, `records`, `sources`, `runtimeStats`, `deployments`, `capacityPools`, `hosts`, `machine`, and `discovery`. The optional `discovery` object reports whether discovery is enabled, its last check time, the 60-second discovery interval, candidate count, and selected request source. The host, deployment, and pool fields extend the unreleased version-1 snapshot; older snapshots without them show unknown coverage. `machine` remains the current host for compatibility; `hosts` is the full hardware inventory. Fields containing unsupported measurements use `null` or are absent. `GET /api/sample` returns only fictional data. `GET /api/info` describes the process's mode and interval.
 
 The server binds to `127.0.0.1`, accepts read-only GET requests, checks Host and Origin, rejects cross-site browser requests, and serves only its bundled assets and explicit API routes. It provides no general file-serving endpoint. Local processes and other users with access to this machine may still reach the loopback service; this is not a multi-user authentication boundary.
 

@@ -7,8 +7,8 @@ import { sampleSnapshot } from './sample.mjs';
 const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/styles.css', ['styles.css', 'text/css']], ['/favicon.svg', ['favicon.svg', 'image/svg+xml']]]);
 for (const file of ['baseten.png', 'groq.ico', 'cerebras.png', 'qwen.png', 'meta.ico', 'nomic.png', 'baai.png', 'ollama.png', 'lm-studio.png', 'vllm.png', 'anthropic.png', 'google.png', 'deepseek.ico', 'cohere.png', 'openai.png', 'mistral.png', 'openrouter.png']) assets.set(`/brands/${file}`, [`brands/${file}`, file.endsWith('.svg') ? 'image/svg+xml' : file.endsWith('.ico') ? 'image/x-icon' : 'image/png']);
 
-export async function startTerminal({ root = process.cwd(), port = 4310, interval = 15, demo = false, collect: customCollect } = {}) {
-  const collect = customCollect ?? (demo ? async () => sampleSnapshot() : createCollector(root, await loadConfig(root), interval));
+export async function startTerminal({ root = process.cwd(), port = 4310, interval = 15, demo = false, collect: customCollect, config, access } = {}) {
+  const collect = customCollect ?? (demo ? async () => sampleSnapshot() : createCollector(root, config ?? await loadConfig(root), interval, access ? { access } : {}));
   let snapshot = await collect();
   let busy = false;
   const timer = setInterval(async () => {

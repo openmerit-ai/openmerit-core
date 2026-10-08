@@ -27,6 +27,7 @@ const cleanEnv = Object.fromEntries(['PATH', 'SystemRoot', 'WINDIR', 'TMPDIR', '
 cleanEnv.HOME = root;
 const checks = [];
 const runtimeRequests = [];
+const discoveryRequests = [];
 const generations = [];
 let loaded = false;
 let unavailable = false;
@@ -73,6 +74,11 @@ async function generate(label) {
   generations.push({ label, inputTokens: result.prompt_eval_count, outputTokens: result.eval_count, durationMs: result.total_duration / 1e6 });
   return result;
 }
+const discoveryRuntime = createServer((request, response) => {
+  discoveryRequests.push(`${request.method} ${request.url}`);
+  if (request.method === 'GET' && request.url === '/v1/models') { response.setHeader('Content-Type', 'application/json'); response.end(json({ data: [{ id: 'discovered-model' }] })); }
+  else { response.writeHead(404); response.end(); }
+});
 const runtime = createServer(async (request, response) => {
   runtimeRequests.push(`${request.method} ${request.url}`);
   // This observation proxy exists only in the test. It guards the discovery API;
@@ -91,6 +97,23 @@ const runtime = createServer(async (request, response) => {
   } catch { response.writeHead(503); response.end(); }
 });
 try {
+  const discoveryPort = await listen(discoveryRuntime);
+  const declarations = `OPENAI_BASE_URL=http://127.0.0.1:${discoveryPort}/v1\nGROQ_API_KEY=fixture-secret-never-export\n`;
+  await writeFile(join(project, '.env'), declarations);
+  await writeFile(join(project, 'package.json'), json({ dependencies: { '@anthropic-ai/sdk': 'fixture' } }));
+  const autoCommand = await command(['dash', '--json']);
+  assert.equal(autoCommand.code, 0, autoCommand.stderr);
+  const automatic = JSON.parse(autoCommand.stdout);
+  assert.equal(automatic.discovery.enabled, true);
+  assert.ok(automatic.models.some(item => item.name === 'discovered-model' && item.provider === `http://127.0.0.1:${discoveryPort}`));
+  assert.ok(automatic.inventory.some(item => item.name === 'Groq' && item.sourceId === 'project:.env'));
+  assert.ok(automatic.sources.some(item => item.id === 'project:package.json' && item.state === 'detected'));
+  assert.equal(automatic.records.length, 0);
+  assert.doesNotMatch(autoCommand.stdout, /fixture-secret-never-export/);
+  assert.equal(await readFile(join(project, '.env'), 'utf8'), declarations);
+  assert.deepEqual(discoveryRequests.sort(), ['GET /metrics', 'GET /v1/models']);
+  await rm(join(project, '.env')); await rm(join(project, 'package.json'));
+  pass('Automatic project and runtime discovery without terminal configuration; SDK hints and secrets remain separate from usage');
   const runtimePort = await listen(runtime);
   const configPath = join(project, '.openmerit/terminal.json');
   const config = json({ ollama: `http://127.0.0.1:${runtimePort}` });
@@ -212,6 +235,7 @@ try {
 } finally {
   if (child && child.exitCode === null && child.signalCode === null) { const stopped = once(child, 'exit'); child.kill('SIGKILL'); await stopped; }
   await close(runtime);
+  await close(discoveryRuntime);
   if (output) { await mkdir(resolve(output), { recursive: true }); await writeFile(join(resolve(output), 'terminal-smoke.json'), JSON.stringify(report, null, 2)); }
   await rm(root, { recursive: true, force: true });
 }

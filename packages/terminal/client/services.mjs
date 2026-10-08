@@ -64,10 +64,10 @@ export function serviceInventory(snapshot, selectedRecords = snapshot.records ??
     classify(service, item); service.configured = true;
     for (const id of item.poolIds ?? []) service.poolIds.add(id);
     for (const entry of item.evidence ?? []) {
-      evidence(service, 'environment', entry.field, entry.basis === 'endpoint-host' ? 'Recognized endpoint host' : 'Credential variable present');
+      evidence(service, entry.sourceId || 'environment', entry.field, entry.basis === 'endpoint-host' ? 'Recognized endpoint host' : 'Credential variable present');
       if (entry.endpointHost) service.endpoints.add(entry.endpointHost);
     }
-    if (item.sourceId !== 'environment') evidence(service, item.sourceId || 'inventory', 'inventory.name', 'Declared service');
+    if (item.sourceId !== 'environment' && !item.sourceId?.startsWith('project:')) evidence(service, item.sourceId || 'inventory', 'inventory.name', 'Declared service');
   }
   for (const source of snapshot.sources ?? []) {
     if (source.kind !== 'Local runtime' || source.state === 'disabled') continue;
