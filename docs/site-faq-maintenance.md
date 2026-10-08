@@ -56,3 +56,7 @@ Top navigation, shared dropdowns, model/service images, path colors, chart inter
 The separate `dash.openmerit.site` preview serves generated fictional data and terminal assets only. It has no collector, filesystem access, provider credentials, inference endpoint, upload path, or connection to a visitor's local environment. Public access is by link; noindex is a search-engine request, not authentication. The root site's FAQ and published npm claims remain unchanged. The deployment uses its own Worker and exact custom domain, and does not redeploy the main site or its demo/memo services.
 
 The hosted preview’s dedicated sharing card and `Inference Terminal by OpenMerit` title change presentation only. Its social description still identifies the environment as fictional; homepage FAQ and package claims are unchanged.
+
+## Inference service identity — unreleased source, 8 October 2026
+
+Baseten and Cerebras credential-name detection joins Groq and the existing services. Known HTTPS endpoint overrides identify configuration independently of SDK vendor; unknown overrides suppress credential-name attribution. Only inherited variables are checked, and no credential values or raw URLs reach the snapshot. No cloud calls, account access, source-code scanning, `.env` loading, or physical hardware inference is introduced. Model creators, deployment modes, and accelerator vendor/kind come from explicit metadata. Configured services remain distinct from observed requests. The hosted sample uses fictional examples; package and homepage claims remain unchanged.

@@ -1,6 +1,7 @@
 import { open, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import os from 'node:os';
+import { configuredServices, modelCreators } from './services.mjs';
 import { normalizeHosts, retainHostHistory, hostState } from './hardware.mjs';
 import { StringDecoder } from 'node:string_decoder';
 import { normalizePath, normalizeDeployments, normalizePools, normalizeCapacity, poolIds } from './topology.mjs';
@@ -33,7 +34,7 @@ export function normalizeRecord(value, sourceId) {
     agentId: text(value.agentId) || null, agent: text(value.agent) || null,
     taskId: text(value.taskId) || null, task: text(value.task) || null,
     deploymentId: text(value.deploymentId) || null, path,
-    model: text(value.model), provider: text(value.provider) || 'Unattributed',
+    model: text(value.model), modelCreator: text(value.modelCreator) || null, provider: text(value.provider) || 'Unattributed',
     workload: text(value.workload) || 'Unattributed workload',
     scope: ['application', 'agent', 'evaluation'].includes(value.scope) ? value.scope : 'application',
     route, routeKind,
@@ -121,7 +122,7 @@ export async function loadConfig(root) {
     return { id: `runtime-${index}`, name: text(runtime.name) || url, type: runtime.type, url };
   }) : [];
   const inventory = Array.isArray(raw.inventory) ? raw.inventory.slice(0, 100).filter(item => item && typeof item === 'object').map(item => ({
-    name: text(item.name), provider: text(item.provider, 'Unattributed'),
+    name: text(item.name), modelCreator: text(item.modelCreator) || null, provider: text(item.provider, 'Unattributed'),
     kind: ['model', 'provider', 'gateway', 'router', 'runtime'].includes(item.kind) ? item.kind : 'model',
     location: ['local', 'private', 'cloud'].includes(item.location) ? item.location : 'unknown',
     poolIds: poolIds(item.poolIds),
@@ -214,9 +215,9 @@ export function createCollector(root, config, interval = 15) {
     const models = new Map([...ollama.models, ...runtimes.flatMap(runtime => runtime.models)].map(item => [`${item.provider}:${item.name}`, item]));
     for (const host of hardware.hosts) for (const model of host.loadedModels) {
       const key = `${model.provider || 'Unattributed'}:${model.name}`;
-      if (!models.has(key)) models.set(key, { id: key, name: model.name, provider: model.provider || 'Unattributed', location: 'private', state: hostState(host, interval) === 'sampled' ? 'loaded' : 'unknown', sourceId: 'hardware', memoryBytes: null });
+      if (!models.has(key)) models.set(key, { id: key, name: model.name, modelCreator: model.modelCreator, provider: model.provider || 'Unattributed', location: 'private', state: hostState(host, interval) === 'sampled' ? 'loaded' : 'unknown', sourceId: 'hardware', memoryBytes: null });
     }
-    for (const item of config.inventory.filter(item => item.kind === 'model')) {
+    for (const item of [...config.inventory.filter(item => item.kind === 'model'), ...(config.deployments ?? []).map(item => ({ ...item, name: item.model }))]) {
       const key = `${item.provider}:${item.name}`;
       if (!models.has(key)) models.set(key, { ...item, id: key, state: 'configured', sourceId: 'inventory', memoryBytes: null });
     }
@@ -240,7 +241,7 @@ export function createCollector(root, config, interval = 15) {
     sources.push({ id: 'hardware', name: 'Hardware export', kind: 'Local file', state: hardware.state, updatedAt: hardware.state === 'connected' ? now : null, detail: config.hardwareFile ?? '.openmerit/hosts.json', note: 'Hosts, racks, accelerators, and loaded models from an existing exporter. Host timestamps determine freshness; no network discovery.' });
     sources.push(...runtimes.map(runtime => ({ ...runtime.source, updatedAt: ['connected', 'partial'].includes(runtime.source.state) ? now : null })));
     sources.push({ id: 'capacity', name: 'Capacity export', kind: 'Local file', state: capacity.state, updatedAt: capacity.state === 'connected' ? now : null, detail: config.capacityFile ?? '.openmerit/capacity.json', note: 'Pool readings retain their source timestamps. A file check does not refresh a measurement. Only declared pool IDs are accepted.' });
-    if ((config.deployments?.length ?? 0) || (config.capacityPools?.length ?? 0)) sources.push({ id: 'inventory', name: 'Declared environment', kind: 'Project configuration', state: 'connected', updatedAt: now, detail: '.openmerit/terminal.json', note: 'Declared deployments and shared pools. Configuration does not prove connectivity or available capacity.' });
+    if (config.inventory.length || (config.deployments?.length ?? 0) || (config.capacityPools?.length ?? 0)) sources.push({ id: 'inventory', name: 'Declared environment', kind: 'Project configuration', state: 'connected', updatedAt: now, detail: '.openmerit/terminal.json', note: 'Declared models, services, deployments, and shared pools. Configuration does not prove connectivity or available capacity.' });
     const capacityPools = (config.capacityPools ?? []).map(pool => ({ ...pool, ...(capacity.pools.find(item => item.id === pool.id) ?? {}) }));
     const deployments = [...(config.deployments ?? [])];
     for (const source of sources.filter(item => item.kind === 'Local runtime' && item.state !== 'disabled')) {
@@ -248,15 +249,22 @@ export function createCollector(root, config, interval = 15) {
       const counters = runtimes.find(item => item.source.id === source.id)?.stats;
       const metrics = Object.fromEntries(['running', 'waiting', 'cachePercent'].filter(key => counters?.[key] != null).map(key => [key, counters[key]]));
       capacityPools.push({ id: poolId, name: source.name, kind: 'runtime', sourceId: source.id, observedAt: Object.keys(metrics).length ? now : null, metrics });
-      for (const model of [...ollama.models, ...runtimes.flatMap(item => item.models)].filter(item => item.sourceId === source.id)) deployments.push({ id: `runtime:${model.id}`, name: `${model.name} / ${source.name}`, model: model.name, provider: model.provider, location: 'local', sourceId: source.id, state: model.state, hostId: 'this-machine', poolIds: [poolId] });
+      for (const model of [...ollama.models, ...runtimes.flatMap(item => item.models)].filter(item => item.sourceId === source.id)) deployments.push({ id: `runtime:${model.id}`, name: `${model.name} / ${source.name}`, model: model.name, provider: model.provider, servingMode: 'self-hosted', location: 'local', sourceId: source.id, state: model.state, hostId: 'this-machine', poolIds: [poolId] });
     }
     const machine = { id: 'this-machine', name: os.hostname(), nameField: 'hostname', hostname: os.hostname(), site: '', rack: '', sourceId: 'machine', observedAt: now, chip: text(os.cpus()[0]?.model, os.arch()), cores: os.cpus().length, platform: os.platform(), arch: os.arch(), memoryTotal, memoryUsed, cpuPercent, history: [...hardwareHistory], accelerators: [], residencyReported: Boolean(ollama.residencyReported), loadedModels: ollama.models.filter(model => model.state === 'loaded').map(model => ({ ...model, runtime: 'Ollama', memoryKind: 'accelerator', deploymentId: `runtime:${model.id}` })) };
     const hosts = [machine, ...retainHostHistory(hardware.hosts, hostHistories)];
-    const envProviders = [['OPENAI_API_KEY', 'OpenAI'], ['ANTHROPIC_API_KEY', 'Anthropic'], ['OPENROUTER_API_KEY', 'OpenRouter'], ['GOOGLE_GENERATIVE_AI_API_KEY', 'Google'], ['GEMINI_API_KEY', 'Google'], ['GROQ_API_KEY', 'Groq']].filter(([key]) => Boolean(process.env[key])).map(([, name]) => ({ name, kind: name === 'OpenRouter' ? 'gateway' : 'provider', location: 'cloud', state: 'configured' }));
+    const environment = configuredServices();
+    if (environment.services.length || environment.unrecognizedEndpoints.length) sources.push({ id: 'environment', name: 'Service configuration', kind: 'Process environment', state: environment.unrecognizedEndpoints.length ? 'partial' : 'connected', updatedAt: now, detail: [...environment.services.flatMap(item => item.evidence.map(entry => entry.field)), ...environment.unrecognizedEndpoints].join(' · '), note: 'Configuration evidence only, not verified connectivity or usage. Credential values are never exported or used. Endpoint overrides are matched by known HTTPS hosts; raw URLs are not retained.' + (environment.unrecognizedEndpoints.length ? ' Unrecognized endpoint variables: ' + environment.unrecognizedEndpoints.join(', ') + '. Declare those services explicitly if needed.' : '') });
+    const inventory = config.inventory.filter(item => item.kind !== 'model').map(item => {
+      const detected = environment.services.find(service => service.kind === item.kind && service.name === item.name);
+      return { ...item, sourceId: 'inventory', ...(detected ? { evidence: detected.evidence } : {}) };
+    });
+    for (const service of environment.services) if (!inventory.some(item => item.kind === service.kind && item.name === service.name)) inventory.push(service);
+    const creatorReports = [...records, ...(config.deployments ?? []), ...config.inventory.filter(item => item.kind === 'model').map(item => ({ ...item, sourceId: 'inventory' })), ...hardware.hosts.flatMap(host => host.loadedModels.map(model => ({ ...model, sourceId: 'hardware' })))];
     return {
       schemaVersion: 1, mode: 'live', observedAt: now, interval,
       project: { name: basename(root), scope: 'Current project' },
-      models: [...models.values()], inventory: [...config.inventory.filter(item => item.kind !== 'model'), ...envProviders, ...(config.runtimes ?? []).map(runtime => ({ name: runtime.name, kind: 'runtime', location: 'local', state: 'configured' }))],
+      models: modelCreators([...models.values()], creatorReports), inventory: [...inventory, ...(config.runtimes ?? []).map(runtime => ({ name: runtime.name, kind: 'runtime', location: 'local', state: 'configured' }))],
       records, sources, deployments, capacityPools, runtimeStats: runtimes.map(runtime => runtime.stats && ({ ...runtime.stats, hostId: 'this-machine' })).filter(Boolean),
       machine, hosts,
     };

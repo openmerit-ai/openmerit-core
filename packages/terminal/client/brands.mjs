@@ -14,6 +14,9 @@ const definitions = [
   ['ollama', 'Ollama', 'ollama.png', ['ollama']],
   ['vllm', 'vLLM', 'vllm.png', ['vllm']],
   ['lm-studio', 'LM Studio', 'lm-studio.png', ['lm studio']],
+  ['baseten', 'Baseten', 'baseten.png', ['baseten', 'baseten api']],
+  ['groq', 'Groq', 'groq.ico', ['groq', 'groq api', 'groqcloud']],
+  ['cerebras', 'Cerebras', 'cerebras.png', ['cerebras', 'cerebras api']],
   ['openrouter', 'OpenRouter', 'openrouter.png', ['openrouter']],
   ['openmerit', 'OpenMerit', null, ['openmerit']],
 ];
@@ -31,12 +34,14 @@ const families = [
   ['deepseek', ['deepseek', 'deepseek-ai'], /^deepseek-(?:r\d|v\d|coder(?:-|$)|llm(?:-|$))/],
   ['mistral', ['mistralai', 'mistral'], /^(?:mistral|mixtral|ministral|codestral|devstral|magistral)(?:-|\d)/],
   ['cohere', ['cohere', 'cohereforai'], /^(?:command-(?:a|r)(?:-|$)|embed-(?:v\d|english(?:-|$)|multilingual(?:-|$)))/],
-  ['qwen', ['qwen'], /^qwen(?:\d|-(?:coder|vl)(?:-|$))/],
+  ['qwen', ['qwen'], /^qwen(?:-?\d|-(?:coder|vl)(?:-|$))/],
   ['meta', ['meta', 'meta-llama'], /^llama-?\d/],
   ['nomic', ['nomic-ai'], /^nomic-embed-(?:text|vision)(?:-|:|$)/],
   ['baai', ['baai'], /^bge-(?:reranker|m3|large|base|small)(?:-|:|$)/],
 ];
 export function modelIdentity(model) {
+  if (model?.creatorConflict) return null;
+  if (model?.modelCreator) return serviceIdentity(model.modelCreator);
   const raw = normalized(typeof model === 'string' ? model : model?.model ?? model?.name).replace(/\s*·\s*|\s+/g, '-');
   const parts = raw.split('/');
   if (parts.length > 2) return null;

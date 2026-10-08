@@ -18,15 +18,15 @@ const MODEL_DEFINITIONS = [
   ['GPT-5', 'OpenAI', 'cloud', 3600, 2.2, 'generation'],
   ['Claude Sonnet 4.5', 'Anthropic', 'cloud', 4200, 2.6, 'generation'],
   ['Gemini 2.5 Flash', 'Google', 'cloud', 900, .3, 'generation'],
-  ['DeepSeek R1', 'DeepSeek', 'cloud', 14000, .8, 'reasoning'],
+  ['DeepSeek R1', 'Baseten', 'cloud', 14000, .8, 'reasoning'],
   ['Mistral Medium 3', 'Mistral', 'cloud', 1800, .7, 'generation'],
   ['GPT-5 mini', 'OpenAI', 'cloud', 1400, .4, 'generation'],
   ['Claude Opus 4.1', 'Anthropic', 'cloud', 11000, 6, 'reasoning'],
   ['Gemini 2.5 Pro', 'Google', 'cloud', 7000, 1.8, 'reasoning'],
   ['GPT-5 nano', 'OpenAI', 'cloud', 480, .08, 'generation'],
   ['Claude Haiku 3.5', 'Anthropic', 'cloud', 700, .2, 'generation'],
-  ['DeepSeek V3.1', 'DeepSeek', 'cloud', 2000, .25, 'generation'],
-  ['Command A', 'Cohere', 'cloud', 2400, .65, 'generation'],
+  ['gpt-oss-120b', 'Groq', 'cloud', 2000, .25, 'generation'],
+  ['qwen-3.8-27b', 'Cerebras', 'cloud', 2400, .65, 'generation'],
   ['text-embedding-3-large', 'OpenAI', 'cloud', 160, .02, 'embedding'],
   ['embed-v4', 'Cohere', 'cloud', 190, .025, 'embedding'],
   ['Qwen3 · 8B', 'Ollama', 'local', 1400, 0, 'generation'],
@@ -37,6 +37,8 @@ const MODEL_DEFINITIONS = [
   ['nomic-embed-text', 'Ollama', 'local', 90, 0, 'embedding'],
   ['bge-reranker-v2-m3', 'vLLM', 'local', 75, 0, 'reranking'],
 ];
+// Explicit fictional metadata, never inferred from the serving company.
+const MODEL_CREATORS = ['OpenAI', 'Anthropic', 'Google', 'DeepSeek', 'Mistral', 'OpenAI', 'Anthropic', 'Google', 'OpenAI', 'Anthropic', 'OpenAI', 'Qwen', 'OpenAI', 'Cohere', 'Qwen', 'Qwen', 'Meta', 'Google', 'DeepSeek', 'Nomic', 'BAAI'];
 const ROUTERS = ['router.quality', 'router.latency', 'router.cost', 'router.private'];
 const GATEWAYS = ['llm-gateway', 'llm-gateway-eu', 'batch-proxy'];
 const ROLES = ['Intake', 'Research', 'Delivery', 'Review'];
@@ -87,7 +89,7 @@ export function sampleSnapshot(now = Date.now()) {
       const cacheReadTokens = role === 'embedding' || role === 'reranking' ? 0 : Math.round(inputTokens * (index % 5 === 0 ? .7 : random() * .35));
       const cost = location === 'local' || running || index % 19 === 0 ? null : ((inputTokens - cacheReadTokens * .8) + outputTokens * 4) * rate / 1_000_000;
       const occurredAt = running ? now - (9600 - index) * 2300 : now - (96 - bin) * 900000 + random() * 900000;
-      records.push({ id: `sample-request-${index + 1}`, sourceId: 'sample-activity', requestId: `req-${String(index + 1).padStart(5, '0')}`, occurredAt: new Date(occurredAt).toISOString(), model, provider, location, workload: `services/${TEAMS[task.teamIndex][0].toLowerCase()}`, scope: 'agent', agentId: task.agent.id, agent: task.agent.name, taskId: task.id, task: task.name, route, routeKind, status: running ? 'running' : failed ? 'failed' : 'completed', inputTokens, outputTokens, cacheReadTokens, durationMs: running || index % 43 === 0 ? null : Math.round(baseLatency * (.4 + random() * 1.4) * (index % 71 === 0 ? 5 : 1)), cost, currency: 'USD', costKind: index % 9 === 0 ? 'estimated' : 'reported' });
+      records.push({ id: `sample-request-${index + 1}`, sourceId: 'sample-activity', requestId: `req-${String(index + 1).padStart(5, '0')}`, occurredAt: new Date(occurredAt).toISOString(), model, modelCreator: MODEL_CREATORS[modelIndex], provider, location, workload: `services/${TEAMS[task.teamIndex][0].toLowerCase()}`, scope: 'agent', agentId: task.agent.id, agent: task.agent.name, taskId: task.id, task: task.name, route, routeKind, status: running ? 'running' : failed ? 'failed' : 'completed', inputTokens, outputTokens, cacheReadTokens, durationMs: running || index % 43 === 0 ? null : Math.round(baseLatency * (.4 + random() * 1.4) * (index % 71 === 0 ? 5 : 1)), cost, currency: 'USD', costKind: index % 9 === 0 ? 'estimated' : 'reported' });
     }
   }
   const time = new Date(now).toISOString();
@@ -95,7 +97,7 @@ export function sampleSnapshot(now = Date.now()) {
   const runningModels = new Set(records.filter(item => item.status === 'running').map(item => item.model));
   const models = MODEL_DEFINITIONS.map(([name, provider, location], index) => {
     const loaded = location === 'local' && (index !== 15 && index !== 18 || runningModels.has(name));
-    return { id: `sample-model-${index}`, name, provider, location, state: location === 'cloud' ? 'observed' : loaded ? 'loaded' : 'installed', sourceId: location === 'cloud' ? 'sample-activity' : provider === 'Ollama' ? 'ollama' : provider === 'vLLM' ? 'runtime-vllm' : 'runtime-studio', memoryBytes: loaded ? localMemory[index - 14] * GiB : null, parameters: index >= 14 ? ['8B', '30B', '70B', '27B', '14B', '137M', '568M'][index - 14] : null, quantization: index >= 14 ? index >= 19 ? 'F16' : 'Q4_K_M' : null };
+    return { id: `sample-model-${index}`, name, modelCreator: MODEL_CREATORS[index], creatorSources: ['sample-activity'], provider, location, state: location === 'cloud' ? 'observed' : loaded ? 'loaded' : 'installed', sourceId: location === 'cloud' ? 'sample-activity' : provider === 'Ollama' ? 'ollama' : provider === 'vLLM' ? 'runtime-vllm' : 'runtime-studio', memoryBytes: loaded ? localMemory[index - 14] * GiB : null, parameters: index >= 14 ? ['8B', '30B', '70B', '27B', '14B', '137M', '568M'][index - 14] : null, quantization: index >= 14 ? index >= 19 ? 'F16' : 'Q4_K_M' : null };
   });
   const modelCounts = new Map();
   for (const record of records) modelCounts.set(`${record.provider}:${record.model}`, (modelCounts.get(`${record.provider}:${record.model}`) ?? 0) + 1);
@@ -103,7 +105,7 @@ export function sampleSnapshot(now = Date.now()) {
   const history = Array.from({ length: 240 }, (_, index) => ({ at: new Date(now - (239 - index) * 15000).toISOString(), cpuPercent: Math.min(97, 46 + Math.sin(index / 13) * 15 + (index > 155 && index < 184 ? 24 : 0) + random() * 12), memoryUsed: (110 + Math.sin(index / 32) * 12 + (index > 155 ? 18 : 0) + random() * 2) * GiB }));
   const providers = [...new Set(models.filter(model => model.location === 'cloud').map(model => model.provider))];
   const poolId = name => `pool-${name.toLowerCase().replaceAll(' ', '-')}`;
-  const deployments = MODEL_DEFINITIONS.flatMap(([model, provider, location], index) => Array.from({ length: index < 6 ? 2 : 1 }, (_, variant) => ({ id: `deployment-${index}-${variant}`, name: location === 'local' ? `${provider.toLowerCase().replaceAll(' ', '-')}-local` : `${provider.toLowerCase()}-${variant ? 'eu-1' : 'us-1'}`, model, provider, location, state: location === 'local' ? models.find(item => item.name === model).state : 'configured', sourceId: location === 'cloud' ? 'inventory' : models.find(item => item.name === model).sourceId, poolIds: [poolId(provider)] })));
+  const deployments = MODEL_DEFINITIONS.flatMap(([model, provider, location], index) => Array.from({ length: index < 6 ? 2 : 1 }, (_, variant) => ({ id: `deployment-${index}-${variant}`, name: location === 'local' ? `${provider.toLowerCase().replaceAll(' ', '-')}-local` : `${provider.toLowerCase()}-${variant ? 'eu-1' : 'us-1'}`, model, modelCreator: MODEL_CREATORS[index], servingMode: location === 'local' ? 'self-hosted' : provider === 'Baseten' ? 'dedicated' : 'shared', provider, location, state: location === 'local' ? models.find(item => item.name === model).state : 'configured', sourceId: location === 'cloud' ? 'inventory' : models.find(item => item.name === model).sourceId, poolIds: [poolId(provider)] })));
   records.forEach((record, index) => {
     const modelIndex = MODEL_DEFINITIONS.findIndex(([model]) => model === record.model);
     record.deploymentId = record.routeKind === 'unknown' ? null : `deployment-${modelIndex}-${modelIndex < 6 && index % 4 === 0 ? 1 : 0}`;
@@ -113,7 +115,7 @@ export function sampleSnapshot(now = Date.now()) {
     if (record.routeKind === 'gateway' && record.location === 'local') record.path.push({ name: record.provider, kind: 'local' });
   });
   const capacityPools = [
-    ...providers.map((name, index) => ({ id: poolId(name), name: `${name.toLowerCase()}-project-01`, kind: 'quota', sourceId: 'sample-capacity', windowSeconds: 60, observedAt: name === 'Cohere' ? null : new Date(now - (name === 'DeepSeek' ? 180000 : 12000)).toISOString(), resetAt: new Date(now + 28000).toISOString(), metrics: name === 'Cohere' ? {} : { requestsUsed: [842, 318, 126, 427, 193, 256][index], requestsLimit: 1000, tokensUsed: name === 'Anthropic' ? 882000 : 180000 + index * 71000, tokensLimit: 1000000, running: 8 + index * 3, concurrencyLimit: 80 } })),
+    ...providers.map((name, index) => ({ id: poolId(name), name: `${name.toLowerCase()}-project-01`, kind: 'quota', sourceId: 'sample-capacity', windowSeconds: 60, observedAt: name === 'Cohere' ? null : new Date(now - (name === 'Baseten' ? 180000 : 12000)).toISOString(), resetAt: new Date(now + 28000).toISOString(), metrics: name === 'Cohere' ? {} : { requestsUsed: [842, 318, 126, 427, 193, 256][index % 6], requestsLimit: 1000, tokensUsed: name === 'Anthropic' ? 882000 : 180000 + index * 71000, tokensLimit: 1000000, running: 8 + index * 3, concurrencyLimit: 80 } })),
     ...['Ollama', 'vLLM', 'LM Studio'].map((name, index) => ({ id: poolId(name), name: `${name} / host unspecified`, kind: 'runtime', sourceId: 'sample-capacity', observedAt: new Date(now - 8000).toISOString(), metrics: { running: [8, 18, 3][index], waiting: [2, 7, 0][index], ...(index < 2 ? { concurrencyLimit: [12, 24][index], cachePercent: [54, 86][index] } : {}), memoryUsedBytes: [33.2, 43.6, 16.8][index] * GiB, memoryTotalBytes: [64, 64, 24][index] * GiB } })),
     ...GATEWAYS.map((name, index) => ({ id: poolId(name), name, kind: 'gateway', sourceId: 'sample-capacity', observedAt: new Date(now - 11000).toISOString(), metrics: { running: [46, 14, 6][index], concurrencyLimit: [50, 40, 20][index], waiting: [4, 0, 0][index] } })),
   ];
@@ -146,13 +148,15 @@ export function sampleSnapshot(now = Date.now()) {
   return { schemaVersion: 1, mode: 'sample', observedAt: time, interval: 15, project: { name: 'inference-sample', scope: 'Enterprise sample environment' }, models, deployments, capacityPools, hosts,
     runtimeStats: [{ name: 'vLLM', sourceId: 'runtime-vllm', hostId: 'gpu-02', running: 18, waiting: 7, inputTokens: 48200000, outputTokens: 9400000, finished: 74620 }],
     inventory: [
+      ...['Baseten', 'Groq', 'Cerebras'].map(name => ({ name, kind: 'provider', location: 'cloud', state: 'configured', sourceId: 'environment', evidence: [{ field: `${name.toUpperCase()}_API_KEY`, basis: 'credential-name' }] })),
       ...ROUTERS.map(name => ({ name, kind: 'router', location: name === 'router.private' ? 'local' : 'cloud', state: 'observed' })),
       ...GATEWAYS.map(name => ({ name, kind: 'gateway', location: 'cloud', state: 'observed', poolIds: [poolId(name)] })),
       ...['Ollama', 'vLLM', 'LM Studio'].map(name => ({ name, kind: 'runtime', location: name === 'LM Studio' ? 'local' : 'private', state: 'observed' })),
     ], records,
     sources: [
+      { id: 'environment', name: 'Service configuration', kind: 'Process environment', state: 'connected', updatedAt: time, detail: 'BASETEN_API_KEY · GROQ_API_KEY · CEREBRAS_API_KEY', note: 'Fictional examples of environment-variable evidence. No credentials were read for this sample. Configuration alone does not establish usage, deployments, or hardware.' },
       { id: 'hardware', name: 'Hardware export', kind: 'Local file', state: 'partial', updatedAt: time, detail: '.openmerit/hosts.json', note: 'Fictional fleet across two racks and a workstation. gpu-04 has stale readings; gpu-05 has not reported a reading.' },
-      { id: 'sample-capacity', name: 'Capacity export', kind: 'Local file', state: 'partial', updatedAt: time, detail: '.openmerit/capacity.json', note: 'Fictional shared quotas and runtime readings. DeepSeek is stale; Cohere has no reading. Pool measurements cover all consumers, including work outside this project.' },
+      { id: 'sample-capacity', name: 'Capacity export', kind: 'Local file', state: 'partial', updatedAt: time, detail: '.openmerit/capacity.json', note: 'Fictional shared quotas and runtime readings. Baseten is stale; Cohere has no reading. Pool measurements cover all consumers, including work outside this project.' },
       { id: 'sample-activity', name: 'Inference activity', kind: 'Local file', state: 'connected', updatedAt: time, detail: '.openmerit/inference.jsonl', note: 'Fictional metadata for 40 agent IDs and 140 task IDs. Names represent exported fields, not discovered code. Some display names are absent. Measurements and prices are illustrative.', records: records.length },
       { id: 'ollama', name: 'Ollama', kind: 'Runtime export', state: 'connected', updatedAt: time, detail: 'gpu-01 / Ollama', note: 'Fictional private-runtime inventory and resident allocations from existing exports.' },
       { id: 'runtime-studio', name: 'LM Studio', kind: 'Local runtime', state: 'connected', updatedAt: time, detail: '127.0.0.1:1234', note: 'Fictional compatible runtime inventory.' },

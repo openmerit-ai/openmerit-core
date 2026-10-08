@@ -74,6 +74,27 @@
       "source": "https://www.baai.ac.cn/Upfile/File/2025-02-26/c843bcbb-5278-418d-bda6-f199bd9797f9..png",
       "declaredBy": "https://www.baai.ac.cn/zh-cn/",
       "sha256": "b1c24ca0026c12f68633126d6833b58bc37ddbb401d0a9f2b5590668fd235b20"
+    },
+    {
+      "file": "baseten.png",
+      "source": "https://www.baseten.co/icon.png",
+      "declaredBy": "https://www.baseten.co",
+      "retrieved": "2026-10-08",
+      "sha256": "5b878e41b1fd733419c6f6e4ff2d28e63ba5f477573e7402f9230f0dff69a4f4"
+    },
+    {
+      "file": "groq.ico",
+      "source": "https://console.groq.com/favicon.ico?cache=rounded-bolt",
+      "declaredBy": "https://console.groq.com",
+      "retrieved": "2026-10-08",
+      "sha256": "3395e09f30348845087d51a562d2145b9634e4dbb5bc5a45d4323c4b28984997"
+    },
+    {
+      "file": "cerebras.png",
+      "source": "https://inference-docs.cerebras.ai/mintlify-assets/_mintlify/favicons/cerebras-inference/FcAuEx9Fi3BOAJGk/_generated/favicon-dark/favicon-32x32.png",
+      "declaredBy": "https://inference-docs.cerebras.ai",
+      "retrieved": "2026-10-08",
+      "sha256": "d7bd70ff0af447b19f6c77f6f88e5ec228fb9463d8f43a9c8cc1d6d3c4f1728c"
     }
   ]
 }

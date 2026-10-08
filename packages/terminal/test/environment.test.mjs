@@ -92,10 +92,10 @@ test('vLLM cache usage reports highest valid series rather than summing percenta
 
 test('enterprise topology has distinct deployments, shared pools, explicit paths, and honest gaps', () => {
   const snapshot = sampleSnapshot(now);
-  assert.equal(snapshot.deployments.length, 27); assert.equal(snapshot.capacityPools.length, 12);
+  assert.equal(snapshot.deployments.length, 27); assert.equal(snapshot.capacityPools.length, 14);
   assert.equal(new Set(snapshot.deployments.map(item => item.id)).size, 27);
   assert.equal(snapshot.records.filter(record => deploymentFor(record, snapshot)).length, 9479);
-  assert.equal(snapshot.capacityPools.filter(pool => capacityState(pool, 15, now) === 'sampled').length, 10);
+  assert.equal(snapshot.capacityPools.filter(pool => capacityState(pool, 15, now) === 'sampled').length, 12);
   assert.equal(snapshot.capacityPools.filter(pool => capacityState(pool, 15, now) === 'stale').length, 1);
   assert.equal(snapshot.capacityPools.filter(pool => capacityState(pool, 15, now) === 'unknown').length, 1);
   for (const record of snapshot.records) {

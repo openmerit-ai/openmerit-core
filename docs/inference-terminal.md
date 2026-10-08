@@ -46,7 +46,7 @@ Use Ctrl+C to close the terminal. There is no persistent daemon or background sc
 Pages, detail panels, and inventory cards lead directly with their title. Supporting context appears below the title; there are no small uppercase labels above headings.
 
 - **Overview:** inventory counts, observed usage, a map of recorded workload-to-deployment connections, shared capacity, and recent activity.
-- **Models:** filter by self-hosted (local or private) or cloud location, search models, and inspect their available measurements. Rows lead with the model name, followed by provider, location, and observed request paths. Select the name to open its details.
+- **Models:** filter by self-hosted (local or private) or cloud location, search models, and inspect their available measurements. Rows lead with the model name, followed by the serving service, location, and observed request paths. Select the name to open its details.
 - **Connections:** a deployment-aware map, an agent focus selector, model deployments, shared capacity pools, and declared providers, gateways, routers, and runtimes. Selecting an agent opens Deployments, Paths, and Capacity views. Selecting an entry connection reveals its reported hop sequence; deployment and capacity nodes open their evidence and shared dependencies. A path is a source-reported connection, not a network inspection or an enforced routing policy.
 - **Activity:** a request-volume chart stacked in the five request-path colors, with selectable path totals and the most recent 100 request summaries in the selected 1-, 6-, or 24-hour window. Aggregate totals include all retained records in that window. Selecting a path isolates its chart series while the activity table keeps the full window. Chart bins support pointer inspection and Left/Right or Home/End keyboard navigation; map nodes also support keyboard inspection.
 - **Local compute:** this machine and exported self-hosted servers, grouped by supplied site and rack labels, a reported-site filter when site labels exist, and per-host CPU, system RAM, accelerator readings, loaded models, and optional vLLM counters. Select a host to inspect its resources. Missing measurements and stale readings remain explicit. This does not attribute machine usage to an individual request.
@@ -97,7 +97,7 @@ Local compute uses Liveline for CPU and memory history. These are passive readin
 
 Torph animates changed totals, table measurements, status labels, and source counts while preserving the surrounding interface between polls. Neither animation library changes the collection interval or makes inference calls.
 
-The environment selector opens `inference-sample`, a fictional enterprise workspace with 40 agents, 140 tasks, 21 models, and 9,600 requests over 24 hours. It includes all five path classifications, traffic bursts, running and failed requests, missing measurements, partial and unavailable sources, three self-hosted runtimes, 27 distinct deployments, 12 shared capacity pools, and an hour of host history. Its six hosts include a workstation and five rack servers across two racks, with eleven accelerators listed. Four hosts have recent readings, one is stale, and one has no measurement. Seven loaded models are placed explicitly across three hosts. Six cloud models have separate `us-1` and `eu-1` example deployments. The capacity sample includes ten recent readings, one stale reading, and one missing reading. Shared gateway pools connect consumers across reported agent IDs. Names resemble exported configuration keys (for example, `support.review` and `llm-gateway`); some agent/task display names are absent and the UI uses their IDs. These identifiers are fictional, not discovered in the current repository. The sample workstation has no site label; server sites and racks are fictional exporter fields. Model rates, latency, allocation, and utilization values are illustrative; the sample is for inspecting the interface at scale, not a performance benchmark. Sample data never enters the real snapshot or project files. A command started with `--demo` only exposes a sample workspace; restart without that flag to collect real data.
+The environment selector opens `inference-sample`, a fictional enterprise workspace with 40 agents, 140 tasks, 21 models, and 9,600 requests over 24 hours. It includes all five path classifications, traffic bursts, running and failed requests, missing measurements, partial and unavailable sources, three self-hosted runtimes, 27 distinct deployments, 14 shared capacity pools, and an hour of host history. Its six hosts include a workstation and five rack servers across two racks, with eleven accelerators listed. Four hosts have recent readings, one is stale, and one has no measurement. Seven loaded models are placed explicitly across three hosts. Six cloud models have separate `us-1` and `eu-1` example deployments. The capacity sample includes twelve recent readings, one stale reading, and one missing reading. Shared gateway pools connect consumers across reported agent IDs. Names resemble exported configuration keys (for example, `support.review` and `llm-gateway`); some agent/task display names are absent and the UI uses their IDs. These identifiers are fictional, not discovered in the current repository. The sample workstation has no site label; server sites and racks are fictional exporter fields. Baseten, Groq, and Cerebras illustrate serving services distinct from model creators; their sample configuration evidence, deployment modes, and quotas are fictional. Model rates, latency, allocation, and utilization values are illustrative; the sample is for inspecting the interface at scale, not a performance benchmark. Sample data never enters the real snapshot or project files. A command started with `--demo` only exposes a sample workspace; restart without that flag to collect real data.
 
 ## Collection sources
 
@@ -123,7 +123,8 @@ Required fields are `id`, `occurredAt` (a valid timestamp), and `model`. Optiona
 | `agentId`, `agent` | Optional stable agent ID and display name; the ID enables grouping and observed-agent counts. Without a name, the ID is displayed. |
 | `taskId`, `task` | Optional stable task ID and display name; the ID enables grouping and observed-task counts. These fields carry no task lifecycle or execution trace. |
 | `scope` | `application`, `agent`, or `evaluation`; defaults to `application` |
-| `provider` | Provider or runtime name; otherwise unattributed |
+| `provider` | Serving service or runtime name, shown as “Served by”; otherwise unattributed. This field does not establish who created the model. |
+| `modelCreator` | Optional source-reported creator name, capped at 160 characters. Missing values stay unknown; the terminal does not derive this field from the serving company, SDK, model name, or API catalog ownership. |
 | `route` | Reported gateway, router, or direct connection name; otherwise unattributed |
 | `routeKind` | Optional `direct`, `local`, `router`, `gateway`, or `unknown`; explicit values take precedence over name matching. Omitted/invalid values become `null` in the snapshot and permit the fallback classification above. |
 | `deploymentId` | Optional stable deployment identity. Joins only when the declared/discovered deployment ID, model, and provider all match. No join is inferred from a model name alone. |
@@ -168,7 +169,29 @@ Restart the terminal after configuration changes. Set `ollama` to `false` to dis
 
 `openai-compatible` reads `GET /v1/models`. Models are labeled available; the list does not prove they are loaded. `vllm` also reads `GET /metrics` for running/waiting requests, inference cache usage, and cumulative input-token, output-token, and finished-request counters. Cache usage is the highest valid `vllm:kv_cache_usage_perc` series, expressed as a percentage; percentages are not summed across workers. These runtime aggregates are displayed separately from imported request totals and are not attributed to projects. Counters can reset when a runtime restarts.
 
-The optional `inventory` accepts `model`, `provider`, `gateway`, `router`, and `runtime` entries. Entries are declared configuration until supported by observations. Names of known provider credential variables present in the terminal process can also identify configured services. Their values are not returned or used to call those services. The terminal does not scan `.env` files, credential stores, arbitrary processes, or home-directory agent histories.
+The optional `inventory` accepts `model`, `provider`, `gateway`, `router`, and `runtime` entries. Entries are declared configuration until supported by observations. Known process-environment variables can also identify configured services, as described below. Their credential values are not returned or used to call those services. The terminal does not scan `.env` files, credential stores, arbitrary processes, or home-directory agent histories.
+
+### Inference services and model creators
+
+The terminal recognizes configuration evidence for Baseten, Groq, and Cerebras alongside the existing services. Only variables inherited by the terminal process are inspected; `.env` files, shell histories, arbitrary source files, and credential stores are not scanned. A configured service does not establish an active connection, model inventory, usage, available capacity, or a hardware allocation.
+
+| Service | Credential-variable names | Optional endpoint-variable names |
+| --- | --- | --- |
+| OpenAI | `OPENAI_API_KEY` | `OPENAI_BASE_URL`, `OPENAI_API_BASE` |
+| Anthropic | `ANTHROPIC_API_KEY` | `ANTHROPIC_BASE_URL` |
+| OpenRouter | `OPENROUTER_API_KEY` | — |
+| Google | `GOOGLE_GENERATIVE_AI_API_KEY`, `GEMINI_API_KEY` | — |
+| Groq | `GROQ_API_KEY` | `GROQ_BASE_URL` |
+| Cerebras | `CEREBRAS_API_KEY` | `CEREBRAS_BASE_URL` |
+| Baseten | `BASETEN_API_KEY` | `BASETEN_BASE_URL` |
+
+Nonempty credential variables identify a configured service by variable name. Endpoint overrides take precedence for that SDK's group: for example, `OPENAI_BASE_URL=https://api.groq.com/openai/v1` identifies Groq rather than OpenAI. Recognized HTTPS hosts are `api.openai.com`, `api.anthropic.com`, `openrouter.ai`, `api.groq.com`, `api.cerebras.ai`, `inference.baseten.co`, and Baseten's `model-<id>.api.baseten.co` hosts. User information and nonstandard ports are rejected. Unknown, local, or malformed overrides suppress that group's credential-name fallback; the source reports only the unrecognized variable name. Multiple configured endpoints do not establish which one an application uses.
+
+Connections show the identifying variable and whether the evidence was a credential name or a recognized endpoint. **Sources → Service configuration** explains the evidence and any unknown endpoints. Credential values and raw endpoint URLs, including their paths and queries, never enter the snapshot. Detection makes no cloud requests and does not assign a request path or rewrite recorded providers from ambient environment configuration.
+
+Supply `modelCreator` in activity metadata, model inventory, deployments, or exported loaded-model entries when that identity is available. The model inspector shows the reported creator separately from **Served by**, including its source. Conflicting creator reports for the same model/service leave the inventory creator unresolved. Existing family icons are visual recognition only; they do not populate creator metadata. An explicit creator takes precedence over family icon matching. Baseten, Groq, and Cerebras service icons are bundled locally.
+
+For example, an export may report `model: "gpt-oss-120b"`, `modelCreator: "OpenAI"`, and `provider: "Groq"`. An application using a gateway still reports its gateway path; the serving company does not change that category. No account API, inference call, remote hardware discovery, or model availability check is performed by this detection.
 
 ### Deployments and shared capacity
 
@@ -181,7 +204,9 @@ A model identity is separate from a deployment of that model. Declare deployment
       "id": "assistant-primary",
       "name": "US East / primary",
       "model": "your-model",
-      "provider": "your-provider",
+      "provider": "your-serving-service",
+      "modelCreator": "your-model-creator",
+      "servingMode": "dedicated",
       "location": "cloud",
       "poolIds": ["provider-account"]
     }
@@ -196,6 +221,8 @@ A model identity is separate from a deployment of that model. Declare deployment
   "capacityFile": ".openmerit/capacity.json"
 }
 ```
+
+Deployments may supply `modelCreator` and `servingMode` (`shared`, `dedicated`, `self-hosted`, or `unknown`). These are declarations; no mode is inferred from a company name or credential. Declared deployments also contribute configured models to the inventory when no runtime or activity source has listed them. Hardware stays “Not reported” until a matching host export supplies it.
 
 Deployment locations accept `local`, `private`, `cloud`, or `unknown`. Pool kinds accept `quota`, `runtime`, `gateway`, or `unknown`. Limits are 200 deployments, 100 pools, and 16 pool references per entry; labels and IDs are capped at 160 characters. Duplicate IDs are excluded rather than resolved arbitrarily. IDs beginning with `runtime:` are reserved for discovery. An optional deployment `hostId` links to the exact host ID in Local compute; an absent or unmatched ID stays unplaced. Configuration changes require restarting the terminal.
 
@@ -261,6 +288,8 @@ For example, an exporter can atomically replace this JSON file with its latest m
     "accelerators": [{
       "id": "gpu-0",
       "name": "NVIDIA H100",
+      "vendor": "NVIDIA",
+      "kind": "gpu",
       "utilization": 72,
       "memoryTotal": 85899345920,
       "memoryUsed": 42949672960
@@ -282,7 +311,7 @@ Replace the example timestamp with the actual measurement time. Each host retain
 
 The export is bounded to 256 KiB, 64 hosts, 16 accelerators per host, and 100 loaded-model entries per host. Labels and IDs are capped at 160 characters. Duplicate IDs within each list are excluded, and exported `this-machine` entries are rejected. Files must be regular files inside the project after symlink resolution. Unsupported fields are discarded. Only supplied metadata is retained; endpoints, credentials, prompts, and responses are not imported.
 
-CPU and accelerator utilization are percentages from 0 to 100; memory fields are nonnegative bytes, displayed as GiB. Used memory exceeding a supplied total is discarded. Missing metrics remain unknown, and zero remains zero. System RAM, accelerator memory, and model allocations are displayed separately and are never added into a misleading fleet total. Hosts can contain mixed accelerator types. Fleet counts describe listed inventory, not usable capacity.
+CPU and accelerator utilization are percentages from 0 to 100; memory fields are nonnegative bytes, displayed as GiB. Used memory exceeding a supplied total is discarded. Missing metrics remain unknown, and zero remains zero. System RAM, accelerator memory, and model allocations are displayed separately and are never added into a misleading fleet total. Hosts can contain mixed accelerator types. Optional accelerator `vendor` and `kind` fields identify reported hardware; supported kinds are `gpu`, `lpu`, `wse`, `npu`, `tpu`, `other`, and `unknown`. They are never inferred from an inference service, and do not supply missing utilization or memory readings. Fleet counts describe listed inventory, not usable capacity.
 
 **Loaded models** means source-reported residency, not an active request or guaranteed readiness. `memoryKind` accepts `accelerator`, `system`, `unified`, or `unknown`; it identifies the allocation being reported. An omitted `loadedModels` field means residency is unknown; an empty array means the source explicitly reported no loaded models. Stale hosts show their last reported models. Exported model names also enter the model inventory as private models, with unknown current state when their host reading is stale. Replicas are kept separate in each host's residency list. Model identity matches do not establish deployment placement: declare the matching `hostId` on a deployment to make that link.
 

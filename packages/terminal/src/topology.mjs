@@ -15,7 +15,7 @@ function unique(items) {
   return items.filter(item => item.id && counts.get(item.id) === 1);
 }
 export function normalizeDeployments(value) {
-  return unique(list(value, 200).map(item => ({ id: label(item.id), name: label(item.name) || label(item.id), model: label(item.model), provider: label(item.provider) || 'Unattributed', location: ['local', 'private', 'cloud'].includes(item.location) ? item.location : 'unknown', poolIds: poolIds(item.poolIds), hostId: label(item.hostId) || null, sourceId: 'inventory', state: 'configured' })).filter(item => item.model && !item.id.startsWith('runtime:')));
+  return unique(list(value, 200).map(item => ({ id: label(item.id), name: label(item.name) || label(item.id), model: label(item.model), modelCreator: label(item.modelCreator) || null, servingMode: ['shared', 'dedicated', 'self-hosted'].includes(item.servingMode) ? item.servingMode : 'unknown', provider: label(item.provider) || 'Unattributed', location: ['local', 'private', 'cloud'].includes(item.location) ? item.location : 'unknown', poolIds: poolIds(item.poolIds), hostId: label(item.hostId) || null, sourceId: 'inventory', state: 'configured' })).filter(item => item.model && !item.id.startsWith('runtime:')));
 }
 export function normalizePools(value) {
   return unique(list(value, 100).map(item => ({ id: label(item.id), name: label(item.name) || label(item.id), kind: ['quota', 'runtime', 'gateway'].includes(item.kind) ? item.kind : 'unknown', windowSeconds: count(item.windowSeconds), sourceId: 'capacity', observedAt: null, metrics: {} })).filter(item => !item.id.startsWith('runtime:')));

@@ -19,13 +19,13 @@ export function normalizeHosts(value, now = Date.now()) {
       cpuPercent: observedAt ? percent(host.cpuPercent) : null,
       accelerators: unique(list(host.accelerators, 16).map(device => {
         const total = number(device.memoryTotal), used = number(device.memoryUsed);
-        return { id: label(device.id), name: label(device.name) || 'Accelerator', memoryTotal: total,
+        return { id: label(device.id), name: label(device.name) || 'Accelerator', vendor: label(device.vendor) || null, kind: ['gpu', 'lpu', 'wse', 'npu', 'tpu', 'other'].includes(device.kind) ? device.kind : 'unknown', memoryTotal: total,
           memoryUsed: observedAt && used !== null && (total === null || used <= total) ? used : null,
           utilization: observedAt ? percent(device.utilization) : null };
       })),
       // A catalog or model name alone never establishes residency.
       residencyReported: Boolean(observedAt && Array.isArray(host.loadedModels)),
-      loadedModels: observedAt ? unique(list(host.loadedModels, 100).map(model => ({ id: label(model.id), name: label(model.name), provider: label(model.provider), runtime: label(model.runtime), memoryBytes: number(model.memoryBytes), memoryKind: ['accelerator', 'system', 'unified'].includes(model.memoryKind) ? model.memoryKind : 'unknown', deploymentId: label(model.deploymentId) || null })).filter(model => model.name)) : [],
+      loadedModels: observedAt ? unique(list(host.loadedModels, 100).map(model => ({ id: label(model.id), name: label(model.name), modelCreator: label(model.modelCreator) || null, provider: label(model.provider), runtime: label(model.runtime), memoryBytes: number(model.memoryBytes), memoryKind: ['accelerator', 'system', 'unified'].includes(model.memoryKind) ? model.memoryKind : 'unknown', deploymentId: label(model.deploymentId) || null })).filter(model => model.name)) : [],
       history: [],
     };
   }).filter(host => host.id !== 'this-machine'));
