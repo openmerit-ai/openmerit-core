@@ -146,3 +146,14 @@ The terminal is a frequently consulted workspace. The persistent side column gav
 | A wide layout anchored to a left rail | A centered 1520px maximum grid with responsive gutters | Align the header, tables, diagrams, and summary measurements |
 
 Tabs use manual keyboard activation: arrows, Home, and End move focus; Enter/Space activates. Navigation preserves focus on the selected tab and reveals it in the scrollable strip. Polls preserve the focused tab and strip position. Direct hash views, command search, workspace selection, source coverage, and inspectors remain accessible. The retired sidebar styles, local-storage preference, marker animation, and hover-tracking code are removed. No new animations are introduced for navigation.
+
+
+## Complete map — 9 October 2026
+
+| Before | After | Why |
+| --- | --- | --- |
+| Four representative workloads and a small model selection under “All” | Every workload, connection, model/service pair, and request represented in collapsible groups | “All” must describe the data, not a hidden display selection |
+| More nodes compressed into a tall diagram | Expand individual groups or all groups, with scrolling and persistent column headings | Keep detail reachable without sacrificing label size |
+| Repeated “Deployment unidentified” captions | Reported service names on model nodes; deployment evidence in the inspector | Lead with known facts while keeping attribution limits accessible |
+
+Groups use identical recorded entry-connection sets, never inferred agent roles. Disclosure is immediate for keyboard users and reduced motion. Stable identities preserve expansion across passive refreshes.

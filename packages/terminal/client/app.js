@@ -5,7 +5,9 @@ import { selectControl, selectIsOpen, closeSelect } from './select.js';
 import { hostState } from '../src/hardware.mjs';
 import { serviceIdentity, modelIdentity, identityIcon, identitySvg } from './brands.mjs';
 import { serviceInventory, SERVICE_TYPES } from './services.mjs';
-import { reportedPath, deploymentFor, poolsFor, capacityState, capacityReadings, poolUsage, selectMapRecords } from './environment.mjs';
+import { reportedPath, deploymentFor, poolsFor, capacityState, capacityReadings, poolUsage } from './environment.mjs';
+
+import { buildEnvironmentMap } from './map.mjs';
 
 const $ = selector => document.querySelector(selector);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
@@ -27,6 +29,8 @@ const hostedSample = document.documentElement.hasAttribute('data-sample-preview'
 const state = { data: null, page: location.hash === '#connections' ? 'services' : pages.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview', hours: 24, filter: 'all', search: '', mode: hostedSample || new URLSearchParams(location.search).has('sample') ? 'sample' : 'live', info: hostedSample ? { defaultMode: 'sample', hostedSample: true } : {}, error: '', fetching: false, timer: null };
 let returnFocus = null;
 let mapAgent = '';
+let mapExpandAll = false;
+const mapGroupExpansion = new Map();
 let serviceView = location.hash === '#connections' ? 'map' : 'inventory';
 let serviceFilter = 'all';
 let serviceSearch = '';
@@ -147,31 +151,57 @@ function environmentMap(expanded = false) {
   const all = records(), agents = observedEntities('agent');
   if (mapAgent && !agents.some(agent => agent.id === mapAgent)) mapAgent = '';
   const candidates = mapAgent ? all.filter(item => item.agentId === mapAgent) : all;
-  const { workloadOrder, workloads, selectedPaths, deployments, workRecords, scoped, workKey, pathKey, deployKey } = selectMapRecords(candidates, state.data, { focused: Boolean(mapAgent) });
-  const height = Math.max(300, Math.max(workloads.length, selectedPaths.length, deployments.length) * 53 + 42);
-  const yFor = (i, length) => 56 + (length === 1 ? (height - 94) / 2 : i * (height - 94) / (length - 1));
-  const label = (value, max = 28) => escape(value.length > max ? `${value.slice(0, max - 1)}…` : value);
-  const node = (x, y, width, name, caption, attrs, route = null, identity = null) => {
-    const textX = route || identity ? 38 : 12;
-    const inset = route && identity ? 37 : 12;
-    const max = Math.floor((width - textX - inset) / 5.7);
-    return `<g class="map-node${route ? ' route-node' : ''}" role="button" tabindex="0" ${attrs} ${route ? `style="--route-color:${ROUTES[route].color}"` : ''} transform="translate(${x} ${y - 23})"><title>${escape(name)} — ${escape(caption)}</title><rect width="${width}" height="46" rx="7"/>${route ? `<g class="route-node-icon" transform="translate(10 13)">${routeIcon(route)}</g>` : ''}${identitySvg(identity, route ? width - 28 : 12, 14)}<text x="${textX}" y="19">${label(name, max)}</text><text class="sub" x="${textX}" y="34">${label(caption, max + 3)}</text></g>`;
-  };
-  let body = '<div class="map-empty"><h3>Your environment will take shape here.</h3><p>Connect existing activity metadata to see agents, reported paths, and identified deployments.</p><button class="text-button" data-page="sources">Connect a source →</button></div>';
-  if (all.length) {
-    const edges = new Map();
-    for (const item of scoped) {
-      const wi = workloads.indexOf(workKey(item)), ri = selectedPaths.indexOf(pathKey(item)), di = deployments.indexOf(deployKey(item));
-      const wy = yFor(wi, workloads.length), ry = yFor(ri, selectedPaths.length), dy = yFor(di, deployments.length), kind = reportedPath(item, state.data)[0].kind;
-      for (const [id, d] of [[`w${wi}r${ri}`, `M210 ${wy}C255 ${wy} 265 ${ry} 310 ${ry}`], [`r${ri}d${di}`, `M532 ${ry}C582 ${ry} 592 ${dy} 642 ${dy}`]]) {
-        const edge = edges.get(id) ?? { d, kind, agents: new Set(), paths: new Set(), deployments: new Set() };
-        edge.agents.add(workKey(item)); edge.paths.add(pathKey(item)); edge.deployments.add(deployKey(item)); edges.set(id, edge);
-      }
+  const graph = buildEnvironmentMap(candidates, state.data, { expandAll: mapExpandAll, expansion: mapGroupExpansion });
+  const quantity = (count, noun) => `${integer(count)} ${noun}${count === 1 ? '' : 's'}`;
+  const allExpanded = graph.groups.length > 0 && graph.groups.every(group => group.expanded);
+  const height = Math.max(250, Math.max(...graph.columns.map(column => column.length)) * 58 + 24);
+  const positions = new Map();
+  const columns = [{ x: 14, width: 244 }, { x: 342, width: 216 }, { x: 642, width: 244 }];
+  graph.columns.forEach((nodes, col) => nodes.forEach((node, index) => positions.set(node.id, { ...columns[col], inset: node.groupId ? 8 : 0, y: nodes.length === 1 ? height / 2 : 35 + index * (height - 70) / (nodes.length - 1) })));
+  const shorten = (value, max) => escape(String(value).length > max ? `${String(value).slice(0, max - 1)}…` : value);
+  const renderNode = node => {
+    const position = positions.get(node.id), isGroup = node.type === 'group', isPath = node.type === 'path';
+    const x = position.x + (node.groupId ? 8 : 0), width = position.width - (node.groupId ? 8 : 0);
+    let name = node.name, caption, attrs, identity = null;
+    if (isGroup) {
+      caption = `${node.names.length === 1 ? node.names[0] : `${node.names.length} connections`} · ${integer(node.count)} requests`;
+      attrs = `data-map-group="${escape(node.id)}" aria-expanded="${node.expanded}" aria-label="${node.expanded ? 'Collapse' : 'Expand'} ${escape(name)} through ${escape(node.names.join(', '))}"`;
+    } else if (isPath) {
+      caption = `${ROUTES[node.kind].short} · ${integer(node.count)} requests`;
+      attrs = `data-inspect="entry" data-key="${escape(node.key)}" aria-label="Inspect connections through ${escape(name)}"`;
+      identity = serviceIdentity(name);
+    } else if (node.type === 'model') {
+      const deployments = [...node.deployments.values()];
+      caption = deployments.length === 1 ? `${node.provider} · ${deployments[0].name}` : `${node.provider}${deployments.length > 1 ? ` · ${deployments.length} deployments` : ''}`;
+      attrs = `data-inspect="map-model" data-key="${escape(node.key)}" aria-label="Inspect ${escape(name)} served by ${escape(node.provider)}"`;
+      identity = modelIdentity(node.example);
+    } else {
+      caption = `${integer(node.count)} requests · ${state.hours}h`;
+      attrs = `data-inspect="${node.type}" data-key="${escape(node.inspectKey)}" aria-label="Inspect ${escape(name)}"`;
     }
-    body = `<div class="map-scroll"><svg class="environment-map deployment-map" style="--map-height:${height}px" viewBox="0 0 900 ${height}" aria-label="Observed workloads, reported entry connections, and identified deployments"><g class="map-column-labels"><text x="14" y="17">AGENTS / WORKLOADS</text><text x="310" y="17">ENTRY CONNECTION</text><text x="642" y="17">MODEL / DEPLOYMENT</text></g>${[...edges.values()].map(edge => `<path class="map-edge route-thread" style="--route-color:${ROUTES[edge.kind].color}" data-agent="${escape(JSON.stringify([...edge.agents]))}" data-path="${escape(JSON.stringify([...edge.paths]))}" data-deployment="${escape(JSON.stringify([...edge.deployments]))}" d="${edge.d}"/>`).join('')}${workloads.map((key, i) => { const item = scoped.find(item => workKey(item) === key) ?? workRecords.find(item => workKey(item) === key); return node(14, yFor(i, workloads.length), 196, item.agent || item.agentId || item.workload, `${integer(candidates.filter(record => workKey(record) === key).length)} requests · ${state.hours}h`, `data-map-type="agent" data-map-key="${escape(key)}" data-inspect="${item.agentId ? 'agent' : 'workload'}" data-key="${escape(item.agentId || item.workload)}" aria-label="Inspect ${escape(item.agent || item.agentId || item.workload)}"`); }).join('')}${selectedPaths.map((key, i) => { const first = JSON.parse(key)[0], variants = new Set(candidates.filter(item => pathKey(item) === key).map(item => JSON.stringify(reportedPath(item, state.data)))), path = JSON.parse([...variants][0]); return node(310, yFor(i, selectedPaths.length), 222, first.name, first.name === 'Unattributed route' ? 'Connection not supplied' : variants.size > 1 ? `${ROUTES[first.kind].short} · ${variants.size} reported paths` : `${ROUTES[first.kind].short} · ${path.length} reported ${path.length === 1 ? 'hop' : 'hops'}`, `data-map-type="path" data-map-key="${escape(key)}" data-inspect="entry" data-key="${escape(key)}" aria-label="Inspect connections through ${escape(first.name)}"`, first.kind, serviceIdentity(first.name)); }).join('')}${deployments.map((key, i) => { const item = scoped.find(item => deployKey(item) === key), deployment = deploymentFor(item, state.data); return node(642, yFor(i, deployments.length), 244, item.model, deployment?.name ?? 'Deployment unidentified', `data-map-type="deployment" data-map-key="${escape(key)}" data-inspect="${deployment ? 'deployment' : 'unidentified'}" data-key="${escape(key)}" aria-label="Inspect ${escape(item.model)} at ${escape(deployment?.name ?? 'unidentified deployment')}"`, null, modelIdentity(item)); }).join('')}</svg></div>`;
+    const textX = isPath || identity ? 38 : 13, inset = isGroup || isPath && identity ? 32 : 12;
+    const max = Math.floor((width - textX - inset) / 6.6);
+    return `<g class="map-node${isPath ? ' route-node' : ''}${isGroup ? ' map-group' : ''}${node.groupId ? ' map-member' : ''}" data-ui-key="${escape(node.id)}" data-map-node-id="${escape(node.id)}" data-map-node-type="${node.type}" role="button" tabindex="0" ${attrs} ${isPath ? `style="--route-color:${ROUTES[node.kind].color}"` : ''} transform="translate(${x} ${position.y - 23})"><title>${escape(name)} — ${escape(caption)}</title><rect width="${width}" height="46" rx="7"/>${isPath ? `<g class="route-node-icon" transform="translate(10 13)">${routeIcon(node.kind)}</g>` : ''}${identitySvg(identity, isPath ? width - 28 : 12, 14)}<text x="${textX}" y="19">${shorten(name, max)}</text><text class="sub" x="${textX}" y="35">${shorten(caption, Math.floor((width - textX - inset) / 5.5))}</text>${isGroup ? `<path class="map-disclosure" d="${node.expanded ? `M${width - 24} 21l4 4 4-4` : `M${width - 22} 19l4 4-4 4`}"/>` : ''}</g>`;
+  };
+  const edges = graph.edges.map(edge => {
+    const from = positions.get(edge.from), to = positions.get(edge.to);
+    const x = from.x + from.width, end = to.x + to.inset;
+    const middle = (x + end) / 2;
+    return `<path class="map-edge route-thread" style="--route-color:${ROUTES[edge.kind].color}" data-nodes="${escape(JSON.stringify([...edge.related]))}" data-map-segment="${edge.segment}" data-request-count="${edge.count}" d="M${x} ${from.y}C${middle} ${from.y} ${middle} ${to.y} ${end} ${to.y}"><title>${integer(edge.count)} requests</title></path>`;
+  }).join('');
+  const body = candidates.length ? `<div class="map-scroll complete-map-scroll" data-ui-key="environment-map-scroll" tabindex="0" role="region" aria-label="Complete environment map. Scroll to explore expanded groups."><div class="map-canvas"><div class="map-column-head" aria-hidden="true"><span>Agents & workloads</span><span>Entry connections</span><span>Models</span></div><svg class="environment-map complete-map" viewBox="0 0 900 ${height}" aria-label="All ${quantity(graph.workloadCount, 'workload')}, ${quantity(graph.connectionCount, 'entry connection')}, and ${quantity(graph.modelCount, 'model')} in this scope">${edges}${graph.columns.map(nodes => nodes.map(renderNode).join('')).join('')}</svg></div></div>` : '<div class="map-empty"><h3>Your environment will take shape here.</h3><p>Connect existing activity metadata to see workloads, connections, and models.</p><button class="text-button" data-page="sources">Connect a source →</button></div>';
+  return `<section class="panel environment-panel"><div class="panel-head"><div><h2>Environment map</h2><p>${quantity(graph.workloadCount, 'workload')} · ${quantity(graph.connectionCount, 'connection')} · ${quantity(graph.modelCount, 'model')}</p></div>${!expanded ? '<button class="panel-action" data-service-view="map" aria-label="Explore environment">↗</button>' : ''}</div><div class="environment-toolbar"><label for="map-agent">Focus${selectControl({ id: 'map-agent', label: 'Focus environment on an agent', value: mapAgent, options: [{ value: '', label: 'All agents & workloads' }, ...agents.map(agent => ({ value: agent.id, label: agent.name }))] })}</label><div class="map-controls">${graph.groups.length ? `<button class="text-button" data-map-expand="${allExpanded ? 'collapse' : 'expand'}">${allExpanded ? 'Collapse all' : 'Expand all'}</button>` : ''}<button class="text-button" data-inspect="deployment-list" data-key="all">Deployments ↗</button></div></div>${body}<div class="map-foot">${routeLegend()}<span>All ${quantity(graph.requestCount, 'request')} represented · ${state.hours}h</span></div>${candidates.length ? `<div class="map-coverage">${graph.groups.length ? 'Grouped by shared connections. Expand a group to see every member; scroll to explore.' : 'Select a workload, connection, or model to inspect its recorded details.'}</div>` : ''}</section>`;
+}
+function toggleMapGroup(element) {
+  const key = element.dataset.mapGroup, top = element.getBoundingClientRect().top;
+  mapGroupExpansion.set(key, !(mapGroupExpansion.get(key) ?? mapExpandAll));
+  render();
+  const target = [...document.querySelectorAll('[data-map-group]')].find(node => node.dataset.mapGroup === key);
+  if (target) {
+    const viewport = target.closest('.map-scroll');
+    viewport.scrollTop += target.getBoundingClientRect().top - top;
+    target.focus({ preventScroll: true });
   }
-  const mapped = candidates.filter(item => deploymentFor(item, state.data)).length;
-  return `<section class="panel environment-panel"><div class="panel-head"><div><h2>Environment map</h2><p>${mapAgent ? 'Following one agent through its environment' : `${selectedPaths.length} ${selectedPaths.length === 1 ? 'connection' : 'connections'} · ${workloads.length} of ${workloadOrder.length} workloads · last ${state.hours}h`}</p></div>${!expanded ? '<button class="panel-action" data-service-view="map" aria-label="Explore environment">↗</button>' : ''}</div><div class="environment-toolbar"><label for="map-agent">Focus${selectControl({ id: 'map-agent', label: 'Focus environment on an agent', value: mapAgent, options: [{ value: '', label: 'All agents & workloads' }, ...agents.map(agent => ({ value: agent.id, label: agent.name }))] })}</label><button class="text-button" data-inspect="deployment-list" data-key="all">${environment().deployments.length} deployments ↗</button></div>${body}<div class="map-foot">${routeLegend()}<span>${integer(scoped.length)} / ${integer(candidates.length)} requests shown</span></div><div class="map-coverage">${scoped.length < candidates.length ? 'All entry connections shown with representative workloads and models. ' : ''}${integer(mapped)} of ${integer(candidates.length)} requests identify a deployment. Select a connection to inspect reported hops.</div><span class="map-scroll-hint">Scroll to explore the map</span></section>`;
 }
 function poolStatus(pool) { return capacityState(pool, state.data.interval); }
 function readingValue(row) { const format = row.unit === 'bytes' ? bytes : row.unit === 'percent' ? value => value == null ? '—' : `${Math.round(value)}%` : compact; return `${format(row.value)}${row.limit != null && row.unit !== 'percent' ? ` / ${format(row.limit)}` : ''}`; }
@@ -364,6 +394,12 @@ function inspect(kind, key, pathKind) {
   try { inspectInner(kind, key, pathKind); } finally { inspecting = false; }
 }
 function inspectInner(kind, key, pathKind) {
+  if (kind === 'map-model') {
+    const model = state.data.models.find(item => JSON.stringify([item.provider, item.name]) === key);
+    if (model) inspectInner('model', model.id);
+    else openInspector('Model no longer in view', 'Activity changed since the map was drawn.', '<p class="detail-note">Choose a model from the current inventory.</p>');
+    return;
+  }
   if (kind === 'service') { inspectService(key); return; }
   if (inspectEnvironment(kind, key)) return;
   if (kind === 'agent-list' || kind === 'task-list') {
@@ -416,7 +452,7 @@ function inspectEnvironment(kind, key) {
     const items = records().filter(item => JSON.stringify(reportedPath(item, state.data)) === key);
     openInspector('Reported execution path', `${integer(items.length)} requests across the last ${state.hours}h`, `<ol class="path-steps">${path.map(hop => `<li style="--route-color:${ROUTES[hop.kind].color}">${routeIcon(hop.kind)}<span><strong>${serviceLabel(hop.name, 16)}</strong><small>${ROUTES[hop.kind].label}</small></span></li>`).join('')}</ol><div class="detail-section-title"><h3>Reached deployments</h3></div>${deploymentList(items)}<p class="detail-note">Only source-reported hops are shown. A one-hop record does not establish that no other intermediaries exist. Usage covers all agents reporting this path.</p>`, 'Reported path');
   } else if (kind === 'unidentified') {
-    openInspector('Deployment unidentified', 'The model is known; its execution instance is not.', '<p class="detail-note">These requests do not provide a matching deployment identity. The map keeps this gap visible rather than assigning a deployment from a model name or connection.</p>', 'Deployment');
+    openInspector('Deployment unidentified', 'The model is known; its execution instance is not.', '<p class="detail-note">These requests do not provide a matching deployment identity. A model name or connection alone does not identify an execution instance.</p>', 'Deployment');
   } else return false;
   return true;
 }
@@ -424,7 +460,7 @@ function agentLinks(agents) { return agents.size ? `<div class="agent-links">${[
 function closeDialog() { const dialog = $('dialog[open]'); if (dialog) dialog.close(); }
 function connect() { closeDialog(); openInspector('Connect your environment.', 'Read existing evidence. Keep inference independent.', `<p class="detail-note" style="margin-top:0">Project declarations and supported local runtime APIs are discovered automatically. Run <code>openmerit dash --access</code> from this project to review optional Pi usage history. For other request sources, export one metadata record per line to <code>.openmerit/inference.jsonl</code>. Do not include prompts, responses, or secrets.</p><pre class="detail-code">${escape(JSON.stringify({ id: 'request-123', occurredAt: new Date().toISOString(), workload: 'your-service-id', scope: 'application', model: 'your-model', provider: 'your-provider', route: 'your-gateway', routeKind: 'gateway', location: 'cloud', status: 'completed', inputTokens: 120, outputTokens: 40, durationMs: 850, cost: 0.002, costKind: 'reported', currency: 'USD' }, null, 2))}</pre><p class="detail-note">Use a stable ID to update an ongoing request. Keep retries under separate IDs. Missing fields stay unknown. The activity feed takes precedence over OpenMerit audit summaries.</p><p class="detail-caption">Other local servers</p><p class="detail-note" style="margin-top:0">For LM Studio or vLLM, add a local runtime to <code>.openmerit/terminal.json</code>. Only model inventory and supported counters are read.</p><pre class="detail-code">${escape(JSON.stringify({ runtimes: [{ name: 'LM Studio', type: 'openai-compatible', url: 'http://127.0.0.1:1234' }, { name: 'vLLM', type: 'vllm', url: 'http://127.0.0.1:8000' }] }, null, 2))}</pre><p class="detail-caption">Optional inventory</p><p class="detail-note" style="margin-top:0">Create <code>.openmerit/terminal.json</code> and restart the terminal:</p><pre class="detail-code">${escape(JSON.stringify({ inventory: [{ name: 'Your gateway', kind: 'gateway', location: 'cloud' }, { name: 'Your model', kind: 'model', provider: 'Your provider', location: 'cloud' }] }, null, 2))}</pre>`, 'Source setup'); }
 function workspace() { openInspector(state.info.hostedSample ? 'Sample environment' : 'Choose your view.', state.info.hostedSample ? 'A fictional workspace. No connection to your machine.' : 'Keep your environment and the example separate.', `<div class="workspace-options">${state.info.defaultMode !== 'sample' ? `<button class="workspace-option ${state.mode === 'live' ? 'selected' : ''}" data-action="live"><strong>Your environment</strong><span>Real inventory and evidence from this project.</span></button>` : ''}<button class="workspace-option ${state.mode === 'sample' ? 'selected' : ''}" data-action="sample"><strong>Sample environment</strong><span>40 agents, 140 tasks, and 21 models in a fictional enterprise workspace.</span></button></div><p class="detail-note">The sample makes no inference calls and never contributes to your project's totals.</p>`, 'Environment'); }
-async function changeMode(mode) { if (state.info.hostedSample && mode !== 'sample') return; closeDialog(); state.mode = mode; state.error = ''; state.search = ''; state.filter = 'all'; mapAgent = ''; serviceSearch = ''; serviceFilter = 'all'; serviceView = 'inventory'; await refresh(true); history.replaceState(null, '', `${location.pathname}${mode === 'sample' ? '?sample=1' : ''}#${state.page}`); $('#announcement').textContent = mode === 'sample' ? 'Showing the fictional sample environment.' : 'Showing your project environment.'; }
+async function changeMode(mode) { if (state.info.hostedSample && mode !== 'sample') return; closeDialog(); state.mode = mode; state.error = ''; state.search = ''; state.filter = 'all'; mapAgent = ''; mapExpandAll = false; mapGroupExpansion.clear(); serviceSearch = ''; serviceFilter = 'all'; serviceView = 'inventory'; await refresh(true); history.replaceState(null, '', `${location.pathname}${mode === 'sample' ? '?sample=1' : ''}#${state.page}`); $('#announcement').textContent = mode === 'sample' ? 'Showing the fictional sample environment.' : 'Showing your project environment.'; }
 
 let commandEntries = [];
 function commandResults(query = '') {
@@ -434,8 +470,10 @@ function commandResults(query = '') {
 function openCommand() { closeDialog(); returnFocus = document.activeElement; $('#command').innerHTML = `<div class="command-input-row">${icon('search')}<input id="command-input" type="search" placeholder="Find a service, model, agent, or source…" aria-label="Search your environment" autocomplete="off"><kbd>esc</kbd></div><div id="command-results"></div><div class="command-footer">↑ ↓ to move · enter to open</div>`; commandResults(); $('#command').showModal(); $('#command-input').focus(); }
 
 document.addEventListener('click', event => {
-  const element = event.target.closest('[data-page],[data-hours],[data-filter],[data-inspect],[data-action],[data-command],[data-focus-agent],[data-inspector-tab],[data-host],[data-activity-path],[data-service-view],[data-service-filter],[data-service-reset]'); if (!element) return;
-  if (element.hasAttribute('data-service-reset')) { serviceFilter = 'all'; serviceSearch = ''; render(); $('#service-search')?.focus({ preventScroll: true }); }
+  const element = event.target.closest('[data-map-group],[data-map-expand],[data-page],[data-hours],[data-filter],[data-inspect],[data-action],[data-command],[data-focus-agent],[data-inspector-tab],[data-host],[data-activity-path],[data-service-view],[data-service-filter],[data-service-reset]'); if (!element) return;
+  if (element.hasAttribute('data-map-group')) { toggleMapGroup(element); }
+  else if (element.dataset.mapExpand) { mapExpandAll = element.dataset.mapExpand === 'expand'; mapGroupExpansion.clear(); render(); $('[data-map-expand]')?.focus({ preventScroll: true }); }
+  else if (element.hasAttribute('data-service-reset')) { serviceFilter = 'all'; serviceSearch = ''; render(); $('#service-search')?.focus({ preventScroll: true }); }
   else if (element.dataset.serviceView) { serviceView = element.dataset.serviceView; if (state.page !== 'services') navigate('services'); else render(); }
   else if (element.dataset.serviceFilter) { serviceFilter = element.dataset.serviceFilter; render(); }
   else if (element.dataset.host) { selectedHost = element.dataset.host; if (state.page !== 'compute') { hostLocation = ''; closeDialog(); navigate('compute'); } else render(); }
@@ -474,7 +512,7 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && document.querySelector('dialog[open]')) { event.preventDefault(); closeDialog(); return; }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); openCommand(); return; }
   if (event.target.matches('[data-bin]') && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const bins = [...document.querySelectorAll('[data-bin]')]; const i = Number(event.target.dataset.bin); const next = event.key === 'Home' ? 0 : event.key === 'End' ? bins.length - 1 : Math.max(0, Math.min(bins.length - 1, i + (event.key === 'ArrowLeft' ? -1 : 1))); bins.forEach((bin, index) => bin.setAttribute('tabindex', index === next ? '0' : '-1')); bins[next]?.focus({ preventScroll: true }); }
-  if (event.target.matches('.map-node') && ['Enter', ' '].includes(event.key)) { event.preventDefault(); inspect(event.target.dataset.inspect, event.target.dataset.key, event.target.dataset.routeKind); }
+  if (event.target.matches('.map-node') && ['Enter', ' '].includes(event.key)) { event.preventDefault(); event.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
   if ($('#command').open && ['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) {
     event.preventDefault(); const buttons = [...document.querySelectorAll('.command-result')]; let index = buttons.findIndex(button => button.classList.contains('selected')); if (event.key === 'Enter') { buttons[index]?.click(); return; } index = Math.min(buttons.length - 1, Math.max(0, index + (event.key === 'ArrowDown' ? 1 : -1))); buttons.forEach((button, i) => button.classList.toggle('selected', i === index)); buttons[index]?.scrollIntoView({ block: 'nearest' });
   }
@@ -483,7 +521,7 @@ for (const dialog of document.querySelectorAll('dialog')) {
   dialog.addEventListener('click', event => { if (event.target !== dialog) return; const bounds = dialog.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dialog.close(); });
   dialog.addEventListener('close', () => { if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); });
 }
-function highlightMap(node) { const kind = node.dataset.mapType, key = node.dataset.mapKey; document.querySelectorAll('.map-edge').forEach(edge => { const match = JSON.parse(edge.dataset[kind] ?? '[]').includes(key); edge.classList.toggle('focused', match); edge.classList.toggle('faded', !match); }); }
+function highlightMap(node) { const key = node.dataset.mapNodeId; document.querySelectorAll('.map-edge').forEach(edge => { const match = JSON.parse(edge.dataset.nodes ?? '[]').includes(key); edge.classList.toggle('focused', match); edge.classList.toggle('faded', !match); }); }
 document.addEventListener('pointerover', event => { const node = event.target.closest('.map-node'); if (node) highlightMap(node); const hit = event.target.closest('[data-bin]'); if (hit) chartTooltip(hit); });
 document.addEventListener('focusin', event => { if (event.target.matches('.map-node')) highlightMap(event.target); if (event.target.matches('[data-bin]')) chartTooltip(event.target); });
 function clearChart() { document.querySelectorAll('.map-edge').forEach(edge => edge.classList.remove('focused', 'faded')); const tooltip = $('.chart-tooltip'); if (tooltip) tooltip.hidden = true; }

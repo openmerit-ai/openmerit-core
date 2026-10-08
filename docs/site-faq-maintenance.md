@@ -83,3 +83,8 @@ Reviewed evidence and data claims. Pi's existing assistant-message provider ID n
 ## Environment map coverage — unreleased source, 9 October 2026
 
 Reviewed evidence and readiness claims. The map now selects representatives around every recorded entry connection in the selected window or agent scope. It no longer drops connections behind workload or model layout caps. Larger maps scroll, and represented request/workload coverage remains explicit. This changes presentation only; no inference, discovery, permission, billing, or published-package behavior changes. Homepage FAQ wording is unchanged.
+
+
+## Complete environment map — unreleased source, 9 October 2026
+
+The map no longer selects representative workloads or models. It groups all retained activity by identical recorded entry connections and lets users expand every member. Request counts and relationships stay complete in collapsed and expanded views. Model nodes display reported services and explicitly matched deployment information; absent deployment identities are explained in inspectors. No source scanning, inferred topology, new permissions, or inference calls are introduced. Homepage FAQ claims about the published package remain unchanged.
