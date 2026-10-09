@@ -8,7 +8,7 @@ The terminal reads existing metadata independently of inference. It does not cal
 
 The [hosted sample preview](https://dash.openmerit.site/) lets you explore the fictional enterprise environment in a browser without installing the terminal. It includes 40 agents, 140 tasks, and 21 models, with the same tabs and inspectors as the local interface. All identities, requests, costs, and hardware readings are illustrative. Shared links use the title **Inference Terminal by OpenMerit** and a dedicated preview image.
 
-The preview is accessible to anyone with the link and asks search engines not to index it. It does not connect to your machine, accept project uploads, make inference calls, or expose the local snapshot API. Its read-only `/api/sample` endpoint returns fictional data. Real environment collection still runs locally through the source-build commands below; sharing this preview does not publish the npm command.
+The preview is accessible to anyone with the link and asks search engines not to index it. It does not connect to your machine, accept project uploads, make inference calls, or expose the local snapshot API. Its read-only `/api/sample` endpoint returns fictional data. Real environment collection still runs locally through the source-build commands below; sharing this preview does not publish the npm command. Hosted sample refreshes allow up to 30 seconds for the large fictional response on slower connections; local snapshot requests retain their 5-second limit. Only one refresh request runs at a time, even when a transfer takes longer than the normal polling interval.
 
 ## Start the terminal
 

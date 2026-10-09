@@ -555,7 +555,8 @@ async function refresh(force = false) {
   state.fetching = true;
   const requestedMode = state.mode;
   try {
-    const response = await fetch(requestedMode === 'sample' ? '/api/sample' : '/api/snapshot', { signal: AbortSignal.timeout(5000) });
+    // The hosted enterprise sample crosses the network; local snapshots stay bounded to 5s.
+    const response = await fetch(requestedMode === 'sample' ? '/api/sample' : '/api/snapshot', { signal: AbortSignal.timeout(state.info.hostedSample ? 30000 : 5000) });
     if (!response.ok) throw new Error('Snapshot unavailable');
     const snapshot = await response.json();
     if (requestedMode !== state.mode) return;
