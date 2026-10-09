@@ -42,6 +42,9 @@ export default {
       const asset = await env.ASSETS.fetch(request);
       response = new Response(asset.body, asset);
       for (const [name, value] of Object.entries(headers)) response.headers.set(name, value);
+      // Keep HTML untouched by zone-level injection, but allow scripts/styles to compress.
+      const contentType = (response.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+      if (['text/javascript', 'application/javascript', 'text/css'].includes(contentType)) response.headers.set('Cache-Control', 'no-cache');
     }
     return request.method === 'HEAD' ? new Response(null, response) : response;
   },

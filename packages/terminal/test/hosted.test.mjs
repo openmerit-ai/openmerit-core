@@ -37,3 +37,21 @@ test('hosted assets retain content types and restrict indexing, framing, and net
   assert.equal(await (await worker.fetch(request('/', { method: 'HEAD' }), env)).text(), '');
   assert.match(await (await worker.fetch(request('/robots.txt'), noAssets)).text(), /Disallow: \/$/m);
 });
+
+
+test('hosted scripts and styles allow compression while preserving asset content and security headers', async () => {
+  for (const [path, contentType, body] of [
+    ['/app.js', 'text/javascript; charset=utf-8', 'console.log("sample")'],
+    ['/flow.js', 'application/javascript', 'export const ready = true;'],
+    ['/styles.css', 'text/css; charset=utf-8', 'body { color: white; }'],
+  ]) {
+    const env = { ASSETS: { fetch: async () => new Response(body, { headers: { 'Content-Type': contentType, ETag: '"asset-version"' } }) } };
+    const response = await worker.fetch(request(path), env);
+    assert.equal(response.headers.get('cache-control'), 'no-cache');
+    assert.equal(response.headers.get('content-type'), contentType);
+    assert.equal(response.headers.get('etag'), '"asset-version"');
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(response.headers.get('content-security-policy'), /connect-src 'self'/);
+    assert.equal(await response.text(), body);
+  }
+});
