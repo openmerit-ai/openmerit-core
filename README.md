@@ -78,9 +78,18 @@ harness-driven lifecycle; it does not migrate the earlier home-directory state.
 - `/openmerit pause` and `/openmerit resume` — control some proactive nudges in the current Pi session; task-triggered checks can still run in 0.1.5. See [pause limitations](docs/commands.md#pause-and-resume).
 - `/openmerit doctor` — show sanitized adapter diagnostics.
 
-## Inference Terminal (unreleased source build)
+## Inference Terminal (test preview)
 
-The source checkout includes a local, dark-only overview of application inference inventory, connections, activity, and compute. Coding-harness usage is outside its scope. It reads existing metadata passively and makes no model calls. Start it with `npm run dash`, or explore fictional data with `npm run dash -- --demo`. The built package adds the `openmerit dash` shell command; published `0.1.5` does not include it. See the [Inference Terminal guide](docs/inference-terminal.md) for installation, supported sources, and read-only agent access.
+A local, dark-only overview of application inference inventory, connections, activity, and compute. Coding-harness usage is outside its scope. It reads existing metadata passively and makes no model calls.
+
+With Node.js 22.19+ installed, run this from your application's directory:
+
+```sh
+npm install -g https://dash.openmerit.site/install/openmerit-preview.tgz
+openmerit dash
+```
+
+The prebuilt test version opens its localhost URL in your default browser. The stable npm package `openmerit@0.1.5` does not include this command. See the [Inference Terminal guide](docs/inference-terminal.md) for supported sources, updating or removing the preview, source builds, and read-only agent access.
 
 ## Documentation
 

@@ -4,18 +4,21 @@ import { stat } from 'node:fs/promises';
 import { startTerminal } from './server.mjs';
 import { createCollector, loadConfig } from './collect.mjs';
 import { sampleSnapshot } from './sample.mjs';
+import { openBrowser } from './browser.mjs';
 
 const help = `OpenMerit · Inference Terminal
 
   openmerit dash [path] [options]
 
-  --port <number>      Local port (default: 4310)
+  --port <number>      Require a specific local port (default: 4310 or a free port)
   --interval <seconds> Collection interval, 10–30 (default: 15)
   --no-discovery       Skip project/log discovery and extra runtime discovery
+  --no-open            Print the URL without opening a browser
   --json               Print one snapshot for an agent, then exit
   --demo               Explore a clearly labeled fictional environment
   --help               Show this help
 
+Opens your default browser after the local terminal is ready.
 Reads application metadata and local runtime inventory. Makes no inference calls.
 Coding-harness usage is outside this terminal's scope.
 `;
@@ -24,14 +27,15 @@ async function main() {
   const args = process.argv.slice(2);
   if (!args.length || args.includes('--help') || args.includes('-h')) { console.log(help); return; }
   if (args.shift() !== 'dash') throw new Error('Unknown command. Run openmerit --help.');
-  let root = process.cwd(), port = 4310, interval = 15, demo = false, json = false, pathSeen = false, discovery = true;
+  let root = process.cwd(), port = 4310, interval = 15, demo = false, json = false, pathSeen = false, discovery = true, noOpen = false, explicitPort = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--port' || arg === '--interval') {
       const value = args[++i];
       if (!/^\d+$/.test(value ?? '')) throw new Error(`${arg} requires an integer.`);
-      if (arg === '--port') port = Number(value); else interval = Number(value);
-    } else if (arg === '--no-discovery') discovery = false;
+      if (arg === '--port') { port = Number(value); explicitPort = true; } else interval = Number(value);
+    } else if (arg === '--no-open') noOpen = true;
+    else if (arg === '--no-discovery') discovery = false;
     else if (arg === '--access' || arg === '--revoke-access') throw new Error('Coding-harness history is no longer collected. Saved history permissions are ignored; these access options have been removed.');
     else if (arg === '--demo') demo = true;
     else if (arg === '--json') json = true;
@@ -44,12 +48,13 @@ async function main() {
   const config = demo ? null : await loadConfig(root);
   if (config && !discovery) config.discovery = false;
   if (json) { console.log(JSON.stringify(demo ? sampleSnapshot() : await createCollector(root, config, interval)(), null, 2)); return; }
-  const terminal = await startTerminal({ root, port, interval, demo, config });
+  const terminal = await startTerminal({ root, port, interval, demo, config, fallbackPort: !explicitPort });
   console.log(`\n  OpenMerit · Inference Terminal\n\n  ${terminal.url}\n\n  ${demo ? 'Sample environment · fictional data' : 'Current project · passive collection'}\n  Updates every ${interval}s. Press Ctrl+C to close.\n`);
   const close = () => { void terminal.close().then(() => process.exit(0)); };
   process.once('SIGINT', close); process.once('SIGTERM', close);
   if (!demo && config.discovery) {
     console.log('  Automatic discovery: project declarations, request logs, local runtimes, and machine readings.');
   }
+  if (!noOpen && !await openBrowser(terminal.url)) console.log('  Open the local URL above in your browser.');
 }
 main().catch(error => { console.error(`\n  ${error.code === 'EADDRINUSE' ? 'Port is in use. Choose another with --port.' : error.message}\n`); process.exitCode = 1; });

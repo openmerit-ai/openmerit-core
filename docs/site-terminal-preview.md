@@ -10,11 +10,17 @@ npm run verify
 npm run deploy:dash-preview
 ```
 
-The deploy command pins Wrangler 4.136.3 and uses `wrangler.terminal.jsonc`. Its build hook rebuilds the terminal preview, runs documentation checks, and checks/tests the terminal workspace before upload. The exact `dash.openmerit.site` custom domain uses the existing Cloudflare account. No storage, container, AI, secret, or external service binding is configured. The only binding serves bundled public assets from `dist/terminal-preview/`.
+The deploy command pins Wrangler 4.136.3 and uses `wrangler.terminal.jsonc`. Its build hook rebuilds the terminal preview, runs documentation checks, and checks/tests the terminal workspace before upload. The exact `dash.openmerit.site` custom domain uses the existing Cloudflare account. No storage, container, AI, secret, or external service binding is configured. The only binding serves bundled public assets and the prebuilt test package from `dist/terminal-preview/`.
 
-`scripts/build-terminal-preview.mjs` creates this asset directory from the same browser bundle and icons as the local terminal. It adds preview metadata, noindex, and a sample-only bootstrap marker; it never copies a project snapshot. `packages/terminal/hosted/worker.mjs` imports only the fictional sample generator, never the collector or local CLI. The Worker reuses each generated sample for its 15-second time bucket. Browser polling and reduced-motion behavior remain the same as the local interface.
+`scripts/build-terminal-preview.mjs` first compiles the package, then creates this asset directory from the same browser bundle and icons as the local terminal. It adds preview metadata, noindex, and a sample-only bootstrap marker; it never copies a project snapshot. `packages/terminal/hosted/worker.mjs` imports only the fictional sample generator, never the collector or local CLI. The Worker reuses each generated sample for its 15-second time bucket. Browser polling and reduced-motion behavior remain the same as the local interface.
 
 `/api/info` selects sample mode and identifies the hosted preview. `/api/sample` exposes the fictional environment; other API paths return 404, and mutations return 405. The visible sample disclosure remains present, and the workspace picker offers no real environment. Static assets and API responses carry a same-origin content policy and indexing restrictions. HTML responses use `no-transform` so the zone’s automatic analytics script injection cannot alter the preview HTML. Script and stylesheet responses allow Cloudflare compression to reduce transfer time; main-site analytics settings are unchanged. `/robots.txt` also requests exclusion. This is public link sharing, not password protection.
+
+## Test installation download
+
+The same deployment serves `/install/openmerit-preview.tgz` and `/install/preview.json`. `scripts/build-terminal-install.mjs` stages only the compiled core, protocol, Pi adapter, and terminal, plus the package documentation and legal files. It preserves runtime dependencies, exports, engine requirements, and the CLI entry point; install-time build scripts, workspace declarations, and development dependencies are removed from the staged manifest. The root package metadata and stable npm release are unchanged. The staged version receives a `-dash.` suffix from a content hash. The build information file includes the version, SHA-256, npm integrity, byte size, and Node requirement.
+
+This download contains application code, never a project snapshot, private configuration, or local evidence. It does not add server-side collection to the Worker. Rebuilding and deploying replaces the preview download; friends can rerun `npm install -g https://dash.openmerit.site/install/openmerit-preview.tgz` to update. Validate the downloaded artifact with an isolated global npm prefix and run its installed executable against a separate project before announcing a preview update.
 
 ## Sharing image
 

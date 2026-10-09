@@ -1,6 +1,6 @@
 # Inference Terminal
 
-The Inference Terminal is an unreleased addition in the source checkout. It gives people and agents a local overview of an application’s models, providers, connections, inference activity, and compute. The selected repository or application path defines its scope. A coding agent can launch or read the terminal, but the coding harness’s own requests, tokens, and costs are outside that scope. Published `openmerit@0.1.5` does not include this command.
+The Inference Terminal is available as a test preview and in the source checkout; it is not in the stable npm release. It gives people and agents a local overview of an application’s models, providers, connections, inference activity, and compute. The selected repository or application path defines its scope. A coding agent can launch or read the terminal, but the coding harness’s own requests, tokens, and costs are outside that scope. Published `openmerit@0.1.5` does not include this command.
 
 The terminal reads existing metadata independently of inference. It does not call a model, change a route, run evaluations, load or unload models, or store prompts and responses. Closing it does not stop your workloads. Collection consumes a small amount of local CPU, memory, and runtime API capacity; it is not zero-overhead monitoring.
 
@@ -8,34 +8,53 @@ The terminal reads existing metadata independently of inference. It does not cal
 
 The [hosted sample preview](https://dash.openmerit.site/) lets you explore the fictional enterprise environment in a browser without installing the terminal. It includes 40 agents, 140 tasks, and 21 models, with the same tabs and inspectors as the local interface. All identities, requests, costs, and hardware readings are illustrative. Shared links use the title **Inference Terminal by OpenMerit** and a dedicated preview image.
 
-The preview is accessible to anyone with the link and asks search engines not to index it. It does not connect to your machine, accept project uploads, make inference calls, or expose the local snapshot API. Its read-only `/api/sample` endpoint returns fictional data. Real environment collection still runs locally through the source-build commands below; sharing this preview does not publish the npm command. Hosted sample refreshes allow up to 30 seconds for the large fictional response on slower connections; local snapshot requests retain their 5-second limit. Only one refresh request runs at a time, even when a transfer takes longer than the normal polling interval.
+The preview is accessible to anyone with the link and asks search engines not to index it. It does not connect to your machine, accept project uploads, make inference calls, or expose the local snapshot API. Its read-only `/api/sample` endpoint returns fictional data. Real environment collection runs locally through the test install or source-build commands below; the hosted page never runs collectors. Hosted sample refreshes allow up to 30 seconds for the large fictional response on slower connections; local snapshot requests retain their 5-second limit. Only one refresh request runs at a time, even when a transfer takes longer than the normal polling interval.
 
-## Start the terminal
+## Install the test preview
 
-From the source checkout, with dependencies installed:
+Requires **Node.js 22.19 or newer**, with npm available in your terminal. From your application's directory:
+
+```sh
+cd /path/to/your/project
+npm install -g https://dash.openmerit.site/install/openmerit-preview.tgz
+openmerit dash
+```
+
+The install downloads a prebuilt test version. No Git checkout, build step, API key, or separate audit command is needed. Installation is global for your Node environment: it does not add a dependency, lockfile, or configuration to the application directory. It replaces any globally installed `openmerit` in the same npm prefix. This preview is separate from the stable package on npm; `npm install -g openmerit` still installs the stable release without `dash`.
+
+`openmerit dash` reads the current directory, starts a server bound to `127.0.0.1`, and opens its URL in your default browser after the first snapshot is ready. Port 4310 is preferred; when occupied, the operating system chooses a free local port. The actual URL is always printed. macOS, Windows, and Linux desktop opening use the platform's default URL handler. SSH and headless Linux sessions print the URL instead; use a private SSH port forward to view a remote instance. A browser-launch failure does not stop collection.
+
+Run the same install command to update the preview. Remove it with `npm uninstall -g openmerit`, or restore the stable package with `npm install -g openmerit@0.1.5`. Preview builds have a `-dash.` version suffix; `npm ls -g openmerit --depth=0` shows which one is installed. The current download's version and checksum are available at [preview build information](https://dash.openmerit.site/install/preview.json).
+
+If npm reports `EACCES`, use a user-owned Node installation/npm prefix rather than installing with `sudo`. If `openmerit` is not found after a successful install, reopen the terminal and check that your npm global executable directory is on `PATH`.
+
+The page uses dark mode only. Keep the terminal command running while using the dashboard. No extra operating-system permission prompt is expected for readable project files and loopback runtime APIs. Files that your user cannot read are reported as unavailable. Supported request logs populate activity automatically; a repository with only model configuration can show its services but cannot supply missing request history.
+
+## Run from a source checkout
+
+With dependencies installed in the OpenMerit checkout:
 
 ```sh
 npm run dash
 npm run dash -- /path/to/your/project
 ```
 
-Open the printed local URL, normally `http://127.0.0.1:4310`. The page uses dark mode only, with neutral graphite surfaces and silver accents. The browser is not opened automatically. Node.js 22.19 or newer is required.
+`npm run dash` bundles the interface before starting. `npm run build` includes the executable and local web assets under `dist/terminal/`. Torph and Liveline are bundled locally. To install this source build for shell use, run `npm install -g .` from the checkout.
 
-The built package provides the following shell command when installed from this source build:
+The shell command also accepts a path and explicit settings:
 
 ```sh
-openmerit dash
 openmerit dash /path/to/your/project --port 4311 --interval 20
+openmerit dash --no-open
 ```
-
-`npm run dash` bundles the browser interface before starting the server. `npm run build` includes the executable and the local web assets under `dist/terminal/`. Torph and Liveline are bundled locally, with no browser requests to package CDNs. To install that build for shell use, run `npm install -g .` from the checkout. This is a local source installation, not an npm release.
 
 | Option | Behavior |
 | --- | --- |
 | `[path]` | Project directory; defaults to the current working directory |
-| `--port <number>` | Loopback port; defaults to 4310 |
+| `--port <number>` | Require this loopback port; fail if it is occupied. Without this option, use 4310 or a free port |
 | `--interval <seconds>` | Collection interval from 10 to 30 seconds; defaults to 15 |
 | `--no-discovery` | Skip project-file and request-log discovery and additional runtime discovery for this run; existing OS, Ollama, declared sources, and process-environment metadata remain available |
+| `--no-open` | Start collection and print the URL without launching a browser |
 | `--json` | Print one snapshot and exit without starting an HTTP server |
 | `--demo` | Use an explicitly fictional environment; no local collectors run |
 | `--help` | Show usage |

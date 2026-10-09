@@ -135,7 +135,7 @@ try {
   const port = await listen(portReservation);
   await close(portReservation);
   const base = `http://127.0.0.1:${port}`;
-  child = spawn(executable, ['dash', '--port', String(port), '--interval', '10'], { cwd: project, env: cleanEnv });
+  child = spawn(executable, ['dash', '--no-open', '--port', String(port), '--interval', '10'], { cwd: project, env: cleanEnv });
   child.stdout.on('data', data => terminalLog += data);
   child.stderr.on('data', data => terminalLog += data);
   const snapshot = async () => { const response = await fetch(`${base}/api/snapshot`); assert.equal(response.status, 200); return response.json(); };

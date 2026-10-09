@@ -7,7 +7,7 @@ import { sampleSnapshot } from './sample.mjs';
 const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/flow.js', ['flow.js', 'text/javascript']], ['/flow.css', ['flow.css', 'text/css']], ['/styles.css', ['styles.css', 'text/css']], ['/favicon.svg', ['favicon.svg', 'image/svg+xml']]]);
 for (const file of ['baseten.png', 'groq.ico', 'cerebras.png', 'qwen.png', 'meta.ico', 'nomic.png', 'baai.png', 'ollama.png', 'lm-studio.png', 'vllm.png', 'anthropic.png', 'google.png', 'deepseek.ico', 'cohere.png', 'openai.png', 'mistral.png', 'openrouter.png']) assets.set(`/brands/${file}`, [`brands/${file}`, file.endsWith('.svg') ? 'image/svg+xml' : file.endsWith('.ico') ? 'image/x-icon' : 'image/png']);
 
-export async function startTerminal({ root = process.cwd(), port = 4310, interval = 15, demo = false, collect: customCollect, config } = {}) {
+export async function startTerminal({ root = process.cwd(), port = 4310, interval = 15, demo = false, collect: customCollect, config, fallbackPort = false } = {}) {
   const collect = customCollect ?? (demo ? async () => sampleSnapshot() : createCollector(root, config ?? await loadConfig(root), interval));
   let snapshot = await collect();
   let busy = false;
@@ -38,7 +38,19 @@ export async function startTerminal({ root = process.cwd(), port = 4310, interva
     catch { return send(500, '{"error":"Terminal assets unavailable. Run npm run build."}'); }
   });
   server.on('close', () => clearInterval(timer));
-  try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); }); }
+  const listen = selectedPort => new Promise((resolve, reject) => {
+    const onError = error => { server.off('listening', onListening); reject(error); };
+    const onListening = () => { server.off('error', onError); resolve(); };
+    server.once('error', onError); server.once('listening', onListening);
+    server.listen(selectedPort, '127.0.0.1');
+  });
+  try {
+    try { await listen(port); }
+    catch (error) {
+      if (!fallbackPort || error.code !== 'EADDRINUSE') throw error;
+      await listen(0);
+    }
+  }
   catch (error) { clearInterval(timer); throw error; }
   return { server, url: `http://127.0.0.1:${server.address().port}`, close: () => new Promise(resolve => { clearInterval(timer); server.close(resolve); server.closeIdleConnections(); }) };
 }

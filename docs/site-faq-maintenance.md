@@ -103,3 +103,8 @@ Reviewed homepage evidence, data, background, approval, and readiness claims aga
 ## Application-only terminal scope — unreleased source, 9 October 2026
 
 Reviewed evidence, data, approval, and readiness claims. The terminal now excludes coding-harness usage: the Pi history reader, saved-grant lookup, and access prompts are removed. Prior history-related entries in this audit are historical and superseded. Application agents, jobs, evaluations, supported request logs, and OpenMerit product-task evidence remain in scope. Explicit development-scoped records are rejected, but unmarked request data cannot be classified by purpose automatically. Runtime inventories and whole-machine measurements remain shared infrastructure evidence, not project-exclusive usage. Published package and homepage FAQ wording remain unchanged; the terminal is still unreleased.
+
+
+## Terminal test installation — preview, 9 October 2026
+
+Reviewed setup, background, data, and readiness claims. A prebuilt test package on the existing sample domain supports a single global npm install, followed by `openmerit dash` in the selected application directory. The CLI opens the default desktop browser, keeps a printed URL for headless sessions, and falls back to a free loopback port only when no explicit port was requested. Collection scope, file access, and consent boundaries are unchanged. This does not publish or change the stable npm release; homepage FAQ claims remain about the published package. Platform URL-handler code is tested separately from actual desktop acceptance, and preview verification must not be presented as broad production readiness.
