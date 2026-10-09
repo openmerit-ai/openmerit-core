@@ -28,9 +28,9 @@ OpenMerit validates structure and deterministic Pareto conformance, not the trut
 
 Do not include credentials, private traces, or proprietary evaluation data in public issues.
 
-## Inference Terminal (unreleased)
+## Inference Terminal (preview)
 
-The source-only terminal reads selected project metadata, bounded loopback runtime inventory/metrics endpoints, and whole-machine CPU and memory. It calls no inference endpoint and exposes no mutation API. Default discovery reads only the project's `.env`, `.env.local`, `package.json`, and `requirements.txt`, with per-file bounds and project containment after symlink resolution. It never executes those files or expands expressions. Known credential-variable presence can identify a configured provider; credential contents are neither retained, returned, nor used for provider calls. Only safe loopback origins and recognized service identity metadata survive projection.
+The preview terminal reads selected project metadata, bounded loopback runtime inventory/metrics endpoints, and whole-machine CPU and memory. It calls no inference endpoint and exposes no mutation API. Default discovery reads only the project's `.env`, `.env.local`, `package.json`, and `requirements.txt`, with per-file bounds and project containment after symlink resolution. It never executes those files or expands expressions. Known credential-variable presence can identify a configured provider; credential contents are neither retained, returned, nor used for provider calls. Only safe loopback origins and recognized service identity metadata survive projection.
 
 Coding-harness histories are outside the terminal’s application scope and are not scanned or imported. The retired Pi history reader and access prompts are removed; legacy grants in `~/.openmerit/terminal-access.json` are never consulted. Application request logs and explicit exports retain only allowlisted metadata. Sources must belong to the selected application; the terminal cannot infer the purpose of an unlabeled API response. Records explicitly marked `scope: "development"` are rejected.
 

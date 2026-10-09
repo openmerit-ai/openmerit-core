@@ -108,3 +108,8 @@ Reviewed evidence, data, approval, and readiness claims. The terminal now exclud
 ## Terminal test installation — preview, 9 October 2026
 
 Reviewed setup, background, data, and readiness claims. A prebuilt test package on the existing sample domain supports a single global npm install, followed by `openmerit dash` in the selected application directory. The CLI opens the default desktop browser, keeps a printed URL for headless sessions, and falls back to a free loopback port only when no explicit port was requested. Collection scope, file access, and consent boundaries are unchanged. This does not publish or change the stable npm release; homepage FAQ claims remain about the published package. Platform URL-handler code is tested separately from actual desktop acceptance, and preview verification must not be presented as broad production readiness.
+
+
+## npm terminal preview delivery — published, 9 October 2026
+
+The terminal prerelease is published in the existing `openmerit` npm package as `0.1.6-preview.0` under the `preview` tag. Registry metadata and integrity match the tested package; `latest` remains `0.1.5`. Registry-install acceptance is recorded in the terminal preview deployment record. The compiled package retains core/protocol/Pi exports and uses an explicit dist-directory allowlist so a sample-site build cannot accidentally add hosted assets or a nested installer archive. The standalone domain-hosted packaging path is removed from the source build. This changes delivery only: collection behavior, browser launch, consent, and application scope remain unchanged. Homepage stable-package claims are unchanged.

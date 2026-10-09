@@ -1,6 +1,6 @@
 {
   "name": "openmerit",
-  "version": "0.1.5",
+  "version": "0.1.6-preview.0",
   "description": "Evidence-driven model decisions for coding harnesses.",
   "type": "module",
   "bin": {
@@ -15,7 +15,10 @@
     "pareto-frontier"
   ],
   "files": [
-    "dist/",
+    "dist/core/",
+    "dist/protocol/",
+    "dist/pi/",
+    "dist/terminal/",
     "docs/",
     "CHANGELOG.md",
     "LICENSE",
@@ -76,7 +79,6 @@
     "prepare": "npm run build",
     "verify": "npm test && npm run check && npm run typecheck && npm run build && npm run check:demo && npm run check:docs && git diff --check",
     "prepublishOnly": "npm run verify",
-    "build:dash-install": "npm run build && node scripts/build-terminal-install.mjs",
     "build:dash-preview": "node scripts/build-terminal-preview.mjs",
     "deploy:dash-preview": "npx --yes wrangler@4.136.3 deploy --config wrangler.terminal.jsonc"
   },

@@ -2,9 +2,9 @@
 
 Run these slash commands inside Pi with the OpenMerit extension loaded. Shell commands such as `pi install` run in your terminal instead.
 
-## Inference Terminal (unreleased)
+## Inference Terminal (preview)
 
-The source checkout adds a separate shell command, `openmerit dash [path]`, for a passive local view of models, connections, usage, and compute. From this checkout, use `npm run dash -- [path]`. It is independent of Pi setup and does not run model comparisons or inference. Published `openmerit@0.1.5` does not include it.
+The `openmerit@preview` npm package adds a shell command, `openmerit dash [path]`, for a passive local view of models, connections, usage, and compute. From this checkout, use `npm run dash -- [path]`. It is independent of Pi setup and does not run model comparisons or inference. Published `openmerit@0.1.5` does not include it.
 
 See the [Inference Terminal guide](inference-terminal.md) for local installation, automatic discovery, `--no-discovery`, `--json`, `--demo`, collection intervals, and data limitations. Discovery is part of `dash` and is scoped to application evidence. Coding-harness histories are not collected.
 

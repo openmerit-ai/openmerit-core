@@ -12,19 +12,19 @@ The preview is accessible to anyone with the link and asks search engines not to
 
 ## Install the test preview
 
-Requires **Node.js 22.19 or newer**, with npm available in your terminal. From your application's directory:
+The terminal is included in `openmerit@0.1.6-preview.0`, under npm’s `preview` tag. Requires **Node.js 22.19 or newer**, with npm available in your terminal. From your application's directory:
 
 ```sh
 cd /path/to/your/project
-npm install -g https://dash.openmerit.site/install/openmerit-preview.tgz
+npm install -g openmerit@preview
 openmerit dash
 ```
 
-The install downloads a prebuilt test version. No Git checkout, build step, API key, or separate audit command is needed. Installation is global for your Node environment: it does not add a dependency, lockfile, or configuration to the application directory. It replaces any globally installed `openmerit` in the same npm prefix. This preview is separate from the stable package on npm; `npm install -g openmerit` still installs the stable release without `dash`.
+The install uses the existing `openmerit` npm package, with the terminal bundled alongside its coordinator, protocol, and Pi adapter. It downloads a prebuilt test version. No Git checkout, build step, API key, or separate audit command is needed. Installation is global for your Node environment: it does not add a dependency, lockfile, or configuration to the application directory. It replaces any globally installed `openmerit` in the same npm prefix. This preview is separate from the stable package on npm; `npm install -g openmerit` still installs the stable release without `dash`.
 
 `openmerit dash` reads the current directory, starts a server bound to `127.0.0.1`, and opens its URL in your default browser after the first snapshot is ready. Port 4310 is preferred; when occupied, the operating system chooses a free local port. The actual URL is always printed. macOS, Windows, and Linux desktop opening use the platform's default URL handler. SSH and headless Linux sessions print the URL instead; use a private SSH port forward to view a remote instance. A browser-launch failure does not stop collection.
 
-Run the same install command to update the preview. Remove it with `npm uninstall -g openmerit`, or restore the stable package with `npm install -g openmerit@0.1.5`. Preview builds have a `-dash.` version suffix; `npm ls -g openmerit --depth=0` shows which one is installed. The current download's version and checksum are available at [preview build information](https://dash.openmerit.site/install/preview.json).
+Run the same install command to update the preview. Remove it with `npm uninstall -g openmerit`, or restore the stable package with `npm install -g openmerit@0.1.5`. Registry preview builds have a `-preview.` version suffix; `npm ls -g openmerit --depth=0` shows which one is installed. `npm view openmerit dist-tags` shows the published preview and stable versions. To replace an earlier hosted `-dash.` test build, run the npm install command above.
 
 If npm reports `EACCES`, use a user-owned Node installation/npm prefix rather than installing with `sudo`. If `openmerit` is not found after a successful install, reopen the terminal and check that your npm global executable directory is on `PATH`.
 
@@ -75,7 +75,7 @@ Set `"discovery": false` in `.openmerit/terminal.json`, or pass `--no-discovery`
 
 ### Existing project request logs
 
-Unreleased source behavior: `openmerit dash /path/to/project` also discovers existing `.jsonl` logs (including numeric rotations such as `.jsonl.1`) under `logs/`, `runs/`, and `results/`, descending at most two subdirectories beneath each root. No exporter, project configuration, credential, or inference call is required when the application already writes a supported format. Selecting the project authorizes these bounded project-local reads. Log files may contain conversation text; the parser retains only allowlisted request metadata, discarding prompts, outputs, headers, and credentials. Symbolic-link files and directories are skipped. Discovery does not execute source code, read arbitrary databases, or scan dependency directories.
+Preview behavior: `openmerit dash /path/to/project` also discovers existing `.jsonl` logs (including numeric rotations such as `.jsonl.1`) under `logs/`, `runs/`, and `results/`, descending at most two subdirectories beneath each root. No exporter, project configuration, credential, or inference call is required when the application already writes a supported format. Selecting the project authorizes these bounded project-local reads. Log files may contain conversation text; the parser retains only allowlisted request metadata, discarding prompts, outputs, headers, and credentials. Symbolic-link files and directories are skipped. Discovery does not execute source code, read arbitrary databases, or scan dependency directories.
 
 Supported records are:
 
@@ -157,13 +157,13 @@ The environment selector opens `inference-sample`, a fictional enterprise worksp
 
 ### Optional map preview
 
-The unreleased source checkout includes an opt-in React Flow + ELK map experiment. Add `?map=flow` before the page hash in your local terminal URL (for example, `http://127.0.0.1:4310/?map=flow#overview`). To try fictional enterprise data instead, use `?sample=1&map=flow#overview`. The existing map remains the default; **Original map** removes the preview flag immediately. No data migration or server restart is needed to switch views.
+The test preview includes an opt-in React Flow + ELK map experiment. Add `?map=flow` before the page hash in your local terminal URL (for example, `http://127.0.0.1:4310/?map=flow#overview`). To try fictional enterprise data instead, use `?sample=1&map=flow#overview`. The existing map remains the default; **Original map** removes the preview flag immediately. No data migration or server restart is needed to switch views.
 
 The preview keeps the existing card dimensions and uses ELK to arrange all collapsed groups. Layout is recalculated only when the set of nodes or relationships changes, not when request counts refresh. The graph scrolls at a fixed scale rather than automatically zooming to fit.
 
 **Browse all** opens a searchable inventory of every workload, entry connection, and model/service pair in the selected scope. Selecting a stack filters that inventory to its exact members; the visible result count always shows the filter coverage. Selecting a member spotlights its actual recorded paths and brings a matching member to the front of each related stack without expanding the diagram. This does not change the total request counts. **Details** opens the existing inspector; **Clear spotlight** or Escape clears the selection. The browser sits beside the map on wide screens and below it on narrower screens, with independently scrolling lists. Keyboard users can navigate its tabs with arrows, Home, and End.
 
-This is a presentation experiment, not a release or a new data source. Its separately bundled scripts and styles are loaded from the local server only when the preview is selected. It makes no inference calls and adds no collection permissions. There is additional download and initial layout cost; very large and densely connected environments still need user evaluation. The original map remains available for comparison and rollback.
+This is a presentation experiment within the preview, not a new data source. Its separately bundled scripts and styles are loaded from the local server only when the preview is selected. It makes no inference calls and adds no collection permissions. There is additional download and initial layout cost; very large and densely connected environments still need user evaluation. The original map remains available for comparison and rollback.
 
 ## Collection sources
 

@@ -1,10 +1,8 @@
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { buildTerminalInstall } from './build-terminal-install.mjs';
-import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { buildTerminal } from './build-terminal.mjs';
 import { terminalSocialImage } from './terminal-social-image.mjs';
 
-execFileSync(process.execPath, [fileURLToPath(new URL('./build.mjs', import.meta.url))], { stdio: 'inherit' });
+await buildTerminal();
 const output = new URL('../dist/terminal-preview/', import.meta.url);
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
@@ -36,5 +34,4 @@ html = html.replace('<title>Inference Terminal · OpenMerit</title>', `<title>${
 html = html.replace('<html lang="en">', '<html lang="en" data-sample-preview>');
 html = html.replace('Reading your environment…', 'Opening the sample environment…').replace('the local JSON snapshot', 'the fictional JSON snapshot').replace('href="/api/snapshot"', 'href="/api/sample"');
 await writeFile(page, html);
-await buildTerminalInstall(fileURLToPath(new URL('install/', output)));
-console.log('Built sample-only terminal assets and the prebuilt preview download in dist/terminal-preview.');
+console.log('Built sample-only terminal assets in dist/terminal-preview.');

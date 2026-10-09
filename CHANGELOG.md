@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.6-preview.0 — 2026-10-09
+
+A test prerelease of the existing `openmerit` npm package, installed with `npm install -g openmerit@preview`. Includes the compiled Inference Terminal, automatic browser opening, and a free loopback-port fallback. `latest` remains `0.1.5`.
+
 - Add the Inference Terminal: `openmerit dash` serves a local, read-only view of models, request metadata, connections, capacity, and compute, sampled every 10–30 seconds. Agent and task identities come from supplied metadata; the terminal does not intercept inference or discover every call automatically.
 - Bind task profiles, metrics, assessments, frontier artifacts, swaps, and
   automation signals to a confirmed application LLM target; Pi's own model

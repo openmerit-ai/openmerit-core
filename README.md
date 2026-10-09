@@ -85,11 +85,11 @@ A local, dark-only overview of application inference inventory, connections, act
 With Node.js 22.19+ installed, run this from your application's directory:
 
 ```sh
-npm install -g https://dash.openmerit.site/install/openmerit-preview.tgz
+npm install -g openmerit@preview
 openmerit dash
 ```
 
-The prebuilt test version opens its localhost URL in your default browser. The stable npm package `openmerit@0.1.5` does not include this command. See the [Inference Terminal guide](docs/inference-terminal.md) for supported sources, updating or removing the preview, source builds, and read-only agent access.
+The preview uses the existing `openmerit` npm package, including its coordinator, protocol, Pi adapter, and compiled terminal assets. It opens its localhost URL in your default browser. The stable npm package `openmerit@0.1.5` does not include this command. See the [Inference Terminal guide](docs/inference-terminal.md) for supported sources, updating or removing the preview, source builds, and read-only agent access.
 
 ## Documentation
 
