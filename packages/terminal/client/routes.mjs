@@ -37,5 +37,5 @@ export function routeBreakdown(records, snapshot) {
 // A connected, empty request source establishes zero; inventory alone does not.
 export function requestCountKnown(snapshot) {
   return Boolean(snapshot.records?.length) || (snapshot.sources ?? []).some(source =>
-    ['activity', 'openmerit', 'sample-activity', 'pi-history'].includes(source.id) && source.state === 'connected');
+    (['activity', 'openmerit', 'sample-activity'].includes(source.id) || source.id?.startsWith('project-log:')) && source.state === 'connected');
 }

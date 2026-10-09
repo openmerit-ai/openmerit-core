@@ -183,3 +183,12 @@ The fresh CLI recovered 276 real requests: 36 from native Pi sessions and 240 fr
 This verifies the VM's existing logged workloads, not arbitrary production application discovery. Its cloud worker logs already contain explicit identity and usage fields; applications that omit those fields cannot recover them from source code alone. Supported protocol formats and discovery limits are described in the public guide. No support for private Codex/Claude histories or cloud account ingestion is claimed.
 
 Browser verification also exposed an unrelated teardown error in the opt-in graph preview: the bundled ELK shim does not implement a real Web Worker's terminate method. Removed that unsupported cleanup call; the existing cancellation flag still prevents layout results from updating an unmounted map.
+
+
+## Application-only scope and VM acceptance — 9 October 2026
+
+The earlier Pi history acceptance result above is superseded. Coding-harness usage is outside the terminal's application scope. This revision removes the Pi history reader, grant lookup, and access prompts, while preserving application agents, jobs, evaluations, project request logs, runtime inventory, and product-task evidence. Existing grants cannot re-enable collection. Explicit development-scoped records are rejected; unmarked API records still require an application-owned source.
+
+Installed the updated source package in the same isolated `openmerit-real` VM. Starting `openmerit dash` directly from `/home/lazim.guest/inference-lab`, with neither `terminal.json` nor `.openmerit/inference.jsonl`, retained all 240 application requests: 144 OpenRouter and 96 direct OpenAI. Every retained record was deeply equal to its pre-update value, including the 40 worker and 120 task identities. The 36 requests previously imported from Pi sessions were excluded. The CLI snapshot, default-port server, next 15-second poll, and persistent private server on port 4313 agreed. All 111 application evidence files and the legacy access file were unchanged; no new inference was run. Ollama inventory and machine readings remained available without attributing their usage to the application. Browser verification confirmed the new totals, both cloud paths, and Sources without Pi history or permission prompts. No browser errors occurred after the update.
+
+The worker identities and request metadata are still the existing controlled VM workload, not newly discovered production agents. The hosted sample and published npm release were not changed by this validation.

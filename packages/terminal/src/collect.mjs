@@ -2,8 +2,6 @@ import { open, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import os from 'node:os';
 import { discoverProject, discoveryCandidates } from './discovery.mjs';
-import { createAccess } from './access.mjs';
-import { createPiHistory } from './pi-history.mjs';
 import { createProjectActivity } from './project-activity.mjs';
 import { reconcileActivity } from './activity-merge.mjs';
 import { configuredServices, modelCreators } from './services.mjs';
@@ -26,7 +24,8 @@ function localOrigin(endpoint) {
 // A projection, never a passthrough: prompts, responses, headers and credentials
 // cannot reach the terminal through an imported record.
 export function normalizeRecord(value, sourceId) {
-  if (!value || typeof value !== 'object' || !text(value.id) || !text(value.model)) return null;
+  // Development usage is outside the application's scope, even in an explicit export.
+  if (!value || typeof value !== 'object' || value.scope === 'development' || !text(value.id) || !text(value.model)) return null;
   const occurredAt = date(value.occurredAt);
   if (!occurredAt) return null;
   let path = normalizePath(value.path);
@@ -207,13 +206,12 @@ async function ollamaSnapshot(endpoint) {
 
 function cpuTotals() { return os.cpus().reduce((all, cpu) => ({ idle: all.idle + cpu.times.idle, total: all.total + Object.values(cpu.times).reduce((a, b) => a + b, 0) }), { idle: 0, total: 0 }); }
 
-export function createCollector(root, config, interval = 15, { access = createAccess(root) } = {}) {
+export function createCollector(root, config, interval = 15) {
   const activityReader = new JsonlReader(root, resolve(root, config.activityFile));
   const auditReader = new JsonlReader(root, resolve(root, '.openmerit/events.jsonl'));
   let previousCpu = null;
   const hardwareHistory = [];
   const hostHistories = new Map();
-  const piHistory = createPiHistory(access, normalizeRecord);
   const projectActivity = createProjectActivity(root, normalizeRecord, { exclude: [resolve(root, config.activityFile)] });
   let projectDiscovery = { sources: [], inventory: [], runtimes: [] }, discoveredAt = 0;
   const knownRuntimes = new Map();
@@ -224,7 +222,7 @@ export function createCollector(root, config, interval = 15, { access = createAc
     const candidateIds = new Set(candidates.map(item => item.id));
     for (const id of knownRuntimes.keys()) if (!candidateIds.has(id)) knownRuntimes.delete(id);
     const autoRuntimes = candidates.filter(item => scan || knownRuntimes.has(item.id)).map(item => ({ ...item, identifiedName: knownRuntimes.get(item.id) }));
-    const [history, logs] = config.discovery ? await Promise.all([piHistory(), projectActivity()]) : [{ records: [], source: null }, { records: [], sources: [] }];
+    const logs = config.discovery ? await projectActivity() : { records: [], sources: [] };
     const [activity, audit, ollama, runtimes, capacity, hardware] = await Promise.all([activityReader.read(), auditReader.read(true), ollamaSnapshot(config.ollama), Promise.all([...(config.runtimes ?? []), ...autoRuntimes].map(runtimeSnapshot)), exportSnapshot(root, config.capacityFile ?? '.openmerit/capacity.json', 'pools', normalizeCapacity), exportSnapshot(root, config.hardwareFile ?? '.openmerit/hosts.json', 'hosts', normalizeHosts, 256 * 1024)]);
     for (const runtime of runtimes) if (runtime.source.discoverySource && ['connected', 'partial'].includes(runtime.source.state)) knownRuntimes.set(runtime.source.id, runtime.source.name);
     // Empty standard addresses are candidates, not configured services.
@@ -233,7 +231,6 @@ export function createCollector(root, config, interval = 15, { access = createAc
     const recent = records => records.filter(item => Date.parse(item.occurredAt) <= Date.now() && Date.parse(item.occurredAt) >= Date.now() - 86_400_000);
     const batches = [
       { sourceId: 'activity', records: recent(activity.records) },
-      { sourceId: 'pi-history', records: recent(history.records) },
       ...logs.sources.map(source => ({ sourceId: source.id, records: recent(logs.records.filter(record => record.sourceId === source.id)) })),
     ].filter(batch => batch.records.length);
     const reconciliation = reconcileActivity(batches);
@@ -262,14 +259,13 @@ export function createCollector(root, config, interval = 15, { access = createAc
     hardwareHistory.push({ at: now, cpuPercent, memoryUsed });
     if (hardwareHistory.length > 240) hardwareHistory.shift();
     const sources = [
-      { id: 'activity', name: 'Inference activity', kind: 'Local file', state: activity.state, updatedAt: activity.state === 'connected' ? now : null, detail: config.activityFile, note: activity.truncated ? 'Showing a bounded recent window; older records are omitted.' : activity.invalid ? `${activity.invalid} invalid records skipped.` : 'Optional metadata export from your applications, agents, or gateway.', records: activity.records.length },
+      { id: 'activity', name: 'Inference activity', kind: 'Local file', state: activity.state, updatedAt: activity.state === 'connected' ? now : null, detail: config.activityFile, note: activity.truncated ? 'Showing a bounded recent window; older records are omitted.' : activity.invalid ? `${activity.invalid} invalid records skipped.` : 'Application request metadata, including its agents, jobs, evaluations, and gateway.', records: activity.records.length },
       { id: 'openmerit', name: 'OpenMerit', kind: 'Project evidence', state: audit.state, updatedAt: audit.state === 'connected' ? now : null, detail: '.openmerit/events.jsonl', note: reconciliation.records.length ? 'Application summaries are not added to request-level evidence; to avoid counting a task summary as another request.' : 'Completed application summaries. Redacted or absent measurements stay unknown.', records: audit.records.length },
       { id: 'ollama', name: 'Ollama', kind: 'Local runtime', state: ollama.state, updatedAt: ['connected', 'partial'].includes(ollama.state) ? now : null, detail: config.ollama ?? 'Disabled', note: ollama.note },
       { id: 'machine', name: 'This machine', kind: 'Operating system', state: 'connected', updatedAt: now, detail: `${os.platform()} · ${os.arch()}`, note: 'CPU and memory describe the whole machine, not individual inference requests.' },
     ];
     if (config.discovery) {
       sources.push(...projectDiscovery.sources);
-      if (history.source) sources.push(history.source);
       sources.push(...logs.sources);
     }
     for (const source of sources) {

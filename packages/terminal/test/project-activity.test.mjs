@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { createProjectActivity, projectActivityRecord } from '../src/project-activity.mjs';
 import { reconcileActivity } from '../src/activity-merge.mjs';
 import { createCollector, loadConfig, normalizeRecord } from '../src/collect.mjs';
-import { createAccess } from '../src/access.mjs';
-import { createPiHistory, piUsageRecord } from '../src/pi-history.mjs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const now = () => new Date().toISOString();
 const line = value => JSON.stringify(value) + '\n';
@@ -16,7 +16,7 @@ async function fixture(t) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'terminal-existing-load-'))), root = join(base, 'project'), home = join(base, 'home');
   await mkdir(root); await mkdir(home); await mkdir(join(root, '.openmerit')); await mkdir(join(root, 'runs', 'batch'), { recursive: true });
   t.after(() => rm(base, { force: true, recursive: true }));
-  return { root, base, home, file: join(root, 'runs', 'batch', 'results.jsonl'), access: createAccess(root, { home, env: {} }) };
+  return { root, base, home, file: join(root, 'runs', 'batch', 'results.jsonl') };
 }
 function noRuntime(t) { t.mock.method(globalThis, 'fetch', async () => { throw new Error('No fixture runtimes'); }); }
 
@@ -33,31 +33,6 @@ test('projects request metadata without outputs, secrets, invented identities, o
   const chat = projectActivityRecord({ id: 'chat-1', object: 'chat.completion', model: 'model-1', created: Date.now() / 1000, usage: { prompt_tokens: 10, completion_tokens: 5 }, choices: [{ finish_reason: 'stop', message: { content: 'PRIVATE_OUTPUT' } }] }, 'chat', 'logs/chat.jsonl', normalizeRecord);
   assert.equal(chat.status, 'completed'); assert.equal(chat.inputTokens, 10);
   for (const value of [{ model: 'catalog-model', id: 'catalog', object: 'model' }, { ...raw, occurredAt: 'yesterday' }, { ...raw, status: 'unknown' }, { ...raw, id: 'x'.repeat(161) }, { id: 'fake', model: 'm', occurredAt: now() }]) assert.equal(projectActivityRecord(value, 'x', 'logs/x.jsonl', normalizeRecord), null);
-});
-
-test('fresh collector discovers existing logs and native Pi without a terminal export or project configuration', async t => {
-  const f = await fixture(t); noRuntime(t);
-  const cloud = request(); await writeFile(f.file, line(cloud));
-  await mkdir(f.access.path, { recursive: true });
-  const entry = { type: 'message', id: 'local-1', timestamp: now(), message: { role: 'assistant', model: 'local-model', provider: 'Ollama', stopReason: 'stop', usage: { input: 2, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } }, content: 'PRIVATE_OUTPUT' } };
-  await writeFile(join(f.access.path, 'session.jsonl'), line({ type: 'session', id: 'session', version: 3, cwd: f.root }) + line(entry));
-  const config = await loadConfig(f.root); config.ollama = null;
-  let snapshot = await createCollector(f.root, config, 15, { access: f.access })();
-  assert.equal(snapshot.records.length, 1); assert.equal(snapshot.sources.find(source => source.id === 'pi-history').state, 'needs_access');
-  await f.access.set(true);
-  const collect = createCollector(f.root, config, 15, { access: f.access });
-  snapshot = await collect(); assert.equal(snapshot.records.length, 2); assert.equal(snapshot.discovery.requestSource, 'combined');
-  assert.equal(snapshot.records.find(record => record.agentId)?.agentId, 'worker.code');
-  // Restoring a copied feed must not duplicate either the native or log request.
-  const local = piUsageRecord(entry, 'session', normalizeRecord);
-  await writeFile(join(f.root, '.openmerit/inference.jsonl'), line(cloud) + line(local));
-  snapshot = await collect(); assert.equal(snapshot.records.length, 2); assert.equal(snapshot.discovery.reconciliation.duplicates, 2);
-  assert.ok(snapshot.records.every(record => record.sourceIds.length === 2));
-  assert.doesNotMatch(JSON.stringify(snapshot), /SECRET|PRIVATE_OUTPUT/);
-  await rm(join(f.root, '.openmerit/inference.jsonl')); await f.access.set(false);
-  snapshot = await collect(); assert.equal(snapshot.records.length, 1); assert.equal(snapshot.records[0].id, cloud.id);
-  config.discovery = false;
-  snapshot = await createCollector(f.root, config, 15, { access: f.access })(); assert.equal(snapshot.records.length, 0);
 });
 
 test('existing logs follow appends, partial UTF-8, running updates, rotation, and deletion', async t => {
@@ -110,9 +85,51 @@ test('unresolved cross-source overlap remains separate from combined totals', ()
   assert.equal(result.records.length, 1); assert.equal(result.excluded, 1); assert.equal(result.sources[1].records, 1); assert.equal(result.sources[1].included, 0);
 });
 
-test('native Pi history can recover all 36 existing sessions on a fresh startup', async t => {
-  const f = await fixture(t); await mkdir(f.access.path, { recursive: true }); await f.access.set(true);
-  for (let i = 0; i < 36; i++) await writeFile(join(f.access.path, `${i}.jsonl`), line({ type: 'session', id: `session-${i}`, version: 3, cwd: f.root }) + line({ type: 'message', id: 'entry', timestamp: now(), message: { role: 'assistant', model: 'local-model', provider: 'Ollama', stopReason: 'stop', usage: { input: 2, output: 1, cacheRead: 0, cacheWrite: 0 } } }));
-  const result = await createPiHistory(f.access, normalizeRecord)();
-  assert.equal(result.records.length, 36); assert.equal(result.source.state, 'connected');
+test('application logs reconcile with explicit exports and keep application agent identities', async t => {
+  const f = await fixture(t); noRuntime(t);
+  const cloud = request({ scope: 'agent' });
+  await writeFile(f.file, line(cloud) + line(request({ id: 'development', scope: 'development' })));
+  const config = await loadConfig(f.root); config.ollama = null;
+  const collect = createCollector(f.root, config);
+  let snapshot = await collect();
+  assert.equal(snapshot.records.length, 1); assert.equal(snapshot.records[0].agentId, 'worker.code');
+  assert.equal(snapshot.records[0].scope, 'agent');
+  assert.ok(snapshot.discovery.requestSource.startsWith('project-log:'));
+  await writeFile(join(f.root, '.openmerit/inference.jsonl'), line(cloud) + line(request({ id: 'development', scope: 'development' })));
+  snapshot = await collect();
+  assert.equal(snapshot.records.length, 1); assert.equal(snapshot.discovery.reconciliation.duplicates, 1);
+  assert.equal(snapshot.records[0].sourceIds.length, 2);
+  await rm(join(f.root, '.openmerit/inference.jsonl'));
+  snapshot = await collect(); assert.equal(snapshot.records.length, 1);
+  config.discovery = false;
+  snapshot = await createCollector(f.root, config)(); assert.equal(snapshot.records.length, 0);
+});
+
+test('normal dash ignores coding histories and legacy grants while discovering application requests', async t => {
+  const f = await fixture(t);
+  const app = request(); await writeFile(f.file, line(app));
+  // Even a valid grant from an earlier preview must not reactivate the retired reader.
+  const history = join(f.home, '.pi/agent/sessions', `--${f.root.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`);
+  await mkdir(history, { recursive: true });
+  await mkdir(join(f.home, '.openmerit'));
+  await writeFile(join(f.home, '.openmerit/terminal-access.json'), JSON.stringify({ version: 1, grants: [{ source: 'pi', project: f.root, path: history, allowed: true }] }));
+  await writeFile(join(history, 'session.jsonl'), line({ type: 'session', version: 3, id: 'session', cwd: f.root }) + line({ type: 'message', id: 'dev-call', timestamp: now(), message: { role: 'assistant', model: 'DEV_ONLY_MODEL', provider: 'dev-provider', stopReason: 'stop', usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, cost: { total: 1 } }, content: 'PRIVATE_CONVERSATION' } }));
+  for (const path of ['.codex/sessions', '.claude/projects', '.local/share/opencode']) {
+    await mkdir(join(f.home, path), { recursive: true });
+    await writeFile(join(f.home, path, 'history.jsonl'), line(request({ id: 'dev-history', model: 'DEV_ONLY_MODEL' })));
+  }
+  // Project audit summaries remain available, but do not duplicate request-level evidence.
+  await writeFile(join(f.root, '.openmerit/events.jsonl'), line({ type: 'automation_signal_recorded', id: 'summary', occurredAt: now(), data: { signalType: 'product_task_completed', targetId: 'app-target', modelId: 'app-model', telemetry: { inputTokens: 7, outputTokens: 2 } } }) + line({ type: 'automation_signal_recorded', id: 'harness-event', occurredAt: now(), data: { signalType: 'session_start', modelId: 'DEV_ONLY_MODEL' } }));
+  const run = () => {
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('../src/cli.mjs', import.meta.url)), 'dash', f.root, '--json'], { encoding: 'utf8', timeout: 15000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, HOME: f.home, PI_CODING_AGENT_DIR: join(f.home, '.pi/agent') } });
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stdout, /DEV_ONLY_MODEL|PRIVATE_CONVERSATION|pi-history|terminal-access|Needs access|SECRET|PRIVATE_OUTPUT/);
+    return JSON.parse(result.stdout);
+  };
+  let snapshot = run();
+  assert.equal(snapshot.records.length, 1); assert.equal(snapshot.records[0].id, app.id);
+  await rm(f.file);
+  snapshot = run();
+  assert.equal(snapshot.records.length, 1); assert.equal(snapshot.records[0].workload, 'app-target');
+  assert.equal(snapshot.discovery.requestSource, 'openmerit');
 });

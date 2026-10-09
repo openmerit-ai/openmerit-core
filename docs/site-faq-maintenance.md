@@ -98,3 +98,8 @@ The `map=flow` URL flag enables a separately bundled React Flow + ELK renderer o
 ## Existing activity audit — unreleased source, 9 October 2026
 
 Reviewed homepage evidence, data, background, approval, and readiness claims against automatic bounded project JSONL readers and multi-source reconciliation. The terminal now reads supported existing request logs inside the selected project and combines their metadata with approved native Pi usage and explicit feeds. Shared recorded identities prevent double counting; unresolved overlaps and conflicting measurements are disclosed. Pi's bounded file selection increases to 128 sessions; permission scope and revocation are unchanged. No inference calls, provider account ingestion, arbitrary process/database scanning, or framework-wide automatic support is implied. Published package and homepage FAQ claims remain unchanged. VM acceptance evidence is recorded in the internal terminal notes only after the run succeeds.
+
+
+## Application-only terminal scope — unreleased source, 9 October 2026
+
+Reviewed evidence, data, approval, and readiness claims. The terminal now excludes coding-harness usage: the Pi history reader, saved-grant lookup, and access prompts are removed. Prior history-related entries in this audit are historical and superseded. Application agents, jobs, evaluations, supported request logs, and OpenMerit product-task evidence remain in scope. Explicit development-scoped records are rejected, but unmarked request data cannot be classified by purpose automatically. Runtime inventories and whole-machine measurements remain shared infrastructure evidence, not project-exclusive usage. Published package and homepage FAQ wording remain unchanged; the terminal is still unreleased.

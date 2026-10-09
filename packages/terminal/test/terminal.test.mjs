@@ -256,10 +256,10 @@ test('all client scripts and styling ship locally; dark mode and reduced motion 
 });
 
 
-test('native request coverage includes retained partial history without inventing inventory usage', () => {
-  assert.equal(requestCountKnown({ records: [record()], sources: [{ id: 'pi-history', state: 'partial' }] }), true);
-  assert.equal(requestCountKnown({ records: [], sources: [{ id: 'pi-history', state: 'connected' }] }), true);
-  assert.equal(requestCountKnown({ records: [], sources: [{ id: 'pi-history', state: 'needs_access' }, { id: 'ollama', state: 'connected' }] }), false);
-  assert.equal(requestCountKnown({ records: [], sources: [{ id: 'pi-history', state: 'partial' }] }), false);
+test('application request coverage includes partial logs without inventing inventory usage', () => {
+  assert.equal(requestCountKnown({ records: [record()], sources: [{ id: 'project-log:fixture', state: 'partial' }] }), true);
+  assert.equal(requestCountKnown({ records: [], sources: [{ id: 'project-log:fixture', state: 'connected' }] }), true);
+  assert.equal(requestCountKnown({ records: [], sources: [{ id: 'ollama', state: 'connected' }] }), false);
+  assert.equal(requestCountKnown({ records: [], sources: [{ id: 'project-log:fixture', state: 'partial' }] }), false);
   assert.equal(requestCountKnown({ records: [], sources: [{ id: 'activity', state: 'connected' }] }), true);
 });
