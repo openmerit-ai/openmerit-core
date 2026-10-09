@@ -14,7 +14,7 @@ export const groups = [
     { source: 'demo-fieldkit.md', slug: 'demo-fieldkit', title: 'Field kit · Six tasks', description: 'Explore a prepared six-model workflow spanning translation, vision, extraction, code, reasoning, and writing.' },
   ] },
   { title: 'Using OpenMerit', pages: [
-    { source: 'inference-terminal.md', slug: 'inference-terminal', title: 'Inference Terminal', description: 'Explore the unreleased local terminal for models, connections, inference activity, and compute.' },
+    { source: 'inference-terminal.md', slug: 'inference-terminal', title: 'Inference Terminal', description: 'Explore the test-preview local terminal for models, connections, inference activity, and compute.' },
     { source: 'metrics-and-evidence.md', slug: 'metrics-and-evidence', title: 'Metrics & evidence', description: 'Understand measurements, sample requirements, and evidence readiness.' },
     { source: 'lifecycle.md', slug: 'lifecycle', title: 'Comparisons & swaps', description: 'Follow the improvement lifecycle from baseline to post-swap evaluation.' },
     { source: 'automation.md', slug: 'automation', title: 'Automatic checks', description: 'Configure cadence, signals, and scheduling for model reassessment.' },
