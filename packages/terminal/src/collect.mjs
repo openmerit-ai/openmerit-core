@@ -1,6 +1,7 @@
 import { open, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import os from 'node:os';
+import { historyExtent } from './history.mjs';
 import { discoverProject, discoveryCandidates } from './discovery.mjs';
 import { createProjectActivity } from './project-activity.mjs';
 import { reconcileActivity } from './activity-merge.mjs';
@@ -228,14 +229,14 @@ export function createCollector(root, config, interval = 15) {
     // Empty standard addresses are candidates, not configured services.
     for (let i = runtimes.length - 1; i >= 0; i--) if (runtimes[i].source.discoverySource && !knownRuntimes.has(runtimes[i].source.id)) runtimes.splice(i, 1);
     const now = new Date().toISOString();
-    const recent = records => records.filter(item => Date.parse(item.occurredAt) <= Date.now() && Date.parse(item.occurredAt) >= Date.now() - 86_400_000);
+    const recorded = records => records.filter(item => Date.parse(item.occurredAt) <= Date.parse(now));
     const batches = [
-      { sourceId: 'activity', records: recent(activity.records) },
-      ...logs.sources.map(source => ({ sourceId: source.id, records: recent(logs.records.filter(record => record.sourceId === source.id)) })),
+      { sourceId: 'activity', records: recorded(activity.records) },
+      ...logs.sources.map(source => ({ sourceId: source.id, records: recorded(logs.records.filter(record => record.sourceId === source.id)) })),
     ].filter(batch => batch.records.length);
     const reconciliation = reconcileActivity(batches);
     // Application summaries are a fallback, never added to request-level data.
-    const records = reconciliation.records.length ? reconciliation.records : recent(audit.records);
+    const records = reconciliation.records.length ? reconciliation.records : recorded(audit.records);
     const requestSources = reconciliation.sources.filter(source => source.included > 0).map(source => source.sourceId);
     if (!requestSources.length && records.length) requestSources.push('openmerit');
     const models = new Map([...ollama.models, ...runtimes.flatMap(runtime => runtime.models)].map(item => [`${item.provider}:${item.name}`, item]));
@@ -259,8 +260,8 @@ export function createCollector(root, config, interval = 15) {
     hardwareHistory.push({ at: now, cpuPercent, memoryUsed });
     if (hardwareHistory.length > 240) hardwareHistory.shift();
     const sources = [
-      { id: 'activity', name: 'Inference activity', kind: 'Local file', state: activity.state, updatedAt: activity.state === 'connected' ? now : null, detail: config.activityFile, note: activity.truncated ? 'Showing a bounded recent window; older records are omitted.' : activity.invalid ? `${activity.invalid} invalid records skipped.` : 'Application request metadata, including its agents, jobs, evaluations, and gateway.', records: activity.records.length },
-      { id: 'openmerit', name: 'OpenMerit', kind: 'Project evidence', state: audit.state, updatedAt: audit.state === 'connected' ? now : null, detail: '.openmerit/events.jsonl', note: reconciliation.records.length ? 'Application summaries are not added to request-level evidence; to avoid counting a task summary as another request.' : 'Completed application summaries. Redacted or absent measurements stay unknown.', records: audit.records.length },
+      { id: 'activity', name: 'Inference activity', kind: 'Local file', state: activity.state === 'connected' && (activity.truncated || activity.invalid) ? 'partial' : activity.state, truncated: activity.truncated, invalid: activity.invalid, updatedAt: activity.state === 'connected' ? now : null, detail: config.activityFile, note: activity.truncated ? 'The bounded reader omitted older records. All time covers retained history only.' : activity.invalid ? `${activity.invalid} invalid records skipped.` : 'Application request metadata, including its agents, jobs, evaluations, and gateway.', records: activity.records.length },
+      { id: 'openmerit', name: 'OpenMerit', kind: 'Project evidence', state: audit.state === 'connected' && (audit.truncated || audit.invalid) ? 'partial' : audit.state, truncated: audit.truncated, invalid: audit.invalid, updatedAt: audit.state === 'connected' ? now : null, detail: '.openmerit/events.jsonl', note: reconciliation.records.length ? 'Application summaries are not added to request-level evidence; to avoid counting a task summary as another request.' : 'Completed application summaries. Redacted or absent measurements stay unknown.', records: audit.records.length },
       { id: 'ollama', name: 'Ollama', kind: 'Local runtime', state: ollama.state, updatedAt: ['connected', 'partial'].includes(ollama.state) ? now : null, detail: config.ollama ?? 'Disabled', note: ollama.note },
       { id: 'machine', name: 'This machine', kind: 'Operating system', state: 'connected', updatedAt: now, detail: `${os.platform()} · ${os.arch()}`, note: 'CPU and memory describe the whole machine, not individual inference requests.' },
     ];
@@ -299,8 +300,11 @@ export function createCollector(root, config, interval = 15) {
     });
     for (const service of environment.services) if (!inventory.some(item => item.kind === service.kind && item.name === service.name)) inventory.push(service);
     const creatorReports = [...records, ...(config.deployments ?? []), ...config.inventory.filter(item => item.kind === 'model').map(item => ({ ...item, sourceId: 'inventory' })), ...hardware.hosts.flatMap(host => host.loadedModels.map(model => ({ ...model, sourceId: 'hardware' })))];
+    const historySources = sources.filter(source => source.id === 'activity' || source.id.startsWith('project-log:') || source.id === 'project-log-coverage' || source.id === 'openmerit' && !reconciliation.records.length);
+    const gaps = historySources.filter(source => source.state === 'partial' || source.state === 'unavailable' || source.truncated || source.invalid);
+    const history = { ...historyExtent(records, now), retained: records.length, coverage: gaps.length || reconciliation.excluded ? 'partial' : 'available', sourceIds: historySources.filter(source => source.state !== 'not_found').map(source => source.id) };
     return {
-      schemaVersion: 1, mode: 'live', observedAt: now, interval,
+      schemaVersion: 1, mode: 'live', observedAt: now, interval, history,
       discovery: { enabled: Boolean(config.discovery), checkedAt: discoveredAt ? new Date(discoveredAt).toISOString() : null, intervalSeconds: 60, runtimeCandidates: candidates.length, requestSource: requestSources.length > 1 ? 'combined' : requestSources[0] ?? null, requestSources, reconciliation: { duplicates: reconciliation.duplicates, excluded: reconciliation.excluded, conflicts: reconciliation.conflicts, sources: reconciliation.sources } },
       project: { name: basename(root), scope: 'Current project' },
       models: modelCreators([...models.values()], creatorReports), inventory: [...inventory, ...(config.runtimes ?? []).map(runtime => ({ name: runtime.name, kind: 'runtime', location: 'local', state: 'configured' }))],

@@ -123,7 +123,6 @@ export function createProjectActivity(root, normalize, { exclude = [] } = {}) {
             } catch { reader.invalid++; }
           }
           if (reader.pending.length > 128 * 1024) { reader.pending = ''; reader.invalid++; }
-          for (const [key, record] of reader.records) if (Date.parse(record.occurredAt) < Date.now() - 86400000) reader.records.delete(key);
           while (reader.records.size > 1000) { reader.records.delete(reader.records.keys().next().value); reader.truncated = true; }
           readers.set(file.path, reader);
           const retained = [...reader.records.values()].filter(record => Date.parse(record.occurredAt) <= Date.now());

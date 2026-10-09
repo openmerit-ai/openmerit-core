@@ -54,7 +54,7 @@ test('project log readers skip symlinks, outside paths, arbitrary directories an
   await symlink(f.base, join(f.root, 'logs'));
   const read = createProjectActivity(f.root, normalizeRecord); assert.equal((await read()).records.length, 0);
   await rm(f.file); await writeFile(f.file, 'malformed\n' + line({ messages: ['PRIVATE_OUTPUT'], model: 'm' }) + line(request({ occurredAt: '2000-01-01T00:00:00Z' })));
-  const result = await read(); assert.equal(result.records.length, 0); assert.equal(result.sources[0].state, 'partial');
+  const result = await read(); assert.equal(result.records.length, 1); assert.equal(result.records[0].occurredAt, '2000-01-01T00:00:00.000Z'); assert.equal(result.sources[0].state, 'partial');
   assert.equal(result.sources[0].invalid, 1); assert.equal(result.sources[0].unsupported, 1);
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE_OUTPUT|SECRET/);
 });
@@ -132,4 +132,33 @@ test('normal dash ignores coding histories and legacy grants while discovering a
   snapshot = run();
   assert.equal(snapshot.records.length, 1); assert.equal(snapshot.records[0].workload, 'app-target');
   assert.equal(snapshot.discovery.requestSource, 'openmerit');
+});
+
+
+test('a dormant project retains historical Groq request evidence across polls and restart', async t => {
+  const f = await fixture(t); noRuntime(t);
+  const old = request({ occurredAt: '2020-03-15T09:00:00Z', provider: 'Groq', route: 'Groq', routeKind: 'direct' });
+  const file = line(old) + line({ ...old, id: 'future', requestId: 'future', occurredAt: '2999-01-01T00:00:00Z' });
+  await writeFile(f.file, file);
+  await writeFile(join(f.root, '.env'), 'GROQ_API_KEY=TEST_ONLY_NOT_A_KEY\n');
+  const config = await loadConfig(f.root), collect = createCollector(f.root, config);
+  for (const snapshot of [await collect(), await collect(), await createCollector(f.root, config)()]) {
+    assert.equal(snapshot.records.length, 1);
+    assert.equal(snapshot.history.first, '2020-03-15T09:00:00.000Z');
+    assert.equal(snapshot.history.last, snapshot.history.first);
+    assert.equal(snapshot.history.coverage, 'available');
+    assert.ok(snapshot.inventory.some(item => item.name === 'Groq'));
+    assert.ok(snapshot.models.some(item => item.provider === 'Groq'));
+    assert.doesNotMatch(JSON.stringify(snapshot), /TEST_ONLY_NOT_A_KEY|PRIVATE_OUTPUT|SECRET/);
+  }
+});
+
+test('All time discloses partial history when bounded import drops older evidence', async t => {
+  const f = await fixture(t); noRuntime(t);
+  await writeFile(f.file, ' '.repeat(600 * 1024) + '\n' + line(request({ occurredAt: '2020-03-15T09:00:00Z' })));
+  const snapshot = await createCollector(f.root, await loadConfig(f.root))();
+  assert.equal(snapshot.records.length, 1);
+  assert.equal(snapshot.history.coverage, 'partial');
+  assert.equal(snapshot.history.first, '2020-03-15T09:00:00.000Z');
+  assert.ok(snapshot.sources.some(source => source.truncated));
 });

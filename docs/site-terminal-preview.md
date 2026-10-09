@@ -96,3 +96,12 @@ A fresh npm cache and disposable global prefix in the isolated Linux VM installe
 The package is now available through npm without a repository checkout or build step. The separate sample Worker and main website were not redeployed by this release; the earlier domain-hosted test download remains at its last deployed version. The source sample build no longer generates that download.
 
 Evidence: `/private/tmp/terminal-npm-preview-verify.log`, `/private/tmp/terminal-npm-preview-smoke.log`, `/private/tmp/terminal-npm-registry-release.json`, and `/private/tmp/terminal-npm-registry-vm.log`. Publication screenshot: `/private/tmp/openmerit-npm-preview-published.png`.
+
+
+### Historical activity — prepared preview, 9 October 2026
+
+Prepared `openmerit@0.1.6-preview.1`, 1,031,362 bytes and 97 files, with SHA-1 `58be1c9606e3e39e33033e8479960eb68e67d03d`. This update removes collector and project-log age cutoffs, adds 7d/30d/default All time, and shows earliest/latest retained evidence with known partial-coverage disclosure. Existing file/read/cache bounds remain; it is not a persistent or complete project-lifetime archive. Publication must be confirmed separately before advising friends to update.
+
+Full verification passed 210 tests plus syntax, typecheck, build, demo, and documentation checks. Browser checks covered exact 24h/7d/30d/All time request counts, keyboard range selection, calendar labels, partial-history disclosure, the enterprise sample and optional map, and a 390-pixel layout without page overflow. No browser warnings or errors were observed. A synthetic stopped Groq project retained three requests from 2020–2022 across separate installed-CLI invocations in the VM; future-dated evidence was excluded and its files were unchanged. The existing real VM workload separately retained all 240 requests, 40 workers, and 120 tasks across a passive refresh, with 111 evidence files unchanged and no inference calls.
+
+Evidence: `/private/tmp/terminal-history-verify.log`, `/private/tmp/terminal-history-pack.json`, `/private/tmp/terminal-history-vm.log`, and `/private/tmp/terminal-history-vm-archive.log`. Browser screenshot: `/private/tmp/openmerit-history-desktop.png`.

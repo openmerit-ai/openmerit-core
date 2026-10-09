@@ -138,12 +138,14 @@ test('imports audit application summaries without converting redacted token fiel
   assert.equal(result.machine.cpuPercent, null);
 });
 
-test('explicit activity is authoritative over overlapping audit summaries; expired records are excluded', async t => {
+test('explicit activity retains old requests, excludes future dates and takes precedence over audit summaries', async t => {
   const root = await fixture(t);
   await writeFile(join(root, '.openmerit/events.jsonl'), jsonl({ id: 'event-1', type: 'automation_signal_recorded', occurredAt: new Date().toISOString(), data: { signalType: 'product_task_completed', signalId: 'signal-1', modelId: 'model', telemetry: { cost: .12 } } }));
-  await writeFile(join(root, '.openmerit/inference.jsonl'), jsonl(record({ cost: .12 })) + jsonl(record({ id: 'old', occurredAt: '2020-01-01T00:00:00Z', cost: 100 })));
+  await writeFile(join(root, '.openmerit/inference.jsonl'), jsonl(record({ cost: .12 })) + jsonl(record({ id: 'old', occurredAt: '2020-01-01T00:00:00Z', cost: 100 })) + jsonl(record({ id: 'future', occurredAt: '2999-01-01T00:00:00Z' })));
   const collect = createCollector(root, { activityFile: '.openmerit/inference.jsonl', ollama: null, inventory: [] });
-  const result = await collect(); assert.equal(result.records.length, 1); assert.equal(result.records[0].sourceId, 'activity');
+  const result = await collect(); assert.equal(result.records.length, 2); assert.equal(result.records[0].sourceId, 'activity');
+  assert.equal(result.history.first, '2020-01-01T00:00:00.000Z'); assert.equal(result.history.coverage, 'available');
+  assert.equal((await collect()).records.length, 2);
   assert.match(result.sources.find(source => source.id === 'openmerit').note, /avoid counting/);
 });
 

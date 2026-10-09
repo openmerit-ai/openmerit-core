@@ -1,3 +1,4 @@
+import { rangeLabel } from '../src/history.mjs';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ReactFlow, Handle, Position } from '@xyflow/react';
@@ -78,7 +79,7 @@ function MapPreview({ records, snapshot, hours, onInspect }) {
   const nodes = layout ? model.graph.columns.flatMap((nodes, col) => nodes.map(node => {
     const stack = node.type === 'group';
     const front = stack ? node.members.find(member => member.id === selectedId) ?? node.members.find(member => highlighted.members.has(member.id)) ?? node.members[0] : node;
-    const caption = stack ? `${node.members.length} ${node.label} · ${number(node.count)} requests` : node.type === 'path' ? `${ROUTES[node.kind].short} · ${number(node.count)} requests` : node.type === 'model' ? node.provider : `${number(node.count)} requests · ${hours}h`;
+    const caption = stack ? `${node.members.length} ${node.label} · ${number(node.count)} requests` : node.type === 'path' ? `${ROUTES[node.kind].short} · ${number(node.count)} requests` : node.type === 'model' ? node.provider : `${number(node.count)} requests · ${rangeLabel(hours)}`;
     const isRelated = selected ? highlighted.nodes.has(node.id) : !hover || node.id === hover || model.graph.edges.some(edge => edge.related.has(hover) && (edge.from === node.id || edge.to === node.id));
     return { id: node.id, type: 'card', position: { x: columnX[col], y: layout.positions.get(node.id)?.y ?? 34 }, width: FLOW_COLUMNS[col].width, height: 46,
       draggable: false, selectable: false, data: { node, front, caption, dimmed: !isRelated, active: selected && highlighted.nodes.has(node.id),
@@ -119,7 +120,7 @@ function MapPreview({ records, snapshot, hours, onInspect }) {
         </tbody></table>{!browsing.rows.length && <p className="flow-empty">No matches. Try another name or connection.</p>}
       </div>
     </section>}
-    <div className="flow-map-footer"><div className="route-legend">{Object.entries(ROUTES).filter(([kind]) => model.graph.columns[1].some(path => path.kind === kind)).map(([kind, route]) => <span key={kind} style={{ color: route.color }}>{routeMark(kind)}{route.label}</span>)}</div><span>All {number(model.graph.requestCount)} requests represented · {hours}h</span></div>
+    <div className="flow-map-footer"><div className="route-legend">{Object.entries(ROUTES).filter(([kind]) => model.graph.columns[1].some(path => path.kind === kind)).map(([kind, route]) => <span key={kind} style={{ color: route.color }}>{routeMark(kind)}{route.label}</span>)}</div><span>All {number(model.graph.requestCount)} requests represented · {rangeLabel(hours)}</span></div>
     <p className="flow-map-note">Select a stack to browse every member.{layout?.height > 340 ? ' Scroll the map to explore all connections.' : ''}</p>
   </div>;
 }

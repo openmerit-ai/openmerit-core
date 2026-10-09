@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check src/cli.mjs && node --check src/browser.mjs && node --check src/discovery.mjs && node --check src/collect.mjs && node --check src/services.mjs && node --check src/server.mjs && node --check src/topology.mjs && node --check src/hardware.mjs && node --check client/app.js && node --check client/interface.js && node --check client/samples.mjs && node --check client/routes.mjs && node --check client/environment.mjs && node --check client/map.mjs && node --check client/flow-model.mjs && node --check client/flow-loader.js && node --check client/route-icons.mjs && node --check client/select.js && node --check client/brands.mjs && node --check client/services.mjs && node --check hosted/worker.mjs && node --check src/project-activity.mjs && node --check src/activity-merge.mjs",
+    "check": "node --check src/cli.mjs && node --check src/browser.mjs && node --check src/discovery.mjs && node --check src/collect.mjs && node --check src/history.mjs && node --check src/services.mjs && node --check src/server.mjs && node --check src/topology.mjs && node --check src/hardware.mjs && node --check client/app.js && node --check client/interface.js && node --check client/samples.mjs && node --check client/routes.mjs && node --check client/environment.mjs && node --check client/map.mjs && node --check client/flow-model.mjs && node --check client/flow-loader.js && node --check client/route-icons.mjs && node --check client/select.js && node --check client/brands.mjs && node --check client/services.mjs && node --check hosted/worker.mjs && node --check src/project-activity.mjs && node --check src/activity-merge.mjs",
     "test": "node --test test/*.test.mjs"
   }
 }

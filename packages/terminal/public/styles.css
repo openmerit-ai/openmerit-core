@@ -777,3 +777,11 @@ body.keyboard .terminal-tabs [role=tab]{transition:none}
 @media(prefers-reduced-motion:reduce){.complete-map .map-node rect,.complete-map .map-edge{transition:none}}
 body.keyboard .complete-map .map-node rect,body.keyboard .complete-map .map-edge{transition:none}
 @media(max-width:700px){.environment-toolbar{flex-wrap:wrap}.environment-toolbar .map-controls{margin-left:auto}.environment-panel .complete-map-scroll{max-height:480px}}
+
+/* Keep history coverage next to the existing range controls. */
+.history-coverage{display:flex;align-items:baseline;justify-content:space-between;gap:12px;color:var(--quiet);font-size:11px;line-height:1.6;margin:-13px 0 24px;flex-wrap:wrap}
+.history-dates{color:var(--muted);margin-left:8px;font-variant-numeric:tabular-nums}
+.history-coverage .text-button{font-size:11px}
+.history-partial{color:#c6aa79}
+@media(max-width:1000px){.page-heading{flex-wrap:wrap}.heading-controls{flex-wrap:wrap}.history-coverage{margin-top:-12px}}
+@media(max-width:700px){.page-heading{gap:18px}.heading-controls{width:100%;margin:0;justify-content:space-between;gap:10px}.heading-controls .segmented{max-width:100%}.heading-controls .segmented button{font-size:11px;min-height:30px;padding:5px 9px}.history-coverage{font-size:11px;margin-bottom:20px}.history-dates{display:block;margin-left:0}}

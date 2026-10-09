@@ -12,7 +12,7 @@ The preview is accessible to anyone with the link and asks search engines not to
 
 ## Install the test preview
 
-The terminal is included in `openmerit@0.1.6-preview.0`, under npm’s `preview` tag. Requires **Node.js 22.19 or newer**, with npm available in your terminal. From your application's directory:
+The terminal is delivered through the existing `openmerit` package under npm’s `preview` tag. Historical ranges are included in `0.1.6-preview.1` and later. Requires **Node.js 22.19 or newer**, with npm available in your terminal. From your application's directory:
 
 ```sh
 cd /path/to/your/project
@@ -85,7 +85,7 @@ Supported records are:
 
 These are format adapters, not automatic OpenAI/OpenRouter account ingestion. An API-compatible object does not establish its serving company or connection. A structured result must explicitly supply those identities; otherwise they stay unknown. Without an application/workload label, the relative log filename is shown. Agent/task names are never inferred from prompts or source code. Costs are copied when supplied; no missing price is synthesized. A recorded running event establishes running status only until a later event updates it; the reader cannot determine whether an abandoned request is still executing.
 
-The reader checks at most 2,048 directory entries and the newest 128 candidate files each poll. It reads up to 512 KiB per file and 4 MiB overall, caches up to 1,000 records per file and 10,000 recent records overall. Initial oversized files import a bounded tail. Appends, split UTF-8 lines, same-file updates, truncation, and rotation are handled; deleted/unreadable sources lose their cached records. Malformed or unsupported lines and scan limits appear as partial coverage in **Sources**. Ordinary unstructured text logs and standalone `.json` response files are not supported.
+The reader checks at most 2,048 directory entries and the newest 128 candidate files each poll. It reads up to 512 KiB per file and 4 MiB overall, caches up to 1,000 records per file and 10,000 retained records overall. Initial oversized files import a bounded tail. Appends, split UTF-8 lines, same-file updates, truncation, and rotation are handled; deleted/unreadable sources lose their cached records. Malformed or unsupported lines and scan limits appear as partial coverage in **Sources**. Ordinary unstructured text logs and standalone `.json` response files are not supported.
 
 ### Application scope
 
@@ -95,6 +95,16 @@ Application agents, background jobs, and evaluations remain in scope when they p
 
 Configuration identifies declared services; it cannot establish past executions or costs. Local runtime inventory and whole-machine counters can describe shared infrastructure and are not attributed exclusively to the selected application. The collector does not retrieve cloud account usage, inspect arbitrary processes, or connect to a remote deployment from its source code alone. Applications without a supported request source can use the optional activity export below.
 
+## Historical activity (0.1.6-preview.1)
+
+Preview `0.1.6-preview.1` adds **7d**, **30d**, and **All time** alongside 1h, 6h, and 24h. **All time** is the default. It shows all retained, supported request evidence without an age cutoff, including logs from an application that is no longer running. The collector and project-log readers no longer discard records merely because they are more than 24 hours old. These changes are not in `0.1.6-preview.0`.
+
+The date range below the page heading shows the earliest and latest retained request, not the project creation date. All time charts span those recorded dates; an inactive project's last request stays dated in the past. Longer ranges use calendar labels and interval units appropriate to their span. Overview totals, models, services, maps, agent/task details, and activity use the same selected range. Hardware and capacity continue to show their latest samples independently of the activity range.
+
+**All time does not promise complete lifetime history.** It can reach the beginning only when the application recorded that history in supported sources that remain readable within the existing limits. The terminal does not reconstruct missing logs from code or Git history, query cloud account history, or keep a separate persistent archive. Initial tail reads, file/count limits, malformed or unsupported records, unreadable sources, and unresolved source overlap can leave gaps. **Partial history · review sources** exposes known gaps next to the available dates. Even without a known gap, the range covers recorded sources only.
+
+The same per-file and total read/cache bounds still apply. Deleted sources are removed from the next snapshot; restarting rereads available files. The JSON snapshot adds `history.first`, `history.last`, `history.retained`, `history.coverage` (`available` or `partial`), and `history.sourceIds`. `available` never asserts complete project history. First/last dates are null when there are no retained requests.
+
 ## Explore the environment
 
 Pages, detail panels, and inventory cards lead directly with their title. Supporting context appears below the title; there are no small uppercase labels above headings.
@@ -102,7 +112,7 @@ Pages, detail panels, and inventory cards lead directly with their title. Suppor
 - **Overview:** inventory counts, observed usage, a map of recorded workload-to-deployment connections, shared capacity, and recent activity.
 - **Models:** filter by self-hosted (local or private) or cloud location, search models, and inspect their available measurements. Rows lead with the model name, followed by the serving service, location, and observed request paths. Select the name to open its details.
 - **Services:** a searchable inventory of model APIs, inference clouds, routers, gateways, and runtimes identified in the environment. Each service opens its models, deployments, recorded paths, explicitly linked capacity pools, and identity evidence. The secondary **Environment map** view contains the deployment map, agent focus selector, deployment list, and shared pools. Selecting an agent opens Deployments, Paths, and Capacity views. Selecting an entry connection reveals its reported hop sequence; deployment and capacity nodes open their evidence and shared dependencies. A path is a source-reported connection, not a network inspection or an enforced routing policy.
-- **Activity:** a request-volume chart stacked in the five request-path colors, with selectable path totals and the most recent 100 request summaries in the selected 1-, 6-, or 24-hour window. Aggregate totals include all retained records in that window. Selecting a path isolates its chart series while the activity table keeps the full window. Chart bins support pointer inspection and Left/Right or Home/End keyboard navigation; map nodes also support keyboard inspection.
+- **Activity:** a request-volume chart stacked in the five request-path colors, with selectable path totals and the most recent 100 request summaries in the selected activity window. Aggregate totals include all retained records in that window. Selecting a path isolates its chart series while the activity table keeps the full window. Chart bins support pointer inspection and Left/Right or Home/End keyboard navigation; map nodes also support keyboard inspection.
 - **Local compute:** this machine and exported self-hosted servers, grouped by supplied site and rack labels, a reported-site filter when site labels exist, and per-host CPU, system RAM, accelerator readings, loaded models, and optional vLLM counters. Select a host to inspect its resources. Missing measurements and stale readings remain explicit. This does not attribute machine usage to an individual request.
 - **Sources:** successful connections, unavailable sources, collection gaps, and setup instructions.
 
@@ -414,7 +424,7 @@ There are no favicon lookups, third-party image services, or remote asset reques
 
 Collectors run once per interval with no overlapping collection cycles. Each runtime request has a timeout and a response-size bound. Browser refreshes read the cached snapshot, so additional tabs do not multiply runtime polling. The interface shows a delayed-collection notice when its snapshot is older than three intervals. A successful source check does not mean that source has recent inference activity.
 
-File readers handle partial lines, split UTF-8 writes, and ordinary file rotation. Activity and audit file reads are bounded to 4 MiB, and each reader retains up to 10,000 unique records. Discovered project logs have the stricter per-file and aggregate limits described above. A large initial file imports its tail. Truncation and malformed records are disclosed in source details. Results are limited to the most recent 24 hours and exclude future timestamps. An unavailable or removed file is not kept looking connected.
+File readers handle partial lines, split UTF-8 writes, and ordinary file rotation. Activity and audit file reads are bounded to 4 MiB, and each reader retains up to 10,000 unique records. Discovered project logs have the stricter per-file and aggregate limits described above. A large initial file imports its tail. Truncation and malformed records are disclosed in source details. From `0.1.6-preview.1`, valid retained records have no age cutoff; future timestamps remain excluded. The released `0.1.6-preview.0` still limits results to the most recent 24 hours. An unavailable or removed file is not kept looking connected.
 
 Collected usage is not persisted to a new database. Optional access choices are stored separately in the user-level permissions file. Machine history and imported-record caches are process-local and disappear when the terminal closes. Existing source files remain under their owner's retention policy.
 

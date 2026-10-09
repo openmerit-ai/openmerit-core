@@ -113,3 +113,8 @@ Reviewed setup, background, data, and readiness claims. A prebuilt test package 
 ## npm terminal preview delivery — published, 9 October 2026
 
 The terminal prerelease is published in the existing `openmerit` npm package as `0.1.6-preview.0` under the `preview` tag. Registry metadata and integrity match the tested package; `latest` remains `0.1.5`. Registry-install acceptance is recorded in the terminal preview deployment record. The compiled package retains core/protocol/Pi exports and uses an explicit dist-directory allowlist so a sample-site build cannot accidentally add hosted assets or a nested installer archive. The standalone domain-hosted packaging path is removed from the source build. This changes delivery only: collection behavior, browser launch, consent, and application scope remain unchanged. Homepage stable-package claims are unchanged.
+
+
+## Historical terminal activity — next preview, 9 October 2026
+
+Reviewed retention, source coverage, and readiness claims. The next preview removes the 24-hour age cutoff and offers 7d, 30d, and default All time with earliest/latest retained request dates. Existing byte, file, and record caps remain; All time describes available evidence, never a guaranteed project-lifetime archive. It neither queries provider accounts nor adds persistent collection. Current `0.1.6-preview.0` and homepage stable-package claims remain unchanged until a new verified preview is published.

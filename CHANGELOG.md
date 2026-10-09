@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.6-preview.1 — 2026-10-09
+
+- Retain historical application requests beyond 24 hours; add 7d, 30d, and default All time with calendar labels, available-history dates, and explicit partial-coverage disclosure. Existing source/read limits still apply.
+
 ## 0.1.6-preview.0 — 2026-10-09
 
 A test prerelease of the existing `openmerit` npm package, installed with `npm install -g openmerit@preview`. Includes the compiled Inference Terminal, automatic browser opening, and a free loopback-port fallback. `latest` remains `0.1.5`.
