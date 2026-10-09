@@ -4,6 +4,8 @@ import os from 'node:os';
 import { discoverProject, discoveryCandidates } from './discovery.mjs';
 import { createAccess } from './access.mjs';
 import { createPiHistory } from './pi-history.mjs';
+import { createProjectActivity } from './project-activity.mjs';
+import { reconcileActivity } from './activity-merge.mjs';
 import { configuredServices, modelCreators } from './services.mjs';
 import { normalizeHosts, retainHostHistory, hostState } from './hardware.mjs';
 import { StringDecoder } from 'node:string_decoder';
@@ -212,6 +214,7 @@ export function createCollector(root, config, interval = 15, { access = createAc
   const hardwareHistory = [];
   const hostHistories = new Map();
   const piHistory = createPiHistory(access, normalizeRecord);
+  const projectActivity = createProjectActivity(root, normalizeRecord, { exclude: [resolve(root, config.activityFile)] });
   let projectDiscovery = { sources: [], inventory: [], runtimes: [] }, discoveredAt = 0;
   const knownRuntimes = new Map();
   return async function collect() {
@@ -221,15 +224,23 @@ export function createCollector(root, config, interval = 15, { access = createAc
     const candidateIds = new Set(candidates.map(item => item.id));
     for (const id of knownRuntimes.keys()) if (!candidateIds.has(id)) knownRuntimes.delete(id);
     const autoRuntimes = candidates.filter(item => scan || knownRuntimes.has(item.id)).map(item => ({ ...item, identifiedName: knownRuntimes.get(item.id) }));
-    const history = config.discovery ? await piHistory() : { records: [], source: null };
+    const [history, logs] = config.discovery ? await Promise.all([piHistory(), projectActivity()]) : [{ records: [], source: null }, { records: [], sources: [] }];
     const [activity, audit, ollama, runtimes, capacity, hardware] = await Promise.all([activityReader.read(), auditReader.read(true), ollamaSnapshot(config.ollama), Promise.all([...(config.runtimes ?? []), ...autoRuntimes].map(runtimeSnapshot)), exportSnapshot(root, config.capacityFile ?? '.openmerit/capacity.json', 'pools', normalizeCapacity), exportSnapshot(root, config.hardwareFile ?? '.openmerit/hosts.json', 'hosts', normalizeHosts, 256 * 1024)]);
     for (const runtime of runtimes) if (runtime.source.discoverySource && ['connected', 'partial'].includes(runtime.source.state)) knownRuntimes.set(runtime.source.id, runtime.source.name);
     // Empty standard addresses are candidates, not configured services.
     for (let i = runtimes.length - 1; i >= 0; i--) if (runtimes[i].source.discoverySource && !knownRuntimes.has(runtimes[i].source.id)) runtimes.splice(i, 1);
     const now = new Date().toISOString();
-    // An explicit activity feed is authoritative. Do not add overlapping audit
-    // summaries to it: they often describe the very same application request.
-    const records = (activity.records.length ? activity.records : history.records.length ? history.records : audit.records).filter(item => Date.parse(item.occurredAt) <= Date.now() && Date.parse(item.occurredAt) >= Date.now() - 86_400_000);
+    const recent = records => records.filter(item => Date.parse(item.occurredAt) <= Date.now() && Date.parse(item.occurredAt) >= Date.now() - 86_400_000);
+    const batches = [
+      { sourceId: 'activity', records: recent(activity.records) },
+      { sourceId: 'pi-history', records: recent(history.records) },
+      ...logs.sources.map(source => ({ sourceId: source.id, records: recent(logs.records.filter(record => record.sourceId === source.id)) })),
+    ].filter(batch => batch.records.length);
+    const reconciliation = reconcileActivity(batches);
+    // Application summaries are a fallback, never added to request-level data.
+    const records = reconciliation.records.length ? reconciliation.records : recent(audit.records);
+    const requestSources = reconciliation.sources.filter(source => source.included > 0).map(source => source.sourceId);
+    if (!requestSources.length && records.length) requestSources.push('openmerit');
     const models = new Map([...ollama.models, ...runtimes.flatMap(runtime => runtime.models)].map(item => [`${item.provider}:${item.name}`, item]));
     for (const host of hardware.hosts) for (const model of host.loadedModels) {
       const key = `${model.provider || 'Unattributed'}:${model.name}`;
@@ -252,13 +263,22 @@ export function createCollector(root, config, interval = 15, { access = createAc
     if (hardwareHistory.length > 240) hardwareHistory.shift();
     const sources = [
       { id: 'activity', name: 'Inference activity', kind: 'Local file', state: activity.state, updatedAt: activity.state === 'connected' ? now : null, detail: config.activityFile, note: activity.truncated ? 'Showing a bounded recent window; older records are omitted.' : activity.invalid ? `${activity.invalid} invalid records skipped.` : 'Optional metadata export from your applications, agents, or gateway.', records: activity.records.length },
-      { id: 'openmerit', name: 'OpenMerit', kind: 'Project evidence', state: audit.state, updatedAt: audit.state === 'connected' ? now : null, detail: '.openmerit/events.jsonl', note: activity.records.length || history.records.length ? 'Activity totals use the higher-priority activity feed or Pi usage history to avoid counting requests twice.' : 'Completed application summaries. Redacted or absent measurements stay unknown.', records: audit.records.length },
+      { id: 'openmerit', name: 'OpenMerit', kind: 'Project evidence', state: audit.state, updatedAt: audit.state === 'connected' ? now : null, detail: '.openmerit/events.jsonl', note: reconciliation.records.length ? 'Application summaries are not added to request-level evidence; to avoid counting a task summary as another request.' : 'Completed application summaries. Redacted or absent measurements stay unknown.', records: audit.records.length },
       { id: 'ollama', name: 'Ollama', kind: 'Local runtime', state: ollama.state, updatedAt: ['connected', 'partial'].includes(ollama.state) ? now : null, detail: config.ollama ?? 'Disabled', note: ollama.note },
       { id: 'machine', name: 'This machine', kind: 'Operating system', state: 'connected', updatedAt: now, detail: `${os.platform()} · ${os.arch()}`, note: 'CPU and memory describe the whole machine, not individual inference requests.' },
     ];
     if (config.discovery) {
       sources.push(...projectDiscovery.sources);
-      if (history.source) sources.push({ ...history.source, note: history.source.note + (activity.records.length ? ' The explicit activity feed takes precedence in request totals.' : '') });
+      if (history.source) sources.push(history.source);
+      sources.push(...logs.sources);
+    }
+    for (const source of sources) {
+      const contribution = reconciliation.sources.find(item => item.sourceId === source.id);
+      if (contribution) {
+        source.activity = contribution;
+        source.note += ` ${contribution.included} requests contribute to totals; ${contribution.duplicates} matching records reconciled; ${contribution.excluded} excluded because overlap could not be resolved.`;
+        if (contribution.excluded) source.state = 'partial';
+      }
     }
     sources.push({ id: 'hardware', name: 'Hardware export', kind: 'Local file', state: hardware.state, updatedAt: hardware.state === 'connected' ? now : null, detail: config.hardwareFile ?? '.openmerit/hosts.json', note: 'Hosts, racks, accelerators, and loaded models from an existing exporter. Host timestamps determine freshness; no network discovery.' });
     sources.push(...runtimes.map(runtime => ({ ...runtime.source, updatedAt: ['connected', 'partial'].includes(runtime.source.state) ? now : null })));
@@ -285,7 +305,7 @@ export function createCollector(root, config, interval = 15, { access = createAc
     const creatorReports = [...records, ...(config.deployments ?? []), ...config.inventory.filter(item => item.kind === 'model').map(item => ({ ...item, sourceId: 'inventory' })), ...hardware.hosts.flatMap(host => host.loadedModels.map(model => ({ ...model, sourceId: 'hardware' })))];
     return {
       schemaVersion: 1, mode: 'live', observedAt: now, interval,
-      discovery: { enabled: Boolean(config.discovery), checkedAt: discoveredAt ? new Date(discoveredAt).toISOString() : null, intervalSeconds: 60, runtimeCandidates: candidates.length, requestSource: activity.records.length ? 'activity' : history.records.length ? 'pi-history' : audit.records.length ? 'openmerit' : null },
+      discovery: { enabled: Boolean(config.discovery), checkedAt: discoveredAt ? new Date(discoveredAt).toISOString() : null, intervalSeconds: 60, runtimeCandidates: candidates.length, requestSource: requestSources.length > 1 ? 'combined' : requestSources[0] ?? null, requestSources, reconciliation: { duplicates: reconciliation.duplicates, excluded: reconciliation.excluded, conflicts: reconciliation.conflicts, sources: reconciliation.sources } },
       project: { name: basename(root), scope: 'Current project' },
       models: modelCreators([...models.values()], creatorReports), inventory: [...inventory, ...(config.runtimes ?? []).map(runtime => ({ name: runtime.name, kind: 'runtime', location: 'local', state: 'configured' }))],
       records, sources, deployments, capacityPools, runtimeStats: runtimes.map(runtime => runtime.stats && ({ ...runtime.stats, hostId: 'this-machine' })).filter(Boolean),

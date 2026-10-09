@@ -167,14 +167,14 @@ test('unsupported local responses do not create services and disabled discovery 
   assert.equal(calls.length, 0); assert.equal(disabled.discovery.enabled, false);
 });
 
-test('explicit activity feed takes priority over native history; revocation removes native data on next poll', async t => {
+test('distinct explicit activity combines with native history; revocation removes native data on next poll', async t => {
   const f = await fixture(t); mockRuntime(t); await session(f); await f.access.set(true);
   const config = await loadConfig(f.root); config.ollama = null;
   const collect = createCollector(f.root, config, 15, { access: f.access });
   let data = await collect(); assert.equal(data.records.length, 1); assert.equal(data.discovery.requestSource, 'pi-history');
   const file = join(f.root, '.openmerit/inference.jsonl');
   await writeFile(file, jsonl({ id: 'explicit', model: 'export-model', occurredAt: new Date().toISOString() }));
-  data = await collect(); assert.equal(data.records.length, 1); assert.equal(data.records[0].id, 'explicit'); assert.equal(data.discovery.requestSource, 'activity');
+  data = await collect(); assert.equal(data.records.length, 2); assert.ok(data.records.some(record => record.id === 'explicit')); assert.equal(data.discovery.requestSource, 'combined');
   await rm(file); await f.access.set(false); data = await collect();
   assert.equal(data.records.length, 0); assert.equal(data.models.some(item => item.name === 'example-model'), false);
 });

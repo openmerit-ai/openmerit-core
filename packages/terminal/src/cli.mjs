@@ -13,7 +13,7 @@ const help = `OpenMerit · Inference Terminal
 
   --port <number>      Local port (default: 4310)
   --interval <seconds> Collection interval, 10–30 (default: 15)
-  --no-discovery       Skip project scan, extra runtime discovery, and Pi history
+  --no-discovery       Skip project/log discovery, extra runtimes, and Pi history
   --access             Review optional access for this project, then exit
   --revoke-access      Revoke Pi history access for this project
   --json               Print one snapshot for an agent, then exit
@@ -76,7 +76,7 @@ async function main() {
   const close = () => { void terminal.close().then(() => process.exit(0)); };
   process.once('SIGINT', close); process.once('SIGTERM', close);
   if (!demo && config.discovery) {
-    console.log('  Automatic discovery: project declarations, local runtimes, and machine readings.');
+    console.log('  Automatic discovery: project declarations, request logs, local runtimes, and machine readings.');
     const permission = await access.status();
     if (process.stdin.isTTY && permission.state === 'needs_access') {
       try { await reviewHistoryAccess(access); }

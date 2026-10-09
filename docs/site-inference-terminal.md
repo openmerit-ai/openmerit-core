@@ -172,3 +172,14 @@ The map remains a quiet local inventory for someone exploring their inference en
 | Graph engine would increase all dashboard loads | A separate local bundle loaded only for the opt-in preview | Keep rollback and comparison cheap |
 
 The desktop member browser uses the space alongside the map and does not dim the page. At narrower widths it sits beneath the graph. Colors continue to identify path types; original service marks, subtle borders, and existing inspector behavior are reused. Search and keyboard interactions are immediate. Only opacity and border colors transition, with transitions disabled for keyboard use and reduced motion. The remaining evaluation is whether automatic layout and browsing help the user enough to justify the additional bundle size; the experiment is not the default.
+
+
+## Existing-load audit acceptance — 9 October 2026
+
+Installed the source build in the existing `openmerit-real` Ubuntu VM and launched the literal command `openmerit dash /home/lazim.guest/inference-lab` on the default port. The test moved `.openmerit/inference.jsonl` to an owner-controlled backup outside the project. No `terminal.json`, custom exporter invocation, new inference, or new credentials were used. Pi history already had an exact project-scoped grant; unit integration tests separately cover missing access and revocation.
+
+The fresh CLI recovered 276 real requests: 36 from native Pi sessions and 240 from two existing structured JSONL result logs (144 OpenRouter and 96 direct OpenAI). All 40 recorded cloud-worker IDs and 120 task IDs remained present. Every normalized measurement and identity matched the previous snapshot. A subsequent 15-second poll preserved the same totals, and hashes confirmed 147 evidence files were unchanged. With the feed still present before removal, 276 duplicate copies reconciled to the same 276 requests. The persistent service on private port 4313 now runs without the custom feed. The feed backup is retained outside the project.
+
+This verifies the VM's existing logged workloads, not arbitrary production application discovery. Its cloud worker logs already contain explicit identity and usage fields; applications that omit those fields cannot recover them from source code alone. Supported protocol formats and discovery limits are described in the public guide. No support for private Codex/Claude histories or cloud account ingestion is claimed.
+
+Browser verification also exposed an unrelated teardown error in the opt-in graph preview: the bundled ELK shim does not implement a real Web Worker's terminate method. Removed that unsupported cleanup call; the existing cancellation flag still prevents layout results from updating an unmounted map.

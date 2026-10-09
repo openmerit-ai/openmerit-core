@@ -49,7 +49,8 @@ function MapPreview({ records, snapshot, hours, onInspect }) {
     layoutFlow(model.graph, elk).then(value => { if (!cancelled) { setLayout(value); setError(''); } }).catch(() => { if (!cancelled) setError('The preview could not arrange this environment. Use Original map to continue.'); });
     return () => { cancelled = true; };
   }, [model.signature, elk]);
-  useEffect(() => () => elk.terminateWorker(), [elk]);
+  // The bundled ELK engine uses an in-process worker shim with no terminate
+  // method. The layout effect above already cancels updates after unmount.
   useEffect(() => {
     if (selectedId && !model.owners.has(selectedId)) setSelectedId('');
     if (groupId && !model.graph.groups.some(group => group.id === groupId)) setGroupId('');

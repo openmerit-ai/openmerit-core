@@ -3,7 +3,7 @@ import { constants } from 'node:fs';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
-const FILE_BYTES = 512 * 1024, TOTAL_BYTES = 4 * 1024 * 1024, MAX_FILES = 32, MAX_RECORDS = 10000;
+const FILE_BYTES = 512 * 1024, TOTAL_BYTES = 4 * 1024 * 1024, MAX_FILES = 128, MAX_RECORDS = 10000, FILE_RECORDS = 312;
 const nonnegative = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 export function piUsageRecord(entry, session, normalize) {
   const message = entry?.message, usage = message?.usage;
@@ -64,7 +64,7 @@ export function createPiHistory(access, normalize) {
             }
             if (reader.pending.length > 128 * 1024) { reader.pending = ''; reader.invalid = true; invalid = true; }
             for (const [id, record] of reader.records) if (Date.parse(record.occurredAt) < Date.now() - 86400000) reader.records.delete(id);
-            while (reader.records.size > MAX_RECORDS / MAX_FILES) { reader.records.delete(reader.records.keys().next().value); reader.truncated = true; omitted = true; }
+            while (reader.records.size > FILE_RECORDS) { reader.records.delete(reader.records.keys().next().value); reader.truncated = true; omitted = true; }
             omitted ||= reader.truncated; invalid ||= reader.invalid;
             readers.set(file.path, reader);
           } finally { await handle.close(); }
@@ -76,7 +76,9 @@ export function createPiHistory(access, normalize) {
         readers.clear();
         return { source: { ...source, state: current.state === 'allowed' ? 'partial' : 'disabled', note: 'Access changed during collection. Metadata was discarded; the next poll will check the current permission.' }, records: [] };
       }
-      const records = [...new Map([...readers.values()].flatMap(reader => [...reader.records]).map(([id, record]) => [id, record])).values()].filter(record => Date.parse(record.occurredAt) <= Date.now());
+      let records = [...new Map([...readers.values()].flatMap(reader => [...reader.records]).map(([id, record]) => [id, record])).values()].filter(record => Date.parse(record.occurredAt) <= Date.now());
+      records.sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
+      if (records.length > MAX_RECORDS) { records = records.slice(0, MAX_RECORDS); omitted = true; }
       return { records, source: { ...source, state: invalid || omitted ? 'partial' : 'connected', updatedAt: new Date().toISOString(), records: records.length, note: source.note + (omitted ? ' The bounded scan omitted older files or records.' : '') + (invalid ? ' Unreadable, malformed, or unsupported sessions were skipped.' : '') } };
     } catch { readers.clear(); return { source: { ...source, state: 'unavailable' }, records: [] }; }
   };

@@ -93,3 +93,8 @@ The map no longer selects representative workloads or models. It groups all reta
 ## Optional graph component experiment — unreleased source, 9 October 2026
 
 The `map=flow` URL flag enables a separately bundled React Flow + ELK renderer over the same retained metadata. The existing map remains the default, with immediate return through Original map. Search and member highlighting change presentation only; grouping, request totals, source collection, permissions, and sample/live separation are unchanged. This is an opt-in experiment, not a claim of production scale or released package behavior. Homepage FAQ wording remains unchanged.
+
+
+## Existing activity audit — unreleased source, 9 October 2026
+
+Reviewed homepage evidence, data, background, approval, and readiness claims against automatic bounded project JSONL readers and multi-source reconciliation. The terminal now reads supported existing request logs inside the selected project and combines their metadata with approved native Pi usage and explicit feeds. Shared recorded identities prevent double counting; unresolved overlaps and conflicting measurements are disclosed. Pi's bounded file selection increases to 128 sessions; permission scope and revocation are unchanged. No inference calls, provider account ingestion, arbitrary process/database scanning, or framework-wide automatic support is implied. Published package and homepage FAQ claims remain unchanged. VM acceptance evidence is recorded in the internal terminal notes only after the run succeeds.
