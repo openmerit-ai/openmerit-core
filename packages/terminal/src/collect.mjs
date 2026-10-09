@@ -5,7 +5,8 @@ import { historyExtent } from './history.mjs';
 import { discoverProject, discoveryCandidates } from './discovery.mjs';
 import { createProjectActivity } from './project-activity.mjs';
 import { reconcileActivity } from './activity-merge.mjs';
-import { configuredServices, modelCreators } from './services.mjs';
+import { modelCreators } from './services.mjs';
+import { collectionLimits, configurationLimits, hardwareLimits, limitNote } from './coverage.mjs';
 import { normalizeHosts, retainHostHistory, hostState } from './hardware.mjs';
 import { StringDecoder } from 'node:string_decoder';
 import { normalizePath, normalizeDeployments, normalizePools, normalizeCapacity, poolIds } from './topology.mjs';
@@ -44,11 +45,11 @@ export function normalizeRecord(value, sourceId) {
     scope: ['application', 'agent', 'evaluation'].includes(value.scope) ? value.scope : 'application',
     route, routeKind,
     location: ['local', 'private', 'cloud'].includes(value.location) ? value.location : 'unknown',
-    status: ['completed', 'running', 'failed'].includes(value.status) ? value.status : 'completed',
+    status: ['completed', 'running', 'failed'].includes(value.status) ? value.status : 'unknown',
     inputTokens: number(value.inputTokens), outputTokens: number(value.outputTokens), cacheReadTokens: number(value.cacheReadTokens),
     durationMs: number(value.durationMs), cost: number(value.cost),
-    costKind: value.costKind === 'estimated' ? 'estimated' : 'reported',
-    currency: value.currency === 'USD' || value.currency === undefined ? 'USD' : 'unknown',
+    costKind: ['reported', 'estimated'].includes(value.costKind) ? value.costKind : 'unknown',
+    currency: value.currency === 'USD' ? 'USD' : 'unknown',
   };
 }
 
@@ -89,7 +90,7 @@ export class JsonlReader {
             const record = normalizeRecord(raw, projectAudit ? 'openmerit' : 'activity');
             if (!record) { this.invalid++; continue; }
             this.records.delete(record.id);
-            this.records.set(record.id, record);
+            this.records.set(record.id, projectAudit ? { ...record, kind: 'task-summary', status: 'unknown' } : record);
             if (this.records.size > MAX_RECORDS) { this.records.delete(this.records.keys().next().value); this.truncated = true; }
           } catch { this.invalid++; }
         }
@@ -119,12 +120,13 @@ export async function loadConfig(root) {
   if (!inside(resolve(root), resolve(root, capacityFile))) throw new Error('capacityFile must be inside this project.');
   const hardwareFile = text(raw.hardwareFile, '.openmerit/hosts.json');
   if (!inside(resolve(root), resolve(root, hardwareFile))) throw new Error('hardwareFile must be inside this project.');
-  const endpoint = raw.ollama === false ? null : text(raw.ollama, 'http://127.0.0.1:11434');
+  if (raw.ollama !== undefined && raw.ollama !== false && (typeof raw.ollama !== 'string' || !raw.ollama.trim())) throw new Error('ollama must be a loopback URL or false.');
+  const endpoint = typeof raw.ollama === 'string' ? text(raw.ollama) : null;
   if (endpoint) localOrigin(endpoint);
   const runtimes = Array.isArray(raw.runtimes) ? raw.runtimes.slice(0, 8).map((runtime, index) => {
-    if (!runtime || !['openai-compatible', 'vllm'].includes(runtime.type)) throw new Error('Runtime type must be openai-compatible or vllm.');
+    if (!runtime || !['openai-compatible', 'vllm', 'ollama'].includes(runtime.type)) throw new Error('Runtime type must be openai-compatible, vllm, or ollama.');
     const url = localOrigin(runtime.url);
-    return { id: `runtime-${index}`, name: text(runtime.name) || url, type: runtime.type, url };
+    return { id: `runtime-${index}`, name: text(runtime.name) || (runtime.type === 'ollama' ? 'Ollama' : url), type: runtime.type, url, ...runtimePlacement(runtime) };
   }) : [];
   const inventory = Array.isArray(raw.inventory) ? raw.inventory.slice(0, 100).filter(item => item && typeof item === 'object').map(item => ({
     name: text(item.name), modelCreator: text(item.modelCreator) || null, provider: text(item.provider, 'Unattributed'),
@@ -133,7 +135,7 @@ export async function loadConfig(root) {
     location: ['local', 'private', 'cloud'].includes(item.location) ? item.location : 'unknown',
     poolIds: poolIds(item.poolIds),
   })).filter(item => item.name) : [];
-  return { discovery: raw.discovery !== false, activityFile, capacityFile, hardwareFile, ollama: endpoint, inventory, runtimes, deployments: normalizeDeployments(raw.deployments), capacityPools: normalizePools(raw.capacityPools) };
+  return { limits: configurationLimits(raw), discovery: raw.discovery !== false, activityFile, capacityFile, hardwareFile, ollama: endpoint, ollamaDisabled: raw.ollama === false, inventory, runtimes, deployments: normalizeDeployments(raw.deployments), capacityPools: normalizePools(raw.capacityPools) };
 }
 
 async function exportSnapshot(root, path, key, normalize, limit = 128 * 1024) {
@@ -146,7 +148,8 @@ async function exportSnapshot(root, path, key, normalize, limit = 128 * 1024) {
     let raw;
     try { const buffer = Buffer.alloc(limit + 1); const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0); if (bytesRead > limit) throw new Error('Too large'); raw = JSON.parse(buffer.subarray(0, bytesRead).toString('utf8')); } finally { await handle.close(); }
     if (!Array.isArray(raw?.[key])) throw new Error('Missing entries');
-    return { state: 'connected', [key]: normalize(raw) };
+    const limits = key === 'hosts' ? hardwareLimits(raw) : collectionLimits(raw, { pools: 100 });
+    return { state: limits.length ? 'partial' : 'connected', limits, truncated: limits.length > 0, [key]: normalize(raw) };
   } catch (error) { return { state: error.code === 'ENOENT' ? 'not_found' : 'unavailable', [key]: [] }; }
 }
 
@@ -177,31 +180,48 @@ export function parseRuntimeMetrics(body) {
   return result;
 }
 
+function runtimePlacement(runtime = {}) {
+  const hostId = text(runtime.hostId) || null;
+  return { hostId, location: hostId === 'this-machine' ? 'local' : ['local', 'private', 'cloud'].includes(runtime.location) ? runtime.location : 'unknown', servingMode: ['shared', 'dedicated', 'self-hosted'].includes(runtime.servingMode) ? runtime.servingMode : 'unknown' };
+}
 async function runtimeSnapshot(runtime) {
+  const placement = runtimePlacement(runtime);
+  const source = { id: runtime.id, name: runtime.name, endpointInventory: true, detail: runtime.url, ...placement,
+    access: runtime.discoverySource ? 'Project declaration' : 'Project configuration', discoverySource: runtime.discoverySource, discoveryField: runtime.discoveryField };
+  if (runtime.type === 'ollama') {
+    const snapshot = await ollamaSnapshot(runtime.url, runtime.id, runtime.name);
+    return { ...snapshot, source: { ...source, kind: 'Model runtime', state: snapshot.state, limits: snapshot.limits, truncated: snapshot.truncated, note: snapshot.note + ' Shared runtime inventory; the endpoint does not identify its physical host.', coverage: ['Model catalog', 'Loaded models'] },
+      models: snapshot.models.map(model => ({ ...model, location: placement.location })), stats: null };
+  }
   const [catalog, metrics] = await Promise.allSettled([fetchJson(`${runtime.url}/v1/models`), ['vllm', 'discover'].includes(runtime.type) ? fetchText(`${runtime.url}/metrics`) : Promise.resolve(null)]);
   const connected = catalog.status === 'fulfilled' && Array.isArray(catalog.value?.data);
   const counters = metrics.status === 'fulfilled' && metrics.value ? parseRuntimeMetrics(metrics.value) : {};
-  const name = runtime.identifiedName || (runtime.type === 'discover' && Object.keys(counters).length ? `vLLM · ${new URL(runtime.url).host}` : runtime.name);
+  const identifiedRuntime = runtime.type === 'vllm' || runtime.identifiedName?.startsWith('vLLM · ') || Object.keys(counters).length > 0;
+  const name = runtime.identifiedName || (runtime.type === 'discover' && identifiedRuntime ? `vLLM · ${new URL(runtime.url).host}` : runtime.name);
+  const limits = connected ? collectionLimits({ models: catalog.value.data }, { models: 100 }) : [];
   return {
-    source: { id: runtime.id, name, kind: 'Local runtime', state: connected ? ((runtime.type === 'vllm' || runtime.identifiedName?.startsWith('vLLM · ')) && !Object.keys(counters).length ? 'partial' : 'connected') : Object.keys(counters).length ? 'partial' : 'unavailable', detail: runtime.url, note: 'Available model inventory. Runtime counters, when present, are separate from recorded request totals.', coverage: ['Model catalog', ...(Object.keys(counters).length ? ['Runtime counters'] : [])], access: runtime.discoverySource ? 'Automatic local discovery' : 'Project configuration', discoverySource: runtime.discoverySource },
-    models: connected ? catalog.value.data.slice(0, 100).filter(item => item && text(item.id)).map(item => ({ id: `${runtime.id}:${text(item.id)}`, name: text(item.id), provider: name, location: 'local', state: 'available', sourceId: runtime.id, memoryBytes: null })) : [],
-    stats: Object.keys(counters).length ? { name, sourceId: runtime.id, ...counters } : null,
+    source: { ...source, name, kind: identifiedRuntime ? 'Model runtime' : 'Model endpoint', state: connected ? (limits.length || identifiedRuntime && !Object.keys(counters).length ? 'partial' : 'connected') : Object.keys(counters).length ? 'partial' : 'unavailable', limits, truncated: limits.length > 0,
+      note: 'Project endpoint inventory. Available models and counters cover all clients; they do not establish application usage or physical host placement.' + limitNote(limits), coverage: ['Model catalog', ...(Object.keys(counters).length ? ['Runtime counters'] : [])] },
+    models: connected ? catalog.value.data.slice(0, 100).filter(item => item && text(item.id)).map(item => ({ id: `${runtime.id}:${text(item.id)}`, name: text(item.id), provider: name, location: placement.location, state: 'available', sourceId: runtime.id, memoryBytes: null })) : [],
+    stats: Object.keys(counters).length ? { name, sourceId: runtime.id, hostId: placement.hostId, ...counters } : null,
   };
 }
 
-async function ollamaSnapshot(endpoint) {
+async function ollamaSnapshot(endpoint, sourceId = 'ollama', provider = 'Ollama') {
   if (!endpoint) return { state: 'disabled', models: [], note: 'Local runtime discovery is disabled.' };
   const [tags, ps] = await Promise.allSettled([fetchJson(`${endpoint.replace(/\/$/, '')}/api/tags`), fetchJson(`${endpoint.replace(/\/$/, '')}/api/ps`)]);
   const tagsOk = tags.status === 'fulfilled' && Array.isArray(tags.value?.models);
   const psOk = ps.status === 'fulfilled' && Array.isArray(ps.value?.models);
   if (!tagsOk && !psOk) return { state: 'unavailable', models: [], note: 'Ollama did not return valid inventory at the configured local address.' };
-  const installed = tagsOk ? tags.value.models.filter(item => item && typeof item === 'object').slice(0, 100) : [];
-  const loaded = psOk ? ps.value.models.filter(item => item && typeof item === 'object').slice(0, 100) : [];
+  const installedEntries = tagsOk ? tags.value.models.filter(item => item && typeof item === 'object') : [];
+  const loadedEntries = psOk ? ps.value.models.filter(item => item && typeof item === 'object') : [];
+  const installed = installedEntries.slice(0, 100), loaded = loadedEntries.slice(0, 100);
+  const limits = collectionLimits({ installedModels: installedEntries, loadedModels: loadedEntries }, { installedModels: 100, loadedModels: 100 });
   const all = new Map([...installed, ...loaded].map(model => [text(model.name ?? model.model), model]));
   return {
-    state: tagsOk && psOk ? 'connected' : 'partial', residencyReported: psOk,
-    note: 'Installed and loaded models. Request history is not exposed by this source.',
-    models: [...all].filter(([name]) => name).map(([name, model]) => ({ id: `ollama:${name}`, name, provider: 'Ollama', location: 'local', state: loaded.some(item => (item.name ?? item.model) === name) ? 'loaded' : (psOk ? 'installed' : 'unknown'), memoryBytes: number(model.size_vram), parameters: text(model.details?.parameter_size) || null, quantization: text(model.details?.quantization_level) || null, sourceId: 'ollama' })),
+    state: tagsOk && psOk && !limits.length ? 'connected' : 'partial', limits, truncated: limits.length > 0, residencyReported: psOk,
+    note: 'Installed and loaded models. Request history is not exposed by this source.' + limitNote(limits),
+    models: [...all].filter(([name]) => name).map(([name, model]) => ({ id: `${sourceId}:${name}`, name, provider, location: 'unknown', state: loaded.some(item => (item.name ?? item.model) === name) ? 'loaded' : (psOk && !limits.some(item => item.collection === 'loadedModels') ? 'installed' : 'unknown'), memoryBytes: number(model.size_vram), parameters: text(model.details?.parameter_size) || null, quantization: text(model.details?.quantization_level) || null, sourceId })),
   };
 }
 
@@ -219,14 +239,17 @@ export function createCollector(root, config, interval = 15) {
   return async function collect() {
     const scan = Boolean(config.discovery) && Date.now() - discoveredAt >= 60_000;
     if (scan) { projectDiscovery = await discoverProject(root); discoveredAt = Date.now(); }
-    const candidates = config.discovery ? discoveryCandidates(projectDiscovery, config.runtimes, config.ollama) : [];
+    const allCandidates = config.discovery ? discoveryCandidates(projectDiscovery, config.runtimes, config.ollama, Infinity).filter(runtime => !(config.ollamaDisabled && runtime.type === 'ollama')) : [];
+    const candidates = allCandidates.slice(0, 8);
+    const discoveryLimits = collectionLimits({ endpoints: allCandidates }, { endpoints: 8 });
+    const localComputeLinked = Boolean(config.runtimes?.some(item => item.hostId === 'this-machine') || config.deployments?.some(item => item.hostId === 'this-machine'));
     const candidateIds = new Set(candidates.map(item => item.id));
     for (const id of knownRuntimes.keys()) if (!candidateIds.has(id)) knownRuntimes.delete(id);
     const autoRuntimes = candidates.filter(item => scan || knownRuntimes.has(item.id)).map(item => ({ ...item, identifiedName: knownRuntimes.get(item.id) }));
     const logs = config.discovery ? await projectActivity() : { records: [], sources: [] };
     const [activity, audit, ollama, runtimes, capacity, hardware] = await Promise.all([activityReader.read(), auditReader.read(true), ollamaSnapshot(config.ollama), Promise.all([...(config.runtimes ?? []), ...autoRuntimes].map(runtimeSnapshot)), exportSnapshot(root, config.capacityFile ?? '.openmerit/capacity.json', 'pools', normalizeCapacity), exportSnapshot(root, config.hardwareFile ?? '.openmerit/hosts.json', 'hosts', normalizeHosts, 256 * 1024)]);
     for (const runtime of runtimes) if (runtime.source.discoverySource && ['connected', 'partial'].includes(runtime.source.state)) knownRuntimes.set(runtime.source.id, runtime.source.name);
-    // Empty standard addresses are candidates, not configured services.
+    // A declared endpoint must respond before its catalog becomes discovered inventory.
     for (let i = runtimes.length - 1; i >= 0; i--) if (runtimes[i].source.discoverySource && !knownRuntimes.has(runtimes[i].source.id)) runtimes.splice(i, 1);
     const now = new Date().toISOString();
     const recorded = records => records.filter(item => Date.parse(item.occurredAt) <= Date.parse(now));
@@ -235,10 +258,10 @@ export function createCollector(root, config, interval = 15) {
       ...logs.sources.map(source => ({ sourceId: source.id, records: recorded(logs.records.filter(record => record.sourceId === source.id)) })),
     ].filter(batch => batch.records.length);
     const reconciliation = reconcileActivity(batches);
-    // Application summaries are a fallback, never added to request-level data.
-    const records = reconciliation.records.length ? reconciliation.records : recorded(audit.records);
+    // Task summaries are a different unit, never request-level evidence.
+    const records = reconciliation.records;
+    const taskSummaries = recorded(audit.records);
     const requestSources = reconciliation.sources.filter(source => source.included > 0).map(source => source.sourceId);
-    if (!requestSources.length && records.length) requestSources.push('openmerit');
     const models = new Map([...ollama.models, ...runtimes.flatMap(runtime => runtime.models)].map(item => [`${item.provider}:${item.name}`, item]));
     for (const host of hardware.hosts) for (const model of host.loadedModels) {
       const key = `${model.provider || 'Unattributed'}:${model.name}`;
@@ -261,13 +284,14 @@ export function createCollector(root, config, interval = 15) {
     if (hardwareHistory.length > 240) hardwareHistory.shift();
     const sources = [
       { id: 'activity', name: 'Inference activity', kind: 'Local file', state: activity.state === 'connected' && (activity.truncated || activity.invalid) ? 'partial' : activity.state, truncated: activity.truncated, invalid: activity.invalid, updatedAt: activity.state === 'connected' ? now : null, detail: config.activityFile, note: activity.truncated ? 'The bounded reader omitted older records. All time covers retained history only.' : activity.invalid ? `${activity.invalid} invalid records skipped.` : 'Application request metadata, including its agents, jobs, evaluations, and gateway.', records: activity.records.length },
-      { id: 'openmerit', name: 'OpenMerit', kind: 'Project evidence', state: audit.state === 'connected' && (audit.truncated || audit.invalid) ? 'partial' : audit.state, truncated: audit.truncated, invalid: audit.invalid, updatedAt: audit.state === 'connected' ? now : null, detail: '.openmerit/events.jsonl', note: reconciliation.records.length ? 'Application summaries are not added to request-level evidence; to avoid counting a task summary as another request.' : 'Completed application summaries. Redacted or absent measurements stay unknown.', records: audit.records.length },
-      { id: 'ollama', name: 'Ollama', kind: 'Local runtime', state: ollama.state, updatedAt: ['connected', 'partial'].includes(ollama.state) ? now : null, detail: config.ollama ?? 'Disabled', note: ollama.note },
-      { id: 'machine', name: 'This machine', kind: 'Operating system', state: 'connected', updatedAt: now, detail: `${os.platform()} · ${os.arch()}`, note: 'CPU and memory describe the whole machine, not individual inference requests.' },
+      { id: 'openmerit', name: 'OpenMerit', kind: 'Project evidence', state: audit.state === 'connected' && (audit.truncated || audit.invalid) ? 'partial' : audit.state, truncated: audit.truncated, invalid: audit.invalid, updatedAt: audit.state === 'connected' ? now : null, detail: '.openmerit/events.jsonl', note: 'Task summaries are retained separately to avoid counting a task summary as an inference request. They do not contribute to request counts, tokens, spend, or request history.', summaries: taskSummaries.length },
+      ...(config.ollama ? [{ id: 'ollama', name: 'Ollama', kind: 'Model runtime', endpointInventory: true, ...runtimePlacement(), limits: ollama.limits, truncated: ollama.truncated, state: ollama.state, updatedAt: ['connected', 'partial'].includes(ollama.state) ? now : null, detail: config.ollama, access: 'Project configuration', note: ollama.note + ' Explicitly linked in terminal.json. Inventory is shared by all clients of this runtime.' }] : []),
+      ...(localComputeLinked ? [{ id: 'machine', name: 'This machine', kind: 'Operating system', state: 'connected', updatedAt: now, detail: `${os.platform()} · ${os.arch()}`, note: 'Shown because the project explicitly links a runtime or deployment to this-machine. CPU and memory describe the whole machine, not individual inference requests.' }] : []),
     ];
     if (config.discovery) {
       sources.push(...projectDiscovery.sources);
       sources.push(...logs.sources);
+      if (discoveryLimits.length) sources.push({ id: 'runtime-discovery', name: 'Endpoint discovery coverage', kind: 'Project discovery', state: 'partial', truncated: true, limits: discoveryLimits, detail: '.env · .env.local', note: limitNote(discoveryLimits).trim() });
     }
     for (const source of sources) {
       const contribution = reconciliation.sources.find(item => item.sourceId === source.id);
@@ -277,38 +301,34 @@ export function createCollector(root, config, interval = 15) {
         if (contribution.excluded) source.state = 'partial';
       }
     }
-    sources.push({ id: 'hardware', name: 'Hardware export', kind: 'Local file', state: hardware.state, updatedAt: hardware.state === 'connected' ? now : null, detail: config.hardwareFile ?? '.openmerit/hosts.json', note: 'Hosts, racks, accelerators, and loaded models from an existing exporter. Host timestamps determine freshness; no network discovery.' });
+    sources.push({ id: 'hardware', name: 'Hardware export', kind: 'Local file', state: hardware.state, limits: hardware.limits, truncated: hardware.truncated, updatedAt: ['connected', 'partial'].includes(hardware.state) ? now : null, detail: config.hardwareFile ?? '.openmerit/hosts.json', note: 'Hosts, racks, accelerators, and loaded models from an existing exporter. Host timestamps determine freshness; no network discovery.' + limitNote(hardware.limits) });
     sources.push(...runtimes.map(runtime => ({ ...runtime.source, updatedAt: ['connected', 'partial'].includes(runtime.source.state) ? now : null })));
-    sources.push({ id: 'capacity', name: 'Capacity export', kind: 'Local file', state: capacity.state, updatedAt: capacity.state === 'connected' ? now : null, detail: config.capacityFile ?? '.openmerit/capacity.json', note: 'Pool readings retain their source timestamps. A file check does not refresh a measurement. Only declared pool IDs are accepted.' });
-    if (config.inventory.length || (config.deployments?.length ?? 0) || (config.capacityPools?.length ?? 0)) sources.push({ id: 'inventory', name: 'Declared environment', kind: 'Project configuration', state: 'connected', updatedAt: now, detail: '.openmerit/terminal.json', note: 'Declared models, services, deployments, and shared pools. Configuration does not prove connectivity or available capacity.' });
+    sources.push({ id: 'capacity', name: 'Capacity export', kind: 'Local file', state: capacity.state, limits: capacity.limits, truncated: capacity.truncated, updatedAt: ['connected', 'partial'].includes(capacity.state) ? now : null, detail: config.capacityFile ?? '.openmerit/capacity.json', note: 'Pool readings retain their source timestamps. A file check does not refresh a measurement. Only declared pool IDs are accepted.' + limitNote(capacity.limits) });
+    if (config.inventory.length || config.runtimes?.length || config.limits?.length || (config.deployments?.length ?? 0) || (config.capacityPools?.length ?? 0)) sources.push({ id: 'inventory', name: 'Declared environment', kind: 'Project configuration', state: config.limits?.length ? 'partial' : 'connected', limits: config.limits, truncated: Boolean(config.limits?.length), updatedAt: now, detail: '.openmerit/terminal.json', note: 'Declared models, services, deployments, and shared pools. Configuration does not prove connectivity or available capacity.' + limitNote(config.limits) });
     const capacityPools = (config.capacityPools ?? []).map(pool => ({ ...pool, ...(capacity.pools.find(item => item.id === pool.id) ?? {}) }));
     const deployments = [...(config.deployments ?? [])];
-    for (const source of sources.filter(item => item.kind === 'Local runtime' && item.state !== 'disabled')) {
+    for (const source of sources.filter(item => item.endpointInventory && item.state !== 'disabled')) {
       const poolId = `runtime:${source.id}`;
       const counters = runtimes.find(item => item.source.id === source.id)?.stats;
       const metrics = Object.fromEntries(['running', 'waiting', 'cachePercent'].filter(key => counters?.[key] != null).map(key => [key, counters[key]]));
       capacityPools.push({ id: poolId, name: source.name, kind: 'runtime', sourceId: source.id, observedAt: Object.keys(metrics).length ? now : null, metrics });
-      for (const model of [...ollama.models, ...runtimes.flatMap(item => item.models)].filter(item => item.sourceId === source.id)) deployments.push({ id: `runtime:${model.id}`, name: `${model.name} / ${source.name}`, model: model.name, provider: model.provider, servingMode: 'self-hosted', location: 'local', sourceId: source.id, state: model.state, hostId: 'this-machine', poolIds: [poolId] });
+      for (const model of [...ollama.models, ...runtimes.flatMap(item => item.models)].filter(item => item.sourceId === source.id)) deployments.push({ id: `runtime:${model.id}`, name: `${model.name} / ${source.name}`, model: model.name, provider: model.provider, servingMode: source.servingMode, location: model.location, sourceId: source.id, state: model.state, hostId: source.hostId, poolIds: [poolId] });
     }
-    const machine = { id: 'this-machine', name: os.hostname(), nameField: 'hostname', hostname: os.hostname(), site: '', rack: '', sourceId: 'machine', observedAt: now, chip: text(os.cpus()[0]?.model, os.arch()), cores: os.cpus().length, platform: os.platform(), arch: os.arch(), memoryTotal, memoryUsed, cpuPercent, history: [...hardwareHistory], accelerators: [], residencyReported: Boolean(ollama.residencyReported), loadedModels: ollama.models.filter(model => model.state === 'loaded').map(model => ({ ...model, runtime: 'Ollama', memoryKind: 'accelerator', deploymentId: `runtime:${model.id}` })) };
-    const hosts = [machine, ...retainHostHistory(hardware.hosts, hostHistories)];
-    const environment = configuredServices();
-    if (environment.services.length || environment.unrecognizedEndpoints.length) sources.push({ id: 'environment', name: 'Service configuration', kind: 'Process environment', state: environment.unrecognizedEndpoints.length ? 'partial' : 'connected', updatedAt: now, detail: [...environment.services.flatMap(item => item.evidence.map(entry => entry.field)), ...environment.unrecognizedEndpoints].join(' · '), note: 'Configuration evidence only, not verified connectivity or usage. Credential values are never exported or used. Endpoint overrides are matched by known HTTPS hosts; raw URLs are not retained.' + (environment.unrecognizedEndpoints.length ? ' Unrecognized endpoint variables: ' + environment.unrecognizedEndpoints.join(', ') + '. Declare those services explicitly if needed.' : '') });
-    const inventory = [...config.inventory.filter(item => item.kind !== 'model'), ...projectDiscovery.inventory].map(item => {
-      const detected = environment.services.find(service => service.kind === item.kind && service.name === item.name);
-      return { ...item, sourceId: item.sourceId || 'inventory', evidence: [...(item.evidence ?? []), ...(detected?.evidence ?? []).map(entry => ({ ...entry, sourceId: 'environment' }))] };
-    });
-    for (const service of environment.services) if (!inventory.some(item => item.kind === service.kind && item.name === service.name)) inventory.push(service);
+    const residentRuntimes = runtimes.filter(runtime => runtime.residencyReported && runtime.source.hostId === 'this-machine');
+    const residentModels = residentRuntimes.flatMap(runtime => runtime.models).filter(model => model.state === 'loaded');
+    const machine = { id: 'this-machine', projectLinked: localComputeLinked, scope: 'whole-machine', name: os.hostname(), nameField: 'hostname', hostname: os.hostname(), site: '', rack: '', sourceId: 'machine', observedAt: now, chip: text(os.cpus()[0]?.model, os.arch()), cores: os.cpus().length, platform: os.platform(), arch: os.arch(), memoryTotal, memoryUsed, cpuPercent, history: [...hardwareHistory], accelerators: [], residencyReported: residentRuntimes.length > 0, loadedModels: residentModels.map(model => ({ ...model, runtime: model.provider, memoryKind: 'accelerator', deploymentId: `runtime:${model.id}` })) };
+    const hosts = [...(localComputeLinked ? [machine] : []), ...retainHostHistory(hardware.hosts, hostHistories)];
+    const inventory = [...config.inventory.filter(item => item.kind !== 'model'), ...projectDiscovery.inventory].map(item => ({ ...item, sourceId: item.sourceId || 'inventory' }));
     const creatorReports = [...records, ...(config.deployments ?? []), ...config.inventory.filter(item => item.kind === 'model').map(item => ({ ...item, sourceId: 'inventory' })), ...hardware.hosts.flatMap(host => host.loadedModels.map(model => ({ ...model, sourceId: 'hardware' })))];
-    const historySources = sources.filter(source => source.id === 'activity' || source.id.startsWith('project-log:') || source.id === 'project-log-coverage' || source.id === 'openmerit' && !reconciliation.records.length);
+    const historySources = sources.filter(source => source.id === 'activity' || source.id.startsWith('project-log:') || source.id === 'project-log-coverage');
     const gaps = historySources.filter(source => source.state === 'partial' || source.state === 'unavailable' || source.truncated || source.invalid);
     const history = { ...historyExtent(records, now), retained: records.length, coverage: gaps.length || reconciliation.excluded ? 'partial' : 'available', sourceIds: historySources.filter(source => source.state !== 'not_found').map(source => source.id) };
     return {
       schemaVersion: 1, mode: 'live', observedAt: now, interval, history,
       discovery: { enabled: Boolean(config.discovery), checkedAt: discoveredAt ? new Date(discoveredAt).toISOString() : null, intervalSeconds: 60, runtimeCandidates: candidates.length, requestSource: requestSources.length > 1 ? 'combined' : requestSources[0] ?? null, requestSources, reconciliation: { duplicates: reconciliation.duplicates, excluded: reconciliation.excluded, conflicts: reconciliation.conflicts, sources: reconciliation.sources } },
       project: { name: basename(root), scope: 'Current project' },
-      models: modelCreators([...models.values()], creatorReports), inventory: [...inventory, ...(config.runtimes ?? []).map(runtime => ({ name: runtime.name, kind: 'runtime', location: 'local', state: 'configured' }))],
-      records, sources, deployments, capacityPools, runtimeStats: runtimes.map(runtime => runtime.stats && ({ ...runtime.stats, hostId: 'this-machine' })).filter(Boolean),
+      models: modelCreators([...models.values()], creatorReports), inventory: [...inventory, ...(config.runtimes ?? []).map(runtime => ({ name: runtime.name, kind: runtime.type === 'openai-compatible' ? 'unknown' : 'runtime', location: runtimePlacement(runtime).location, state: 'configured' }))],
+      records, taskSummaries, sources, deployments, capacityPools, runtimeStats: runtimes.map(runtime => runtime.stats).filter(Boolean),
       machine, hosts,
     };
   };

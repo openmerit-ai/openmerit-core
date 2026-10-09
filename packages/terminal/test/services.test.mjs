@@ -74,7 +74,7 @@ test('collector joins explicit creator evidence and surfaces declared models wit
   assert.equal(snapshot.deployments[0].hostId, null);
   const entries = snapshot.inventory.filter(item => item.name === 'Groq');
   assert.equal(entries.length, 1); assert.equal(entries[0].serviceType, 'inference-cloud'); assert.deepEqual(entries[0].poolIds, ['groq-quota']);
-  assert.equal(entries[0].evidence[0].field, 'GROQ_API_KEY');
+  assert.equal(entries[0].evidence, undefined, 'unrelated shell credentials are not project evidence');
   assert.doesNotMatch(JSON.stringify(snapshot), /private-fixture-key/);
-  assert.equal(snapshot.hosts.length, 1); assert.equal(snapshot.hosts[0].accelerators.length, 0);
+  assert.equal(snapshot.hosts.length, 0); assert.equal(snapshot.machine.projectLinked, false);
 });

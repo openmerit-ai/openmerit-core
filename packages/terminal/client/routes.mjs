@@ -21,7 +21,7 @@ export function routeKind(record, snapshot = {}) {
   if (!route || route === 'unattributed route') return 'unknown';
   const declared = new Set((snapshot.inventory ?? []).filter(item => nameKey(item.name) === route).map(inventoryRouteKind).filter(kind => kind !== 'unknown'));
   if (declared.size) return declared.size === 1 ? [...declared][0] : 'unknown';
-  if ((snapshot.sources ?? []).some(source => source.kind === 'Local runtime' && nameKey(source.name) === route)) return 'local';
+  if ((snapshot.sources ?? []).some(source => (source.kind === 'Local runtime' || source.kind === 'Model runtime' && ['local', 'private'].includes(source.location)) && nameKey(source.name) === route)) return 'local';
   if (route === 'direct' || route === 'direct api') return 'direct';
   // A cloud provider or local model location alone says nothing about the path.
   return 'unknown';
@@ -37,5 +37,12 @@ export function routeBreakdown(records, snapshot) {
 // A connected, empty request source establishes zero; inventory alone does not.
 export function requestCountKnown(snapshot) {
   return Boolean(snapshot.records?.length) || (snapshot.sources ?? []).some(source =>
-    (['activity', 'openmerit', 'sample-activity'].includes(source.id) || source.id?.startsWith('project-log:')) && source.state === 'connected');
+    (['activity', 'sample-activity'].includes(source.id) || source.id?.startsWith('project-log:')) && source.state === 'connected');
+}
+
+export function activityEvidence(snapshot, records = snapshot.records ?? []) {
+  const known = requestCountKnown(snapshot);
+  const unknownStatuses = records.filter(record => !['completed', 'running', 'failed'].includes(record.status)).length;
+  const failures = records.filter(record => record.status === 'failed').length;
+  return { known, count: known ? records.length : null, failures: !known || unknownStatuses ? null : failures, reportedFailures: failures, unknownStatuses };
 }

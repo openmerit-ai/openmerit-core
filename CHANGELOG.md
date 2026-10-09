@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.1.6-preview.2 — 2026-10-09
+
+- Require selected-project declarations for service and runtime discovery; remove unconditional Ollama/standard-port probes and inherited shell service detection.
+- Keep endpoint identity separate from physical placement. A loopback URL does not prove that inference runs on this machine; local compute requires explicit host links.
+- Retain OpenMerit task summaries separately from request counts, models, tokens, and spend.
+- Preserve unknown request status, currency, and cost basis. Missing activity evidence no longer appears as measured zero usage or failures.
+- Disclose bounded inventory omissions and partial source coverage.
+
 ## 0.1.6-preview.1 — 2026-10-09
 
 - Retain historical application requests beyond 24 hours; add 7d, 30d, and default All time with calendar labels, available-history dates, and explicit partial-coverage disclosure. Existing source/read limits still apply.

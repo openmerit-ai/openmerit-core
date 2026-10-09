@@ -121,7 +121,7 @@ test('bounds historical import and discloses truncation', async t => {
 
 test('configuration restricts local endpoints and source paths and excludes unknown inventory fields', async t => {
   const root = await fixture(t), configPath = join(root, '.openmerit/terminal.json');
-  assert.equal((await loadConfig(root)).ollama, 'http://127.0.0.1:11434');
+  assert.equal((await loadConfig(root)).ollama, null);
   for (const config of [{ activityFile: '../elsewhere' }, { ollama: 'https://external.example' }, { ollama: 'http://user:secret@localhost:11434' }, { ollama: 'http://localhost:11434/other' }, null]) {
     await writeFile(configPath, JSON.stringify(config)); await assert.rejects(loadConfig(root));
   }
@@ -134,7 +134,7 @@ test('imports audit application summaries without converting redacted token fiel
   await writeFile(join(root, '.openmerit/events.jsonl'), jsonl({ id: 'event-1', type: 'automation_signal_recorded', occurredAt: new Date().toISOString(), data: { signalType: 'product_task_completed', signalId: 'signal-1', modelId: 'model', targetId: 'application', telemetry: { inputTokens: '[REDACTED]', outputTokens: 20, cost: .12, durationMs: 150 } } }));
   const collect = createCollector(root, { activityFile: '.openmerit/inference.jsonl', ollama: null, inventory: [] });
   const result = await collect();
-  assert.equal(result.records.length, 1); assert.equal(result.records[0].inputTokens, null); assert.equal(result.records[0].cost, .12); assert.equal(result.records[0].sourceId, 'openmerit');
+  assert.equal(result.records.length, 0); assert.equal(result.taskSummaries.length, 1); assert.equal(result.taskSummaries[0].inputTokens, null); assert.equal(result.taskSummaries[0].cost, .12); assert.equal(result.taskSummaries[0].sourceId, 'openmerit');
   assert.equal(result.machine.cpuPercent, null);
 });
 

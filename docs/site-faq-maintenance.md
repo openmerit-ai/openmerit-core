@@ -118,3 +118,17 @@ The terminal prerelease is published in the existing `openmerit` npm package as 
 ## Historical terminal activity — published preview, 9 October 2026
 
 Reviewed retention, source coverage, and readiness claims. Published `0.1.6-preview.1` removes the 24-hour age cutoff and offers 7d, 30d, and default All time with earliest/latest retained request dates. Existing byte, file, and record caps remain; All time describes available evidence, never a guaranteed project-lifetime archive. It neither queries provider accounts nor adds persistent collection. Registry metadata and integrity match the tested artifact, and a direct npm installation passed the existing-application and dormant-log acceptance checks in the isolated VM. The `preview` tag now resolves `0.1.6-preview.1`; `latest` remains `0.1.5`. Homepage stable-package claims remain unchanged.
+
+
+## Project-linked runtime inventory — unreleased source, 9 October 2026
+
+Reviewed application scope, data access, automatic discovery, and compute claims. The source correction removes unconditional Ollama and standard-port probes. A project declaration or explicit terminal configuration must identify the local endpoint before inventory is requested; installed SDKs, inherited shell endpoints, and historical runtime names alone do not establish it. Once linked, the runtime’s available models remain shared inventory, with usage separately sourced from request records. Local compute omits this machine unless an endpoint or explicit deployment links it; declared hardware exports remain supported. The legacy machine snapshot is labeled whole-machine context. npm `0.1.6-preview.1` still has the previous automatic probes until another preview is published. Homepage stable-package claims are unchanged.
+
+### Evidence integrity corrections — unreleased source, 9 October 2026
+
+Reviewed project scope, usage accuracy, passive collection, hardware placement, and completeness claims. The terminal now ignores inherited shell services, requires explicit host links for endpoint placement, retains task summaries separately from all request metrics, preserves unknown status/currency/cost basis, discloses inventory count limits with partial coverage and omitted counts, and distinguishes missing request evidence from a measured zero. These corrections are source-only until another preview is published; npm `0.1.6-preview.1` retains the earlier behavior. Main-site FAQ claims describe the stable package and remain unchanged. No deployment or npm publication is implied by verification.
+
+
+## Evidence corrections — preview.2 release review, 9 October 2026
+
+Prepared `0.1.6-preview.2` with the project-scope and evidence-integrity corrections above. The release guide and changelog describe this version explicitly; earlier previews retain their documented behavior. The existing VM acceptance preserved 240 original request records and all 125 original project files; two separate, real local Ollama calls were picked up from an application log during passive refresh. A project without declarations exposed no runtime inventory, while an explicit host link matched the VM hostname and Ollama residency response. Registry publication and installation must be verified separately. The stable `latest` channel and homepage FAQ remain about `0.1.5`; no homepage wording or website deployment is needed for this preview release.

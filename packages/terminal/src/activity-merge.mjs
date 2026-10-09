@@ -5,6 +5,8 @@ const known = value => value && !['Unattributed', 'Unattributed route'].includes
 const scope = record => known(record.route) ? `route:${record.route}` : known(record.provider) ? `provider:${record.provider}` : null;
 const exactKey = record => JSON.stringify([record.id, record.occurredAt, record.model, record.provider, record.route]);
 const requestKey = record => record.requestId && scope(record) ? JSON.stringify([scope(record), record.model, record.requestId]) : null;
+const terminal = record => ['completed', 'failed'].includes(record.status);
+const knownField = value => value != null && value !== 'unknown';
 const fields = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'durationMs', 'cost', 'currency', 'costKind', 'agentId', 'taskId'];
 
 // Sources arrive in precedence order. Only shared recorded identifiers merge;
@@ -20,10 +22,10 @@ export function reconcileActivity(batches) {
       else {
         counts[rank].duplicates++;
         const old = group.record;
-        if (old.status !== 'running' && record.status !== 'running') for (const field of fields) {
-          if (old[field] != null && record[field] != null && old[field] !== record[field]) group.conflicts.add(field);
+        if (terminal(old) && terminal(record)) for (const field of fields) {
+          if (knownField(old[field]) && knownField(record[field]) && old[field] !== record[field]) group.conflicts.add(field);
         }
-        if (old.status === 'running' && record.status !== 'running') group.record = { ...record };
+        if ((old.status === 'running' && terminal(record)) || (old.status === 'unknown' && record.status !== 'unknown')) group.record = { ...record };
       }
       group.sources.add(record.sourceId); group.members.push({ rank, sourceId: record.sourceId });
       exact.set(key, group); if (request) requests.set(request, group);

@@ -130,8 +130,8 @@ test('normal dash ignores coding histories and legacy grants while discovering a
   assert.equal(snapshot.records.length, 1); assert.equal(snapshot.records[0].id, app.id);
   await rm(f.file);
   snapshot = run();
-  assert.equal(snapshot.records.length, 1); assert.equal(snapshot.records[0].workload, 'app-target');
-  assert.equal(snapshot.discovery.requestSource, 'openmerit');
+  assert.equal(snapshot.records.length, 0); assert.equal(snapshot.taskSummaries[0].workload, 'app-target');
+  assert.equal(snapshot.discovery.requestSource, null);
 });
 
 

@@ -125,7 +125,7 @@ test('application connection names resolve against evidence without treating gen
 test('a named runtime resolves application request paths through the normal collector', async t => {
   const f = await fixture(t); mockRuntime(t);
   await writeFile(join(f.root, '.openmerit/inference.jsonl'), jsonl({ id: 'local-app', occurredAt: new Date().toISOString(), model: 'fixture-model', route: 'workstation-inference', scope: 'agent' }));
-  await writeFile(join(f.root, '.openmerit/terminal.json'), JSON.stringify({ ollama: false, runtimes: [{ name: 'workstation-inference', type: 'openai-compatible', url: 'http://127.0.0.1:19991' }] }));
+  await writeFile(join(f.root, '.openmerit/terminal.json'), JSON.stringify({ ollama: false, runtimes: [{ name: 'workstation-inference', type: 'vllm', url: 'http://127.0.0.1:19991', hostId: 'this-machine', servingMode: 'self-hosted' }] }));
   const data = await createCollector(f.root, await loadConfig(f.root), 15)();
   assert.equal(data.discovery.requestSource, 'activity'); assert.equal(data.records.length, 1);
   assert.equal(data.records[0].route, 'workstation-inference');

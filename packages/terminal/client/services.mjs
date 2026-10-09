@@ -9,6 +9,7 @@ export const SERVICE_TYPES = {
   runtime: { label: 'Runtime', plural: 'Runtimes', path: 'local' },
   unknown: { label: 'Unclassified', plural: 'Unclassified', path: 'unknown' },
 };
+const endpointSource = source => source.endpointInventory || source.kind === 'Local runtime';
 const key = name => String(name ?? '').trim().toLowerCase();
 const valid = name => key(name) && !['unattributed', 'unattributed route', 'direct', 'direct api'].includes(key(name));
 const knownTypes = { openai: 'model-api', anthropic: 'model-api', google: 'model-api', mistral: 'model-api', deepseek: 'model-api', cohere: 'model-api', baseten: 'inference-cloud', groq: 'inference-cloud', cerebras: 'inference-cloud', openrouter: 'gateway', ollama: 'runtime', vllm: 'runtime', 'lm-studio': 'runtime' };
@@ -58,7 +59,7 @@ export function serviceInventory(snapshot, selectedRecords = snapshot.records ??
   };
   const inventory = (snapshot.inventory ?? []).filter(item => item.kind !== 'model');
   for (const item of inventory) if (valid(item.name)) declarations.add(key(item.name));
-  for (const source of snapshot.sources ?? []) if (source.kind === 'Local runtime' && source.state !== 'disabled') declarations.add(key(source.name));
+  for (const source of snapshot.sources ?? []) if (endpointSource(source) && source.state !== 'disabled') declarations.add(key(source.name));
   for (const item of inventory) {
     const service = ensure(item.name, true); if (!service) continue;
     classify(service, item); service.configured = true;
@@ -70,13 +71,14 @@ export function serviceInventory(snapshot, selectedRecords = snapshot.records ??
     if (item.sourceId !== 'environment' && !item.sourceId?.startsWith('project:')) evidence(service, item.sourceId || 'inventory', 'inventory.name', 'Declared service');
   }
   for (const source of snapshot.sources ?? []) {
-    if (source.kind !== 'Local runtime' || source.state === 'disabled') continue;
+    if (!endpointSource(source) || source.state === 'disabled') continue;
     const service = ensure(source.name, true); if (!service) continue;
-    classify(service, { kind: 'runtime', location: 'local' }); service.configured = true;
+    classify(service, { name: source.name, kind: source.kind === 'Model endpoint' ? 'unknown' : 'runtime', location: source.location ?? (source.kind === 'Local runtime' ? 'local' : 'unknown') }); service.configured = true;
     // Runtime details are validated loopback origins by the collector; never
     // promote an arbitrary source description to an endpoint or external link.
     try { const url = new URL(source.detail); if (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) && !url.username && !url.password && !url.search && !url.hash && url.pathname === '/') service.endpoints.add(url.host); } catch { /* no endpoint supplied */ }
-    evidence(service, source.id, 'runtime', 'Configured local runtime');
+    evidence(service, source.id, 'runtime', 'Project endpoint inventory; placement is separate');
+    if (source.discoverySource) evidence(service, source.discoverySource, source.discoveryField || 'endpoint', 'Project endpoint declaration');
     const pool = (snapshot.capacityPools ?? []).find(pool => pool.id === `runtime:${source.id}`);
     if (pool) service.poolIds.add(pool.id);
   }

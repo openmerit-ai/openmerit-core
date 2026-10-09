@@ -6,7 +6,7 @@ import { configuredServices } from './services.mjs';
 const LIMIT = 128 * 1024;
 const inside = (root, path) => { const part = relative(root, path); return part !== '..' && !part.startsWith(`..${sep}`) && !isAbsolute(part); };
 const credentials = new Set(['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY', 'GROQ_API_KEY', 'CEREBRAS_API_KEY', 'BASETEN_API_KEY']);
-const endpoints = new Set(['OPENAI_BASE_URL', 'OPENAI_API_BASE', 'ANTHROPIC_BASE_URL', 'GROQ_BASE_URL', 'CEREBRAS_BASE_URL', 'BASETEN_BASE_URL']);
+const endpoints = new Set(['OPENAI_BASE_URL', 'OPENAI_API_BASE', 'ANTHROPIC_BASE_URL', 'GROQ_BASE_URL', 'CEREBRAS_BASE_URL', 'BASETEN_BASE_URL', 'OLLAMA_HOST', 'OLLAMA_BASE_URL']);
 const sdks = new Set(['openai', '@anthropic-ai/sdk', '@google/genai', '@google/generative-ai', 'groq-sdk', '@cerebras/cerebras_cloud_sdk', '@lmstudio/sdk', 'ollama', 'ollama-js', 'ai', 'litellm', 'anthropic', 'groq', 'cerebras-cloud-sdk', 'baseten']);
 
 // Parse literal assignments only. Never source a shell file, expand variables,
@@ -45,16 +45,21 @@ async function boundedFile(root, name) {
   } finally { await handle.close(); }
 }
 
-export async function discoverProject(root, env = process.env) {
+export async function discoverProject(root) {
   const sources = [], inventory = [], runtimes = new Map();
   const local = (values, sourceId) => {
     for (const field of endpoints) {
-      const url = loopbackEndpoint(values[field]);
+      const nativeOllama = field === 'OLLAMA_HOST' || field === 'OLLAMA_BASE_URL';
+      const value = values[field];
+      const url = loopbackEndpoint(nativeOllama && value && !value.includes('://') ? `http://${value}` : value);
       if (!url) continue;
-      runtimes.set(url, { id: `discovered:${url}`, name: url, type: 'discover', url, discoverySource: sourceId });
+      // A named protocol declaration takes precedence over an API-compatible alias.
+      if (runtimes.get(url)?.type === 'ollama' && !nativeOllama) continue;
+      runtimes.set(url, { id: `discovered:${url}`, name: nativeOllama ? `Ollama · ${new URL(url).host}` : url, type: nativeOllama ? 'ollama' : 'discover', url, discoverySource: sourceId, discoveryField: field });
     }
   };
-  local(env, 'environment');
+  // Shell-wide endpoint variables are not evidence that this project uses a runtime.
+  // Only selected-project declarations and explicit terminal configuration authorize probes.
   for (const name of ['.env', '.env.local', 'package.json', 'requirements.txt']) {
     let file;
     try { file = await boundedFile(root, name); }
@@ -84,10 +89,10 @@ export async function discoverProject(root, env = process.env) {
       if (matches.length) sources.push({ id, name: 'SDK declarations', kind: 'Project discovery', state: 'detected', detail: `${name} · ${[...new Set(matches)].join(' · ')}`, updatedAt: new Date().toISOString(), modifiedAt: file.at, coverage: ['SDK declarations'], access: 'Selected project', note: 'Supported SDKs are declared here. An SDK does not establish a configured provider, running service, request, or cost.' });
     }
   }
-  return { sources, inventory, runtimes: [...runtimes.values()].slice(0, 8) };
+  return { sources, inventory, runtimes: [...runtimes.values()] };
 }
 
-export function discoveryCandidates(project, configured = [], ollama) {
+export function discoveryCandidates(project, configured = [], ollama, limit = 8) {
   const claimed = new Set([ollama, ...configured.map(item => item.url)].filter(Boolean).map(value => loopbackEndpoint(value) || value));
-  return [...new Map([...[1234, 8000].map(port => ({ id: `discovered:http://127.0.0.1:${port}`, name: `http://127.0.0.1:${port}`, url: `http://127.0.0.1:${port}`, type: 'discover', discoverySource: 'standard-address' })), ...project.runtimes].map(item => [item.url, item])).values()].filter(item => !claimed.has(item.url)).slice(0, 8);
+  return [...new Map([...project.runtimes].map(item => [item.url, item])).values()].filter(item => !claimed.has(item.url)).slice(0, limit);
 }
