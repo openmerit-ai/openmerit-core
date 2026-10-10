@@ -5,7 +5,7 @@ export const PREFERENCES = [
   { value: 'default', label: 'Default · within your stack', note: 'Search all configured services; choose the lowest modeled cost among qualified replacements.' },
   { value: 'zdr', label: 'Bias ZDR models', note: 'Prefer confirmed ZDR endpoints. Eligibility alone does not establish account approval or enabled settings.' },
   { value: 'open', label: 'Bias open-weights models', note: 'Prefer open weights among qualifying replacements; otherwise keep the default qualified choice.' },
-  { value: 'closed', label: 'No open-weights models', note: 'Require a closed-weight assignment for every workload. An unresolved workload blocks the After plan.' },
+  { value: 'closed', label: 'No open-weights models', note: 'Require a closed-weight assignment for every workload. Unresolved workloads remain unassigned; qualifying choices stay visible in an incomplete plan.' },
   { value: 'usa', label: 'Bias USA models', note: 'Prefer models from US developers. This does not specify hosting location or data residency.' },
   { value: 'china', label: 'Bias Chinese models', note: 'Prefer models from Chinese developers. This does not specify hosting location or data residency.' },
 ];
@@ -160,7 +160,7 @@ export function selectReplacement(workload, usage, preference = 'default') {
     preferenceMatched: Boolean(after && matchesPreference(after, preference)),
     preferenceChanged: Boolean(after && after.id !== defaultChoice.id),
     defaultChoice: defaultChoice.id, unresolved,
-    reason: unresolved ? 'No qualifying closed-weight assignment. This workload blocks the After plan.'
+    reason: unresolved ? 'Needs a qualifying replacement. No reviewed closed-weight candidate passes every required check.'
       : selected ? `${modelChanged ? 'Selected benchmark scores match or improve' : 'Same model checkpoint and published benchmark scores; service changes'}; ${selected.cheaper ? 'modeled token cost is lower' : 'paired latency is lower'}.`
       : 'Baseline retained. No reviewed candidate passes every required check.',
   };

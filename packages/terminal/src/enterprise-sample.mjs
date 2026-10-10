@@ -93,7 +93,7 @@ export function demoSnapshot(now = Date.now(), stage = 'before', preference = 'd
   const models = new Map(), deployments = new Map();
   data.records.forEach((record, index) => {
     const assignmentId = record.assignmentId, assignment = assignments[assignmentId], workload = WORKLOADS[assignmentId];
-    const price = stage === 'after' && feasible ? assignment.after : assignment.before, sequence = Math.floor(index / WORKLOADS.length);
+    const price = stage === 'after' ? assignment.after ?? assignment.before : assignment.before, sequence = Math.floor(index / WORKLOADS.length);
     const worker = String(sequence % 20 + 1).padStart(2, '0');
     record.workload = `services/${workload.id.replaceAll('.', '/')}`;
     record.agentId = record.agent = `${workload.id}.worker-${worker}`;
@@ -103,12 +103,13 @@ export function demoSnapshot(now = Date.now(), stage = 'before', preference = 'd
     record.location = 'cloud'; record.status = 'completed'; record.durationMs = null;
     record.cost = tokenCost(price, record.inputTokens, record.outputTokens);
     record.beforeCost = tokenCost(assignment.before, record.inputTokens, record.outputTokens);
-    record.afterCost = tokenCost(feasible ? assignment.after : null, record.inputTokens, record.outputTokens);
+    record.afterCost = tokenCost(assignment.after, record.inputTokens, record.outputTokens);
     record.routeKind = ['direct', 'router', 'gateway'][index % 3];
     record.route = record.routeKind === 'direct' ? `${price.provider} API` : record.routeKind === 'router' ? 'insurance.router' : 'insurance-gateway';
     record.path = [{ name: record.route, kind: record.routeKind }];
     if (record.routeKind !== 'direct') record.path.push({ name: `${price.provider} API`, kind: 'direct' });
     record.deploymentId = `demo-deployment-${assignmentId}`;
+    if (stage === 'after' && !assignment.after) return;
     models.set(price.id, { id: `demo-model-${price.id}`, name: price.name, provider: price.provider, modelCreator: price.creator, sourceId: 'sample-activity', location: 'cloud', state: 'observed' });
     deployments.set(assignmentId, { id: record.deploymentId, name: workload.id, model: price.name, modelCreator: price.creator, provider: price.provider, location: 'cloud', servingMode: 'shared', state: 'configured', sourceId: 'inventory', poolIds: [`pool-${price.provider.toLowerCase()}`] });
   });
@@ -122,14 +123,17 @@ export function demoSnapshot(now = Date.now(), stage = 'before', preference = 'd
   data.sources.find(source => source.id === 'sample-activity').note += ' Insurance workflow and worker names are fictional declarations. Replacements pass the selected public benchmark screen, not an insurance-task evaluation. Application quality and latency have not been measured.';
   data.simulation.windows = Object.fromEntries([0, 1, 6, 24, 168, 720].map(hours => {
     const rows = data.records.filter(record => !hours || Date.parse(record.occurredAt) >= now - hours * 3600000);
-    const totals = selected => ({ requests: selected.length * REQUESTS_PER_GROUP, beforeCost: selected.reduce((n, r) => n + r.beforeCost, 0), afterCost: feasible ? selected.reduce((n, r) => n + r.afterCost, 0) : null });
+    const totals = selected => ({ requests: selected.length * REQUESTS_PER_GROUP, qualifiedRequests: selected.filter(record => assignments[record.assignmentId].after).length * REQUESTS_PER_GROUP, beforeCost: selected.reduce((n, r) => n + r.beforeCost, 0), afterCost: feasible ? selected.reduce((n, r) => n + r.afterCost, 0) : null });
     return [hours, { ...totals(rows), workloads: assignments.map((pair, index) => {
       const selected = rows.filter(record => record.assignmentId === index);
       return { ...totals(selected), afterCost: pair.after ? selected.reduce((n, r) => n + tokenCost(pair.after, r.inputTokens, r.outputTokens), 0) : null };
     }) }];
   }));
   if (stage === 'after' && !feasible) {
-    data.records = []; data.models = []; data.deployments = []; data.capacityPools = [];
+    data.records = data.records.filter(record => assignments[record.assignmentId].after);
+    const source = data.sources.find(source => source.id === 'sample-activity');
+    source.records = data.records.length * REQUESTS_PER_GROUP;
+    source.note += ' Incomplete After plan: only workloads with a qualifying assignment are included. Unresolved workloads remain in comparison metadata, without an After assignment or cost.';
   }
   return data;
 }

@@ -94,7 +94,7 @@ test('both comparison URL forms serve the comparison document', async () => {
   for (const path of ['/demo', '/demo/']) assert.equal(await (await worker.fetch(new Request(`https://dash.openmerit.site${path}`), env)).text(), 'demo');
 });
 
-test('preferences preserve the scenario, search all configured services, and fail closed as a whole', () => {
+test('preferences preserve the scenario and show only qualifying workloads in an incomplete plan', () => {
   const baseline = demoSnapshot(now);
   assert.equal(baseline.project.name, 'insurance-tech-demo');
   assert.equal(new Set(baseline.records.map(r => r.agentId)).size, 200);
@@ -105,7 +105,29 @@ test('preferences preserve the scenario, search all configured services, and fai
     assert.equal(sim.catalogSize, 25);
     if (value === 'closed') {
       assert.equal(sim.feasible, false);
-      for (const field of ['records', 'models', 'deployments', 'capacityPools']) assert.deepEqual(data[field], []);
+      assert.equal(data.records.length, 6720);
+      assert.equal(data.models.length, 6);
+      assert.equal(data.deployments.length, 7);
+      assert.deepEqual(data.capacityPools, baseline.capacityPools);
+      const unresolved = new Set(sim.assignments.flatMap((pair, index) => pair.unresolved ? [index] : []));
+      const original = new Map(baseline.records.map(record => [record.id, record]));
+      for (const record of data.records) {
+        assert.ok(!unresolved.has(record.assignmentId));
+        assert.equal(sim.assignments[record.assignmentId].after.openWeights, false);
+        assert.equal(record.model, sim.assignments[record.assignmentId].after.name);
+        for (const field of ['id','occurredAt','inputTokens','outputTokens','sampleRequests','agentId','taskId']) assert.equal(record[field], original.get(record.id)[field]);
+        assert.equal(record.cost, record.afterCost);
+        assert.ok(deploymentFor(record, data));
+      }
+      for (const [hours, totals] of Object.entries(sim.windows)) {
+        const selected = data.records.filter(record => !Number(hours) || Date.parse(record.occurredAt) >= now - Number(hours) * 3600000);
+        assert.equal(totals.qualifiedRequests, selected.length * 1000);
+        assert.ok(totals.requests >= totals.qualifiedRequests);
+        assert.equal(totals.afterCost, null);
+      }
+      const graph = buildEnvironmentMap(data.records, data);
+      assert.equal(graph.requestCount, 6720000);
+      assert.equal(Object.values(routeBreakdown(data.records, data)).reduce((a,b)=>a+b,0), 6720000);
       assert.equal(sim.assignments.filter(pair => pair.after === null).length, 3);
       for (const window of Object.values(sim.windows)) assert.equal(window.afterCost, null);
       continue;
@@ -237,9 +259,12 @@ test('multiple evidence cohorts find matched benchmarks and never skip a matched
   assert.equal(qwen.eligible, false);
   assert.ok(qwen.checks.some(check => check.before?.name === 'ClawEval · pass³' && check.status === 'pass'));
 });
-test('blocked snapshots do not mutate the baseline or create a partial After cost', () => {
+test('incomplete plans preserve the full baseline and leave complete-plan After totals unknown', () => {
   const data = demoSnapshot(now, 'before', 'closed');
   assert.equal(data.records.length, 9600);
-  assert.ok(data.records.every(record => record.afterCost === null));
+  assert.equal(data.records.filter(record => record.afterCost === null).length, 2880);
+  assert.ok(Object.values(data.simulation.windows).every(totals => totals.afterCost === null));
+  assert.equal(data.simulation.windows[0].requests, 9600000);
+  assert.equal(data.simulation.windows[0].qualifiedRequests, 6720000);
   assert.deepEqual(data.records.map(record => record.model), demoSnapshot(now).records.map(record => record.model));
 });

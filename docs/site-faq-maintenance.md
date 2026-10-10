@@ -205,3 +205,8 @@ Reviewed the hosted demo's quality, price, privacy and model-selection claims. R
 ## Expanded comparison selection — 10 October 2026
 
 Reviewed the hosted preference behavior against the public guide. The dated catalog searches 25 offers across six configured services and distinguishes model identity from endpoint pricing and ZDR. A hard no-open-weights conflict blocks the complete After plan and its projected cost. Soft biases can produce identical selections; the UI exposes matches and equality with Default instead of implying arbitrary changes. Benchmarks remain public screening signals, not measured application-quality or endpoint-latency evidence. The main homepage FAQ and published npm behavior require no changes.
+
+
+### Incomplete comparison plans — 10 October 2026
+
+Reviewed hosted comparison claims after replacing the whole-plan block with a visible partial plan. The closed-weight requirement remains enforced per assignment: unresolved workflows have no After assignment or usage. Qualifying workloads remain inspectable, their subset coverage is disclosed, and complete-plan savings remain unavailable. No local collection, real routing, npm or homepage FAQ claims change.

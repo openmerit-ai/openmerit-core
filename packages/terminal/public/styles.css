@@ -904,13 +904,6 @@ body.keyboard .comparison-switch button, body.keyboard .comparison-cost { transi
 .comparison-decisions .data-table { margin-top: 14px; }
 .comparison-decisions td { vertical-align: top; }
 .comparison-decisions td small { display: block; color: #999; font-size: 12px; margin-top: 6px; }
-.comparison-blocked { max-width: 700px; padding: 32px 0 48px; }
-.comparison-blocked > p { color: #aaa; line-height: 1.7; max-width: 560px; }
-.comparison-blocked > div { margin: 24px 0; border-top: 1px solid #292929; }
-.comparison-blocked > div > p { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 16px 0; border-bottom: 1px solid #292929; margin: 0; }
-.comparison-blocked strong { font-weight: 450; }
-.comparison-blocked span { color: #999; }
-.comparison-blocked > .text-button { margin-left: 18px; }
 .candidate-review > summary { display: flex; justify-content: space-between; gap: 16px; font-size: 12px; line-height: 1.5; }
 .candidate-review > summary > span:last-child { color: #888; white-space: nowrap; }
 .price-models > div > span { overflow-wrap: anywhere; }
@@ -920,3 +913,12 @@ body.keyboard .comparison-switch button, body.keyboard .comparison-cost { transi
 .comparison-decisions > summary::marker { color: #777; }
 .comparison-decisions .table-wrap { max-width: 100%; }
 .comparison-decisions .data-table td:last-child { color: #999; }
+
+.comparison-unresolved { margin-top: 18px; padding: 16px 0; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+.comparison-unresolved > div { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.comparison-unresolved strong { font-size: 13px; font-weight: 450; color: #d1d1d1; }
+.comparison-unresolved ul { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; list-style: none; padding: 0; margin: 16px 0; }
+.comparison-unresolved li { font-size: 12px; }
+.comparison-unresolved small { display: block; margin-top: 6px; font-size: 12px; color: #999; }
+.comparison-unresolved > p { font-size: 12px; color: #aaa; line-height: 1.6; margin-bottom: 0; }
+@media (max-width: 650px) { .comparison-unresolved ul { grid-template-columns: 1fr; gap: 14px; } }
