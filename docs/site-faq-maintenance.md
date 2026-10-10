@@ -195,3 +195,8 @@ Deployed the fictional sample at `dash.openmerit.site` with the preview.5 browse
 ## Hosted enterprise comparison — 10 October 2026
 
 Reviewed evidence, pricing and readiness claims. The hosted comparison uses fictional workload volumes and published token rates, clearly labels model assignments as illustrative, and makes no measured quality or latency claim. Unknown costs remain unknown. No changes to local collection, consent, routing, evaluations, billing or the published npm preview are implied. The main homepage FAQ requires no change.
+
+
+## Insurance comparison evidence and preferences — 10 October 2026
+
+Reviewed the hosted demo's quality, price, privacy and model-selection claims. Replacements now require the selected public benchmark screen and a cost or paired-latency improvement. Publisher point estimates are distinct from application evaluations; missing evidence retains the baseline. Preference conflicts remain visible, including unresolved open-weight baselines under the closed-only option. ZDR is endpoint/account-specific and developer origin is separate from residency. Fictional insurance names and fixed token volumes remain explicit. No local discovery, runtime routing, evaluation-engine, npm or homepage FAQ behavior changes. Deployment verification is recorded separately.

@@ -33,7 +33,7 @@ export default {
     let response;
     if (path === '/api/info') response = json({ version: 1, defaultMode: 'sample', hostedSample: true, interval: 15 });
     else if (path === '/api/sample-seed') response = json({ version: 1, now: Math.floor(Date.now() / 15000) * 15000 });
-    else if (path === '/api/demo') response = json(demoSnapshot(Math.floor(Date.now() / 15000) * 15000, new URL(request.url).searchParams.get('stage') === 'after' ? 'after' : 'before'));
+    else if (path === '/api/demo') response = json(demoSnapshot(Math.floor(Date.now() / 15000) * 15000, new URL(request.url).searchParams.get('stage') === 'after' ? 'after' : 'before', new URL(request.url).searchParams.get('preference')));
     else if (path === '/api/sample') {
       const now = Math.floor(Date.now() / 15000) * 15000;
       if (!sampleBody || sampleTime !== now) { sampleBody = JSON.stringify(enterpriseSnapshot(now)); sampleTime = now; }
