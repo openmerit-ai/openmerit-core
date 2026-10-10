@@ -151,3 +151,8 @@ Reviewed evidence, data, background, and readiness claims for the shared 39-serv
 ## Endpoint coverage release preparation — 10 October 2026
 
 Prepared `0.1.6-preview.3` to include the three source-only changes above. The public terminal guide now describes this version explicitly, while registry publication remains pending verification. The latest source build passed 47 focused Linux tests in the isolated VM, preserved all 242 saved requests, 41 agent IDs, and 122 task IDs across passive refresh, and left all 126 project files unchanged. Separate endpoint fixtures did not enter the real dashboard. No new inference calls were made. Stable `latest` and homepage FAQ wording remain about `0.1.5`; neither the main site nor hosted sample is deployed by this package release.
+
+
+## Endpoint coverage — published preview.3, 10 October 2026
+
+Published `0.1.6-preview.3` and verified its npm integrity and `preview` dist-tag, superseding the source-only and release-preparation status above. Direct registry installation on the VM retained all 242 requests, 41 agent IDs, 122 task IDs, and 126 unchanged application files through passive refresh. Endpoint fixtures remained separate from actual history; no inference calls were made. Stable `latest` remains `0.1.5`; no homepage FAQ wording or site deployment changed.
