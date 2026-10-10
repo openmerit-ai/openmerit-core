@@ -215,3 +215,8 @@ Reviewed hosted comparison claims after replacing the whole-plan block with a vi
 ## Hosted preference comparison expansion — source, 10 October 2026
 
 Reviewed homepage FAQ claims against the expanded fictional comparison. The new application workloads, benchmark cohorts, fixed token profiles and preference-dependent costs affect only the hosted demonstration. They do not establish live model-routing performance, production discovery coverage or a new npm release. Existing public FAQ claims remain unchanged; detailed assumptions and limits are maintained in `inference-terminal.md`.
+
+
+## Preference overrides — source, 10 October 2026
+
+Reviewed comparison, evidence, approval and regression claims. This change is confined to the fictional hosted comparison: a selected preference may override benchmark and efficiency criteria, with explicit exceptions and truthful prices. It never weakens the live evaluation engine, routing approvals, endpoint compatibility or source collection. No real inference or insurance decision is made. The main homepage FAQ and published npm release remain unchanged. Hosted publication and verification are recorded separately.

@@ -922,3 +922,12 @@ body.keyboard .comparison-switch button, body.keyboard .comparison-cost { transi
 .comparison-unresolved small { display: block; margin-top: 6px; font-size: 12px; color: #999; }
 .comparison-unresolved > p { font-size: 12px; color: #aaa; line-height: 1.6; margin-bottom: 0; }
 @media (max-width: 650px) { .comparison-unresolved ul { grid-template-columns: 1fr; gap: 14px; } }
+
+/* Preference exceptions use the terminal's existing warm evidence color. */
+.comparison-override{display:flex;align-items:baseline;gap:8px 14px;flex-wrap:wrap;margin:12px 0 0;padding:12px 0;border-top:1px solid var(--line);font-size:12px;line-height:1.6}
+.comparison-override strong,.preference-override,.price-workload .preference-override{color:var(--amber)}
+.comparison-override span{color:var(--muted)}
+.override-evidence{padding:14px 0;border-block:1px solid var(--line);font-size:12px;line-height:1.7}
+.override-evidence strong{color:var(--amber);font-weight:500}
+.override-evidence ul{margin:8px 0;padding-left:18px}
+.benchmark-check[data-check="regression"] .benchmark-values{color:var(--amber)}

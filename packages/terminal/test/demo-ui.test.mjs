@@ -29,44 +29,42 @@ test('every demo preference renders its real plan, costs, decisions and evidence
     const markup = vm.runInContext('state.data = snapshot; demoPreference = preference; comparisonPanel();', context);
     assert.match(markup, /Workload decisions/);
     if (value === 'default') assert.match(markup, /26 model\/service offers/);
-    if (value === 'closed') assert.match(markup, /26 offers reviewed/);
+    const pairs = context.snapshot.simulation.assignments;
+    const overrideCount = pairs.filter(pair=>pair.override).length;
+    assert.doesNotMatch(markup, /Plan incomplete|Needs a qualifying replacement/);
+    const amount = context.snapshot.simulation.windows[0].afterCost.toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
+    assert.ok(markup.includes(amount));
+    if (overrideCount) {
+      assert.ok(markup.includes(`${overrideCount} preference overrides`));
+      assert.match(markup, /Included in After costs · primary criteria not met/);
+      assert.match(markup, /Review exceptions/);
+      const rows = markup.slice(markup.indexOf('<tbody>'));
+      assert.ok(rows.indexOf(pairs.find(pair=>pair.override).purpose) < rows.indexOf('Actuarial query generation'));
+    } else assert.doesNotMatch(markup, /class="comparison-override"/);
+    assert.match(markup, /Token cost ·/);
     if (value === 'closed') {
-      assert.match(markup, /Plan incomplete/);
-      assert.match(markup, /11 of 14 workloads have a qualifying assignment/);
-      assert.match(markup, /7.5M of 9.6M baseline requests/);
-      assert.doesNotMatch(markup, /% lower/);
       const main = vm.runInContext('main()', context);
       assert.match(main, /id="model-results"/);
-      assert.match(main, /GPT-4.1/);
-      assert.match(main, /Needs a qualifying replacement/);
       const inventory = main.slice(main.indexOf('id="model-results"'));
       assert.doesNotMatch(inventory, /gpt-oss|GLM-5.3|Mistral Medium/);
-      assert.doesNotMatch(main, /No qualifying After plan|Blocks the After plan|% lower/);
-      const cards = vm.runInContext('summary()', context);
-      assert.match(cards, /Qualified-workload cost/);
-      assert.match(cards, /Partial cost · excludes unresolved workloads/);
       for (const hours of [1,168,720]) {
         context.hours = hours;
         const ranged = vm.runInContext('state.hours=hours; comparisonPanel()', context);
-        assert.match(ranged, /Plan incomplete/);
-        assert.doesNotMatch(ranged, /% lower|NaN|undefined/);
+        assert.match(ranged, /3 preference overrides/);
+        assert.doesNotMatch(ranged, /Plan incomplete|NaN|undefined/);
       }
       vm.runInContext('state.hours=0;',context);
-    } else {
-      assert.match(markup, /8 model changes · 5 service changes · 5 retained/);
-      const amount = context.snapshot.simulation.windows[0].afterCost.toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
-      assert.ok(markup.includes(amount));
-      if (value !== 'default') assert.match(markup, /2 choices differ from Default/);
-      if (['open','zdr','china'].includes(value)) assert.match(markup, /Same model mix and cost as/);
-      else assert.doesNotMatch(markup, /Same model mix and cost as/);
-      assert.match(markup, /Actuarial query generation/);
-      assert.match(markup, /Token cost ·/);
-      const rows = markup.slice(markup.indexOf('<tbody>'));
-      assert.ok(rows.indexOf(value === 'usa' ? 'Claim reconciliation scripts' : 'Actuarial query generation') < rows.indexOf('Claim intake'));
-      assert.match(markup, /model \+ service change/);
     }
     vm.runInContext('openInspector = (title, subtitle, body) => { globalThis.drawer = body; }; showPrices();', context);
     assert.match(context.drawer, /Review 26 candidates/);
+    assert.doesNotMatch(context.drawer, /Every swap clears|never waive a gate/);
+    if (overrideCount) {
+      assert.match(context.drawer, /Criteria overridden/);
+      assert.match(context.drawer, /Selected · override/);
+      assert.match(context.drawer, /No comparable evidence/);
+      assert.match(context.drawer, /Missing evidence is uncertainty, not a pass/);
+    }
+    if (value === 'closed') assert.match(context.drawer, /No verified cost or latency improvement/);
     assert.match(context.drawer, /Published benchmark comparison/);
     assert.match(context.drawer, /Application code · tools, code generation, reasoning/);
     assert.match(context.drawer, /LiveCodeBench/);

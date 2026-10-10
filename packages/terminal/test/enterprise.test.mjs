@@ -94,7 +94,7 @@ test('both comparison URL forms serve the comparison document', async () => {
   for (const path of ['/demo', '/demo/']) assert.equal(await (await worker.fetch(new Request(`https://dash.openmerit.site${path}`), env)).text(), 'demo');
 });
 
-test('preferences preserve the scenario and show only qualifying workloads in an incomplete plan', () => {
+test('preferences preserve all usage while separating overrides from qualified selections', () => {
   const baseline = demoSnapshot(now);
   assert.equal(baseline.project.name, 'insurance-tech-demo');
   assert.equal(new Set(baseline.records.map(r => r.agentId)).size, 280);
@@ -102,57 +102,40 @@ test('preferences preserve the scenario and show only qualifying workloads in an
   for (const { value } of PREFERENCES) {
     const data = demoSnapshot(now, 'after', value), sim = data.simulation;
     assert.deepEqual(data.inventory, baseline.inventory);
+    assert.deepEqual(data.capacityPools, baseline.capacityPools);
     assert.equal(sim.catalogSize, 26);
-    if (value === 'closed') {
-      assert.equal(sim.feasible, false);
-      assert.equal(data.records.length, 7542);
-      assert.equal(data.models.length, 6);
-      assert.equal(data.deployments.length, 11);
-      assert.deepEqual(data.capacityPools, baseline.capacityPools);
-      const unresolved = new Set(sim.assignments.flatMap((pair, index) => pair.unresolved ? [index] : []));
-      const original = new Map(baseline.records.map(record => [record.id, record]));
-      for (const record of data.records) {
-        assert.ok(!unresolved.has(record.assignmentId));
-        assert.equal(sim.assignments[record.assignmentId].after.openWeights, false);
-        assert.equal(record.model, sim.assignments[record.assignmentId].after.name);
-        for (const field of ['id','occurredAt','inputTokens','outputTokens','sampleRequests','agentId','taskId']) assert.equal(record[field], original.get(record.id)[field]);
-        assert.equal(record.cost, record.afterCost);
-        assert.ok(deploymentFor(record, data));
-      }
-      for (const [hours, totals] of Object.entries(sim.windows)) {
-        const selected = data.records.filter(record => !Number(hours) || Date.parse(record.occurredAt) >= now - Number(hours) * 3600000);
-        assert.equal(totals.qualifiedRequests, selected.length * 1000);
-        assert.ok(totals.requests >= totals.qualifiedRequests);
-        assert.equal(totals.afterCost, null);
-      }
-      const graph = buildEnvironmentMap(data.records, data);
-      assert.equal(graph.requestCount, 7542000);
-      assert.equal(Object.values(routeBreakdown(data.records, data)).reduce((a,b)=>a+b,0), 7542000);
-      assert.equal(sim.assignments.filter(pair => pair.after === null).length, 3);
-      for (const window of Object.values(sim.windows)) assert.equal(window.afterCost, null);
-      continue;
-    }
     assert.equal(sim.feasible, true);
-    assert.equal(total(data.records, 'inputTokens'), total(baseline.records, 'inputTokens'));
-    assert.equal(total(data.records, 'outputTokens'), total(baseline.records, 'outputTokens'));
-    assert.ok(total(data.records, 'cost') < total(baseline.records, 'cost'));
-    assert.equal(sim.assignments.filter(pair => pair.changed).length, 9);
-    assert.equal(sim.assignments.filter(pair => pair.modelChanged).length, 8);
-    assert.equal(sim.assignments.filter(pair => pair.serviceChanged).length, 5);
+    assert.equal(data.records.length, 9600);
+    assert.equal(data.deployments.length, 14);
+    const overrides = sim.assignments.filter(pair => pair.override);
+    assert.equal(overrides.length, {default:0,zdr:8,open:7,closed:3,usa:2,china:9}[value]);
     for (const pair of sim.assignments) {
-      if (pair.changed) assert.ok(pair.checks.every(check => check.status === 'pass'));
-      assert.equal(pair.assessments.length, CATALOG.length - 1);
+      assert.ok(pair.after);
       assert.ok(CONFIGURED_SERVICES.includes(pair.after.provider));
-      assert.equal(pair.preferenceMatched, matchesPreference(pair.after, value));
+      assert.equal(pair.after.outputType, pair.before.outputType);
+      assert.equal(pair.preferenceMatched, true);
+      assert.equal(matchesPreference(pair.after, value), true);
+      if (!pair.changed) { assert.equal(pair.override, false); continue; }
+      const assessment = pair.assessments.find(item => item.candidate.id === pair.after.id);
+      assert.equal(pair.override, !assessment.eligible);
+      assert.deepEqual(pair.overrideReasons, pair.override ? assessment.issues : []);
+      if (!pair.override) assert.ok(pair.checks.every(check => check.status === 'pass'));
     }
     for (let i = 0; i < data.records.length; i++) {
-      for (const field of ['id','workload','agent','agentId','task','taskId','occurredAt','routeKind']) assert.deepEqual(data.records[i][field], baseline.records[i][field]);
+      for (const field of ['id','workload','agent','agentId','task','taskId','occurredAt','routeKind','inputTokens','outputTokens']) assert.deepEqual(data.records[i][field], baseline.records[i][field]);
+      assert.equal(data.records[i].cost, data.records[i].afterCost);
+      assert.ok(deploymentFor(data.records[i], data));
     }
     for (const [hours, totals] of Object.entries(sim.windows)) {
       const records = data.records.filter(r => !Number(hours) || Date.parse(r.occurredAt) >= now - Number(hours) * 3600000);
       assert.equal(totals.requests, records.length * 1000);
+      assert.equal(totals.assignedRequests, totals.requests);
+      assert.equal(totals.overrideRequests, records.filter(r => sim.assignments[r.assignmentId].override).length * 1000);
+      assert.equal(totals.qualifiedRequests + totals.overrideRequests, totals.assignedRequests);
       assert.equal(totals.afterCost, total(records, 'cost'));
     }
+    assert.equal(buildEnvironmentMap(data.records, data).requestCount, 9600000);
+    assert.equal(Object.values(routeBreakdown(data.records, data)).reduce((a,b)=>a+b,0), 9600000);
   }
 });
 test('cheaper models with weaker or missing benchmark evidence are not selected', () => {
@@ -171,7 +154,7 @@ test('cheaper models with weaker or missing benchmark evidence are not selected'
   const expensive = structuredClone(workload); expensive.candidates = [expensive.candidates[0]]; expensive.candidates[0].input = 100;
   assert.equal(selectReplacement(expensive, usage).changed, false);
 });
-test('preference ranking never relaxes quality, cost, endpoint or output-contract gates', () => {
+test('qualified preferred candidates win while service and output-contract constraints remain required', () => {
   const workload = fixtureWorkload(), usage = { inputTokens: 1e6, outputTokens: 1e6 };
   const base = workload.candidates[0];
   // Synthetic candidates exercise the ranking mechanism; these are not public model claims.
@@ -206,7 +189,9 @@ test('speed only qualifies with a matched latency measurement, never a missing v
   candidate.latency = { ...workload.before.latency, value:80 };
   assert.equal(selectReplacement(workload, usage).changed, true);
   candidate.latency.suite = 'different'; assert.equal(selectReplacement(workload, usage).changed, false);
-  candidate.latency.suite = workload.before.latency.suite; candidate.latency.value = 0;
+  candidate.latency.suite = workload.before.latency.suite;
+  candidate.input = null; assert.equal(selectReplacement(workload, usage).changed, false);
+  candidate.input = 3; candidate.latency.value = 0;
   assert.equal(selectReplacement(workload, usage).changed, false);
 });
 test('hosted preference is validated and reflected in the sample API', async () => {
@@ -259,16 +244,72 @@ test('multiple evidence cohorts find matched benchmarks and never skip a matched
   assert.equal(qwen.eligible, false);
   assert.ok(qwen.checks.some(check => check.before?.name === 'ClawEval · pass³' && check.status === 'pass'));
 });
-test('incomplete plans preserve the full baseline and leave complete-plan After totals unknown', () => {
-  const data = demoSnapshot(now, 'before', 'closed');
-  assert.equal(data.records.length, 9600);
-  assert.equal(data.records.filter(record => record.afterCost === null).length, 2058);
-  assert.ok(Object.values(data.simulation.windows).every(totals => totals.afterCost === null));
-  assert.equal(data.simulation.windows[0].requests, 9600000);
-  assert.equal(data.simulation.windows[0].qualifiedRequests, 7542000);
-  assert.deepEqual(data.records.map(record => record.model), demoSnapshot(now).records.map(record => record.model));
+test('closed preference includes all workloads and honestly reports the three exceptions', () => {
+  const before = demoSnapshot(now, 'before', 'closed'), after = demoSnapshot(now, 'after', 'closed');
+  assert.deepEqual(before.records.map(r=>r.model), demoSnapshot(now).records.map(r=>r.model));
+  assert.equal(before.records.filter(record => record.afterCost === null).length, 0);
+  assert.deepEqual(before.simulation.windows, after.simulation.windows);
+  const pairs = after.simulation.assignments.filter(pair => pair.override);
+  assert.deepEqual(pairs.map(pair=>pair.id), ['claims.tagging','fraud.review','broker.translation']);
+  assert.ok(pairs.every(pair=>pair.after.openWeights === false));
+  assert.ok(pairs.every(pair=>pair.checks.every(check=>check.status === 'missing')));
+  const tagging = pairs[0].assessments.find(item=>item.candidate.id === pairs[0].after.id);
+  assert.ok(tagging.afterCost > tagging.beforeCost);
+  assert.equal(tagging.faster, false);
+  assert.ok(pairs[0].overrideReasons.includes('No verified cost or latency improvement'));
 });
 
+test('preference overrides preserve missing evidence, regressions, efficiency and decision criteria', () => {
+  const workload = fixtureWorkload(), usage = {inputTokens:1e6, outputTokens:1e6};
+  workload.candidates = [workload.candidates[1]];
+  const model = workload.candidates[0];
+  model.openWeights = true;
+  model.input = 100;
+  workload.requiredAxes.push('decisions');
+  assert.equal(selectReplacement(workload, usage).after.id, workload.before.id);
+  const chosen = selectReplacement(workload, usage, 'open');
+  assert.equal(chosen.after.id, model.id);
+  assert.equal(chosen.override, true);
+  assert.deepEqual(chosen.overrideReasons, ['Comparable benchmark evidence is incomplete','A required benchmark regresses','No verified cost or latency improvement']);
+  assert.equal(chosen.checks.find(c=>c.axis==='decisionAccuracy').status, 'missing');
+  assert.equal(chosen.checks.find(c=>c.axis==='calibration').status, 'missing');
+  assert.equal(chosen.checks.find(c=>c.axis==='tools').status, 'regression');
+  // A baseline that already meets a preference is retained without a spurious exception.
+  workload.before.openWeights = true;
+  assert.equal(selectReplacement(workload, usage, 'open').changed, false);
+});
+
+test('overrides cannot invent a compatible endpoint, output contract, known price or preference match', () => {
+  const usage = {inputTokens:1e6,outputTokens:1e6};
+  for (const patch of [{provider:'Unconfigured'}, {outputType:'decision'}, {input:null}, {openWeights:null}]) {
+    const workload = fixtureWorkload();
+    workload.before.openWeights = true;
+    workload.candidates = [{...workload.candidates[1], ...patch}];
+    const chosen = selectReplacement(workload, usage, 'closed');
+    assert.equal(chosen.unresolved, true);
+    assert.equal(chosen.after, null);
+    assert.equal(chosen.override, false);
+    assert.deepEqual(chosen.overrideReasons, []);
+  }
+});
+
+test('override ranking prioritizes fewer regressions then evidence gaps and efficiency before cost', () => {
+  const workload = fixtureWorkload(), usage = {inputTokens:1e6,outputTokens:1e6};
+  const strong = structuredClone(workload.candidates[0]);
+  const weak = structuredClone(workload.candidates[1]);
+  strong.id='preferred-strong'; weak.id='preferred-weak';
+  strong.openWeights=weak.openWeights=true;
+  strong.input=100; // fails efficiency, while the cheaper choice regresses on benchmarks.
+  workload.candidates=[weak,strong];
+  let result=selectReplacement(workload,usage,'open');
+  assert.equal(result.after.id,strong.id);
+  assert.equal(result.override,true);
+  assert.deepEqual(result.overrideReasons,['No verified cost or latency improvement']);
+  strong.input=2;
+  result=selectReplacement(workload,usage,'open');
+  assert.equal(result.after.id,strong.id);
+  assert.equal(result.override,false);
+});
 
 test('expanded application workloads make actual preference selections and recalculate prices', () => {
   const plans = Object.fromEntries(PREFERENCES.map(({value}) => [value, demoSnapshot(now, 'after', value)]));
@@ -277,12 +318,12 @@ test('expanded application workloads make actual preference selections and recal
   assert.equal(pick('default', 'claims.reconciliation').after.id, 'glm47');
   for (const preference of ['zdr', 'open', 'china']) {
     assert.equal(pick(preference, 'actuarial.queries').after.id, 'glm47');
-    assert.ok(plans[preference].simulation.windows[0].afterCost > plans.default.simulation.windows[0].afterCost);
+    assert.notEqual(plans[preference].simulation.windows[0].afterCost, plans.default.simulation.windows[0].afterCost);
   }
   assert.equal(pick('usa', 'claims.reconciliation').after.id, 'gemini3flash');
   assert.equal(pick('closed', 'claims.reconciliation').after.id, 'gemini3flash');
-  assert.ok(plans.usa.simulation.windows[0].afterCost > plans.default.simulation.windows[0].afterCost);
-  assert.deepEqual(plans.zdr.simulation.equivalentPreferences, ['open','china']);
+  assert.notEqual(plans.usa.simulation.windows[0].afterCost, plans.default.simulation.windows[0].afterCost);
+  assert.deepEqual(plans.zdr.simulation.equivalentPreferences, []);
   assert.deepEqual(plans.default.simulation.equivalentPreferences, []);
   for (const [preference, data] of Object.entries(plans)) {
     const baseline = demoSnapshot(now, 'before', preference);

@@ -132,10 +132,10 @@ export function demoSnapshot(now = Date.now(), stage = 'before', preference = 'd
   data.hosts = []; data.runtimeStats = []; delete data.machine;
   data.sources = data.sources.filter(source => ['sample-activity', 'sample-capacity', 'inventory'].includes(source.id));
   data.sources.find(source => source.id === 'sample-capacity').note = 'Fictional provider quota readings, held identical in both stages. They do not establish a change in latency, throughput or available capacity.';
-  data.sources.find(source => source.id === 'sample-activity').note += ' Insurance workflow and worker names are fictional declarations. Replacements pass the selected public benchmark screen, not an insurance-task evaluation. Application quality and latency have not been measured.';
+  data.sources.find(source => source.id === 'sample-activity').note += ' Insurance workflow and worker names are fictional declarations. Assignments distinguish qualified replacements, retained baselines and explicit preference overrides. Overrides do not pass all primary criteria. Application quality and latency have not been measured.';
   data.simulation.windows = Object.fromEntries([0, 1, 6, 24, 168, 720].map(hours => {
     const rows = data.records.filter(record => !hours || Date.parse(record.occurredAt) >= now - hours * 3600000);
-    const totals = selected => ({ requests: selected.length * REQUESTS_PER_GROUP, qualifiedRequests: selected.filter(record => assignments[record.assignmentId].after).length * REQUESTS_PER_GROUP, beforeCost: selected.reduce((n, r) => n + r.beforeCost, 0), afterCost: feasible ? selected.reduce((n, r) => n + r.afterCost, 0) : null });
+    const totals = selected => ({ requests: selected.length * REQUESTS_PER_GROUP, assignedRequests: selected.filter(record => assignments[record.assignmentId].after).length * REQUESTS_PER_GROUP, qualifiedRequests: selected.filter(record => assignments[record.assignmentId].after && !assignments[record.assignmentId].override).length * REQUESTS_PER_GROUP, overrideRequests: selected.filter(record => assignments[record.assignmentId].override).length * REQUESTS_PER_GROUP, beforeCost: selected.reduce((n, r) => n + r.beforeCost, 0), afterCost: feasible ? selected.reduce((n, r) => n + r.afterCost, 0) : null });
     return [hours, { ...totals(rows), workloads: assignments.map((pair, index) => {
       const selected = rows.filter(record => record.assignmentId === index);
       return { ...totals(selected), afterCost: pair.after ? selected.reduce((n, r) => n + tokenCost(pair.after, r.inputTokens, r.outputTokens), 0) : null };
@@ -145,7 +145,7 @@ export function demoSnapshot(now = Date.now(), stage = 'before', preference = 'd
     data.records = data.records.filter(record => assignments[record.assignmentId].after);
     const source = data.sources.find(source => source.id === 'sample-activity');
     source.records = data.records.length * REQUESTS_PER_GROUP;
-    source.note += ' Incomplete After plan: only workloads with a qualifying assignment are included. Unresolved workloads remain in comparison metadata, without an After assignment or cost.';
+    source.note += ' Incomplete After plan: only workloads with an assignment are included; preference overrides are identified in comparison metadata. Unresolved workloads remain in comparison metadata, without an After assignment or cost.';
   }
   return data;
 }

@@ -4,8 +4,8 @@ export const EVIDENCE_DATE = '2026-10-10';
 export const PREFERENCES = [
   { value: 'default', label: 'Default · within your stack', note: 'Search all configured services; choose the lowest modeled cost among qualified replacements.' },
   { value: 'zdr', label: 'Bias ZDR models', note: 'Prefer confirmed ZDR endpoints. Eligibility alone does not establish account approval or enabled settings.' },
-  { value: 'open', label: 'Bias open-weights models', note: 'Prefer open weights among qualifying replacements; otherwise keep the default qualified choice.' },
-  { value: 'closed', label: 'No open-weights models', note: 'Require a closed-weight assignment for every workload. Unresolved workloads remain unassigned; qualifying choices stay visible in an incomplete plan.' },
+  { value: 'open', label: 'Bias open-weights models', note: 'Prefer models with open weights.' },
+  { value: 'closed', label: 'No open-weights models', note: 'Require a closed-weight assignment for every workload.' },
   { value: 'usa', label: 'Bias USA models', note: 'Prefer models from US developers. This does not specify hosting location or data residency.' },
   { value: 'china', label: 'Bias Chinese models', note: 'Prefer models from Chinese developers. This does not specify hosting location or data residency.' },
 ];
@@ -151,13 +151,15 @@ export function assessReplacement(workload, candidate, usage) {
   // No latency data is fabricated or inferred from token generation speed in this demo.
   const a = before.latency, b = candidate.latency;
   const faster = Boolean(a && b && a.suite && a.metric && a.suite === b.suite && a.metric === b.metric && a.source && b.source && Number.isFinite(a.value) && Number.isFinite(b.value) && b.value > 0 && b.value < a.value);
+  const compatible = (workload.configuredServices ?? [before.provider]).includes(candidate.provider) && candidate.outputType === before.outputType && afterCost !== null;
   const issues = [];
   if (!(workload.configuredServices ?? [before.provider]).includes(candidate.provider)) issues.push('Service is not configured in this environment');
   if (candidate.outputType !== before.outputType) issues.push('Different output contract; application adaptation required');
   if (checks.some(check => check.status === 'missing')) issues.push('Comparable benchmark evidence is incomplete');
   if (checks.some(check => check.status === 'regression')) issues.push('A required benchmark regresses');
+  if (afterCost === null) issues.push('Token price is unavailable');
   if (!cheaper && !faster) issues.push('No verified cost or latency improvement');
-  return { candidate, checks, cheaper, faster, beforeCost, afterCost, issues, eligible: issues.length === 0 };
+  return { candidate, checks, cheaper, faster, beforeCost, afterCost, compatible, issues, eligible: issues.length === 0 };
 }
 export function matchesPreference(model, preference) {
   return preference === 'zdr' ? model.confirmedZdr === true : preference === 'open' ? model.openWeights === true : preference === 'closed' ? model.openWeights === false : preference === 'usa' ? model.origin === 'US' : preference === 'china' ? model.origin === 'CN' : true;
@@ -169,10 +171,22 @@ export function selectReplacement(workload, usage, preference = 'default') {
   const byCost = (a, b) => (a.afterCost ?? Infinity) - (b.afterCost ?? Infinity) || a.candidate.id.localeCompare(b.candidate.id);
   const qualified = assessments.filter(allowed).sort(byCost);
   const defaultChoice = assessments.filter(item => item.eligible).sort(byCost)[0]?.candidate ?? workload.before;
-  const selected = [...qualified].sort((a, b) => Number(matchesPreference(b.candidate, preference)) - Number(matchesPreference(a.candidate, preference)) || byCost(a, b))[0];
+  // A preference first seeks a fully qualified match. Retaining an already
+  // matching baseline needs no exception. Only then relax benchmark/efficiency
+  // criteria, never the configured service, output contract or known pricing.
+  let selected = preference === 'default' ? qualified[0] : qualified.find(item => matchesPreference(item.candidate, preference));
+  if (!selected && preference !== 'default' && !matchesPreference(workload.before, preference)) {
+    const axes = (item, status) => new Set(item.checks.filter(check => check.status === status).map(check => check.axis)).size;
+    selected = assessments.filter(item => item.compatible && matchesPreference(item.candidate, preference)).sort((a, b) =>
+      axes(a, 'regression') - axes(b, 'regression') || axes(a, 'missing') - axes(b, 'missing') ||
+      Number(!a.cheaper && !a.faster) - Number(!b.cheaper && !b.faster) || byCost(a, b))[0];
+    if (!selected && preference !== 'closed') selected = qualified[0];
+  }
   const proposed = selected?.candidate ?? workload.before;
   const unresolved = preference === 'closed' && proposed.openWeights !== false;
   const after = unresolved ? null : proposed;
+  const override = Boolean(after && selected && !selected.eligible);
+  const overrideReasons = override ? selected.issues : [];
   const serviceChanged = Boolean(after && after.provider !== workload.before.provider);
   const modelChanged = Boolean(after && after.modelId !== workload.before.modelId);
   return {
@@ -181,9 +195,11 @@ export function selectReplacement(workload, usage, preference = 'default') {
     checks: selected?.checks ?? [], assessments, qualifiedCount: qualified.length,
     preferenceMatched: Boolean(after && matchesPreference(after, preference)),
     preferenceChanged: Boolean(after && after.id !== defaultChoice.id),
-    defaultChoice: defaultChoice.id, unresolved,
-    reason: unresolved ? 'Needs a qualifying replacement. No reviewed closed-weight candidate passes every required check.'
+    defaultChoice: defaultChoice.id, unresolved, override, overrideReasons,
+    reason: unresolved ? 'No compatible closed-weight assignment in the reviewed catalog. Service, output contract and known pricing remain required.'
+      : override ? `Selected for ${preferenceFor(preference).label}. No preferred replacement passed every primary check.`
       : selected ? `${modelChanged ? 'Selected benchmark scores match or improve' : 'Same model checkpoint and published benchmark scores; service changes'}; ${selected.cheaper ? 'modeled token cost is lower' : 'paired latency is lower'}.`
+      : preference !== 'default' && matchesPreference(workload.before, preference) ? 'Baseline retained: already matches this preference; no qualifying preferred replacement.'
       : 'Baseline retained. No reviewed candidate passes every required check.',
   };
 }
