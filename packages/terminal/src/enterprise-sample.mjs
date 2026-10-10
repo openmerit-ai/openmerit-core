@@ -1,5 +1,5 @@
 import { sampleSnapshot } from './sample.mjs';
-import { WORKLOADS, preferenceFor, selectReplacement } from './demo-policy.mjs';
+import { WORKLOADS, CATALOG, CONFIGURED_SERVICES, preferenceFor, selectReplacement } from './demo-policy.mjs';
 
 // Published standard, uncached text-token rates in USD per million tokens.
 // This catalog belongs to the fictional hosted demonstration, never live billing.
@@ -88,11 +88,12 @@ export function demoSnapshot(now = Date.now(), stage = 'before', preference = 'd
     usage[record.assignmentId].outputTokens += record.outputTokens;
   });
   const assignments = WORKLOADS.map((workload, index) => selectReplacement(workload, usage[index], preference));
-  data.simulation = { ...data.simulation, kind: 'comparison-groups', stage, preference, assignments, prices: [...new Map(assignments.flatMap(pair => [pair.before, pair.after]).map(model => [model.id, model])).values()] };
+  const feasible = assignments.every(pair => !pair.unresolved);
+  data.simulation = { ...data.simulation, kind: 'comparison-groups', stage, preference, feasible, catalogSize: CATALOG.filter(model => CONFIGURED_SERVICES.includes(model.provider)).length, configuredServices: CONFIGURED_SERVICES, assignments, prices: [...new Map(assignments.flatMap(pair => [pair.before, pair.after]).filter(Boolean).map(model => [model.id, model])).values()] };
   const models = new Map(), deployments = new Map();
   data.records.forEach((record, index) => {
     const assignmentId = record.assignmentId, assignment = assignments[assignmentId], workload = WORKLOADS[assignmentId];
-    const price = assignment[stage], sequence = Math.floor(index / WORKLOADS.length);
+    const price = stage === 'after' && feasible ? assignment.after : assignment.before, sequence = Math.floor(index / WORKLOADS.length);
     const worker = String(sequence % 20 + 1).padStart(2, '0');
     record.workload = `services/${workload.id.replaceAll('.', '/')}`;
     record.agentId = record.agent = `${workload.id}.worker-${worker}`;
@@ -102,7 +103,7 @@ export function demoSnapshot(now = Date.now(), stage = 'before', preference = 'd
     record.location = 'cloud'; record.status = 'completed'; record.durationMs = null;
     record.cost = tokenCost(price, record.inputTokens, record.outputTokens);
     record.beforeCost = tokenCost(assignment.before, record.inputTokens, record.outputTokens);
-    record.afterCost = tokenCost(assignment.after, record.inputTokens, record.outputTokens);
+    record.afterCost = tokenCost(feasible ? assignment.after : null, record.inputTokens, record.outputTokens);
     record.routeKind = ['direct', 'router', 'gateway'][index % 3];
     record.route = record.routeKind === 'direct' ? `${price.provider} API` : record.routeKind === 'router' ? 'insurance.router' : 'insurance-gateway';
     record.path = [{ name: record.route, kind: record.routeKind }];
@@ -112,12 +113,23 @@ export function demoSnapshot(now = Date.now(), stage = 'before', preference = 'd
     deployments.set(assignmentId, { id: record.deploymentId, name: workload.id, model: price.name, modelCreator: price.creator, provider: price.provider, location: 'cloud', servingMode: 'shared', state: 'configured', sourceId: 'inventory', poolIds: [`pool-${price.provider.toLowerCase()}`] });
   });
   data.models = [...models.values()]; data.deployments = [...deployments.values()];
-  const providers = [...new Set(data.models.map(model => model.provider))];
+  const providers = CONFIGURED_SERVICES;
   data.inventory = [...providers.map(name => ({ name, kind: 'provider', location: 'cloud', state: 'configured', sourceId: 'inventory' })), { name: 'insurance.router', kind: 'router', location: 'cloud', state: 'configured' }, { name: 'insurance-gateway', kind: 'gateway', location: 'cloud', state: 'configured' }];
   data.capacityPools = data.capacityPools.filter(pool => providers.some(name => pool.id === `pool-${name.toLowerCase()}`));
   data.hosts = []; data.runtimeStats = []; delete data.machine;
   data.sources = data.sources.filter(source => ['sample-activity', 'sample-capacity', 'inventory'].includes(source.id));
   data.sources.find(source => source.id === 'sample-capacity').note = 'Fictional provider quota readings, held identical in both stages. They do not establish a change in latency, throughput or available capacity.';
   data.sources.find(source => source.id === 'sample-activity').note += ' Insurance workflow and worker names are fictional declarations. Replacements pass the selected public benchmark screen, not an insurance-task evaluation. Application quality and latency have not been measured.';
+  data.simulation.windows = Object.fromEntries([0, 1, 6, 24, 168, 720].map(hours => {
+    const rows = data.records.filter(record => !hours || Date.parse(record.occurredAt) >= now - hours * 3600000);
+    const totals = selected => ({ requests: selected.length * REQUESTS_PER_GROUP, beforeCost: selected.reduce((n, r) => n + r.beforeCost, 0), afterCost: feasible ? selected.reduce((n, r) => n + r.afterCost, 0) : null });
+    return [hours, { ...totals(rows), workloads: assignments.map((pair, index) => {
+      const selected = rows.filter(record => record.assignmentId === index);
+      return { ...totals(selected), afterCost: pair.after ? selected.reduce((n, r) => n + tokenCost(pair.after, r.inputTokens, r.outputTokens), 0) : null };
+    }) }];
+  }));
+  if (stage === 'after' && !feasible) {
+    data.records = []; data.models = []; data.deployments = []; data.capacityPools = [];
+  }
   return data;
 }

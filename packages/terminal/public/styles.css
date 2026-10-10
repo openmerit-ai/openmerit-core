@@ -897,3 +897,26 @@ body.keyboard .comparison-switch button, body.keyboard .comparison-cost { transi
 @media (max-width: 650px) { .comparison-controls { width: 100%; min-width: 0; } .comparison-eligibility { gap: 6px; } .comparison-note { font-size: 12px; } }
 
 .comparison-switch button { flex: 1; }
+
+.comparison-decisions { margin-top: 18px; border-top: 1px solid #292929; padding-top: 14px; }
+.comparison-decisions > summary { cursor: pointer; width: fit-content; color: #bdbdbd; font-size: 12px; }
+.comparison-decisions > summary > span { margin-left: 8px; color: #888; font-variant-numeric: tabular-nums; }
+.comparison-decisions .data-table { margin-top: 14px; }
+.comparison-decisions td { vertical-align: top; }
+.comparison-decisions td small { display: block; color: #999; font-size: 12px; margin-top: 6px; }
+.comparison-blocked { max-width: 700px; padding: 32px 0 48px; }
+.comparison-blocked > p { color: #aaa; line-height: 1.7; max-width: 560px; }
+.comparison-blocked > div { margin: 24px 0; border-top: 1px solid #292929; }
+.comparison-blocked > div > p { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 16px 0; border-bottom: 1px solid #292929; margin: 0; }
+.comparison-blocked strong { font-weight: 450; }
+.comparison-blocked span { color: #999; }
+.comparison-blocked > .text-button { margin-left: 18px; }
+.candidate-review > summary { display: flex; justify-content: space-between; gap: 16px; font-size: 12px; line-height: 1.5; }
+.candidate-review > summary > span:last-child { color: #888; white-space: nowrap; }
+.price-models > div > span { overflow-wrap: anywhere; }
+
+.comparison-decisions .data-table th, .comparison-decisions .data-table td { text-align: left; font-family: var(--sans); }
+.comparison-decisions .data-table td { font-size: 12px; color: #d1d1d1; }
+.comparison-decisions > summary::marker { color: #777; }
+.comparison-decisions .table-wrap { max-width: 100%; }
+.comparison-decisions .data-table td:last-child { color: #999; }

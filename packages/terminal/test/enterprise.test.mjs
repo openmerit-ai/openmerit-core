@@ -7,7 +7,9 @@ import { serviceInventory } from '../client/services.mjs';
 import { buildEnvironmentMap } from '../client/map.mjs';
 import { deploymentFor } from '../client/environment.mjs';
 import worker from '../hosted/worker.mjs';
-import { WORKLOADS, PREFERENCES, selectReplacement, assessReplacement } from '../src/demo-policy.mjs';
+import { WORKLOADS, CATALOG, CONFIGURED_SERVICES, PREFERENCES, selectReplacement, assessReplacement, matchesPreference } from '../src/demo-policy.mjs';
+const candidate = id => CATALOG.find(item => item.id === id);
+const fixtureWorkload = () => structuredClone({ ...WORKLOADS[0], candidates: [candidate('gpt41'), candidate('gpt41mini')] });
 const now = Date.parse('2026-10-10T12:00:00Z');
 const total = (items, field) => items.reduce((n, item) => n + (item[field] ?? 0), 0);
 
@@ -46,9 +48,11 @@ test('comparison changes models and prices while preserving the complete workloa
   assert.equal(before.records.length, after.records.length);
   for (let i = 0; i < before.records.length; i++) {
     const a = before.records[i], b = after.records[i];
-    for (const field of ['id', 'occurredAt', 'sampleRequests', 'provider', 'agentId', 'taskId', 'inputTokens', 'outputTokens', 'route', 'path', 'deploymentId']) assert.deepEqual(a[field], b[field], field);
+    for (const field of ['id', 'occurredAt', 'sampleRequests', 'agentId', 'taskId', 'inputTokens', 'outputTokens', 'deploymentId']) assert.deepEqual(a[field], b[field], field);
     const pair = after.simulation.assignments[a.assignmentId];
-    assert.equal(a.model !== b.model, pair.changed);
+    assert.equal(a.model !== b.model, pair.modelChanged);
+    assert.equal(a.provider !== b.provider, pair.serviceChanged);
+    assert.ok(CONFIGURED_SERVICES.includes(b.provider));
     assert.equal(a.durationMs, null); assert.equal(b.durationMs, null);
     assert.ok(a.cost >= b.cost && b.cost > 0);
     assert.equal(a.cost, a.beforeCost); assert.equal(b.cost, b.afterCost);
@@ -90,31 +94,47 @@ test('both comparison URL forms serve the comparison document', async () => {
   for (const path of ['/demo', '/demo/']) assert.equal(await (await worker.fetch(new Request(`https://dash.openmerit.site${path}`), env)).text(), 'demo');
 });
 
-test('demo identities describe a stable insurance application in every preference', () => {
+test('preferences preserve the scenario, search all configured services, and fail closed as a whole', () => {
   const baseline = demoSnapshot(now);
   assert.equal(baseline.project.name, 'insurance-tech-demo');
   assert.equal(new Set(baseline.records.map(r => r.agentId)).size, 200);
   assert.equal(new Set(baseline.records.map(r => r.taskId)).size, 700);
-  const cost = total(baseline.records, 'cost');
   for (const { value } of PREFERENCES) {
-    const data = demoSnapshot(now, 'after', value);
+    const data = demoSnapshot(now, 'after', value), sim = data.simulation;
+    assert.deepEqual(data.inventory, baseline.inventory);
+    assert.equal(sim.catalogSize, 25);
+    if (value === 'closed') {
+      assert.equal(sim.feasible, false);
+      for (const field of ['records', 'models', 'deployments', 'capacityPools']) assert.deepEqual(data[field], []);
+      assert.equal(sim.assignments.filter(pair => pair.after === null).length, 3);
+      for (const window of Object.values(sim.windows)) assert.equal(window.afterCost, null);
+      continue;
+    }
+    assert.equal(sim.feasible, true);
     assert.equal(total(data.records, 'inputTokens'), total(baseline.records, 'inputTokens'));
     assert.equal(total(data.records, 'outputTokens'), total(baseline.records, 'outputTokens'));
-    assert.ok(total(data.records, 'cost') < cost);
-    assert.equal(data.simulation.assignments.filter(pair => pair.changed).length, 3);
-    for (const pair of data.simulation.assignments) {
+    assert.ok(total(data.records, 'cost') < total(baseline.records, 'cost'));
+    assert.equal(sim.assignments.filter(pair => pair.changed).length, 5);
+    assert.equal(sim.assignments.filter(pair => pair.modelChanged).length, 4);
+    assert.equal(sim.assignments.filter(pair => pair.serviceChanged).length, 1);
+    for (const pair of sim.assignments) {
       if (pair.changed) assert.ok(pair.checks.every(check => check.status === 'pass'));
-      assert.equal(pair.before.provider, pair.after.provider);
+      assert.equal(pair.assessments.length, CATALOG.length - 1);
+      assert.ok(CONFIGURED_SERVICES.includes(pair.after.provider));
+      assert.equal(pair.preferenceMatched, matchesPreference(pair.after, value));
     }
-    if (value === 'closed') assert.equal(data.simulation.assignments.filter(pair => pair.unresolved).length, 3);
     for (let i = 0; i < data.records.length; i++) {
-      for (const field of ['id','workload','agent','agentId','task','taskId','occurredAt','path']) assert.deepEqual(data.records[i][field], baseline.records[i][field]);
-      assert.match(data.records[i].workload, /^services\/(claims|policy|coverage|documents|renewals|fraud|broker)\//);
+      for (const field of ['id','workload','agent','agentId','task','taskId','occurredAt','routeKind']) assert.deepEqual(data.records[i][field], baseline.records[i][field]);
+    }
+    for (const [hours, totals] of Object.entries(sim.windows)) {
+      const records = data.records.filter(r => !Number(hours) || Date.parse(r.occurredAt) >= now - Number(hours) * 3600000);
+      assert.equal(totals.requests, records.length * 1000);
+      assert.equal(totals.afterCost, total(records, 'cost'));
     }
   }
 });
 test('cheaper models with weaker or missing benchmark evidence are not selected', () => {
-  const workload = WORKLOADS[0], usage = { inputTokens: 1e6, outputTokens: 1e6 };
+  const workload = fixtureWorkload(), usage = { inputTokens: 1e6, outputTokens: 1e6 };
   const mini = assessReplacement(workload, workload.candidates[1], usage);
   assert.equal(mini.cheaper, true); assert.equal(mini.eligible, false);
   assert.equal(mini.checks.find(c => c.axis === 'tools').status, 'regression');
@@ -130,7 +150,7 @@ test('cheaper models with weaker or missing benchmark evidence are not selected'
   assert.equal(selectReplacement(expensive, usage).changed, false);
 });
 test('preference ranking never relaxes quality, cost, endpoint or output-contract gates', () => {
-  const workload = structuredClone(WORKLOADS[0]), usage = { inputTokens: 1e6, outputTokens: 1e6 };
+  const workload = fixtureWorkload(), usage = { inputTokens: 1e6, outputTokens: 1e6 };
   const base = workload.candidates[0];
   // Synthetic candidates exercise the ranking mechanism; these are not public model claims.
   workload.candidates = [base, { ...base, id: 'fixture-open', openWeights: true, origin: 'CN', confirmedZdr: true, input: 2.1 }];
@@ -139,7 +159,9 @@ test('preference ranking never relaxes quality, cost, endpoint or output-contrac
   for (const preference of ['closed','usa']) assert.equal(selectReplacement(workload, usage, preference).after.id, base.id);
   workload.candidates[1].provider = 'Unconfigured service';
   assert.equal(selectReplacement(workload, usage, 'open').after.id, base.id);
-  workload.candidates[1].provider = base.provider; workload.candidates[1].outputType = 'decision';
+  workload.candidates[1].provider = 'Baseten';
+  assert.equal(selectReplacement(workload, usage, 'open').after.id, 'fixture-open');
+  workload.candidates[1].outputType = 'decision';
   assert.equal(selectReplacement(workload, usage, 'open').after.id, base.id);
   workload.candidates[1].outputType = base.outputType; workload.candidates[1].openWeights = null;
   workload.candidates = [workload.candidates[1]];
@@ -155,7 +177,7 @@ test('a fourth decision gate cannot be bypassed by ordinary LLM benchmark scores
   assert.ok(jev.issues.some(issue => issue.includes('output contract')));
 });
 test('speed only qualifies with a matched latency measurement, never a missing value or different setup', () => {
-  const workload = structuredClone(WORKLOADS[0]), usage = { inputTokens: 1e6, outputTokens: 1e6 };
+  const workload = fixtureWorkload(), usage = { inputTokens: 1e6, outputTokens: 1e6 };
   workload.candidates = [workload.candidates[0]]; const candidate = workload.candidates[0];
   candidate.input = 3; candidate.output = 12;
   workload.before.latency = { suite:'fixture-workload-config', metric:'p95-ms', value:100, source:'https://example.com/paired' };
@@ -173,7 +195,7 @@ test('hosted preference is validated and reflected in the sample API', async () 
 });
 
 test('decision accuracy and calibration must both match or improve', () => {
-  const workload = structuredClone(WORKLOADS[0]), usage = {inputTokens:1e6,outputTokens:1e6};
+  const workload = fixtureWorkload(), usage = {inputTokens:1e6,outputTokens:1e6};
   workload.requiredAxes.push('decisions'); workload.candidates = [workload.candidates[0]];
   const metric = (axis, value, direction='higher') => ({axis, name:axis, suite:`fixture-${axis}`, value, direction, unit:'%', source:'https://example.com/paired'});
   workload.before.benchmarks.push(metric('decisionAccuracy',90), metric('calibration',5,'lower'));
@@ -183,4 +205,41 @@ test('decision accuracy and calibration must both match or improve', () => {
   assert.equal(selectReplacement(workload, usage).changed, false);
   workload.candidates[0].benchmarks.at(-1).value = 4;
   assert.equal(selectReplacement(workload, usage).changed, true);
+});
+
+test('published offer identities, configured set and actual preference outcomes are explicit', () => {
+  const baseline = demoSnapshot(now), after = demoSnapshot(now, 'after');
+  const assignment = after.simulation.assignments.find(item => item.id === 'claims.tagging');
+  assert.equal(assignment.before.modelId, assignment.after.modelId);
+  assert.equal(assignment.after.provider, 'Baseten');
+  assert.equal(assignment.after.confirmedZdr, true);
+  assert.ok(assignment.after.input < assignment.before.input);
+  assert.deepEqual(baseline.inventory, after.inventory);
+  // Identical soft-bias results are a real catalog outcome, not mocked differences.
+  for (const preference of ['zdr','open','usa','china']) {
+    const data = demoSnapshot(now, 'after', preference);
+    for (const pair of data.simulation.assignments) assert.equal(pair.preferenceChanged, pair.after.id !== pair.defaultChoice);
+  }
+  for (const model of CATALOG) {
+    assert.match(model.source, /^https:\/\//);
+    assert.ok(Number.isFinite(model.input) && Number.isFinite(model.output));
+    if (model.confirmedZdr) assert.match(model.policySource, /^https:\/\//);
+  }
+  assert.equal(matchesPreference({openWeights:null}, 'closed'), false);
+  assert.equal(matchesPreference({confirmedZdr:null}, 'zdr'), false);
+  assert.equal(matchesPreference({origin:null}, 'china'), false);
+});
+test('multiple evidence cohorts find matched benchmarks and never skip a matched regression', () => {
+  const workload = WORKLOADS.find(item => item.id === 'coverage.review');
+  const qwen = assessReplacement(workload, candidate('qwen36'), {inputTokens:1e6,outputTokens:1e6});
+  assert.equal(qwen.checks.length, 4);
+  assert.equal(qwen.checks.filter(check => check.status === 'regression').length, 1);
+  assert.equal(qwen.eligible, false);
+  assert.ok(qwen.checks.some(check => check.before?.name === 'ClawEval · pass³' && check.status === 'pass'));
+});
+test('blocked snapshots do not mutate the baseline or create a partial After cost', () => {
+  const data = demoSnapshot(now, 'before', 'closed');
+  assert.equal(data.records.length, 9600);
+  assert.ok(data.records.every(record => record.afterCost === null));
+  assert.deepEqual(data.records.map(record => record.model), demoSnapshot(now).records.map(record => record.model));
 });

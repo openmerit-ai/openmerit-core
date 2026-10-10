@@ -200,3 +200,8 @@ Reviewed evidence, pricing and readiness claims. The hosted comparison uses fict
 ## Insurance comparison evidence and preferences — 10 October 2026
 
 Reviewed the hosted demo's quality, price, privacy and model-selection claims. Replacements now require the selected public benchmark screen and a cost or paired-latency improvement. Publisher point estimates are distinct from application evaluations; missing evidence retains the baseline. Preference conflicts remain visible, including unresolved open-weight baselines under the closed-only option. ZDR is endpoint/account-specific and developer origin is separate from residency. Fictional insurance names and fixed token volumes remain explicit. No local discovery, runtime routing, evaluation-engine, npm or homepage FAQ behavior changes. Deployment verification is recorded separately.
+
+
+## Expanded comparison selection — 10 October 2026
+
+Reviewed the hosted preference behavior against the public guide. The dated catalog searches 25 offers across six configured services and distinguishes model identity from endpoint pricing and ZDR. A hard no-open-weights conflict blocks the complete After plan and its projected cost. Soft biases can produce identical selections; the UI exposes matches and equality with Default instead of implying arbitrary changes. Benchmarks remain public screening signals, not measured application-quality or endpoint-latency evidence. The main homepage FAQ and published npm behavior require no changes.
