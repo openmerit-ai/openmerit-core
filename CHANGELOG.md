@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.6-preview.4 — 2026-10-10
+
+- Index supported application code, nested configuration, custom endpoints, and conservative model/call-site references automatically during `openmerit dash`, with file-and-line evidence.
+- Separate static declarations, aliases, examples, benchmarks, candidates, fallbacks, and unresolved references from recorded inference usage. Retain custom service identities without guessing vendors or hardware.
+- Add a searchable code/configuration view, coverage notes, and a counts-only `openmerit dash --diagnostics` report for troubleshooting without repository access.
 
 ## 0.1.6-preview.3 — 2026-10-10
 

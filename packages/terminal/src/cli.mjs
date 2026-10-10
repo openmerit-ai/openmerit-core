@@ -5,6 +5,7 @@ import { startTerminal } from './server.mjs';
 import { createCollector, loadConfig } from './collect.mjs';
 import { sampleSnapshot } from './sample.mjs';
 import { openBrowser } from './browser.mjs';
+import { indexDiagnostics, indexRepository } from './repository-index.mjs';
 
 const help = `OpenMerit · Inference Terminal
 
@@ -15,6 +16,7 @@ const help = `OpenMerit · Inference Terminal
   --no-discovery       Skip project/log discovery and extra runtime discovery
   --no-open            Print the URL without opening a browser
   --json               Print one snapshot for an agent, then exit
+  --diagnostics        Print shareable index coverage counts, then exit
   --demo               Explore a clearly labeled fictional environment
   --help               Show this help
 
@@ -27,7 +29,7 @@ async function main() {
   const args = process.argv.slice(2);
   if (!args.length || args.includes('--help') || args.includes('-h')) { console.log(help); return; }
   if (args.shift() !== 'dash') throw new Error('Unknown command. Run openmerit --help.');
-  let root = process.cwd(), port = 4310, interval = 15, demo = false, json = false, pathSeen = false, discovery = true, noOpen = false, explicitPort = false;
+  let root = process.cwd(), port = 4310, interval = 15, demo = false, json = false, pathSeen = false, discovery = true, noOpen = false, explicitPort = false, diagnostics = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--port' || arg === '--interval') {
@@ -39,6 +41,7 @@ async function main() {
     else if (arg === '--access' || arg === '--revoke-access') throw new Error('Coding-harness history is no longer collected. Saved history permissions are ignored; these access options have been removed.');
     else if (arg === '--demo') demo = true;
     else if (arg === '--json') json = true;
+    else if (arg === '--diagnostics') diagnostics = true;
     else if (!arg.startsWith('-') && !pathSeen) { root = resolve(arg); pathSeen = true; }
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -47,13 +50,14 @@ async function main() {
   if (!(await stat(root)).isDirectory()) throw new Error('Choose a project directory.');
   const config = demo ? null : await loadConfig(root);
   if (config && !discovery) config.discovery = false;
+  if (diagnostics) { const index = !demo && config.discovery ? await indexRepository(root) : null; console.log(JSON.stringify(indexDiagnostics(index), null, 2)); return; }
   if (json) { console.log(JSON.stringify(demo ? sampleSnapshot() : await createCollector(root, config, interval)(), null, 2)); return; }
   const terminal = await startTerminal({ root, port, interval, demo, config, fallbackPort: !explicitPort });
   console.log(`\n  OpenMerit · Inference Terminal\n\n  ${terminal.url}\n\n  ${demo ? 'Sample environment · fictional data' : 'Current project · passive collection'}\n  Updates every ${interval}s. Press Ctrl+C to close.\n`);
   const close = () => { void terminal.close().then(() => process.exit(0)); };
   process.once('SIGINT', close); process.once('SIGTERM', close);
   if (!demo && config.discovery) {
-    console.log('  Automatic discovery: project declarations, request logs, local runtimes, and machine readings.');
+    console.log('  Automatic discovery: repository code/configuration, saved request logs, and project-linked runtimes.');
   }
   if (!noOpen && !await openBrowser(terminal.url)) console.log('  Open the local URL above in your browser.');
 }

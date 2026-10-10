@@ -12,7 +12,7 @@ The preview is accessible to anyone with the link and asks search engines not to
 
 ## Install the test preview
 
-The terminal is delivered through the existing `openmerit` package under npm’s `preview` tag. Historical ranges are included in `0.1.6-preview.1` and later; the project-evidence corrections below require `0.1.6-preview.2` or later. Expanded endpoint discovery and the review corrections require `0.1.6-preview.3` or later. Requires **Node.js 22.19 or newer**, with npm available in your terminal. From your application's directory:
+The terminal is delivered through the existing `openmerit` package under npm’s `preview` tag. Historical ranges are included in `0.1.6-preview.1` and later; the project-evidence corrections below require `0.1.6-preview.2` or later. Expanded endpoint discovery and the review corrections require `0.1.6-preview.3` or later. Repository code/configuration indexing and counts-only diagnostics require `0.1.6-preview.4` or later. Requires **Node.js 22.19 or newer**, with npm available in your terminal. From your application's directory:
 
 ```sh
 cd /path/to/your/project
@@ -56,10 +56,37 @@ openmerit dash --no-open
 | `--no-discovery` | Skip project-file and request-log discovery and additional runtime discovery for this run; explicitly declared runtimes and exports, explicitly linked machine context remain available |
 | `--no-open` | Start collection and print the URL without launching a browser |
 | `--json` | Print one snapshot and exit without starting an HTTP server |
+| `--diagnostics` | **0.1.6-preview.4+:** print repository-index coverage counts only, then exit; no browser, server, or endpoint probes |
 | `--demo` | Use an explicitly fictional environment; no local collectors run |
 | `--help` | Show usage |
 
 Use Ctrl+C to close the terminal. There is no persistent daemon or background scheduler. Collection runs only while the command is running. The terminal is separate from Pi's `/openmerit pause` and other orchestration commands.
+
+## Repository indexing (0.1.6-preview.4+)
+
+Version `0.1.6-preview.4` adds a bounded, local syntax index of application declarations. No repository access needs to be shared with OpenMerit, and no separate audit step is required. The index runs initially and every 60 seconds while the terminal is running. It creates no files in the application.
+
+The reader supports Python, JavaScript/TypeScript (including JSX/TSX), JSON, YAML, TOML, and project-local `.env*` files. It finds literal model/endpoint fields, conservative same-file variable and object references, environment references resolved from the nearest project-local dotenv directory, selected SDK call patterns, and enclosing function names. Unknown/private HTTP(S) endpoints remain named by their sanitized address; a custom host or port never establishes a vendor, runtime, deployment, or physical machine. Public Hub/download URLs do not establish an inference service. URLs found by this index are **never probed**; existing explicitly authorized runtime discovery remains separate.
+
+- **Services and Models:** linked application declarations appear as **Declared**, with file-and-line evidence. This does not establish reachability, availability, loaded state, usage, or cost. Model-only fields without a supported call or endpoint link remain unlinked references in Sources.
+- **Sources → Code & configuration:** searchable, paginated endpoint/model/call-site references, their declaration fields, and source locations. Examples, tests, benchmarks, candidate lists, fallback values, model aliases, and unlinked references are labeled separately and excluded from the application inventory. A function or task declaration never creates a running agent, completed task, request, or environment-map path.
+- **Index coverage:** unresolved expressions, conflicting dotenv declarations, parse failures, unsupported values, and read limits. Unsupported file types and policy exclusions are counted. Missing declarations do not establish that a project uses no inference.
+
+The index does not execute or import project code, load shell files, inspect running processes, consult inherited shell variables, or fetch cloud accounts. It does not resolve cross-file imports, arbitrary expressions, template interpolation, configuration loading order, dynamic routers, YAML aliases, or multiline TOML values. Conditional values remain candidates; a fallback remains a fallback even if a runtime might choose it. Supported syntax is deliberately conservative. Models and task names are never inferred from prose, prompts, or model-name conventions.
+
+Reads stay within the selected directory, skipping symlinks, hidden directories, dependency/build folders, credential-named files, and request-log roots handled by the separate activity reader. Each scan visits at most 8,000 entries and eight nested directories, reads at most 400 supported files, 128 KiB per file and 4 MiB overall, and retains at most 2,000 declarations and 100 detailed coverage notes. Dotenv files are prioritized, then files are sorted by path. These bounds can leave a large repository partially indexed. Removing a declaration removes it after the next scan.
+
+The snapshot retains selected identifiers, relative file paths, line numbers, and sanitized endpoint addresses. It discards raw source text, prompt/response fields, credentials, URL credentials, query strings, fragments, and resource paths. Known dedicated resource subdomains are redacted. Structural paths such as `/v1` or `/api/v1` may remain. Local endpoint addresses, model names, and filenames can still be sensitive; the full snapshot is intended for local viewing.
+
+To share coverage without sharing the repository or its identifiers, run this option from the project with **0.1.6-preview.4 or later**:
+
+```sh
+openmerit dash --diagnostics
+```
+
+It prints only format/read/skip/declaration/issue counts and scan limits. It does not include paths, variable names, model names, endpoint identities, file contents, or credentials, and sends nothing itself. The user chooses whether to copy the output. Detailed issue counts cover the retained notes; the summary reports the total unresolved count.
+
+`--no-discovery` or `"discovery": false` disables the index. Request history still requires supported application logs or explicit exports. An inactive project can expose its declarations without having retained any usage history; code cannot reconstruct missing requests, tokens, latency, or spend.
 
 ## Review corrections (0.1.6-preview.3)
 
@@ -76,7 +103,7 @@ Version `0.1.6-preview.3` includes the following corrections; earlier previews r
 
 Discovery runs as part of `openmerit dash`; no separate audit command or exporter is needed for supported sources. The first snapshot checks the selected project and its declared loopback runtime endpoints. Project declarations and previously unresponsive addresses are checked again every 60 seconds. Responding runtimes, OS readings, project request logs, and existing exports refresh at the normal 10–30-second collection interval.
 
-Configuration discovery reads only four fixed files: `.env`, `.env.local`, `package.json`, and `requirements.txt`, each limited to 128 KiB and required to resolve to a regular file inside the project. It does not recursively index source code, execute project code, source shell files, or expand environment expressions. Supported SDK declarations are shown as **Detected** source hints; an installed SDK is not proof of a service connection or request. Supported literal `.env` declarations establish project configuration evidence. Inherited shell credentials and endpoint variables are not added to project services; the terminal cannot establish which project owns them. For applications configured only through their launch environment, declare the services explicitly in `.openmerit/terminal.json` or supply recorded request metadata. Each file is independent evidence; discovery does not pretend to know an application's loading order. Credential contents and unrelated settings are discarded before metadata is retained or returned.
+Through `0.1.6-preview.3`, configuration discovery reads only four fixed files: `.env`, `.env.local`, `package.json`, and `requirements.txt`, each limited to 128 KiB and required to resolve to a regular file inside the project. It does not recursively index source code, execute project code, source shell files, or expand environment expressions. Supported SDK declarations are shown as **Detected** source hints; an installed SDK is not proof of a service connection or request. Supported literal `.env` declarations establish project configuration evidence. Inherited shell credentials and endpoint variables are not added to project services; the terminal cannot establish which project owns them. For applications configured only through their launch environment, declare the services explicitly in `.openmerit/terminal.json` or supply recorded request metadata. Each file is independent evidence; discovery does not pretend to know an application's loading order. Credential contents and unrelated settings are discarded before metadata is retained or returned.
 
 Local runtime probes require an endpoint in the selected project’s `.env` or `.env.local`, or an explicit runtime in `.openmerit/terminal.json`. No standard ports are probed automatically. SDK dependencies, runtime names in historical records, and inherited shell endpoint settings alone do not authorize a probe. A recorded request remains visible without discovering any additional runtime models. Supported API endpoint variables are listed below; `OLLAMA_HOST` and `OLLAMA_BASE_URL` identify native Ollama endpoints. `OLLAMA_HOST` may use `127.0.0.1:11434` without the HTTP scheme. Endpoint paths must be empty or `/v1`; credentials, queries, fragments, and non-loopback hosts are rejected. At most eight discovered origins are checked without authentication or redirects. Compatible endpoints use read-only `GET /v1/models` and `GET /metrics`; native Ollama declarations use `GET /api/tags` and `GET /api/ps`. Unknown or nonresponding candidates do not become service rows. Configured origins are not probed twice. A compatible catalog supplies model availability; recognized vLLM counters can also identify vLLM. A port number alone never establishes LM Studio or vLLM identity, so an otherwise unidentified compatible runtime is named by its loopback origin. Bounded inventory from a project endpoint can be shown, including available models that have no recorded project usage. Catalogs are limited to 100 entries per response; exceeded limits mark the source Partial, include omitted counts, and display an inventory-coverage notice. API compatibility and a loopback address do not establish a runtime role, physical host, or self-hosted serving mode. Inventory and shared runtime counters do not establish that the selected application used every model. Removing an endpoint declaration removes its discovered inventory on the next 60-second discovery pass. This is bounded project-linked discovery, not network or remote-host scanning.
 
@@ -135,7 +162,7 @@ When request metadata includes stable agent or task IDs, the overview leads dire
 
 ### Where names come from
 
-The terminal does not infer agent roles, task descriptions, service identities, or physical locations from arbitrary source code, prompts, or model output. Being present in a repository does not establish that an agent ran. This build reads supported metadata exports, explicit configuration, runtime inventory, and the operating system. A codebase integration must export its existing identifiers; it should not generate nicer descriptions to fill gaps.
+The terminal does not infer agent roles, task descriptions, service identities, or physical locations from arbitrary source code, prompts, or model output. Being present in a repository does not establish that an agent ran. The terminal reads supported metadata exports, explicit configuration, runtime inventory, and the operating system. Version `0.1.6-preview.4` also indexes supported code/configuration declarations as references; those references do not create running agents or request history. Application logs or exports must supply their existing request identities; the terminal does not generate nicer descriptions to fill gaps.
 
 | Identity | Source and fallback |
 | --- | --- |
@@ -292,7 +319,7 @@ Configuration, inventory, and activity evidence are distinct. A configured servi
 
 ### Inference services and model creators
 
-The terminal recognizes configuration evidence for Baseten, Groq, and Cerebras alongside the existing services below. Expanded coverage in `0.1.6-preview.3` is documented under **Additional inference endpoints**. Only supported literal declarations in the selected project’s `.env` and `.env.local` files provide automatic configuration evidence. Global shell variables do not establish project ownership. Shell histories, arbitrary source files, and credential stores are not scanned. A configured service does not establish an active connection, model inventory, usage, available capacity, or a hardware allocation.
+The terminal recognizes configuration evidence for Baseten, Groq, and Cerebras alongside the existing services below. Expanded coverage in `0.1.6-preview.3` is documented under **Additional inference endpoints**. The configuration reader described here uses supported literal declarations in the selected project’s `.env` and `.env.local` files. Version `0.1.6-preview.4` additionally indexes supported code and nested configuration as described under Repository indexing. Global shell variables do not establish project ownership. Shell histories and credential stores are not scanned; source indexing follows the bounded syntax rules above. A configured service does not establish an active connection, model inventory, usage, available capacity, or a hardware allocation.
 
 | Service | Credential-variable names | Optional endpoint-variable names |
 | --- | --- | --- |
@@ -394,7 +421,7 @@ These declarations identify two configured services; they do not establish that 
 
 The terminal makes no remote calls, reads no Hugging Face token cache, and fetches no account history or model catalog. Models, requests, tokens, costs, agents, and deployment links still require recorded metadata or explicit inventory. Supported request logs can use `provider: "Hugging Face Endpoints"` or `route: "Hugging Face Router"` to identify the corresponding service. A generic `Hugging Face` name remains unclassified; the terminal does not choose a product or serving provider for it. The two products share a locally bundled official logo but remain separate service identities.
 
-The recognized formats follow Hugging Face's [environment-variable documentation](https://huggingface.co/docs/huggingface_hub/en/package_reference/environment_variables), [dedicated endpoint guide](https://huggingface.co/docs/huggingface_hub/guides/inference_endpoints), and [inference router documentation](https://huggingface.co/docs/inference-providers/index). Hardcoded URLs in source code and arbitrary environment-variable names are outside the current declaration scan.
+The recognized formats follow Hugging Face's [environment-variable documentation](https://huggingface.co/docs/huggingface_hub/en/package_reference/environment_variables), [dedicated endpoint guide](https://huggingface.co/docs/huggingface_hub/guides/inference_endpoints), and [inference router documentation](https://huggingface.co/docs/inference-providers/index). In `0.1.6-preview.3`, URLs in source code and arbitrary environment-variable names are outside the declaration scan. Version `0.1.6-preview.4` can index supported literal source declarations and custom dotenv names referenced by supported inference fields; dynamic expressions and cross-file imports remain unresolved.
 
 ### Deployments and shared capacity
 

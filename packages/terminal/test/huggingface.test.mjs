@@ -65,7 +65,8 @@ test('Hub credentials, SDK dependencies and model downloads cannot establish an 
   const snapshot = await createCollector(root, await loadConfig(root))();
   assert.deepEqual(serviceInventory(snapshot), []);
   assert.deepEqual(snapshot.models, []); assert.deepEqual(snapshot.records, []);
-  assert.doesNotMatch(JSON.stringify(snapshot), /private-token|MODEL_ID|HF_TOKEN|Qwen/);
+  assert.doesNotMatch(JSON.stringify(snapshot), /private-token|HF_TOKEN/);
+  assert.ok(snapshot.repository.references.some(ref => ref.value === 'Qwen/Qwen3-8B' && ref.context === 'unlinked'));
 });
 
 test('both Hugging Face products index passively and usage appears only from supported project logs', async t => {

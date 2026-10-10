@@ -35,12 +35,12 @@ export function serviceInventory(snapshot, selectedRecords = snapshot.records ??
       const candidates = [...services.values()].filter(item => serviceKey(item.name) === identity);
       if (candidates.length === 1) { candidates[0].aliases.add(name); return candidates[0]; }
     }
-    const service = { id, name, aliases: new Set([name]), explicitTypes: new Set(), registryTypes: new Set(), locations: new Set(), endpoints: new Set(), evidence: new Map(), models: new Map(), deployments: new Map(), poolIds: new Set(), records: new Set(), paths: new Map(), lastAt: null, configured: false, reported: false };
+    const service = { id, name, aliases: new Set([name]), explicitTypes: new Set(), registryTypes: new Set(), locations: new Set(), endpoints: new Set(), evidence: new Map(), models: new Map(), deployments: new Map(), poolIds: new Set(), records: new Set(), paths: new Map(), lastAt: null, configured: false, declared: false, reported: false };
     services.set(id, service); return service;
   };
-  const evidence = (service, sourceId, field, detail) => {
+  const evidence = (service, sourceId, field, detail, provenance = {}) => {
     if (!service) return;
-    const item = { sourceId: sourceId || 'inventory', field, detail };
+    const item = { sourceId: sourceId || 'inventory', field, detail, ...provenance };
     service.evidence.set(JSON.stringify(item), item);
   };
   const classify = (service, item) => {
@@ -63,13 +63,13 @@ export function serviceInventory(snapshot, selectedRecords = snapshot.records ??
   for (const source of snapshot.sources ?? []) if (endpointSource(source) && source.state !== 'disabled') declarations.add(key(source.name));
   for (const item of inventory) {
     const service = ensure(item.name, true); if (!service) continue;
-    classify(service, item); service.configured = true;
+    classify(service, item); if (item.state === 'declared') service.declared = true; else service.configured = true;
     for (const id of item.poolIds ?? []) service.poolIds.add(id);
     for (const entry of item.evidence ?? []) {
-      evidence(service, entry.sourceId || 'environment', entry.field, entry.basis === 'endpoint-host' ? 'Recognized endpoint host' : 'Credential variable present');
+      evidence(service, entry.sourceId || 'environment', entry.field, entry.basis === 'repository-declaration' ? 'Code or configuration declaration' : entry.basis === 'endpoint-host' ? 'Recognized endpoint host' : 'Credential variable present', entry.file ? { file: entry.file, line: entry.line, referenceId: entry.referenceId } : {});
       if (entry.endpointHost) service.endpoints.add(entry.endpointHost);
     }
-    if (item.sourceId !== 'environment' && !item.sourceId?.startsWith('project:')) evidence(service, item.sourceId || 'inventory', 'inventory.name', 'Declared service');
+    if (item.sourceId !== 'repository' && item.sourceId !== 'environment' && !item.sourceId?.startsWith('project:')) evidence(service, item.sourceId || 'inventory', 'inventory.name', 'Declared service');
   }
   for (const source of snapshot.sources ?? []) {
     if (!endpointSource(source) || source.state === 'disabled') continue;
@@ -86,7 +86,7 @@ export function serviceInventory(snapshot, selectedRecords = snapshot.records ??
   for (const model of snapshot.models ?? []) {
     const service = ensure(model.provider); if (!service) continue;
     classify(service, { name: model.provider, kind: 'provider', location: model.location }); addModel(service, model);
-    evidence(service, model.sourceId, 'provider', 'Model inventory');
+    evidence(service, model.sourceId, 'provider', model.state === 'declared' ? 'Declared model reference' : 'Model inventory');
     if (model.state === 'configured') service.configured = true;
   }
   for (const deployment of snapshot.deployments ?? []) {

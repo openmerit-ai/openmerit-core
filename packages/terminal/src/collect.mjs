@@ -3,6 +3,7 @@ import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import os from 'node:os';
 import { historyExtent } from './history.mjs';
 import { discoverProject, discoveryCandidates } from './discovery.mjs';
+import { indexRepository } from './repository-index.mjs';
 import { createProjectActivity } from './project-activity.mjs';
 import { reconcileActivity } from './activity-merge.mjs';
 import { modelCreators } from './services.mjs';
@@ -236,11 +237,11 @@ export function createCollector(root, config, interval = 15) {
   const hardwareHistory = [];
   const hostHistories = new Map();
   const projectActivity = createProjectActivity(root, normalizeRecord, { exclude: [resolve(root, config.activityFile)] });
-  let projectDiscovery = { sources: [], inventory: [], runtimes: [] }, discoveredAt = 0;
+  let projectDiscovery = { sources: [], inventory: [], runtimes: [] }, repository = null, discoveredAt = 0;
   const knownRuntimes = new Map();
   return async function collect() {
     const scan = Boolean(config.discovery) && Date.now() - discoveredAt >= 60_000;
-    if (scan) { projectDiscovery = await discoverProject(root); discoveredAt = Date.now(); }
+    if (scan) { [projectDiscovery, repository] = await Promise.all([discoverProject(root), indexRepository(root)]); discoveredAt = Date.now(); }
     const allCandidates = config.discovery ? discoveryCandidates(projectDiscovery, config.runtimes, config.ollama, Infinity).filter(runtime => !(config.ollamaDisabled && runtime.type === 'ollama')) : [];
     const candidates = allCandidates.slice(0, 8);
     const discoveryLimits = collectionLimits({ endpoints: allCandidates }, { endpoints: 8 });
@@ -279,6 +280,12 @@ export function createCollector(root, config, interval = 15) {
       const key = `${item.provider}:${item.model}`;
       if (!models.has(key)) models.set(key, { id: key, name: item.model, provider: item.provider, location: item.location, state: 'observed', sourceId: item.sourceId, memoryBytes: null });
     }
+    for (const item of repository?.models ?? []) {
+      const key = `${item.provider}:${item.name}`;
+      const existing = models.get(key);
+      if (!existing) models.set(key, item);
+      else existing.declarationIds = [...new Set([...(existing.declarationIds ?? []), ...item.declarationIds])];
+    }
     const cpu = cpuTotals();
     const cpuPercent = previousCpu && cpu.total > previousCpu.total ? Math.max(0, Math.min(100, 100 * (1 - (cpu.idle - previousCpu.idle) / (cpu.total - previousCpu.total)))) : null;
     previousCpu = cpu;
@@ -294,6 +301,7 @@ export function createCollector(root, config, interval = 15) {
     ];
     if (config.discovery) {
       sources.push(...projectDiscovery.sources);
+      if (repository) sources.push({ id: 'repository', name: 'Repository index', kind: 'Code & configuration', state: repository.summary.truncated || repository.issues.length ? 'partial' : 'connected', detail: `${repository.summary.filesRead} files · ${repository.references.length} declarations`, updatedAt: repository.checkedAt, coverage: ['Endpoint declarations', 'Model references', 'Call sites', 'Coverage gaps'], access: 'Selected project', note: 'Static syntax only. Source code is never executed. Declarations do not establish usage, reachability, loaded models, or physical hosts. Examples, candidates, benchmarks and fallbacks are separated. Paths and line numbers identify the evidence; prompts, credentials and raw source contents are discarded.' });
       sources.push(...logs.sources);
       if (discoveryLimits.length) sources.push({ id: 'runtime-discovery', name: 'Endpoint discovery coverage', kind: 'Project discovery', state: 'partial', truncated: true, limits: discoveryLimits, detail: '.env · .env.local', note: limitNote(discoveryLimits).trim() });
     }
@@ -322,13 +330,14 @@ export function createCollector(root, config, interval = 15) {
     const residentModels = residentRuntimes.flatMap(runtime => runtime.models).filter(model => model.state === 'loaded');
     const machine = { id: 'this-machine', projectLinked: localComputeLinked, scope: 'whole-machine', name: os.hostname(), nameField: 'hostname', hostname: os.hostname(), site: '', rack: '', sourceId: 'machine', observedAt: now, chip: text(os.cpus()[0]?.model, os.arch()), cores: os.cpus().length, platform: os.platform(), arch: os.arch(), memoryTotal, memoryUsed, cpuPercent, history: [...hardwareHistory], accelerators: [], residencyReported: residentRuntimes.length > 0, loadedModels: residentModels.map(model => ({ ...model, runtime: model.provider, memoryKind: 'accelerator', deploymentId: `runtime:${model.id}` })) };
     const hosts = [...(localComputeLinked ? [machine] : []), ...retainHostHistory(hardware.hosts, hostHistories)];
-    const inventory = [...config.inventory.filter(item => item.kind !== 'model'), ...projectDiscovery.inventory].map(item => ({ ...item, sourceId: item.sourceId || 'inventory' }));
+    const inventory = [...config.inventory.filter(item => item.kind !== 'model'), ...projectDiscovery.inventory, ...(repository?.inventory ?? [])].map(item => ({ ...item, sourceId: item.sourceId || 'inventory' }));
     const creatorReports = [...records, ...(config.deployments ?? []), ...config.inventory.filter(item => item.kind === 'model').map(item => ({ ...item, sourceId: 'inventory' })), ...hardware.hosts.flatMap(host => host.loadedModels.map(model => ({ ...model, sourceId: 'hardware' })))];
     const historySources = sources.filter(source => source.id === 'activity' || source.id.startsWith('project-log:') || source.id === 'project-log-coverage');
     const gaps = historySources.filter(source => source.state === 'partial' || source.state === 'unavailable' || source.truncated || source.invalid);
     const history = { ...historyExtent(records, now), retained: records.length, coverage: gaps.length || reconciliation.excluded ? 'partial' : 'available', sourceIds: historySources.filter(source => source.state !== 'not_found').map(source => source.id) };
     return {
       schemaVersion: 1, mode: 'live', observedAt: now, interval, history,
+      repository: repository ? { references: repository.references, issues: repository.issues, summary: repository.summary, checkedAt: repository.checkedAt } : null,
       discovery: { enabled: Boolean(config.discovery), checkedAt: discoveredAt ? new Date(discoveredAt).toISOString() : null, intervalSeconds: 60, runtimeCandidates: candidates.length, requestSource: requestSources.length > 1 ? 'combined' : requestSources[0] ?? null, requestSources, reconciliation: { duplicates: reconciliation.duplicates, excluded: reconciliation.excluded, conflicts: reconciliation.conflicts, sources: reconciliation.sources } },
       project: { name: basename(root), scope: 'Current project' },
       models: modelCreators([...models.values()], creatorReports), inventory: [...inventory, ...(config.runtimes ?? []).map(runtime => ({ name: runtime.name, kind: runtime.type === 'openai-compatible' ? 'unknown' : 'runtime', location: runtimePlacement(runtime).location, state: 'configured' }))],

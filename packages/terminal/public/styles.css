@@ -785,3 +785,15 @@ body.keyboard .complete-map .map-node rect,body.keyboard .complete-map .map-edge
 .history-partial{color:#c6aa79}
 @media(max-width:1000px){.page-heading{flex-wrap:wrap}.heading-controls{flex-wrap:wrap}.history-coverage{margin-top:-12px}}
 @media(max-width:700px){.page-heading{gap:18px}.heading-controls{width:100%;margin:0;justify-content:space-between;gap:10px}.heading-controls .segmented{max-width:100%}.heading-controls .segmented button{font-size:11px;min-height:30px;padding:5px 9px}.history-coverage{font-size:11px;margin-bottom:20px}.history-dates{display:block;margin-left:0}}
+
+/* Repository evidence uses the same table rhythm as recorded inventory. */
+.repository-index { margin: 28px 0 36px; }
+.reference-table { min-width: 620px; }
+.reference-table td { vertical-align: middle; }
+.reference-table th:nth-child(2), .reference-table td:nth-child(2) { text-align: left; width: 140px; }
+.reference-table th:last-child, .reference-table td:last-child { text-align: left; }
+.reference-table .model-name, .reference-file { overflow-wrap: anywhere; white-space: normal; text-align: left; }
+.reference-table .model-name { max-width: 480px; }
+.reference-pagination { display: flex; justify-content: flex-end; align-items: center; gap: 20px; margin-top: 14px; }
+.reference-pagination > :first-child { margin-right: auto; }
+.reference-pagination button:disabled { opacity: .35; cursor: default; }

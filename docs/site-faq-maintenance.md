@@ -156,3 +156,13 @@ Prepared `0.1.6-preview.3` to include the three source-only changes above. The p
 ## Endpoint coverage — published preview.3, 10 October 2026
 
 Published `0.1.6-preview.3` and verified its npm integrity and `preview` dist-tag, superseding the source-only and release-preparation status above. Direct registry installation on the VM retained all 242 requests, 41 agent IDs, 122 task IDs, and 126 unchanged application files through passive refresh. Endpoint fixtures remained separate from actual history; no inference calls were made. Stable `latest` remains `0.1.5`; no homepage FAQ wording or site deployment changed.
+
+
+## Repository index — unreleased source, 10 October 2026
+
+Reviewed data handling, evidence, background collection, and readiness claims. The terminal now reads bounded Python/JS/TS and structured configuration syntax within the selected project, including nested dotenv declarations. No code execution, cloud calls, or network probes are added by the index. Local snapshots expose narrow identifiers and relative file/line evidence; a separate opt-in diagnostics command outputs counts only. Declarations, examples, candidates, aliases, and unresolved references remain distinct from actual application usage. Existing activity adapters and runtime-probe authorization remain unchanged. The guide explicitly marks this as unreleased source; npm preview.3 and the stable-package homepage FAQ keep their published scope. No main-site or hosted-sample deployment is implied by local verification.
+
+
+## Repository index release preparation — 10 October 2026
+
+Prepared `0.1.6-preview.4` to deliver repository indexing and counts-only diagnostics through the existing npm preview channel. The public guide identifies the minimum version and retains the boundaries on static references, recorded usage, supported syntax, and bounded scans. Registry publication and registry-install verification are pending. The VM source-build acceptance retained the existing 242 records; a separate real HF smoke workload added three successful requests and one credit-related failure. Its provider and route metadata were explicitly logged by the test application, not reconstructed from network traffic. Stable-package homepage FAQ claims remain unchanged; no website deployment is included.
