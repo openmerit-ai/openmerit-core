@@ -815,3 +815,59 @@ progress:indeterminate { opacity:.55; }
 .terminal-loading progress { max-width:260px;margin-bottom:16px; }
 .terminal-loading>span { color:var(--muted);font-size:12px; }
 @media(max-width:700px) { .index-progress { grid-template-columns:1fr auto;gap:14px; }.index-progress progress { grid-column:1 / -1;grid-row:2; }.index-progress small { line-height:1.5; } }
+/* Hosted comparison uses the terminal's existing typography and neutral surfaces. */
+.sample-disclosure a { color: inherit; white-space: nowrap; text-decoration: none; }
+.sample-disclosure a:hover { color: var(--text); }
+.sample-method { display: flex; justify-content: flex-end; margin: -10px 0 18px; font-size: 11px; }
+.comparison { margin: 0 0 24px; padding: 6px 0 16px; border-bottom: 1px solid var(--line, #292929); }
+.comparison-top, .comparison-bottom { display: flex; align-items: center; gap: 24px; }
+.comparison-top { justify-content: space-between; margin-bottom: 18px; }
+.comparison h2 { margin: 0 0 6px; font-size: 17px; font-weight: 500; letter-spacing: -.3px; }
+.comparison-top p { margin: 0; color: #929292; font-size: 12px; }
+.comparison-switch { display: flex; padding: 4px; gap: 3px; border: 1px solid #303030; border-radius: 9px; background: #181818; flex-shrink: 0; }
+.comparison-switch button { border: 0; border-radius: 5px; background: transparent; color: #969696; padding: 10px 15px; font: inherit; font-size: 12px; cursor: pointer; transition: background-color 160ms ease-out, color 160ms ease-out, transform 160ms ease-out; }
+.comparison-switch button[aria-pressed="true"] { background: #343434; color: #f1f1f1; box-shadow: 0 1px 3px #0005, inset 0 1px #ffffff0b; }
+.comparison-switch button:active { transform: scale(.98); }
+.comparison-switch button:focus-visible { outline: 2px solid #adadad; outline-offset: 3px; }
+.comparison-cost { display: grid; gap: 7px; min-width: 165px; color: #7e7e7e; transition: color 180ms ease-out; }
+.comparison-cost.selected { color: #eee; }
+.comparison-cost > span { font-size: 11px; color: #999; }
+.comparison-cost strong { font-size: 23px; letter-spacing: -.6px; font-weight: 450; font-variant-numeric: tabular-nums; }
+.comparison-arrow { color: #6d6d6d; font-size: 19px; }
+.comparison-saving { margin-left: 16px; padding-left: 25px; border-left: 1px solid #303030; display: grid; gap: 8px; }
+.comparison-saving strong { color: #d4b185; font-size: 17px; font-weight: 450; }
+.comparison-saving span { color: #999; font-size: 11px; font-variant-numeric: tabular-nums; }
+.comparison-bottom > button { margin-left: auto; font-size: 11px; }
+.comparison-note { margin: 16px 0 0; color: #838383; font-size: 11px; line-height: 1.6; }
+.pricing-method { font-size: 12px; line-height: 1.7; color: #aaa; padding-bottom: 16px; }
+.price-assignment { padding: 22px 0; border-top: 1px solid #2c2c2c; font-size: 12px; }
+.price-provider { display: flex; justify-content: space-between; margin-bottom: 16px; }
+.price-provider > span:last-child { color: #929292; font-variant-numeric: tabular-nums; }
+.price-models { display: grid; grid-template-columns: minmax(0,1fr) 18px minmax(0,1fr); gap: 12px; }
+.price-models > div { display: flex; flex-direction: column; gap: 7px; }
+.price-models strong { font-size: 13px; font-weight: 450; }
+.price-models span, .price-result span { color: #999; font-size: 11px; }
+.price-assignment a { color: #aaa; font-size: 11px; text-decoration-color: #555; text-underline-offset: 3px; }
+.price-assignment a:hover { color: #eee; }
+.price-result { margin-top: 18px; color: #c8c8c8; font-variant-numeric: tabular-nums; }
+@media (max-width: 1100px) { .comparison-bottom { flex-wrap: wrap; gap: 18px; } .comparison-bottom > button { margin-left: 0; } .comparison-saving { margin-left: 0; } }
+@media (max-width: 650px) {
+  .comparison { margin-bottom: 18px; padding-top: 12px; }
+  .comparison-top { align-items: flex-start; flex-direction: column; gap: 18px; }
+  .comparison-top p { line-height: 1.6; }
+  .comparison-switch { width: 100%; }
+  .comparison-switch button { flex: 1; padding: 10px 8px; }
+  .comparison-bottom { gap: 12px; }
+  .comparison-cost { min-width: 0; flex: 1; }
+  .comparison-cost strong { font-size: 21px; }
+  .comparison-saving { border-left: 0; border-top: 1px solid #292929; padding: 16px 0 0; margin-top: 6px; flex-basis: 100%; }
+  .comparison-note { margin-top: 15px; }
+  .sample-disclosure { align-items: flex-start; gap: 14px; }
+  .sample-disclosure a { white-space: normal; min-width: 70px; }
+}
+@media (prefers-reduced-motion: reduce) { .comparison-switch button, .comparison-cost { transition: none; } }
+
+.pricing-assumptions { margin-top: 14px; }
+.pricing-assumptions summary { cursor: pointer; color: #c8c8c8; }
+.pricing-assumptions p { margin-top: 12px; }
+body.keyboard .comparison-switch button, body.keyboard .comparison-cost { transition: none; }

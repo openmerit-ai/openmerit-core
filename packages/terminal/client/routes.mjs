@@ -1,3 +1,4 @@
+import { requestCount, requestWeight } from './request-count.mjs';
 // One palette and vocabulary for paths throughout the terminal.
 export const ROUTES = {
   direct: { label: 'Direct API', short: 'Direct API', color: '#6387ff' },
@@ -29,7 +30,7 @@ export function routeKind(record, snapshot = {}) {
 
 export function routeBreakdown(records, snapshot) {
   const counts = Object.fromEntries(Object.keys(ROUTES).map(kind => [kind, 0]));
-  for (const record of records) counts[routeKind(record, snapshot)]++;
+  for (const record of records) counts[routeKind(record, snapshot)] += requestWeight(record, snapshot);
   return counts;
 }
 
@@ -42,7 +43,7 @@ export function requestCountKnown(snapshot) {
 
 export function activityEvidence(snapshot, records = snapshot.records ?? []) {
   const known = requestCountKnown(snapshot);
-  const unknownStatuses = records.filter(record => !['completed', 'running', 'failed'].includes(record.status)).length;
-  const failures = records.filter(record => record.status === 'failed').length;
-  return { known, count: known ? records.length : null, failures: !known || unknownStatuses ? null : failures, reportedFailures: failures, unknownStatuses };
+  const unknownStatuses = requestCount(records.filter(record => !['completed', 'running', 'failed'].includes(record.status)), snapshot);
+  const failures = requestCount(records.filter(record => record.status === 'failed'), snapshot);
+  return { known, count: known ? requestCount(records, snapshot) : null, failures: !known || unknownStatuses ? null : failures, reportedFailures: failures, unknownStatuses };
 }

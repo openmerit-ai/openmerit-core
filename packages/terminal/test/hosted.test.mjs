@@ -16,11 +16,11 @@ test('hosted preview contains the fictional enterprise sample and refreshed time
   const response = await worker.fetch(request('/api/sample?sample=0'), noAssets);
   const data = await response.json();
   assert.equal(data.mode, 'sample');
-  assert.equal(data.project.name, 'inference-sample');
+  assert.equal(data.project.name, 'enterprise-sample');
   assert.equal(data.records.length, 9600);
   assert.equal(data.models.length, 21);
-  assert.equal(new Set(data.records.map(record => record.agentId)).size, 40);
-  assert.equal(new Set(data.records.map(record => record.taskId)).size, 140);
+  assert.equal(new Set(data.records.map(record => record.agentId)).size, 200);
+  assert.equal(new Set(data.records.map(record => record.taskId)).size, 699);
   assert.ok(Math.abs(Date.now() - Date.parse(data.observedAt)) < 16000);
   assert.equal(response.headers.get('cache-control'), 'no-store');
 });

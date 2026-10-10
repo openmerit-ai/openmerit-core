@@ -9,6 +9,7 @@ import { createProjectActivity } from '../src/project-activity.mjs';
 import { reconcileActivity } from '../src/activity-merge.mjs';
 import * as history from '../src/history.mjs';
 import * as routes from '../client/routes.mjs';
+import * as requestCounts from '../client/request-count.mjs';
 import * as brands from '../client/brands.mjs';
 import * as environment from '../client/environment.mjs';
 
@@ -102,7 +103,7 @@ test('model details render unavailable usage without evidence and preserve measu
   // Run the actual browser view with event wiring and the dialog mount stubbed.
   // Imported data/formatting helpers remain the production implementations.
   const source = (await readFile(new URL('../client/app.js', import.meta.url), 'utf8')).replace(/^import .*;$/gm, '').replace('void start();', '');
-  const context = vm.createContext({ ...history, ...routes, ...brands, ...environment, URLSearchParams,
+  const context = vm.createContext({ ...history, ...routes, ...requestCounts, ...brands, ...environment, URLSearchParams,
     location: { hash: '#models', search: '' }, document: { querySelectorAll: () => [], documentElement: { hasAttribute: () => false }, addEventListener() {} }, window: { addEventListener() {} },
   });
   vm.runInContext(source, context);

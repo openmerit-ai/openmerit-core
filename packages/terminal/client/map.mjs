@@ -1,3 +1,4 @@
+import { requestCount, requestWeight } from './request-count.mjs';
 import { reportedPath, deploymentFor } from './environment.mjs';
 import { ROUTES } from './routes.mjs';
 
@@ -9,19 +10,19 @@ const sortedEntities = values => [...values].sort((a, b) => a.name.localeCompare
 // model/service pair. Collapsing changes only the endpoints used to draw edges.
 export function buildEnvironmentMap(records, snapshot, { expandAll = false, expansion = new Map() } = {}) {
   const works = new Map(), paths = new Map(), models = new Map(), links = [];
-  const addEntity = (index, key, values, connection) => {
+  const addEntity = (index, key, values, connection, count) => {
     if (!index.has(key)) index.set(key, { key, ...values, count: 0, connections: new Set(), deployments: new Map() });
-    const entity = index.get(key); entity.count++; entity.connections.add(connection); return entity;
+    const entity = index.get(key); entity.count += count; entity.connections.add(connection); return entity;
   };
   for (const record of records) {
     const path = reportedPath(record, snapshot), entry = path[0], pk = JSON.stringify([entry]);
     if (!paths.has(pk)) paths.set(pk, { key: pk, id: `path:${pk}`, type: 'path', name: entry.name, kind: entry.kind, count: 0, variants: new Set() });
-    const connection = paths.get(pk); connection.count++; connection.variants.add(JSON.stringify(path));
+    const connection = paths.get(pk); connection.count += requestWeight(record, snapshot); connection.variants.add(JSON.stringify(path));
     const wk = workKey(record), mk = modelKey(record);
-    addEntity(works, wk, { id: `work:${wk}`, type: record.agentId ? 'agent' : 'workload', name: record.agent || record.agentId || record.workload, inspectKey: record.agentId || record.workload }, pk);
-    const model = addEntity(models, mk, { id: `model:${mk}`, type: 'model', name: record.model, provider: record.provider, example: record }, pk);
+    addEntity(works, wk, { id: `work:${wk}`, type: record.agentId ? 'agent' : 'workload', name: record.agent || record.agentId || record.workload, inspectKey: record.agentId || record.workload }, pk, requestWeight(record, snapshot));
+    const model = addEntity(models, mk, { id: `model:${mk}`, type: 'model', name: record.model, provider: record.provider, example: record }, pk, requestWeight(record, snapshot));
     const deployment = deploymentFor(record, snapshot); if (deployment) model.deployments.set(deployment.id, deployment);
-    links.push({ work: wk, path: pk, model: mk });
+    links.push({ work: wk, path: pk, model: mk, count: requestWeight(record, snapshot) });
   }
   const kinds = Object.keys(ROUTES);
   const connections = [...paths.values()].sort((a, b) => kinds.indexOf(a.kind) - kinds.indexOf(b.kind) || a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
@@ -61,8 +62,8 @@ export function buildEnvironmentMap(records, snapshot, { expandAll = false, expa
     for (const [from, to, segment] of [[work.id, path.id, 'work'], [path.id, model.id, 'model']]) {
       const key = JSON.stringify([from, to]);
       if (!edges.has(key)) edges.set(key, { from, to, segment, kind: path.kind, count: 0, related: new Set() });
-      const edge = edges.get(key); edge.count++; related.forEach(id => edge.related.add(id));
+      const edge = edges.get(key); edge.count += link.count; related.forEach(id => edge.related.add(id));
     }
   }
-  return { columns: [workColumn.nodes, connections, modelColumn.nodes], groups, edges: [...edges.values()], workloadCount: works.size, connectionCount: paths.size, modelCount: models.size, requestCount: records.length };
+  return { columns: [workColumn.nodes, connections, modelColumn.nodes], groups, edges: [...edges.values()], workloadCount: works.size, connectionCount: paths.size, modelCount: models.size, requestCount: requestCount(records, snapshot) };
 }

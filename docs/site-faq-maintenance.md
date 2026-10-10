@@ -191,3 +191,7 @@ Published and verified `0.1.6-preview.5`, superseding the unreleased/preparation
 ## Hosted sample synchronization — 10 October 2026
 
 Deployed the fictional sample at `dash.openmerit.site` with the preview.5 browser assets and current sample generator. The public data disclosure and sample-only API boundary remain intact; repository scanning, local runtime collection, and phased indexing do not run on visitors' environments. Historical range controls describe the available sample records, not a complete project-lifetime archive. The main-site FAQ and deployment remain unchanged. Live assets, sample counts, read-only API behavior, and desktop/mobile browser checks passed; see [the sample deployment record](site-terminal-preview.md).
+
+## Hosted enterprise comparison — 10 October 2026
+
+Reviewed evidence, pricing and readiness claims. The hosted comparison uses fictional workload volumes and published token rates, clearly labels model assignments as illustrative, and makes no measured quality or latency claim. Unknown costs remain unknown. No changes to local collection, consent, routing, evaluations, billing or the published npm preview are implied. The main homepage FAQ requires no change.

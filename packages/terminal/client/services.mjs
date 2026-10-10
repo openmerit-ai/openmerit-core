@@ -1,3 +1,4 @@
+import { requestCount, requestWeight } from './request-count.mjs';
 import { serviceIdentity } from './brands.mjs';
 import { registeredService } from '../src/service-registry.mjs';
 const serviceKey = name => registeredService(name)?.key ?? serviceIdentity(name)?.key;
@@ -113,7 +114,7 @@ export function serviceInventory(snapshot, selectedRecords = snapshot.records ??
       if (!selected.has(record)) continue;
       service.records.add(record); addModel(service, record);
       const sequence = JSON.stringify(path), entry = service.paths.get(sequence) ?? { path, count: 0 };
-      entry.count++; service.paths.set(sequence, entry);
+      entry.count += requestWeight(record, snapshot); service.paths.set(sequence, entry);
       const deployment = deploymentFor(record, snapshot);
       if (deployment) service.deployments.set(deployment.id, deployment);
       // Include only explicitly associated service/deployment pools; a router
@@ -127,5 +128,5 @@ export function serviceInventory(snapshot, selectedRecords = snapshot.records ??
     const typeEvidence = [service.explicitTypes.size ? 'Declared or reported role' : types.has('unknown') ? 'Role not supplied' : 'Known service registry'];
     const { explicitTypes, registryTypes, poolIds, ...fields } = service;
     return { ...fields, aliases: [...service.aliases], types: [...types], typeEvidence, locations: [...service.locations], endpoints: [...service.endpoints], evidence: [...service.evidence.values()], models: [...service.models.values()], deployments: [...service.deployments.values()], pools: (snapshot.capacityPools ?? []).filter(pool => service.poolIds.has(pool.id)), records: [...service.records], paths: [...service.paths.values()] };
-  }).sort((a, b) => b.records.length - a.records.length || a.name.localeCompare(b.name));
+  }).sort((a, b) => requestCount(b.records, snapshot) - requestCount(a.records, snapshot) || a.name.localeCompare(b.name));
 }

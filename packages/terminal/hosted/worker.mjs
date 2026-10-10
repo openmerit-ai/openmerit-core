@@ -1,4 +1,4 @@
-import { sampleSnapshot } from '../src/sample.mjs';
+import { enterpriseSnapshot, demoSnapshot } from '../src/enterprise-sample.mjs';
 
 // This entry point deliberately imports no collector, CLI, filesystem, or provider client.
 const headers = {
@@ -32,14 +32,16 @@ export default {
     const path = new URL(request.url).pathname;
     let response;
     if (path === '/api/info') response = json({ version: 1, defaultMode: 'sample', hostedSample: true, interval: 15 });
+    else if (path === '/api/sample-seed') response = json({ version: 1, now: Math.floor(Date.now() / 15000) * 15000 });
+    else if (path === '/api/demo') response = json(demoSnapshot(Math.floor(Date.now() / 15000) * 15000, new URL(request.url).searchParams.get('stage') === 'after' ? 'after' : 'before'));
     else if (path === '/api/sample') {
       const now = Math.floor(Date.now() / 15000) * 15000;
-      if (!sampleBody || sampleTime !== now) { sampleBody = JSON.stringify(sampleSnapshot(now)); sampleTime = now; }
+      if (!sampleBody || sampleTime !== now) { sampleBody = JSON.stringify(enterpriseSnapshot(now)); sampleTime = now; }
       response = new Response(sampleBody, { headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
     } else if (path.startsWith('/api/')) response = json({ error: 'This preview contains fictional sample data only.' }, 404);
     else if (path === '/robots.txt') response = new Response(robots, { headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' } });
     else {
-      const asset = await env.ASSETS.fetch(request);
+      const asset = await env.ASSETS.fetch(['/demo', '/demo/'].includes(path) ? new Request(new URL('/demo/index.html', request.url), request) : request);
       response = new Response(asset.body, asset);
       for (const [name, value] of Object.entries(headers)) response.headers.set(name, value);
       // Keep HTML untouched by zone-level injection, but allow scripts/styles to compress.
