@@ -186,3 +186,8 @@ Prepared `0.1.6-preview.5` for the existing npm preview channel. The source buil
 ## Phased repository indexing — published preview.5, 10 October 2026
 
 Published and verified `0.1.6-preview.5`, superseding the unreleased/preparation status above. The npm integrity matches the tested archive and `preview` points to this version; stable `latest` remains `0.1.5`. A direct `npm install -g openmerit@preview` on the VM succeeded, and the persistent dashboard now runs that global registry package instead of the temporary source-build override. All 246 real records and 128 application files remain unchanged across passive refresh. Counts-only diagnostics, full JSON output, package exports, and all 61 packaged code/asset/metadata file hashes passed; served browser assets match the release. No inference calls were made. The existing activity/runtime limits and static-declaration evidence boundaries remain documented. Homepage FAQ wording and site deployments are unchanged.
+
+
+## Hosted sample synchronization — 10 October 2026
+
+Deployed the fictional sample at `dash.openmerit.site` with the preview.5 browser assets and current sample generator. The public data disclosure and sample-only API boundary remain intact; repository scanning, local runtime collection, and phased indexing do not run on visitors' environments. Historical range controls describe the available sample records, not a complete project-lifetime archive. The main-site FAQ and deployment remain unchanged. Live assets, sample counts, read-only API behavior, and desktop/mobile browser checks passed; see [the sample deployment record](site-terminal-preview.md).

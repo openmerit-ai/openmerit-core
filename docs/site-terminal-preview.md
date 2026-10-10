@@ -147,3 +147,12 @@ After publication, the VM updated from the registry using `npm install -g openme
 Friends can update with `npm install -g openmerit@preview`, stop the running terminal, and launch `openmerit dash` again in the application directory. This verifies the saved VM workload and supported source patterns; it does not establish complete discovery of arbitrary applications or reconstruct missing usage. The hosted sample and main website were not deployed.
 
 Evidence: `/private/tmp/terminal-preview4-release/verify.log`, `pack.json`, `build.json`, `registry.json`, `tags.json`, `tarball-vm.json`, `registry-vm.json`, and `persistent-vm.json`. Publication screenshot: `/private/tmp/terminal-preview4-release/npm-published.png`.
+
+
+### Sample synchronized with preview.5 — 10 October 2026
+
+Published source commit `0648af7` to `dash.openmerit.site` as Worker version `1cff2493-3b72-4609-ad6c-7bf02d47d669`. The sample now uses the browser assets from npm `0.1.6-preview.5`, including the historical activity ranges, revised evidence displays, service identities, and current map bundles. Repository discovery and phased indexing remain local collector behavior; the hosted Worker still imports only the fictional sample generator. No actual repository, VM history, or local environment was uploaded. The obsolete interim installer assets are no longer included; npm is the documented delivery channel.
+
+The deployment hook passed 171 terminal tests, 11 documentation checks, and syntax checks. All 26 public assets matched the local build over HTTPS. The sample matched the current generator (allowing only negligible cross-runtime floating-point differences), with 9,600 requests, 40 agents, 140 tasks, and 21 models. `/api/info` identifies a hosted sample, `/api/snapshot` returns 404, and POST to `/api/sample` returns 405. All six views passed browser checks at desktop and 390-pixel widths with no page overflow or console errors. The 7d/All time controls, agent inspector, and sample-only environment picker worked; the optional map also represented all requests without mobile page overflow. Physical phones were not tested.
+
+Only the terminal sample was deployed; the npm package, private VM service, and main website were unchanged. Evidence is retained at `/private/tmp/terminal-sample-preview5/deploy.log`, `live.json`, and `live-overview.png`.
