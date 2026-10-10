@@ -2,12 +2,13 @@ import { open, realpath, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { relative, resolve, sep, isAbsolute } from 'node:path';
 import { configuredServices } from './services.mjs';
+import { SERVICE_CREDENTIAL_FIELDS, SERVICE_ENDPOINT_FIELDS } from './service-registry.mjs';
 
 const LIMIT = 128 * 1024;
 const inside = (root, path) => { const part = relative(root, path); return part !== '..' && !part.startsWith(`..${sep}`) && !isAbsolute(part); };
-const credentials = new Set(['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY', 'GROQ_API_KEY', 'CEREBRAS_API_KEY', 'BASETEN_API_KEY']);
-const endpoints = new Set(['OPENAI_BASE_URL', 'OPENAI_API_BASE', 'ANTHROPIC_BASE_URL', 'GROQ_BASE_URL', 'CEREBRAS_BASE_URL', 'BASETEN_BASE_URL', 'OLLAMA_HOST', 'OLLAMA_BASE_URL']);
-const sdks = new Set(['openai', '@anthropic-ai/sdk', '@google/genai', '@google/generative-ai', 'groq-sdk', '@cerebras/cerebras_cloud_sdk', '@lmstudio/sdk', 'ollama', 'ollama-js', 'ai', 'litellm', 'anthropic', 'groq', 'cerebras-cloud-sdk', 'baseten']);
+const credentials = new Set(SERVICE_CREDENTIAL_FIELDS);
+const endpoints = new Set([...SERVICE_ENDPOINT_FIELDS, 'OLLAMA_HOST', 'OLLAMA_BASE_URL']);
+const sdks = new Set(['openai', '@anthropic-ai/sdk', '@google/genai', '@google/generative-ai', 'groq-sdk', '@cerebras/cerebras_cloud_sdk', '@lmstudio/sdk', 'ollama', 'ollama-js', 'ai', 'litellm', 'anthropic', 'groq', 'cerebras-cloud-sdk', 'baseten', '@huggingface/inference', 'huggingface_hub', 'huggingface-hub', '@mistralai/mistralai', 'mistralai', 'cohere-ai', 'cohere', 'together-ai', 'together', 'fireworks-ai', 'replicate', 'voyageai', 'portkey-ai', 'xai-sdk', '@aws-sdk/client-bedrock-runtime', '@aws-sdk/client-sagemaker-runtime', '@google-cloud/vertexai', 'google-cloud-aiplatform', '@azure/ai-inference', 'azure-ai-inference']);
 
 // Parse literal assignments only. Never source a shell file, expand variables,
 // return credential contents, or guess how the application loads its config.

@@ -1,45 +1,27 @@
-// Configuration evidence only. Never call these services or return credentials,
-// endpoint paths, queries, or user-supplied URLs to the browser.
-const groups = [
-  ['OpenAI', ['OPENAI_API_KEY'], ['OPENAI_BASE_URL', 'OPENAI_API_BASE']],
-  ['Anthropic', ['ANTHROPIC_API_KEY'], ['ANTHROPIC_BASE_URL']],
-  ['OpenRouter', ['OPENROUTER_API_KEY'], []],
-  ['Google', ['GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY'], []],
-  ['Groq', ['GROQ_API_KEY'], ['GROQ_BASE_URL']],
-  ['Cerebras', ['CEREBRAS_API_KEY'], ['CEREBRAS_BASE_URL']],
-  ['Baseten', ['BASETEN_API_KEY'], ['BASETEN_BASE_URL']],
-];
-const hosts = new Map([
-  ['api.openai.com', 'OpenAI'], ['api.anthropic.com', 'Anthropic'],
-  ['openrouter.ai', 'OpenRouter'], ['api.groq.com', 'Groq'],
-  ['api.cerebras.ai', 'Cerebras'], ['inference.baseten.co', 'Baseten'],
-]);
-export function serviceFromEndpoint(value) {
-  if (typeof value !== 'string' || value.length > 2048) return null;
-  try {
-    const url = new URL(value);
-    if (url.protocol !== 'https:' || url.username || url.password || url.port) return null;
-    return hosts.get(url.hostname) ?? (/^model-[a-z0-9-]+\.api\.baseten\.co$/.test(url.hostname) ? 'Baseten' : null);
-  } catch { return null; }
-}
-export function configuredServices(env = process.env) {
+// Configuration evidence only. Never call services or return credentials or raw URLs.
+import { SERVICE_GROUPS, endpointService } from './service-registry.mjs';
+
+export const serviceFromEndpoint = value => endpointService(value)?.service.name ?? null;
+export function configuredServices(env = {}) {
   const found = new Map(), unrecognizedEndpoints = [];
   const present = key => typeof env[key] === 'string' && env[key].trim().length > 0;
-  const add = (name, field, basis) => {
-    const item = found.get(name) ?? { name, kind: name === 'OpenRouter' ? 'gateway' : 'provider', location: 'cloud', state: 'configured', sourceId: 'environment', evidence: [] };
-    item.evidence.push({ field, basis, ...(basis === 'endpoint-host' ? { endpointHost: new URL(env[field]).hostname.replace(/^model-[a-z0-9-]+(?=\.api\.baseten\.co$)/, 'model-…') } : {}) }); found.set(name, item);
+  const add = (service, field, basis, endpointHost) => {
+    const { name, type } = service;
+    const kind = ['router', 'gateway'].includes(type) ? type : 'provider';
+    const item = found.get(name) ?? { name, kind, ...(['model-api', 'inference-cloud'].includes(type) ? { serviceType: type } : {}), location: 'cloud', state: 'configured', sourceId: 'environment', evidence: [] };
+    item.evidence.push({ field, basis, ...(endpointHost ? { endpointHost } : {}) }); found.set(name, item);
   };
-  for (const [name, credentials, endpoints] of groups) {
-    const overrides = endpoints.filter(present);
+  for (const group of SERVICE_GROUPS) {
+    const overrides = group.endpoints.filter(present);
     if (overrides.length) {
       for (const field of overrides) {
-        const service = serviceFromEndpoint(env[field]);
-        if (service) add(service, field, 'endpoint-host');
+        const match = endpointService(env[field]);
+        if (match) add(match.service, field, 'endpoint-host', match.endpointHost);
         else unrecognizedEndpoints.push(field);
       }
-      // A custom base URL can repurpose the SDK's credential variable. Its name
-      // alone must not establish the SDK vendor as a configured service.
-    } else for (const field of credentials.filter(present)) add(name, field, 'credential-name');
+      // An override can repurpose the SDK credential. Unknown/local overrides
+      // must suppress the vendor fallback too; the key name is not enough.
+    } else for (const field of group.credentials.filter(present)) add(group, field, 'credential-name');
   }
   return { services: [...found.values()], unrecognizedEndpoints };
 }

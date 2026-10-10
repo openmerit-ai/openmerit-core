@@ -132,3 +132,22 @@ Reviewed project scope, usage accuracy, passive collection, hardware placement, 
 ## Evidence corrections — published preview.2, 9 October 2026
 
 Published `0.1.6-preview.2` with the project-scope and evidence-integrity corrections above; this supersedes the earlier source-only status of those corrections. The release guide and changelog describe this version explicitly; earlier previews retain their documented behavior. The existing VM acceptance preserved 240 original request records and all 125 original project files; two separate, real local Ollama calls were picked up from an application log during passive refresh. A project without declarations exposed no runtime inventory, while an explicit host link matched the VM hostname and Ollama residency response. Registry metadata and artifact integrity were verified, and a direct npm update in the VM retained all 242 current requests and 126 project files across passive refresh. The `preview` tag resolves `0.1.6-preview.2`. The stable `latest` channel and homepage FAQ remain about `0.1.5`; no homepage wording or website deployment is needed for this preview release.
+
+
+## Terminal review corrections — unreleased source, 10 October 2026
+
+Reviewed homepage evidence, data, background, and readiness claims against the log continuity, request outcome, multi-host residency, and model-detail coverage corrections. Collection remains passive and project-local. Bounded checkpoint verification adds up to 8 KiB of reads per cached JSONL file per poll and retains hashes, not another raw-content cache. It does not guarantee detection of every in-place edit to a large file; the terminal guide states the sampled-region limitation. Conflict reporting preserves source precedence, residency still requires fresh exported evidence, and missing usage stays unavailable. These fixes are source-only; npm `0.1.6-preview.2`, the hosted sample, and stable-package homepage claims remain unchanged. No FAQ wording change is needed.
+
+
+## Hugging Face endpoint discovery — unreleased source, 10 October 2026
+
+Reviewed evidence, data, background, and readiness claims. Selected-project endpoint declarations can identify Hugging Face dedicated endpoints and its inference router separately. Generic Hub credentials, SDK presence, downloaded models, and inherited shell settings do not establish inference use. Dedicated endpoint subdomains and URL paths/queries are excluded from the snapshot. Detection makes no remote requests or account-history calls and creates no request, model, hardware, or deployment measurements. Recorded names retain their original attribution. The official service mark is bundled locally. These changes are source-only; npm `0.1.6-preview.2`, the VM installation, the hosted sample, and stable homepage claims are unchanged. No FAQ wording change is needed.
+
+## Expanded endpoint discovery — unreleased source, 10 October 2026
+
+Reviewed evidence, data, background, and readiness claims for the shared 39-service endpoint registry. Only selected-project literal declarations are indexed; provider-specific credential names establish configuration, and general cloud credentials or SDK dependencies alone do not establish inference. Endpoint overrides suppress SDK-vendor fallback. Dedicated resource labels and all path/query/fragment data are excluded from snapshots. The service inventory uses the same identity registry, while explicit roles, reported paths, model creators, and actual request metadata remain authoritative. The change adds no cloud calls, account history access, source-code execution, or guessed usage. Custom domains and unlisted forms remain coverage gaps. This is unreleased source work; npm preview.2 and homepage published-behavior wording remain unchanged.
+
+
+## Endpoint coverage release preparation — 10 October 2026
+
+Prepared `0.1.6-preview.3` to include the three source-only changes above. The public terminal guide now describes this version explicitly, while registry publication remains pending verification. The latest source build passed 47 focused Linux tests in the isolated VM, preserved all 242 saved requests, 41 agent IDs, and 122 task IDs across passive refresh, and left all 126 project files unchanged. Separate endpoint fixtures did not enter the real dashboard. No new inference calls were made. Stable `latest` and homepage FAQ wording remain about `0.1.5`; neither the main site nor hosted sample is deployed by this package release.

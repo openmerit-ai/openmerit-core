@@ -18,6 +18,9 @@ const definitions = [
   ['groq', 'Groq', 'groq.ico', ['groq', 'groq api', 'groqcloud']],
   ['cerebras', 'Cerebras', 'cerebras.png', ['cerebras', 'cerebras api']],
   ['openrouter', 'OpenRouter', 'openrouter.png', ['openrouter']],
+  ['huggingface', 'Hugging Face', 'huggingface.svg', ['hugging face', 'huggingface']],
+  ['huggingface-endpoints', 'Hugging Face Endpoints', 'huggingface.svg', ['hugging face endpoints', 'hugging face inference endpoints']],
+  ['huggingface-router', 'Hugging Face Router', 'huggingface.svg', ['hugging face router', 'hugging face inference providers']],
   ['openmerit', 'OpenMerit', null, ['openmerit']],
 ];
 const identities = new Map(definitions.map(([key, label, file]) => [key, Object.freeze({ key, label, src: file ? `/brands/${file}` : '/favicon.svg' })]));

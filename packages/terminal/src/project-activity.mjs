@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
+import { checkpointForRead, checkpointMatches } from './log-continuity.mjs';
 
 const FILE_BYTES = 512 * 1024, TOTAL_BYTES = 4 * 1024 * 1024;
 const MAX_FILES = 128, MAX_ENTRIES = 2048, MAX_RECORDS = 10000;
@@ -102,8 +103,8 @@ export function createProjectActivity(root, normalize, { exclude = [] } = {}) {
           if (!info.isFile()) throw new Error('Not a regular file');
           let reader = readers.get(file.path);
           const identity = `${info.dev}:${info.ino}`;
-          if (!reader || reader.identity !== identity || info.size < reader.offset || info.size === reader.offset && info.mtimeMs !== reader.mtime) {
-            reader = { identity, offset: 0, mtime: 0, pending: '', decoder: new StringDecoder('utf8'), records: new Map(), invalid: 0, unsupported: 0, truncated: false };
+          if (!reader || reader.identity !== identity || info.size < reader.offset || info.size === reader.offset && info.mtimeMs !== reader.mtime || !await checkpointMatches(handle, reader.checkpoint)) {
+            reader = { identity, offset: 0, mtime: 0, pending: '', decoder: new StringDecoder('utf8'), records: new Map(), invalid: 0, unsupported: 0, truncated: false, checkpoint: null };
           }
           const limit = Math.min(FILE_BYTES, budget);
           if (limit === 0 && info.size > reader.offset) { omitted = true; sources.push({ ...source, state: 'partial', records: 0, note: source.note + ' Waiting for the next bounded read.' }); continue; }
@@ -111,6 +112,7 @@ export function createProjectActivity(root, normalize, { exclude = [] } = {}) {
           if (info.size - reader.offset > limit) { reader.offset = info.size - limit; reader.pending = ''; reader.decoder = new StringDecoder('utf8'); reader.records.clear(); reader.truncated = true; skip = true; }
           const buffer = Buffer.alloc(Math.min(limit, info.size - reader.offset));
           const { bytesRead } = await handle.read(buffer, 0, buffer.length, reader.offset);
+          reader.checkpoint = checkpointForRead(buffer.subarray(0, bytesRead), reader.offset, reader.checkpoint);
           reader.offset += bytesRead; reader.mtime = info.mtimeMs; budget -= bytesRead;
           const lines = (reader.pending + reader.decoder.write(buffer.subarray(0, bytesRead))).split('\n');
           reader.pending = lines.pop() ?? ''; if (skip) lines.shift();

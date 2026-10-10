@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.1.6-preview.3 — 2026-10-10
+
+- Expand passive project endpoint discovery to 39 service identities across model APIs, inference clouds, managed cloud endpoints, and gateways; share classification with the service inventory and preserve unknown/custom endpoint boundaries.
+
+- Recognize project-declared Hugging Face dedicated endpoints and the inference router as separate services, without cloud calls or token-based inference assumptions.
+
+- Detect changed JSONL checkpoints before resuming incremental reads, including same-inode truncation followed by growth between polls.
+- Disclose conflicting completed/failed outcomes when reconciling copies of a request.
+- Prefer fresh model residency over stale reports from other exported hosts.
+- Preserve unavailable usage in model details when no request source is connected.
+
 ## 0.1.6-preview.2 — 2026-10-09
 
 - Require selected-project declarations for service and runtime discovery; remove unconditional Ollama/standard-port probes and inherited shell service detection.

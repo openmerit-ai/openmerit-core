@@ -7,7 +7,7 @@ const exactKey = record => JSON.stringify([record.id, record.occurredAt, record.
 const requestKey = record => record.requestId && scope(record) ? JSON.stringify([scope(record), record.model, record.requestId]) : null;
 const terminal = record => ['completed', 'failed'].includes(record.status);
 const knownField = value => value != null && value !== 'unknown';
-const fields = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'durationMs', 'cost', 'currency', 'costKind', 'agentId', 'taskId'];
+const fields = ['status', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'durationMs', 'cost', 'currency', 'costKind', 'agentId', 'taskId'];
 
 // Sources arrive in precedence order. Only shared recorded identifiers merge;
 // similar timestamps, equal token counts, or matching model names never do.

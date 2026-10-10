@@ -1,4 +1,6 @@
 import { serviceIdentity } from './brands.mjs';
+import { registeredService } from '../src/service-registry.mjs';
+const serviceKey = name => registeredService(name)?.key ?? serviceIdentity(name)?.key;
 import { reportedPath, deploymentFor, poolsFor } from './environment.mjs';
 
 export const SERVICE_TYPES = {
@@ -12,11 +14,10 @@ export const SERVICE_TYPES = {
 const endpointSource = source => source.endpointInventory || source.kind === 'Local runtime';
 const key = name => String(name ?? '').trim().toLowerCase();
 const valid = name => key(name) && !['unattributed', 'unattributed route', 'direct', 'direct api'].includes(key(name));
-const knownTypes = { openai: 'model-api', anthropic: 'model-api', google: 'model-api', mistral: 'model-api', deepseek: 'model-api', cohere: 'model-api', baseten: 'inference-cloud', groq: 'inference-cloud', cerebras: 'inference-cloud', openrouter: 'gateway', ollama: 'runtime', vllm: 'runtime', 'lm-studio': 'runtime' };
 function typeOf(item) {
   if (['router', 'gateway', 'runtime'].includes(item.kind)) return item.kind;
   if (item.kind === 'provider' && ['model-api', 'inference-cloud'].includes(item.serviceType)) return item.serviceType;
-  return knownTypes[serviceIdentity(item.name)?.key] ?? 'unknown';
+  return registeredService(item.name)?.type ?? 'unknown';
 }
 
 // A row is an identified service, not a company inferred from a model creator.
@@ -29,9 +30,9 @@ export function serviceInventory(snapshot, selectedRecords = snapshot.records ??
     if (!valid(name)) return null;
     const id = key(name);
     if (services.has(id)) return services.get(id);
-    const identity = serviceIdentity(name);
+    const identity = serviceKey(name);
     if (!exact && !declarations.has(id) && identity) {
-      const candidates = [...services.values()].filter(item => serviceIdentity(item.name)?.key === identity.key);
+      const candidates = [...services.values()].filter(item => serviceKey(item.name) === identity);
       if (candidates.length === 1) { candidates[0].aliases.add(name); return candidates[0]; }
     }
     const service = { id, name, aliases: new Set([name]), explicitTypes: new Set(), registryTypes: new Set(), locations: new Set(), endpoints: new Set(), evidence: new Map(), models: new Map(), deployments: new Map(), poolIds: new Set(), records: new Set(), paths: new Map(), lastAt: null, configured: false, reported: false };

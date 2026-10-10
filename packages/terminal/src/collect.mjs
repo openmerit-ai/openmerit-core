@@ -9,6 +9,7 @@ import { modelCreators } from './services.mjs';
 import { collectionLimits, configurationLimits, hardwareLimits, limitNote } from './coverage.mjs';
 import { normalizeHosts, retainHostHistory, hostState } from './hardware.mjs';
 import { StringDecoder } from 'node:string_decoder';
+import { checkpointForRead, checkpointMatches } from './log-continuity.mjs';
 import { normalizePath, normalizeDeployments, normalizePools, normalizeCapacity, poolIds } from './topology.mjs';
 
 const MAX_READ = 4 * 1024 * 1024;
@@ -54,7 +55,7 @@ export function normalizeRecord(value, sourceId) {
 }
 
 export class JsonlReader {
-  constructor(root, path) { this.root = root; this.path = path; this.offset = 0; this.identity = ''; this.pending = ''; this.decoder = new StringDecoder('utf8'); this.records = new Map(); this.invalid = 0; this.truncated = false; this.mtime = 0; }
+  constructor(root, path) { this.root = root; this.path = path; this.offset = 0; this.identity = ''; this.pending = ''; this.decoder = new StringDecoder('utf8'); this.records = new Map(); this.invalid = 0; this.truncated = false; this.mtime = 0; this.checkpoint = null; }
   async read(projectAudit = false) {
     try {
       const canonicalRoot = await realpath(this.root);
@@ -66,14 +67,15 @@ export class JsonlReader {
         const info = await handle.stat();
         if (!info.isFile()) throw new Error('Source must be a regular file.');
         const identity = `${info.dev}:${info.ino}`;
-        if (identity !== this.identity || info.size < this.offset || (info.size === this.offset && info.mtimeMs !== this.mtime)) {
-          this.offset = 0; this.pending = ''; this.decoder = new StringDecoder('utf8'); this.records.clear(); this.invalid = 0; this.truncated = false;
+        if (identity !== this.identity || info.size < this.offset || (info.size === this.offset && info.mtimeMs !== this.mtime) || !await checkpointMatches(handle, this.checkpoint)) {
+          this.offset = 0; this.pending = ''; this.decoder = new StringDecoder('utf8'); this.records.clear(); this.invalid = 0; this.truncated = false; this.checkpoint = null;
         }
         this.identity = identity;
         let skipFirst = false;
         if (info.size - this.offset > MAX_READ) { this.offset = info.size - MAX_READ; this.pending = ''; this.decoder = new StringDecoder('utf8'); this.truncated = true; skipFirst = true; }
         const buffer = Buffer.alloc(Math.min(MAX_READ, info.size - this.offset));
         const { bytesRead } = await handle.read(buffer, 0, buffer.length, this.offset);
+        this.checkpoint = checkpointForRead(buffer.subarray(0, bytesRead), this.offset, this.checkpoint);
         this.offset += bytesRead; this.mtime = info.mtimeMs;
         const lines = (this.pending + this.decoder.write(buffer.subarray(0, bytesRead))).split('\n');
         this.pending = lines.pop() ?? '';
@@ -99,7 +101,7 @@ export class JsonlReader {
       } finally { await handle.close(); }
     } catch (error) {
       // Never keep deleted or unreadable source data looking current.
-      this.records.clear(); this.offset = 0; this.pending = ''; this.identity = ''; this.decoder = new StringDecoder('utf8');
+      this.records.clear(); this.offset = 0; this.pending = ''; this.identity = ''; this.decoder = new StringDecoder('utf8'); this.checkpoint = null;
       return { state: error.code === 'ENOENT' ? 'not_found' : 'unavailable', records: [], invalid: 0, truncated: false };
     }
   }
@@ -265,7 +267,9 @@ export function createCollector(root, config, interval = 15) {
     const models = new Map([...ollama.models, ...runtimes.flatMap(runtime => runtime.models)].map(item => [`${item.provider}:${item.name}`, item]));
     for (const host of hardware.hosts) for (const model of host.loadedModels) {
       const key = `${model.provider || 'Unattributed'}:${model.name}`;
-      if (!models.has(key)) models.set(key, { id: key, name: model.name, modelCreator: model.modelCreator, provider: model.provider || 'Unattributed', location: 'private', state: hostState(host, interval) === 'sampled' ? 'loaded' : 'unknown', sourceId: 'hardware', memoryBytes: null });
+      const loaded = hostState(host, interval) === 'sampled';
+      // A fresh resident on any exported host wins over stale host evidence.
+      if (!models.has(key) || models.get(key).sourceId === 'hardware' && loaded) models.set(key, { id: key, name: model.name, modelCreator: model.modelCreator, provider: model.provider || 'Unattributed', location: 'private', state: loaded ? 'loaded' : 'unknown', sourceId: 'hardware', memoryBytes: null });
     }
     for (const item of [...config.inventory.filter(item => item.kind === 'model'), ...(config.deployments ?? []).map(item => ({ ...item, name: item.model }))]) {
       const key = `${item.provider}:${item.name}`;

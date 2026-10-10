@@ -12,7 +12,7 @@ The preview is accessible to anyone with the link and asks search engines not to
 
 ## Install the test preview
 
-The terminal is delivered through the existing `openmerit` package under npm’s `preview` tag. Historical ranges are included in `0.1.6-preview.1` and later; the project-evidence corrections below require `0.1.6-preview.2` or later. Requires **Node.js 22.19 or newer**, with npm available in your terminal. From your application's directory:
+The terminal is delivered through the existing `openmerit` package under npm’s `preview` tag. Historical ranges are included in `0.1.6-preview.1` and later; the project-evidence corrections below require `0.1.6-preview.2` or later. Expanded endpoint discovery and the review corrections require `0.1.6-preview.3` or later. Requires **Node.js 22.19 or newer**, with npm available in your terminal. From your application's directory:
 
 ```sh
 cd /path/to/your/project
@@ -60,6 +60,15 @@ openmerit dash --no-open
 | `--help` | Show usage |
 
 Use Ctrl+C to close the terminal. There is no persistent daemon or background scheduler. Collection runs only while the command is running. The terminal is separate from Pi's `/openmerit pause` and other orchestration commands.
+
+## Review corrections (0.1.6-preview.3)
+
+Version `0.1.6-preview.3` includes the following corrections; earlier previews retain their previous behavior:
+
+- JSONL readers check bounded content fingerprints before resuming from a saved offset. A changed checkpoint resets the cache and imports the current file, including when it was truncated and regrew between polls. Each cached file adds at most 8 KiB of verification reads per poll; only hashes are retained. These checks cover the initial consumed bytes and the latest read boundary, not every byte of a large historical file. Rewrites that preserve both sampled regions cannot be distinguished from appends; append-only logs or rotation to a new file remain the reliable format.
+- Copies of one request that disagree on `completed` versus `failed` expose a `status` conflict in request details and the dashboard warning. Source precedence still determines the displayed outcome; a normal `running` to terminal update is not a conflict.
+- For matching models in the hardware export, a fresh resident report takes precedence over a stale report from another host, regardless of host order. Once all such reports are stale, residency is unknown.
+- Model details show unavailable request and cost coverage when no request source is connected, consistent with the overview and model table. A readable empty request source still establishes a recorded count of zero.
 
 ## Automatic application discovery
 
@@ -283,7 +292,7 @@ Configuration, inventory, and activity evidence are distinct. A configured servi
 
 ### Inference services and model creators
 
-The terminal recognizes configuration evidence for Baseten, Groq, and Cerebras alongside the existing services. Only supported literal declarations in the selected project’s `.env` and `.env.local` files provide automatic configuration evidence. Global shell variables do not establish project ownership. Shell histories, arbitrary source files, and credential stores are not scanned. A configured service does not establish an active connection, model inventory, usage, available capacity, or a hardware allocation.
+The terminal recognizes configuration evidence for Baseten, Groq, and Cerebras alongside the existing services below. Expanded coverage in `0.1.6-preview.3` is documented under **Additional inference endpoints**. Only supported literal declarations in the selected project’s `.env` and `.env.local` files provide automatic configuration evidence. Global shell variables do not establish project ownership. Shell histories, arbitrary source files, and credential stores are not scanned. A configured service does not establish an active connection, model inventory, usage, available capacity, or a hardware allocation.
 
 | Service | Credential-variable names | Optional endpoint-variable names |
 | --- | --- | --- |
@@ -302,6 +311,90 @@ Service details show the identifying variable and whether the evidence was a cre
 Supply `modelCreator` in activity metadata, model inventory, deployments, or exported loaded-model entries when that identity is available. The model inspector shows the reported creator separately from **Served by**, including its source. Conflicting creator reports for the same model/service leave the inventory creator unresolved. Existing family icons are visual recognition only; they do not populate creator metadata. An explicit creator takes precedence over family icon matching. Baseten, Groq, and Cerebras service icons are bundled locally.
 
 For example, an export may report `model: "gpt-oss-120b"`, `modelCreator: "OpenAI"`, and `provider: "Groq"`. An application using a gateway still reports its gateway path; the serving company does not change that category. No account API, inference call, remote hardware discovery, or model availability check is performed by this detection.
+
+### Additional inference endpoints
+
+Version `0.1.6-preview.3` recognizes 39 cloud/API/router/gateway service identities, including the two Hugging Face products described below. Earlier previews do not include this expansion. Detection still reads only supported literal declarations in the selected project's `.env` and `.env.local`; the file's presence does not prove the application loaded it. No installation, API request, account access, or additional permission is needed to recognize these declarations.
+
+Any recognized endpoint can be supplied through `OPENAI_BASE_URL` or `OPENAI_API_BASE`, even when the application uses an OpenAI-compatible SDK for another service. The following additional variable names are accepted. Endpoint aliases are supported application conventions, not a claim that every vendor SDK reads them automatically. A nonempty credential declaration is recorded only as **Configured**; its value is discarded. An endpoint override suppresses that group's credential-based vendor fallback, including when the URL is unknown or malformed.
+
+| Service | Credential declarations | Endpoint declarations |
+| --- | --- | --- |
+| [Mistral](https://docs.mistral.ai/getting-started/quickstarts/developer/first-api-request) | `MISTRAL_API_KEY` | `MISTRAL_BASE_URL`, `MISTRAL_SERVER_URL` |
+| [DeepSeek](https://api-docs.deepseek.com/) | `DEEPSEEK_API_KEY` | `DEEPSEEK_BASE_URL` |
+| [Cohere](https://docs.cohere.com/docs/compatibility-api) | `COHERE_API_KEY`, `CO_API_KEY` | `COHERE_BASE_URL` |
+| [xAI](https://docs.x.ai/developers/rest-api-reference/inference) | `XAI_API_KEY` | `XAI_BASE_URL` |
+| [Voyage AI](https://docs.voyageai.com/docs/embeddings) | `VOYAGE_API_KEY` | `VOYAGE_BASE_URL` |
+| [Jina AI](https://jina.ai/embeddings/) | Endpoint required | `JINA_BASE_URL` |
+| [Together AI](https://docs.together.ai/docs/inference/openai-compatibility) | `TOGETHER_API_KEY` | `TOGETHER_BASE_URL` |
+| [Fireworks AI](https://docs.fireworks.ai/tools-sdks/openai-compatibility) | `FIREWORKS_API_KEY` | `FIREWORKS_BASE_URL` |
+| [DeepInfra](https://docs.deepinfra.com/chat/overview) | `DEEPINFRA_API_KEY`, `DEEPINFRA_API_TOKEN` | `DEEPINFRA_BASE_URL` |
+| [Replicate](https://replicate.com/docs/reference/how-does-replicate-work/) | `REPLICATE_API_TOKEN` | `REPLICATE_BASE_URL` |
+| [NVIDIA API Catalog](https://docs.api.nvidia.com/nim/reference/llm-apis) | Endpoint required | `NVIDIA_BASE_URL`, `NVIDIA_NIM_BASE_URL` |
+| [SambaNova](https://docs.sambanova.ai/docs/en/integrations/vscode) | `SAMBANOVA_API_KEY` | `SAMBANOVA_BASE_URL` |
+| [Novita AI](https://docs.novita.ai/api-reference/model-apis-llm-create-chat-completion) | `NOVITA_API_KEY` | `NOVITA_BASE_URL` |
+| [Nebius Token Factory](https://nebius.com/blog/posts/launch-production-agents-at-scale) | Endpoint required | `NEBIUS_BASE_URL` |
+| [SiliconFlow](https://docs.siliconflow.com/en/userguide/quickstart) | `SILICONFLOW_API_KEY` | `SILICONFLOW_BASE_URL` |
+| [Azure OpenAI](https://learn.microsoft.com/en-us/azure/ai-studio/ai-services/concepts/endpoints) | Endpoint required | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_BASE_URL`, `AZURE_OPENAI_API_BASE` |
+| [Azure AI Foundry](https://learn.microsoft.com/en-us/azure/ai-studio/ai-services/concepts/endpoints) | Endpoint required | `AZURE_AI_ENDPOINT`, `AZURE_AI_INFERENCE_ENDPOINT`, `AZURE_INFERENCE_ENDPOINT` |
+| [Amazon Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html) | `AWS_BEARER_TOKEN_BEDROCK` | `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, `BEDROCK_ENDPOINT_URL`, `BEDROCK_BASE_URL` |
+| [Amazon SageMaker](https://docs.aws.amazon.com/sagemaker/latest/dg/realtime-endpoints-openai-compatible.html) | Endpoint required | `AWS_ENDPOINT_URL_SAGEMAKER_RUNTIME`, `SAGEMAKER_ENDPOINT_URL`, `SAGEMAKER_BASE_URL` |
+| [Google Vertex AI](https://docs.cloud.google.com/api-gateway/docs/model-routing-configure) | Endpoint required | `VERTEX_AI_ENDPOINT`, `VERTEX_AI_BASE_URL` |
+| [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/) | Endpoint required | `CLOUDFLARE_WORKERS_AI_BASE_URL` |
+| [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/usage/universal/) | Endpoint required | `CLOUDFLARE_AI_GATEWAY_URL` |
+| [Portkey](https://portkey.ai/blog/using-openai-agentkit-with-anthropic-gemini-and-other-providers/) | `PORTKEY_API_KEY` | `PORTKEY_BASE_URL`, `PORTKEY_GATEWAY_URL` |
+| [Vercel AI Gateway](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions) | Endpoint required | `AI_GATEWAY_BASE_URL`, `VERCEL_AI_GATEWAY_BASE_URL` |
+| [Alibaba Cloud Model Studio](https://help.aliyun.com/en/model-studio/base-url) | `DASHSCOPE_API_KEY` | `DASHSCOPE_BASE_URL`, `DASHSCOPE_API_BASE` |
+| [MiniMax](https://platform.minimax.io/docs/api-reference/text-openai-api) | `MINIMAX_API_KEY` | `MINIMAX_BASE_URL` |
+| [Moonshot AI](https://platform.kimi.ai/docs/overview) | `MOONSHOT_API_KEY` | `MOONSHOT_BASE_URL` |
+| [Z.AI](https://docs.z.ai/guides/overview/quick-start) | `ZAI_API_KEY` | `ZAI_BASE_URL` |
+| [Perplexity Sonar and Router](https://docs.perplexity.ai/docs/getting-started/quickstart) | Endpoint required | `PERPLEXITY_BASE_URL` |
+
+Existing services also gain `OPENROUTER_BASE_URL`, `GEMINI_BASE_URL`, and `GOOGLE_GEMINI_BASE_URL`. Gemini's `generativelanguage.googleapis.com` endpoint identifies **Google**, separate from **Google Vertex AI**.
+
+#### Supported endpoint boundaries
+
+The registry uses exact HTTPS API hostnames or anchored service-specific formats. It does not match a company name anywhere in a URL. URL user information, nonstandard ports, control characters, and lookalike domains are rejected. Unknown declarations retain only their variable name in source coverage. No remote DNS lookup or HTTP request is made.
+
+- **Model APIs:** `api.mistral.ai`, `api.deepseek.com`, `api.cohere.ai` / `api.cohere.com`, `api.x.ai`, `api.voyageai.com`, `api.jina.ai`, `api.minimax.io`, `api.moonshot.ai`, and `api.z.ai`.
+- **Inference clouds:** `api.together.ai` / `api.together.xyz`, `api.fireworks.ai`, `api.deepinfra.com`, `api.replicate.com`, `integrate.api.nvidia.com`, `api.sambanova.ai`, `api.novita.ai`, `api.studio.nebius.com` / `api.studio.nebius.ai`, and `api.siliconflow.com` / `api.siliconflow.cn`. NVIDIA's hosted API does not imply local NIM or NVIDIA hardware.
+- **Azure:** single-resource `*.openai.azure.com` endpoints identify Azure OpenAI. `*.services.ai.azure.com` with a root, `/models`, or `/openai` path identifies Azure AI Foundry. Foundry project-management URLs are not accepted. Resource labels are redacted to `…`.
+- **AWS:** regional `bedrock-runtime[‐fips].<region>.amazonaws.com` and `runtime[‐fips].sagemaker.<region>.amazonaws.com` hosts, including the `.com.cn` suffix, identify their respective services. Control-plane and unrelated AWS hosts do not match. These are structural service identities, not a claim that every region exposes every API.
+- **Vertex:** `aiplatform.googleapis.com` and regional `<region>-aiplatform.googleapis.com` identify Google Vertex AI. Project IDs and endpoint IDs in paths are discarded. A generic Google API key or service-account file does not establish Vertex usage.
+- **Cloudflare:** Workers AI requires `api.cloudflare.com/client/v4/accounts/<account>/ai...`; other Cloudflare API paths do not match. `gateway.ai.cloudflare.com` identifies Cloudflare AI Gateway separately. Account, gateway, and model path segments are never retained.
+- **Gateways:** `api.portkey.ai` and `ai-gateway.vercel.sh` identify Portkey and Vercel AI Gateway. These do not establish which downstream providers or models were used.
+- **Alibaba:** the documented `dashscope`, `dashscope-intl`, `dashscope-us`, and `cn-hongkong.dashscope` hosts under `aliyuncs.com`, plus workspace hosts in the Beijing, Hong Kong, Singapore, and Tokyo `maas.aliyuncs.com` regions. Workspace labels are redacted to `….maas.aliyuncs.com`. This is a serving platform; it does not imply Qwen as the model creator.
+- **Perplexity:** the legacy API base/root, `/v1`, and `/chat/completions` identify Sonar; `/router...` identifies Perplexity Router. Search and agent-product paths do not imply either service. A generic Perplexity key alone does not identify the product.
+
+Generic AWS credentials, `GOOGLE_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`, Azure keys without an endpoint, `CLOUDFLARE_API_TOKEN`, `NVIDIA_API_KEY`, `NGC_API_KEY`, `NEBIUS_API_KEY`, `JINA_API_KEY`, `AI_GATEWAY_API_KEY`, and `VERCEL_OIDC_TOKEN` are not used as standalone discovery evidence. Provider SDK dependencies only produce an SDK hint. Services with no bundled logo use their name; a model never inherits its serving platform's brand.
+
+**Coverage is still bounded.** Custom domains, private/LAN endpoints, unlisted regional or sovereign-cloud variants, serverless application URLs (for example, custom Modal or RunPod deployments), and URLs assembled only in application code are not automatically identified by this registry. Self-hosted LiteLLM, vLLM, SGLang, NIM, or other compatible servers cannot be distinguished merely from an arbitrary URL or port. A declared safe loopback endpoint can still expose a supported catalog through the existing runtime discovery path, without inventing its runtime identity or physical host. Explicit terminal inventory can name other services and their roles.
+
+Configured services add no historical requests, model catalog, agent names, tokens, cost, deployments, or hardware. Supported saved request logs and explicit inventory remain the source for those fields. A previously active project whose logs were never saved cannot reconstruct past calls from a URL or API key. Known service names in recorded metadata can be classified, but the registry does not insert unreported request-path hops or rewrite provider names.
+
+### Hugging Face endpoints
+
+Version `0.1.6-preview.3` recognizes literal endpoint declarations in the selected project's `.env` and `.env.local`. Earlier previews do not include this support.
+
+| Endpoint host | Service in the terminal | Type |
+| --- | --- | --- |
+| Subdomains of `endpoints.huggingface.cloud` | Hugging Face Endpoints | Inference cloud |
+| `router.huggingface.co` | Hugging Face Router | Router |
+
+The reader accepts the documented `HF_INFERENCE_ENDPOINT` variable, application aliases `HF_ENDPOINT_URL` and `HUGGINGFACE_ENDPOINT_URL`, and existing supported SDK base-URL overrides such as `OPENAI_BASE_URL`. For example:
+
+```dotenv
+HF_INFERENCE_ENDPOINT=https://your-endpoint.us-east-1.aws.endpoints.huggingface.cloud
+OPENAI_BASE_URL=https://router.huggingface.co/v1
+```
+
+These declarations identify two configured services; they do not establish that either endpoint is reachable or has served requests. Endpoint subdomains are redacted to `….endpoints.huggingface.cloud`; paths, query strings, fragments, and tokens are not exposed. HTTPS is required, user information and nonstandard ports are rejected, and lookalike domains do not match. An unknown base URL never falls back to the SDK vendor. Generic Hub URLs and custom domains remain unidentified unless explicitly declared in the terminal inventory.
+
+`HF_TOKEN`, `HUGGING_FACE_HUB_TOKEN`, `HUGGINGFACEHUB_API_TOKEN`, and the Hub's `HF_ENDPOINT` do not establish an inference service and are not used for discovery. Declaring `@huggingface/inference`, `huggingface_hub`, or `huggingface-hub` produces only an SDK hint. A model downloaded from the Hub does not establish Hugging Face as its serving provider.
+
+The terminal makes no remote calls, reads no Hugging Face token cache, and fetches no account history or model catalog. Models, requests, tokens, costs, agents, and deployment links still require recorded metadata or explicit inventory. Supported request logs can use `provider: "Hugging Face Endpoints"` or `route: "Hugging Face Router"` to identify the corresponding service. A generic `Hugging Face` name remains unclassified; the terminal does not choose a product or serving provider for it. The two products share a locally bundled official logo but remain separate service identities.
+
+The recognized formats follow Hugging Face's [environment-variable documentation](https://huggingface.co/docs/huggingface_hub/en/package_reference/environment_variables), [dedicated endpoint guide](https://huggingface.co/docs/huggingface_hub/guides/inference_endpoints), and [inference router documentation](https://huggingface.co/docs/inference-providers/index). Hardcoded URLs in source code and arbitrary environment-variable names are outside the current declaration scan.
 
 ### Deployments and shared capacity
 
