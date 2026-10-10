@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.6-preview.5 — 2026-10-10
+
+- Open the terminal before initial collection, then index repository declarations in a background worker with visible discovery, indexing, and linking progress. Replace repository-wide scan caps with continuing work batches.
+- Reuse unchanged source/configuration metadata across scans, re-resolve changed dotenv bindings, and remove deleted declarations. Keep activity collection independent and disclose skipped files or interrupted indexing.
+- Reuse unchanged reference catalogs in the browser and report complete issue counts alongside the bounded detail list. Request-history and runtime inventory limits are unchanged.
+- Preserve ordinary function names containing `task_` instead of mistaking their suffix for a credential prefix.
+
 ## 0.1.6-preview.4 — 2026-10-10
 
 - Index supported application code, nested configuration, custom endpoints, and conservative model/call-site references automatically during `openmerit dash`, with file-and-line evidence.

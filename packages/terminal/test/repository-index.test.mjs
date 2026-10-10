@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { indexRepository, indexDiagnostics, INDEX_LIMITS, endpointIdentity } from '../src/repository-index.mjs';
+import { indexRepository, createRepositoryScanner, indexDiagnostics, INDEX_LIMITS, endpointIdentity } from '../src/repository-index.mjs';
 import { parseCode } from '../src/repository-syntax.mjs';
 import { createCollector, loadConfig } from '../src/collect.mjs';
 import { serviceInventory } from '../client/services.mjs';
@@ -114,7 +114,7 @@ test('scanner stays inside root and reports read budgets, policy exclusions and 
   const root=await fixture(t,{'node_modules/pkg/index.js':'model = "dependency-only"','.claude/config.json':'{"model":"harness-only"}','big.py':'x'.repeat(200),'ok.json':'{"model":"valid-model"}'});
   const outside=await fixture(t,{'other.json':'{"model":"outside-model"}'});await symlink(join(outside,'other.json'),join(root,'link.json'));
   let data=await indexRepository(root,{...INDEX_LIMITS,fileBytes:100});assert.deepEqual(values(data,'model'),['valid-model']);assert.equal(data.summary.skipped.symlink,1);assert.equal(data.summary.skipped.oversized,1);assert.ok(data.summary.skipped.policy>=2);
-  data=await indexRepository(root,{...INDEX_LIMITS,files:1});assert.equal(data.summary.truncated,true);assert.ok(data.issues.some(i=>i.code==='scan-limit'));
+  data=await indexRepository(root,{...INDEX_LIMITS,batchFiles:1});assert.equal(data.summary.truncated,false);assert.ok(data.progress.batches>1);assert.ok(values(data,'model').includes('valid-model'));
 });
 
 test('removed declarations disappear on the normal rescan and discovery can be disabled',async t=>{
@@ -188,4 +188,56 @@ test('linked endpoints retain their actual declaration line without duplicating 
   const configEndpoints=index.references.filter(r=>r.kind==='endpoint'&&r.file==='config.yaml');assert.equal(configEndpoints.length,1);assert.equal(configEndpoints[0].line,2);
   const models=index.references.filter(r=>r.kind==='model'&&r.file==='app.py');assert.equal(models.length,1);assert.equal(models[0].context,'application');
   assert.deepEqual(models[0].endpointIds,[codeEndpoints[0].id]);
+});
+
+
+test('batches continue beyond old file, byte, entry, depth and declaration limits',async t=>{
+  const root=await fixture(t,{}),deep='src/'+Array(10).fill('nested').join('/');
+  await mkdir(join(root,deep),{recursive:true});await mkdir(join(root,'assets'));
+  const files=650;
+  for(let offset=0;offset<files;offset+=50)await Promise.all(Array.from({length:Math.min(50,files-offset)},(_,i)=>writeFile(join(root,deep,`inference-${offset+i}.py`),`# ${'padding '.repeat(1100)}\nclient = OpenAI(base_url="https://api.openai.com/v1")\ndef task_${offset+i}():\n    return client.responses.create(model="model-${offset+i}")\ndef second_${offset+i}():\n    return client.responses.create(model="other-${offset+i}")\n`.replaceAll('\\n','\n'))));
+  for(let offset=0;offset<7500;offset+=100)await Promise.all(Array.from({length:100},(_,i)=>writeFile(join(root,'assets',`file-${offset+i}.txt`),'ignored')));
+  const updates=[];const scan=createRepositoryScanner(root,{publishMs:0,batchFiles:100});
+  const result=await scan({onProgress:update=>updates.push({phase:update.progress.phase,processed:update.progress.processed,references:update.index?.references.length})});
+  assert.equal(result.summary.filesRead,files);assert.ok(result.summary.bytesRead>4*1024*1024);
+  assert.ok(result.summary.entriesVisited>8000);assert.ok(result.references.length>2000);
+  assert.equal(result.summary.truncated,false);assert.equal(result.progress.phase,'complete');
+  assert.equal(result.progress.total,files);assert.equal(result.progress.processed,files);
+  assert.ok(updates.some(u=>u.references>0&&u.processed<files),'usable results before completion');
+  assert.ok(result.models.some(m=>m.name==='other-649'));
+  const cached=await scan();assert.equal(cached.progress.parsed,0);assert.equal(cached.progress.reused,files);assert.equal(cached.summary.bytesRead,0);assert.equal(cached.summary.filesRead,0);assert.equal(cached.summary.filesIndexed,files);
+  assert.deepEqual(cached.references,result.references);
+});
+
+test('incremental scans re-resolve environment changes and remove changed, deleted and oversized files',async t=>{
+  const root=await fixture(t,{'.env':'UPSTREAM_BASE_URL=https://api.openai.com/v1\n','a.py':'client = OpenAI(base_url=os.getenv("UPSTREAM_BASE_URL"))\ndef reply():\n    return client.responses.create(model="first-model")\n','b.json':'{"base_url":"https://api.openai.com/v1","model":"second-model"}'});
+  const scan=createRepositoryScanner(root);let result=await scan();assert.equal(result.models.find(m=>m.name==='first-model').provider,'OpenAI');
+  await writeFile(join(root,'.env'),'UPSTREAM_BASE_URL=https://openrouter.ai/api/v1\n');
+  result=await scan();assert.equal(result.progress.reused,2);assert.equal(result.progress.parsed,1);
+  assert.equal(result.models.find(m=>m.name==='first-model').provider,'OpenRouter');
+  await rm(join(root,'b.json'));await writeFile(join(root,'a.py'),'x'.repeat(INDEX_LIMITS.fileBytes+1));
+  result=await scan();assert.equal(result.models.length,0);assert.equal(result.summary.skipped.oversized,1);
+  await writeFile(join(root,'a.py'),'client = OpenAI(base_url="https://api.openai.com/v1")\nclient.responses.create(model="replacement-model")');
+  result=await scan();assert.ok(result.models.some(m=>m.name==='replacement-model'));assert.equal(result.progress.reused,0);
+});
+
+test('cached endpoints retain sanitized service identity without retaining URL credentials or queries',async t=>{
+  const root=await fixture(t,{'a.py':'client = OpenAI(base_url="https://private-name.openai.azure.com/openai/v1?key=PRIVATE_SECRET")\nclient.responses.create(model="gpt-5")'});
+  const scan=createRepositoryScanner(root);const first=await scan(),second=await scan();
+  assert.deepEqual(first.references,second.references);assert.equal(second.progress.reused,1);
+  assert.ok(second.models.some(m=>m.provider==='Azure OpenAI'));assert.doesNotMatch(JSON.stringify(second),/PRIVATE_SECRET|private-name|key=/);
+});
+
+test('scan cancellation is recoverable and issue totals outlive the detailed-note budget',async t=>{
+  const root=await fixture(t,Object.fromEntries(Array.from({length:105},(_,i)=>[`bad-${i}.json`,'{broken'])));
+  const scan=createRepositoryScanner(root,{batchFiles:2,publishMs:0});const abort=new AbortController();
+  await assert.rejects(scan({signal:abort.signal,onProgress:()=>abort.abort()}),{name:'AbortError'});
+  const result=await scan();assert.equal(result.summary.unresolved,105);assert.equal(result.issues.length,100);
+  assert.equal(indexDiagnostics(result).issueCounts['syntax-error'],105);
+});
+
+
+test('ordinary task names are not mistaken for credential prefixes',async t=>{
+  const root=await fixture(t,{'app.py':'def task_worker():\n    return client.responses.create(model="gpt-5")\ndef review_task_item():\n    return client.responses.create(model="gpt-5")\n','unsafe.json':'{"model":"sk-private-value","base_url":"https://api.openai.com/v1"}'});
+  const result=await indexRepository(root);assert.ok(values(result,'task').includes('task_worker'));assert.ok(values(result,'task').includes('review_task_item'));assert.doesNotMatch(JSON.stringify(result),/sk-private-value/);
 });

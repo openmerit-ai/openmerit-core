@@ -171,3 +171,13 @@ Prepared `0.1.6-preview.4` to deliver repository indexing and counts-only diagno
 ## Repository index — published preview.4, 10 October 2026
 
 Published and verified `0.1.6-preview.4`, superseding the unreleased/preparation status above. The npm package integrity matches the tested archive and `preview` points to this version. Direct registry installation and the restarted VM dashboard preserve all 246 real request records and 128 application files across passive refresh, with counts-only diagnostics and package-export checks passing. The release acceptance makes no inference calls; the separate earlier HF test supplied its provider/route identifiers explicitly. Static declarations remain distinct from actual usage. Stable `latest` is still `0.1.5`; homepage FAQ wording and site deployments are unchanged.
+
+
+## Phased repository indexing — unreleased source, 10 October 2026
+
+Reviewed startup, background collection, data handling, coverage and readiness claims. The source build opens the local dashboard before initial collection and indexes declarations in a dedicated worker. Repository-wide coverage limits become continuing batch budgets; per-file and parser protections remain, along with a worker memory ceiling. Fingerprints and sanitized parser metadata live only in process memory; no project files or persistent source cache are created. Rechecks start 60 seconds after a completed pass, while request/runtime collection keeps its existing interval and limits. Progress and failures remain explicit. The guide separates this unreleased behavior from published preview.4. No homepage FAQ wording, npm publication, or site deployment is implied.
+
+
+## Phased indexing release preparation — 10 October 2026
+
+Prepared `0.1.6-preview.5` for the existing npm preview channel. The source build passed all 281 verification tests. A separate 5,001-file synthetic repository on the four-core, 4 GiB VM exposed 25,001 references: URL ready in 43 ms, first declarations at about 1 second, full index at 4.1 seconds. An edit/deletion pass reused 4,998 files, read about 9 KiB, and completed in 1.27 seconds. These are fixture measurements, not a universal performance guarantee. The private VM source build preserved all 246 real request records and all 128 application files through passive refresh. Registry publication and installation verification are pending. The guide identifies behavior by minimum version; stable `latest`, homepage FAQ claims, and site deployments are unchanged.

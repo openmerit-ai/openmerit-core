@@ -54,3 +54,14 @@ test('busy default ports fall back to loopback and keep collection running; expl
   const next = await (await fetch(`${terminal.url}/api/snapshot`)).json();
   assert.ok(next.sequence > first.sequence);
 });
+
+
+test('HTTP is available before slow collection and first-load errors recover',async t=>{
+  let resolveCollection;let calls=0;
+  const terminal=await startTerminal({port:0,interval:0.05,collect:()=>{calls++;if(calls===1)return new Promise(resolve=>{resolveCollection=resolve;});if(calls===2)throw new Error('private detail');return {mode:'live',records:[],sequence:calls};}});
+  t.after(()=>terminal.close());
+  const first=await (await fetch(`${terminal.url}/api/snapshot`)).json();assert.equal(first.loading,true);assert.equal(calls,1);
+  assert.equal((await fetch(`${terminal.url}/api/info`)).status,200);
+  resolveCollection({mode:'live',records:[],sequence:1});
+  await delay(140);const later=await (await fetch(`${terminal.url}/api/snapshot`)).json();assert.ok(later.sequence>=3);
+});

@@ -5,7 +5,6 @@ import { startTerminal } from './server.mjs';
 import { createCollector, loadConfig } from './collect.mjs';
 import { sampleSnapshot } from './sample.mjs';
 import { openBrowser } from './browser.mjs';
-import { indexDiagnostics, indexRepository } from './repository-index.mjs';
 
 const help = `OpenMerit · Inference Terminal
 
@@ -50,7 +49,7 @@ async function main() {
   if (!(await stat(root)).isDirectory()) throw new Error('Choose a project directory.');
   const config = demo ? null : await loadConfig(root);
   if (config && !discovery) config.discovery = false;
-  if (diagnostics) { const index = !demo && config.discovery ? await indexRepository(root) : null; console.log(JSON.stringify(indexDiagnostics(index), null, 2)); return; }
+  if (diagnostics) { const {indexRepository,indexDiagnostics}=await import('./repository-index.mjs'); const index = !demo && config.discovery ? await indexRepository(root) : null; console.log(JSON.stringify(indexDiagnostics(index), null, 2)); return; }
   if (json) { console.log(JSON.stringify(demo ? sampleSnapshot() : await createCollector(root, config, interval)(), null, 2)); return; }
   const terminal = await startTerminal({ root, port, interval, demo, config, fallbackPort: !explicitPort });
   console.log(`\n  OpenMerit · Inference Terminal\n\n  ${terminal.url}\n\n  ${demo ? 'Sample environment · fictional data' : 'Current project · passive collection'}\n  Updates every ${interval}s. Press Ctrl+C to close.\n`);
