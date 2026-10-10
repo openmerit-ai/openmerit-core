@@ -220,3 +220,8 @@ Reviewed homepage FAQ claims against the expanded fictional comparison. The new 
 ## Preference overrides — source, 10 October 2026
 
 Reviewed comparison, evidence, approval and regression claims. This change is confined to the fictional hosted comparison: a selected preference may override benchmark and efficiency criteria, with explicit exceptions and truthful prices. It never weakens the live evaluation engine, routing approvals, endpoint compatibility or source collection. No real inference or insurance decision is made. The main homepage FAQ and published npm release remain unchanged. Hosted publication and verification are recorded separately.
+
+
+## Comparison visual hierarchy — source, 10 October 2026
+
+Reviewed the hosted comparison's presentation. The leading dark panel makes stage controls, fixed token costs and their modeled difference more prominent while keeping override disclosures and evidence visible. Selection and pricing rules are unchanged. No homepage FAQ, npm or live routing claim changes.
