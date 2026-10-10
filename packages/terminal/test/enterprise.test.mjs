@@ -84,6 +84,6 @@ test('hosted seed and comparison are read-only and never fall back to a collecto
   assert.equal((await worker.fetch(req('/api/snapshot'), env)).status, 404);
 });
 test('both comparison URL forms serve the comparison document', async () => {
-  const env = { ASSETS: { fetch(request) { assert.equal(new URL(request.url).pathname, '/demo/index.html'); return new Response('demo', {headers:{'Content-Type':'text/html'}}); } } };
+  const env = { ASSETS: { fetch(request) { assert.equal(new URL(request.url).pathname, '/demo/'); return new Response('demo', {headers:{'Content-Type':'text/html'}}); } } };
   for (const path of ['/demo', '/demo/']) assert.equal(await (await worker.fetch(new Request(`https://dash.openmerit.site${path}`), env)).text(), 'demo');
 });

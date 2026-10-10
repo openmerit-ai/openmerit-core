@@ -41,7 +41,9 @@ export default {
     } else if (path.startsWith('/api/')) response = json({ error: 'This preview contains fictional sample data only.' }, 404);
     else if (path === '/robots.txt') response = new Response(robots, { headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' } });
     else {
-      const asset = await env.ASSETS.fetch(['/demo', '/demo/'].includes(path) ? new Request(new URL('/demo/index.html', request.url), request) : request);
+      // The asset binding canonicalizes index.html to its directory URL.
+      // Fetch the canonical directory to avoid an index.html → /demo/ loop.
+      const asset = await env.ASSETS.fetch(['/demo', '/demo/'].includes(path) ? new Request(new URL('/demo/', request.url), request) : request);
       response = new Response(asset.body, asset);
       for (const [name, value] of Object.entries(headers)) response.headers.set(name, value);
       // Keep HTML untouched by zone-level injection, but allow scripts/styles to compress.
