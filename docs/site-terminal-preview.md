@@ -134,3 +134,16 @@ After publication, the VM updated directly with `npm install -g openmerit@previe
 Friends can update with `npm install -g openmerit@preview`, stop any running terminal, and run `openmerit dash` again from their application directory. The main website and hosted sample were not deployed. The source branch remains `codex/inference-terminal-preview`; this is a preview release, not a stable-channel release or a claim of universal log compatibility.
 
 Evidence: `/private/tmp/terminal-preview3-release/verify.log`, `pack.json`, `registry.json`, `tags.json`, `tarball-vm.json`, and `registry-vm.json`. Publication screenshot: `/private/tmp/terminal-preview3-release/npm-published.png`.
+
+
+### Repository index — npm preview release, 10 October 2026
+
+Published source commit `38d294f` as `openmerit@0.1.6-preview.4` under the `preview` dist-tag. The 103-file package is 1,080,626 bytes, with SHA-1 `f5217dc0e49f89cb48c129d65cd046443667a56a`. npm registry SHA-512 integrity matches the exact tested tarball. Availability and the preview tag were verified after npm processing; stable `latest` remains `0.1.5`. The release adds bounded repository syntax indexing, nested configuration and custom endpoint references, file/line evidence, and counts-only diagnostics. Static declarations remain distinct from recorded usage.
+
+Full release verification passed 272 tests (162 terminal tests) plus syntax, typecheck, build, demo, and documentation checks. Before publication, the exact release tarball was installed in an isolated VM prefix and passed plain `openmerit dash`, a passive refresh, diagnostics, package-export imports, and installed/served asset hashes. It preserved all 246 request records and all 128 application files.
+
+After publication, the VM updated from the registry using `npm install -g openmerit@preview` with sudo for its existing root-owned prefix. Installation completed in 14 seconds; plain `openmerit dash` started in 306 ms. The temporary source-build service override was moved to the VM release evidence directory, restoring the original `/usr/local/bin/openmerit` service command. The persistent dashboard at `http://127.0.0.1:4313/` passed the same checks across a passive refresh. All 246 request records remained deeply equal and all 128 application files stayed unchanged. The four HF records retain three completed requests, one prior credit failure, 99 input tokens, and 30 output tokens. Those calls were made by a separate test application before release acceptance; the application explicitly logged its provider/route metadata. Installation and acceptance generated no new inference calls.
+
+Friends can update with `npm install -g openmerit@preview`, stop the running terminal, and launch `openmerit dash` again in the application directory. This verifies the saved VM workload and supported source patterns; it does not establish complete discovery of arbitrary applications or reconstruct missing usage. The hosted sample and main website were not deployed.
+
+Evidence: `/private/tmp/terminal-preview4-release/verify.log`, `pack.json`, `build.json`, `registry.json`, `tags.json`, `tarball-vm.json`, `registry-vm.json`, and `persistent-vm.json`. Publication screenshot: `/private/tmp/terminal-preview4-release/npm-published.png`.
