@@ -1,5 +1,5 @@
 import { sampleSnapshot } from './sample.mjs';
-import { WORKLOADS, CATALOG, CONFIGURED_SERVICES, preferenceFor, selectReplacement } from './demo-policy.mjs';
+import { WORKLOADS, CATALOG, CONFIGURED_SERVICES, PREFERENCES, preferenceFor, selectReplacement } from './demo-policy.mjs';
 
 // Published standard, uncached text-token rates in USD per million tokens.
 // This catalog belongs to the fictional hosted demonstration, never live billing.
@@ -83,13 +83,25 @@ export function demoSnapshot(now = Date.now(), stage = 'before', preference = 'd
   const usage = WORKLOADS.map(() => ({ inputTokens: 0, outputTokens: 0 }));
   data.records.forEach((record, index) => {
     record.assignmentId = index % WORKLOADS.length;
+    const profile = WORKLOADS[record.assignmentId].tokenProfile;
+    if (profile) {
+      // Fixed fictional application profiles, independent of stage/preference.
+      // Schema-heavy SQL prompts and longer reconciliation scripts have distinct
+      // input/output mixes. Both include any billed reasoning output.
+      const variation = .85 + (index * 17 % 31) / 100;
+      record.inputTokens = Math.round(profile.input * variation) * REQUESTS_PER_GROUP;
+      record.outputTokens = Math.round(profile.output * variation) * REQUESTS_PER_GROUP;
+    }
     if (!record.outputTokens) record.outputTokens = (80 + index * 37 % 1600) * REQUESTS_PER_GROUP;
     usage[record.assignmentId].inputTokens += record.inputTokens;
     usage[record.assignmentId].outputTokens += record.outputTokens;
   });
-  const assignments = WORKLOADS.map((workload, index) => selectReplacement(workload, usage[index], preference));
+  const plans = Object.fromEntries(PREFERENCES.map(({ value }) => [value, WORKLOADS.map((workload, index) => selectReplacement(workload, usage[index], value))]));
+  const assignments = plans[preference];
+  const signature = pairs => JSON.stringify(pairs.map(pair => pair.after?.id ?? null));
+  const equivalentPreferences = Object.keys(plans).filter(value => value !== preference && signature(plans[value]) === signature(assignments));
   const feasible = assignments.every(pair => !pair.unresolved);
-  data.simulation = { ...data.simulation, kind: 'comparison-groups', stage, preference, feasible, catalogSize: CATALOG.filter(model => CONFIGURED_SERVICES.includes(model.provider)).length, configuredServices: CONFIGURED_SERVICES, assignments, prices: [...new Map(assignments.flatMap(pair => [pair.before, pair.after]).filter(Boolean).map(model => [model.id, model])).values()] };
+  data.simulation = { ...data.simulation, kind: 'comparison-groups', stage, preference, feasible, equivalentPreferences, catalogSize: CATALOG.filter(model => CONFIGURED_SERVICES.includes(model.provider)).length, configuredServices: CONFIGURED_SERVICES, assignments, prices: [...new Map(assignments.flatMap(pair => [pair.before, pair.after]).filter(Boolean).map(model => [model.id, model])).values()] };
   const models = new Map(), deployments = new Map();
   data.records.forEach((record, index) => {
     const assignmentId = record.assignmentId, assignment = assignments[assignmentId], workload = WORKLOADS[assignmentId];

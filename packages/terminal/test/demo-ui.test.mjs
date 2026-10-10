@@ -28,12 +28,12 @@ test('every demo preference renders its real plan, costs, decisions and evidence
     context.preference = value;
     const markup = vm.runInContext('state.data = snapshot; demoPreference = preference; comparisonPanel();', context);
     assert.match(markup, /Workload decisions/);
-    if (value === 'default') assert.match(markup, /25 model\/service offers/);
-    if (value === 'closed') assert.match(markup, /25 offers reviewed/);
+    if (value === 'default') assert.match(markup, /26 model\/service offers/);
+    if (value === 'closed') assert.match(markup, /26 offers reviewed/);
     if (value === 'closed') {
       assert.match(markup, /Plan incomplete/);
-      assert.match(markup, /7 of 10 workloads have a qualifying assignment/);
-      assert.match(markup, /6.7M of 9.6M baseline requests/);
+      assert.match(markup, /11 of 14 workloads have a qualifying assignment/);
+      assert.match(markup, /7.5M of 9.6M baseline requests/);
       assert.doesNotMatch(markup, /% lower/);
       const main = vm.runInContext('main()', context);
       assert.match(main, /id="model-results"/);
@@ -53,13 +53,23 @@ test('every demo preference renders its real plan, costs, decisions and evidence
       }
       vm.runInContext('state.hours=0;',context);
     } else {
-      assert.match(markup, /4 model changes · 1 service change · 5 retained/);
-      assert.match(markup, /215,363.17/);
-      if (value !== 'default') assert.match(markup, /Same choices as Default/);
+      assert.match(markup, /8 model changes · 5 service changes · 5 retained/);
+      const amount = context.snapshot.simulation.windows[0].afterCost.toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
+      assert.ok(markup.includes(amount));
+      if (value !== 'default') assert.match(markup, /2 choices differ from Default/);
+      if (['open','zdr','china'].includes(value)) assert.match(markup, /Same model mix and cost as/);
+      else assert.doesNotMatch(markup, /Same model mix and cost as/);
+      assert.match(markup, /Actuarial query generation/);
+      assert.match(markup, /Token cost ·/);
+      const rows = markup.slice(markup.indexOf('<tbody>'));
+      assert.ok(rows.indexOf(value === 'usa' ? 'Claim reconciliation scripts' : 'Actuarial query generation') < rows.indexOf('Claim intake'));
+      assert.match(markup, /model \+ service change/);
     }
     vm.runInContext('openInspector = (title, subtitle, body) => { globalThis.drawer = body; }; showPrices();', context);
-    assert.match(context.drawer, /Review 25 candidates/);
+    assert.match(context.drawer, /Review 26 candidates/);
     assert.match(context.drawer, /Published benchmark comparison/);
+    assert.match(context.drawer, /Application code · tools, code generation, reasoning/);
+    assert.match(context.drawer, /LiveCodeBench/);
     assert.doesNotMatch(context.drawer, /undefined|NaN/);
   }
 });

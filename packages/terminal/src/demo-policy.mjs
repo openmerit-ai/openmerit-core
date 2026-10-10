@@ -53,6 +53,12 @@ const flashCard = 'https://huggingface.co/zai-org/GLM-5.3-Flash';
 const flashScores = values => cohortScores(flashCard, 'glm53flash-release', ['AutomationBench v1.0.6', 'GDPval-AA v2', 'HLE · with tools'], values, 'Published release chart and footnotes; maximum effort; GDPval-AA rating, not percent.').map(item => item.axis === 'capabilities' ? { ...item, unit: ' rating' } : item);
 const qwen38Card = 'https://huggingface.co/Qwen/Qwen3.8-27B';
 const qwen38Scores = values => cohortScores(qwen38Card, 'qwen38-release', ['ClawEval-MM · average', 'IFBench', 'GPQA Diamond'], values, 'Qwen 3.8 model card comparison; published thinking configurations. ClawEval-MM is distinct from ClawEval.');
+// The application-code profile screens generated SQL/Python used by the
+// insurance product. These are application workers, not developer-harness usage.
+// Keep publisher cohorts separate: LiveCodeBench v6 % is not LCB Pro Elo.
+const glm47Card = 'https://huggingface.co/zai-org/GLM-4.7';
+const glmCodeScores = values => cohortScores(glm47Card, 'glm47-application-code', ['τ²-bench', 'LiveCodeBench v6', 'GPQA Diamond'], values, 'GLM-4.7 release table; thinking enabled, preserved thinking for multi-turn tools; adjusted user prompts and fixed Airline domain. Published comparator configurations; not endpoint parity.');
+const googleCodeScores = values => cohortScores(gemini, 'google-3flash-application-code', ['τ²-bench', 'LiveCodeBench Pro', 'GPQA Diamond'], values, 'December 2025 comparison: Gemini thinking, Sonnet 4.5 high/best available thinking. LCB Pro official leaderboard Elo; τ² fixed Airline, Gemini user simulator for Gemini and publisher-reported Sonnet score. Public comparison, not a controlled endpoint evaluation.').map(item => item.axis === 'capabilities' ? { ...item, unit: ' Elo' } : item);
 const basetenPolicy = { confirmedZdr: true, policySource: 'https://www.baseten.co/security-practices/', endpointMode: 'Synchronous Model API; request/response logging off' };
 const model = (id, name, provider, input, output, source, benchmarks = [], extra = {}) => ({ id, modelId: id, name, provider, input, output, source, benchmarks, creator: provider, origin: 'US', openWeights: false, outputType: 'text', confirmedZdr: false, ...extra });
 const openai = name => `https://developers.openai.com/api/docs/models/${name}`;
@@ -69,10 +75,11 @@ export const CATALOG = [
   model('gpt54mini', 'GPT-5.4 mini', 'OpenAI', .75, 4.5, openai('gpt-5.4-mini')),
   model('opus45', 'Claude Opus 4.5', 'Anthropic', 5, 25, anthropic, [...claudeScores(88.9, 70.6, 87), ...qwenScores(76.6, 59.6, 70.6, 87)]),
   model('sonnet46', 'Claude Sonnet 4.6', 'Anthropic', 3, 15, anthropic, claudeScores(91.7, 74.5, 89.9)),
+  model('sonnet45', 'Claude Sonnet 4.5', 'Anthropic', 3, 15, anthropic, [...glmCodeScores([87.2, 64.0, 83.4]), ...googleCodeScores([87.2, 1418, 83.4])], { configuration: 'Thinking enabled; published comparison configurations' }),
   model('haiku45', 'Claude Haiku 4.5', 'Anthropic', 1, 5, anthropic),
   model('gemini25pro', 'Gemini 2.5 Pro', 'Google', 1.25, 10, google, googleScores(77.8, 68, 86.4)),
   model('gemini25flash', 'Gemini 2.5 Flash', 'Google', .3, 2.5, google, googleScores(79.5, 66.7, 82.8)),
-  model('gemini3flash', 'Gemini 3 Flash Preview', 'Google', .5, 3, google, googleScores(90.2, 81.2, 90.4)),
+  model('gemini3flash', 'Gemini 3 Flash Preview', 'Google', .5, 3, google, [...googleScores(90.2, 81.2, 90.4), ...googleCodeScores([90.2, 2316, 90.4])]),
   model('oss120', 'gpt-oss-120b', 'Groq', .15, .6, groq, ossScores(67.8, 90, 80.1), { creator: 'OpenAI', openWeights: true, configuration: 'High reasoning effort' }),
   model('oss20', 'gpt-oss-20b', 'Groq', .075, .3, groq, ossScores(54.8, 85.3, 71.5), { creator: 'OpenAI', openWeights: true, configuration: 'High reasoning effort' }),
   model('glm53', 'GLM-5.3', 'Baseten', 1.4, 4.4, baseten, dsScores(48.8, 28.5, 88.1), { creator: 'Z.ai', origin: 'CN', openWeights: true, ...basetenPolicy, configuration: 'Maximum reasoning effort' }),
@@ -84,7 +91,7 @@ export const CATALOG = [
   model('deepseek4pro0813', 'DeepSeek V4 Pro 0813', 'Baseten', 1.32, 3.96, baseten, [], { creator: 'DeepSeek', origin: 'CN', openWeights: true, ...basetenPolicy, metadataSource: 'https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro-0813' }),
   model('nemotron3ultra', 'Nemotron 3 Ultra', 'Baseten', .6, 2.4, baseten, cohortScores('https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16', 'nvidia-ultra-nemo', ['TauBench V3 · average', 'MMLU-Pro', 'GPQA · no tools'], [70.9, 86.8, 87.0], 'NVIDIA NeMo evaluation SDK; model-card configurations. TauBench V3 is not τ-bench or τ²-bench.'), { creator: 'NVIDIA', origin: 'US', openWeights: true, ...basetenPolicy, metadataSource: 'https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16' }),
   model('glm52', 'GLM-5.2', 'Baseten', 1.4, 4.4, baseten, flashScores([26.2, 1504, 54.7]), { creator: 'Z.ai', origin: 'CN', openWeights: true, ...basetenPolicy, metadataSource: 'https://huggingface.co/zai-org/GLM-5.2' }),
-  model('glm47', 'GLM-4.7', 'Baseten', .6, 2.2, 'https://www.baseten.co/library/glm-4-7/', cohortScores('https://huggingface.co/zai-org/GLM-4.7', 'glm47-release', ['τ²-bench', 'MMLU-Pro', 'GPQA Diamond'], [87.4, 84.3, 85.7], 'GLM-4.7 release configurations; preserved thinking, adjusted user prompts and fixed Airline domain for τ²-bench.'), { creator: 'Z.ai', origin: 'CN', openWeights: true, ...basetenPolicy, configuration: 'Thinking enabled', metadataSource: 'https://huggingface.co/zai-org/GLM-4.7' }),
+  model('glm47', 'GLM-4.7', 'Baseten', .6, 2.2, 'https://www.baseten.co/library/glm-4-7/', [...cohortScores('https://huggingface.co/zai-org/GLM-4.7', 'glm47-release', ['τ²-bench', 'MMLU-Pro', 'GPQA Diamond'], [87.4, 84.3, 85.7], 'GLM-4.7 release configurations; preserved thinking, adjusted user prompts and fixed Airline domain for τ²-bench.'), ...glmCodeScores([87.4, 84.9, 85.7])], { creator: 'Z.ai', origin: 'CN', openWeights: true, ...basetenPolicy, configuration: 'Thinking enabled', metadataSource: 'https://huggingface.co/zai-org/GLM-4.7' }),
   model('qwen36', 'Qwen 3.6 · 27B', 'Groq', .6, 3, groq, [...qwenScores(72.4, 60.6, 75.8, 87.8), ...qwen38Scores([50.4, 69.1, 87.8])], { creator: 'Alibaba', origin: 'CN', openWeights: true, availability: 'Preview', metadataSource: qwenCard }),
   model('qwen38', 'Qwen 3.8 · 27B', 'Groq', .8, 4, groq, qwen38Scores([56.9, 79.5, 89.2]), { creator: 'Alibaba', origin: 'CN', openWeights: true, availability: 'Preview', metadataSource: 'https://huggingface.co/Qwen/Qwen3.8-27B' }),
   model('jev', 'Jev 1.13', 'TypeSafe', .042, 0, 'https://docs.typesafe.ai/models', [], { outputType: 'decision' }),
@@ -93,6 +100,12 @@ export const CONFIGURED_SERVICES = ['OpenAI', 'Anthropic', 'Google', 'Groq', 'Ba
 const byId = id => CATALOG.find(item => item.id === id);
 // Every workload is fictional application work. Names are plausible declarations,
 // never represented as discoveries from a visitor's repository.
+const APPLICATION_CODE_PROFILES = {
+  'actuarial.queries': { input: 14000, output: 700 },
+  'portfolio.reporting': { input: 18000, output: 900 },
+  'claims.reconciliation': { input: 5000, output: 2000 },
+  'reserves.analysis': { input: 6000, output: 2400 },
+};
 export const WORKLOADS = [
   ['claims.intake', 'Claim intake', 'gpt4o', ['parse_notice', 'extract_loss_date', 'normalize_address', 'link_policy', 'check_attachments', 'summarize_notice', 'prepare_case']],
   ['policy.extraction', 'Policy document extraction', 'gpt54', ['read_schedule', 'extract_limits', 'extract_deductibles', 'identify_endorsements', 'normalize_terms', 'link_sections', 'check_completeness']],
@@ -104,7 +117,16 @@ export const WORKLOADS = [
   ['fraud.review', 'Fraud review support', 'glm53', ['summarize_signals', 'link_evidence', 'compare_statements', 'flag_inconsistency', 'build_timeline', 'prepare_case_note', 'route_to_reviewer']],
   ['broker.translation', 'Broker correspondence', 'mistral35', ['detect_language', 'translate_email', 'preserve_policy_terms', 'check_names', 'summarize_request', 'draft_reply', 'prepare_review']],
   ['claims.routing', 'Decision routing', 'gpt4o', ['route_notice', 'rank_queue', 'classify_document', 'score_completeness', 'flag_duplicates', 'choose_workflow', 'route_exception']],
-].map(([id, purpose, before, tasks]) => ({ id, purpose, before: byId(before), configuredServices: CONFIGURED_SERVICES, tasks, requiredAxes: ['tools', 'capabilities', 'reasoning', ...(id === 'claims.routing' ? ['decisions'] : [])] }));
+  ['actuarial.queries', 'Actuarial query generation', 'sonnet45', ['read_schema', 'select_tables', 'generate_query', 'check_join_keys', 'validate_query', 'explain_result', 'prepare_review']],
+  ['claims.reconciliation', 'Claim reconciliation scripts', 'sonnet45', ['read_line_items', 'normalize_columns', 'generate_transform', 'compare_totals', 'build_checks', 'explain_variance', 'prepare_review']],
+  ['portfolio.reporting', 'Portfolio reporting queries', 'sonnet45', ['read_report_spec', 'map_dimensions', 'generate_query', 'check_aggregates', 'validate_periods', 'explain_result', 'prepare_report']],
+  ['reserves.analysis', 'Reserve analysis scripts', 'sonnet45', ['read_triangle', 'normalize_periods', 'generate_calculation', 'check_assumptions', 'build_sensitivity', 'explain_projection', 'prepare_review']],
+].map(([id, purpose, before, tasks]) => ({
+  id, purpose, before: byId(before), configuredServices: CONFIGURED_SERVICES, tasks,
+  benchmarkProfile: APPLICATION_CODE_PROFILES[id] ? 'Application code · tools, code generation, reasoning' : 'General application · tools, capabilities, reasoning',
+  tokenProfile: APPLICATION_CODE_PROFILES[id] ?? null,
+  requiredAxes: ['tools', 'capabilities', 'reasoning', ...(id === 'claims.routing' ? ['decisions'] : [])],
+}));
 
 export function modeledCost(model, usage) {
   return model && [model.input, model.output, usage.inputTokens, usage.outputTokens].every(value => Number.isFinite(value) && value >= 0)
@@ -154,7 +176,7 @@ export function selectReplacement(workload, usage, preference = 'default') {
   const serviceChanged = Boolean(after && after.provider !== workload.before.provider);
   const modelChanged = Boolean(after && after.modelId !== workload.before.modelId);
   return {
-    id: workload.id, purpose: workload.purpose, before: workload.before, after,
+    id: workload.id, purpose: workload.purpose, benchmarkProfile: workload.benchmarkProfile, tokenProfile: workload.tokenProfile, before: workload.before, after,
     changed: Boolean(after && selected), serviceChanged, modelChanged,
     checks: selected?.checks ?? [], assessments, qualifiedCount: qualified.length,
     preferenceMatched: Boolean(after && matchesPreference(after, preference)),

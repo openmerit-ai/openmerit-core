@@ -61,7 +61,7 @@ test('comparison changes models and prices while preserving the complete workloa
     assert.equal(b.cost, tokenCost(after.simulation.assignments[b.assignmentId].after, b.inputTokens, b.outputTokens));
   }
   assert.equal(new Set(before.records.map(item=>item.provider)).size, 6);
-  assert.equal(before.models.length, 9); assert.equal(after.models.length, 9);
+  assert.equal(before.models.length, 10); assert.equal(after.models.length, 10);
   assert.equal(total(before.records, 'inputTokens'), total(after.records, 'inputTokens'));
   assert.equal(total(before.records, 'outputTokens'), total(after.records, 'outputTokens'));
   assert.ok(total(after.records, 'cost') < total(before.records, 'cost'));
@@ -97,17 +97,17 @@ test('both comparison URL forms serve the comparison document', async () => {
 test('preferences preserve the scenario and show only qualifying workloads in an incomplete plan', () => {
   const baseline = demoSnapshot(now);
   assert.equal(baseline.project.name, 'insurance-tech-demo');
-  assert.equal(new Set(baseline.records.map(r => r.agentId)).size, 200);
-  assert.equal(new Set(baseline.records.map(r => r.taskId)).size, 700);
+  assert.equal(new Set(baseline.records.map(r => r.agentId)).size, 280);
+  assert.equal(new Set(baseline.records.map(r => r.taskId)).size, 980);
   for (const { value } of PREFERENCES) {
     const data = demoSnapshot(now, 'after', value), sim = data.simulation;
     assert.deepEqual(data.inventory, baseline.inventory);
-    assert.equal(sim.catalogSize, 25);
+    assert.equal(sim.catalogSize, 26);
     if (value === 'closed') {
       assert.equal(sim.feasible, false);
-      assert.equal(data.records.length, 6720);
+      assert.equal(data.records.length, 7542);
       assert.equal(data.models.length, 6);
-      assert.equal(data.deployments.length, 7);
+      assert.equal(data.deployments.length, 11);
       assert.deepEqual(data.capacityPools, baseline.capacityPools);
       const unresolved = new Set(sim.assignments.flatMap((pair, index) => pair.unresolved ? [index] : []));
       const original = new Map(baseline.records.map(record => [record.id, record]));
@@ -126,8 +126,8 @@ test('preferences preserve the scenario and show only qualifying workloads in an
         assert.equal(totals.afterCost, null);
       }
       const graph = buildEnvironmentMap(data.records, data);
-      assert.equal(graph.requestCount, 6720000);
-      assert.equal(Object.values(routeBreakdown(data.records, data)).reduce((a,b)=>a+b,0), 6720000);
+      assert.equal(graph.requestCount, 7542000);
+      assert.equal(Object.values(routeBreakdown(data.records, data)).reduce((a,b)=>a+b,0), 7542000);
       assert.equal(sim.assignments.filter(pair => pair.after === null).length, 3);
       for (const window of Object.values(sim.windows)) assert.equal(window.afterCost, null);
       continue;
@@ -136,9 +136,9 @@ test('preferences preserve the scenario and show only qualifying workloads in an
     assert.equal(total(data.records, 'inputTokens'), total(baseline.records, 'inputTokens'));
     assert.equal(total(data.records, 'outputTokens'), total(baseline.records, 'outputTokens'));
     assert.ok(total(data.records, 'cost') < total(baseline.records, 'cost'));
-    assert.equal(sim.assignments.filter(pair => pair.changed).length, 5);
-    assert.equal(sim.assignments.filter(pair => pair.modelChanged).length, 4);
-    assert.equal(sim.assignments.filter(pair => pair.serviceChanged).length, 1);
+    assert.equal(sim.assignments.filter(pair => pair.changed).length, 9);
+    assert.equal(sim.assignments.filter(pair => pair.modelChanged).length, 8);
+    assert.equal(sim.assignments.filter(pair => pair.serviceChanged).length, 5);
     for (const pair of sim.assignments) {
       if (pair.changed) assert.ok(pair.checks.every(check => check.status === 'pass'));
       assert.equal(pair.assessments.length, CATALOG.length - 1);
@@ -237,7 +237,7 @@ test('published offer identities, configured set and actual preference outcomes 
   assert.equal(assignment.after.confirmedZdr, true);
   assert.ok(assignment.after.input < assignment.before.input);
   assert.deepEqual(baseline.inventory, after.inventory);
-  // Identical soft-bias results are a real catalog outcome, not mocked differences.
+  // Preference effects come from the real reviewed catalog.
   for (const preference of ['zdr','open','usa','china']) {
     const data = demoSnapshot(now, 'after', preference);
     for (const pair of data.simulation.assignments) assert.equal(pair.preferenceChanged, pair.after.id !== pair.defaultChoice);
@@ -262,9 +262,49 @@ test('multiple evidence cohorts find matched benchmarks and never skip a matched
 test('incomplete plans preserve the full baseline and leave complete-plan After totals unknown', () => {
   const data = demoSnapshot(now, 'before', 'closed');
   assert.equal(data.records.length, 9600);
-  assert.equal(data.records.filter(record => record.afterCost === null).length, 2880);
+  assert.equal(data.records.filter(record => record.afterCost === null).length, 2058);
   assert.ok(Object.values(data.simulation.windows).every(totals => totals.afterCost === null));
   assert.equal(data.simulation.windows[0].requests, 9600000);
-  assert.equal(data.simulation.windows[0].qualifiedRequests, 6720000);
+  assert.equal(data.simulation.windows[0].qualifiedRequests, 7542000);
   assert.deepEqual(data.records.map(record => record.model), demoSnapshot(now).records.map(record => record.model));
+});
+
+
+test('expanded application workloads make actual preference selections and recalculate prices', () => {
+  const plans = Object.fromEntries(PREFERENCES.map(({value}) => [value, demoSnapshot(now, 'after', value)]));
+  const pick = (preference, id) => plans[preference].simulation.assignments.find(pair => pair.id === id);
+  assert.equal(pick('default', 'actuarial.queries').after.id, 'gemini3flash');
+  assert.equal(pick('default', 'claims.reconciliation').after.id, 'glm47');
+  for (const preference of ['zdr', 'open', 'china']) {
+    assert.equal(pick(preference, 'actuarial.queries').after.id, 'glm47');
+    assert.ok(plans[preference].simulation.windows[0].afterCost > plans.default.simulation.windows[0].afterCost);
+  }
+  assert.equal(pick('usa', 'claims.reconciliation').after.id, 'gemini3flash');
+  assert.equal(pick('closed', 'claims.reconciliation').after.id, 'gemini3flash');
+  assert.ok(plans.usa.simulation.windows[0].afterCost > plans.default.simulation.windows[0].afterCost);
+  assert.deepEqual(plans.zdr.simulation.equivalentPreferences, ['open','china']);
+  assert.deepEqual(plans.default.simulation.equivalentPreferences, []);
+  for (const [preference, data] of Object.entries(plans)) {
+    const baseline = demoSnapshot(now, 'before', preference);
+    for (const pair of data.simulation.assignments.filter(pair => pair.tokenProfile)) {
+      const qualified = pair.assessments.filter(item => item.eligible);
+      assert.deepEqual(qualified.map(item => item.candidate.id).sort(), ['gemini3flash','glm47']);
+      for (const item of qualified) {
+        assert.equal(item.checks.length, 3);
+        assert.ok(item.checks.every(check => check.status === 'pass'));
+        assert.equal(item.cheaper, true);
+      }
+    }
+    const original = new Map(baseline.records.map(record => [record.id, record]));
+    for (const record of data.records) {
+      const pair = data.simulation.assignments[record.assignmentId];
+      assert.equal(record.inputTokens, original.get(record.id).inputTokens);
+      assert.equal(record.outputTokens, original.get(record.id).outputTokens);
+      // Independent arithmetic, not the implementation's cost helper.
+      const expected = (record.inputTokens * pair.after.input + record.outputTokens * pair.after.output) / 1e6;
+      assert.equal(record.cost, expected);
+    }
+    if (data.simulation.feasible) assert.equal(data.simulation.windows[0].afterCost, total(data.records, 'cost'));
+    else assert.equal(data.simulation.windows[0].afterCost, null);
+  }
 });

@@ -210,3 +210,8 @@ Reviewed the hosted preference behavior against the public guide. The dated cata
 ### Incomplete comparison plans — 10 October 2026
 
 Reviewed hosted comparison claims after replacing the whole-plan block with a visible partial plan. The closed-weight requirement remains enforced per assignment: unresolved workflows have no After assignment or usage. Qualifying workloads remain inspectable, their subset coverage is disclosed, and complete-plan savings remain unavailable. No local collection, real routing, npm or homepage FAQ claims change.
+
+
+## Hosted preference comparison expansion — source, 10 October 2026
+
+Reviewed homepage FAQ claims against the expanded fictional comparison. The new application workloads, benchmark cohorts, fixed token profiles and preference-dependent costs affect only the hosted demonstration. They do not establish live model-routing performance, production discovery coverage or a new npm release. Existing public FAQ claims remain unchanged; detailed assumptions and limits are maintained in `inference-terminal.md`.
