@@ -8,12 +8,8 @@
   "build": {
     "command": "npm run build:dash-preview && npm run check:docs && npm run check --workspace @openmerit/terminal && npm test --workspace @openmerit/terminal"
   },
-  "routes": [
-    {
-      "pattern": "dash.openmerit.site",
-      "custom_domain": true
-    }
-  ],
+  // Public domains are owned by wrangler.domains.jsonc.
+  "routes": [],
   "assets": {
     "directory": "./dist/terminal-preview",
     "binding": "ASSETS",

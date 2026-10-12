@@ -1,6 +1,6 @@
 # Backfill recovery
 
-The [agent workflow](https://openmerit.site/demo?task=backfill) prepares a recovery manifest for an interrupted data backfill. Its goal is to resume recoverable partitions without duplicating committed data, quarantine malformed input, and stop for investigation when the failure is unknown or involves a checksum conflict. It never executes the manifest or writes to a database.
+The [agent workflow](https://openmerit.ai/demo?task=backfill) prepares a recovery manifest for an interrupted data backfill. Its goal is to resume recoverable partitions without duplicating committed data, quarantine malformed input, and stop for investigation when the failure is unknown or involves a checksum conflict. It never executes the manifest or writes to a database.
 
 ## Workflow structure
 

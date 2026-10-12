@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../hosted/worker.mjs';
 
-const request = (path, options) => new Request(`https://dash.openmerit.site${path}`, options);
+const request = (path, options) => new Request(`https://dash.openmerit.ai${path}`, options);
 const noAssets = { ASSETS: { fetch() { throw new Error('API must not use an asset fallback'); } } };
 
 test('hosted preview defaults to sample and has no live snapshot or mutation endpoint', async () => {

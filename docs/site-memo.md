@@ -1,5 +1,7 @@
 # Website memo
 
+Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
+
 The standalone `/memo/` page renders [Lazim's supplied memo](memo.md), “Optimum Inference For All.” The Markdown is the single maintained source; its wording and reading links are preserved from the supplied text. It describes the company's direction, including proposed capabilities and business model, rather than the released package contract. The homepage FAQ continues to describe released behavior.
 
 ## Editing and building

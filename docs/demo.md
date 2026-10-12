@@ -1,6 +1,6 @@
 # Demo
 
-The [demo player](https://openmerit.site/demo) shows recorded, supervised OpenMerit comparisons. The guides in this section explain each example's inputs, model assignments, evaluation policy, and outcome. These are early development demonstrations from this checkout; they do not establish general product reliability or behavior in the published npm release.
+The [demo player](https://openmerit.ai/demo) shows recorded, supervised OpenMerit comparisons. The guides in this section explain each example's inputs, model assignments, evaluation policy, and outcome. These are early development demonstrations from this checkout; they do not establish general product reliability or behavior in the published npm release.
 
 ## Choose a walkthrough
 

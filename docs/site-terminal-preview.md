@@ -1,6 +1,8 @@
 # Hosted Inference Terminal sample
 
-This separate preview is configured for `https://dash.openmerit.site/`. It uses the isolated terminal branch and its own Cloudflare Worker, `openmerit-terminal-preview`. It does not deploy `wrangler.jsonc`, the main website, or the main website’s interactive inference demo. The terminal-specific comparison lives at `/demo` on this Worker.
+Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
+
+This separate preview is configured for `https://dash.openmerit.ai/`. It uses the isolated terminal branch and its own Cloudflare Worker, `openmerit-terminal-preview`. It does not deploy `wrangler.jsonc`, the main website, or the main website’s interactive inference demo. The terminal-specific comparison lives at `/demo` on this Worker.
 
 ## Build and deploy
 
@@ -10,7 +12,7 @@ npm run verify
 npm run deploy:dash-preview
 ```
 
-The deploy command pins Wrangler 4.136.3 and uses `wrangler.terminal.jsonc`. Its build hook rebuilds the terminal preview, runs documentation checks, and checks/tests the terminal workspace before upload. The exact `dash.openmerit.site` custom domain uses the existing Cloudflare account. No storage, container, AI, secret, or external service binding is configured. The only binding serves bundled public assets from `dist/terminal-preview/`.
+The deploy command pins Wrangler 4.136.3 and uses `wrangler.terminal.jsonc`. Its build hook rebuilds the terminal preview, runs documentation checks, and checks/tests the terminal workspace before upload. The `openmerit-domains` router owns the `dash.openmerit.ai` custom domain and forwards requests to this Worker through its `TERMINAL` service binding. Both Workers use the existing Cloudflare account. No storage, container, AI, secret, or external service binding is configured. The only binding serves bundled public assets from `dist/terminal-preview/`.
 
 `scripts/build-terminal-preview.mjs` creates this asset directory from the same browser bundle and icons as the local terminal. It adds preview metadata, noindex, and a sample-only bootstrap marker; it never copies a project snapshot. `packages/terminal/hosted/worker.mjs` imports only the fictional sample generator, never the collector or local CLI. The Worker reuses each generated sample for its 15-second time bucket. Browser polling and reduced-motion behavior remain the same as the local interface.
 

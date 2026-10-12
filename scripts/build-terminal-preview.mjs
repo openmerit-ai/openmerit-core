@@ -9,7 +9,7 @@ await mkdir(output, { recursive: true });
 await cp(new URL('../packages/terminal/public/', import.meta.url), output, { recursive: true });
 const social = await terminalSocialImage();
 await writeFile(new URL(social.filename, output), social.png);
-const imageUrl = `https://dash.openmerit.site/${social.filename}`;
+const imageUrl = `https://dash.openmerit.ai/${social.filename}`;
 const page = new URL('index.html', output);
 let html = await readFile(page, 'utf8');
 html = html.replace('<title>Inference Terminal · OpenMerit</title>', `<title>${social.title}</title>
@@ -18,7 +18,7 @@ html = html.replace('<title>Inference Terminal · OpenMerit</title>', `<title>${
     <meta property="og:title" content="${social.title}">
     <meta property="og:description" content="An interactive sample of your inference environment, in one place. All names, activity, and hardware are fictional.">
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://dash.openmerit.site/">
+    <meta property="og:url" content="https://dash.openmerit.ai/">
     <meta property="og:site_name" content="OpenMerit">
     <meta property="og:image" content="${imageUrl}">
     <meta property="og:image:secure_url" content="${imageUrl}">
@@ -37,7 +37,7 @@ await writeFile(page, html);
 await mkdir(new URL('demo/', output), { recursive: true });
 const demoHtml = html.replace('data-sample-preview>', 'data-sample-preview data-comparison-demo>')
   .replaceAll(social.title, 'Before & after OpenMerit · Inference Terminal')
-  .replace('content="https://dash.openmerit.site/"', 'content="https://dash.openmerit.site/demo"')
+  .replace('content="https://dash.openmerit.ai/"', 'content="https://dash.openmerit.ai/demo"')
   .replace('Opening the sample environment…', 'Opening the comparison…');
 await writeFile(new URL('demo/index.html', output), demoHtml);
 console.log('Built sample-only terminal assets in dist/terminal-preview.');

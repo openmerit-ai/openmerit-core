@@ -31,7 +31,7 @@ export async function buildMemo(root) {
     await readFile(join(root, 'site/styles.css'), 'utf8'),
     await readFile(join(root, 'site/memo.css'), 'utf8'),
   ].join('\n')).digest('hex').slice(0, 12);
-  const image = 'https://openmerit.site/assets/openmerit-og-v1.png';
+  const image = 'https://openmerit.ai/assets/openmerit-og-v1.png';
   const imageAlt = 'Good models prove themselves in the work. Three miniature makers compare tools at a wooden workbench.';
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -41,11 +41,11 @@ export async function buildMemo(root) {
   <meta name="theme-color" content="#f8f7f4">
   <meta name="description" content="${escape(memo.description)}">
   <title>${escape(title)} · OpenMerit</title>
-  <link rel="canonical" href="https://openmerit.site${memo.url}">
+  <link rel="canonical" href="https://openmerit.ai${memo.url}">
   <meta property="og:type" content="article">
   <meta property="og:title" content="${escape(title)} · OpenMerit">
   <meta property="og:description" content="${escape(memo.description)}">
-  <meta property="og:url" content="https://openmerit.site${memo.url}">
+  <meta property="og:url" content="https://openmerit.ai${memo.url}">
   <meta property="og:site_name" content="OpenMerit">
   <meta property="og:image" content="${image}">
   <meta property="og:image:type" content="image/png">

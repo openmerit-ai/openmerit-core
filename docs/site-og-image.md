@@ -4,7 +4,7 @@ This is the shared default image for the homepage and all documentation pages. [
 
 Final asset: `site/assets/openmerit-og-v1.png` (1200 × 630 pixels, PNG).
 
-Public URL: https://openmerit.site/assets/openmerit-og-v1.png
+Primary-domain URL: https://openmerit.ai/assets/openmerit-og-v1.png. See the [domain migration status](site-domain-migration.md) for activation and cutover verification.
 
 Created with the built-in imagegen tool using the existing diverse miniature workshop as a style reference. The only visible text is “Good models prove themselves in the work.” The card features three diverse makers comparing and measuring tools at a wooden bench, plus the workshop spaniel.
 

@@ -1,6 +1,6 @@
 # Page sharing images
 
-Separate page images are disabled for now at the user's request. The homepage and all documentation pages use `https://openmerit.site/assets/openmerit-og-v1.png` for Open Graph and Twitter cards. No entries in `scripts/docs.config.mjs` currently enable `socialImage`.
+Separate page images are disabled for now at the user's request. The homepage and all documentation page sources use `https://openmerit.ai/assets/openmerit-og-v1.png` for Open Graph and Twitter cards. See the [domain migration status](site-domain-migration.md) for activation and cutover verification. No entries in `scripts/docs.config.mjs` currently enable `socialImage`.
 
 The optional template and workshop artwork remain available for later use. Normal docs builds do not render a separate page card. The previously published `/docs/og.png` path serves a copy of the default image so cached sharing metadata still resolves.
 
@@ -16,7 +16,7 @@ Enabled cards are generated during the build and served as PNGs. They are not re
 
 ## URLs and future pages
 
-When enabled for the overview, a custom image is written to `site/docs/og.png`, alongside the generated page, and assigned through `https://openmerit.site/docs/og.png?v=<content-hash>`. The hash comes from the rendered PNG, so changing the title, workshop artwork, font, or template changes the URL when it changes the pixels. Rebuilding the same card produces the same URL. Description or package-version updates do not invalidate an unchanged custom image; those details are not printed on the card.
+When enabled for the overview, a custom image is written to `site/docs/og.png`, alongside the generated page, and assigned through `https://openmerit.ai/docs/og.png?v=<content-hash>`. The hash comes from the rendered PNG, so changing the title, workshop artwork, font, or template changes the URL when it changes the pixels. Rebuilding the same card produces the same URL. Description or package-version updates do not invalidate an unchanged custom image; those details are not printed on the card.
 
 The physical PNG path stays stable. Previously shared image URLs with an older query parameter still resolve after a deployment instead of pointing to a deleted filename. Social platforms control their own preview caches and may retain a previously fetched card.
 

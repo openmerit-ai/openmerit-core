@@ -1,0 +1,50 @@
+{
+  "name": "openmerit-domains",
+  "account_id": "1f505317550261331711b1274ec53c33",
+  "main": "demo/domain-router.mjs",
+  "compatibility_date": "2026-10-12",
+  "workers_dev": false,
+  "preview_urls": false,
+  "build": {
+    "command": "node --test demo/test/domain-migration.test.mjs && npm run check:docs"
+  },
+  "services": [
+    {
+      "binding": "SITE",
+      "service": "openmerit-site"
+    },
+    {
+      "binding": "TERMINAL",
+      "service": "openmerit-terminal-preview"
+    }
+  ],
+  "vars": {
+    "DOMAIN_REDIRECTS_ENABLED": "true"
+  },
+  "routes": [
+    {
+      "pattern": "openmerit.ai",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.openmerit.ai",
+      "custom_domain": true
+    },
+    {
+      "pattern": "dash.openmerit.ai",
+      "custom_domain": true
+    },
+    {
+      "pattern": "openmerit.site/*",
+      "zone_id": "f4eb6a0586e7778ec5e6fa37bb8fa9e7"
+    },
+    {
+      "pattern": "www.openmerit.site/*",
+      "zone_id": "f4eb6a0586e7778ec5e6fa37bb8fa9e7"
+    },
+    {
+      "pattern": "dash.openmerit.site",
+      "custom_domain": true
+    }
+  ]
+}

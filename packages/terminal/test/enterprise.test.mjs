@@ -80,7 +80,7 @@ test('graphs, activity and service paths account for every grouped request', () 
 });
 test('hosted seed and comparison are read-only and never fall back to a collector', async () => {
   const env = { ASSETS: { fetch() { throw new Error('Unexpected assets'); } } };
-  const req = (path, method='GET') => new Request(`https://dash.openmerit.site${path}`, {method});
+  const req = (path, method='GET') => new Request(`https://dash.openmerit.ai${path}`, {method});
   const seed = await (await worker.fetch(req('/api/sample-seed'), env)).json();
   assert.equal(seed.version, 1); assert.ok(Math.abs(seed.now - Date.now()) < 16000);
   assert.ok(JSON.stringify(seed).length < 100);
@@ -91,7 +91,7 @@ test('hosted seed and comparison are read-only and never fall back to a collecto
 });
 test('both comparison URL forms serve the comparison document', async () => {
   const env = { ASSETS: { fetch(request) { assert.equal(new URL(request.url).pathname, '/demo/'); return new Response('demo', {headers:{'Content-Type':'text/html'}}); } } };
-  for (const path of ['/demo', '/demo/']) assert.equal(await (await worker.fetch(new Request(`https://dash.openmerit.site${path}`), env)).text(), 'demo');
+  for (const path of ['/demo', '/demo/']) assert.equal(await (await worker.fetch(new Request(`https://dash.openmerit.ai${path}`), env)).text(), 'demo');
 });
 
 test('preferences preserve all usage while separating overrides from qualified selections', () => {
@@ -196,7 +196,7 @@ test('speed only qualifies with a matched latency measurement, never a missing v
 });
 test('hosted preference is validated and reflected in the sample API', async () => {
   for (const preference of ['closed', 'unknown']) {
-    const data = await (await worker.fetch(new Request(`https://dash.openmerit.site/api/demo?stage=after&preference=${preference}`), {})).json();
+    const data = await (await worker.fetch(new Request(`https://dash.openmerit.ai/api/demo?stage=after&preference=${preference}`), {})).json();
     assert.equal(data.simulation.preference, preference === 'closed' ? 'closed' : 'default');
   }
 });

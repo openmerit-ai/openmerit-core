@@ -93,7 +93,7 @@ The preview uses the existing `openmerit` npm package, including its coordinator
 
 ## Documentation
 
-Read the searchable [OpenMerit documentation](https://openmerit.site/docs/). The Markdown sources below also ship with the package.
+Read the searchable [OpenMerit documentation](https://openmerit.ai/docs/). The Markdown sources below also ship with the package.
 
 - [Getting started](docs/getting-started.md)
 - [Your first trial](docs/first-trial.md)

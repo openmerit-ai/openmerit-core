@@ -97,7 +97,7 @@ const indexUrl = `/docs/search-index.${revision}.json`;
 const searchLibrary = `/docs/minisearch.${revision}.js`;
 const sourceUrl = doc => `${doc.url}source.md`;
 const defaultSocialImage = {
-  url: 'https://openmerit.site/assets/openmerit-og-v1.png', type: 'image/png', width: 1200, height: 630,
+  url: 'https://openmerit.ai/assets/openmerit-og-v1.png', type: 'image/png', width: 1200, height: 630,
   alt: 'Good models prove themselves in the work. Three miniature makers compare tools at a wooden workbench.',
 };
 const brand = '<svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M4 24V8l12 10L28 8v16M4 8l12 16L28 8" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg><span>openmerit</span>';
@@ -134,11 +134,11 @@ function layout(doc) {
   <meta name="theme-color" content="#f8f7f4">
   <meta name="description" content="${escape(doc.description)}">
   <title>${escape(doc.title)} · OpenMerit docs</title>
-  <link rel="canonical" href="https://openmerit.site${doc.url}">
+  <link rel="canonical" href="https://openmerit.ai${doc.url}">
   <meta property="og:title" content="${escape(doc.title)} · OpenMerit docs">
   <meta property="og:description" content="${escape(doc.description)}">
   <meta property="og:type" content="${doc.slug ? 'article' : 'website'}">
-  <meta property="og:url" content="https://openmerit.site${doc.url}">
+  <meta property="og:url" content="https://openmerit.ai${doc.url}">
   <meta property="og:site_name" content="OpenMerit">
   <meta property="og:image" content="${escape(socialImage.url)}">
   <meta property="og:image:type" content="${socialImage.type}">
@@ -207,7 +207,7 @@ for (const doc of docs) {
   if (doc.socialImage) {
     const { png, svg, revision, ...metadata } = createSocialImage(doc);
     await writeFile(join(directory, 'og.png'), png);
-    doc.socialImage = { ...metadata, url: `https://openmerit.site${doc.url}og.png?v=${revision}` };
+    doc.socialImage = { ...metadata, url: `https://openmerit.ai${doc.url}og.png?v=${revision}` };
   } else if (!doc.slug) {
     // Keep previously shared docs-image URLs working with the default artwork.
     await copyFile(join(root, 'site', new URL(defaultSocialImage.url).pathname), join(directory, 'og.png'));

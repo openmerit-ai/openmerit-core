@@ -225,3 +225,8 @@ Reviewed comparison, evidence, approval and regression claims. This change is co
 ## Comparison visual hierarchy — source, 10 October 2026
 
 Reviewed the hosted comparison's presentation. The leading dark panel makes stage controls, fixed token costs and their modeled difference more prominent while keeping override disclosures and evidence visible. Selection and pricing rules are unchanged. No homepage FAQ, npm or live routing claim changes.
+
+
+## Primary domain migration — preparation, 12 October 2026
+
+The `.ai` migration changes hostnames and mail configuration, not product behavior or readiness. Existing homepage FAQ claims remain unchanged. The protected memo, OTP limits, reader data, and interactive demo must be preserved from the deployed Worker because this checkout lacks parts of the current production source. See [migration operations and verification](site-domain-migration.md) for cutover status; DNS preparation alone does not establish successful publication or email delivery.

@@ -11,16 +11,10 @@
   "build": {
     "command": "npm run build && npm ci --ignore-scripts --prefix demo && npm run check:demo && npm run check:docs"
   },
-  "routes": [
-    {
-      "pattern": "openmerit.site/*",
-      "zone_id": "f4eb6a0586e7778ec5e6fa37bb8fa9e7"
-    },
-    {
-      "pattern": "www.openmerit.site/*",
-      "zone_id": "f4eb6a0586e7778ec5e6fa37bb8fa9e7"
-    }
-  ],
+  // Public domains are owned by wrangler.domains.jsonc.
+  // Reconcile the production auth source before deploying this application;
+  // see docs/site-domain-migration.md.
+  "routes": [],
   "assets": {
     "directory": "./site",
     "binding": "ASSETS",

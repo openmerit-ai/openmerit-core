@@ -86,7 +86,7 @@ export default {
         const { body, reservation } = prepare(JSON.parse(raw), new TextEncoder().encode(raw).length, session.task ?? 'support');
         if (!await registry(env).reserve(internal[1], token, reservation)) return response({ error: 'Session inference allowance reached.' }, 429);
         const upstream = await fetch(decisions ? 'https://openrouter.ai/api/alpha/decisions' : 'https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST', headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://openmerit.site/demo', 'X-Title': 'OpenMerit supervised demo' },
+          method: 'POST', headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://openmerit.ai/demo', 'X-Title': 'OpenMerit supervised demo' },
           body: JSON.stringify(body), signal: AbortSignal.timeout(90000),
         });
         return new Response(upstream.body, { status: upstream.status, headers: { 'Content-Type': upstream.headers.get('Content-Type') ?? 'application/json', 'Cache-Control': 'no-store' } });

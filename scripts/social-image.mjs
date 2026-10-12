@@ -54,8 +54,8 @@ function textBlock({ lines, size }, { x, y, lineHeight, fill }) {
 // The same template can render another page by passing its maintained metadata.
 export function createSocialImage({ title, url }) {
   const heading = fit(title, { maxWidth: 820, maxLines: 2, size: 76, minSize: 52 });
-  const address = new URL(url, 'https://openmerit.site');
-  if (address.origin !== 'https://openmerit.site') throw new Error('Social image must describe an OpenMerit page');
+  const address = new URL(url, 'https://openmerit.ai');
+  if (address.origin !== 'https://openmerit.ai') throw new Error('Social image must describe an OpenMerit page');
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
     <image width="1200" height="630" href="data:image/png;base64,${workshop.toString('base64')}"/>
     ${textBlock(heading, { x: 68, y: 133, lineHeight: 72, fill: '#30312d' })}

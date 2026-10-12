@@ -20,8 +20,8 @@ const html = await Promise.all(['/', ...publishedPages.map(page => page.url)].ma
 test('all generated navigation, source, asset and section links resolve', async () => {
   for (const page of html) {
     for (const match of page.text.matchAll(/(?:href|src)="([^"]+)"/g)) {
-      const url = new URL(match[1].replaceAll('&amp;', '&'), `https://openmerit.site${page.url}`);
-      if (url.origin !== 'https://openmerit.site') continue;
+      const url = new URL(match[1].replaceAll('&amp;', '&'), `https://openmerit.ai${page.url}`);
+      if (url.origin !== 'https://openmerit.ai') continue;
       let path = join(site, decodeURIComponent(url.pathname));
       const info = await stat(path).catch(() => undefined);
       assert.ok(info, `${page.url}: missing ${url.pathname}`);
@@ -40,7 +40,7 @@ test('pages have one H1, distinct section IDs, and a canonical address', () => {
     assert.equal([...page.text.matchAll(/<h1(?:\s|>)/g)].length, 1, page.url);
     const ids = [...page.text.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
     assert.equal(ids.length, new Set(ids).size, `Duplicate IDs on ${page.url}`);
-    assert.ok(page.text.includes(`<link rel="canonical" href="https://openmerit.site${page.url}">`));
+    assert.ok(page.text.includes(`<link rel="canonical" href="https://openmerit.ai${page.url}">`));
   }
 });
 
@@ -146,7 +146,7 @@ test('pages assign the default or enabled custom image to Open Graph and Twitter
     const image = page.socialImage ?? { url: defaultUrl, width: 1200, height: 630, type: 'image/png' };
     assert.ok(image, page.url);
     const url = new URL(image.url);
-    assert.equal(url.origin, 'https://openmerit.site');
+    assert.equal(url.origin, 'https://openmerit.ai');
     if (page.socialImage) assert.equal(url.pathname, `${page.url}og.png`);
     const png = await readFile(join(site, url.pathname));
     assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
