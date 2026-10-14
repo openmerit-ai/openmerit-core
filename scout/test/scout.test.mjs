@@ -135,10 +135,11 @@ test('reference speed preserves first-answer delay and does not mistake reasonin
   assert.equal(data.models[1].speed.timeToFirstAnswer, null);
 });
 
-test('refresh uses six bounded public sources and rejects a total outage without a previous index', async () => {
+test('refresh uses six benchmark/catalogue feeds and eight bounded Hub queries; total outage needs a previous index', async () => {
   const f = fixtures(); const calls = [];
   const fetcher = async url => { calls.push(url); return new Response(url.endsWith('.zip') ? f.epochZip : url.includes('artificialanalysis') ? f.analysisHTML : JSON.stringify(url.includes('OpenVLM') ? f.openvlm : f.router)); };
-  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 6); assert.equal(refreshed.models.length, 12);
+  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 14); assert.equal(refreshed.models.length, 12);
+  assert.equal(refreshed.sources.find(s => s.id === 'huggingface').status, 'failed');
   await assert.rejects(refreshSnapshot(async () => new Response('Unavailable', { status: 503 })), /Invalid model catalogue/);
 });
 
@@ -160,10 +161,17 @@ test('document leaderboard parser selects the named version and preserves publis
 });
 
 test('partial refresh preserves only failed sources with original timestamps while refreshing prices', () => {
-  const input = { ...fixtures(), omnidocHTML: omniFixture };
+  const input = { ...fixtures(), omnidocHTML: omniFixture, hubRows: [{ id: 'lab/specialist', pipeline_tag: 'document-question-answering', sha: 'a'.repeat(40) }] };
   const previous = compileSnapshot(input);
   input.router.data[0].pricing.prompt = '.000003';
-  const next = compileSnapshot({ ...input, previous, analysisHTML: 'broken', checkedAt: '2026-10-14T03:00:00Z' });
+  const next = compileSnapshot({ ...input, previous, hubRows: null, analysisHTML: 'broken', checkedAt: '2026-10-14T03:00:00Z' });
+  assert.deepEqual(next.specialists, previous.specialists);
+  assert.equal(next.sources.find(s => s.id === 'huggingface').status, 'failed');
+  assert.equal(next.sources.find(s => s.id === 'huggingface').checkedAt, previous.checkedAt);
+  const larger = { ...previous, specialists: Array.from({ length: 20 }, (_, i) => ({ ...previous.specialists[0], id: `lab/specialist-${i}` })) };
+  const emptyHub = compileSnapshot({ ...input, previous: larger, hubRows: [] });
+  assert.deepEqual(emptyHub.specialists, larger.specialists);
+  assert.equal(emptyHub.sources.find(s => s.id === 'huggingface').status, 'failed');
   assert.equal(next.models[0].inputPrice, 3);
   assert.equal(next.sources.find(s => s.id === 'analysis').status, 'failed');
   assert.equal(next.sources.find(s => s.id === 'analysis').checkedAt, previous.checkedAt);

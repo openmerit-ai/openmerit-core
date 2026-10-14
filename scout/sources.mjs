@@ -1,5 +1,6 @@
 import { unzipSync, strFromU8 } from 'fflate';
 import { benchmarkCapabilities } from './capabilities.mjs';
+import { hubQueries, parseHubModels, hubID } from './huggingface.mjs';
 
 export const sourceURLs = {
   epoch: 'https://epoch.ai/data/benchmark_data.zip',
@@ -90,7 +91,7 @@ export function parseBFCL(csv) {
   });
 }
 
-export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, bfclCSV, previous, failures = {}, checkedAt = new Date().toISOString() }) {
+export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, bfclCSV, hubRows, previous, failures = {}, checkedAt = new Date().toISOString() }) {
   const sources = [], benchmarks = [], observations = new Map();
   const priorSources = new Map(previous?.sources.map(s => [s.id, s]) ?? []);
   const failed = (id, error) => ({ ...priorSources.get(id), id, status: 'failed', checkedAt: priorSources.get(id)?.checkedAt ?? null, attemptedAt: checkedAt, error: String(error).slice(0, 200) });
@@ -101,7 +102,7 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
   const models = router ? router.data.filter(m => !m.id.includes(':') && !m.id.startsWith('~') && m.architecture?.output_modalities?.includes('text') &&
     !/\b(router|auto|embed)\b/.test(m.id) && (!m.expiration_date || Date.parse(m.expiration_date) > Date.parse(checkedAt))).map(m => ({
     id: m.id, name: m.name.replace(/^[^:]+:\s*/, ''), provider: m.name.includes(':') ? m.name.split(':')[0] : m.id.split('/')[0],
-    canonical: m.canonical_slug, modalities: m.architecture.input_modalities, parameters: m.supported_parameters ?? [], context: m.context_length,
+    canonical: m.canonical_slug, repository: hubID(m.hugging_face_id), modalities: m.architecture.input_modalities, parameters: m.supported_parameters ?? [], context: m.context_length,
     inputPrice: number(m.pricing?.prompt) === null ? null : Number(m.pricing.prompt) * 1e6,
     outputPrice: number(m.pricing?.completion) === null ? null : Number(m.pricing.completion) * 1e6,
     speed: null, evidence: [],
@@ -227,27 +228,39 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
   const usable = models.filter(m => m.evidence.length && m.inputPrice >= 0 && m.outputPrice >= 0 && m.inputPrice !== null && m.outputPrice !== null);
   if (usable.length < 10) throw new Error('Too few matched models; previous index retained.');
   if (!sources.some(s => s.status === 'ok')) throw new Error('All public sources failed; previous index retained.');
-  return { version: 1, dataVersion: 2, checkedAt, sources, benchmarks, models: usable, availableModels: models.length,
+  let specialists = previous?.specialists ?? [];
+  if (hubRows !== undefined || previous?.specialists) {
+    try {
+      const next = parseHubModels(hubRows, checkedAt);
+      if (specialists.length > 10 && next.length < specialists.length * .3) throw new Error('Hub coverage dropped unexpectedly.');
+      specialists = next;
+      sources.push({ id: 'huggingface', name: 'Hugging Face', url: 'https://huggingface.co/models', status: 'ok', checkedAt, publishedAt: null, attribution: 'Public repository metadata and reported evaluation results. Up to 30 most-downloaded repositories in each of eight task queries, including two OCR-filtered pipelines; not an exhaustive Hub index.' });
+    } catch { sources.push({ ...failed('huggingface', failures.huggingface ?? 'Hub metadata unavailable.'), name: 'Hugging Face', url: 'https://huggingface.co/models', attribution: 'Public repository metadata and reported evaluation results; last complete discovery snapshot retained.' }); }
+  }
+  return { version: 1, dataVersion: 3, checkedAt, sources, benchmarks, models: usable, specialists, availableModels: models.length,
     catalogue: models.map(({ evidence: _e, speed: _s, ...model }) => model) };
 }
 
 export async function refreshSnapshot(fetcher = fetch, previous) {
-  async function read(url, type) {
+  async function read(url, type, maxBytes = 12_000_000) {
     const response = await fetcher(url, { signal: AbortSignal.timeout(45_000), headers: { 'User-Agent': 'OpenMerit-Scout/0.1 (+https://openmerit.ai/scout)' } });
     if (!response.ok) throw new Error(`Source returned ${response.status}: ${new URL(url).hostname}`);
     const reader = response.body.getReader(); const chunks = []; let size = 0;
-    while (true) { const { done, value } = await reader.read(); if (done) break; size += value.length; if (size > 12_000_000) { await reader.cancel(); throw new Error('Source exceeded size limit.'); } chunks.push(value); }
+    while (true) { const { done, value } = await reader.read(); if (done) break; size += value.length; if (size > maxBytes) { await reader.cancel(); throw new Error('Source exceeded size limit.'); } chunks.push(value); }
     const bytes = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
     if (type === 'zip') return bytes;
     const text = new TextDecoder().decode(bytes); return type === 'json' ? JSON.parse(text) : text;
   }
   const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['bfcl', 'bfclCSV', 'text']];
-  const results = await Promise.allSettled(specs.map(([id, , type]) => read(sourceURLs[id], type)));
+  const results = await Promise.allSettled([...specs.map(([id, , type]) => read(sourceURLs[id], type)), ...hubQueries.map(query => read(query.url, 'json', 2_000_000))]);
   const inputs = { previous, failures: {} };
-  results.forEach((result, i) => {
+  results.slice(0, specs.length).forEach((result, i) => {
     const [id, field] = specs[i];
     if (result.status === 'fulfilled') inputs[field] = result.value;
     else inputs.failures[id] = result.reason.message;
   });
+  const hubResults = results.slice(specs.length);
+  if (hubResults.every(r => r.status === 'fulfilled' && Array.isArray(r.value) && r.value.length <= 30)) inputs.hubRows = hubResults.flatMap(r => r.value);
+  else { inputs.hubRows = null; inputs.failures.huggingface = 'One or more bounded Hub queries failed; previous complete snapshot retained.'; }
   return compileSnapshot(inputs);
 }

@@ -77,6 +77,17 @@ summary::-webkit-details-marker { display: none; }
 .support-section { color: var(--muted); font-size: 12px; }
 .support-section[open] > summary { color: var(--ink); text-decoration: underline; text-underline-offset: 6px; }
 .support-section p { max-width: 850px; margin: 10px 0; line-height: 1.7; }
+.source-detail { margin: 12px 0 20px; }
+.source-detail > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; min-height: 32px; color: var(--ink); }
+.source-role, .source-dates { color: var(--quiet); font-size: 11px; }
+.source-links { display: flex; gap: 18px; text-decoration: underline; text-underline-offset: 3px; }
+.source-counts { font-variant-numeric: tabular-nums; }
+.specialist-section { margin-top: 18px; }
+.specialist-item { margin: 24px 0 30px; }
+.specialist-item > p:first-child { color: var(--ink); overflow-wrap: anywhere; }
+.specialist-item a { text-decoration: underline; text-underline-offset: 3px; }
+.specialist-evidence { margin-top: 12px; font-size: 11px; }
+.specialist-evidence > summary { min-height: 32px; }
 .agent-body { padding-top: 6px; }
 .code-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; font: 11px var(--mono); }
 .agent-body pre { overflow-x: auto; padding: 17px 19px; margin: 4px 0 0; background: var(--surface); color: var(--ink); border-radius: 7px; font-size: 12px; line-height: 1.8; }

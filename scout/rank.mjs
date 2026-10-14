@@ -2,6 +2,8 @@ import { interpretPrompt, capabilities } from './capabilities.mjs';
 import { orderCandidates, benchmarkFamily } from './comparison.mjs';
 import { measuredCandidates } from './task-evidence.mjs';
 import { providerURL } from './provider-links.mjs';
+import { describeSources, calibrationStatus } from './source-details.mjs';
+import { discoverSpecialists } from './huggingface.mjs';
 
 const round = (value, places = 2) => Math.round(value * 10 ** places) / 10 ** places;
 // Workers can freeze the clock during synchronous execution. Zero is not a timing measurement.
@@ -27,7 +29,7 @@ export function indexStatus(index, now = Date.now()) {
   return { checkedAt: snapshot.checkedAt, stale: snapshot.sources.some(s => !s.checkedAt || now - Date.parse(s.checkedAt) > 2 * 3600_000), degraded: snapshot.sources.some(s => s.status === 'failed'),
     benchmarks: snapshot.benchmarks.length, benchmarksWithResults: new Set(models.flatMap(m => m.evidence.map(e => e.benchmark))).size,
     models: models.length, providers, availableModels: snapshot.availableModels, measurements: models.reduce((sum, m) => sum + m.evidence.length, 0),
-    sources: snapshot.sources, wordCloud: Object.entries(capabilities).map(([id, c]) => ({ id, label: c.label, keywords: c.terms, benchmarks: snapshot.benchmarks.filter(b => b.tags.includes(id)).length, models: models.filter(m => m.evidence.some(e => index.benchmarks.get(e.benchmark)?.tags.includes(id))).length })), refreshIntervalSeconds: 3600 };
+    sources: describeSources(index), calibration: calibrationStatus(now), specialistRepositories: snapshot.specialists?.length ?? 0, wordCloud: Object.entries(capabilities).map(([id, c]) => ({ id, label: c.label, keywords: c.terms, benchmarks: snapshot.benchmarks.filter(b => b.tags.includes(id)).length, models: models.filter(m => m.evidence.some(e => index.benchmarks.get(e.benchmark)?.tags.includes(id))).length })), refreshIntervalSeconds: 3600 };
 }
 
 // HTTP/MCP provide the same server-interpreted task. Client-supplied task objects
@@ -99,7 +101,7 @@ export function recommend(index, prompt, now = Date.now(), interpretedTask = nul
         configurations: e.configurations, historical: !!e.historical, urls: e.urls, observedDates: e.observedDates, cohortSize: e.cohortSize })),
     };
   });
-  return { prompt: prompt.trim(), task, ...status, eligibleModels: candidates.length, recommendations, warnings,
+  return { prompt: prompt.trim(), task, ...status, eligibleModels: candidates.length, recommendations, specialists: discoverSpecialists(index.snapshot, task, prompt, selected), warnings,
     ranking: { version: '4', mode: measured ? 'measured' : 'benchmarks', profile: measured?.profile ?? null, benchmarkEligibleModels: benchmarkEligible, workload: comparison.workload, weights: comparison.weights, eligibleModels: candidates.length },
     methodology: measured ? `Typed task match → calibration-only task-check accuracy, reported cost and full request time → strongest pairwise preferences without cycles → ordered top five among tested eligible models. Weights: ${comparison.weights.quality * 100}% quality, ${comparison.weights.cost * 100}% cost, ${comparison.weights.latency * 100}% latency. Small-sample evidence, not predicted accuracy on your task.` : `${task.interpreter === 'openai-decisions' ? 'OpenAI Decisions task interpretation' : 'Capability vocabulary'} → compare candidates on the same benchmarks, grouped by family → task-shaped reference cost and completion time → strongest pairwise preferences without cycles → ordered top five. Weights: ${Math.round(comparison.weights.quality * 100)}% quality, ${Math.round(comparison.weights.cost * 100)}% cost, ${Math.round(comparison.weights.latency * 100)}% latency. Scores are ranking signals, not predicted accuracy.`, elapsedMs: elapsed(start) };
 }
