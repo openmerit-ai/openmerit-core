@@ -51,12 +51,12 @@
       <div class="table-frame">
         <div class="table-scroll" role="region" aria-label="Model comparison" tabindex="0">
           <table class="data-table model-table">
-            <caption class="sr-only">Recommended models in Scout rank order. Quality is a relative benchmark signal, cost is USD per million tokens at a 3:1 input/output mix, and speed is reference output tokens per second.</caption>
+            <caption class="sr-only" id="table-caption">Recommended models in Scout rank order. Quality is a shared-benchmark comparison signal. Cost and completion time use an illustrative workload disclosed below the table, not a measured execution of your task.</caption>
             <thead><tr>
               <th scope="col" class="model-column">Model</th>
-              <th scope="col" class="numeric-column">Quality <span class="column-unit">relative / 100</span></th>
-              <th scope="col" class="numeric-column">Cost <span class="column-unit">USD / 1M tokens</span></th>
-              <th scope="col" class="numeric-column">Speed <span class="column-unit">output tokens / s</span></th>
+              <th scope="col" class="numeric-column" id="quality-heading">Quality <span class="column-unit">relative / 100</span></th>
+              <th scope="col" class="numeric-column">Cost <span class="column-unit">USD / 1,000 tasks</span></th>
+              <th scope="col" class="numeric-column">Time <span class="column-unit" id="time-unit">reference seconds</span></th>
               <th scope="col" class="evidence-column"><span class="sr-only">Benchmark evidence</span></th>
             </tr></thead>
             <tbody id="model-list"><tr><td colspan="5" class="table-message"><span>Reading the latest available index…</span></td></tr></tbody>
@@ -65,7 +65,7 @@
       </div>
       <p class="table-scroll-hint" hidden>Scroll to compare quality, cost and speed <span aria-hidden="true">↔</span></p>
       <p class="results-caption" id="results-caption">Published benchmarks guide the shortlist. Your own evaluation makes the final call.</p>
-      <details class="evidence-note" id="limitations" hidden><summary>What to know about these results <span aria-hidden="true">+</span></summary><div id="warnings"></div><p>Quality is a relative benchmark signal, not predicted task accuracy. Prices use a 3:1 input/output token mix. Speed is a published reference measurement and can vary by provider and reasoning configuration.</p></details>
+      <details class="evidence-note" id="limitations" hidden><summary>What to know about these results <span aria-hidden="true">+</span></summary><div id="warnings"></div><p>Measured rows use representative calibration cases; benchmark rows use the stated reference workload. Neither predicts exact results on your task. Evaluate the shortlist on your own examples.</p></details>
     </section>
 
     <section class="index-strip" aria-label="Index status"><div><span class="status-dot" id="status-dot" aria-hidden="true"></span><span id="index-status">Checking sources</span></div><p id="index-counts"></p></section>

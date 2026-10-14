@@ -10,4 +10,5 @@ for (const path of ['scout', 'docs', 'styles.css', 'docs.css', 'docs.js', 'docs-
   const destination = resolve(output, path); await mkdir(dirname(destination), { recursive: true });
   await cp(resolve(root, 'site', path), destination, { recursive: true });
 }
+await cp(resolve(root, 'scout/task-evidence.json'), resolve(output, 'scout/task-evidence.json'));
 console.log('Scout assets prepared in dist/scout-site.');

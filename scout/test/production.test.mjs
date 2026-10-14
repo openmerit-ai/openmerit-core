@@ -10,7 +10,7 @@ import { bfclMetrics, parseBFCL, compileSnapshot } from '../sources.mjs';
 
 const snapshot = JSON.parse(await readFile(new URL('../snapshot.json', import.meta.url), 'utf8'));
 const index = createIndex(snapshot);
-const answers = (choices = {}) => decisionQuestions.map(q => ({ name: q.name, type: 'choice', confidence: .9, choice: choices[q.name] ?? ({ tools: 'no', memory: 'none', json: 'no', output: 'supported' }[q.name] ?? 'absent') }));
+const answers = (choices = {}) => decisionQuestions.map(q => ({ name: q.name, type: 'choice', confidence: .9, choice: choices[q.name] ?? ({ tools: 'no', memory: 'none', json: 'no', output: 'supported', input_length: 'medium', output_length: 'medium', priority: 'balanced', task_kind: 'other' }[q.name] ?? 'absent') }));
 const post = (body, path = 'api/recommend') => new Request(`https://example.test/scout/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 const rpc = prompt => post({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scout_models', arguments: { prompt } } }, 'mcp');
 
@@ -113,4 +113,23 @@ test('BFCL imports native function calling only, preserves zero/unknown, and rej
   const definitions = snapshot.benchmarks.filter(b => b.source === 'bfcl');
   assert.equal(definitions.length, 6); assert.ok(definitions.every(b => b.family === 'bfcl-v4'));
   assert.ok(snapshot.models.every(m => m.evidence.filter(e => e.benchmark.startsWith('bfcl:')).every(e => e.observedAt === null && e.configurations.every(c => /\(FC/.test(c)))));
+});
+
+test('typed operations ground their required capability and single dispatch does not become an autonomous agent', () => {
+ const dispatch=interpretDecisions(answers({task_kind:'dispatch',tools:'no',agents:'useful'}),'Choose one provided function and its arguments.');
+ assert.equal(dispatch.needsTools,true);assert.equal(dispatch.weights.tools,3);assert.equal(dispatch.weights.agents,undefined);
+ const loop=interpretDecisions(answers({task_kind:'dispatch',tools:'yes',agents:'required'}),'Call a function, inspect errors and retry with corrected arguments.');
+ assert.equal(loop.weights.agents,3);
+ const sql=interpretDecisions(answers({task_kind:'sql',coding:'absent'}),'Write a read-only SQLite SELECT.');
+ assert.equal(sql.weights.coding,3);
+ const retrieval=interpretDecisions(answers({task_kind:'retrieve',context:'absent',input_length:'short'}),'Find the latest record in a long ledger.');
+ assert.equal(retrieval.weights.context,3);assert.equal(retrieval.workload.input,'long');
+});
+
+
+test('a short task description cannot make visual input a short text workload', () => {
+ const task=interpretDecisions(answers({task_kind:'extract',vision:'required',documents:'required',input_length:'short',output_length:'short'}),'Read a photo and extract fields.');
+ assert.equal(task.workload.input,'medium');
+ const long=interpretDecisions(answers({vision:'required',context:'required',input_length:'short'}),'Read a very large collection of scans.');
+ assert.equal(long.workload.input,'long');
 });

@@ -3,7 +3,7 @@ import { readFile, stat, writeFile, mkdir, rename } from 'node:fs/promises';
 import { resolve, sep, extname } from 'node:path';
 import { Readable } from 'node:stream';
 import { setDefaultResultOrder } from 'node:dns';
-import { createIndex } from './rank.mjs';
+import { createIndex, selectSnapshot } from './rank.mjs';
 import { handleAPI } from './http.mjs';
 import { handleMCP } from './mcp.mjs';
 import { refreshSnapshot } from './sources.mjs';
@@ -16,7 +16,7 @@ const cache = resolve(import.meta.dirname, '../.openmerit/scout/snapshot.json');
 let snapshot;
 try { snapshot = JSON.parse(await readFile(cache, 'utf8')); } catch { snapshot = JSON.parse(await readFile(new URL('./snapshot.json', import.meta.url), 'utf8')); }
 const seed = JSON.parse(await readFile(new URL('./snapshot.json', import.meta.url), 'utf8'));
-if (Date.parse(seed.checkedAt) > Date.parse(snapshot.checkedAt)) snapshot = seed;
+snapshot = selectSnapshot(seed, snapshot);
 let index = createIndex(snapshot), refreshing = false, refreshState = { refreshStatus: 'idle', scheduler: 'local-hourly' };
 async function refresh() {
   if (refreshing) return; refreshing = true; refreshState.refreshStatus = 'refreshing';
@@ -38,6 +38,7 @@ const server = createServer(async (req, res) => {
       res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text()); return;
     }
     if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405); res.end(); return; }
+    if (url.pathname === '/scout/task-evidence.json') { const body = await readFile(new URL('./task-evidence.json', import.meta.url)); res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(req.method === 'HEAD' ? undefined : body); return; }
     let file = resolve(root, `.${decodeURIComponent(url.pathname)}`);
     if (!file.startsWith(root + sep) && file !== root) { res.writeHead(404); res.end(); return; }
     if ((await stat(file)).isDirectory()) file = resolve(file, 'index.html');

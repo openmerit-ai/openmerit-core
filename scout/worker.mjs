@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import snapshot from './snapshot.json';
-import { createIndex } from './rank.mjs';
+import { createIndex, selectSnapshot } from './rank.mjs';
 import { handleAPI } from './http.mjs';
 import { handleMCP } from './mcp.mjs';
 import { refreshSnapshot } from './sources.mjs';
@@ -14,7 +14,7 @@ export class ScoutIndex extends DurableObject {
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS scout_snapshot (id INTEGER PRIMARY KEY, data TEXT NOT NULL, state TEXT NOT NULL)');
     const stored = ctx.storage.sql.exec('SELECT data, state FROM scout_snapshot WHERE id = 1').toArray()[0];
     const saved = stored ? JSON.parse(stored.data) : snapshot;
-    this.index = createIndex(Date.parse(snapshot.checkedAt) > Date.parse(saved.checkedAt) || snapshot.sources.some(source => !saved.sources.some(s => s.id === source.id)) ? snapshot : saved);
+    this.index = createIndex(selectSnapshot(snapshot, saved));
     this.state = stored ? JSON.parse(stored.state) : { refreshStatus: 'seed', scheduler: 'cloudflare-hourly' };
   }
   async refresh() {

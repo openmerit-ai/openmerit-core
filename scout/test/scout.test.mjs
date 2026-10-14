@@ -109,6 +109,17 @@ test('source ingestion preserves zero, rejects out-of-range and missing scores, 
   assert.throws(() => parseAnalysis('<script>throw new Error("not data")</script>'), /format changed/);
 });
 
+test('reference speed preserves first-answer delay and does not mistake reasoning tokens for an answer', () => {
+  const input = fixtures(), rows = parseAnalysis(input.analysisHTML);
+  Object.assign(rows[0], { isReasoning: true, medianTimeToFirstTokenSeconds: .1, medianTimeToFirstAnswerTokenSeconds: 12 });
+  Object.assign(rows[1], { isReasoning: true, medianTimeToFirstTokenSeconds: .2 });
+  const flight = `a:${JSON.stringify({ models: rows })}\n`;
+  const data = compileSnapshot({ ...input, analysisHTML: `<script>self.__next_f.push([1,${JSON.stringify(flight)}])</script>` });
+  assert.equal(data.models[0].speed.timeToFirstAnswer, 12);
+  assert.equal(data.models[0].speed.measurements[0].timeToFirstAnswer, 12);
+  assert.equal(data.models[1].speed.timeToFirstAnswer, null);
+});
+
 test('refresh uses six bounded public sources and rejects a total outage without a previous index', async () => {
   const f = fixtures(); const calls = [];
   const fetcher = async url => { calls.push(url); return new Response(url.endsWith('.zip') ? f.epochZip : url.includes('artificialanalysis') ? f.analysisHTML : JSON.stringify(url.includes('OpenVLM') ? f.openvlm : f.router)); };

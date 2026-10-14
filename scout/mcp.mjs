@@ -4,7 +4,7 @@ import { json, readJSON } from './http.mjs';
 const versions = ['2025-03-26', '2025-06-18', '2025-11-25'];
 const tool = {
   name: 'scout_models', title: 'Find models for a task',
-  description: 'Get up to five available language models using benchmark evidence, advertised cost and reference speed. The task description is sent to OpenAI Decisions for interpretation; Scout does not store it or execute the recommended models. Inspect requirements, warnings, memory configurations and evidence. This is a shortlist, not a guarantee of task accuracy.',
+  description: 'Get up to five available language models in rank order. Matching measured task profiles use observed accuracy, charges and request time; other tasks use public benchmarks and reference estimates. The task description is sent to OpenAI Decisions for interpretation; Scout does not store it or execute the recommended models. Inspect ranking.mode, the tested pool and sample size, freshness, requirements, warnings, memory configurations and evidence. This is a shortlist, not a guarantee of task accuracy.',
   inputSchema: { type: 'object', properties: { prompt: { type: 'string', minLength: 1, maxLength: 4000, description: 'Describe what the selected model needs to do, including input and output formats.' } }, required: ['prompt'], additionalProperties: false },
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
 };

@@ -46,10 +46,10 @@ function evidenceItem(e) {
 function modelRow(model) {
   const fragment = document.createDocumentFragment(), row = element('tr', 'model-row'), nameCell = element('th', 'model-cell'); nameCell.scope = 'row';
   const provider = providerIdentity(model), identity = element('div', 'model-identity'), name = element('div'), title = element('span', 'model-title', model.name), byline = element('span', 'model-provider', provider.label);
-  if (model.rank === 1) byline.append(element('span', 'pick-label', 'Best fit'));
   name.append(title, byline); identity.append(element('span', 'model-number', String(model.rank).padStart(2, '0')), providerIcon(provider), name); nameCell.append(identity);
-  const quality = metric(model.quality.toFixed(0), 'Relative percentile across relevant benchmarks. Not predicted task accuracy.', model.quality);
-  row.append(nameCell, quality, metric(money(model.pricing.blendedPerMillion), 'USD per million tokens · 3:1 input/output mix'), metric(model.speed ? String(Math.round(model.speed.tokensPerSecond)) : '—', model.speed ? 'Published reference output tokens per second; endpoint performance may differ.' : 'Reference speed unavailable'));
+  const qualityValue = model.measured ? model.measured.quality * 100 : model.quality;
+  const quality = metric(`${qualityValue.toFixed(0)}${model.measured ? '%' : ''}`, model.measured ? 'Mean field accuracy on separate calibration cases. Not predicted accuracy on your prompt.' : 'Relative result of shared-benchmark comparisons. Not predicted task accuracy.', qualityValue);
+  row.append(nameCell, quality, metric(model.reference?.costUsd != null ? money(model.reference.costUsd * 1000) : '—', model.measured ? `Mean reported charge, scaled to 1,000 similar tasks; cost known for ${model.measured.costKnownCalls}/${model.measured.cases} requests.` : 'Illustrative USD per 1,000 tasks at the workload below; excludes hidden reasoning and modality-specific charges.'), metric(model.reference?.completionSeconds != null ? `${model.reference.completionSeconds.toFixed(1)}s` : '—', model.measured ? 'Median full request time on the calibration cases, including failures.' : 'Reference first-answer delay plus generation time; actual endpoint latency may differ.'));
   const action = element('td'), toggle = element('button', 'evidence-toggle'); toggle.type = 'button';
   toggle.setAttribute('aria-label', `Evidence for ${model.name}`); toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', `model-evidence-${model.rank}`);
   const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); chevron.setAttribute('viewBox', '0 0 16 16'); chevron.setAttribute('fill', 'none'); chevron.setAttribute('aria-hidden', 'true');
@@ -57,13 +57,14 @@ function modelRow(model) {
   toggle.append(document.createTextNode('Evidence'), chevron); action.append(toggle); row.append(action);
   const detail = element('tr', 'model-detail'), detailCell = element('td', 'model-detail-cell'); detailCell.colSpan = 5; detail.id = `model-evidence-${model.rank}`; detail.hidden = true;
   toggle.addEventListener('click', () => { detail.hidden = !detail.hidden; toggle.setAttribute('aria-expanded', String(!detail.hidden)); row.dataset.expanded = String(!detail.hidden); });
-  const body = element('div', 'model-evidence'); body.append(element('p', 'evidence-intro', `${model.reason} ${model.evidenceCoverage}% capability coverage · ${model.confidence}.`));
+  const body = element('div', 'model-evidence'); body.append(element('p', 'evidence-intro', `${model.reason} ${model.evidenceCoverage}% capability coverage · ${model.comparison?.capabilityCoverage ?? 0}% average shared-capability coverage · ${model.confidence}.`));
   const idLine = element('div', 'model-id-line'), copyID = element('button', '', 'Copy ID'); copyID.type = 'button'; copyID.addEventListener('click', () => copy(model.id, copyID));
   idLine.append(element('code', '', model.id), copyID); body.append(idLine);
+  if (model.measured) { const observed = element('p', 'price-detail'); observed.append(link('Measured task evidence ↗', model.measured.url), document.createTextNode(` · ${model.measured.cases} cases · ${new Date(model.measured.measuredAt).toLocaleDateString()} · charges known for ${model.measured.costKnownCalls}/${model.measured.cases} calls.`)); body.append(observed); }
   const grid = element('div', 'evidence-grid'); model.evidence.slice(0, 4).forEach(e => grid.append(evidenceItem(e))); body.append(grid);
   if (model.evidence.length > 4) { const more = element('details', 'evidence-more'); more.append(element('summary', '', `All ${model.evidence.length} benchmark results`)); const rest = element('div', 'evidence-grid'); model.evidence.slice(4).forEach(e => rest.append(evidenceItem(e))); more.append(rest); body.append(more); }
   const pricing = element('p', 'price-detail'); pricing.append(document.createTextNode(`${money(model.pricing.inputPerMillion)} input / ${money(model.pricing.outputPerMillion)} output per million tokens. `), link('View model & pricing ↗', model.pricing.url)); body.append(pricing);
-  if (model.speed) { const speed = element('p', 'price-detail'); speed.append(link('Reference speed by Artificial Analysis ↗', model.speed.url), document.createTextNode(` · ${model.speed.configurations.join(', ')}. ${model.speed.historical ? 'Archived reference measurement. ' : ''}Endpoint performance may differ.`)); body.append(speed); }
+  if (model.speed && !model.measured) { const speed = element('p', 'price-detail'); speed.append(link('Reference timing by Artificial Analysis ↗', model.speed.url), document.createTextNode(` · ${model.speed.configurations.join(', ')}. ${model.speed.historical ? 'Archived reference measurement. ' : ''}Endpoint performance may differ.`)); body.append(speed); }
   detailCell.append(body); detail.append(detailCell); fragment.append(row, detail); return fragment;
 }
 function showSources(sources) {
@@ -74,14 +75,18 @@ function showSources(sources) {
 }
 function showResult(data, roundTripMs) {
   result = data;
-  $('#results-title').textContent = data.recommendations.length ? `${data.recommendations.length} models. A good place to start.` : 'No supported matches yet.';
+  $('#results-title').textContent = data.recommendations.length ? `${data.recommendations.length} models. ${data.ranking?.mode === 'measured' ? 'Ranked on measured tasks.' : 'A good place to start.'}` : 'No supported matches yet.';
   $('#capabilities').replaceChildren(...(data.task.capabilities.length ? data.task.capabilities.map(c => c.label) : ['General purpose']).map(label => element('span', '', label)));
   $('#query-time').textContent = `${data.elapsedMs == null ? 'Task interpreted' : `${data.elapsedMs < 1 ? '<1' : Math.round(data.elapsedMs)} ms ranking`} · ${Math.round(roundTripMs)} ms round trip`;
   $('#model-list').replaceChildren(...data.recommendations.map(modelRow));
   if (!data.recommendations.length) $('#model-list').append(tableMessage(data.warnings[0] || 'Try describing the task in more detail.'));
   $('#copy-results').disabled = !data.recommendations.length;
   $('#warnings').replaceChildren(...data.warnings.map(warning => element('p', '', warning)));
-  $('#results-caption').textContent = data.warnings.find(w => w.startsWith('Memory evidence')) || data.warnings.find(w => w.includes('Newer models')) || 'Published benchmarks guide the shortlist. Your own evaluation makes the final call.';
+  const workload = data.ranking?.workload, profile = data.ranking?.profile;
+  $('#quality-heading').replaceChildren(document.createTextNode(profile ? 'Accuracy ' : 'Quality '), element('span', 'column-unit', profile ? 'calibration cases' : 'relative / 100'));
+  $('#time-unit').textContent = profile ? 'measured seconds' : 'reference seconds';
+  $('#table-caption').textContent = profile ? 'Models in Scout rank order among tested eligible candidates. Accuracy, mean cost and median full request time come from separate calibration cases, not executions of your prompt.' : 'Models in Scout rank order using shared benchmarks and an illustrative workload. Quality is a ranking signal, not predicted task accuracy.';
+  $('#results-caption').textContent = profile ? `${profile.label} · ${profile.casesPerModel} calibration cases per model · ranked among ${profile.eligibleTestedModels} tested models · ${new Date(profile.measuredAt).toLocaleDateString()}. Small-sample results; your task and route may differ.` : workload ? `Reference workload: ${workload.inputTokens.toLocaleString()} input + ${workload.outputTokens.toLocaleString()} output tokens per task · ${workload.priority} priority. Cost and time are comparisons, not task-specific measurements.` : 'Published benchmarks guide the shortlist. Your own evaluation makes the final call.';
   $('#limitations').hidden = false;
   $('#results-caption').hidden = false;
   showIndex(data);

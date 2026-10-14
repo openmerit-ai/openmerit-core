@@ -265,3 +265,13 @@ Reviewed evidence, comparison, data handling and readiness claims for the semant
 ## Scout Decisions integration — release preparation, 14 October 2026
 
 Reviewed data handling, inference cost, evidence, scheduling and readiness claims. Scout now makes one server-side OpenAI Decisions call per prompt; its page and guide disclose this before submission. BFCL adds explicit tool-calling and external-memory evidence, with strict eligibility and source limitations. Fixed cost/quality/speed weights remain unchanged. The homepage FAQ continues to describe terminal/Pi behavior, so no FAQ copy change is required. This does not change terminal approvals, provider budgets, the npm package or local routing. Live publication is recorded separately in the Scout launch record.
+
+
+## Scout ranking revision — 14 October 2026
+
+Checked homepage FAQ claims against the proposed ranking revision. FAQ answers still describe the terminal/Pi workflow; Scout does not change its budgets, approvals or routing contracts. The Scout guide and table now disclose same-benchmark pairwise ordering, prompt-shaped reference cost, first-answer completion timing, tradeoff defaults, and incomplete comparison coverage. Reference estimates must not be described as measured task accuracy, actual endpoint latency or exact per-task charges. No general SOTA claim is established by the small task evaluations. Deployment and measured evaluation outcomes are recorded separately in the Scout publication notes.
+
+
+## Scout measured-task ranking — 14 October 2026
+
+Reviewed evidence, data, costs, scheduling and readiness claims for the Scout change. The separate Scout service uses calibration-only aggregates for narrow matching tasks, and public benchmark comparisons elsewhere. Held-out results are not loaded into ranking. Evaluation requires an explicit offline run; the existing hourly job still only refreshes six public feeds. No user task execution, saved prompt history, extra runtime inference, or database is introduced. Small samples and the selected candidate pool do not establish SOTA or a perfect ordered top five. Homepage FAQ claims concern the terminal/package and need no changes. Publication and test outcomes are recorded in `site-scout.md`.

@@ -178,7 +178,12 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
   }
   for (const model of models) {
     const rows = speedByModel.get(model.id); if (!rows) continue;
+    // Reasoning may stream before the answer. Preserve each measured configuration
+    // so the ranker never combines one mode's startup time with another's throughput.
+    const measurements = rows.map(r => ({ configuration: r.name, tokensPerSecond: r.medianOutputTokensPerSecond,
+      timeToFirstAnswer: number(r.medianTimeToFirstAnswerTokenSeconds) ?? (r.isReasoning ? null : number(r.medianTimeToFirstTokenSeconds)) }));
     model.speed = { tokensPerSecond: median(rows.map(r => r.medianOutputTokensPerSecond)), timeToFirstToken: median(rows.map(r => r.medianTimeToFirstTokenSeconds).filter(v => v > 0)),
+      timeToFirstAnswer: median(measurements.map(m => m.timeToFirstAnswer).filter(v => v !== null && v >= 0)), measurements,
       source: 'Artificial Analysis', url: `https://artificialanalysis.ai/models/${rows[0].slug}`, configurations: rows.map(r => r.name), observedAt: null, historical: rows.every(r => r.deprecated) };
   }
   });
@@ -222,7 +227,7 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
   const usable = models.filter(m => m.evidence.length && m.inputPrice >= 0 && m.outputPrice >= 0 && m.inputPrice !== null && m.outputPrice !== null);
   if (usable.length < 10) throw new Error('Too few matched models; previous index retained.');
   if (!sources.some(s => s.status === 'ok')) throw new Error('All public sources failed; previous index retained.');
-  return { version: 1, checkedAt, sources, benchmarks, models: usable, availableModels: models.length,
+  return { version: 1, dataVersion: 2, checkedAt, sources, benchmarks, models: usable, availableModels: models.length,
     catalogue: models.map(({ evidence: _e, speed: _s, ...model }) => model) };
 }
 

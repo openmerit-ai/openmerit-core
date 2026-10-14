@@ -1,0 +1,1330 @@
+{
+  "version": 1,
+  "methodology": "Equal-case field accuracy (schema and request errors score zero), mean reported USD charge (unknown charges omitted, count disclosed), median full request time including failures. Two or more failed requests cap quality by observed HTTP success across calibration tasks, so an unreliable route cannot regain full credit from one clean task slice. Separate calibration split only. Seven-day expiry; matched task shape and current catalogue eligibility required.",
+  "limitations": "Small development corpus and selected candidate pool, not a catalogue-wide or statistically validated optimum. Provider routing and latency can change. Text fixtures are authored; visual calibration uses eight public Portuguese invoices, not every document type. Four new payment slips and one new invoice are held out and never ingested.",
+  "visualSource": {
+    "title": "Invoice dataset — Cruz and Castelli (2022)",
+    "url": "https://zenodo.org/records/6371710",
+    "license": "https://creativecommons.org/licenses/by/4.0/"
+  },
+  "profiles": [
+    {
+      "id": "text-fields",
+      "label": "Text field extraction",
+      "split": "calibration",
+      "scope": {
+        "kind": "extract",
+        "vision": false,
+        "tools": false,
+        "structured": true,
+        "input": "short",
+        "output": "short",
+        "capabilities": [
+          "structured"
+        ]
+      },
+      "casesPerModel": 10,
+      "measuredAt": "2026-10-14T18:05:56.422Z",
+      "lastMeasuredAt": "2026-10-14T18:50:26.537Z",
+      "protocolSha256": "0c0c80a4ea38075a9c8cd717b439e9c4fffc9ece386de9d73b6f1c876481bd8c",
+      "models": [
+        {
+          "id": "minimax/minimax-m3",
+          "cases": 10,
+          "quality": 0.9666666666666668,
+          "validSchema": 10,
+          "validJson": 10,
+          "meanCostUsd": 0.00008325099999999999,
+          "costKnownCalls": 10,
+          "medianSeconds": 1.0835,
+          "providers": [
+            "CoreWeave"
+          ],
+          "availability": {
+            "successes": 16,
+            "attempts": 16,
+            "rate": 1
+          },
+          "effectiveQuality": 0.9666666666666668
+        },
+        {
+          "id": "nvidia/nemotron-3-ultra-550b-a55b",
+          "cases": 10,
+          "quality": 1,
+          "validSchema": 10,
+          "validJson": 10,
+          "meanCostUsd": 0.00013884,
+          "costKnownCalls": 10,
+          "medianSeconds": 1.3780000000000001,
+          "providers": [
+            "DeepInfra"
+          ],
+          "availability": {
+            "successes": 16,
+            "attempts": 16,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "x-ai/grok-4.3",
+          "cases": 10,
+          "quality": 1,
+          "validSchema": 10,
+          "validJson": 10,
+          "meanCostUsd": 0.00113091,
+          "costKnownCalls": 10,
+          "medianSeconds": 3.966,
+          "providers": [
+            "xAI"
+          ],
+          "availability": {
+            "successes": 16,
+            "attempts": 16,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "google/gemini-3.1-flash-lite",
+          "cases": 10,
+          "quality": 1,
+          "validSchema": 10,
+          "validJson": 10,
+          "meanCostUsd": 0.00011392499999999999,
+          "costKnownCalls": 10,
+          "medianSeconds": 1.37,
+          "providers": [
+            "Google"
+          ],
+          "availability": {
+            "successes": 16,
+            "attempts": 16,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "qwen/qwen3.7-max",
+          "cases": 10,
+          "quality": 1,
+          "validSchema": 10,
+          "validJson": 10,
+          "meanCostUsd": 0.00347687,
+          "costKnownCalls": 10,
+          "medianSeconds": 8.152000000000001,
+          "providers": [
+            "Alibaba"
+          ],
+          "availability": {
+            "successes": 16,
+            "attempts": 16,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "qwen/qwen3.7-plus",
+          "cases": 10,
+          "quality": 1,
+          "validSchema": 10,
+          "validJson": 10,
+          "meanCostUsd": 0.001145344,
+          "costKnownCalls": 10,
+          "medianSeconds": 14.7355,
+          "providers": [
+            "Alibaba"
+          ],
+          "availability": {
+            "successes": 16,
+            "attempts": 16,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "nvidia/nemotron-3-super-120b-a12b",
+          "cases": 10,
+          "quality": 0.9,
+          "validSchema": 9,
+          "validJson": 9,
+          "meanCostUsd": 0.00013328444444444444,
+          "costKnownCalls": 9,
+          "medianSeconds": 5.234999999999999,
+          "providers": [
+            "DekaLLM"
+          ],
+          "availability": {
+            "successes": 9,
+            "attempts": 10,
+            "rate": 0.9
+          },
+          "effectiveQuality": 0.9
+        }
+      ]
+    },
+    {
+      "id": "classification",
+      "label": "Rule-based classification",
+      "split": "calibration",
+      "scope": {
+        "kind": "classify",
+        "vision": false,
+        "tools": false,
+        "structured": true,
+        "input": "short",
+        "output": "short",
+        "capabilities": [
+          "structured"
+        ]
+      },
+      "casesPerModel": 6,
+      "measuredAt": "2026-10-14T18:50:27.353Z",
+      "lastMeasuredAt": "2026-10-14T18:51:00.923Z",
+      "protocolSha256": "0c0c80a4ea38075a9c8cd717b439e9c4fffc9ece386de9d73b6f1c876481bd8c",
+      "models": [
+        {
+          "id": "anthropic/claude-opus-5.5",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.002140666666666667,
+          "costKnownCalls": 6,
+          "medianSeconds": 3.5540000000000003,
+          "providers": [
+            "Claude Platform on AWS"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "openai/gpt-6-astra",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.0026216666666666667,
+          "costKnownCalls": 6,
+          "medianSeconds": 3.255,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "openai/gpt-6.1-sol",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.000526,
+          "costKnownCalls": 6,
+          "medianSeconds": 2.5090000000000003,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "google/gemini-4-argon",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.0009696666666666667,
+          "costKnownCalls": 6,
+          "medianSeconds": 2.8605,
+          "providers": [
+            "Google"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "anthropic/claude-sonnet-5.5",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.0010703333333333335,
+          "costKnownCalls": 6,
+          "medianSeconds": 2.3305,
+          "providers": [
+            "Azure"
+          ],
+          "availability": {
+            "successes": 23,
+            "attempts": 24,
+            "rate": 0.9583333333333334
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "anthropic/claude-fable-5.1",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.005351666666666667,
+          "costKnownCalls": 6,
+          "medianSeconds": 4.3365,
+          "providers": [
+            "Anthropic"
+          ],
+          "availability": {
+            "successes": 28,
+            "attempts": 28,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "inclusionai/ling-3.1-flash",
+          "cases": 6,
+          "quality": 0,
+          "validSchema": 0,
+          "validJson": 0,
+          "meanCostUsd": null,
+          "costKnownCalls": 0,
+          "medianSeconds": 0.8685,
+          "providers": [],
+          "availability": {
+            "successes": 12,
+            "attempts": 24,
+            "rate": 0.5
+          },
+          "effectiveQuality": 0
+        }
+      ]
+    },
+    {
+      "id": "tool-dispatch",
+      "label": "Single-function dispatch",
+      "split": "calibration",
+      "scope": {
+        "kind": "dispatch",
+        "vision": false,
+        "tools": true,
+        "structured": false,
+        "input": "short",
+        "output": "short",
+        "capabilities": [
+          "tools"
+        ]
+      },
+      "casesPerModel": 6,
+      "measuredAt": "2026-10-14T18:51:02.572Z",
+      "lastMeasuredAt": "2026-10-14T18:51:57.409Z",
+      "protocolSha256": "0c0c80a4ea38075a9c8cd717b439e9c4fffc9ece386de9d73b6f1c876481bd8c",
+      "models": [
+        {
+          "id": "anthropic/claude-opus-5.5",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.0035346666666666664,
+          "costKnownCalls": 6,
+          "medianSeconds": 3.7245,
+          "providers": [
+            "Claude Platform on AWS"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "openai/gpt-6-astra",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.003225,
+          "costKnownCalls": 6,
+          "medianSeconds": 2.458,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "openai/gpt-6.1-sol",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.0005,
+          "costKnownCalls": 6,
+          "medianSeconds": 1.9545,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "google/gemini-4-argon",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.0007196666666666667,
+          "costKnownCalls": 6,
+          "medianSeconds": 2.5374999999999996,
+          "providers": [
+            "Google"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "anthropic/claude-fable-5.1",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.010261666666666665,
+          "costKnownCalls": 6,
+          "medianSeconds": 4.0565,
+          "providers": [
+            "Anthropic"
+          ],
+          "availability": {
+            "successes": 28,
+            "attempts": 28,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "anthropic/claude-sonnet-5.5",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.0017806666666666667,
+          "costKnownCalls": 6,
+          "medianSeconds": 1.99,
+          "providers": [
+            "Claude Platform on AWS"
+          ],
+          "availability": {
+            "successes": 23,
+            "attempts": 24,
+            "rate": 0.9583333333333334
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "z-ai/glm-4.7-flash",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.00006781658333333334,
+          "costKnownCalls": 6,
+          "medianSeconds": 3.8434999999999997,
+          "providers": [
+            "Cloudflare"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "stepfun/step-3.5-flash",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.00007711666666666667,
+          "costKnownCalls": 6,
+          "medianSeconds": 2.4935,
+          "providers": [
+            "SiliconFlow"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "z-ai/glm-5.3-flash",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.00005994,
+          "costKnownCalls": 6,
+          "medianSeconds": 2.73,
+          "providers": [
+            "Relace"
+          ],
+          "availability": {
+            "successes": 10,
+            "attempts": 10,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "z-ai/glm-5.3",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.00022079183333333332,
+          "costKnownCalls": 6,
+          "medianSeconds": 1.9455,
+          "providers": [
+            "Relace"
+          ],
+          "availability": {
+            "successes": 10,
+            "attempts": 10,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "deepseek/deepseek-v4-flash-0731",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.00007683533333333334,
+          "costKnownCalls": 6,
+          "medianSeconds": 5.531000000000001,
+          "providers": [
+            "Sail Research"
+          ],
+          "availability": {
+            "successes": 12,
+            "attempts": 16,
+            "rate": 0.75
+          },
+          "effectiveQuality": 0.75
+        },
+        {
+          "id": "google/gemini-3.8-flash",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.000570375,
+          "costKnownCalls": 6,
+          "medianSeconds": 2.7565,
+          "providers": [
+            "Google"
+          ],
+          "availability": {
+            "successes": 10,
+            "attempts": 10,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        }
+      ]
+    },
+    {
+      "id": "sql-generation",
+      "label": "Read-only SQL generation",
+      "split": "calibration",
+      "scope": {
+        "kind": "sql",
+        "vision": false,
+        "tools": false,
+        "structured": true,
+        "input": "short",
+        "output": "short",
+        "capabilities": [
+          "structured",
+          "coding",
+          "reasoning"
+        ]
+      },
+      "casesPerModel": 6,
+      "measuredAt": "2026-10-14T18:51:58.694Z",
+      "lastMeasuredAt": "2026-10-14T18:52:38.557Z",
+      "protocolSha256": "0c0c80a4ea38075a9c8cd717b439e9c4fffc9ece386de9d73b6f1c876481bd8c",
+      "models": [
+        {
+          "id": "anthropic/claude-opus-5.5",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.0026320000000000002,
+          "costKnownCalls": 6,
+          "medianSeconds": 4.163,
+          "providers": [
+            "Claude Platform on AWS"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "openai/gpt-6-astra",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.003363333333333333,
+          "costKnownCalls": 6,
+          "medianSeconds": 3.401,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "openai/gpt-6.1-sol",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.0006493333333333333,
+          "costKnownCalls": 6,
+          "medianSeconds": 2.685,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "google/gemini-4-argon",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.0010326666666666668,
+          "costKnownCalls": 6,
+          "medianSeconds": 3.2584999999999997,
+          "providers": [
+            "Google"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "anthropic/claude-sonnet-5.5",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.0013076666666666668,
+          "costKnownCalls": 6,
+          "medianSeconds": 2.762,
+          "providers": [
+            "Azure"
+          ],
+          "availability": {
+            "successes": 23,
+            "attempts": 24,
+            "rate": 0.9583333333333334
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "anthropic/claude-fable-5.1",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.00653,
+          "costKnownCalls": 6,
+          "medianSeconds": 4.5855,
+          "providers": [
+            "Anthropic"
+          ],
+          "availability": {
+            "successes": 28,
+            "attempts": 28,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "inclusionai/ling-3.1-flash",
+          "cases": 6,
+          "quality": 0.3333333333333333,
+          "validSchema": 2,
+          "validJson": 2,
+          "meanCostUsd": 0.00030104999999999997,
+          "costKnownCalls": 2,
+          "medianSeconds": 1.147,
+          "providers": [
+            "DeepInfra"
+          ],
+          "availability": {
+            "successes": 12,
+            "attempts": 24,
+            "rate": 0.5
+          },
+          "effectiveQuality": 0.3333333333333333
+        }
+      ]
+    },
+    {
+      "id": "numeric-reasoning",
+      "label": "Short numerical problems",
+      "split": "calibration",
+      "scope": {
+        "kind": "calculate",
+        "vision": false,
+        "tools": false,
+        "structured": true,
+        "input": "short",
+        "output": "short",
+        "capabilities": [
+          "structured",
+          "reasoning",
+          "math"
+        ]
+      },
+      "casesPerModel": 6,
+      "measuredAt": "2026-10-14T18:52:39.064Z",
+      "lastMeasuredAt": "2026-10-14T18:53:38.823Z",
+      "protocolSha256": "0c0c80a4ea38075a9c8cd717b439e9c4fffc9ece386de9d73b6f1c876481bd8c",
+      "models": [
+        {
+          "id": "anthropic/claude-opus-5.5",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.0015780000000000002,
+          "costKnownCalls": 6,
+          "medianSeconds": 3.668,
+          "providers": [
+            "Claude Platform on AWS"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "openai/gpt-6.1-sol",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.000453,
+          "costKnownCalls": 6,
+          "medianSeconds": 3.414,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "openai/gpt-6-astra",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.002265,
+          "costKnownCalls": 6,
+          "medianSeconds": 3.561,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "google/gemini-4-argon",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.0008813333333333334,
+          "costKnownCalls": 6,
+          "medianSeconds": 2.2385,
+          "providers": [
+            "Google"
+          ],
+          "availability": {
+            "successes": 24,
+            "attempts": 24,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "anthropic/claude-sonnet-5.5",
+          "cases": 6,
+          "quality": 0.8333333333333334,
+          "validSchema": 5,
+          "validJson": 5,
+          "meanCostUsd": 0.0005864,
+          "costKnownCalls": 5,
+          "medianSeconds": 2.418,
+          "providers": [
+            "Azure"
+          ],
+          "availability": {
+            "successes": 23,
+            "attempts": 24,
+            "rate": 0.9583333333333334
+          },
+          "effectiveQuality": 0.8333333333333334
+        },
+        {
+          "id": "anthropic/claude-fable-5.1",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.0029616666666666667,
+          "costKnownCalls": 6,
+          "medianSeconds": 4.5535,
+          "providers": [
+            "Anthropic"
+          ],
+          "availability": {
+            "successes": 28,
+            "attempts": 28,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "inclusionai/ling-3.1-flash",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.00018659999999999998,
+          "costKnownCalls": 6,
+          "medianSeconds": 5.1295,
+          "providers": [
+            "DeepInfra"
+          ],
+          "availability": {
+            "successes": 12,
+            "attempts": 24,
+            "rate": 0.5
+          },
+          "effectiveQuality": 0.5
+        },
+        {
+          "id": "openai/gpt-6-sol",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.00048633333333333335,
+          "costKnownCalls": 6,
+          "medianSeconds": 2.809,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        }
+      ]
+    },
+    {
+      "id": "context-retrieval",
+      "label": "Long-text record retrieval",
+      "split": "calibration",
+      "scope": {
+        "kind": "retrieve",
+        "vision": false,
+        "tools": false,
+        "structured": true,
+        "input": "long",
+        "output": "short",
+        "capabilities": [
+          "structured",
+          "context"
+        ]
+      },
+      "casesPerModel": 6,
+      "measuredAt": "2026-10-14T18:53:39.220Z",
+      "lastMeasuredAt": "2026-10-14T18:54:58.910Z",
+      "protocolSha256": "0c0c80a4ea38075a9c8cd717b439e9c4fffc9ece386de9d73b6f1c876481bd8c",
+      "models": [
+        {
+          "id": "minimax/minimax-m3",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.00153063,
+          "costKnownCalls": 6,
+          "medianSeconds": 1.069,
+          "providers": [
+            "CoreWeave"
+          ],
+          "availability": {
+            "successes": 16,
+            "attempts": 16,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "nvidia/nemotron-3-ultra-550b-a55b",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.004262800000000001,
+          "costKnownCalls": 6,
+          "medianSeconds": 1.5785,
+          "providers": [
+            "DeepInfra"
+          ],
+          "availability": {
+            "successes": 16,
+            "attempts": 16,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "x-ai/grok-4.3",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.008823933333333334,
+          "costKnownCalls": 6,
+          "medianSeconds": 3.0835,
+          "providers": [
+            "xAI"
+          ],
+          "availability": {
+            "successes": 16,
+            "attempts": 16,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "google/gemini-3.1-flash-lite",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.00224625,
+          "costKnownCalls": 6,
+          "medianSeconds": 1.279,
+          "providers": [
+            "Google"
+          ],
+          "availability": {
+            "successes": 16,
+            "attempts": 16,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "qwen/qwen3.7-max",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.015007387500000002,
+          "costKnownCalls": 6,
+          "medianSeconds": 5.548500000000001,
+          "providers": [
+            "Alibaba"
+          ],
+          "availability": {
+            "successes": 16,
+            "attempts": 16,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "qwen/qwen3.7-plus",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.003463253333333334,
+          "costKnownCalls": 6,
+          "medianSeconds": 9.792,
+          "providers": [
+            "Alibaba"
+          ],
+          "availability": {
+            "successes": 16,
+            "attempts": 16,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "deepseek/deepseek-v4-flash-0731",
+          "cases": 6,
+          "quality": 0.05555555555555555,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.0002021652,
+          "costKnownCalls": 6,
+          "medianSeconds": 10.2485,
+          "providers": [
+            "OpenInference"
+          ],
+          "availability": {
+            "successes": 12,
+            "attempts": 16,
+            "rate": 0.75
+          },
+          "effectiveQuality": 0.05555555555555555
+        },
+        {
+          "id": "inclusionai/ling-3.1-flash",
+          "cases": 6,
+          "quality": 0.6666666666666666,
+          "validSchema": 4,
+          "validJson": 4,
+          "meanCostUsd": 0.002865075,
+          "costKnownCalls": 4,
+          "medianSeconds": 8.835999999999999,
+          "providers": [
+            "DeepInfra"
+          ],
+          "availability": {
+            "successes": 12,
+            "attempts": 24,
+            "rate": 0.5
+          },
+          "effectiveQuality": 0.5
+        },
+        {
+          "id": "upstage/solar-mini4",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.00042679999999999997,
+          "costKnownCalls": 6,
+          "medianSeconds": 1.8025,
+          "providers": [
+            "Upstage"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "google/gemini-3.7-flash",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.007517375,
+          "costKnownCalls": 6,
+          "medianSeconds": 5.532,
+          "providers": [
+            "Google"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "stepfun/step-5-preview",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.00646525,
+          "costKnownCalls": 6,
+          "medianSeconds": 1.3675,
+          "providers": [
+            "StepFun"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "inception/mercury-2.5",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.00048159999999999994,
+          "costKnownCalls": 6,
+          "medianSeconds": 2.42,
+          "providers": [
+            "Inception"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        }
+      ]
+    },
+    {
+      "id": "visual-fields",
+      "label": "Visual field extraction",
+      "split": "calibration",
+      "scope": {
+        "kind": "extract",
+        "vision": true,
+        "tools": false,
+        "structured": true,
+        "input": "medium",
+        "output": "short",
+        "capabilities": [
+          "documents",
+          "structured",
+          "vision"
+        ]
+      },
+      "casesPerModel": 8,
+      "measuredAt": "2026-10-14T17:59:29.793Z",
+      "lastMeasuredAt": "2026-10-14T18:05:53.508Z",
+      "protocolSha256": "0c0c80a4ea38075a9c8cd717b439e9c4fffc9ece386de9d73b6f1c876481bd8c",
+      "models": [
+        {
+          "id": "openai/gpt-5-mini",
+          "cases": 8,
+          "quality": 0.9583333333333333,
+          "validSchema": 8,
+          "validJson": 8,
+          "meanCostUsd": 0.0022900000000000004,
+          "costKnownCalls": 8,
+          "medianSeconds": 9.7685,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 8,
+            "attempts": 8,
+            "rate": 1
+          },
+          "effectiveQuality": 0.9583333333333333
+        },
+        {
+          "id": "google/gemini-2.5-pro",
+          "cases": 8,
+          "quality": 0.9791666666666666,
+          "validSchema": 8,
+          "validJson": 8,
+          "meanCostUsd": 0.011368749999999999,
+          "costKnownCalls": 8,
+          "medianSeconds": 10.661000000000001,
+          "providers": [
+            "Google"
+          ],
+          "availability": {
+            "successes": 8,
+            "attempts": 8,
+            "rate": 1
+          },
+          "effectiveQuality": 0.9791666666666666
+        },
+        {
+          "id": "google/gemini-3-flash-preview",
+          "cases": 8,
+          "quality": 1,
+          "validSchema": 8,
+          "validJson": 8,
+          "meanCostUsd": 0.0009299999999999999,
+          "costKnownCalls": 8,
+          "medianSeconds": 3.2430000000000003,
+          "providers": [
+            "Google"
+          ],
+          "availability": {
+            "successes": 8,
+            "attempts": 8,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "openai/gpt-4.1-mini",
+          "cases": 8,
+          "quality": 0.9166666666666666,
+          "validSchema": 8,
+          "validJson": 8,
+          "meanCostUsd": 0.0011232,
+          "costKnownCalls": 8,
+          "medianSeconds": 4.849,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 8,
+            "attempts": 8,
+            "rate": 1
+          },
+          "effectiveQuality": 0.9166666666666666
+        },
+        {
+          "id": "openai/gpt-5",
+          "cases": 8,
+          "quality": 0.9583333333333334,
+          "validSchema": 8,
+          "validJson": 8,
+          "meanCostUsd": 0.01655125,
+          "costKnownCalls": 8,
+          "medianSeconds": 21.026,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 8,
+            "attempts": 8,
+            "rate": 1
+          },
+          "effectiveQuality": 0.9583333333333334
+        },
+        {
+          "id": "qwen/qwen3-vl-235b-a22b-instruct",
+          "cases": 8,
+          "quality": 0.9583333333333333,
+          "validSchema": 8,
+          "validJson": 8,
+          "meanCostUsd": 0.00245843,
+          "costKnownCalls": 8,
+          "medianSeconds": 11.474499999999999,
+          "providers": [
+            "DeepInfra"
+          ],
+          "availability": {
+            "successes": 8,
+            "attempts": 8,
+            "rate": 1
+          },
+          "effectiveQuality": 0.9583333333333333
+        },
+        {
+          "id": "openai/gpt-4.1",
+          "cases": 8,
+          "quality": 0.8958333333333333,
+          "validSchema": 8,
+          "validJson": 8,
+          "meanCostUsd": 0.002437,
+          "costKnownCalls": 8,
+          "medianSeconds": 4.844,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 8,
+            "attempts": 8,
+            "rate": 1
+          },
+          "effectiveQuality": 0.8958333333333333
+        },
+        {
+          "id": "moonshotai/kimi-k2.5",
+          "cases": 8,
+          "quality": 0.5,
+          "validSchema": 4,
+          "validJson": 4,
+          "meanCostUsd": 0.0068469464,
+          "costKnownCalls": 5,
+          "medianSeconds": 70.122,
+          "providers": [
+            "Venice"
+          ],
+          "availability": {
+            "successes": 5,
+            "attempts": 8,
+            "rate": 0.625
+          },
+          "effectiveQuality": 0.5
+        }
+      ]
+    }
+  ]
+}
