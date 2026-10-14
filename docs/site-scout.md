@@ -212,3 +212,17 @@ Two model-agnostic paired-evidence proposals were evaluated after ranking versio
 Neither proposal met the exact-five release gate. First test: coding pair agreement 6/10 → 7/10, membership 4/5 → 4/5; extraction pairs 9/10 → 9/10, membership 5/5 → 4/5, with selected quality regression. Second test: coding pairs 6/10 → 5/10 and membership 4/5 → 4/5; extraction pairs 7/10 → 8/10 and membership 5/5 → 5/5. A prose-prefixed code answer violated the code-only contract; truncated code, missed corrections, four timeouts and one rate limit remain in the results. No retry or provider fallback was used. Raw JSON and executable code checks were kept distinct.
 
 The 96 requests cost $0.499428995 in reported charges, excluding Decisions; the four timeout charges remain unknown. The last candidate passed 378 local tests, which does not validate its recommendation quality. Both candidate implementations and evidence files were withheld; production source was restored to the released implementation. No Worker was deployed. The existing public guide's statement that exact-five ordering remains unproven still applies, and no public behavior or homepage FAQ claim changed. Frozen inputs, outputs, scores, candidate source and both reports are archived in the task's `scout-ranking-v5-20261015` artifact directory.
+
+## Detailed placeholders and fixed footer — published 15 October 2026
+
+| Before | After | Why |
+| --- | --- | --- |
+| Short examples swapped abruptly every five seconds | Paragraph examples hold for ten seconds, fade out in 180ms and in over 240ms | Give readers useful task context and a quieter transition |
+| Form had its own filled outer box | Transparent, unpadded form around the distinct input surface | Align the field with the page and remove the extra box |
+| Footer followed the short page content | Fixed bottom footer with reserved content and scroll space | Keep the evaluation link at the bottom without hiding the last source details |
+
+Focus, text input, page visibility and reduced-motion changes cancel any pending placeholder swap. Reduced motion keeps a static example. Native placeholder text never becomes submitted input. The public Scout guide documents the revised behavior; homepage FAQ claims were reviewed and need no change. Ranking and data handling are unchanged.
+
+Full verification passed 371 tests. Browser checks confirmed intermediate fade opacity, stable field height through rotation, pausing on focus and filled input, Shift+Enter, a 390px layout without horizontal overflow or clipped example text, and clear space between the final source details and fixed footer at the end of scrolling. The reduced-motion and hidden-page cancellation paths were reviewed in code; physical mobile hardware was not tested.
+
+Published as Scout Worker `ac207166-0abc-4773-951e-f1721528a49a` and documentation Worker `50027870-52e4-4014-9f2e-92b6f3655d55`. All 34 changed published assets matched the build, excluding only the existing injected edge analytics beacon. Main application modules, bindings, containers and asset routing were preserved. The live invoice prompt returned five recommendations in 0.55s with no browser errors. This is a UI smoke check, not a new ranking evaluation or latency guarantee. Screenshots and sanitized verification logs are in the task's `scout-placeholder-polish-20261015` artifact directory.

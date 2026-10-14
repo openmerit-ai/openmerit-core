@@ -30,7 +30,7 @@
     <section class="search-section" aria-label="Find models">
       <form id="scout-form" class="prompt-box">
         <label for="prompt">Task</label>
-        <textarea id="prompt" name="prompt" rows="2" maxlength="4000" required spellcheck="false" enterkeyhint="search" aria-describedby="prompt-hint" placeholder="Extract six fields from uploaded invoices as JSON."></textarea>
+        <textarea id="prompt" name="prompt" rows="2" maxlength="4000" required spellcheck="false" enterkeyhint="search" aria-describedby="prompt-hint" placeholder="Users upload photos of supplier invoices. Extract the vendor, invoice number, date, currency, tax, and total as JSON. Return null for missing fields. We process thousands a day, so accuracy, cost, and speed matter."></textarea>
         <div class="prompt-footer"><span id="prompt-hint">Search <span class="newline-hint">· Shift + Enter for a new line</span></span><button class="find-button" type="submit" title="Find models"><span class="sr-only">Find models</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
       </form>
       <p class="error-message" id="error" role="alert" hidden></p>

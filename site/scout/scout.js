@@ -131,18 +131,38 @@ fitPrompt();
 // Examples are hints only: never insert text or submit a request.
 const promptExamples = [
   $('#prompt').placeholder,
-  'Find a bug in a TypeScript project and write a test for the fix.',
-  'Compare research papers and summarize the evidence.',
-  'Rewrite a product announcement as a clear, friendly email.',
+  'Review a TypeScript API that sometimes creates duplicate orders. Trace the cause, suggest a small fix, and write regression tests. The model needs to read several files and use tools to run the tests.',
+  'Compare five research papers about battery recycling. Summarize their methods, separate measured results from claims, and cite the passages behind each conclusion. Flag anything the papers leave uncertain.',
+  'Turn release notes into a customer email under 200 words. Explain what changed, who benefits, and how to get started. Keep the tone direct and friendly, preserve the facts, and avoid promotional language.',
+  'Build a support assistant that checks order status with tools and remembers customer preferences across conversations. It should use the latest information, ask before changing an order, and respond quickly.',
 ];
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 let exampleIndex = 0;
-setInterval(() => {
+let exampleTransition;
+function canRotateExample() {
   const input = $('#prompt');
-  if (input.value || document.activeElement === input || document.hidden || reducedMotion.matches) return;
-  exampleIndex = (exampleIndex + 1) % promptExamples.length;
-  input.placeholder = promptExamples[exampleIndex];
-}, 5000);
+  return !input.value && document.activeElement !== input && !document.hidden && !reducedMotion.matches;
+}
+function stopExampleTransition() {
+  clearTimeout(exampleTransition);
+  $('#prompt').classList.remove('example-changing');
+}
+setInterval(() => {
+  if (!canRotateExample()) return;
+  const input = $('#prompt');
+  input.classList.add('example-changing');
+  exampleTransition = setTimeout(() => {
+    if (canRotateExample()) {
+      exampleIndex = (exampleIndex + 1) % promptExamples.length;
+      input.placeholder = promptExamples[exampleIndex];
+    }
+    stopExampleTransition();
+  }, 180);
+}, 10000);
+$('#prompt').addEventListener('focus', stopExampleTransition);
+$('#prompt').addEventListener('input', stopExampleTransition);
+document.addEventListener('visibilitychange', stopExampleTransition);
+reducedMotion.addEventListener('change', stopExampleTransition);
 $('#scout-form').addEventListener('submit', event => { event.preventDefault(); void search(); });
 $('#prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#scout-form').requestSubmit(); } });
 new ResizeObserver(() => { const table = $('.table-scroll'); $('.table-scroll-hint').hidden = table.scrollWidth <= table.clientWidth + 1; }).observe($('.table-scroll'));
