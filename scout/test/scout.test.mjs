@@ -109,10 +109,10 @@ test('source ingestion preserves zero, rejects out-of-range and missing scores, 
   assert.throws(() => parseAnalysis('<script>throw new Error("not data")</script>'), /format changed/);
 });
 
-test('refresh uses five bounded public sources and rejects a total outage without a previous index', async () => {
+test('refresh uses six bounded public sources and rejects a total outage without a previous index', async () => {
   const f = fixtures(); const calls = [];
   const fetcher = async url => { calls.push(url); return new Response(url.endsWith('.zip') ? f.epochZip : url.includes('artificialanalysis') ? f.analysisHTML : JSON.stringify(url.includes('OpenVLM') ? f.openvlm : f.router)); };
-  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 5); assert.equal(refreshed.models.length, 12);
+  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 6); assert.equal(refreshed.models.length, 12);
   await assert.rejects(refreshSnapshot(async () => new Response('Unavailable', { status: 503 })), /Invalid model catalogue/);
 });
 

@@ -30,9 +30,11 @@ export function indexStatus(index, now = Date.now()) {
     sources: snapshot.sources, wordCloud: Object.entries(capabilities).map(([id, c]) => ({ id, label: c.label, keywords: c.terms, benchmarks: snapshot.benchmarks.filter(b => b.tags.includes(id)).length, models: models.filter(m => m.evidence.some(e => index.benchmarks.get(e.benchmark)?.tags.includes(id))).length })), refreshIntervalSeconds: 3600 };
 }
 
-export function recommend(index, prompt, now = Date.now()) {
+// HTTP/MCP provide the same server-interpreted task. Client-supplied task objects
+// are never accepted. The keyword path remains available for offline comparison.
+export function recommend(index, prompt, now = Date.now(), interpretedTask = null) {
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('Describe a task in 1–4,000 characters.');
-  const start = performance.now(), task = interpretPrompt(prompt.trim()), status = indexStatus(index, now);
+  const start = performance.now(), task = interpretedTask ?? interpretPrompt(prompt.trim()), status = indexStatus(index, now);
   const warnings = [];
   if (status.stale) warnings.push('Some source data has not refreshed successfully for more than two hours.');
   if (status.degraded) warnings.push(`Source refresh incomplete: ${status.sources.filter(s => s.status === 'failed').map(s => s.name).join(', ')}. Last available evidence is retained with its original timestamps.`);
@@ -43,10 +45,13 @@ export function recommend(index, prompt, now = Date.now()) {
   for (const model of index.models) {
     if (task.needsVision && !model.modalities.includes('image')) continue;
     if (task.needsStructured && !model.parameters.some(p => ['structured_outputs', 'response_format'].includes(p))) continue;
+    if ((task.needsTools || task.needsMemory) && !model.parameters.includes('tools')) continue;
     const evidence = model.evidence.map(e => ({ ...e, definition: index.benchmarks.get(e.benchmark) })).filter(e => e.definition && !e.definition.superseded && e.definition.tags.some(t => task.weights[t]));
     if (!evidence.length) continue;
     // A general vision score cannot stand in for actually reading documents.
     if (task.needsVision && task.weights.documents && !evidence.some(e => e.definition.tags.includes('documents'))) continue;
+    if (task.needsTools && !evidence.some(e => e.definition.tags.includes('tools'))) continue;
+    if (task.needsMemory && !evidence.some(e => e.definition.tags.includes('memory'))) continue;
     let quality = 0, coverage = 0;
     for (const [tag, weight] of Object.entries(task.weights)) {
       const matches = evidence.filter(e => e.definition.tags.includes(tag));
@@ -55,7 +60,7 @@ export function recommend(index, prompt, now = Date.now()) {
       // Correlated versions of one benchmark cannot overwhelm independent evidence.
       const families = new Map();
       for (const e of matches) {
-        const key = family(e.definition.name), group = families.get(key) ?? [];
+        const key = e.definition.family ?? family(e.definition.name), group = families.get(key) ?? [];
         group.push(e.relativeQuality); families.set(key, group);
       }
       const mean = [...families.values()].reduce((sum, group) => sum + group.reduce((a, b) => a + b, 0) / group.length, 0) / families.size;
@@ -73,6 +78,10 @@ export function recommend(index, prompt, now = Date.now()) {
       const weight = e => e.definition.tags.reduce((sum, t) => sum + (task.weights[t] ?? 0), 0);
       return weight(b) - weight(a) || b.cohortSize - a.cohortSize || a.benchmark.localeCompare(b.benchmark);
     });
+    // Compact responses must show why each hard evidence requirement was satisfied.
+    const requiredTags = [task.needsMemory && 'memory', task.needsTools && 'tools', task.needsVision && task.weights.documents && 'documents'].filter(Boolean);
+    const requiredEvidence = [...new Set(requiredTags.map(tag => evidence.find(e => e.definition.tags.includes(tag))).filter(Boolean))];
+    evidence.splice(0, evidence.length, ...requiredEvidence, ...evidence.filter(e => !requiredEvidence.includes(e)));
     candidates.push({ model, quality, coverage, blendedPrice, score, evidence });
   }
   candidates.sort((a, b) => b.score - a.score || a.blendedPrice - b.blendedPrice || a.model.id.localeCompare(b.model.id));
@@ -81,10 +90,14 @@ export function recommend(index, prompt, now = Date.now()) {
   if (selected.some(c => !c.model.speed)) warnings.push('Reference speed is unavailable for some models; no speed was estimated.');
   if (selected.some(c => c.evidence.some(e => e.definition.source === 'openvlm'))) warnings.push(`Some visual evidence comes from OpenVLM’s ${index.snapshot.sources.find(s => s.id === 'openvlm')?.publishedAt ?? 'undated'} snapshot. Newer models may lack comparable document results.`);
   if (task.needsStructured) warnings.push('JSON support is checked against the model catalogue. Instruction-following benchmarks are a proxy, not a test of your exact schema.');
+  if (task.weights.tools) warnings.push('Tool-calling support and published tool evaluations are checked. Reliability still depends on your function definitions, arguments and execution loop.');
+  if (task.weights.memory) warnings.push('Memory evidence is BFCL v4 with external key-value, vector and summarization stores. It is not built-in memory or a test of your storage system; newer models without comparable results are excluded when persistent memory is required.');
+  if (task.requirements?.memory === 'session') warnings.push('The prompt requires conversation state within a session. This is distinct from persistent-memory benchmarks.');
+  if (task.uncertainty?.length) warnings.push(`Some task requirements are uncertain: ${task.uncertainty.join(', ')}. Inspect the interpretation and evaluate the shortlist on your examples.`);
   const recommendations = selected.map((c, i) => {
     const { model } = c;
     const tags = [...new Set(c.evidence.flatMap(e => e.definition.tags).filter(t => task.weights[t]))];
-    const families = new Set(c.evidence.map(e => family(e.definition.name)));
+    const families = new Set(c.evidence.map(e => e.definition.family ?? family(e.definition.name)));
     const confidence = c.coverage >= .8 && families.size >= 4 ? 'broader evidence' : 'limited evidence';
     return { rank: i + 1, id: model.id, name: model.name, provider: model.provider, score: round(c.score * 100), quality: round(c.quality * 100),
       evidenceCoverage: round(c.coverage * 100), confidence, reason: `${tags.map(t => capabilities[t].label.toLowerCase()).join(', ')}: ${c.evidence.length} results across ${families.size} benchmark families. ${model.speed ? 'Measured reference throughput included.' : 'Reference throughput unavailable.'}`,
@@ -95,5 +108,5 @@ export function recommend(index, prompt, now = Date.now()) {
     };
   });
   return { prompt: prompt.trim(), task, ...status, eligibleModels: candidates.length, recommendations, warnings,
-    methodology: 'Capability vocabulary → benchmark percentiles grouped by family and adjusted for evidence coverage → 80% task quality, 13% price, 7% reference generation speed. Scores are ranking signals, not predicted accuracy. Published evaluation configurations can differ from API defaults.', elapsedMs: elapsed(start) };
+    methodology: `${task.interpreter === 'openai-decisions' ? 'OpenAI Decisions task interpretation' : 'Capability vocabulary'} → benchmark percentiles grouped by family and adjusted for evidence coverage → 80% task quality, 13% price, 7% reference generation speed. Scores are ranking signals, not predicted accuracy. Published evaluation configurations can differ from API defaults.`, elapsedMs: elapsed(start) };
 }

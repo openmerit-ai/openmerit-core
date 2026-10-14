@@ -7,8 +7,10 @@ import { createIndex } from './rank.mjs';
 import { handleAPI } from './http.mjs';
 import { handleMCP } from './mcp.mjs';
 import { refreshSnapshot } from './sources.mjs';
+import { createRecommender } from './recommend.mjs';
 
 const root = resolve(import.meta.dirname, '../site');
+const recommendTask = createRecommender({ apiKey: process.env.OPENAI_API_KEY });
 setDefaultResultOrder('ipv4first');
 const cache = resolve(import.meta.dirname, '../.openmerit/scout/snapshot.json');
 let snapshot;
@@ -32,7 +34,7 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if ((url.pathname.startsWith('/scout/api/') || url.pathname === '/scout/mcp')) {
       const request = new Request(url, { method: req.method, headers: req.headers, ...(!['GET', 'HEAD'].includes(req.method) ? { body: Readable.toWeb(req), duplex: 'half' } : {}) });
-      const response = await (url.pathname === '/scout/mcp' ? handleMCP : handleAPI)(request, index, refreshState);
+      const response = await (url.pathname === '/scout/mcp' ? handleMCP : handleAPI)(request, index, refreshState, recommendTask);
       res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text()); return;
     }
     if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405); res.end(); return; }

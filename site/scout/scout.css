@@ -127,3 +127,6 @@
 .scout-page [hidden] { display: none !important; }
 .word-cloud { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding-block: 14px; color: var(--muted); }
 .word-cloud [data-matched="true"] { color: var(--ink); text-decoration: underline; text-underline-offset: 5px; }
+
+.prompt-privacy { margin: 10px 2px 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.prompt-privacy a { text-underline-offset: 3px; }

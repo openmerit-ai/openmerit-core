@@ -4,13 +4,13 @@ import { json, readJSON } from './http.mjs';
 const versions = ['2025-03-26', '2025-06-18', '2025-11-25'];
 const tool = {
   name: 'scout_models', title: 'Find models for a task',
-  description: 'Get up to five available language models for a task, using indexed benchmark evidence, advertised cost and reference speed. Pass the intended task as a natural-language prompt. Inspect warnings and evidence; this is a shortlist, not a guarantee of task accuracy. Does not run models or store prompts.',
+  description: 'Get up to five available language models using benchmark evidence, advertised cost and reference speed. The task description is sent to OpenAI Decisions for interpretation; Scout does not store it or execute the recommended models. Inspect requirements, warnings, memory configurations and evidence. This is a shortlist, not a guarantee of task accuracy.',
   inputSchema: { type: 'object', properties: { prompt: { type: 'string', minLength: 1, maxLength: 4000, description: 'Describe what the selected model needs to do, including input and output formats.' } }, required: ['prompt'], additionalProperties: false },
-  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
 };
 
-// Stateless Streamable HTTP. No sessions, SDK runtime, inference or open SSE streams.
-export async function handleMCP(request, index, state = {}) {
+// Stateless Streamable HTTP. No sessions, SDK runtime or open SSE streams.
+export async function handleMCP(request, index, state = {}, recommendTask = recommend) {
   const origin = request.headers.get('origin');
   if (origin && origin !== new URL(request.url).origin) return json({ error: 'Origin not allowed.' }, 403);
   if (request.method !== 'POST') return json({ error: 'Use POST. This server does not open SSE streams.' }, 405, { Allow: 'POST' });
@@ -36,7 +36,7 @@ export async function handleMCP(request, index, state = {}) {
   const args = params.arguments;
   if (!args || Array.isArray(args) || typeof args !== 'object' || Object.keys(args).some(k => k !== 'prompt')) return fail(-32602, 'Provide only a prompt.');
   try {
-    const result = { ...recommend(index, args.prompt), ...state };
+    const result = { ...await recommendTask(index, args.prompt), ...state };
     // Keep agent context small; the JSON API exposes the complete evidence list.
     result.recommendations = result.recommendations.map(m => ({ ...m, evidenceCount: m.evidence.length, evidence: m.evidence.slice(0, 4) }));
     delete result.wordCloud;

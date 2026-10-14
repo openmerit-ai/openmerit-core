@@ -1,7 +1,7 @@
 // A small, explicit vocabulary keeps prompt matching local and explainable.
 export const capabilities = {
   documents: { label: 'Document understanding', terms: ['invoice', 'receipt', 'document', 'pdf', 'ocr', 'scan', 'scanned', 'billing', 'purchase order', 'handwriting', 'form', 'bill', 'passport', 'bank statement'], benchmark: /ocr|document|textvqa|chartqa|gdp\.pdf|mtvqa/i },
-  structured: { label: 'Structured output', terms: ['json', 'schema', 'extract', 'extraction', 'fields', 'parse', 'parsing', 'classify', 'classification', 'categorize', 'csv', 'structured'], benchmark: /ifbench|instruction|ifeval|function.call|bfcl|superglue/i },
+  structured: { label: 'Structured output', terms: ['json', 'schema', 'extract', 'extraction', 'fields', 'parse', 'parsing', 'classify', 'classification', 'categorize', 'csv', 'structured'], benchmark: /ifbench|instruction|ifeval|superglue/i },
   coding: { label: 'Code & engineering', terms: ['code', 'coding', 'program', 'programming', 'function', 'debug', 'bug', 'repository', 'refactor', 'python', 'javascript', 'typescript', 'sql', 'build an app', 'unit test', 'website', 'next js', 'react', 'vue', 'svelte', 'rust', 'golang', 'java', 'ruby', 'csharp', 'c sharp', 'html', 'css', 'api', 'backend', 'frontend', 'web app', 'webapp', 'app', 'git', 'pull request', 'test suite', 'authentication', 'database', 'software', 'script'], benchmark: /swe|code|coding|aider|terminal|cursor|weirdml|algotune|ale.bench|webdev|gso/i },
   reasoning: { label: 'Reasoning', terms: ['reason', 'reasoning', 'logic', 'logical', 'solve', 'plan', 'planning', 'compare', 'decide', 'analyze', 'analyse', 'analysis', 'puzzle'], benchmark: /arc|bbh|simplebench|reason|anli|piqa|hellaswag|winogrande|puzzle|enigma|mindcube/i },
   math: { label: 'Math & science', terms: ['math', 'mathematics', 'calculate', 'calculation', 'equation', 'proof', 'theorem', 'physics', 'science', 'scientific', 'statistics'], benchmark: /math|aime|gsm8k|proof|critpt|science|scicode|surface.evolver/i },
@@ -10,6 +10,8 @@ export const capabilities = {
   vision: { label: 'Visual understanding', terms: ['image', 'images', 'photo', 'photos', 'picture', 'screenshot', 'visual', 'chart', 'diagram', 'invoice', 'receipt', 'scan', 'scanned', 'ocr', 'pdf', 'photo', 'photograph', 'photographs', 'diagram', 'drawing'], benchmark: /mmmu|mmbench|mme$|mmstar|mmvet|mm[t-]bench|seedbench|vision|visual|ocr|chartqa|textvqa|realworld|blink|ai2d|qbench|hallusion|pope|llavabench|coco|ccbench|vcr|abench|spatial|geobench/i },
   agents: { label: 'Tools & agents', terms: ['agent', 'agents', 'tool', 'tools', 'browser', 'automate', 'automation', 'workflow', 'function calling', 'computer use', 'web search', 'browse', 'click', 'navigate', 'booking', 'book a flight'], benchmark: /agent|tau|osworld|os.world|balrog|cybench|exploit|posttrain|metr|remote.labor|vending|itbench|gdpval|furniture|gbaeval/i },
   context: { label: 'Long context', terms: ['long', 'book', 'books', 'entire', 'transcript', 'transcripts', 'summarize', 'summary', 'hundred pages', 'context', 'summarise', 'large codebase', 'full codebase'], benchmark: /lcr|cl.bench|fiction|graphwalk/i },
+  tools: { label: 'Tool calling', terms: ['function calling', 'tool calling'], benchmark: /function.call|bfcl/i },
+  memory: { label: 'Memory use', terms: ['persistent memory', 'memory store'], benchmark: /longmemeval|locomo|memory/i },
 };
 
 export function benchmarkCapabilities(name) {

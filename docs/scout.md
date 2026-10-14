@@ -26,11 +26,11 @@ Scout exposes one read-only tool, `scout_models`, with one argument:
 {"prompt":"Upload an invoice and extract six fields as JSON"}
 ```
 
-No API key is required. Scout does not call model providers. The MCP endpoint supports protocol versions `2025-03-26`, `2025-06-18`, and `2025-11-25`, including initialization, tool discovery, and tool calls. It uses JSON responses without sessions or a long-lived SSE stream. Browser requests must have the same origin; ordinary agent clients omit the Origin header. An unsupported protocol version is rejected. Agent configuration is client-specific; connecting an endpoint does not automatically make an agent use it.
+No API key is required from the caller. Scout sends the task description to OpenAI Decisions to interpret requirements, then ranks its collected evidence. It does not execute the recommended models. The MCP endpoint supports protocol versions `2025-03-26`, `2025-06-18`, and `2025-11-25`, including initialization, tool discovery, and tool calls. It uses JSON responses without sessions or a long-lived SSE stream. Browser requests must have the same origin; ordinary agent clients omit the Origin header. An unsupported protocol version is rejected. Agent configuration is client-specific; connecting an endpoint does not automatically make an agent use it.
 
 Tell the agent: “Before choosing an inference model for this feature, call Scout with the task description. Compare the five candidates, read their evidence and warnings, and evaluate the shortlist on our own examples.”
 
-The MCP response includes the four most relevant evidence entries per model and the total evidence count. The JSON API exposes the complete evidence list.
+The MCP response includes up to four relevant evidence entries per model and the total evidence count. Evidence satisfying required memory, tool-calling, and visual-document capabilities is shown first. The JSON API exposes the complete evidence list.
 
 ## JSON API
 
@@ -45,19 +45,19 @@ curl https://openmerit.ai/scout/api/recommend \
 The response contains:
 
 - `recommendations`: up to five distinct model IDs with rank, provider, reason, quality signal, evidence coverage, input/output pricing, reference speed when available, supported inputs, and source-linked evidence.
-- `task`: matched capabilities and keywords, image-input and structured-output requirements, and whether the general-purpose fallback was used.
+- `task`: interpreted capabilities and weights; image-input, structured-output, tool-calling and persistent-memory requirements; `requirements.tools` (`yes`, `no`, `unspecified`); `requirements.memory` (`none`, `session`, `persistent`, `unspecified`); consequential `uncertainty`; and `interpreter: "openai-decisions"`. `keywords` is retained as an empty compatibility field. A general-purpose fallback means no specific capability was identified, not that the classifier was unavailable.
 - `checkedAt`, `stale`, `degraded`, `sources`: index and source health. Each source has its own last successful check. A failed source is marked degraded; any source unchecked for more than two hours makes the index stale.
 - `benchmarks`, `benchmarksWithResults`, `models`, `availableModels`, `eligibleModels`: indexed series, series with matched results, evidence-backed models, catalogue models, and eligible candidates for this task.
 - `wordCloud`: capability vocabulary with benchmark and model coverage counts.
-- `warnings`, `methodology`, `elapsedMs`: limitations, ranking method, and measured server ranking time when the runtime provides a sufficiently precise clock (`null` otherwise). Cloudflare freezes its clock during synchronous work, so the hosted page reports measured HTTP round-trip time instead of claiming zero-millisecond computation.
+- `warnings`, `methodology`, `interpretationMs`, `elapsedMs`: limitations, ranking method, Decisions request time, and measured server ranking time when the runtime provides a sufficiently precise clock (`null` otherwise). Cloudflare freezes its clock during synchronous work, so the hosted page reports measured HTTP round-trip time instead of claiming zero-millisecond computation.
 
-`GET /scout/api/status` returns index coverage, source timestamps, freshness, and scheduler state without submitting a prompt. API responses are `no-store`. Errors return JSON with `error`: 400 for invalid input, 413 for an oversized request, 415 for a non-JSON body, 405 for an unsupported method, and 404 for an unknown endpoint.
+`GET /scout/api/status` returns index coverage, source timestamps, freshness, and scheduler state without submitting a prompt. API responses are `no-store`. Errors return JSON with `error`: 400 for invalid input, 413 for an oversized request, 415 for a non-JSON body, 405 for an unsupported method, 404 for an unknown endpoint, 429 when shared admission limits are reached, and 503 if interpretation is unavailable. A failed, malformed, refused, or timed-out Decisions response never silently falls back to keyword ranking. MCP reports these failures as tool errors.
 
 Scout recommends models; it does not process an uploaded invoice, execute a task, install a model, or select a provider account.
 
 ## Real sources and their limits
 
-The hourly updater fetches five public feeds and prepares the index before requests arrive. Queries do not browse the internet or run a language model.
+The hourly updater fetches six public feeds and prepares the index before requests arrive. Queries make one Decisions call for intent classification; they do not browse benchmark sites or ask a model to invent rankings.
 
 | Feed | Used for |
 | --- | --- |
@@ -65,7 +65,8 @@ The hourly updater fetches five public feeds and prepares the index before reque
 | [Artificial Analysis](https://artificialanalysis.ai/leaderboards/models) | Benchmark results and measured reference generation speed. Archived evaluations remain labelled when their models are still available. |
 | [OmniDocBench](https://github.com/opendatalab/OmniDocBench#end-to-end-evaluation) | Document parsing scores from the explicitly labelled `v1.6_full` leaderboard, including newer document models than the OpenVLM snapshot. |
 | [OpenCompass / VLMEvalKit](https://huggingface.co/spaces/opencompass/open_vlm_leaderboard) | Visual understanding and OCR benchmark results. Its feed currently identifies itself as 17 September 2025. |
-| [OpenRouter](https://openrouter.ai/api/v1/models) | Available model IDs, input modalities, structured-output support, context limits, and advertised token prices. |
+| [Berkeley Function Calling Leaderboard (BFCL v4)](https://gorilla.cs.berkeley.edu/leaderboard) | Native function-calling single-turn, live, and multi-turn scores; separate memory scores for key-value, vector, and recursive-summarization stores. |
+| [OpenRouter](https://openrouter.ai/api/v1/models) | Available model IDs, input modalities, declared tools and structured-output support, context limits, and advertised token prices. |
 
 Over 100 benchmark **series** are indexed, including source-specific implementations and versions. This is not 100 independent publishers, and coverage is not uniformly current. Some definitions have no results matched to an available model. Both counts are exposed. Missing metrics and ambiguous or unmatched model versions are omitted. Availability is limited to OpenRouter's text-output catalogue, excluding batch/free variants and known routers.
 
@@ -75,9 +76,15 @@ Epoch AI attribution: “Capabilities & benchmarking,” published at epoch.ai, 
 
 ## Ranking
 
-An explicit English vocabulary maps a prompt to document understanding, structured output, coding, reasoning, math, knowledge, writing, vision, agents, and long context. It recognizes common phrases and inflections. Pasted plain-text extraction does not require an image-capable model. Unrecognized prompts receive a clearly labelled general-purpose fallback. This is local phrase matching, not an embedding service or language-model classifier; multilingual prompts and complex negation can be misinterpreted.
+One server-side call to [OpenAI Decisions](https://developers.openai.com/api/docs/guides/decisions), using `gpt-6-luna`, interprets the work the selected model must perform. It distinguishes executing tools from writing code about them, incidental words such as “tool” or “agent,” supplied plain text versus visual inputs, and session state versus persistent memory. Fourteen typed choices become capability weights and requirements. Decisions sees the task, not candidate names or rankings; the shortlist still comes from collected scores.
 
-Image tasks require an image-capable model. JSON tasks require declared `response_format` or `structured_outputs` support. Visual document tasks require document-specific evidence. Recognized image/video/audio generation and transcription tasks return no recommendations because those outputs are outside the current index.
+Strong JSON/schema filtering also needs explicit format wording in the prompt. An uncertain format answer cannot turn an ordinary story or comparison into a JSON task. Low-confidence consequential classifications and unspecified retention/tool interfaces are exposed as uncertainty. This is still a probabilistic classifier: paraphrases can differ, ambiguous requests can be misread, and English format-grounding rules limit multilingual handling. Scout has no clarification dialogue or user-defined constraints yet.
+
+Image tasks require an image-capable model. JSON/schema tasks require declared `response_format` or `structured_outputs` support. Visual document tasks require document-specific evidence. Required tool use needs declared `tools` support and published tool-calling evidence. Persistent memory needs declared tools support and dedicated memory evidence; generic reasoning or a large context window cannot substitute. Session-only state does not trigger this filter. Recognized image/video/audio generation and transcription tasks return no recommendations because those outputs are outside the current index.
+
+BFCL contributes only native function-calling (`FC`) configurations, preserving their published labels. Its six correlated series count as one benchmark family, not six independent sources. Missing scores stay unknown and zero remains a score. Model versions are matched conservatively; ambiguous versions are omitted. BFCL does not supply per-model measurement dates, so these remain unknown.
+
+The [BFCL memory evaluations](https://gorilla.cs.berkeley.edu/blogs/16_bfcl_v4_memory.html) test using external memory stores across sessions. They do **not** establish built-in model memory, automatic retention in your app, or performance on your storage system. The application still implements storage and tool execution. Models without matched memory results are excluded when persistent memory is required, including newer models with other strong scores.
 
 Scores become within-benchmark mid-rank percentiles. Small comparison cohorts are shrunk toward neutral. Multiple configurations use their median; their names and source links are retained. Correlated versions of common benchmark families are grouped before averaging. Sparse evidence is shrunk toward neutral, and missing capability evidence is penalized. This prevents one isolated high score from carrying the same confidence as broad evidence.
 
@@ -85,11 +92,13 @@ The final fixed weighting is **80% task quality signal, 13% token price, 7% refe
 
 Price uses a **3:1 input/output token mix**, in USD per million total tokens, solely for comparison. Separate input and output prices are returned. This is not a per-invoice estimate; it excludes caching, reasoning-token usage, modality-specific charges, and provider-specific differences. Speed is an Artificial Analysis reference measurement, not guaranteed latency on the OpenRouter route. Archived speed measurements are labelled. Missing speed stays unknown and contributes no bonus; time to first token is reported where available but not scored.
 
-If fewer than five eligible models have evidence, Scout returns fewer and explains why. There are no accounts, saved prompt history, selection controls, vector database, or query-time model calls.
+If fewer than five eligible models have evidence, Scout returns fewer and explains why. There are no accounts, saved prompt history, selection controls, vector database, or language-model reranker. Cost and speed preferences in prose do not yet change the fixed 80/13/7 blend.
 
 ## Refresh and data handling
 
-The task description is sent to the Scout server and processed in memory. Scout's application code does not save or log prompts or send them to benchmark sites or model providers. Only the public index is persisted. Hosting infrastructure can have separate request-metadata policies. Clipboard actions occur only when selected.
+The task description is sent to Scout and then to OpenAI Decisions for interpretation. Scout's application code processes it in memory without saving or logging it. Only the public index is persisted; prompts are not sent to benchmark sites or recommended-model providers. [OpenAI's API data controls and retention policies](https://developers.openai.com/api/docs/guides/your-data) apply to that provider call. Scout does not claim zero retention by OpenAI. Hosting infrastructure can have separate request-metadata policies. Clipboard actions occur only when selected. Describe the task rather than pasting actual invoices, credentials or private customer records.
+
+Each query has one Decisions request with a four-second timeout and no automatic retry. Shared in-memory admission limits allow at most eight active requests and 120 starts per minute for the Scout service. Excess requests fail promptly instead of queuing. These counters reset with the process and are not an account-level billing cap. Provider-side limits can also make interpretation unavailable. The API key is held server-side; callers never receive it.
 
 Sources refresh independently. A failed download, changed parser format, or unexpected loss of coverage preserves that source's previous evidence and timestamp while healthy sources and prices continue updating. Fresh catalogue removals still remove unavailable models. A complete outage preserves the previous index. Failure and stale status are exposed in both interfaces.
 
@@ -97,7 +106,7 @@ Source content is parsed as data, never executed. Downloads, decompression, and 
 
 ## Run locally
 
-Requires Node.js 22.19 or newer:
+Requires Node.js 22.19 or newer. Make `OPENAI_API_KEY` available in the server environment before starting; never put it in browser code. It must have access to the Decisions API:
 
 ```sh
 npm ci
@@ -106,11 +115,11 @@ npm run scout
 
 Open `http://127.0.0.1:45833/scout/`. Local API and MCP endpoints use that same origin. `SCOUT_PORT` changes the port. The server immediately uses the newer of its bundled index and `.openmerit/scout/snapshot.json` cache, refreshes when older than an hour, and continues hourly while running. Stopping the process stops its local schedule.
 
-`npm run scout:refresh` fetches the five public feeds and atomically updates `scout/snapshot.json` after validation. Successful sources replace their previous data; failed sources retain labelled prior data when available. No provider key or inference budget is required.
+`npm run scout:refresh` fetches the six public feeds and atomically updates `scout/snapshot.json` after validation. Successful sources replace their previous data; failed sources retain labelled prior data when available. Refreshing public sources requires no provider key or inference budget. Recommendation queries require the server key and incur Decisions API usage.
 
 ## Hosting and verification
 
-`wrangler.scout.jsonc` defines a separate Scout Worker, one SQLite Durable Object holding the index, and an hourly cron at minute 7 UTC. Searches use the prepared in-memory index. The bundled snapshot allows immediate startup; subsequent successful updates persist across restarts. Refreshes are serialized.
+`wrangler.scout.jsonc` defines a separate Scout Worker, one SQLite Durable Object holding the index, and an hourly cron at minute 7 UTC. Configure `OPENAI_API_KEY` as a secret on this Scout Worker before deployment. Searches interpret the task once and use the prepared in-memory index. The bundled snapshot allows immediate startup; subsequent successful updates persist across restarts. Refreshes are serialized.
 
 `demo/domain-router.mjs` routes Scout paths to this service while retaining the existing website, protected memo, authentication, and dashboard services. The public guide is generated and published with the main documentation. Do not deploy the older root `wrangler.jsonc` to publish Scout. `npm run build:scout` packages only Scout, public documentation, and its shared assets; private memo and demo applications are excluded.
 
@@ -120,4 +129,4 @@ npm run verify
 npx wrangler@4.136.3 dev --config wrangler.scout.jsonc
 ```
 
-Tests cover task interpretation, eligibility, provenance, missing metrics, source outage recovery, catalogue removals, API limits, MCP discovery/calls, and routing isolation. These establish implementation behavior, not task-level model accuracy. Local checks and CI do not publish a deployment. Physical mobile hardware requires separate verification.
+Tests cover false-positive regressions, response validation, memory/tool eligibility, provenance, missing metrics, source outage recovery, catalogue removals, provider failure/timeout, admission limits, shared API/MCP interpretation, compact evidence and routing isolation. Real API diagnostic cases are separate opt-in checks that incur provider usage. These establish implementation behavior, not task-level model accuracy. Local checks and CI do not publish a deployment. Physical mobile hardware requires separate verification.

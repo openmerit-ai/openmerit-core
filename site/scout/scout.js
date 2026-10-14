@@ -76,12 +76,12 @@ function showResult(data, roundTripMs) {
   result = data;
   $('#results-title').textContent = data.recommendations.length ? `${data.recommendations.length} models. A good place to start.` : 'No supported matches yet.';
   $('#capabilities').replaceChildren(...(data.task.capabilities.length ? data.task.capabilities.map(c => c.label) : ['General purpose']).map(label => element('span', '', label)));
-  $('#query-time').textContent = `${data.elapsedMs == null ? 'Indexed lookup' : `${data.elapsedMs < 1 ? '<1' : Math.round(data.elapsedMs)} ms ranking`} · ${Math.round(roundTripMs)} ms round trip`;
+  $('#query-time').textContent = `${data.elapsedMs == null ? 'Task interpreted' : `${data.elapsedMs < 1 ? '<1' : Math.round(data.elapsedMs)} ms ranking`} · ${Math.round(roundTripMs)} ms round trip`;
   $('#model-list').replaceChildren(...data.recommendations.map(modelRow));
   if (!data.recommendations.length) $('#model-list').append(tableMessage(data.warnings[0] || 'Try describing the task in more detail.'));
   $('#copy-results').disabled = !data.recommendations.length;
   $('#warnings').replaceChildren(...data.warnings.map(warning => element('p', '', warning)));
-  $('#results-caption').textContent = data.warnings.find(w => w.includes('Newer models')) || 'Published benchmarks guide the shortlist. Your own evaluation makes the final call.';
+  $('#results-caption').textContent = data.warnings.find(w => w.startsWith('Memory evidence')) || data.warnings.find(w => w.includes('Newer models')) || 'Published benchmarks guide the shortlist. Your own evaluation makes the final call.';
   $('#limitations').hidden = false;
   $('#results-caption').hidden = false;
   showIndex(data);
@@ -102,7 +102,7 @@ async function search() {
   const prompt = $('#prompt').value.trim(); if (!prompt) { $('#error').textContent = 'Describe the task you want a model to do.'; $('#error').hidden = false; $('#prompt').focus(); return; }
   activeRequest?.abort(); const controller = new AbortController(); activeRequest = controller; const id = ++requestID;
   $('#results').hidden = false; $('#error').hidden = true; $('#results').setAttribute('aria-busy', 'true'); $('#copy-results').disabled = true;
-  result = null; $('#results-title').textContent = 'Finding your five…'; $('#model-list').replaceChildren(tableMessage('Reading the latest available index…', $('#model-list').getBoundingClientRect().height));
+  result = null; $('#results-title').textContent = 'Finding your five…'; $('#model-list').replaceChildren(tableMessage('Interpreting your task and checking the latest index…', $('#model-list').getBoundingClientRect().height));
   $('#capabilities').replaceChildren(); $('#query-time').textContent = ''; $('#limitations').hidden = true; $('#results-caption').hidden = true;
   $('.find-button span').textContent = 'Finding…';
   document.querySelectorAll('[data-example]').forEach(button => button.setAttribute('aria-pressed', String(examples[button.dataset.example] === prompt)));

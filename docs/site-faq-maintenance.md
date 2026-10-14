@@ -260,3 +260,8 @@ Scout's page, JSON API and MCP tool are now hosted, with an hourly Worker trigge
 ## Scout comparison table — 14 October 2026
 
 Reviewed evidence, comparison, data handling and readiness claims for the semantic results table and bundled provider favicons. This changes presentation and evidence disclosure controls only; ranking, API/MCP responses and prompt handling remain unchanged. Icons use a curated local registry, with no remote favicon requests from the browser. No homepage FAQ wording change is required. Publication and browser verification are recorded separately in [the Scout launch record](site-scout.md).
+
+
+## Scout Decisions integration — release preparation, 14 October 2026
+
+Reviewed data handling, inference cost, evidence, scheduling and readiness claims. Scout now makes one server-side OpenAI Decisions call per prompt; its page and guide disclose this before submission. BFCL adds explicit tool-calling and external-memory evidence, with strict eligibility and source limitations. Fixed cost/quality/speed weights remain unchanged. The homepage FAQ continues to describe terminal/Pi behavior, so no FAQ copy change is required. This does not change terminal approvals, provider budgets, the npm package or local routing. Live publication is recorded separately in the Scout launch record.
