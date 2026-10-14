@@ -280,3 +280,7 @@ Reviewed evidence, data, costs, scheduling and readiness claims for the Scout ch
 ## Scout interface refinement — 14 October 2026
 
 Checked comparison, evidence and data-handling claims for the terminal-style Scout interface. Ranking and API/MCP contracts are unchanged. The page retains its OpenAI prompt-processing notice, measurement scope and limitations. Bundled provider marks replace boxed favicons; missing assets use text-only names. No homepage FAQ wording change is needed.
+
+## Scout compact controls — 15 October 2026
+
+Reviewed index coverage, evidence and data-handling claims. The header counts indexed models, distinct model creators, benchmark series and source feeds; it does not equate series with independent publishers or creators with hosting routes. Row disclosures retain benchmark and measured evidence, while sample/workload context moves into the existing limitations disclosure. The prompt-processing sentence is removed from the form at the user's request; the public Scout guide retains the OpenAI data-flow and retention description. Ranking, persistence and terminal/Pi behavior are unchanged. No homepage FAQ copy change is needed; publication is recorded separately in the Scout notes.

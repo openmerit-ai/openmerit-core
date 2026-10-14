@@ -20,9 +20,13 @@ export function createIndex(snapshot) {
 
 export function indexStatus(index, now = Date.now()) {
   const { snapshot, models } = index;
+  const providers = new Set(models.map(model => {
+    const namespace = model.id.split('/')[0];
+    return namespace === 'meta-llama' ? 'meta' : namespace;
+  })).size;
   return { checkedAt: snapshot.checkedAt, stale: snapshot.sources.some(s => !s.checkedAt || now - Date.parse(s.checkedAt) > 2 * 3600_000), degraded: snapshot.sources.some(s => s.status === 'failed'),
     benchmarks: snapshot.benchmarks.length, benchmarksWithResults: new Set(models.flatMap(m => m.evidence.map(e => e.benchmark))).size,
-    models: models.length, availableModels: snapshot.availableModels, measurements: models.reduce((sum, m) => sum + m.evidence.length, 0),
+    models: models.length, providers, availableModels: snapshot.availableModels, measurements: models.reduce((sum, m) => sum + m.evidence.length, 0),
     sources: snapshot.sources, wordCloud: Object.entries(capabilities).map(([id, c]) => ({ id, label: c.label, keywords: c.terms, benchmarks: snapshot.benchmarks.filter(b => b.tags.includes(id)).length, models: models.filter(m => m.evidence.some(e => index.benchmarks.get(e.benchmark)?.tags.includes(id))).length })), refreshIntervalSeconds: 3600 };
 }
 

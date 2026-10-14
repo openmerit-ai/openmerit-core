@@ -60,6 +60,21 @@ test('limited evidence never fills five slots and stale status comes from source
   assert.equal(indexStatus(index, Date.parse(snapshot.checkedAt)).stale, false);
 });
 
+test('index coverage counts providers once across aliases and label variations', async () => {
+  const model = snapshot.models[0];
+  const models = [
+    { ...model, id: 'meta/muse', provider: 'Meta' },
+    { ...model, id: 'meta-llama/llama', provider: 'Meta' },
+    { ...model, id: 'mistralai/large', provider: 'Mistral' },
+    { ...model, id: 'mistralai/small', provider: 'mistralai' },
+  ];
+  const sample = createIndex({ ...snapshot, models });
+  const status = await (await handleAPI(new Request('http://localhost/scout/api/status'), sample)).json();
+  assert.equal(status.models, 4);
+  assert.equal(status.providers, 2);
+  assert.equal(indexStatus(createIndex({ ...snapshot, models: models.slice(0, 2) })).providers, 1);
+});
+
 test('API validates method, content type, shape, empty and oversized input; prompts are not cached', async () => {
   const valid = await handleAPI(post({ prompt: 'Debug Python code' }), index);
   assert.equal(valid.status, 200); assert.equal(valid.headers.get('cache-control'), 'no-store');

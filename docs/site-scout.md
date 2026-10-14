@@ -153,3 +153,19 @@ Published as Scout Worker `f7fe8215-d11e-408c-8df4-d4bab173ff73` and documentati
 The curated registry covers all 213 models in the checked seed index. New, unreviewed providers return a null URL instead of a router or inferred destination. Gemma and GPT-OSS use model documentation. Official destinations were read on 14 October; redirects stay with the provider. Ranking, numeric rates, inference routes and benchmark evidence are unchanged. The public guide documents the nullable URL contract. Homepage FAQ claims still describe the terminal/Pi workflow and require no copy changes.
 
 Published as Scout Worker `bcbb8c81-18d3-4b44-a31d-1ee07fcb6f21` and documentation Worker `250dcd56-6ea6-4ba3-ad1a-efd4348b87d7`. `npm run verify` passed 366 tests, including provider-domain coverage, unknown-provider handling, model-family destinations and API/MCP provenance checks. All 34 deployed assets matched the checked build after removing only the existing edge-injected analytics script; main modules and bindings were preserved. The live page, JSON API and MCP returned the same five invoice models with Google, OpenAI and Alibaba provider URLs. The browser showed the new provider link and quote attribution with no console errors. Direct API/MCP verification used the deployment-check User-Agent; Python's default User-Agent received an edge 403. No provider inference evaluations were rerun for this navigation-only change.
+
+## Compact controls and expandable rows — published 15 October 2026
+
+| Before | After | Why |
+| --- | --- | --- |
+| Generic sentence under the heading | Live model, provider, benchmark-series and source-feed counts | Show the scope of the current index |
+| Active textarea outline | Subtle fill change with no stroke | Keep focus calm and the editable area distinct |
+| Text and arrow submit button | Arrow-only button with an accessible name | Reduce repeated copy |
+| Copy JSON beside the results | Full responses remain available through the API | Keep the comparison focused |
+| Prompt-processing sentence beside examples | Data handling remains in the public guide | Remove secondary copy from the form |
+| Evidence column and per-row control | Clickable rows with native model-name disclosure buttons | Expand anywhere in the row while preserving table and keyboard semantics |
+| Measurement caption below the rows | Measurement scope inside Assumptions & limitations | Keep the default results compact without dropping the evidence context |
+
+The shared status payload now counts distinct model-provider namespaces, consolidating Meta's two aliases and ignoring display-label variations. This counts model creators, not hosting endpoints. Ranking and prompt handling are unchanged. The public guide documents the controls, count definitions and disclosure placement.
+
+Published as Scout Worker `66b9a20d-8bf5-4c69-affd-aff728cbaca0` and documentation Worker `5519ceef-bd9f-4537-b5df-0c81d2ab7149`. Full verification passed 367 tests; deployment repeated the Scout and documentation checks after the final count-wrapping adjustment. All 34 published assets matched the build after removing only the existing edge analytics script, with main modules and bindings preserved. Live metadata and the header agreed on 213 models, 26 providers, 146 benchmark series and six source feeds. Checks covered active input without an outline, icon-button and Enter submission, empty results, four-column layout, row clicks, Enter/Space disclosure, provider links, measurement context inside the limitations disclosure, and no console errors. The local light preview at 390px kept whole count labels together, used a 44px submit button and bounded table/detail scrolling without page overflow. Desktop and dark appearance were checked live at 1644px. Physical mobile hardware was not tested.

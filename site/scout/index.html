@@ -25,20 +25,20 @@
   <main class="scout-wrap" id="main">
     <section class="scout-intro" aria-labelledby="scout-title">
       <h1 id="scout-title">Compare models for your task.</h1>
-      <p>Five candidates, ranked by quality, cost, and speed.</p>
+      <p id="index-counts">Loading index…</p>
     </section>
     <section class="search-section" aria-label="Find models">
       <form id="scout-form" class="prompt-box">
         <label for="prompt">Task</label>
-        <textarea id="prompt" name="prompt" rows="2" maxlength="4000" required spellcheck="false" enterkeyhint="search" aria-describedby="prompt-hint prompt-privacy" placeholder="Describe what you need the model to do…"></textarea>
-        <div class="prompt-footer"><span id="prompt-hint"><kbd>↵</kbd> Search <span class="newline-hint">· Shift + Enter for a new line</span></span><button class="find-button" type="submit"><span>Find models</span><svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
+        <textarea id="prompt" name="prompt" rows="2" maxlength="4000" required spellcheck="false" enterkeyhint="search" aria-describedby="prompt-hint" placeholder="Describe what you need the model to do…"></textarea>
+        <div class="prompt-footer"><span id="prompt-hint"><kbd>↵</kbd> Search <span class="newline-hint">· Shift + Enter for a new line</span></span><button class="find-button" type="submit" title="Find models"><span class="sr-only">Find models</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
       </form>
-      <div class="search-meta"><div class="examples" aria-label="Example tasks"><span>Try</span><button type="button" data-example="invoice">Extraction</button><button type="button" data-example="coding">Code</button><button type="button" data-example="research">Research</button><button type="button" data-example="writing">Writing</button></div><p id="prompt-privacy" class="prompt-privacy">Interpreted by OpenAI. Not saved by Scout. <a href="/docs/scout/#refresh-and-data-handling">Details</a></p></div>
+      <div class="examples" aria-label="Example tasks"><span>Try</span><button type="button" data-example="invoice">Extraction</button><button type="button" data-example="coding">Code</button><button type="button" data-example="research">Research</button><button type="button" data-example="writing">Writing</button></div>
       <p class="error-message" id="error" role="alert" hidden></p>
     </section>
 
     <section class="results-section" id="results" aria-labelledby="results-title" aria-busy="false" hidden>
-      <div class="results-heading"><h2 id="results-title">Recommendations</h2><button id="copy-results" class="quiet-button" type="button" disabled>Copy JSON</button></div>
+      <h2 id="results-title">Recommendations</h2>
       <div class="match-line"><div id="capabilities" class="capability-tags" aria-label="Matched capabilities"></div><span class="query-time" id="query-time"></span></div>
       <div class="table-frame">
         <div class="table-scroll" role="region" aria-label="Model comparison" tabindex="0">
@@ -49,18 +49,16 @@
               <th scope="col" class="numeric-column" id="quality-heading">Quality <span class="column-unit">relative / 100</span></th>
               <th scope="col" class="numeric-column">Cost <span class="column-unit">USD / 1,000 tasks</span></th>
               <th scope="col" class="numeric-column">Time <span class="column-unit" id="time-unit">reference seconds</span></th>
-              <th scope="col" class="evidence-column"><span class="sr-only">Evidence</span></th>
             </tr></thead>
-            <tbody id="model-list"><tr><td colspan="5" class="table-message"><span>Searching…</span></td></tr></tbody>
+            <tbody id="model-list"><tr><td colspan="4" class="table-message"><span>Searching…</span></td></tr></tbody>
           </table>
         </div>
       </div>
       <p class="table-scroll-hint" hidden>Scroll to compare <span aria-hidden="true">↔</span></p>
-      <p class="results-caption" id="results-caption"></p>
-      <details class="evidence-note" id="limitations" hidden><summary>Assumptions &amp; limitations</summary><div id="warnings"></div><p>Measured results come from separate calibration cases. Benchmark results use a reference workload. Neither predicts exact performance on your task.</p></details>
+      <details class="evidence-note" id="limitations" hidden><summary>Assumptions &amp; limitations</summary><p id="workload-note"></p><div id="warnings"></div><p>Measured results come from separate calibration cases. Benchmark results use a reference workload. Neither predicts exact performance on your task.</p></details>
     </section>
 
-    <section class="index-strip" aria-label="Index status"><p id="index-counts">Loading index…</p><div><span class="status-dot" id="status-dot" aria-hidden="true"></span><span id="index-status">Checking sources</span></div></section>
+    <section class="index-strip" aria-label="Index status"><div><span class="status-dot" id="status-dot" aria-hidden="true"></span><span id="index-status">Checking sources</span></div></section>
     <div class="support-sections">
       <details class="support-section" id="for-agents">
         <summary>API &amp; MCP</summary>
