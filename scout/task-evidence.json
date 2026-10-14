@@ -1,13 +1,355 @@
 {
   "version": 1,
-  "methodology": "Equal-case field accuracy (schema and request errors score zero), mean reported USD charge (unknown charges omitted, count disclosed), median full request time including failures. Two or more failed requests cap quality by observed HTTP success across calibration tasks, so an unreliable route cannot regain full credit from one clean task slice. Separate calibration split only. Seven-day expiry; matched task shape and current catalogue eligibility required.",
-  "limitations": "Small development corpus and selected candidate pool, not a catalogue-wide or statistically validated optimum. Provider routing and latency can change. Text fixtures are authored; visual calibration uses eight public Portuguese invoices, not every document type. Four new payment slips and one new invoice are held out and never ingested.",
+  "methodology": "Equal-case task-check accuracy (schema and request errors score zero), mean reported USD charge (unknown charges omitted, count disclosed), median full request time including failures. Two or more failed requests cap quality by observed HTTP success across calibration tasks, so an unreliable route cannot regain full credit from one clean task slice. Separate calibration split only. Seven-day expiry; matched task shape and current catalogue eligibility required.",
+  "limitations": "Small development corpus and selected candidate pool, not a catalogue-wide or statistically validated optimum. Provider routing and latency can change. Text fixtures are authored; visual calibration uses eight public Portuguese invoices, not every document type. Four new payment slips and one new invoice are held out and never ingested. The external-memory profile uses six calibration cases per model from the previous broad audit and new calibration, scored for stored/recalled facts separately from raw JSON validity. Initial candidate code/action/text profiles were withheld after fresh validation regressions. The action pool was subsequently expanded to nine models on the same six calibration cases, with a further fresh test excluded from runtime evidence. Validation outcomes are not runtime inputs.",
   "visualSource": {
     "title": "Invoice dataset — Cruz and Castelli (2022)",
     "url": "https://zenodo.org/records/6371710",
     "license": "https://creativecommons.org/licenses/by/4.0/"
   },
   "profiles": [
+    {
+      "id": "broad-tools-v4-expanded",
+      "label": "Dependent tool actions",
+      "split": "calibration",
+      "scope": {
+        "kind": "act",
+        "vision": false,
+        "tools": true,
+        "structured": false,
+        "memory": "none",
+        "agentic": true,
+        "input": "short",
+        "output": "short",
+        "capabilities": [
+          "reasoning",
+          "agents",
+          "tools"
+        ]
+      },
+      "casesPerModel": 6,
+      "measuredAt": "2026-10-14T20:47:22.368Z",
+      "lastMeasuredAt": "2026-10-14T21:32:52.423Z",
+      "protocolSha256": "81fdca5c6e254e62ce8b04975354ec6e54ec7cdc694ab996a5df97a64d3a8dfa",
+      "models": [
+        {
+          "id": "openai/gpt-6.1-sol",
+          "cases": 6,
+          "quality": 0.9666666666666667,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.003470666666666667,
+          "costKnownCalls": 6,
+          "medianSeconds": 7.1805,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 12,
+            "attempts": 12,
+            "rate": 1
+          },
+          "effectiveQuality": 0.9666666666666667
+        },
+        {
+          "id": "anthropic/claude-sonnet-5.5",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.009384666666666666,
+          "costKnownCalls": 6,
+          "medianSeconds": 5.907,
+          "providers": [
+            "Claude Platform on AWS"
+          ],
+          "availability": {
+            "successes": 12,
+            "attempts": 12,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "anthropic/claude-opus-5.5",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 2,
+          "meanCostUsd": 0.017843333333333333,
+          "costKnownCalls": 6,
+          "medianSeconds": 8.7005,
+          "providers": [
+            "Claude Platform on AWS"
+          ],
+          "availability": {
+            "successes": 12,
+            "attempts": 12,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "google/gemini-4-argon",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.004641,
+          "costKnownCalls": 6,
+          "medianSeconds": 7.687,
+          "providers": [
+            "Google"
+          ],
+          "availability": {
+            "successes": 12,
+            "attempts": 12,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "anthropic/claude-fable-5.1",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.045803333333333335,
+          "costKnownCalls": 6,
+          "medianSeconds": 6.6345,
+          "providers": [
+            "Anthropic"
+          ],
+          "availability": {
+            "successes": 12,
+            "attempts": 12,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "deepseek/deepseek-v4-flash-0731",
+          "cases": 6,
+          "quality": 0.9666666666666667,
+          "validSchema": 6,
+          "validJson": 1,
+          "meanCostUsd": 0.00020484099999999999,
+          "costKnownCalls": 6,
+          "medianSeconds": 14.575500000000002,
+          "providers": [
+            "Sail Research"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 0.9666666666666667
+        },
+        {
+          "id": "z-ai/glm-5.3",
+          "cases": 6,
+          "quality": 0.9,
+          "validSchema": 6,
+          "validJson": 1,
+          "meanCostUsd": 0.0009785130666666666,
+          "costKnownCalls": 6,
+          "medianSeconds": 6.493,
+          "providers": [
+            "Relace"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 0.9
+        },
+        {
+          "id": "google/gemini-3.8-flash",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.00299325,
+          "costKnownCalls": 6,
+          "medianSeconds": 9.3705,
+          "providers": [
+            "Google"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "z-ai/glm-5.3-flash",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 1,
+          "meanCostUsd": 0.00024675999999999995,
+          "costKnownCalls": 6,
+          "medianSeconds": 11.302,
+          "providers": [
+            "Relace"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        }
+      ],
+      "qualityBasis": "Observable tool actions and prerequisites; raw JSON and final prose precision are not scored",
+      "source": "Nine eligible models on the same six calibration cases; held-out outcomes excluded."
+    },
+    {
+      "id": "broad-memory-v4",
+      "label": "External memory across sessions",
+      "split": "calibration",
+      "scope": {
+        "kind": "remember",
+        "vision": false,
+        "tools": true,
+        "structured": false,
+        "memory": "persistent",
+        "agentic": true,
+        "input": "short",
+        "output": "short",
+        "capabilities": [
+          "reasoning",
+          "agents",
+          "memory",
+          "tools"
+        ]
+      },
+      "casesPerModel": 6,
+      "measuredAt": "2026-10-14T20:47:42.329Z",
+      "lastMeasuredAt": "2026-10-14T21:17:38.881Z",
+      "protocolSha256": "19490dd2dcf4302eee5db8ee501c5ad2a162943571de54da065fe1955b2ce17d",
+      "models": [
+        {
+          "id": "deepseek/deepseek-v3.2-exp",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 0,
+          "meanCostUsd": 0.0016575266666666666,
+          "costKnownCalls": 6,
+          "medianSeconds": 41.053,
+          "providers": [
+            "SiliconFlow"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "openai/o3",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.009723666666666667,
+          "costKnownCalls": 6,
+          "medianSeconds": 17.557000000000002,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "openai/gpt-5-mini",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 6,
+          "meanCostUsd": 0.002943416666666667,
+          "costKnownCalls": 6,
+          "medianSeconds": 15.1675,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "z-ai/glm-4.6",
+          "cases": 6,
+          "quality": 0.5,
+          "validSchema": 3,
+          "validJson": 0,
+          "meanCostUsd": 0.0018834666666666666,
+          "costKnownCalls": 3,
+          "medianSeconds": 53.7565,
+          "providers": [
+            "DeepInfra"
+          ],
+          "availability": {
+            "successes": 3,
+            "attempts": 6,
+            "rate": 0.5
+          },
+          "effectiveQuality": 0.5
+        },
+        {
+          "id": "openai/gpt-5.2",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 1,
+          "meanCostUsd": 0.007330166666666668,
+          "costKnownCalls": 6,
+          "medianSeconds": 10.8845,
+          "providers": [
+            "OpenAI"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        },
+        {
+          "id": "anthropic/claude-sonnet-4.5",
+          "cases": 6,
+          "quality": 1,
+          "validSchema": 6,
+          "validJson": 0,
+          "meanCostUsd": 0.024151000000000002,
+          "costKnownCalls": 6,
+          "medianSeconds": 18.1525,
+          "providers": [
+            "Amazon Bedrock"
+          ],
+          "availability": {
+            "successes": 6,
+            "attempts": 6,
+            "rate": 1
+          },
+          "effectiveQuality": 1
+        }
+      ],
+      "qualityBasis": "Executable tests or correct saved/recalled facts; JSON presentation wrappers accepted without a strict JSON requirement",
+      "source": "Previous broad audit (now development) plus three new calibration cases; independent fresh holdout excluded."
+    },
     {
       "id": "text-fields",
       "label": "Text field extraction",
@@ -34,7 +376,7 @@
           "quality": 0.9666666666666668,
           "validSchema": 10,
           "validJson": 10,
-          "meanCostUsd": 0.00008325099999999999,
+          "meanCostUsd": 8.325099999999999e-05,
           "costKnownCalls": 10,
           "medianSeconds": 1.0835,
           "providers": [
@@ -456,7 +798,7 @@
           "quality": 1,
           "validSchema": 6,
           "validJson": 6,
-          "meanCostUsd": 0.00006781658333333334,
+          "meanCostUsd": 6.781658333333334e-05,
           "costKnownCalls": 6,
           "medianSeconds": 3.8434999999999997,
           "providers": [
@@ -475,7 +817,7 @@
           "quality": 1,
           "validSchema": 6,
           "validJson": 6,
-          "meanCostUsd": 0.00007711666666666667,
+          "meanCostUsd": 7.711666666666667e-05,
           "costKnownCalls": 6,
           "medianSeconds": 2.4935,
           "providers": [
@@ -494,7 +836,7 @@
           "quality": 1,
           "validSchema": 6,
           "validJson": 6,
-          "meanCostUsd": 0.00005994,
+          "meanCostUsd": 5.994e-05,
           "costKnownCalls": 6,
           "medianSeconds": 2.73,
           "providers": [
@@ -532,7 +874,7 @@
           "quality": 1,
           "validSchema": 6,
           "validJson": 6,
-          "meanCostUsd": 0.00007683533333333334,
+          "meanCostUsd": 7.683533333333334e-05,
           "costKnownCalls": 6,
           "medianSeconds": 5.531000000000001,
           "providers": [

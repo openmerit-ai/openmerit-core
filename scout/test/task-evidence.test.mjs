@@ -65,3 +65,33 @@ test('repeated route failures cap other task scores; one isolated failure does n
  assert.equal(b.quality,1);assert.equal(b.effectiveQuality,1);assert.equal(b.availability.rate,.9);
  const candidates=evidence.profiles[0].models.map(m=>({model:{id:m.id},evidence:[],measured:m}));orderCandidates(candidates,task);assert.equal(candidates.at(-1).model.id,'a');
 });
+
+test('execution profiles match contracts, including retention and loops, without model or prompt rules',()=>{
+ for(const [kind,changes] of Object.entries({code:{weights:{coding:3}},act:{weights:{agents:3,tools:3},needsTools:true},remember:{weights:{memory:3,tools:3},needsTools:true,needsMemory:true,requirements:{memory:'persistent'}}})){
+  const {candidates,data}=fixture();const t={...task,kind,needsStructured:false,...changes};
+  Object.assign(data.profiles[0].scope,{kind,structured:false,tools:!!t.needsTools,memory:t.needsMemory?'persistent':'none',agentic:!!t.weights.agents,capabilities:Object.keys(t.weights)});
+  assert.equal(measuredCandidates(candidates,t,now,data).candidates.length,6);
+  if(kind==='remember')assert.equal(measuredCandidates(candidates,{...t,needsMemory:false,requirements:{memory:'session'}},now,data),null);
+  if(kind==='act')assert.equal(measuredCandidates(candidates,{...t,weights:{tools:3}},now,data),null);
+  assert.equal(measuredCandidates(candidates,{...t,needsStructured:true},now,data),null);
+  assert.equal(measuredCandidates(candidates,{...t,weights:{...t.weights,knowledge:3}},now,data),null);
+ }
+});
+
+test('new execution evidence is built through the same calibration-only path',()=>{
+ for(const kind of ['code','act','remember']){
+  const t={...task,kind,needsStructured:false,needsTools:kind!=='code',needsMemory:kind==='remember',weights:{[kind==='code'?'coding':kind==='act'?'agents':'memory']:3}};
+  const models=['a','b','c','d','e'],cases=Array.from({length:6},(_,i)=>({id:String(i),split:'calibration'}));
+  const manifest={tasks:[{id:'new-operation',models,cases,task:t}]};
+  const rows=models.flatMap(model=>cases.map(c=>({task:'new-operation',caseId:c.id,model,startedAt:new Date(now).toISOString(),latencyMs:2000,httpStatus:200,usage:{cost:.002},score:{correct:1,total:1,schemaValid:true}})));
+  const data=buildEvidence(manifest,rows,'protocol');
+  assert.equal(data.profiles.length,1);assert.equal(data.profiles[0].scope.memory,kind==='remember'?'persistent':'none');
+  assert.ok(measuredCandidates(models.map(id=>({model:{id}})),t,now,data));
+ }
+});
+
+test('matching evidence is selected by measurement recency rather than file order',()=>{
+ const {candidates,data}=fixture();const newer=structuredClone(data.profiles[0]);newer.id='newer';newer.measuredAt=new Date(now-500).toISOString();data.profiles.push(newer);
+ assert.equal(measuredCandidates(candidates,task,now,data).profile.id,'newer');
+ newer.split='holdout';assert.equal(measuredCandidates(candidates,task,now,data).profile.id,'fixture');
+});

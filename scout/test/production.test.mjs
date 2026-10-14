@@ -133,3 +133,15 @@ test('a short task description cannot make visual input a short text workload', 
  const long=interpretDecisions(answers({vision:'required',context:'required',input_length:'short'}),'Read a very large collection of scans.');
  assert.equal(long.workload.input,'long');
 });
+
+test('typed execution operations retain tool and memory requirements despite contradictory independent answers', () => {
+ const code=interpretDecisions(answers({task_kind:'code'}),'Implement a JavaScript function under a specification.');
+ assert.equal(code.weights.coding,3);assert.equal(code.needsTools,false);
+ const action=interpretDecisions(answers({task_kind:'act',tools:'no'}),'Look up state with functions and choose the next permitted action.');
+ assert.equal(action.needsTools,true);assert.equal(action.weights.agents,3);assert.equal(action.weights.tools,3);
+ const memory=interpretDecisions(answers({task_kind:'remember',memory:'none',tools:'unspecified',agents:'required'}),'Save facts with memory tools and recall them in a new session.');
+ assert.equal(memory.needsMemory,true);assert.equal(memory.needsTools,true);assert.equal(memory.requirements.memory,'persistent');assert.equal(memory.weights.agents,3);
+ // An ordinary description of a tool does not select an execution operation.
+ const prose=interpretDecisions(answers({task_kind:'other',writing:'required'}),'Explain how an external memory tool works.');
+ assert.equal(prose.needsMemory,false);assert.equal(prose.needsTools,false);
+});

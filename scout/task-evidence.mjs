@@ -4,12 +4,16 @@ import { workloadFor } from './comparison.mjs';
 // Small, versioned aggregates from a separate calibration split. No prompt text,
 // answer keys, provider preferences, or per-model coefficients enter the ranker.
 export function measuredCandidates(candidates, task, now, data = bundled) {
-  if (data.version !== 1 || !task.kind || task.kind === 'other' || task.unsupported || task.needsMemory || task.weights.agents || !['none', undefined].includes(task.requirements?.memory)) return null;
+  if (data.version !== 1 || !task.kind || task.kind === 'other' || task.unsupported) return null;
   const workload = workloadFor(task);
-  for (const profile of data.profiles) {
+  for (const profile of [...data.profiles].sort((a, b) => Date.parse(b.measuredAt) - Date.parse(a.measuredAt))) {
     const age = now - Date.parse(profile.measuredAt);
     if (!Number.isFinite(age) || age < 0 || age > 7 * 86400_000 || profile.split !== 'calibration') continue;
     const scope = profile.scope;
+    // Retention and execution are part of the task contract, never interchangeable
+    // with a long context window or one function dispatch. Legacy profiles have neither.
+    const memory = task.needsMemory ? 'persistent' : task.requirements?.memory ?? 'none';
+    if ((scope.memory ?? 'none') !== memory || (scope.agentic ?? false) !== !!task.weights.agents) continue;
     if (scope.kind !== task.kind || scope.vision !== !!task.needsVision || scope.tools !== !!task.needsTools || scope.structured !== !!task.needsStructured || scope.input !== workload.input || scope.output !== workload.output) continue;
     if (Object.entries(task.weights).some(([tag, weight]) => weight >= 3 && !scope.capabilities.includes(tag))) continue;
     const observations = new Map(profile.models.map(m => [m.id, m]));
@@ -19,7 +23,7 @@ export function measuredCandidates(candidates, task, now, data = bundled) {
     });
     if (selected.length < 5) continue;
     for (const c of selected) c.measured = observations.get(c.model.id);
-    return { candidates: selected, profile: { id: profile.id, label: profile.label, measuredAt: profile.measuredAt, expiresAt: new Date(Date.parse(profile.measuredAt) + 7 * 86400_000).toISOString(), casesPerModel: profile.casesPerModel, testedModels: profile.models.length, eligibleTestedModels: selected.length, protocolSha256: profile.protocolSha256, url: 'https://openmerit.ai/scout/task-evidence.json' } };
+    return { candidates: selected, profile: { id: profile.id, label: profile.label, measuredAt: profile.measuredAt, expiresAt: new Date(Date.parse(profile.measuredAt) + 7 * 86400_000).toISOString(), casesPerModel: profile.casesPerModel, testedModels: profile.models.length, eligibleTestedModels: selected.length, protocolSha256: profile.protocolSha256, qualityBasis: profile.qualityBasis ?? 'Mean task-check accuracy; required format failures score zero.', url: 'https://openmerit.ai/scout/task-evidence.json' } };
   }
   return null;
 }
