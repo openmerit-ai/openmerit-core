@@ -1,84 +1,77 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#171915" media="(prefers-color-scheme: dark)">
-  <meta name="description" content="Describe the work. Scout by OpenMerit finds five model candidates using published benchmark evidence, token prices, and reference speed.">
-  <title>Scout by OpenMerit — Find your five.</title>
+  <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="Compare five models for your task using measured results, public benchmarks, cost, and speed.">
+  <title>Scout by OpenMerit</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="preload" href="/assets/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/styles.css?v=20261014-transparent-art">
   <link rel="stylesheet" href="/scout/scout.css">
   <link rel="stylesheet" href="/scout/table.css">
   <script src="/scout/scout.js" type="module"></script>
 </head>
 <body class="scout-page">
-  <a class="skip-link" href="#prompt">Skip to prompt</a>
-  <header class="scout-header scout-wrap">
-    <a class="scout-brand" href="/scout/" aria-label="Scout home">
-      <svg class="scout-mark" width="30" height="30" viewBox="0 0 32 32" fill="none" aria-hidden="true"><circle cx="16" cy="16" r="12.5" stroke="currentColor" stroke-width="1.25"/><path d="m21 10-3 9-7 3 3-9 7-3Z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="m14 13 4 6" stroke="currentColor" stroke-width="1.25"/><path d="M16 1v3m15 12h-3M16 31v-3M1 16h3" stroke="currentColor"/></svg>
-      <span>scout</span>
-    </a>
-    <a class="parent-brand" href="/">by openmerit</a>
-    <nav aria-label="Scout navigation"><a href="/docs/scout/">How it works</a><a href="#for-agents">Use with your agent <span aria-hidden="true">↗</span></a></nav>
+  <a class="skip-link" href="#prompt">Skip to task</a>
+  <header class="scout-header">
+    <div class="scout-wrap header-inner">
+      <a class="parent-brand" href="/" aria-label="OpenMerit home"><svg width="22" height="25" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span>openmerit</span></a>
+      <a class="scout-brand" href="/scout/">Scout <span class="beta-label">Beta</span></a>
+      <nav aria-label="Scout navigation"><a href="/docs/scout/">Docs</a><a href="#for-agents">API &amp; MCP <span aria-hidden="true">↗</span></a></nav>
+    </div>
   </header>
   <main class="scout-wrap" id="main">
     <section class="scout-intro" aria-labelledby="scout-title">
-      <div><p class="scout-eyebrow"><span class="open-dot" aria-hidden="true"></span> A little direction. A better model.</p>
-        <h1 id="scout-title">Describe the work.<br><span>Find your five.</span></h1>
-        <p class="scout-description">The right models for what you’re building.<br>Quality, cost, and speed. One prompt away.</p>
-      </div>
-      <div class="intro-aside" aria-hidden="true"><img src="/assets/motion/setup-poster-transparent-v2.webp" width="543" height="362" alt=""><span>Choose your tools well.</span></div>
+      <h1 id="scout-title">Compare models for your task.</h1>
+      <p>Five candidates, ranked by quality, cost, and speed.</p>
     </section>
-
     <section class="search-section" aria-label="Find models">
       <form id="scout-form" class="prompt-box">
-        <label for="prompt">What are you building?</label>
-        <textarea id="prompt" name="prompt" rows="2" maxlength="4000" required spellcheck="false" enterkeyhint="search" aria-describedby="prompt-hint prompt-privacy" placeholder="I want to upload an invoice and extract six fields as JSON…"></textarea>
-        <div class="prompt-footer"><span id="prompt-hint">A task, in your own words.</span><button class="find-button" type="submit"><span>Find models</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
+        <label for="prompt">Task</label>
+        <textarea id="prompt" name="prompt" rows="2" maxlength="4000" required spellcheck="false" enterkeyhint="search" aria-describedby="prompt-hint prompt-privacy" placeholder="Extract the invoice number, date, vendor, subtotal, tax, and total from an uploaded invoice as JSON."></textarea>
+        <div class="prompt-footer"><span id="prompt-hint"><kbd>↵</kbd> Search <span class="newline-hint">· Shift + Enter for a new line</span></span><button class="find-button" type="submit"><span>Find models</span><svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
       </form>
-      <p id="prompt-privacy" class="prompt-privacy">Your task is sent to OpenAI for interpretation. Scout does not save it. <a href="/docs/scout/#refresh-and-data-handling">Data handling</a></p>
-      <div class="examples" aria-label="Example tasks"><span>Or try</span><button type="button" data-example="invoice">Invoice → JSON</button><button type="button" data-example="coding">Fix a tricky bug</button><button type="button" data-example="research">Research a question</button><button type="button" data-example="writing">Write something good</button></div>
+      <div class="search-meta"><div class="examples" aria-label="Example tasks"><span>Try</span><button type="button" data-example="invoice">Extraction</button><button type="button" data-example="coding">Code</button><button type="button" data-example="research">Research</button><button type="button" data-example="writing">Writing</button></div><p id="prompt-privacy" class="prompt-privacy">Interpreted by OpenAI. Not saved by Scout. <a href="/docs/scout/#refresh-and-data-handling">Details</a></p></div>
       <p class="error-message" id="error" role="alert" hidden></p>
     </section>
 
     <section class="results-section" id="results" aria-labelledby="results-title" aria-busy="false" hidden>
-      <div class="results-heading"><div><p class="scout-eyebrow">THE SHORTLIST</p><h2 id="results-title">Finding your five…</h2></div><button id="copy-results" class="quiet-button" type="button" disabled>Copy results <span aria-hidden="true">↗</span></button></div>
-      <div class="match-line"><div id="capabilities" class="capability-tags"></div><span class="query-time" id="query-time"></span></div>
+      <div class="results-heading"><h2 id="results-title">Recommendations</h2><button id="copy-results" class="quiet-button" type="button" disabled>Copy JSON</button></div>
+      <div class="match-line"><div id="capabilities" class="capability-tags" aria-label="Matched capabilities"></div><span class="query-time" id="query-time"></span></div>
       <div class="table-frame">
         <div class="table-scroll" role="region" aria-label="Model comparison" tabindex="0">
           <table class="data-table model-table">
-            <caption class="sr-only" id="table-caption">Recommended models in Scout rank order. Quality is a shared-benchmark comparison signal. Cost and completion time use an illustrative workload disclosed below the table, not a measured execution of your task.</caption>
+            <caption class="sr-only" id="table-caption">Models in Scout rank order.</caption>
             <thead><tr>
               <th scope="col" class="model-column">Model</th>
               <th scope="col" class="numeric-column" id="quality-heading">Quality <span class="column-unit">relative / 100</span></th>
               <th scope="col" class="numeric-column">Cost <span class="column-unit">USD / 1,000 tasks</span></th>
               <th scope="col" class="numeric-column">Time <span class="column-unit" id="time-unit">reference seconds</span></th>
-              <th scope="col" class="evidence-column"><span class="sr-only">Benchmark evidence</span></th>
+              <th scope="col" class="evidence-column"><span class="sr-only">Evidence</span></th>
             </tr></thead>
-            <tbody id="model-list"><tr><td colspan="5" class="table-message"><span>Reading the latest available index…</span></td></tr></tbody>
+            <tbody id="model-list"><tr><td colspan="5" class="table-message"><span>Searching…</span></td></tr></tbody>
           </table>
         </div>
       </div>
-      <p class="table-scroll-hint" hidden>Scroll to compare quality, cost and speed <span aria-hidden="true">↔</span></p>
-      <p class="results-caption" id="results-caption">Published benchmarks guide the shortlist. Your own evaluation makes the final call.</p>
-      <details class="evidence-note" id="limitations" hidden><summary>What to know about these results <span aria-hidden="true">+</span></summary><div id="warnings"></div><p>Measured rows use representative calibration cases; benchmark rows use the stated reference workload. Neither predicts exact results on your task. Evaluate the shortlist on your own examples.</p></details>
+      <p class="table-scroll-hint" hidden>Scroll to compare <span aria-hidden="true">↔</span></p>
+      <p class="results-caption" id="results-caption"></p>
+      <details class="evidence-note" id="limitations" hidden><summary>Assumptions &amp; limitations</summary><div id="warnings"></div><p>Measured results come from separate calibration cases. Benchmark results use a reference workload. Neither predicts exact performance on your task.</p></details>
     </section>
 
-    <section class="index-strip" aria-label="Index status"><div><span class="status-dot" id="status-dot" aria-hidden="true"></span><span id="index-status">Checking sources</span></div><p id="index-counts"></p></section>
-    <details class="sources-section"><summary>The capability index <span aria-hidden="true">+</span></summary><p>Built from the benchmarks Scout can actually match to available models. Your task lights up the relevant capabilities.</p><div id="word-cloud" class="word-cloud" aria-label="Indexed capabilities"></div></details>
-
-    <details class="agent-section" id="for-agents">
-      <summary><span><span class="scout-eyebrow">MADE FOR YOUR CODING AGENT</span><strong>A second opinion, one call away.</strong></span><span class="disclosure-arrow" aria-hidden="true">↗</span></summary>
-      <div class="agent-body"><p>Connect your agent to Scout over MCP, or use the JSON API below. The only input is the task. It gets the same five recommendations, with model IDs, prices, speed, and linked evidence.</p><div class="code-heading"><span>Remote MCP · Streamable HTTP</span><button class="quiet-button" id="copy-mcp" type="button">Copy MCP URL</button></div><pre tabindex="0"><code id="mcp-url"></code></pre><div class="code-heading"><span>POST /scout/api/recommend</span><button class="quiet-button" id="copy-command" type="button">Copy request</button></div><pre tabindex="0"><code id="agent-code"></code></pre><p class="agent-note">No key needed from you. Scout uses OpenAI Decisions to interpret the task.</p><a class="text-link" href="/docs/scout/">Read the API guide <span aria-hidden="true">↗</span></a></div>
-    </details>
-    <details class="sources-section" id="sources"><summary>Follow the evidence <span aria-hidden="true">+</span></summary><div id="source-list"></div><p>Scout refreshes its public sources every hour. Each source shows its own last successful check. Collection time and measurement time are different. Coverage is limited to available, matched evidence.</p></details>
-    <noscript><p class="error-message">Enable JavaScript to try Scout here, or call the JSON API described in <a href="/docs/scout/">the Scout guide</a>.</p></noscript>
+    <section class="index-strip" aria-label="Index status"><p id="index-counts">Loading index…</p><div><span class="status-dot" id="status-dot" aria-hidden="true"></span><span id="index-status">Checking sources</span></div></section>
+    <div class="support-sections">
+      <details class="support-section" id="for-agents">
+        <summary>API &amp; MCP</summary>
+        <div class="agent-body"><p>Send a task. Get the same recommendations, model IDs, and evidence as this page.</p><div class="code-heading"><span>MCP · Streamable HTTP</span><button class="quiet-button" id="copy-mcp" type="button">Copy URL</button></div><pre tabindex="0"><code id="mcp-url"></code></pre><div class="code-heading"><span>JSON API</span><button class="quiet-button" id="copy-command" type="button">Copy request</button></div><pre tabindex="0"><code id="agent-code"></code></pre><p class="agent-note">No API key required. <a href="/docs/scout/">API guide ↗</a></p></div>
+      </details>
+      <details class="support-section" id="capability-index"><summary>Capabilities</summary><p>Benchmark coverage across available models. Search matches are underlined.</p><div id="word-cloud" class="word-cloud" aria-label="Indexed capabilities"></div></details>
+      <details class="support-section" id="sources"><summary>Sources</summary><div id="source-list"></div><p>Refreshed hourly. Collection dates and measurement dates may differ.</p></details>
+    </div>
+    <noscript><p class="error-message">Enable JavaScript to search, or use the API in <a href="/docs/scout/">the Scout guide</a>.</p></noscript>
   </main>
-  <footer class="scout-footer scout-wrap"><a href="/">openmerit <span aria-hidden="true">↗</span></a><span>Let the work decide.</span><span>Scout · Beta</span></footer>
+  <footer class="scout-footer scout-wrap"><span>Scout by OpenMerit</span><a href="/docs/scout/#current-validation-limits">Evaluation &amp; limitations <span aria-hidden="true">↗</span></a></footer>
   <p class="sr-only" id="announcement" role="status" aria-live="polite"></p>
 </body>
 </html>

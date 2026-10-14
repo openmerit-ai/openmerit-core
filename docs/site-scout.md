@@ -105,3 +105,17 @@ UI review: the table identifies calibration accuracy, reported cost, median timi
 Published Scout Worker `5dcffb9e-5055-464d-b8f9-d9f1deefbf9d` and main documentation Worker `664523ed-0aae-456c-bdad-b4be779e4678`. The main application modules, bindings, storage and routing are preserved. Full `npm run verify` passed 362 tests; the independent extraction/SQL/tool scorers passed another seven tests. Deployment repeated Scout and documentation checks. Seven live API requests matched the frozen final lists, MCP returned the same measured text shortlist, client task overrides were rejected, and the public calibration file matched exactly. Live API round trips were 525–1,612 ms; the browser text request took 623 ms. Live measured-table verification at 390px found no page overflow, and no browser runtime errors were observed.
 
 Final report: `/Users/lazim/.codex/visualizations/2026/10/14/01a13ab1-5051-79f2-b483-5392dab0f97e/scout-ranking-v4/report.html`. The first iteration remains in the sibling `scout-ranking-v3` folder. Raw protocols, scores, frozen policy hashes and calibration aggregates are retained with the reports.
+
+
+## Terminal-style interface — 14 October 2026
+
+| Before | After | Why |
+| --- | --- | --- |
+| Large marketing headline, illustration, slogans, and repeated overlines | One task heading and a compact input | Put the search first and describe the action directly |
+| Green accents, score bars, bordered rows and boxed favicons | Neutral terminal surfaces, plain measurements, open rows and 13px provider marks | Make model names and comparisons the main visual content |
+| Shared marketing stylesheet and downloaded font | Scoped Scout stylesheet using the terminal’s system typeface | Keep Scout lean and prevent marketing styles from affecting the workspace |
+| Large agent promotion and separate supporting sections | Compact native API/MCP, capability and source disclosures | Keep setup and provenance available without competing with results |
+
+The same live API, ranking, calibration disclosures and reference estimates remain in use. Unknown or failed provider images now leave a text-only identity. Search status gives total round-trip time; the API still exposes ranking time separately. No motion was added to search or result updates. Published as Scout Worker `325e6da9-1451-44a7-a3ed-274de638092b` and documentation Worker `30edf3a6-33a4-4ad3-92aa-f3ab922e68c1`. The existing main application modules, bindings, containers and routing were preserved. All 34 changed public assets matched the built files, excluding only the existing edge-injected analytics script in HTML. The retired 152 KiB illustration is omitted from the Scout asset bundle.
+
+`npm run verify` passed all 362 tests plus type, build and syntax checks. Browser review covered real measured and benchmark searches, a typed task submitted with Enter, model evidence, copy feedback, agent setup deep links, 320px and 390px layouts, and a light-palette preview. Table overflow stays inside its region and the model column remains pinned. The live desktop search returned five rows in 0.48 seconds with no failed provider images, page overflow or console errors. Light appearance was reviewed using a local stylesheet preview; physical mobile hardware was not tested. The live screenshot is saved in the task’s `scout-ui-redesign` artifact directory.

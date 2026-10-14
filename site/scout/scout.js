@@ -12,10 +12,9 @@ let result = null, activeRequest = null, requestID = 0;
 
 function element(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text != null) node.textContent = text; return node; }
 function link(text, url) { const node = element('a', '', text); try { const parsed = new URL(url); if (['https:', 'http:'].includes(parsed.protocol)) { node.href = parsed.href; node.target = '_blank'; node.rel = 'noopener noreferrer'; } } catch {} return node; }
-function metric(value, label, quality) {
+function metric(value, label) {
   const node = element('td', 'metric-cell'); node.title = label;
-  if (quality != null) { const line = element('div', 'quality-value'), track = element('span', 'quality-track'), bar = element('span'); track.setAttribute('aria-hidden', 'true'); bar.style.width = `${Math.max(0, Math.min(100, quality))}%`; track.append(bar); line.append(track, element('span', '', value)); node.append(line); }
-  else node.append(element('span', value === '—' ? 'metric-unavailable' : '', value));
+  node.append(element('span', value === '—' ? 'metric-unavailable' : '', value));
   if (value === '—') node.append(element('span', 'sr-only', label));
   return node;
 }
@@ -23,15 +22,10 @@ function tableMessage(message, height = 120) {
   const row = element('tr'), cell = element('td', 'table-message'); cell.colSpan = 5; cell.style.height = `${Math.max(120, height)}px`; cell.append(element('span', '', message)); row.append(cell); return row;
 }
 function providerIcon(provider) {
-  const icon = element('span', 'provider-icon'), initial = element('span', 'provider-initial', provider.label.slice(0, 1).toUpperCase());
-  icon.setAttribute('aria-hidden', 'true'); icon.append(initial);
-  if (provider.file) {
-    const img = element('img'); img.alt = ''; img.width = 20; img.height = 20; img.decoding = 'async';
-    img.addEventListener('load', () => { initial.hidden = true; });
-    img.addEventListener('error', () => { img.remove(); initial.hidden = false; });
-    img.src = `/scout/providers/${provider.file}`; icon.append(img);
-  }
-  return icon;
+  if (!provider.file) return null;
+  const img = element('img', 'provider-icon'); img.alt = ''; img.width = 13; img.height = 13; img.decoding = 'async';
+  img.setAttribute('aria-hidden', 'true'); img.addEventListener('error', () => img.remove());
+  img.src = `/scout/providers/${provider.file}`; return img;
 }
 async function copy(text, button, label = 'Copied') {
   const previous = button.textContent;
@@ -46,9 +40,10 @@ function evidenceItem(e) {
 function modelRow(model) {
   const fragment = document.createDocumentFragment(), row = element('tr', 'model-row'), nameCell = element('th', 'model-cell'); nameCell.scope = 'row';
   const provider = providerIdentity(model), identity = element('div', 'model-identity'), name = element('div'), title = element('span', 'model-title', model.name), byline = element('span', 'model-provider', provider.label);
-  name.append(title, byline); identity.append(element('span', 'model-number', String(model.rank).padStart(2, '0')), providerIcon(provider), name); nameCell.append(identity);
+  const icon = providerIcon(provider); if (icon) byline.prepend(icon);
+  name.append(title, byline); identity.append(element('span', 'model-number', String(model.rank).padStart(2, '0')), name); nameCell.append(identity);
   const qualityValue = model.measured ? model.measured.quality * 100 : model.quality;
-  const quality = metric(`${qualityValue.toFixed(0)}${model.measured ? '%' : ''}`, model.measured ? 'Mean field accuracy on separate calibration cases. Not predicted accuracy on your prompt.' : 'Relative result of shared-benchmark comparisons. Not predicted task accuracy.', qualityValue);
+  const quality = metric(`${qualityValue.toFixed(0)}${model.measured ? '%' : ''}`, model.measured ? 'Mean field accuracy on separate calibration cases. Not predicted accuracy on your prompt.' : 'Relative result of shared-benchmark comparisons. Not predicted task accuracy.');
   row.append(nameCell, quality, metric(model.reference?.costUsd != null ? money(model.reference.costUsd * 1000) : '—', model.measured ? `Mean reported charge, scaled to 1,000 similar tasks; cost known for ${model.measured.costKnownCalls}/${model.measured.cases} requests.` : 'Illustrative USD per 1,000 tasks at the workload below; excludes hidden reasoning and modality-specific charges.'), metric(model.reference?.completionSeconds != null ? `${model.reference.completionSeconds.toFixed(1)}s` : '—', model.measured ? 'Median full request time on the calibration cases, including failures.' : 'Reference first-answer delay plus generation time; actual endpoint latency may differ.'));
   const action = element('td'), toggle = element('button', 'evidence-toggle'); toggle.type = 'button';
   toggle.setAttribute('aria-label', `Evidence for ${model.name}`); toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', `model-evidence-${model.rank}`);
@@ -75,9 +70,10 @@ function showSources(sources) {
 }
 function showResult(data, roundTripMs) {
   result = data;
-  $('#results-title').textContent = data.recommendations.length ? `${data.recommendations.length} models. ${data.ranking?.mode === 'measured' ? 'Ranked on measured tasks.' : 'A good place to start.'}` : 'No supported matches yet.';
+  $('#results-title').textContent = data.recommendations.length ? 'Recommendations' : 'No matching models';
   $('#capabilities').replaceChildren(...(data.task.capabilities.length ? data.task.capabilities.map(c => c.label) : ['General purpose']).map(label => element('span', '', label)));
-  $('#query-time').textContent = `${data.elapsedMs == null ? 'Task interpreted' : `${data.elapsedMs < 1 ? '<1' : Math.round(data.elapsedMs)} ms ranking`} · ${Math.round(roundTripMs)} ms round trip`;
+  $('#query-time').textContent = `${(roundTripMs / 1000).toFixed(2)}s`;
+  $('#query-time').title = 'Total search time, including task interpretation and network time';
   $('#model-list').replaceChildren(...data.recommendations.map(modelRow));
   if (!data.recommendations.length) $('#model-list').append(tableMessage(data.warnings[0] || 'Try describing the task in more detail.'));
   $('#copy-results').disabled = !data.recommendations.length;
@@ -86,16 +82,17 @@ function showResult(data, roundTripMs) {
   $('#quality-heading').replaceChildren(document.createTextNode(profile ? 'Accuracy ' : 'Quality '), element('span', 'column-unit', profile ? 'calibration cases' : 'relative / 100'));
   $('#time-unit').textContent = profile ? 'measured seconds' : 'reference seconds';
   $('#table-caption').textContent = profile ? 'Models in Scout rank order among tested eligible candidates. Accuracy, mean cost and median full request time come from separate calibration cases, not executions of your prompt.' : 'Models in Scout rank order using shared benchmarks and an illustrative workload. Quality is a ranking signal, not predicted task accuracy.';
-  $('#results-caption').textContent = profile ? `${profile.label} · ${profile.casesPerModel} calibration cases per model · ranked among ${profile.eligibleTestedModels} tested models · ${new Date(profile.measuredAt).toLocaleDateString()}. Small-sample results; your task and route may differ.` : workload ? `Reference workload: ${workload.inputTokens.toLocaleString()} input + ${workload.outputTokens.toLocaleString()} output tokens per task · ${workload.priority} priority. Cost and time are comparisons, not task-specific measurements.` : 'Published benchmarks guide the shortlist. Your own evaluation makes the final call.';
+  $('#results-caption').textContent = profile ? `${profile.casesPerModel} calibration cases per model · ${profile.eligibleTestedModels} tested models · ${new Date(profile.measuredAt).toLocaleDateString()}. Not measured on your task.` : workload ? `Reference workload: ${workload.inputTokens.toLocaleString()} input + ${workload.outputTokens.toLocaleString()} output tokens per task · ${workload.priority} priority. Cost and time are comparisons, not task-specific measurements.` : 'Based on published benchmarks. Evaluate these models on your own examples.';
   $('#limitations').hidden = false;
   $('#results-caption').hidden = false;
   showIndex(data);
   $('#announcement').textContent = `${data.recommendations.length} models found. ${data.task.capabilities.map(c => c.label).join(', ')}.`;
 }
 function showIndex(data) {
-  $('#index-status').textContent = `${data.degraded ? 'Some sources need attention' : data.stale ? 'Index needs a refresh' : 'Sources checked'} · ${new Date(data.checkedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}${data.refreshStatus === 'failed' ? ' · Refresh failed' : ''}`;
+  $('#index-status').textContent = `${data.degraded ? 'Some sources need attention' : data.stale ? 'Index needs a refresh' : 'Checked'} · ${new Date(data.checkedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}${data.refreshStatus === 'failed' ? ' · Refresh failed' : ''}`;
   $('#status-dot').dataset.stale = String(data.stale || data.degraded || data.refreshStatus === 'failed');
-  $('#index-counts').textContent = `${data.benchmarks} benchmark series · ${data.benchmarksWithResults} with matched results · ${data.models} models`;
+  $('#index-counts').textContent = `${data.models} models · ${data.benchmarks} benchmark series`;
+  $('#index-counts').title = `${data.benchmarksWithResults} benchmark series have matched results`;
   showSources(data.sources);
   $('#word-cloud').replaceChildren(...(data.wordCloud ?? []).map(c => {
     const term = element('span', '', c.label); term.style.fontSize = `${.85 + Math.min(1, c.benchmarks / 45) * .65}rem`;
@@ -107,9 +104,9 @@ async function search() {
   const prompt = $('#prompt').value.trim(); if (!prompt) { $('#error').textContent = 'Describe the task you want a model to do.'; $('#error').hidden = false; $('#prompt').focus(); return; }
   activeRequest?.abort(); const controller = new AbortController(); activeRequest = controller; const id = ++requestID;
   $('#results').hidden = false; $('#error').hidden = true; $('#results').setAttribute('aria-busy', 'true'); $('#copy-results').disabled = true;
-  result = null; $('#results-title').textContent = 'Finding your five…'; $('#model-list').replaceChildren(tableMessage('Interpreting your task and checking the latest index…', $('#model-list').getBoundingClientRect().height));
+  result = null; $('#results-title').textContent = 'Searching…'; $('#model-list').replaceChildren(tableMessage('Interpreting task…', $('#model-list').getBoundingClientRect().height));
   $('#capabilities').replaceChildren(); $('#query-time').textContent = ''; $('#limitations').hidden = true; $('#results-caption').hidden = true;
-  $('.find-button span').textContent = 'Finding…';
+  $('.find-button span').textContent = 'Searching…';
   document.querySelectorAll('[data-example]').forEach(button => button.setAttribute('aria-pressed', String(examples[button.dataset.example] === prompt)));
   const started = performance.now(), timeout = setTimeout(() => controller.abort(), 15_000);
   try {
@@ -119,7 +116,7 @@ async function search() {
     if (id === requestID) showResult(data, performance.now() - started);
   } catch (error) {
     if (id !== requestID) return;
-    result = null; $('#model-list').replaceChildren(tableMessage('No results loaded. Try your search again.')); $('#results-title').textContent = 'Let’s try that again.'; $('#capabilities').replaceChildren(); $('#query-time').textContent = '';
+    result = null; $('#model-list').replaceChildren(tableMessage('No results loaded. Try your search again.')); $('#results-title').textContent = 'Search unavailable'; $('#capabilities').replaceChildren(); $('#query-time').textContent = '';
     $('#error').textContent = error.name === 'AbortError' ? 'This request took too long. Please try again.' : error instanceof TypeError ? 'Couldn’t reach Scout. Check the connection and try again.' : error.message; $('#error').hidden = false;
   } finally { clearTimeout(timeout); if (id === requestID) { $('#results').setAttribute('aria-busy', 'false'); $('.find-button span').textContent = 'Find models'; } }
 }
@@ -135,3 +132,12 @@ const mcpURL = `${location.origin}/scout/mcp`;
 $('#mcp-url').textContent = mcpURL;
 $('#copy-mcp').addEventListener('click', () => copy(mcpURL, $('#copy-mcp')));
 fetch('/scout/api/status').then(response => { if (!response.ok) throw new Error(); return response.json(); }).then(data => { if (!result) showIndex(data); }).catch(() => { $('#index-status').textContent = 'Could not reach the index. Try a search to reconnect.'; $('#status-dot').dataset.stale = 'true'; });
+
+// Deep links reveal the native disclosure before moving focus to its summary.
+function revealSection() {
+  if (location.hash !== '#for-agents') return;
+  const section = $('#for-agents'); section.open = true; section.querySelector('summary').focus({ preventScroll: true });
+}
+window.addEventListener('hashchange', revealSection);
+document.querySelector('a[href="#for-agents"]').addEventListener('click', () => { $('#for-agents').open = true; });
+revealSection();

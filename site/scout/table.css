@@ -1,74 +1,57 @@
-/* Semantic table primitives, adapted from the shadcn/ui Table composition.
-   Native elements keep the static site lean and preserve column semantics. */
-.table-frame { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; container-type: inline-size; background: var(--surface); }
+/* Native table semantics, with the terminal's compact, unboxed presentation. */
+.table-frame { container-type: inline-size; }
 .table-scroll { position: relative; width: 100%; overflow: auto; overscroll-behavior-x: contain; }
-.table-scroll:focus-visible { outline-offset: -3px; border-radius: 7px; }
+.table-scroll:focus-visible { outline-offset: -2px; }
 .data-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
 .data-table th { font-weight: 500; }
-.data-table thead { background: var(--paper); }
-.data-table thead th { height: 60px; padding: 12px 18px; color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-.data-table tbody > tr { border-bottom: 1px solid var(--line); }
-.data-table tbody > tr:last-child { border-bottom: 0; }
-.data-table tbody th, .data-table tbody td { padding: 18px; vertical-align: middle; }
+.data-table thead th { padding: 10px 16px 12px; color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.data-table tbody th, .data-table tbody td { padding: 14px 16px; vertical-align: middle; }
+.data-table thead th:first-child, .data-table tbody th:first-child { padding-left: 0; }
+.data-table thead th:last-child, .data-table tbody td:last-child { padding-right: 0; }
 .data-table .numeric-column, .data-table .metric-cell { text-align: right; }
-.column-unit { display: block; font-size: 10px; font-weight: 400; color: var(--quiet); margin-top: 2px; }
-.model-table { min-width: 760px; }
-.model-column { width: 44%; }
-.numeric-column { width: 15%; }
-.evidence-column { width: 11%; }
-.model-row { background: var(--surface); }
-.model-row[data-expanded="true"] { background: var(--soft); }
+.column-unit { display: block; color: var(--quiet); font-size: 10px; font-weight: 400; margin-top: 3px; }
+.model-table { min-width: 660px; }
+.model-column { width: 43%; }
+.numeric-column { width: 16%; }
+.evidence-column { width: 9%; }
+.model-row { background: var(--paper); }
+.model-row[data-expanded="true"] { background: var(--surface); }
 .model-cell { text-align: left; }
-.model-identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.model-identity { display: flex; align-items: center; gap: 15px; min-width: 0; }
 .model-number { flex: 0 0 17px; font: 10px var(--mono); color: var(--quiet); }
-.provider-icon { position: relative; flex: 0 0 32px; width: 32px; height: 32px; border: 1px solid #e5e5e1; background: #fff; color: #565953; border-radius: 7px; display: grid; place-items: center; font-size: 11px; }
-.provider-icon img { width: 20px; height: 20px; object-fit: contain; position: relative; }
-.provider-initial { position: absolute; }
-.model-title { display: block; font-size: 13px; font-weight: 500; line-height: 1.5; letter-spacing: -.015em; overflow-wrap: anywhere; }
-.model-provider { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 3px; font-size: 11px; font-weight: 400; color: var(--muted); }
-.pick-label { border-radius: 3px; background: var(--soft); color: var(--green); padding: 1px 5px; font-size: 9px; line-height: 1.5; }
+.model-title { display: block; font-size: 13px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
+.model-provider { display: flex; align-items: center; gap: 5px; margin-top: 4px; color: var(--muted); font-size: 11px; font-weight: 400; }
+.provider-icon { display: block; flex: none; width: 13px; height: 13px; object-fit: contain; }
 .metric-cell { font: 12px var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.quality-value { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
-.quality-track { display: block; width: 36px; height: 3px; border-radius: 2px; overflow: hidden; background: var(--line); }
-.quality-track > span { display: block; height: 100%; background: var(--green); }
 .metric-unavailable { color: var(--quiet); }
-.evidence-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 6px 8px; margin: -6px -8px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 11px; white-space: nowrap; }
-.evidence-toggle svg { width: 13px; height: 13px; }
+.evidence-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 6px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.evidence-toggle svg { width: 12px; height: 12px; }
 .evidence-toggle[aria-expanded="true"] { color: var(--ink); }
 .evidence-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
-.evidence-toggle:active:not(:focus-visible) { transform: scale(.97); }
-.model-detail { background: var(--paper); }
+.model-detail { background: var(--surface); }
 .data-table .model-detail-cell { padding: 0; }
-.model-evidence { position: sticky; left: 0; width: min(100%, 100cqw); padding: 20px 22px 24px; white-space: normal; font-size: 12px; }
-.evidence-intro { color: var(--muted); max-width: 700px; }
+.model-evidence { position: sticky; left: 0; width: min(100%, 100cqw); padding: 6px 24px 24px 32px; white-space: normal; font-size: 12px; }
+.evidence-intro { color: var(--muted); max-width: 800px; }
 .data-table .table-message { height: 120px; padding: 0; text-align: center; color: var(--muted); }
 .table-message > span { display: block; position: sticky; left: 0; width: min(100%, 100cqw); padding: 24px; }
-.table-scroll-hint { display: flex; align-items: center; justify-content: space-between; margin-top: 9px; font-size: 10px; color: var(--quiet); }
+.table-scroll-hint { display: flex; align-items: center; justify-content: space-between; margin-top: 9px; color: var(--quiet); font-size: 10px; }
 @media (hover: hover) and (pointer: fine) {
-  .model-row:hover { background: var(--paper); }
-  .model-row[data-expanded="true"]:hover { background: var(--soft); }
-  .evidence-toggle:hover { color: var(--ink); background: var(--soft); }
+  .model-row:hover { background: var(--hover); }
+  .evidence-toggle:hover { color: var(--ink); }
 }
-@media (max-width: 820px) {
-  .data-table thead th, .data-table tbody th, .data-table tbody td { padding-inline: 14px; }
-  .model-table { min-width: 720px; }
-  .model-column { width: 260px; }
-  .model-table .model-column, .model-table .model-cell { position: sticky; left: 0; z-index: 1; background: inherit; border-right: 1px solid var(--line); }
+@media (max-width: 760px) {
+  .model-table { min-width: 655px; table-layout: fixed; }
+  .model-column { width: 205px; }
+  .model-table .numeric-column { width: 112px; }
+  .model-table .evidence-column { width: 104px; }
+  .data-table thead th, .data-table tbody th, .data-table tbody td { padding-inline: 13px; }
+  .model-table .model-column, .model-table .model-cell { position: sticky; left: 0; z-index: 1; background: inherit; }
   .model-table thead tr { background: var(--paper); }
-  .model-identity { gap: 9px; }
-  .model-number { flex-basis: 13px; }
-  .model-evidence { padding: 18px 16px 22px; }
+  .model-identity { gap: 10px; }
+  .model-number { flex-basis: 12px; }
+  .model-title { font-size: 12px; }
+  .model-provider { font-size: 10px; }
+  .model-evidence { padding: 8px 16px 22px; }
   .evidence-toggle { min-height: 44px; }
   .model-id-line button { min-height: 36px; }
-}
-@media (max-width: 480px) {
-  .model-column { width: 218px; }
-  .model-table { min-width: 670px; table-layout: fixed; }
-  .model-table .numeric-column { width: 116px; }
-  .model-table .evidence-column { width: 104px; }
-  .model-number { display: none; }
-  .provider-icon { flex-basis: 28px; width: 28px; height: 28px; border-radius: 6px; }
-  .provider-icon img { width: 18px; height: 18px; }
-  .model-title { font-size: 12px; }
-  .model-provider { font-size: 10px; gap: 5px; }
 }

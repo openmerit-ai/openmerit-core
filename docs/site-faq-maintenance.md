@@ -275,3 +275,8 @@ Checked homepage FAQ claims against the proposed ranking revision. FAQ answers s
 ## Scout measured-task ranking — 14 October 2026
 
 Reviewed evidence, data, costs, scheduling and readiness claims for the Scout change. The separate Scout service uses calibration-only aggregates for narrow matching tasks, and public benchmark comparisons elsewhere. Held-out results are not loaded into ranking. Evaluation requires an explicit offline run; the existing hourly job still only refreshes six public feeds. No user task execution, saved prompt history, extra runtime inference, or database is introduced. Small samples and the selected candidate pool do not establish SOTA or a perfect ordered top five. Homepage FAQ claims concern the terminal/package and need no changes. Publication and test outcomes are recorded in `site-scout.md`.
+
+
+## Scout interface refinement — 14 October 2026
+
+Checked comparison, evidence and data-handling claims for the terminal-style Scout interface. Ranking and API/MCP contracts are unchanged. The page retains its OpenAI prompt-processing notice, measurement scope and limitations. Bundled provider marks replace boxed favicons; missing assets use text-only names. No homepage FAQ wording change is needed.

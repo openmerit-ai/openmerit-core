@@ -6,7 +6,7 @@ import { resolve, dirname } from 'node:path';
 const root = resolve(import.meta.dirname, '..'), output = resolve(root, 'dist/scout-site');
 await rm(output, { recursive: true, force: true });
 for (const path of ['scout', 'docs', 'styles.css', 'docs.css', 'docs.js', 'docs-search.js', 'favicon.svg',
-  'assets/inter-latin.woff2', 'assets/inter-LICENSE.txt', 'assets/openmerit-og-v1.png', 'assets/motion/setup-poster-transparent-v2.webp']) {
+  'assets/inter-latin.woff2', 'assets/inter-LICENSE.txt', 'assets/openmerit-og-v1.png']) {
   const destination = resolve(output, path); await mkdir(dirname(destination), { recursive: true });
   await cp(resolve(root, 'site', path), destination, { recursive: true });
 }
