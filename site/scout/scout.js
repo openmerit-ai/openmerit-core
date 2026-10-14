@@ -94,10 +94,17 @@ function showIndex(data) {
   $('#index-counts').textContent = `${data.models} models · ${data.benchmarks} benchmark series`;
   $('#index-counts').title = `${data.benchmarksWithResults} benchmark series have matched results`;
   showSources(data.sources);
-  $('#word-cloud').replaceChildren(...(data.wordCloud ?? []).map(c => {
-    const term = element('span', '', c.label); term.style.fontSize = `${.85 + Math.min(1, c.benchmarks / 45) * .65}rem`;
-    term.dataset.matched = String(!!data.task?.weights[c.id]);
-    term.title = `${c.benchmarks} benchmark series · ${c.models} models`; return term;
+  const capabilities = (data.wordCloud ?? []).map(c => ({ ...c, matched: !!data.task?.weights[c.id] }));
+  capabilities.sort((a, b) => Number(b.matched) - Number(a.matched));
+  $('#capability-list').replaceChildren(...capabilities.map(c => {
+    const item = element('li', 'capability-item'), name = element('div', 'capability-name', c.label);
+    item.dataset.matched = String(c.matched);
+    if (c.matched) {
+      const match = element('span', 'capability-match', '✓'); match.setAttribute('aria-hidden', 'true'); match.title = 'Task match';
+      name.append(match, element('span', 'sr-only', ' — Task match'));
+    }
+    item.append(name, element('span', 'capability-coverage', `${c.benchmarks} benchmark series · ${c.models} models`));
+    return item;
   }));
 }
 async function search() {

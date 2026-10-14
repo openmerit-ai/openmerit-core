@@ -119,3 +119,14 @@ Final report: `/Users/lazim/.codex/visualizations/2026/10/14/01a13ab1-5051-79f2-
 The same live API, ranking, calibration disclosures and reference estimates remain in use. Unknown or failed provider images now leave a text-only identity. Search status gives total round-trip time; the API still exposes ranking time separately. No motion was added to search or result updates. Published as Scout Worker `325e6da9-1451-44a7-a3ed-274de638092b` and documentation Worker `30edf3a6-33a4-4ad3-92aa-f3ab922e68c1`. The existing main application modules, bindings, containers and routing were preserved. All 34 changed public assets matched the built files, excluding only the existing edge-injected analytics script in HTML. The retired 152 KiB illustration is omitted from the Scout asset bundle.
 
 `npm run verify` passed all 362 tests plus type, build and syntax checks. Browser review covered real measured and benchmark searches, a typed task submitted with Enter, model evidence, copy feedback, agent setup deep links, 320px and 390px layouts, and a light-palette preview. Table overflow stays inside its region and the model column remains pinned. The live desktop search returned five rows in 0.48 seconds with no failed provider images, page overflow or console errors. Light appearance was reviewed using a local stylesheet preview; physical mobile hardware was not tested. The live screenshot is saved in the task’s `scout-ui-redesign` artifact directory.
+
+
+## Capability index refinement — 14 October 2026
+
+| Before | After | Why |
+| --- | --- | --- |
+| Mixed-size word cloud, loose wrapping, underlined matches and hover-only counts | Equal-size capability names in an aligned responsive list, with visible benchmark/model counts and checked task matches first | Make coverage scannable and distinguish task matches without implying links |
+
+The list uses existing API data and native list semantics. Coverage counts are not eligibility counts. The disclosure remains keyboard-operable and updates in place after a search; ranking and data handling are unchanged. Homepage FAQ evidence and readiness claims remain accurate without edits.
+
+Published as Scout Worker `1ebbbd44-95ed-4bab-8e7a-4e41e99063eb` and documentation Worker `ae4af99b-e515-4333-a9b1-fe956053223d`, preserving the main application modules and bindings. Full verification passed 362 tests. Browser checks covered the initial list, Enter-key disclosure, a real invoice search, three matched capabilities placed first, 12 equal-size labels, and a 390px layout without page overflow. Live rendering showed three aligned columns and no console errors. The 34 published changed assets matched the local build (HTML normalization removes only the existing Cloudflare analytics beacon).
