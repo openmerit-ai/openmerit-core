@@ -72,3 +72,13 @@ test('binary assets remain byte-identical and staging leaves legacy pages availa
     assert.deepEqual(new Uint8Array(await result.arrayBuffer()), data);
   }
 });
+
+test('Scout routes are isolated from protected memo, demos, docs and terminal services', async () => {
+  const { default: router } = await import('../domain-router.mjs');
+  const env = { ...enabled, SITE: { fetch: () => new Response('site') }, SCOUT: { fetch: () => new Response('scout') }, TERMINAL: { fetch: () => new Response('terminal') } };
+  for (const path of ['/scout', '/scout/', '/scout/api/recommend', '/scout/mcp']) assert.equal(await (await router.fetch(new Request(`https://openmerit.ai${path}`), env)).text(), 'scout');
+  for (const path of ['/', '/scouting', '/docs/scout/', '/docs/', '/docs/interactive-demo/', '/memo/source.md', '/memo/auth/sign-in/email-otp', '/demo/api/session']) assert.equal(await (await router.fetch(new Request(`https://openmerit.ai${path}`), env)).text(), 'site');
+  assert.equal(await (await router.fetch(new Request('https://dash.openmerit.ai/scout'), env)).text(), 'terminal');
+  const redirect = await router.fetch(new Request('https://www.openmerit.ai/scout/?q=hello'), env);
+  assert.equal(redirect.status, 308); assert.equal(redirect.headers.get('location'), 'https://openmerit.ai/scout/?q=hello');
+});

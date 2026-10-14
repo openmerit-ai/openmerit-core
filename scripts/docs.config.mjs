@@ -6,6 +6,7 @@ export const groups = [
     { source: 'index.md', slug: '', title: 'Overview', description: 'Inspect application inference and set up supervised model comparisons.' },
     { source: 'getting-started.md', slug: 'getting-started', title: 'Installation & setup', description: 'Open the standalone terminal or configure the separate Pi comparison workflow.' },
     { source: 'inference-terminal.md', slug: 'inference-terminal', title: 'Inference Terminal', description: 'Inspect application declarations, recorded requests, services, and linked compute.' },
+    { source: 'scout.md', slug: 'scout', documentationLabel: 'Hosted beta', githubSource: false, title: 'Scout · Beta', description: 'Get a prompt-only model shortlist from published benchmark evidence, pricing, and reference speed.' },
     { source: 'first-trial.md', slug: 'first-trial', title: 'Your first trial', description: 'Collect evidence, compare candidates, and validate a supervised model change.' },
   ] },
   { title: 'Demos & recorded examples', pages: [

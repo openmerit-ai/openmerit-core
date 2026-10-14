@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#171915" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="Describe the work. Scout by OpenMerit finds five model candidates using published benchmark evidence, token prices, and reference speed.">
+  <title>Scout by OpenMerit — Find your five.</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/assets/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css?v=20261014-transparent-art">
+  <link rel="stylesheet" href="/scout/scout.css">
+  <script src="/scout/scout.js" type="module"></script>
+</head>
+<body class="scout-page">
+  <a class="skip-link" href="#prompt">Skip to prompt</a>
+  <header class="scout-header scout-wrap">
+    <a class="scout-brand" href="/scout/" aria-label="Scout home">
+      <svg class="scout-mark" width="30" height="30" viewBox="0 0 32 32" fill="none" aria-hidden="true"><circle cx="16" cy="16" r="12.5" stroke="currentColor" stroke-width="1.25"/><path d="m21 10-3 9-7 3 3-9 7-3Z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="m14 13 4 6" stroke="currentColor" stroke-width="1.25"/><path d="M16 1v3m15 12h-3M16 31v-3M1 16h3" stroke="currentColor"/></svg>
+      <span>scout</span>
+    </a>
+    <a class="parent-brand" href="/">by openmerit</a>
+    <nav aria-label="Scout navigation"><a href="/docs/scout/">How it works</a><a href="#for-agents">Use with your agent <span aria-hidden="true">↗</span></a></nav>
+  </header>
+  <main class="scout-wrap" id="main">
+    <section class="scout-intro" aria-labelledby="scout-title">
+      <div><p class="scout-eyebrow"><span class="open-dot" aria-hidden="true"></span> A little direction. A better model.</p>
+        <h1 id="scout-title">Describe the work.<br><span>Find your five.</span></h1>
+        <p class="scout-description">The right models for what you’re building.<br>Quality, cost, and speed. One prompt away.</p>
+      </div>
+      <div class="intro-aside" aria-hidden="true"><img src="/assets/motion/setup-poster-transparent-v2.webp" width="543" height="362" alt=""><span>Choose your tools well.</span></div>
+    </section>
+
+    <section class="search-section" aria-label="Find models">
+      <form id="scout-form" class="prompt-box">
+        <label for="prompt">What are you building?</label>
+        <textarea id="prompt" name="prompt" rows="2" maxlength="4000" required spellcheck="false" enterkeyhint="search" aria-describedby="prompt-hint" placeholder="I want to upload an invoice and extract six fields as JSON…"></textarea>
+        <div class="prompt-footer"><span id="prompt-hint">A task, in your own words.</span><button class="find-button" type="submit"><span>Find models</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
+      </form>
+      <div class="examples" aria-label="Example tasks"><span>Or try</span><button type="button" data-example="invoice">Invoice → JSON</button><button type="button" data-example="coding">Fix a tricky bug</button><button type="button" data-example="research">Research a question</button><button type="button" data-example="writing">Write something good</button></div>
+      <p class="error-message" id="error" role="alert" hidden></p>
+    </section>
+
+    <section class="results-section" id="results" aria-labelledby="results-title" aria-busy="false" hidden>
+      <div class="results-heading"><div><p class="scout-eyebrow">THE SHORTLIST</p><h2 id="results-title">Finding your five…</h2></div><button id="copy-results" class="quiet-button" type="button" disabled>Copy results <span aria-hidden="true">↗</span></button></div>
+      <div class="match-line"><div id="capabilities" class="capability-tags"></div><span class="query-time" id="query-time"></span></div>
+      <div class="result-columns" aria-hidden="true"><span>Model</span><span>Quality signal</span><span>Cost / 1M tokens</span><span>Output speed</span><span></span></div>
+      <div id="model-list" class="model-list"><p class="loading-note">Reading the latest available index…</p></div>
+      <p class="results-caption" id="results-caption">Published benchmarks guide the shortlist. Your own evaluation makes the final call.</p>
+      <details class="evidence-note" id="limitations" hidden><summary>What to know about these results <span aria-hidden="true">+</span></summary><div id="warnings"></div><p>Quality is a relative benchmark signal, not predicted task accuracy. Prices use a 3:1 input/output token mix. Speed is a published reference measurement and can vary by provider and reasoning configuration.</p></details>
+    </section>
+
+    <section class="index-strip" aria-label="Index status"><div><span class="status-dot" id="status-dot" aria-hidden="true"></span><span id="index-status">Checking sources</span></div><p id="index-counts"></p></section>
+    <details class="sources-section"><summary>The capability index <span aria-hidden="true">+</span></summary><p>Built from the benchmarks Scout can actually match to available models. Your task lights up the relevant capabilities.</p><div id="word-cloud" class="word-cloud" aria-label="Indexed capabilities"></div></details>
+
+    <details class="agent-section" id="for-agents">
+      <summary><span><span class="scout-eyebrow">MADE FOR YOUR CODING AGENT</span><strong>A second opinion, one call away.</strong></span><span class="disclosure-arrow" aria-hidden="true">↗</span></summary>
+      <div class="agent-body"><p>Connect your agent to Scout over MCP, or use the JSON API below. The only input is the task. It gets the same five recommendations, with model IDs, prices, speed, and linked evidence.</p><div class="code-heading"><span>Remote MCP · Streamable HTTP</span><button class="quiet-button" id="copy-mcp" type="button">Copy MCP URL</button></div><pre tabindex="0"><code id="mcp-url"></code></pre><div class="code-heading"><span>POST /scout/api/recommend</span><button class="quiet-button" id="copy-command" type="button">Copy request</button></div><pre tabindex="0"><code id="agent-code"></code></pre><p class="agent-note">No API key. No model calls. Scout does not save your prompt.</p><a class="text-link" href="/docs/scout/">Read the API guide <span aria-hidden="true">↗</span></a></div>
+    </details>
+    <details class="sources-section" id="sources"><summary>Follow the evidence <span aria-hidden="true">+</span></summary><div id="source-list"></div><p>Scout refreshes its public sources every hour. Each source shows its own last successful check. Collection time and measurement time are different. Coverage is limited to available, matched evidence.</p></details>
+    <noscript><p class="error-message">Enable JavaScript to try Scout here, or call the JSON API described in <a href="/docs/scout/">the Scout guide</a>.</p></noscript>
+  </main>
+  <footer class="scout-footer scout-wrap"><a href="/">openmerit <span aria-hidden="true">↗</span></a><span>Let the work decide.</span><span>Scout · Beta</span></footer>
+  <p class="sr-only" id="announcement" role="status" aria-live="polite"></p>
+</body>
+</html>

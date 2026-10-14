@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "openmerit-scout",
+  "main": "scout/worker.mjs",
+  "compatibility_date": "2026-09-22",
+  "workers_dev": true,
+  "preview_urls": true,
+  "assets": {
+    "directory": "./dist/scout-site",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "triggers": { "crons": ["7 * * * *"] },
+  "durable_objects": { "bindings": [{ "name": "SCOUT_INDEX", "class_name": "ScoutIndex" }] },
+  "migrations": [{ "tag": "scout-v1", "new_sqlite_classes": ["ScoutIndex"] }],
+  "build": { "command": "npm run check:scout && npm run check:docs && npm run build:scout" },
+  "observability": { "enabled": false }
+}

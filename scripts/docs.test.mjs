@@ -199,3 +199,12 @@ test('social image text escapes markup and rejects copy that cannot fit', () => 
   assert.throws(() => createSocialImage({ ...page, title: 'Very long documentation title '.repeat(20) }), /too long to fit/);
   assert.throws(() => createSocialImage({ ...page, title: '' }), /nonempty text/);
 });
+
+
+test('hosted Scout docs link to their published Markdown without claiming the feature is on main', () => {
+  const scout = html.find(page => page.url === '/docs/scout/').text;
+  assert.match(scout, /Hosted beta/);
+  assert.match(scout, /href="\/docs\/scout\/source.md"/);
+  assert.ok(!scout.includes('/blob/main/docs/scout.md'));
+  assert.ok(!scout.includes('/edit/main/docs/scout.md'));
+});

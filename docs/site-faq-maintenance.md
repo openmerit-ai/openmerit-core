@@ -244,3 +244,15 @@ The `.ai` migration changes hostnames and mail configuration, not product behavi
 ## Automatic light and dark appearance — unreleased source, 14 October 2026
 
 Reviewed homepage FAQ claims against the appearance-only change. Device-driven colors affect website reading surfaces, demos, and the Inference Terminal, including charts and overlays. They add no saved theme preference, inference calls, collection, routing, permissions, or billing behavior. No FAQ wording change is required. The terminal guide separates the unreleased source appearance from published preview.5. Website/npm publication is not implied by local builds; the main-app source divergence and integration boundary are recorded in [theme maintenance](site-themes.md).
+
+## Scout — unreleased branch preview, 14 October 2026
+
+Reviewed evidence, comparisons, data, background checks, cost, and readiness claims. Scout adds a separate prompt-only shortlist API and `/scout/` page; it does not change Pi approvals, evaluations, automatic swaps, terminal collection, or the published npm package. Its preview guide explains fixed ranking defaults, source/configuration differences, old visual evidence, missing speed, HTTP-only vision source transport, token-price assumptions, in-memory prompt handling, and hourly refresh lifetime. The homepage gains a navigation link; existing FAQ answers continue describing the terminal and Pi workflow and need no behavioral rewrite. Local checks do not establish a hosted deployment or state-of-the-art recommendation quality.
+
+## Scout launch preparation — 14 October 2026
+
+Reviewed freshness, real-data, privacy, price, speed and recommendation claims against the five-source importer and prompt-only API/MCP tool. The guide now documents independent source recovery, archived measurements, OmniDocBench's actual table version, uncertainty adjustment, and the limits of phrase matching. The page starts with a real empty input. Scout is a separate beta and does not establish SOTA task accuracy. No Pi/npm approval, budget or routing behavior changes. Hosted publication is verified separately.
+
+## Scout publication — 14 October 2026
+
+Scout's page, JSON API and MCP tool are now hosted, with an hourly Worker trigger and independently refreshed real public sources. The homepage navigation and generated documentation were published while preserving the deployed main application. Existing FAQ answers still describe the terminal/Pi workflow; no edits to those behavior claims were required. Publication and verification boundaries are recorded in [the Scout launch record](site-scout.md).

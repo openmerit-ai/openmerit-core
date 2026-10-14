@@ -112,9 +112,11 @@ function outline(doc, label) {
 }
 function articleActions(doc) {
   const path = doc.source.split('/').map(encodeURIComponent).join('/');
-  return `<div class="doc-meta"><span>${escape(documentationLabel)}</span>${[
-    [`${repository}/blob/main/docs/${path}`, 'View source on GitHub', 'source'],
-    [`${repository}/edit/main/docs/${path}`, 'Edit this page on GitHub', 'edit'],
+  return `<div class="doc-meta"><span>${escape(doc.documentationLabel ?? documentationLabel)}</span>${[
+    ...(doc.githubSource === false ? [] : [
+      [`${repository}/blob/main/docs/${path}`, 'View source on GitHub', 'source'],
+      [`${repository}/edit/main/docs/${path}`, 'Edit this page on GitHub', 'edit'],
+    ]),
     [sourceUrl(doc), 'Read as Markdown', 'markdown'],
   ].map(([href, label, symbol]) => `<a class="doc-action" href="${href}" aria-label="${label}" title="${label}">${icon(symbol)}</a>`).join('')}</div>`;
 }
@@ -166,7 +168,7 @@ function layout(doc) {
   </div></header>
   <div class="docs-intro"><p class="docs-intro-title">Documentation</p><p>Guides and reference for using and extending OpenMerit.</p></div>
   <div class="docs-layout">
-    <aside class="docs-sidebar"><div class="docs-sidebar-body">${navigation(doc, 'Documentation')}<p class="docs-release">OpenMerit · ${escape(documentationLabel)}</p></div></aside>
+    <aside class="docs-sidebar"><div class="docs-sidebar-body">${navigation(doc, 'Documentation')}<p class="docs-release">OpenMerit · ${escape(doc.documentationLabel ?? documentationLabel)}</p></div></aside>
     <main class="docs-main">
       ${mobileNavigation(doc)}
       <section class="docs-search" aria-label="Search documentation" hidden data-index-url="${indexUrl}" data-library-url="${searchLibrary}">

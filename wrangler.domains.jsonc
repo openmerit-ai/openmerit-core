@@ -9,6 +9,7 @@
     "command": "node --test demo/test/domain-migration.test.mjs && npm run check:docs"
   },
   "services": [
+    { "binding": "SCOUT", "service": "openmerit-scout" },
     {
       "binding": "SITE",
       "service": "openmerit-site"
