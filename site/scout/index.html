@@ -12,6 +12,7 @@
   <link rel="preload" href="/assets/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css?v=20261014-transparent-art">
   <link rel="stylesheet" href="/scout/scout.css">
+  <link rel="stylesheet" href="/scout/table.css">
   <script src="/scout/scout.js" type="module"></script>
 </head>
 <body class="scout-page">
@@ -46,8 +47,22 @@
     <section class="results-section" id="results" aria-labelledby="results-title" aria-busy="false" hidden>
       <div class="results-heading"><div><p class="scout-eyebrow">THE SHORTLIST</p><h2 id="results-title">Finding your five…</h2></div><button id="copy-results" class="quiet-button" type="button" disabled>Copy results <span aria-hidden="true">↗</span></button></div>
       <div class="match-line"><div id="capabilities" class="capability-tags"></div><span class="query-time" id="query-time"></span></div>
-      <div class="result-columns" aria-hidden="true"><span>Model</span><span>Quality signal</span><span>Cost / 1M tokens</span><span>Output speed</span><span></span></div>
-      <div id="model-list" class="model-list"><p class="loading-note">Reading the latest available index…</p></div>
+      <div class="table-frame">
+        <div class="table-scroll" role="region" aria-label="Model comparison" tabindex="0">
+          <table class="data-table model-table">
+            <caption class="sr-only">Recommended models in Scout rank order. Quality is a relative benchmark signal, cost is USD per million tokens at a 3:1 input/output mix, and speed is reference output tokens per second.</caption>
+            <thead><tr>
+              <th scope="col" class="model-column">Model</th>
+              <th scope="col" class="numeric-column">Quality <span class="column-unit">relative / 100</span></th>
+              <th scope="col" class="numeric-column">Cost <span class="column-unit">USD / 1M tokens</span></th>
+              <th scope="col" class="numeric-column">Speed <span class="column-unit">output tokens / s</span></th>
+              <th scope="col" class="evidence-column"><span class="sr-only">Benchmark evidence</span></th>
+            </tr></thead>
+            <tbody id="model-list"><tr><td colspan="5" class="table-message"><span>Reading the latest available index…</span></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <p class="table-scroll-hint" hidden>Scroll to compare quality, cost and speed <span aria-hidden="true">↔</span></p>
       <p class="results-caption" id="results-caption">Published benchmarks guide the shortlist. Your own evaluation makes the final call.</p>
       <details class="evidence-note" id="limitations" hidden><summary>What to know about these results <span aria-hidden="true">+</span></summary><div id="warnings"></div><p>Quality is a relative benchmark signal, not predicted task accuracy. Prices use a 3:1 input/output token mix. Speed is a published reference measurement and can vary by provider and reasoning configuration.</p></details>
     </section>

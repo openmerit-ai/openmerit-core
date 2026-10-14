@@ -1,0 +1,206 @@
+{
+  "assets": [
+    {
+      "file": "anthropic.png",
+      "source": "https://cdn.prod.website-files.com/67ce28cfec624e2b733f8a52/681d52619fec35886a7f1a70_favicon.png",
+      "sha256": "47718065aeeb968b381b070c66c90d9c3ae95b09a0ee24e78b9e12ae5c4f11c7",
+      "key": "anthropic"
+    },
+    {
+      "key": "arcee",
+      "file": "arcee.ico",
+      "source": "https://www.arcee.ai/favicon.ico?favicon.0x9_slmtcx73v.ico",
+      "declaredBy": "https://www.arcee.ai/",
+      "retrieved": "2026-10-14",
+      "sha256": "28c199760e9ab3e0ec9d191c53022dcf527ab623de236cbe9ad2d7cb2761a966"
+    },
+    {
+      "file": "cohere.png",
+      "source": "https://cohere.com/favicon-32x32.png",
+      "sha256": "5fd55b86633d4a9534e914993ce8bad0a4079065254917497c5704c370c3939e",
+      "key": "cohere"
+    },
+    {
+      "file": "deepseek.ico",
+      "source": "https://www.deepseek.com/favicon.ico",
+      "sha256": "30a4420e6e4dcb17fd7de560c5004346c2bc8cd971d2d5f5ee15326603e51321",
+      "key": "deepseek"
+    },
+    {
+      "file": "google.png",
+      "source": "https://www.gstatic.com/devrel-devsite/prod/vc572093a046b25fad0d22bd3210637939b9c971bea06a064d6f48a166bf893c5/googledevai/images/favicon-new.png",
+      "sha256": "f123996a1aa1109c1a6c60c3a30777411b0d57662f11c7dd301557251fa7b594",
+      "key": "google"
+    },
+    {
+      "key": "ibm",
+      "file": "ibm.png",
+      "source": "https://www.ibm.com/content/dam/adobe-cms/default-images/icon-16x16.png",
+      "declaredBy": "https://www.ibm.com/us-en",
+      "retrieved": "2026-10-14",
+      "sha256": "6ea379abd298fe236b39261026590aed6fe20300372548e209933b90f8eb1790"
+    },
+    {
+      "key": "inception",
+      "file": "inception.png",
+      "source": "https://framerusercontent.com/images/u3lyX8mBY8mLYJQ0zOr4Y0ucwe4.png",
+      "declaredBy": "https://www.inceptionlabs.ai/",
+      "retrieved": "2026-10-14",
+      "sha256": "eb576fbfc4d4a8b3c93c8269ec52ec8ec70872d8c51558c085db04074dcc255d"
+    },
+    {
+      "key": "inclusionai",
+      "file": "inclusionai.png",
+      "source": "https://www.inclusion-ai.org/img/favicon.png",
+      "declaredBy": "https://www.inclusion-ai.org/",
+      "retrieved": "2026-10-14",
+      "sha256": "b10cbc419a942784d53ba45330f48fd4cb93e0ee2a7cd7649d60aa68b8a95818"
+    },
+    {
+      "key": "meituan",
+      "file": "meituan.ico",
+      "source": "https://s3plus.meituan.net/v1/mss_e2821d7f0cfe4ac1bf9202ecf9590e67/cdn-prod/file:1040877d/favicon-mt.ico",
+      "declaredBy": "https://www.meituan.com/",
+      "retrieved": "2026-10-14",
+      "sha256": "a6f4dd99edf8c49563be4c90ed0b509adb6b890d1a3c35caaa6d799a21c022de"
+    },
+    {
+      "file": "meta.ico",
+      "source": "https://static.xx.fbcdn.net/rsrc.php/y5/r/m4nf26cLQxS.ico",
+      "declaredBy": "https://ai.meta.com",
+      "sha256": "b96d739c3a8ac4ef0b34212c8a2b7f23dcb7b039e0dd14ef170d8e9232972bf7",
+      "key": "meta"
+    },
+    {
+      "key": "microsoft",
+      "file": "microsoft.ico",
+      "source": "https://www.microsoft.com/favicon.ico?v2",
+      "declaredBy": "https://www.microsoft.com/en-us/",
+      "retrieved": "2026-10-14",
+      "sha256": "90cdaf487716184e4034000935c605d1633926d348116d198f355a98b8c6cd21"
+    },
+    {
+      "key": "minimax",
+      "file": "minimax.ico",
+      "source": "https://www.minimax.io/favicon.ico",
+      "declaredBy": "https://www.minimax.io/",
+      "retrieved": "2026-10-14",
+      "sha256": "43ce4c9b9e627b391a116cd5da09e4c062d9c4e3d585509c65a4a3d16f386256"
+    },
+    {
+      "file": "mistral.png",
+      "source": "https://docs.mistral.ai/favicons/favicon-32x32.png",
+      "sha256": "9aa9c4453458ebe0159f9cc9c9dc44431380f70248a2672f4022b86b111b8395",
+      "key": "mistral"
+    },
+    {
+      "key": "moonshot",
+      "file": "moonshot.ico",
+      "source": "https://statics.kimi.ai/moonshot-ai/favicon.ico",
+      "declaredBy": "https://www.moonshot.ai/",
+      "retrieved": "2026-10-14",
+      "sha256": "b963e8d74a9a4f6986fee2662e333ae4b4379f0553c8bf9eee50d40a3077014f"
+    },
+    {
+      "key": "nous",
+      "file": "nous.png",
+      "source": "https://web-assets.nousresearch.com/portal/99a4d6704aaa802ddbe34283cfd9e0d239794758/logo-favicon.png",
+      "declaredBy": "https://nousresearch.com/",
+      "retrieved": "2026-10-14",
+      "sha256": "88d85717651a6c44dfdd25fd485c5e4a25a3ef09411dedef4429c8840cc9e500"
+    },
+    {
+      "key": "nvidia",
+      "file": "nvidia.ico",
+      "source": "https://developer.nvidia.com/assets/favicon-81bff16cada05fcff11e5711f7e6212bdc2e0a32ee57cd640a8cf66c87a6cbe6.ico",
+      "declaredBy": "https://developer.nvidia.com/",
+      "retrieved": "2026-10-14",
+      "sha256": "bedcb14e0470ff8abe26405a630e9604ac4fa581b385a7cfb00420c22f541b6e"
+    },
+    {
+      "file": "openai.png",
+      "source": "https://developers.openai.com/favicon.png",
+      "sha256": "8d5575ee667ff715cd3e3074d5296edc68d5aadd89720d203e13131b68b22a04",
+      "key": "openai"
+    },
+    {
+      "key": "perplexity",
+      "file": "perplexity.png",
+      "source": "https://www.perplexity.ai/favicon.png",
+      "declaredBy": "https://www.perplexity.ai/",
+      "retrieved": "2026-10-14",
+      "sha256": "0f310164224f649803cf1ae586cd1d881a718e899a86716b5ebf7b878f5be29c"
+    },
+    {
+      "file": "qwen.png",
+      "source": "https://img.alicdn.com/imgextra/i4/O1CN01OXv3EM1FN8t9W4P79_!!6000000000474-2-tps-80-80.png",
+      "declaredBy": "https://qwen.ai",
+      "sha256": "cd9390bc4209c319121d111f3a1f535b3c7dd909b8f860d41acc9744138d58df",
+      "key": "qwen"
+    },
+    {
+      "key": "reka",
+      "file": "reka.jpg",
+      "source": "https://framerusercontent.com/images/XekAjHcWv2prUE9pJiSj61CD54.jpg",
+      "declaredBy": "https://reka.ai/",
+      "retrieved": "2026-10-14",
+      "sha256": "e1cec73d781195d9de74015cf52d2f99c1dafc12e98c0e94868100efbf6f6752"
+    },
+    {
+      "key": "stepfun",
+      "file": "stepfun.png",
+      "source": "https://www.stepfun.com/step_favicon.svg",
+      "declaredBy": "https://www.stepfun.com/",
+      "retrieved": "2026-10-14",
+      "sha256": "713422cff88d4a1ccb8a2a5e3d805c3e06323201a15250ffd5cc8a37d0cea8f4"
+    },
+    {
+      "key": "tencent",
+      "file": "tencent.png",
+      "source": "https://www.tencent.com/wp-content/themes/tencent-web/assets/favicon/favicon-32x32.png",
+      "declaredBy": "https://www.tencent.com/",
+      "retrieved": "2026-10-14",
+      "sha256": "85713aeec3033177061733f9cb8d15e9b2b4c7e0a94cda468c39b2c25bf67dc6"
+    },
+    {
+      "key": "thinkingmachines",
+      "file": "thinkingmachines.png",
+      "source": "https://thinkingmachines.ai/images/favicon-32x32.png",
+      "declaredBy": "https://thinkingmachines.ai/",
+      "retrieved": "2026-10-14",
+      "sha256": "0949c0531ea4d820d209dbe669ac2e0277efb6b3c7bef7c3f3e9e81158d237ac"
+    },
+    {
+      "key": "upstage",
+      "file": "upstage.png",
+      "source": "https://cdn.prod.website-files.com/6743d5190bb2b52f38e99e37/6748713db65988aab4e2dbf7_G.WEB.svg",
+      "declaredBy": "https://www.upstage.ai/",
+      "retrieved": "2026-10-14",
+      "sha256": "d74fa2096a11bd03e1f0fca0d631b4778896fc159dd7b1880f2f96ad50d42c43"
+    },
+    {
+      "key": "xai",
+      "file": "xai.ico",
+      "source": "https://docs.x.ai/_next/static/media/favicon-light.2023htx52lx-a.ico?dpl=f88a0ff1753788bf1a2b4943eb64b3e3fc21bd74",
+      "declaredBy": "https://docs.x.ai/overview",
+      "retrieved": "2026-10-14",
+      "sha256": "05156a916d1b695e952b63a6196d8d481562bcb0180454311a861ba214e753d9"
+    },
+    {
+      "key": "xiaomi",
+      "file": "xiaomi.png",
+      "source": "https://i02.appmifile.com/i18n/scm/favicon.png",
+      "declaredBy": "https://www.mi.com/ae-en/",
+      "retrieved": "2026-10-14",
+      "sha256": "cbd7602e878c987180cbb14e86aa241541e3523e85362e1ac0bc7b896f93ea65"
+    },
+    {
+      "key": "zai",
+      "file": "zai.png",
+      "source": "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+      "declaredBy": "https://chat.z.ai/",
+      "retrieved": "2026-10-14",
+      "sha256": "f6ff11cd61111c5652dfbcfae4710c7b0d4e873e222bdb261e7112e5539755ca"
+    }
+  ]
+}

@@ -256,3 +256,7 @@ Reviewed freshness, real-data, privacy, price, speed and recommendation claims a
 ## Scout publication — 14 October 2026
 
 Scout's page, JSON API and MCP tool are now hosted, with an hourly Worker trigger and independently refreshed real public sources. The homepage navigation and generated documentation were published while preserving the deployed main application. Existing FAQ answers still describe the terminal/Pi workflow; no edits to those behavior claims were required. Publication and verification boundaries are recorded in [the Scout launch record](site-scout.md).
+
+## Scout comparison table — 14 October 2026
+
+Reviewed evidence, comparison, data handling and readiness claims for the semantic results table and bundled provider favicons. This changes presentation and evidence disclosure controls only; ranking, API/MCP responses and prompt handling remain unchanged. Icons use a curated local registry, with no remote favicon requests from the browser. No homepage FAQ wording change is required. Publication and browser verification are recorded separately in [the Scout launch record](site-scout.md).

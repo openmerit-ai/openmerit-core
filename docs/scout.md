@@ -6,7 +6,9 @@ Scout is a separate beta product. It does not change the OpenMerit npm package, 
 
 ## Use Scout
 
-Open [Scout](https://openmerit.ai/scout/), type a task, and select **Find models**. For example: “I want to upload an invoice and get the invoice number, date, vendor, subtotal, tax, and total as JSON.” Expand any recommendation to inspect model IDs, prices, benchmark scores, evaluation configurations, and source links. The examples submit real requests to the same API as your own input.
+Open [Scout](https://openmerit.ai/scout/), type a task, and select **Find models**. For example: “I want to upload an invoice and get the invoice number, date, vendor, subtotal, tax, and total as JSON.” The examples submit real requests to the same API as your own input.
+
+The comparison table keeps recommendations in Scout rank order, with aligned quality, cost, and reference-speed columns. Select **Evidence** for a model to inspect its ID, separate input/output prices, benchmark scores, evaluation configurations, and source links. On narrow screens, scroll the table horizontally; the model column stays visible. Provider favicons are bundled with Scout and served from the same origin. Unknown providers or unavailable images use a text initial; no third-party favicon service is contacted.
 
 The capability index shows which areas have benchmark coverage. Matching capabilities are highlighted after a search. The source panel distinguishes the last successful collection time from the age of published measurements.
 

@@ -26,7 +26,7 @@ async function refresh() {
   } catch (error) { refreshState = { refreshStatus: 'failed', scheduler: 'local-hourly', lastAttemptAt: new Date().toISOString(), refreshError: 'Source refresh failed; serving the last successful index.' }; console.error(error.message); }
   finally { refreshing = false; }
 }
-const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png', '.json': 'application/json' };
+const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png', '.ico': 'image/x-icon', '.jpg': 'image/jpeg', '.json': 'application/json' };
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');

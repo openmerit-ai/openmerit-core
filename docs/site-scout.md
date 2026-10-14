@@ -2,7 +2,7 @@
 
 Scout's beta is published at `https://openmerit.ai/scout/`. It accepts real prompts through the page, `POST /scout/api/recommend`, and the remote Streamable HTTP MCP endpoint `/scout/mcp`. The MCP tool is `scout_models`. This is separate from the npm package and Inference Terminal; no npm release was made.
 
-## Deployed services
+## Launch services
 
 - Scout Worker: `openmerit-scout`, version `b2e1028c-76e3-4dbe-84e3-99e3bc4030d7`.
 - Domain router: `openmerit-domains`, version `ed1d3c26-5c81-4c7c-aabf-f1b35b0149f5`. Only `/scout` and `/scout/*` use the new service.
@@ -28,3 +28,21 @@ Do not deploy the older root `wrangler.jsonc` as a shortcut. The main applicatio
 The prior main-site version was `62ac686b-2895-4263-8e55-053119d2eb27`; the prior domain-router version was `7e5cbee3-1c26-4cb8-afd6-07b6a092ee31`. They remain rollback references. Reverting the domain router removes the Scout public route; the separate Worker can remain deployed during investigation.
 
 Private operational snapshots, metadata, publication scripts and deployment responses are under `/private/tmp/openmerit-scout-publication-20261014/`. Do not commit credential-bearing operational metadata. Scout source and configuration live on `codex/scout`. The guide is labelled Hosted beta and links to its published Markdown; GitHub main-branch source/edit links are omitted for Scout until that guide is merged to main. Future Scout-only application deployments use `wrangler.scout.jsonc`; documentation changes must also publish the generated main-site docs through the preserved-application workflow.
+
+## Comparison table — published 14 October 2026
+
+The results now use a native HTML table with reusable table styles, following the [shadcn Table composition](https://ui.shadcn.com/docs/components/base/table) within the site's existing HTML/CSS/JavaScript stack. This adds no browser framework or table library. Ranking and API/MCP contracts are unchanged.
+
+| Before | After | Why |
+| --- | --- | --- |
+| Separate grid headers and expandable cards | Semantic column headers, row headers and aligned numeric cells | Keep comparisons aligned and expose table structure to assistive technology |
+| Repeated labels beneath each metric | Units in the column headings | Reduce visual noise while preserving price and speed context |
+| Provider names alone | 27 locally bundled provider favicons with text fallback | Recognize labs without third-party image lookups |
+| Mobile cards | Horizontal table scrolling with a sticky model column | Preserve comparable columns on narrow screens |
+| Entire row as disclosure | Named Evidence buttons with expanded state and associated detail rows | Make the evidence action explicit and keyboard accessible |
+
+The favicon registry matches explicit catalogue namespaces, not arbitrary provider strings. Origins and hashes are recorded in `scout/provider-assets.json`; several publisher SVG favicons were rasterized to PNG. Unknown namespaces or failed images retain a text initial. Model labels remain visible beside decorative icons. Loading states retain the previous table height, and scroll guidance appears only when the table actually overflows.
+
+Published Scout Worker version `bb0fc221-b9dd-4e42-8d27-3b5fec7b5d02` and main-site documentation version `9c557935-f896-4ad1-95f6-473794b36433`. The domain router is unchanged. The main-site update changed documentation assets only and preserved application modules, bindings, storage, containers and routing. Operational snapshots are in `/private/tmp/openmerit-scout-table-publication-20261014/`. Previous Scout and main versions in the launch section remain rollback references.
+
+`npm run verify` passed all 330 tests; focused Scout checks passed again after the final presentation adjustments. Browser checks covered real coding/invoice searches, an unsupported task, Enter/Space evidence toggles, copying a model ID, loaded provider images, and narrow layouts down to 320 CSS pixels without page overflow. Expanded evidence remains readable at the viewport width even when the table is scrolled. Live desktop and 433 CSS-pixel checks passed with no browser errors; physical mobile hardware was not tested. All 34 updated page, style, script, guide and icon assets matched the live domain byte-for-byte. The production index remained healthy at its successful `2026-10-14T16:07:59.287Z` hourly refresh.
