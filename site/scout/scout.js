@@ -1,12 +1,6 @@
 import { providerIdentity } from './providers.js';
 
 const $ = selector => document.querySelector(selector);
-const examples = {
-  invoice: 'I want to upload an invoice and extract 6 fields from it as JSON.',
-  coding: 'Find and fix a tricky bug in a TypeScript repository, then write unit tests.',
-  research: 'Research a scientific question, compare the evidence, and explain the answer clearly.',
-  writing: 'Rewrite a product announcement as a warm, clear email that sounds like a person.',
-};
 const money = value => `$${new Intl.NumberFormat('en-US', { maximumFractionDigits: 2, minimumFractionDigits: value < 1 ? 2 : 0 }).format(value)}`;
 let result = null, activeRequest = null, requestID = 0;
 
@@ -89,9 +83,7 @@ function showResult(data, roundTripMs) {
   $('#announcement').textContent = `${data.recommendations.length} models found. ${data.task.capabilities.map(c => c.label).join(', ')}.`;
 }
 function showIndex(data) {
-  $('#index-status').textContent = `${data.degraded ? 'Some sources need attention' : data.stale ? 'Index needs a refresh' : 'Checked'} · ${new Date(data.checkedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}${data.refreshStatus === 'failed' ? ' · Refresh failed' : ''}`;
-  $('#status-dot').dataset.stale = String(data.stale || data.degraded || data.refreshStatus === 'failed');
-  $('#index-counts').replaceChildren(...[`${data.models} models`, `${data.providers} providers`, `${data.benchmarks} benchmark series`, `${data.sources.length} sources`].flatMap(text => [element('span', '', text), ' ']));
+  $('#index-counts').replaceChildren(...[`${data.models} models`, `${data.providers} providers`, `${data.benchmarks} benchmark series`, `${data.sources.length} sources`].map(text => element('span', '', text)));
   $('#index-counts').title = `${data.benchmarksWithResults} benchmark series have matched results`;
   showSources(data.sources);
   const capabilities = (data.wordCloud ?? []).map(c => ({ ...c, matched: !!data.task?.weights[c.id] }));
@@ -114,7 +106,6 @@ async function search() {
   result = null; $('#results-title').textContent = 'Searching…'; $('#model-list').replaceChildren(tableMessage('Interpreting task…', $('#model-list').getBoundingClientRect().height));
   $('#capabilities').replaceChildren(); $('#query-time').textContent = ''; $('#limitations').hidden = true;
   $('.find-button span').textContent = 'Searching…'; $('.find-button').setAttribute('aria-busy', 'true');
-  document.querySelectorAll('[data-example]').forEach(button => button.setAttribute('aria-pressed', String(examples[button.dataset.example] === prompt)));
   const started = performance.now(), timeout = setTimeout(() => controller.abort(), 15_000);
   try {
     const response = await fetch('/scout/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }), signal: controller.signal });
@@ -137,9 +128,23 @@ $('#prompt').addEventListener('input', fitPrompt);
 window.addEventListener('resize', fitPrompt);
 window.addEventListener('pageshow', fitPrompt);
 fitPrompt();
+// Examples are hints only: never insert text or submit a request.
+const promptExamples = [
+  $('#prompt').placeholder,
+  'Find a bug in a TypeScript project and write a test for the fix.',
+  'Compare research papers and summarize the evidence.',
+  'Rewrite a product announcement as a clear, friendly email.',
+];
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+let exampleIndex = 0;
+setInterval(() => {
+  const input = $('#prompt');
+  if (input.value || document.activeElement === input || document.hidden || reducedMotion.matches) return;
+  exampleIndex = (exampleIndex + 1) % promptExamples.length;
+  input.placeholder = promptExamples[exampleIndex];
+}, 5000);
 $('#scout-form').addEventListener('submit', event => { event.preventDefault(); void search(); });
 $('#prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#scout-form').requestSubmit(); } });
-document.querySelectorAll('[data-example]').forEach(button => button.addEventListener('click', () => { $('#prompt').value = examples[button.dataset.example]; fitPrompt(); void search(); }));
 new ResizeObserver(() => { const table = $('.table-scroll'); $('.table-scroll-hint').hidden = table.scrollWidth <= table.clientWidth + 1; }).observe($('.table-scroll'));
 const command = `curl ${location.origin}/scout/api/recommend \\\n  -H 'Content-Type: application/json' \\\n  -d '{"prompt":"Extract six invoice fields as JSON"}'`;
 $('#agent-code').textContent = command;
@@ -147,7 +152,7 @@ $('#copy-command').addEventListener('click', () => copy(command, $('#copy-comman
 const mcpURL = `${location.origin}/scout/mcp`;
 $('#mcp-url').textContent = mcpURL;
 $('#copy-mcp').addEventListener('click', () => copy(mcpURL, $('#copy-mcp')));
-fetch('/scout/api/status').then(response => { if (!response.ok) throw new Error(); return response.json(); }).then(data => { if (!result) showIndex(data); }).catch(() => { if (!result) { $('#index-counts').textContent = 'Index unavailable'; $('#index-status').textContent = 'Could not reach the index. Try a search to reconnect.'; $('#status-dot').dataset.stale = 'true'; } });
+fetch('/scout/api/status').then(response => { if (!response.ok) throw new Error(); return response.json(); }).then(data => { if (!result) showIndex(data); }).catch(() => { if (!result) { $('#index-counts').textContent = 'Index unavailable'; } });
 
 // Deep links reveal the native disclosure before moving focus to its summary.
 function revealSection() {

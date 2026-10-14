@@ -169,3 +169,18 @@ Published as Scout Worker `bcbb8c81-18d3-4b44-a31d-1ee07fcb6f21` and documentati
 The shared status payload now counts distinct model-provider namespaces, consolidating Meta's two aliases and ignoring display-label variations. This counts model creators, not hosting endpoints. Ranking and prompt handling are unchanged. The public guide documents the controls, count definitions and disclosure placement.
 
 Published as Scout Worker `66b9a20d-8bf5-4c69-affd-aff728cbaca0` and documentation Worker `5519ceef-bd9f-4537-b5df-0c81d2ab7149`. Full verification passed 367 tests; deployment repeated the Scout and documentation checks after the final count-wrapping adjustment. All 34 published assets matched the build after removing only the existing edge analytics script, with main modules and bindings preserved. Live metadata and the header agreed on 213 models, 26 providers, 146 benchmark series and six source feeds. Checks covered active input without an outline, icon-button and Enter submission, empty results, four-column layout, row clicks, Enter/Space disclosure, provider links, measurement context inside the limitations disclosure, and no console errors. The local light preview at 390px kept whole count labels together, used a 44px submit button and bounded table/detail scrolling without page overflow. Desktop and dark appearance were checked live at 1644px. Physical mobile hardware was not tested.
+
+
+## Borderless task form and placeholder examples — 15 October 2026
+
+| Before | After | Why |
+| --- | --- | --- |
+| Outlined form and rectangular submit button | Borderless form with the existing field fill and a circular arrow button | Keep the task area distinct with less chrome |
+| Separate example task buttons | Short placeholder examples that rotate only when empty and unfocused | Keep examples in the field without inserting or submitting text |
+| Widely spaced index counts | Tighter counts separated by interpuncts | Read the index scope as one line |
+| Standalone index status strip | Collection times and failures remain inside Sources | Remove an extra line from the default view |
+| Undivided logo and Scout label | Subtle vertical divider | Clarify the product relationship |
+
+The keyboard hint no longer starts with an Enter glyph. Placeholder updates pause on hidden pages and for reduced-motion preferences; they do not make API calls or affect user text. The examples row is removed rather than restyled, following the requested placeholder direction. Ranking, provider links, data handling and table interactions are unchanged. The public guide describes the revised input behavior. Homepage FAQ claims were reviewed against `docs/site-faq-maintenance.md`; no terminal or Pi claim changes are needed.
+
+Published as Scout Worker `0b7dcf1e-3920-4720-a24c-f010538c303b` and documentation Worker `0e27a9e9-8708-4ae2-83cc-8bf4000953b8`. Full verification passed 367 tests. All 34 changed published assets matched the build after removing only the existing edge analytics script; current main application modules and bindings were preserved. Browser checks covered placeholder rotation with empty input, pausing on focus and on filled input after blur, no automatic search, real invoice submission, native row disclosure by mouse and keyboard, a 390px dark layout with a 44px round button and no page overflow, and the desktop light palette. The live search returned the same five invoice models with no console errors. Source collection dates remain available in Sources. Reduced-motion and hidden-page guards were reviewed in code; physical mobile hardware was not tested. Live empty and populated screenshots are saved in the task's `scout-ui-redesign` artifact directory.

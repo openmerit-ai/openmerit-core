@@ -30,10 +30,9 @@
     <section class="search-section" aria-label="Find models">
       <form id="scout-form" class="prompt-box">
         <label for="prompt">Task</label>
-        <textarea id="prompt" name="prompt" rows="2" maxlength="4000" required spellcheck="false" enterkeyhint="search" aria-describedby="prompt-hint" placeholder="Describe what you need the model to do…"></textarea>
-        <div class="prompt-footer"><span id="prompt-hint"><kbd>↵</kbd> Search <span class="newline-hint">· Shift + Enter for a new line</span></span><button class="find-button" type="submit" title="Find models"><span class="sr-only">Find models</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
+        <textarea id="prompt" name="prompt" rows="2" maxlength="4000" required spellcheck="false" enterkeyhint="search" aria-describedby="prompt-hint" placeholder="Extract six fields from uploaded invoices as JSON."></textarea>
+        <div class="prompt-footer"><span id="prompt-hint">Search <span class="newline-hint">· Shift + Enter for a new line</span></span><button class="find-button" type="submit" title="Find models"><span class="sr-only">Find models</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
       </form>
-      <div class="examples" aria-label="Example tasks"><span>Try</span><button type="button" data-example="invoice">Extraction</button><button type="button" data-example="coding">Code</button><button type="button" data-example="research">Research</button><button type="button" data-example="writing">Writing</button></div>
       <p class="error-message" id="error" role="alert" hidden></p>
     </section>
 
@@ -58,7 +57,6 @@
       <details class="evidence-note" id="limitations" hidden><summary>Assumptions &amp; limitations</summary><p id="workload-note"></p><div id="warnings"></div><p>Measured results come from separate calibration cases. Benchmark results use a reference workload. Neither predicts exact performance on your task.</p></details>
     </section>
 
-    <section class="index-strip" aria-label="Index status"><div><span class="status-dot" id="status-dot" aria-hidden="true"></span><span id="index-status">Checking sources</span></div></section>
     <div class="support-sections">
       <details class="support-section" id="for-agents">
         <summary>API &amp; MCP</summary>
