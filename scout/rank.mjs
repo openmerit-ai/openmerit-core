@@ -1,6 +1,7 @@
 import { interpretPrompt, capabilities } from './capabilities.mjs';
 import { orderCandidates, benchmarkFamily } from './comparison.mjs';
 import { measuredCandidates } from './task-evidence.mjs';
+import { providerURL } from './provider-links.mjs';
 
 const round = (value, places = 2) => Math.round(value * 10 ** places) / 10 ** places;
 // Workers can freeze the clock during synchronous execution. Zero is not a timing measurement.
@@ -84,7 +85,7 @@ export function recommend(index, prompt, now = Date.now(), interpretedTask = nul
     const confidence = c.measured ? 'small calibration sample' : c.coverage >= .8 && families.size >= 4 ? 'broader evidence' : 'limited evidence';
     return { rank: i + 1, id: model.id, name: model.name, provider: model.provider, score: round(c.score * 100), quality: round(c.quality * 100),
       evidenceCoverage: round(c.coverage * 100), confidence, reason: c.measured ? `${c.measured.cases} calibration cases: ${round(c.measured.quality * 100)}% mean field accuracy, ${c.measured.validSchema}/${c.measured.cases} valid outputs. ${c.measured.availability ? `Request success across calibration tasks: ${c.measured.availability.successes}/${c.measured.availability.attempts}; repeated failures cap the quality signal. ` : ''}Compared with ${c.comparedModels} tested models. Independent test results are not used in this ranking.` : `${tags.map(t => capabilities[t].label.toLowerCase()).join(', ')}: ${c.evidence.length} results across ${families.size} benchmark families. Compared on shared benchmarks with ${c.comparedModels} eligible models. ${c.reference.seconds !== null ? 'Reference first-answer delay and generation time included.' : 'Reference latency unavailable.'}`,
-      pricing: { inputPerMillion: round(model.inputPrice, 4), outputPerMillion: round(model.outputPrice, 4), blendedPerMillion: round(c.blendedPrice, 4), currency: 'USD', basis: '3 input tokens : 1 output token; advertised OpenRouter rates, excluding caching, reasoning and modality-specific charges.', url: `https://openrouter.ai/${model.id}` },
+      pricing: { inputPerMillion: round(model.inputPrice, 4), outputPerMillion: round(model.outputPrice, 4), blendedPerMillion: round(c.blendedPrice, 4), currency: 'USD', basis: '3 input tokens : 1 output token; advertised OpenRouter rates, excluding caching, reasoning and modality-specific charges.', url: providerURL(model.id) },
       measured: c.measured ? { ...c.measured, profile: measured.profile.id, measuredAt: measured.profile.measuredAt, url: measured.profile.url } : null,
       comparison: { comparedModels: c.comparedModels, capabilityCoverage: round(c.comparisonCoverage * 100) },
       reference: { inputTokens: measured ? null : comparison.workload.inputTokens, outputTokens: measured ? null : comparison.workload.outputTokens, costUsd: c.reference.cost === null ? null : round(c.reference.cost, 6), completionSeconds: c.reference.seconds === null ? null : round(c.reference.seconds),

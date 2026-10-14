@@ -142,3 +142,14 @@ Published as Scout Worker `1ebbbd44-95ed-4bab-8e7a-4e41e99063eb` and documentati
 Search semantics, prompt limits and data handling are unchanged. Relevant homepage FAQ claims remain accurate. The public Scout guide describes the input and keyboard behavior.
 
 Published as Scout Worker `f7fe8215-d11e-408c-8df4-d4bab173ff73` and documentation Worker `312b0848-1413-4bfb-9d50-8c66ce067bad`. All 34 changed public assets matched the checked build, excluding only the existing edge-injected analytics script; main modules and bindings were preserved. The first adapter-guide request returned different bytes immediately after deployment; a fresh request and a complete verification pass matched the expected active version. `npm run verify` passed 362 tests. Browser checks covered expansion from 88px to 192px, shrinking back after deletion, bounded scrolling for a long paste, Shift + Enter, refitting on a 390px viewport, example replacement, and the light palette. The live multiline input fit all text at 120px and Enter returned five results with no console errors. Physical mobile hardware was not tested.
+
+## Official provider links — published 14 October 2026
+
+| Before | After | Why |
+| --- | --- | --- |
+| Model and pricing links led to OpenRouter model pages | A shared official-provider destination in page, JSON and MCP results | Take readers directly to the model's provider |
+| A generic model/pricing label beside catalogue prices | Provider page link with explicit quoted-price attribution | Keep direct provider navigation distinct from OpenRouter-sourced rates |
+
+The curated registry covers all 213 models in the checked seed index. New, unreviewed providers return a null URL instead of a router or inferred destination. Gemma and GPT-OSS use model documentation. Official destinations were read on 14 October; redirects stay with the provider. Ranking, numeric rates, inference routes and benchmark evidence are unchanged. The public guide documents the nullable URL contract. Homepage FAQ claims still describe the terminal/Pi workflow and require no copy changes.
+
+Published as Scout Worker `bcbb8c81-18d3-4b44-a31d-1ee07fcb6f21` and documentation Worker `250dcd56-6ea6-4ba3-ad1a-efd4348b87d7`. `npm run verify` passed 366 tests, including provider-domain coverage, unknown-provider handling, model-family destinations and API/MCP provenance checks. All 34 deployed assets matched the checked build after removing only the existing edge-injected analytics script; main modules and bindings were preserved. The live page, JSON API and MCP returned the same five invoice models with Google, OpenAI and Alibaba provider URLs. The browser showed the new provider link and quote attribution with no console errors. Direct API/MCP verification used the deployment-check User-Agent; Python's default User-Agent received an edge 403. No provider inference evaluations were rerun for this navigation-only change.

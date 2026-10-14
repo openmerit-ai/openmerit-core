@@ -12,6 +12,8 @@ The comparison table keeps recommendations in Scout rank order. When a matching 
 
 The capability index lists each area with its benchmark-series and model counts. After a search, task matches appear first with a check mark. Counts describe index coverage, not the number of models eligible for your task. The source panel distinguishes the last successful collection time from the age of published measurements.
 
+**Provider page** in each model's evidence opens its provider's official pricing, model documentation, or website. Model links never fall back to a router. Token prices shown in Scout are still quoted via OpenRouter and may differ from direct provider rates. Benchmark links lead to the original evaluation sources.
+
 ## Connect a coding agent
 
 Add this remote **Streamable HTTP MCP** endpoint to an agent that supports it:
@@ -51,6 +53,8 @@ The response contains:
 - `wordCloud`: capability vocabulary with benchmark and model coverage counts.
 - `ranking`: algorithm version, `mode` (`measured` or `benchmarks`), workload and tradeoff weights. A measured `profile` gives the task type, sample size, eligible tested pool, protocol hash, collection and expiry times, and public evidence URL. `benchmarkEligibleModels` reports the separate public-benchmark pool. Rank is the final order; the aggregate `score` is a supporting signal and can be non-monotonic because stronger direct comparisons take precedence.
 - `warnings`, `methodology`, `interpretationMs`, `elapsedMs`: limitations, ranking method, Decisions request time, and measured server ranking time when the runtime provides a sufficiently precise clock (`null` otherwise). Cloudflare freezes its clock during synchronous work, so the hosted page reports measured HTTP round-trip time instead of claiming zero-millisecond computation.
+
+`pricing.url` is the official provider destination, not the source of the quoted rates. It is `null` for a provider without a reviewed destination; the page then omits the link. The same rule applies to MCP responses. `pricing.basis` identifies the price source and calculation assumptions.
 
 `GET /scout/api/status` returns index coverage, source timestamps, freshness, and scheduler state without submitting a prompt. API responses are `no-store`. Errors return JSON with `error`: 400 for invalid input, 413 for an oversized request, 415 for a non-JSON body, 405 for an unsupported method, 404 for an unknown endpoint, 429 when shared admission limits are reached, and 503 if interpretation is unavailable. A failed, malformed, refused, or timed-out Decisions response never silently falls back to keyword ranking. MCP reports these failures as tool errors.
 
