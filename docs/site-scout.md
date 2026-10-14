@@ -130,3 +130,15 @@ The same live API, ranking, calibration disclosures and reference estimates rema
 The list uses existing API data and native list semantics. Coverage counts are not eligibility counts. The disclosure remains keyboard-operable and updates in place after a search; ranking and data handling are unchanged. Homepage FAQ evidence and readiness claims remain accurate without edits.
 
 Published as Scout Worker `1ebbbd44-95ed-4bab-8e7a-4e41e99063eb` and documentation Worker `ae4af99b-e515-4333-a9b1-fe956053223d`, preserving the main application modules and bindings. Full verification passed 362 tests. Browser checks covered the initial list, Enter-key disclosure, a real invoice search, three matched capabilities placed first, 12 equal-size labels, and a 390px layout without page overflow. Live rendering showed three aligned columns and no console errors. The 34 published changed assets matched the local build (HTML normalization removes only the existing Cloudflare analytics beacon).
+
+
+## Task input refinement — 14 October 2026
+
+| Before | After | Why |
+| --- | --- | --- |
+| Fixed textarea with a manual resize handle | Content-driven height on input, examples, restored pages and viewport changes; bounded scrolling for long prompts | Keep the text visible without dragging the field or pushing the action indefinitely down the page |
+| Transparent editable area inside the form | Distinct neutral field fill, inset padding, direct placeholder and field-level focus ring | Make the input boundary and keyboard focus clear |
+
+Search semantics, prompt limits and data handling are unchanged. Relevant homepage FAQ claims remain accurate. The public Scout guide describes the input and keyboard behavior.
+
+Published as Scout Worker `f7fe8215-d11e-408c-8df4-d4bab173ff73` and documentation Worker `312b0848-1413-4bfb-9d50-8c66ce067bad`. All 34 changed public assets matched the checked build, excluding only the existing edge-injected analytics script; main modules and bindings were preserved. The first adapter-guide request returned different bytes immediately after deployment; a fresh request and a complete verification pass matched the expected active version. `npm run verify` passed 362 tests. Browser checks covered expansion from 88px to 192px, shrinking back after deletion, bounded scrolling for a long paste, Shift + Enter, refitting on a 390px viewport, example replacement, and the light palette. The live multiline input fit all text at 120px and Enter returned five results with no console errors. Physical mobile hardware was not tested.

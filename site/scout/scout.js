@@ -127,9 +127,19 @@ async function search() {
     $('#error').textContent = error.name === 'AbortError' ? 'This request took too long. Please try again.' : error instanceof TypeError ? 'Couldn’t reach Scout. Check the connection and try again.' : error.message; $('#error').hidden = false;
   } finally { clearTimeout(timeout); if (id === requestID) { $('#results').setAttribute('aria-busy', 'false'); $('.find-button span').textContent = 'Find models'; } }
 }
+// Re-measure after content or width changes; CSS bounds very long prompts.
+function fitPrompt() {
+  const input = $('#prompt');
+  input.style.height = 'auto';
+  input.style.height = `${input.scrollHeight}px`;
+}
+$('#prompt').addEventListener('input', fitPrompt);
+window.addEventListener('resize', fitPrompt);
+window.addEventListener('pageshow', fitPrompt);
+fitPrompt();
 $('#scout-form').addEventListener('submit', event => { event.preventDefault(); void search(); });
 $('#prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#scout-form').requestSubmit(); } });
-document.querySelectorAll('[data-example]').forEach(button => button.addEventListener('click', () => { $('#prompt').value = examples[button.dataset.example]; void search(); }));
+document.querySelectorAll('[data-example]').forEach(button => button.addEventListener('click', () => { $('#prompt').value = examples[button.dataset.example]; fitPrompt(); void search(); }));
 $('#copy-results').addEventListener('click', () => { if (result) void copy(JSON.stringify(result, null, 2), $('#copy-results')); });
 new ResizeObserver(() => { const table = $('.table-scroll'); $('.table-scroll-hint').hidden = table.scrollWidth <= table.clientWidth + 1; }).observe($('.table-scroll'));
 const command = `curl ${location.origin}/scout/api/recommend \\\n  -H 'Content-Type: application/json' \\\n  -d '{"prompt":"Extract six invoice fields as JSON"}'`;

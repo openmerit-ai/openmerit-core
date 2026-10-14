@@ -3,7 +3,7 @@
   color-scheme: light dark;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  --paper: #fafafa; --surface: #fff; --raised: #f1f1f1; --hover: #f0f0f0;
+  --paper: #fafafa; --surface: #fff; --raised: #f1f1f1; --hover: #f0f0f0; --input: #f1f1f1;
   --ink: #262626; --muted: #666; --quiet: #727272;
   --line: #e3e3e3; --field-line: #d6d6d6; --focus: #777;
   --button: #303030; --button-ink: #fff; --button-hover: #494949;
@@ -11,7 +11,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #121212; --surface: #181818; --raised: #1e1e1e; --hover: #1c1c1c;
+    --paper: #121212; --surface: #181818; --raised: #1e1e1e; --hover: #1c1c1c; --input: #242424;
     --ink: #e7e7e7; --muted: #a2a2a2; --quiet: #969696;
     --line: #2d2d2d; --field-line: #383838; --focus: #888;
     --button: #e0e0e0; --button-ink: #282828; --button-hover: #fff;
@@ -48,11 +48,10 @@ code, kbd { font-family: var(--mono); }
 .scout-intro { padding: 38px 0 24px; }
 .scout-intro p { margin-top: 8px; color: var(--muted); font-size: 13px; }
 .prompt-box { padding: 17px 19px 13px; background: var(--surface); border: 1px solid var(--field-line); border-radius: 10px; }
-.prompt-box:focus-within { border-color: var(--focus); }
 .prompt-box label { display: block; margin-bottom: 9px; font-size: 12px; font-weight: 500; }
-.prompt-box textarea { display: block; width: 100%; min-height: 59px; max-height: 240px; padding: 0; border: 0; border-radius: 0; resize: vertical; outline: none; color: var(--ink); background: transparent; font-size: 15px; line-height: 1.6; }
+.prompt-box textarea { display: block; width: 100%; min-height: 88px; max-height: min(420px, 55svh); padding: 12px 14px; border: 0; border-radius: 6px; resize: none; overflow-y: auto; color: var(--ink); background: var(--input); font-size: 15px; line-height: 1.6; }
 .prompt-box textarea::placeholder { color: var(--quiet); opacity: 1; }
-.prompt-box textarea:focus-visible { outline: none; }
+.prompt-box textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .prompt-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 12px; }
 .prompt-footer > span { color: var(--quiet); font-size: 11px; }
 .prompt-footer kbd { font-size: 13px; margin-right: 4px; }
@@ -132,7 +131,7 @@ summary::-webkit-details-marker { display: none; }
   .scout-header nav { gap: 16px; font-size: 11px; }
   .scout-header nav span { display: none; }
   .prompt-box { padding: 15px; }
-  .prompt-box textarea { font-size: 16px; min-height: 100px; }
+  .prompt-box textarea { font-size: 16px; min-height: 112px; }
   .find-button { min-height: 40px; }
   .newline-hint { display: none; }
   .examples { gap: 18px; }
