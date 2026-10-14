@@ -1,6 +1,8 @@
 # Field kit · Six tasks
 
-[Watch the six-task field-kit recording](https://openmerit.ai/demo/?task=fieldkit). The captured run compares two heterogeneous model routes using real OpenRouter calls through Pi and OpenMerit. Each route uses six distinct models; five assignments change and the feasibility model is retained.
+> Recorded example · September 28, 2026. This guide describes the recording retained in main, not a current product benchmark or the live interactive demo. For current samples, see [Demos and samples](demo.md).
+
+Watch the six-task field-kit recording in the checkout’s recorded player (`site/demo/`). The captured run compares two heterogeneous model routes using real OpenRouter calls through Pi and OpenMerit. Each route uses six distinct models; five assignments change and the feasibility model is retained.
 
 The field-kit workflow prepares an offline recording handoff from a Spanish technician brief, a synthetic equipment-label image, an HTML operating manual, and a Python capture script. Both paths already use **six different models**. The approved route pairs narrow specialists with broader coding, reasoning, and writing models:
 

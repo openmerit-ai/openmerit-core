@@ -39,3 +39,7 @@ The header addition passed all 11 documentation checks. Browser checks at 320, 3
 ## Production publication
 
 Published on September 28, 2026 as Worker `6b9dfbd1-d9a0-4f13-9120-4e754774998a`. The memo HTML, exact Markdown download, stylesheet, and abstract header artwork on both `openmerit.site` and `www.openmerit.site` match the maintained local build byte for byte. The homepage navigation is also published and matched. Repository verification and all 11 documentation checks passed.
+
+## Device appearance — published 14 October 2026
+
+Memo prose, tables, SVG diagrams, and the recovered protected-memo access components now use the shared device-driven light/dark palette. The email gate, code-entry/error states, reader list, and message pages use the same colors. Print remains light. No authentication logic or protected content was changed. See [theme maintenance](site-themes.md), including the production-source mismatch and presentation-only verification limits.

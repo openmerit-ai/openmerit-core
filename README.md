@@ -1,137 +1,95 @@
 # OpenMerit
 
-OpenMerit is a harness-neutral orchestration layer that helps a coding harness continuously find and maintain the Pareto frontier of models for a real product task.
+OpenMerit provides a local Inference Terminal for understanding an application's models, services, recorded activity, and compute, plus a Pi integration for evidence-driven model comparisons.
 
-OpenMerit does not perform the intelligent work. It nudges a connected coding harness, such as Pi, with typed outcome requests. The harness understands the project, establishes evaluations and observability, gathers evidence, discovers and tests candidates, calculates the Pareto frontier, and performs an authorized model change. OpenMerit validates the returned contracts, preserves evidence and preferences, and advances the approved lifecycle.
+The terminal reads existing evidence. The Pi integration asks a coding harness to build evaluations, measure candidates, and carry out authorized changes. OpenMerit coordinates that workflow and validates its structured results; the terminal does not route requests, run evaluations, or swap models.
 
-The npm package `openmerit` contains the Pi extension, the reusable coordinator,
-and the protocol in one install. The Pi adapter is the first integration; other
-harnesses can use the same core and protocol exports.
+## Open the terminal
 
-## Why OpenMerit
+Requires Node.js 22.19 or newer and npm:
 
-The cheapest model, fastest model, and highest-quality model are often different. Public benchmarks are useful before product evidence exists, but they cannot establish which model is best for a particular workload. OpenMerit connects the initial choice to production evidence and repeated reassessment.
+```sh
+npm install -g openmerit
+cd /path/to/your/application
+openmerit dash
+```
 
-It distinguishes:
+Stable `openmerit@0.1.6` includes the terminal. No Pi installation or provider API key is needed. It opens a browser connected to a read-only loopback service. Supported source/configuration declarations establish inventory; existing application logs or exports supply request history. Prompts, responses, and credentials are not retained. Unsupported or missing evidence remains unknown.
 
-- one-run observations from rate, percentile, consistency, and reliability claims;
-- missing evidence from poor performance;
-- feasible candidates from dominated, unresolved, or ineligible candidates;
-- an automatic nudge from an intelligent action performed by the harness;
-- a recommendation from an authorized, verified model swap.
+The source interface and hosted dashboard follow the device's light/dark preference without a theme control. This appearance change is not included in npm 0.1.6.
 
-## Current capabilities
+Explore the [hosted sample](https://dash.openmerit.ai/) or [before/after dashboard demo](https://dash.openmerit.ai/demo). Both use fictional data and make no inference calls. See [the terminal guide](docs/inference-terminal.md) for configuration, discovery, diagnostics, history limits, and agent access.
 
-- Pi 0.87 extension with a single `/openmerit` command surface.
-- Harness-inferred, user-confirmed task profiles with explicit metrics, sampling designs, constraints, and evaluation budgets.
-- The complete initial quality, reliability, cost, latency, efficiency, and human-intervention metric catalogue.
-- Setup-time preliminary model research in the source checkout, followed by baseline evidence collection, refreshed candidate discovery, and controlled challenger trials. The published `0.1.5` package still begins candidate discovery after the baseline.
-- A normative, uncertainty-aware Pareto definition owned by OpenMerit.
-- Harness-calculated frontier results independently checked by OpenMerit's conformance verifier.
-- Versioned result schemas for all ten intents, reusable across harness adapters and exposed dynamically by Pi.
-- Configurable swap approval, post-swap verification requests, and policy-based rollback requests. Automatic swaps can begin immediately if explicitly enabled with a zero verified-swap threshold.
-- Project-local snapshots, redacted append-only audit events, evidence manifests, and optional best-effort event exporters under `.openmerit/`.
-- Model-catalog change detection that can nudge the harness to reassess a mature baseline.
-- User-confirmed task-count, elapsed-time, regression, catalogue-change, and post-swap check policies.
-- Idempotent harness signals, durable pending work, native wakeup planning, and explicit scheduler capability gaps.
-- In the unreleased source checkout, an opt-in macOS Pi LaunchAgent for time-based checks and a durable pause; published `0.1.5` still requires an external scheduler and has a partial, session-local pause.
+## Compare models with Pi
 
-## Responsibility boundary
-
-| OpenMerit | Coding harness |
-| --- | --- |
-| Defines typed outcomes and Pareto conformance rules | Understands the product and user task |
-| Tracks lifecycle, policy, budget, and evidence references | Builds evals and observability |
-| Determines which approved nudge is due | Collects and calculates metrics |
-| Verifies returned structure and frontier conformance | Discovers candidates and calculates the frontier |
-| Selects intents according to confirmation and rollback policy | Applies and verifies an authorized model change |
-
-Jev System One, when configured, belongs to the coding harness. Pi may use it aggressively for bounded ranking, triage, and fast judgment. OpenMerit contains no Jev client and accepts no Jev credential.
-
-## Install with Pi
-
-Requirements:
-
-- Node.js 22.19 or newer
-- Pi 0.87 with a supported model provider configured
+With Pi 0.87 and a model provider configured:
 
 ```sh
 pi install npm:openmerit
 pi list
 ```
 
-When Pi enters an unconfigured project with an interactive UI, the adapter first looks for an actual application LLM call pattern. If the project starts empty, the unreleased source checkout scans again after each settled build turn and automatically begins setup when Pi creates the application call. `/openmerit setup` remains a recovery command rather than a required demo step. Pi confirms the application target and exact incumbent application model, infers task-relevant metrics and their repeated-input or representative-case sampling designs, explains the proposed collection plan and estimated cost, and asks the user to confirm or edit it. It then establishes task-specific eval and observability artifacts, verifies them, and reports evidence to OpenMerit. Pi's own model is never the application target.
+Open the product repository in interactive Pi. An unconfigured project is checked for an application LLM call at session start and after settled build turns. Pi confirms the application target and incumbent model, proposes task-specific metrics and sampling, explains estimated evaluation cost, and requests confirmation of the plan, budget, and permissions. `/openmerit setup` can recover or rerun setup. Pi's own model is never the application target.
 
-Run `/openmerit doctor` inside Pi to check the installation. OpenMerit keeps
-project evidence under `.openmerit/` in the product repository. Version 0.1.5
-replaces the 0.1.4 background watcher and standalone CLI with this
-harness-driven lifecycle; it does not migrate the earlier home-directory state.
+Core checks stored baseline windows against the confirmed requirements. When ready, it asks Pi to discover candidates, run controlled comparisons, and calculate a frontier. Core validates the returned evidence contracts and Pareto conformance. The harness must execute the work and provide honest evidence.
 
-## Commands
+Model changes normally require approval. Explicit automatic-swap opt-in can allow changes once the configured verified-swap threshold is reached, including a threshold of zero. Post-swap evaluation and conditional rollback depend on the harness performing and reporting them.
 
-- `/openmerit` or `/openmerit status` — show evidence readiness and lifecycle stage.
-- `/openmerit setup` — explicitly rerun or recover automatic setup.
-- `/openmerit assess` — check stored application metric windows against the baseline thresholds now (in the unreleased source checkout); start candidate discovery only when ready. Published `0.1.5` still asks Pi to assess.
-- `/openmerit logs` — show the canonical audit, exporter-error, evidence, and state paths.
-- `/openmerit frontier` — ask the harness to calculate a frontier now; OpenMerit verifies it.
-- `/openmerit approve` — approve a verified proposal during supervised graduation.
-- `/openmerit pause` and `/openmerit resume` — control some proactive nudges in the current Pi session; task-triggered checks can still run in 0.1.5. See [pause limitations](docs/commands.md#pause-and-resume).
-- `/openmerit doctor` — show sanitized adapter diagnostics.
+Read [getting started](docs/getting-started.md) and [your first supervised trial](docs/first-trial.md).
 
-## Inference Terminal (test preview)
+## Implemented orchestration
 
-A local, dark-only overview of application inference inventory, connections, activity, and compute. Coding-harness usage is outside its scope. It reads existing metadata passively and makes no model calls.
+- Task profiles with confirmed metrics, sampling plans, constraints, budgets, and permissions.
+- Preliminary model research, incumbent identity, durable candidate handoffs, and controlled challenger experiments.
+- Deterministic baseline checks and uncertainty-aware frontier validation.
+- Versioned result schemas for all ten intents and a reusable harness adapter boundary.
+- Challenger-spend accounting, bounded intent admission, approval, verification, and rollback requests.
+- Project-local state, redacted audit events, evidence manifests, and optional event exporters.
+- Task-count, elapsed-time, catalogue-change, regression, and post-swap signals.
+- Durable pause and authorized macOS user LaunchAgents; other platforms require an external scheduler.
 
-With Node.js 22.19+ installed, run this from your application's directory:
+These implementations have automated coverage. They do not establish application-quality improvements or reliable unattended model changes. See [current limitations](docs/roadmap.md).
 
-```sh
-npm install -g openmerit@preview
-openmerit dash
-```
+## Pi commands
 
-The preview uses the existing `openmerit` npm package, including its coordinator, protocol, Pi adapter, and compiled terminal assets. It opens its localhost URL in your default browser. The stable npm package `openmerit@0.1.5` does not include this command. See the [Inference Terminal guide](docs/inference-terminal.md) for supported sources, updating or removing the preview, source builds, and read-only agent access.
+- `/openmerit` or `/openmerit status` — inspect readiness, active work, and lifecycle state.
+- `/openmerit setup` — request or recover setup.
+- `/openmerit assess` — check stored baseline windows; discover candidates only when ready.
+- `/openmerit frontier` — request a harness-calculated comparison for validation.
+- `/openmerit approve` — approve the current verified proposal.
+- `/openmerit pause` / `/openmerit resume` — persist or clear the automatic-work pause and reconcile authorized scheduling; active work is not cancelled.
+- `/openmerit cancel` — record abandonment of an interrupted intent; it does not terminate a provider request.
+- `/openmerit logs` — locate local state, audit, and evidence files.
+- `/openmerit doctor` — inspect adapter and scheduler diagnostics.
 
 ## Documentation
 
-Read the searchable [OpenMerit documentation](https://openmerit.ai/docs/). The Markdown sources below also ship with the package.
+The [documentation overview](docs/index.md) links all current guides. The website at [openmerit.ai/docs](https://openmerit.ai/docs/) is deployed separately from the package and this checkout.
 
-- [Getting started](docs/getting-started.md)
-- [Your first trial](docs/first-trial.md)
-- [Command reference](docs/commands.md)
-- [Budgets and permissions](docs/budgets.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Architecture and responsibility boundary](docs/architecture.md)
+- [Inference Terminal](docs/inference-terminal.md)
 - [Metrics and evidence](docs/metrics-and-evidence.md)
-- [Improvement lifecycle](docs/lifecycle.md)
-- [Harness-neutral automation](docs/automation.md)
-- [Pi extension guide](docs/pi-extension.md)
-- [Building another harness adapter](docs/adapter-guide.md)
-- [Pareto conformance specification](docs/pareto-spec.md)
-- [Project state and operations](docs/operations.md)
-- [Security](docs/security.md)
-- [Testing](docs/testing.md)
-- [Current limitations and roadmap](docs/roadmap.md)
+- [Lifecycle](docs/lifecycle.md), [automation](docs/automation.md), and [budgets](docs/budgets.md)
+- [Commands](docs/commands.md), [operations](docs/operations.md), and [troubleshooting](docs/troubleshooting.md)
+- [Security and data handling](docs/security.md)
+- [Architecture](docs/architecture.md), [Pi adapter](docs/pi-extension.md), and [adapter development](docs/adapter-guide.md)
+- [Pareto specification](docs/pareto-spec.md) and [testing](docs/testing.md)
 
-### Maintaining documentation
-
-Edit the Markdown in `docs/` alongside product changes. The public documentation is generated from these same files; there is no separate article copy to update in `site/`. Run `npm run check:docs` to rebuild and validate it. The normal Cloudflare deployment rebuilds and publishes the documentation. See [the documentation workflow](docs/site-documentation.md) for adding guides and previewing changes.
-
-## Repository layout
-
-- `packages/protocol` — harness-neutral types for intents, results, metrics, policies, and frontier evidence.
-- `packages/core` — adapter SDK, durable coordinator, pluggable persistence, policy, and frontier conformance verification.
-- `packages/pi` — Pi extension that turns OpenMerit intents into harness work.
-- `docs` — user, operator, architecture, and normative documentation.
-
-The workspace modules are private development boundaries. The published
-package exposes `openmerit/core`, `openmerit/protocol`, and `openmerit/pi`.
-
-## Development from source
+## Development
 
 ```sh
 npm ci
 npm run verify
+npm run dash -- /path/to/application
+```
+
+For Pi extension development:
+
+```sh
 ./node_modules/.bin/pi --no-extensions -e ./packages/pi/src/index.ts
 ```
 
-`--no-extensions` prevents an installed npm copy of OpenMerit from registering the same tools as the source extension. Credentials must never be committed. The repository intentionally contains no provider or Jev API key.
+`--no-extensions` avoids registering an installed npm copy alongside the source extension. Credentials belong to the harness or its environment and must never be committed. Jev, if configured, is invoked by the harness; OpenMerit provides no Jev client.
+
+`packages/terminal` contains the CLI, collectors, hosted sample, and browser interface. `packages/protocol`, `packages/core`, and `packages/pi` provide the protocol, coordinator, and Pi adapter. The package exports `openmerit/core`, `openmerit/protocol`, and `openmerit/pi`.
+
+Edit documentation in `docs/`, then run `npm run check:docs`. The website is generated from those Markdown files. See [documentation maintenance](docs/site-documentation.md) and the [production-source reconciliation note](docs/site-domain-migration.md) before deployment; a local build does not publish changes.

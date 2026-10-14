@@ -250,11 +250,11 @@ test('CLI rejects invalid options and outputs valid JSON without opening a brows
   assert.equal(snapshot.mode, 'sample'); assert.equal(snapshot.records.length, 9600);
 });
 
-test('all client scripts and styling ship locally; dark mode and reduced motion are explicit', async () => {
+test('all client scripts and styling ship locally; system color preference and reduced motion are explicit', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
   assert.doesNotMatch(html, /(?:src|href)="https?:/);
-  assert.match(css, /prefers-reduced-motion:reduce/); assert.match(css, /color-scheme:dark/);
+  assert.match(css, /prefers-reduced-motion:reduce/); assert.match(css, /color-scheme:light dark/); assert.match(css, /prefers-color-scheme: dark/);
 });
 
 

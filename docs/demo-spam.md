@@ -1,6 +1,8 @@
 # Spam filter · Jev
 
-The [Jev task](https://openmerit.ai/demo?task=spam) classifies a community comment as `publish` or `hold` under a narrow promotional-spam policy. Ordinary discussion, criticism, and reports of spam are allowed. Unsolicited promotional solicitations are held. The fixtures contain twelve examples of each class, with six separate verification comments.
+> Recorded example · September 28, 2026. This guide describes the recording retained in main, not a current product benchmark or the live interactive demo. For current samples, see [Demos and samples](demo.md).
+
+The Jev task in the checkout’s recorded player (`site/demo/`) classifies a community comment as `publish` or `hold` under a narrow promotional-spam policy. Ordinary discussion, criticism, and reports of spam are allowed. Unsolicited promotional solicitations are held. The fixtures contain twelve examples of each class, with six separate verification comments.
 
 ## Models and integration
 

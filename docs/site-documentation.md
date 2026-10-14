@@ -2,7 +2,7 @@
 
 Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
 
-The public documentation lives at https://openmerit.ai/docs/. It uses the homepage's typography, colors, and Cloudflare hosting. Twenty-two curated guides, including a dedicated Demo group with an overview and five example walkthroughs, are generated from Markdown in `docs/`; internal website design and maintenance notes are excluded.
+The public documentation lives at https://openmerit.ai/docs/. It uses the homepage's typography, colors, and Cloudflare hosting. Twenty-four guides are generated from Markdown in `docs/`. The terminal is in Get started; demos distinguish hosted samples from the five historical recordings retained in main. Internal website design and maintenance notes are excluded.
 
 Article content has one maintained source: `docs/*.md`. Update those files alongside product changes, then rebuild and deploy. Do not edit the generated `site/docs/` files. The repository's `AGENTS.md` records this rule for future coding work.
 
@@ -17,7 +17,7 @@ The structure draws on [Pi's documentation](https://pi.dev/docs/latest): a group
 - All documentation pages currently share the homepage's default Open Graph/Twitter image. Separate card generation is disabled for now; the optional template is retained in `scripts/social-image.mjs`. See [sharing-image configuration](site-dynamic-og.md).
 - `site/docs/` contains generated HTML, downloadable Markdown, the search index, the self-hosted search library and its license, and a manifest. Generated files are ignored by Git.
 - Search loads its library and index on the first query of at least two characters. No search query is sent to a search service. Hashed filenames and versioned CSS/JavaScript URLs update with the source or supporting assets. If a tab still references assets removed by a newer deployment, search fetches the current manifest without using its cache and retries with the current library and index. Recovery uses a fresh module URL because browsers can cache failed imports. If recovery also fails, the error message lets the reader retry by typing again; retries do not loop in the background.
-- Each page displays the package version and compact actions for viewing its source on GitHub, editing that source, and reading the generated Markdown. This is documentation for the current release, with no historical version selector yet.
+- Each page displays the configured **Main branch** label and actions for viewing its source, editing it, and reading generated Markdown. The manifest retains the actual package version separately; a preview version in package metadata is not presented as the stable release. Current guides describe main and distinguish hosted/source appearance changes from npm 0.1.6. There is no historical version selector.
 
 ## Pi component structure
 
@@ -32,7 +32,7 @@ The 2026-09-23 component pass follows the rendered [Pi documentation layout](htt
 
 At intermediate widths, the documentation rail remains visible and the article outline moves above the article. Narrow layouts use the combined navigation component; its disclosures and section links work without JavaScript. Search and code copying remain available. Previous/next page links are omitted to match Pi's component structure. The component pass introduces no runtime framework or separate article content.
 
-The header contains the OpenMerit brand and Home/GitHub links. The sidebar begins directly with its navigation groups and ends with the package version. The repeated “Documentation” labels in the header and sidebar, and the sidebar's “Early development” link, were removed on 2026-09-23.
+The header contains the OpenMerit brand and Home/GitHub links. The sidebar begins directly with its navigation groups and ends with the documentation scope label. The repeated “Documentation” labels in the header and sidebar, and the sidebar's “Early development” link, were removed on 2026-09-23.
 
 ## Editing and previewing
 
@@ -83,3 +83,7 @@ Chrome browser checks covered all 16 pages at 1440px and 320px with HTTP 200 res
 WebKit also loaded all 16 pages without overflow at 1440px and 390px. Search, keyboard result navigation, Escape, mobile navigation, section links, and the clipboard fallback passed without runtime errors. Axe WCAG 2 A/AA and 2.1 AA checks passed for the overview, budget table, adapter code examples, and open search results at 1440px and 390px after increasing code-label contrast. These are browser and automated accessibility checks, not exhaustive accessibility certification or physical-device validation.
 
 Production smoke testing caught an event-ordering bug in pointer selection: a `focusout` microtask could close the result panel before the clicked link received focus. Closing the panel on a completed `focusin` outside search fixes that race. Mouse and touch result navigation, keyboard browsing, Escape, and moving focus outside search subsequently passed in both Chrome and WebKit. Include actual mouse and touch result selection in future browser reviews alongside keyboard tests.
+
+## Device appearance — published 14 October 2026
+
+Documentation now shares the automatic light/dark website palette. Search results, sidebars, table headers, code examples, mobile disclosures, and focus states follow the device preference without a reload or a theme control. Printing uses light colors. The generator emits appearance metadata before styles load; articles remain maintained exclusively in Markdown. See [theme maintenance](site-themes.md) for verification and the separate publication boundary.

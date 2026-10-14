@@ -1,8 +1,10 @@
 # Illustrated frame sequences
 
-Generated with the built-in image generation tool on 2026-09-23. These replace the SVG displacement animation. Each atlas contains distinct poses; the player only copies whole cells to a canvas. There are no mesh deformations, optical-flow frames, morphs, or crossfades.
+Generated with the built-in image generation tool on 2026-09-23. These replace the SVG displacement animation. Each atlas contains distinct poses. Supporting scenes copy whole cells to a canvas; the current hero source keeps a fixed stage and registers only the moving maker above the bench. There are no mesh deformations, optical-flow frames, morphs, or crossfades.
 
 ## Assets and playback
+
+Published update, 14 October 2026: the active homepage assets now use transparent backgrounds. The four hero files are `hero-frame-{0..3}-transparent-v3.webp`; the supporting atlases and posters are `{setup,questions,rest}-sequence-transparent-v2.webp` and `{setup,questions,rest}-poster-transparent-v2.webp`. Their dimensions, poses, frame order, and timing remain unchanged. The hero renderer corrects camera drift in the generated sources by retaining the first-frame workshop and registering only the moving maker. See [transparent asset provenance, packaging, and playback](site-illustration-transparency.md). The table and generation notes below document the original opaque versions retained as references; their byte totals do not describe the transparent exports.
 
 | Scene | Atlas | Grid | Frame size | Action |
 | --- | --- | --- | --- | --- |

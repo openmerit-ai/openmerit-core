@@ -1,6 +1,8 @@
 # GPU placement
 
-The [GPU placement workflow](https://openmerit.ai/demo?task=placement) prepares a pool assignment for a synthetic render job. It reads job requirements with `read_job`, inspects a fixed capacity snapshot with `list_pools`, then proposes the cheapest eligible pool. It never reserves capacity, launches compute, moves data, or incurs a GPU charge.
+> Recorded example · September 28, 2026. This guide describes the recording retained in main, not a current product benchmark or the live interactive demo. For current samples, see [Demos and samples](demo.md).
+
+The GPU placement workflow in the checkout’s recorded player (`site/demo/`) prepares a pool assignment for a synthetic render job. It reads job requirements with `read_job`, inspects a fixed capacity snapshot with `list_pools`, then proposes the cheapest eligible pool. It never reserves capacity, launches compute, moves data, or incurs a GPU charge.
 
 ## Workflow structure
 

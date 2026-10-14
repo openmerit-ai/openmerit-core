@@ -42,11 +42,11 @@ Pending or active intent state is durable. Inspect `state.json` and `events.json
 
 ## Checks are not running while Pi is closed
 
-This is a current adapter limitation. Pi reports session and task signals while running, but does not provision its own background wakeups. A persistent policy reports an external-scheduler requirement. See [automatic checks](automation.md).
+On macOS, check that the confirmed policy requests persistent execution and allows infrastructure changes, that the Mac user is logged in, and that Pi authentication works without shell-only credentials. `/openmerit doctor` reports scheduler diagnostics; `.openmerit/scheduler-status.json` records completed wakeups and failures. An active pause unloads the managed LaunchAgent. Other platforms need an external scheduler. A successful schedule does not establish that model-driven work completed. See [automatic checks](automation.md).
 
-## Status says paused but a check starts
+## Work continues after pausing
 
-This is a known 0.1.5 limitation: the automation-signal dispatch path does not check the pause flag. The flag is also reset by a process restart. Pause does not cancel existing work. See [current limitations](roadmap.md).
+Pause is durable and gates automatic work, but an already-active intent can continue and explicit commands remain available. Inspect the active intent and audit timestamps to distinguish prior work from a new automatic dispatch. `/openmerit cancel` records abandonment; it does not terminate a provider request or harness process. The standalone terminal is independent of Pi pause; stop its CLI with Ctrl+C to stop collection. If a new automatic intent starts while the persisted pause is active, record a sanitized reproduction and your installed version.
 
 ## Report a reproducible problem
 

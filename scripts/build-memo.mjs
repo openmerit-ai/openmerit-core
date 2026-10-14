@@ -38,7 +38,9 @@ export async function buildMemo(root) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#f8f7f4">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#171915" media="(prefers-color-scheme: dark)">
   <meta name="description" content="${escape(memo.description)}">
   <title>${escape(title)} · OpenMerit</title>
   <link rel="canonical" href="https://openmerit.ai${memo.url}">

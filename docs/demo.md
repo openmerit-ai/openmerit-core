@@ -1,8 +1,25 @@
-# Demo
+# Demos and samples
 
-The [demo player](https://openmerit.ai/demo) shows recorded, supervised OpenMerit comparisons. The guides in this section explain each example's inputs, model assignments, evaluation policy, and outcome. These are early development demonstrations from this checkout; they do not establish general product reliability or behavior in the published npm release.
+## Explore the terminal
 
-## Choose a walkthrough
+- [Hosted enterprise sample](https://dash.openmerit.ai/): 200 fictional agents, 699 task IDs, 21 models, and 9.6 million requests across 30 days. It demonstrates inventory, paths, activity, shared compute, and source coverage without reading your machine.
+- [Before/after comparison](https://dash.openmerit.ai/demo): fourteen fictional insurance workflows and six preference choices across 26 model/service offers. Workloads and token volume stay fixed; costs are modeled from the dated price catalog. Benchmark and efficiency exceptions remain visible as preference overrides.
+
+Neither hosted terminal example makes inference calls, applies model changes, or establishes application quality or latency. See [the comparison methodology](inference-terminal.md#hosted-enterprise-sample-and-comparison) for the exact selection rules, costs, and evidence limits.
+
+## Interactive website experiment
+
+The separately deployed [delivery-resolution experiment](https://openmerit.ai/demo/) uses fictional customer cases and bounded live provider calls. Its [guide](interactive-demo.md) explains the current scenarios, approval and verification steps, and session limits. This is distinct from the passive dashboard samples above.
+
+## Run your own supervised trial
+
+Use [Pi setup](getting-started.md#set-up-model-comparisons-with-pi) and [your first trial](first-trial.md) for real application measurements. The repository's separate `npm run demo` sandbox makes live provider calls; its requirements and spend boundaries are in [testing](testing.md#experimental-sandbox).
+
+## Recorded player
+
+Main also retains a recorded player in `site/demo/`, served at `/demo` by this checkout's static preview. Its September 28, 2026 recordings and the walkthroughs below document specific earlier experiments. They are not a description of the separately deployed interactive website demo, current provider availability, or a new validation of main. Existing recording links remain available for inspecting their evidence.
+
+## Recorded examples in this checkout
 
 | Scope | Demo | How it is structured |
 | --- | --- | --- |
@@ -25,11 +42,11 @@ The agent examples compare supplied route configurations as whole workflows. The
 
 Pi invokes bounded helpers and submits saved artifacts by name through a demo-specific transport bridge. The bridge expands those references into the adapter's canonical results and signals. The actual OpenMerit lifecycle then validates and advances the comparison. Missing provider cost stops a comparison instead of being treated as zero; a partial run is not a successful outcome.
 
-The unreleased source runner now supplies explicit sampling plans, metric aggregations, and an incumbent descriptor to match the current protocol. Candidate limits count the incumbent and challengers together. Its comparison manifest records the fixed fixtures, rubric, model routes, and actual run order; the incumbent's baseline is reused in the comparison and included in evaluation-spend accounting. Runs are not randomized. These source changes do not alter the existing recordings or establish a new live validation result.
+The repository runner supplies explicit sampling plans, metric aggregations, and an incumbent descriptor to match the current protocol. Candidate limits count the incumbent and challengers together. Its comparison manifest records the fixed fixtures, rubric, model routes, and actual run order; the incumbent's baseline is reused in the comparison and included in evaluation-spend accounting. Runs are not randomized. The recordings retain their original execution evidence; the current runner does not establish a new validation result without a new run.
 
 ## Playback controls
 
-The player is for recorded playback. It makes no model calls, starts no sandbox, and accepts no custom inputs. The **How it works** link opens the guide for the selected example.
+The player in `site/demo/` is for recorded playback. It makes no model calls, starts no sandbox, and accepts no custom inputs. The **How it works** link opens the guide for the selected example.
 
 - **Pause / Play** stops or resumes playback. Seeking on the timeline pauses at the selected position.
 - **Replay** starts the recording again from the beginning.

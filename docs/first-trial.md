@@ -35,7 +35,7 @@ These commands help locate readiness and evidence. They do not independently cer
 
 Use the product normally while its evaluations collect representative measurements. OpenMerit also records completed-work checkpoints; these checkpoints alone do not establish product quality.
 
-In the unreleased source checkout, OpenMerit core checks baseline sufficiency from reported metric windows; when they pass, it asks Pi to discover candidates, run challenger trials, and calculate a comparison. Published `openmerit@0.1.5` still asks Pi to assess the baseline. You can request a check explicitly:
+OpenMerit core checks baseline sufficiency from reported metric windows; when they pass, it asks Pi to discover candidates, run challenger trials, and calculate a comparison. You can request a check explicitly:
 
 ```text
 /openmerit assess
@@ -57,4 +57,4 @@ The harness applies the change. Allow the configured post-swap evaluation window
 
 Keep the trial’s artifacts and audit trail. Before enabling automatic changes, confirm that your evaluations detect meaningful failures, provider costs are visible, and post-swap verification and rollback work for this task.
 
-Pi does not wake itself while closed. Version 0.1.5 also has a [partial pause limitation](roadmap.md#known-limitations). Plan supervision around those behaviors.
+Persistent checks require an authorized macOS LaunchAgent or an external scheduler on other platforms. Pause survives restarts and stops automatic due decisions, but does not cancel active work or disable explicit commands. Review [automatic checks](automation.md) and keep the trial supervised; background candidate work is not yet product-validated.

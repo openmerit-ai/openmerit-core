@@ -1,6 +1,8 @@
 # Support tickets
 
-[Watch the support-ticket demo](https://openmerit.ai/demo?task=support). One model call turns a synthetic customer email into a structured ticket. Both paths start with GPT-4.1 mini and use the same prompt and JSON schema. The fixed path keeps that model; the managed path changes only after measured comparison and operator approval.
+> Recorded example · September 28, 2026. This guide describes the recording retained in main, not a current product benchmark or the live interactive demo. For current samples, see [Demos and samples](demo.md).
+
+Watch the support-ticket demo in the checkout’s recorded player (`site/demo/`). One model call turns a synthetic customer email into a structured ticket. Both paths start with GPT-4.1 mini and use the same prompt and JSON schema. The fixed path keeps that model; the managed path changes only after measured comparison and operator approval.
 
 ## Input and output
 

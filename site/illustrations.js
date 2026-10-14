@@ -1,14 +1,24 @@
-// Each image or atlas cell is a separately illustrated pose. Playback selects whole frames;
-// it never distorts an image or interpolates between poses.
+// Each image or atlas cell is a separately illustrated pose. The hero keeps a fixed
+// stage and registers only the moving maker; other scenes select whole atlas cells.
 const scenes = [
   {
     selector: '.hero-art', source: 'hero', minimumWidth: 2172,
     frameUrls: [
-      '/assets/motion/hero-frame-0-v2.webp',
-      '/assets/motion/hero-frame-1-v2.webp',
-      '/assets/motion/hero-frame-2-v2.webp',
-      '/assets/motion/hero-frame-3-v2.webp',
+      '/assets/motion/hero-frame-0-transparent-v3.webp',
+      '/assets/motion/hero-frame-1-transparent-v3.webp',
+      '/assets/motion/hero-frame-2-transparent-v3.webp',
+      '/assets/motion/hero-frame-3-transparent-v3.webp',
     ],
+    // Later generated poses changed the camera scale and position. Register them
+    // against the original stool/bench, and replace only the maker above the bench.
+    // These are fixed source corrections, never animated zooms or interpolations.
+    registration: [
+      { scale: 1, x: 0, y: 0 },
+      { scale: 1.002, x: -9, y: -2 },
+      { scale: .956, x: 43, y: 46 },
+      { scale: .962, x: 35, y: 35 },
+    ],
+    motionRegion: [[795, 235], [1060, 235], [1060, 435], [1010, 463], [825, 463], [795, 435]],
     step: 180, rest: 1100, hold: 700,
   },
   { selector: '.setup-art', source: 'setup', columns: 4, rows: 2, step: 120, rest: 1400, hold: 600 },
@@ -35,7 +45,23 @@ function makeSequence(scene) {
 function drawFrame(scene, frame) {
   scene.context.clearRect(0, 0, scene.width, scene.height);
   if (scene.images) {
-    scene.context.drawImage(scene.images[frame], 0, 0);
+    // The same first-frame pixels anchor every still object throughout the loop.
+    scene.context.drawImage(scene.images[scene.motionRegion ? 0 : frame], 0, 0);
+    if (frame && scene.motionRegion) {
+      const { context, motionRegion, registration, width, height } = scene;
+      const { scale, x, y } = registration[frame];
+      context.save();
+      context.beginPath();
+      motionRegion.forEach(([px, py], index) => {
+        if (index) context.lineTo(px, py);
+        else context.moveTo(px, py);
+      });
+      context.closePath();
+      context.clip();
+      context.clearRect(0, 0, width, height);
+      context.drawImage(scene.images[frame], x, y, width * scale, height * scale);
+      context.restore();
+    }
     return;
   }
   const x = (frame % scene.columns) * scene.width;
@@ -54,7 +80,7 @@ async function loadFrame(source) {
 async function prepareScene(scene) {
   // The wide hero needs a full-size image per pose, not a quarter of one atlas.
   const images = scene.frameUrls ? await Promise.all(scene.frameUrls.map(loadFrame)) : null;
-  const atlas = images ? null : await loadFrame(`/assets/motion/${scene.source}-sequence-v1.webp`);
+  const atlas = images ? null : await loadFrame(`/assets/motion/${scene.source}-sequence-transparent-v2.webp`);
   const width = images ? images[0].naturalWidth : atlas.naturalWidth / scene.columns;
   const height = images ? images[0].naturalHeight : atlas.naturalHeight / scene.rows;
   if (!width || !height || !Number.isInteger(width) || !Number.isInteger(height)) {
@@ -62,6 +88,9 @@ async function prepareScene(scene) {
   }
   if (images && (width < scene.minimumWidth || images.some(image => image.naturalWidth !== width || image.naturalHeight !== height))) {
     throw new Error('Illustration frames must retain their full, matching resolution');
+  }
+  if (scene.registration && (width !== 2172 || height !== 724 || scene.registration.length !== images.length)) {
+    throw new Error('Registered illustration poses must match the calibrated source dimensions');
   }
 
   const layer = document.createElement('canvas');
@@ -88,6 +117,7 @@ function stopScene(scene) {
   if (reducedMotion.matches) {
     scene.cursor = 0;
     if (scene.layer) scene.layer.hidden = true;
+    scene.figure?.classList.remove('has-motion-frame');
   }
 }
 
@@ -97,6 +127,8 @@ function advanceScene(scene) {
   const { frame, duration } = scene.sequence[scene.cursor];
   drawFrame(scene, frame);
   scene.layer.hidden = false;
+  // Transparent poses must replace the poster, otherwise its old pose shows through.
+  scene.figure.classList.add('has-motion-frame');
   scene.cursor = (scene.cursor + 1) % scene.sequence.length;
   // Wake only when a new pose is due. There is no per-refresh rendering loop.
   scene.timer = setTimeout(() => advanceScene(scene), duration);

@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client';
 import { Liveline } from 'liveline';
 import { hostState } from '../src/hardware.mjs';
 import { contiguousSamples, nearestSample } from './samples.mjs';
+import { useSystemTheme, chartColor } from './theme.js';
 
 /* MOTION STORYBOARD
  * 0ms       A pointer selection commits immediately.
@@ -72,6 +73,7 @@ function StaticSamples({ points, color }) {
 }
 
 function SampledChart({ snapshot, machine, error, mini }) {
+  const theme = useSystemTheme();
   const [metric, setMetric] = useState('cpuPercent');
   const [hover, setHover] = useState(null);
   const [reduced, setReduced] = useState(motionQuery.matches);
@@ -86,7 +88,7 @@ function SampledChart({ snapshot, machine, error, mini }) {
   }, []);
   const samples = contiguousSamples((machine.history ?? []), metric, snapshot.interval);
   const latest = samples.at(-1);
-  const color = metric === 'cpuPercent' ? '#c2c2c2' : '#9bb8cb';
+  const color = chartColor(metric === 'cpuPercent' ? 'chart' : 'blue');
   const points = metric === 'cpuPercent' ? samples : samples.map(p => ({ ...p, value: p.value / 1024 ** 3 }));
   const stale = Boolean(error) || hostState({ ...machine, observedAt: machine.observedAt ?? (machine.id ? null : snapshot.observedAt) }, snapshot.interval) !== 'sampled';
   const canDraw = points.length >= 2 && !reduced && visible;
@@ -106,7 +108,7 @@ function SampledChart({ snapshot, machine, error, mini }) {
         ...[['cpuPercent', 'CPU'], ['memoryUsed', 'System RAM']].map(([key, label]) => h('button', { key, type: 'button', 'aria-pressed': metric === key, onClick: () => { setMetric(key); setHover(null); } }, label))),
       h('span', { className: 'sample-reading' }, h(TextMorph, { duration: MOTION.text, ease: MOTION.ease, scale: false, disabled: instant() }, latest ? reading(latest.value, metric) : '—'))),
     h('div', { className: 'liveline-canvas', 'aria-hidden': true }, canDraw
-      ? h(Liveline, { data: points, value: points.at(-1).value, window: windowSecs, theme: 'dark', color, grid: !mini, badge: false, momentum: false, pulse: false, fill: false, scrub: !mini, paused: stale, lineWidth: 1.5, padding: mini ? { top: 5, right: 4, bottom: 5, left: 4 } : { top: 16, right: 68, bottom: 28, left: 10 }, formatValue: format, formatTime: clock, onHover: point => setHover(point?.time ?? null) })
+      ? h(Liveline, { data: points, value: points.at(-1).value, window: windowSecs, theme, color, grid: !mini, badge: false, momentum: false, pulse: false, fill: false, scrub: !mini, paused: stale, lineWidth: 1.5, padding: mini ? { top: 5, right: 4, bottom: 5, left: 4 } : { top: 16, right: 68, bottom: 28, left: 10 }, formatValue: format, formatTime: clock, onHover: point => setHover(point?.time ?? null) })
       : h(StaticSamples, { points, color })),
     !mini && h('div', { className: 'sample-readout', tabIndex: 0, role: 'group', 'aria-label': 'Exact samples. Use left and right arrows to inspect readings.', onKeyDown: keydown },
       h('span', { className: 'sample-crosshair', 'aria-hidden': true }, '+'),

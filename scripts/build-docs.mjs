@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import MarkdownIt from 'markdown-it';
 import MiniSearch from 'minisearch';
-import { groups, pages } from './docs.config.mjs';
+import { groups, pages, documentationLabel } from './docs.config.mjs';
 import { createSocialImage } from './social-image.mjs';
 import { buildMemo } from './build-memo.mjs';
 
@@ -85,7 +85,7 @@ const docs = await Promise.all(pages.map(async page => {
 }));
 
 const miniSearchFile = fileURLToPath(import.meta.resolve('minisearch'));
-const revision = createHash('sha256').update(JSON.stringify([pkg.version, groups, ...docs.map(doc => doc.sourceText),
+const revision = createHash('sha256').update(JSON.stringify([pkg.version, documentationLabel, groups, ...docs.map(doc => doc.sourceText),
   await readFile(join(root, 'site/docs.css'), 'utf8'), await readFile(join(root, 'site/docs.js'), 'utf8'),
   await readFile(join(root, 'site/docs-search.js'), 'utf8'),
   await readFile(join(root, 'site/styles.css'), 'utf8'), await readFile(miniSearchFile, 'utf8'),
@@ -112,7 +112,7 @@ function outline(doc, label) {
 }
 function articleActions(doc) {
   const path = doc.source.split('/').map(encodeURIComponent).join('/');
-  return `<div class="doc-meta"><span>v${escape(pkg.version)}</span>${[
+  return `<div class="doc-meta"><span>${escape(documentationLabel)}</span>${[
     [`${repository}/blob/main/docs/${path}`, 'View source on GitHub', 'source'],
     [`${repository}/edit/main/docs/${path}`, 'Edit this page on GitHub', 'edit'],
     [sourceUrl(doc), 'Read as Markdown', 'markdown'],
@@ -131,7 +131,9 @@ function layout(doc) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#f8f7f4">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#171915" media="(prefers-color-scheme: dark)">
   <meta name="description" content="${escape(doc.description)}">
   <title>${escape(doc.title)} · OpenMerit docs</title>
   <link rel="canonical" href="https://openmerit.ai${doc.url}">
@@ -164,7 +166,7 @@ function layout(doc) {
   </div></header>
   <div class="docs-intro"><p class="docs-intro-title">Documentation</p><p>Guides and reference for using and extending OpenMerit.</p></div>
   <div class="docs-layout">
-    <aside class="docs-sidebar"><div class="docs-sidebar-body">${navigation(doc, 'Documentation')}<p class="docs-release">OpenMerit ${escape(pkg.version)}</p></div></aside>
+    <aside class="docs-sidebar"><div class="docs-sidebar-body">${navigation(doc, 'Documentation')}<p class="docs-release">OpenMerit · ${escape(documentationLabel)}</p></div></aside>
     <main class="docs-main">
       ${mobileNavigation(doc)}
       <section class="docs-search" aria-label="Search documentation" hidden data-index-url="${indexUrl}" data-library-url="${searchLibrary}">
@@ -218,6 +220,6 @@ for (const doc of docs) {
 await writeFile(join(root, 'site', indexUrl), JSON.stringify({ options, index: index.toJSON() }));
 await copyFile(miniSearchFile, join(root, 'site', searchLibrary));
 await copyFile(join(dirname(miniSearchFile), '../../LICENSE.txt'), join(out, 'minisearch-LICENSE.txt'));
-await writeFile(join(out, 'manifest.json'), JSON.stringify({ version: pkg.version, revision, pages: docs.map(doc => ({ url: doc.url, source: doc.source, title: doc.title, headings: doc.headings, ...(doc.socialImage && { socialImage: doc.socialImage }) })), searchIndex: indexUrl, searchLibrary }, null, 2));
+await writeFile(join(out, 'manifest.json'), JSON.stringify({ version: pkg.version, documentationLabel, revision, pages: docs.map(doc => ({ url: doc.url, source: doc.source, title: doc.title, headings: doc.headings, ...(doc.socialImage && { socialImage: doc.socialImage }) })), searchIndex: indexUrl, searchLibrary }, null, 2));
 console.log(`Built ${docs.length} documentation pages and ${searchDocuments.length} searchable sections (${revision}).`);
 await buildMemo(root);

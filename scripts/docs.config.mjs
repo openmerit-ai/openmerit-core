@@ -1,12 +1,16 @@
+// These guides describe main; package releases and hosted deployments are separate.
+export const documentationLabel = 'Main branch';
 // Only these product documents are published. Design notes stay in the repository.
 export const groups = [
   { title: 'Get started', pages: [
-    { source: 'index.md', slug: '', title: 'Overview', description: 'Start comparing models against the work your product needs to do.' },
-    { source: 'getting-started.md', slug: 'getting-started', title: 'Installation & setup', description: 'Install OpenMerit in Pi and establish your first product profile.' },
+    { source: 'index.md', slug: '', title: 'Overview', description: 'Inspect application inference and set up supervised model comparisons.' },
+    { source: 'getting-started.md', slug: 'getting-started', title: 'Installation & setup', description: 'Open the standalone terminal or configure the separate Pi comparison workflow.' },
+    { source: 'inference-terminal.md', slug: 'inference-terminal', title: 'Inference Terminal', description: 'Inspect application declarations, recorded requests, services, and linked compute.' },
     { source: 'first-trial.md', slug: 'first-trial', title: 'Your first trial', description: 'Collect evidence, compare candidates, and validate a supervised model change.' },
   ] },
-  { title: 'Demo', pages: [
-    { source: 'demo.md', slug: 'demo', title: 'Overview', description: 'Watch recorded comparisons and understand their structure, measurements, and limits.' },
+  { title: 'Demos & recorded examples', pages: [
+    { source: 'demo.md', slug: 'demo', title: 'Demos & samples', description: 'Explore fictional dashboards and distinguish them from recorded experiments.' },
+    { source: 'interactive-demo.md', slug: 'interactive-demo', title: 'Interactive experiment', description: 'Understand the separately deployed delivery-resolution experiment, its checks, approvals, and limits.' },
     { source: 'demo-support.md', slug: 'demo-support', title: 'Support tickets', description: 'Compare three models on email-to-ticket extraction with exact-match grading.' },
     { source: 'demo-spam.md', slug: 'demo-spam', title: 'Spam filter · Jev', description: 'Compare a chat model with a typed-decision specialist on promotional spam.' },
     { source: 'demo-backfill.md', slug: 'demo-backfill', title: 'Backfill recovery', description: 'Follow a three-task agent through incident inspection, checkpoint lookup, and recovery planning.' },
@@ -14,7 +18,6 @@ export const groups = [
     { source: 'demo-fieldkit.md', slug: 'demo-fieldkit', title: 'Field kit · Six tasks', description: 'Explore a prepared six-model workflow spanning translation, vision, extraction, code, reasoning, and writing.' },
   ] },
   { title: 'Using OpenMerit', pages: [
-    { source: 'inference-terminal.md', slug: 'inference-terminal', title: 'Inference Terminal', description: 'Explore the test-preview local terminal for models, connections, inference activity, and compute.' },
     { source: 'metrics-and-evidence.md', slug: 'metrics-and-evidence', title: 'Metrics & evidence', description: 'Understand measurements, sample requirements, and evidence readiness.' },
     { source: 'lifecycle.md', slug: 'lifecycle', title: 'Comparisons & swaps', description: 'Follow the improvement lifecycle from baseline to post-swap evaluation.' },
     { source: 'automation.md', slug: 'automation', title: 'Automatic checks', description: 'Configure cadence, signals, and scheduling for model reassessment.' },

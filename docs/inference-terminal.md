@@ -1,70 +1,69 @@
 # Inference Terminal
 
-The Inference Terminal is available as a test preview and in the source checkout; it is not in the stable npm release. It gives people and agents a local overview of an application’s models, providers, connections, inference activity, and compute. The selected repository or application path defines its scope. A coding agent can launch or read the terminal, but the coding harness’s own requests, tokens, and costs are outside that scope. Published `openmerit@0.1.5` does not include this command.
+The terminal gives people and agents a local overview of an application's models, services, connections, inference activity, and linked compute. The selected repository or application path defines its scope. Coding-harness requests, tokens, and costs are outside that scope.
 
-The terminal reads existing metadata independently of inference. It does not call a model, change a route, run evaluations, load or unload models, or store prompts and responses. Closing it does not stop your workloads. Collection consumes a small amount of local CPU, memory, and runtime API capacity; it is not zero-overhead monitoring.
+It reads existing evidence independently of inference. It does not call a model, change a route, run evaluations, load or unload models, or retain prompts and responses. Closing it does not stop your workloads. Collection uses local CPU, memory, and authorized runtime API capacity.
 
-## Share the sample
+## Install
 
-The [hosted sample preview](https://dash.openmerit.ai/) lets you explore the fictional enterprise environment in a browser without installing the terminal. It includes 40 agents, 140 tasks, and 21 models, with the same tabs and inspectors as the local interface. All identities, requests, costs, and hardware readings are illustrative. Shared links use the title **Inference Terminal by OpenMerit** and a dedicated preview image.
-
-The preview is accessible to anyone with the link and asks search engines not to index it. It does not connect to your machine, accept project uploads, make inference calls, or expose the local snapshot API. Its read-only `/api/sample` endpoint returns fictional data. Real environment collection runs locally through the test install or source-build commands below; the hosted page never runs collectors. Hosted sample refreshes allow up to 30 seconds for the large fictional response on slower connections; local snapshot requests retain their 5-second limit. Only one refresh request runs at a time, even when a transfer takes longer than the normal polling interval.
-
-## Install the test preview
-
-The terminal is delivered through the existing `openmerit` package under npm’s `preview` tag. Historical ranges are included in `0.1.6-preview.1` and later; the project-evidence corrections below require `0.1.6-preview.2` or later. Expanded endpoint discovery and the review corrections require `0.1.6-preview.3` or later. Repository code/configuration indexing and counts-only diagnostics require `0.1.6-preview.4` or later. Phased background indexing and incremental metadata reuse require `0.1.6-preview.5` or later. Requires **Node.js 22.19 or newer**, with npm available in your terminal. From your application's directory:
+Requires **Node.js 22.19 or newer** and npm. Stable `openmerit@0.1.6` includes the terminal:
 
 ```sh
-cd /path/to/your/project
-npm install -g openmerit@preview
+npm install -g openmerit
+cd /path/to/your/application
 openmerit dash
 ```
 
-The install uses the existing `openmerit` npm package, with the terminal bundled alongside its coordinator, protocol, and Pi adapter. It downloads a prebuilt test version. No Git checkout, build step, API key, or separate audit command is needed. Installation is global for your Node environment: it does not add a dependency, lockfile, or configuration to the application directory. It replaces any globally installed `openmerit` in the same npm prefix. This preview is separate from the stable package on npm; `npm install -g openmerit` still installs the stable release without `dash`.
+No Git checkout, build step, Pi installation, provider API key, or separate audit command is needed. The global install does not add dependencies or configuration to your application. Run the same install command to update, or `npm uninstall -g openmerit` to remove it. `npm ls -g openmerit --depth=0` shows the installed version; `npm view openmerit dist-tags` reports published channels.
 
-`openmerit dash` reads the current directory, starts a server bound to `127.0.0.1`, and opens its URL in your default browser after the first snapshot is ready in published previews through `0.1.6-preview.4`. From `0.1.6-preview.5`, it opens before collection finishes, as described below. Port 4310 is preferred; when occupied, the operating system chooses a free local port. The actual URL is always printed. macOS, Windows, and Linux desktop opening use the platform's default URL handler. SSH and headless Linux sessions print the URL instead; use a private SSH port forward to view a remote instance. A browser-launch failure does not stop collection.
+The CLI starts a server bound to `127.0.0.1` and opens the browser before initial collection finishes. Port 4310 is preferred; if occupied, the operating system chooses a free local port. The actual URL is printed. macOS, Windows, and desktop Linux use the default URL handler. SSH and headless sessions print the URL; use a private SSH port forward to view a remote instance. Browser-launch failure does not stop collection.
 
-Run the same install command to update the preview. Remove it with `npm uninstall -g openmerit`, or restore the stable package with `npm install -g openmerit@0.1.5`. Registry preview builds have a `-preview.` version suffix; `npm ls -g openmerit --depth=0` shows which one is installed. `npm view openmerit dist-tags` shows the published preview and stable versions. To replace an earlier hosted `-dash.` test build, run the npm install command above.
+If npm reports `EACCES`, use a user-owned Node installation/npm prefix rather than `sudo`. If the command is not found after installation, reopen the shell and check that npm's global executable directory is on `PATH`.
 
-If npm reports `EACCES`, use a user-owned Node installation/npm prefix rather than installing with `sudo`. If `openmerit` is not found after a successful install, reopen the terminal and check that your npm global executable directory is on `PATH`.
+The **source interface and hosted dashboard** follow the device's light/dark preference, including charts and inspectors, and update when that preference changes. There is no theme control or saved override. This appearance change is not included in npm 0.1.6.
 
-The page uses dark mode only. Keep the terminal command running while using the dashboard. No extra operating-system permission prompt is expected for readable project files and loopback runtime APIs. Files that your user cannot read are reported as unavailable. Supported request logs populate activity automatically; a repository with only model configuration can show its services but cannot supply missing request history.
+Keep the CLI running while using the dashboard. Files unreadable by your user are reported as unavailable. Configuration can identify services but cannot supply missing request history.
+
+## Hosted samples
+
+[dash.openmerit.ai](https://dash.openmerit.ai/) shows 200 fictional agents, 699 task IDs, 21 models, and 9.6 million requests over 30 days. The [before/after comparison](https://dash.openmerit.ai/demo) uses a separate fictional insurance scenario with 280 workers and 980 task IDs across fourteen workflows. See [the comparison details](#hosted-enterprise-sample-and-comparison) for selection rules, preference overrides, prices, and limitations.
+
+Hosted pages do not connect to your machine, accept project uploads, or run inference. Their public JSON endpoints return fictional data; the local snapshot API is not exposed. They request no search-engine indexing. The local CLI's sample selector uses a smaller 40-agent, 140-task example described below.
 
 ## Run from a source checkout
 
 With dependencies installed in the OpenMerit checkout:
 
 ```sh
-npm run dash
-npm run dash -- /path/to/your/project
+npm run dash -- /path/to/your/application
 ```
 
-`npm run dash` bundles the interface before starting. `npm run build` includes the executable and local web assets under `dist/terminal/`. Torph and Liveline are bundled locally. To install this source build for shell use, run `npm install -g .` from the checkout.
+`npm run dash` bundles the interface before starting. Without a path it reads the current directory. `npm run build` includes the executable and bundled assets under `dist/terminal/`. To install that build, run `npm install -g .` from the checkout.
 
-The shell command also accepts a path and explicit settings:
+## CLI options
 
 ```sh
-openmerit dash /path/to/your/project --port 4311 --interval 20
+openmerit dash /path/to/your/application --port 4311 --interval 20
 openmerit dash --no-open
 ```
 
 | Option | Behavior |
 | --- | --- |
-| `[path]` | Project directory; defaults to the current working directory |
-| `--port <number>` | Require this loopback port; fail if it is occupied. Without this option, use 4310 or a free port |
+| `[path]` | Selected application directory; defaults to the working directory |
+| `--port <number>` | Require this loopback port; fail if occupied |
 | `--interval <seconds>` | Collection interval from 10 to 30 seconds; defaults to 15 |
-| `--no-discovery` | Skip project-file and request-log discovery and additional runtime discovery for this run; explicitly declared runtimes and exports, explicitly linked machine context remain available |
-| `--no-open` | Start collection and print the URL without launching a browser |
-| `--json` | Print one snapshot and exit without starting an HTTP server |
-| `--diagnostics` | **0.1.6-preview.4+:** print repository-index coverage counts only, then exit; no browser, server, or endpoint probes |
-| `--demo` | Use an explicitly fictional environment; no local collectors run |
+| `--no-discovery` | Disable automatic project/index/log and additional runtime discovery; explicitly configured sources remain available |
+| `--no-open` | Print the URL without opening a browser |
+| `--json` | Print one snapshot and exit without an HTTP server |
+| `--diagnostics` | Print repository-index coverage counts, without endpoint probes, browser, or HTTP server |
+| `--demo` | Use only a fictional local sample; no local collectors run |
 | `--help` | Show usage |
 
-Use Ctrl+C to close the terminal. There is no persistent daemon or background scheduler. Collection runs only while the command is running. The terminal is separate from Pi's `/openmerit pause` and other orchestration commands.
+Ctrl+C stops collection. The terminal has no persistent daemon and is independent of Pi's pause and scheduling commands.
 
-## Repository indexing (0.1.6-preview.4+)
+## Repository indexing
 
-Version `0.1.6-preview.4` adds a bounded, local syntax index of application declarations. No repository access needs to be shared with OpenMerit, and no separate audit step is required. The index runs initially and every 60 seconds while the terminal is running. It creates no files in the application.
+A local background worker indexes supported application declarations without executing code or creating files in the application. It starts with collection and rechecks 60 seconds after a completed pass.
 
 The reader supports Python, JavaScript/TypeScript (including JSX/TSX), JSON, YAML, TOML, and project-local `.env*` files. It finds literal model/endpoint fields, conservative same-file variable and object references, environment references resolved from the nearest project-local dotenv directory, selected SDK call patterns, and enclosing function names. Unknown/private HTTP(S) endpoints remain named by their sanitized address; a custom host or port never establishes a vendor, runtime, deployment, or physical machine. Public Hub/download URLs do not establish an inference service. URLs found by this index are **never probed**; existing explicitly authorized runtime discovery remains separate.
 
@@ -74,23 +73,21 @@ The reader supports Python, JavaScript/TypeScript (including JSX/TSX), JSON, YAM
 
 The index does not execute or import project code, load shell files, inspect running processes, consult inherited shell variables, or fetch cloud accounts. It does not resolve cross-file imports, arbitrary expressions, template interpolation, configuration loading order, dynamic routers, YAML aliases, or multiline TOML values. Conditional values remain candidates; a fallback remains a fallback even if a runtime might choose it. Supported syntax is deliberately conservative. Models and task names are never inferred from prose, prompts, or model-name conventions.
 
-Reads stay within the selected directory, skipping symlinks, hidden directories, dependency/build folders, credential-named files, and request-log roots handled by the separate activity reader. In published `0.1.6-preview.4`, each scan visits at most 8,000 entries and eight nested directories, reads at most 400 supported files, 128 KiB per file and 4 MiB overall, and retains at most 2,000 declarations and 100 detailed coverage notes. Dotenv files are prioritized, then files are sorted by path. These bounds can leave a large repository partially indexed. Removing a declaration removes it after the next scan.
+The index skips symlinks, hidden directories, dependency/build folders, credential-named files, and request-log roots handled by the activity reader. It processes eligible files in continuing batches rather than imposing a repository-wide file, depth, byte, or declaration cap. Per-file and parser limits still apply; coverage reports excluded or unreadable material. Removing a declaration removes it after the next completed scan.
 
 The snapshot retains selected identifiers, relative file paths, line numbers, and sanitized endpoint addresses. It discards raw source text, prompt/response fields, credentials, URL credentials, query strings, fragments, and resource paths. Known dedicated resource subdomains are redacted. Structural paths such as `/v1` or `/api/v1` may remain. Local endpoint addresses, model names, and filenames can still be sensitive; the full snapshot is intended for local viewing.
 
-To share coverage without sharing the repository or its identifiers, run this option from the project with **0.1.6-preview.4 or later**:
+To inspect coverage counts without sharing the repository or its identifiers, run:
 
 ```sh
 openmerit dash --diagnostics
 ```
 
-It prints only format/read/skip/declaration/issue counts and scan limits. It does not include paths, variable names, model names, endpoint identities, file contents, or credentials, and sends nothing itself. The user chooses whether to copy the output. Detailed issue counts cover the retained notes; the summary reports the total unresolved count.
+It prints only format/read/skip/declaration/issue counts and scan limits. It does not include paths, variable names, model names, endpoint identities, file contents, or credentials, and sends nothing itself. The user chooses whether to copy the output. Issue totals include all unresolved notes; the detailed list retains at most 100 notes.
 
 `--no-discovery` or `"discovery": false` disables the index. Request history still requires supported application logs or explicit exports. An inactive project can expose its declarations without having retained any usage history; code cannot reconstruct missing requests, tokens, latency, or spend.
 
-## Phased repository indexing (0.1.6-preview.5+)
-
-Version `0.1.6-preview.5` replaces the repository-wide entry, depth, file-count, total-byte, and declaration limits above with continuing batches. Versions through `0.1.6-preview.4` retain the earlier bounds.
+### Background indexing and refresh
 
 - **Open immediately:** the loopback server listens before initial collection. The browser shows “Opening your inference terminal” while sources load, without displaying empty metrics as measured zero. Initial collection failures are disclosed and retried on the next collection tick.
 - **Discover, index, link:** a dedicated worker walks eligible directories, then prioritizes dotenv files, structured configuration, and inference-related source names. The initial index publishes usable declarations in batches. The interface shows discovered files while the total is unknown, then checked/total files. Completion means the eligible-file pass finished; exclusions and unresolved syntax still appear in coverage.
@@ -104,9 +101,7 @@ Nothing is written into the application, and no persistent index or source-conte
 
 These changes apply to **repository declarations only**. The separate request-log, runtime, hardware-export, and configuration-inventory limits elsewhere in this guide still apply. They do not recover missing historical usage or make a log importer unlimited.
 
-## Review corrections (0.1.6-preview.3)
-
-Version `0.1.6-preview.3` includes the following corrections; earlier previews retain their previous behavior:
+### Request and inventory consistency
 
 - JSONL readers check bounded content fingerprints before resuming from a saved offset. A changed checkpoint resets the cache and imports the current file, including when it was truncated and regrew between polls. Each cached file adds at most 8 KiB of verification reads per poll; only hashes are retained. These checks cover the initial consumed bytes and the latest read boundary, not every byte of a large historical file. Rewrites that preserve both sampled regions cannot be distinguished from appends; append-only logs or rotation to a new file remain the reliable format.
 - Copies of one request that disagree on `completed` versus `failed` expose a `status` conflict in request details and the dashboard warning. Source precedence still determines the displayed outcome; a normal `running` to terminal update is not a conflict.
@@ -115,11 +110,11 @@ Version `0.1.6-preview.3` includes the following corrections; earlier previews r
 
 ## Automatic application discovery
 
-**Evidence corrections (0.1.6-preview.2):** project declarations now establish service and endpoint inventory, explicit host links establish physical placement, and task summaries remain separate from requests. Missing status, currency, and cost basis stay unknown. Inventory count limits disclose omissions, and missing request evidence is distinguished from measured zero usage. Earlier `0.1.6-preview.1` retains the previous automatic probes and defaults. Update the package and restart `openmerit dash` to apply these corrections.
+Project declarations establish service and endpoint inventory; explicit host links establish physical placement. Task summaries remain separate from request measurements. Missing status, currency, and cost basis stay unknown, and inventory/read limits appear in source coverage.
 
 Discovery runs as part of `openmerit dash`; no separate audit command or exporter is needed for supported sources. The first snapshot checks the selected project and its declared loopback runtime endpoints. Project declarations and previously unresponsive addresses are checked again every 60 seconds. Responding runtimes, OS readings, project request logs, and existing exports refresh at the normal 10–30-second collection interval.
 
-Through `0.1.6-preview.3`, configuration discovery reads only four fixed files: `.env`, `.env.local`, `package.json`, and `requirements.txt`, each limited to 128 KiB and required to resolve to a regular file inside the project. It does not recursively index source code, execute project code, source shell files, or expand environment expressions. Supported SDK declarations are shown as **Detected** source hints; an installed SDK is not proof of a service connection or request. Supported literal `.env` declarations establish project configuration evidence. Inherited shell credentials and endpoint variables are not added to project services; the terminal cannot establish which project owns them. For applications configured only through their launch environment, declare the services explicitly in `.openmerit/terminal.json` or supply recorded request metadata. Each file is independent evidence; discovery does not pretend to know an application's loading order. Credential contents and unrelated settings are discarded before metadata is retained or returned.
+Alongside the repository index, the bounded provider/runtime discovery reader checks four root files: `.env`, `.env.local`, `package.json`, and `requirements.txt`, each limited to 128 KiB and required to resolve to a regular file inside the project. This reader does not execute project code, source shell files, or expand environment expressions. Recursive source/configuration references are handled by the separate syntax index described above. Supported SDK declarations are shown as **Detected** source hints; an installed SDK is not proof of a service connection or request. Supported literal `.env` declarations establish project configuration evidence. Inherited shell credentials and endpoint variables are not added to project services; the terminal cannot establish which project owns them. For applications configured only through their launch environment, declare the services explicitly in `.openmerit/terminal.json` or supply recorded request metadata. Each file is independent evidence; discovery does not pretend to know an application's loading order. Credential contents and unrelated settings are discarded before metadata is retained or returned.
 
 Local runtime probes require an endpoint in the selected project’s `.env` or `.env.local`, or an explicit runtime in `.openmerit/terminal.json`. No standard ports are probed automatically. SDK dependencies, runtime names in historical records, and inherited shell endpoint settings alone do not authorize a probe. A recorded request remains visible without discovering any additional runtime models. Supported API endpoint variables are listed below; `OLLAMA_HOST` and `OLLAMA_BASE_URL` identify native Ollama endpoints. `OLLAMA_HOST` may use `127.0.0.1:11434` without the HTTP scheme. Endpoint paths must be empty or `/v1`; credentials, queries, fragments, and non-loopback hosts are rejected. At most eight discovered origins are checked without authentication or redirects. Compatible endpoints use read-only `GET /v1/models` and `GET /metrics`; native Ollama declarations use `GET /api/tags` and `GET /api/ps`. Unknown or nonresponding candidates do not become service rows. Configured origins are not probed twice. A compatible catalog supplies model availability; recognized vLLM counters can also identify vLLM. A port number alone never establishes LM Studio or vLLM identity, so an otherwise unidentified compatible runtime is named by its loopback origin. Bounded inventory from a project endpoint can be shown, including available models that have no recorded project usage. Catalogs are limited to 100 entries per response; exceeded limits mark the source Partial, include omitted counts, and display an inventory-coverage notice. API compatibility and a loopback address do not establish a runtime role, physical host, or self-hosted serving mode. Inventory and shared runtime counters do not establish that the selected application used every model. Removing an endpoint declaration removes its discovered inventory on the next 60-second discovery pass. This is bounded project-linked discovery, not network or remote-host scanning.
 
@@ -143,15 +138,15 @@ The reader checks at most 2,048 directory entries and the newest 128 candidate f
 
 ### Application scope
 
-The terminal does not discover or read Pi, Codex, Claude Code, OpenCode, or other coding-harness histories. Older preview builds offered Pi history access; that reader and the `--access` / `--revoke-access` options have been removed. Existing `~/.openmerit/terminal-access.json` grants are ignored, left untouched, and cannot enable history collection. Restart an older terminal process after upgrading to apply the new boundary.
+The terminal does not discover or read Pi, Codex, Claude Code, OpenCode, or other coding-harness histories. Application scope does not include coding-assistant sessions or credentials.
 
 Application agents, background jobs, and evaluations remain in scope when they produce supported request evidence. The `agent` scope means an agent in the application, not the coding assistant developing it. Explicit exports and discovered request logs must belong to the application; records explicitly marked `scope: "development"` are rejected. An unlabeled API response cannot establish whether it came from an application or a coding tool, so the terminal does not guess its purpose from a model or agent name. Keep development logs separate from application request sources.
 
 Configuration identifies declared services; it cannot establish past executions or costs. Local runtime inventory and whole-machine counters can describe shared infrastructure and are not attributed exclusively to the selected application. The collector does not retrieve cloud account usage, inspect arbitrary processes, or connect to a remote deployment from its source code alone. Applications without a supported request source can use the optional activity export below.
 
-## Historical activity (0.1.6-preview.1)
+## Historical activity
 
-Preview `0.1.6-preview.1` adds **7d**, **30d**, and **All time** alongside 1h, 6h, and 24h. **All time** is the default. It shows all retained, supported request evidence without an age cutoff, including logs from an application that is no longer running. The collector and project-log readers no longer discard records merely because they are more than 24 hours old. These changes are not in `0.1.6-preview.0`.
+Choose **1h**, **6h**, **24h**, **7d**, **30d**, or **All time**. **All time** is the default. It shows all retained, supported request evidence without an age cutoff, including logs from an application that is no longer running. The collector and project-log readers retain supported older records within their read/cache limits.
 
 The date range below the page heading shows the earliest and latest retained request, not the project creation date. All time charts span those recorded dates; an inactive project's last request stays dated in the past. Longer ranges use calendar labels and interval units appropriate to their span. Overview totals, models, services, maps, agent/task details, and activity use the same selected range. Hardware and capacity continue to show their latest samples independently of the activity range.
 
@@ -172,13 +167,13 @@ Pages, detail panels, and inventory cards lead directly with their title. Suppor
 
 Use Command+K or Control+K to find a view, model, source, or reported agent/task. Escape closes details. Keyboard actions remain immediate, and reduced-motion preferences disable movement transitions.
 
-Dropdowns share a dark menu, inset chevron, and neutral focus and selection states. For the agent and host-location selectors, use Enter, Space, or an arrow key to open; arrows, Home/End, or typing a name prefix move through options. Enter or Space confirms, Escape cancels, and Tab confirms and continues through the page. Clicking outside dismisses the menu. An open menu preserves its options and position during passive polling; underlying collection continues.
+Dropdowns follow the interface's color scheme and share an inset chevron with neutral focus and selection states. For the agent and host-location selectors, use Enter, Space, or an arrow key to open; arrows, Home/End, or typing a name prefix move through options. Enter or Space confirms, Escape cancels, and Tab confirms and continues through the page. Clicking outside dismisses the menu. An open menu preserves its options and position during passive polling; underlying collection continues.
 
 When request metadata includes stable agent or task IDs, the overview leads directly with their counts for the selected window, without an “Observed” prefix. Select a count to browse those agents or tasks and inspect their request totals, models, connections, and available measurements. Records without these IDs do not contribute to those counts. These are activity summaries, not an agent registry or a task lifecycle tracker; a completed inference request does not establish that its task is complete. The overview previews up to twelve models and ten recent requests. The Models view contains the full retained model inventory; Activity lists the latest 100 requests.
 
 ### Where names come from
 
-The terminal does not infer agent roles, task descriptions, service identities, or physical locations from arbitrary source code, prompts, or model output. Being present in a repository does not establish that an agent ran. The terminal reads supported metadata exports, explicit configuration, runtime inventory, and the operating system. Version `0.1.6-preview.4` also indexes supported code/configuration declarations as references; those references do not create running agents or request history. Application logs or exports must supply their existing request identities; the terminal does not generate nicer descriptions to fill gaps.
+The terminal does not infer agent roles, task descriptions, service identities, or physical locations from arbitrary source code, prompts, or model output. Being present in a repository does not establish that an agent ran. The terminal reads supported metadata exports, explicit configuration, runtime inventory, and the operating system. The syntax index records supported code/configuration declarations as references; those references do not create running agents or request history. Application logs or exports must supply their existing request identities; the terminal does not generate nicer descriptions to fill gaps.
 
 | Identity | Source and fallback |
 | --- | --- |
@@ -260,17 +255,17 @@ ZDR means an endpoint/account retention policy, not a property of weights. This 
 
 Both sides calculate token cost from published standard USD input/output rates checked on 10 October 2026. **Workload decisions** shows each Before/After model, serving service, qualifying-alternative count, per-workload Before/After token cost for the selected window, and preference match. Choices that differ from Default appear first, followed by workloads with more qualifying alternatives. **Swaps & evidence** exposes selected and rejected candidates, rates, public benchmark comparisons and methodology. Inputs are below 33K tokens per represented request; the scenario assumes uncached text, no batch discount, and no regional premium, tool charge, gateway fee, tax or infrastructure cost. Token counts, including billed reasoning output where applicable, are held fixed for comparison; actual tokenization, reasoning budgets and generated output can differ. The broader sample leaves costs unknown when no verified token price is included. It never treats local infrastructure as free.
 
-The hosted browser builds deterministic fictional records from a small same-origin seed response. `/api/sample` and `/api/demo?stage=before|after&preference=default|zdr|open|closed|usa|china` expose complete sample snapshots; `/api/sample-seed` supplies the recipe version and timestamp. The comparison metadata includes plan feasibility, model-versus-service changes, preference matches, `equivalentPreferences` for identical model/service assignments, and window totals. An incomplete After snapshot keeps `simulation.feasible: false`, contains request/model/deployment rows only for qualifying assignments, and has no projected complete-plan After cost. Its unresolved assignments and full Before totals remain in comparison metadata. Each window reports both baseline `requests` and `qualifiedRequests`; individual qualifying records and workload totals retain their After costs. Unresolved assignments retain `after: null`, without substituting their open-weight baseline. Unknown preferences fall back to default. Stage and preference survive tab navigation and are shareable in the page URL. No collector, local files, credentials or inference provider is contacted. The comparison holds its dataset fixed while you explore; reload to start a fresh scenario. These hosted changes do not change the published npm preview.
+The hosted browser builds deterministic fictional records from a small same-origin seed response. `/api/sample` and `/api/demo?stage=before|after&preference=default|zdr|open|closed|usa|china` expose complete sample snapshots; `/api/sample-seed` supplies the recipe version and timestamp. The comparison metadata includes plan feasibility, model-versus-service changes, preference matches, `equivalentPreferences` for identical model/service assignments, and window totals. An incomplete After snapshot keeps `simulation.feasible: false`, contains request/model/deployment rows only for qualifying assignments, and has no projected complete-plan After cost. Its unresolved assignments and full Before totals remain in comparison metadata. Each window reports both baseline `requests` and `qualifiedRequests`; individual qualifying records and workload totals retain their After costs. Unresolved assignments retain `after: null`, without substituting their open-weight baseline. Unknown preferences fall back to default. Stage and preference survive tab navigation and are shareable in the page URL. No collector, local files, credentials or inference provider is contacted. The comparison holds its dataset fixed while you explore; reload to start a fresh scenario. The hosted scenarios are separate from local collection; exploring them does not change your installed package or application.
 
 ### Optional map preview
 
-The test preview includes an opt-in React Flow + ELK map experiment. Add `?map=flow` before the page hash in your local terminal URL (for example, `http://127.0.0.1:4310/?map=flow#overview`). To try fictional enterprise data instead, use `?sample=1&map=flow#overview`. The existing map remains the default; **Original map** removes the preview flag immediately. No data migration or server restart is needed to switch views.
+The terminal includes an opt-in React Flow + ELK map experiment. Add `?map=flow` before the page hash in your local terminal URL (for example, `http://127.0.0.1:4310/?map=flow#overview`). To try fictional enterprise data instead, use `?sample=1&map=flow#overview`. The existing map remains the default; **Original map** removes the preview flag immediately. No data migration or server restart is needed to switch views.
 
 The preview keeps the existing card dimensions and uses ELK to arrange all collapsed groups. Layout is recalculated only when the set of nodes or relationships changes, not when request counts refresh. The graph scrolls at a fixed scale rather than automatically zooming to fit.
 
 **Browse all** opens a searchable inventory of every workload, entry connection, and model/service pair in the selected scope. Selecting a stack filters that inventory to its exact members; the visible result count always shows the filter coverage. Selecting a member spotlights its actual recorded paths and brings a matching member to the front of each related stack without expanding the diagram. This does not change the total request counts. **Details** opens the existing inspector; **Clear spotlight** or Escape clears the selection. The browser sits beside the map on wide screens and below it on narrower screens, with independently scrolling lists. Keyboard users can navigate its tabs with arrows, Home, and End.
 
-This is a presentation experiment within the preview, not a new data source. Its separately bundled scripts and styles are loaded from the local server only when the preview is selected. It makes no inference calls and adds no collection permissions. There is additional download and initial layout cost; very large and densely connected environments still need user evaluation. The original map remains available for comparison and rollback.
+This is an optional presentation experiment, not a new data source. Its separately bundled scripts and styles are loaded from the local server only when the preview is selected. It makes no inference calls and adds no collection permissions. There is additional download and initial layout cost; very large and densely connected environments still need user evaluation. The original map remains available for comparison and rollback.
 
 ## Collection sources
 
@@ -378,7 +373,7 @@ Configuration, inventory, and activity evidence are distinct. A configured servi
 
 ### Inference services and model creators
 
-The terminal recognizes configuration evidence for Baseten, Groq, and Cerebras alongside the existing services below. Expanded coverage in `0.1.6-preview.3` is documented under **Additional inference endpoints**. The configuration reader described here uses supported literal declarations in the selected project’s `.env` and `.env.local` files. Version `0.1.6-preview.4` additionally indexes supported code and nested configuration as described under Repository indexing. Global shell variables do not establish project ownership. Shell histories and credential stores are not scanned; source indexing follows the bounded syntax rules above. A configured service does not establish an active connection, model inventory, usage, available capacity, or a hardware allocation.
+The terminal recognizes configuration evidence for Baseten, Groq, and Cerebras alongside the existing services below. The full set is documented under **Additional inference endpoints**. The configuration reader described here uses supported literal declarations in the selected project’s `.env` and `.env.local` files. The repository index additionally reads supported code and nested configuration as described under Repository indexing. Global shell variables do not establish project ownership. Shell histories and credential stores are not scanned; source indexing follows the bounded syntax rules above. A configured service does not establish an active connection, model inventory, usage, available capacity, or a hardware allocation.
 
 | Service | Credential-variable names | Optional endpoint-variable names |
 | --- | --- | --- |
@@ -400,7 +395,7 @@ For example, an export may report `model: "gpt-oss-120b"`, `modelCreator: "OpenA
 
 ### Additional inference endpoints
 
-Version `0.1.6-preview.3` recognizes 39 cloud/API/router/gateway service identities, including the two Hugging Face products described below. Earlier previews do not include this expansion. Detection still reads only supported literal declarations in the selected project's `.env` and `.env.local`; the file's presence does not prove the application loaded it. No installation, API request, account access, or additional permission is needed to recognize these declarations.
+The provider/runtime discovery reader recognizes 39 cloud/API/router/gateway service identities, including the two Hugging Face products described below. It reads supported literal declarations in the selected project's `.env` and `.env.local`; the file's presence does not prove the application loaded it. The separate repository index can identify additional nested declarations and conservative source references without probing their URLs. No installation, API request, account access, or additional permission is needed to recognize these declarations.
 
 Any recognized endpoint can be supplied through `OPENAI_BASE_URL` or `OPENAI_API_BASE`, even when the application uses an OpenAI-compatible SDK for another service. The following additional variable names are accepted. Endpoint aliases are supported application conventions, not a claim that every vendor SDK reads them automatically. A nonempty credential declaration is recorded only as **Configured**; its value is discarded. An endpoint override suppresses that group's credential-based vendor fallback, including when the URL is unknown or malformed.
 
@@ -460,7 +455,7 @@ Configured services add no historical requests, model catalog, agent names, toke
 
 ### Hugging Face endpoints
 
-Version `0.1.6-preview.3` recognizes literal endpoint declarations in the selected project's `.env` and `.env.local`. Earlier previews do not include this support.
+The provider/runtime reader recognizes literal endpoint declarations in the selected project's `.env` and `.env.local`.
 
 | Endpoint host | Service in the terminal | Type |
 | --- | --- | --- |
@@ -480,7 +475,7 @@ These declarations identify two configured services; they do not establish that 
 
 The terminal makes no remote calls, reads no Hugging Face token cache, and fetches no account history or model catalog. Models, requests, tokens, costs, agents, and deployment links still require recorded metadata or explicit inventory. Supported request logs can use `provider: "Hugging Face Endpoints"` or `route: "Hugging Face Router"` to identify the corresponding service. A generic `Hugging Face` name remains unclassified; the terminal does not choose a product or serving provider for it. The two products share a locally bundled official logo but remain separate service identities.
 
-The recognized formats follow Hugging Face's [environment-variable documentation](https://huggingface.co/docs/huggingface_hub/en/package_reference/environment_variables), [dedicated endpoint guide](https://huggingface.co/docs/huggingface_hub/guides/inference_endpoints), and [inference router documentation](https://huggingface.co/docs/inference-providers/index). In `0.1.6-preview.3`, URLs in source code and arbitrary environment-variable names are outside the declaration scan. Version `0.1.6-preview.4` can index supported literal source declarations and custom dotenv names referenced by supported inference fields; dynamic expressions and cross-file imports remain unresolved.
+The recognized formats follow Hugging Face's [environment-variable documentation](https://huggingface.co/docs/huggingface_hub/en/package_reference/environment_variables), [dedicated endpoint guide](https://huggingface.co/docs/huggingface_hub/guides/inference_endpoints), and [inference router documentation](https://huggingface.co/docs/inference-providers/index). The repository index also reads supported literal source declarations and custom dotenv names referenced by supported inference fields; dynamic expressions and cross-file imports remain unresolved.
 
 ### Deployments and shared capacity
 
@@ -623,7 +618,7 @@ There are no favicon lookups, third-party image services, or remote asset reques
 
 Collectors run once per interval with no overlapping collection cycles. Each runtime request has a timeout and a response-size bound. Browser refreshes read the cached snapshot, so additional tabs do not multiply runtime polling. The interface shows a delayed-collection notice when its snapshot is older than three intervals. A successful source check does not mean that source has recent inference activity.
 
-File readers handle partial lines, split UTF-8 writes, and ordinary file rotation. Activity and audit file reads are bounded to 4 MiB, and each reader retains up to 10,000 unique records. Discovered project logs have the stricter per-file and aggregate limits described above. A large initial file imports its tail. Truncation and malformed records are disclosed in source details. From `0.1.6-preview.1`, valid retained records have no age cutoff; future timestamps remain excluded. The released `0.1.6-preview.0` still limits results to the most recent 24 hours. An unavailable or removed file is not kept looking connected.
+File readers handle partial lines, split UTF-8 writes, and ordinary file rotation. Activity and audit file reads are bounded to 4 MiB, and each reader retains up to 10,000 unique records. Discovered project logs have the stricter per-file and aggregate limits described above. A large initial file imports its tail. Truncation and malformed records are disclosed in source details. Valid retained records have no age cutoff; future timestamps remain excluded. An unavailable or removed file is not kept looking connected.
 
 Inventory bounds remain in place: eight explicit runtimes, eight discovered endpoint candidates after deduplication, 100 declared inventory entries, 200 deployments, 100 declared/exported pools, 16 pool references per inventory/deployment entry, 100 models per endpoint catalog or native Ollama list, 64 exported hosts, 16 accelerators and 100 loaded-model entries per host. Reaching a count bound with additional entries sets **Partial** coverage and reports omitted counts in Sources; the dashboard displays **Inventory is incomplete**. Retained counts mean entries in view, not complete environment totals. Oversized files or responses remain unavailable rather than being silently accepted.
 
@@ -645,7 +640,7 @@ From the checkout:
 node packages/terminal/src/cli.mjs dash /path/to/project --json
 ```
 
-While the server is running, `GET /api/snapshot` returns the cached JSON object. Schema version 1 contains `mode`, `observedAt`, `interval`, `project`, `models`, `inventory`, `records`, `taskSummaries`, `sources`, `runtimeStats`, `deployments`, `capacityPools`, `hosts`, `machine`, and `discovery`. The optional `discovery` object reports whether discovery is enabled, its last check time, the 60-second configuration discovery interval, candidate count, contributing request sources, and reconciliation coverage. Request records can include `sourceIds`, a supported log `evidenceFormat`, and `conflictingFields`. Colliding local IDs from demonstrably distinct records receive a stable namespaced ID while retaining `originalId`. The host, deployment, and pool fields extend the preview version-1 snapshot; older snapshots without them show unknown coverage. `machine` remains the current host for compatibility; `hosts` is the retained project-linked hardware inventory. Sources affected by inventory limits expose `truncated: true` and a `limits` array of `{ collection, limit, omitted }`; their state is `partial`. The UI shows an inventory-coverage notice and per-source omitted counts. Task summaries never establish request coverage. Unknown status, cost basis, and currency are represented by `"unknown"`. Fields containing unsupported measurements use `null` or are absent. `GET /api/sample` returns only fictional data. `GET /api/info` describes the process's mode and interval.
+While the server is running, `GET /api/snapshot` returns the cached JSON object. Schema version 1 contains `mode`, `observedAt`, `interval`, `project`, `models`, `inventory`, `records`, `taskSummaries`, `sources`, `runtimeStats`, `deployments`, `capacityPools`, `hosts`, `machine`, and `discovery`. The optional `discovery` object reports whether discovery is enabled, its last check time, the 60-second configuration discovery interval, candidate count, contributing request sources, and reconciliation coverage. Request records can include `sourceIds`, a supported log `evidenceFormat`, and `conflictingFields`. Colliding local IDs from demonstrably distinct records receive a stable namespaced ID while retaining `originalId`. The host, deployment, and pool fields are optional version-1 snapshot fields; snapshots without them show unknown coverage. `machine` remains the current host for compatibility; `hosts` is the retained project-linked hardware inventory. Sources affected by inventory limits expose `truncated: true` and a `limits` array of `{ collection, limit, omitted }`; their state is `partial`. The UI shows an inventory-coverage notice and per-source omitted counts. Task summaries never establish request coverage. Unknown status, cost basis, and currency are represented by `"unknown"`. Fields containing unsupported measurements use `null` or are absent. `GET /api/sample` returns only fictional data. `GET /api/info` describes the process's mode and interval.
 
 The server binds to `127.0.0.1`, accepts read-only GET requests, checks Host and Origin, rejects cross-site browser requests, and serves only its bundled assets and explicit API routes. It provides no general file-serving endpoint. Local processes and other users with access to this machine may still reach the loopback service; this is not a multi-user authentication boundary.
 

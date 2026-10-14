@@ -1,6 +1,16 @@
 # Website FAQ maintenance
 
-The public FAQ lives in `site/index.html`. Its answers describe the published package, including known limitations, rather than planned capabilities or unreleased fixes.
+The public FAQ lives in `site/index.html`. Its answers describe implemented behavior verified against main and the published package, including known limitations. Appearance differences between npm 0.1.6 and the hosted/source interface are identified separately in the terminal guide.
+
+## Current factual review — 14 October 2026
+
+Reviewed main against the published `openmerit@0.1.6` artifact and the hosted dashboard/demo. Stable installation includes `openmerit dash`; Pi is optional for the separate comparison workflow. The homepage now introduces the standalone terminal and links the demo guide, which distinguishes fictional hosted samples from the recorded player retained in main.
+
+Updated background scheduling, durable pause, challenger-budget accounting, and terminal data-handling claims. The macOS LaunchAgent requires confirmed persistent execution and infrastructure permission, a logged-in user, and headless Pi authentication. Pause gates automatic work but does not cancel active intents or disable explicit commands. Budget admission and result validation use reported challenger costs; they are not provider billing controls. The terminal indexes supported source/configuration declarations, reads existing application evidence, and retains selected metadata in memory. It does not invoke the coordinator, make inference calls, or mutate model configuration.
+
+Removed obsolete 0.1.5 comparisons and preview release chronology from current public guides. Retained uncertainty, incomplete coverage, supervised-validation limits, and npm-versus-hosted appearance disclosure. The following dated entries are historical records, not the current release contract. The docs and website were subsequently published on 14 October; npm was not changed. See the [publication record](site-publication-2026-10-14.md). Direct root-configuration deployments still require production-source reconciliation.
+
+## Historical reviews
 
 Last factual review: 2026-09-23, against npm `openmerit@0.1.5`, the Pi 0.87 adapter, and the current source. The FAQ contains 13 questions. The earlier audit reproduced a task-triggered assessment while `/openmerit status` reported paused and confirmed the same dispatch path in the published package.
 
@@ -19,11 +29,11 @@ The experimental `npm run demo` sandbox is a repository-local live-provider demo
 | `faq-evidence` | Required samples; unresolved candidates; evidence trust | Core feasibility and frontier verification, `docs/metrics-and-evidence.md`, `docs/security.md` |
 | `faq-approval` | Opt-in automation; zero-capable graduation threshold; post-swap evaluation | Core `nextImprovementAction`, `packages/protocol/src/schemas.ts` (`SupervisedGraduationPolicySchema`), Pi `approve` command |
 | `faq-regressions` | Post-swap regression handling; conditional rollback | Core `interpretIntentResult` and `nextImprovementAction`, `docs/lifecycle.md` |
-| `faq-background` | Active-session signals; no built-in persistent scheduler | Pi `PI_HARNESS_DESCRIPTOR`, core `buildAutomationPlan`, `docs/automation.md` |
+| `faq-background` | CLI lifetime; authorized macOS LaunchAgent; other-platform gaps; product-validation limits | Pi `PI_HARNESS_DESCRIPTOR`, core `buildAutomationPlan`, `docs/automation.md` |
 | `faq-pause` | Which automatic dispatches stop; restart behavior; active work | Pi `reportAutomationSignal`, `createInitialUiState`, completion handler and `pause` command; `docs/operations.md` |
 | `faq-data` | Project files; Pi session entries; harness/provider data flows | `packages/core/src/store.ts`, Pi `appendEntry` and `privateIntentMessage`, `docs/security.md` |
 | `faq-cost` | License; npm availability; provider and infrastructure costs | `LICENSE`, published npm metadata, harness execution path |
-| `faq-budget` | Budget passed to harness; absence or presence of metering/cutoffs | Core `createOpenMeritIntent`, budget consumers across `packages/` |
+| `faq-budget` | Reported challenger ledger, admission/result checks, separate costs, no independent provider-billing cutoff | Core `createOpenMeritIntent`, budget consumers across `packages/` |
 | `faq-readiness` | Implemented, tested, and product-validated behavior | `docs/testing.md`, `docs/roadmap.md`, actual product-trial evidence |
 
 ## Review during releases and website updates
@@ -230,3 +240,7 @@ Reviewed the hosted comparison's presentation. The leading dark panel makes stag
 ## Primary domain migration — preparation, 12 October 2026
 
 The `.ai` migration changes hostnames and mail configuration, not product behavior or readiness. Existing homepage FAQ claims remain unchanged. The protected memo, OTP limits, reader data, and interactive demo must be preserved from the deployed Worker because this checkout lacks parts of the current production source. See [migration operations and verification](site-domain-migration.md) for cutover status; DNS preparation alone does not establish successful publication or email delivery.
+
+## Automatic light and dark appearance — unreleased source, 14 October 2026
+
+Reviewed homepage FAQ claims against the appearance-only change. Device-driven colors affect website reading surfaces, demos, and the Inference Terminal, including charts and overlays. They add no saved theme preference, inference calls, collection, routing, permissions, or billing behavior. No FAQ wording change is required. The terminal guide separates the unreleased source appearance from published preview.5. Website/npm publication is not implied by local builds; the main-app source divergence and integration boundary are recorded in [theme maintenance](site-themes.md).

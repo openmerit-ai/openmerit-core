@@ -1,40 +1,36 @@
 # OpenMerit documentation
 
-OpenMerit helps your coding harness compare models against the work your product needs to do. You define what matters; the harness gathers measurements and tests candidates; OpenMerit coordinates the process and checks the returned results.
+These guides describe the implementation on **main**. The standalone Inference Terminal is included in stable npm `openmerit@0.1.6`; interface changes available in source and the hosted dashboard but absent from that npm release are identified separately. The website, hosted samples, and npm package are deployed independently.
 
-The current release is intended for supervised trials with Pi. Start with a representative task and working evaluations before relying on automatic model changes.
+## See your inference environment
 
-## Start with your product
-
-Install the extension in Pi, then open your product repository:
+With Node.js 22.19 or newer:
 
 ```sh
-pi install npm:openmerit
+npm install -g openmerit
+cd /path/to/your/application
+openmerit dash
 ```
 
-Interactive setup asks Pi to establish your task requirements, evaluation budget, automation permissions, and measurements. Follow the [getting started guide](getting-started.md), then work through a [first supervised trial](first-trial.md).
+The terminal shows application services, model declarations, recorded requests, and linked compute. It reads supported local evidence, needs no Pi installation or provider API key, and makes no inference calls or model changes. Configuration can identify declared services; actual activity requires existing supported logs or exports.
 
-## Explore the demos
+Start with [installation and setup](getting-started.md) or the [Inference Terminal guide](inference-terminal.md). Explore the [hosted sample](https://dash.openmerit.ai/) and [before/after dashboard demo](https://dash.openmerit.ai/demo) without connecting your machine. The [demo guide](demo.md) explains their fictional data and comparison limits.
 
-The [Demo section](demo.md) explains how each prepared example works, from a single ticket-classification call to a multi-model agent workflow. Watch the recorded comparisons and inspect their inputs, grading rules, model routes, and evidence.
+## Evaluate model changes with Pi
 
-## Understand the decisions
+The separate Pi 0.87 integration asks a coding harness to establish evaluations, gather application measurements, and test candidates. OpenMerit coordinates the approved lifecycle, records evidence references, validates structured results and frontier conformance, and requests authorized changes. The harness executes the work; the terminal does not perform this workflow.
 
-OpenMerit compares candidates against the objectives you confirm, such as quality, cost, and latency. Several models may offer useful tradeoffs. A cheaper model is not automatically a better fit.
+Follow [Pi setup](getting-started.md#set-up-model-comparisons-with-pi), then [your first supervised trial](first-trial.md).
 
-- [Metrics and evidence](metrics-and-evidence.md) explains which measurements and samples a comparison needs.
-- [Comparisons and swaps](lifecycle.md) follows a baseline through challenger trials, approval, and post-swap checks.
-- [Budgets and permissions](budgets.md) describes the limits you give the harness and where enforcement depends on it.
-- [Automatic checks](automation.md) explains when work becomes due and what needs an external scheduler.
+- [Metrics and evidence](metrics-and-evidence.md): measurements, sample requirements, and readiness.
+- [Comparisons and swaps](lifecycle.md): baseline, challenger trials, approval, verification, and rollback.
+- [Budgets and permissions](budgets.md): challenger accounting and provider-spend limits.
+- [Automatic checks](automation.md): durable signals, cadence, and authorized macOS scheduling.
 
-## Operate with visibility
+## Operate and troubleshoot
 
-Use [commands](commands.md) to inspect status and request work. [Project files and logs](operations.md) explains what is stored, and [troubleshooting](troubleshooting.md) covers common setup and evidence problems.
-
-OpenMerit checks structured results and model comparisons. It relies on the harness to execute the work and provide honest evidence. Read the [security notes](security.md) and [current limitations](roadmap.md) before enabling automation.
+[Commands](commands.md) and [project files and logs](operations.md) explain status, pause, diagnostics, and recovery. [Troubleshooting](troubleshooting.md), [security and data](security.md), and [current limitations](roadmap.md) describe the boundaries to check before relying on automation.
 
 ## Build an integration
 
-Pi 0.87 is the only implemented adapter today. The core and protocol can support other harnesses through an adapter.
-
-Start with the [architecture](architecture.md), then the [adapter guide](adapter-guide.md). The [Pareto specification](pareto-spec.md) defines the comparison rules, and [testing and validation](testing.md) explains the evidence behind implementation claims.
+Pi is the implemented coding-harness adapter. Other harnesses can implement the protocol and coordinator boundary described in [architecture](architecture.md) and [the adapter guide](adapter-guide.md). The [Pareto specification](pareto-spec.md) defines comparison rules; [testing and validation](testing.md) distinguishes automated coverage from product evidence.

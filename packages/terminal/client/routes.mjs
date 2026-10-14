@@ -1,11 +1,11 @@
 import { requestCount, requestWeight } from './request-count.mjs';
 // One palette and vocabulary for paths throughout the terminal.
 export const ROUTES = {
-  direct: { label: 'Direct API', short: 'Direct API', color: '#6387ff' },
-  local: { label: 'Local runtime', short: 'Local', color: '#d4b185' },
-  router: { label: 'Router', short: 'Router', color: '#b39bdd' },
-  gateway: { label: 'Gateway', short: 'Gateway', color: '#45d3e3' },
-  unknown: { label: 'Unclassified', short: 'Unclassified', color: '#8c8c8c' },
+  direct: { label: 'Direct API', short: 'Direct API', color: 'var(--route-direct)' },
+  local: { label: 'Local runtime', short: 'Local', color: 'var(--route-local)' },
+  router: { label: 'Router', short: 'Router', color: 'var(--route-router)' },
+  gateway: { label: 'Gateway', short: 'Gateway', color: 'var(--route-gateway)' },
+  unknown: { label: 'Unclassified', short: 'Unclassified', color: 'var(--route-unknown)' },
 };
 
 const nameKey = name => String(name ?? '').trim().toLowerCase();

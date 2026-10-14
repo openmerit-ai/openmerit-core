@@ -4,6 +4,8 @@ The first generated 2 × 2 hero sheet was 2172 × 724 overall, leaving each pose
 
 ## Final assets
 
+The table records the original full-resolution opaque frames. As of the 14 October 2026 source update, the homepage uses matching `hero-frame-{0..3}-transparent-v3.webp` cutouts at the same 2172 × 724 resolution. See [the transparency update](site-illustration-transparency.md); it was published on 14 October 2026.
+
 | Pose | Workspace asset | Source |
 | --- | --- | --- |
 | Rest | `site/assets/motion/hero-frame-0-v2.webp` | Original full-resolution PNG, `exec-c120bc1a-6cea-4824-a27a-81b382be4063.png`. |

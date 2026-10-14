@@ -105,7 +105,7 @@ function MapPreview({ records, snapshot, hours, onInspect }) {
           <ReactFlow nodes={[...labels, ...nodes]} edges={edges} nodeTypes={nodeTypes} defaultViewport={{ x: 0, y: 0, zoom: 1 }}
             nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} elementsSelectable={false}
             panOnDrag={false} panOnScroll={false} zoomOnScroll={false} zoomOnPinch={false} zoomOnDoubleClick={false} preventScrolling={false}
-            minZoom={1} maxZoom={1} deleteKeyCode={null} selectionKeyCode={null} proOptions={{ hideAttribution: true }} colorMode="dark" />
+            minZoom={1} maxZoom={1} deleteKeyCode={null} selectionKeyCode={null} proOptions={{ hideAttribution: true }} colorMode="system" />
         </div>
       </div>}
     {open && <section id="flow-browser" className="flow-browser" aria-label="Browse the environment">

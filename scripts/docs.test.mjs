@@ -44,6 +44,15 @@ test('pages have one H1, distinct section IDs, and a canonical address', () => {
   }
 });
 
+test('every generated page declares device-driven appearance before styles load', () => {
+  for (const page of html) {
+    assert.ok(page.text.includes('<meta name="color-scheme" content="light dark">'), page.url);
+    for (const scheme of ['light', 'dark']) {
+      assert.match(page.text, new RegExp(`<meta name="theme-color" content="#[a-f0-9]{6}" media="\\(prefers-color-scheme: ${scheme}\\)">`), page.url);
+    }
+  }
+});
+
 test('downloadable Markdown matches the maintained source and excludes internal site notes', async () => {
   for (const page of publishedPages) {
     assert.ok(!page.source.startsWith('site-'), `Internal site notes published: ${page.source}`);

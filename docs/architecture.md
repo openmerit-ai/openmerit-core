@@ -38,7 +38,7 @@ Contains deterministic behavior: choosing the next lifecycle intent according to
 
 `OpenMeritCoordinator` is the reusable adapter boundary. It constructs canonical intents, negotiates capabilities, records lifecycle progress and observations, validates results, and advances durable state. `OpenMeritStore` makes persistence replaceable; `ProjectStore` is the bundled filesystem backend.
 
-The coordinator also accepts idempotent application-target automation signals and evaluates the user-confirmed `AutomationCheckPolicy`. `buildAutomationPlan` tells an adapter which signals and wakeups are required and reports unsupported persistent scheduling honestly. OpenMerit never installs a scheduler or creates a paid cloud worker itself.
+The coordinator also accepts idempotent application-target automation signals and evaluates the user-confirmed `AutomationCheckPolicy`. `buildAutomationPlan` tells an adapter which signals and wakeups are required and reports unsupported persistent scheduling honestly. Provisioning belongs to the adapter: Pi can install an authorized macOS user LaunchAgent; the coordinator itself does not create operating-system schedulers or paid cloud workers.
 
 ### `openmerit/pi`
 
@@ -46,9 +46,9 @@ Exposes the command surface, supplies private typed intent context, triggers Pi,
 
 The Pi package implements `HarnessAdapter`. It does not define canonical intents, per-intent result contracts, stage transitions, or validation rules.
 
-### Inference Terminal (unreleased)
+### Inference Terminal
 
-`packages/terminal` supplies a standalone `openmerit dash` executable, passive collectors, a loopback read-only HTTP API, and bundled dark-only browser assets. It does not invoke the coordinator or harness. One collector cycle reads existing metadata and runtime inventory; browser clients receive the same cached snapshot. Imported activity, runtime counters, and sampled whole-machine resources retain their separate scopes. Missing measurements remain unknown, and fictional sample data is isolated from the real snapshot. See the [terminal guide](inference-terminal.md) for the supported sources and JSON contract.
+`packages/terminal` supplies a standalone `openmerit dash` executable, passive collectors, a loopback read-only HTTP API, and bundled browser assets. Stable npm 0.1.6 includes the terminal. The source interface and hosted dashboard follow the device’s light/dark preference; that appearance change is not included in npm 0.1.6. It does not invoke the coordinator or harness. One collector cycle reads existing metadata and runtime inventory; browser clients receive the same cached snapshot. Imported activity, runtime counters, and sampled whole-machine resources retain their separate scopes. Missing measurements remain unknown, and fictional sample data is isolated from the real snapshot. See the [terminal guide](inference-terminal.md) for the supported sources and JSON contract.
 
 ## Intelligence resources
 
