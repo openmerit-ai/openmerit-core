@@ -41,5 +41,9 @@ step "Node.js $NODE_VERSION" install_node
 export PATH="$bin_dir:$PATH"
 node --version
 
+# npm reads the NPM_TOKEN project secret at run time; the snapshot stores only this reference.
+npm_auth='//registry.npmjs.org/:_authToken=${NPM_TOKEN}'
+grep -Fqx "$npm_auth" "$HOME/.npmrc" 2>/dev/null || echo "$npm_auth" >> "$HOME/.npmrc"
+
 # npm ci also runs the prepare script, which builds dist/.
 step "npm ci" npm ci --prefer-offline --no-audit --no-fund
