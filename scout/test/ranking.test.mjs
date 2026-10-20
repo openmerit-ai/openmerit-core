@@ -63,11 +63,11 @@ test('missing latency is not treated as zero and cannot outperform an otherwise 
   assert.equal(items[0].model.id, 'known'); assert.equal(items[1].reference.seconds, null);
 });
 test('Decisions validates typed workload choices and large-context requirements remain large', () => {
-  const choices = { context: 'required', input_length: 'medium', output_length: 'short', priority: 'cost', task_kind: 'retrieve', tools: 'no', memory: 'none', json: 'no', output: 'supported' };
-  const answers = decisionQuestions.map(q => ({ name: q.name, type: 'choice', confidence: .9, choice: choices[q.name] ?? 'absent' }));
-  const result = interpretDecisions(answers, 'Summarize a 200-page report, keeping cost low.');
+  const choices = { context: 'required', input_length: 'medium', output_length: 'short', priority: 'cost', task_kind: 'retrieve', detection_scope: 'absent', tools: 'no', memory: 'none', json: 'no', output_format: 'unspecified', output_specificity: 'established', output: 'supported' };
+  const answers = decisionQuestions.map(q => ({ name: q.name, type: 'choice', confidence: .9, choice: choices[q.name] ?? ({output_format:'unspecified',output_specificity:'established'}[q.name] ?? 'absent') }));
+  const result = interpretDecisions(answers);
   assert.deepEqual(result.workload, { input: 'long', output: 'short', priority: 'cost' });
-  answers.find(a => a.name === 'priority').choice = 'a-provider'; assert.throws(() => interpretDecisions(answers, 'task'), /Invalid/);
+  answers.find(a => a.name === 'priority').choice = 'a-provider'; assert.throws(() => interpretDecisions(answers), /Invalid/);
 });
 test('runtime ranking never imports local invoice answers or evaluation model IDs', async () => {
   const { readFile } = await import('node:fs/promises');

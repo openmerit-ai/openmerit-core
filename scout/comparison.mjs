@@ -2,14 +2,13 @@
 const mean = values => values.reduce((sum, value) => sum + value, 0) / values.length;
 const median = values => { const sorted = [...values].sort((a, b) => a - b); return (sorted[Math.floor((sorted.length - 1) / 2)] + sorted[Math.floor(sorted.length / 2)]) / 2; };
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
-export const benchmarkFamily = b => b.family ?? b.name.toLowerCase().replace(/ · aa$/, '')
-  .replace(/^(aime|gpqa|mmlu|swe.bench|terminal.bench|ocrbench|mmmu|ifbench|tau|τ).*$/, '$1');
+export const benchmarkFamily = b => b.family ?? b.id ?? b.name;
 
 export function workloadFor(task) {
   const input = task.workload?.input ?? (task.weights.context ? 'long' : task.needsVision ? 'medium' : 'short');
   const output = task.workload?.output ?? (task.needsStructured || task.needsTools ? 'short' : 'medium');
   return { input, output, inputTokens: { short: 1024, medium: 4096, long: 32768 }[input],
-    outputTokens: { short: 128, medium: 512, long: 2048 }[output], priority: task.workload?.priority ?? 'balanced' };
+    outputTokens: task.kind === 'judge' || (task.kind === 'classify' && task.labelSpace === 'supplied') ? 16 : { short: 128, medium: 512, long: 2048 }[output], priority: task.workload?.priority ?? 'balanced' };
 }
 
 export function taskWeights(task) {
@@ -21,7 +20,7 @@ export function taskWeights(task) {
 }
 
 export function referenceWork(model, workload) {
-  const cost = (model.inputPrice * workload.inputTokens + model.outputPrice * workload.outputTokens) / 1e6;
+  const cost = Number.isFinite(model.inputPrice) && model.inputPrice >= 0 && Number.isFinite(model.outputPrice) && model.outputPrice >= 0 ? (model.inputPrice * workload.inputTokens + model.outputPrice * workload.outputTokens) / 1e6 : null;
   const measurements = model.speed?.measurements ?? [{ timeToFirstAnswer: model.speed?.timeToFirstAnswer, tokensPerSecond: model.speed?.tokensPerSecond }];
   const times = measurements.filter(m => Number.isFinite(m.timeToFirstAnswer) && m.timeToFirstAnswer >= 0 && Number.isFinite(m.tokensPerSecond) && m.tokensPerSecond > 0)
     .map(m => m.timeToFirstAnswer + workload.outputTokens / m.tokensPerSecond);
@@ -97,13 +96,23 @@ export function orderCandidates(candidates, task) {
   // cycles. A candidate's easy wins over weak models cannot override its direct
   // loss to another finalist. Stable IDs are used only for exact ties.
   const next = new Map(candidates.map(c => [c, new Set()])), incoming = new Map(candidates.map(c => [c, 0]));
-  const reaches = (from, target, seen = new Set()) => {
-    if (from === target) return true;
-    if (seen.has(from)) return false;
-    seen.add(from); return [...next.get(from)].some(c => reaches(c, target, seen));
-  };
+  // Incremental transitive closure preserves the exact ranked-pairs policy.
+  // Bitsets replace repeated recursive walks through the growing DAG.
+  const positions = new Map(candidates.map((c, i) => [c, i]));
+  const words = Math.ceil(candidates.length / 32);
+  const reachable = candidates.map(() => new Uint32Array(words));
+  const reaches = (a, b) => (reachable[a][b >>> 5] & (1 << (b & 31))) !== 0;
   edges.sort((a, b) => b.strength - a.strength || a.winner.model.id.localeCompare(b.winner.model.id) || a.loser.model.id.localeCompare(b.loser.model.id));
-  for (const { winner, loser } of edges) if (!reaches(loser, winner)) { next.get(winner).add(loser); incoming.set(loser, incoming.get(loser) + 1); }
+  for (const { winner, loser } of edges) {
+    const a = positions.get(winner), b = positions.get(loser);
+    if (reaches(b, a)) continue;
+    next.get(winner).add(loser); incoming.set(loser, incoming.get(loser) + 1);
+    if (reaches(a, b)) continue;
+    const descendants = reachable[b].slice(); descendants[b >>> 5] |= 1 << (b & 31);
+    for (let i = 0; i < candidates.length; i++) if (i === a || reaches(i, a)) {
+      for (let w = 0; w < words; w++) reachable[i][w] |= descendants[w];
+    }
+  }
   const tieBreak = (a, b) => b.score - a.score || b.quality - a.quality || (a.reference.cost ?? Infinity) - (b.reference.cost ?? Infinity) || a.model.id.localeCompare(b.model.id);
   const ordered = [], remaining = new Set(candidates);
   while (remaining.size) {

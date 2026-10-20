@@ -1,7 +1,7 @@
 import { providerIdentity } from './providers.js';
 
 const $ = selector => document.querySelector(selector);
-const money = value => `$${new Intl.NumberFormat('en-US', { maximumFractionDigits: 2, minimumFractionDigits: value < 1 ? 2 : 0 }).format(value)}`;
+const money = value => value == null ? '—' : `$${new Intl.NumberFormat('en-US', { maximumFractionDigits: 2, minimumFractionDigits: value < 1 ? 2 : 0 }).format(value)}`;
 let result = null, activeRequest = null, requestID = 0;
 
 function element(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text != null) node.textContent = text; return node; }
@@ -17,7 +17,8 @@ function tableMessage(message, height = 120) {
 }
 function providerIcon(provider) {
   if (!provider.file) return null;
-  const img = element('img', 'provider-icon'); img.alt = ''; img.width = 13; img.height = 13; img.decoding = 'async';
+  const img = element('img', `provider-icon${provider.invertOnDark ? ' provider-icon-monochrome' : ''}`); img.alt = ''; img.width = 13; img.height = 13; img.decoding = 'async';
+  img.title = provider.title ?? provider.label;
   img.setAttribute('aria-hidden', 'true'); img.addEventListener('error', () => img.remove());
   img.src = `/scout/providers/${provider.file}`; return img;
 }
@@ -37,22 +38,30 @@ function modelRow(model) {
   const toggle = element('button', 'model-toggle'); toggle.type = 'button';
   toggle.setAttribute('aria-label', `Details for ${model.name}`); toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', `model-evidence-${model.rank}`);
   const icon = providerIcon(provider); if (icon) byline.prepend(icon);
+  if (model.endpoint) byline.append(document.createTextNode(` · ${model.endpoint.protocol === 'decisions' ? 'Decisions' : model.endpoint.protocol === 'systemone' ? 'System One' : model.endpoint.deployment === 'self-hosted' ? 'Self-hosted' : model.endpoint.provider}`));
   name.append(title, byline); identity.append(element('span', 'model-number', String(model.rank).padStart(2, '0')), name); toggle.append(identity); nameCell.append(toggle);
   const qualityValue = model.measured ? model.measured.quality * 100 : model.quality;
-  const quality = metric(`${qualityValue.toFixed(0)}${model.measured ? '%' : ''}`, model.measured ? 'Mean task-check accuracy on separate calibration cases. Not predicted accuracy on your prompt.' : 'Relative result of shared-benchmark comparisons. Not predicted task accuracy.');
+  const quality = metric(qualityValue == null ? '—' : `${qualityValue.toFixed(0)}${model.measured ? '%' : ''}`, model.measured ? 'Mean task-check accuracy on separate calibration cases. Not predicted accuracy on your prompt.' : model.quality == null ? 'No comparable task-quality measurement. Ordered by task fit, not proven performance.' : 'Relative result of shared-benchmark comparisons. Not predicted task accuracy.');
   row.append(nameCell, quality, metric(model.reference?.costUsd != null ? money(model.reference.costUsd * 1000) : '—', model.measured ? `Mean reported charge, scaled to 1,000 similar tasks; cost known for ${model.measured.costKnownCalls}/${model.measured.cases} tasks.` : 'Illustrative USD per 1,000 tasks at the workload below; excludes hidden reasoning and modality-specific charges.'), metric(model.reference?.completionSeconds != null ? `${model.reference.completionSeconds.toFixed(1)}s` : '—', model.measured ? 'Median full task time on the calibration cases, including failures.' : 'Reference first-answer delay plus generation time; actual endpoint latency may differ.'));
   const detail = element('tr', 'model-detail'), detailCell = element('td', 'model-detail-cell'); detailCell.colSpan = 4; detail.id = `model-evidence-${model.rank}`; detail.hidden = true;
   toggle.addEventListener('click', () => { detail.hidden = !detail.hidden; toggle.setAttribute('aria-expanded', String(!detail.hidden)); row.dataset.expanded = String(!detail.hidden); });
   // Preserve table semantics and native Enter/Space behavior; any other part of
   // the row activates the same button. Links and buttons keep their own action.
   row.addEventListener('click', event => { if (!event.target.closest('button, a')) toggle.click(); });
-  const body = element('div', 'model-evidence'); body.append(element('p', 'evidence-intro', `${model.reason} ${model.evidenceCoverage}% capability coverage · ${model.comparison?.capabilityCoverage ?? 0}% average shared-capability coverage · ${model.confidence}.`));
-  const idLine = element('div', 'model-id-line'), copyID = element('button', '', 'Copy ID'); copyID.type = 'button'; copyID.addEventListener('click', () => copy(model.id, copyID));
-  idLine.append(element('code', '', model.id), copyID); body.append(idLine);
+  const body = element('div', 'model-evidence');
+  const idLine = element('div', 'model-id-line'), copyID = element('button', '', 'Copy ID'); copyID.type = 'button'; copyID.addEventListener('click', () => copy(model.endpoint?.modelId ?? model.id, copyID));
+  idLine.append(element('code', '', model.endpoint?.modelId ?? model.id), copyID); body.append(idLine);
+  if (model.endpoint) {
+    const endpoint = element('p', 'price-detail'); endpoint.append(element('code', '', model.endpoint.id), document.createTextNode(` · ${model.endpoint.status ?? 'listed'} · ${model.endpoint.deployment}.`)); body.append(endpoint);
+    if (model.taskFit) body.append(element('p', 'price-detail', model.reason));
+    if (model.endpoint.limits && !model.taskFit) body.append(element('p', 'price-detail', model.endpoint.limits));
+    if (model.endpoint.licenseURL) { const license = element('p', 'price-detail'); license.append(link(`Declared license: ${model.endpoint.license ?? 'check model card'} ↗`, model.endpoint.licenseURL)); body.append(license); }
+    if (model.endpoint.cardURL) { const card = element('p', 'price-detail'); card.append(link('Pinned model card ↗', model.endpoint.cardURL)); body.append(card); }
+  }
   if (model.measured) { const observed = element('p', 'price-detail'); observed.append(link('Measured task evidence ↗', model.measured.url), document.createTextNode(` · ${model.measured.cases} cases · ${new Date(model.measured.measuredAt).toLocaleDateString()} · charges known for ${model.measured.costKnownCalls}/${model.measured.cases} tasks.`)); body.append(observed); }
   const grid = element('div', 'evidence-grid'); model.evidence.slice(0, 4).forEach(e => grid.append(evidenceItem(e))); body.append(grid);
   if (model.evidence.length > 4) { const more = element('details', 'evidence-more'); more.append(element('summary', '', `All ${model.evidence.length} benchmark results`)); const rest = element('div', 'evidence-grid'); model.evidence.slice(4).forEach(e => rest.append(evidenceItem(e))); more.append(rest); body.append(more); }
-  const pricing = element('p', 'price-detail', `${money(model.pricing.inputPerMillion)} input / ${money(model.pricing.outputPerMillion)} output per million tokens, quoted via OpenRouter.`);
+  const pricing = element('p', 'price-detail', `${money(model.pricing.inputPerMillion)} input / ${money(model.pricing.outputPerMillion)} output per million tokens, ${model.pricing.basis ?? 'Advertised rates.'}`);
   if (model.pricing.url) pricing.append(document.createTextNode(' '), link('Provider page ↗', model.pricing.url));
   body.append(pricing);
   if (model.speed && !model.measured) { const speed = element('p', 'price-detail'); speed.append(link('Reference timing by Artificial Analysis ↗', model.speed.url), document.createTextNode(` · ${model.speed.configurations.join(', ')}. ${model.speed.historical ? 'Archived reference measurement. ' : ''}Endpoint performance may differ.`)); body.append(speed); }
@@ -62,9 +71,9 @@ function showSources(sources, calibration) {
   $('#source-list').replaceChildren(...sources.map(source => {
     const detail = element('details', 'source-detail'), heading = element('summary'), coverage = source.coverage;
     heading.append(element('span', '', source.name), element('span', 'source-role', source.role ?? 'Public source')); detail.append(heading);
-    if (coverage) detail.append(element('p', 'source-counts', source.id === 'models' ? `${coverage.cataloguedModels} catalogued models` : source.id === 'huggingface' ? `${coverage.repositories} repositories · ${coverage.repositoriesWithReportedResults} with structured reported results` : `${coverage.benchmarkSeries} benchmark series · ${coverage.matchedModels} matched models · ${coverage.measurements} results`));
+    if (coverage) detail.append(element('p', 'source-counts', source.refreshPolicy === 'manual-contract-review' ? 'Reviewed endpoint contract' : ['models', 'modelsdev'].includes(source.id) ? `${coverage.cataloguedModels} catalogued models` : source.id === 'huggingface' ? `${coverage.repositories} repositories · ${coverage.repositoriesWithReportedResults} with structured reported results` : `${coverage.benchmarkSeries} benchmark series · ${coverage.matchedModels} matched models · ${coverage.measurements} results`));
     detail.append(element('p', '', source.measures ?? source.attribution), element('p', '', source.limits));
-    const date = element('p', 'source-dates', `Collected ${source.checkedAt ? new Date(source.checkedAt).toLocaleString() : '—'}.${source.publishedAt ? ` Published ${source.publishedAt}.` : ''}${source.status === 'failed' ? ' Refresh failed; previous data retained.' : ''}`);
+    const date = element('p', 'source-dates', `${source.refreshPolicy === 'manual-contract-review' ? 'Contract reviewed' : 'Collected'} ${source.checkedAt ? new Date(source.checkedAt).toLocaleString() : '—'}.${source.publishedAt ? ` Published ${source.publishedAt}.` : ''}${source.status === 'failed' ? ' Refresh failed; previous data retained.' : ''}`);
     if (coverage?.measurements) date.append(document.createTextNode(` Source dates supplied for ${coverage.datedResults}/${coverage.measurements} results; these may be publication dates.${coverage.latestSourceDate ? ` Latest: ${coverage.latestSourceDate.slice(0, 10)}.` : ''}${coverage.historicalResults ? ` Includes ${coverage.historicalResults} archived results.` : ''}`));
     detail.append(date); const links = element('p', 'source-links'); links.append(link('Source ↗', source.url));
     if (source.license) links.append(link('Source license ↗', source.license)); detail.append(links); return detail;
@@ -80,7 +89,9 @@ function showSpecialists(discovery) {
   $('#specialists').hidden = !candidates.length;
   $('#specialists-title').textContent = `Specialist models · ${candidates.length}`;
   $('#specialist-list').replaceChildren(...candidates.map(m => {
-    const item = element('article', 'specialist-item'), title = element('p'); title.append(link(`${m.id} ↗`, m.url)); item.append(title, element('p', '', m.fit));
+    const item = element('article', 'specialist-item'), title = element('p', 'specialist-title');
+    const icon = providerIcon(providerIdentity({ ...m, source: 'huggingface', provider: m.id.split('/')[0] }));
+    if (icon) title.append(icon); title.append(link(`${m.id} ↗`, m.url)); item.append(title, element('p', '', m.fit));
     item.append(element('p', 'source-dates', `${m.pipeline} · ${m.languages.length ? m.languages.join(', ') : 'Language not declared'} · ${m.library ?? 'Runtime not declared'}. ${m.parameters ? `${(m.parameters / 1e6).toFixed(0)}M parameters; hardware needs unmeasured.` : 'Size and hardware needs not established.'}`));
     const license = element('p', 'source-dates'); license.append(link(`Declared license: ${m.license ?? 'not supplied'} ↗`, m.licenseURL), document.createTextNode(` · ${m.gated ? 'Access approval required' : 'Not marked gated'}. ${m.providers.length ? `Hub lists hosting via ${m.providers.map(p => p.provider).join(', ')}; prices and latency unmeasured.` : 'No live hosting route listed by the Hub; check hosting or local deployment.'}`)); item.append(license);
     const evidence = element('details', 'specialist-evidence'); evidence.append(element('summary', '', m.evaluations.length ? `${m.evaluations.length} reported evaluation results` : 'No structured evaluation results indexed'));
@@ -92,26 +103,31 @@ function showSpecialists(discovery) {
 }
 function showResult(data, roundTripMs) {
   result = data;
-  $('#results-title').textContent = data.recommendations.length ? 'Recommendations' : 'No matching models';
+  $('#results-title').textContent = data.task.clarification ? 'Choose the output' : data.ranking?.mode === 'task-fit' ? 'Candidates to evaluate' : data.recommendations.length ? 'Recommendations' : 'No matching models';
   $('#capabilities').replaceChildren(...(data.task.capabilities.length ? data.task.capabilities.map(c => c.label) : ['General purpose']).map(label => element('span', '', label)));
   $('#query-time').textContent = `${(roundTripMs / 1000).toFixed(2)}s`;
   $('#query-time').title = 'Total search time, including task interpretation and network time';
+  $('.model-table thead').hidden = !!data.task.clarification;
   $('#model-list').replaceChildren(...data.recommendations.map(modelRow));
   if (!data.recommendations.length) $('#model-list').append(tableMessage(data.warnings[0] || 'Try describing the task in more detail.'));
+  if (data.task.clarification) {
+    const cell = $('#model-list td');
+    for (const option of data.task.clarification.options) { const button = element('button', 'clarification-option', option); button.type = 'button'; button.addEventListener('click', () => { $('#prompt').value = `${data.prompt} ${option}`; fitPrompt(); $('#scout-form').requestSubmit(); }); cell.append(button); }
+  }
   $('#warnings').replaceChildren(...data.warnings.map(warning => element('p', '', warning)));
   const workload = data.ranking?.workload, profile = data.ranking?.profile;
-  $('#quality-heading').replaceChildren(document.createTextNode(profile ? 'Accuracy ' : 'Quality '), element('span', 'column-unit', profile ? 'calibration cases' : 'relative / 100'));
+  $('#quality-heading').replaceChildren(document.createTextNode(profile ? 'Accuracy ' : 'Quality '), element('span', 'column-unit', profile ? 'calibration cases' : data.ranking?.mode === 'task-fit' ? 'not measured' : 'relative / 100'));
   $('#time-unit').textContent = profile ? 'measured seconds' : 'reference seconds';
-  $('#table-caption').textContent = profile ? 'Models in Scout rank order among tested eligible candidates. Accuracy, mean cost and median full task time come from separate calibration cases, not executions of your prompt.' : 'Models in Scout rank order using shared benchmarks and an illustrative workload. Quality is a ranking signal, not predicted task accuracy.';
-  $('#workload-note').textContent = profile ? `${profile.casesPerModel} calibration cases per model · ${profile.eligibleTestedModels} tested models · ${new Date(profile.measuredAt).toLocaleDateString()}. Not measured on your task.` : workload ? `Reference workload: ${workload.inputTokens.toLocaleString()} input + ${workload.outputTokens.toLocaleString()} output tokens per task · ${workload.priority} priority. Cost and time are comparisons, not task-specific measurements.` : 'Based on published benchmarks. Evaluate these models on your own examples.';
-  $('#limitations').hidden = false;
+  $('#table-caption').textContent = data.task.clarification ? data.task.clarification.question : data.ranking?.mode === 'task-fit' ? 'Candidates ordered by task fit and deployment readiness, then known reference costs. Quality is unmeasured.' : profile ? 'Models in Scout rank order among tested eligible candidates. Accuracy, mean cost and median full task time come from separate calibration cases, not executions of your prompt.' : 'Models in Scout rank order using shared benchmarks and an illustrative workload. Quality is a ranking signal, not predicted task accuracy.';
+  $('#workload-note').textContent = data.ranking?.mode === 'task-fit' ? 'Task-compatible shortlist. No comparable endpoint-quality measurements; self-hosted costs and unmeasured latency remain unknown.' : profile ? `${profile.casesPerModel} calibration cases per model · ${profile.eligibleTestedModels} tested models · ${new Date(profile.measuredAt).toLocaleDateString()}. Not measured on your task.` : workload ? `Reference workload: ${workload.inputTokens.toLocaleString()} input + ${workload.outputTokens.toLocaleString()} output tokens per task · ${workload.priority} priority. Cost and time are comparisons, not task-specific measurements.` : 'Based on published benchmarks. Evaluate these models on your own examples.';
+  $('#limitations').hidden = !!data.task.clarification;
   showSpecialists(data.specialists);
   showIndex(data);
-  $('#announcement').textContent = `${data.recommendations.length} models found. ${data.task.capabilities.map(c => c.label).join(', ')}.`;
+  $('#announcement').textContent = data.task.clarification ? data.task.clarification.question : `${data.recommendations.length} models found. ${data.task.capabilities.map(c => c.label).join(', ')}.`;
 }
 function showIndex(data) {
-  $('#index-counts').replaceChildren(...[`${data.models} models`, `${data.providers} providers`, `${data.benchmarks} benchmark series`, `${data.sources.length} sources`].map(text => element('span', '', text)));
-  $('#index-counts').title = `${data.benchmarksWithResults} benchmark series have matched results`;
+  $('#index-counts').replaceChildren(...[`${data.availableModels ?? data.models} API models`, `${data.specialistRepositories ?? 0} HF repositories`, `${data.benchmarks} benchmark series`, `${data.sources.length} sources`].map(text => element('span', '', text)));
+  $('#index-counts').title = `${data.benchmarksWithResults} benchmark series have matched results · ${data.endpoints ?? data.models} hosted endpoints · ${data.independentModels ?? 0} models with independent provider metadata · ${data.specialistRepositories ?? 0} specialist repositories`;
   showSources(data.sources, data.calibration);
   const capabilities = (data.wordCloud ?? []).map(c => ({ ...c, matched: !!data.task?.weights[c.id] }));
   capabilities.sort((a, b) => Number(b.matched) - Number(a.matched));

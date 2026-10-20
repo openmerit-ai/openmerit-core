@@ -21,7 +21,7 @@ let index = createIndex(snapshot), refreshing = false, refreshState = { refreshS
 async function refresh() {
   if (refreshing) return; refreshing = true; refreshState.refreshStatus = 'refreshing';
   try {
-    const next = await refreshSnapshot(fetch, index.snapshot); const nextIndex = createIndex(next);
+    const next = await refreshSnapshot(fetch, index.snapshot, { apiKey: process.env.OPENAI_API_KEY }); const nextIndex = createIndex(next);
     await mkdir(resolve(cache, '..'), { recursive: true }); await writeFile(`${cache}.tmp`, JSON.stringify(next)); await rename(`${cache}.tmp`, cache);
     index = nextIndex; refreshState = { refreshStatus: next.sources.some(s => s.status === 'failed') ? 'degraded' : 'idle', scheduler: 'local-hourly', lastAttemptAt: new Date().toISOString() };
     console.log(`Scout index refreshed: ${nextIndex.models.length} models.`);

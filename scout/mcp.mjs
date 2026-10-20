@@ -1,16 +1,17 @@
 import { recommend } from './rank.mjs';
 import { json, readJSON } from './http.mjs';
+import { validateSelection } from './selection.mjs';
 
 const versions = ['2025-03-26', '2025-06-18', '2025-11-25'];
 const tool = {
   name: 'scout_models', title: 'Find models for a task',
-  description: 'Get up to five available language models in rank order. Matching measured task profiles use observed accuracy, charges and request time; other tasks use public benchmarks and reference estimates. A separate specialists field contains unranked Hugging Face discovery matches, with reported evidence and deployment metadata; they are not validated replacements. The task description is sent to OpenAI Decisions for interpretation; Scout does not store it or execute the recommended models. Inspect ranking.mode, tested pool, sample size, freshness, requirements, warnings and evidence. This is a shortlist, not a guarantee of task accuracy.',
-  inputSchema: { type: 'object', properties: { prompt: { type: 'string', minLength: 1, maxLength: 4000, description: 'Describe what the selected model needs to do, including input and output formats.' } }, required: ['prompt'], additionalProperties: false },
+  description: 'Get up to five task-compatible models with explicit endpoint identities. Typed decision and vision tasks use a task-fit shortlist when comparable quality measurements are absent; inspect ranking.mode and unknown metrics. Comparable calibration can supply task-quality observations; inspect each metric basis and reference assumptions. Public benchmarks are task proxies. The evidence engine selects numerical tradeoffs only within comparable scopes; missing objectives remain provisional. Compatible classification/detection/segmentation deployments can enter the task-fit five. Other Hugging Face components remain in specialists; reported results are not independently verified. The task description is sent to OpenAI for Decisions interpretation and, on the evidence engine, structured metadata extraction and a transient query embedding; Scout stores the submitted task prompt with task categories, ordered model/endpoint choices and their supporting source evidence in private Cloudflare analytics for three months. No separate visitor identifiers are collected; personal information typed into a prompt is retained. Scout does not execute the recommended models. Inspect ranking.mode, tested pool, sample size, freshness, requirements, warnings and evidence. This is a shortlist, not a guarantee of task accuracy.',
+  inputSchema: { type: 'object', properties: { prompt: { type: 'string', minLength: 1, maxLength: 4000, description: 'Describe what the selected model needs to do, including input and output formats.' }, endpointIds: { type: 'array', maxItems: 100, uniqueItems: true, items: { type: 'string', maxLength: 160 }, description: 'Optional exact endpoint IDs. Filters before ranking; no provider credential fallback. Omit modelIds when selecting non-router endpoints.' }, modelIds: { type: 'array', maxItems: 100, uniqueItems: true, items: { type: 'string', maxLength: 160 }, description: 'Optional project-accessible legacy OpenRouter catalogue model IDs. Filtered before ranking. Empty means no models.' } }, required: ['prompt'], additionalProperties: false },
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
 };
 
 // Stateless Streamable HTTP. No sessions, SDK runtime or open SSE streams.
-export async function handleMCP(request, index, state = {}, recommendTask = recommend) {
+export async function handleMCP(request, index, state = {}, recommendTask = (index, prompt, modelIds, endpointIds) => recommend(index, prompt, Date.now(), null, undefined, modelIds ?? null, endpointIds ?? null)) {
   const origin = request.headers.get('origin');
   if (origin && origin !== new URL(request.url).origin) return json({ error: 'Origin not allowed.' }, 403);
   if (request.method !== 'POST') return json({ error: 'Use POST. This server does not open SSE streams.' }, 405, { Allow: 'POST' });
@@ -34,9 +35,10 @@ export async function handleMCP(request, index, state = {}, recommendTask = reco
   if (method !== 'tools/call') return fail(-32601, 'Method not found.');
   if (params?.name !== tool.name) return fail(-32602, 'Unknown tool.');
   const args = params.arguments;
-  if (!args || Array.isArray(args) || typeof args !== 'object' || Object.keys(args).some(k => k !== 'prompt')) return fail(-32602, 'Provide only a prompt.');
+  if (!args || Array.isArray(args) || typeof args !== 'object' || Object.keys(args).some(k => !['prompt', 'modelIds', 'endpointIds'].includes(k))) return fail(-32602, 'Provide prompt and optionally modelIds or endpointIds.');
   try {
-    const result = { ...await recommendTask(index, args.prompt), ...state };
+    validateSelection(args.modelIds); validateSelection(args.endpointIds, 'endpointIds');
+    const result = { ...await recommendTask(index, args.prompt, args.modelIds, args.endpointIds), ...state };
     // Keep agent context small; the JSON API exposes the complete evidence list.
     result.recommendations = result.recommendations.map(m => ({ ...m, evidenceCount: m.evidence.length, evidence: m.evidence.slice(0, 4) }));
     if (result.specialists) result.specialists.candidates = result.specialists.candidates.map(m => ({ ...m, evaluationCount: m.evaluations.length, evaluations: m.evaluations.slice(0, 4) }));

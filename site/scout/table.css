@@ -28,7 +28,6 @@
 .model-detail { background: var(--surface); }
 .data-table .model-detail-cell { padding: 0; }
 .model-evidence { position: sticky; left: 0; width: min(100%, 100cqw); padding: 6px 24px 24px 32px; white-space: normal; font-size: 12px; }
-.evidence-intro { color: var(--muted); max-width: 800px; }
 .data-table .table-message { height: 120px; padding: 0; text-align: center; color: var(--muted); }
 .table-message > span { display: block; position: sticky; left: 0; width: min(100%, 100cqw); padding: 24px; }
 .table-scroll-hint { display: flex; align-items: center; justify-content: space-between; margin-top: 9px; color: var(--quiet); font-size: 10px; }

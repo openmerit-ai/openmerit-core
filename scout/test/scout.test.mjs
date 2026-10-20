@@ -2,12 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { zipSync, strToU8 } from 'fflate';
-import { createIndex, recommend, indexStatus } from '../rank.mjs';
-import { interpretPrompt } from '../capabilities.mjs';
+import { createIndex, recommend as rankTask, indexStatus } from '../rank.mjs';
+import offlineTasks from './fixtures/offline-tasks.json' with {type:'json'};
+// Explicit historical task objects test arithmetic and transports, not interpretation.
+const fixtureTask = prompt => {const task=offlineTasks[prompt];if(!task)throw Error('Missing typed test fixture');return structuredClone(task);};
+const recommend=(index,prompt)=>rankTask(index,prompt,Date.now(),fixtureTask(prompt));
 import { parseCSV, parseAnalysis, compileSnapshot, refreshSnapshot, parseOmniDoc } from '../sources.mjs';
-import { handleMCP } from '../mcp.mjs';
-import { handleAPI } from '../http.mjs';
+import { handleMCP as mcp } from '../mcp.mjs';
+import { handleAPI as api } from '../http.mjs';
 
+const handleAPI=(request,index)=>api(request,index,{},recommend);
+const handleMCP=(request,index)=>mcp(request,index,{},recommend);
 const snapshot = JSON.parse(await readFile(new URL('../snapshot.json', import.meta.url), 'utf8'));
 const index = createIndex(snapshot);
 const post = body => new Request('http://localhost/scout/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -19,27 +24,20 @@ test('invoice recommendations require real document evidence, image input, JSON 
   for (const model of result.recommendations) {
     assert.ok(model.modalities.includes('image'));
     assert.ok(model.parameters.some(p => ['structured_outputs', 'response_format'].includes(p)));
-    assert.ok(model.evidence.some(e => /ocr|document|omnidoc|textvqa|chartqa/i.test(e.benchmark)), model.id);
+    assert.ok(model.evidence.some(e => e.capabilities.includes('documents')), model.id);
     assert.ok(model.evidence.every(e => /^https?:/.test(e.url) && e.configurations.length));
   }
-  assert.ok(result.warnings.some(w => w.includes('Newer models')));
+  if (result.recommendations.some(m => m.evidence.some(e => e.source === 'openvlm'))) assert.ok(result.warnings.some(w => w.includes('Newer models')));
 });
 
 test('task changes produce different rankings; writing tests does not select creative-writing evidence', () => {
-  assert.ok(!interpretPrompt('Write unit tests for a Python function').weights.writing);
   const code = recommend(index, 'Fix a bug in a TypeScript repository and write unit tests');
   const invoice = recommend(index, 'Extract invoice fields as JSON');
   assert.notDeepEqual(code.recommendations.map(m => m.id), invoice.recommendations.map(m => m.id));
   assert.ok(code.recommendations.every(m => m.evidence.some(e => /code|swe|terminal|aider|weirdml|cursor|gso/i.test(e.benchmark))));
 });
 
-test('paraphrases retain the same capabilities; unsupported generation does not silently return text models', () => {
-  for (const prompt of ['Read a receipt and return JSON', 'Parse a scanned billing document into a schema', 'Extracting fields from invoices into JSON']) {
-    const task = interpretPrompt(prompt); assert.ok(task.needsVision); assert.ok(task.needsStructured); assert.ok(task.weights.documents);
-  }
-  for (const prompt of ['Generate a video of a cat', 'Create an image for a logo', 'Transcribe this audio']) assert.equal(recommend(index, prompt).recommendations.length, 0);
-  assert.ok(recommend(index, 'xyzzy').warnings.some(w => w.includes('general-purpose')));
-});
+
 
 test('scores are finite, quality is bounded, missing speed stays null, and increased price cannot improve rank score', () => {
   for (const prompt of ['Debug Python code', 'Research a question', 'Write a story', 'Extract invoice fields as JSON']) {
@@ -47,9 +45,10 @@ test('scores are finite, quality is bounded, missing speed stays null, and incre
     for (const m of result.recommendations) { assert.ok(Number.isFinite(m.score)); assert.ok(m.quality >= 0 && m.quality <= 100); if (!m.speed) assert.equal(m.speed, null); }
   }
   const baseline = recommend(index, 'Research a scientific question').recommendations[0];
-  const modified = structuredClone(snapshot), model = modified.models.find(m => m.id === baseline.id);
+  const modified = structuredClone(snapshot), model = modified.models.find(m => m.id === baseline.modelId);
   model.inputPrice *= 100; model.outputPrice *= 100;
-  const result = recommend(createIndex(modified), 'Research a scientific question').recommendations.find(m => m.id === baseline.id);
+  model.endpoints?.forEach(e => { e.inputPrice *= 100; e.outputPrice *= 100; });
+  const result = recommend(createIndex(modified), 'Research a scientific question').recommendations.find(m => m.id === baseline.modelId);
   assert.ok(!result || result.score < baseline.score);
 });
 
@@ -134,11 +133,26 @@ test('reference speed preserves first-answer delay and does not mistake reasonin
   assert.equal(data.models[0].speed.measurements[0].timeToFirstAnswer, 12);
   assert.equal(data.models[1].speed.timeToFirstAnswer, null);
 });
+test('serialized leaderboard records survive component property renames without executing source scripts',()=>{
+ const rows=parseAnalysis(fixtures().analysisHTML);
+ const flight=`ab:${JSON.stringify(['component',{children:{renamedProperty:rows}}])}\n`;
+ assert.deepEqual(parseAnalysis(`<script>self.__next_f.push([1,${JSON.stringify(flight)}])</script>`),rows);
+ assert.throws(()=>parseAnalysis(`<script>self.__next_f.push([1,${JSON.stringify(`ab:${JSON.stringify({renamedProperty:rows.map(({slug,...m})=>m)})}\n`)}])</script>`),/format changed/);
+});
+test('a fresh table retains omitted historical observations only for an unchanged series',()=>{
+ const input=fixtures(),previous=compileSnapshot(input),model=previous.models.find(m=>m.id==='lab/model-0');
+ const old=model.evidence.find(e=>e.benchmark==='aa:gpqa');old.historical=true;
+ const rows=parseAnalysis(input.analysisHTML);rows[0].gpqa=null;
+ const flight=`a:${JSON.stringify({records:rows})}\n`,analysisHTML=`<script>self.__next_f.push([1,${JSON.stringify(flight)}])</script>`;
+ const next=compileSnapshot({...input,analysisHTML,previous});assert.deepEqual(next.models.find(m=>m.id===model.id).evidence.find(e=>e.benchmark==='aa:gpqa'),old);
+ previous.benchmarks.find(b=>b.id==='aa:gpqa').definition.description='A different version.';
+ const changed=compileSnapshot({...input,analysisHTML,previous});assert.ok(!changed.models.find(m=>m.id===model.id).evidence.some(e=>e.benchmark==='aa:gpqa'));
+});
 
-test('refresh uses six benchmark/catalogue feeds and eight bounded Hub queries; total outage needs a previous index', async () => {
+test('refresh reads bounded benchmark methodology and catalogue feeds; total outage needs a previous index', async () => {
   const f = fixtures(); const calls = [];
   const fetcher = async url => { calls.push(url); return new Response(url.endsWith('.zip') ? f.epochZip : url.includes('artificialanalysis') ? f.analysisHTML : JSON.stringify(url.includes('OpenVLM') ? f.openvlm : f.router)); };
-  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 14); assert.equal(refreshed.models.length, 12);
+  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 25); assert.equal(refreshed.models.length, 12);
   assert.equal(refreshed.sources.find(s => s.id === 'huggingface').status, 'failed');
   await assert.rejects(refreshSnapshot(async () => new Response('Unavailable', { status: 503 })), /Invalid model catalogue/);
 });
@@ -186,14 +200,7 @@ test('partial refresh preserves only failed sources with original timestamps whi
   assert.equal(noCatalogue.sources.find(s => s.id === 'models').status, 'failed');
 });
 
-test('free-form tasks identify coding, language, context and text extraction without forcing OCR', () => {
-  for (const prompt of ['Build a Next.js site with authentication', 'Refactor the React component', 'Add indexes to my SQL database', 'Review a pull request']) assert.ok(interpretPrompt(prompt).weights.coding, prompt);
-  for (const prompt of ['Reply to a customer support ticket in Spanish', 'Draft a newsletter', 'Fix the grammar in this article']) assert.ok(interpretPrompt(prompt).weights.writing, prompt);
-  assert.ok(interpretPrompt('Summarise a 200 page contract').weights.context);
-  const text = interpretPrompt('Extract invoice numbers from plain text emails as JSON');
-  assert.equal(text.needsVision, false); assert.ok(text.needsStructured); assert.ok(!text.weights.documents);
-  assert.equal(interpretPrompt('Read a screenshot of invoice text and return JSON').needsVision, true);
-});
+
 
 const rpc = (method, params, headers = {}, id = 1) => new Request('http://localhost/scout/mcp', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...headers }, body: JSON.stringify({ jsonrpc: '2.0', id, method, params }) });
 

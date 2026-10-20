@@ -1,5 +1,7 @@
 # Scout Decisions experiment — 14 October 2026
 
+Historical experiment record. The comparison against the keyword interpreter and its runner were retired during the 16 October single-runtime consolidation. Use `scout/experiments/audit.mjs` for the current semantic acceptance suite. Commands below describe the historical experiment only.
+
 Historical status: this initial experiment was local only and did not change production. The subsequent integration below supersedes its implementation status; see the Scout launch record for verified publication.
 
 ## Question and method

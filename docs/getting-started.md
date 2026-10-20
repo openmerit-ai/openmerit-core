@@ -1,5 +1,7 @@
 # Getting started
 
+The [npm agent-evaluation preview](agent-evaluations.md) adds a separate CLI-change loop for Claude Code, Codex and OpenCode. It is not part of stable npm 0.1.6 or the Pi setup below.
+
 ## Open your inference environment
 
 With Node.js 22.19 or newer and npm installed, run:

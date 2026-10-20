@@ -8,6 +8,13 @@ test('upgraded connections retain the original Cloudflare WebSocket response', a
   const worker = withPrimaryDomain({ fetch() { return upgrade; } });
   assert.equal(await worker.fetch(new Request('https://openmerit.ai/demo/api/socket'), enabled), upgrade);
 });
+
+test('Scout uses one service without capturing unrelated paths or docs',async()=>{
+  const {default:router}=await import('../domain-router.mjs');
+  const env={...enabled,SITE:{fetch:()=>new Response('site')},SCOUT:{fetch:()=>new Response('scout')}};
+  for(const path of ['/scout','/scout/','/scout/api/status','/scout/api/recommend','/scout/mcp','/scout/providers/openai.svg'])assert.equal(await(await router.fetch(new Request('https://openmerit.ai'+path),env)).text(),'scout');
+  for(const path of ['/docs/scout/','/scouts','/scoutish'])assert.equal(await(await router.fetch(new Request('https://openmerit.ai'+path),env)).text(),'site');
+});
 test('legacy pages preserve path and query while redirecting to the matching primary host', async () => {
   for (const [kind, from, to] of [
     ['site', 'openmerit.site', 'openmerit.ai'],
@@ -76,7 +83,7 @@ test('binary assets remain byte-identical and staging leaves legacy pages availa
 test('Scout routes are isolated from protected memo, demos, docs and terminal services', async () => {
   const { default: router } = await import('../domain-router.mjs');
   const env = { ...enabled, SITE: { fetch: () => new Response('site') }, SCOUT: { fetch: () => new Response('scout') }, TERMINAL: { fetch: () => new Response('terminal') } };
-  for (const path of ['/scout', '/scout/', '/scout/api/recommend', '/scout/mcp']) assert.equal(await (await router.fetch(new Request(`https://openmerit.ai${path}`), env)).text(), 'scout');
+  for (const path of ['/scout', '/scout/', '/scout/api/recommend', '/scout/mcp', '/scout/admin', '/scout/admin/verify']) assert.equal(await (await router.fetch(new Request(`https://openmerit.ai${path}`), env)).text(), 'scout');
   for (const path of ['/', '/scouting', '/docs/scout/', '/docs/', '/docs/interactive-demo/', '/memo/source.md', '/memo/auth/sign-in/email-otp', '/demo/api/session']) assert.equal(await (await router.fetch(new Request(`https://openmerit.ai${path}`), env)).text(), 'site');
   assert.equal(await (await router.fetch(new Request('https://dash.openmerit.ai/scout'), env)).text(), 'terminal');
   const redirect = await router.fetch(new Request('https://www.openmerit.ai/scout/?q=hello'), env);

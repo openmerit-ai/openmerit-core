@@ -4,10 +4,10 @@ import { measuredCandidates } from '../task-evidence.mjs';
 import { orderCandidates, taskWeights, compareQuality } from '../comparison.mjs';
 import { buildEvidence } from '../experiments/build-task-evidence.mjs';
 const now=Date.parse('2026-10-14T20:00:00Z');
-const task={kind:'extract',weights:{structured:3},needsStructured:true,workload:{input:'short',output:'short',priority:'balanced'}};
+const task={kind:'extract',outputFormat:'json',weights:{structured:3},needsStructured:true,workload:{input:'short',output:'short',priority:'balanced'}};
 function fixture() {
  const candidates=Array.from({length:6},(_,i)=>({model:{id:`provider/${i}`,inputPrice:9-i,outputPrice:9-i},evidence:[]}));
- const profile={id:'fixture',label:'Text extraction',split:'calibration',measuredAt:new Date(now-1000).toISOString(),casesPerModel:8,scope:{kind:'extract',vision:false,tools:false,structured:true,input:'short',output:'short',capabilities:['structured']},models:candidates.map((c,i)=>({id:c.model.id,cases:8,quality:1-i*.1,meanCostUsd:1+i,medianSeconds:1+i}))};
+ const profile={id:'fixture',label:'Text extraction',split:'calibration',measuredAt:new Date(now-1000).toISOString(),casesPerModel:8,scope:{kind:'extract',vision:false,tools:false,structured:true,outputFormat:'json',input:'short',output:'short',capabilities:['structured']},models:candidates.map((c,i)=>({id:c.model.id,cases:8,quality:1-i*.1,meanCostUsd:1+i,medianSeconds:1+i}))};
  return {candidates,data:{version:1,profiles:[profile]}};
 }
 test('all five positions use measured task performance rather than model identity or advertised price',()=>{
@@ -30,6 +30,14 @@ test('measured evidence cannot leak across modalities, workload, retention or su
   const {candidates,data}=fixture();assert.equal(measuredCandidates(candidates,{...task,...change},now,data),null);
  }
 });
+test('uncertain operation, output or format cannot inherit a narrow measured profile',()=>{
+ for(const field of ['task_kind','result_type','json']) {
+  const {candidates,data}=fixture();
+  assert.equal(measuredCandidates(candidates,{...task,uncertainty:[field]},now,data),null);
+ }
+ const {candidates,data}=fixture();
+ assert.ok(measuredCandidates(candidates,{...task,uncertainty:['priority']},now,data));
+});
 test('expired, future, held-out, undersampled and unavailable pools fall back without padding',()=>{
  for(const mutate of [p=>p.measuredAt=new Date(now-8*86400_000).toISOString(),p=>p.measuredAt=new Date(now+1).toISOString(),p=>p.split='holdout',p=>p.models=p.models.slice(0,4),p=>p.models.forEach(m=>m.cases=5)]) {
   const {candidates,data}=fixture();mutate(data.profiles[0]);assert.equal(measuredCandidates(candidates,task,now,data),null);
@@ -48,7 +56,7 @@ test('evidence builder rejects held-out rows, duplicate observations and unplann
 test('direct task evidence can establish an otherwise unmeasured capability while catalogue requirements still apply',async()=>{
  const {recommend,createIndex}=await import('../rank.mjs');
  const {candidates,data}=fixture();
- const snapshot={version:1,checkedAt:new Date(now).toISOString(),sources:[],benchmarks:[],models:candidates.map(c=>({...c.model,name:c.model.id,provider:'provider',modalities:['text'],parameters:['response_format'],context:10000,evidence:[]}))};
+ const snapshot={version:1,checkedAt:new Date(now).toISOString(),sources:[],benchmarks:[],models:candidates.map(c=>({...c.model,name:c.model.id,provider:'provider',modalities:['text'],outputModalities:['text'],parameters:['response_format'],context:10000,evidence:[]}))};
  const t={...task,capabilities:[{id:'structured',label:'Structured output'}]};
  const result=recommend(createIndex(snapshot),'Extract fields as JSON',now,t,data);
  assert.equal(result.ranking.mode,'measured');assert.equal(result.recommendations.length,5);assert.equal(result.ranking.benchmarkEligibleModels,0);

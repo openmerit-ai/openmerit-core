@@ -19,6 +19,7 @@ export const groups = [
     { source: 'demo-fieldkit.md', slug: 'demo-fieldkit', title: 'Field kit · Six tasks', description: 'Explore a prepared six-model workflow spanning translation, vision, extraction, code, reasoning, and writing.' },
   ] },
   { title: 'Using OpenMerit', pages: [
+    { source: 'agent-evaluations.md', slug: 'agent-evaluations', title: 'Agent evaluations', documentationLabel: 'npm preview', description: 'Compare CLI revisions across Claude Code, Codex and OpenCode with Scout and repeated local checks.' },
     { source: 'metrics-and-evidence.md', slug: 'metrics-and-evidence', title: 'Metrics & evidence', description: 'Understand measurements, sample requirements, and evidence readiness.' },
     { source: 'lifecycle.md', slug: 'lifecycle', title: 'Comparisons & swaps', description: 'Follow the improvement lifecycle from baseline to post-swap evaluation.' },
     { source: 'automation.md', slug: 'automation', title: 'Automatic checks', description: 'Configure cadence, signals, and scheduling for model reassessment.' },

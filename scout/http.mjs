@@ -1,7 +1,8 @@
 import { indexStatus, recommend } from './rank.mjs';
+import { validateSelection } from './selection.mjs';
 
 export const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...extra } });
-export async function handleAPI(request, index, refresh = {}, recommendTask = recommend) {
+export async function handleAPI(request, index, refresh = {}, recommendTask = (index, prompt, modelIds, endpointIds) => recommend(index, prompt, Date.now(), null, undefined, modelIds ?? null, endpointIds ?? null)) {
   const path = new URL(request.url).pathname;
   if (path === '/scout/api/status') {
     if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405, { Allow: 'GET' });
@@ -13,8 +14,9 @@ export async function handleAPI(request, index, refresh = {}, recommendTask = re
   if (Number(request.headers.get('content-length')) > 18_000) return json({ error: 'Request is too large.' }, 413);
   try {
     const body = await readJSON(request);
-    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(k => k !== 'prompt')) return json({ error: 'The only input is prompt.' }, 400);
-    const result = await recommendTask(index, body.prompt);
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(k => !['prompt', 'modelIds', 'endpointIds'].includes(k))) return json({ error: 'Provide prompt and optionally modelIds or endpointIds.' }, 400);
+    validateSelection(body.modelIds); validateSelection(body.endpointIds, 'endpointIds');
+    const result = await recommendTask(index, body.prompt, body.modelIds, body.endpointIds);
     return json({ ...result, ...refresh }, 200, result.elapsedMs == null ? {} : { 'Server-Timing': `scout;dur=${result.elapsedMs}` });
   } catch (error) { return json({ error: error instanceof SyntaxError ? 'Invalid JSON.' : error.message }, error.status ?? 400, error.status === 429 ? { 'Retry-After': '2' } : {}); }
 }

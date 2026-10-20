@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { providerURL } from '../provider-links.mjs';
-import { createIndex } from '../rank.mjs';
+import { createIndex, recommend } from '../rank.mjs';
 import { handleAPI } from '../http.mjs';
 import { handleMCP } from '../mcp.mjs';
 
@@ -37,18 +37,20 @@ test('Gemma and GPT-OSS lead to model documentation instead of hosted API pricin
 });
 
 test('HTTP and MCP share provider links while retaining quoted prices and benchmark provenance', async () => {
-  const index = createIndex(snapshot), prompt = 'Debug Python code';
+  const run=(i,p)=>recommend(i,p,Date.now(),{kind:'extract',needsVision:true,needsStructured:true,outputFormat:'json',weights:{documents:6,vision:3,structured:3},workload:{input:'medium',output:'short'}});
+const index = createIndex(snapshot), prompt = 'Debug Python code';
   const post = (path, body) => new Request(`https://example.test/scout/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const http = await (await handleAPI(post('api/recommend', { prompt }), index)).json();
-  const mcp = (await (await handleMCP(post('mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scout_models', arguments: { prompt } } }), index)).json()).result.structuredContent;
+  const http = await (await handleAPI(post('api/recommend', { prompt }), index, {}, run)).json();
+  const mcp = (await (await handleMCP(post('mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scout_models', arguments: { prompt } } }), index, {}, run)).json()).result.structuredContent;
   assert.equal(http.recommendations.length, 5);
   assert.deepEqual(mcp.recommendations.map(m => m.pricing), http.recommendations.map(m => m.pricing));
   for (const model of http.recommendations) {
-    const original = snapshot.models.find(m => m.id === model.id);
-    assert.equal(model.pricing.url, providerURL(model.id));
-    assert.match(model.pricing.basis, /OpenRouter rates/);
-    assert.equal(model.pricing.inputPerMillion, Number(original.inputPrice.toFixed(4)));
-    assert.equal(model.pricing.outputPerMillion, Number(original.outputPrice.toFixed(4)));
+    const original = snapshot.models.find(m => m.id === model.modelId);
+    assert.equal(model.pricing.url, providerURL(model.modelId));
+    assert.match(model.pricing.basis, /rates|prices/);
+    const quote = original.endpoints?.find(e => e.id === model.endpoint.id) ?? original;
+    assert.equal(model.pricing.inputPerMillion, Number(quote.inputPrice.toFixed(4)));
+    assert.equal(model.pricing.outputPerMillion, Number(quote.outputPrice.toFixed(4)));
     assert.ok(model.evidence.every(e => original.evidence.some(source => source.url === e.url)));
   }
 });

@@ -7,7 +7,7 @@ const file = new URL('./snapshot.json', import.meta.url);
 setDefaultResultOrder('ipv4first');
 let previous;
 try { previous = JSON.parse(await readFile(file, 'utf8')); } catch {}
-const snapshot = await refreshSnapshot(fetch, previous);
+const snapshot = await refreshSnapshot(fetch, previous, { apiKey: process.env.OPENAI_API_KEY });
 await writeFile(new URL('./snapshot.json.tmp', import.meta.url), JSON.stringify(snapshot));
 await rename(new URL('./snapshot.json.tmp', import.meta.url), file);
 const { models, benchmarks, benchmarksWithResults, measurements, checkedAt } = indexStatus(createIndex(snapshot));

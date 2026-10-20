@@ -3,7 +3,7 @@
   "methodology": "Equal-case task-check accuracy (schema and request errors score zero), mean reported USD charge (unknown charges omitted, count disclosed), median full request time including failures. Two or more failed requests cap quality by observed HTTP success across calibration tasks, so an unreliable route cannot regain full credit from one clean task slice. Separate calibration split only. Seven-day expiry; matched task shape and current catalogue eligibility required.",
   "limitations": "Small development corpus and selected candidate pool, not a catalogue-wide or statistically validated optimum. Provider routing and latency can change. Text fixtures are authored; visual calibration uses eight public Portuguese invoices, not every document type. Four new payment slips and one new invoice are held out and never ingested. The external-memory profile uses six calibration cases per model from the previous broad audit and new calibration, scored for stored/recalled facts separately from raw JSON validity. Initial candidate code/action/text profiles were withheld after fresh validation regressions. The action pool was subsequently expanded to nine models on the same six calibration cases, with a further fresh test excluded from runtime evidence. Validation outcomes are not runtime inputs.",
   "visualSource": {
-    "title": "Invoice dataset — Cruz and Castelli (2022)",
+    "title": "Invoice dataset \u2014 Cruz and Castelli (2022)",
     "url": "https://zenodo.org/records/6371710",
     "license": "https://creativecommons.org/licenses/by/4.0/"
   },
@@ -363,7 +363,8 @@
         "output": "short",
         "capabilities": [
           "structured"
-        ]
+        ],
+        "outputFormat": "json"
       },
       "casesPerModel": 10,
       "measuredAt": "2026-10-14T18:05:56.422Z",
@@ -518,7 +519,8 @@
         "output": "short",
         "capabilities": [
           "structured"
-        ]
+        ],
+        "outputFormat": "json"
       },
       "casesPerModel": 6,
       "measuredAt": "2026-10-14T18:50:27.353Z",
@@ -923,7 +925,8 @@
           "structured",
           "coding",
           "reasoning"
-        ]
+        ],
+        "outputFormat": "json"
       },
       "casesPerModel": 6,
       "measuredAt": "2026-10-14T18:51:58.694Z",
@@ -1080,7 +1083,8 @@
           "structured",
           "reasoning",
           "math"
-        ]
+        ],
+        "outputFormat": "json"
       },
       "casesPerModel": 6,
       "measuredAt": "2026-10-14T18:52:39.064Z",
@@ -1255,7 +1259,8 @@
         "capabilities": [
           "structured",
           "context"
-        ]
+        ],
+        "outputFormat": "json"
       },
       "casesPerModel": 6,
       "measuredAt": "2026-10-14T18:53:39.220Z",
@@ -1507,7 +1512,8 @@
           "documents",
           "structured",
           "vision"
-        ]
+        ],
+        "outputFormat": "json"
       },
       "casesPerModel": 8,
       "measuredAt": "2026-10-14T17:59:29.793Z",

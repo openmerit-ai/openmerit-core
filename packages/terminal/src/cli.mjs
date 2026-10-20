@@ -9,6 +9,7 @@ import { openBrowser } from './browser.mjs';
 const help = `OpenMerit · Inference Terminal
 
   openmerit dash [path] [options]
+  openmerit eval --help              Evaluate CLI changes across coding agents
 
   --port <number>      Require a specific local port (default: 4310 or a free port)
   --interval <seconds> Collection interval, 10–30 (default: 15)
@@ -26,6 +27,7 @@ Coding-harness usage is outside this terminal's scope.
 
 async function main() {
   const args = process.argv.slice(2);
+  if (args[0] === 'eval') { const { main } = await import('../../eval/src/cli.mjs'); await main(args.slice(1)); return; }
   if (!args.length || args.includes('--help') || args.includes('-h')) { console.log(help); return; }
   if (args.shift() !== 'dash') throw new Error('Unknown command. Run openmerit --help.');
   let root = process.cwd(), port = 4310, interval = 15, demo = false, json = false, pathSeen = false, discovery = true, noOpen = false, explicitPort = false, diagnostics = false;
