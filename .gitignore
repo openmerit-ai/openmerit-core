@@ -23,3 +23,6 @@ packages/terminal/public/app.js
 # Opt-in environment-map prototype bundles
 packages/terminal/public/flow.js
 packages/terminal/public/flow.css
+
+# Amp orb portal registrations
+.amp/portals/*

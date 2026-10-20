@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Prepares an Amp orb: installs the Node.js version CI uses and the npm dependencies.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+step() {
+  local label="$1"
+  shift
+  local start=$SECONDS
+  echo "==> $label"
+  "$@"
+  echo "<== $label ($((SECONDS - start))s)"
+}
+
+# Keep in sync with node-version in .github/workflows/ci.yml. The orb's default
+# Node.js is newer and fails the terminal worker tests.
+NODE_VERSION=22.19.0
+node_dist="node-v${NODE_VERSION}-linux-x64"
+node_home="$HOME/.local/share/node/$node_dist"
+bin_dir="$HOME/.local/bin" # Already on PATH for Amp commands, login shells, and services.
+
+install_node() {
+  if [[ ! -x "$node_home/bin/node" ]]; then
+    local tmp
+    tmp="$(mktemp -d)"
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/${node_dist}.tar.xz" -o "$tmp/$node_dist.tar.xz"
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt" -o "$tmp/SHASUMS256.txt"
+    (cd "$tmp" && grep " $node_dist.tar.xz\$" SHASUMS256.txt | sha256sum -c -)
+    mkdir -p "$(dirname "$node_home")"
+    tar -xJf "$tmp/$node_dist.tar.xz" -C "$(dirname "$node_home")"
+    rm -rf "$tmp"
+  fi
+  mkdir -p "$bin_dir"
+  for tool in node npm npx corepack; do
+    ln -sfn "$node_home/bin/$tool" "$bin_dir/$tool"
+  done
+}
+
+step "Node.js $NODE_VERSION" install_node
+export PATH="$bin_dir:$PATH"
+node --version
+
+# npm ci also runs the prepare script, which builds dist/.
+step "npm ci" npm ci --prefer-offline --no-audit --no-fund
