@@ -1,6 +1,54 @@
 # Website FAQ maintenance
 
+## Scout task relevance — hosted beta publication, 17 October 2026
+
+Reviewed evidence, ranking, latency, data handling and scheduling claims. The candidate retains verified methodology in hourly retrieval documents, excludes rejected or unverified task applicability from quality ranking, considers benchmark evidence before unmeasured classification contracts, and uses the existing clarification response for ambiguous output representations. Source parsing is independent of component-property names. Metadata extraction supplies downstream work to Decisions, keeping selection activities out of capability interpretation while retaining the six-second deadline. These changes do not establish whole-catalogue optimality or authorize transferring timing between endpoints. The fresh 38-request execution gate failed on bird identification and invoice extraction despite valid outputs; the Scout guide records those failures and the owner-authorized beta scope. The original gate compared average accuracy across unequal pools, rather than supported Pareto tradeoffs; no accuracy or global-optimum improvement is claimed. The public guide records the owner-authorized beta publication and its 9/11 public first-pass acceptance, including unresolved SVG and code-evidence issues. The hourly schedule and UI are unchanged; terminal/Pi homepage FAQ behavior requires no copy changes.
+
+## Scout matching repair — hosted beta, 17 October 2026
+
+Reviewed evidence, latency, background work and readiness claims. Primary quality targets remain separate from endpoint requirements; prepared memberships backstop bounded vector retrieval before batched scored-ability assessment. Metadata/embedding work overlaps task interpretation, and prefetched model observations still require semantic approval before ranking. Contradictory task fields receive one bounded semantic reconciliation. Final production acceptance passed 203 VM assertions and eight filter/ambiguity cases; earlier failures remain disclosed. Hourly research, UI, retention and request contracts are unchanged. This establishes neither exact task accuracy nor exhaustive methodology retrieval or a latency guarantee. npm preview.4 and stable latest remain unchanged. Homepage FAQ copy requires no changes.
+
+## Prompt metadata filters — not released, 16 October 2026
+
+Reviewed the metadata-preparation and Decisions-only selection prototype. Current hosted free-text creator/family/context/date restrictions are not reliable; explicit API inventories remain authoritative. The local implementation now collects metadata independently of native API adapters, validates transfers and claim compatibility through Decisions during refresh, and builds complete fact posting lists before retrieval caps. Hourly scheduling, data-handling boundaries, server-side credentials and the UI are unchanged. The latest 25-case real-provider prototype run passed 20 cases and failed five: known date/compound matches were omitted, a rolling-date condition admitted an older model, and an allowed preference became a filter. Structural unit tests do not establish semantic correctness. Do not publish filtering or readiness claims until semantic acceptance passes. No Worker, website or npm publication has been made for this prototype.
+
+## Scout guides and npm preview.3 — published, 16 October 2026
+
+Published `0.1.7-preview.3` under `preview`; stable `latest` remains `0.1.6`. The packaged guides now describe the sole hosted `/scout/` service and its independently deployed hourly research/matching behavior. Runtime files match preview.2, and internal site maintenance notes are excluded from the package. The fresh registry installation in the local Ubuntu ARM64 Lima VM passed artifact, HTTP/MCP and installed CLI planning acceptance, as recorded in the public testing guide. No agent execution or new hourly refresh is claimed by this release test. Homepage stable-package, approval, budget, background scheduling and UI claims remain accurate and unchanged. The npm release does not deploy the website.
+
+## Scout naming and secret storage — 16 October 2026
+
+Reviewed the removal of preview routes, the single `/scout/` entry point and Cloudflare secret bindings. Hourly refresh, matching semantics and the UI are unchanged. The public guide documents the canonical endpoints and server-side secret storage. Homepage terminal/Pi FAQ claims need no changes. npm publication remains deferred.
+
+## Scout default consolidation — published, 16 October 2026
+
+Reviewed the single-runtime promotion, exact calibration serialization, semantic uncertainty, concurrency and hourly-research claims. The UI and homepage terminal/Pi FAQ need no changes. Existing endpoint and inventory contracts remain. The preview passed 187 semantic requests, 12 request-validation checks and eight concurrent searches before promotion. Median preview latency was 0.89 seconds and p95 1.70 seconds; these are observations, not guarantees. The researched catalogue now serves the default route and the original Worker is deleted. Post-promotion verification is recorded in the internal operations guide. Instant responses and exhaustive model coverage are not promised; npm publication remains deferred.
+
 The public FAQ lives in `site/index.html`. Its answers describe implemented behavior verified against main and the published package, including known limitations. Appearance differences between npm 0.1.6 and the hosted/source interface are identified separately in the terminal guide.
+
+## Scout isolated preview — 16 October 2026
+
+Reviewed the new `/scout/v2/` service against scheduling, source freshness, evidence, data handling and performance claims. Known-feed refresh remains hourly; Parallel discovery is incremental, with an explicit job limit and recheck interval. Visitor prompts never enter Parallel research. Decisions interprets semantics; validation, publication, inventory enforcement and comparison arithmetic remain code. The public guide identifies approximate candidate retrieval and external-call latency rather than promising exhaustive coverage or instantaneous execution. The original service, the UI and terminal/Pi homepage FAQ claims are unchanged. npm publication remains deferred. Publication receipts and acceptance results belong in the architecture operations guide after deployment.
+
+## Semantic benchmark interpretation — hosted beta, 15 October 2026
+
+Reviewed evidence, hourly scheduling, data handling and provider-usage claims. Benchmark capabilities and families are prepared with Decisions from source metadata and methodology, cached independently of score/price updates, and read locally during searches. Unknown or failed interpretations cannot grant capability evidence; existing source status exposes failures. Public methodology goes to Decisions during refresh, without user prompts. Existing prompt/specialist interpretation calls and the UI remain unchanged. Homepage terminal/Pi FAQ copy needs no changes. npm remains deferred; publication and validation are recorded separately in the internal Scout guide.
+
+## Semantic specialist matching — hosted beta, 15 October 2026
+
+Reviewed evidence, scheduling, data handling and provider-usage claims. Decisions replaces Hub domain/language keyword matching and partial label overlap. Public repository metadata is analyzed during hourly preparation, with revision/metadata cache reuse. Relevant searches add batched compatibility checks against prepared profiles; the initial 21-question interpreter and deterministic evidence ranking remain. Refresh now needs a provider key for changed specialist metadata. Semantic compatibility does not establish performance. UI and homepage terminal/Pi FAQ copy remain unchanged. The hosted interpreter version 14 passed all 107 local and live HTTP/MCP semantic cases, including four fresh specialist holdouts. Publication details are recorded in the internal Scout guide; npm remains deferred.
+
+## Scout semantic formats and SQL interpretation — hosted beta, 15 October 2026
+
+Reviewed matching, evidence, data handling and scheduling claims. Interpreter version 13 combines removal of the two prompt keyword scans with an operation-based SQL definition that does not require schema details in a task description. Uncertain format answers do not impose a hard requirement or inherit narrow measured evidence. Query-writing capability does not imply database execution or measured accuracy on the user's query. The existing UI, hourly refresh, input contract, request count and data destinations remain unchanged. Homepage terminal/Pi FAQ copy needs no changes. The guide records 91 passing local and live HTTP/MCP semantic cases without claiming universal accuracy. Hosted deployment and npm publication remain separate; npm is deferred.
+
+## Scout identification matching — hosted beta, 15 October 2026
+
+Reviewed the distinction between open identification and supplied-label classification against endpoint contracts, interpreter validation, visual benchmark eligibility and calibration scope. The Scout guide describes the hosted update and preserves the limits of proxy visual evidence. The homepage's terminal/Pi evidence, budget, data and readiness answers remain accurate; no FAQ edit is needed. UI files, data destinations, refresh scheduling and the number of interpretation calls are unchanged. This work does not authorize npm publication.
+
+## Scout matching corrections — hosted beta, 15 October 2026
+
+Reviewed homepage evidence, comparison, data, budget and readiness claims against the four Scout fixes: shared endpoint eligibility, null-preserving prices, endpoint-scope specialist exclusion and latency-aware route selection. These changes affect the separate Scout service; terminal/Pi FAQ wording remains accurate and needs no edit. The Scout guide describes the hosted-beta corrections, conservative text-output catalogue eligibility and unknown quality and timing. No UI, inference-provider call, data destination, paid evaluation or schedule change is introduced. Catalogue preparation remains hourly and request matching remains local after task interpretation. This publication updates the Scout Worker and generated documentation through the preserved-main-application workflow; npm publication remains deferred until user testing.
 
 ## Current factual review — 14 October 2026
 
@@ -19,6 +67,8 @@ Source review on 2026-09-27: unreleased post-build target detection, harness-inf
 The experimental `npm run demo` sandbox is a repository-local live-provider demonstration, not a released package workflow. Its end-to-end result and tiny pilot sample do not change the homepage's shipping-behavior or reliability claims.
 
 ## Sources to review when behavior changes
+
+The 16 October 2026 Scout reliability changes affect the hosted research/matching service and its source-backed guide: publication recovery, per-source freshness and bounded Decisions retries. Homepage approval, budgets, background-agent scheduling, and published npm behavior are unchanged. No homepage FAQ claim is strengthened by these service tests.
 
 | FAQ anchor | Claims to verify | Primary sources |
 | --- | --- | --- |
@@ -244,3 +294,147 @@ The `.ai` migration changes hostnames and mail configuration, not product behavi
 ## Automatic light and dark appearance — unreleased source, 14 October 2026
 
 Reviewed homepage FAQ claims against the appearance-only change. Device-driven colors affect website reading surfaces, demos, and the Inference Terminal, including charts and overlays. They add no saved theme preference, inference calls, collection, routing, permissions, or billing behavior. No FAQ wording change is required. The terminal guide separates the unreleased source appearance from published preview.5. Website/npm publication is not implied by local builds; the main-app source divergence and integration boundary are recorded in [theme maintenance](site-themes.md).
+
+## Scout — unreleased branch preview, 14 October 2026
+
+Reviewed evidence, comparisons, data, background checks, cost, and readiness claims. Scout adds a separate prompt-only shortlist API and `/scout/` page; it does not change Pi approvals, evaluations, automatic swaps, terminal collection, or the published npm package. Its preview guide explains fixed ranking defaults, source/configuration differences, old visual evidence, missing speed, HTTP-only vision source transport, token-price assumptions, in-memory prompt handling, and hourly refresh lifetime. The homepage gains a navigation link; existing FAQ answers continue describing the terminal and Pi workflow and need no behavioral rewrite. Local checks do not establish a hosted deployment or state-of-the-art recommendation quality.
+
+## Scout launch preparation — 14 October 2026
+
+Reviewed freshness, real-data, privacy, price, speed and recommendation claims against the five-source importer and prompt-only API/MCP tool. The guide now documents independent source recovery, archived measurements, OmniDocBench's actual table version, uncertainty adjustment, and the limits of phrase matching. The page starts with a real empty input. Scout is a separate beta and does not establish SOTA task accuracy. No Pi/npm approval, budget or routing behavior changes. Hosted publication is verified separately.
+
+## Scout publication — 14 October 2026
+
+Scout's page, JSON API and MCP tool are now hosted, with an hourly Worker trigger and independently refreshed real public sources. The homepage navigation and generated documentation were published while preserving the deployed main application. Existing FAQ answers still describe the terminal/Pi workflow; no edits to those behavior claims were required. Publication and verification boundaries are recorded in [the Scout launch record](site-scout.md).
+
+## Scout comparison table — 14 October 2026
+
+Reviewed evidence, comparison, data handling and readiness claims for the semantic results table and bundled provider favicons. This changes presentation and evidence disclosure controls only; ranking, API/MCP responses and prompt handling remain unchanged. Icons use a curated local registry, with no remote favicon requests from the browser. No homepage FAQ wording change is required. Publication and browser verification are recorded separately in [the Scout launch record](site-scout.md).
+
+
+## Scout Decisions integration — release preparation, 14 October 2026
+
+Reviewed data handling, inference cost, evidence, scheduling and readiness claims. Scout now makes one server-side OpenAI Decisions call per prompt; its page and guide disclose this before submission. BFCL adds explicit tool-calling and external-memory evidence, with strict eligibility and source limitations. Fixed cost/quality/speed weights remain unchanged. The homepage FAQ continues to describe terminal/Pi behavior, so no FAQ copy change is required. This does not change terminal approvals, provider budgets, the npm package or local routing. Live publication is recorded separately in the Scout launch record.
+
+
+## Scout ranking revision — 14 October 2026
+
+Checked homepage FAQ claims against the proposed ranking revision. FAQ answers still describe the terminal/Pi workflow; Scout does not change its budgets, approvals or routing contracts. The Scout guide and table now disclose same-benchmark pairwise ordering, prompt-shaped reference cost, first-answer completion timing, tradeoff defaults, and incomplete comparison coverage. Reference estimates must not be described as measured task accuracy, actual endpoint latency or exact per-task charges. No general SOTA claim is established by the small task evaluations. Deployment and measured evaluation outcomes are recorded separately in the Scout publication notes.
+
+
+## Scout measured-task ranking — 14 October 2026
+
+Reviewed evidence, data, costs, scheduling and readiness claims for the Scout change. The separate Scout service uses calibration-only aggregates for narrow matching tasks, and public benchmark comparisons elsewhere. Held-out results are not loaded into ranking. Evaluation requires an explicit offline run; the existing hourly job still only refreshes six public feeds. No user task execution, saved prompt history, extra runtime inference, or database is introduced. Small samples and the selected candidate pool do not establish SOTA or a perfect ordered top five. Homepage FAQ claims concern the terminal/package and need no changes. Publication and test outcomes are recorded in `site-scout.md`.
+
+
+## Scout interface refinement — 14 October 2026
+
+Checked comparison, evidence and data-handling claims for the terminal-style Scout interface. Ranking and API/MCP contracts are unchanged. The page retains its OpenAI prompt-processing notice, measurement scope and limitations. Bundled provider marks replace boxed favicons; missing assets use text-only names. No homepage FAQ wording change is needed.
+
+## Scout compact controls — 15 October 2026
+
+Reviewed index coverage, evidence and data-handling claims. The header counts indexed models, distinct model creators, benchmark series and source feeds; it does not equate series with independent publishers or creators with hosting routes. Row disclosures retain benchmark and measured evidence, while sample/workload context moves into the existing limitations disclosure. The prompt-processing sentence is removed from the form at the user's request; the public Scout guide retains the OpenAI data-flow and retention description. Ranking, persistence and terminal/Pi behavior are unchanged. No homepage FAQ copy change is needed; publication is recorded separately in the Scout notes.
+
+## Scout execution evidence — 15 October 2026
+
+Reviewed evidence, comparisons, cost, latency, memory and data claims. The ranking extends the existing offline calibration path to specified code, dependent tool actions and external memory, with explicit execution/retention matching and full-episode cost/time. It adds no runtime provider evaluation, extra inference call, model-specific bonus or persistence of user prompts. The previous broad audit becomes development data; new held-out cases remain excluded. Failed candidate profiles are withheld, and missing action-pool coverage is filled through separate calibration before another fresh check. Selected pools and small samples cannot prove a universally correct ordered five. Homepage FAQ answers still describe terminal/Pi behavior and need no copy changes. Publication and fresh validation are recorded in the Scout notes.
+
+
+## Agent evaluation loop — unreleased source, 15 October 2026
+
+Reviewed harness support, evaluations, costs, budgets, data and scheduling. The new standalone eval commands are separate from terminal collection and Pi application evaluation. Source docs mark them unreleased; published npm 0.1.6 and homepage FAQ claims are unchanged. Project instructions are opt-in through init, not install hooks. Watch is foreground-only, cumulative reservations are admission controls rather than billing caps, unknown usage/cost stays unknown, and Scout eligibility filtering happens before ranking. No performance guarantee or automatic production model swap is introduced.
+
+
+## Scout model detail cleanup — 15 October 2026
+
+Reviewed evidence and comparison claims after removing the prose summary from every expanded model row. Measurement scope remains in Assumptions & limitations and source-linked evidence remains in the details. Ranking and API/MCP metadata are unchanged; homepage FAQ wording requires no change.
+
+
+## Agent evaluation npm preview — 15 October 2026
+
+Prepared the `0.1.7-preview.1` npm preview with explicit installation and setup instructions. The stable `latest` tag remains `0.1.6`. Reviewed homepage readiness, evaluation, budget and data claims: they describe stable terminal/Pi behavior and require no copy changes. The preview retains explicit initialization, connection scope, local execution and budget limitations; no install-time automation is claimed.
+
+## Agent evaluation accounting — unreleased source, 15 October 2026
+
+Reviewed evidence, comparisons, budgets, data and readiness against the source corrections. Native cost estimates and partial charges remain distinct from provider billing; reservations are not released by estimates. Recognized budget/environment blocks are unscored and stop comparisons. The Linux Codex sandbox probe is a local preflight action with no inference call or permission bypass. There is no provider-account ingestion in the product, production model swap or new background process. The guide distinguishes these changes from npm `0.1.7-preview.1`; stable homepage FAQ wording remains unchanged.
+
+## Agent evaluation budget selection — unreleased source, 15 October 2026
+
+Reviewed budget, approval, scheduling and readiness claims. Source planning now asks for an explicit $10, custom or no-fixed-cap allowance after model scope; no option is selected automatically. New project instructions reuse the saved choice, and reservations stay internal. Cumulative accounting survives replanning and limit changes. No fixed cap retains task/repetition/time limits and native permissions, but a foreground watcher can incur further charges until stopped. Provider billing limits remain independent. These changes are documented separately from published `0.1.7-preview.1`; the stable homepage FAQ still describes terminal/Pi behavior and needs no wording change.
+
+## Agent evaluation preview.2 release preparation — 15 October 2026
+
+Prepared `0.1.7-preview.2` for the existing npm preview channel, combining corrected accounting and execution-block handling with explicit budget selection. The public guide now describes these versioned behaviors together and keeps earlier VM findings historical. Stable `latest` remains `0.1.6`; homepage FAQ claims still describe terminal/Pi behavior and require no copy changes. Registry publication and fresh-install VM acceptance are recorded separately; a successful local build alone does not establish either.
+
+## Agent evaluation preview.2 — published, 15 October 2026
+
+Published and verified `0.1.7-preview.2`, superseding the release-preparation status above. A fresh VM registry install matched the package integrity and all 124 files. Real Claude Code and OpenCode before/after watcher runs completed three attempts each per revision; native budget stops were unscored and Codex's unsupported VM sandbox stopped before inference. Budget choices and prior reservations persisted. These results establish the tested integration paths, not universal model quality or reconciled per-attempt pricing. Stable `latest` remains `0.1.6`; no homepage FAQ rewrite or website deployment was required. Detailed acceptance evidence is in [testing](testing.md#published-preview2-acceptance-15-october-2026).
+
+
+## Scout endpoint catalogue — 15 October 2026
+
+Reviewed evidence, setup, data and model-selection claims against the independent provider catalogue and typed/specialist endpoint shortlist. Classification and spatial vision choices are explicitly task-fit candidates with unknown quality, not a proven five-model performance ranking. Price and latency belong to the selected route; self-hosted compute is unknown. Jev is a recommended task candidate, not the ranker. The hosted guide describes new endpoint scope without claiming npm clients execute new protocols automatically. Homepage terminal/Pi FAQ wording is unaffected. Fresh routing and image execution results and their limits are recorded in the public Scout guide; deployment acceptance is recorded separately.
+
+
+## Scout publisher icons — 15 October 2026
+
+Reviewed the provider identity and data-handling claims after adding TypeSafe and Hub publisher marks. Icons remain bundled, same-origin assets; there is no browser-side avatar lookup or third-party favicon service. A fallback Hugging Face mark denotes the repository platform, not authorship or endorsement. Ranking, endpoint access and budgets are unchanged; homepage FAQ copy needs no changes.
+
+
+## Scout source spacing — 15 October 2026
+
+Reviewed the compact source-disclosure layout. Only spacing changes: source coverage, methods, limitations, refresh dates and links remain available on expansion. Ranking, data handling, refresh scheduling and budget behavior are unchanged; homepage FAQ wording needs no change.
+
+
+## Scout search analytics — 15 October 2026
+
+Reviewed data handling, history, evidence and account claims. Hosted Scout now adds allowlisted task-category-plus-shortlist events to Analytics Engine for API and MCP recommendation attempts. No raw prompts, hashes, user identifiers, request metadata or requested project inventories are recorded. Three-month sampled retention and persistent private local exports are disclosed. Maintainer authentication does not require visitor login. Metrics describe recommendations, not actual task success. Ranking and endpoint selection are unchanged; homepage terminal/Pi FAQ wording requires no change. Deployment and live verification are recorded separately.
+
+Scout admin review (15 October 2026): the protected team report adds no visitor login or identifier to Scout recommendation events. Homepage/Pi/terminal data and approval claims remain unchanged. Public Scout and security guides distinguish anonymous analytics from team authentication records.
+
+
+## Scout private prompt records — 15 October 2026
+
+The owner requested original task input alongside the ordered five. Version 2 search analytics now includes that validated text in the same Cloudflare sampling unit, while excluding separately collected visitor identifiers and request metadata. Public Scout/security guides replace the earlier no-prompt-storage claim, disclose potentially sensitive prompt content, and retain three-month sampled retention plus private export lifetime. Older records cannot be backfilled. The private report shows prompt text safely escaped; no visitor-facing history is added. Homepage FAQs still describe terminal/Pi collection and need no behavioral rewrite. Live publication is recorded separately.
+
+
+## Scout storage-only observability — 15 October 2026
+
+At the owner's request, the report generator, HTML export, dashboard/auth handlers and staging utility are removed. Private Analytics Engine storage remains, now attaching a snapshot of benchmark/calibration/endpoint/pricing evidence to the prompt and ordered five in one sampling unit. No user-facing history, analytics sign-in or public query route remains. Account-authenticated ad hoc queries use the documented schema; legacy data remains intact. The public data-handling and security guides disclose unredacted prompt text, source evidence, best-effort collection and sampled retention. Homepage terminal/Pi FAQ behavior is unchanged. Earlier report/dashboard audit entries are historical and superseded.
+
+
+## Scout ambiguity audit — unreleased source, 15 October 2026
+
+Reviewed matching, evidence and scheduling claims after the local ambiguity audit. Mixed answer types require generative candidates, uncertain operation/output interpretations cannot inherit narrow calibration, and low-confidence document guesses no longer narrow ordinary photos to OCR evidence. The existing UI and hourly refresh are unchanged; the matcher still uses one interpretation call. The public Scout guide identifies these changes as unreleased and records the remaining binary-label confidence limitation. No candidate inference, deployment or npm publication occurred in this audit. Homepage terminal/Pi FAQ claims remain accurate and need no copy changes.
+
+
+## Scout task framing — hosted beta, 15 October 2026
+
+Reviewed interpretation, evidence, data handling and scheduling claims. All prompts receive the same JSON-quoted task context; confidence thresholds, API/MCP inputs, analytics records, hourly refresh and request count are unchanged. The earlier mixed-output and calibration corrections are included. Local and live HTTP/MCP acceptance passed 25 routing cases, including arbitrary labels and explicit negation. No model-answer accuracy or universal interpretation guarantee is claimed. The existing Scout UI and homepage FAQ copy need no changes; hosted deployment and npm publication remain separate actions.
+
+
+## Scout category/content distinction — hosted beta, 15 October 2026
+
+Reviewed evidence, model selection, input and scheduling claims. Conversational categories are interpreted from the requested distinction, while reading capability depends on the requested content. Task-fit quality remains unknown; representative benchmarks are not claimed as classification accuracy. Two existing questions change; no object-name rules, new requests, source fetches, UI controls or new data collection are introduced. The public guide records 43 passing local and live HTTP/MCP semantic checks and keeps hosted deployment separate from npm publication. Homepage terminal/Pi FAQ copy requires no changes.
+
+
+## Scout hybrid evidence implementation — unreleased, 16 October 2026
+
+Reviewed recommendation, data, scheduling and comparison claims. Local changes introduce small-model constraint extraction, exact typed metadata comparisons, public-evidence embeddings and a provisional Pareto shortlist. Discovery archives are distinct from verified endpoints; benchmark similarity is not measured task accuracy. Missing objectives cannot establish a global frontier. OpenAI also receives prompts for structured interpretation and query embeddings; visitor query vectors are not persisted in Vectorize. Existing private prompt analytics remain unchanged. UI and homepage terminal/Pi FAQ wording need no changes. Deployment remains conditional on semantic and operational acceptance; no npm publication is included.
+
+
+## Scout hybrid evidence publication — 16 October 2026
+
+Reviewed matching, source, data handling and scheduling claims after hosted activation. Exact model restrictions and a provisional Pareto shortlist replace the bounded model pool. OpenAI receives prompts for Decisions, structured metadata extraction and transient query embeddings; public methodology vectors enter Vectorize. Calibration contributes scoped quality rather than replacing only some reference charges/timings. Source coverage remains incremental and large-scale performance is not established. The memory fix and staged publication retain the previous complete catalogue on failure. UI and homepage terminal/Pi FAQ copy require no changes. No npm publication is included.
+
+## Scout latency implementation — hosted beta, 17 October 2026
+
+Reviewed homepage evidence, speed, scheduling and data handling claims. This change affects hosted Scout serving only: hourly specialist packs, compact/cacheable interpretation reference data, bounded exact-result memory reuse and fixed diagnostic timings/status codes. The UI, hourly research interval, exact metadata eligibility and numerical selection remain unchanged. No instantaneous-result or global-best-model claim is added. Provider, family, context, date, model identity and ambiguous-prompt gates passed before Worker deployment; post-deployment transport checks are recorded separately. npm publication is excluded. Homepage terminal/Pi FAQ behavior needs no edit.
+
+## Scout beta publication follow-up — 17 October 2026
+
+Reviewed evidence, freshness, background work and readiness claims after preview.4 publication. Stable `latest` remains `0.1.6`; Scout deploys independently. Exact stable research identities are updated on rediscovery, while semantic interpretation still governs cross-identity links. Publication validation preserves the last committed catalogue on failure. This does not expand coverage or establish task accuracy, universal semantic reliability or instantaneous matching. Homepage FAQ wording remains unchanged.
+
+## Preview.5 package publication — 17 October 2026
+
+Reviewed setup, readiness, evidence and scheduling claims for packaging the hosted matching-repair guides. Preview.5 is published to the preview channel, with stable latest retained at 0.1.6; runtime bytes, legal metadata, terminal/Pi approvals, budgets and routing are unchanged. All 679 repository tests passed before publication and the fresh registry installation passed 203/203 VM HTTP/MCP/CLI assertions afterward. Scout remains independently deployed with hourly preparation and bounded matching. These integration samples do not establish exact task quality or universal latency. Existing homepage FAQ copy needs no changes; detailed results and retained limitations are in the testing guide.

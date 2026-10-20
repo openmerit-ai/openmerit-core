@@ -22,6 +22,8 @@ Explore the [hosted sample](https://dash.openmerit.ai/) or [before/after dashboa
 
 ## Compare models with Pi
 
+The **npm preview** provides `openmerit eval` for evaluating Claude Code, Codex and OpenCode with your CLI. Choose model scope and a $10, custom or no-fixed-cap budget, freeze Scout's shortlist, and compare 3–10 fresh attempts after source changes. Budget and sandbox blocks stay separate from task scores; unknown costs stay unknown. Install with `npm install -g openmerit@preview`. See [agent evaluations](https://unpkg.com/openmerit@preview/docs/agent-evaluations.md) for setup, graders, budgets and availability. Scout's hosted API and MCP service update independently of the npm package. This is separate from the Pi workflow below.
+
 With Pi 0.87 and a model provider configured:
 
 ```sh

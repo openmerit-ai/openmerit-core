@@ -1,6 +1,6 @@
 # OpenMerit social sharing image
 
-This is the shared default image for the homepage and all documentation pages. [Separate page cards](site-dynamic-og.md) are disabled for now at the user's request.
+This is the shared default image for the homepage and all documentation pages. [Separate documentation cards](site-dynamic-og.md) are disabled for now at the user's request. Scout's dedicated card is recorded below.
 
 Final asset: `site/assets/openmerit-og-v1.png` (1200 × 630 pixels, PNG).
 
@@ -36,3 +36,19 @@ Include the final period. No quotation marks. No additional text, logos, brand n
 Illustration: a fresh, compact arrangement from the same workshop, in the lower portion of the card (approximately y=275 to y=580), with generous breathing room separating it from the headline. Three diverse adult miniature makers thoughtfully testing and comparing hand tools at a long, modest wooden workbench: an East Asian man measuring with calipers on the left, an older South Asian man with gray beard and glasses comparing two wooden hand planes near the middle, and a Black woman with a natural bun making a note in an open notebook on the right. Their faces, fabric and materials should have the same nuanced miniature craftsmanship as the reference. Include the small brass balance scale on the bench and the resting spaniel underneath. Natural, slightly asymmetric spacing and different poses; ordinary skilled colleagues. The whole miniature scene should span most of the card's width, about x=74 to x=1126, keeping all heads, feet and bench legs within the frame. Do not crop the people. The ground is the same warm paper as the background, with only delicate contact shadows. Do not add workshop walls or scenery.
 
 Constraints: exact text and only that text. Strong, simple hierarchy. No badges, UI, buttons, icons, technical diagrams, glowing effects, sparkles, purple/blue tech gradients, floating ornaments, shiny 3D marketing shapes, childish characters or generic corporate illustration. Quiet and intentional, consistent with the attached miniature workshop.
+
+## Scout social card — local source, 16 October 2026
+
+Scout has a dedicated card at `site/scout/scout-og.png` (1200 × 630 pixels, PNG). Its page metadata uses `https://openmerit.ai/scout/scout-og.png` for Open Graph and Twitter, with image dimensions, MIME type, alt text and a large-image card. The canonical page is `https://openmerit.ai/scout/`. The homepage and documentation retain the default image above.
+
+The card follows the [Inference Terminal social image](site-terminal-preview.md#sharing-image): graphite background, the OpenMerit mark, large Inter typography, a muted “by OpenMerit” line, thin colored paths and a quiet footer URL. One task branches to five abstract model candidates. The artwork represents a shortlist and contains no model identities, scores or performance claims. Product behavior and homepage FAQ claims are unchanged.
+
+The editable source is `scout/social-image.svg`. Render the checked-in PNG with:
+
+```sh
+node scripts/scout-social-image.mjs
+```
+
+The renderer uses the existing `@resvg/resvg-js` dependency and bundled `site/assets/inter-latin.woff2`, matching the Terminal's workflow without network or system-font dependencies. Update the versioned filename in the renderer and page metadata when replacing a published image. The earlier miniature-workshop draft was rejected and is no longer shipped; its original generated file remains outside the project.
+
+The asset lives under `/scout/` so the existing domain router sends image requests to the Scout service and `scripts/build-scout.mjs` copies it with the page. The isolated v2 build also copies the image and rewrites the metadata to its `/scout/v2/` path. This is a local source change; publication and live crawler verification are not established by a successful local build. Follow the [Scout publication workflow](site-scout.md#publication-boundaries-and-rollback) to publish it.

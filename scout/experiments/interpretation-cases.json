@@ -1,0 +1,411 @@
+[
+  {
+    "id": "books-posters-original",
+    "prompt": "users's upload photos of books and posters and you need to tell me which is which",
+    "expect": {
+      "kind": "classify",
+      "labelSpace": "supplied",
+      "vision": true,
+      "native": true,
+      "noDocuments": true
+    }
+  },
+  {
+    "id": "receipts-menus",
+    "prompt": "People send us photos of receipts and menus. Tell us which kind each image shows.",
+    "expect": {
+      "kind": "classify",
+      "labelSpace": "supplied",
+      "vision": true,
+      "native": true,
+      "noDocuments": true
+    }
+  },
+  {
+    "id": "screens-printed-pages",
+    "prompt": "Our uploads contain computer screens and printed pages; distinguish between the two.",
+    "expect": {
+      "kind": "classify",
+      "labelSpace": "supplied",
+      "vision": true,
+      "native": true,
+      "noDocuments": true
+    }
+  },
+  {
+    "id": "cats-dogs",
+    "prompt": "Users upload photos of cats and dogs and we want to know which is which.",
+    "expect": {
+      "kind": "classify",
+      "labelSpace": "supplied",
+      "vision": true,
+      "native": true,
+      "noDocuments": true
+    }
+  },
+  {
+    "id": "cans-bottles",
+    "prompt": "Customers send pictures of cans and bottles. Tell me which type is in each picture.",
+    "expect": {
+      "kind": "classify",
+      "labelSpace": "supplied",
+      "vision": true,
+      "native": true,
+      "noDocuments": true
+    }
+  },
+  {
+    "id": "food-drinks",
+    "prompt": "Our gallery has food and drinks. Identify which category each photo belongs to.",
+    "expect": {
+      "kind": "classify",
+      "labelSpace": "supplied",
+      "vision": true,
+      "native": true,
+      "noDocuments": true
+    }
+  },
+  {
+    "id": "document-text-extraction",
+    "prompt": "Read the text in these scanned pages and return the headings and paragraphs.",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "documents": true
+    }
+  },
+  {
+    "id": "named-object-content",
+    "prompt": "Read each photographed cover and return the printed title and author.",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "documents": true
+    }
+  },
+  {
+    "id": "document-table",
+    "prompt": "Read the scanned table and extract its rows and columns into JSON.",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "structured": true,
+      "documents": true
+    }
+  },
+  {
+    "id": "open-species",
+    "prompt": "Our gallery has cats and dogs. Identify the breed of each animal.",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "noDocuments": true
+    }
+  },
+  {
+    "id": "mixed-content",
+    "prompt": "Classify each photo as a menu or receipt and transcribe all the printed text.",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "documents": true,
+      "noCalibration": true
+    }
+  },
+  {
+    "id": "plain-text-document",
+    "prompt": "From this already extracted text, copy the invoice number and total into JSON. Images and PDFs are not supplied.",
+    "expect": {
+      "generative": true,
+      "vision": false,
+      "noDocuments": true,
+      "structured": true
+    }
+  },
+  {
+    "id": "category-and-reply",
+    "prompt": "Read a customer email, choose billing, technical or account, and draft a helpful reply.",
+    "expect": {
+      "generative": true,
+      "vision": false,
+      "tools": false,
+      "noCalibration": true
+    }
+  },
+  {
+    "id": "judgment-and-explanation",
+    "prompt": "Review this product photo. Say whether it is damaged and explain the visible evidence in one sentence.",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "tools": false,
+      "noCalibration": true
+    }
+  },
+  {
+    "id": "judgment-and-extraction",
+    "prompt": "For each receipt photo, decide whether it is reimbursable and return the merchant, date and total in JSON.",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "structured": true,
+      "tools": false,
+      "noCalibration": true
+    }
+  },
+  {
+    "id": "fixed-and-open-labels",
+    "prompt": "Pick robin, sparrow or owl for each bird photo, and identify the tree species in the background.",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "tools": false,
+      "noDocuments": true
+    }
+  },
+  {
+    "id": "open-photo-tags",
+    "prompt": "Tag photos of objects with descriptive names so users can search them later; we don't have a predefined category list.",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "tools": false,
+      "noDocuments": true
+    }
+  },
+  {
+    "id": "visual-schema-to-sql",
+    "prompt": "Given screenshots of our database schema, write a read-only SQL query to find overdue invoices.",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "tools": false
+    }
+  },
+  {
+    "id": "visual-tool-loop",
+    "prompt": "Look at a product photo, call our inventory lookup tool, then check the returned matches and retry the lookup if none fit.",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "tools": true,
+      "agentic": true,
+      "noDocuments": true
+    }
+  },
+  {
+    "id": "ambiguous-separation",
+    "prompt": "Separate each item in these clothing photos so we can use the results in our store.",
+    "expect": {
+      "clarification": true
+    }
+  },
+  {
+    "id": "all-package-boxes",
+    "prompt": "Find every package in a loading-dock photo and return bounding boxes for all of them.",
+    "expect": {
+      "kind": "detect",
+      "vision": true,
+      "allBoxes": true
+    }
+  },
+  {
+    "id": "audio-plus-summary",
+    "prompt": "Transcribe customer voice recordings and summarize the reasons they called.",
+    "expect": {
+      "unsupported": true
+    }
+  },
+  {
+    "id": "pure-fixed-labels",
+    "prompt": "Sort messages into spam or not spam. Return only the selected label.",
+    "expect": {
+      "kind": "classify",
+      "labelSpace": "supplied",
+      "native": true
+    }
+  },
+  {
+    "id": "pure-rubric-score",
+    "prompt": "Review an application against the supplied rubric. Return only a score from 1 to 5.",
+    "expect": {
+      "kind": "judge",
+      "native": true
+    }
+  },
+  {
+    "id": "bird-original",
+    "prompt": "users's upload photos of birds and we need to find the name of it and arrange it in the alphabetic order",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "tools": false,
+      "noDocuments": true
+    }
+  },
+  {
+    "id": "refund-and-reply",
+    "prompt": "Read a refund request, mark it approved or denied according to our policy, then write a polite reply to the customer.",
+    "expect": {
+      "generative": true,
+      "vision": false,
+      "tools": false,
+      "noCalibration": true
+    }
+  },
+  {
+    "id": "essay-score-feedback",
+    "prompt": "Give this student essay a score out of 10 and two sentences explaining how to improve it.",
+    "expect": {
+      "generative": true,
+      "vision": false,
+      "tools": false,
+      "noCalibration": true
+    }
+  },
+  {
+    "id": "negative-fixed-choice",
+    "prompt": "For each chat message choose safe or unsafe. Do not add explanations.",
+    "expect": {
+      "kind": "classify",
+      "labelSpace": "supplied",
+      "native": true
+    }
+  },
+  {
+    "id": "invoice-only-extraction",
+    "prompt": "Read this invoice photo and copy the vendor name, date and total into JSON.",
+    "expect": {
+      "generative": true,
+      "kind": "extract",
+      "vision": true,
+      "structured": true,
+      "tools": false
+    }
+  },
+  {
+    "id": "approved-rejected",
+    "prompt": "Classify an incoming request as approved or rejected. Give only the category.",
+    "expect": {
+      "kind": "classify",
+      "labelSpace": "supplied",
+      "native": true
+    }
+  },
+  {
+    "id": "arbitrary-labels",
+    "prompt": "For each incoming event, choose exactly one of these labels: cobalt, saffron, ivory. Return the label only.",
+    "expect": {
+      "kind": "classify",
+      "labelSpace": "supplied",
+      "native": true
+    }
+  },
+  {
+    "id": "negated-label",
+    "prompt": "Label each email relevant or not relevant. No explanation is needed.",
+    "expect": {
+      "kind": "classify",
+      "labelSpace": "supplied",
+      "native": true
+    }
+  },
+  {
+    "id": "quoted-labels",
+    "prompt": "Route each support ticket to \"resolve\", \"escalate\", or \"defer\". Output just that label.",
+    "expect": {
+      "kind": "classify",
+      "labelSpace": "supplied",
+      "native": true
+    }
+  },
+  {
+    "id": "safe-with-explanation",
+    "prompt": "Choose safe or unsafe for each chat message and explain your decision.",
+    "expect": {
+      "generative": true,
+      "noCalibration": true
+    }
+  },
+  {
+    "id": "code-not-labels",
+    "prompt": "Write a Python function that labels messages safe or unsafe. Return the function, not a label.",
+    "expect": {
+      "generative": true,
+      "kind": "code"
+    }
+  },
+  {
+    "id": "invent-labels",
+    "prompt": "Read the customer feedback and invent useful categories; we have no category list. Return category names only.",
+    "expect": {
+      "generative": true
+    }
+  },
+  {
+    "id": "missing-labels",
+    "prompt": "Categorize incoming customer messages.",
+    "expect": {
+      "generative": true
+    }
+  },
+  {
+    "id": "handwritten-printed-types",
+    "prompt": "We get handwritten notes and printed letters. For each image say which of those it is.",
+    "expect": {
+      "kind": "classify",
+      "labelSpace": "supplied",
+      "vision": true,
+      "native": true,
+      "noDocuments": true
+    }
+  },
+  {
+    "id": "handwritten-printed-text",
+    "prompt": "We get handwritten notes and printed letters. Transcribe their contents.",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "documents": true
+    }
+  },
+  {
+    "id": "plant-subtypes",
+    "prompt": "Our image library includes flowers and trees. Return the species name for each.",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "noDocuments": true
+    }
+  },
+  {
+    "id": "maps-paintings",
+    "prompt": "Users submit pictures of maps and paintings. Tell which type each is.",
+    "expect": {
+      "kind": "classify",
+      "labelSpace": "supplied",
+      "vision": true,
+      "native": true,
+      "noDocuments": true
+    }
+  },
+  {
+    "id": "scene-text",
+    "prompt": "Our photos contain road signs and storefronts. Read the wording visible in each.",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "documents": true
+    }
+  },
+  {
+    "id": "card-category-and-fields",
+    "prompt": "Tell me whether the photo is an ID card or a business card, and copy the name and expiry date.",
+    "expect": {
+      "generative": true,
+      "vision": true,
+      "documents": true,
+      "noCalibration": true
+    }
+  }
+]

@@ -1,0 +1,72 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "openmerit-scout",
+  "account_id": "1f505317550261331711b1274ec53c33",
+  "main": "scout/worker.mjs",
+  "compatibility_date": "2026-10-15",
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./dist/scout-site",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "r2_buckets": [
+    {
+      "binding": "SCOUT_CATALOGUE",
+      "bucket_name": "openmerit-scout-catalogue"
+    }
+  ],
+  "d1_databases": [{"binding":"SCOUT_INDEX","database_name":"openmerit-scout-index","database_id":"80312d1c-c9e7-43f3-a09d-cb4b2c538f49"}],
+  "vectorize": [{"binding":"SCOUT_EVIDENCE","index_name":"openmerit-scout-evidence"}],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SCOUT_CONTROL",
+        "class_name": "ScoutPublication"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "publication-1",
+      "new_sqlite_classes": [
+        "ScoutPublication"
+      ]
+    }
+  ],
+  "workflows": [
+    {
+      "name": "openmerit-scout-refresh",
+      "binding": "SCOUT_REFRESH",
+      "class_name": "ScoutRefresh"
+    }
+  ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "SCOUT_ANALYTICS",
+      "dataset": "scout_searches"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "SCOUT_RATE",
+      "namespace_id": "2026101601",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "7 * * * *"
+    ]
+  },
+  "build": {
+    "command": "npm run check:scout && npm run check:docs && npm run build:scout"
+  },
+  "observability": {
+    "enabled": false
+  }
+}

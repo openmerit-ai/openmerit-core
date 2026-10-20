@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="Compare five models for your task using measured results, public benchmarks, cost, and speed.">
+  <title>Scout by OpenMerit</title>
+  <link rel="canonical" href="https://openmerit.ai/scout/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Scout by OpenMerit">
+  <meta property="og:description" content="Compare five models for your task using measured results, public benchmarks, cost, and speed.">
+  <meta property="og:url" content="https://openmerit.ai/scout/">
+  <meta property="og:site_name" content="OpenMerit">
+  <meta property="og:image" content="https://openmerit.ai/scout/scout-og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Scout by OpenMerit. One task branches into five model candidates along colored paths on a graphite background.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Scout by OpenMerit">
+  <meta name="twitter:description" content="Compare five models for your task using measured results, public benchmarks, cost, and speed.">
+  <meta name="twitter:image" content="https://openmerit.ai/scout/scout-og.png">
+  <meta name="twitter:image:alt" content="Scout by OpenMerit. One task branches into five model candidates along colored paths on a graphite background.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/scout/scout.css">
+  <link rel="stylesheet" href="/scout/table.css">
+  <script src="/scout/scout.js" type="module"></script>
+</head>
+<body class="scout-page">
+  <a class="skip-link" href="#prompt">Skip to task</a>
+  <header class="scout-header">
+    <div class="scout-wrap header-inner">
+      <a class="parent-brand" href="/" aria-label="OpenMerit home"><svg width="22" height="25" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span>openmerit</span></a>
+      <a class="scout-brand" href="/scout/">Scout <span class="beta-label">Beta</span></a>
+      <nav aria-label="Scout navigation"><a href="/docs/scout/">Docs</a><a href="#for-agents">API &amp; MCP <span aria-hidden="true">↗</span></a></nav>
+    </div>
+  </header>
+  <main class="scout-wrap" id="main">
+    <section class="scout-intro" aria-labelledby="scout-title">
+      <h1 id="scout-title">Compare models for your task.</h1>
+      <p id="index-counts">Loading index…</p>
+    </section>
+    <section class="search-section" aria-label="Find models">
+      <form id="scout-form" class="prompt-box">
+        <label for="prompt">Task</label>
+        <textarea id="prompt" name="prompt" rows="2" maxlength="4000" required spellcheck="false" enterkeyhint="search" aria-describedby="prompt-hint" placeholder="Users upload photos of supplier invoices. Extract the vendor, invoice number, date, currency, tax, and total as JSON. Return null for missing fields. We process thousands a day, so accuracy, cost, and speed matter."></textarea>
+        <div class="prompt-footer"><span id="prompt-hint">Search <span class="newline-hint">· Shift + Enter for a new line</span></span><button class="find-button" type="submit" title="Find models"><span class="sr-only">Find models</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
+      </form>
+      <p class="error-message" id="error" role="alert" hidden></p>
+    </section>
+
+    <section class="results-section" id="results" aria-labelledby="results-title" aria-busy="false" hidden>
+      <h2 id="results-title">Recommendations</h2>
+      <div class="match-line"><div id="capabilities" class="capability-tags" aria-label="Matched capabilities"></div><span class="query-time" id="query-time"></span></div>
+      <div class="table-frame">
+        <div class="table-scroll" role="region" aria-label="Model comparison" tabindex="0">
+          <table class="data-table model-table">
+            <caption class="sr-only" id="table-caption">Models in Scout rank order.</caption>
+            <thead><tr>
+              <th scope="col" class="model-column">Model</th>
+              <th scope="col" class="numeric-column" id="quality-heading">Quality <span class="column-unit">relative / 100</span></th>
+              <th scope="col" class="numeric-column">Cost <span class="column-unit">USD / 1,000 tasks</span></th>
+              <th scope="col" class="numeric-column">Time <span class="column-unit" id="time-unit">reference seconds</span></th>
+            </tr></thead>
+            <tbody id="model-list"><tr><td colspan="4" class="table-message"><span>Searching…</span></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <p class="table-scroll-hint" hidden>Scroll to compare <span aria-hidden="true">↔</span></p>
+      <details class="evidence-note" id="limitations" hidden><summary>Assumptions &amp; limitations</summary><p id="workload-note"></p><div id="warnings"></div><p>Measured results come from separate calibration cases. Benchmark results use a reference workload. Neither predicts exact performance on your task.</p></details>
+      <details class="support-section specialist-section" id="specialists" hidden><summary id="specialists-title">Specialist models</summary><p>Related models to investigate. These are outside the ranked five; quality, cost and speed have not been compared on the same task.</p><div id="specialist-list"></div><p id="specialist-coverage"></p></details>
+    </section>
+
+    <div class="support-sections">
+      <details class="support-section" id="for-agents">
+        <summary>API &amp; MCP</summary>
+        <div class="agent-body"><p>Send a task. Get the same recommendations, model IDs, and evidence as this page.</p><div class="code-heading"><span>MCP · Streamable HTTP</span><button class="quiet-button" id="copy-mcp" type="button">Copy URL</button></div><pre tabindex="0"><code id="mcp-url"></code></pre><div class="code-heading"><span>JSON API</span><button class="quiet-button" id="copy-command" type="button">Copy request</button></div><pre tabindex="0"><code id="agent-code"></code></pre><p class="agent-note">No API key required. <a href="/docs/scout/">API guide ↗</a></p></div>
+      </details>
+      <details class="support-section" id="capability-index"><summary>Capabilities</summary><p>Coverage in the index. Task matches appear first.</p><ul id="capability-list" class="capability-list" aria-label="Indexed capabilities"></ul></details>
+      <details class="support-section" id="sources"><summary>Sources</summary><p>What each source measures, how much it covers, and where it falls short.</p><div id="source-list"></div><p>Public feeds refresh hourly. Collection dates and measurement dates may differ. Task calibration is updated separately.</p></details>
+    </div>
+    <noscript><p class="error-message">Enable JavaScript to search, or use the API in <a href="/docs/scout/">the Scout guide</a>.</p></noscript>
+  </main>
+  <footer class="scout-footer scout-wrap"><span>Scout by OpenMerit</span><a href="/docs/scout/#current-validation-limits">Evaluation &amp; limitations <span aria-hidden="true">↗</span></a></footer>
+  <p class="sr-only" id="announcement" role="status" aria-live="polite"></p>
+</body>
+</html>

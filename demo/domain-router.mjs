@@ -2,7 +2,11 @@ import { withPrimaryDomain } from './domain-migration.mjs';
 
 const siteHosts = new Set(['openmerit.ai', 'www.openmerit.ai', 'openmerit.site', 'www.openmerit.site']);
 const terminalHosts = new Set(['dash.openmerit.ai', 'dash.openmerit.site']);
-const site = withPrimaryDomain({ fetch: (request, env) => env.SITE.fetch(request) });
+export const isScoutPath = path => path === '/scout' || path.startsWith('/scout/');
+const site = withPrimaryDomain({ fetch: (request, env) => {
+  const path=new URL(request.url).pathname;
+  return (isScoutPath(path)?env.SCOUT:env.SITE).fetch(request);
+} });
 const terminal = withPrimaryDomain({ fetch: (request, env) => env.TERMINAL.fetch(request) }, 'terminal');
 
 export default {

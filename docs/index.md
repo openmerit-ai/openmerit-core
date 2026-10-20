@@ -16,6 +16,10 @@ The terminal shows application services, model declarations, recorded requests, 
 
 Start with [installation and setup](getting-started.md) or the [Inference Terminal guide](inference-terminal.md). Explore the [hosted sample](https://dash.openmerit.ai/) and [before/after dashboard demo](https://dash.openmerit.ai/demo) without connecting your machine. The [demo guide](demo.md) explains their fictional data and comparison limits.
 
+## Discover model candidates
+
+For a shortlist before building an integration, the separate [Scout beta](scout.md) accepts a task description and returns up to five evidence-backed model candidates. It is available at [openmerit.ai/scout/](https://openmerit.ai/scout/), with a prompt-only JSON API and MCP tool for coding agents.
+
 ## Evaluate model changes with Pi
 
 The separate Pi 0.87 integration asks a coding harness to establish evaluations, gather application measurements, and test candidates. OpenMerit coordinates the approved lifecycle, records evidence references, validates structured results and frontier conformance, and requests authorized changes. The harness executes the work; the terminal does not perform this workflow.

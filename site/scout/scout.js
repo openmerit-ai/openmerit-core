@@ -1,0 +1,228 @@
+import { providerIdentity } from './providers.js';
+
+const $ = selector => document.querySelector(selector);
+const money = value => value == null ? '—' : `$${new Intl.NumberFormat('en-US', { maximumFractionDigits: 2, minimumFractionDigits: value < 1 ? 2 : 0 }).format(value)}`;
+let result = null, activeRequest = null, requestID = 0;
+
+function element(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text != null) node.textContent = text; return node; }
+function link(text, url) { const node = element('a', '', text); try { const parsed = new URL(url); if (['https:', 'http:'].includes(parsed.protocol)) { node.href = parsed.href; node.target = '_blank'; node.rel = 'noopener noreferrer'; } } catch {} return node; }
+function metric(value, label) {
+  const node = element('td', 'metric-cell'); node.title = label;
+  node.append(element('span', value === '—' ? 'metric-unavailable' : '', value));
+  if (value === '—') node.append(element('span', 'sr-only', label));
+  return node;
+}
+function tableMessage(message, height = 120) {
+  const row = element('tr'), cell = element('td', 'table-message'); cell.colSpan = 4; cell.style.height = `${Math.max(120, height)}px`; cell.append(element('span', '', message)); row.append(cell); return row;
+}
+function providerIcon(provider) {
+  if (!provider.file) return null;
+  const img = element('img', `provider-icon${provider.invertOnDark ? ' provider-icon-monochrome' : ''}`); img.alt = ''; img.width = 13; img.height = 13; img.decoding = 'async';
+  img.title = provider.title ?? provider.label;
+  img.setAttribute('aria-hidden', 'true'); img.addEventListener('error', () => img.remove());
+  img.src = `/scout/providers/${provider.file}`; return img;
+}
+async function copy(text, button, label = 'Copied') {
+  const previous = button.textContent;
+  try { await navigator.clipboard.writeText(text); button.textContent = label; $('#announcement').textContent = label; }
+  catch { button.textContent = 'Select and copy'; $('#announcement').textContent = 'Clipboard access is unavailable. Select the text to copy it.'; }
+  setTimeout(() => { if (button.isConnected) button.textContent = previous; }, 1800);
+}
+function evidenceItem(e) {
+  const item = element('div', 'evidence-item'); item.append(link(`${e.benchmark} ↗`, e.url), element('span', '', `${e.score.toFixed(1)}`));
+  item.append(element('small', '', `${e.cohortSize} comparable models · ${e.observedAt ? `Source date: ${e.observedAt.slice(0, 10)}` : 'Measurement date not supplied'} · ${e.configurations.join(', ')}${e.historical ? ' · archived evaluation' : ''}`)); return item;
+}
+function modelRow(model) {
+  const fragment = document.createDocumentFragment(), row = element('tr', 'model-row'), nameCell = element('th', 'model-cell'); nameCell.scope = 'row';
+  const provider = providerIdentity(model), identity = element('span', 'model-identity'), name = element('span'), title = element('span', 'model-title', model.name), byline = element('span', 'model-provider', provider.label);
+  const toggle = element('button', 'model-toggle'); toggle.type = 'button';
+  toggle.setAttribute('aria-label', `Details for ${model.name}`); toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', `model-evidence-${model.rank}`);
+  const icon = providerIcon(provider); if (icon) byline.prepend(icon);
+  if (model.endpoint) byline.append(document.createTextNode(` · ${model.endpoint.protocol === 'decisions' ? 'Decisions' : model.endpoint.protocol === 'systemone' ? 'System One' : model.endpoint.deployment === 'self-hosted' ? 'Self-hosted' : model.endpoint.provider}`));
+  name.append(title, byline); identity.append(element('span', 'model-number', String(model.rank).padStart(2, '0')), name); toggle.append(identity); nameCell.append(toggle);
+  const qualityValue = model.measured ? model.measured.quality * 100 : model.quality;
+  const quality = metric(qualityValue == null ? '—' : `${qualityValue.toFixed(0)}${model.measured ? '%' : ''}`, model.measured ? 'Mean task-check accuracy on separate calibration cases. Not predicted accuracy on your prompt.' : model.quality == null ? 'No comparable task-quality measurement. Ordered by task fit, not proven performance.' : 'Relative result of shared-benchmark comparisons. Not predicted task accuracy.');
+  row.append(nameCell, quality, metric(model.reference?.costUsd != null ? money(model.reference.costUsd * 1000) : '—', model.measured ? `Mean reported charge, scaled to 1,000 similar tasks; cost known for ${model.measured.costKnownCalls}/${model.measured.cases} tasks.` : 'Illustrative USD per 1,000 tasks at the workload below; excludes hidden reasoning and modality-specific charges.'), metric(model.reference?.completionSeconds != null ? `${model.reference.completionSeconds.toFixed(1)}s` : '—', model.measured ? 'Median full task time on the calibration cases, including failures.' : 'Reference first-answer delay plus generation time; actual endpoint latency may differ.'));
+  const detail = element('tr', 'model-detail'), detailCell = element('td', 'model-detail-cell'); detailCell.colSpan = 4; detail.id = `model-evidence-${model.rank}`; detail.hidden = true;
+  toggle.addEventListener('click', () => { detail.hidden = !detail.hidden; toggle.setAttribute('aria-expanded', String(!detail.hidden)); row.dataset.expanded = String(!detail.hidden); });
+  // Preserve table semantics and native Enter/Space behavior; any other part of
+  // the row activates the same button. Links and buttons keep their own action.
+  row.addEventListener('click', event => { if (!event.target.closest('button, a')) toggle.click(); });
+  const body = element('div', 'model-evidence');
+  const idLine = element('div', 'model-id-line'), copyID = element('button', '', 'Copy ID'); copyID.type = 'button'; copyID.addEventListener('click', () => copy(model.endpoint?.modelId ?? model.id, copyID));
+  idLine.append(element('code', '', model.endpoint?.modelId ?? model.id), copyID); body.append(idLine);
+  if (model.endpoint) {
+    const endpoint = element('p', 'price-detail'); endpoint.append(element('code', '', model.endpoint.id), document.createTextNode(` · ${model.endpoint.status ?? 'listed'} · ${model.endpoint.deployment}.`)); body.append(endpoint);
+    if (model.taskFit) body.append(element('p', 'price-detail', model.reason));
+    if (model.endpoint.limits && !model.taskFit) body.append(element('p', 'price-detail', model.endpoint.limits));
+    if (model.endpoint.licenseURL) { const license = element('p', 'price-detail'); license.append(link(`Declared license: ${model.endpoint.license ?? 'check model card'} ↗`, model.endpoint.licenseURL)); body.append(license); }
+    if (model.endpoint.cardURL) { const card = element('p', 'price-detail'); card.append(link('Pinned model card ↗', model.endpoint.cardURL)); body.append(card); }
+  }
+  if (model.measured) { const observed = element('p', 'price-detail'); observed.append(link('Measured task evidence ↗', model.measured.url), document.createTextNode(` · ${model.measured.cases} cases · ${new Date(model.measured.measuredAt).toLocaleDateString()} · charges known for ${model.measured.costKnownCalls}/${model.measured.cases} tasks.`)); body.append(observed); }
+  const grid = element('div', 'evidence-grid'); model.evidence.slice(0, 4).forEach(e => grid.append(evidenceItem(e))); body.append(grid);
+  if (model.evidence.length > 4) { const more = element('details', 'evidence-more'); more.append(element('summary', '', `All ${model.evidence.length} benchmark results`)); const rest = element('div', 'evidence-grid'); model.evidence.slice(4).forEach(e => rest.append(evidenceItem(e))); more.append(rest); body.append(more); }
+  const pricing = element('p', 'price-detail', `${money(model.pricing.inputPerMillion)} input / ${money(model.pricing.outputPerMillion)} output per million tokens, ${model.pricing.basis ?? 'Advertised rates.'}`);
+  if (model.pricing.url) pricing.append(document.createTextNode(' '), link('Provider page ↗', model.pricing.url));
+  body.append(pricing);
+  if (model.speed && !model.measured) { const speed = element('p', 'price-detail'); speed.append(link('Reference timing by Artificial Analysis ↗', model.speed.url), document.createTextNode(` · ${model.speed.configurations.join(', ')}. ${model.speed.historical ? 'Archived reference measurement. ' : ''}Endpoint performance may differ.`)); body.append(speed); }
+  detailCell.append(body); detail.append(detailCell); fragment.append(row, detail); return fragment;
+}
+function showSources(sources, calibration) {
+  $('#source-list').replaceChildren(...sources.map(source => {
+    const detail = element('details', 'source-detail'), heading = element('summary'), coverage = source.coverage;
+    heading.append(element('span', '', source.name), element('span', 'source-role', source.role ?? 'Public source')); detail.append(heading);
+    if (coverage) detail.append(element('p', 'source-counts', source.refreshPolicy === 'manual-contract-review' ? 'Reviewed endpoint contract' : ['models', 'modelsdev'].includes(source.id) ? `${coverage.cataloguedModels} catalogued models` : source.id === 'huggingface' ? `${coverage.repositories} repositories · ${coverage.repositoriesWithReportedResults} with structured reported results` : `${coverage.benchmarkSeries} benchmark series · ${coverage.matchedModels} matched models · ${coverage.measurements} results`));
+    detail.append(element('p', '', source.measures ?? source.attribution), element('p', '', source.limits));
+    const date = element('p', 'source-dates', `${source.refreshPolicy === 'manual-contract-review' ? 'Contract reviewed' : 'Collected'} ${source.checkedAt ? new Date(source.checkedAt).toLocaleString() : '—'}.${source.publishedAt ? ` Published ${source.publishedAt}.` : ''}${source.status === 'failed' ? ' Refresh failed; previous data retained.' : ''}`);
+    if (coverage?.measurements) date.append(document.createTextNode(` Source dates supplied for ${coverage.datedResults}/${coverage.measurements} results; these may be publication dates.${coverage.latestSourceDate ? ` Latest: ${coverage.latestSourceDate.slice(0, 10)}.` : ''}${coverage.historicalResults ? ` Includes ${coverage.historicalResults} archived results.` : ''}`));
+    detail.append(date); const links = element('p', 'source-links'); links.append(link('Source ↗', source.url));
+    if (source.license) links.append(link('Source license ↗', source.license)); detail.append(links); return detail;
+  }));
+  if (calibration) {
+    const detail = element('details', 'source-detail'); detail.append(element('summary', '', calibration.name), element('p', '', calibration.limits));
+    for (const p of calibration.profiles) detail.append(element('p', 'source-dates', `${p.label} · ${p.casesPerModel} cases × ${p.testedModels} models · measured ${new Date(p.measuredAt).toLocaleDateString()} · ${p.active ? 'within seven-day window' : 'expired'}. ${p.scope.input} input / ${p.scope.output} output.`));
+    const links = element('p', 'source-links'); links.append(link('Calibration data ↗', calibration.url)); detail.append(links); $('#source-list').append(detail);
+  }
+}
+function showSpecialists(discovery) {
+  const candidates = discovery?.candidates ?? [];
+  $('#specialists').hidden = !candidates.length;
+  $('#specialists-title').textContent = `Specialist models · ${candidates.length}`;
+  $('#specialist-list').replaceChildren(...candidates.map(m => {
+    const item = element('article', 'specialist-item'), title = element('p', 'specialist-title');
+    const icon = providerIcon(providerIdentity({ ...m, source: 'huggingface', provider: m.id.split('/')[0] }));
+    if (icon) title.append(icon); title.append(link(`${m.id} ↗`, m.url)); item.append(title, element('p', '', m.fit));
+    item.append(element('p', 'source-dates', `${m.pipeline} · ${m.languages.length ? m.languages.join(', ') : 'Language not declared'} · ${m.library ?? 'Runtime not declared'}. ${m.parameters ? `${(m.parameters / 1e6).toFixed(0)}M parameters; hardware needs unmeasured.` : 'Size and hardware needs not established.'}`));
+    const license = element('p', 'source-dates'); license.append(link(`Declared license: ${m.license ?? 'not supplied'} ↗`, m.licenseURL), document.createTextNode(` · ${m.gated ? 'Access approval required' : 'Not marked gated'}. ${m.providers.length ? `Hub lists hosting via ${m.providers.map(p => p.provider).join(', ')}; prices and latency unmeasured.` : 'No live hosting route listed by the Hub; check hosting or local deployment.'}`)); item.append(license);
+    const evidence = element('details', 'specialist-evidence'); evidence.append(element('summary', '', m.evaluations.length ? `${m.evaluations.length} reported evaluation results` : 'No structured evaluation results indexed'));
+    if (m.evaluations.length) evidence.append(element('p', 'source-dates', 'Reported by the repository or evaluation source; not independently verified by Scout. Scores keep their original units. Dates may be publication dates.'));
+    for (const e of m.evaluations) { const p = element('p'); p.append(link(`${e.dataset} · ${e.metric ?? e.task} · ${e.value} ↗`, e.url), element('small', 'source-dates', `${e.split ? ` Split: ${e.split}.` : ''}${e.configuration ? ` Configuration: ${e.configuration}.` : ''}${e.date ? ` Reported ${e.date.slice(0, 10)}.` : ' Date not supplied.'}${e.notes ? ` ${e.notes}` : ''}`)); evidence.append(p); }
+    const card = element('p'); card.append(link('Pinned model card ↗', m.cardURL), document.createTextNode(` · checked ${new Date(m.checkedAt).toLocaleDateString()}`)); evidence.append(card); item.append(evidence); return item;
+  }));
+  $('#specialist-coverage').textContent = candidates.length ? `${discovery.indexedRepositories} repositories indexed in a bounded Hub sample. Matches use task metadata, not measured performance. Model-card claims and licenses need checking; missing results do not mean a model is poor.` : '';
+}
+function showResult(data, roundTripMs) {
+  result = data;
+  $('#results-title').textContent = data.task.clarification ? 'Choose the output' : data.ranking?.mode === 'task-fit' ? 'Candidates to evaluate' : data.recommendations.length ? 'Recommendations' : 'No matching models';
+  $('#capabilities').replaceChildren(...(data.task.capabilities.length ? data.task.capabilities.map(c => c.label) : ['General purpose']).map(label => element('span', '', label)));
+  $('#query-time').textContent = `${(roundTripMs / 1000).toFixed(2)}s`;
+  $('#query-time').title = 'Total search time, including task interpretation and network time';
+  $('.model-table thead').hidden = !!data.task.clarification;
+  $('#model-list').replaceChildren(...data.recommendations.map(modelRow));
+  if (!data.recommendations.length) $('#model-list').append(tableMessage(data.warnings[0] || 'Try describing the task in more detail.'));
+  if (data.task.clarification) {
+    const cell = $('#model-list td');
+    for (const option of data.task.clarification.options) { const button = element('button', 'clarification-option', option); button.type = 'button'; button.addEventListener('click', () => { $('#prompt').value = `${data.prompt} ${option}`; fitPrompt(); $('#scout-form').requestSubmit(); }); cell.append(button); }
+  }
+  $('#warnings').replaceChildren(...data.warnings.map(warning => element('p', '', warning)));
+  const workload = data.ranking?.workload, profile = data.ranking?.profile;
+  $('#quality-heading').replaceChildren(document.createTextNode(profile ? 'Accuracy ' : 'Quality '), element('span', 'column-unit', profile ? 'calibration cases' : data.ranking?.mode === 'task-fit' ? 'not measured' : 'relative / 100'));
+  $('#time-unit').textContent = profile ? 'measured seconds' : 'reference seconds';
+  $('#table-caption').textContent = data.task.clarification ? data.task.clarification.question : data.ranking?.mode === 'task-fit' ? 'Candidates ordered by task fit and deployment readiness, then known reference costs. Quality is unmeasured.' : profile ? 'Models in Scout rank order among tested eligible candidates. Accuracy, mean cost and median full task time come from separate calibration cases, not executions of your prompt.' : 'Models in Scout rank order using shared benchmarks and an illustrative workload. Quality is a ranking signal, not predicted task accuracy.';
+  $('#workload-note').textContent = data.ranking?.mode === 'task-fit' ? 'Task-compatible shortlist. No comparable endpoint-quality measurements; self-hosted costs and unmeasured latency remain unknown.' : profile ? `${profile.casesPerModel} calibration cases per model · ${profile.eligibleTestedModels} tested models · ${new Date(profile.measuredAt).toLocaleDateString()}. Not measured on your task.` : workload ? `Reference workload: ${workload.inputTokens.toLocaleString()} input + ${workload.outputTokens.toLocaleString()} output tokens per task · ${workload.priority} priority. Cost and time are comparisons, not task-specific measurements.` : 'Based on published benchmarks. Evaluate these models on your own examples.';
+  $('#limitations').hidden = !!data.task.clarification;
+  showSpecialists(data.specialists);
+  showIndex(data);
+  $('#announcement').textContent = data.task.clarification ? data.task.clarification.question : `${data.recommendations.length} models found. ${data.task.capabilities.map(c => c.label).join(', ')}.`;
+}
+function showIndex(data) {
+  $('#index-counts').replaceChildren(...[`${data.availableModels ?? data.models} API models`, `${data.specialistRepositories ?? 0} HF repositories`, `${data.benchmarks} benchmark series`, `${data.sources.length} sources`].map(text => element('span', '', text)));
+  $('#index-counts').title = `${data.benchmarksWithResults} benchmark series have matched results · ${data.endpoints ?? data.models} hosted endpoints · ${data.independentModels ?? 0} models with independent provider metadata · ${data.specialistRepositories ?? 0} specialist repositories`;
+  showSources(data.sources, data.calibration);
+  const capabilities = (data.wordCloud ?? []).map(c => ({ ...c, matched: !!data.task?.weights[c.id] }));
+  capabilities.sort((a, b) => Number(b.matched) - Number(a.matched));
+  $('#capability-list').replaceChildren(...capabilities.map(c => {
+    const item = element('li', 'capability-item'), name = element('div', 'capability-name', c.label);
+    item.dataset.matched = String(c.matched);
+    if (c.matched) {
+      const match = element('span', 'capability-match', '✓'); match.setAttribute('aria-hidden', 'true'); match.title = 'Task match';
+      name.append(match, element('span', 'sr-only', ' — Task match'));
+    }
+    item.append(name, element('span', 'capability-coverage', `${c.benchmarks} benchmark series · ${c.models} models`));
+    return item;
+  }));
+}
+async function search() {
+  const prompt = $('#prompt').value.trim(); if (!prompt) { $('#error').textContent = 'Describe the task you want a model to do.'; $('#error').hidden = false; $('#prompt').focus(); return; }
+  activeRequest?.abort(); const controller = new AbortController(); activeRequest = controller; const id = ++requestID;
+  $('#results').hidden = false; $('#error').hidden = true; $('#results').setAttribute('aria-busy', 'true');
+  result = null; $('#results-title').textContent = 'Searching…'; $('#model-list').replaceChildren(tableMessage('Interpreting task…', $('#model-list').getBoundingClientRect().height));
+  $('#capabilities').replaceChildren(); $('#query-time').textContent = ''; $('#limitations').hidden = true;
+  $('#specialists').hidden = true;
+  $('.find-button span').textContent = 'Searching…'; $('.find-button').setAttribute('aria-busy', 'true');
+  const started = performance.now(), timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch('/scout/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }), signal: controller.signal });
+    if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('The Scout API is not available on this server. Start the Scout server and try again.');
+    const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Scout could not complete this search.');
+    if (id === requestID) showResult(data, performance.now() - started);
+  } catch (error) {
+    if (id !== requestID) return;
+    result = null; $('#model-list').replaceChildren(tableMessage('No results loaded. Try your search again.')); $('#results-title').textContent = 'Search unavailable'; $('#capabilities').replaceChildren(); $('#query-time').textContent = '';
+    $('#error').textContent = error.name === 'AbortError' ? 'This request took too long. Please try again.' : error instanceof TypeError ? 'Couldn’t reach Scout. Check the connection and try again.' : error.message; $('#error').hidden = false;
+  } finally { clearTimeout(timeout); if (id === requestID) { $('#results').setAttribute('aria-busy', 'false'); $('.find-button span').textContent = 'Find models'; $('.find-button').setAttribute('aria-busy', 'false'); } }
+}
+// Re-measure after content or width changes; CSS bounds very long prompts.
+function fitPrompt() {
+  const input = $('#prompt');
+  input.style.height = 'auto';
+  input.style.height = `${input.scrollHeight}px`;
+}
+$('#prompt').addEventListener('input', fitPrompt);
+window.addEventListener('resize', fitPrompt);
+window.addEventListener('pageshow', fitPrompt);
+fitPrompt();
+// Examples are hints only: never insert text or submit a request.
+const promptExamples = [
+  $('#prompt').placeholder,
+  'Review a TypeScript API that sometimes creates duplicate orders. Trace the cause, suggest a small fix, and write regression tests. The model needs to read several files and use tools to run the tests.',
+  'Compare five research papers about battery recycling. Summarize their methods, separate measured results from claims, and cite the passages behind each conclusion. Flag anything the papers leave uncertain.',
+  'Turn release notes into a customer email under 200 words. Explain what changed, who benefits, and how to get started. Keep the tone direct and friendly, preserve the facts, and avoid promotional language.',
+  'Build a support assistant that checks order status with tools and remembers customer preferences across conversations. It should use the latest information, ask before changing an order, and respond quickly.',
+];
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+let exampleIndex = 0;
+let exampleTransition;
+function canRotateExample() {
+  const input = $('#prompt');
+  return !input.value && document.activeElement !== input && !document.hidden && !reducedMotion.matches;
+}
+function stopExampleTransition() {
+  clearTimeout(exampleTransition);
+  $('#prompt').classList.remove('example-changing');
+}
+setInterval(() => {
+  if (!canRotateExample()) return;
+  const input = $('#prompt');
+  input.classList.add('example-changing');
+  exampleTransition = setTimeout(() => {
+    if (canRotateExample()) {
+      exampleIndex = (exampleIndex + 1) % promptExamples.length;
+      input.placeholder = promptExamples[exampleIndex];
+    }
+    stopExampleTransition();
+  }, 180);
+}, 10000);
+$('#prompt').addEventListener('focus', stopExampleTransition);
+$('#prompt').addEventListener('input', stopExampleTransition);
+document.addEventListener('visibilitychange', stopExampleTransition);
+reducedMotion.addEventListener('change', stopExampleTransition);
+$('#scout-form').addEventListener('submit', event => { event.preventDefault(); void search(); });
+$('#prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#scout-form').requestSubmit(); } });
+new ResizeObserver(() => { const table = $('.table-scroll'); $('.table-scroll-hint').hidden = table.scrollWidth <= table.clientWidth + 1; }).observe($('.table-scroll'));
+const command = `curl ${location.origin}/scout/api/recommend \\\n  -H 'Content-Type: application/json' \\\n  -d '{"prompt":"Extract six invoice fields as JSON"}'`;
+$('#agent-code').textContent = command;
+$('#copy-command').addEventListener('click', () => copy(command, $('#copy-command')));
+const mcpURL = `${location.origin}/scout/mcp`;
+$('#mcp-url').textContent = mcpURL;
+$('#copy-mcp').addEventListener('click', () => copy(mcpURL, $('#copy-mcp')));
+fetch('/scout/api/status').then(response => { if (!response.ok) throw new Error(); return response.json(); }).then(data => { if (!result) showIndex(data); }).catch(() => { if (!result) { $('#index-counts').textContent = 'Index unavailable'; } });
+
+// Deep links reveal the native disclosure before moving focus to its summary.
+function revealSection() {
+  if (location.hash !== '#for-agents') return;
+  const section = $('#for-agents'); section.open = true; section.querySelector('summary').focus({ preventScroll: true });
+}
+window.addEventListener('hashchange', revealSection);
+document.querySelector('a[href="#for-agents"]').addEventListener('click', () => { $('#for-agents').open = true; });
+revealSection();

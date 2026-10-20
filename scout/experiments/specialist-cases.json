@@ -1,0 +1,221 @@
+[
+  {
+    "id": "hub-books-posters",
+    "prompt": "users's upload photos of books and posters and you need to tell me which is which",
+    "expect": {
+      "kind": "classify",
+      "vision": true,
+      "labelSpace": "supplied",
+      "hub": true,
+      "excludeRepos": [
+        "Marqo/marqo-fashionSigLIP",
+        "patrickjohncyh/fashion-clip",
+        "Falconsai/nsfw_image_detection"
+      ]
+    }
+  },
+  {
+    "id": "hub-garment-paraphrase",
+    "prompt": "For each uploaded product photo, tell whether the item is a shirt or a pair of trousers. Return only that category.",
+    "expect": {
+      "kind": "classify",
+      "vision": true,
+      "labelSpace": "supplied",
+      "hub": true,
+      "matchRepos": [
+        "Marqo/marqo-fashionSigLIP"
+      ],
+      "excludeRepos": [
+        "Falconsai/nsfw_image_detection"
+      ]
+    }
+  },
+  {
+    "id": "hub-business-background",
+    "prompt": "Our apparel business uploads photos of books and posters. Distinguish books from posters; do not inspect clothing.",
+    "expect": {
+      "kind": "classify",
+      "vision": true,
+      "labelSpace": "supplied",
+      "hub": true,
+      "excludeRepos": [
+        "Marqo/marqo-fashionSigLIP",
+        "patrickjohncyh/fashion-clip"
+      ]
+    }
+  },
+  {
+    "id": "hub-fixed-partial",
+    "prompt": "Label each photo with one of normal, nsfw, or a third category for unreadable corrupted images.",
+    "expect": {
+      "kind": "classify",
+      "vision": true,
+      "labelSpace": "supplied",
+      "excludeRepos": [
+        "Falconsai/nsfw_image_detection"
+      ]
+    }
+  },
+  {
+    "id": "hub-fixed-complete",
+    "prompt": "Classify each photo as normal or nsfw using exactly these two categories. Return only the category.",
+    "expect": {
+      "kind": "classify",
+      "vision": true,
+      "labelSpace": "supplied",
+      "matchRepos": [
+        "Falconsai/nsfw_image_detection"
+      ]
+    }
+  },
+  {
+    "id": "hub-language-english",
+    "prompt": "Read scanned English invoices and copy the vendor, date and total into JSON.",
+    "expect": {
+      "vision": true,
+      "documents": true,
+      "specialists": true,
+      "matchRepos": [
+        "impira/layoutlm-invoices"
+      ],
+      "excludeRepos": [
+        "jonathanjordan21/donut_fine_tuning_food_composition_id"
+      ]
+    }
+  },
+  {
+    "id": "hub-language-spanish",
+    "prompt": "Read scanned Spanish invoices and copy the vendor, date and total into JSON.",
+    "expect": {
+      "vision": true,
+      "documents": true,
+      "specialists": true,
+      "excludeRepos": [
+        "impira/layoutlm-invoices",
+        "impira/layoutlm-document-qa"
+      ]
+    }
+  },
+  {
+    "id": "hub-language-negation",
+    "prompt": "Read these English invoice photos and extract the date and total. We do not process Spanish documents.",
+    "expect": {
+      "vision": true,
+      "documents": true,
+      "specialists": true,
+      "matchRepos": [
+        "impira/layoutlm-invoices"
+      ]
+    }
+  },
+  {
+    "id": "hub-visual-french-instructions",
+    "prompt": "Classe chaque photo dans les catégories livre ou affiche. Renvoie seulement la catégorie.",
+    "expect": {
+      "kind": "classify",
+      "vision": true,
+      "labelSpace": "supplied",
+      "hub": true,
+      "excludeRepos": [
+        "Marqo/marqo-fashionSigLIP"
+      ]
+    }
+  },
+  {
+    "id": "hub-boxes-all",
+    "prompt": "Find every person and dog in the uploaded photo and return bounding boxes for all of them.",
+    "expect": {
+      "kind": "detect",
+      "vision": true,
+      "hub": true,
+      "allBoxes": true,
+      "matchRepos": [
+        "PekingU/rtdetr_r101vd_coco_o365"
+      ],
+      "excludeRepos": [
+        "microsoft/table-transformer-detection"
+      ]
+    }
+  },
+  {
+    "id": "hub-bird-open",
+    "prompt": "users's upload photos of birds and we need to find the name of it and arrange it in the alphabetic order",
+    "expect": {
+      "vision": true,
+      "labelSpace": "open",
+      "generative": true,
+      "noHubChecks": true
+    }
+  },
+  {
+    "id": "hub-tool-loop",
+    "prompt": "Look at a product photo, call our inventory lookup tool, inspect the result and retry if there is no match.",
+    "expect": {
+      "tools": true,
+      "agentic": true,
+      "generative": true,
+      "noHubChecks": true
+    }
+  },
+  {
+    "id": "hub-holdout-background",
+    "prompt": "We run a clothing shop, but these uploaded photos show bicycles or buses. Tell which of those two objects each picture contains.",
+    "expect": {
+      "kind": "classify",
+      "vision": true,
+      "labelSpace": "supplied",
+      "hub": true,
+      "excludeRepos": [
+        "Marqo/marqo-fashionSigLIP",
+        "patrickjohncyh/fashion-clip"
+      ]
+    }
+  },
+  {
+    "id": "hub-holdout-described-language",
+    "prompt": "Lee estas facturas escaneadas escritas en inglés y devuelve proveedor, fecha y total. No hay documentos en español.",
+    "expect": {
+      "vision": true,
+      "documents": true,
+      "specialists": true,
+      "matchRepos": [
+        "impira/layoutlm-invoices"
+      ],
+      "excludeRepos": [
+        "jonathanjordan21/donut_fine_tuning_food_composition_id"
+      ]
+    }
+  },
+  {
+    "id": "hub-holdout-localization",
+    "prompt": "Locate all dogs and bicycles in a street photograph and give a bounding box for each instance.",
+    "expect": {
+      "kind": "detect",
+      "vision": true,
+      "hub": true,
+      "allBoxes": true,
+      "matchRepos": [
+        "PekingU/rtdetr_r101vd_coco_o365"
+      ],
+      "excludeRepos": [
+        "microsoft/table-transformer-detection"
+      ]
+    }
+  },
+  {
+    "id": "hub-holdout-accessories",
+    "prompt": "Sort uploaded product photographs into handbags or shoes. Return just the category.",
+    "expect": {
+      "kind": "classify",
+      "vision": true,
+      "labelSpace": "supplied",
+      "hub": true,
+      "matchRepos": [
+        "Marqo/marqo-fashionSigLIP"
+      ],
+      "excludeRepos": [
+        "Falconsai/nsfw_image_detection"
+      ]
+    }
+  }
+]

@@ -2,6 +2,10 @@
 
 The standalone `openmerit dash` command runs in your shell. The `/openmerit` slash commands run inside Pi with the extension loaded.
 
+The npm preview (`openmerit@preview`) provides `openmerit eval init`, `doctor`, `plan`, `run`, `watch` and `report`. See [agent evaluations](agent-evaluations.md) for scope selection, repeated task checks and budgets. These are shell commands, separate from Pi commands.
+
+Since `0.1.7-preview.2`, `openmerit eval plan [--scope existing|all] [--budget <USD|unlimited>]` asks for a budget after scope. Choose $10, a custom amount, or no fixed cap; saved choices and cumulative usage persist. See [budget selection](agent-evaluations.md#budget-selection).
+
 ## Inference Terminal
 
 Install with `npm install -g openmerit` to use `openmerit dash [path]` for a passive local view of models, connections, usage, and compute. From this checkout, use `npm run dash -- [path]`. It is independent of Pi setup and does not run model comparisons or inference.
