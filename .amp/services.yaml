@@ -11,6 +11,13 @@ services:
         title: Documentation
       - url: /demo/
         title: Demo player
+  scout:
+    # Scout dev server; recommendations that need OPENAI_API_KEY stay unavailable without it.
+    command: SCOUT_PORT="$PORT" exec npm run scout
+    health: /scout/
+    portal:
+      url: /scout/
+      title: Scout
   dash:
     # Inference Terminal for this checkout; its sample selector switches to fictional data.
     command: npm run dash -- --no-open --port "$PORT"
