@@ -1,3 +1,7 @@
+# Amp orbs
+
+`.agents/setup` installs Node.js 22.19.0 (the CI version) into `~/.local/bin` and runs `npm ci`; the orb's default Node.js fails the terminal worker tests. Run `amp orb services ensure` to start the website preview (`site`) and the Inference Terminal (`dash`, exposed through `.amp/loopback-proxy.mjs` because the terminal accepts only loopback hosts).
+
 # Documentation maintenance
 
 The Markdown files in `docs/` are the source of truth for public documentation. The website at `/docs/` is generated from those files by `scripts/build-docs.mjs`. Do not edit generated files in `site/docs/` or maintain a second copy of an article in website code.

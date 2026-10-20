@@ -1,0 +1,26 @@
+services:
+  site:
+    # Same static preview as docs/site-documentation.md, rebuilt from docs/ on each start.
+    command: npm run build:docs && exec python3 -m http.server "$PORT" --bind 127.0.0.1 --directory site
+    health: /docs/
+    portal:
+      url: /
+      title: Website
+    portals:
+      - url: /docs/
+        title: Documentation
+      - url: /demo/
+        title: Demo player
+  dash:
+    # Inference Terminal for this checkout; its sample selector switches to fictional data.
+    command: npm run dash -- --no-open --port "$PORT"
+    port: 4310
+  dash-portal:
+    # The terminal rejects non-loopback Host headers, so the portal goes through this adapter.
+    command: exec node .amp/loopback-proxy.mjs
+    env:
+      TARGET_PORT: "4310"
+    health: /api/info
+    portal:
+      url: /
+      title: Inference Terminal
