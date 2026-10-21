@@ -23,7 +23,7 @@ async function runTasks(index,prompt,modelIds,endpointIds,options) {
   // One embedding batch, then independent tasks in parallel under ONE deadline.
   // A failed embedding stays a failure, never a keyword-only recommendation.
   const embeddings=trace.measure('embedding',()=>embed(slots.map(s=>s.search),{apiKey,fetcher,timeoutMs:remaining()})).then(value=>({value}),error=>({error}));
-  const results=await Promise.all(tasks.map(async(t,i)=>({id:`task-${i+1}`,title:t.title,layers:t.layers,slots:await Promise.all(t.slots.map(async(s,j)=>({
+  const results=await Promise.all(tasks.map(async(t,i)=>({id:`task-${i+1}`,title:t.title,sourceText:t.sourceText,layers:t.layers,slots:await Promise.all(t.slots.map(async(s,j)=>({
     id:`task-${i+1}-slot-${j+1}`,label:s.label,
     ...await runMatch(index,s.search,modelIds,endpointIds,{...options,timeoutMs:remaining(),trace:createTimings(),directory,definitions,vocabulary,metadata:s,
       embedding:embeddings.then(r=>r.error?r:{value:[r.value[slots.indexOf(s)]]}),

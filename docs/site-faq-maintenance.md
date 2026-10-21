@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Scout task sequences — unreleased source, 21 October 2026
+
+Reviewed comparison, evidence and readiness claims for the side-by-side task table. Headers use verified verbatim prompt excerpts; an invalid excerpt falls back to an unquoted interpretation without blocking search. This adds `tasks[].sourceText` to the existing decomposition response, not a new provider call. Rows align independent per-task ranks in prompt order, not jointly tested combinations or verified execution dependencies; no total workflow accuracy, cost or latency is claimed. Reference workloads, unknown metrics, collection and retention remain unchanged. Homepage terminal/Pi FAQ answers need no edits. This change is not yet deployed to alpha or stable Scout.
+
 ## Scout cost-first selection — published alpha, 21 October 2026
 
 Reviewed evidence, comparison, cost and readiness claims against the published alpha ordering change. Cost leads only after a relative two-point proxy quality screen; latency breaks price ties. The guide explicitly distinguishes that screen from a task-accuracy threshold, keeps unverified discovery lists provisional, and discloses reference-workload pricing rather than exact dataset charges. The alpha-only rollout passed targeted hosted HTTP/MCP checks; shorter lists, interpretation variability and searches over five seconds remain disclosed. No verified minimum accuracy, global optimum or new collection run is claimed. Homepage terminal/Pi FAQ answers remain unchanged and need no edit.

@@ -23,7 +23,10 @@ async function fixture(conditions=[],unresolved=[],decomposition) {
   const db=new LocalD1();await stageProjection(db,'fixture',snapshot,directory);
   let calls=0;const fetcher=async(url,options)=>{calls++;
     const request=JSON.parse(options.body);
-    if(url.endsWith('/responses'))return Response.json({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify(decomposition??{overflow:false,tasks:[{title:'Code task',layers,slots:[{...slot(conditions),unresolved}]}]})}]}]});
+    if(url.endsWith('/responses')){
+      const value=decomposition??{overflow:false,tasks:[{title:'Code task',layers,slots:[{...slot(conditions),unresolved}]}]};
+      return Response.json({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({...value,tasks:value.tasks.map(t=>({sourceText:'Opaque task.',...t}))})}]}]});
+    }
     if(url.endsWith('/embeddings'))return Response.json({data:request.input.map((_,index)=>({index,embedding:Array(256).fill(.01)}))});
     const choices={tools:'no',memory:'none',json:'no',output:'supported',result_type:'absent',label_space:'absent',detection_scope:'absent',input_length:'short',output_length:'short',priority:'balanced',task_kind:'code',output_format:'none',output_specificity:'established',catalogue_scope:'restricted',coding:'required',quality_target:'coding'};
     return Response.json({answers:request.questions.map(q=>q.type==='predicate'?{name:q.name,type:'predicate',probability:.99}:{name:q.name,type:'choice',choice:(q.name.startsWith('method_')?'coding':choices[q.name]??'absent'),confidence:.99})});
@@ -91,6 +94,30 @@ test('task restrictions stay independent through HTTP and MCP, including empty i
   assert.deepEqual(r.tasks.flatMap(t=>t.slots.map(s=>s.recommendations.map(m=>m.modelId))),[['lab/m0'],['lab/m1'],[]]);
  }
  for(const r of await transports(f,{prompt:'Three independent tasks with different provider restrictions.',endpointIds:['route:1']}))assert.deepEqual(r.tasks.flatMap(t=>t.slots.map(s=>s.recommendations.map(m=>m.modelId))),[[],['lab/m1'],[]]);
+});
+
+test('task excerpts retain the original wording and prompt order without swapping their models',async()=>{
+ const excerpts=['修复 café.ts — keep “α”\nand β.','Write tests for the CSV parser.'];
+ const tasks=excerpts.map((sourceText,i)=>({title:`Rephrased task ${i}`,sourceText,layers,slots:[slot([{all:[{field:'creator',op:'eq',values:[i?'Lab B':'Lab A']}]}])]}));
+ const f=await fixture([],[],{overflow:false,tasks:tasks.toReversed()});
+ for(const result of await transports(f,{prompt:`First: ${excerpts[0]}\nSeparately: ${excerpts[1]}`})){
+  assert.deepEqual(result.tasks.map(t=>t.sourceText),excerpts);
+  assert.deepEqual(result.tasks.map(t=>t.title),['Rephrased task 0','Rephrased task 1']);
+  assert.deepEqual(result.tasks.map(t=>t.slots[0].recommendations[0].modelId),['lab/m0','lab/m1']);
+ }
+ const repeated=await fixture([],[],{overflow:false,tasks:tasks.map((t,i)=>({...t,sourceText:i?'JSON':'preserving case'}))});
+ for(const result of await transports(repeated,{prompt:'Parse JSON, preserving case. Separately, validate JSON.'})){
+  assert.deepEqual(result.tasks.map(t=>t.sourceText),['preserving case','JSON']);
+  assert.deepEqual(result.tasks.map(t=>t.title),['Rephrased task 0','Rephrased task 1']);
+ }
+ // A rewritten or whitespace-only excerpt is not presented as a user quote,
+ // but display metadata alone must not suppress an otherwise valid shortlist.
+ for(const sourceText of ['Fix the parser.', '   ']){
+  const invalid=await fixture([],[],{overflow:false,tasks:[{title:'Parser task',sourceText,layers,slots:[slot()]}]});
+  for(const result of await transports(invalid,{prompt:'Repair the parser.'})){
+   assert.equal(result.tasks[0].sourceText,null);assert.ok(result.tasks[0].slots[0].recommendations.length);
+  }
+ }
 });
 
 test('one, two and three tasks return five distinct ranked models each through HTTP and MCP',async()=>{
