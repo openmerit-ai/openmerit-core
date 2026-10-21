@@ -104,6 +104,8 @@
     }
   },
   "devDependencies": {
+    "@clerk/backend": "3.26.1",
+    "@clerk/shared": "4.41.0",
     "@resvg/resvg-js": "2.6.2",
     "@types/node": "^22.18.6",
     "@xyflow/react": "12.12.0",

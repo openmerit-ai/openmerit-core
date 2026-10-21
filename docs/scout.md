@@ -4,6 +4,29 @@ Describe what you need a model to do. Scout returns up to five model-and-endpoin
 
 Scout is a separate beta product. It does not change the OpenMerit npm package, Pi coordinator, or Inference Terminal. Recommendations are evidence-based candidates for your own evaluation, not a guarantee of task accuracy or an independently validated state-of-the-art ranking.
 
+## Account sign-in — unreleased, 21 October 2026
+
+The implementation adds Clerk authentication for **Google and GitHub only**, without Clerk Billing, subscriptions or payment collection. Development checks confirmed those providers enabled and Billing disabled. Production keys have been supplied and validated, but deployment is pending Clerk DNS provisioning and production login checks. The hosted service remains on the canonical release below. Google/GitHub enablement is a Clerk dashboard setting, not something the source code alone establishes.
+
+The page and index status remain public. **Sign in** opens Clerk's account UI; submitting a task while signed out opens that same flow without invoking matching. A prompt draft is temporarily kept in this tab's `sessionStorage` to survive the OAuth redirect, then removed on return or successful sign-in. Storage-disabled browsers can sign in but may lose their draft during the redirect. Signing out or changing accounts clears the visible prompt/results and cancels the browser's pending request; it does not guarantee cancellation of provider work already accepted by the server.
+
+The Worker verifies Clerk session tokens before catalogue access for both `/scout/api/recommend` and `/scout/mcp`, including MCP discovery. Requests must send `Authorization: Bearer <session token>`; a cookie alone is not enough. Signature, expiry, issuer and authorized-party validation use Clerk's SDK, and pending sessions cannot search. Missing/invalid credentials return HTTP 401; missing server configuration returns 503 rather than enabling anonymous access. Status and `/scout/api/auth` remain public; the latter exposes only the publishable key and frontend API hostname. The secret key never reaches the browser.
+
+For an authenticated development/API check, obtain a current token from `await window.Clerk.session.getToken()` in your own signed-in browser. Treat it as a credential, do not share it, and set it privately as `SCOUT_TOKEN`. Then send:
+
+```sh
+curl https://openmerit.ai/scout/api/recommend \
+  -H "Authorization: Bearer $SCOUT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Extract six invoice fields as JSON"}'
+```
+
+Use the same header for MCP. These tokens are short-lived; clients must refresh them rather than store one as a permanent API key. This first integration does **not** implement agent OAuth discovery/registration, long-lived API keys, or unattended agent sign-in. Existing clients without a way to supply a current session token will need an update before auth is deployed. Already-issued valid JWTs may remain usable until expiry after session revocation; this is not a per-request online session-status lookup.
+
+The existing edge limiter applies separately to IP addresses and authenticated user IDs: 60 protected requests per minute for each key, including MCP initialization/discovery. It is not a durable monthly usage ledger or a billing cap; the local preview does not emulate Cloudflare's limiter. Clerk handles account/profile and session data and loads its browser SDK/UI from its own frontend API domain. Its optional SDK telemetry is disabled. Account IDs are used transiently for rate limiting, not attached to Scout's existing prompt/evidence analytics. No new account database, saved-search history or billing integration is introduced. Clerk's identity data is separate from the three-month Scout analytics policy below.
+
+Local development now also needs `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` in the server environment. Configure a Clerk development instance with Google/GitHub sign-in and sign-up; disable other sign-in methods and unnecessary required profile fields. Use the production instance and its own OAuth applications for `openmerit.ai`. Never expose the secret key in client configuration or commit it. The real development modal was checked at desktop/mobile sizes, and both buttons reached provider authorization redirects requesting basic identity/email scopes only. Tests stopped before provider authentication: complete sign-in/sign-up, callback return and real-user authenticated searches remain unverified. Offline signature tests are not evidence of a complete Google/GitHub login.
+
 ## Canonical promotion — published, 21 October 2026
 
 The [canonical Scout](https://openmerit.ai/scout/) now replaces the older interface and matcher with the former alpha: original prompt excerpts, one shared task-sequence table, automatic ambiguity resolution and cost-first selection after the relative quality screen. Canonical endpoints remain `/scout/api/status`, `/scout/api/recommend` and `/scout/mcp`. Existing `/scout/alpha/` page, asset and API/MCP URLs redirect to the corresponding canonical paths with HTTP 308, preserving query strings and POST methods/bodies. Clients should update their configured endpoint rather than rely on redirects. There is no separate alpha interface after promotion; retired `/scout/v1/` and `/scout/v2/` paths remain unavailable.
@@ -253,7 +276,7 @@ Scout exposes one read-only tool, `scout_models`, with a required prompt:
 {"prompt":"Upload an invoice and extract six fields as JSON"}
 ```
 
-No API key is required from the caller. Scout sends the task description to OpenAI for Decisions interpretation, structured metadata extraction and a transient query embedding, then compares its collected evidence. It does not execute the recommended models. The MCP endpoint supports protocol versions `2025-03-26`, `2025-06-18`, and `2025-11-25`, including initialization, tool discovery, and tool calls. It uses JSON responses without sessions or a long-lived SSE stream. Browser requests must have the same origin; ordinary agent clients omit the Origin header. An unsupported protocol version is rejected. Agent configuration is client-specific; connecting an endpoint does not automatically make an agent use it.
+The current hosted release requires no caller API key; the unreleased [account sign-in](#account-sign-in-unreleased-21-october-2026) changes that contract to a Clerk bearer token. Scout sends the task description to OpenAI for Decisions interpretation, structured metadata extraction and a transient query embedding, then compares its collected evidence. It does not execute the recommended models. The MCP endpoint supports protocol versions `2025-03-26`, `2025-06-18`, and `2025-11-25`, including initialization, tool discovery, and tool calls. It uses JSON responses without MCP transport sessions or a long-lived SSE stream. Browser requests must have the same origin; ordinary agent clients omit the Origin header. An unsupported protocol version is rejected. Agent configuration is client-specific; connecting an endpoint does not automatically make an agent use it.
 
 Tell the agent: “Before choosing an inference model for this feature, call Scout with the task description. Compare the five candidates, read their evidence and warnings, and evaluate the shortlist on our own examples.”
 
@@ -351,7 +374,7 @@ Reference input sizes are **1,024 / 4,096 / 32,768 tokens**, and visible output 
 
 Reference completion time is **time to the first answer token + visible output tokens / throughput**, only when measurements identify the selected endpoint. Multiple published configurations retain paired timing before taking a median. Timing is not borrowed across provider routes, and early reasoning tokens are not confused with the first answer. Missing timing stays unknown. The page's request duration measures Scout matching, not a recommended model executing the visitor's task.
 
-The shortlist requires evaluation on the visitor's own examples. Public benchmarks, small calibration samples and semantic applicability checks do not prove the optimal membership or order of five models for an arbitrary task. There are no visitor accounts, public prompt history or additional filter controls. Public methodology embeddings are stored in Vectorize; visitor query vectors are transient. Private prompt-and-evidence analytics are described below.
+The shortlist requires evaluation on the visitor's own examples. Public benchmarks, small calibration samples and semantic applicability checks do not prove the optimal membership or order of five models for an arbitrary task. The current hosted release has no visitor accounts; the unreleased account integration above adds sign-in but no public prompt history or additional filter controls. Public methodology embeddings are stored in Vectorize; visitor query vectors are transient. Private prompt-and-evidence analytics are described below.
 
 ## Current validation limits
 

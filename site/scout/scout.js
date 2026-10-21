@@ -1,4 +1,5 @@
 import { providerIdentity } from './providers.js';
+import { initAuth } from './auth.js';
 
 const $ = selector => document.querySelector(selector);
 const basePath = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
@@ -208,6 +209,10 @@ function showIndex(data) {
 async function search() {
   const prompt = $('#prompt').value.trim(); if (!prompt) { $('#error').textContent = 'Describe the task you want a model to do.'; $('#error').hidden = false; $('#prompt').focus(); return; }
   activeRequest?.abort(); const controller = new AbortController(); activeRequest = controller; const id = ++requestID;
+  let token;
+  try { token = await auth.getToken(); }
+  catch (error) { if (id === requestID) { $('#error').textContent = error.message; $('#error').hidden = false; } return; }
+  if (!token || id !== requestID) return;
   $('#results').hidden = false; $('#error').hidden = true; $('#results').setAttribute('aria-busy', 'true');
   result = null; tableObserver.disconnect(); $('#results-title').textContent = 'Searching…';
   $('#task-results').replaceChildren(element('p', 'search-state', 'Understanding tasks and comparing the prepared index…'));
@@ -216,7 +221,9 @@ async function search() {
   $('.find-button span').textContent = 'Searching…'; $('.find-button').setAttribute('aria-busy', 'true');
   const started = performance.now(), timeout = setTimeout(() => controller.abort(), 35_000);
   try {
-    const response = await fetch(`${basePath}/api/recommend`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }), signal: controller.signal });
+    const response = await fetch(`${basePath}/api/recommend`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ prompt }), signal: controller.signal });
+    if (id !== requestID) return;
+    if (response.status === 401) { await auth.signIn(); throw new Error('Your session has expired. Sign in and try again.'); }
     if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('The Scout API is not available on this server. Start the Scout server and try again.');
     const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Scout could not complete this search.');
     if (id === requestID) showResult(data, performance.now() - started);
@@ -273,7 +280,12 @@ document.addEventListener('visibilitychange', stopExampleTransition);
 reducedMotion.addEventListener('change', stopExampleTransition);
 $('#scout-form').addEventListener('submit', event => { event.preventDefault(); void search(); });
 $('#prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#scout-form').requestSubmit(); } });
-const command = `curl ${location.origin}${basePath}/api/recommend \\\n  -H 'Content-Type: application/json' \\\n  -d '{"prompt":"Extract six invoice fields as JSON"}'`;
+const auth = initAuth(() => {
+  activeRequest?.abort(); requestID++; result = null; tableObserver.disconnect();
+  $('#task-results').replaceChildren(); $('#results').hidden = true; $('#results').setAttribute('aria-busy', 'false'); $('#error').hidden = true;
+  $('#prompt').value = ''; fitPrompt(); $('.find-button span').textContent = 'Find models'; $('.find-button').setAttribute('aria-busy', 'false');
+});
+const command = `curl ${location.origin}${basePath}/api/recommend \\\n  -H "Authorization: Bearer $SCOUT_TOKEN" \\\n  -H 'Content-Type: application/json' \\\n  -d '{"prompt":"Extract six invoice fields as JSON"}'`;
 $('#agent-code').textContent = command;
 $('#copy-command').addEventListener('click', () => copy(command, $('#copy-command')));
 const mcpURL = `${location.origin}${basePath}/mcp`;

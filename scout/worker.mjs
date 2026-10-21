@@ -7,6 +7,7 @@ import { createSnapshotReader, getJSON, putJSON } from './store.mjs';
 import { runRefresh } from './pipeline.mjs';
 import { ParallelResearch } from './research.mjs';
 import { indexStatus } from './rank.mjs';
+import { scoutAccess } from './auth.mjs';
 
 // Publication coordination only. User searches do not pass through this object.
 export class ScoutPublication extends DurableObject {
@@ -73,7 +74,7 @@ export default {
     if(!path.startsWith('/scout/api/')&&path!=='/scout/mcp') {
       return ['GET','HEAD'].includes(request.method)?env.ASSETS.fetch(request):json({error:'Not found.'},404);
     }
-    const origin=request.headers.get('origin');if(origin&&origin!==url.origin)return json({error:'Origin not allowed.'},403);
+    const access=await scoutAccess(request,env);if(access)return access;
     try {
       const {reader,recommend}=services(env),index=await reader.view();
       if(path==='/scout/api/status') {
@@ -81,10 +82,6 @@ export default {
         const status=indexStatus(index);
         const health=await getJSON(env.SCOUT_CATALOGUE,'health.json').catch(()=>null);
         return json({...status,scheduler:'cloudflare-hourly',refreshStatus:status.degraded?'degraded':'idle',...health,snapshotVersion:index.snapshot.publication.id,refreshSummary:index.snapshot.refreshSummary});
-      }
-      if(request.method==='POST'&&env.SCOUT_RATE) {
-        const key=request.headers.get('cf-connecting-ip')??'anonymous';
-        if(!(await env.SCOUT_RATE.limit({key})).success)return json({error:'Scout is busy. Please try again shortly.'},429,{'Retry-After':'60'});
       }
       const mcp=path==='/scout/mcp';
       return (mcp?handleMCP:handleAPI)(request,index,{},(...args)=>recommend(...args,mcp?'mcp':'api'));

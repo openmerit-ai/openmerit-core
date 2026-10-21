@@ -46,6 +46,9 @@ code, kbd { font-family: var(--mono); }
 .beta-label { font-size: 10px; color: var(--quiet); }
 .scout-header nav { margin-left: auto; display: flex; align-items: center; gap: 25px; color: var(--muted); font-size: 12px; }
 .scout-header nav a { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; }
+.account-controls { display: flex; align-items: center; flex: none; min-height: 40px; }
+.sign-in-button { padding: 7px 12px; min-height: 36px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font-size: 12px; white-space: nowrap; }
+#user-account { min-width: 32px; }
 .scout-intro { padding: 38px 0 24px; }
 .scout-intro p { margin-top: 5px; color: var(--muted); font-size: 13px; }
 #index-counts { display: flex; flex-wrap: wrap; row-gap: 3px; }
@@ -135,12 +138,13 @@ summary::-webkit-details-marker { display: none; }
 }
 @media (max-width: 520px) {
   .scout-wrap { width: auto; margin-inline: max(20px, env(safe-area-inset-left)) max(20px, env(safe-area-inset-right)); }
-  .parent-brand > span { font-size: 18px; }
+  .parent-brand > span { display: none; }
   .parent-brand svg { width: 19px; }
   .scout-brand { gap: 6px; }
   .beta-label { display: none; }
-  .scout-header nav { gap: 16px; font-size: 11px; }
+  .scout-header nav { gap: 12px; font-size: 11px; }
   .scout-header nav span { display: none; }
+  .sign-in-button { min-height: 40px; font-size: 11px; }
   .prompt-box textarea { font-size: 16px; min-height: 208px; }
   .find-button { width: 44px; height: 44px; }
   .newline-hint { display: none; }

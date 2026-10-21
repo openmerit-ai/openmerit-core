@@ -9,6 +9,7 @@ import { handleMCP } from './mcp.mjs';
 import { refreshSnapshot } from './sources.mjs';
 import { createRecommender } from './recommend.mjs';
 import { registry } from './registry.mjs';
+import { scoutAccess } from './auth.mjs';
 
 const root = resolve(import.meta.dirname, '../site');
 const recommendTask = createRecommender({ apiKey: process.env.OPENAI_API_KEY });
@@ -33,10 +34,13 @@ async function refresh() {
 const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png', '.ico': 'image/x-icon', '.jpg': 'image/jpeg', '.json': 'application/json' };
 const server = createServer(async (req, res) => {
   try {
-    const url = new URL(req.url, 'http://localhost');
+    // This server binds only to loopback. The local Amp portal proxy supplies
+    // the external scheme after stripping client-supplied forwarding headers.
+    const protocol = req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+    const url = new URL(req.url, `${protocol}://${req.headers.host ?? 'localhost'}`);
     if ((url.pathname.startsWith('/scout/api/') || url.pathname === '/scout/mcp')) {
       const request = new Request(url, { method: req.method, headers: req.headers, ...(!['GET', 'HEAD'].includes(req.method) ? { body: Readable.toWeb(req), duplex: 'half' } : {}) });
-      const response = await (url.pathname === '/scout/mcp' ? handleMCP : handleAPI)(request, index, refreshState, recommendTask);
+      const response = await scoutAccess(request, process.env) ?? await (url.pathname === '/scout/mcp' ? handleMCP : handleAPI)(request, index, refreshState, recommendTask);
       res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text()); return;
     }
     if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405); res.end(); return; }

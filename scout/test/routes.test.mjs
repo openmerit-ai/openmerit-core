@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {registerHooks} from 'node:module';
+import {generateKeyPairSync,sign} from 'node:crypto';
 
 // Node supplies only the platform base classes; exercise the actual Worker router.
 const hook=registerHooks({resolve(specifier,context,next){
@@ -53,4 +54,70 @@ test('promoted Scout preserves canonical API and MCP bodies and leaves non-Scout
     const response=await alpha.fetch(new Request(`https://example.test${path}`),{},{});
     assert.equal(await response.text(),`Original route: ${path}`);assert.equal(response.headers.get('x-robots-tag'),null);
   }
+});
+
+// Real SDK signature verification with disposable keys, not a mocked identity.
+const keys=generateKeyPairSync('rsa',{modulusLength:2048});
+const authEnv={
+  CLERK_PUBLISHABLE_KEY:`pk_test_${Buffer.from('scout-auth.clerk.accounts.dev$').toString('base64')}`,
+  CLERK_SECRET_KEY:'sk_test_local_fixture_not_a_credential',
+  CLERK_JWT_KEY:keys.publicKey.export({type:'spki',format:'pem'}),
+};
+function sessionToken(changes={},key=keys.privateKey){
+  const now=Math.floor(Date.now()/1000),encode=value=>Buffer.from(JSON.stringify(value)).toString('base64url');
+  const payload={iss:'https://scout-auth.clerk.accounts.dev',azp:'https://example.test',sub:'user_alice',sid:'sess_alice',iat:now,nbf:now-1,exp:now+60,v:2,sts:'active',...changes};
+  const input=`${encode({alg:'RS256',typ:'JWT',kid:'local-fixture'})}.${encode(payload)}`;
+  return `${input}.${sign('RSA-SHA256',Buffer.from(input),key).toString('base64url')}`;
+}
+const authenticatedRequest=(path,token,headers={})=>new Request(`https://example.test/scout/${path}`,{method:'POST',headers:{'content-type':'application/json',...(token?{authorization:`Bearer ${token}`} : {}),...headers},body:JSON.stringify(path==='mcp'?{jsonrpc:'2.0',id:7,method:'ping'}:{invalid:'body preserved'})});
+
+test('public auth configuration exposes only the publishable key and fails closed when incomplete',async()=>{
+  const response=await alpha.fetch(new Request('https://example.test/scout/api/auth'),authEnv,{});
+  assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
+  assert.deepEqual(await response.json(),{publishableKey:authEnv.CLERK_PUBLISHABLE_KEY,frontendApi:'scout-auth.clerk.accounts.dev'});
+  for(const config of [{},{CLERK_PUBLISHABLE_KEY:authEnv.CLERK_PUBLISHABLE_KEY},{...authEnv,CLERK_PUBLISHABLE_KEY:'invalid'}]){
+    for(const path of ['api/auth','api/recommend','mcp']){
+      const result=await alpha.fetch(new Request(`https://example.test/scout/${path}`),config,{});
+      assert.equal(result.status,503);assert.doesNotMatch(await result.text(),/sk_test|BEGIN PUBLIC KEY|invalid/);
+    }
+  }
+});
+
+test('HTTP and MCP reject missing, forged, expired, foreign and pending sessions before catalogue access',async()=>{
+  const otherKey=generateKeyPairSync('rsa',{modulusLength:2048}).privateKey;
+  const invalid=[null,'malformed',sessionToken({},otherKey),sessionToken({exp:Math.floor(Date.now()/1000)-60}),sessionToken({nbf:Math.floor(Date.now()/1000)+120}),sessionToken({iss:'https://other.clerk.accounts.dev'}),sessionToken({azp:'https://untrusted.example'}),sessionToken({sts:'pending'}),sessionToken({sid:''}),sessionToken({sub:''})];
+  const blockedEnv=Object.assign(Object.create(env),authEnv);
+  for(const path of ['api/recommend','mcp']){
+    for(const token of invalid){
+      const response=await alpha.fetch(authenticatedRequest(path,token),blockedEnv,{});
+      assert.equal(response.status,401,`${path}: ${token?.slice(0,20)??'anonymous'}`);
+      assert.equal(response.headers.get('www-authenticate'),'Bearer realm="Scout"');
+      assert.equal(response.headers.get('cache-control'),'no-store');
+      assert.equal((await response.json()).code,'sign_in_required');
+    }
+    const cookieOnly=await alpha.fetch(authenticatedRequest(path,null,{cookie:`__session=${sessionToken()}`}),blockedEnv,{});
+    assert.equal(cookieOnly.status,401);
+    assert.equal((await alpha.fetch(authenticatedRequest(path,sessionToken(),{origin:'https://untrusted.example'}),blockedEnv,{})).status,403);
+  }
+});
+
+test('verified sessions reach HTTP/MCP handlers, while account and IP limits remain independent',async()=>{
+  const manifest={publication:{id:'auth-fixture'},sources:[],publicStatus:{models:0},servingEngine:'evidence'};
+  const bucket={async get(key){const data=key==='active.json'?{key:'manifest.json',publication:manifest.publication}:key==='manifest.json'?manifest:null;return data?{json:async()=>data}:null;}};
+  const configured={...authEnv,SCOUT_CATALOGUE:bucket};
+  const token=sessionToken();
+  const api=await alpha.fetch(authenticatedRequest('api/recommend',token),configured,{});
+  assert.equal(api.status,400,await api.clone().text());assert.equal((await api.json()).error,'Provide prompt and optionally modelIds or endpointIds.');
+  const ping=await alpha.fetch(authenticatedRequest('mcp',token),configured,{});
+  assert.equal(ping.status,200);assert.deepEqual(await ping.json(),{jsonrpc:'2.0',id:7,result:{}});
+  const status=await alpha.fetch(new Request('https://example.test/scout/api/status'),configured,{});
+  assert.equal(status.status,200);assert.equal((await status.json()).snapshotVersion,'auth-fixture');
+
+  const counts=new Map();configured.SCOUT_RATE={async limit({key}){const count=(counts.get(key)??0)+1;counts.set(key,count);return {success:count<=2};}};
+  const call=(sub,ip)=>alpha.fetch(authenticatedRequest('mcp',sessionToken({sub}),{'cf-connecting-ip':ip}),configured,{});
+  assert.equal((await call('user_alice','192.0.2.1')).status,200);
+  assert.equal((await call('user_alice','192.0.2.2')).status,200);
+  const accountLimit=await call('user_alice','192.0.2.3');assert.equal(accountLimit.status,429);assert.equal(accountLimit.headers.get('retry-after'),'60');
+  assert.equal((await call('user_bob','192.0.2.3')).status,200);
+  assert.equal((await call('user_charlie','192.0.2.3')).status,429);
 });
