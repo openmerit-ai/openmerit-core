@@ -181,6 +181,5 @@ summary::-webkit-details-marker { display: none; }
 }
 @media (max-width: 360px) { .parent-brand > span { display: none; } .header-inner { gap: 14px; } h1 { font-size: 24px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
-.clarification-option { display: inline-block; margin: 12px 16px 0 0; padding: 6px 0; color: var(--ink); background: transparent; border: 0; font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 4px; }
 
 @media (prefers-color-scheme: dark) { .provider-icon-monochrome { filter: invert(1); } }

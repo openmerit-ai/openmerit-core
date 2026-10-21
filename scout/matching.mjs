@@ -19,19 +19,19 @@ async function runTasks(index,prompt,modelIds,endpointIds,options) {
   const manifest=index.snapshot,directory=options.db&&manifest.metadataDefinitions?null:prepareEligibility(manifest),definitions=manifest.metadataDefinitions??fieldDefinitions(directory),vocabulary=manifest.selectionVocabulary??directory.vocabulary;
   const tasks=await trace.measure('decomposition',()=>decomposePrompt(prompt,{apiKey,fetcher,registry:manifest.registry,definitions,vocabulary,now:now(),timeoutMs}));
   const remaining=()=>Math.max(1,Math.floor(timeoutMs-(performance.now()-started)));
-  const slots=tasks.flatMap(t=>t.slots),searchable=slots.filter(s=>!s.clarification);
-  // One embedding batch, then independent roles in parallel under ONE deadline.
+  const slots=tasks.flatMap(t=>t.slots);
+  // One embedding batch, then independent tasks in parallel under ONE deadline.
   // A failed embedding stays a failure, never a keyword-only recommendation.
-  const embeddings=searchable.length?trace.measure('embedding',()=>embed(searchable.map(s=>s.search),{apiKey,fetcher,timeoutMs:remaining()})).then(value=>({value}),error=>({error})):Promise.resolve({value:[]});
+  const embeddings=trace.measure('embedding',()=>embed(slots.map(s=>s.search),{apiKey,fetcher,timeoutMs:remaining()})).then(value=>({value}),error=>({error}));
   const results=await Promise.all(tasks.map(async(t,i)=>({id:`task-${i+1}`,title:t.title,layers:t.layers,slots:await Promise.all(t.slots.map(async(s,j)=>({
     id:`task-${i+1}-slot-${j+1}`,label:s.label,
     ...await runMatch(index,s.search,modelIds,endpointIds,{...options,timeoutMs:remaining(),trace:createTimings(),directory,definitions,vocabulary,metadata:s,
-      embedding:embeddings.then(r=>r.error?r:{value:s.clarification?[]:[r.value[searchable.indexOf(s)]]}),
+      embedding:embeddings.then(r=>r.error?r:{value:[r.value[slots.indexOf(s)]]}),
     }),
   })))})));
   const flat=results.flatMap(t=>t.slots),single=flat.length===1,capabilities=[...new Map(flat.flatMap(s=>s.task.capabilities).map(c=>[c.id,c])).values()];
-  const result=single?{...flat[0]}:{...indexStatus(index,now()),selection:{modelIds,endpointIds},recommendations:[],warnings:['Each model role has its own shortlist. Candidates are not ranked across tasks; combinations have not been jointly evaluated.'],
-    task:{kind:'multi-task',capabilities,unsupported:flat.every(s=>s.task.unsupported),interpreter:'openai-hybrid',interpreterVersion},ranking:{version:'8',mode:'multi-task'},snapshotVersion:manifest.publication?.id};
+  const result=single?{...flat[0]}:{...indexStatus(index,now()),selection:{modelIds,endpointIds},recommendations:[],warnings:['Each task has its own shortlist. Candidates are not ranked across tasks; combinations have not been jointly evaluated.'],
+    task:{kind:'multi-task',capabilities,unsupported:flat.every(s=>s.task.unsupported),interpreter:'openai-hybrid',interpreterVersion},ranking:{version:'9',mode:'multi-task'},snapshotVersion:manifest.publication?.id};
   delete result.id;delete result.label;
   const runtime=trace.snapshot();if(single)Object.assign(runtime.timings,flat[0].runtime.timings);
   return {...result,prompt,tasks:results,evaluatedAt:new Date(now()).toISOString(),elapsedMs:Math.round(performance.now()-started),runtime};
@@ -73,12 +73,12 @@ async function runMatch(index,prompt,modelIds,endpointIds,{apiKey,fetcher,db,vec
   })().then(value=>({value}),error=>({error}));
   const evidenceIndex=manifest.evidenceIndex??{documents:evidenceDocuments(manifest)};
   const loadRows=benchmarkIds=>{
-    if(task.unsupported||task.clarification||!selected.length||(!benchmarkIds.length&&!taskFit))return Promise.resolve([]);
+    if(task.unsupported||!selected.length||(!benchmarkIds.length&&!taskFit))return Promise.resolve([]);
     if(db)return trace.measure('modelRead',()=>loadProjectionModels(db,manifest.publication.id,task.selection.allowedModelIds,benchmarkIds));
     const ids=new Set(task.selection.allowedModelIds);return Promise.resolve((manifest.catalogue??manifest.models).filter(m=>ids.has(m.id)).map(m=>({...m,evidence:(manifest.models.find(x=>x.id===m.id)?.evidence??[]).filter(e=>benchmarkIds.includes(e.benchmark))})));
   };
   let rows;
-  if(selected.length&&!task.unsupported&&!task.clarification&&!taskFit){
+  if(selected.length&&!task.unsupported&&!taskFit){
     const vectors=interpreted.prepared.embedding;if(vectors.error)throw vectors.error;
     const documents=await trace.measure('evidenceRetrieval',()=>retrieveEvidence(task,evidenceIndex,{vectorize,queryVector:vectors.value[0],modelIds:task.selection.allowedModelIds}));
     [task.evidenceMatch,rows]=await Promise.all([

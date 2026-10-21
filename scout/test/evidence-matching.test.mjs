@@ -38,7 +38,11 @@ async function transports(f,args) {
 }
 test('the evidence engine enforces SQL filters and inventory intersections through HTTP and MCP',async()=>{
   const f=await fixture([{all:[{field:'creator',op:'eq',values:['Lab A']},{field:'contextTokens',op:'gte',values:[200000]}]}]);
-  for(const r of await transports(f,{prompt:'Opaque task.'}))assert.deepEqual(r.recommendations.map(m=>m.modelId),['lab/m0']);
+  for(const r of await transports(f,{prompt:'Opaque task.'})){
+    assert.deepEqual(r.recommendations.map(m=>m.modelId),['lab/m0']);
+    assert.equal(r.ranking.frontier.qualityGate.status,'unverified');assert.equal(r.ranking.frontier.qualityGate.qualifiedConfigurations,0);
+    assert.ok(r.warnings.some(w=>w.includes('not a claim that the models meet your required quality')));
+  }
   for(const scope of [{modelIds:['lab/m1']},{endpointIds:['route:1']},{modelIds:[]}])for(const r of await transports(f,{prompt:'Opaque task.',...scope}))assert.deepEqual(r.recommendations,[]);
 });
 test('all eligible models enter Pareto comparison before the API selects distinct tradeoffs',async()=>{
@@ -76,26 +80,47 @@ test('exact result reuse respects inventories, prompt identity and catalogue pub
  f.index.snapshot.publication.id='missing-generation';await assert.rejects(f.run(f.index,args.prompt),/could not establish/);
 });
 
-test('task and role restrictions stay independent through HTTP and MCP, including empty intersections',async()=>{
+test('task restrictions stay independent through HTTP and MCP, including empty intersections',async()=>{
  const creator=name=>[{all:[{field:'creator',op:'eq',values:[name]}]}];
- const tasks=[{title:'Two roles',layers,slots:[slot(creator('Lab A')),slot(creator('Lab B'))]},{title:'Another task',layers,slots:[slot(creator('Unknown lab'))]}];
+ const tasks=['Lab A','Lab B','Unknown lab'].map(name=>({title:`Task for ${name}`,layers,slots:[slot(creator(name))]}));
  const f=await fixture([],[],{overflow:false,tasks});
- for(const r of await transports(f,{prompt:'Two separate tasks with different model roles.'})){
+ for(const r of await transports(f,{prompt:'Three independent tasks with different provider restrictions.'})){
   assert.equal(r.ranking.mode,'multi-task');assert.deepEqual(r.recommendations,[]);
-  assert.deepEqual(r.tasks.map(t=>t.slots.length),[2,1]);assert.deepEqual(r.tasks[0].layers,layers);
+  assert.deepEqual(r.tasks.map(t=>t.slots.length),[1,1,1]);assert.deepEqual(r.tasks[0].layers,layers);
   assert.ok(Number.isFinite(Date.parse(r.evaluatedAt)));assert.ok(r.tasks.flatMap(t=>t.slots).every(s=>s.runtime.cache===r.runtime.cache));
   assert.deepEqual(r.tasks.flatMap(t=>t.slots.map(s=>s.recommendations.map(m=>m.modelId))),[['lab/m0'],['lab/m1'],[]]);
  }
- for(const r of await transports(f,{prompt:'Two separate tasks with different model roles.',endpointIds:['route:1']}))assert.deepEqual(r.tasks.flatMap(t=>t.slots.map(s=>s.recommendations.map(m=>m.modelId))),[[],['lab/m1'],[]]);
+ for(const r of await transports(f,{prompt:'Three independent tasks with different provider restrictions.',endpointIds:['route:1']}))assert.deepEqual(r.tasks.flatMap(t=>t.slots.map(s=>s.recommendations.map(m=>m.modelId))),[[],['lab/m1'],[]]);
 });
 
-test('nine independent shortlists share one request deadline instead of nine serial budgets',async()=>{
- const tasks=Array.from({length:3},(_,i)=>({title:`Task ${i}`,layers,slots:Array.from({length:3},()=>slot())}));
+test('one, two and three tasks return five distinct ranked models each through HTTP and MCP',async()=>{
+ for(const count of [1,2,3]){
+  const tasks=Array.from({length:count},(_,i)=>({title:`Task ${i+1}`,layers,slots:[slot()]})),f=await fixture([],[],{overflow:false,tasks});
+  // Nine models meet the relative quality band; the cheapest is too weak.
+  f.index.snapshot.models.forEach((m,i)=>{m.evidence[0].score=i===0?.6:.9+i*.002;});
+  f.index.snapshot.publication.id='tradeoffs';
+  await stageProjection(f.db,'tradeoffs',f.index.snapshot,prepareEligibility(f.index.snapshot));
+  for(const result of await transports(f,{prompt:`${count} independent tasks.`})){
+   assert.equal(result.tasks.length,count);
+   assert.equal(result.tasks.reduce((n,t)=>n+t.slots[0].recommendations.length,0),5*count);
+   for(const task of result.tasks){
+    assert.equal(task.slots.length,1);assert.equal(task.slots[0].task.clarification,null);
+    assert.deepEqual(task.slots[0].recommendations.map(m=>m.modelId),['lab/m1','lab/m2','lab/m3','lab/m4','lab/m5']);
+    assert.equal(task.slots[0].ranking.frontier.qualityGate.excludedConfigurations,1);
+    assert.equal(task.slots[0].ranking.frontier.qualityGate.status,'proxy-qualified');
+    assert.ok(task.slots[0].warnings.some(w=>w.includes('not proof of sufficient quality')));
+   }
+  }
+ }
+});
+
+test('three independent shortlists share one request deadline instead of three serial budgets',async()=>{
+ const tasks=Array.from({length:3},(_,i)=>({title:`Task ${i}`,layers,slots:[slot()]}));
  const f=await fixture([],[],{overflow:false,tasks});
  const fetcher=async(...args)=>{await new Promise(r=>setTimeout(r,25));return f.fetcher(...args);};
  const run=createRecommender({apiKey:'fixture',db:f.db,fetcher,timeoutMs:350});
- const result=await run(f.index,'Three independent tasks with three roles each.');
- assert.equal(result.tasks.length,3);assert.ok(result.tasks.every(t=>t.slots.length===3&&t.slots.every(s=>s.recommendations[0].modelId==='lab/m0')));
+ const result=await run(f.index,'Three independent tasks.');
+ assert.equal(result.tasks.length,3);assert.ok(result.tasks.every(t=>t.slots.length===1&&t.slots[0].recommendations[0].modelId==='lab/m0'));
  const limited=createRecommender({apiKey:'fixture',db:f.db,fetcher,timeoutMs:30});
  await assert.rejects(limited(f.index,'Three tasks.'),e=>e.status===503);
 });
@@ -120,10 +145,12 @@ test('HTTP and MCP accept valid searches beyond the speed target but still bound
  }
 });
 
-test('task overflow is explicit and a malformed fourth task or missing-layer claim fails closed',async()=>{
+test('task overflow, extra model roles, follow-up questions and invalid layers cannot change the result contract',async()=>{
  for(const [decomposition,status] of [
   [{overflow:true,tasks:[{title:'Too many tasks',layers,slots:[slot()]}]},422],
   [{overflow:false,tasks:Array.from({length:4},()=>({title:'Task',layers,slots:[slot()]}))},503],
+  [{overflow:false,tasks:[{title:'Extra roles',layers,slots:[slot(),slot()]}]},503],
+  [{overflow:false,tasks:[{title:'Question',layers,slots:[{...slot(),clarification:{question:'Which format?',options:['JSON','CSV']}}]}]},503],
   [{overflow:false,tasks:[{title:'Task',layers:{...layers,criteria:{text:'Invented',origin:'missing'}},slots:[slot()]}]},503],
  ]){
   const f=await fixture([],[],decomposition);

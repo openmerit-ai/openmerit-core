@@ -3,6 +3,7 @@ const mean = values => values.reduce((sum, value) => sum + value, 0) / values.le
 const median = values => { const sorted = [...values].sort((a, b) => a - b); return (sorted[Math.floor((sorted.length - 1) / 2)] + sorted[Math.floor(sorted.length / 2)]) / 2; };
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 export const benchmarkFamily = b => b.family ?? b.id ?? b.name;
+export const qualityIndifference = .02;
 
 export function workloadFor(task) {
   const input = task.workload?.input ?? (task.weights.context ? 'long' : task.needsVision ? 'medium' : 'short');
@@ -51,7 +52,7 @@ export function compareQuality(a, b, weights) {
   // price/latency premium. Two points are an explicit indifference band, not a
   // statistical confidence interval. A further 20-point gap gives full preference.
   const difference = delta / comparedWeight;
-  const margin = Math.sign(difference) * clamp((Math.abs(difference) - .02) / .2, 0, 1);
+  const margin = Math.sign(difference) * clamp((Math.abs(difference) - qualityIndifference) / .2, 0, 1);
   return { preference: .5 + margin / 2, difference, tags, comparedWeight };
 }
 

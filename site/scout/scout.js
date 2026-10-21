@@ -106,32 +106,24 @@ function showSpecialists(discovery, root) {
 const tableObserver = new ResizeObserver(entries => {
   for (const {target} of entries) target.closest('.result-slot').querySelector('.table-scroll-hint').hidden = target.scrollWidth <= target.clientWidth + 1;
 });
-function renderSlot(data, prefix, label, originalPrompt, taskTitle) {
+function renderSlot(data, prefix, label, taskTitle) {
   const root = $('#result-template').content.firstElementChild.cloneNode(true);
   const field = name => root.querySelector(`[data-field="${name}"]`);
+  const qualityGate = data.ranking?.frontier?.qualityGate;
   field('slot-title').textContent = label;
   field('slot-title').id = `${prefix}-title`; root.setAttribute('aria-labelledby', `${prefix}-title`);
   root.querySelector('.table-scroll').setAttribute('aria-label', `${taskTitle} · ${label} model comparison`);
-  field('frontier-label').textContent = data.task.clarification ? 'Clarification needed' : data.ranking?.mode === 'task-fit' ? 'Task fit · quality unmeasured' : data.ranking?.frontier?.scope === 'partial' ? 'Provisional frontier' : data.ranking?.frontier ? 'Pareto frontier' : 'Evidence-ranked candidates';
+  field('frontier-label').textContent = data.ranking?.mode === 'task-fit' ? 'Task fit · quality unmeasured' : qualityGate?.status === 'unverified' ? 'Unverified shortlist' : data.ranking?.frontier?.scope === 'partial' ? 'Provisional frontier' : data.ranking?.frontier ? 'Pareto frontier' : 'Evidence-ranked candidates';
   field('capabilities').replaceChildren(...(data.task.capabilities.length ? data.task.capabilities.map(c => c.label) : ['General purpose']).map(label => element('span', '', label)));
-  root.querySelector('thead').hidden = !!data.task.clarification;
   field('model-list').replaceChildren(...data.recommendations.map(model => modelRow(model, prefix)));
-  if (!data.recommendations.length) field('model-list').append(tableMessage(data.task.clarification?.question || data.warnings[0] || 'No matching models with verified evidence.'));
-  if (data.task.clarification) {
-    const cell = field('model-list').querySelector('td');
-    for (const option of data.task.clarification.options) { const button = element('button', 'clarification-option', option); button.type = 'button'; button.addEventListener('click', () => {
-      const clarified = `${originalPrompt}\nFor task "${taskTitle}", role "${label}": ${option}`;
-      if (clarified.length > 4000) { $('#error').textContent = 'Shorten the request before adding this clarification (4,000 characters maximum).'; $('#error').hidden = false; return; }
-      $('#prompt').value = clarified; fitPrompt(); $('#scout-form').requestSubmit();
-    }); cell.append(button); }
-  }
+  if (!data.recommendations.length) field('model-list').append(tableMessage(data.warnings[0] || 'No matching models with verified evidence.'));
   field('warnings').replaceChildren(...data.warnings.map(warning => element('p', '', warning)));
   const workload = data.ranking?.workload, profile = data.ranking?.profile;
   field('quality-heading').replaceChildren(document.createTextNode(profile ? 'Accuracy ' : 'Quality '), element('span', 'column-unit', profile ? 'calibration cases' : data.ranking?.mode === 'task-fit' ? 'not measured' : 'relative / 100'));
   field('time-unit').textContent = profile ? 'measured seconds' : 'reference seconds';
-  field('table-caption').textContent = data.task.clarification ? data.task.clarification.question : data.ranking?.mode === 'task-fit' ? 'Candidates ordered by task fit and deployment readiness, then known reference costs. Quality is unmeasured.' : profile ? 'Models in Scout rank order among tested eligible candidates. Accuracy, mean cost and median full task time come from separate calibration cases, not executions of your prompt.' : 'Models in Scout rank order using shared benchmarks and an illustrative workload. Quality is a ranking signal, not predicted task accuracy.';
-  field('workload-note').textContent = data.ranking?.mode === 'task-fit' ? 'Task-compatible shortlist. No comparable endpoint-quality measurements; self-hosted costs and unmeasured latency remain unknown.' : profile ? `${profile.casesPerModel} calibration cases per model · ${profile.eligibleTestedModels} tested models · ${new Date(profile.measuredAt).toLocaleDateString()}. Not measured on your task.` : workload ? `Reference workload: ${workload.inputTokens.toLocaleString()} input + ${workload.outputTokens.toLocaleString()} output tokens per task · ${workload.priority} priority. Cost and time are comparisons, not task-specific measurements.` : 'Based on published benchmarks. Evaluate these models on your own examples.';
-  field('limitations').hidden = !!data.task.clarification;
+  field('table-caption').textContent = data.ranking?.mode === 'task-fit' ? 'Candidates ordered by task fit and deployment readiness, then known reference costs. Quality is unmeasured.' : profile ? 'Models in Scout rank order among tested eligible candidates. Accuracy, mean cost and median full task time come from separate calibration cases, not executions of your prompt.' : qualityGate ? 'Lowest known reference cost first; latency breaks price ties. Quality qualification uses a relative proxy band, not verified task accuracy. Unverified shortlists have not passed that screen.' : 'Models in Scout rank order using shared benchmarks and an illustrative workload. Quality is a ranking signal, not predicted task accuracy.';
+  field('workload-note').textContent = data.ranking?.mode === 'task-fit' ? 'Task-compatible shortlist. No comparable endpoint-quality measurements; self-hosted costs and unmeasured latency remain unknown.' : profile ? `${profile.casesPerModel} calibration cases per model · ${profile.eligibleTestedModels} tested models · ${new Date(profile.measuredAt).toLocaleDateString()}. Not measured on your task.` : workload ? `Reference workload: ${workload.inputTokens.toLocaleString()} input + ${workload.outputTokens.toLocaleString()} output tokens per task · ${qualityGate ? 'cost-first order' : `${workload.priority} priority`}. Cost and time are comparisons, not task-specific measurements.` : 'Based on published benchmarks. Evaluate these models on your own examples.';
+  field('limitations').hidden = false;
   showSpecialists(data.specialists, root);
   tableObserver.observe(root.querySelector('.table-scroll'));
   return root;
@@ -144,9 +136,9 @@ function showResult(data, roundTripMs) {
   $('#query-time').title = 'Total search time, including task interpretation and network time';
   $('#results-basis').hidden = false;
   $('#task-results').replaceChildren(...tasks.map((task, i) => {
-    const section = element('article', 'task-section'), heading = element('div', 'task-heading'), title = element('h3', '', task.title), meta = element('span', 'task-meta', `${task.slots.length} model ${task.slots.length === 1 ? 'role' : 'roles'}`);
+    const section = element('article', 'task-section'), heading = element('div', 'task-heading'), title = element('h3', '', task.title);
     title.id = `task-${i+1}-title`; section.setAttribute('aria-labelledby', title.id);
-    heading.append(element('span', 'task-number', String(i+1).padStart(2,'0')), title, meta); section.append(heading);
+    heading.append(element('span', 'task-number', String(i+1).padStart(2,'0')), title); section.append(heading);
     if (task.layers) {
       const details = element('details', 'task-layers'), list = element('dl');
       details.append(element('summary', '', 'Task breakdown · 5 layers'));
@@ -158,11 +150,11 @@ function showResult(data, roundTripMs) {
       }
       details.append(list); section.append(details);
     }
-    task.slots.forEach((slot,j) => section.append(renderSlot(slot, `task-${i+1}-slot-${j+1}`, slot.label ?? 'Model candidates', data.prompt, task.title)));
+    task.slots.forEach((slot,j) => section.append(renderSlot(slot, `task-${i+1}-slot-${j+1}`, slot.label ?? 'Model candidates', task.title)));
     return section;
   }));
   showIndex(data);
-  $('#announcement').textContent = `${tasks.length} tasks. ${count} candidates across independent model roles.${tasks.some(t=>t.slots.some(s=>s.task.clarification))?' Some roles need clarification.':''}`;
+  $('#announcement').textContent = `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}. ${count} model candidates.`;
 }
 function showIndex(data) {
   $('#index-counts').replaceChildren(...[`${data.availableModels ?? data.models} API models`, `${data.specialistRepositories ?? 0} HF repositories`, `${data.benchmarks} benchmark series`, `${data.sources.length} sources`].map(text => element('span', '', text)));

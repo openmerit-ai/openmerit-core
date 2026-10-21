@@ -1,5 +1,13 @@
 # Website FAQ maintenance
 
+## Scout cost-first selection — local revision, not deployed
+
+Reviewed evidence, comparison, cost and readiness claims against the pending alpha ordering change. Cost leads only after a relative two-point proxy quality screen; latency breaks price ties. The guide explicitly distinguishes that screen from a task-accuracy threshold, keeps unverified discovery lists provisional, and discloses reference-workload pricing rather than exact dataset charges. No verified minimum accuracy, global optimum, new collection run or deployment is claimed. Homepage terminal/Pi FAQ answers remain unchanged and need no edit.
+
+## Scout direct model lists — local revision, not deployed
+
+Reviewed the homepage's evidence, comparison, background, data, cost and readiness answers. They describe the terminal/Pi workflow and need no changes. The pending alpha revision resolves missing task details internally and returns one ranked shortlist per task, without follow-up questions. The five/ten/fifteen-candidate target still respects explicit restrictions, verified evidence and available Pareto tradeoffs; it is not a promise to fabricate five eligible models. Analytics retains the existing task/slot envelope and retention policy. No latency improvement, exact task accuracy or collection deployment is claimed.
+
 ## Scout multi-task discovery — published alpha, 21 October 2026
 
 Reviewed the homepage's evidence, comparison, background, data, cost and readiness answers against Scout alpha. They describe the terminal/Pi workflow and require no copy change. The separate `/scout/alpha/` deployment adds five-layer decomposition, independent role shortlists and a shared 30-second matching deadline; stable Scout and its hourly publisher remain unchanged. Its guide identifies the response-shape change and per-role private analytics, and records the initial failed recommendation checks and subsequent timeout mitigation rather than claiming successful under-five-second search. Broader collection categories remain unreleased and unvalidated by paid research runs. The prompt toolbar, task-count hint and header freshness line are removed without changing task limits, status API freshness or source-date disclosures. No complete source coverage, jointly evaluated model combinations or exact task accuracy is claimed.

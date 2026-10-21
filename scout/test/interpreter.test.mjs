@@ -20,12 +20,21 @@ test('the hybrid reuses the complete Decisions task and serialization contract',
     if(format==='unspecified')assert.ok(task.uncertainty.includes('output_format'));
   }
 });
-test('semantic output ambiguity uses the existing clarification response without discarding provider restrictions',async()=>{
+test('semantic output ambiguity is resolved internally without discarding provider restrictions',async()=>{
  const alternatives=[{all:[{field:'creator',op:'eq',values:['Lab']}]}],base=transport('none',alternatives);
- const clarification={question:'Which output representation do you need?',options:['Source for a renderer.','Rendered media.']};
- const fetcher=async(url,options)=>{const r=await base(url,options);if(!url.endsWith('/responses'))return r;const body=await r.json();const content=body.output[0].content[0];content.text=JSON.stringify({...JSON.parse(content.text),clarification});return Response.json(body);};
- const {task}=await interpretPrompt('An ambiguous output request.',{apiKey:'fixture',fetcher});
- assert.deepEqual(task.clarification,clarification);assert.deepEqual(task.constraints,alternatives);assert.equal(task.unsupported,false);
+ let decisions=0;
+ const fetcher=async(url,options)=>{
+  const body=await(await base(url,options)).json();
+  if(url.endsWith('/responses')){const content=body.output[0].content[0];content.text=JSON.stringify({...JSON.parse(content.text),search:'Sort images into their supplied animal categories.'});}
+  else {
+   const ambiguous=decisions++===0,values={coding:'absent',vision:'required',quality_target:'vision',task_kind:ambiguous?'visual_unspecified':'classify',result_type:ambiguous?'unspecified':'labels',label_space:'supplied',output_specificity:ambiguous?'ambiguous':'established'};
+   for(const answer of body.answers)if(Object.hasOwn(values,answer.name))answer.choice=values[answer.name];
+  }
+  return Response.json(body);
+ };
+ const {task}=await interpretPrompt('Use Lab models to separate cats, dogs and snakes from 1000 images.',{apiKey:'fixture',fetcher});
+ assert.equal(task.clarification,null);assert.equal(task.kind,'classify');assert.equal(task.needsVision,true);
+ assert.deepEqual(task.evidenceCapabilities,['vision']);assert.deepEqual(task.constraints,alternatives);assert.equal(task.unsupported,false);
 });
 test('request-time task questions remain bounded as the hourly capability directory grows',async()=>{
  const expanded={...registry,capabilities:[...registry.capabilities,...Array.from({length:500},(_,i)=>({id:`fine_${i}`,label:'Narrow scope',task:'A particular domain.',benchmark:'Its evaluation.',parent:'coding',core:false}))]};
