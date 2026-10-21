@@ -1,8 +1,8 @@
 # Website FAQ maintenance
 
-## Scout account sign-in — unreleased, 21 October 2026
+## Scout account sign-in — published, 21 October 2026
 
-Reviewed Clerk sign-in, account data, cookies, transient prompt drafts, bearer-token requirements and edge rate limits against the local implementation. The development instance has Google/GitHub enabled and Billing disabled; its real modal and outgoing provider authorization redirects were checked locally. Complete OAuth acceptance and production configuration remain pending; the public service has not changed. Clerk handles identity separately from Scout's prompt/evidence analytics, which still omit account/session IDs. No Clerk Billing, subscriptions, durable account budgets, saved-search history or automatic agent OAuth is included. Existing anonymous API/MCP clients will require tokens on deployment. Homepage terminal/Pi claims need no edits; the Scout guide distinguishes these pending changes from hosted behavior and makes no privacy, latency or universal-login guarantee.
+Reviewed Clerk sign-in, account data, cookies, transient prompt drafts, bearer-token requirements and edge rate limits against the deployed integration. The production instance has Google/GitHub enabled and organizations/Billing disabled; the public desktop/mobile modal and outgoing provider authorization redirects passed checks with identity/email scopes only. Anonymous API/MCP requests now return HTTP 401; public page/status and old alpha redirects remain available. Complete human OAuth acceptance and authenticated searches remain unverified. Clerk handles identity separately from Scout's prompt/evidence analytics, which still omit account/session IDs. No Clerk Billing, subscriptions, durable account budgets, saved-search history or automatic agent OAuth is included. Homepage terminal/Pi claims need no edits; the source Scout/security guides document the new hosted contract without a privacy, latency or universal-login guarantee. The separate main-site documentation deployment is unchanged.
 
 ## Canonical Scout promotion — published, 21 October 2026
 
