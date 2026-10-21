@@ -10,9 +10,11 @@ import { refreshSnapshot } from './sources.mjs';
 import { createRecommender } from './recommend.mjs';
 import { registry } from './registry.mjs';
 import { scoutAccess } from './auth.mjs';
+import { createProductAnalytics } from './product-analytics.mjs';
 
 const root = resolve(import.meta.dirname, '../site');
 const recommendTask = createRecommender({ apiKey: process.env.OPENAI_API_KEY });
+const analyticsEnv = { ...process.env, POSTHOG_ENVIRONMENT: 'development' };
 setDefaultResultOrder('ipv4first');
 const cache = resolve(import.meta.dirname, '../.openmerit/scout/snapshot.json');
 let snapshot;
@@ -40,7 +42,11 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url, `${protocol}://${req.headers.host ?? 'localhost'}`);
     if ((url.pathname.startsWith('/scout/api/') || url.pathname === '/scout/mcp')) {
       const request = new Request(url, { method: req.method, headers: req.headers, ...(!['GET', 'HEAD'].includes(req.method) ? { body: Readable.toWeb(req), duplex: 'half' } : {}) });
-      const response = await scoutAccess(request, process.env) ?? await (url.pathname === '/scout/mcp' ? handleMCP : handleAPI)(request, index, refreshState, recommendTask);
+      const analytics = createProductAnalytics(request, analyticsEnv), mcp = url.pathname === '/scout/mcp';
+      const response = await scoutAccess(request, analyticsEnv, analytics.identify) ?? (url.pathname === '/scout/api/analytics'
+        ? await analytics.handleEvent()
+        : await (mcp ? handleMCP : handleAPI)(request, index, refreshState, (...args) => recommendTask(...args, mcp ? 'mcp' : 'api', analytics.observeSearch)));
+      analytics.complete(response);
       res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text()); return;
     }
     if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405); res.end(); return; }

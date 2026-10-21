@@ -8,6 +8,7 @@ import { runRefresh } from './pipeline.mjs';
 import { ParallelResearch } from './research.mjs';
 import { indexStatus } from './rank.mjs';
 import { scoutAccess } from './auth.mjs';
+import { createProductAnalytics } from './product-analytics.mjs';
 
 // Publication coordination only. User searches do not pass through this object.
 export class ScoutPublication extends DurableObject {
@@ -74,7 +75,11 @@ export default {
     if(!path.startsWith('/scout/api/')&&path!=='/scout/mcp') {
       return ['GET','HEAD'].includes(request.method)?env.ASSETS.fetch(request):json({error:'Not found.'},404);
     }
-    const access=await scoutAccess(request,env);if(access)return access;
+    const analytics=createProductAnalytics(request,env,ctx);
+    const access=await scoutAccess(request,env,analytics.identify);
+    if(access){analytics.complete(access);return access;}
+    if(path==='/scout/api/analytics')return analytics.handleEvent();
+    let response;
     try {
       const {reader,recommend}=services(env),index=await reader.view();
       if(path==='/scout/api/status') {
@@ -84,8 +89,9 @@ export default {
         return json({...status,scheduler:'cloudflare-hourly',refreshStatus:status.degraded?'degraded':'idle',...health,snapshotVersion:index.snapshot.publication.id,refreshSummary:index.snapshot.refreshSummary});
       }
       const mcp=path==='/scout/mcp';
-      return (mcp?handleMCP:handleAPI)(request,index,{},(...args)=>recommend(...args,mcp?'mcp':'api'));
-    } catch {return json({error:'Scout could not load its prepared catalogue. Please try again shortly.'},503);}
+      response=await (mcp?handleMCP:handleAPI)(request,index,{},(...args)=>recommend(...args,mcp?'mcp':'api',analytics.observeSearch));
+    } catch {response=json({error:'Scout could not load its prepared catalogue. Please try again shortly.'},503);}
+    analytics.complete(response);return response;
   },
   async scheduled(event,env,ctx) {
     const id=`hour-${Math.floor(event.scheduledTime/3600_000)}`;

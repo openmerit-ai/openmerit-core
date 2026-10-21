@@ -22,6 +22,8 @@
   "d1_databases": [{ "binding": "SCOUT_INDEX", "database_name": "openmerit-scout-index", "database_id": "80312d1c-c9e7-43f3-a09d-cb4b2c538f49" }],
   "vectorize": [{ "binding": "SCOUT_EVIDENCE", "index_name": "openmerit-scout-evidence" }],
   "analytics_engine_datasets": [{ "binding": "SCOUT_ANALYTICS", "dataset": "scout_alpha_searches" }],
+  // Product analytics remain off without POSTHOG_PROJECT_TOKEN and POSTHOG_HOST.
+  "vars": { "POSTHOG_ENVIRONMENT": "production" },
   "ratelimits": [{ "name": "SCOUT_RATE", "namespace_id": "2026102101", "simple": { "limit": 60, "period": 60 } }],
   "build": {
     "command": "npm run check:scout && npm run check:docs && npm run build:scout"

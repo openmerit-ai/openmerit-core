@@ -6,6 +6,14 @@ Compared with `0.1.7-preview.1`, this version adds [corrected cost accounting an
 
 One local runner supports Claude Code, Codex and OpenCode. Scout supplies candidates; local task checks measure each model/agent/CLI combination. Installing npm alone does not install or authenticate agents, modify project instructions, or start paid evaluations.
 
+## Optional CLI product analytics (source checkout only)
+
+Unreleased source builds support the [opt-in CLI analytics contract](inference-terminal.md#optional-cli-product-analytics-source-checkout-only). Only `OPENMERIT_TELEMETRY=1` enables command start/completion events; `DO_NOT_TRACK=1` overrides it. A process-only random ID accompanies command categories, completion outcomes and bounded durations, never task descriptions, model IDs, arguments, paths, error text or configuration. No project key is distributed. Transport failures cannot change JSON output or exit status.
+
+`eval watch` completes only when its loop returns, not after each iteration; forced exits can leave a start without a completion. An `ok` command outcome is not evidence of model quality or reconciled charges. Direct imports of the evaluation module do not emit CLI lifecycle events.
+
+Scout planning requests carry `X-Scout-Client: cli` and `X-Scout-Analytics: off` unless explicitly opted in without Do Not Track. The server owns search-completion counts; the CLI does not emit another search event. This opt-out affects optional PostHog product events, not task processing or the existing private Cloudflare prompt archive. Planning still sends the task descriptions and model scope required by its protocol. No CLI authentication is added; clients without a current Clerk session token still cannot use the protected hosted service. This source change has not been published to npm.
+
 ## Set up
 
 Install the preview and initialize it inside the project you want to evaluate:

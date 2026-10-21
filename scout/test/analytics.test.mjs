@@ -190,3 +190,51 @@ test('specialist evidence retains pinned model-card and contract sources without
     assert.deepEqual(m.evidence.reportedEvaluations, original.endpoint.reportedEvaluations ?? []);
   });
 });
+
+test('browser analytics links an OAuth return, rotates on account switches, and respects opt-outs without leaking stale events', async t => {
+  const storage = () => { const data = new Map(); return { getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value), removeItem: key => data.delete(key) }; };
+  for (const [key, value] of Object.entries({ navigator: {}, sessionStorage: storage(), localStorage: storage() })) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { value, configurable: true });
+    t.after(() => { if (previous) Object.defineProperty(globalThis, key, previous); else delete globalThis[key]; });
+  }
+  const sent = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => { sent.push(JSON.parse(options.body)); return new Response(null, { status: 204 }); });
+  const settle = () => new Promise(resolve => setTimeout(resolve, 5));
+  async function until(check) { for (let i = 0; i < 100 && !check(); i++) await settle(); assert.ok(check()); }
+  const { analytics } = await import(`../../site/scout/analytics.js?first=${crypto.randomUUID()}`);
+  analytics.track('scout_visited'); await settle(); assert.equal(sent.length, 0);
+  analytics.configure(true); analytics.account(null, null); await until(() => sent.length === 1);
+  const anonymous = sent[0].anonymousId;
+  const alice = { id: 'private_session_a', getToken: async () => 'private_bearer_a' };
+  analytics.account('private_user_a', alice); await until(() => sent.some(e => e.event === 'scout_signed_in'));
+  assert.equal(sent.find(e => e.event === 'scout_signed_in').anonymousId, anonymous);
+
+  let release;
+  alice.getToken = () => new Promise(resolve => { release = resolve; });
+  analytics.track('scout_model_id_copied', { rank: 2, task_index: 1 }); await until(() => !!release);
+  analytics.account('private_user_a', alice); release('private_bearer_a');
+  await until(() => sent.some(e => e.event === 'scout_model_id_copied'));
+  assert.equal(sent.filter(e => e.event === 'scout_signed_in').length, 1, 'ordinary Clerk refresh is not another sign-in');
+
+  release = undefined; analytics.track('scout_provider_opened', { rank: 3, task_index: 2 }); await until(() => !!release);
+  const bob = { id: 'private_session_b', getToken: async () => 'private_bearer_b' };
+  analytics.account('private_user_b', bob); release('private_bearer_a');
+  await until(() => sent.filter(e => e.event === 'scout_signed_in').length === 2);
+  assert.equal(sent.filter(e => e.event === 'scout_provider_opened').length, 0, 'a pending old-account event must be dropped');
+  const bobId = sent.filter(e => e.event === 'scout_signed_in').at(-1).anonymousId;
+  assert.notEqual(bobId, anonymous);
+  const { analytics: reloaded } = await import(`../../site/scout/analytics.js?return=${crypto.randomUUID()}`);
+  reloaded.configure(true); reloaded.account('private_user_b', bob);
+  await until(() => sent.filter(e => e.event === 'scout_visited').length === 2);
+  assert.equal(sent.at(-1).anonymousId, bobId); assert.equal(sent.filter(e => e.event === 'scout_signed_in').length, 2);
+  assert.doesNotMatch(JSON.stringify(sent), /private_user|private_session|private_bearer/);
+
+  const before = sent.length;
+  for (const preference of ['dnt', 'gpc', 'local', 'disabled']) {
+    navigator.doNotTrack = preference === 'dnt' ? '1' : '0'; navigator.globalPrivacyControl = preference === 'gpc';
+    localStorage.setItem('scout-analytics-opt-out', preference === 'local' ? '1' : '0');
+    reloaded.configure(preference !== 'disabled'); reloaded.account('private_user_b', bob); reloaded.track('scout_visited');
+    assert.equal(reloaded.headers()['X-Scout-Analytics'], 'off'); await settle(); assert.equal(sent.length, before);
+  }
+});

@@ -1,3 +1,5 @@
+import { analytics } from './analytics.js';
+
 const basePath = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
 const draftKey = 'scout-sign-in-draft';
 
@@ -27,7 +29,8 @@ export function initAuth(onAccountChange) {
     if (!loading) loading = (async () => {
       const response = await fetch(`${basePath}/api/auth`);
       if (!response.ok) throw new Error('Sign-in is temporarily unavailable. Please try again later.');
-      const { publishableKey, frontendApi } = await response.json();
+      const { publishableKey, frontendApi, analytics: config } = await response.json();
+      analytics.configure(config?.enabled);
       await Promise.all([
         window.__internal_ClerkUICtor || loadScript(`https://${frontendApi}/npm/@clerk/ui@1/dist/ui.browser.js`),
         window.Clerk || loadScript(`https://${frontendApi}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`, publishableKey),
@@ -46,13 +49,14 @@ export function initAuth(onAccountChange) {
         const id = session?.status === 'active' ? user?.id ?? null : null;
         if (previousUser && previousUser !== id) onAccountChange();
         previousUser = id;
+        analytics.account(id, id ? session : null);
         button.hidden = !!id; account.hidden = !id;
         if (id && !mounted) { clerk.mountUserButton(account); mounted = true; }
         if (!id && mounted) { clerk.unmountUserButton(account); mounted = false; }
         if (id) { try { sessionStorage.removeItem(draftKey); } catch { /* Optional storage. */ } }
       });
       return clerk;
-    })().catch(error => { loading = null; throw error; });
+    })().catch(error => { loading = null; analytics.account(null, null); analytics.track('scout_client_error', { code: 'auth_unavailable' }); throw error; });
     return loading;
   }
 
@@ -60,6 +64,7 @@ export function initAuth(onAccountChange) {
     const clerk = await client();
     try { if (prompt.value) sessionStorage.setItem(draftKey, prompt.value); } catch { /* Optional storage. */ }
     clerk.openSignIn({ forceRedirectUrl: returnUrl, signUpForceRedirectUrl: returnUrl });
+    analytics.track('scout_sign_in_opened');
   }
   button.addEventListener('click', async () => {
     button.disabled = true; error.hidden = true;

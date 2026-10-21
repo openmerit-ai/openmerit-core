@@ -4,6 +4,14 @@ The terminal gives people and agents a local overview of an application's models
 
 It reads existing evidence independently of inference. It does not call a model, change a route, run evaluations, load or unload models, or retain prompts and responses. Closing it does not stop your workloads. Collection uses local CPU, memory, and authorized runtime API capacity.
 
+## Optional CLI product analytics (source checkout only)
+
+This unreleased source-checkout behavior does not describe the published npm package. CLI product analytics are off unless `OPENMERIT_TELEMETRY=1`; `DO_NOT_TRACK=1` always disables them. Terminal `discovery` configuration and `--no-discovery` are unrelated to analytics consent.
+
+When explicitly enabled, the CLI posts `cli_command_started` and `cli_command_completed` to `https://openmerit.ai/scout/api/analytics`, with a fresh `crypto.randomUUID()` identity for that process only. No identity file, cookie, or installation ID is stored. Properties contain only a command category (`help`, `dash`, `eval_init`, `eval_doctor`, `eval_plan`, `eval_run`, `eval_watch`, `eval_report`, or `unknown`), plus completion outcome (`ok` or `error`) and integer elapsed milliseconds capped at one day. Paths, arguments, prompts, configuration, model IDs, error text, environment contents, machine names, and email are not included.
+
+Transport is best-effort, silent, has no retries, and is bounded to about 750 ms per event. It does not change command exit status or JSON output. For a long-running `dash`, completion means startup readiness and the browser-opening attempt finished, not that the server session ended or collection succeeded. JSON and diagnostics modes complete after producing their output. Abrupt termination can lose events. See [evaluation analytics notes](agent-evaluations.md#optional-cli-product-analytics-source-checkout-only) for watch and Scout request behavior.
+
 ## Install
 
 Requires **Node.js 22.19 or newer** and npm. Stable `openmerit@0.1.6` includes the terminal:

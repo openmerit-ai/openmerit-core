@@ -14,7 +14,7 @@ import {matchingTimeoutMs} from './timing.mjs';
 export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, timeoutMs = matchingTimeoutMs, db, vectorize, observe = () => {},cacheOptions } = {}) {
   let inFlight = 0, windowStart = now(), requests = 0;
   const cached=createResultCache({now,...cacheOptions});
-  return async (index, prompt, selection, endpoints, channel = 'api') => {
+  return async (index, prompt, selection, endpoints, channel = 'api', observeRequest = () => {}) => {
     const submittedPrompt = prompt;
     prompt = validatePrompt(prompt);
     const modelIds = validateSelection(selection), endpointIds = validateSelection(endpoints, 'endpointIds');
@@ -73,8 +73,10 @@ export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, tim
       return result;
     } finally {
       if (admitted) inFlight--;
-      try { observe({ prompt: submittedPrompt, index, result, task, outcome, channel, scope, durationMs: now() - started,diagnostics:diagnostics??result?.runtime }); }
-      catch { /* Best-effort analytics cannot change task results. */ }
+      for (const observer of [observe, observeRequest]) {
+        try { observer({ prompt: submittedPrompt, index, result, task, outcome, channel, scope, durationMs: now() - started,diagnostics:diagnostics??result?.runtime }); }
+        catch { /* Independent best-effort observers cannot change task results. */ }
+      }
     }
   };
 }

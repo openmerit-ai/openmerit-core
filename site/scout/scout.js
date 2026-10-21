@@ -1,5 +1,6 @@
 import { providerIdentity } from './providers.js';
 import { initAuth } from './auth.js';
+import { analytics } from './analytics.js';
 
 const $ = selector => document.querySelector(selector);
 const basePath = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
@@ -25,16 +26,18 @@ function providerIcon(provider) {
   img.src = `${basePath}/providers/${provider.file}`; return img;
 }
 async function copy(text, button, label = 'Copied') {
-  const previous = button.textContent;
-  try { await navigator.clipboard.writeText(text); button.textContent = label; $('#announcement').textContent = label; }
+  const previous = button.textContent; let copied = false;
+  try { await navigator.clipboard.writeText(text); copied = true; button.textContent = label; $('#announcement').textContent = label; }
   catch { button.textContent = 'Select and copy'; $('#announcement').textContent = 'Clipboard access is unavailable. Select the text to copy it.'; }
   setTimeout(() => { if (button.isConnected) button.textContent = previous; }, 1800);
+  return copied;
 }
 function evidenceItem(e) {
   const item = element('div', 'evidence-item'); item.append(link(`${e.benchmark} ↗`, e.url), element('span', '', `${e.score.toFixed(1)}`));
   item.append(element('small', '', `${e.cohortSize} comparable models · ${e.observedAt ? `Source date: ${e.observedAt.slice(0, 10)}` : 'Measurement date not supplied'} · ${e.configurations.join(', ')}${e.historical ? ' · archived evaluation' : ''}`)); return item;
 }
-function modelEntry(model, prefix, taskTitle, steps = 0) {
+function modelEntry(model, prefix, taskTitle, steps = 0, taskIndex = 1) {
+  const position = { rank: model.rank, task_index: taskIndex };
   const row = element(steps ? 'td' : 'tr', steps ? 'sequence-cell' : 'model-row'), nameCell = element(steps ? 'div' : 'th', 'model-cell');
   if (!steps) nameCell.scope = 'row';
   const provider = providerIdentity(model), identity = element('span', 'model-identity'), name = element('span'), title = element('span', 'model-title', model.name), byline = element('span', 'model-provider', provider.label);
@@ -60,13 +63,13 @@ function modelEntry(model, prefix, taskTitle, steps = 0) {
     row.append(metrics);
   } else row.append(quality, cost, time);
   const detail = element('tr', 'model-detail'), detailCell = element('td', 'model-detail-cell'); detailCell.colSpan = steps ? steps + 1 : 4; detail.id = `${prefix}-model-${model.rank}`; detail.hidden = true;
-  toggle.addEventListener('click', () => { detail.hidden = !detail.hidden; toggle.setAttribute('aria-expanded', String(!detail.hidden)); row.dataset.expanded = String(!detail.hidden); });
+  toggle.addEventListener('click', () => { detail.hidden = !detail.hidden; toggle.setAttribute('aria-expanded', String(!detail.hidden)); row.dataset.expanded = String(!detail.hidden); if (!detail.hidden) analytics.track('scout_evidence_opened', position); });
   // Preserve table semantics and native Enter/Space behavior; any other part of
   // the row activates the same button. Links and buttons keep their own action.
   row.addEventListener('click', event => { if (!event.target.closest('button, a')) toggle.click(); });
   const body = element('div', 'model-evidence');
   if (taskTitle) body.append(element('p', 'price-detail', taskTitle));
-  const idLine = element('div', 'model-id-line'), copyID = element('button', '', 'Copy ID'); copyID.type = 'button'; copyID.addEventListener('click', () => copy(model.endpoint?.modelId ?? model.id, copyID));
+  const idLine = element('div', 'model-id-line'), copyID = element('button', '', 'Copy ID'); copyID.type = 'button'; copyID.addEventListener('click', async () => { if (await copy(model.endpoint?.modelId ?? model.id, copyID)) analytics.track('scout_model_id_copied', position); });
   idLine.append(element('code', '', model.endpoint?.modelId ?? model.id), copyID); body.append(idLine);
   if (model.endpoint) {
     const endpoint = element('p', 'price-detail'); endpoint.append(element('code', '', model.endpoint.id), document.createTextNode(` · ${model.endpoint.status ?? 'listed'} · ${model.endpoint.deployment}.`)); body.append(endpoint);
@@ -79,7 +82,12 @@ function modelEntry(model, prefix, taskTitle, steps = 0) {
   const grid = element('div', 'evidence-grid'); model.evidence.slice(0, 4).forEach(e => grid.append(evidenceItem(e))); body.append(grid);
   if (model.evidence.length > 4) { const more = element('details', 'evidence-more'); more.append(element('summary', '', `All ${model.evidence.length} benchmark results`)); const rest = element('div', 'evidence-grid'); model.evidence.slice(4).forEach(e => rest.append(evidenceItem(e))); more.append(rest); body.append(more); }
   const pricing = element('p', 'price-detail', `${money(model.pricing.inputPerMillion)} input / ${money(model.pricing.outputPerMillion)} output per million tokens, ${model.pricing.basis ?? 'Advertised rates.'}`);
-  if (model.pricing.url) pricing.append(document.createTextNode(' '), link('Provider page ↗', model.pricing.url));
+  if (model.pricing.url) {
+    const providerLink = link('Provider page ↗', model.pricing.url);
+    const followed = event => { if (providerLink.href && (event.type === 'click' || event.button === 1)) analytics.track('scout_provider_opened', position); };
+    providerLink.addEventListener('click', followed); providerLink.addEventListener('auxclick', followed);
+    pricing.append(document.createTextNode(' '), providerLink);
+  }
   body.append(pricing);
   if (model.speed && !model.measured) { const speed = element('p', 'price-detail'); speed.append(link('Reference timing by Artificial Analysis ↗', model.speed.url), document.createTextNode(` · ${model.speed.configurations.join(', ')}. ${model.speed.historical ? 'Archived reference measurement. ' : ''}Endpoint performance may differ.`)); body.append(speed); }
   detailCell.append(body); detail.append(detailCell); return { row, detail };
@@ -176,7 +184,7 @@ function showResult(data, roundTripMs) {
       steps.forEach((step, j) => {
         const model = step.data.recommendations[i];
         if (!model) { row.append(element('td', 'sequence-empty', step.data.recommendations.length ? 'No further candidate' : 'No eligible model')); return; }
-        const entry = modelEntry(model, `task-${j+1}`, step.text ?? step.task.title, steps.length);
+        const entry = modelEntry(model, `task-${j+1}`, step.text ?? step.task.title, steps.length, j + 1);
         row.append(entry.row); details.push(entry.detail);
       });
       body.append(row, ...details);
@@ -188,6 +196,7 @@ function showResult(data, roundTripMs) {
   tableObserver.observe(root.querySelector('.table-scroll'));
   showIndex(data);
   $('#announcement').textContent = `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}. ${count} model candidates.`;
+  analytics.track('scout_results_viewed', { task_count: tasks.length, candidate_count: count, duration_ms: Math.round(roundTripMs) });
 }
 function showIndex(data) {
   $('#index-counts').replaceChildren(...[`${data.availableModels ?? data.models} API models`, `${data.specialistRepositories ?? 0} HF repositories`, `${data.benchmarks} benchmark series`, `${data.sources.length} sources`].map(text => element('span', '', text)));
@@ -220,15 +229,19 @@ async function search() {
   $('#announcement').textContent = 'Searching the prepared index.';
   $('.find-button span').textContent = 'Searching…'; $('.find-button').setAttribute('aria-busy', 'true');
   const started = performance.now(), timeout = setTimeout(() => controller.abort(), 35_000);
+  let failureCode = 'network_error', httpStatus;
   try {
-    const response = await fetch(`${basePath}/api/recommend`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ prompt }), signal: controller.signal });
+    const response = await fetch(`${basePath}/api/recommend`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...analytics.headers() }, body: JSON.stringify({ prompt }), signal: controller.signal });
     if (id !== requestID) return;
+    httpStatus = response.status; failureCode = response.ok ? 'invalid_response' : 'http_error';
     if (response.status === 401) { await auth.signIn(); throw new Error('Your session has expired. Sign in and try again.'); }
     if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('The Scout API is not available on this server. Start the Scout server and try again.');
     const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Scout could not complete this search.');
+    failureCode = 'render_error';
     if (id === requestID) showResult(data, performance.now() - started);
   } catch (error) {
     if (id !== requestID) return;
+    analytics.track('scout_client_error', { code: error.name === 'AbortError' ? 'search_timeout' : failureCode, ...(httpStatus >= 400 ? { http_status: httpStatus } : {}) });
     result = null; tableObserver.disconnect(); $('#task-results').replaceChildren(); $('#results-title').textContent = 'Search unavailable'; $('#query-time').textContent = '';
     $('#error').textContent = error.name === 'AbortError' ? 'This request took too long. Please try again.' : error instanceof TypeError ? 'Couldn’t reach Scout. Check the connection and try again.' : error.message; $('#error').hidden = false;
   } finally { clearTimeout(timeout); if (id === requestID) { $('#results').setAttribute('aria-busy', 'false'); $('.find-button span').textContent = 'Find models'; $('.find-button').setAttribute('aria-busy', 'false'); } }

@@ -74,7 +74,7 @@ const authenticatedRequest=(path,token,headers={})=>new Request(`https://example
 test('public auth configuration exposes only the publishable key and fails closed when incomplete',async()=>{
   const response=await alpha.fetch(new Request('https://example.test/scout/api/auth'),authEnv,{});
   assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
-  assert.deepEqual(await response.json(),{publishableKey:authEnv.CLERK_PUBLISHABLE_KEY,frontendApi:'scout-auth.clerk.accounts.dev'});
+  assert.deepEqual(await response.json(),{publishableKey:authEnv.CLERK_PUBLISHABLE_KEY,frontendApi:'scout-auth.clerk.accounts.dev',analytics:{enabled:false}});
   for(const config of [{},{CLERK_PUBLISHABLE_KEY:authEnv.CLERK_PUBLISHABLE_KEY},{...authEnv,CLERK_PUBLISHABLE_KEY:'invalid'}]){
     for(const path of ['api/auth','api/recommend','mcp']){
       const result=await alpha.fetch(new Request(`https://example.test/scout/${path}`),config,{});
@@ -120,4 +120,73 @@ test('verified sessions reach HTTP/MCP handlers, while account and IP limits rem
   const accountLimit=await call('user_alice','192.0.2.3');assert.equal(accountLimit.status,429);assert.equal(accountLimit.headers.get('retry-after'),'60');
   assert.equal((await call('user_bob','192.0.2.3')).status,200);
   assert.equal((await call('user_charlie','192.0.2.3')).status,429);
+});
+
+const productEnv={POSTHOG_PROJECT_TOKEN:'phc_disposable_fixture',POSTHOG_HOST:'https://eu.i.posthog.com',POSTHOG_ENVIRONMENT:'test'};
+const anon='de31df69-f037-422a-909c-7a56cb2a2048';
+const eventRequest=(event,properties={},token,headers={})=>new Request('https://example.test/scout/api/analytics?private=URL_CANARY',{
+  method:'POST',headers:{'content-type':'application/json',...(token?{authorization:`Bearer ${token}`} : {}),...headers},
+  body:JSON.stringify({event,anonymousId:anon,properties}),
+});
+function pendingContext(){
+  const pending=[];
+  return {waitUntil:p=>pending.push(p),async flush(){while(pending.length)await Promise.all(pending.splice(0));}};
+}
+
+test('product events are allowlisted, identity comes from verified sessions, and prompt archives stay separate',async t=>{
+  const sent=[],ctx=pendingContext(),config={...authEnv,...productEnv,SCOUT_ANALYTICS:{writeDataPoint(){assert.fail('Product events must not enter prompt archives');}}};
+  t.mock.method(globalThis,'fetch',async(url,options)=>{sent.push({url,headers:options.headers,...JSON.parse(options.body)});return new Response(null,{status:200});});
+  const secret='PRIVATE_CANARY_person@example.invalid';
+  const visit=await alpha.fetch(eventRequest('scout_visited',{prompt:secret,$set:{email:secret},distinct_id:secret},undefined,{'user-agent':secret,cookie:secret,'cf-connecting-ip':'192.0.2.55'}),config,ctx);
+  assert.equal(visit.status,204);
+  const responses=await Promise.all(['alice','bob'].map(name=>alpha.fetch(eventRequest('scout_signed_in',{userId:secret},sessionToken({sub:`user_${name}`})),config,ctx)));
+  assert.deepEqual(responses.map(r=>r.status),[204,204]);
+  assert.equal((await alpha.fetch(eventRequest('scout_model_id_copied',{rank:2,task_index:3,modelId:secret}),config,ctx)).status,204);
+  await ctx.flush();
+  const events=sent.flatMap(p=>p.batch),identities=events.filter(e=>e.event==='$identify');
+  assert.equal(events.length,6);assert.equal(identities.length,2);
+  assert.equal(events[0].properties.distinct_id,`anonymous:${anon}`);
+  assert.notEqual(identities[0].properties.distinct_id,identities[1].properties.distinct_id);
+  assert.ok(identities.every(e=>/^account:[a-f0-9]{64}$/.test(e.properties.distinct_id)&&e.properties.$anon_distinct_id===`anonymous:${anon}`));
+  const copy=events.find(e=>e.event==='scout_model_id_copied');assert.equal(copy.properties.rank,2);assert.equal(copy.properties.task_index,3);
+  assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_CANARY|URL_CANARY|192\.0\.2|user_alice|user_bob|sess_alice|authorization|cookie|\$set/);
+  assert.ok(sent.every(p=>p.url==='https://eu.i.posthog.com/batch/'&&Object.keys(p.headers).join()==='Content-Type'));
+  assert.ok(events.every(e=>e.properties.$geoip_disable===true&&e.properties.$ip===null&&e.properties.environment==='test'));
+  for(const event of ['scout_search_completed','$identify','constructor',{toString:false}])assert.equal((await alpha.fetch(eventRequest(event),config,ctx)).status,400);
+  assert.equal((await alpha.fetch(eventRequest('scout_signed_in'),config,ctx)).status,401);
+  assert.equal((await alpha.fetch(eventRequest('scout_signed_in',{},'forged'),config,ctx)).status,401);
+  assert.equal((await alpha.fetch(eventRequest('scout_visited',{},undefined,{origin:'https://foreign.test'}),config,ctx)).status,403);
+  await ctx.flush();assert.equal(sent.flatMap(p=>p.batch).length,6);
+});
+
+test('product opt-out and missing configuration suppress all transmissions; rejected searches remain unchanged',async t=>{
+  const sent=[],ctx=pendingContext();
+  t.mock.method(globalThis,'fetch',async(url,options)=>{sent.push(JSON.parse(options.body));return new Response(null,{status:200});});
+  for(const headers of [{dnt:'1'},{'sec-gpc':'1'},{'x-scout-analytics':'off'}]){
+    const config={...authEnv,...productEnv};
+    assert.equal((await alpha.fetch(eventRequest('scout_visited',{},undefined,headers),config,ctx)).status,204);
+    assert.equal((await alpha.fetch(authenticatedRequest('api/recommend',null,headers),config,ctx)).status,401);
+  }
+  for(const config of [{...authEnv},{...authEnv,...productEnv,POSTHOG_PROJECT_TOKEN:''},{...authEnv,...productEnv,POSTHOG_HOST:'https://unexpected.test'},{...authEnv,...productEnv,POSTHOG_ENVIRONMENT:''}]){
+    assert.equal((await alpha.fetch(eventRequest('scout_visited'),config,ctx)).status,204);
+    assert.equal((await alpha.fetch(authenticatedRequest('mcp'),config,ctx)).status,401);
+  }
+  await ctx.flush();assert.equal(sent.length,0);
+  assert.equal((await alpha.fetch(authenticatedRequest('api/recommend',null,{'x-scout-client':'cli'}),{...authEnv,...productEnv},ctx)).status,401);
+  await ctx.flush();const event=sent[0].batch[0];assert.equal(event.event,'scout_request_completed');
+  assert.equal(event.properties.http_status,401);assert.equal(event.properties.outcome,'error');assert.equal(event.properties.client,'cli');assert.equal(event.properties.transport,'http');
+});
+
+test('analytics has a separate IP quota and unavailable delivery cannot fail or block requests',async t=>{
+  const keys=[],ctx=pendingContext();let release;
+  const config={...authEnv,...productEnv,SCOUT_RATE:{async limit({key}){keys.push(key);return {success:true};}}};
+  t.mock.method(globalThis,'fetch',()=>new Promise((_,reject)=>{release=()=>reject(new Error('PRIVATE_CANARY'));}));
+  const response=await alpha.fetch(eventRequest('scout_signed_in',{},sessionToken()),config,ctx);
+  assert.equal(response.status,204);assert.deepEqual(keys,['analytics:ip:unknown']);
+  // The response arrived while PostHog is still unresolved. Drain its failed
+  // background work afterwards without any failure leaking into the response.
+  while(!release)await new Promise(resolve=>setTimeout(resolve,1));release();await ctx.flush();
+  assert.equal(await response.text(),'');
+  config.SCOUT_RATE.limit=async()=>({success:false});
+  assert.equal((await alpha.fetch(eventRequest('scout_visited'),config,ctx)).status,429);
 });

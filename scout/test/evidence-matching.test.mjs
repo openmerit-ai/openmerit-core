@@ -9,6 +9,7 @@ import {createRecommender} from '../recommend.mjs';
 import {handleAPI} from '../http.mjs';
 import {handleMCP} from '../mcp.mjs';
 import {registry} from '../registry.mjs';
+import {createProductAnalytics} from '../product-analytics.mjs';
 
 const layers={input:{text:'Source files',origin:'explicit'},work:{text:'Review code',origin:'inferred'},output:{text:'Corrected code',origin:'explicit'},criteria:{text:null,origin:'missing'},constraints:{text:null,origin:'missing'}};
 const slot=(alternatives=[])=>({label:'Code',search:'Write source code.',alternatives,preferences:[],unresolved:[],clarification:null});
@@ -81,6 +82,41 @@ test('exact result reuse respects inventories, prompt identity and catalogue pub
  await f.run(f.index,'Different task.');assert.ok(f.calls()>afterScope);
  // A new publication never reuses a result from its predecessor.
  f.index.snapshot.publication.id='missing-generation';await assert.rejects(f.run(f.index,args.prompt),/could not establish/);
+});
+
+test('product analytics counts one search per caller across multi-task, shared computation, cache hits and failures',async t=>{
+ const sent=[],pending=[];
+ t.mock.method(globalThis,'fetch',async(url,options)=>{sent.push(...JSON.parse(options.body).batch);return new Response(null,{status:200});});
+ const env={POSTHOG_PROJECT_TOKEN:'phc_fixture',POSTHOG_HOST:'https://us.i.posthog.com',POSTHOG_ENVIRONMENT:'test'};
+ const flush=async()=>{while(pending.length)await Promise.all(pending.splice(0));};
+ for(const count of [1,2,3]){
+  sent.length=0;
+  const tasks=Array.from({length:count},(_,i)=>({title:`Task ${i}`,layers,slots:[slot(i===2?[{all:[{field:'creator',op:'eq',values:['Unknown lab']}]}]:[])]}));
+  const f=await fixture([],[],{overflow:false,tasks});
+  // Failure in the separate prompt archive must not suppress product events.
+  const run=createRecommender({apiKey:'fixture',db:f.db,fetcher:f.fetcher,observe(){throw new Error('PRIVATE_ARCHIVE_FAILURE');}});
+  async function call(mcp,user,prompt='PRIVATE_PROMPT_CANARY'){
+   const args={prompt},request=new Request(`https://example.test/scout/${mcp?'mcp':'api/recommend'}`,{
+    method:'POST',headers:{'content-type':'application/json','x-scout-client':mcp?'agent':'web'},
+    body:JSON.stringify(mcp?{jsonrpc:'2.0',id:'PRIVATE_RPC_ID',method:'tools/call',params:{name:'scout_models',arguments:args}}:args),
+   });
+   const analytics=createProductAnalytics(request,env,{waitUntil:p=>pending.push(p)});analytics.identify(user);
+   const response=await(mcp?handleMCP:handleAPI)(request,f.index,{},(...args)=>run(...args,mcp?'mcp':'api',analytics.observeSearch));
+   analytics.complete(response);return response.json();
+  }
+  await Promise.all([call(false,'user_a'),call(false,'user_b')]);
+  const calls=f.calls();await call(true,'user_a');assert.equal(f.calls(),calls);await flush();
+  const searches=sent.filter(e=>e.event==='scout_search_completed');assert.equal(searches.length,3);
+  assert.deepEqual(searches.map(e=>e.properties.cache).sort(),['hit','miss','shared']);
+  assert.ok(searches.every(e=>e.properties.task_count===count&&e.properties.candidate_count===Math.min(count,2)&&e.properties.outcome==='ok'));
+  const ids=searches.map(e=>e.properties.distinct_id);assert.equal(new Set(ids).size,2);
+  assert.equal(searches.find(e=>e.properties.transport==='mcp').properties.distinct_id,ids.find(id=>ids.filter(other=>id===other).length===2));
+  assert.equal(sent.filter(e=>e.event==='scout_request_completed').length,3);
+  f.index.snapshot.publication.id='missing';await call(true,'user_a','Another private prompt');await flush();
+  assert.equal(sent.filter(e=>e.event==='scout_search_completed').at(-1).properties.outcome,'interpretation_error');
+  const failed=sent.filter(e=>e.event==='scout_request_completed').at(-1);assert.equal(failed.properties.http_status,200);assert.equal(failed.properties.outcome,'error');
+  assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_|user_a|user_b|Another private|Source files|lab\/m/);
+ }
 });
 
 test('task restrictions stay independent through HTTP and MCP, including empty intersections',async()=>{
