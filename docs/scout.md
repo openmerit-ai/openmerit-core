@@ -1,8 +1,16 @@
 # Scout by OpenMerit
 
-Describe what you need a model to do. Scout returns up to five model-and-endpoint candidates. Comparable measurements support performance ranking; narrow decision and vision tasks use an explicitly labelled task-fit shortlist when quality is unmeasured. The `/scout/` page, JSON API, and MCP tool all use the same index and ranking.
+Describe what you need a model to do. Scout returns up to five model-and-endpoint candidates per task. Comparable measurements support performance ranking; narrow decision and vision tasks use an explicitly labelled task-fit shortlist when quality is unmeasured. The `/scout/` page, JSON API, and MCP tool all use the same index and ranking.
 
 Scout is a separate beta product. It does not change the OpenMerit npm package, Pi coordinator, or Inference Terminal. Recommendations are evidence-based candidates for your own evaluation, not a guarantee of task accuracy or an independently validated state-of-the-art ranking.
+
+## Canonical promotion — published, 21 October 2026
+
+The [canonical Scout](https://openmerit.ai/scout/) now replaces the older interface and matcher with the former alpha: original prompt excerpts, one shared task-sequence table, automatic ambiguity resolution and cost-first selection after the relative quality screen. Canonical endpoints remain `/scout/api/status`, `/scout/api/recommend` and `/scout/mcp`. Existing `/scout/alpha/` page, asset and API/MCP URLs redirect to the corresponding canonical paths with HTTP 308, preserving query strings and POST methods/bodies. Clients should update their configured endpoint rather than rely on redirects. There is no separate alpha interface after promotion; retired `/scout/v1/` and `/scout/v2/` paths remain unavailable.
+
+Only serving changes. The existing hourly catalogue publisher, research budget, data and secrets remain intact; the unreleased collection changes below are not activated. Search retains the alpha analytics dataset and existing three-month data-handling policy. The homepage, terminal and protected main application are outside this deployment. Candidate counts can remain below five per task, timing may be unknown, and searches can exceed five seconds. Promotion does not establish task accuracy or jointly evaluated workflows. This promotion supersedes the alpha-only scope in the dated release records below.
+
+Fresh canonical browser searches returned five, nine and thirteen candidates for one, two and three tasks in 6.91, 6.44 and 6.71 seconds, using interpreter 37 without result-cache hits or clarification questions. A real MCP request through the old alpha URL redirected successfully to `/scout/mcp`. Redirects retained queries and POST bodies; untrusted origins remained rejected. Deployed page/script/style hashes matched the build, and desktop/mobile renders were inspected. The publisher's deployment and hourly schedule, main/router/terminal deployments and unrelated routes remained unchanged. Full verification passed 692 tests. These smoke checks establish the canonical routing and UI contracts, not a latency or task-accuracy guarantee.
 
 ## Task sequences — published alpha, 21 October 2026
 

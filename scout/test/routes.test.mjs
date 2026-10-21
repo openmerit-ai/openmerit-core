@@ -25,24 +25,31 @@ test('retired preview pages and API/MCP aliases do not redirect or execute match
   }
 });
 
-test('alpha serves its page and keeps canonical redirects inside its path',async()=>{
-  const redirect=await alpha.fetch(new Request('https://example.test/scout/alpha?q=a%20b'),env,{});
-  assert.equal(redirect.status,308);assert.equal(redirect.headers.get('location'),'https://example.test/scout/alpha/?q=a%20b');
-  const page=await alpha.fetch(new Request('https://example.test/scout/alpha/'),env,{});
-  assert.equal(await page.text(),'Scout');assert.equal(page.headers.get('x-robots-tag'),'noindex, nofollow');
+test('promoted Scout serves the canonical page and redirects former alpha paths',async t=>{
+  t.mock.method(globalThis,'fetch',()=>new Response('Original site'));
+  const redirect=await alpha.fetch(new Request('https://example.test/scout?q=a%20b'),env,{});
+  assert.equal(redirect.status,308);assert.equal(redirect.headers.get('location'),'https://example.test/scout/?q=a%20b');
+  const page=await alpha.fetch(new Request('https://example.test/scout/'),env,{});
+  assert.equal(await page.text(),'Scout');assert.equal(page.headers.get('x-robots-tag'),null);
+  for(const suffix of ['', '/', '/scout.js', '/api/status', '/api/recommend', '/mcp'])for(const method of ['GET','HEAD','POST']){
+    const response=await alpha.fetch(new Request(`https://example.test/scout/alpha${suffix}?q=a%20b`,{method}),env,{});
+    assert.equal(response.status,308);assert.equal(response.headers.get('location'),`https://example.test/scout${suffix||'/'}?q=a%20b`);
+    assert.equal(response.headers.get('cache-control'),'no-store');assert.equal(await response.text(),'');
+  }
   const assets={ASSETS:{fetch:()=>Response.redirect('https://example.test/scout/?q=kept',308)}};
-  const assetRedirect=await alpha.fetch(new Request('https://example.test/scout/alpha/index.html'),assets,{});
-  assert.equal(assetRedirect.headers.get('location'),'https://example.test/scout/alpha/?q=kept');
+  const assetRedirect=await alpha.fetch(new Request('https://example.test/scout/index.html'),assets,{});
+  assert.equal(assetRedirect.headers.get('location'),'https://example.test/scout/?q=kept');
+  for(const path of ['/scout/alpha-other','/scout/alphabets','/scout/v1/','/scout/v2/'])assert.equal((await alpha.fetch(new Request(`https://example.test${path}`),env,{})).status,404);
 });
 
-test('alpha preserves API and MCP request bodies and leaves other routes untouched',async t=>{
+test('promoted Scout preserves canonical API and MCP bodies and leaves non-Scout routes untouched',async t=>{
+  t.mock.method(globalThis,'fetch',request=>new Response(`Original route: ${new URL(request.url).pathname}`));
   t.mock.method(worker,'fetch',async request=>Response.json({path:new URL(request.url).pathname,query:new URL(request.url).search,method:request.method,origin:request.headers.get('origin'),body:await request.json()}));
   for(const path of ['api/recommend','mcp']){
-    const response=await alpha.fetch(new Request(`https://example.test/scout/alpha/${path}?test=1`,{method:'POST',headers:{origin:'https://example.test','content-type':'application/json'},body:'{"prompt":"Keep my task"}'}),{},{});
+    const response=await alpha.fetch(new Request(`https://example.test/scout/${path}?test=1`,{method:'POST',headers:{origin:'https://example.test','content-type':'application/json'},body:'{"prompt":"Keep my task"}'}),{},{});
     assert.deepEqual(await response.json(),{path:`/scout/${path}`,query:'?test=1',method:'POST',origin:'https://example.test',body:{prompt:'Keep my task'}});
   }
-  t.mock.method(globalThis,'fetch',request=>new Response(`Original route: ${new URL(request.url).pathname}`));
-  for(const path of ['/scout/','/scout/alpha-other','/scout/alphabets','/docs/scout/','/memo/']){
+  for(const path of ['/scouting','/scout-other','/docs/scout/','/memo/','/']){
     const response=await alpha.fetch(new Request(`https://example.test${path}`),{},{});
     assert.equal(await response.text(),`Original route: ${path}`);assert.equal(response.headers.get('x-robots-tag'),null);
   }

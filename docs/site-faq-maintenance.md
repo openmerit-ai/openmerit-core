@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Canonical Scout promotion — published, 21 October 2026
+
+Reviewed the former alpha's promotion to `/scout/`: the public page, API and MCP use the same multi-task matcher and cost-first quality-screen policy. Old alpha links redirect; there is no new capability, accuracy claim or speed improvement. The hourly publisher, research budget, retention and existing analytics dataset remain unchanged. Homepage terminal/Pi claims need no edits. Canonical one-, two- and three-task browser checks and an MCP call through the former alpha URL passed; candidate counts remained variable and all three searches exceeded five seconds. The guide records these limits. The main site and terminal were unchanged; the dated alpha-only records below retain their historical scope.
+
 ## Scout task sequences — published alpha, 21 October 2026
 
 Reviewed comparison, evidence and readiness claims for the side-by-side task table. Headers use verified verbatim prompt excerpts; an invalid excerpt falls back to an unquoted interpretation without blocking search. This adds `tasks[].sourceText` to the existing decomposition response, not a new provider call. Rows align independent per-task ranks in prompt order, not jointly tested combinations or verified execution dependencies; no total workflow accuracy, cost or latency is claimed. Reference workloads, unknown metrics, collection and retention remain unchanged. Homepage terminal/Pi FAQ answers need no edits. Alpha publication passed fresh one-, two- and three-task browser checks plus MCP, using interpreter 37 and the hosted catalogue. Candidate counts remained variable and all three browser searches exceeded five seconds; the public guide records those limits. Stable Scout, the main site and domain routing were unchanged.

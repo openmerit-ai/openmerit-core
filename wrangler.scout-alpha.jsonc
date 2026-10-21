@@ -6,13 +6,14 @@
   "compatibility_date": "2026-10-15",
   "workers_dev": false,
   "preview_urls": false,
-  // A path-specific Route takes precedence over the existing Custom Domain.
-  // The alpha entry point passes non-alpha suffixes to the unchanged router.
+  // Keep the existing fetch-only Worker identity, secrets and analytics.
+  // Canonical Scout now overrides the router's older serving implementation;
+  // adjacent paths such as /scouting still pass through to the Custom Domain.
   "routes": [
-    { "pattern": "openmerit.ai/scout/alpha*", "zone_id": "4192d54a67b16e3af7e1503a7590dc65" }
+    { "pattern": "openmerit.ai/scout*", "zone_id": "4192d54a67b16e3af7e1503a7590dc65" }
   ],
   "assets": {
-    "directory": "./dist/scout-alpha-site",
+    "directory": "./dist/scout-site",
     "binding": "ASSETS",
     "run_worker_first": true
   },
@@ -23,7 +24,7 @@
   "analytics_engine_datasets": [{ "binding": "SCOUT_ANALYTICS", "dataset": "scout_alpha_searches" }],
   "ratelimits": [{ "name": "SCOUT_RATE", "namespace_id": "2026102101", "simple": { "limit": 60, "period": 60 } }],
   "build": {
-    "command": "npm run check:scout && npm run check:docs && node scripts/build-scout.mjs --alpha"
+    "command": "npm run check:scout && npm run check:docs && npm run build:scout"
   },
   "observability": { "enabled": false }
 }
