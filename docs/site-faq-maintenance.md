@@ -1,12 +1,12 @@
 # Website FAQ maintenance
 
-## Scout cost-first selection — local revision, not deployed
+## Scout cost-first selection — published alpha, 21 October 2026
 
-Reviewed evidence, comparison, cost and readiness claims against the pending alpha ordering change. Cost leads only after a relative two-point proxy quality screen; latency breaks price ties. The guide explicitly distinguishes that screen from a task-accuracy threshold, keeps unverified discovery lists provisional, and discloses reference-workload pricing rather than exact dataset charges. No verified minimum accuracy, global optimum, new collection run or deployment is claimed. Homepage terminal/Pi FAQ answers remain unchanged and need no edit.
+Reviewed evidence, comparison, cost and readiness claims against the published alpha ordering change. Cost leads only after a relative two-point proxy quality screen; latency breaks price ties. The guide explicitly distinguishes that screen from a task-accuracy threshold, keeps unverified discovery lists provisional, and discloses reference-workload pricing rather than exact dataset charges. The alpha-only rollout passed targeted hosted HTTP/MCP checks; shorter lists, interpretation variability and searches over five seconds remain disclosed. No verified minimum accuracy, global optimum or new collection run is claimed. Homepage terminal/Pi FAQ answers remain unchanged and need no edit.
 
-## Scout direct model lists — local revision, not deployed
+## Scout direct model lists — published alpha, 21 October 2026
 
-Reviewed the homepage's evidence, comparison, background, data, cost and readiness answers. They describe the terminal/Pi workflow and need no changes. The pending alpha revision resolves missing task details internally and returns one ranked shortlist per task, without follow-up questions. The five/ten/fifteen-candidate target still respects explicit restrictions, verified evidence and available Pareto tradeoffs; it is not a promise to fabricate five eligible models. Analytics retains the existing task/slot envelope and retention policy. No latency improvement, exact task accuracy or collection deployment is claimed.
+Reviewed the homepage's evidence, comparison, background, data, cost and readiness answers. They describe the terminal/Pi workflow and need no changes. Alpha resolves missing task details internally and returns one ranked shortlist per task, without follow-up questions. The five/ten/fifteen-candidate target still respects explicit restrictions, verified evidence and available Pareto tradeoffs; it is not a promise to fabricate five eligible models. Analytics retains the existing task/slot envelope and retention policy. No latency improvement, exact task accuracy or collection deployment is claimed.
 
 ## Scout multi-task discovery — published alpha, 21 October 2026
 
