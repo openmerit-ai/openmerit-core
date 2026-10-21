@@ -51,7 +51,7 @@ export function decodeSearchRecord(row) {
 
 // The validated prompt is the only user-supplied text. Public source evidence is
 // attached separately. Never serialize requests, errors, inventories or whole results.
-export function searchDataPoint({ prompt, result, task = result?.task, outcome = 'internal_error', channel = 'api', durationMs, scope = 'all', index,diagnostics } = {}) {
+export function searchDataPoint({ prompt, result, task = result?.task, outcome = 'internal_error', channel = 'api', durationMs, scope = 'all', index,diagnostics,position } = {}) {
   const mode = pick(result?.ranking?.mode, modes);
   const safeTask = {
     kind: pick(task?.kind, kinds),
@@ -79,6 +79,7 @@ export function searchDataPoint({ prompt, result, task = result?.task, outcome =
     eligibleModels: number(result?.eligibleModels),
     inputTokens: number(result?.ranking?.workload?.inputTokens), outputTokens: number(result?.ranking?.workload?.outputTokens),
     weights: result?.ranking?.weights ? Object.fromEntries(['quality', 'cost', 'latency'].map(k => [k, number(result.ranking.weights[k])])) : null,
+    ...(position?{position:Object.fromEntries(['task','slot','tasks','slots'].map(k=>[k,number(position[k])]))}:{}),
   };
   if(diagnostics)context.runtime={
     timings:Object.fromEntries(timingStages.filter(k=>number(diagnostics.timings?.[k])!==null).map(k=>[k,diagnostics.timings[k]])),
@@ -114,7 +115,14 @@ export function searchDataPoint({ prompt, result, task = result?.task, outcome =
 export function createSearchObserver(binding) {
   return event => {
     if (!binding) return;
-    try { binding.writeDataPoint(searchDataPoint(event)); }
+    try {
+      if(event.result?.tasks)for(const [i,task] of event.result.tasks.entries())for(const [j,slot] of task.slots.entries()) {
+        binding.writeDataPoint(searchDataPoint({...event,result:slot,task:slot.task,diagnostics:slot.runtime,
+          outcome:slot.task.unsupported?'unsupported':slot.task.clarification?'clarification':slot.recommendations.length?'ok':'empty',
+          position:{task:i+1,slot:j+1,tasks:event.result.tasks.length,slots:task.slots.length}}));
+      }
+      else binding.writeDataPoint(searchDataPoint(event));
+    }
     catch { /* Analytics must never fail a recommendation. No payload logging. */ }
   };
 }

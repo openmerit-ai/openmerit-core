@@ -22,7 +22,9 @@ test('all generated navigation, source, asset and section links resolve', async 
     for (const match of page.text.matchAll(/(?:href|src)="([^"]+)"/g)) {
       const url = new URL(match[1].replaceAll('&amp;', '&'), `https://openmerit.ai${page.url}`);
       if (url.origin !== 'https://openmerit.ai') continue;
-      let path = join(site, decodeURIComponent(url.pathname));
+      // The alpha Worker serves the same Scout sources under its own prefix.
+      const assetPath = url.pathname.replace(/^\/scout\/alpha(?=\/|$)/, '/scout');
+      let path = join(site, decodeURIComponent(assetPath));
       const info = await stat(path).catch(() => undefined);
       assert.ok(info, `${page.url}: missing ${url.pathname}`);
       if (info.isDirectory()) path = join(path, 'index.html');

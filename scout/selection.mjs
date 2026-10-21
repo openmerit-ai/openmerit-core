@@ -7,7 +7,7 @@ export function validateSelection(value, label = 'modelIds') {
 }
 
 export const eligibilityVersion = '1';
-export const factKinds = {releasedAt:'date',listedAt:'date'};
+export const factKinds = {releasedAt:'date',listedAt:'date',expiresAt:'date',deprecatedAt:'date',offerExpiresAt:'date'};
 export const factLabels = {
   creator:'model creator organization', host:'inference hosting service',
   family:'model family or line, including its parent family', identity:'exact model version or checkpoint',

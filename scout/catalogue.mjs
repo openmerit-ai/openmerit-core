@@ -39,6 +39,7 @@ export const textOutputOnly = outputs => Array.isArray(outputs) && outputs.lengt
 export function routerEndpoint(model, checkedAt) {
   return { id: `openrouter:chat:${model.id}`, provider: 'OpenRouter', modelId: model.id, api: 'https://openrouter.ai/api/v1/chat/completions', protocol: 'chat-completions',
     inputPrice: model.inputPrice, outputPrice: model.outputPrice, modalities: model.modalities, outputModalities: model.outputModalities, parameters: model.parameters,
+    facts:model.routerExpiry?[reportedFact('expiresAt',model.routerExpiry,'https://openrouter.ai/api/v1/models','Announced expiry of this OpenRouter route, not all deployments of this model.')]:[],
     context: model.routerContext ?? model.context ?? null, source: 'models', checkedAt, url: providerURL(model.id), pricingBasis: 'OpenRouter advertised token rates; endpoint may route across hosts.', deployment: 'hosted', configuration: 'provider default' };
 }
 export function parseProviderCatalogue(data, checkedAt) {

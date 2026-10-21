@@ -1,6 +1,7 @@
 import { providerIdentity } from './providers.js';
 
 const $ = selector => document.querySelector(selector);
+const basePath = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
 const money = value => value == null ? '—' : `$${new Intl.NumberFormat('en-US', { maximumFractionDigits: 2, minimumFractionDigits: value < 1 ? 2 : 0 }).format(value)}`;
 let result = null, activeRequest = null, requestID = 0;
 
@@ -20,7 +21,7 @@ function providerIcon(provider) {
   const img = element('img', `provider-icon${provider.invertOnDark ? ' provider-icon-monochrome' : ''}`); img.alt = ''; img.width = 13; img.height = 13; img.decoding = 'async';
   img.title = provider.title ?? provider.label;
   img.setAttribute('aria-hidden', 'true'); img.addEventListener('error', () => img.remove());
-  img.src = `/scout/providers/${provider.file}`; return img;
+  img.src = `${basePath}/providers/${provider.file}`; return img;
 }
 async function copy(text, button, label = 'Copied') {
   const previous = button.textContent;
@@ -32,18 +33,18 @@ function evidenceItem(e) {
   const item = element('div', 'evidence-item'); item.append(link(`${e.benchmark} ↗`, e.url), element('span', '', `${e.score.toFixed(1)}`));
   item.append(element('small', '', `${e.cohortSize} comparable models · ${e.observedAt ? `Source date: ${e.observedAt.slice(0, 10)}` : 'Measurement date not supplied'} · ${e.configurations.join(', ')}${e.historical ? ' · archived evaluation' : ''}`)); return item;
 }
-function modelRow(model) {
+function modelRow(model, prefix) {
   const fragment = document.createDocumentFragment(), row = element('tr', 'model-row'), nameCell = element('th', 'model-cell'); nameCell.scope = 'row';
   const provider = providerIdentity(model), identity = element('span', 'model-identity'), name = element('span'), title = element('span', 'model-title', model.name), byline = element('span', 'model-provider', provider.label);
   const toggle = element('button', 'model-toggle'); toggle.type = 'button';
-  toggle.setAttribute('aria-label', `Details for ${model.name}`); toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', `model-evidence-${model.rank}`);
+  toggle.setAttribute('aria-label', `Details for ${model.name}`); toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', `${prefix}-model-${model.rank}`);
   const icon = providerIcon(provider); if (icon) byline.prepend(icon);
   if (model.endpoint) byline.append(document.createTextNode(` · ${model.endpoint.protocol === 'decisions' ? 'Decisions' : model.endpoint.protocol === 'systemone' ? 'System One' : model.endpoint.deployment === 'self-hosted' ? 'Self-hosted' : model.endpoint.provider}`));
   name.append(title, byline); identity.append(element('span', 'model-number', String(model.rank).padStart(2, '0')), name); toggle.append(identity); nameCell.append(toggle);
   const qualityValue = model.measured ? model.measured.quality * 100 : model.quality;
   const quality = metric(qualityValue == null ? '—' : `${qualityValue.toFixed(0)}${model.measured ? '%' : ''}`, model.measured ? 'Mean task-check accuracy on separate calibration cases. Not predicted accuracy on your prompt.' : model.quality == null ? 'No comparable task-quality measurement. Ordered by task fit, not proven performance.' : 'Relative result of shared-benchmark comparisons. Not predicted task accuracy.');
   row.append(nameCell, quality, metric(model.reference?.costUsd != null ? money(model.reference.costUsd * 1000) : '—', model.measured ? `Mean reported charge, scaled to 1,000 similar tasks; cost known for ${model.measured.costKnownCalls}/${model.measured.cases} tasks.` : 'Illustrative USD per 1,000 tasks at the workload below; excludes hidden reasoning and modality-specific charges.'), metric(model.reference?.completionSeconds != null ? `${model.reference.completionSeconds.toFixed(1)}s` : '—', model.measured ? 'Median full task time on the calibration cases, including failures.' : 'Reference first-answer delay plus generation time; actual endpoint latency may differ.'));
-  const detail = element('tr', 'model-detail'), detailCell = element('td', 'model-detail-cell'); detailCell.colSpan = 4; detail.id = `model-evidence-${model.rank}`; detail.hidden = true;
+  const detail = element('tr', 'model-detail'), detailCell = element('td', 'model-detail-cell'); detailCell.colSpan = 4; detail.id = `${prefix}-model-${model.rank}`; detail.hidden = true;
   toggle.addEventListener('click', () => { detail.hidden = !detail.hidden; toggle.setAttribute('aria-expanded', String(!detail.hidden)); row.dataset.expanded = String(!detail.hidden); });
   // Preserve table semantics and native Enter/Space behavior; any other part of
   // the row activates the same button. Links and buttons keep their own action.
@@ -84,7 +85,8 @@ function showSources(sources, calibration) {
     const links = element('p', 'source-links'); links.append(link('Calibration data ↗', calibration.url)); detail.append(links); $('#source-list').append(detail);
   }
 }
-function showSpecialists(discovery) {
+function showSpecialists(discovery, root) {
+  const $ = selector => root.querySelector(`[data-field="${selector.slice(1)}"]`);
   const candidates = discovery?.candidates ?? [];
   $('#specialists').hidden = !candidates.length;
   $('#specialists-title').textContent = `Specialist models · ${candidates.length}`;
@@ -101,35 +103,72 @@ function showSpecialists(discovery) {
   }));
   $('#specialist-coverage').textContent = candidates.length ? `${discovery.indexedRepositories} repositories indexed in a bounded Hub sample. Matches use task metadata, not measured performance. Model-card claims and licenses need checking; missing results do not mean a model is poor.` : '';
 }
-function showResult(data, roundTripMs) {
-  result = data;
-  $('#results-title').textContent = data.task.clarification ? 'Choose the output' : data.ranking?.mode === 'task-fit' ? 'Candidates to evaluate' : data.recommendations.length ? 'Recommendations' : 'No matching models';
-  $('#capabilities').replaceChildren(...(data.task.capabilities.length ? data.task.capabilities.map(c => c.label) : ['General purpose']).map(label => element('span', '', label)));
-  $('#query-time').textContent = `${(roundTripMs / 1000).toFixed(2)}s`;
-  $('#query-time').title = 'Total search time, including task interpretation and network time';
-  $('.model-table thead').hidden = !!data.task.clarification;
-  $('#model-list').replaceChildren(...data.recommendations.map(modelRow));
-  if (!data.recommendations.length) $('#model-list').append(tableMessage(data.warnings[0] || 'Try describing the task in more detail.'));
+const tableObserver = new ResizeObserver(entries => {
+  for (const {target} of entries) target.closest('.result-slot').querySelector('.table-scroll-hint').hidden = target.scrollWidth <= target.clientWidth + 1;
+});
+function renderSlot(data, prefix, label, originalPrompt, taskTitle) {
+  const root = $('#result-template').content.firstElementChild.cloneNode(true);
+  const field = name => root.querySelector(`[data-field="${name}"]`);
+  field('slot-title').textContent = label;
+  field('slot-title').id = `${prefix}-title`; root.setAttribute('aria-labelledby', `${prefix}-title`);
+  root.querySelector('.table-scroll').setAttribute('aria-label', `${taskTitle} · ${label} model comparison`);
+  field('frontier-label').textContent = data.task.clarification ? 'Clarification needed' : data.ranking?.mode === 'task-fit' ? 'Task fit · quality unmeasured' : data.ranking?.frontier?.scope === 'partial' ? 'Provisional frontier' : data.ranking?.frontier ? 'Pareto frontier' : 'Evidence-ranked candidates';
+  field('capabilities').replaceChildren(...(data.task.capabilities.length ? data.task.capabilities.map(c => c.label) : ['General purpose']).map(label => element('span', '', label)));
+  root.querySelector('thead').hidden = !!data.task.clarification;
+  field('model-list').replaceChildren(...data.recommendations.map(model => modelRow(model, prefix)));
+  if (!data.recommendations.length) field('model-list').append(tableMessage(data.task.clarification?.question || data.warnings[0] || 'No matching models with verified evidence.'));
   if (data.task.clarification) {
-    const cell = $('#model-list td');
-    for (const option of data.task.clarification.options) { const button = element('button', 'clarification-option', option); button.type = 'button'; button.addEventListener('click', () => { $('#prompt').value = `${data.prompt} ${option}`; fitPrompt(); $('#scout-form').requestSubmit(); }); cell.append(button); }
+    const cell = field('model-list').querySelector('td');
+    for (const option of data.task.clarification.options) { const button = element('button', 'clarification-option', option); button.type = 'button'; button.addEventListener('click', () => {
+      const clarified = `${originalPrompt}\nFor task "${taskTitle}", role "${label}": ${option}`;
+      if (clarified.length > 4000) { $('#error').textContent = 'Shorten the request before adding this clarification (4,000 characters maximum).'; $('#error').hidden = false; return; }
+      $('#prompt').value = clarified; fitPrompt(); $('#scout-form').requestSubmit();
+    }); cell.append(button); }
   }
-  $('#warnings').replaceChildren(...data.warnings.map(warning => element('p', '', warning)));
+  field('warnings').replaceChildren(...data.warnings.map(warning => element('p', '', warning)));
   const workload = data.ranking?.workload, profile = data.ranking?.profile;
-  $('#quality-heading').replaceChildren(document.createTextNode(profile ? 'Accuracy ' : 'Quality '), element('span', 'column-unit', profile ? 'calibration cases' : data.ranking?.mode === 'task-fit' ? 'not measured' : 'relative / 100'));
-  $('#time-unit').textContent = profile ? 'measured seconds' : 'reference seconds';
-  $('#table-caption').textContent = data.task.clarification ? data.task.clarification.question : data.ranking?.mode === 'task-fit' ? 'Candidates ordered by task fit and deployment readiness, then known reference costs. Quality is unmeasured.' : profile ? 'Models in Scout rank order among tested eligible candidates. Accuracy, mean cost and median full task time come from separate calibration cases, not executions of your prompt.' : 'Models in Scout rank order using shared benchmarks and an illustrative workload. Quality is a ranking signal, not predicted task accuracy.';
-  $('#workload-note').textContent = data.ranking?.mode === 'task-fit' ? 'Task-compatible shortlist. No comparable endpoint-quality measurements; self-hosted costs and unmeasured latency remain unknown.' : profile ? `${profile.casesPerModel} calibration cases per model · ${profile.eligibleTestedModels} tested models · ${new Date(profile.measuredAt).toLocaleDateString()}. Not measured on your task.` : workload ? `Reference workload: ${workload.inputTokens.toLocaleString()} input + ${workload.outputTokens.toLocaleString()} output tokens per task · ${workload.priority} priority. Cost and time are comparisons, not task-specific measurements.` : 'Based on published benchmarks. Evaluate these models on your own examples.';
-  $('#limitations').hidden = !!data.task.clarification;
-  showSpecialists(data.specialists);
+  field('quality-heading').replaceChildren(document.createTextNode(profile ? 'Accuracy ' : 'Quality '), element('span', 'column-unit', profile ? 'calibration cases' : data.ranking?.mode === 'task-fit' ? 'not measured' : 'relative / 100'));
+  field('time-unit').textContent = profile ? 'measured seconds' : 'reference seconds';
+  field('table-caption').textContent = data.task.clarification ? data.task.clarification.question : data.ranking?.mode === 'task-fit' ? 'Candidates ordered by task fit and deployment readiness, then known reference costs. Quality is unmeasured.' : profile ? 'Models in Scout rank order among tested eligible candidates. Accuracy, mean cost and median full task time come from separate calibration cases, not executions of your prompt.' : 'Models in Scout rank order using shared benchmarks and an illustrative workload. Quality is a ranking signal, not predicted task accuracy.';
+  field('workload-note').textContent = data.ranking?.mode === 'task-fit' ? 'Task-compatible shortlist. No comparable endpoint-quality measurements; self-hosted costs and unmeasured latency remain unknown.' : profile ? `${profile.casesPerModel} calibration cases per model · ${profile.eligibleTestedModels} tested models · ${new Date(profile.measuredAt).toLocaleDateString()}. Not measured on your task.` : workload ? `Reference workload: ${workload.inputTokens.toLocaleString()} input + ${workload.outputTokens.toLocaleString()} output tokens per task · ${workload.priority} priority. Cost and time are comparisons, not task-specific measurements.` : 'Based on published benchmarks. Evaluate these models on your own examples.';
+  field('limitations').hidden = !!data.task.clarification;
+  showSpecialists(data.specialists, root);
+  tableObserver.observe(root.querySelector('.table-scroll'));
+  return root;
+}
+function showResult(data, roundTripMs) {
+  result = data; tableObserver.disconnect();
+  const tasks = data.tasks ?? [{title:'Your task',slots:[data]}], count = tasks.reduce((n,t) => n+t.slots.reduce((n,s) => n+s.recommendations.length,0),0);
+  $('#results-title').textContent = `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'} · ${count} candidates`;
+  $('#query-time').textContent = `Search ${(roundTripMs / 1000).toFixed(2)}s`;
+  $('#query-time').title = 'Total search time, including task interpretation and network time';
+  $('#results-basis').hidden = false;
+  $('#task-results').replaceChildren(...tasks.map((task, i) => {
+    const section = element('article', 'task-section'), heading = element('div', 'task-heading'), title = element('h3', '', task.title), meta = element('span', 'task-meta', `${task.slots.length} model ${task.slots.length === 1 ? 'role' : 'roles'}`);
+    title.id = `task-${i+1}-title`; section.setAttribute('aria-labelledby', title.id);
+    heading.append(element('span', 'task-number', String(i+1).padStart(2,'0')), title, meta); section.append(heading);
+    if (task.layers) {
+      const details = element('details', 'task-layers'), list = element('dl');
+      details.append(element('summary', '', 'Task breakdown · 5 layers'));
+      for (const [key,label] of [['input','Input'],['work','Work / steps'],['output','Deliverable'],['criteria','Criteria / evals'],['constraints','Guardrails']]) {
+        const layer = task.layers[key], row = element('div'), value = element('dd', '', layer.text ?? 'Not specified');
+        if (layer.origin === 'inferred') value.append(element('span', 'inferred-label', 'Inferred'));
+        if (layer.origin === 'missing') value.className = 'layer-missing';
+        row.append(element('dt','',label),value); list.append(row);
+      }
+      details.append(list); section.append(details);
+    }
+    task.slots.forEach((slot,j) => section.append(renderSlot(slot, `task-${i+1}-slot-${j+1}`, slot.label ?? 'Model candidates', data.prompt, task.title)));
+    return section;
+  }));
   showIndex(data);
-  $('#announcement').textContent = data.task.clarification ? data.task.clarification.question : `${data.recommendations.length} models found. ${data.task.capabilities.map(c => c.label).join(', ')}.`;
+  $('#announcement').textContent = `${tasks.length} tasks. ${count} candidates across independent model roles.${tasks.some(t=>t.slots.some(s=>s.task.clarification))?' Some roles need clarification.':''}`;
 }
 function showIndex(data) {
   $('#index-counts').replaceChildren(...[`${data.availableModels ?? data.models} API models`, `${data.specialistRepositories ?? 0} HF repositories`, `${data.benchmarks} benchmark series`, `${data.sources.length} sources`].map(text => element('span', '', text)));
   $('#index-counts').title = `${data.benchmarksWithResults} benchmark series have matched results · ${data.endpoints ?? data.models} hosted endpoints · ${data.independentModels ?? 0} models with independent provider metadata · ${data.specialistRepositories ?? 0} specialist repositories`;
   showSources(data.sources, data.calibration);
-  const capabilities = (data.wordCloud ?? []).map(c => ({ ...c, matched: !!data.task?.weights[c.id] }));
+  const capabilities = (data.wordCloud ?? []).map(c => ({ ...c, matched: !!data.task?.capabilities?.some(match => match.id === c.id) }));
   capabilities.sort((a, b) => Number(b.matched) - Number(a.matched));
   $('#capability-list').replaceChildren(...capabilities.map(c => {
     const item = element('li', 'capability-item'), name = element('div', 'capability-name', c.label);
@@ -146,19 +185,20 @@ async function search() {
   const prompt = $('#prompt').value.trim(); if (!prompt) { $('#error').textContent = 'Describe the task you want a model to do.'; $('#error').hidden = false; $('#prompt').focus(); return; }
   activeRequest?.abort(); const controller = new AbortController(); activeRequest = controller; const id = ++requestID;
   $('#results').hidden = false; $('#error').hidden = true; $('#results').setAttribute('aria-busy', 'true');
-  result = null; $('#results-title').textContent = 'Searching…'; $('#model-list').replaceChildren(tableMessage('Interpreting task…', $('#model-list').getBoundingClientRect().height));
-  $('#capabilities').replaceChildren(); $('#query-time').textContent = ''; $('#limitations').hidden = true;
-  $('#specialists').hidden = true;
+  result = null; tableObserver.disconnect(); $('#results-title').textContent = 'Searching…';
+  $('#task-results').replaceChildren(element('p', 'search-state', 'Understanding tasks and comparing the prepared index…'));
+  $('#query-time').textContent = ''; $('#results-basis').hidden = true;
+  $('#announcement').textContent = 'Searching the prepared index.';
   $('.find-button span').textContent = 'Searching…'; $('.find-button').setAttribute('aria-busy', 'true');
-  const started = performance.now(), timeout = setTimeout(() => controller.abort(), 15_000);
+  const started = performance.now(), timeout = setTimeout(() => controller.abort(), 35_000);
   try {
-    const response = await fetch('/scout/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }), signal: controller.signal });
+    const response = await fetch(`${basePath}/api/recommend`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }), signal: controller.signal });
     if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('The Scout API is not available on this server. Start the Scout server and try again.');
     const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Scout could not complete this search.');
     if (id === requestID) showResult(data, performance.now() - started);
   } catch (error) {
     if (id !== requestID) return;
-    result = null; $('#model-list').replaceChildren(tableMessage('No results loaded. Try your search again.')); $('#results-title').textContent = 'Search unavailable'; $('#capabilities').replaceChildren(); $('#query-time').textContent = '';
+    result = null; tableObserver.disconnect(); $('#task-results').replaceChildren(); $('#results-title').textContent = 'Search unavailable'; $('#query-time').textContent = '';
     $('#error').textContent = error.name === 'AbortError' ? 'This request took too long. Please try again.' : error instanceof TypeError ? 'Couldn’t reach Scout. Check the connection and try again.' : error.message; $('#error').hidden = false;
   } finally { clearTimeout(timeout); if (id === requestID) { $('#results').setAttribute('aria-busy', 'false'); $('.find-button span').textContent = 'Find models'; $('.find-button').setAttribute('aria-busy', 'false'); } }
 }
@@ -209,14 +249,13 @@ document.addEventListener('visibilitychange', stopExampleTransition);
 reducedMotion.addEventListener('change', stopExampleTransition);
 $('#scout-form').addEventListener('submit', event => { event.preventDefault(); void search(); });
 $('#prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#scout-form').requestSubmit(); } });
-new ResizeObserver(() => { const table = $('.table-scroll'); $('.table-scroll-hint').hidden = table.scrollWidth <= table.clientWidth + 1; }).observe($('.table-scroll'));
-const command = `curl ${location.origin}/scout/api/recommend \\\n  -H 'Content-Type: application/json' \\\n  -d '{"prompt":"Extract six invoice fields as JSON"}'`;
+const command = `curl ${location.origin}${basePath}/api/recommend \\\n  -H 'Content-Type: application/json' \\\n  -d '{"prompt":"Extract six invoice fields as JSON"}'`;
 $('#agent-code').textContent = command;
 $('#copy-command').addEventListener('click', () => copy(command, $('#copy-command')));
-const mcpURL = `${location.origin}/scout/mcp`;
+const mcpURL = `${location.origin}${basePath}/mcp`;
 $('#mcp-url').textContent = mcpURL;
 $('#copy-mcp').addEventListener('click', () => copy(mcpURL, $('#copy-mcp')));
-fetch('/scout/api/status').then(response => { if (!response.ok) throw new Error(); return response.json(); }).then(data => { if (!result) showIndex(data); }).catch(() => { if (!result) { $('#index-counts').textContent = 'Index unavailable'; } });
+fetch(`${basePath}/api/status`).then(response => { if (!response.ok) throw new Error(); return response.json(); }).then(data => { if (!result) showIndex(data); }).catch(() => { if (!result) { $('#index-counts').textContent = 'Index unavailable'; } });
 
 // Deep links reveal the native disclosure before moving focus to its summary.
 function revealSection() {

@@ -17,6 +17,14 @@ const post = body => new Request('https://example.test/scout/api/recommend', { m
 const secret = 'private.person@example.invalid PRIVATE_CANARY_493';
 const decode = point => decodeSearchRecord({ schemaVersion: point.blobs[0], payload: point.blobs[11], payloadEncoding: point.blobs[12] });
 
+test('multi-task analytics retains each role separately instead of reporting an empty global shortlist',()=>{
+ const points=[],observer=createSearchObserver({writeDataPoint:p=>points.push(p)});
+ const slots=['first','second'].map(name=>({task:{kind:'code'},recommendations:[{modelId:`lab/${name}`}],ranking:{mode:'benchmarks'}}));
+ observer({prompt:'Two model roles.',result:{tasks:[{slots}],recommendations:[]},outcome:'ok'});
+ assert.equal(points.length,2);assert.deepEqual(points.map(p=>decode(p).top5[0].model),['lab/first','lab/second']);
+ assert.deepEqual(points.map(p=>decode(p).context.position),[{task:1,slot:1,tasks:1,slots:2},{task:1,slot:2,tasks:1,slots:2}]);
+});
+
 test('only explicit prompt and allowlisted public evidence cross the analytics boundary', () => {
   const poison = { prompt: secret, keywords: [secret], reason: secret, name: secret, provider: secret, error: secret, headers: { authorization: secret }, selection: { modelIds: [secret] } };
   const result = { ...poison, task: { ...poison, kind: secret, capabilities: [{ id: 'vision', label: secret }, { id: secret }], needsVision: true, outputContract: secret, interpreterVersion: secret, workload: { priority: secret, input: secret, output: secret } }, ranking: { mode: secret, version: secret, workload: poison }, checkedAt: secret,

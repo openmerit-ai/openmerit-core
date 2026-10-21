@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "openmerit-scout-alpha",
+  "account_id": "1f505317550261331711b1274ec53c33",
+  "main": "scout/alpha-worker.mjs",
+  "compatibility_date": "2026-10-15",
+  "workers_dev": false,
+  "preview_urls": false,
+  // A path-specific Route takes precedence over the existing Custom Domain.
+  // The alpha entry point passes non-alpha suffixes to the unchanged router.
+  "routes": [
+    { "pattern": "openmerit.ai/scout/alpha*", "zone_id": "4192d54a67b16e3af7e1503a7590dc65" }
+  ],
+  "assets": {
+    "directory": "./dist/scout-alpha-site",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  // Read the published production catalogue; no cron, Workflow or coordinator.
+  "r2_buckets": [{ "binding": "SCOUT_CATALOGUE", "bucket_name": "openmerit-scout-catalogue" }],
+  "d1_databases": [{ "binding": "SCOUT_INDEX", "database_name": "openmerit-scout-index", "database_id": "80312d1c-c9e7-43f3-a09d-cb4b2c538f49" }],
+  "vectorize": [{ "binding": "SCOUT_EVIDENCE", "index_name": "openmerit-scout-evidence" }],
+  "analytics_engine_datasets": [{ "binding": "SCOUT_ANALYTICS", "dataset": "scout_alpha_searches" }],
+  "ratelimits": [{ "name": "SCOUT_RATE", "namespace_id": "2026102101", "simple": { "limit": 60, "period": 60 } }],
+  "build": {
+    "command": "npm run check:scout && npm run check:docs && node scripts/build-scout.mjs --alpha"
+  },
+  "observability": { "enabled": false }
+}

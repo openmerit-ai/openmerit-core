@@ -1,7 +1,18 @@
 import { digest, publicURL, date } from './utils.mjs';
 
 // Public catalogue evidence only. Task prompts and visitor data never enter research.
-export const researchVersion = '2';
+export const researchVersion = '3';
+// Six discovery categories share the existing paid-job budget. Smaller budgets
+// rotate coverage; these starting points do not imply a public API exists.
+const discoveryFocus=[
+  'Gateway catalogues and model availability, starting with https://openrouter.ai/docs/overview and Vercel AI Gateway at https://vercel.com/docs/ai-gateway/models-and-providers and https://vercel.com/docs/ai-gateway/pricing. Discover additional gateways only from verified official documentation.',
+  'Lab launch notes, model cards and capability updates to existing checkpoints, including standard pricing, launch offers and announced deprecations. Follow original lab documentation.',
+  'Independent evaluation methodology and results, starting with https://artificialanalysis.ai/ and https://arena.ai/. Keep benchmark versions and evaluation configurations separate.',
+  'Editorial leads from https://semianalysis.com/ and https://www.citriniresearch.com/. Use publicly accessible material only. Commentary is discovery context, not measured model quality; follow citations to original evaluations. Do not bypass paywalls.',
+  'Open-weight models and lab releases at https://huggingface.co/models, hosted inference providers and self-hosted engines such as https://docs.vllm.ai/. Establish actual served capabilities, regions, fine-tuning support and documented infrastructure requirements. An engine is not an inference host.',
+  'Small and industry-specialist labs, including medical, legal, finance and scientific models. Discover their official websites, model cards and original evaluations. Narrow-domain claims do not establish broad frontier quality.',
+];
+const lifecycleInstructions=' Report sourced facts for production status, expiresAt and deprecatedAt (ISO dates), capability updates, regions, inferenceEngine, fineTuneable (boolean), fineTuningScope (task-specific, capability-specific or general), and fineTuningInfrastructure (documented hardware/runtime, not estimated). Distinguish open weights from source licensing and hosted endpoints from self-hosted deployment. Facts about a provider-specific route must name that provider in the field and description; do not generalize one host’s regions, lifecycle or fine-tuning support to all deployments. Endpoint inputPerMillion/outputPerMillion must be STANDARD USD rates; a promotional price never replaces a standard rate. Record offers, subsidies, eligibility and offer expiry separately as cited facts. If only an offer price is known, standard rates remain null. Newly added capabilities can belong to an existing model version; do not invent a new checkpoint. Editorial or anecdotal claims never become numerical benchmark observations.';
 const text = { type: ['string', 'null'] };
 const record = { type: 'object', additionalProperties: false, properties: {
   kind: { type: 'string', enum: ['benchmark', 'model', 'provider'] }, name: { type: 'string' }, url: { type: 'string' },
@@ -33,7 +44,7 @@ export class ParallelResearch {
     return response.json();
   }
   async start(job) {
-    const result = await this.request('', { method: 'POST', body: JSON.stringify({ processor: this.processor, input: { instructions:instructions+' For model records, report sourced selection facts using creator (model developer), family (documented lineage), releasedAt (ISO date of this exact model release), and contextTokens (documented token capacity). Other documented selection attributes may use descriptive field names. Each fact needs its exact supporting URL and description. Never substitute a model listing, repository modification, collection or article date for a release date. Unknown facts must be omitted or null. Creator is distinct from an inference host or repository publisher.', objective: job.objective, evidence: job.evidence ?? null }, task_spec: { output_schema: { type: 'json', json_schema: outputSchema } } }) });
+    const result = await this.request('', { method: 'POST', body: JSON.stringify({ processor: this.processor, input: { instructions:instructions+lifecycleInstructions+' For model records, report sourced selection facts using creator (model developer), family (documented lineage), releasedAt (ISO date of this exact model release), and contextTokens (documented token capacity). Other documented selection attributes may use descriptive field names. Each fact needs its exact supporting URL and description. Never substitute a model listing, repository modification, collection or article date for a release date. Unknown facts must be omitted or null. Creator is distinct from an inference host or repository publisher.', objective: job.objective, evidence: job.evidence ?? null }, task_spec: { output_schema: { type: 'json', json_schema: outputSchema } } }) });
     if (!/^trun_[\w-]+$/.test(result.run_id)) throw new Error('Invalid research run.');
     return result.run_id;
   }
@@ -85,6 +96,8 @@ export async function planResearch(snapshot, previous = [], options = {}) {
   jobs.sort((a,b) => a.priority-b.priority || (Date.parse(bySubject.get(a.id)?.checkedAt) || 0)-(Date.parse(bySubject.get(b.id)?.checkedAt) || 0) || a.id.localeCompare(b.id));
   const discovery = { id: 'discovery', subjectHash: String(Math.floor(now/3600_000)), objective: `Discover recently released or previously missing AI models, inference providers and reliable evaluations across tasks, including specialists. Find up to 12 useful new records, prioritizing original methodology and published results. Recent catalogue examples to avoid rediscovering: ${JSON.stringify({ models: snapshot.catalogue?.slice(-100).map(m=>m.name), benchmarks: snapshot.benchmarks.slice(-100).map(b=>b.name) })}. Returned records are deduplicated against the complete maintained catalogue. Existing records may be returned only with a materially different version or newly published evidence. Do not claim exhaustive coverage.` };
   const pending=(snapshot.researchPending??[]).map(p=>p.job),ids=new Set(pending.map(j=>j.id));
-  const fresh=[...jobs.filter(j=>!ids.has(j.id)).slice(0, Math.max(0,limit-pending.length-(ids.has('discovery')?0:1))),...(!ids.has('discovery')?[discovery]:[])].map(job=>({...job,epoch:Math.floor(now/maxAge)}));
+  const available=Math.max(0,limit-pending.length),discoveryBudget=Math.max(0,Math.max(1,Math.floor(limit/4))-pending.filter(j=>j.id==='discovery'||j.id.startsWith('discovery:')).length);
+  const discoveries=discoveryFocus.map((_,i)=>({...discovery,id:i?`discovery:${i}`:'discovery',objective:discovery.objective+` This job's focus: ${discoveryFocus[(Math.floor(now/3600_000)+i)%discoveryFocus.length]}`})).filter(j=>!ids.has(j.id)).slice(0,Math.min(available,discoveryBudget));
+  const fresh=[...jobs.filter(j=>!ids.has(j.id)).slice(0,available-discoveries.length),...discoveries].map(job=>({...job,epoch:Math.floor(now/maxAge)}));
   return [...pending,...fresh].slice(0,limit);
 }

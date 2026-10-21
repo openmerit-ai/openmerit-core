@@ -69,6 +69,18 @@ test('unchanged recently researched subjects are not researched again',async()=>
   const tiny={benchmarks:[bench('a')],catalogue:[]},jobs=await planResearch(tiny,[],{limit:2});
   const next=await planResearch(tiny,[{subjectId:'a',subjectHash:jobs[0].subjectHash,checkedAt:new Date().toISOString()}],{limit:2});assert.deepEqual(next.map(x=>x.id),['discovery']);
 });
+test('hourly research covers six source categories within budget and preserves pending paid jobs',async()=>{
+ const tiny={benchmarks:Array.from({length:30},(_,i)=>bench(`b${i}`)),catalogue:[]},now=Date.parse('2026-10-21T00:00:00Z');
+ const jobs=await planResearch(tiny,[],{now}),discovery=jobs.filter(j=>j.id.startsWith('discovery'));
+ assert.equal(jobs.length,24);assert.equal(discovery.length,6);
+ const objectives=discovery.map(j=>j.objective).join('\n');
+ for(const source of ['openrouter.ai','vercel.com/docs/ai-gateway','Lab launch','artificialanalysis.ai','arena.ai','semianalysis.com','citriniresearch.com','huggingface.co','docs.vllm.ai','industry-specialist'])assert.ok(objectives.includes(source),source);
+ const pending=jobs.slice(-4).map(job=>({job,key:'saved'}));
+ const next=await planResearch({...tiny,researchPending:pending},[],{now:now+3600_000,limit:5});
+ assert.equal(next.length,5);assert.deepEqual(next.slice(0,4),pending.map(p=>p.job));assert.equal(new Set(next.map(j=>j.id)).size,5);
+ const focused=[];for(let i=0;i<6;i++)focused.push((await planResearch(tiny,[],{now:now+i*3600_000,limit:1}))[0].objective);
+ assert.equal(new Set(focused).size,6);assert.deepEqual(await planResearch(tiny,[],{now,limit:0}),[]);
+});
 test('candidate retrieval remains bounded and explicit inventories never widen',()=>{
   const index=createIndex(snapshot),task={weights:{coding:3},workload:{priority:'balanced'}};
   assert.ok(retrieve(index,task).length<=registry.policy.candidateLimit+index.search.calibrationModels.length);

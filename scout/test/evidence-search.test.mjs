@@ -59,3 +59,12 @@ test('a processed mutation cannot publish missing or cross-generation vectors',a
  service.getByIds=async()=>[{id:'one',namespace:'next'},{id:'two',namespace:'previous'}];await assert.rejects(verifyEvidenceReady(service,index),/unavailable/);
  service.getByIds=async()=>[{id:'one',namespace:'next'},{id:'two',namespace:'next'}];assert.equal(await verifyEvidenceReady(service,index),true);
 });
+test('explicit terms retrieve a narrow evaluation missed by vectors without bypassing inventory or applicability',async()=>{
+ const documents=[...Array.from({length:20},(_,i)=>({id:`general-${i}`,text:'General scientific reasoning.',tags:['reasoning'],modelIds:['allowed']})),
+  {id:'target',text:'Isotope dating calculations.',tags:['reasoning'],modelIds:['allowed']},
+  {id:'excluded',text:'Isotope isotope dating.',tags:['reasoning'],modelIds:['other']}];
+ const task={search:'Isotope dating',weights:{reasoning:3}},options={apiKey:'fixture',modelIds:['allowed'],vectorize:{query:async()=>({matches:[{metadata:{benchmark:'general-0'}}]})},queryVector:[],
+  fetcher:async(_url,o)=>Response.json({answers:JSON.parse(o.body).questions.map(q=>({name:q.name,type:'choice',choice:q.instructions.endsWith('Isotope dating calculations.')?'reasoning':'none',confidence:.99}))})};
+ const r=await relevantEvidence('Task.',task,{documents},options);assert.deepEqual(r.ids,['target']);assert.ok(!r.assessments.some(a=>a.benchmark==='excluded'));
+ const rejected=await relevantEvidence('Task.',task,{documents},{...options,fetcher:async(_url,o)=>Response.json({answers:JSON.parse(o.body).questions.map(q=>({name:q.name,type:'choice',choice:'none',confidence:.99}))})});assert.deepEqual(rejected.ids,[]);
+});

@@ -8,6 +8,7 @@ import { handleAPI } from './http.mjs';
 import { handleMCP } from './mcp.mjs';
 import { refreshSnapshot } from './sources.mjs';
 import { createRecommender } from './recommend.mjs';
+import { registry } from './registry.mjs';
 
 const root = resolve(import.meta.dirname, '../site');
 const recommendTask = createRecommender({ apiKey: process.env.OPENAI_API_KEY });
@@ -17,11 +18,12 @@ let snapshot;
 try { snapshot = JSON.parse(await readFile(cache, 'utf8')); } catch { snapshot = JSON.parse(await readFile(new URL('./snapshot.json', import.meta.url), 'utf8')); }
 const seed = JSON.parse(await readFile(new URL('./snapshot.json', import.meta.url), 'utf8'));
 snapshot = selectSnapshot(seed, snapshot);
-let index = createIndex(snapshot), refreshing = false, refreshState = { refreshStatus: 'idle', scheduler: 'local-hourly' };
+const localIndex = snapshot => createIndex({...snapshot,registry:snapshot.registry??registry,servingEngine:'evidence',publication:{id:`local-${snapshot.checkedAt}`}});
+let index = localIndex(snapshot), refreshing = false, refreshState = { refreshStatus: 'idle', scheduler: 'local-hourly' };
 async function refresh() {
   if (refreshing) return; refreshing = true; refreshState.refreshStatus = 'refreshing';
   try {
-    const next = await refreshSnapshot(fetch, index.snapshot, { apiKey: process.env.OPENAI_API_KEY }); const nextIndex = createIndex(next);
+    const next = await refreshSnapshot(fetch, index.snapshot, { apiKey: process.env.OPENAI_API_KEY }); const nextIndex = localIndex(next);
     await mkdir(resolve(cache, '..'), { recursive: true }); await writeFile(`${cache}.tmp`, JSON.stringify(next)); await rename(`${cache}.tmp`, cache);
     index = nextIndex; refreshState = { refreshStatus: next.sources.some(s => s.status === 'failed') ? 'degraded' : 'idle', scheduler: 'local-hourly', lastAttemptAt: new Date().toISOString() };
     console.log(`Scout index refreshed: ${nextIndex.models.length} models.`);

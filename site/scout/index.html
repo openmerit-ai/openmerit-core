@@ -40,39 +40,47 @@
   </header>
   <main class="scout-wrap" id="main">
     <section class="scout-intro" aria-labelledby="scout-title">
-      <h1 id="scout-title">Compare models for your task.</h1>
+      <h1 id="scout-title">Compare models for your tasks.</h1>
       <p id="index-counts">Loading index…</p>
     </section>
     <section class="search-section" aria-label="Find models">
       <form id="scout-form" class="prompt-box">
-        <label for="prompt">Task</label>
+        <label for="prompt">Describe your work</label>
         <textarea id="prompt" name="prompt" rows="2" maxlength="4000" required spellcheck="false" enterkeyhint="search" aria-describedby="prompt-hint" placeholder="Users upload photos of supplier invoices. Extract the vendor, invoice number, date, currency, tax, and total as JSON. Return null for missing fields. We process thousands a day, so accuracy, cost, and speed matter."></textarea>
-        <div class="prompt-footer"><span id="prompt-hint">Search <span class="newline-hint">· Shift + Enter for a new line</span></span><button class="find-button" type="submit" title="Find models"><span class="sr-only">Find models</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
+        <div class="prompt-footer"><span id="prompt-hint">Include inputs, outputs and what success looks like.<span class="newline-hint"> Shift + Enter for a new line.</span></span><button class="find-button" type="submit" title="Find models"><span class="sr-only">Find models</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
       </form>
       <p class="error-message" id="error" role="alert" hidden></p>
     </section>
 
     <section class="results-section" id="results" aria-labelledby="results-title" aria-busy="false" hidden>
-      <h2 id="results-title">Recommendations</h2>
-      <div class="match-line"><div id="capabilities" class="capability-tags" aria-label="Matched capabilities"></div><span class="query-time" id="query-time"></span></div>
+      <div class="results-heading"><h2 id="results-title">Recommendations</h2><span class="query-time" id="query-time"></span></div>
+      <p class="results-basis" id="results-basis">Up to five candidates per model role · quality, cost and latency trade-offs</p>
+      <div id="task-results"></div>
+    </section>
+
+    <template id="result-template">
+      <section class="result-slot">
+      <div class="slot-heading"><h4 data-field="slot-title"></h4><span class="frontier-label" data-field="frontier-label"></span></div>
+      <div class="match-line"><div data-field="capabilities" class="capability-tags" aria-label="Matched capabilities"></div></div>
       <div class="table-frame">
         <div class="table-scroll" role="region" aria-label="Model comparison" tabindex="0">
           <table class="data-table model-table">
-            <caption class="sr-only" id="table-caption">Models in Scout rank order.</caption>
+            <caption class="sr-only" data-field="table-caption">Models in Scout rank order.</caption>
             <thead><tr>
               <th scope="col" class="model-column">Model</th>
-              <th scope="col" class="numeric-column" id="quality-heading">Quality <span class="column-unit">relative / 100</span></th>
+              <th scope="col" class="numeric-column" data-field="quality-heading">Quality <span class="column-unit">relative / 100</span></th>
               <th scope="col" class="numeric-column">Cost <span class="column-unit">USD / 1,000 tasks</span></th>
-              <th scope="col" class="numeric-column">Time <span class="column-unit" id="time-unit">reference seconds</span></th>
+              <th scope="col" class="numeric-column">Time <span class="column-unit" data-field="time-unit">reference seconds</span></th>
             </tr></thead>
-            <tbody id="model-list"><tr><td colspan="4" class="table-message"><span>Searching…</span></td></tr></tbody>
+            <tbody data-field="model-list"></tbody>
           </table>
         </div>
       </div>
       <p class="table-scroll-hint" hidden>Scroll to compare <span aria-hidden="true">↔</span></p>
-      <details class="evidence-note" id="limitations" hidden><summary>Assumptions &amp; limitations</summary><p id="workload-note"></p><div id="warnings"></div><p>Measured results come from separate calibration cases. Benchmark results use a reference workload. Neither predicts exact performance on your task.</p></details>
-      <details class="support-section specialist-section" id="specialists" hidden><summary id="specialists-title">Specialist models</summary><p>Related models to investigate. These are outside the ranked five; quality, cost and speed have not been compared on the same task.</p><div id="specialist-list"></div><p id="specialist-coverage"></p></details>
-    </section>
+      <details class="evidence-note" data-field="limitations" hidden><summary>Assumptions &amp; limitations</summary><p data-field="workload-note"></p><div data-field="warnings"></div><p>Measured results come from separate calibration cases. Benchmark results use a reference workload. Neither predicts exact performance on your task.</p></details>
+      <details class="support-section specialist-section" data-field="specialists" hidden><summary data-field="specialists-title">Specialist models</summary><p>Related models to investigate. These are outside the ranked five; quality, cost and speed have not been compared on the same task.</p><div data-field="specialist-list"></div><p data-field="specialist-coverage"></p></details>
+      </section>
+    </template>
 
     <div class="support-sections">
       <details class="support-section" id="for-agents">

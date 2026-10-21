@@ -1,5 +1,9 @@
+// Five seconds is the performance target, not a reason to discard valid work.
+// Bound the whole search, including decomposition and every model role.
+export const matchingTimeoutMs=30_000;
+
 // Fixed diagnostic fields only: no request text, error messages or credentials.
-export const timingStages=['interpretation','decisions','consistency','constraints','canonicalNames','embedding','eligibility','specialistRead','specialistCheck','evidenceRetrieval','evidence','modelRead','ranking'];
+export const timingStages=['decomposition','interpretation','decisions','consistency','constraints','canonicalNames','embedding','eligibility','specialistRead','specialistCheck','evidenceRetrieval','evidence','modelRead','ranking'];
 export function createTimings(clock=()=>performance.now()) {
   const timings={},pending=new Map();
   return {

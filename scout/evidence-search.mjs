@@ -1,5 +1,8 @@
 import {requestDecisions} from './decisions.mjs';
 import {digest,chunks,concurrent,fetchJSON} from './utils.mjs';
+import MiniSearch from 'minisearch';
+
+const keywordIndexes=new WeakMap();
 
 export const embeddingModel='text-embedding-3-small',embeddingDimensions=256;
 export async function embed(input,{apiKey,fetcher=fetch,timeoutMs=4000}={}) {
@@ -46,8 +49,17 @@ export async function retrieveEvidence(task,index,{vectorize,queryVector,modelId
   // They do not turn broad capability overlap into task-relevance evidence.
   const supported=documents.filter(d=>d.tags.some(t=>task.weights[t]));
   if(!candidates.length)candidates=supported;
+  let lexical=[];
+  if(task.search){
+    let keywords=keywordIndexes.get(index);
+    if(!keywords){keywords=new MiniSearch({fields:['text']});keywords.addAll(index.documents);keywordIndexes.set(index,keywords);}
+    lexical=keywords.search(task.search).flatMap(hit=>byId.has(hit.id)?[byId.get(hit.id)]:[]).slice(0,8);
+  }
   const required=new Set(task.evidenceCapabilities??Object.keys(task.weights).filter(id=>task.weights[id]>=3));
-  if(required.size){const primary=candidates.filter(d=>d.tags.some(t=>required.has(t))),backstop=supported.filter(d=>d.tags.some(t=>required.has(t)));candidates=[...new Map([...primary,...backstop,...candidates].map(d=>[d.id,d])).values()];}
+  // Exact terms supplement vectors, but neither similarity signal proves quality.
+  // Reserve room for both lexical and semantic primary evidence before backstops.
+  const primary=candidates.filter(d=>d.tags.some(t=>required.has(t))),backstop=supported.filter(d=>d.tags.some(t=>required.has(t)));
+  candidates=[...new Map([...lexical.filter(d=>d.tags.some(t=>required.has(t))).slice(0,4),...primary,...backstop,...lexical,...candidates].map(d=>[d.id,d])).values()];
   return candidates.slice(0,16);
 }
 export async function assessEvidence(task,candidates,{apiKey,fetcher=fetch,timeoutMs=4000,capabilityDefinitions=[]}={}) {

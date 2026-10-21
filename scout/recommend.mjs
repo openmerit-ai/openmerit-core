@@ -8,9 +8,10 @@ import { prepareEligibility, matchEligibility, eligibilityWarnings } from './eli
 import { matchTask } from './matching.mjs';
 import {createResultCache} from './result-cache.mjs';
 import {interpreterVersion} from './interpreter.mjs';
+import {matchingTimeoutMs} from './timing.mjs';
 
 // Shared by HTTP and MCP; bounded admission without visitor accounts or queues.
-export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, timeoutMs = 6000, db, vectorize, observe = () => {},cacheOptions } = {}) {
+export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, timeoutMs = matchingTimeoutMs, db, vectorize, observe = () => {},cacheOptions } = {}) {
   let inFlight = 0, windowStart = now(), requests = 0;
   const cached=createResultCache({now,...cacheOptions});
   return async (index, prompt, selection, endpoints, channel = 'api') => {
@@ -34,9 +35,14 @@ export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, tim
           const entry=await cached(key,()=>matchTask(index,prompt,modelIds,endpointIds,{apiKey,fetcher,now,timeoutMs,db,vectorize}));
           result=entry.value;result.runtime={...(entry.status==='miss'?result.runtime:{}),cache:entry.status,ageMs:entry.ageMs};
           result.elapsedMs=Math.max(0,now()-started);if(entry.status!=='miss')result.interpretationMs=0;
-          task=result.task;outcome=task.unsupported?'unsupported':task.clarification?'clarification':result.recommendations.length?'ok':'empty';return result;
+          task=result.task;const slots=result.tasks.flatMap(t=>t.slots);
+          for(const slot of slots){
+            slot.runtime={...(entry.status==='miss'?slot.runtime:{}),cache:entry.status,ageMs:entry.ageMs};
+            if(entry.status!=='miss')slot.interpretationMs=0;
+          }
+          outcome=task.unsupported?'unsupported':slots.some(s=>s.task.clarification)?'clarification':slots.some(s=>s.recommendations.length)?'ok':'empty';return result;
         }
-        catch(cause){diagnostics=cause.diagnostics;outcome='interpretation_error';const error=new Error('Scout could not establish this recommendation right now. Please try again.');error.status=503;error.cause=cause;throw error;}
+        catch(cause){diagnostics=cause.diagnostics;outcome='interpretation_error';if(cause.status===422)throw cause;const error=new Error('Scout could not establish this recommendation right now. Please try again.');error.status=503;error.cause=cause;throw error;}
       }
       let interpreted;
       try { interpreted = await classifyPrompt(prompt, { apiKey, fetcher, timeoutMs, registry: index.snapshot.registry ?? seed, interpretSelection:!!index.snapshot.eligibilityKey||index.snapshot.selectionMetadataVersion==='1',selectionVocabulary:index.snapshot.selectionVocabulary??{} }); }

@@ -178,7 +178,10 @@ test('partial refresh preserves only failed sources with original timestamps whi
   const input = { ...fixtures(), omnidocHTML: omniFixture, hubRows: [{ id: 'lab/specialist', pipeline_tag: 'document-question-answering', sha: 'a'.repeat(40) }] };
   const previous = compileSnapshot(input);
   input.router.data[0].pricing.prompt = '.000003';
+  input.router.data[0].expiration_date = '2026-12-01';
   const next = compileSnapshot({ ...input, previous, hubRows: null, analysisHTML: 'broken', checkedAt: '2026-10-14T03:00:00Z' });
+  assert.deepEqual(next.models[0].endpoints[0].facts.map(f=>[f.field,f.value]),[['expiresAt','2026-12-01T00:00:00.000Z']]);
+  assert.ok(!next.models[0].facts.some(f=>f.field==='expiresAt'), 'Route expiry must not apply to every host');
   assert.deepEqual(next.specialists, previous.specialists);
   assert.equal(next.sources.find(s => s.id === 'huggingface').status, 'failed');
   assert.equal(next.sources.find(s => s.id === 'huggingface').checkedAt, previous.checkedAt);
@@ -195,6 +198,8 @@ test('partial refresh preserves only failed sources with original timestamps whi
   assert.ok(indexStatus(createIndex(next)).degraded);
   const removed = compileSnapshot({ ...input, previous, router: { data: input.router.data.slice(1) } });
   assert.ok(!removed.models.some(m => m.id === 'lab/model-0'));
+  const expired = compileSnapshot({...input,previous,checkedAt:'2026-12-01T00:00:00Z'});
+  assert.ok(!expired.catalogue.some(m=>m.id==='lab/model-0'));
   const noCatalogue = compileSnapshot({ ...input, previous, router: null });
   assert.equal(noCatalogue.models[0].inputPrice, previous.models[0].inputPrice);
   assert.equal(noCatalogue.sources.find(s => s.id === 'models').status, 'failed');

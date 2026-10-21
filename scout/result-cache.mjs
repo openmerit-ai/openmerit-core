@@ -13,7 +13,8 @@ export function createResultCache({now=Date.now,ttlMs=30_000,maxEntries=32,maxBy
     try {
       const value=await job;
       // An omitted compatibility check is not a complete result to reuse.
-      if(value.task?.specialistMatch?.status!=='unavailable'&&!value.task?.evidenceMatch?.degraded) {
+      const results=value.tasks?value.tasks.flatMap(t=>t.slots):[value];
+      if(results.every(r=>r.task?.specialistMatch?.status!=='unavailable'&&!r.task?.evidenceMatch?.degraded)) {
         const text=JSON.stringify(value),size=text.length*2;
         if(maxEntries>0&&size<=maxBytes){while(values.size>=maxEntries||bytes+size>maxBytes)remove(values.keys().next().value);
           const created=now();values.set(key,{text,bytes:size,created,expires:created+ttlMs});bytes+=size;}

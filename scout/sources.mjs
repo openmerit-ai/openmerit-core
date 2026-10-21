@@ -120,6 +120,7 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     id: m.id, name: m.name.replace(/^[^:]+:\s*/, ''), provider: m.name.includes(':') ? m.name.split(':')[0] : m.id.split('/')[0],
     canonical: m.canonical_slug, repository: hubID(m.hugging_face_id), modalities: m.architecture.input_modalities, outputModalities: m.architecture.output_modalities, parameters: m.supported_parameters ?? [], context: m.context_length,
     routerContext:m.top_provider?.context_length??m.context_length,
+    routerExpiry:Number.isFinite(Date.parse(m.expiration_date))?new Date(m.expiration_date).toISOString():null,
     facts:[reportedFact('creator',m.name.includes(':')?m.name.split(':')[0]:m.id.split('/')[0],sourceURLs.models,'Creator attribution reported by OpenRouter.'),...(Number.isFinite(m.created)?[reportedFact('listedAt',new Date(m.created*1000).toISOString(),sourceURLs.models,'OpenRouter listing timestamp; not a model release date.')]:[])],
     inputPrice: number(m.pricing?.prompt) === null || number(m.pricing?.prompt) < 0 ? null : Number(m.pricing.prompt) * 1e6,
     outputPrice: number(m.pricing?.completion) === null || number(m.pricing?.completion) < 0 ? null : Number(m.pricing.completion) * 1e6,

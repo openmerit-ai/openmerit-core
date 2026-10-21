@@ -37,7 +37,7 @@ test('malformed model-generated constraints fail closed before selecting any end
   await assert.rejects(interpretPrompt('Opaque task data.',{apiKey:'fixture',registry,fetcher:transport('none',[{all:[]}])}),/structured interpretation|selection group/i);
 });
 test('matching bounds a transport that never resolves and aborts pending provider work',async()=>{
-  let signal;await assert.rejects(matchTask({snapshot:{registry,metadataDefinitions:{creator:'Creator'},selectionVocabulary:{}}},'Opaque task.',null,null,{apiKey:'fixture',timeoutMs:25,fetcher:async(_url,options)=>{signal=options.signal;return new Promise(()=>{});}}),/deadline|timed out/i);assert.equal(signal.aborted,true);
+  let signal;await assert.rejects(matchTask({snapshot:{registry,metadataDefinitions:{creator:'Creator'},selectionVocabulary:{}}},'Opaque task.',null,null,{db:{},apiKey:'fixture',timeoutMs:25,fetcher:async(_url,options)=>{signal=options.signal;return new Promise(()=>{});}}),/deadline|timed out/i);assert.equal(signal.aborted,true);
 });
 test('metadata restrictions remain exact while Decisions sees only extracted downstream work',async()=>{
   const alternatives=[{all:[{field:'creator',op:'eq',values:['Lab']}]}],inner=transport('none',alternatives);let responses=0,decisionsStarted=false;

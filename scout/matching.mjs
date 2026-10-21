@@ -1,30 +1,51 @@
-import {interpretPrompt} from './interpreter.mjs';
+import {interpretPrompt,decomposePrompt,interpreterVersion} from './interpreter.mjs';
 import {prepareEligibility,eligibilityWarnings} from './eligibility.mjs';
 import {fieldDefinitions,selectionResult,satisfies} from './constraints.mjs';
 import {embed,retrieveEvidence,assessEvidence,evidenceDocuments} from './evidence-search.mjs';
 import {queryProjection,loadProjectionModels} from './projection.mjs';
-import {createIndex,recommend} from './rank.mjs';
+import {createIndex,recommend,indexStatus} from './rank.mjs';
 import {matchSpecialists,relevantProfiles} from './specialists.mjs';
-import {createTimings} from './timing.mjs';
+import {createTimings,matchingTimeoutMs} from './timing.mjs';
 
 export async function matchTask(index,prompt,modelIds,endpointIds,options={}) {
-  const {timeoutMs=6000,fetcher=fetch}=options,controller=new AbortController(),trace=createTimings();let timer;
+  const {timeoutMs=matchingTimeoutMs,fetcher=fetch}=options,controller=new AbortController(),trace=createTimings();let timer;
   const boundedFetch=(url,init)=>fetcher(url,{...init,signal:init?.signal?AbortSignal.any([controller.signal,init.signal]):controller.signal});
-  try{return await Promise.race([runMatch(index,prompt,modelIds,endpointIds,{...options,timeoutMs,fetcher:boundedFetch,trace}),new Promise((_resolve,reject)=>{timer=setTimeout(()=>{const error=new DOMException('Matching deadline exceeded.','TimeoutError');controller.abort(error);reject(error);},timeoutMs);})]);}
+  try{return await Promise.race([runTasks(index,prompt,modelIds,endpointIds,{...options,timeoutMs,fetcher:boundedFetch,trace}),new Promise((_resolve,reject)=>{timer=setTimeout(()=>{const error=new DOMException('Matching deadline exceeded.','TimeoutError');controller.abort(error);reject(error);},timeoutMs);})]);}
   catch(error){error.diagnostics=trace.snapshot(error);throw error;}
   finally{clearTimeout(timer);controller.abort();}
 }
-async function runMatch(index,prompt,modelIds,endpointIds,{apiKey,fetcher,db,vectorize,now=Date.now,timeoutMs,trace}={}) {
+async function runTasks(index,prompt,modelIds,endpointIds,options) {
+  const {apiKey,fetcher,timeoutMs,trace,now=Date.now}=options,started=performance.now();
+  const manifest=index.snapshot,directory=options.db&&manifest.metadataDefinitions?null:prepareEligibility(manifest),definitions=manifest.metadataDefinitions??fieldDefinitions(directory),vocabulary=manifest.selectionVocabulary??directory.vocabulary;
+  const tasks=await trace.measure('decomposition',()=>decomposePrompt(prompt,{apiKey,fetcher,registry:manifest.registry,definitions,vocabulary,now:now(),timeoutMs}));
+  const remaining=()=>Math.max(1,Math.floor(timeoutMs-(performance.now()-started)));
+  const slots=tasks.flatMap(t=>t.slots),searchable=slots.filter(s=>!s.clarification);
+  // One embedding batch, then independent roles in parallel under ONE deadline.
+  // A failed embedding stays a failure, never a keyword-only recommendation.
+  const embeddings=searchable.length?trace.measure('embedding',()=>embed(searchable.map(s=>s.search),{apiKey,fetcher,timeoutMs:remaining()})).then(value=>({value}),error=>({error})):Promise.resolve({value:[]});
+  const results=await Promise.all(tasks.map(async(t,i)=>({id:`task-${i+1}`,title:t.title,layers:t.layers,slots:await Promise.all(t.slots.map(async(s,j)=>({
+    id:`task-${i+1}-slot-${j+1}`,label:s.label,
+    ...await runMatch(index,s.search,modelIds,endpointIds,{...options,timeoutMs:remaining(),trace:createTimings(),directory,definitions,vocabulary,metadata:s,
+      embedding:embeddings.then(r=>r.error?r:{value:s.clarification?[]:[r.value[searchable.indexOf(s)]]}),
+    }),
+  })))})));
+  const flat=results.flatMap(t=>t.slots),single=flat.length===1,capabilities=[...new Map(flat.flatMap(s=>s.task.capabilities).map(c=>[c.id,c])).values()];
+  const result=single?{...flat[0]}:{...indexStatus(index,now()),selection:{modelIds,endpointIds},recommendations:[],warnings:['Each model role has its own shortlist. Candidates are not ranked across tasks; combinations have not been jointly evaluated.'],
+    task:{kind:'multi-task',capabilities,unsupported:flat.every(s=>s.task.unsupported),interpreter:'openai-hybrid',interpreterVersion},ranking:{version:'8',mode:'multi-task'},snapshotVersion:manifest.publication?.id};
+  delete result.id;delete result.label;
+  const runtime=trace.snapshot();if(single)Object.assign(runtime.timings,flat[0].runtime.timings);
+  return {...result,prompt,tasks:results,evaluatedAt:new Date(now()).toISOString(),elapsedMs:Math.round(performance.now()-started),runtime};
+}
+async function runMatch(index,prompt,modelIds,endpointIds,{apiKey,fetcher,db,vectorize,now=Date.now,timeoutMs,trace,directory,definitions,vocabulary,metadata,embedding}={}) {
   const started=performance.now(),deadline=started+timeoutMs,remaining=()=>Math.max(1,Math.floor(deadline-performance.now()));
-  const manifest=index.snapshot,directory=manifest.metadataDefinitions?null:prepareEligibility(manifest),definitions=manifest.metadataDefinitions??fieldDefinitions(directory),vocabulary=manifest.selectionVocabulary??directory.vocabulary;
-  // Exact metadata selection and embedding depend on extraction, not on the
-  // independent Decisions task contract. Start them as soon as names resolve.
+  const manifest=index.snapshot;
+  // Selection waits for canonical names; the shared embedding batch is already
+  // running independently of this role's Decisions contract.
   const prepare=async metadata=>{
-    const vectors=metadata.clarification?Promise.resolve({value:[]}):trace.measure('embedding',()=>embed([metadata.search||prompt],{apiKey,fetcher,timeoutMs:remaining()})).then(value=>({value}),error=>({error}));
     const selection=db?trace.measure('eligibility',()=>queryProjection(db,manifest.publication.id,metadata.alternatives,definitions,{modelIds,endpointIds,includeFacts:metadata.preferences.length>0})):Promise.resolve(selectionResult(directory,metadata.alternatives,metadata.preferences,{modelIds,endpointIds}));
-    const [embedding,selectionValue]=await Promise.all([vectors,selection]);return {embedding,selection:selectionValue};
+    const [vectors,selectionValue]=await Promise.all([embedding,selection]);return {embedding:vectors,selection:selectionValue};
   };
-  const interpreted=await trace.measure('interpretation',()=>interpretPrompt(prompt,{apiKey,fetcher,registry:manifest.registry,definitions,vocabulary,now:now(),timeoutMs:remaining(),trace,prepare}));
+  const interpreted=await trace.measure('interpretation',()=>interpretPrompt(prompt,{apiKey,fetcher,registry:manifest.registry,definitions,vocabulary,now:now(),timeoutMs:remaining(),trace,prepare,metadata}));
   const task=interpreted.task;task.servingEngine='evidence';
   // Selection restrictions must not bias methodology search. Embed the actual
   // downstream work while the independent exact eligibility query runs.
