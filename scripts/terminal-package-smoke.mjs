@@ -141,7 +141,7 @@ try {
   const snapshot = async () => { const response = await fetch(`${base}/api/snapshot`); assert.equal(response.status, 200); return response.json(); };
   await until(snapshot, 'Terminal startup');
   const info = await (await fetch(`${base}/api/info`)).json();
-  assert.deepEqual(info, { version: 1, defaultMode: 'live', interval: 10 });
+  assert.deepEqual(info, { version: 1, defaultMode: 'live', interval: 10, telemetry: false });
   const page = await fetch(base);
   assert.match(page.headers.get('content-security-policy'), /connect-src 'self'/);
   assert.match(await page.text(), /app.js/);
