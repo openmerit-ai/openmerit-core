@@ -60,7 +60,11 @@ test('changing model/provider names cannot change a non-tied task-fit order', ()
 test('one model does not gain ranking votes from extra endpoints; quality/timing do not migrate', () => {
   const m = { id: 'lab/a', modalities: ['text'], parameters: [], speed: { tokensPerSecond: 50, timeToFirstAnswer: 1 }, endpoints: [1, 2].map(n => ({ id: `route:${n}`, inputPrice: n, outputPrice: n, modalities: ['text'], parameters: [] })) };
   const expanded = expandEndpoints([m], '2026-10-15');
-  assert.ok(expanded.every(m => m.speed === null));
+  // Unbound model-level timing is a labelled fallback on every route.
+  assert.ok(expanded.every(m => m.speed?.scope === 'model'));
+  // Timing measured on one route never migrates to another.
+  const bound = expandEndpoints([{ ...m, speed: { ...m.speed, endpointId: 'route:1' } }], '2026-10-15');
+  assert.deepEqual(bound.map(m => m.speed?.scope ?? null), ['endpoint', null]);
   assert.equal(bestEndpointPerModel(expanded.map(model => ({ model })), task('classify'))[0].model.endpoint.id, 'route:1');
 });
 test('fixed label sets and domain-specific models do not become arbitrary classifiers', () => {

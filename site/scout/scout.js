@@ -142,8 +142,8 @@ function renderContext(data, taskTitle) {
   field('task-title').textContent = taskTitle ?? ''; field('task-title').hidden = !taskTitle;
   field('warnings').replaceChildren(...data.warnings.map(warning => element('p', '', warning)));
   const workload = data.ranking?.workload, profile = data.ranking?.profile;
-  field('ranking-note').textContent = data.ranking?.mode === 'task-fit' ? 'Candidates ordered by task fit and deployment readiness, then known reference costs. Quality is unmeasured.' : profile ? 'Models in Scout rank order among tested eligible candidates. Accuracy, mean cost and median full task time come from separate calibration cases, not executions of your prompt.' : qualityGate?.status === 'unverified' ? 'Unverified shortlist: no comparable quality cohort. Known reference cost first; these candidates have not passed the relative quality screen.' : qualityGate ? 'Lowest known reference cost first; latency breaks price ties. Quality qualification uses a relative proxy band, not verified task accuracy.' : 'Models in Scout rank order using shared benchmarks and an illustrative workload. Quality is a ranking signal, not predicted task accuracy.';
-  field('workload-note').textContent = data.ranking?.mode === 'task-fit' ? 'Task-compatible shortlist. No comparable endpoint-quality measurements; self-hosted costs and unmeasured latency remain unknown.' : profile ? `${profile.casesPerModel} calibration cases per model · ${profile.eligibleTestedModels} tested models · ${new Date(profile.measuredAt).toLocaleDateString()}. Not measured on your task.` : workload ? `Reference workload: ${workload.inputTokens.toLocaleString()} input + ${workload.outputTokens.toLocaleString()} output tokens per task · ${qualityGate ? 'cost-first order' : `${workload.priority} priority`}. Cost and time are comparisons, not task-specific measurements.` : 'Based on published benchmarks. Evaluate these models on your own examples.';
+  field('ranking-note').textContent = data.ranking?.mode === 'task-fit' ? 'Candidates ordered by task fit and deployment readiness, then known reference costs. Quality is unmeasured.' : profile ? 'Models in Scout rank order among tested eligible candidates. Accuracy, mean cost and median full task time come from separate calibration cases, not executions of your prompt.' : qualityGate?.status === 'unverified' ? 'Unverified shortlist: no comparable quality cohort. Known reference cost first; these candidates have not passed the relative quality screen.' : qualityGate ? ({ cost: 'Lowest known reference cost first among models not credibly worse than the strongest benchmark estimate.', latency: 'Fastest known reference time first among models not credibly worse than the strongest benchmark estimate.' }[data.ranking.frontier.priority] ?? 'Strongest benchmark estimate first, keeping the best-value and fastest qualifying models. Quality uses one relative benchmark estimate, not verified task accuracy.') : 'Models in Scout rank order using shared benchmarks and an illustrative workload. Quality is a ranking signal, not predicted task accuracy.';
+  field('workload-note').textContent = data.ranking?.mode === 'task-fit' ? 'Task-compatible shortlist. No comparable endpoint-quality measurements; self-hosted costs and unmeasured latency remain unknown.' : profile ? `${profile.casesPerModel} calibration cases per model · ${profile.eligibleTestedModels} tested models · ${new Date(profile.measuredAt).toLocaleDateString()}. Not measured on your task.` : workload ? `Reference workload: ${workload.inputTokens.toLocaleString()} input + ${workload.outputTokens.toLocaleString()} output tokens per task · ${workload.priority} priority. Cost and time are comparisons, not task-specific measurements.` : 'Based on published benchmarks. Evaluate these models on your own examples.';
   showSpecialists(data.specialists, root);
   return root;
 }
@@ -313,7 +313,13 @@ function revealSection() {
   const section = $('#for-agents'); section.open = true; section.querySelector('summary').focus({ preventScroll: true });
 }
 window.addEventListener('hashchange', revealSection);
-document.querySelector('a[href="#for-agents"]').addEventListener('click', () => { $('#for-agents').open = true; });
+document.querySelectorAll('a[href="#for-agents"]').forEach(link => link.addEventListener('click', event => {
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  location.hash = '#for-agents';
+  revealSection();
+  $('#for-agents').scrollIntoView({ block: 'start' });
+}));
 revealSection();
 
 function updateAnalyticsControls() {

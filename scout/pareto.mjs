@@ -1,110 +1,161 @@
-import {referenceWork,workloadFor,taskWeights,compareQuality,qualityIndifference} from './comparison.mjs';
-import {stable} from './utils.mjs';
+import {referenceWork,workloadFor,taskWeights,qualityIndifference} from './comparison.mjs';
+
+// Common latent quality across every connected benchmark, in score units of an
+// average benchmark. Each evaluation keeps its own difficulty offset, scale and
+// noise; each model has one shrunk estimate with a standard error. These are
+// fixed modelling priors, not tuned per model, task or prompt.
+const priorScale=.2,noisePrior=.02,noiseStrength=4,slopeStrength=.02,minimumSlope=.05,iterations=80;
+// Configurations within this many standard errors (plus the indifference band)
+// of the strongest estimate are not credibly worse than it.
+export const qualityTolerance=1;
 
 const lowerBound=(values,x)=>{let lo=0,hi=values.length;while(lo<hi){const mid=(lo+hi)>>>1;if(values[mid]<x)lo=mid+1;else hi=mid;}return lo;};
-function commonScopeQuality(candidates,weights) {
-  const first=candidates[0];if(!first)return true;
-  const zero={...first,evidence:first.evidence.map(e=>({...e,score:0}))};
-  const values=new Map();
-  for(const c of candidates){const direct=c.taskObservation??c.measured;const value=direct?(direct.effectiveQuality??direct.quality):compareQuality(c,zero,weights)?.difference;if(!Number.isFinite(value)||values.has(c.model.id)&&values.get(c.model.id)!==value)return false;values.set(c.model.id,value);c.scopeQuality=value;}
-  const sorted=[...values.values()].sort((a,b)=>a-b),prefix=[0];for(const x of sorted)prefix.push(prefix.at(-1)+x);
-  for(const c of candidates){const x=c.scopeQuality,lo=lowerBound(sorted,x-.2),hi=lowerBound(sorted,x+.2),n=sorted.length;
-    const signal=lo*.5+(x*(hi-lo)-(prefix[hi]-prefix[lo]))/.4-(n-hi)*.5;
-    c.quality=n>1?.5+signal/(n-1):null;c.comparedModels=n-1;c.comparisonCoverage=n>1?1:0;
-    c.frontierComplete=c.quality!==null&&c.reference.cost!==null&&c.reference.seconds!==null;
+
+// Model-level observations: duplicate routes share their model's evidence and
+// never add votes. Calibration observations join as one more evaluation.
+function observations(candidates,weights) {
+  const total=Object.values(weights).reduce((a,b)=>a+b,0),rows=new Map();
+  for(const c of candidates){
+    if(rows.has(c.model.id))continue;
+    const m=new Map();
+    for(const e of c.evidence){
+      const tags=e.definition?.tags??[],weight=tags.reduce((n,t)=>n+(weights[t]??0),0);
+      if(weight>0&&Number.isFinite(e.score))m.set(e.benchmark,{score:e.score,weight,family:e.definition.family??e.benchmark,tags});
+    }
+    const direct=c.taskObservation??c.measured,quality=direct&&(direct.effectiveQuality??direct.quality);
+    if(Number.isFinite(quality)){const id=`calibration:${direct.profile?.id??direct.profileId??''}`,prior=m.get(id);m.set(id,{score:quality,weight:prior?.weight??total,family:id,tags:prior?.tags??Object.keys(weights)});}
+    rows.set(c.model.id,m);
   }
-  return true;
+  return rows;
 }
 
-// Three-objective skyline, independently within each comparable quality scope.
-// Equal triples are retained together. Missing objectives cannot dominate.
-function supportedFrontier(candidates) {
-  const groups=new Map(),retained=candidates.filter(c=>!c.frontierComplete);
-  for(const c of candidates.filter(c=>c.frontierComplete)){const g=groups.get(c.qualityScope)??[];g.push(c);groups.set(c.qualityScope,g);}
-  for(const group of groups.values()){
-    group.sort((a,b)=>b.scopeQuality-a.scopeQuality||a.reference.cost-b.reference.cost||a.reference.seconds-b.reference.seconds);
-    const costs=[...new Set(group.map(c=>c.reference.cost))].sort((a,b)=>a-b),tree=Array(costs.length+1).fill(Infinity);
-    const query=i=>{let value=Infinity;for(i++;i>0;i-=i&-i)value=Math.min(value,tree[i]);return value;};
-    const insert=(i,value)=>{for(i++;i<tree.length;i+=i&-i)tree[i]=Math.min(tree[i],value);};
-    for(let i=0;i<group.length;){let j=i+1;const c=group[i];while(j<group.length&&group[j].scopeQuality===c.scopeQuality&&group[j].reference.cost===c.reference.cost&&group[j].reference.seconds===c.reference.seconds)j++;
-      const position=lowerBound(costs,c.reference.cost);if(query(position)>c.reference.seconds)retained.push(...group.slice(i,j));insert(position,c.reference.seconds);i=j;
+export function estimateQuality(candidates,weights) {
+  const rows=observations(candidates,weights),byBenchmark=new Map();
+  for(const [model,m] of rows)for(const [benchmark,o] of m){const list=byBenchmark.get(benchmark)??[];list.push({model,...o});byBenchmark.set(benchmark,list);}
+  // A benchmark run by one model links nothing and cannot rank it.
+  for(const [id,list] of byBenchmark)if(list.length<2)byBenchmark.delete(id);
+  // Correlated series in one family share that family's weight.
+  const families=new Map();for(const [,list] of byBenchmark)families.set(list[0].family,(families.get(list[0].family)??0)+1);
+  const parent=new Map(),find=x=>{while(parent.get(x)!==x){parent.set(x,parent.get(parent.get(x)));x=parent.get(x);}return x;};
+  for(const [,list] of byBenchmark)for(const o of list){if(!parent.has(o.model))parent.set(o.model,o.model);parent.set(find(o.model),find(list[0].model));}
+  const sizes=new Map();for(const m of parent.keys())sizes.set(find(m),(sizes.get(find(m))??0)+1);
+  const root=[...sizes].sort((a,b)=>b[1]-a[1]||String(a[0]).localeCompare(String(b[0])))[0]?.[0];
+  const estimates=new Map();
+  if(root===undefined||sizes.get(root)<2)return {estimates,models:0,benchmarks:0};
+  const models=[...parent.keys()].filter(m=>find(m)===root),index=new Map(models.map((m,i)=>[m,i]));
+  const benchmarks=[...byBenchmark].filter(([,list])=>index.has(list[0].model)).map(([id,list])=>({id,weight:list[0].weight/families.get(list[0].family),obs:list.map(o=>({m:index.get(o.model),y:o.score}))}));
+  const meanWeight=benchmarks.reduce((n,b)=>n+b.weight,0)/benchmarks.length;
+  for(const b of benchmarks){b.weight/=meanWeight;b.a=1;b.mean=b.obs.reduce((n,o)=>n+o.y,0)/b.obs.length;b.beta=b.mean;b.noise=noisePrior**2;}
+  const byModel=models.map(()=>[]);for(const b of benchmarks)for(const o of b.obs)byModel[o.m].push({b,y:o.y});
+  const theta=byModel.map(list=>list.reduce((n,{b,y})=>n+y-b.mean,0)/list.length),se=models.map(()=>priorScale);
+  for(let step=0;step<iterations;step++){
+    for(let i=0;i<models.length;i++){
+      let num=0,den=1/priorScale**2;
+      for(const {b,y} of byModel[i]){num+=b.weight*b.a*(y-b.beta)/b.noise;den+=b.weight*b.a**2/b.noise;}
+      theta[i]=num/den;se[i]=1/Math.sqrt(den);
     }
+    for(const b of benchmarks){
+      const n=b.obs.length,tm=b.obs.reduce((s,o)=>s+theta[o.m],0)/n;let sxx=0,sxy=0;
+      for(const o of b.obs){sxx+=(theta[o.m]-tm)**2;sxy+=(theta[o.m]-tm)*(o.y-b.mean);}
+      // Slopes shrink toward the average scale so two models cannot define one.
+      b.a=Math.max(minimumSlope,(sxy+slopeStrength)/(sxx+slopeStrength));b.beta=b.mean-b.a*tm;
+      const ssr=b.obs.reduce((s,o)=>s+(o.y-b.beta-b.a*theta[o.m])**2,0);
+      b.noise=(ssr+noiseStrength*noisePrior**2)/(Math.max(0,n-2)+noiseStrength);
+    }
+    // Identify the scale: mean model at zero, weighted average slope of one.
+    const scale=benchmarks.reduce((s,b)=>s+b.weight*b.a,0)/benchmarks.reduce((s,b)=>s+b.weight,0);
+    for(let i=0;i<theta.length;i++)theta[i]*=scale;for(const b of benchmarks)b.a/=scale;
+    const center=theta.reduce((a,b)=>a+b,0)/theta.length;for(let i=0;i<theta.length;i++)theta[i]-=center;for(const b of benchmarks)b.beta+=b.a*center;
+  }
+  // Report each standard error on the final identified scale.
+  for(let i=0;i<models.length;i++){let den=1/priorScale**2;for(const {b} of byModel[i])den+=b.weight*b.a**2/b.noise;se[i]=1/Math.sqrt(den);}
+  const sorted=[...theta].sort((a,b)=>a-b);
+  models.forEach((m,i)=>{
+    const below=lowerBound(sorted,theta[i]),ties=lowerBound(sorted,theta[i]+Number.EPSILON*8)-below;
+    estimates.set(m,{value:theta[i],se:se[i],percentile:(below+(ties-1)/2)/(models.length-1),benchmarks:byModel[i].map(x=>x.b.id)});
+  });
+  return {estimates,models:models.length,benchmarks:benchmarks.length};
+}
+
+// Three-objective skyline. Equal triples are retained together. Missing
+// objectives cannot dominate or be dominated.
+function supportedFrontier(candidates) {
+  const retained=candidates.filter(c=>!c.frontierComplete),group=candidates.filter(c=>c.frontierComplete);
+  group.sort((a,b)=>b.scopeQuality-a.scopeQuality||a.reference.cost-b.reference.cost||a.reference.seconds-b.reference.seconds);
+  const costs=[...new Set(group.map(c=>c.reference.cost))].sort((a,b)=>a-b),tree=Array(costs.length+1).fill(Infinity);
+  const query=i=>{let value=Infinity;for(i++;i>0;i-=i&-i)value=Math.min(value,tree[i]);return value;};
+  const insert=(i,value)=>{for(i++;i<tree.length;i+=i&-i)tree[i]=Math.min(tree[i],value);};
+  for(let i=0;i<group.length;){let j=i+1;const c=group[i];while(j<group.length&&group[j].scopeQuality===c.scopeQuality&&group[j].reference.cost===c.reference.cost&&group[j].reference.seconds===c.reference.seconds)j++;
+    const position=lowerBound(costs,c.reference.cost);if(query(position)>c.reference.seconds)retained.push(...group.slice(i,j));insert(position,c.reference.seconds);i=j;
   }
   return retained;
 }
 
-// Quality is comparable only within a common evaluation scope. Incomplete
-// objectives remain provisional; missing measurements never become zeros.
 export function prepareObjectives(candidates,task) {
-  const workload=workloadFor(task),weights=taskWeights(task),groups=new Map();
+  const workload=workloadFor(task),weights=taskWeights(task),total=Object.values(weights).reduce((a,b)=>a+b,0);
+  const fit=estimateQuality(candidates,weights);
   for(const c of candidates) {
-    const direct=c.taskObservation??c.measured;
-    // Calibration quality can support a matching operation. Its episode bill
-    // and duration are a different workload from the common token reference;
-    // they cannot replace that reference for just some points on the frontier.
+    // Calibration episode bills and durations are a different workload from
+    // the common token reference; they never replace it for some candidates.
     c.reference=c.measured?{cost:c.measured.meanCostUsd,seconds:c.measured.medianSeconds}:referenceWork(c.model,workload);
-    c.qualityScope=direct?`measured:${direct.profile?.id??direct.profileId??task.calibrationProfile??''}`:stable(c.evidence.map(e=>[e.benchmark,e.metric??'',e.definition?.interpretation?.sourceHash??'']).sort((a,b)=>stable(a).localeCompare(stable(b))));
-    const group=groups.get(c.qualityScope)??[];group.push(c);groups.set(c.qualityScope,group);
-    c.comparedModels=0;c.comparisonCoverage=0;c.scopeQuality=null;
+    const estimate=fit.estimates.get(c.model.id);
+    c.scopeQuality=estimate?.value??null;c.qualitySE=estimate?.se??null;
+    c.qualityScope=estimate?'common':`disconnected:${c.model.id}`;
+    c.quality=estimate&&fit.models>1?estimate.percentile:null;
+    c.comparedModels=estimate?fit.models-1:0;
+    const covered=new Set(c.evidence.filter(e=>estimate?.benchmarks.includes(e.benchmark)).flatMap(e=>e.definition?.tags??[]));
+    if(estimate&&(c.taskObservation??c.measured))for(const t of Object.keys(weights))covered.add(t);
+    c.comparisonCoverage=estimate&&total?Object.entries(weights).reduce((n,[t,w])=>n+(covered.has(t)?w:0),0)/total:0;
+    c.frontierComplete=Number.isFinite(c.scopeQuality)&&c.reference.cost!==null&&c.reference.seconds!==null;
   }
-  if(groups.size===1&&commonScopeQuality(candidates,weights))return {workload,groups:groups.size};
-  // Keep scope quality in score units, not a sum that grows with cohort size.
-  for(const group of groups.values())if(!commonScopeQuality(group,weights))for(const c of group)c.scopeQuality=null;
-  const identities=new Set(candidates.map(c=>c.model.id)),totalWeight=Object.values(weights).reduce((a,b)=>a+b,0);
-  const peers=new Map();for(const c of candidates)for(const e of c.evidence){const rows=peers.get(e.benchmark)??[];rows.push(c);peers.set(e.benchmark,rows);}
-  for(const c of candidates) {
-    let signal=0,comparisons=0,coverage=0;const seen=new Set([c.model.id]);
-    // A route must not get extra quality votes because another model has many
-    // hosts. Unknown overlap contributes no advantage to the common cohort.
-    const neighbors=new Set(c.evidence.flatMap(e=>peers.get(e.benchmark)??[]));
-    if(c.taskObservation||c.measured)for(const other of groups.get(c.qualityScope))neighbors.add(other);
-    for(const other of neighbors)if(!seen.has(other.model.id)) {
-      const a=c.taskObservation??c.measured,b=other.taskObservation??other.measured;
-      const comparison=a&&b&&c.qualityScope===other.qualityScope?{difference:(a.effectiveQuality??a.quality)-(b.effectiveQuality??b.quality),comparedWeight:totalWeight}:compareQuality(c,other,weights);
-      if(!comparison)continue;seen.add(other.model.id);
-      signal+=Math.max(-.5,Math.min(.5,comparison.difference/.4));
-      coverage+=comparison.comparedWeight/totalWeight;comparisons++;
-    }
-    c.quality=comparisons?.5+signal/Math.max(1,identities.size-1):null;
-    c.comparedModels=comparisons;c.comparisonCoverage=coverage/Math.max(1,identities.size-1);
-    c.frontierComplete=c.quality!==null&&Number.isFinite(c.scopeQuality)&&c.reference.cost!==null&&c.reference.seconds!==null;
-  }
-  return {workload,groups:groups.size};
+  return {workload,models:fit.models,benchmarks:fit.benchmarks};
 }
 export function dominates(a,b) {
   if(a.qualityScope!==b.qualityScope||!a.frontierComplete||!b.frontierComplete)return false;
   return a.scopeQuality>=b.scopeQuality&&a.reference.cost<=b.reference.cost&&a.reference.seconds<=b.reference.seconds&&
     (a.scopeQuality>b.scopeQuality||a.reference.cost<b.reference.cost||a.reference.seconds<b.reference.seconds);
 }
-export function selectPareto(candidates,task,{limit=5}={}) {
-  const count=candidates.length;
-  const scope=prepareObjectives(candidates,task);
-  const cohorts=new Map();
-  for(const c of candidates)if(Number.isFinite(c.scopeQuality)){
-    const cohort=cohorts.get(c.qualityScope)??{best:-Infinity,models:new Set()};
-    cohort.best=Math.max(cohort.best,c.scopeQuality);cohort.models.add(c.model.id);cohorts.set(c.qualityScope,cohort);
-  }
+const providerOf=c=>c.model.provider??c.model.id.split('/')[0];
+export function selectPareto(candidates,task,{limit=5,providerLimit=2}={}) {
+  const count=candidates.length,scope=prepareObjectives(candidates,task),priority=workloadFor(task).priority;
+  const estimated=candidates.filter(c=>Number.isFinite(c.scopeQuality)),best=estimated.reduce((x,c)=>!x||c.scopeQuality>x.scopeQuality?c:x,null);
   const qualified=[],unverified=[];
   for(const c of candidates){
-    const cohort=cohorts.get(c.qualityScope);
-    // A lone or disconnected observation cannot establish quality adequacy.
-    if(!Number.isFinite(c.scopeQuality)||!cohort||cohort.models.size<2){unverified.push(c);continue;}
-    // This is the existing proxy indifference policy, NOT task accuracy. Never
-    // compare numerical levels from unrelated benchmark/calibration scopes.
-    if(cohort.best-c.scopeQuality<=qualityIndifference+Number.EPSILON*4)qualified.push(c);
+    if(!Number.isFinite(c.scopeQuality)){unverified.push(c);continue;}
+    // Not credibly worse than the strongest estimate. This is a relative
+    // evidence policy, NOT a verified task-accuracy threshold.
+    const gap=best.scopeQuality-c.scopeQuality,allowance=qualityIndifference+qualityTolerance*Math.hypot(c.qualitySE,best.qualitySE);
+    if(gap<=allowance+Number.EPSILON*4)qualified.push(c);
   }
-  const qualityGate={status:qualified.length?'proxy-qualified':'unverified',margin:qualityIndifference,qualifiedConfigurations:qualified.length,unverifiedConfigurations:unverified.length,excludedConfigurations:count-qualified.length-unverified.length};
-  // Unknown quality cannot displace or pad a qualified shortlist. Preserve the
-  // explicitly provisional discovery list only when no cohort can qualify.
+  const qualityGate={status:qualified.length?'proxy-qualified':'unverified',margin:qualityIndifference,tolerance:qualityTolerance,qualifiedConfigurations:qualified.length,unverifiedConfigurations:unverified.length,excludedConfigurations:count-qualified.length-unverified.length};
   const frontier=supportedFrontier(qualified.length?qualified:unverified);
-  const q=c=>c.quality??-1,cost=c=>c.reference.cost??Infinity,time=c=>c.reference.seconds??Infinity;
-  const preference=c=>c.preference??0;
-  const compare=(a,b)=>cost(a)-cost(b)||time(a)-time(b)||preference(b)-preference(a)||q(b)-q(a)||a.model.id.localeCompare(b.model.id)||a.model.endpoint.id.localeCompare(b.model.endpoint.id);
-  frontier.sort(compare);
-  const selected=[],ids=new Set();
-  const take=c=>{if(c&&!ids.has(c.model.id)&&selected.length<limit){ids.add(c.model.id);selected.push(c);}};
-  for(const c of frontier)take(c);
-  selected.sort(compare);
+  const q=c=>c.scopeQuality??-Infinity,cost=c=>c.reference.cost??Infinity,time=c=>c.reference.seconds??Infinity,preference=c=>c.preference??0;
+  const tie=(a,b)=>preference(b)-preference(a)||a.model.id.localeCompare(b.model.id)||a.model.endpoint.id.localeCompare(b.model.endpoint.id);
+  const orders={quality:(a,b)=>q(b)-q(a)||cost(a)-cost(b)||time(a)-time(b)||tie(a,b),cost:(a,b)=>cost(a)-cost(b)||time(a)-time(b)||q(b)-q(a)||tie(a,b),latency:(a,b)=>time(a)-time(b)||cost(a)-cost(b)||q(b)-q(a)||tie(a,b)};
+  // Without established quality, keep the explicitly unverified discovery list
+  // in known-cost order; no pick can claim a quality role.
+  const order=!qualified.length?orders.cost:orders[priority]??orders.quality;
+  frontier.sort(order);
+  // Labelled tradeoffs among the supported frontier, never outside it.
+  const roles=new Map();
+  if(qualified.length){
+    const known=(value,list)=>list.filter(c=>Number.isFinite(value(c)));
+    const pick=(role,list,compare)=>{const c=[...list].sort(compare)[0];if(c)roles.set(c,[...(roles.get(c)??[]),role]);};
+    pick('quality',frontier,orders.quality);pick('value',known(cost,frontier),orders.cost);pick('speed',known(time,frontier),orders.latency);
+  }
+  const selected=[],ids=new Set(),providers=new Map();
+  const take=(c,capped)=>{
+    if(!c||ids.has(c.model.id)||selected.length>=limit||capped&&(providers.get(providerOf(c))??0)>=providerLimit)return;
+    ids.add(c.model.id);providers.set(providerOf(c),(providers.get(providerOf(c))??0)+1);selected.push(c);
+  };
+  // A balanced search keeps each labelled tradeoff; explicit priorities follow their order.
+  if(priority==='balanced')for(const c of roles.keys())take(c,false);
+  for(const c of frontier)take(c,true);
+  // The provider cap diversifies; it does not leave supported places empty.
+  for(const c of frontier)take(c,false);
+  selected.sort(order);
+  for(const c of selected)c.pick=[...roles].filter(([x])=>x.model.id===c.model.id).flatMap(([,r])=>r);
   candidates.splice(0,candidates.length,...selected);
-  return {workload:scope.workload,weights:{quality:null,cost:null,latency:null},frontier:{version:3,scope:qualityGate.status==='proxy-qualified'&&scope.groups===1&&frontier.every(c=>c.frontierComplete)?'comparable':'partial',qualityGroups:scope.groups,qualityGate,eligibleConfigurations:frontier.length,comparedConfigurations:count,completeConfigurations:frontier.filter(c=>c.frontierComplete).length,selectedModels:selected.length,policy:'Within two proxy-score points of the strongest comparable model, then supported Pareto selection and lowest known reference cost first; latency breaks price ties. Unknown quality is provisional, never a pass. This does not establish a task-specific accuracy threshold.'}};
+  return {workload:scope.workload,weights:{quality:null,cost:null,latency:null},frontier:{version:4,scope:qualityGate.status==='proxy-qualified'&&frontier.every(c=>c.frontierComplete)?'comparable':'partial',qualityModels:scope.models,qualityBenchmarks:scope.benchmarks,qualityGate,eligibleConfigurations:frontier.length,comparedConfigurations:count,completeConfigurations:frontier.filter(c=>c.frontierComplete).length,selectedModels:selected.length,priority,
+    policy:'One latent quality estimate across all connected evaluations, with per-evaluation difficulty, scale and noise. Configurations not credibly worse than the strongest estimate (two points plus one combined standard error) enter supported Pareto selection over quality, reference cost and time. Balanced searches keep the strongest, lowest-cost and fastest frontier points, then order by estimated quality, with at most two models per provider unless places would remain empty. Unknown quality is provisional, never a pass. This does not establish a task-specific accuracy threshold.'}};
 }

@@ -75,7 +75,7 @@ async function runMatch(index,prompt,modelIds,endpointIds,{apiKey,fetcher,db,vec
   const loadRows=benchmarkIds=>{
     if(task.unsupported||!selected.length||(!benchmarkIds.length&&!taskFit))return Promise.resolve([]);
     if(db)return trace.measure('modelRead',()=>loadProjectionModels(db,manifest.publication.id,task.selection.allowedModelIds,benchmarkIds));
-    const ids=new Set(task.selection.allowedModelIds);return Promise.resolve((manifest.catalogue??manifest.models).filter(m=>ids.has(m.id)).map(m=>({...m,evidence:(manifest.models.find(x=>x.id===m.id)?.evidence??[]).filter(e=>benchmarkIds.includes(e.benchmark))})));
+    const ids=new Set(task.selection.allowedModelIds);return Promise.resolve((manifest.catalogue??manifest.models).filter(m=>ids.has(m.id)).map(m=>{const measured=manifest.models.find(x=>x.id===m.id);return {...m,speed:m.speed??measured?.speed??null,evidence:(measured?.evidence??[]).filter(e=>benchmarkIds.includes(e.benchmark))};}));
   };
   let rows;
   if(selected.length&&!task.unsupported&&!taskFit){

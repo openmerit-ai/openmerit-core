@@ -1,5 +1,15 @@
 # Website FAQ maintenance
 
+## Scout coding-agent button — source only, unreleased, 22 October 2026
+
+The new **Add to your coding agent** button opens existing API/MCP setup, including the current short-lived bearer-token and no-automatic-OAuth limitations. Stacked brand marks are navigation decoration, not a claim of tested integration with each client. No ranking, authentication, installation, collection or homepage FAQ behavior changes. The page serves its marks locally; no visitor request goes to a brand's favicon service.
+
+Brand assets were downloaded unchanged from the product sites on 22 October: Claude from `https://assets.claude.com/95a868946ac8a31e5ff832e2899f294aa368b836.png?w=96&h=96` (the Claude Code page's favicon; returned 32×32), Cursor from `https://cursor.com/marketing-static/icon-192x192-light.png`, Amp from `https://ampcode.com/app-icon-192.png?v=4`, OpenCode from `https://opencode.ai/favicon-96x96-v3.png`, and T3 Code from `https://t3.codes/apple-touch-icon.png`. Codex reuses the existing OpenAI mark from `https://developers.openai.com/favicon.png`, attributed in `packages/terminal/brand-assets.json`. These marks remain their respective owners' trademarks.
+
+## Scout common quality estimate — source only, unreleased, 22 October 2026
+
+Reviewed comparison, cost, latency and evidence claims against the replacement of per-scope cost-first screening with one cross-benchmark quality estimate, labelled strongest/value/fastest picks, a two-per-provider cap and labelled model-level timing. The homepage answer that OpenMerit does not always choose the cheapest model remains accurate; no FAQ change is needed. The Scout guide distinguishes this unreleased source change from the deployed cost-first policy.
+
 ## Unified analytics — Scout deployed, 22 October 2026
 
 Reviewed user identity, input collection, local storage, optional telemetry and readiness claims. The deployed Scout release consolidates new search metadata/errors into PostHog, with separate opt-in for text and no historical export. New local terminal/map telemetry remains off by default and excludes local identifiers/content; CLI planning explicitly disables content capture. Public website navigation events do not inspect task input or protected pages and remain unpublished. The homepage data FAQ describes released npm behavior, which is unchanged; the source-only telemetry exceptions are documented in the terminal/security guides. Scout adds native privacy controls but no ranking/layout redesign. Local verification and hosted browser checks passed; anonymous visits and a rejected request were confirmed in PostHog storage, with opt-out controls absent. Authenticated acceptance, dashboard updates, retention configuration and npm publication remain pending. Main-site deployment is blocked by production-source/asset divergence and was left unchanged.

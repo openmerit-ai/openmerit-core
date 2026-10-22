@@ -170,7 +170,7 @@ test('task excerpts retain the original wording and prompt order without swappin
 test('one, two and three tasks return five distinct ranked models each through HTTP and MCP',async()=>{
  for(const count of [1,2,3]){
   const tasks=Array.from({length:count},(_,i)=>({title:`Task ${i+1}`,layers,slots:[slot()]})),f=await fixture([],[],{overflow:false,tasks});
-  // Nine models meet the relative quality band; the cheapest is too weak.
+  // Nine models meet the quality band; the cheapest is too weak. Labs alternate.
   f.index.snapshot.models.forEach((m,i)=>{m.evidence[0].score=i===0?.6:.9+i*.002;});
   f.index.snapshot.publication.id='tradeoffs';
   await stageProjection(f.db,'tradeoffs',f.index.snapshot,prepareEligibility(f.index.snapshot));
@@ -179,7 +179,9 @@ test('one, two and three tasks return five distinct ranked models each through H
    assert.equal(result.tasks.reduce((n,t)=>n+t.slots[0].recommendations.length,0),5*count);
    for(const task of result.tasks){
     assert.equal(task.slots.length,1);assert.equal(task.slots[0].task.clarification,null);
-    assert.deepEqual(task.slots[0].recommendations.map(m=>m.modelId),['lab/m1','lab/m2','lab/m3','lab/m4','lab/m5']);
+    // Strongest first; the cheapest-and-fastest qualifying model keeps a labelled place.
+    assert.deepEqual(task.slots[0].recommendations.map(m=>m.modelId),['lab/m9','lab/m8','lab/m7','lab/m6','lab/m1']);
+    assert.deepEqual(task.slots[0].recommendations.map(m=>m.pick??[]),[['quality'],[],[],[],['value','speed']]);
     assert.equal(task.slots[0].ranking.frontier.qualityGate.excludedConfigurations,1);
     assert.equal(task.slots[0].ranking.frontier.qualityGate.status,'proxy-qualified');
     assert.ok(task.slots[0].warnings.some(w=>w.includes('not proof of sufficient quality')));

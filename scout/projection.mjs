@@ -41,8 +41,9 @@ export function projectionRows(snapshot,directory) {
       facts.push([p.endpointId,field,factKinds[field]??typeof x,numeric===null?String(x):null,numeric]);
     }
   }
-  const measured=new Map(snapshot.models.map(m=>[m.id,m.evidence]));
-  const models=(snapshot.catalogue??snapshot.models).map(m=>({id:m.id,name:m.name,provider:m.provider,endpoints:m.endpoints,facts:m.facts,modalities:m.modalities,parameters:m.parameters,speed:m.speed,evidence:(measured.get(m.id)??[]).map(({benchmark,score,metric,url,observedAt,configurations,raw,provenance})=>({benchmark,score,metric,url,observedAt,configurations,raw,provenance}))}));
+  const measured=new Map(snapshot.models.map(m=>[m.id,m.evidence])),timing=new Map(snapshot.models.map(m=>[m.id,m.speed]));
+  // Catalogue identities omit measurements; timing lives on the measured record.
+  const models=(snapshot.catalogue??snapshot.models).map(m=>({id:m.id,name:m.name,provider:m.provider,endpoints:m.endpoints,facts:m.facts,modalities:m.modalities,parameters:m.parameters,speed:m.speed??timing.get(m.id)??null,evidence:(measured.get(m.id)??[]).map(({benchmark,score,metric,url,observedAt,configurations,raw,provenance})=>({benchmark,score,metric,url,observedAt,configurations,raw,provenance}))}));
   return {definitions,routes,facts,models};
 }
 export async function stageProjection(db,version,snapshot,directory) {

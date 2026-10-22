@@ -49,8 +49,13 @@ code, kbd { font-family: var(--mono); }
 .account-controls { display: flex; align-items: center; flex: none; min-height: 40px; }
 .sign-in-button { padding: 7px 12px; min-height: 36px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font-size: 12px; white-space: nowrap; }
 #user-account { min-width: 32px; }
-.scout-intro { padding: 38px 0 24px; }
+.scout-intro { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px 28px; padding: 38px 0 24px; }
+.intro-copy { flex: 1 1 440px; min-width: 0; }
 .scout-intro p { margin-top: 5px; color: var(--muted); font-size: 13px; }
+.add-agent-button { display: inline-flex; align-items: center; gap: 12px; flex: none; min-height: 44px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: 12px; font-weight: 500; }
+.agent-logos { display: inline-flex; align-items: center; flex: none; padding-left: 2px; }
+.agent-logos img { display: block; position: relative; width: 28px; height: 28px; border: 2px solid var(--surface); border-radius: 50%; background: #fff; object-fit: contain; }
+.agent-logos img + img { margin-left: -5px; }
 #index-counts { display: flex; flex-wrap: wrap; row-gap: 3px; }
 #index-counts > span { white-space: nowrap; }
 #index-counts > span:not(:last-child)::after { content: "·"; margin-inline: 7px; color: var(--quiet); }
@@ -126,6 +131,7 @@ summary::-webkit-details-marker { display: none; }
 .error-message { color: var(--error); font-size: 12px; margin-top: 16px; }
 @media (hover: hover) and (pointer: fine) {
   .find-button:hover { background: var(--button-hover); }
+  .add-agent-button:hover { border-color: var(--field-line); background: var(--hover); }
   .quiet-button:hover, .scout-header nav a:hover, .scout-footer a:hover, summary:hover { color: var(--ink); }
   .model-id-line button:hover { background: var(--hover); }
 }
@@ -145,6 +151,8 @@ summary::-webkit-details-marker { display: none; }
   .scout-header nav { gap: 12px; font-size: 11px; }
   .scout-header nav span { display: none; }
   .sign-in-button { min-height: 40px; font-size: 11px; }
+  .add-agent-button { gap: 10px; padding-inline: 10px; }
+  .agent-logos img { width: 24px; height: 24px; }
   .prompt-box textarea { font-size: 16px; min-height: 208px; }
   .find-button { width: 44px; height: 44px; }
   .newline-hint { display: none; }

@@ -21,9 +21,9 @@ export function expandEndpoints(models, checkedAt, scoped = false) {
     .map(endpoint => ({ ...model, endpoint, inputPrice: endpoint.inputPrice, outputPrice: endpoint.outputPrice,
       modalities: endpoint.modalities, outputModalities: endpoint.outputModalities, parameters: endpoint.parameters,
       context: endpoint.context ?? null,
-      // Public model-level quality can be inspected across routes, but timing
-      // and task charges cannot migrate to a different endpoint.
-      speed: model.speed?.endpointId === endpoint.id ? model.speed : null })));
+      // Endpoint-bound timing wins. Unbound model-level measurements apply to
+      // every route as a labelled fallback; timing bound to another route never migrates.
+      speed: model.speed?.endpointId === endpoint.id ? { ...model.speed, scope: 'endpoint' } : model.speed && !model.speed.endpointId ? { ...model.speed, scope: 'model' } : null })));
 }
 export function hubEndpointModels(snapshot, task, _prompt) {
   const relevant = new Set(relevantProfiles(snapshot.specialistProfiles ?? [], task).map(p => p.id));
