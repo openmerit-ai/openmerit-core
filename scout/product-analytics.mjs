@@ -67,6 +67,12 @@ export function accountSyncEnabled(env) {
     !!env.CLERK_WEBHOOK_SIGNING_SECRET && !!env.POSTHOG_PERSONAL_API_KEY && /^\d+$/.test(env.POSTHOG_PROJECT_ID ?? '');
 }
 
+export function betaEvaluationEnabled(env) {
+  // Roll out only after privacy review and live acceptance of PostHog's AI
+  // content retention. Existing deployments keep their explicit opt-in default.
+  return env.SCOUT_BETA_EVALUATION_LOGGING === 'true' && env.POSTHOG_CAPTURE_CONTENT === 'true' && accountSyncEnabled(env);
+}
+
 export async function accountId(userId) {
   const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`openmerit:posthog:${userId}`));
   return `account:${Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('')}`;
@@ -100,9 +106,12 @@ export function createProductAnalytics(request, env, ctx = {}) {
   // These caller hints are attribution, not authentication or proof of installation.
   const selectedAgent = agent(request.headers.get('x-scout-agent') ?? url.searchParams.get('agent')) ?? 'unknown';
   const client = choice(['web', 'cli', 'agent'])(request.headers.get('x-scout-client')) ?? (selectedAgent !== 'unknown' ? 'agent' : 'unknown');
+  const linkAccount = request.headers.get('x-scout-analytics-account') !== 'off';
   const anonymousId = uuid(request.headers.get('x-scout-anonymous-id')) ?? crypto.randomUUID();
   const traceId = crypto.randomUUID();
-  const contentAllowed = env.POSTHOG_CAPTURE_CONTENT === 'true' && accountSyncEnabled(env) && request.headers.get('x-scout-analytics-content') === 'on';
+  const contentChoice = request.headers.get('x-scout-analytics-content');
+  const contentAllowed = env.POSTHOG_CAPTURE_CONTENT === 'true' && accountSyncEnabled(env) &&
+    (contentChoice === 'on' || contentChoice === null && client === 'web' && betaEvaluationEnabled(env));
   let userId, method, reportedAgent = 'unknown';
 
   function background(promise) {
@@ -117,8 +126,11 @@ export function createProductAnalytics(request, env, ctx = {}) {
       platform: choice(['darwin', 'linux', 'win32', 'unknown']), runtime_major: integer(22, 100) })) {
       const value = validate(properties[key]); if (value !== undefined) safe[key] = value;
     }
-    if (!safe.trace_id) delete safe.trace_id;
-    const identity = userId, anon = options.anonymousId ?? anonymousId;
+    // A browser ID or result trace may already belong to an identified person.
+    // Unlinked requests must not reuse either, even after a privacy-mode change.
+    if (!safe.trace_id || !linkAccount) delete safe.trace_id;
+    const account = userId, identity = linkAccount ? account : null;
+    const anon = linkAccount ? options.anonymousId ?? anonymousId : crypto.randomUUID();
     const timestamp = new Date().toISOString();
     background((async () => {
       const distinctId = identity ? await accountId(identity) : `anonymous:${anon}`;
@@ -128,7 +140,7 @@ export function createProductAnalytics(request, env, ctx = {}) {
         client: options.client ?? client, transport: path === '/scout/mcp' ? 'mcp' : 'http',
         agent: selectedAgent,
         request_id: traceId, trace_id: safe.trace_id ?? traceId, $session_id: anon,
-        analytics_version: 3,
+        analytics_version: 4, account_linked: !!identity,
         ...(safe.trace_id || ['/scout/api/recommend', '/scout/mcp'].includes(path) ? { $ai_trace_id: safe.trace_id ?? traceId } : {}),
         ...(env.CF_VERSION_METADATA?.id ? { release: env.CF_VERSION_METADATA.id } : {}),
       };
@@ -150,7 +162,7 @@ export function createProductAnalytics(request, env, ctx = {}) {
       });
       // Capture API only: no SDK/autocapture/replay, arbitrary metadata or IPs.
       // All expanded events retain account preference and deletion enforcement.
-      if (identity && env.SCOUT_ACCOUNTS) await (await accountAnalytics(env, identity)).capture(batch);
+      if (account && env.SCOUT_ACCOUNTS) await (await accountAnalytics(env, account)).capture(batch);
       else await sendProductBatch(env, batch);
     })());
   }
@@ -199,7 +211,9 @@ export function createProductAnalytics(request, env, ctx = {}) {
     },
     response(response) {
       const headers = new Headers(response.headers);
-      headers.set('X-Scout-Trace-Id', traceId);
+      // Do not hand an unlinked trace back to later account-linked clicks.
+      if (linkAccount) headers.set('X-Scout-Trace-Id', traceId);
+      else headers.delete('X-Scout-Trace-Id');
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     },
     complete(response) {

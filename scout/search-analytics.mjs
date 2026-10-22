@@ -42,13 +42,6 @@ export function searchEvents(event, includeContent) {
     properties.quality_status = ['proxy-qualified', 'unverified'].includes(slot?.ranking?.frontier?.qualityGate?.status) ? slot.ranking.frontier.qualityGate.status : 'unknown';
     properties.evidence_truncated = truncated;
     properties.benchmark_counts = (slot?.recommendations ?? []).slice(0, 5).map(m => (m.evidence ?? []).length);
-    if (includeContent) {
-      properties.task_excerpt = redactContent(task.sourceText ?? task.title, 1000);
-      properties.layers = Object.fromEntries(['input', 'work', 'output', 'criteria', 'constraints'].map(key => [key, {
-        origin: ['explicit', 'inferred', 'missing'].includes(task.layers?.[key]?.origin) ? task.layers[key].origin : 'missing',
-        text: redactContent(task.layers?.[key]?.text, 1000),
-      }]));
-    }
     details.push({ event: 'scout_search_details', properties });
   }
   return [{ event: '$ai_trace', properties: {
@@ -56,7 +49,18 @@ export function searchEvents(event, includeContent) {
     $ai_latency: Math.max(0, Math.min(86400, (event.durationMs ?? 0) / 1000)),
     $ai_is_error: /error$/.test(event.outcome ?? ''),
     content_captured: includeContent,
-    ...(includeContent ? { $ai_input_state: redactContent(event.prompt) } : {}),
+    // PostHog Cloud expires these AI content fields after 30 days. Never copy
+    // prompt-derived prose to ordinary event properties, which persist longer.
+    ...(includeContent ? { $ai_input_state: {
+      prompt: redactContent(event.prompt),
+      tasks: tasks.slice(0, 3).map((task, i) => ({
+        task_index: i + 1, excerpt: redactContent(task.sourceText ?? task.title, 1000),
+        layers: Object.fromEntries(['input', 'work', 'output', 'criteria', 'constraints'].map(key => [key, {
+          origin: ['explicit', 'inferred', 'missing'].includes(task.layers?.[key]?.origin) ? task.layers[key].origin : 'missing',
+          text: redactContent(task.layers?.[key]?.text, 1000),
+        }])),
+      })),
+    } } : {}),
     // These are recommended models, not executions or actual provider charges.
     $ai_output_state: details.map(({ properties: p }) => ({ task_index: p.task_index, slot_index: p.slot_index,
       quality_status: p.quality_status, models: p.top5.map(({ evidence, ...model }) => model) })),

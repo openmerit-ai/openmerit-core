@@ -75,7 +75,7 @@ const authenticatedRequest=(path,token,headers={})=>new Request(`https://example
 test('public auth configuration exposes only the publishable key and fails closed when incomplete',async()=>{
   const response=await alpha.fetch(new Request('https://example.test/scout/api/auth'),authEnv,{});
   assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
-  assert.deepEqual(await response.json(),{publishableKey:authEnv.CLERK_PUBLISHABLE_KEY,frontendApi:'scout-auth.clerk.accounts.dev',analytics:{enabled:false,accountSync:false,content:false}});
+  assert.deepEqual(await response.json(),{publishableKey:authEnv.CLERK_PUBLISHABLE_KEY,frontendApi:'scout-auth.clerk.accounts.dev',analytics:{enabled:false,accountSync:false,content:false,contentDefault:false}});
   for(const config of [{},{CLERK_PUBLISHABLE_KEY:authEnv.CLERK_PUBLISHABLE_KEY},{...authEnv,CLERK_PUBLISHABLE_KEY:'invalid'}]){
     for(const path of ['api/auth','api/recommend','mcp']){
       const result=await alpha.fetch(new Request(`https://example.test/scout/${path}`),config,{});
@@ -356,6 +356,46 @@ test('webhook signatures and preference authentication fail closed, and opt-outs
     assert.equal((await alpha.fetch(eventRequest('scout_session_observed', {}, sessionToken()), config, ctx)).status, 204);
     await ctx.flush(); assert.equal(sent.length, before, 'webhooks and account events obey the stored opt-out');
   }
+});
+
+test('unlinked requests ignore known identities and traces without bypassing account opt-outs or deletion', async t => {
+  const { config } = accountEnvironment(), sent = [], ctx = pendingContext();
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (url.startsWith('https://api.clerk.com/')) return Response.json(profileFixture());
+    if (url.includes('/persons/bulk_delete/')) return Response.json({ persons_found: 0, deletion_errors: [] });
+    sent.push(...JSON.parse(options.body).batch); return Response.json({ status: 1 });
+  });
+  config.POSTHOG_CAPTURE_CONTENT = 'true'; config.SCOUT_BETA_EVALUATION_LOGGING = 'true';
+  const auth = await (await alpha.fetch(new Request('https://example.test/scout/api/auth'), config, ctx)).json();
+  assert.equal(auth.analytics.contentDefault, true);
+  const unavailable = await (await alpha.fetch(new Request('https://example.test/scout/api/auth'), { ...config, POSTHOG_PERSONAL_API_KEY: '' }, ctx)).json();
+  assert.equal(unavailable.analytics.contentDefault, false);
+  await alpha.fetch(preferenceRequest(true), config, ctx);
+  await alpha.fetch(eventRequest('scout_session_observed', {}, sessionToken()), config, ctx); await ctx.flush();
+  const linked = sent.find(e => e.event === '$identify').properties;
+  const headers = { 'x-scout-analytics-account': 'off', 'x-scout-anonymous-id': linked.$session_id };
+  const before = sent.length;
+  for (let i = 0; i < 2; i++) {
+    const response = await alpha.fetch(eventRequest('scout_model_id_copied', { rank: 2, task_index: 1, trace_id: linked.trace_id }, sessionToken(), headers), config, ctx);
+    assert.equal(response.headers.get('X-Scout-Trace-Id'), null, 'a later linked click must not recover this unlinked trace');
+  }
+  await alpha.fetch(eventRequest('scout_session_observed', {}, sessionToken(), headers), config, ctx);
+  await ctx.flush();
+  const unlinked = sent.slice(before);
+  assert.equal(unlinked.length, 3, 'no identify or profile accompanies an unlinked request');
+  assert.equal(new Set(unlinked.map(e => e.properties.distinct_id)).size, 3);
+  for (const { event, properties: p } of unlinked) {
+    assert.notEqual(event, '$identify'); assert.equal(p.account_linked, false); assert.equal(p.$process_person_profile, false);
+    assert.notEqual(p.distinct_id, linked.distinct_id); assert.notEqual(p.$session_id, linked.$session_id);
+    assert.notEqual(p.trace_id, linked.trace_id); assert.equal(p.$anon_distinct_id, undefined);
+  }
+  await alpha.fetch(preferenceRequest(false), config, ctx);
+  const count = sent.length;
+  await alpha.fetch(eventRequest('scout_visited', {}, sessionToken(), headers), config, ctx); await ctx.flush();
+  assert.equal(sent.length, count);
+  await alpha.fetch(webhookRequest('user.deleted', { id: 'user_alice' }), config, ctx);
+  await alpha.fetch(eventRequest('scout_visited', {}, sessionToken(), headers), config, ctx); await ctx.flush();
+  assert.equal(sent.length, count);
 });
 
 test('delivery retries preserve IDs and deletion tombstones block late updates and still-valid sessions', async t => {

@@ -14,11 +14,11 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const site = join(root, 'site');
 const manifest = JSON.parse(await readFile(join(site, 'docs/manifest.json'), 'utf8'));
 const publishedPages = [...manifest.pages, memo];
-const html = await Promise.all(['/', ...publishedPages.map(page => page.url)].map(async url => ({
+const html = await Promise.all(['/', '/scout/', ...publishedPages.map(page => page.url)].map(async url => ({
   url, text: await readFile(join(site, url, 'index.html'), 'utf8'),
 })));
 
-test('all generated navigation, source, asset and section links resolve', async () => {
+test('all website, Scout and generated documentation links resolve', async () => {
   for (const page of html) {
     for (const match of page.text.matchAll(/(?:href|src)="([^"]+)"/g)) {
       const url = new URL(match[1].replaceAll('&amp;', '&'), `https://openmerit.ai${page.url}`);
@@ -68,7 +68,7 @@ test('downloadable Markdown matches the maintained source and excludes internal 
 test('search finds operational topics and produces valid section destinations', async () => {
   const bundle = JSON.parse(await readFile(join(site, manifest.searchIndex), 'utf8'));
   const index = MiniSearch.loadJSON(JSON.stringify(bundle.index), bundle.options);
-  for (const [query, expectedPage] of [['budget', '/docs/budgets/'], ['pause', '/docs/commands/'], ['rollback', '/docs/lifecycle/']]) {
+  for (const [query, expectedPage] of [['budget', '/docs/budgets/'], ['pause', '/docs/commands/'], ['rollback', '/docs/lifecycle/'], ['data policy', '/docs/scout-data-policy/']]) {
     const results = index.search(query);
     assert.ok(results.some(result => result.url.startsWith(expectedPage)), query);
     for (const result of results) {

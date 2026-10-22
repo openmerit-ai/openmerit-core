@@ -81,7 +81,7 @@
     <section class="search-section" aria-label="Find models">
       <form id="scout-form" class="prompt-box">
         <label for="prompt">Describe your work</label>
-        <textarea id="prompt" name="prompt" rows="2" maxlength="4000" required spellcheck="false" enterkeyhint="search" aria-describedby="prompt-hint" placeholder="Users upload photos of supplier invoices. Extract the vendor, invoice number, date, currency, tax, and total as JSON. Return null for missing fields. We process thousands a day, so accuracy, cost, and speed matter."></textarea>
+        <textarea id="prompt" name="prompt" rows="2" maxlength="4000" required spellcheck="false" enterkeyhint="search" aria-describedby="prompt-hint beta-data-notice" placeholder="Users upload photos of supplier invoices. Extract the vendor, invoice number, date, currency, tax, and total as JSON. Return null for missing fields. We process thousands a day, so accuracy, cost, and speed matter."></textarea>
         <div class="prompt-footer"><span id="prompt-hint">Include inputs, outputs and what success looks like.<span class="newline-hint"> Shift + Enter for a new line.</span></span><button class="find-button" type="submit" title="Find models"><span class="sr-only">Find models</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
         <div class="prompt-examples" role="group" aria-labelledby="examples-label">
           <span id="examples-label">Try an example</span>
@@ -90,6 +90,7 @@
           <button type="button" data-example="feedback-workflow" data-prompt="Recommend models for three independent tasks, each with its own deliverable. 1. Summarize customer feedback into themes with supporting quotes. 2. Turn those themes into a prioritized list of proposed fixes, explaining the customer impact. 3. Write customer-facing release notes from a supplied list of completed fixes, without claiming planned work is already available. Give each task its own model shortlist."><span class="example-count">3 tasks</span><span>Feedback → Fixes → Release notes</span></button>
         </div>
       </form>
+      <p class="beta-data-notice"><span id="beta-data-notice">OpenAI processes your task. Don't include confidential or sensitive data.</span> <a href="#analytics-settings">Privacy settings</a> · <a href="/docs/scout-data-policy/">Data policy</a></p>
       <p class="error-message" id="error" role="alert" hidden></p>
     </section>
 
@@ -142,11 +143,14 @@
       <details class="support-section" id="sources"><summary>Sources</summary><p>What each source measures, how much it covers, and where it falls short.</p><div id="source-list"></div><p>Public feeds refresh hourly. Collection dates and measurement dates may differ. Task calibration is updated separately.</p></details>
       <details class="support-section" id="analytics-settings">
         <summary>Privacy &amp; analytics</summary>
-        <p>PostHog helps us understand usage, recommendations and errors. When account sync is configured, enabled analytics also includes your name, verified email and sign-in provider information. No session recording.</p>
+        <p><strong>Help improve Scout during beta.</strong> We use enabled prompt, recommendation and usage logging to evaluate matching and fix problems, not to train a foundation model. You can turn off sharing below; existing opt-outs are preserved.</p>
+        <p>Our service providers process data on our behalf: Cloudflare hosts Scout, OpenAI processes tasks, Clerk handles sign-in, and PostHog stores enabled analytics. Account analytics can include your name, verified email and sign-in provider information. No session recording.</p>
         <p><label><input id="analytics-usage" type="checkbox" disabled> Share usage and account analytics</label></p>
-        <p><label><input id="analytics-content" type="checkbox" disabled> Also share my task prompts and breakdowns for product improvement</label></p>
+        <p><label><input id="analytics-content" type="checkbox" disabled> Share my task prompts and breakdowns for product improvement</label></p>
+        <p><label><input id="analytics-unlinked" type="checkbox" disabled> Don't link this browser's activity to my account</label></p>
+        <p>Unlinked activity uses separate request IDs, not your account identity. This does not erase earlier links or stop separate account-profile and sign-in analytics. Prompt text can still identify you.</p>
         <p id="analytics-status" role="status">Loading analytics settings…</p>
-        <p>Common sensitive patterns are removed before optional prompt sharing, but redaction cannot detect every secret or personal detail. Turning sharing off stops future collection, not required task processing or previously stored records. <a href="/docs/scout/#product-analytics">Data handling ↗</a></p>
+        <p>Don't submit confidential or sensitive information. Redaction cannot detect every secret or personal detail. Turning sharing off stops future collection, not required task processing or previously stored records. <a href="/docs/scout-data-policy/">Read the beta data policy ↗</a></p>
       </details>
     </div>
     <div class="footer-meta"><span>Scout by OpenMerit</span><a href="/docs/scout/#current-validation-limits">Evaluation &amp; limitations <span aria-hidden="true">↗</span></a></div>

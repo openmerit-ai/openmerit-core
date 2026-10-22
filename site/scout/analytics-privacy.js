@@ -16,7 +16,7 @@ export function safeFrames(value) {
 }
 
 // Best-effort redaction is not a confidentiality guarantee. Content capture is
-// separately opt-in; arbitrary names or proprietary prose cannot be detected.
+// separately controlled; arbitrary names or proprietary prose cannot be detected.
 export function redactContent(value, max = 4000) {
   if (typeof value !== 'string') return null;
   return value.slice(0, 16000)

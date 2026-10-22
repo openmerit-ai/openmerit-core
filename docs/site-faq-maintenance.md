@@ -1,5 +1,13 @@
 # Website FAQ maintenance
 
+## Scout beta evaluation analytics — source only, unreleased, 22 October 2026
+
+Reviewed data, consent, identity, retention and readiness claims against the proposed beta analytics change. Current prompt sharing remains opt-in. Activation requires `SCOUT_BETA_EVALUATION_LOGGING=true` (not deployed), `POSTHOG_CAPTURE_CONTENT=true` and complete account-sync/deletion configuration. Browser content would default on only without a stored choice; saved off, general opt-out, DNT/GPC and unreadable storage keep it off. API/MCP retain explicit content opt-in and CLI content remains off. Prompt/excerpt/five-layer prose belongs only in `$ai_trace.$ai_input_state`, not ordinary search details, with existing redaction bounds and three-task cap.
+
+The policy cites PostHog's documented 30-day AI-property storage separately from normal metadata retention, without claiming verified live expiry, retroactive v3 deletion or exact backup erasure. Browser/request unlinking uses fresh unrelated identifiers without profile/identify or prior browser/trace IDs, still honoring account opt-out/deletion gates. It is not account-wide, does not stop separately consented Clerk lifecycle/profile analytics, unlink past records or propagate to copied agent instructions. It sacrifices cross-request funnels and automatic account-based historical deletion; text can still identify someone. Product evaluation/debugging is not foundation model training, and processors and restricted access remain disclosed.
+
+Homepage FAQ answers describe the unchanged terminal/Pi workflow and need no edits. The policy preserves the verified data-request contact and deletion limits. Beta status establishes no consent/legal basis; privacy/legal review, live PostHog acceptance and explicit deployment approval remain pending. This is local, uncommitted source only. Main-site `/docs/` publication remains blocked by source divergence; no website, Worker or npm publication is included.
+
 ## Scout in-place agent setup — source only, unreleased, 22 October 2026
 
 Reviewed setup, privacy and installation claims against the agent picker, automatic clipboard handoff and footer disclosures. A successful clipboard write copies public instructions, not credentials or the user's task, and does not establish an installation or authenticated connection. Existing token/header requirements and analytics opt-outs remain intact. Manual-copy fallback does not emit a successful-copy receipt. Homepage FAQ answers concern unchanged terminal/Pi integration and require no edits.

@@ -257,7 +257,7 @@ test('browser analytics links an OAuth return, rotates on account switches, and 
   }
 });
 
-test('PostHog search content needs both configured deletion and explicit consent; bounded evidence preserves every rank', async t => {
+test('PostHog content obeys rollout and privacy gates, stays in expiring AI fields, and preserves every rank', async t => {
   const sent = [], pending = [], flush = async () => { while (pending.length) await Promise.all(pending.splice(0)); };
   t.mock.method(globalThis, 'fetch', async (_, options) => { sent.push(...JSON.parse(options.body).batch); return new Response(null, { status: 200 }); });
   const base = { POSTHOG_PROJECT_TOKEN: 'phc_fixture', POSTHOG_HOST: 'https://eu.i.posthog.com', POSTHOG_ENVIRONMENT: 'test',
@@ -272,6 +272,18 @@ test('PostHog search content needs both configured deletion and explicit consent
     })) }] }] };
   for (const [headers, changes, expectedContent, expectedCount] of [
     [{}, {}, false, 3], [{ 'X-Scout-Analytics-Content': 'on' }, {}, true, 3],
+    [{ 'X-Scout-Client': 'web' }, {}, false, 3],
+    [{ 'X-Scout-Client': 'web' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, true, 3],
+    [{ 'X-Scout-Client': 'web', 'X-Scout-Analytics-Content': 'off' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 3],
+    [{ 'X-Scout-Client': 'web', 'X-Scout-Analytics-Content': 'invalid' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 3],
+    [{ 'X-Scout-Client': 'cli' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 3],
+    [{ 'X-Scout-Client': 'agent' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 3],
+    [{}, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 3],
+    [{ 'X-Scout-Client': 'web' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true', POSTHOG_CAPTURE_CONTENT: 'false' }, false, 3],
+    [{ 'X-Scout-Client': 'web' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true', POSTHOG_PERSONAL_API_KEY: '' }, false, 3],
+    [{ 'X-Scout-Client': 'web', DNT: '1' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 0],
+    [{ 'X-Scout-Client': 'web', 'Sec-GPC': '1' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 0],
+    [{ 'X-Scout-Client': 'web', 'X-Scout-Analytics': 'off' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 0],
     [{ 'X-Scout-Analytics-Content': 'on' }, { POSTHOG_CAPTURE_CONTENT: 'false' }, false, 3],
     [{ 'X-Scout-Analytics-Content': 'on' }, { POSTHOG_PERSONAL_API_KEY: '' }, false, 3],
     [{ 'X-Scout-Analytics-Content': 'on', 'X-Scout-Analytics': 'off' }, {}, false, 0],
@@ -287,9 +299,13 @@ test('PostHog search content needs both configured deletion and explicit consent
     if (!expectedCount) continue;
     const trace = sent.find(e => e.event === '$ai_trace').properties, details = sent.find(e => e.event === 'scout_search_details').properties;
     assert.equal(trace.content_captured, expectedContent);
-    assert.equal(typeof trace.$ai_input_state === 'string', expectedContent);
-    assert.equal(details.layers !== undefined, expectedContent);
-    if (expectedContent) { assert.match(trace.$ai_input_state, /Classify invoices/); assert.match(details.layers.input.text, /\[EMAIL\]/); }
+    assert.equal(trace.$ai_input_state !== undefined, expectedContent);
+    assert.equal(details.layers, undefined);
+    if (expectedContent) { assert.match(trace.$ai_input_state.prompt, /Classify invoices/); assert.match(trace.$ai_input_state.tasks[0].layers.input.text, /\[EMAIL\]/); }
+    // Model PostHog's documented split: no user prose may survive in ordinary
+    // event properties after the expiring AI input/output fields are removed.
+    const retained = sent.map(e => ({ ...e, properties: Object.fromEntries(Object.entries(e.properties).filter(([key]) => !e.event.startsWith('$ai_') || !['$ai_input_state', '$ai_output_state'].includes(key))) }));
+    assert.doesNotMatch(JSON.stringify(retained), /Classify invoices/);
     assert.doesNotMatch(JSON.stringify(sent), /CANARY_JSON|CANARY_ESCAPED|QUOTE/);
     assert.doesNotMatch(JSON.stringify(sent), /person@example|private-canary|private.invalid|private-key|PRIVATE_DERIVED|secret=bad/);
     assert.equal(details.evidence_truncated, true);
@@ -323,4 +339,66 @@ test('sanitized errors and terminal/website events reach the same account-aware 
   assert.equal(sent.find(e => e.event === 'terminal_snapshot').properties.model_count, 9);
   assert.equal(sent.find(e => e.event === 'website_link_opened').properties.product, 'website');
   assert.doesNotMatch(JSON.stringify(sent), /PRIVATE_CANARY|private\/file|example.invalid|\$set|\"message\"/);
+});
+
+test('browser beta defaults preserve saved refusals and privacy signals; unlinking rotates IDs across reloads', async t => {
+  const data = new Map(), sessionData = new Map();
+  const storage = map => ({ getItem: key => map.get(key) ?? null, setItem: (key, value) => map.set(key, value), removeItem: key => map.delete(key) });
+  for (const [key, value] of Object.entries({ navigator: {}, localStorage: storage(data), sessionStorage: storage(sessionData) })) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { value, configurable: true });
+    t.after(() => { if (previous) Object.defineProperty(globalThis, key, previous); else delete globalThis[key]; });
+  }
+  const sent = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => { sent.push({ url, ...options, body: JSON.parse(options.body) }); return new Response(null, { status: 204 }); });
+  async function until(check) { for (let i = 0; i < 100 && !check(); i++) await new Promise(r => setTimeout(r, 5)); assert.ok(check()); }
+  const { analytics } = await import(`../../site/scout/analytics.js?beta=${crypto.randomUUID()}`);
+  analytics.configure(true, true, true);
+  assert.equal(analytics.headers()['X-Scout-Analytics-Content'], 'off');
+  analytics.configure(true, true, true, true);
+  assert.equal(analytics.headers()['X-Scout-Analytics-Content'], 'on');
+  for (const saved of ['0', 'invalid']) {
+    data.set('scout-analytics-content', saved);
+    assert.equal(analytics.headers()['X-Scout-Analytics-Content'], 'off');
+  }
+  data.set('scout-analytics-content', '1');
+  assert.equal(analytics.headers()['X-Scout-Analytics-Content'], 'on');
+  for (const signal of ['dnt', 'gpc', 'opt-out']) {
+    navigator.doNotTrack = signal === 'dnt' ? '1' : '0'; navigator.globalPrivacyControl = signal === 'gpc';
+    data.set('scout-analytics-opt-out', signal === 'opt-out' ? '1' : '0');
+    assert.equal(analytics.headers()['X-Scout-Analytics-Content'], 'off');
+  }
+  navigator.doNotTrack = '0'; navigator.globalPrivacyControl = false; data.clear();
+  const get = localStorage.getItem;
+  localStorage.getItem = () => { throw new Error('Storage denied'); };
+  assert.equal(analytics.headers()['X-Scout-Analytics-Content'], 'off');
+  assert.equal(analytics.headers()['X-Scout-Analytics-Account'], 'off');
+  localStorage.getItem = get;
+
+  const active = { id: 'session_test', getToken: async () => 'test-bearer' };
+  analytics.account('user_test', active);
+  await until(() => sent.some(e => e.body.event === 'scout_session_observed'));
+  const linkedId = analytics.headers()['X-Scout-Anonymous-Id'];
+  let release;
+  active.getToken = () => new Promise(resolve => { release = resolve; });
+  analytics.track('scout_provider_opened', { rank: 1, task_index: 1 });
+  await until(() => !!release);
+  active.getToken = async () => 'test-bearer';
+  analytics.setPreferences(true, true, false);
+  release('test-bearer');
+  analytics.track('scout_model_id_copied', { rank: 2, task_index: 1 });
+  await until(() => sent.some(e => e.body.event === 'scout_model_id_copied'));
+  assert.equal(sent.filter(e => e.body.event === 'scout_provider_opened').length, 0);
+  const unlinkedId = analytics.headers()['X-Scout-Anonymous-Id'];
+  assert.notEqual(unlinkedId, linkedId);
+  assert.equal(sent.find(e => e.body.event === 'scout_model_id_copied').headers['X-Scout-Analytics-Account'], 'off');
+  assert.equal(sent.filter(e => e.body.event === 'scout_session_observed').length, 1);
+  const { analytics: reloaded } = await import(`../../site/scout/analytics.js?betaReload=${crypto.randomUUID()}`);
+  reloaded.configure(true, true, true, true); reloaded.account('user_test', active);
+  await until(() => sent.filter(e => e.body.event === 'scout_visited').length === 2);
+  assert.equal(reloaded.headers()['X-Scout-Analytics-Account'], 'off');
+  reloaded.setPreferences(true, false, true);
+  await until(() => sent.filter(e => e.body.event === 'scout_session_observed').length === 2);
+  assert.notEqual(reloaded.headers()['X-Scout-Anonymous-Id'], unlinkedId);
+  assert.equal(reloaded.headers()['X-Scout-Analytics-Content'], 'off');
 });

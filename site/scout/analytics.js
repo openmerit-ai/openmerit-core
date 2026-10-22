@@ -2,9 +2,9 @@ import { errorType, exceptionFrames } from './analytics-privacy.js';
 
 const endpoint = new URL('./api/analytics', import.meta.url).pathname;
 const storageKey = 'scout-product-analytics';
-let enabled = false, accountSync = false, contentAvailable = false, state, session, currentUser, lastAllowed, generation = 0, visited = false, ready = Promise.resolve();
-let usageChoice, contentChoice, errors = 0;
-const fresh = () => ({ anonymousId: crypto.randomUUID(), user: null, session: null });
+let enabled = false, accountSync = false, contentAvailable = false, contentDefault = false, state, session, currentUser, lastAllowed, lastLinked, generation = 0, visited = false, ready = Promise.resolve();
+let usageChoice, contentChoice, linkChoice, errors = 0;
+const fresh = () => ({ anonymousId: crypto.randomUUID(), user: null, session: null, linked: accountLinked() });
 function allowed() {
   if (!enabled || navigator.doNotTrack === '1' || navigator.globalPrivacyControl === true) return false;
   if (usageChoice !== undefined) return usageChoice;
@@ -13,7 +13,14 @@ function allowed() {
 function contentAllowed() {
   if (!allowed() || !contentAvailable) return false;
   if (contentChoice !== undefined) return contentChoice;
-  try { return localStorage.getItem('scout-analytics-content') === '1'; } catch { return false; }
+  try {
+    const saved = localStorage.getItem('scout-analytics-content');
+    return saved === '1' || saved === null && contentDefault;
+  } catch { return false; } // An unreadable existing refusal must not become consent.
+}
+function accountLinked() {
+  if (linkChoice !== undefined) return linkChoice;
+  try { return localStorage.getItem('scout-analytics-account-link') !== '0'; } catch { return false; }
 }
 function save() {
   try { sessionStorage.setItem(storageKey, JSON.stringify(state)); } catch { /* Optional tab storage. */ }
@@ -39,8 +46,8 @@ async function preference(active, current, value) {
 }
 
 export const analytics = {
-  configure(value, sync = false, content = false) {
-    enabled = value === true; accountSync = sync === true; contentAvailable = content === true; currentUser = undefined; lastAllowed = undefined; generation++;
+  configure(value, sync = false, content = false, beta = false) {
+    enabled = value === true; accountSync = sync === true; contentAvailable = content === true; contentDefault = beta === true; currentUser = undefined; lastAllowed = undefined; lastLinked = undefined; generation++;
     globalThis.dispatchEvent?.(new Event('scout-analytics-change'));
     if (!allowed()) return;
     try {
@@ -51,13 +58,14 @@ export const analytics = {
   },
   preferences() {
     return { available: enabled && navigator.doNotTrack !== '1' && navigator.globalPrivacyControl !== true,
-      enabled: allowed(), contentAvailable, content: contentAllowed() };
+      enabled: allowed(), contentAvailable, contentDefault, content: contentAllowed(), linkAccount: accountLinked() };
   },
-  setPreferences(usage, content) {
-    usageChoice = usage === true; contentChoice = usageChoice && content === true;
+  setPreferences(usage, content, link = accountLinked()) {
+    usageChoice = usage === true; contentChoice = usageChoice && content === true; linkChoice = link === true;
     try {
       localStorage.setItem('scout-analytics-opt-out', usageChoice ? '0' : '1');
       localStorage.setItem('scout-analytics-content', contentChoice ? '1' : '0');
+      localStorage.setItem('scout-analytics-account-link', linkChoice ? '1' : '0');
     } catch { /* In-memory controls still apply when browser storage is denied. */ }
     analytics.account(currentUser, session);
     globalThis.dispatchEvent?.(new Event('scout-analytics-change'));
@@ -68,10 +76,10 @@ export const analytics = {
     analytics.track('scout_client_error', { ...properties, code, error_type: errorType(error?.name), frames: exceptionFrames(error?.stack) });
   },
   account(userId, activeSession, signIn) {
-    const permitted = allowed();
-    const unchanged = currentUser === userId && session?.id === activeSession?.id && lastAllowed === permitted;
+    const permitted = allowed(), linked = accountLinked();
+    const unchanged = currentUser === userId && session?.id === activeSession?.id && lastAllowed === permitted && lastLinked === linked;
     currentUser = userId; session = activeSession;
-    lastAllowed = permitted;
+    lastAllowed = permitted; lastLinked = linked;
     if (!permitted) {
       if (unchanged) return;
       const current = ++generation; state = undefined;
@@ -81,6 +89,7 @@ export const analytics = {
     }
     if (unchanged && state) return;
     const current = ++generation;
+    if (state && (state.linked ?? true) !== linked) state = fresh();
     state ??= fresh();
     ready = (async () => {
       await preference(activeSession, current, true);
@@ -93,7 +102,7 @@ export const analytics = {
         visited = true; analytics.track('scout_visited');
         globalThis.dispatchEvent?.(new Event('scout-analytics-ready'));
       }
-      if (signedIn) {
+      if (signedIn && linked) {
         // Linked accounts and the client's latest authentication strategy are
         // not proof of how this particular session was created.
         const verification = signIn?.status === 'complete' && signIn.createdSessionId === activeSession?.id ? signIn.firstFactorVerification : null;
@@ -107,6 +116,7 @@ export const analytics = {
     return {
       'X-Scout-Client': 'web', 'X-Scout-Analytics': allowed() ? 'on' : 'off',
       'X-Scout-Analytics-Content': contentAllowed() ? 'on' : 'off',
+      'X-Scout-Analytics-Account': accountLinked() ? 'on' : 'off',
       ...(allowed() && state ? { 'X-Scout-Anonymous-Id': state.anonymousId } : {}),
     };
   },

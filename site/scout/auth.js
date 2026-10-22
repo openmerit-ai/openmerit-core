@@ -30,7 +30,7 @@ export function initAuth(onAccountChange) {
       const response = await fetch(`${basePath}/api/auth`);
       if (!response.ok) throw new Error('Sign-in is temporarily unavailable. Please try again later.');
       const { publishableKey, frontendApi, analytics: config } = await response.json();
-      analytics.configure(config?.enabled, config?.accountSync, config?.content);
+      analytics.configure(config?.enabled, config?.accountSync, config?.content, config?.contentDefault);
       await Promise.all([
         window.__internal_ClerkUICtor || loadScript(`https://${frontendApi}/npm/@clerk/ui@1/dist/ui.browser.js`),
         window.Clerk || loadScript(`https://${frontendApi}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`, publishableKey),

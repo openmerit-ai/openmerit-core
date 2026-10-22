@@ -1,7 +1,7 @@
 import { createClerkClient } from '@clerk/backend';
 import { parsePublishableKey } from '@clerk/shared/keys';
 import { json } from './http.mjs';
-import { productAnalyticsEnabled, accountSyncEnabled } from './product-analytics.mjs';
+import { productAnalyticsEnabled, accountSyncEnabled, betaEvaluationEnabled } from './product-analytics.mjs';
 
 // Shared by the Worker and local server. Public assets/status need no identity;
 // every recommendation and MCP request must pass this boundary before retrieval.
@@ -24,7 +24,7 @@ export async function scoutAccess(request, env, onAuthenticated = () => {}) {
     const publishableKey = env.CLERK_PUBLISHABLE_KEY;
     if (!publishableKey || !env.CLERK_SECRET_KEY) throw new Error('Missing Clerk configuration');
     const { frontendApi } = parsePublishableKey(publishableKey, { fatal: true });
-    if (path === '/scout/api/auth') return json({ publishableKey, frontendApi, analytics: { enabled: productAnalyticsEnabled(env), accountSync: !!env.SCOUT_ACCOUNTS, content: env.POSTHOG_CAPTURE_CONTENT === 'true' && accountSyncEnabled(env) } });
+    if (path === '/scout/api/auth') return json({ publishableKey, frontendApi, analytics: { enabled: productAnalyticsEnabled(env), accountSync: !!env.SCOUT_ACCOUNTS, content: env.POSTHOG_CAPTURE_CONTENT === 'true' && accountSyncEnabled(env), contentDefault: betaEvaluationEnabled(env) } });
 
     if (!analytics && env.SCOUT_RATE && !(await env.SCOUT_RATE.limit({ key: `ip:${request.headers.get('cf-connecting-ip') ?? 'unknown'}` })).success) return limited();
 

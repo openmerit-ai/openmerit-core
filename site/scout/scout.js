@@ -422,9 +422,16 @@ function updateAnalyticsControls() {
   const settings = analytics.preferences();
   $('#analytics-usage').checked = settings.enabled; $('#analytics-usage').disabled = !settings.available;
   $('#analytics-content').checked = settings.content; $('#analytics-content').disabled = !settings.enabled || !settings.contentAvailable;
+  $('#analytics-unlinked').checked = !settings.linkAccount; $('#analytics-unlinked').disabled = !settings.enabled;
+  $('#beta-data-notice').textContent = settings.content
+    ? 'Beta: we log task text and recommendations to improve Scout. Task text has a 30-day retention window in PostHog. Don’t include confidential data.'
+    : 'Task text sharing is off. OpenAI still processes your task. Don’t include confidential data.';
   $('#analytics-status').textContent = !settings.available ? 'Analytics is unavailable or disabled by your browser privacy settings.'
-    : !settings.contentAvailable ? 'Prompt sharing is not enabled on this deployment.' : 'Prompt sharing is optional and off by default. Do not include secrets or confidential records.';
+    : !settings.contentAvailable ? 'Prompt sharing is not enabled on this deployment.'
+    : settings.contentDefault ? 'Beta prompt logging defaults on unless you previously opted out. Task text uses PostHog’s 30-day AI storage; recommendation metrics remain longer.'
+    : 'Prompt sharing is optional and off by default on this deployment. Shared task text uses PostHog’s 30-day AI storage.';
 }
-for (const id of ['#analytics-usage', '#analytics-content']) $(id).addEventListener('change', () => analytics.setPreferences($('#analytics-usage').checked, $('#analytics-content').checked));
+for (const id of ['#analytics-usage', '#analytics-content', '#analytics-unlinked']) $(id).addEventListener('change', () => analytics.setPreferences($('#analytics-usage').checked, $('#analytics-content').checked, !$('#analytics-unlinked').checked));
+$('.beta-data-notice a[href="#analytics-settings"]').addEventListener('click', () => { $('#analytics-settings').open = true; $('#analytics-settings summary').focus(); });
 window.addEventListener('scout-analytics-change', updateAnalyticsControls);
 updateAnalyticsControls();
