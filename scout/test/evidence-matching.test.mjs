@@ -96,18 +96,21 @@ test('product analytics counts one search per caller across multi-task, shared c
   // Failure in the separate prompt archive must not suppress product events.
   const run=createRecommender({apiKey:'fixture',db:f.db,fetcher:f.fetcher,observe(){throw new Error('PRIVATE_ARCHIVE_FAILURE');}});
   async function call(mcp,user,prompt='PRIVATE_PROMPT_CANARY'){
-   const args={prompt},request=new Request(`https://example.test/scout/${mcp?'mcp':'api/recommend'}`,{
-    method:'POST',headers:{'content-type':'application/json','x-scout-client':mcp?'agent':'web'},
+   const args={prompt},request=new Request(`https://example.test/scout/${mcp?'mcp?agent=amp':'api/recommend'}`,{
+    method:'POST',headers:{'content-type':'application/json','x-scout-client':mcp?'agent':'web',...(!mcp?{'x-scout-agent':user==='user_a'?'cursor':'codex'}:{})},
     body:JSON.stringify(mcp?{jsonrpc:'2.0',id:'PRIVATE_RPC_ID',method:'tools/call',params:{name:'scout_models',arguments:args}}:args),
    });
    const analytics=createProductAnalytics(request,env,{waitUntil:p=>pending.push(p)});analytics.identify(user);
-   const response=await(mcp?handleMCP:handleAPI)(request,f.index,{},(...args)=>run(...args,mcp?'mcp':'api',analytics.observeSearch));
+   const response=await(mcp?handleMCP:handleAPI)(request,f.index,{},(...args)=>run(...args,mcp?'mcp':'api',analytics.observeSearch),analytics.observeMCP);
    analytics.complete(response);return response.json();
   }
   await Promise.all([call(false,'user_a'),call(false,'user_b')]);
   const calls=f.calls();await call(true,'user_a');assert.equal(f.calls(),calls);await flush();
   const searches=sent.filter(e=>e.event==='scout_search_completed');assert.equal(searches.length,3);
   assert.deepEqual(searches.map(e=>e.properties.cache).sort(),['hit','miss','shared']);
+  assert.deepEqual(searches.map(e=>e.properties.agent).sort(),['amp','codex','cursor'],'cached/shared results cannot inherit another agent attribution');
+  assert.equal(sent.find(e=>e.event==='scout_request_completed'&&e.properties.transport==='mcp').properties.mcp_method,'tools/call');
+  assert.equal(sent.filter(e=>e.event==='scout_agent_connected').length,0,'searches are not MCP handshakes');
   assert.ok(searches.every(e=>e.properties.task_count===count&&e.properties.candidate_count===Math.min(count,2)&&e.properties.outcome==='ok'));
   assert.equal(new Set(searches.map(e=>e.properties.trace_id)).size,3,'shared computation must not share request traces');
   for(const search of searches){

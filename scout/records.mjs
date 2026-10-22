@@ -2,6 +2,9 @@ import { finite, publicURL, digest } from './utils.mjs';
 import { validateRegistry, registry as seed } from './registry.mjs';
 
 export const catalogueVersion = 2;
+// A stored inspection's record is the enclosing research record itself. Keep one
+// copy: the duplicate doubled the research data that every refresh step loads.
+const dropInspectionRecord = r => r.inspection?.record ? { ...r, inspection: (({ record, ...rest }) => rest)(r.inspection) } : r;
 // Normalized records are the maintained catalogue; snapshots are derived views.
 export function toRecords(snapshot) {
   const evidence = new Map(snapshot.models.map(m=>[m.id,m]));
@@ -16,7 +19,7 @@ export function toRecords(snapshot) {
   }
   return { version: catalogueVersion,discoveryState:snapshot.discoveryState??{},discoverySummary:snapshot.discoverySummary??null,selectionMetadataVersion:snapshot.selectionMetadataVersion??null,checkedAt: snapshot.checkedAt, registry: snapshot.registry ?? seed, models, endpoints, benchmarks: snapshot.benchmarks, observations, sources: snapshot.sources,
     specialists: snapshot.specialists ?? [], specialistProfiles: snapshot.specialistProfiles ?? [], benchmarkMethodologies: snapshot.benchmarkMethodologies, benchmarkDescriptions: snapshot.benchmarkDescriptions,
-    research: snapshot.research ?? [], researchState: snapshot.researchState ?? {}, researchPending:snapshot.researchPending??[], refreshSummary:snapshot.refreshSummary??null, publication: snapshot.publication ?? null };
+    research: (snapshot.research ?? []).map(dropInspectionRecord), researchState: snapshot.researchState ?? {}, researchPending:snapshot.researchPending??[], refreshSummary:snapshot.refreshSummary??null, publication: snapshot.publication ?? null };
 }
 
 export function validateRecords(records) {
@@ -40,7 +43,7 @@ export function toSnapshot(records) {
   for(const o of records.observations) { const rows=evidence.get(o.modelId)??[];const {modelId,id,...e}=o;rows.push(e);evidence.set(o.modelId,rows); }
   const catalogue=records.models.map(m=>({...m,endpoints:endpoints.get(m.id)??[],evidence:evidence.get(m.id)??[]}));
   return { version:1,dataVersion:20,discoveryState:records.discoveryState??{},discoverySummary:records.discoverySummary??null,selectionMetadataVersion:records.selectionMetadataVersion??null,checkedAt:records.checkedAt,availableModels:catalogue.filter(m=>m.endpoints.length).length,catalogue,models:catalogue.filter(m=>m.evidence.length),benchmarks:records.benchmarks,sources:records.sources,
-    registry:records.registry,specialists:records.specialists,specialistProfiles:records.specialistProfiles,benchmarkMethodologies:records.benchmarkMethodologies,benchmarkDescriptions:records.benchmarkDescriptions,research:records.research,researchState:records.researchState,researchPending:records.researchPending??[],refreshSummary:records.refreshSummary,publication:records.publication };
+    registry:records.registry,specialists:records.specialists,specialistProfiles:records.specialistProfiles,benchmarkMethodologies:records.benchmarkMethodologies,benchmarkDescriptions:records.benchmarkDescriptions,research:(records.research??[]).map(dropInspectionRecord),researchState:records.researchState,researchPending:records.researchPending??[],refreshSummary:records.refreshSummary,publication:records.publication };
 }
 
 // Hash each record independently before the small catalogue root. This retains

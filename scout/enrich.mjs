@@ -49,7 +49,8 @@ export async function integrateResearch(snapshot, batches, options) {
   const inspected=await concurrent(incoming,next.registry.policy.refreshConcurrency,async r=>{
     const subject=next.benchmarks.find(b=>b.id===r.subjectId);
     const inspectionHash=await digest(['22',r.contentHash,r.subjectId,subject?.definition??null]);
-    if(prior.get(r.id)?.inspectionHash===inspectionHash&&prior.get(r.id)?.verifiedAt)return prior.get(r.id).inspection;
+    const cached=prior.get(r.id);
+    if(cached?.inspectionHash===inspectionHash&&cached.verifiedAt){const {inspection:stored,inspectionHash:_h,verifiedAt:_v,...record}=cached;return {...stored,record:stored.record??record};}
     // A rejected claim and an unavailable interpreter are different outcomes.
     // Provider failures must leave the durable research queue unconsumed.
     const inspection=await inspectResearch(r,subject,next,options);return inspection?{...inspection,inspectionHash}:null;

@@ -11,7 +11,7 @@ const tool = {
 };
 
 // Stateless Streamable HTTP. No sessions, SDK runtime or open SSE streams.
-export async function handleMCP(request, index, state = {}, recommendTask = (index, prompt, modelIds, endpointIds) => recommend(index, prompt, Date.now(), null, undefined, modelIds ?? null, endpointIds ?? null)) {
+export async function handleMCP(request, index, state = {}, recommendTask = (index, prompt, modelIds, endpointIds) => recommend(index, prompt, Date.now(), null, undefined, modelIds ?? null, endpointIds ?? null), observe = () => {}) {
   const origin = request.headers.get('origin');
   if (origin && origin !== new URL(request.url).origin) return json({ error: 'Origin not allowed.' }, 403);
   if (request.method !== 'POST') return json({ error: 'Use POST. This server does not open SSE streams.' }, 405, { Allow: 'POST' });
@@ -24,6 +24,7 @@ export async function handleMCP(request, index, state = {}, recommendTask = (ind
   const { id, method, params = {} } = message ?? {};
   const fail = (code, message, status = 200) => json({ jsonrpc: '2.0', id: id ?? null, error: { code, message } }, status);
   if (!message || Array.isArray(message) || message.jsonrpc !== '2.0' || typeof method !== 'string' || (id !== undefined && typeof id !== 'string' && !Number.isSafeInteger(id))) return fail(-32600, 'Invalid JSON-RPC request.', 400);
+  observe(method, method === 'initialize' ? params?.clientInfo?.name : undefined);
   if (id === undefined) {
     if (['notifications/initialized', 'notifications/cancelled'].includes(method)) return new Response(null, { status: 202, headers: { 'Cache-Control': 'no-store' } });
     return fail(-32600, 'Unrecognized notification.', 400);

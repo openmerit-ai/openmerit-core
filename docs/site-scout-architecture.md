@@ -1,5 +1,11 @@
 # Scout architecture and operations
 
+## Refresh memory failure — source only, not deployed, 22 October 2026
+
+Every hourly `openmerit-scout-refresh` run since `hour-497862` (18 October, 06:07 UTC) failed in `collect-public-feeds` with "Worker exceeded memory limit", so production kept serving the 18 October 05:07 UTC catalogue and reported overdue sources. The last successful run published `812a3139430efb5560b98ba6d87f964b`; its 32.7 MB records file is 65% research records, and each stored research record carried a second copy of itself in `inspection.record`. The collect step then wrote `{next, previous}` with the research array in both.
+
+Records now store one copy (`toRecords`/`toSnapshot` drop `inspection.record`; `integrateResearch` rebuilds it from the enclosing record for cached inspections), and `collected.json` omits `previous.research`, which no later step reads. With recorded feed responses replayed, the smallest Node heap that completes the collect step on the production catalogue fell from 287 MB to 192 MB; the 18 October input that last succeeded needed 282 MB on the old code. Node's figure includes runtime overhead absent in Workers, so compare these only relative to each other. The intermediate file shrinks from 66 MB to 35 MB, which also lowers the later steps' loads. Research still grows by up to 24 jobs per hour without pruning; this restores headroom rather than removing that growth. The publisher (`wrangler.scout.jsonc`) must be deployed for the fix to take effect.
+
 ## Unified PostHog collection — deployed, 22 October 2026
 
 The serving recommender no longer installs the shared Cloudflare search observer. Every request supplies its own PostHog observer; `search-analytics.mjs` projects the existing evidence allowlist into bounded task records and recommendation traces. Historical Analytics Engine helpers remain available for decoding/testing prior records, but no runtime fallback writes user prompts there. The serving config removes its archive binding without deleting the dataset. A generated request trace appears in `X-Scout-Trace-Id`, search/request/error records and browser result interactions; it is never cached with another account's result.

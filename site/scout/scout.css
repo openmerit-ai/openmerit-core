@@ -68,6 +68,10 @@ code, kbd { font-family: var(--mono); }
 .prompt-box textarea:focus { outline: none; background: var(--input-active); }
 .prompt-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 12px; }
 .prompt-footer > span { color: var(--quiet); font-size: 11px; }
+.prompt-examples { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+#examples-label { margin-right: 4px; color: var(--muted); font-size: 11px; }
+.prompt-examples button { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font-size: 12px; text-align: left; }
+.example-count { flex: none; color: var(--quiet); font: 10px var(--mono); }
 .find-button { display: inline-flex; justify-content: center; align-items: center; flex: none; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; color: var(--button-ink); background: var(--button); }
 .find-button[aria-busy="true"] { opacity: .5; }
 .results-section { margin-top: 33px; }
@@ -106,6 +110,8 @@ summary::-webkit-details-marker { display: none; }
 .specialist-evidence { margin-top: 12px; font-size: 11px; }
 .specialist-evidence > summary { min-height: 32px; }
 .agent-body { padding-top: 6px; }
+.agent-choice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin-top: 18px; color: var(--ink); }
+.agent-choice select { min-height: 44px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
 .code-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; font: 11px var(--mono); }
 .agent-body pre { overflow-x: auto; padding: 17px 19px; margin: 4px 0 0; background: var(--surface); color: var(--ink); border-radius: 7px; font-size: 12px; line-height: 1.8; }
 .agent-body .agent-note { margin-top: 14px; font-size: 11px; }
@@ -131,7 +137,7 @@ summary::-webkit-details-marker { display: none; }
 .error-message { color: var(--error); font-size: 12px; margin-top: 16px; }
 @media (hover: hover) and (pointer: fine) {
   .find-button:hover { background: var(--button-hover); }
-  .add-agent-button:hover { border-color: var(--field-line); background: var(--hover); }
+  .add-agent-button:hover, .prompt-examples button:hover { border-color: var(--field-line); background: var(--hover); }
   .quiet-button:hover, .scout-header nav a:hover, .scout-footer a:hover, summary:hover { color: var(--ink); }
   .model-id-line button:hover { background: var(--hover); }
 }
@@ -154,6 +160,7 @@ summary::-webkit-details-marker { display: none; }
   .add-agent-button { gap: 10px; padding-inline: 10px; }
   .agent-logos img { width: 24px; height: 24px; }
   .prompt-box textarea { font-size: 16px; min-height: 208px; }
+  #examples-label { flex-basis: 100%; }
   .find-button { width: 44px; height: 44px; }
   .newline-hint { display: none; }
   .quiet-button { min-height: 40px; }

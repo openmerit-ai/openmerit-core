@@ -46,7 +46,7 @@ const server = createServer(async (req, res) => {
       let response = await scoutAccess(request, analyticsEnv, analytics.identify) ?? (url.pathname === '/scout/api/analytics'
         ? await analytics.handleEvent()
         : url.pathname === '/scout/api/analytics/preference' ? await analytics.handlePreference()
-        : await (mcp ? handleMCP : handleAPI)(request, index, refreshState, (...args) => recommendTask(...args, mcp ? 'mcp' : 'api', analytics.observeSearch)));
+        : await (mcp ? handleMCP : handleAPI)(request, index, refreshState, (...args) => recommendTask(...args, mcp ? 'mcp' : 'api', analytics.observeSearch), analytics.observeMCP));
       analytics.complete(response);
       response = analytics.response(response);
       res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text()); return;

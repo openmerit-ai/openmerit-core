@@ -94,7 +94,8 @@ export function recommend(index, prompt, now = Date.now(), interpretedTask = nul
   }
   // Direct task observations can establish a capability absent from public feeds.
   // The benchmark fallback still requires explicit document/tool/memory evidence.
-  if(task.servingEngine==='evidence')attachTaskObservations(candidates,task,now,taskEvidence);
+  const calibration=task.servingEngine==='evidence'?attachTaskObservations(candidates,task,now,taskEvidence):null;
+  if(calibration?.expired)warnings.push(`Calibration results for ${calibration.expired.label} expired on ${calibration.expired.expiresAt.slice(0,10)} and are excluded until re-measured. This shortlist uses public benchmarks only.`);
   const benchmarkCandidates = candidates.filter(c => c.evidence.length &&
     (!task.needsVision || c.evidence.some(e => e.definition.tags.includes(task.weights.documents ? 'documents' : 'vision'))) &&
     (!task.needsTools || c.evidence.some(e => e.definition.tags.includes('tools'))) &&

@@ -89,7 +89,10 @@ export const analytics = {
       if (state.user && state.user !== user) state = fresh();
       const signedIn = !!user && state.session !== sessionId;
       state.user = user; state.session = sessionId; save();
-      if (!visited) { visited = true; analytics.track('scout_visited'); }
+      if (!visited) {
+        visited = true; analytics.track('scout_visited');
+        globalThis.dispatchEvent?.(new Event('scout-analytics-ready'));
+      }
       if (signedIn) {
         // Linked accounts and the client's latest authentication strategy are
         // not proof of how this particular session was created.

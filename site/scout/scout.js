@@ -257,7 +257,16 @@ $('#prompt').addEventListener('input', fitPrompt);
 window.addEventListener('resize', fitPrompt);
 window.addEventListener('pageshow', fitPrompt);
 fitPrompt();
-// Examples are hints only: never insert text or submit a request.
+// Presets fill an editable draft; only the normal submit action runs a search.
+document.querySelectorAll('[data-example]').forEach(button => button.addEventListener('click', () => {
+  const input = $('#prompt'); input.value = button.dataset.prompt;
+  input.dispatchEvent(new Event('input', { bubbles: true })); input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+  $('#error').hidden = true;
+  $('#announcement').textContent = 'Example added. Edit it or find models.';
+  analytics.track('scout_example_selected', { example: button.dataset.example });
+}));
+// Rotating placeholders remain hints only; they never replace a draft.
 const promptExamples = [
   $('#prompt').placeholder,
   'Review a TypeScript API that sometimes creates duplicate orders. Trace the cause, suggest a small fix, and write regression tests. The model needs to read several files and use tools to run the tests.',
@@ -299,28 +308,63 @@ const auth = initAuth(() => {
   $('#task-results').replaceChildren(); $('#results').hidden = true; $('#results').setAttribute('aria-busy', 'false'); $('#error').hidden = true;
   $('#prompt').value = ''; fitPrompt(); $('.find-button span').textContent = 'Find models'; $('.find-button').setAttribute('aria-busy', 'false');
 });
-const command = `curl ${location.origin}${basePath}/api/recommend \\\n  -H "Authorization: Bearer $SCOUT_TOKEN" \\\n  -H 'Content-Type: application/json' \\\n  -d '{"prompt":"Extract six invoice fields as JSON"}'`;
-$('#agent-code').textContent = command;
-$('#copy-command').addEventListener('click', () => copy(command, $('#copy-command')));
-const mcpURL = `${location.origin}${basePath}/mcp`;
-$('#mcp-url').textContent = mcpURL;
-$('#copy-mcp').addEventListener('click', () => copy(mcpURL, $('#copy-mcp')));
+function setupURL(path) {
+  const url = new URL(`${location.origin}${basePath}/${path}`);
+  if (!analytics.preferences().enabled) url.searchParams.set('analytics', 'off');
+  else if ($('#coding-agent').value !== 'unknown') url.searchParams.set('agent', $('#coding-agent').value);
+  return url.href;
+}
+function setupCommand() {
+  return `curl '${setupURL('api/recommend')}' \\\n  -H "Authorization: Bearer $SCOUT_TOKEN" \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Scout-Client: agent' \\\n  -H 'X-Scout-Analytics-Content: off' \\\n  -d '{"prompt":"Extract six invoice fields as JSON"}'`;
+}
+function renderAgentSetup() {
+  $('#mcp-url').textContent = setupURL('mcp'); $('#agent-code').textContent = setupCommand();
+}
+$('#coding-agent').addEventListener('change', () => {
+  renderAgentSetup(); analytics.track('scout_agent_selected', { agent: $('#coding-agent').value });
+});
+for (const [id, artifact] of [['copy-mcp', 'mcp_url'], ['copy-command', 'api_request']]) {
+  $(`#${id}`).addEventListener('click', async () => {
+    const agent = $('#coding-agent').value;
+    const ok = await copy(artifact === 'mcp_url' ? setupURL('mcp') : setupCommand(), $(`#${id}`));
+    analytics.track('scout_agent_setup_copied', { agent, artifact, outcome: ok ? 'ok' : 'error' });
+  });
+}
+$('#agent-docs').addEventListener('click', () => analytics.track('scout_agent_docs_opened', { agent: $('#coding-agent').value }));
+window.addEventListener('scout-analytics-change', renderAgentSetup);
+renderAgentSetup();
 fetch(`${basePath}/api/status`).then(response => { if (!response.ok) throw new Error(); return response.json(); }).then(data => { if (!result) showIndex(data); }).catch(() => { if (!result) { $('#index-counts').textContent = 'Index unavailable'; } });
 
 // Deep links reveal the native disclosure before moving focus to its summary.
-function revealSection() {
+let setupOpened = false;
+function revealSection(source = 'deep_link', track = true) {
   if (location.hash !== '#for-agents') return;
+  if (!setupOpened && track) analytics.track('scout_agent_setup_opened', { source });
+  setupOpened = true;
   const section = $('#for-agents'); section.open = true; section.querySelector('summary').focus({ preventScroll: true });
 }
-window.addEventListener('hashchange', revealSection);
+window.addEventListener('hashchange', () => revealSection());
+$('#for-agents').addEventListener('toggle', () => {
+  const open = $('#for-agents').open;
+  if (open && !setupOpened) analytics.track('scout_agent_setup_opened', { source: 'disclosure' });
+  setupOpened = open;
+});
 document.querySelectorAll('a[href="#for-agents"]').forEach(link => link.addEventListener('click', event => {
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
   location.hash = '#for-agents';
-  revealSection();
+  // Count deliberate clicks even if the disclosure is already open, without
+  // double-counting the resulting hashchange and native toggle events.
+  setupOpened = false;
+  revealSection(link.classList.contains('add-agent-button') ? 'button' : 'navigation');
   $('#for-agents').scrollIntoView({ block: 'start' });
 }));
-revealSection();
+if (location.hash === '#for-agents') {
+  revealSection('deep_link', false);
+  window.addEventListener('scout-analytics-ready', () => {
+    if ($('#for-agents').open) analytics.track('scout_agent_setup_opened', { source: 'deep_link' });
+  }, { once: true });
+}
 
 function updateAnalyticsControls() {
   const settings = analytics.preferences();

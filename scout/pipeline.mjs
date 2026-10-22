@@ -64,7 +64,8 @@ export async function runRefresh(env,step,id) {
         await archiveListings(env.SCOUT_INDEX,extra,next.checkedAt);
         next=await discoverInventory(next,previous,{archiveDb:env.SCOUT_INDEX,pages:next.registry.policy.discoveryPagesPerHour??2});
       }
-      const key=`runs/${id}/collected.json`;await putJSON(bucket,key,{next,previous});return key;
+      // next already carries the retained research; later steps never read the previous copy.
+      const key=`runs/${id}/collected.json`;await putJSON(bucket,key,{next,previous:{...previous,research:[]}});return key;
     });
     const jobs=await step.do('plan-research',async()=>{
       const {next}=await getJSON(bucket,baseKey);

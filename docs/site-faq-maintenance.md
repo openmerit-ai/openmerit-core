@@ -1,5 +1,13 @@
 # Website FAQ maintenance
 
+## Scout preset tasks — source only, unreleased, 22 October 2026
+
+Reviewed the new editable one-, two- and three-task examples against setup, model-selection and data claims. Selection only fills the prompt; sign-in and explicit submission still apply. Examples use normal ranking, do not execute models, and do not guarantee task counts or five candidates. The click event sends a fixed example ID, not draft text. Homepage FAQ claims about released npm behavior are unchanged.
+
+## Scout coding-agent activation analytics — source only, unreleased, 22 October 2026
+
+Reviewed setup, identity and data claims against explicit setup/choice/copy events and server-confirmed MCP initialization. The new optional selector adds a public agent label, not an installer or a compatibility guarantee. Copies are not conversions; activation requires a successful search with candidates. Browser privacy controls propagate to newly copied URLs, account preferences still gate server events, and no credentials or copied configuration enter analytics. The homepage FAQ still describes unchanged released npm behavior. Scout documentation marks the expanded funnel source-only and distinguishes first observed use from lifetime-first use and model execution.
+
 ## Scout coding-agent button — source only, unreleased, 22 October 2026
 
 The new **Add to your coding agent** button opens existing API/MCP setup, including the current short-lived bearer-token and no-automatic-OAuth limitations. Stacked brand marks are navigation decoration, not a claim of tested integration with each client. No ranking, authentication, installation, collection or homepage FAQ behavior changes. The page serves its marks locally; no visitor request goes to a brand's favicon service.

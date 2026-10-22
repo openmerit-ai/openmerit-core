@@ -17,3 +17,15 @@ test('compact predecessors preserve publication retention checks without retaini
  const ready=records.benchmarks.find(b=>b.interpretation?.status==='ready');
  await assert.rejects(validatePublication({...records,benchmarks:records.benchmarks.filter(b=>b.id!==ready.id),observations:records.observations.filter(o=>o.benchmark!==ready.id)},compact),/discard previously validated/);
 });
+test('stored research keeps one copy of each record and cached inspections still re-integrate without provider calls',async()=>{
+ const {toSnapshot}=await import('../records.mjs'),{integrateResearch}=await import('../enrich.mjs'),{digest}=await import('../utils.mjs');
+ const record={id:'research:x',kind:'benchmark',name:'Fixture bench',url:'https://example.com/b',contentHash:'c1',subjectId:'none',subjectHash:'h',capabilities:[],citations:[{url:'https://example.com/b',excerpt:'x'.repeat(5000)}]};
+ const inspectionHash=await digest(['22','c1','none',null]);
+ const stored={...record,inspectionHash,verifiedAt:'2026-10-20T00:00:00Z',inspection:{record,identity:null,familyVerified:true,facts:[],observations:[],endpoints:[],verifiedAt:'2026-10-20T00:00:00Z',inspectionHash}};
+ const records=toRecords({...snapshot,research:[stored]});
+ assert.equal(records.research[0].inspection.record,undefined);
+ assert.ok(JSON.stringify(records.research).length<JSON.stringify([stored]).length*.6);
+ let calls=0;const fetcher=async()=>{calls++;throw Error('unexpected provider call');};
+ const next=await integrateResearch(toSnapshot(records),[{subjectId:'none',subjectHash:'h',records:[record]}],{fetcher,apiKey:'fixture'});
+ assert.equal(calls,0);assert.equal(next.research.length,1);assert.equal(toRecords(next).research[0].inspection.record,undefined);
+});

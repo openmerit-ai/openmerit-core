@@ -3,13 +3,14 @@ import { workloadFor } from './comparison.mjs';
 
 // Small, versioned aggregates from a separate calibration split. No prompt text,
 // answer keys, provider preferences, or per-model coefficients enter the ranker.
-export function measuredCandidates(candidates, task, now, data = bundled, {minimumModels=5}={}) {
+export const calibrationMaxAgeMs = 7 * 86400_000;
+export function measuredCandidates(candidates, task, now, data = bundled, {minimumModels=5,maxAgeMs=calibrationMaxAgeMs}={}) {
   if (data.version !== 1 || !task.kind || task.kind === 'other' || task.unsupported) return null;
   if (task.uncertainty?.some(id => ['task_kind', 'result_type', 'json'].includes(id))) return null;
   const workload = workloadFor(task);
   for (const profile of [...data.profiles].sort((a, b) => Date.parse(b.measuredAt) - Date.parse(a.measuredAt))) {
     const age = now - Date.parse(profile.measuredAt);
-    if (!Number.isFinite(age) || age < 0 || age > 7 * 86400_000 || profile.split !== 'calibration') continue;
+    if (!Number.isFinite(age) || age < 0 || age > maxAgeMs || profile.split !== 'calibration') continue;
     const scope = profile.scope;
     // A measurement applies only to the serialization actually exercised by
     // its harness. Unknown/legacy formats cannot authorize measured accuracy.
@@ -37,7 +38,13 @@ export function measuredCandidates(candidates, task, now, data = bundled, {minim
 
 // Reuse direct observations without excluding every other eligible model.
 export function attachTaskObservations(candidates,task,now,data=bundled) {
-  const matched=measuredCandidates(candidates,task,now,data,{minimumModels:1});if(!matched)return null;
+  const matched=measuredCandidates(candidates,task,now,data,{minimumModels:1});
+  if(!matched){
+    // An applicable profile past its expiry stays excluded, but not silently.
+    const expired=measuredCandidates(candidates,task,now,data,{minimumModels:1,maxAgeMs:Infinity});
+    if(expired)for(const c of expired.candidates)delete c.measured;
+    return expired?{expired:expired.profile}:null;
+  }
   const scope=data.profiles.find(p=>p.id===matched.profile.id).scope;
   for(const c of matched.candidates) {
     c.taskObservation={...c.measured,profile:matched.profile};delete c.measured;

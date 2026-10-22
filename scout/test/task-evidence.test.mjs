@@ -103,3 +103,12 @@ test('matching evidence is selected by measurement recency rather than file orde
  assert.equal(measuredCandidates(candidates,task,now,data).profile.id,'newer');
  newer.split='holdout';assert.equal(measuredCandidates(candidates,task,now,data).profile.id,'fixture');
 });
+test('an applicable calibration profile past its expiry is excluded with a visible warning',async()=>{
+ const {attachTaskObservations}=await import('../task-evidence.mjs');
+ const {candidates,data}=fixture(),late=now+8*86400_000;
+ assert.equal(attachTaskObservations(candidates,task,late,data).expired.id,'fixture');
+ assert.ok(candidates.every(c=>!c.measured&&!c.taskObservation&&!c.evidence.length));
+ assert.equal(attachTaskObservations(fixture().candidates,task,now,data).id,'fixture');
+ // A non-matching task gets neither observations nor an expiry warning.
+ assert.equal(attachTaskObservations(fixture().candidates,{...task,kind:'classify'},late,data),null);
+});

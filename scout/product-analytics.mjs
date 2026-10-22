@@ -11,12 +11,19 @@ const counts = { task_count: integer(0, 3), candidate_count: integer(0, 15) };
 const position = { rank: integer(1, 5), task_index: integer(1, 3) };
 const command = choice(['help', 'dash', 'eval_init', 'eval_doctor', 'eval_plan', 'eval_run', 'eval_watch', 'eval_report', 'unknown']);
 const mode = choice(['sample', 'live']), page = choice(['home', 'docs']);
+const agent = choice(['claude-code', 'cursor', 'codex', 'amp', 'opencode', 't3-code', 'other', 'unknown']);
+const mcpMethod = choice(['initialize', 'ping', 'tools/list', 'tools/call', 'notifications/initialized', 'notifications/cancelled']);
 const exception = { error_type: errorType, frames: safeFrames };
 const version = value => typeof value === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[a-z0-9.]{1,30})?$/.test(value) ? value : undefined;
 const clientEvents = {
   scout_visited: {},
   scout_sign_in_opened: {},
+  scout_example_selected: { example: choice(['invoice-extraction', 'support-workflow', 'feedback-workflow']) },
   scout_session_observed: { auth_provider: choice(['google', 'github', 'unknown']) },
+  scout_agent_setup_opened: { source: choice(['button', 'navigation', 'disclosure', 'deep_link']) },
+  scout_agent_selected: { agent },
+  scout_agent_setup_copied: { agent, artifact: choice(['mcp_url', 'api_request']), outcome: choice(['ok', 'error']) },
+  scout_agent_docs_opened: { agent },
   scout_results_viewed: { ...counts, duration_ms: duration },
   scout_evidence_opened: position,
   scout_model_id_copied: position,
@@ -39,7 +46,8 @@ const schemas = {
     ...counts, duration_ms: duration, cache: choice(['miss', 'hit', 'shared', 'unknown']),
     outcome: choice(['ok', 'empty', 'unsupported', 'clarification', 'rate_limited', 'interpretation_error', 'selection_error', 'internal_error']),
   },
-  scout_request_completed: { route: choice(['recommend', 'mcp']), http_status: integer(100, 599), duration_ms: duration, outcome: choice(['ok', 'error']) },
+  scout_request_completed: { route: choice(['recommend', 'mcp']), mcp_method: mcpMethod, http_status: integer(100, 599), duration_ms: duration, outcome: choice(['ok', 'error']) },
+  scout_agent_connected: { reported_agent: agent },
   scout_server_error: { code: choice(['catalogue_error', 'interpretation_error', 'selection_error', 'internal_error']), ...exception },
 };
 const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) ? value.toLowerCase() : null;
@@ -83,15 +91,19 @@ export async function sendProductBatch(env, batch) {
 // Request-local identity only: never attach an account or trace to a shared
 // computation/cache. Search and interaction events now share this destination.
 export function createProductAnalytics(request, env, ctx = {}) {
+  const url = new URL(request.url);
   const enabled = productAnalyticsEnabled(env) && request.headers.get('dnt') !== '1' &&
-    request.headers.get('sec-gpc') !== '1' && request.headers.get('x-scout-analytics') !== 'off';
-  const path = new URL(request.url).pathname, started = performance.now();
+    request.headers.get('sec-gpc') !== '1' && request.headers.get('x-scout-analytics') !== 'off' && url.searchParams.get('analytics') !== 'off';
+  const path = url.pathname, started = performance.now();
   const observedAt = Date.now();
-  const client = choice(['web', 'cli', 'agent'])(request.headers.get('x-scout-client')) ?? 'unknown';
+  // Setup URLs carry only a public agent category, never an account or token.
+  // These caller hints are attribution, not authentication or proof of installation.
+  const selectedAgent = agent(request.headers.get('x-scout-agent') ?? url.searchParams.get('agent')) ?? 'unknown';
+  const client = choice(['web', 'cli', 'agent'])(request.headers.get('x-scout-client')) ?? (selectedAgent !== 'unknown' ? 'agent' : 'unknown');
   const anonymousId = uuid(request.headers.get('x-scout-anonymous-id')) ?? crypto.randomUUID();
   const traceId = crypto.randomUUID();
   const contentAllowed = env.POSTHOG_CAPTURE_CONTENT === 'true' && accountSyncEnabled(env) && request.headers.get('x-scout-analytics-content') === 'on';
-  let userId;
+  let userId, method, reportedAgent = 'unknown';
 
   function background(promise) {
     const safe = promise.catch(() => {});
@@ -114,8 +126,9 @@ export function createProductAnalytics(request, env, ctx = {}) {
         distinct_id: distinctId, $process_person_profile: !!identity, $geoip_disable: true, $ip: null,
         product: event.startsWith('cli_') || event.startsWith('terminal_') ? 'openmerit' : event.startsWith('website_') ? 'website' : 'scout', environment: env.POSTHOG_ENVIRONMENT,
         client: options.client ?? client, transport: path === '/scout/mcp' ? 'mcp' : 'http',
+        agent: selectedAgent,
         request_id: traceId, trace_id: safe.trace_id ?? traceId, $session_id: anon,
-        analytics_version: 2,
+        analytics_version: 3,
         ...(safe.trace_id || ['/scout/api/recommend', '/scout/mcp'].includes(path) ? { $ai_trace_id: safe.trace_id ?? traceId } : {}),
         ...(env.CF_VERSION_METADATA?.id ? { release: env.CF_VERSION_METADATA.id } : {}),
       };
@@ -143,6 +156,11 @@ export function createProductAnalytics(request, env, ctx = {}) {
   }
 
   return {
+    observeMCP(value, clientName) {
+      method = mcpMethod(value);
+      // Never retain arbitrary client names/versions; some contain local paths.
+      reportedAgent = agent(clientName) ?? 'unknown';
+    },
     identify(id) {
       userId = id;
       // An opted-out authenticated API/MCP call also stops background sync.
@@ -191,10 +209,14 @@ export function createProductAnalytics(request, env, ctx = {}) {
         // MCP tool/protocol failures can have HTTP 200. Inspect the outcome, but
         // never copy its body, error message or JSON-RPC ID into an event.
         const body = path === '/scout/mcp' ? await response.clone().json().catch(() => null) : null;
+        const ok = response.ok && !body?.error && !body?.result?.isError;
         capture('scout_request_completed', {
           route: path === '/scout/mcp' ? 'mcp' : 'recommend', http_status: response.status, duration_ms,
-          outcome: response.ok && !body?.error && !body?.result?.isError ? 'ok' : 'error',
+          ...(method ? { mcp_method: method } : {}), outcome: ok ? 'ok' : 'error',
         });
+        if (userId && method === 'initialize' && ok && body?.result?.protocolVersion) {
+          capture('scout_agent_connected', { reported_agent: reportedAgent });
+        }
       })());
     },
     async handleEvent() {

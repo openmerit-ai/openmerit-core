@@ -143,9 +143,11 @@ test('product events are allowlisted, identity comes from verified sessions, and
   const responses=await Promise.all(['alice','bob'].map(name=>alpha.fetch(eventRequest('scout_session_observed',{userId:secret},sessionToken({sub:`user_${name}`})),config,ctx)));
   assert.deepEqual(responses.map(r=>r.status),[204,204]);
   assert.equal((await alpha.fetch(eventRequest('scout_model_id_copied',{rank:2,task_index:3,modelId:secret}),config,ctx)).status,204);
+  for(const example of ['invoice-extraction','support-workflow','feedback-workflow',secret])assert.equal((await alpha.fetch(eventRequest('scout_example_selected',{example,prompt:secret}),config,ctx)).status,204);
   await ctx.flush();
   const events=sent.flatMap(p=>p.batch),identities=events.filter(e=>e.event==='$identify');
-  assert.equal(events.length,6);assert.equal(identities.length,2);
+  assert.equal(events.length,10);assert.equal(identities.length,2);
+  assert.deepEqual(events.filter(e=>e.event==='scout_example_selected').map(e=>e.properties.example),['invoice-extraction','support-workflow','feedback-workflow',undefined]);
   assert.equal(events[0].properties.distinct_id,`anonymous:${anon}`);
   assert.notEqual(identities[0].properties.distinct_id,identities[1].properties.distinct_id);
   assert.ok(identities.every(e=>/^account:[a-f0-9]{64}$/.test(e.properties.distinct_id)&&e.properties.$anon_distinct_id===`anonymous:${anon}`));
@@ -157,7 +159,48 @@ test('product events are allowlisted, identity comes from verified sessions, and
   assert.equal((await alpha.fetch(eventRequest('scout_session_observed'),config,ctx)).status,401);
   assert.equal((await alpha.fetch(eventRequest('scout_session_observed',{},'forged'),config,ctx)).status,401);
   assert.equal((await alpha.fetch(eventRequest('scout_visited',{},undefined,{origin:'https://foreign.test'}),config,ctx)).status,403);
-  await ctx.flush();assert.equal(sent.flatMap(p=>p.batch).length,6);
+  await ctx.flush();assert.equal(sent.flatMap(p=>p.batch).length,10);
+});
+
+test('agent setup attribution joins verified MCP connections, never copies, failed auth or unrelated requests',async t=>{
+  const sent=[],ctx=pendingContext(),config={...authEnv,...productEnv};
+  t.mock.method(globalThis,'fetch',async(_url,options)=>{sent.push(...JSON.parse(options.body).batch);return new Response(null,{status:200});});
+  const token=sessionToken(),privateName='PRIVATE_CANARY_person@example.invalid';
+  const call=(query,method='initialize',headers={},bearer=token,id=1)=>alpha.fetch(new Request(`https://example.test/scout/mcp${query}`,{
+    method:'POST',headers:{'content-type':'application/json',...(bearer?{authorization:`Bearer ${bearer}`} : {}),...headers},
+    body:JSON.stringify({jsonrpc:'2.0',id,method,params:{protocolVersion:'2025-11-25',clientInfo:{name:privateName,version:privateName}}}),
+  }),config,ctx);
+  for(const agent of ['claude-code','cursor','codex','amp','opencode','t3-code','other']){
+    assert.equal((await alpha.fetch(eventRequest('scout_agent_selected',{agent,installation:true,token:privateName},token),config,ctx)).status,204);
+    assert.equal((await alpha.fetch(eventRequest('scout_agent_setup_copied',{agent,artifact:'mcp_url',outcome:'ok'},token),config,ctx)).status,204);
+    const result=await call(`?agent=${agent}`);assert.equal((await result.json()).result.protocolVersion,'2025-11-25');
+  }
+  await ctx.flush();
+  const connections=sent.filter(e=>e.event==='scout_agent_connected');assert.equal(connections.length,7);
+  assert.deepEqual(connections.map(e=>e.properties.agent).sort(),['amp','claude-code','codex','cursor','opencode','other','t3-code']);
+  assert.ok(connections.every(e=>e.properties.reported_agent==='unknown'&&e.properties.client==='agent'&&e.properties.transport==='mcp'));
+  assert.equal(new Set(sent.map(e=>e.properties.distinct_id)).size,1,'setup and connection share the verified account');
+  assert.ok(sent.filter(e=>e.event==='scout_request_completed').every(e=>e.properties.mcp_method==='initialize'&&e.properties.outcome==='ok'));
+  assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_CANARY|user_alice|sess_alice|installation|Bearer/);
+
+  for(const method of ['ping','tools/list','tools/call','PRIVATE_CANARY'])await call('?agent=cursor',method);
+  assert.equal((await call('?agent=cursor','initialize',{},null)).status,401);
+  assert.equal((await call('?agent=cursor','initialize',{},'forged')).status,401);
+  assert.equal((await call('?agent=cursor','initialize',{'mcp-protocol-version':'invalid'})).status,400);
+  assert.equal((await call('?agent=cursor','initialize',{},token,null)).status,400);
+  assert.equal((await alpha.fetch(eventRequest('scout_agent_connected',{agent:'cursor'},token),config,ctx)).status,400,'browser cannot claim a server connection');
+  await ctx.flush();
+  assert.equal(sent.filter(e=>e.event==='scout_agent_connected').length,7);
+  assert.equal(sent.filter(e=>e.event==='scout_request_completed'&&e.properties.mcp_method==='tools/call').at(-1).properties.outcome,'error');
+  assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_CANARY/);
+
+  sent.length=0;
+  for(const headers of [{dnt:'1'},{'sec-gpc':'1'},{'x-scout-analytics':'off'}])await call('?agent=amp','initialize',headers);
+  await call('?agent=amp&analytics=off');await ctx.flush();assert.equal(sent.length,0);
+  await call('?agent=PRIVATE_CANARY&private=PRIVATE_CANARY');
+  await call('?agent=cursor','initialize',{'x-scout-agent':'amp'});
+  await ctx.flush();assert.deepEqual(sent.filter(e=>e.event==='scout_agent_connected').map(e=>e.properties.agent),['unknown','amp']);
+  assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_CANARY/);
 });
 
 test('analytics never forwards its credentials or event body to a redirect destination',async t=>{
