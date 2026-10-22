@@ -159,6 +159,7 @@ function layout(doc) {
   <link rel="stylesheet" href="/styles.css?v=${revision}">
   <link rel="stylesheet" href="/docs.css?v=${revision}">
   <script src="/docs.js?v=${revision}" defer></script>
+  ${doc.url.startsWith('/docs/demo/') ? '' : '<script type="module" src="/product-analytics.js"></script>'}
 </head>
 <body class="docs-page">
   <a class="skip-link" href="#doc-content">Skip to content</a>

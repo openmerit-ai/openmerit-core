@@ -6,7 +6,7 @@
   "compatibility_date": "2026-10-15",
   "workers_dev": false,
   "preview_urls": false,
-  // Keep the existing fetch-only Worker identity, secrets and analytics.
+  // Keep the existing fetch-only Worker identity and secrets.
   // Canonical Scout now overrides the router's older serving implementation;
   // adjacent paths such as /scouting still pass through to the Custom Domain.
   "routes": [
@@ -17,13 +17,16 @@
     "binding": "ASSETS",
     "run_worker_first": true
   },
-  // Read the published production catalogue; no cron, Workflow or coordinator.
+  // Read the published production catalogue; no indexing cron or Workflow.
   "r2_buckets": [{ "binding": "SCOUT_CATALOGUE", "bucket_name": "openmerit-scout-catalogue" }],
   "d1_databases": [{ "binding": "SCOUT_INDEX", "database_name": "openmerit-scout-index", "database_id": "80312d1c-c9e7-43f3-a09d-cb4b2c538f49" }],
   "vectorize": [{ "binding": "SCOUT_EVIDENCE", "index_name": "openmerit-scout-evidence" }],
-  "analytics_engine_datasets": [{ "binding": "SCOUT_ANALYTICS", "dataset": "scout_alpha_searches" }],
+  // Historical Analytics Engine records are untouched; new search events go to PostHog.
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  "durable_objects": { "bindings": [{ "name": "SCOUT_ACCOUNTS", "class_name": "ScoutAccounts" }] },
+  "migrations": [{ "tag": "accounts-1", "new_sqlite_classes": ["ScoutAccounts"] }],
   // Product analytics remain off without POSTHOG_PROJECT_TOKEN and POSTHOG_HOST.
-  "vars": { "POSTHOG_ENVIRONMENT": "production" },
+  "vars": { "POSTHOG_ENVIRONMENT": "production", "POSTHOG_PROJECT_ID": "315509", "POSTHOG_CAPTURE_CONTENT": "true" },
   "ratelimits": [{ "name": "SCOUT_RATE", "namespace_id": "2026102101", "simple": { "limit": 60, "period": 60 } }],
   "build": {
     "command": "npm run check:scout && npm run check:docs && npm run build:scout"

@@ -30,7 +30,7 @@ export function initAuth(onAccountChange) {
       const response = await fetch(`${basePath}/api/auth`);
       if (!response.ok) throw new Error('Sign-in is temporarily unavailable. Please try again later.');
       const { publishableKey, frontendApi, analytics: config } = await response.json();
-      analytics.configure(config?.enabled);
+      analytics.configure(config?.enabled, config?.accountSync, config?.content);
       await Promise.all([
         window.__internal_ClerkUICtor || loadScript(`https://${frontendApi}/npm/@clerk/ui@1/dist/ui.browser.js`),
         window.Clerk || loadScript(`https://${frontendApi}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`, publishableKey),
@@ -49,14 +49,14 @@ export function initAuth(onAccountChange) {
         const id = session?.status === 'active' ? user?.id ?? null : null;
         if (previousUser && previousUser !== id) onAccountChange();
         previousUser = id;
-        analytics.account(id, id ? session : null);
+        analytics.account(id, id ? session : null, clerk.client?.signIn);
         button.hidden = !!id; account.hidden = !id;
         if (id && !mounted) { clerk.mountUserButton(account); mounted = true; }
         if (!id && mounted) { clerk.unmountUserButton(account); mounted = false; }
         if (id) { try { sessionStorage.removeItem(draftKey); } catch { /* Optional storage. */ } }
       });
       return clerk;
-    })().catch(error => { loading = null; analytics.account(null, null); analytics.track('scout_client_error', { code: 'auth_unavailable' }); throw error; });
+    })().catch(error => { loading = null; analytics.account(null, null); analytics.exception(error, 'auth_unavailable'); throw error; });
     return loading;
   }
 

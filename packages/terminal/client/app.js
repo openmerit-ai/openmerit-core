@@ -13,6 +13,12 @@ import { reportedPath, deploymentFor, poolsFor, capacityState, capacityReadings,
 
 import { buildEnvironmentMap } from './map.mjs';
 import { syncFlowMap } from './flow-loader.js';
+import { createAnalytics, browserErrorType } from './analytics.mjs';
+
+const analytics = createAnalytics({ enabled: () => state.info.telemetry === true, mode: () => state.mode });
+const interaction = (action, kind = 'other') => analytics('terminal_interaction', { action, kind: ['model','agent','task','service','source','host','deployment','pool','record','path'].includes(kind) ? kind : 'other' });
+window.addEventListener('error', event => analytics('terminal_error', { code: 'uncaught_error', error_type: browserErrorType(event.error) }));
+window.addEventListener('unhandledrejection', event => analytics('terminal_error', { code: 'uncaught_error', error_type: browserErrorType(event.reason) }));
 
 const $ = selector => document.querySelector(selector);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
@@ -462,6 +468,10 @@ function main() {
   return `${state.error ? `<div class="notice" role="status">${escape(state.error)}</div>` : stale ? '<div class="notice" role="status">Collection is delayed. Showing the last available snapshot.</div>' : ''}${sample ? `<div class="sample-disclosure"><span>${demoMode ? 'Demo. Fictional usage, published model prices.' : groupedSample() ? 'Enterprise sample. 9.6M fictional requests across 30 days. Published prices where available.' : 'Sample environment. Names, requests, and hardware are fictional.'}</span>${hostedSample ? demoMode ? '<a href="/">Enterprise sample ↗</a>' : '<a href="/demo">Before & after →</a>' : ''}${state.info.defaultMode !== 'sample' ? '<button data-action="live">View your environment →</button>' : ''}</div>` : ''}${demoMode ? comparisonPanel() : groupedSample() ? '<div class="sample-method"><button class="text-button" data-action="prices">Pricing & assumptions ↗</button></div>' : ''}${coverageNotice}${inventoryNotice}${indexProgress()}${content}${footer()}`;
 }
 function render({ focusMain = false, focusTab = false } = {}) {
+  try { return renderInner({focusMain,focusTab}); }
+  catch (error) { analytics('terminal_error',{code:'render_error',error_type:browserErrorType(error)}); throw error; }
+}
+function renderInner({ focusMain = false, focusTab = false } = {}) {
   closeSelect();
   const firstRender = !$('#terminal-panel');
   const active = document.activeElement;
@@ -480,7 +490,7 @@ function render({ focusMain = false, focusTab = false } = {}) {
   else { if (pageButton) { document.querySelectorAll('.terminal-tabs [role="tab"]').forEach(tab => { tab.tabIndex = tab.dataset.page === pageButton ? 0 : -1; }); $(`#tab-${pageButton}`)?.focus({ preventScroll: true }); } if (hoursButton) $(`[data-hours="${hoursButton}"]`)?.focus({ preventScroll: true }); if (filterButton) $(`[data-filter="${filterButton}"]`)?.focus({ preventScroll: true }); window.scrollTo(0, scroll); }
 }
 function terminalQuery(mode) { const params = new URLSearchParams(); if (mode === 'sample') params.set('sample', '1'); if (flowPreview) params.set('map', 'flow'); if (demoMode) { params.set('stage', demoStage); if (demoPreference !== 'default') params.set('preference', demoPreference); } return params.size ? `?${params}` : ''; }
-function navigate(page, { focusTab = false } = {}) { if (page === 'connections') { page = 'services'; serviceView = 'map'; } if (!pages.includes(page)) return; state.page = page; state.filter = 'all'; state.search = ''; history.replaceState(null, '', `${location.pathname}${terminalQuery(state.mode)}#${page}`); render({ focusMain: !focusTab, focusTab }); }
+function navigate(page, { focusTab = false } = {}) { if (page === 'connections') { page = 'services'; serviceView = 'map'; } if (!pages.includes(page)) return; state.page = page; analytics('terminal_page_viewed', {page}); if (page === 'services' && serviceView === 'map') analytics('terminal_page_viewed', {page:'connections'}); state.filter = 'all'; state.search = ''; history.replaceState(null, '', `${location.pathname}${terminalQuery(state.mode)}#${page}`); render({ focusMain: !focusTab, focusTab }); }
 function revealTab(tab) {
   if (!tab) return;
   const nav = tab.closest('.terminal-tabs'), left = tab.offsetLeft, right = left + tab.offsetWidth;
@@ -518,6 +528,7 @@ function refreshInspection() {
   try { inspectInner(...currentInspection); } finally { inspecting = false; inspectorUpdating = false; }
 }
 function inspect(kind, key, pathKind) {
+  interaction('inspect', kind === 'map-model' ? 'model' : kind === 'entry' ? 'path' : kind);
   currentInspection = [kind, key, pathKind]; inspectorTab = 'deployments'; inspecting = true;
   try { inspectInner(kind, key, pathKind); } finally { inspecting = false; }
 }
@@ -602,6 +613,12 @@ function openCommand() { closeDialog(); returnFocus = document.activeElement; $(
 
 document.addEventListener('click', event => {
   const element = event.target.closest('[data-map-version],[data-map-group],[data-map-expand],[data-page],[data-hours],[data-filter],[data-inspect],[data-action],[data-command],[data-focus-agent],[data-inspector-tab],[data-host],[data-activity-path],[data-service-view],[data-service-filter],[data-service-reset],[data-reference-kind],[data-reference-page]'); if (!element) return;
+  if (element.hasAttribute('data-map-group') || element.dataset.mapExpand) interaction('map_expand');
+  if (['hours','filter','serviceFilter','referenceKind','activityPath'].some(key => element.dataset[key] != null) || element.hasAttribute('data-service-reset')) interaction('filter');
+  if (element.dataset.host) interaction('inspect','host');
+  if (element.dataset.serviceView === 'map') analytics('terminal_page_viewed',{page:'connections'});
+  if (element.dataset.action === 'live' || element.dataset.action === 'sample') analytics('terminal_interaction',{action:'mode',kind:'other',mode:state.mode});
+  if (element.dataset.action === 'search' || element.dataset.command != null) interaction('command');
   if (element.dataset.mapVersion) { flowPreview = false; history.replaceState(null, '', `${location.pathname}${terminalQuery(state.mode)}#${state.page}`); render(); $('#map-agent')?.focus({ preventScroll: true }); }
   else if (element.hasAttribute('data-map-group')) { toggleMapGroup(element); }
   else if (element.dataset.mapExpand) { mapExpandAll = element.dataset.mapExpand === 'expand'; mapGroupExpansion.clear(); render(); $('[data-map-expand]')?.focus({ preventScroll: true }); }
@@ -634,6 +651,9 @@ document.addEventListener('click', event => {
 document.addEventListener('change', event => { if (event.target.id === 'host-location') { hostLocation = event.target.value; render(); $('#host-location')?.focus({ preventScroll: true }); } if (event.target.id === 'map-agent') { mapAgent = event.target.value; render(); $('#map-agent')?.focus({ preventScroll: true }); } });
 document.addEventListener('input', event => { if (event.target.id === 'reference-search') { referenceSearch = event.target.value; referencePage = 0; render(); $('#reference-search').focus({ preventScroll: true }); } if (event.target.id === 'service-search') { serviceSearch = event.target.value; render(); $('#service-search').focus({ preventScroll: true }); } if (event.target.id === 'model-search') { state.search = event.target.value; render(); $('#model-search').focus({ preventScroll: true }); } if (event.target.id === 'command-input') commandResults(event.target.value); });
 document.addEventListener('pointerdown', () => document.body.classList.remove('keyboard'));
+document.addEventListener('change', event => { if (['host-location','map-agent'].includes(event.target.id)) interaction('filter'); });
+let lastSearchAction = 0;
+document.addEventListener('input', event => { if (['reference-search','service-search','model-search','command-input'].includes(event.target.id) && Date.now() - lastSearchAction > 1000) { lastSearchAction = Date.now(); interaction('search'); } });
 document.addEventListener('keydown', event => {
   document.body.classList.add('keyboard');
   if (event.target.matches('.terminal-tabs [role="tab"]') && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
@@ -681,9 +701,11 @@ async function refresh(force = false) {
     if (requestedMode !== state.mode) return;
     if(snapshot.repository&&!snapshot.repository.references&&previousIndex?.revision===snapshot.repository.revision)snapshot.repository.references=previousIndex.references;
     state.data = snapshot; state.error = '';
+    analytics('terminal_snapshot', {model_count:snapshot.models?.length??0,record_count:snapshot.records?.length??0,source_count:snapshot.sources?.length??0,host_count:snapshot.hosts?.length??0,deployment_count:snapshot.deployments?.length??0,agent_count:new Set((snapshot.records??[]).map(record=>record.agentId).filter(Boolean)).size});
     refreshInspection();
     if (force || (!document.querySelector('dialog[open]') && !selectIsOpen() && !document.activeElement?.matches('input'))) render();
-  } catch {
+  } catch (error) {
+    analytics('terminal_error', {code:'snapshot_error',error_type:browserErrorType(error)});
     state.error = state.info.hostedSample ? 'The sample preview could not refresh. Reload the page to reconnect.' : 'The terminal is disconnected. Your inference is unaffected. Reopen the local command to reconnect.';
     refreshInspection();
     if (state.data && !document.querySelector('dialog[open]') && !selectIsOpen()) render();
@@ -699,6 +721,7 @@ function scheduleRefresh() {
 }
 async function start() {
   try { const response = await fetch('/api/info'); state.info = await response.json(); if (state.info.defaultMode === 'sample') state.mode = 'sample'; } catch { /* The snapshot request provides the actionable error. */ }
+  analytics('terminal_visited'); analytics('terminal_page_viewed',{page:state.page});
   await refresh(true);
   document.addEventListener('visibilitychange', () => { if (!document.hidden && !demoMode) void refresh(); });
 }

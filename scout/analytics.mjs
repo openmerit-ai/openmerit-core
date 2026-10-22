@@ -51,7 +51,7 @@ export function decodeSearchRecord(row) {
 
 // The validated prompt is the only user-supplied text. Public source evidence is
 // attached separately. Never serialize requests, errors, inventories or whole results.
-export function searchDataPoint({ prompt, result, task = result?.task, outcome = 'internal_error', channel = 'api', durationMs, scope = 'all', index,diagnostics,position } = {}) {
+export function searchRecord({ prompt, result, task = result?.task, scope = 'all', index, diagnostics, position } = {}) {
   const mode = pick(result?.ranking?.mode, modes);
   const safeTask = {
     kind: pick(task?.kind, kinds),
@@ -89,13 +89,21 @@ export function searchDataPoint({ prompt, result, task = result?.task, outcome =
       code:typeof diagnostics.failure.code==='string'&&/^[a-z0-9_]{1,64}$/.test(diagnostics.failure.code)?diagnostics.failure.code:null,
       providerStatus:Number.isInteger(diagnostics.failure.providerStatus)&&diagnostics.failure.providerStatus>=100&&diagnostics.failure.providerStatus<=599?diagnostics.failure.providerStatus:null}}:{}),
   };
+  return { prompt: typeof prompt === 'string' && prompt.length <= 4000 ? prompt : '', task: safeTask, top5, context };
+}
+
+// Legacy encoding remains available for reading/testing historical archives.
+// Serving Workers now send request-local diagnostics only to PostHog.
+export function searchDataPoint(event = {}) {
+  let { result, outcome = 'internal_error', channel = 'api', durationMs } = event;
+  const record = searchRecord(event), { task: safeTask, top5, context } = record;
+  const mode = pick(result?.ranking?.mode, modes);
   channel = pick(channel, ['api', 'mcp']);
   outcome = pick(outcome, ['ok', 'empty', 'clarification', 'unsupported', 'rate_limited', 'interpretation_error', 'internal_error']);
   // Keep legacy columns reserved. One payload holds the prompt, all five, and
   // their source evidence; compression avoids duplicating long source strings.
   const blobs = ['3', channel, outcome, safeTask.kind, mode, context.rankingVersion ?? '', '', '', '', '', ''];
-  const promptText = typeof prompt === 'string' && prompt.length <= 4000 ? prompt : '';
-  let payload = JSON.stringify({ prompt: promptText, task: safeTask, top5, context }), encoding = 'json';
+  let payload = JSON.stringify(record), encoding = 'json';
   const prefixBytes = blobs.reduce((n, b) => n + strToU8(b).length, 0);
   if (prefixBytes + strToU8(payload).length + encoding.length > 16_384) {
     const compressed = gzipSync(strToU8(payload));

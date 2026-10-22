@@ -109,13 +109,24 @@ test('product analytics counts one search per caller across multi-task, shared c
   const searches=sent.filter(e=>e.event==='scout_search_completed');assert.equal(searches.length,3);
   assert.deepEqual(searches.map(e=>e.properties.cache).sort(),['hit','miss','shared']);
   assert.ok(searches.every(e=>e.properties.task_count===count&&e.properties.candidate_count===Math.min(count,2)&&e.properties.outcome==='ok'));
+  assert.equal(new Set(searches.map(e=>e.properties.trace_id)).size,3,'shared computation must not share request traces');
+  for(const search of searches){
+   const events=sent.filter(e=>e.properties.trace_id===search.properties.trace_id);
+   assert.ok(events.every(e=>e.properties.distinct_id===search.properties.distinct_id));
+   assert.equal(events.filter(e=>e.event==='$ai_trace').length,1);
+   const details=events.filter(e=>e.event==='scout_search_details');assert.equal(details.length,count);
+   assert.deepEqual(details.map(e=>e.properties.task_index),Array.from({length:count},(_,i)=>i+1));
+   assert.equal(details[0].properties.top5[0].model,'lab/m0');
+   assert.equal(events.find(e=>e.event==='$ai_trace').properties.$ai_input_state,undefined);
+   assert.ok(details.every(e=>e.properties.layers===undefined));
+  }
   const ids=searches.map(e=>e.properties.distinct_id);assert.equal(new Set(ids).size,2);
   assert.equal(searches.find(e=>e.properties.transport==='mcp').properties.distinct_id,ids.find(id=>ids.filter(other=>id===other).length===2));
   assert.equal(sent.filter(e=>e.event==='scout_request_completed').length,3);
   f.index.snapshot.publication.id='missing';await call(true,'user_a','Another private prompt');await flush();
   assert.equal(sent.filter(e=>e.event==='scout_search_completed').at(-1).properties.outcome,'interpretation_error');
   const failed=sent.filter(e=>e.event==='scout_request_completed').at(-1);assert.equal(failed.properties.http_status,200);assert.equal(failed.properties.outcome,'error');
-  assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_|user_a|user_b|Another private|Source files|lab\/m/);
+  assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_|user_a|user_b|Another private|Source files/);
  }
 });
 

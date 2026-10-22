@@ -8,6 +8,18 @@ Article content has one maintained source: `docs/*.md`. Update those files along
 
 ## Reference and implementation
 
+### Website analytics — source-only, unreleased
+
+The homepage and generated public guides load the small first-party ES module `site/product-analytics.js`; protected memo and demo pages are not instrumented. This source change is not evidence of a live deployment. It loads no Clerk SDK, PostHog SDK, replay, or autocapture and exposes no project token. It fetches same-origin `/scout/api/auth` for `analytics.enabled`, then best-effort posts to `/scout/api/analytics` with the web client and analytics-on headers. Requests omit credentials and referrers, reject redirects, and time out after three seconds.
+
+Publication is blocked as of 22 October 2026. The main site's active version remains `9b0ea195-8c33-40b0-a5ee-a21f3e31a46d`; the root checkout predates its memo authentication, and the complete previous static-asset staging manifest is unavailable. A version-only upload preserving all deployed modules/bindings/assets retained the old assets-first routing despite a requested configuration change, so its loader would not run on homepage/docs responses. Candidate `f6c5d9ae-107a-49e9-883a-5046e57d810c` was **not deployed**. Do not activate it or deploy the root configuration. Recover/reconcile the complete production application and asset bundle before publishing this module and updated public guides. Scout's independent analytics deployment is live; the main website, router, terminal and publisher are unchanged. Private version backups and comparison evidence are retained under `.amp/in/`.
+
+Only `website_visited` (`page: home|docs`), `website_link_opened` (the same page category plus `destination: scout|docs|terminal|github|other`), and `website_error` (the same page category, fixed `code: uncaught_error`, and an allowlisted error class) are emitted. Navigation listeners match explicit navigation links. No link text, arbitrary paths, URLs, queries, fragments, referrers, page titles, error messages/stacks, bodies, user agents, or personal fields are included. Events are limited to 30 per rolling minute and three errors per page; payloads are bounded to 512 characters.
+
+The website uses its own random UUID in `sessionStorage` under `openmerit-website-tab-id`, not Clerk IDs, profiles, or Scout signed-in identity state. Storage-denied session storage falls back to a page-lifetime UUID. There is no authenticated identity linking, fingerprinting, or cross-device identity claim on the main website. Browser session-storage cloning can copy a tab's ID; this is not a unique-person count.
+
+Disabled server configuration, Do Not Track (`1`), Global Privacy Control (`true`), or `localStorage` preference `scout-analytics-opt-out=1` suppress events. Privacy is checked before configuration, after asynchronous configuration, and before every send. If local storage cannot be read, collection fails closed. This website code does not implement Scout opt-in controls or account synchronization. Checks use fake browser state and do not capture live traffic.
+
 The structure draws on [Pi's documentation](https://pi.dev/docs/latest): a grouped left navigation, central article, right page outline, mobile disclosures, and browser search. OpenMerit's presentation and content are its own. The public Pi website repository is an older archived implementation, so it is not a reliable description of Pi's current deployment stack.
 
 - `scripts/docs.config.mjs` controls navigation, routes, titles, and descriptions.

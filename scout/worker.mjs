@@ -2,13 +2,13 @@ import { DurableObject, WorkflowEntrypoint } from 'cloudflare:workers';
 import { handleAPI, json } from './http.mjs';
 import { handleMCP } from './mcp.mjs';
 import { createRecommender } from './recommend.mjs';
-import { createSearchObserver } from './analytics.mjs';
 import { createSnapshotReader, getJSON, putJSON } from './store.mjs';
 import { runRefresh } from './pipeline.mjs';
 import { ParallelResearch } from './research.mjs';
 import { indexStatus } from './rank.mjs';
 import { scoutAccess } from './auth.mjs';
 import { createProductAnalytics } from './product-analytics.mjs';
+import { handleClerkWebhook } from './account-analytics.mjs';
 
 // Publication coordination only. User searches do not pass through this object.
 export class ScoutPublication extends DurableObject {
@@ -65,20 +65,23 @@ export class ScoutRefresh extends WorkflowEntrypoint {
 
 let reader,recommend;
 function services(env) {
-  if(!reader){reader=createSnapshotReader(env.SCOUT_CATALOGUE);recommend=createRecommender({apiKey:env.OPENAI_API_KEY,db:env.SCOUT_INDEX,vectorize:env.SCOUT_EVIDENCE,observe:createSearchObserver(env.SCOUT_ANALYTICS)});}
+  if(!reader){reader=createSnapshotReader(env.SCOUT_CATALOGUE);recommend=createRecommender({apiKey:env.OPENAI_API_KEY,db:env.SCOUT_INDEX,vectorize:env.SCOUT_EVIDENCE});}
   return {reader,recommend};
 }
 export default {
   async fetch(request,env,ctx) {
     const url=new URL(request.url),path=url.pathname;
     if(path==='/scout')return Response.redirect(`${url.origin}/scout/${url.search}`,308);
+    // This endpoint authenticates Clerk's signature, never a browser session.
+    if(path==='/scout/api/webhooks/clerk')return handleClerkWebhook(request,env);
     if(!path.startsWith('/scout/api/')&&path!=='/scout/mcp') {
       return ['GET','HEAD'].includes(request.method)?env.ASSETS.fetch(request):json({error:'Not found.'},404);
     }
     const analytics=createProductAnalytics(request,env,ctx);
     const access=await scoutAccess(request,env,analytics.identify);
-    if(access){analytics.complete(access);return access;}
+    if(access){analytics.complete(access);return analytics.response(access);}
     if(path==='/scout/api/analytics')return analytics.handleEvent();
+    if(path==='/scout/api/analytics/preference')return analytics.handlePreference();
     let response;
     try {
       const {reader,recommend}=services(env),index=await reader.view();
@@ -90,8 +93,8 @@ export default {
       }
       const mcp=path==='/scout/mcp';
       response=await (mcp?handleMCP:handleAPI)(request,index,{},(...args)=>recommend(...args,mcp?'mcp':'api',analytics.observeSearch));
-    } catch {response=json({error:'Scout could not load its prepared catalogue. Please try again shortly.'},503);}
-    analytics.complete(response);return response;
+    } catch (error) {analytics.exception(error);response=json({error:'Scout could not load its prepared catalogue. Please try again shortly.'},503);}
+    analytics.complete(response);return analytics.response(response);
   },
   async scheduled(event,env,ctx) {
     const id=`hour-${Math.floor(event.scheduledTime/3600_000)}`;

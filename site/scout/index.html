@@ -92,6 +92,14 @@
       </details>
       <details class="support-section" id="capability-index"><summary>Capabilities</summary><p>Coverage in the index. Task matches appear first.</p><ul id="capability-list" class="capability-list" aria-label="Indexed capabilities"></ul></details>
       <details class="support-section" id="sources"><summary>Sources</summary><p>What each source measures, how much it covers, and where it falls short.</p><div id="source-list"></div><p>Public feeds refresh hourly. Collection dates and measurement dates may differ. Task calibration is updated separately.</p></details>
+      <details class="support-section" id="analytics-settings">
+        <summary>Privacy &amp; analytics</summary>
+        <p>PostHog helps us understand usage, recommendations and errors. When account sync is configured, enabled analytics also includes your name, verified email and sign-in provider information. No session recording.</p>
+        <p><label><input id="analytics-usage" type="checkbox" disabled> Share usage and account analytics</label></p>
+        <p><label><input id="analytics-content" type="checkbox" disabled> Also share my task prompts and breakdowns for product improvement</label></p>
+        <p id="analytics-status" role="status">Loading analytics settings…</p>
+        <p>Common sensitive patterns are removed before optional prompt sharing, but redaction cannot detect every secret or personal detail. Turning sharing off stops future collection, not required task processing or previously stored records. <a href="/docs/scout/#product-analytics">Data handling ↗</a></p>
+      </details>
     </div>
     <noscript><p class="error-message">Enable JavaScript to search, or use the API in <a href="/docs/scout/">the Scout guide</a>.</p></noscript>
   </main>

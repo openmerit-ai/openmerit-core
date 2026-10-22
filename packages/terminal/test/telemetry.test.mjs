@@ -2,8 +2,66 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
+import { startTerminal } from '../src/server.mjs';
+import { commandTelemetry } from '../src/telemetry.mjs';
+import { createAnalytics } from '../client/analytics.mjs';
 
 const cli = new URL('../src/cli.mjs', import.meta.url);
+test('browser consent controls prevent even local submission; enabled browser uses only relay', async () => {
+  const calls = [];
+  for (const control of [{enabled:false}, {navigator:{doNotTrack:'1'}}, {navigator:{globalPrivacyControl:true}}, {optOut:'1'}, {blocked:true}, {}]) {
+    const send = createAnalytics({enabled:()=>control.enabled!==false,mode:()=> 'live',navigator:control.navigator??{},storage:{getItem:()=>{if(control.blocked)throw new Error('blocked');return control.optOut;}},fetcher:async (...args)=>{calls.push(args);}});
+    send('terminal_visited');
+    await new Promise(resolve=>setImmediate(resolve));
+  }
+  assert.equal(calls.length,1);
+  assert.equal(calls[0][0],'/api/analytics');
+  assert.deepEqual(JSON.parse(calls[0][1].body),{event:'terminal_visited',properties:{mode:'live'}});
+});
+
+test('local relay projects allowlists, shares CLI identity, enforces guards and bounds on hung transport', async () => {
+  const originalFetch = globalThis.fetch, saved = process.env.OPENMERIT_TELEMETRY, dnt = process.env.DO_NOT_TRACK;
+  const calls=[];
+  globalThis.fetch=async (url,options)=>{calls.push({url,...options});return new Response(null);};
+  process.env.OPENMERIT_TELEMETRY=''; process.env.DO_NOT_TRACK='';
+  const terminal=await startTerminal({port:0,demo:true});
+  const post=(body,headers={})=>originalFetch(`${terminal.url}/api/analytics`,{method:'POST',headers:{'Content-Type':'application/json',...headers},body:typeof body==='string'?body:JSON.stringify(body)});
+  try {
+    const event={event:'terminal_interaction',anonymousId:'CANARY',properties:{mode:'live',action:'inspect',kind:'model',key:'CANARY',prompt:'CANARY',error:'CANARY'}};
+    assert.equal((await originalFetch(`${terminal.url}/api/info`).then(r=>r.json())).telemetry,false);
+    assert.equal((await post(event)).status,204); assert.equal(calls.length,0);
+    process.env.OPENMERIT_TELEMETRY='1';
+    assert.equal((await originalFetch(`${terminal.url}/api/info`).then(r=>r.json())).telemetry,true);
+    await commandTelemetry(['dash'])('ok');
+    assert.equal((await post(event)).status,204);
+    await new Promise(resolve=>setImmediate(resolve));
+    const body=JSON.parse(calls.at(-1).body);
+    assert.equal(body.anonymousId,JSON.parse(calls[0].body).anonymousId);
+    assert.deepEqual(body.properties,{mode:'live',action:'inspect',kind:'model'});
+    assert.doesNotMatch(JSON.stringify(body),/CANARY/);
+    const consented = calls.length;
+    for (const privacy of [{ DNT: '1' }, { 'Sec-GPC': '1' }, { 'X-Scout-Analytics': 'off' }]) {
+      assert.equal((await post(event, privacy)).status, 204);
+      assert.equal(calls.length, consented, 'request privacy overrides process opt-in');
+    }
+    assert.equal((await post(event,{Origin:'https://evil.example'})).status,403);
+    assert.equal((await post(event,{'Sec-Fetch-Site':'cross-site'})).status,403);
+    assert.equal((await post('x'.repeat(2049))).status,413);
+    for(const value of [{...event,event:'private_event'},{...event,properties:{mode:'CANARY',action:'inspect',kind:'model'}},{event:'terminal_snapshot',properties:{mode:'live',model_count:Infinity}},{event:'terminal_error',properties:{code:'collection_error',error_type:'CANARY'}}]) assert.equal((await post(value)).status,400);
+    globalThis.fetch=async (url,options)=>{calls.push({url,...options});return new Promise(()=>{});};
+    const before=calls.length, started=performance.now();
+    await Promise.all(Array.from({length:12},()=>post(event)));
+    assert.ok(calls.length-before<=4);
+    assert.ok(performance.now()-started<700);
+    assert.equal((await originalFetch(`${terminal.url}/api/snapshot`)).status,200);
+    await new Promise(resolve=>setTimeout(resolve,800));
+    await post(event); assert.ok(calls.length>before);
+  } finally {
+    await terminal.close();globalThis.fetch=originalFetch;
+    if(saved===undefined)delete process.env.OPENMERIT_TELEMETRY;else process.env.OPENMERIT_TELEMETRY=saved;
+    if(dnt===undefined)delete process.env.DO_NOT_TRACK;else process.env.DO_NOT_TRACK=dnt;
+  }
+});
 async function run(args, env = {}, mode = 'ok', stopAfterStartup = false) {
   // Installed before the CLI loads: no test can contact the analytics service.
   const preload = `globalThis.fetch = async (url, options) => {
@@ -55,7 +113,7 @@ test('opted-in CLI sends only allowlisted payloads with ephemeral UUID identity'
       assert.equal(url, 'https://openmerit.ai/scout/api/analytics');
       assert.equal(method, 'POST');
       assert.equal(redirect, 'error');
-      assert.deepEqual(headers, { 'Content-Type': 'application/json' });
+      assert.deepEqual(headers, { 'Content-Type': 'application/json', 'X-Scout-Client': 'cli', 'X-Scout-Analytics': 'on' });
       return JSON.parse(body);
     });
     const id = bodies[0].anonymousId;
@@ -105,6 +163,7 @@ test('Scout requests identify the CLI and propagate explicit analytics consent',
       process.env.OPENMERIT_TELEMETRY = telemetry; process.env.DO_NOT_TRACK = dnt;
       await makePlan({ scope: 'all', connections: [], tasks: [{ id: 'task', description: 'private task' }] }, async (url, options) => {
         assert.equal(options.headers['X-Scout-Client'], 'cli');
+        assert.equal(options.headers['X-Scout-Analytics-Content'], 'off');
         assert.equal(options.headers['X-Scout-Analytics'], expected);
         return { ok: true, json: async () => ({ recommendations: [] }) };
       });

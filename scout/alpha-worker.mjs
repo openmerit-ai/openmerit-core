@@ -1,4 +1,5 @@
 import scout from './worker.mjs';
+export { ScoutAccounts } from './account-analytics.mjs';
 
 const base = '/scout/alpha';
 

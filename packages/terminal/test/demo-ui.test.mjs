@@ -10,12 +10,13 @@ import * as routes from '../client/routes.mjs';
 import * as counts from '../client/request-count.mjs';
 import * as environment from '../client/environment.mjs';
 import { routeIcon } from '../client/route-icons.mjs';
+import * as analytics from '../client/analytics.mjs';
 
 // Execute the actual view functions. Stub browser mounts, not the selection logic.
 test('every demo preference renders its real plan, costs, decisions and evidence', async () => {
   const source = (await readFile(new URL('../client/app.js', import.meta.url), 'utf8')).replace(/^import .*;$/gm, '').replace('void start();', '');
   const selectSource = (await readFile(new URL('../client/select.js', import.meta.url), 'utf8')).replace(/export /g, '');
-  const context = vm.createContext({ ...history, ...brands, ...routes, ...counts, ...environment, routeIcon, PREFERENCES, preferenceFor, PRICE_DATE, URLSearchParams,
+  const context = vm.createContext({ ...analytics, ...history, ...brands, ...routes, ...counts, ...environment, routeIcon, PREFERENCES, preferenceFor, PRICE_DATE, URLSearchParams,
     location: { hash:'#models', search:'?stage=after' },
     document: { querySelectorAll:()=>[], documentElement:{hasAttribute:()=>true}, addEventListener(){} }, window:{addEventListener(){}},
     morphText: (_key, value) => value,

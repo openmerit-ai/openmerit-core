@@ -12,6 +12,7 @@ import * as routes from '../client/routes.mjs';
 import * as requestCounts from '../client/request-count.mjs';
 import * as brands from '../client/brands.mjs';
 import * as environment from '../client/environment.mjs';
+import * as analytics from '../client/analytics.mjs';
 
 const at = new Date(Date.now() - 1000).toISOString();
 const request = (id, extra = {}) => ({ id, requestId: id, occurredAt: at, model: 'test-model', provider: 'service', route: 'service', status: 'completed', usage: { input_tokens: 10, output_tokens: 2 }, ...extra });
@@ -103,7 +104,7 @@ test('model details render unavailable usage without evidence and preserve measu
   // Run the actual browser view with event wiring and the dialog mount stubbed.
   // Imported data/formatting helpers remain the production implementations.
   const source = (await readFile(new URL('../client/app.js', import.meta.url), 'utf8')).replace(/^import .*;$/gm, '').replace('void start();', '');
-  const context = vm.createContext({ ...history, ...routes, ...requestCounts, ...brands, ...environment, URLSearchParams,
+  const context = vm.createContext({ ...analytics, ...history, ...routes, ...requestCounts, ...brands, ...environment, URLSearchParams,
     location: { hash: '#models', search: '' }, document: { querySelectorAll: () => [], documentElement: { hasAttribute: () => false }, addEventListener() {} }, window: { addEventListener() {} },
   });
   vm.runInContext(source, context);

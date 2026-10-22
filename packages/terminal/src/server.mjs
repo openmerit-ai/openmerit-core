@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { basename } from 'node:path';
 import { createCollector, loadConfig } from './collect.mjs';
 import { sampleSnapshot } from './sample.mjs';
+import { telemetryEnabled, terminalProperties, sendTerminalEvent, errorType } from './telemetry.mjs';
 
 const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/flow.js', ['flow.js', 'text/javascript']], ['/flow.css', ['flow.css', 'text/css']], ['/styles.css', ['styles.css', 'text/css']], ['/favicon.svg', ['favicon.svg', 'image/svg+xml']]]);
 for (const file of ['baseten.png', 'groq.ico', 'cerebras.png', 'qwen.png', 'meta.ico', 'nomic.png', 'baai.png', 'ollama.png', 'lm-studio.png', 'vllm.png', 'anthropic.png', 'google.png', 'deepseek.ico', 'cohere.png', 'openai.png', 'mistral.png', 'openrouter.png', 'huggingface.svg']) assets.set(`/brands/${file}`, [`brands/${file}`, file.endsWith('.svg') ? 'image/svg+xml' : file.endsWith('.ico') ? 'image/x-icon' : 'image/png']);
@@ -16,7 +17,7 @@ export async function startTerminal({ root = process.cwd(), port = 4310, interva
     if(busy||closed)return;
     busy=true;
     try {const next=await collect();if(!closed)snapshot=next;}
-    catch {if(snapshot.loading)snapshot={...snapshot,loadError:true};}
+    catch (error) {if(snapshot.loading)snapshot={...snapshot,loadError:true};sendTerminalEvent('terminal_error',{code:'collection_error',error_type:errorType(error)});}
     finally {busy=false;}
   };
   const server = createServer(async (request, response) => {
@@ -26,10 +27,34 @@ export async function startTerminal({ root = process.cwd(), port = 4310, interva
     const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" };
     const send = (code, body, type = 'application/json') => { response.writeHead(code, { ...headers, 'Content-Type': `${type}; charset=utf-8` }); response.end(body); };
     if (!validHosts.includes(host) || (request.headers.origin && request.headers.origin !== `http://${host}`) || request.headers['sec-fetch-site'] === 'cross-site') return send(403, '{"error":"Local access only"}');
-    if (request.method !== 'GET') return send(405, '{"error":"Read-only terminal"}');
     let path;
     try { path = new URL(request.url, `http://${host}`).pathname; }
     catch { return send(400, '{"error":"Invalid request URL"}'); }
+    if (path === '/api/analytics' && request.method === 'POST') {
+      if (!telemetryEnabled() || request.headers.dnt === '1' || request.headers['sec-gpc'] === '1' || request.headers['x-scout-analytics'] === 'off') return send(204, '');
+      if (request.headers['content-type'] !== 'application/json') return send(415, '{}');
+      if (Number(request.headers['content-length']) > 2048) return send(413, '{}');
+      let size = 0, body = '', done = false;
+      const timeout = setTimeout(() => { if (!done) { done = true; send(408, '{}'); request.destroy(); } }, 1000);
+      request.on('data', chunk => {
+        if (done) return;
+        size += chunk.length;
+        if (size > 2048) { done = true; clearTimeout(timeout); send(413, '{}'); request.resume(); return; }
+        body += chunk.toString('utf8');
+      });
+      request.on('error', () => { done = true; clearTimeout(timeout); });
+      request.on('end', () => {
+        clearTimeout(timeout); if (done) return; done = true;
+        try {
+          const value = JSON.parse(body), properties = terminalProperties(value.event, value.properties);
+          if (!properties) return send(400, '{}');
+          sendTerminalEvent(value.event, properties);
+          return send(204, '');
+        } catch { return send(400, '{}'); }
+      });
+      return;
+    }
+    if (request.method !== 'GET') return send(405, '{"error":"Read-only terminal"}');
     if (path === '/api/snapshot') {
       const data=collect.current?.(snapshot)??snapshot;
       const revision=new URL(request.url,`http://${host}`).searchParams.get('repositoryRevision');
@@ -42,7 +67,7 @@ export async function startTerminal({ root = process.cwd(), port = 4310, interva
       return send(200,JSON.stringify(data));
     }
     if (path === '/api/sample') return send(200, JSON.stringify(sampleSnapshot()));
-    if (path === '/api/info') return send(200, JSON.stringify({ version: 1, defaultMode: demo ? 'sample' : 'live', interval }));
+    if (path === '/api/info') return send(200, JSON.stringify({ version: 1, defaultMode: demo ? 'sample' : 'live', interval, telemetry: telemetryEnabled() }));
     const asset = assets.get(path);
     if (!asset) return send(404, '{"error":"Not found"}');
     try { return send(200, await readFile(fileURLToPath(new URL(`../public/${asset[0]}`, import.meta.url))), asset[1]); }

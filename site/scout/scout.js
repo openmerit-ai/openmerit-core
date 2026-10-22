@@ -5,7 +5,7 @@ import { analytics } from './analytics.js';
 const $ = selector => document.querySelector(selector);
 const basePath = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
 const money = value => value == null ? '—' : `$${new Intl.NumberFormat('en-US', { maximumFractionDigits: 2, minimumFractionDigits: value < 1 ? 2 : 0 }).format(value)}`;
-let result = null, activeRequest = null, requestID = 0;
+let result = null, activeRequest = null, requestID = 0, resultTrace;
 
 function element(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text != null) node.textContent = text; return node; }
 function link(text, url) { const node = element('a', '', text); try { const parsed = new URL(url); if (['https:', 'http:'].includes(parsed.protocol)) { node.href = parsed.href; node.target = '_blank'; node.rel = 'noopener noreferrer'; } } catch {} return node; }
@@ -37,7 +37,7 @@ function evidenceItem(e) {
   item.append(element('small', '', `${e.cohortSize} comparable models · ${e.observedAt ? `Source date: ${e.observedAt.slice(0, 10)}` : 'Measurement date not supplied'} · ${e.configurations.join(', ')}${e.historical ? ' · archived evaluation' : ''}`)); return item;
 }
 function modelEntry(model, prefix, taskTitle, steps = 0, taskIndex = 1) {
-  const position = { rank: model.rank, task_index: taskIndex };
+  const position = { rank: model.rank, task_index: taskIndex, trace_id: resultTrace };
   const row = element(steps ? 'td' : 'tr', steps ? 'sequence-cell' : 'model-row'), nameCell = element(steps ? 'div' : 'th', 'model-cell');
   if (!steps) nameCell.scope = 'row';
   const provider = providerIdentity(model), identity = element('span', 'model-identity'), name = element('span'), title = element('span', 'model-title', model.name), byline = element('span', 'model-provider', provider.label);
@@ -196,7 +196,7 @@ function showResult(data, roundTripMs) {
   tableObserver.observe(root.querySelector('.table-scroll'));
   showIndex(data);
   $('#announcement').textContent = `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}. ${count} model candidates.`;
-  analytics.track('scout_results_viewed', { task_count: tasks.length, candidate_count: count, duration_ms: Math.round(roundTripMs) });
+  analytics.track('scout_results_viewed', { task_count: tasks.length, candidate_count: count, duration_ms: Math.round(roundTripMs), trace_id: resultTrace });
 }
 function showIndex(data) {
   $('#index-counts').replaceChildren(...[`${data.availableModels ?? data.models} API models`, `${data.specialistRepositories ?? 0} HF repositories`, `${data.benchmarks} benchmark series`, `${data.sources.length} sources`].map(text => element('span', '', text)));
@@ -229,19 +229,20 @@ async function search() {
   $('#announcement').textContent = 'Searching the prepared index.';
   $('.find-button span').textContent = 'Searching…'; $('.find-button').setAttribute('aria-busy', 'true');
   const started = performance.now(), timeout = setTimeout(() => controller.abort(), 35_000);
-  let failureCode = 'network_error', httpStatus;
+  let failureCode = 'network_error', httpStatus, traceId;
   try {
     const response = await fetch(`${basePath}/api/recommend`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...analytics.headers() }, body: JSON.stringify({ prompt }), signal: controller.signal });
     if (id !== requestID) return;
+    traceId = response.headers.get('x-scout-trace-id');
     httpStatus = response.status; failureCode = response.ok ? 'invalid_response' : 'http_error';
     if (response.status === 401) { await auth.signIn(); throw new Error('Your session has expired. Sign in and try again.'); }
     if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('The Scout API is not available on this server. Start the Scout server and try again.');
     const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Scout could not complete this search.');
     failureCode = 'render_error';
-    if (id === requestID) showResult(data, performance.now() - started);
+    if (id === requestID) { resultTrace = traceId; showResult(data, performance.now() - started); }
   } catch (error) {
     if (id !== requestID) return;
-    analytics.track('scout_client_error', { code: error.name === 'AbortError' ? 'search_timeout' : failureCode, ...(httpStatus >= 400 ? { http_status: httpStatus } : {}) });
+    analytics.exception(error, error.name === 'AbortError' ? 'search_timeout' : failureCode, { trace_id: traceId, ...(httpStatus >= 400 ? { http_status: httpStatus } : {}) });
     result = null; tableObserver.disconnect(); $('#task-results').replaceChildren(); $('#results-title').textContent = 'Search unavailable'; $('#query-time').textContent = '';
     $('#error').textContent = error.name === 'AbortError' ? 'This request took too long. Please try again.' : error instanceof TypeError ? 'Couldn’t reach Scout. Check the connection and try again.' : error.message; $('#error').hidden = false;
   } finally { clearTimeout(timeout); if (id === requestID) { $('#results').setAttribute('aria-busy', 'false'); $('.find-button span').textContent = 'Find models'; $('.find-button').setAttribute('aria-busy', 'false'); } }
@@ -294,7 +295,7 @@ reducedMotion.addEventListener('change', stopExampleTransition);
 $('#scout-form').addEventListener('submit', event => { event.preventDefault(); void search(); });
 $('#prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#scout-form').requestSubmit(); } });
 const auth = initAuth(() => {
-  activeRequest?.abort(); requestID++; result = null; tableObserver.disconnect();
+  activeRequest?.abort(); requestID++; result = null; resultTrace = undefined; tableObserver.disconnect();
   $('#task-results').replaceChildren(); $('#results').hidden = true; $('#results').setAttribute('aria-busy', 'false'); $('#error').hidden = true;
   $('#prompt').value = ''; fitPrompt(); $('.find-button span').textContent = 'Find models'; $('.find-button').setAttribute('aria-busy', 'false');
 });
@@ -314,3 +315,14 @@ function revealSection() {
 window.addEventListener('hashchange', revealSection);
 document.querySelector('a[href="#for-agents"]').addEventListener('click', () => { $('#for-agents').open = true; });
 revealSection();
+
+function updateAnalyticsControls() {
+  const settings = analytics.preferences();
+  $('#analytics-usage').checked = settings.enabled; $('#analytics-usage').disabled = !settings.available;
+  $('#analytics-content').checked = settings.content; $('#analytics-content').disabled = !settings.enabled || !settings.contentAvailable;
+  $('#analytics-status').textContent = !settings.available ? 'Analytics is unavailable or disabled by your browser privacy settings.'
+    : !settings.contentAvailable ? 'Prompt sharing is not enabled on this deployment.' : 'Prompt sharing is optional and off by default. Do not include secrets or confidential records.';
+}
+for (const id of ['#analytics-usage', '#analytics-content']) $(id).addEventListener('change', () => analytics.setPreferences($('#analytics-usage').checked, $('#analytics-content').checked));
+window.addEventListener('scout-analytics-change', updateAnalyticsControls);
+updateAnalyticsControls();

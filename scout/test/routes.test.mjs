@@ -1,17 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {registerHooks} from 'node:module';
-import {generateKeyPairSync,sign} from 'node:crypto';
+import {generateKeyPairSync,sign,createHmac,randomBytes} from 'node:crypto';
 import {createServer} from 'node:http';
 
 // Node supplies only the platform base classes; exercise the actual Worker router.
 const hook=registerHooks({resolve(specifier,context,next){
   return specifier==='cloudflare:workers'
-    ? {url:'data:text/javascript,export class DurableObject {} export class WorkflowEntrypoint {}',shortCircuit:true}
+    ? {url:'data:text/javascript,export class DurableObject { constructor(ctx,env){this.ctx=ctx;this.env=env;} } export class WorkflowEntrypoint {}',shortCircuit:true}
     : next(specifier,context);
 }});
 const {default:worker}=await import('../worker.mjs');
-const {default:alpha}=await import('../alpha-worker.mjs');
+const {default:alpha,ScoutAccounts}=await import('../alpha-worker.mjs');
 hook.deregister();
 const env={ASSETS:{fetch:request=>new Response(new URL(request.url).pathname==='/scout/'?'Scout':'Not found',{status:new URL(request.url).pathname==='/scout/'?200:404})},get SCOUT_CATALOGUE(){assert.fail('Non-API routes must not read the catalogue');},get OPENAI_API_KEY(){assert.fail('Non-API routes must not invoke Decisions');}};
 
@@ -75,7 +75,7 @@ const authenticatedRequest=(path,token,headers={})=>new Request(`https://example
 test('public auth configuration exposes only the publishable key and fails closed when incomplete',async()=>{
   const response=await alpha.fetch(new Request('https://example.test/scout/api/auth'),authEnv,{});
   assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
-  assert.deepEqual(await response.json(),{publishableKey:authEnv.CLERK_PUBLISHABLE_KEY,frontendApi:'scout-auth.clerk.accounts.dev',analytics:{enabled:false}});
+  assert.deepEqual(await response.json(),{publishableKey:authEnv.CLERK_PUBLISHABLE_KEY,frontendApi:'scout-auth.clerk.accounts.dev',analytics:{enabled:false,accountSync:false,content:false}});
   for(const config of [{},{CLERK_PUBLISHABLE_KEY:authEnv.CLERK_PUBLISHABLE_KEY},{...authEnv,CLERK_PUBLISHABLE_KEY:'invalid'}]){
     for(const path of ['api/auth','api/recommend','mcp']){
       const result=await alpha.fetch(new Request(`https://example.test/scout/${path}`),config,{});
@@ -140,7 +140,7 @@ test('product events are allowlisted, identity comes from verified sessions, and
   const secret='PRIVATE_CANARY_person@example.invalid';
   const visit=await alpha.fetch(eventRequest('scout_visited',{prompt:secret,$set:{email:secret},distinct_id:secret},undefined,{'user-agent':secret,cookie:secret,'cf-connecting-ip':'192.0.2.55'}),config,ctx);
   assert.equal(visit.status,204);
-  const responses=await Promise.all(['alice','bob'].map(name=>alpha.fetch(eventRequest('scout_signed_in',{userId:secret},sessionToken({sub:`user_${name}`})),config,ctx)));
+  const responses=await Promise.all(['alice','bob'].map(name=>alpha.fetch(eventRequest('scout_session_observed',{userId:secret},sessionToken({sub:`user_${name}`})),config,ctx)));
   assert.deepEqual(responses.map(r=>r.status),[204,204]);
   assert.equal((await alpha.fetch(eventRequest('scout_model_id_copied',{rank:2,task_index:3,modelId:secret}),config,ctx)).status,204);
   await ctx.flush();
@@ -153,9 +153,9 @@ test('product events are allowlisted, identity comes from verified sessions, and
   assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_CANARY|URL_CANARY|192\.0\.2|user_alice|user_bob|sess_alice|authorization|cookie|\$set/);
   assert.ok(sent.every(p=>p.url==='https://eu.i.posthog.com/batch/'&&Object.keys(p.headers).join()==='Content-Type'));
   assert.ok(events.every(e=>e.properties.$geoip_disable===true&&e.properties.$ip===null&&e.properties.environment==='test'));
-  for(const event of ['scout_search_completed','$identify','constructor',{toString:false}])assert.equal((await alpha.fetch(eventRequest(event),config,ctx)).status,400);
-  assert.equal((await alpha.fetch(eventRequest('scout_signed_in'),config,ctx)).status,401);
-  assert.equal((await alpha.fetch(eventRequest('scout_signed_in',{},'forged'),config,ctx)).status,401);
+  for(const event of ['scout_search_completed','scout_signed_in','scout_signed_up','scout_signed_out','$identify','constructor',{toString:false}])assert.equal((await alpha.fetch(eventRequest(event),config,ctx)).status,400);
+  assert.equal((await alpha.fetch(eventRequest('scout_session_observed'),config,ctx)).status,401);
+  assert.equal((await alpha.fetch(eventRequest('scout_session_observed',{},'forged'),config,ctx)).status,401);
   assert.equal((await alpha.fetch(eventRequest('scout_visited',{},undefined,{origin:'https://foreign.test'}),config,ctx)).status,403);
   await ctx.flush();assert.equal(sent.flatMap(p=>p.batch).length,6);
 });
@@ -200,7 +200,7 @@ test('analytics has a separate IP quota and unavailable delivery cannot fail or 
   const keys=[],ctx=pendingContext();let release;
   const config={...authEnv,...productEnv,SCOUT_RATE:{async limit({key}){keys.push(key);return {success:true};}}};
   t.mock.method(globalThis,'fetch',()=>new Promise((_,reject)=>{release=()=>reject(new Error('PRIVATE_CANARY'));}));
-  const response=await alpha.fetch(eventRequest('scout_signed_in',{},sessionToken()),config,ctx);
+  const response=await alpha.fetch(eventRequest('scout_session_observed',{},sessionToken()),config,ctx);
   assert.equal(response.status,204);assert.deepEqual(keys,['analytics:ip:unknown']);
   // The response arrived while PostHog is still unresolved. Drain its failed
   // background work afterwards without any failure leaking into the response.
@@ -208,4 +208,148 @@ test('analytics has a separate IP quota and unavailable delivery cannot fail or 
   assert.equal(await response.text(),'');
   config.SCOUT_RATE.limit=async()=>({success:false});
   assert.equal((await alpha.fetch(eventRequest('scout_visited'),config,ctx)).status,429);
+});
+
+const webhookKey = randomBytes(32);
+function webhookRequest(type, data, { id = crypto.randomUUID(), timestamp = Date.now(), signedAt = Math.floor(Date.now()/1000), tamper = false } = {}) {
+  const body = JSON.stringify({ object: 'event', type, timestamp, instance_id: 'ins_fixture', data, event_attributes: { http_request: { client_ip: '192.0.2.199', user_agent: 'PRIVATE_CANARY' } } });
+  const signature = createHmac('sha256', webhookKey).update(`${id}.${signedAt}.${body}`).digest('base64');
+  return new Request('https://example.test/scout/api/webhooks/clerk', { method: 'POST', headers: {
+    'content-type': 'application/json', 'svix-id': id, 'svix-timestamp': String(signedAt), 'svix-signature': `v1,${signature}`,
+  }, body: tamper ? body.replace(type, 'user.deleted') : body });
+}
+function accountEnvironment() {
+  const config = { ...authEnv, ...productEnv, CLERK_WEBHOOK_SIGNING_SECRET: `whsec_${webhookKey.toString('base64')}`, POSTHOG_PERSONAL_API_KEY: 'disposable-person-key', POSTHOG_PROJECT_ID: '123' };
+  const objects = new Map(), stored = new Map();
+  config.SCOUT_ACCOUNTS = { idFromName: id => id, get(id) {
+    if (!objects.has(id)) {
+      const data = new Map(); stored.set(id, data); let pending = Promise.resolve();
+      const ctx = {
+        storage: { get: async key => structuredClone(data.get(key)), put: async (key, value) => data.set(key, structuredClone(value)), setAlarm: async () => {} },
+        blockConcurrencyWhile(fn) { const next = pending.then(fn); pending = next.catch(() => {}); return next; },
+      };
+      objects.set(id, new ScoutAccounts(ctx, config));
+    }
+    return objects.get(id);
+  } };
+  return { config, stored, alarm: async () => { for (const object of objects.values()) await object.alarm(); } };
+}
+const preferenceRequest = (enabled, headers = {}, token = sessionToken()) => new Request('https://example.test/scout/api/analytics/preference', {
+  method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, body: JSON.stringify({ enabled }),
+});
+const profileFixture = () => ({ object: 'user', id: 'user_alice', first_name: 'Ada', last_name: 'Lovelace', created_at: 1700000000000,
+  primary_email_address_id: 'id_primary', email_addresses: [
+    { id: 'id_secondary', email_address: 'PRIVATE_CANARY@example.invalid', verification: { status: 'verified' } },
+    { id: 'id_primary', email_address: 'ada@example.invalid', verification: { status: 'verified' } },
+  ], external_accounts: [{ provider: 'oauth_google' }, { provider: 'github' }], private_metadata: { secret: 'PRIVATE_CANARY' }, image_url: 'PRIVATE_CANARY', phone_numbers: ['PRIVATE_CANARY'],
+});
+
+test('signed Clerk deliveries sync canonical profiles, buffer OAuth signup and deduplicate lifecycle events', async t => {
+  const { config, stored } = accountEnvironment(), sent = [], ctx = pendingContext(); let profile = profileFixture();
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (url.startsWith('https://api.clerk.com/v1/users/')) return Response.json(profile);
+    assert.equal(url, 'https://eu.i.posthog.com/batch/'); sent.push(...JSON.parse(options.body).batch); return Response.json({ status: 1 });
+  });
+  const signup = webhookRequest('user.created', { id: 'user_alice', first_name: 'PRIVATE_CANARY' });
+  const signin = webhookRequest('session.created', { user_id: 'user_alice', id: 'sess_private', user: profile });
+  for (const request of [signup.clone(), signin.clone(), signup.clone()]) assert.equal((await alpha.fetch(request, config, ctx)).status, 200);
+  assert.equal(sent.length, 0, 'no webhook exports before the browser preference is known');
+  assert.equal((await alpha.fetch(preferenceRequest(true), config, ctx)).status, 204);
+  assert.deepEqual(sent.map(e => e.event), ['$set', 'scout_signed_up', 'scout_signed_in']);
+  assert.deepEqual(sent[0].properties.$set, { name: 'Ada Lovelace', email: 'ada@example.invalid', signup_at: '2023-11-14T22:13:20.000Z', connected_providers: ['github', 'google'] });
+  assert.equal(sent[2].properties.auth_provider, 'unknown', 'two linked providers do not establish the login provider');
+  for (const request of [signup.clone(), signin.clone()]) assert.equal((await alpha.fetch(request, config, ctx)).status, 200);
+  assert.equal(sent.length, 3);
+  profile = { ...profile, first_name: '', last_name: '', email_addresses: profile.email_addresses.map(e => ({ ...e, verification: { status: 'unverified' } })), external_accounts: [{ provider: 'google' }] };
+  assert.equal((await alpha.fetch(webhookRequest('user.updated', profileFixture(), { timestamp: Date.now() - 10000 }), config, ctx)).status, 200);
+  assert.deepEqual(sent.at(-1).properties.$unset, ['name', 'email']);
+  assert.deepEqual(sent.at(-1).properties.$set.connected_providers, ['google']);
+  assert.equal(sent.at(-1).properties.$set.email, undefined, 'stale webhook data cannot restore the previous email');
+  for (const [type, event] of [['session.ended', 'scout_signed_out'], ['session.revoked', 'scout_session_revoked'], ['session.removed', 'scout_session_removed']]) {
+    const request = webhookRequest(type, { user_id: 'user_alice' });
+    assert.equal((await alpha.fetch(request.clone(), config, ctx)).status, 200);
+    assert.equal((await alpha.fetch(request, config, ctx)).status, 200);
+    assert.equal(sent.filter(e => e.event === event).length, 1);
+  }
+  assert.ok(sent.every(e => e.properties.distinct_id === sent[0].properties.distinct_id && e.properties.$geoip_disable && e.properties.$ip === null));
+  assert.doesNotMatch(JSON.stringify(sent), /PRIVATE_CANARY|user_alice|sess_private|192\.0\.2/);
+  assert.doesNotMatch(JSON.stringify([...stored].map(([id, data]) => [id, [...data]])), /Lovelace|ada@|user_alice|sess_private|PRIVATE_CANARY/);
+});
+
+test('webhook signatures and preference authentication fail closed, and opt-outs suppress later server deliveries', async t => {
+  const { config } = accountEnvironment(), sent = [], ctx = pendingContext();
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (url.startsWith('https://api.clerk.com/')) return Response.json(profileFixture());
+    sent.push(...JSON.parse(options.body).batch); return Response.json({ status: 1 });
+  });
+  for (const request of [webhookRequest('user.updated', { id: 'user_alice' }, { tamper: true }), webhookRequest('user.updated', { id: 'user_alice' }, { signedAt: 1 }), authenticatedRequest('api/webhooks/clerk', sessionToken())]) {
+    assert.equal((await alpha.fetch(request, config, ctx)).status, 400);
+  }
+  assert.equal((await alpha.fetch(webhookRequest('user.updated', { id: 'user_alice' }), { ...config, CLERK_WEBHOOK_SIGNING_SECRET: '' }, ctx)).status, 503);
+  assert.equal((await alpha.fetch(new Request('https://example.test/scout/api/webhooks/clerk', { method: 'POST', body: 'x'.repeat(262145) }), config, ctx)).status, 413);
+  assert.equal((await alpha.fetch(preferenceRequest(true, {}, null), config, ctx)).status, 401);
+  assert.equal((await alpha.fetch(preferenceRequest(true, { origin: 'https://foreign.test' }), config, ctx)).status, 403);
+  assert.equal((await alpha.fetch(preferenceRequest(true, {}, 'forged'), config, ctx)).status, 401);
+  assert.equal(sent.length, 0);
+  for (const headers of [{ dnt: '1' }, { 'sec-gpc': '1' }, { 'x-scout-analytics': 'off' }]) {
+    // Re-enable only through a later authenticated preference, then suppress
+    // again through an ordinary event request (not just the preference route).
+    await new Promise(resolve => setTimeout(resolve, 2));
+    assert.equal((await alpha.fetch(preferenceRequest(true), config, ctx)).status, 204);
+    assert.equal((await alpha.fetch(eventRequest('scout_visited', {}, sessionToken(), headers), config, ctx)).status, 204);
+    await ctx.flush(); const before = sent.length;
+    assert.equal((await alpha.fetch(webhookRequest('session.created', { user_id: 'user_alice' }), config, ctx)).status, 200);
+    assert.equal((await alpha.fetch(webhookRequest('user.updated', { id: 'user_alice' }), config, ctx)).status, 200);
+    assert.equal((await alpha.fetch(preferenceRequest(true, headers), config, ctx)).status, 204);
+    assert.equal((await alpha.fetch(eventRequest('scout_session_observed', {}, sessionToken()), config, ctx)).status, 204);
+    await ctx.flush(); assert.equal(sent.length, before, 'webhooks and account events obey the stored opt-out');
+  }
+});
+
+test('delivery retries preserve IDs and deletion tombstones block late updates and still-valid sessions', async t => {
+  const { config, alarm } = accountEnvironment(), attempts = [], erased = [], ctx = pendingContext(); let failCapture = false, failDelete = true, persons = 1;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (url.startsWith('https://api.clerk.com/')) return Response.json(profileFixture());
+    if (url === 'https://eu.posthog.com/api/projects/123/persons/bulk_delete/') {
+      erased.push(JSON.parse(options.body));
+      return failDelete ? new Response('PRIVATE_CANARY', { status: 503 }) : Response.json({ persons_found: persons, events_queued_for_deletion: persons > 0, deletion_errors: [] }, { status: 202 });
+    }
+    assert.equal(url, 'https://eu.i.posthog.com/batch/');
+    attempts.push(...JSON.parse(options.body).batch);
+    return new Response(null, { status: failCapture ? 503 : 200 });
+  });
+  assert.equal((await alpha.fetch(preferenceRequest(true), config, ctx)).status, 204);
+  const event = webhookRequest('session.created', { user_id: 'user_alice' });
+  failCapture = true;
+  assert.equal((await alpha.fetch(event.clone(), config, ctx)).status, 503);
+  failCapture = false;
+  assert.equal((await alpha.fetch(event.clone(), config, ctx)).status, 200);
+  assert.equal((await alpha.fetch(event, config, ctx)).status, 200);
+  const retries = attempts.filter(e => e.event === 'scout_signed_in');
+  assert.equal(retries.length, 2); assert.equal(retries[0].uuid, retries[1].uuid);
+  const deleted = webhookRequest('user.deleted', { id: 'user_alice', deleted: true });
+  const failed = await alpha.fetch(deleted.clone(), config, ctx);
+  assert.equal(failed.status, 503); assert.doesNotMatch(await failed.text(), /PRIVATE_CANARY/);
+  const before = attempts.length;
+  assert.equal((await alpha.fetch(webhookRequest('user.updated', { id: 'user_alice' }), config, ctx)).status, 503, 'a late update retries erasure, not profile creation');
+  assert.equal((await alpha.fetch(eventRequest('scout_session_observed', {}, sessionToken()), config, ctx)).status, 204);
+  await ctx.flush(); assert.equal(attempts.length, before);
+  failDelete = false;
+  assert.equal((await alpha.fetch(deleted.clone(), config, ctx)).status, 200);
+  assert.equal((await alpha.fetch(deleted, config, ctx)).status, 200);
+  assert.equal((await alpha.fetch(webhookRequest('user.created', { id: 'user_alice' }), config, ctx)).status, 200);
+  assert.equal((await alpha.fetch(preferenceRequest(true), config, ctx)).status, 204);
+  assert.equal(attempts.length, before);
+  assert.equal(erased.length, 3);
+  assert.deepEqual(erased[2], { distinct_ids: [attempts[0].properties.distinct_id], delete_events: true, delete_recordings: true });
+  assert.doesNotMatch(JSON.stringify(erased), /user_alice|Lovelace|ada@/);
+  assert.equal((await alpha.fetch(eventRequest('scout_visited', {}, sessionToken({ sub: 'user_bob' })), config, ctx)).status, 204);
+  await ctx.flush(); assert.equal(attempts.length, before + 1, 'deleting Alice must not suppress Bob');
+  persons = 0; config.POSTHOG_PROJECT_TOKEN = '';
+  assert.equal((await alpha.fetch(webhookRequest('user.deleted', { id: 'user_bob' }), config, ctx)).status, 200, 'zero matching persons is accepted even with capture disabled');
+  const prior = erased.length;
+  await alarm(); assert.equal(erased.length, prior + 2, 'both tombstones reconcile after a no-op or accepted deletion');
+  persons = 1; // Accepted-but-delayed capture finally creates the person upstream.
+  await alarm(); assert.equal(erased.length, prior + 4);
+  assert.deepEqual(erased.at(-1), erased[prior - 1], 'late ingestion is erased by the same pseudonym');
 });

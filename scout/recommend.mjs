@@ -21,7 +21,7 @@ export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, tim
     const started = now();
     const deadline = performance.now() + timeoutMs;
     const scope = modelIds !== null && endpointIds !== null ? 'intersection' : modelIds !== null ? 'models' : endpointIds !== null ? 'endpoints' : 'all';
-    let admitted = false, task, result, diagnostics, outcome = 'internal_error';
+    let admitted = false, task, result, diagnostics, failure, outcome = 'internal_error';
     try {
       if (now() - windowStart >= 60_000) { windowStart = now(); requests = 0; }
       if (inFlight >= 32 || requests >= 600) {
@@ -71,10 +71,13 @@ export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, tim
       result.warnings.push(...eligibilityWarnings(task));
       outcome = task.unsupported ? 'unsupported' : task.clarification ? 'clarification' : result.recommendations.length ? 'ok' : 'empty';
       return result;
+    } catch (error) {
+      failure = error;
+      throw error;
     } finally {
       if (admitted) inFlight--;
       for (const observer of [observe, observeRequest]) {
-        try { observer({ prompt: submittedPrompt, index, result, task, outcome, channel, scope, durationMs: now() - started,diagnostics:diagnostics??result?.runtime }); }
+        try { observer({ prompt: submittedPrompt, index, result, task, outcome, channel, scope, durationMs: now() - started,diagnostics:diagnostics??result?.runtime,error:failure }); }
         catch { /* Independent best-effort observers cannot change task results. */ }
       }
     }

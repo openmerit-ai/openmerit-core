@@ -9,6 +9,7 @@ import { decisionQuestions } from '../decisions.mjs';
 import { handleAPI } from '../http.mjs';
 import { handleMCP } from '../mcp.mjs';
 import { gzipSync, strToU8 } from 'fflate';
+import { createProductAnalytics } from '../product-analytics.mjs';
 
 const snapshot = JSON.parse(await readFile(new URL('../snapshot.json', import.meta.url), 'utf8'));
 const index = createIndex(snapshot);
@@ -198,8 +199,8 @@ test('browser analytics links an OAuth return, rotates on account switches, and 
     Object.defineProperty(globalThis, key, { value, configurable: true });
     t.after(() => { if (previous) Object.defineProperty(globalThis, key, previous); else delete globalThis[key]; });
   }
-  const sent = [];
-  t.mock.method(globalThis, 'fetch', async (url, options) => { sent.push(JSON.parse(options.body)); return new Response(null, { status: 204 }); });
+  const sent = [], controls = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => { (url.endsWith('/preference') ? controls : sent).push(JSON.parse(options.body)); return new Response(null, { status: 204 }); });
   const settle = () => new Promise(resolve => setTimeout(resolve, 5));
   async function until(check) { for (let i = 0; i < 100 && !check(); i++) await settle(); assert.ok(check()); }
   const { analytics } = await import(`../../site/scout/analytics.js?first=${crypto.randomUUID()}`);
@@ -207,27 +208,30 @@ test('browser analytics links an OAuth return, rotates on account switches, and 
   analytics.configure(true); analytics.account(null, null); await until(() => sent.length === 1);
   const anonymous = sent[0].anonymousId;
   const alice = { id: 'private_session_a', getToken: async () => 'private_bearer_a' };
-  analytics.account('private_user_a', alice); await until(() => sent.some(e => e.event === 'scout_signed_in'));
-  assert.equal(sent.find(e => e.event === 'scout_signed_in').anonymousId, anonymous);
+  analytics.account('private_user_a', alice, { status: 'complete', createdSessionId: alice.id, firstFactorVerification: { status: 'verified', strategy: 'oauth_google' } });
+  await until(() => sent.some(e => e.event === 'scout_session_observed'));
+  assert.equal(sent.find(e => e.event === 'scout_session_observed').anonymousId, anonymous);
+  assert.equal(sent.find(e => e.event === 'scout_session_observed').properties.auth_provider, 'google');
 
   let release;
   alice.getToken = () => new Promise(resolve => { release = resolve; });
   analytics.track('scout_model_id_copied', { rank: 2, task_index: 1 }); await until(() => !!release);
   analytics.account('private_user_a', alice); release('private_bearer_a');
   await until(() => sent.some(e => e.event === 'scout_model_id_copied'));
-  assert.equal(sent.filter(e => e.event === 'scout_signed_in').length, 1, 'ordinary Clerk refresh is not another sign-in');
+  assert.equal(sent.filter(e => e.event === 'scout_session_observed').length, 1, 'ordinary Clerk refresh is not another session');
 
   release = undefined; analytics.track('scout_provider_opened', { rank: 3, task_index: 2 }); await until(() => !!release);
   const bob = { id: 'private_session_b', getToken: async () => 'private_bearer_b' };
-  analytics.account('private_user_b', bob); release('private_bearer_a');
-  await until(() => sent.filter(e => e.event === 'scout_signed_in').length === 2);
+  analytics.account('private_user_b', bob, { status: 'complete', createdSessionId: alice.id, firstFactorVerification: { status: 'verified', strategy: 'oauth_github' } }); release('private_bearer_a');
+  await until(() => sent.filter(e => e.event === 'scout_session_observed').length === 2);
   assert.equal(sent.filter(e => e.event === 'scout_provider_opened').length, 0, 'a pending old-account event must be dropped');
-  const bobId = sent.filter(e => e.event === 'scout_signed_in').at(-1).anonymousId;
+  const bobEvent = sent.filter(e => e.event === 'scout_session_observed').at(-1), bobId = bobEvent.anonymousId;
+  assert.equal(bobEvent.properties.auth_provider, 'unknown', 'a different session cannot establish this provider');
   assert.notEqual(bobId, anonymous);
   const { analytics: reloaded } = await import(`../../site/scout/analytics.js?return=${crypto.randomUUID()}`);
   reloaded.configure(true); reloaded.account('private_user_b', bob);
   await until(() => sent.filter(e => e.event === 'scout_visited').length === 2);
-  assert.equal(sent.at(-1).anonymousId, bobId); assert.equal(sent.filter(e => e.event === 'scout_signed_in').length, 2);
+  assert.equal(sent.at(-1).anonymousId, bobId); assert.equal(sent.filter(e => e.event === 'scout_session_observed').length, 2);
   assert.doesNotMatch(JSON.stringify(sent), /private_user|private_session|private_bearer/);
 
   const before = sent.length;
@@ -237,4 +241,86 @@ test('browser analytics links an OAuth return, rotates on account switches, and 
     reloaded.configure(preference !== 'disabled'); reloaded.account('private_user_b', bob); reloaded.track('scout_visited');
     assert.equal(reloaded.headers()['X-Scout-Analytics'], 'off'); await settle(); assert.equal(sent.length, before);
   }
+  navigator.doNotTrack = '0'; navigator.globalPrivacyControl = false; localStorage.removeItem('scout-analytics-opt-out');
+  reloaded.configure(true, true); reloaded.account('private_user_b', bob);
+  await until(() => sent.length > before && controls.length === 1);
+  assert.deepEqual(controls, [{ enabled: true }]);
+  const enabledEvents = sent.length;
+  for (const preference of ['dnt', 'gpc', 'local', 'disabled']) {
+    navigator.doNotTrack = preference === 'dnt' ? '1' : '0'; navigator.globalPrivacyControl = preference === 'gpc';
+    localStorage.setItem('scout-analytics-opt-out', preference === 'local' ? '1' : '0');
+    reloaded.configure(preference !== 'disabled', true); reloaded.account('private_user_b', bob);
+    await until(() => controls.length === ['dnt', 'gpc', 'local', 'disabled'].indexOf(preference) + 2);
+    reloaded.track('scout_visited'); await settle();
+    assert.deepEqual(controls.at(-1), { enabled: false }, 'privacy controls contain no event, profile or anonymous ID');
+    assert.equal(sent.length, enabledEvents);
+  }
+});
+
+test('PostHog search content needs both configured deletion and explicit consent; bounded evidence preserves every rank', async t => {
+  const sent = [], pending = [], flush = async () => { while (pending.length) await Promise.all(pending.splice(0)); };
+  t.mock.method(globalThis, 'fetch', async (_, options) => { sent.push(...JSON.parse(options.body).batch); return new Response(null, { status: 200 }); });
+  const base = { POSTHOG_PROJECT_TOKEN: 'phc_fixture', POSTHOG_HOST: 'https://eu.i.posthog.com', POSTHOG_ENVIRONMENT: 'test',
+    POSTHOG_CAPTURE_CONTENT: 'true', CLERK_SECRET_KEY: 'fixture', CLERK_WEBHOOK_SIGNING_SECRET: 'fixture', POSTHOG_PERSONAL_API_KEY: 'fixture', POSTHOG_PROJECT_ID: '123',
+    SCOUT_ACCOUNTS: { idFromName: x => x, get: () => ({ capture: async batch => sent.push(...batch), preference: async () => {} }) } };
+  const prompt = 'Classify invoices for person@example.invalid with API_KEY=private-canary at https://private.invalid/?secret=yes';
+  const result = { tasks: [{ sourceText: prompt, layers: { input: { origin: 'explicit', text: prompt } }, slots: [{
+    task: { kind: 'classify' }, ranking: { mode: 'benchmarks' }, recommendations: Array.from({ length: 5 }, (_, i) => ({
+      modelId: `lab/model-${i}`, quality: i === 0 ? 0 : 95, reference: { costUsd: i === 0 ? 0 : null, completionSeconds: i + 1 },
+      endpoint: { id: `route:${i}`, semanticMatch: { reason: 'PRIVATE_DERIVED_TEXT' }, url: 'https://public.test/model?private-key=bad#private' },
+      evidence: Array.from({ length: 50 }, () => ({ benchmark: 'A'.repeat(2000), score: 80, url: 'https://public.test/eval?secret=bad' })),
+    })) }] }] };
+  for (const [headers, changes, expectedContent, expectedCount] of [
+    [{}, {}, false, 3], [{ 'X-Scout-Analytics-Content': 'on' }, {}, true, 3],
+    [{ 'X-Scout-Analytics-Content': 'on' }, { POSTHOG_CAPTURE_CONTENT: 'false' }, false, 3],
+    [{ 'X-Scout-Analytics-Content': 'on' }, { POSTHOG_PERSONAL_API_KEY: '' }, false, 3],
+    [{ 'X-Scout-Analytics-Content': 'on', 'X-Scout-Analytics': 'off' }, {}, false, 0],
+    [{ 'X-Scout-Analytics-Content': 'on', DNT: '1' }, {}, false, 0],
+    [{ 'X-Scout-Analytics-Content': 'on', 'Sec-GPC': '1' }, {}, false, 0],
+  ]) {
+    sent.length = 0;
+    const analytics = createProductAnalytics(new Request('https://example.test/scout/api/recommend', { headers }), { ...base, ...changes }, { waitUntil: p => pending.push(p) });
+    analytics.identify('user_fixture');
+    const credentials = JSON.stringify({ token: 'CANARY_JSON_TOKEN', password: 'CANARY_ESCAPED"QUOTE', 'api-key': 'CANARY_JSON_KEY' });
+    analytics.observeSearch({ prompt: `${prompt} ${credentials}`, result, outcome: 'ok', durationMs: 23 }); await flush();
+    assert.equal(sent.length, expectedCount);
+    if (!expectedCount) continue;
+    const trace = sent.find(e => e.event === '$ai_trace').properties, details = sent.find(e => e.event === 'scout_search_details').properties;
+    assert.equal(trace.content_captured, expectedContent);
+    assert.equal(typeof trace.$ai_input_state === 'string', expectedContent);
+    assert.equal(details.layers !== undefined, expectedContent);
+    if (expectedContent) { assert.match(trace.$ai_input_state, /Classify invoices/); assert.match(details.layers.input.text, /\[EMAIL\]/); }
+    assert.doesNotMatch(JSON.stringify(sent), /CANARY_JSON|CANARY_ESCAPED|QUOTE/);
+    assert.doesNotMatch(JSON.stringify(sent), /person@example|private-canary|private.invalid|private-key|PRIVATE_DERIVED|secret=bad/);
+    assert.equal(details.evidence_truncated, true);
+    assert.deepEqual(details.top5.map(m => m.model), ['lab/model-0', 'lab/model-1', 'lab/model-2', 'lab/model-3', 'lab/model-4']);
+    assert.equal(details.top5[0].costUsd, 0); assert.equal(details.top5[1].costUsd, null); assert.equal(details.top5[0].quality, 0);
+    assert.ok(Buffer.byteLength(JSON.stringify(details)) < 250000);
+    assert.equal(analytics.response(new Response('ok')).headers.get('x-scout-trace-id'), trace.trace_id);
+  }
+});
+
+test('sanitized errors and terminal/website events reach the same account-aware ingestion boundary', async t => {
+  const sent = [], pending = [];
+  t.mock.method(globalThis, 'fetch', async (_, options) => { sent.push(...JSON.parse(options.body).batch); return new Response(null, { status: 200 }); });
+  const env = { POSTHOG_PROJECT_TOKEN: 'phc_fixture', POSTHOG_HOST: 'https://eu.i.posthog.com', POSTHOG_ENVIRONMENT: 'test' };
+  const trace = crypto.randomUUID();
+  for (const [event, properties] of [
+    ['scout_client_error', { code: 'render_error', error_type: 'TypeError', trace_id: trace, frames: [{ filename: 'scout.js', lineno: 74, colno: 9, function: secret }, { filename: '/Users/private/file.js', lineno: 1, colno: 2 }], message: secret, stack: secret }],
+    ['terminal_snapshot', { mode: 'live', model_count: 9, record_count: 42, source_count: 2, host_count: 0, deployment_count: 4, agent_count: 3, model: secret }],
+    ['website_link_opened', { page: 'home', destination: 'scout', url: secret }],
+    ['terminal_error', { code: 'collection_error', error_type: secret }],
+  ]) {
+    const request = new Request('https://example.test/scout/api/analytics', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event, anonymousId: crypto.randomUUID(), properties }) });
+    const analytics = createProductAnalytics(request, env, { waitUntil: p => pending.push(p) });
+    assert.equal((await analytics.handleEvent()).status, 204);
+  }
+  while (pending.length) await Promise.all(pending.splice(0));
+  const errors = sent.filter(e => e.event === '$exception'); assert.equal(errors.length, 2);
+  assert.equal(errors[0].properties.trace_id, trace); assert.equal(errors[0].properties.$exception_list[0].stacktrace.frames.length, 1);
+  assert.equal(errors[0].properties.$exception_list[0].stacktrace.frames[0].lineno, 74);
+  assert.equal(errors[1].properties.$exception_list[0].type, 'Error');
+  assert.equal(sent.find(e => e.event === 'terminal_snapshot').properties.model_count, 9);
+  assert.equal(sent.find(e => e.event === 'website_link_opened').properties.product, 'website');
+  assert.doesNotMatch(JSON.stringify(sent), /PRIVATE_CANARY|private\/file|example.invalid|\$set|\"message\"/);
 });

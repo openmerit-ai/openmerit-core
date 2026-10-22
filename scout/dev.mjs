@@ -43,10 +43,12 @@ const server = createServer(async (req, res) => {
     if ((url.pathname.startsWith('/scout/api/') || url.pathname === '/scout/mcp')) {
       const request = new Request(url, { method: req.method, headers: req.headers, ...(!['GET', 'HEAD'].includes(req.method) ? { body: Readable.toWeb(req), duplex: 'half' } : {}) });
       const analytics = createProductAnalytics(request, analyticsEnv), mcp = url.pathname === '/scout/mcp';
-      const response = await scoutAccess(request, analyticsEnv, analytics.identify) ?? (url.pathname === '/scout/api/analytics'
+      let response = await scoutAccess(request, analyticsEnv, analytics.identify) ?? (url.pathname === '/scout/api/analytics'
         ? await analytics.handleEvent()
+        : url.pathname === '/scout/api/analytics/preference' ? await analytics.handlePreference()
         : await (mcp ? handleMCP : handleAPI)(request, index, refreshState, (...args) => recommendTask(...args, mcp ? 'mcp' : 'api', analytics.observeSearch)));
       analytics.complete(response);
+      response = analytics.response(response);
       res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text()); return;
     }
     if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405); res.end(); return; }
