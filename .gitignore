@@ -3,6 +3,7 @@ dist/
 site/docs/
 site/memo/
 site/scout/data-policy/
+site/scout/vendor/
 coverage/
 *.tsbuildinfo
 

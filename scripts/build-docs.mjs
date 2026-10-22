@@ -7,6 +7,7 @@ import MiniSearch from 'minisearch';
 import { groups, pages, documentationLabel } from './docs.config.mjs';
 import { createSocialImage } from './social-image.mjs';
 import { buildMemo } from './build-memo.mjs';
+import './build-web-analytics.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const out = join(root, 'site/docs');

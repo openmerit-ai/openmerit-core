@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { basename } from 'node:path';
 import { createCollector, loadConfig } from './collect.mjs';
 import { sampleSnapshot } from './sample.mjs';
-import { telemetryEnabled, terminalProperties, sendTerminalEvent, errorType } from './telemetry.mjs';
+import { telemetryEnabled, terminalProperties, sendTerminalEvent, errorProperties } from './telemetry.mjs';
 
 const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/flow.js', ['flow.js', 'text/javascript']], ['/flow.css', ['flow.css', 'text/css']], ['/styles.css', ['styles.css', 'text/css']], ['/favicon.svg', ['favicon.svg', 'image/svg+xml']]]);
 for (const file of ['baseten.png', 'groq.ico', 'cerebras.png', 'qwen.png', 'meta.ico', 'nomic.png', 'baai.png', 'ollama.png', 'lm-studio.png', 'vllm.png', 'anthropic.png', 'google.png', 'deepseek.ico', 'cohere.png', 'openai.png', 'mistral.png', 'openrouter.png', 'huggingface.svg']) assets.set(`/brands/${file}`, [`brands/${file}`, file.endsWith('.svg') ? 'image/svg+xml' : file.endsWith('.ico') ? 'image/x-icon' : 'image/png']);
@@ -17,7 +17,7 @@ export async function startTerminal({ root = process.cwd(), port = 4310, interva
     if(busy||closed)return;
     busy=true;
     try {const next=await collect();if(!closed)snapshot=next;}
-    catch (error) {if(snapshot.loading)snapshot={...snapshot,loadError:true};sendTerminalEvent('terminal_error',{code:'collection_error',error_type:errorType(error)});}
+    catch (error) {if(snapshot.loading)snapshot={...snapshot,loadError:true};sendTerminalEvent('terminal_error',{code:'collection_error',...errorProperties(error)});}
     finally {busy=false;}
   };
   const server = createServer(async (request, response) => {

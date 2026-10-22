@@ -8,7 +8,7 @@ const keywordIndexes=new WeakMap();
 export const embeddingModel='text-embedding-3-small',embeddingDimensions=256;
 export async function embed(input,{apiKey,fetcher=fetch,timeoutMs=4000}={}) {
   const {response,body}=await fetchJSON(fetcher,'https://api.openai.com/v1/embeddings',{method:'POST',headers:{authorization:`Bearer ${apiKey}`,'content-type':'application/json'},body:JSON.stringify({model:embeddingModel,dimensions:embeddingDimensions,input})},timeoutMs);
-  if(!response.ok)throw Error(`Evidence embeddings returned HTTP ${response.status}.`);
+  if(!response.ok){const error=Error(`Evidence embeddings returned HTTP ${response.status}.`);error.providerStatus=response.status;error.code=body?.error?.code;throw error;}
   if(!Array.isArray(body.data)||body.data.length!==input.length)throw Error('Incomplete embeddings.');
   const rows=[...body.data].sort((a,b)=>a.index-b.index);
   if(rows.some((r,i)=>r.index!==i||r.embedding?.length!==embeddingDimensions||r.embedding.some(v=>!Number.isFinite(v))))throw Error('Invalid embeddings.');

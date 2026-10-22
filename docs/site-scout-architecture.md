@@ -1,5 +1,18 @@
 # Scout architecture and operations
 
+## Version-5 instrumentation rollout
+
+The implementation adds the [version-5 instrumentation contract](scout.md#version-5-instrumentation): native web lifecycle/CTA events, allowlisted acquisition/device categories, support-dependent sampled vitals, same-tab linked identity, logical MCP failures, stage/provider failure codes, bounded real computation attempts/tokens and feedback/retry correlation. Shared cache followers have no generation attempts of their own. Unknown usage/cost stays unknown; shortlist evidence is not model execution. Prompt-content and retention controls are unchanged. CLI version/platform/runtime and sanitized application frames remain explicitly opt-in. Replay is a separate spike and is not activated.
+
+The owner authorized commit/push and the independent Scout serving rollout. Deploy only `wrangler.scout-alpha.jsonc`, preserving account-state bindings and tombstones; main-site, publisher, router, terminal and npm releases are outside this rollout. Before release acceptance, inspect actual ingested events for linked signup/search, feedback, retries, HTTP-200 MCP failures, provider failures, cache followers and opt-out/unlinking privacy canaries; HTTP capture acknowledgements alone are insufficient. Main-site publication remains blocked by [source divergence](site-documentation.md#website-analytics-source-only-unreleased). Alert notifications require chosen cadence and recipients; no notification configuration is implied by a serving deployment.
+
+### Reviewed feedback and future experiments
+
+1. Authorized operators review negative-feedback traces with the fixed reason, ranking/evidence versions and stage/provider diagnostics. Distinguish task misunderstanding, evidence gaps and operational failure from measured model quality; feedback is not a ground-truth grade.
+2. Propose a minimal evaluation case only after human review of permission and privacy. Prefer synthetic or sanitized descriptions and public evidence, remove identifiers/secrets, and record provenance, expected behavior and review approval. Never automatically copy private prompts, trace content or account details into fixtures/issues/exports, and never expand retention to preserve a case.
+3. Establish an offline baseline with a versioned suite, fixed metrics/graders and held-out cases before proposing a controlled ranking experiment. Review regressions, evidence coverage and unknown metrics before any online allocation.
+4. Only then define a future experiment's hypothesis, eligibility, assignment unit, primary metric, quality/latency/cost guardrails, duration, stopping/rollback rules and privacy review. Obtain separate activation approval. No experiment, remote ranking flag or automatic feedback-driven ranking update is active.
+
 ## Beta evaluation analytics — rollout, 22 October 2026
 
 The owner approved serving deployment and activation. The serving configuration enables `SCOUT_BETA_EVALUATION_LOGGING=true`, alongside `POSTHOG_CAPTURE_CONTENT=true` and complete account-sync/deletion configuration. Browser content defaults on only without a stored content choice; saved off, general opt-out, DNT/GPC and unreadable storage keep it off. API/MCP retain explicit `X-Scout-Analytics-Content: on`; CLI content stays off. Content serves product evaluation/debugging, not foundation model training.

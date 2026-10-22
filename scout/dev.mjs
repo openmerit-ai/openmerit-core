@@ -11,6 +11,7 @@ import { createRecommender } from './recommend.mjs';
 import { registry } from './registry.mjs';
 import { scoutAccess } from './auth.mjs';
 import { createProductAnalytics } from './product-analytics.mjs';
+import '../scripts/build-web-analytics.mjs';
 
 const root = resolve(import.meta.dirname, '../site');
 const recommendTask = createRecommender({ apiKey: process.env.OPENAI_API_KEY });

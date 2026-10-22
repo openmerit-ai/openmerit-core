@@ -67,5 +67,5 @@ const completeTelemetry = commandTelemetry(process.argv.slice(2));
 main().then(() => completeTelemetry(process.exitCode ? 'error' : 'ok'), async error => {
   console.error(`\n  ${error.code === 'EADDRINUSE' ? 'Port is in use. Choose another with --port.' : error.message}\n`);
   process.exitCode = 1;
-  await completeTelemetry('error');
+  await completeTelemetry('error', error);
 });

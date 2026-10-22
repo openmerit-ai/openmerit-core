@@ -1,5 +1,44 @@
 import { searchRecord } from './analytics.mjs';
 import { redactContent } from '../site/scout/analytics-privacy.js';
+import { timingStages } from './timing.mjs';
+
+const nonnegative = value => Number.isFinite(value) && value >= 0;
+const spanId = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+export const failureCodes = new Set(['timeout', 'transport_error', 'http_error', 'rate_limited', 'rate_limit_exceeded', 'insufficient_quota', 'credit_balance_exhausted', 'billing_hard_limit_reached', 'organization_usage_limit_exceeded', 'refusal', 'incomplete', 'validation_error', 'provider_error']);
+
+// These are real computation attempts, never the recommended models. Cache
+// followers have no attempts of their own. Missing usage/cost stays unknown.
+function computationEvents(diagnostics) {
+  if (!diagnostics || ['hit', 'shared'].includes(diagnostics.cache)) return [];
+  const events = [];
+  for (const [kind, records, limit] of [['span', diagnostics.spans, 80], ['generation', diagnostics.generations, 40]]) {
+    for (const record of (records ?? []).slice(0, limit)) {
+      if (!spanId(record.id) || !nonnegative(record.durationMs) || !Number.isFinite(Date.parse(record.startedAt))) continue;
+      if (kind === 'span' && !timingStages.includes(record.stage)) continue;
+      if (kind === 'generation' && !['responses', 'decisions', 'embeddings'].includes(record.operation)) continue;
+      const code = failureCodes.has(record.code) ? record.code : undefined;
+      const properties = {
+        $ai_span_id: record.id, $ai_span_name: kind === 'span' ? record.stage : `openai.${record.operation}`,
+        $ai_latency: Math.max(0, Math.min(record.pending && kind === 'generation' ? Date.now() - Date.parse(record.startedAt) : record.durationMs, 86400000)) / 1000,
+        $ai_is_error: record.failed === true || !!code,
+        ...(kind === 'span' ? { stage_state: record.failed ? 'failed' : record.pending ? 'incomplete' : 'completed' } : {}),
+        ...(code ? { $ai_error: code, failure_code: code } : {}),
+      };
+      if (kind === 'generation') {
+        properties.$ai_provider = 'openai';
+        properties.operation = record.operation;
+        properties.attempt_state = record.pending ? 'incomplete' : code ? 'failed' : 'completed';
+        if (['gpt-6-luna', 'text-embedding-3-small'].includes(record.model)) properties.$ai_model = record.model;
+        for (const [source, target] of [['inputTokens', '$ai_input_tokens'], ['outputTokens', '$ai_output_tokens'], ['cachedInputTokens', '$ai_cache_read_input_tokens']]) {
+          if (Number.isSafeInteger(record[source]) && record[source] >= 0) properties[target] = record[source];
+        }
+        if (Number.isInteger(record.providerStatus) && record.providerStatus >= 100 && record.providerStatus <= 599) properties.provider_status = record.providerStatus;
+      }
+      events.push({ event: kind === 'generation' && record.operation === 'embeddings' ? '$ai_embedding' : `$ai_${kind}`, timestamp: record.startedAt, properties });
+    }
+  }
+  return events;
+}
 
 // Public evidence is selected by searchRecord, then bounded for PostHog. Never
 // serialize a whole recommendation: it also carries prompt-derived prose.
@@ -64,5 +103,5 @@ export function searchEvents(event, includeContent) {
     // These are recommended models, not executions or actual provider charges.
     $ai_output_state: details.map(({ properties: p }) => ({ task_index: p.task_index, slot_index: p.slot_index,
       quality_status: p.quality_status, models: p.top5.map(({ evidence, ...model }) => model) })),
-  } }, ...details];
+  } }, ...details, ...computationEvents(event.diagnostics ?? event.result?.runtime)];
 }

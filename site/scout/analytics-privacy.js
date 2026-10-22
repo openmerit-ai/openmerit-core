@@ -1,7 +1,7 @@
 // Shared by browser and ingestion: no raw exception message, source context,
 // function name, URL, or absolute path crosses either telemetry boundary.
 const types = new Set(['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'URIError', 'EvalError', 'AggregateError', 'AbortError']);
-const files = new Set(['scout.js', 'auth.js', 'analytics.js', 'worker.mjs', 'alpha-worker.mjs', 'worker.js', 'alpha-worker.js', 'recommend.mjs', 'matching.mjs', 'interpreter.mjs', 'product-analytics.mjs', 'store.mjs', 'http.mjs', 'mcp.mjs']);
+const files = new Set(['scout.js', 'auth.js', 'analytics.js', 'web-analytics.js', 'product-analytics.js', 'docs.js', 'docs-search.js', 'worker.mjs', 'alpha-worker.mjs', 'worker.js', 'alpha-worker.js', 'recommend.mjs', 'matching.mjs', 'interpreter.mjs', 'structured.mjs', 'decisions.mjs', 'evidence-search.mjs', 'eligibility.mjs', 'specialists.mjs', 'utils.mjs', 'product-analytics.mjs', 'store.mjs', 'http.mjs', 'mcp.mjs', 'cli.mjs', 'server.mjs', 'collect.mjs', 'repository-index.mjs', 'scout.mjs', 'config.mjs', 'runner.mjs', 'adapters.mjs', 'process.mjs', 'report.mjs', 'app.js']);
 export const errorType = value => types.has(value) ? value : 'Error';
 export function exceptionFrames(stack) {
   if (typeof stack !== 'string') return [];

@@ -2,6 +2,8 @@
 
 Updated 22 October 2026.
 
+**Version-5 diagnostics:** Scout serving builds collect page views/leaves, bounded engagement, allowlisted acquisition/UTM and browser/device categories, and sampled browser performance observations where supported and usage analytics is enabled. Native URL properties use only reconstructed public paths, never raw visitor URLs, queries or fragments. Linked activity can join same-tab visits, signup and searches; unlinking retains request-only server identity, not a cross-request funnel. Feedback records a useful/not-useful rating and optional fixed reason, with linked trace/retry correlation, not free text. Server diagnostics include bounded stage/provider failure codes and actual pipeline attempt tokens when reported, not invented charges or executions of recommended models. See the [technical contract](scout.md#version-5-instrumentation). Main-site/docs collection and CLI publication have separate release boundaries. No replay or ranking experiment is enabled, and none of the prompt-content or retention controls below change.
+
 Scout is operated by OpenMerit. This policy covers the hosted Scout website, recommendation API and MCP endpoint. It describes current data handling, not a promise that beta data is anonymous or exempt from privacy requirements. External coding agents, the local Inference Terminal and other OpenMerit services have separate data flows.
 
 ## Help improve Scout during beta

@@ -8,7 +8,8 @@ import { prepareEligibility, matchEligibility, eligibilityWarnings } from './eli
 import { matchTask } from './matching.mjs';
 import {createResultCache} from './result-cache.mjs';
 import {interpreterVersion} from './interpreter.mjs';
-import {matchingTimeoutMs} from './timing.mjs';
+import {matchingTimeoutMs,createTimings} from './timing.mjs';
+import {diagnosticTransport} from './utils.mjs';
 
 // Shared by HTTP and MCP; bounded admission without visitor accounts or queues.
 export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, timeoutMs = matchingTimeoutMs, db, vectorize, observe = () => {},cacheOptions } = {}) {
@@ -21,7 +22,8 @@ export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, tim
     const started = now();
     const deadline = performance.now() + timeoutMs;
     const scope = modelIds !== null && endpointIds !== null ? 'intersection' : modelIds !== null ? 'models' : endpointIds !== null ? 'endpoints' : 'all';
-    let admitted = false, task, result, diagnostics, failure, outcome = 'internal_error';
+    let admitted = false, task, result, diagnostics, failure, legacyTrace, legacyCause, outcome = 'internal_error';
+    const generations=[];
     try {
       if (now() - windowStart >= 60_000) { windowStart = now(); requests = 0; }
       if (inFlight >= 32 || requests >= 600) {
@@ -30,9 +32,10 @@ export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, tim
       }
       requests++; inFlight++; admitted = true;
       if(index.snapshot.servingEngine==='evidence') {
+        let ownsComputation=false;
         try {
           const key=JSON.stringify([index.snapshot.publication.id,interpreterVersion,prompt,modelIds,endpointIds,new Date(started).toISOString().slice(0,10)]);
-          const entry=await cached(key,()=>matchTask(index,prompt,modelIds,endpointIds,{apiKey,fetcher,now,timeoutMs,db,vectorize}));
+          const entry=await cached(key,()=>{ownsComputation=true;return matchTask(index,prompt,modelIds,endpointIds,{apiKey,fetcher,now,timeoutMs,db,vectorize});});
           result=entry.value;result.runtime={...(entry.status==='miss'?result.runtime:{}),cache:entry.status,ageMs:entry.ageMs};
           result.elapsedMs=Math.max(0,now()-started);if(entry.status!=='miss')result.interpretationMs=0;
           task=result.task;const slots=result.tasks.flatMap(t=>t.slots);
@@ -42,18 +45,20 @@ export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, tim
           }
           outcome=task.unsupported?'unsupported':slots.some(s=>s.task.clarification)?'clarification':slots.some(s=>s.recommendations.length)?'ok':'empty';return result;
         }
-        catch(cause){diagnostics=cause.diagnostics;outcome='interpretation_error';if(cause.status===422)throw cause;const error=new Error('Scout could not establish this recommendation right now. Please try again.');error.status=503;error.cause=cause;throw error;}
+        catch(cause){diagnostics=cause.diagnostics?structuredClone({...cause.diagnostics,generations:ownsComputation?cause.diagnostics.generations:[],spans:ownsComputation?cause.diagnostics.spans:[]}):undefined;outcome='interpretation_error';if(cause.status===422)throw cause;const error=new Error('Scout could not establish this recommendation right now. Please try again.');error.status=503;error.cause=cause;throw error;}
       }
+      legacyTrace=createTimings();
+      const legacyFetcher=diagnosticTransport(fetcher,generations);
       let interpreted;
-      try { interpreted = await classifyPrompt(prompt, { apiKey, fetcher, timeoutMs, registry: index.snapshot.registry ?? seed, interpretSelection:!!index.snapshot.eligibilityKey||index.snapshot.selectionMetadataVersion==='1',selectionVocabulary:index.snapshot.selectionVocabulary??{} }); }
-      catch { outcome = 'interpretation_error'; const error = new Error('Scout could not interpret this task right now. Please try again.'); error.status = 503; throw error; }
+      try { interpreted = await legacyTrace.measure('interpretation',()=>classifyPrompt(prompt, { apiKey, fetcher:legacyFetcher, timeoutMs, registry: index.snapshot.registry ?? seed, interpretSelection:!!index.snapshot.eligibilityKey||index.snapshot.selectionMetadataVersion==='1',selectionVocabulary:index.snapshot.selectionVocabulary??{} })); }
+      catch (cause) { legacyCause=cause;outcome = 'interpretation_error'; const error = new Error('Scout could not interpret this task right now. Please try again.'); error.status = 503;error.cause=cause; throw error; }
       task = interpreted.task;
       if(task.selection.required.length&&!task.unsupported&&!task.clarification) {
         try {
           const directory=index.loadEligibility?await index.loadEligibility():prepareEligibility(index.snapshot);
           const remaining=Math.floor(deadline-performance.now());if(remaining<=0)throw new Error('Selection deadline exceeded.');
-          task.selection=await matchEligibility(prompt,task.selection,directory,{apiKey,fetcher,timeoutMs:remaining,modelIds,endpointIds,now:now()});
-        }catch {outcome='selection_error';const error=new Error('Scout could not verify the model-selection restrictions right now. Please try again.');error.status=503;throw error;}
+          task.selection=await legacyTrace.measure('eligibility',()=>matchEligibility(prompt,task.selection,directory,{apiKey,fetcher:legacyFetcher,timeoutMs:remaining,modelIds,endpointIds,now:now()}));
+        }catch (cause) {legacyCause=cause;outcome='selection_error';const error=new Error('Scout could not verify the model-selection restrictions right now. Please try again.');error.status=503;error.cause=cause;throw error;}
       }
       index = index.loadTask ? await index.loadTask(task, modelIds, endpointIds) : narrowIndex(index, task, modelIds, endpointIds);
       // Explicit legacy model inventories cannot grant access to a Hub route.
@@ -64,7 +69,7 @@ export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, tim
       try {
         const remaining = Math.floor(deadline-performance.now());
         if(profiles.length && remaining<=0)throw new Error('Specialist comparison deadline exceeded.');
-        task.specialistMatch = await matchSpecialists(prompt, task, profiles, { apiKey, fetcher, timeoutMs: Math.max(1,remaining) });
+        task.specialistMatch = await legacyTrace.measure('specialistCheck',()=>matchSpecialists(prompt, task, profiles, { apiKey, fetcher:legacyFetcher, timeoutMs: Math.max(1,remaining) }));
       }
       catch { task.specialistMatch = { version: specialistVersion, status: 'unavailable', matches: [] }; }
       result = { ...recommend(index, prompt, now(), task, undefined, modelIds, endpointIds), interpretationMs: interpreted.elapsedMs, retrieval: index.retrieval, snapshotVersion: index.snapshot.publication?.id };
@@ -76,6 +81,7 @@ export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, tim
       throw error;
     } finally {
       if (admitted) inFlight--;
+      if(legacyTrace){diagnostics={...legacyTrace.snapshot(legacyCause??failure),generations:structuredClone(generations)};if(result)result.runtime=diagnostics;}
       for (const observer of [observe, observeRequest]) {
         try { observer({ prompt: submittedPrompt, index, result, task, outcome, channel, scope, durationMs: now() - started,diagnostics:diagnostics??result?.runtime,error:failure }); }
         catch { /* Independent best-effort observers cannot change task results. */ }

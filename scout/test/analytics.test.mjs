@@ -402,3 +402,75 @@ test('browser beta defaults preserve saved refusals and privacy signals; unlinki
   assert.notEqual(reloaded.headers()['X-Scout-Anonymous-Id'], unlinkedId);
   assert.equal(reloaded.headers()['X-Scout-Analytics-Content'], 'off');
 });
+
+test('native web, feedback and CLI errors preserve correlation without bypassing account gates', async t => {
+  const sent = [], pending = [], env = { POSTHOG_PROJECT_TOKEN: 'phc_fixture', POSTHOG_HOST: 'https://eu.i.posthog.com', POSTHOG_ENVIRONMENT: 'test' };
+  t.mock.method(globalThis, 'fetch', async (_, options) => { sent.push(...JSON.parse(options.body).batch); return new Response(null, { status: 200 }); });
+  const session_id = crypto.randomUUID(), pageview_id = crypto.randomUUID(), trace_id = crypto.randomUUID(), anonymousId = crypto.randomUUID();
+  const common = { page: 'scout', page_path: '/scout/', session_id, pageview_id };
+  async function ingest(event, properties, headers = {}, configuration = env) {
+    const request = new Request('https://example.test/scout/api/analytics?PRIVATE', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ event, anonymousId, properties }) });
+    const analytics = createProductAnalytics(request, configuration, { waitUntil: p => pending.push(p) });
+    if (configuration.SCOUT_ACCOUNTS) analytics.identify('verified_account');
+    const response = await analytics.handleEvent();
+    while (pending.length) await Promise.all(pending.splice(0));
+    return response.status;
+  }
+  assert.equal(await ingest('web_pageview', { ...common, referrer_channel: 'search', referrer_domain: 'google.com', browser: 'safari', os: 'ios', device: 'mobile', viewport: 'small', utm_source: 'google' }), 204);
+  assert.equal(await ingest('web_pageleave', { ...common, duration_ms: 12500, scroll_depth: 63, content_depth: 79 }), 204);
+  assert.equal(await ingest('web_vitals', { ...common, vital_name: 'CLS', vital_value: 0.17 }), 204);
+  assert.equal(await ingest('web_interaction', { ...common, cta_id: 'search_submit' }), 204);
+  assert.equal(await ingest('scout_recommendation_feedback', { rating: 'not_useful', reason: 'wrong_task', task_count: 2, candidate_count: 7, trace_id, prompt: secret }), 204);
+  assert.equal(await ingest('cli_command_completed', { command: 'eval_plan', command_id: pageview_id, client_version: '0.1.7-preview.5', platform: 'darwin', runtime_major: 22, outcome: 'error', duration_ms: 43, code: 'scout_http_error', operation: 'scout_recommend', trace_id, frames: [{ filename: 'scout.mjs', lineno: 23, colno: 4, function: secret }] }), 204);
+  const [view, leave, vital, click, feedback, command, exception] = sent;
+  assert.deepEqual(sent.map(e => e.event), ['$pageview', '$pageleave', '$web_vitals', '$autocapture', 'scout_recommendation_feedback', 'cli_command_completed', '$exception']);
+  assert.equal(view.properties.$current_url, 'https://openmerit.ai/scout/'); assert.equal(view.properties.$browser, 'Safari');
+  assert.equal(leave.properties.$session_id, session_id); assert.equal(leave.properties.$prev_pageview_id, pageview_id);
+  assert.equal(leave.properties.$prev_pageview_duration, 12.5); assert.equal(leave.properties.$prev_pageview_max_content_percentage, .79);
+  assert.equal(vital.properties.$web_vitals_CLS_value, .17); assert.equal(vital.properties.$pageview_id, pageview_id);
+  assert.equal(click.properties.cta_id, 'search_submit'); assert.equal(feedback.properties.$ai_trace_id, trace_id);
+  assert.equal(command.properties.command_id, pageview_id); assert.equal(exception.properties.$exception_list[0].stacktrace.frames[0].filename, 'scout.mjs');
+  assert.equal(exception.properties.trace_id, trace_id); assert.equal(exception.properties.client_version, '0.1.7-preview.5');
+  assert.doesNotMatch(JSON.stringify(sent), /PRIVATE|example.invalid|function.*CANARY/);
+  assert.equal(await ingest('web_interaction', { ...common, cta_id: 'search_submit', url: secret }), 400);
+  assert.equal(await ingest('scout_recommendation_feedback', { rating: 'arbitrary' }), 400);
+  await ingest('web_interaction', { ...common, cta_id: 'search_submit' }, { 'X-Scout-Analytics-Account': 'off', 'X-Scout-Trace-Id': trace_id, 'X-Scout-Retry-Of': trace_id });
+  assert.doesNotMatch(JSON.stringify(sent.at(-1)), new RegExp([session_id, pageview_id, trace_id, anonymousId].join('|')));
+  const before = sent.length;
+  await ingest('scout_recommendation_feedback', { rating: 'useful', trace_id }, { DNT: '1' });
+  await ingest('scout_recommendation_feedback', { rating: 'useful', trace_id }, {}, { ...env, SCOUT_ACCOUNTS: { idFromName: v => v, get: () => ({ capture: async () => {} }) } });
+  assert.equal(sent.length, before, 'opt-out and the account gate suppress every derived event');
+});
+
+test('actual computation attempts, failed stages and HTTP-200 MCP failures have native diagnostics', async t => {
+  const sent = [], pending = [], env = { POSTHOG_PROJECT_TOKEN: 'phc_fixture', POSTHOG_HOST: 'https://eu.i.posthog.com', POSTHOG_ENVIRONMENT: 'test' };
+  t.mock.method(globalThis, 'fetch', async (_, options) => { sent.push(...JSON.parse(options.body).batch); return new Response(null, { status: 200 }); });
+  const trace = crypto.randomUUID(), retry = crypto.randomUUID(), startedAt = '2026-10-22T01:02:03.000Z';
+  const analytics = createProductAnalytics(new Request('https://example.test/scout/mcp', { headers: { 'X-Scout-Trace-Id': trace, 'X-Scout-Retry-Of': retry, 'X-Scout-Agent': 'claude-code' } }), env, { waitUntil: p => pending.push(p) });
+  const span = (stage, rest = {}) => ({ id: crypto.randomUUID(), stage, durationMs: 43, startedAt, failed: false, ...rest });
+  const attempt = rest => ({ id: crypto.randomUUID(), operation: 'responses', durationMs: 19, startedAt, ...rest });
+  const diagnostics = { failure: { stage: 'decisions', code: 'rate_limited', providerStatus: 429 }, pendingStages: ['decisions'],
+    spans: [span('decisions', { failed: true }), span('decisions', { pending: true }), span('decisions')],
+    generations: [attempt({ code: 'rate_limited', providerStatus: 429 }), attempt({ model: 'gpt-6-luna', inputTokens: 83, outputTokens: 7, cachedInputTokens: 0 }), attempt({ operation: 'embeddings', inputTokens: 11, model: 'text-embedding-3-small' })] };
+  analytics.observeSearch({ prompt: secret, outcome: 'interpretation_error', durationMs: 72, error: new TypeError(secret), diagnostics });
+  analytics.observeMCP('tools/call', secret, 'scout_models');
+  analytics.complete(Response.json({ result: { isError: true, content: [{ text: secret }] } }));
+  while (pending.length) await Promise.all(pending.splice(0));
+  const search = sent.find(e => e.event === 'scout_search_completed').properties;
+  assert.equal(search.trace_id, trace); assert.equal(search.retry_of, retry); assert.equal(search.failure_stage, 'decisions'); assert.equal(search.failure_code, 'rate_limited'); assert.equal(search.provider_status, 429);
+  assert.deepEqual(sent.filter(e => e.event === '$ai_span').map(e => e.properties.stage_state), ['failed', 'incomplete', 'completed']);
+  const generations = sent.filter(e => e.event === '$ai_generation');
+  assert.equal(generations.length, 2); assert.equal(generations[0].properties.$ai_input_tokens, undefined);
+  assert.equal(generations[1].properties.$ai_input_tokens, 83); assert.equal(generations[1].properties.$ai_output_tokens, 7); assert.equal(generations[1].properties.$ai_cache_read_input_tokens, 0);
+  assert.equal(generations[1].properties.$ai_total_cost_usd, undefined); assert.equal(generations[1].properties.$ai_parent_id, trace); assert.equal(generations[1].timestamp, startedAt);
+  assert.equal(sent.find(e => e.event === '$ai_embedding').properties.$ai_input_tokens, 11);
+  assert.equal(sent.find(e => e.event === 'scout_request_completed').properties.outcome, 'error');
+  assert.equal(sent.find(e => e.event === '$mcp_tool_call').properties.$mcp_is_error, true);
+  assert.equal(sent.find(e => e.event === '$mcp_tool_call').properties.$mcp_tool_name, 'scout_models');
+  assert.equal(sent.filter(e => e.event === '$exception').length, 1);
+  assert.doesNotMatch(JSON.stringify(sent), /PRIVATE_CANARY|example.invalid/);
+  for (const cache of ['hit', 'shared']) analytics.observeSearch({ result: { tasks: [] }, outcome: 'empty', durationMs: 3, diagnostics: { ...diagnostics, failure: undefined, cache } });
+  while (pending.length) await Promise.all(pending.splice(0));
+  assert.equal(sent.filter(e => e.event === '$ai_generation').length, 2, 'cached/shared requests cannot double-count provider usage');
+  assert.equal(sent.filter(e => e.event === 'scout_search_completed').length, 3, 'each request still counts as one search');
+});

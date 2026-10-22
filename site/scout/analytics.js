@@ -1,14 +1,16 @@
 import { errorType, exceptionFrames } from './analytics-privacy.js';
+import { createWebAnalytics, webPermitted } from './web-analytics.js';
 
 const endpoint = new URL('./api/analytics', import.meta.url).pathname;
 const storageKey = 'scout-product-analytics';
 let enabled = false, accountSync = false, contentAvailable = false, contentDefault = false, state, session, currentUser, lastAllowed, lastLinked, generation = 0, visited = false, ready = Promise.resolve();
 let usageChoice, contentChoice, linkChoice, errors = 0;
-const fresh = () => ({ anonymousId: crypto.randomUUID(), user: null, session: null, linked: accountLinked() });
+let web;
+const fresh = () => ({ anonymousId: accountLinked() && web?.identity()?.anonymousId || crypto.randomUUID(), user: null, session: null, linked: accountLinked() });
 function allowed() {
-  if (!enabled || navigator.doNotTrack === '1' || navigator.globalPrivacyControl === true) return false;
+  if (!enabled || !webPermitted()) return false;
   if (usageChoice !== undefined) return usageChoice;
-  try { return localStorage.getItem('scout-analytics-opt-out') !== '1'; } catch { return true; }
+  try { return localStorage.getItem('scout-analytics-opt-out') !== '1'; } catch { return false; }
 }
 function contentAllowed() {
   if (!allowed() || !contentAvailable) return false;
@@ -19,8 +21,7 @@ function contentAllowed() {
   } catch { return false; } // An unreadable existing refusal must not become consent.
 }
 function accountLinked() {
-  if (linkChoice !== undefined) return linkChoice;
-  try { return localStorage.getItem('scout-analytics-account-link') !== '0'; } catch { return false; }
+  try { return localStorage.getItem('scout-analytics-account-link') !== '0' && linkChoice !== false; } catch { return false; }
 }
 function save() {
   try { sessionStorage.setItem(storageKey, JSON.stringify(state)); } catch { /* Optional tab storage. */ }
@@ -49,17 +50,25 @@ export const analytics = {
   configure(value, sync = false, content = false, beta = false) {
     enabled = value === true; accountSync = sync === true; contentAvailable = content === true; contentDefault = beta === true; currentUser = undefined; lastAllowed = undefined; lastLinked = undefined; generation++;
     globalThis.dispatchEvent?.(new Event('scout-analytics-change'));
+    if (!web && globalThis.document?.addEventListener && globalThis.location) {
+      web = createWebAnalytics({ permitted: allowed, accountLink: accountLinked, autoStart: false,
+        send: (event, properties, anonymousId) => analytics.track(event, properties, anonymousId) });
+    }
     if (!allowed()) return;
     try {
       const saved = JSON.parse(sessionStorage.getItem(storageKey));
       if (/^[0-9a-f-]{36}$/.test(saved?.anonymousId) && [saved.user, saved.session].every(v => v === null || /^[0-9a-f]{64}$/.test(v))) state = saved;
     } catch { /* Disabled or invalid storage does not affect Scout. */ }
     state ??= fresh();
+    if (accountLinked() && web) state.anonymousId = web.identity().anonymousId;
   },
   preferences() {
     return { available: enabled && navigator.doNotTrack !== '1' && navigator.globalPrivacyControl !== true,
       enabled: allowed(), contentAvailable, contentDefault, content: contentAllowed(), linkAccount: accountLinked() };
   },
+  webNavigation() { web?.navigate(); },
+  webInteraction(id) { web?.interaction(id); },
+  webVital(metric) { web?.vital(metric); },
   setPreferences(usage, content, link = accountLinked()) {
     usageChoice = usage === true; contentChoice = usageChoice && content === true; linkChoice = link === true;
     try {
@@ -78,26 +87,29 @@ export const analytics = {
   account(userId, activeSession, signIn) {
     const permitted = allowed(), linked = accountLinked();
     const unchanged = currentUser === userId && session?.id === activeSession?.id && lastAllowed === permitted && lastLinked === linked;
+    const switched = !!currentUser && currentUser !== userId;
     currentUser = userId; session = activeSession;
     lastAllowed = permitted; lastLinked = linked;
     if (!permitted) {
       if (unchanged) return;
       const current = ++generation; state = undefined;
+      web?.reset();
       try { sessionStorage.removeItem(storageKey); } catch { /* Optional tab storage. */ }
       ready = preference(activeSession, current, false);
       return;
     }
     if (unchanged && state) return;
     const current = ++generation;
-    if (state && (state.linked ?? true) !== linked) state = fresh();
+    if (switched || state && (state.linked ?? true) !== linked) { web?.reset(); state = fresh(); }
     state ??= fresh();
     ready = (async () => {
       await preference(activeSession, current, true);
       const [user, sessionId] = await Promise.all([hash(userId), hash(activeSession?.id)]);
       if (current !== generation) return;
-      if (state.user && state.user !== user) state = fresh();
+      if (state.user && state.user !== user) { web?.reset(); state = fresh(); }
       const signedIn = !!user && state.session !== sessionId;
       state.user = user; state.session = sessionId; save();
+      web?.navigate();
       if (!visited) {
         visited = true; analytics.track('scout_visited');
         globalThis.dispatchEvent?.(new Event('scout-analytics-ready'));
@@ -113,32 +125,47 @@ export const analytics = {
     })().catch(() => {});
   },
   headers() {
+    if (state && state.linked !== accountLinked()) analytics.account(currentUser, session);
+    const webIdentity = allowed() ? web?.identity() : null;
     return {
       'X-Scout-Client': 'web', 'X-Scout-Analytics': allowed() ? 'on' : 'off',
       'X-Scout-Analytics-Content': contentAllowed() ? 'on' : 'off',
       'X-Scout-Analytics-Account': accountLinked() ? 'on' : 'off',
       ...(allowed() && state ? { 'X-Scout-Anonymous-Id': state.anonymousId } : {}),
+      ...(webIdentity ? { 'X-Scout-Session-Id': webIdentity.session_id } : {}),
     };
   },
-  track(event, properties = {}) {
-    if (!allowed()) { analytics.account(currentUser, session); return; }
-    if (!state) return;
+  track(event, properties = {}, webId) {
+    if (!allowed()) { analytics.account(currentUser, session); return Promise.resolve(false); }
+    if (state && state.linked !== accountLinked()) analytics.account(currentUser, session);
+    if (!state) return Promise.resolve(false);
     const current = generation;
-    void (async () => {
+    return (async () => {
       await ready;
-      if (current !== generation || !allowed()) return;
-      const anonymousId = state.anonymousId, active = session;
+      if (current !== generation || !allowed() || !state) return false;
+      if (webId && accountLinked() && webId !== state.anonymousId) return false;
+      const anonymousId = webId || state.anonymousId, active = session;
       const token = active ? await active.getToken() : null;
       // A sign-out/account switch while fetching a token must not merge users.
-      if (current !== generation || !allowed() || active && !token) return;
-      await fetch(endpoint, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...analytics.headers(), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ event, anonymousId, properties }),
+      if (current !== generation || !allowed() || active && !token) return false;
+      const headers = analytics.headers();
+      if (current !== generation || !allowed()) return false;
+      if (properties.session_id) headers['X-Scout-Session-Id'] = properties.session_id;
+      const response = await fetch(endpoint, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...headers, 'X-Scout-Anonymous-Id': anonymousId, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ event, anonymousId, properties: properties.session_id ? properties : { ...properties, ...(headers['X-Scout-Session-Id'] ? { session_id: headers['X-Scout-Session-Id'] } : {}) } }),
         signal: AbortSignal.timeout(2000), keepalive: true, redirect: 'error',
       });
-    })().catch(() => {});
+      return response.ok === true;
+    })().catch(() => false);
   },
 };
 
+globalThis.addEventListener?.('storage', event => {
+  if (event.key !== null && !['scout-analytics-opt-out', 'scout-analytics-content', 'scout-analytics-account-link'].includes(event.key)) return;
+  usageChoice = contentChoice = linkChoice = undefined;
+  analytics.account(currentUser, session);
+  globalThis.dispatchEvent?.(new Event('scout-analytics-change'));
+});
 globalThis.addEventListener?.('error', event => { if (event.error) analytics.exception(event.error); });
 globalThis.addEventListener?.('unhandledrejection', event => analytics.exception(event.reason));

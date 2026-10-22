@@ -224,6 +224,87 @@ test('HTTP and MCP accept valid searches beyond the speed target but still bound
  }
 });
 
+test('parallel task failure retains distinct timestamped child spans only for the computation owner',async()=>{
+ const tasks=Array.from({length:2},(_,i)=>({title:`Task ${i}`,layers,slots:[slot()]}));
+ const f=await fixture([],[],{overflow:false,tasks}),events=[];
+ const fetcher=async(url,init)=>{
+  if(url.endsWith('/decisions')){await new Promise(r=>setTimeout(r,20));return Response.json({error:{code:'unknown_secret'}},{status:400});}
+  return f.fetcher(url,init);
+ };
+ const run=createRecommender({apiKey:'fixture',db:f.db,fetcher,observe:e=>events.push(e)});
+ await Promise.allSettled([run(f.index,'parallel failure'),run(f.index,'parallel failure')]);
+ const owner=events.find(e=>e.diagnostics.generations.length),shared=events.find(e=>!e.diagnostics.generations.length);
+ const saved=structuredClone(owner.diagnostics);
+ const children=owner.diagnostics.spans.filter(s=>s.stage==='interpretation');
+ assert.equal(children.length,2);assert.notEqual(children[0].id,children[1].id);
+ assert.ok(children.some(s=>s.failed));
+ for(const span of children){assert.ok(Number.isFinite(Date.parse(span.startedAt)));assert.ok(span.durationMs>=10);}
+ assert.ok(Math.max(...children.map(s=>Date.parse(s.startedAt)))<Math.min(...children.map(s=>Date.parse(s.startedAt)+s.durationMs)));
+ assert.equal(shared.diagnostics.spans.length,0);
+ assert.ok(owner.diagnostics.generations.every(g=>Number.isFinite(Date.parse(g.startedAt))));
+ await new Promise(r=>setTimeout(r,30));assert.deepEqual(owner.diagnostics,saved);
+ assert.equal(owner.diagnostics.failure.code,'http_error');
+});
+
+test('legacy recommendations expose timestamped call metadata on success and failure',async()=>{
+ const f=await fixture();delete f.index.snapshot.servingEngine;
+ f.index.loadTask=async()=>f.index;
+ const events=[];
+ const run=createRecommender({apiKey:'fixture',fetcher:f.fetcher,observe:e=>events.push(e)});
+ const result=await run(f.index,'Legacy task');
+ assert.ok(result.runtime.generations.length);assert.equal(events[0].diagnostics,result.runtime);
+ assert.ok(result.runtime.spans.some(s=>s.stage==='interpretation'&&!s.failed));
+ const failed=[];
+ const fail=createRecommender({apiKey:'SECRET',fetcher:async()=>Response.json({error:{code:'SECRET'}},{status:400}),observe:e=>failed.push(e)});
+ await assert.rejects(fail(f.index,'Legacy task'),e=>e.status===503&&e.cause.providerStatus===400);
+ assert.equal(failed[0].diagnostics.failure.code,'http_error');
+ assert.equal(failed[0].diagnostics.generations[0].providerStatus,400);
+ assert.ok(failed[0].diagnostics.spans[0].failed);
+ assert.ok(!JSON.stringify(failed[0].diagnostics).includes('SECRET'));
+});
+
+test('observer diagnostics retain failed child timings without provider secrets or shared usage',async()=>{
+ const f=await fixture();const events=[];
+ const fetcher=async(url,init)=>url.endsWith('/decisions')?Response.json({error:{code:'secret_identifier',message:'SECRET'}},{status:400}):f.fetcher(url,init);
+ const run=createRecommender({apiKey:'SECRET',db:f.db,fetcher,observe:e=>events.push(e)});
+ await Promise.allSettled([run(f.index,'same request'),run(f.index,'same request')]);
+ assert.equal(events.length,2);
+ for(const event of events){
+  assert.equal(event.diagnostics.failure.providerStatus,400);
+  assert.equal(event.diagnostics.failure.code,'http_error');
+  assert.ok(Object.hasOwn(event.diagnostics.timings,'decisions'));
+  assert.ok(!JSON.stringify(event.diagnostics).includes('SECRET'));
+  assert.ok(!JSON.stringify(event.diagnostics).includes('secret_identifier'));
+ }
+ assert.equal(events.filter(e=>e.diagnostics.generations.length>0).length,1);
+});
+
+test('transport generations record retry attempts and omit missing usage',async()=>{
+ const {diagnosticTransport}=await import('../utils.mjs');
+ const {requestDecisions}=await import('../decisions.mjs');
+ const generations=[];let calls=0;
+ const fetcher=diagnosticTransport(async()=>++calls===1?Response.json({error:{code:'rate_limit_exceeded'}},{status:429,headers:{'retry-after':'0'}}):Response.json({answers:[]}),generations);
+ await requestDecisions('private task',[],{apiKey:'private key',fetcher,retryBaseMs:0});
+ assert.equal(generations.length,2);assert.equal(generations[0].code,'rate_limit_exceeded');
+ assert.equal(generations[0].providerStatus,429);assert.equal(generations[1].providerStatus,200);
+ assert.ok(generations.every(g=>!Object.hasOwn(g,'inputTokens')));
+ assert.ok(!JSON.stringify(generations).includes('private'));
+});
+
+test('generation metadata parses usage and cache hits do not emit calls again',async()=>{
+ const f=await fixture();const events=[];
+ const fetcher=async(url,init)=>{
+  const response=await f.fetcher(url,init),body=await response.json();
+  body.usage={input_tokens:11,output_tokens:3,input_tokens_details:{cached_tokens:7}};
+  return Response.json(body,{status:response.status});
+ };
+ const run=createRecommender({apiKey:'fixture',db:f.db,fetcher,observe:e=>events.push(e)});
+ await run(f.index,'usage request');await run(f.index,'usage request');
+ assert.ok(events[0].diagnostics.generations.length>0);
+ for(const g of events[0].diagnostics.generations){assert.match(g.id,/^[a-f0-9-]{14}4[a-f0-9-]{21}$/);assert.equal(g.inputTokens,11);assert.equal(g.outputTokens,3);assert.equal(g.cachedInputTokens,7);}
+ assert.equal(events[1].diagnostics.generations,undefined);
+});
+
 test('task overflow, extra model roles, follow-up questions and invalid layers cannot change the result contract',async()=>{
  for(const [decomposition,status] of [
   [{overflow:true,tasks:[{title:'Too many tasks',layers,slots:[slot()]}]},422],

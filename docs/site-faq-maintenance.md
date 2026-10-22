@@ -1,5 +1,11 @@
 # Website FAQ maintenance
 
+## PostHog instrumentation — version-5 serving rollout
+
+Reviewed homepage data, background, cost and evaluation claims against the current source upgrade. The FAQ describes released terminal/Pi behavior; optional source-only telemetry does not add inference execution or alter that workflow, so website code needs no edit. Source guides now qualify native public-page lifecycle/CTA events, allowlisted acquisition/UTM/device categories, support-dependent sampled performance, same-tab linked signup/search identity versus request-only unlinking, HTTP-200 logical MCP errors, bounded stage/provider codes and actual attempt tokens. Recommendations are not executions, and unknown costs are not invented. Feedback uses fixed ratings/reasons with trace/retry correlation; CLI version/platform/runtime and sanitized frames remain opt-in. Prompt sharing and retention controls are unchanged.
+
+Replay is a separate inactive spike, not an available capability; no ranking experiment is active. Reviewed, sanitized feedback-derived evaluation cases must precede an offline baseline and any future controlled experiment, without automatic private-content copying or retention expansion. The owner authorized the independent Scout serving rollout, not main-site or npm publication. Alert notifications still need chosen cadence/recipients and release ingestion acceptance. Main-site publication remains blocked by documented source divergence. Dated entries below are historical rollout receipts, not acceptance of this upgrade.
+
 ## Scout beta evaluation analytics — rollout, 22 October 2026
 
 Reviewed data, consent, identity, retention and readiness claims against the beta analytics rollout. The serving configuration enables `SCOUT_BETA_EVALUATION_LOGGING=true`, alongside `POSTHOG_CAPTURE_CONTENT=true` and complete account-sync/deletion configuration. Browser content defaults on only without a stored choice; saved off, general opt-out, DNT/GPC and unreadable storage keep it off. API/MCP retain explicit content opt-in and CLI content remains off. Prompt/excerpt/five-layer prose belongs only in `$ai_trace.$ai_input_state`, not ordinary search details, with existing redaction bounds and three-task cap.

@@ -6,6 +6,7 @@ const $ = selector => document.querySelector(selector);
 const basePath = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
 const money = value => value == null ? '—' : `$${new Intl.NumberFormat('en-US', { maximumFractionDigits: 2, minimumFractionDigits: value < 1 ? 2 : 0 }).format(value)}`;
 let result = null, activeRequest = null, requestID = 0, resultTrace;
+let failedSearch, privacyEpoch = 0;
 
 function element(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text != null) node.textContent = text; return node; }
 function link(text, url) { const node = element('a', '', text); try { const parsed = new URL(url); if (['https:', 'http:'].includes(parsed.protocol)) { node.href = parsed.href; node.target = '_blank'; node.rel = 'noopener noreferrer'; } } catch {} return node; }
@@ -37,7 +38,7 @@ function evidenceItem(e) {
   item.append(element('small', '', `${e.cohortSize} comparable models · ${e.observedAt ? `Source date: ${e.observedAt.slice(0, 10)}` : 'Measurement date not supplied'} · ${e.configurations.join(', ')}${e.historical ? ' · archived evaluation' : ''}`)); return item;
 }
 function modelEntry(model, prefix, taskTitle, steps = 0, taskIndex = 1) {
-  const position = { rank: model.rank, task_index: taskIndex, trace_id: resultTrace };
+  const position = () => ({ rank: model.rank, task_index: taskIndex, trace_id: resultTrace });
   const row = element(steps ? 'td' : 'tr', steps ? 'sequence-cell' : 'model-row'), nameCell = element(steps ? 'div' : 'th', 'model-cell');
   if (!steps) nameCell.scope = 'row';
   const provider = providerIdentity(model), identity = element('span', 'model-identity'), name = element('span'), title = element('span', 'model-title', model.name), byline = element('span', 'model-provider', provider.label);
@@ -63,13 +64,13 @@ function modelEntry(model, prefix, taskTitle, steps = 0, taskIndex = 1) {
     row.append(metrics);
   } else row.append(quality, cost, time);
   const detail = element('tr', 'model-detail'), detailCell = element('td', 'model-detail-cell'); detailCell.colSpan = steps ? steps + 1 : 4; detail.id = `${prefix}-model-${model.rank}`; detail.hidden = true;
-  toggle.addEventListener('click', () => { detail.hidden = !detail.hidden; toggle.setAttribute('aria-expanded', String(!detail.hidden)); row.dataset.expanded = String(!detail.hidden); if (!detail.hidden) analytics.track('scout_evidence_opened', position); });
+  toggle.addEventListener('click', () => { detail.hidden = !detail.hidden; toggle.setAttribute('aria-expanded', String(!detail.hidden)); row.dataset.expanded = String(!detail.hidden); if (!detail.hidden) analytics.track('scout_evidence_opened', position()); });
   // Preserve table semantics and native Enter/Space behavior; any other part of
   // the row activates the same button. Links and buttons keep their own action.
   row.addEventListener('click', event => { if (!event.target.closest('button, a')) toggle.click(); });
   const body = element('div', 'model-evidence');
   if (taskTitle) body.append(element('p', 'price-detail', taskTitle));
-  const idLine = element('div', 'model-id-line'), copyID = element('button', '', 'Copy ID'); copyID.type = 'button'; copyID.addEventListener('click', async () => { if (await copy(model.endpoint?.modelId ?? model.id, copyID)) analytics.track('scout_model_id_copied', position); });
+  const idLine = element('div', 'model-id-line'), copyID = element('button', '', 'Copy ID'); copyID.type = 'button'; copyID.addEventListener('click', async () => { const epoch = privacyEpoch; if (await copy(model.endpoint?.modelId ?? model.id, copyID) && copyID.isConnected && epoch === privacyEpoch) analytics.track('scout_model_id_copied', position()); });
   idLine.append(element('code', '', model.endpoint?.modelId ?? model.id), copyID); body.append(idLine);
   if (model.endpoint) {
     const endpoint = element('p', 'price-detail'); endpoint.append(element('code', '', model.endpoint.id), document.createTextNode(` · ${model.endpoint.status ?? 'listed'} · ${model.endpoint.deployment}.`)); body.append(endpoint);
@@ -84,7 +85,7 @@ function modelEntry(model, prefix, taskTitle, steps = 0, taskIndex = 1) {
   const pricing = element('p', 'price-detail', `${money(model.pricing.inputPerMillion)} input / ${money(model.pricing.outputPerMillion)} output per million tokens, ${model.pricing.basis ?? 'Advertised rates.'}`);
   if (model.pricing.url) {
     const providerLink = link('Provider page ↗', model.pricing.url);
-    const followed = event => { if (providerLink.href && (event.type === 'click' || event.button === 1)) analytics.track('scout_provider_opened', position); };
+    const followed = event => { if (providerLink.href && (event.type === 'click' || event.button === 1)) analytics.track('scout_provider_opened', position()); };
     providerLink.addEventListener('click', followed); providerLink.addEventListener('auxclick', followed);
     pricing.append(document.createTextNode(' '), providerLink);
   }
@@ -147,6 +148,35 @@ function renderContext(data, taskTitle) {
   showSpecialists(data.specialists, root);
   return root;
 }
+function resultFeedback(taskCount, candidateCount) {
+  const root = element('div', 'result-feedback'), question = element('span', '', 'Was this shortlist useful?');
+  const controls = element('div', 'feedback-controls'), useful = element('button', '', 'Useful'), notUseful = element('button', '', 'Not useful');
+  const reason = element('select'), send = element('button', '', 'Send feedback'), status = element('span', 'feedback-status');
+  reason.setAttribute('aria-label', 'Why was this shortlist not useful?');
+  for (const [value, label] of [['', 'Reason (optional)'], ['wrong_task', 'Misunderstood my task'], ['missing_model', 'Missing a model'], ['too_expensive', 'Too expensive'], ['insufficient_evidence', 'Not enough evidence'], ['other', 'Something else']]) {
+    const option = element('option', '', label); option.value = value; reason.append(option);
+  }
+  useful.type = notUseful.type = send.type = 'button'; reason.hidden = send.hidden = true;
+  status.setAttribute('role', 'status');
+  const epoch = privacyEpoch, trace = resultTrace;
+  async function submit(rating) {
+    if (epoch !== privacyEpoch || !root.isConnected) return;
+    if (!analytics.preferences().enabled) { status.textContent = 'Enable usage analytics in Privacy & analytics to send feedback.'; return; }
+    for (const control of [useful, notUseful, reason, send]) control.disabled = true;
+    status.textContent = 'Sending…';
+    const accepted = await analytics.track('scout_recommendation_feedback', { rating, ...(rating === 'not_useful' && reason.value ? { reason: reason.value } : {}), task_count: taskCount, candidate_count: candidateCount, trace_id: trace });
+    if (epoch !== privacyEpoch || !root.isConnected) return;
+    status.textContent = accepted ? 'Feedback submitted. Thank you.' : 'Couldn’t send feedback. Please try again.';
+    if (accepted) controls.hidden = true;
+    else for (const control of [useful, notUseful, reason, send]) control.disabled = false;
+  }
+  useful.addEventListener('click', () => void submit('useful'));
+  notUseful.addEventListener('click', () => { reason.hidden = send.hidden = false; notUseful.setAttribute('aria-expanded', 'true'); reason.focus(); });
+  notUseful.setAttribute('aria-expanded', 'false');
+  send.addEventListener('click', () => void submit('not_useful'));
+  controls.append(useful, notUseful, reason, send); root.append(question, controls, status);
+  return root;
+}
 function showResult(data, roundTripMs) {
   result = data; tableObserver.disconnect();
   const tasks = data.tasks ?? [{title:'Your task',slots:[data]}], count = tasks.reduce((n,t) => n+t.slots.reduce((n,s) => n+s.recommendations.length,0),0);
@@ -192,7 +222,7 @@ function showResult(data, roundTripMs) {
   }
   table.append(body);
   steps.forEach(step => root.querySelector('[data-field="contexts"]').append(renderContext(step.data, step.text ?? step.task.title)));
-  $('#task-results').replaceChildren(root);
+  $('#task-results').replaceChildren(root, resultFeedback(tasks.length, count));
   tableObserver.observe(root.querySelector('.table-scroll'));
   showIndex(data);
   $('#announcement').textContent = `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}. ${count} model candidates.`;
@@ -229,20 +259,30 @@ async function search() {
   $('#announcement').textContent = 'Searching the prepared index.';
   $('.find-button span').textContent = 'Searching…'; $('.find-button').setAttribute('aria-busy', 'true');
   const started = performance.now(), timeout = setTimeout(() => controller.abort(), 35_000);
-  let failureCode = 'network_error', httpStatus, traceId;
+  const epoch = privacyEpoch, settings = analytics.preferences(), headers = analytics.headers();
+  let failureCode = 'network_error', httpStatus, traceId = settings.enabled && settings.linkAccount ? crypto.randomUUID() : undefined;
+  if (traceId) headers['X-Scout-Trace-Id'] = traceId;
+  // Compare only this tab's last failed draft, in memory. Never transmit the
+  // comparison text or a fingerprint; retry attribution is not authentication.
+  if (traceId && failedSearch?.prompt === prompt && Date.now() - failedSearch.at < 300000) headers['X-Scout-Retry-Of'] = failedSearch.trace;
+  failedSearch = undefined;
+  analytics.webInteraction('search_submit');
   try {
-    const response = await fetch(`${basePath}/api/recommend`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...analytics.headers() }, body: JSON.stringify({ prompt }), signal: controller.signal });
+    const response = await fetch(`${basePath}/api/recommend`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...headers }, body: JSON.stringify({ prompt }), signal: controller.signal });
     if (id !== requestID) return;
-    traceId = response.headers.get('x-scout-trace-id');
+    const receivedTrace = response.headers.get('x-scout-trace-id');
+    if (traceId && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(receivedTrace)) traceId = receivedTrace;
     httpStatus = response.status; failureCode = response.ok ? 'invalid_response' : 'http_error';
     if (response.status === 401) { await auth.signIn(); throw new Error('Your session has expired. Sign in and try again.'); }
     if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('The Scout API is not available on this server. Start the Scout server and try again.');
     const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Scout could not complete this search.');
     failureCode = 'render_error';
-    if (id === requestID) { resultTrace = traceId; showResult(data, performance.now() - started); }
+    if (id === requestID) { resultTrace = epoch === privacyEpoch ? traceId : undefined; showResult(data, performance.now() - started); }
   } catch (error) {
     if (id !== requestID) return;
-    analytics.exception(error, error.name === 'AbortError' ? 'search_timeout' : failureCode, { trace_id: traceId, ...(httpStatus >= 400 ? { http_status: httpStatus } : {}) });
+    if (epoch !== privacyEpoch) traceId = undefined;
+    if (traceId) failedSearch = { prompt, trace: traceId, at: Date.now() };
+    analytics.exception(error, error.name === 'AbortError' ? 'search_timeout' : failureCode, { trace_id: traceId, duration_ms: Math.round(performance.now() - started), ...(httpStatus >= 400 ? { http_status: httpStatus } : {}) });
     result = null; tableObserver.disconnect(); $('#task-results').replaceChildren(); $('#results-title').textContent = 'Search unavailable'; $('#query-time').textContent = '';
     $('#error').textContent = error.name === 'AbortError' ? 'This request took too long. Please try again.' : error instanceof TypeError ? 'Couldn’t reach Scout. Check the connection and try again.' : error.message; $('#error').hidden = false;
   } finally { clearTimeout(timeout); if (id === requestID) { $('#results').setAttribute('aria-busy', 'false'); $('.find-button span').textContent = 'Find models'; $('.find-button').setAttribute('aria-busy', 'false'); } }
@@ -305,6 +345,7 @@ $('#scout-form').addEventListener('submit', event => { event.preventDefault(); v
 $('#prompt').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#scout-form').requestSubmit(); } });
 const auth = initAuth(() => {
   activeRequest?.abort(); requestID++; result = null; resultTrace = undefined; tableObserver.disconnect();
+  failedSearch = undefined; privacyEpoch++;
   $('#task-results').replaceChildren(); $('#results').hidden = true; $('#results').setAttribute('aria-busy', 'false'); $('#error').hidden = true;
   $('#prompt').value = ''; fitPrompt(); $('.find-button span').textContent = 'Find models'; $('.find-button').setAttribute('aria-busy', 'false');
 });
@@ -434,5 +475,10 @@ function updateAnalyticsControls() {
 for (const id of ['#analytics-usage', '#analytics-content', '#analytics-unlinked']) $(id).addEventListener('change', () => analytics.setPreferences($('#analytics-usage').checked, $('#analytics-content').checked, !$('#analytics-unlinked').checked));
 $('.beta-data-notice a[href="#analytics-settings"]').addEventListener('click', () => { $('#analytics-settings').open = true; $('#analytics-settings summary').focus(); });
 if (location.hash === '#analytics-settings') $('#analytics-settings').open = true;
-window.addEventListener('scout-analytics-change', updateAnalyticsControls);
+window.addEventListener('scout-analytics-change', () => {
+  privacyEpoch++; failedSearch = undefined; resultTrace = undefined;
+  // Existing result closures must not carry an earlier identity into feedback.
+  document.querySelector('.result-feedback')?.remove();
+  updateAnalyticsControls();
+});
 updateAnalyticsControls();

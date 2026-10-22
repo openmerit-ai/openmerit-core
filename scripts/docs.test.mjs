@@ -224,7 +224,11 @@ async function websiteBrowser(options = {}) {
   runInNewContext(websiteAnalytics, {
     location: { pathname, origin: 'https://openmerit.ai', href: `https://openmerit.ai${pathname}?private=secret#private` },
     navigator, window: { addEventListener: listen }, document: { addEventListener: listen },
-    localStorage: { getItem: key => { assert.equal(key, 'scout-analytics-opt-out'); if (options.localDenied) throw Error(); return preference.value; } },
+    localStorage: { getItem: key => {
+      assert.ok(['scout-analytics-opt-out', 'scout-analytics-account-link'].includes(key));
+      if (options.localDenied) throw Error();
+      return key === 'scout-analytics-account-link' ? options.accountLink ?? null : preference.value;
+    } },
     sessionStorage: {
       getItem: key => { if (options.sessionDenied) throw Error(); return storage.get(key); },
       setItem: (key, value) => storage.set(key, value),
@@ -306,11 +310,13 @@ test('website analytics sends only bounded schemas via first-party requests with
     if (!call.body) continue;
     assert.ok(call.body.length <= 512);
     assert.ok(!call.body.includes('private'));
-    assert.deepEqual({ ...call.headers }, { 'Content-Type': 'application/json', 'X-Scout-Client': 'web', 'X-Scout-Analytics': 'on' });
+    assert.deepEqual({ ...call.headers }, { 'Content-Type': 'application/json', 'X-Scout-Client': 'web', 'X-Scout-Analytics': 'on', 'X-Scout-Analytics-Account': 'on' });
   }
 });
 
 test('website analytics rechecks privacy before sends and handles denied session storage', async () => {
+  const unlinked = await websiteBrowser({ accountLink: '0' });
+  assert.equal(unlinked.calls.find(call => call.method === 'POST').headers['X-Scout-Analytics-Account'], 'off');
   for (const property of ['optOut', 'dnt', 'gpc']) {
     const browser = await websiteBrowser({ sessionDenied: true });
     assert.equal(browser.events().length, 1);

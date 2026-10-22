@@ -8,6 +8,12 @@ let enabled = false;
 let anonymousId;
 let errors = 0;
 let sent = [];
+let web;
+let privacy;
+function accountHeader() {
+  try { return { 'X-Scout-Analytics-Account': localStorage.getItem('scout-analytics-account-link') === '0' ? 'off' : 'on' }; }
+  catch { return { 'X-Scout-Analytics-Account': 'off' }; }
+}
 
 function permitted() {
   try {
@@ -37,11 +43,11 @@ function send(event, properties) {
   sent = sent.filter(time => now - time < 60_000);
   if (sent.length >= 30) return;
   const body = JSON.stringify({ event, anonymousId, properties: { page, ...properties } });
-  if (body.length > 512) return;
+  if (body.length > (event === 'website_error' ? 4096 : 512)) return;
   sent.push(now);
   void request('/scout/api/analytics', {
     method: 'POST', keepalive: true,
-    headers: { 'Content-Type': 'application/json', 'X-Scout-Client': 'web', 'X-Scout-Analytics': 'on' },
+    headers: { 'Content-Type': 'application/json', 'X-Scout-Client': 'web', 'X-Scout-Analytics': 'on', ...accountHeader() },
     body,
   });
 }
@@ -78,6 +84,18 @@ async function start() {
     try { anonymousId = crypto.randomUUID(); } catch { return; }
   }
   enabled = true;
+  void import('./scout/analytics-privacy.js').then(module => { privacy = module; }).catch(() => {});
+  // Dynamic import keeps this entry point usable without a bundler. The shared
+  // contract is also imported directly by the first-party ingestion service.
+  void import('./scout/web-analytics.js').then(({ createWebAnalytics }) => {
+    web = createWebAnalytics({ permitted: () => enabled && permitted(), send(event, properties, webId) {
+      void request('/scout/api/analytics', {
+        method: 'POST', keepalive: true,
+        headers: { 'Content-Type': 'application/json', 'X-Scout-Client': 'web', 'X-Scout-Analytics': 'on', ...accountHeader(), 'X-Scout-Session-Id': properties.session_id },
+        body: JSON.stringify({ event, anonymousId: webId, properties }),
+      });
+    } });
+  }).catch(() => {});
   send('website_visited', {});
   document.addEventListener('click', event => {
     // Only explicit navigation regions/links, never arbitrary clickable content.
@@ -85,6 +103,7 @@ async function start() {
     if (!anchor) return;
     const category = destination(anchor);
     if (category) send('website_link_opened', { destination: category });
+    if (['scout', 'docs', 'terminal', 'github'].includes(category) && !anchor.hasAttribute?.('data-web-cta')) web?.interaction(`open_${category}`);
   });
   function report(value) {
     if (errors >= 3 || !permitted()) return;
@@ -92,7 +111,9 @@ async function start() {
     try { name = value?.name; } catch { return; }
     if (!errorTypes.has(name)) return;
     errors++;
-    send('website_error', { code: 'uncaught_error', error_type: name });
+    let frames;
+    try { frames = privacy?.exceptionFrames(value?.stack); } catch { frames = []; }
+    send('website_error', { code: 'uncaught_error', error_type: name, ...(frames ? { frames } : {}) });
   }
   window.addEventListener('error', event => report(event.error));
   window.addEventListener('unhandledrejection', event => report(event.reason));

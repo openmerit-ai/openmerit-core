@@ -2,11 +2,47 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
+import { readFileSync } from 'node:fs';
 import { startTerminal } from '../src/server.mjs';
-import { commandTelemetry } from '../src/telemetry.mjs';
-import { createAnalytics } from '../client/analytics.mjs';
+import { commandTelemetry, errorProperties, safeFrames, terminalProperties } from '../src/telemetry.mjs';
+import { createAnalytics, browserErrorProperties } from '../client/analytics.mjs';
 
 const cli = new URL('../src/cli.mjs', import.meta.url);
+const clientEnvironment = {client_version:JSON.parse(readFileSync(new URL('../../../package.json',import.meta.url),'utf8')).version,platform:process.platform,runtime_major:Number(process.versions.node.split('.')[0])};
+test('diagnostics keep only application basenames and coordinates, including Scout response traces', async () => {
+  const app = new URL('../src/cli.mjs', import.meta.url).href;
+  const error = new TypeError('PRIVATE text /home/user/secret');
+  error.stack = `TypeError: PRIVATE\n    at secretFunction (${app}:12:3)\n    at privateFunction (file:///home/user/cli.mjs:22:4)\n    at PRIVATE (file:///home/user/task.js:4:8)`;
+  assert.deepEqual(safeFrames(error), [{filename:'cli.mjs',lineno:12,colno:3}]);
+  assert.deepEqual(terminalProperties('terminal_error', {code:'render_error',error_type:'TypeError',frames:[{filename:'app.js',lineno:5,colno:9,function:'PRIVATE',message:'PRIVATE'}, {filename:'/home/user/cli.mjs',lineno:3,colno:2}]}), {code:'render_error',error_type:'TypeError',frames:[{filename:'app.js',lineno:5,colno:9}]});
+  assert.deepEqual(errorProperties({get name(){throw Error('PRIVATE');}}), {error_type:'Error',frames:[]});
+  const location = globalThis.location;
+  try {
+    globalThis.location = { href: 'http://localhost:4310/' };
+    const browserError = { name:'TypeError', stack:'TypeError: PRIVATE\n    at PRIVATE (http://localhost:4310/app.js:17:2)\n    at PRIVATE (https://private.example/app.js:22:5)' };
+    assert.deepEqual(browserErrorProperties(browserError), {error_type:'TypeError',frames:[{filename:'app.js',lineno:17,colno:2}]});
+    assert.deepEqual(browserErrorProperties({get stack(){throw Error('PRIVATE');}}), {error_type:'Error',frames:[]});
+  } finally { if (location === undefined) delete globalThis.location; else globalThis.location = location; }
+  const { makePlan } = await import('../../eval/src/scout.mjs');
+  const config = {scope:'all',connections:[],tasks:[{id:'PRIVATE',description:'PRIVATE'}]};
+  const trace = 'b8d2d9fa-6d37-4d50-a90b-d83ea69b22bf';
+  for (const [response, code] of [[new Response('PRIVATE',{status:503,headers:{'X-Scout-Trace-Id':trace}}),'scout_http_error'], [Response.json({PRIVATE:true},{headers:{'X-Scout-Trace-Id':trace}}),'scout_response_error']]) {
+    await assert.rejects(makePlan(config, async()=>response), error => {
+      const diagnostic = errorProperties(error);
+      assert.equal(diagnostic.code,code);
+      assert.equal(diagnostic.operation,'scout_recommend');
+      assert.equal(diagnostic.trace_id,trace);
+      assert.ok(diagnostic.frames.some(f=>f.filename==='scout.mjs'));
+      assert.doesNotMatch(JSON.stringify(diagnostic), /PRIVATE|file:|\/home\//);
+      return true;
+    });
+  }
+  for (const [error, code] of [[new Error('PRIVATE'),'scout_network_error'],[new DOMException('PRIVATE','TimeoutError'),'scout_timeout']]) {
+    await assert.rejects(makePlan(config,async()=>{throw error;}), caught => errorProperties(caught).code===code);
+  }
+  await assert.rejects(makePlan(config,async()=>new Response(null,{status:503,headers:{'X-Scout-Trace-Id':'PRIVATE'}})), error => !('trace_id' in errorProperties(error)));
+});
+
 test('browser consent controls prevent even local submission; enabled browser uses only relay', async () => {
   const calls = [];
   for (const control of [{enabled:false}, {navigator:{doNotTrack:'1'}}, {navigator:{globalPrivacyControl:true}}, {optOut:'1'}, {blocked:true}, {}]) {
@@ -37,7 +73,7 @@ test('local relay projects allowlists, shares CLI identity, enforces guards and 
     await new Promise(resolve=>setImmediate(resolve));
     const body=JSON.parse(calls.at(-1).body);
     assert.equal(body.anonymousId,JSON.parse(calls[0].body).anonymousId);
-    assert.deepEqual(body.properties,{mode:'live',action:'inspect',kind:'model'});
+    assert.deepEqual(body.properties,{mode:'live',action:'inspect',kind:'model',...clientEnvironment});
     assert.doesNotMatch(JSON.stringify(body),/CANARY/);
     const consented = calls.length;
     for (const privacy of [{ DNT: '1' }, { 'Sec-GPC': '1' }, { 'X-Scout-Analytics': 'off' }]) {
@@ -119,10 +155,15 @@ test('opted-in CLI sends only allowlisted payloads with ephemeral UUID identity'
     const id = bodies[0].anonymousId;
     assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     assert.notEqual(id, previousId); previousId = id;
-    assert.deepEqual(bodies[0], { event: 'cli_command_started', anonymousId: id, properties: { command } });
+    const common = { ...clientEnvironment, command_id: bodies[0].properties.command_id };
+    assert.match(common.command_id, /^[0-9a-f-]{36}$/);
+    assert.deepEqual(bodies[0], { event: 'cli_command_started', anonymousId: id, properties: { command, ...common } });
     const duration = bodies[1].properties.duration_ms;
     assert.ok(Number.isInteger(duration) && duration >= 0 && duration <= 86400000);
-    assert.deepEqual(bodies[1], { event: 'cli_command_completed', anonymousId: id, properties: { command, outcome, duration_ms: duration } });
+    const diagnostic = outcome === 'ok' ? {} : { code: 'command_error', error_type: 'Error', frames: bodies[1].properties.frames };
+    if (outcome === 'error') assert.ok(diagnostic.frames.some(f => f.filename === 'cli.mjs'));
+    assert.deepEqual(bodies[1], { event: 'cli_command_completed', anonymousId: id, properties: { command, outcome, ...diagnostic, duration_ms: duration, ...common } });
+    assert.doesNotMatch(JSON.stringify(bodies), /private-|secret|@example|\/Users\/|file:\/\//);
   }
 });
 

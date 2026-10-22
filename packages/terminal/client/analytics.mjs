@@ -17,3 +17,15 @@ export function createAnalytics({ enabled, mode, navigator = globalThis.navigato
   };
 }
 export const browserErrorType = error => ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'URIError', 'EvalError', 'AggregateError', 'AbortError'].includes(error?.name) ? error.name : 'Error';
+export function browserErrorProperties(error) {
+  try {
+    const stack = error?.stack;
+    const frames = (typeof stack === 'string' ? stack.slice(0, 8000) : '').split('\n').slice(1, 40).flatMap(line => {
+      const match = line.match(/(?:\(|\s|@)(https?:\/\/[^\s)]+):(\d+):(\d+)\)?$/);
+      if (!match || match[1] !== new URL('/app.js', globalThis.location.href).href) return [];
+      const lineNumber = Number(match[2]), column = Number(match[3]);
+      return lineNumber > 0 && lineNumber <= 1000000 && column > 0 && column <= 1000000 ? [{ filename: 'app.js', lineno: lineNumber, colno: column }] : [];
+    }).slice(0, 8);
+    return { error_type: browserErrorType(error), frames };
+  } catch { return { error_type: 'Error', frames: [] }; }
+}

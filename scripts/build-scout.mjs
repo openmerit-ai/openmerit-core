@@ -1,5 +1,6 @@
 import { cp, mkdir, rm } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
+import './build-web-analytics.mjs';
 
 // Package only Scout and public docs. The main site's protected memo and demos
 // must not become reachable through the independently deployed Scout Worker.

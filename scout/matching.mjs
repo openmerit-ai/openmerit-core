@@ -6,12 +6,14 @@ import {queryProjection,loadProjectionModels} from './projection.mjs';
 import {createIndex,recommend,indexStatus} from './rank.mjs';
 import {matchSpecialists,relevantProfiles} from './specialists.mjs';
 import {createTimings,matchingTimeoutMs} from './timing.mjs';
+import {diagnosticTransport} from './utils.mjs';
 
 export async function matchTask(index,prompt,modelIds,endpointIds,options={}) {
   const {timeoutMs=matchingTimeoutMs,fetcher=fetch}=options,controller=new AbortController(),trace=createTimings();let timer;
-  const boundedFetch=(url,init)=>fetcher(url,{...init,signal:init?.signal?AbortSignal.any([controller.signal,init.signal]):controller.signal});
-  try{return await Promise.race([runTasks(index,prompt,modelIds,endpointIds,{...options,timeoutMs,fetcher:boundedFetch,trace}),new Promise((_resolve,reject)=>{timer=setTimeout(()=>{const error=new DOMException('Matching deadline exceeded.','TimeoutError');controller.abort(error);reject(error);},timeoutMs);})]);}
-  catch(error){error.diagnostics=trace.snapshot(error);throw error;}
+  const generations=[];
+  const boundedFetch=diagnosticTransport((url,init)=>fetcher(url,{...init,signal:init?.signal?AbortSignal.any([controller.signal,init.signal]):controller.signal}),generations);
+  try{const result=await Promise.race([runTasks(index,prompt,modelIds,endpointIds,{...options,timeoutMs,fetcher:boundedFetch,trace}),new Promise((_resolve,reject)=>{timer=setTimeout(()=>{const error=new DOMException('Matching deadline exceeded.','TimeoutError');controller.abort(error);reject(error);},timeoutMs);})]);result.runtime.generations=structuredClone(generations);return result;}
+  catch(error){error.diagnostics={...trace.snapshot(error),generations:structuredClone(generations)};throw error;}
   finally{clearTimeout(timer);controller.abort();}
 }
 async function runTasks(index,prompt,modelIds,endpointIds,options) {
@@ -25,7 +27,7 @@ async function runTasks(index,prompt,modelIds,endpointIds,options) {
   const embeddings=trace.measure('embedding',()=>embed(slots.map(s=>s.search),{apiKey,fetcher,timeoutMs:remaining()})).then(value=>({value}),error=>({error}));
   const results=await Promise.all(tasks.map(async(t,i)=>({id:`task-${i+1}`,title:t.title,sourceText:t.sourceText,layers:t.layers,slots:await Promise.all(t.slots.map(async(s,j)=>({
     id:`task-${i+1}-slot-${j+1}`,label:s.label,
-    ...await runMatch(index,s.search,modelIds,endpointIds,{...options,timeoutMs:remaining(),trace:createTimings(),directory,definitions,vocabulary,metadata:s,
+    ...await runMatch(index,s.search,modelIds,endpointIds,{...options,timeoutMs:remaining(),trace:trace.child(),directory,definitions,vocabulary,metadata:s,
       embedding:embeddings.then(r=>r.error?r:{value:[r.value[slots.indexOf(s)]]}),
     }),
   })))})));

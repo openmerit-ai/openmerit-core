@@ -1,5 +1,6 @@
 import { digest, saveJSON, statePath } from './config.mjs';
 import { join } from 'node:path';
+import { scoutDiagnostic } from '../../terminal/src/telemetry.mjs';
 
 export const selectionHash = config => digest({ scope: config.scope, connections: config.connections, tasks: config.tasks.map(t => ({ id: t.id, description: t.description })), scoutURL: config.scoutURL });
 export async function makePlan(config, fetcher = fetch) {
@@ -8,8 +9,13 @@ export async function makePlan(config, fetcher = fetch) {
   if (config.scope === 'existing' && !modelIds.length) throw new Error('Declare project connections in .openmerit/eval.json first. No credentials are sent to Scout.');
   const tasks = [];
   for (const task of config.tasks) {
+    let trace, code = 'scout_network_error';
+    try {
     const response = await fetcher(config.scoutURL ?? 'https://openmerit.ai/scout/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Scout-Client': 'cli', 'X-Scout-Analytics-Content': 'off', 'X-Scout-Analytics': process.env.OPENMERIT_TELEMETRY === '1' && process.env.DO_NOT_TRACK !== '1' ? 'on' : 'off' }, body: JSON.stringify({ prompt: task.description, ...(config.scope === 'existing' ? { modelIds } : {}) }), signal: AbortSignal.timeout(15_000), redirect: 'error' });
+    trace = response.headers?.get('X-Scout-Trace-Id');
+    code = 'scout_http_error';
     if (!response.ok) throw new Error(`Scout returned HTTP ${response.status}; no evaluation was started.`);
+    code = 'scout_response_error';
     const body = await response.json();
     if (!Array.isArray(body.recommendations) || body.recommendations.length > 5) throw new Error('Invalid Scout response.');
     if (config.scope === 'existing' && (!Array.isArray(body.selection?.modelIds) || digest([...body.selection.modelIds].sort()) !== digest([...modelIds].sort()))) throw new Error('Scout did not acknowledge filtering before ranking. Update the Scout endpoint; no unscoped fallback is allowed.');
@@ -20,6 +26,11 @@ export async function makePlan(config, fetcher = fetch) {
       return { scoutId: m.id, name: m.name, rank: m.rank, connections: config.connections.filter(c => c.scoutId === m.id).map(c => c.id) };
     });
     tasks.push({ id: task.id, candidates, ranking: body.ranking, warnings: body.warnings ?? [] });
+    } catch (error) {
+      try { scoutDiagnostic(error, trace, error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 'scout_timeout' : code); }
+      catch { /* Diagnostics must not replace the original Scout failure. */ }
+      throw error;
+    }
   }
   return { version: 1, createdAt: new Date().toISOString(), scope: config.scope, selectionHash: selectionHash(config), tasks };
 }

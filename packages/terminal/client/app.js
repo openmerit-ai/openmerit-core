@@ -13,12 +13,12 @@ import { reportedPath, deploymentFor, poolsFor, capacityState, capacityReadings,
 
 import { buildEnvironmentMap } from './map.mjs';
 import { syncFlowMap } from './flow-loader.js';
-import { createAnalytics, browserErrorType } from './analytics.mjs';
+import { createAnalytics, browserErrorProperties } from './analytics.mjs';
 
 const analytics = createAnalytics({ enabled: () => state.info.telemetry === true, mode: () => state.mode });
 const interaction = (action, kind = 'other') => analytics('terminal_interaction', { action, kind: ['model','agent','task','service','source','host','deployment','pool','record','path'].includes(kind) ? kind : 'other' });
-window.addEventListener('error', event => analytics('terminal_error', { code: 'uncaught_error', error_type: browserErrorType(event.error) }));
-window.addEventListener('unhandledrejection', event => analytics('terminal_error', { code: 'uncaught_error', error_type: browserErrorType(event.reason) }));
+window.addEventListener('error', event => analytics('terminal_error', { code: 'uncaught_error', ...browserErrorProperties(event.error) }));
+window.addEventListener('unhandledrejection', event => analytics('terminal_error', { code: 'uncaught_error', ...browserErrorProperties(event.reason) }));
 
 const $ = selector => document.querySelector(selector);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
@@ -469,7 +469,7 @@ function main() {
 }
 function render({ focusMain = false, focusTab = false } = {}) {
   try { return renderInner({focusMain,focusTab}); }
-  catch (error) { analytics('terminal_error',{code:'render_error',error_type:browserErrorType(error)}); throw error; }
+  catch (error) { analytics('terminal_error',{code:'render_error',...browserErrorProperties(error)}); throw error; }
 }
 function renderInner({ focusMain = false, focusTab = false } = {}) {
   closeSelect();
@@ -705,7 +705,7 @@ async function refresh(force = false) {
     refreshInspection();
     if (force || (!document.querySelector('dialog[open]') && !selectIsOpen() && !document.activeElement?.matches('input'))) render();
   } catch (error) {
-    analytics('terminal_error', {code:'snapshot_error',error_type:browserErrorType(error)});
+    analytics('terminal_error', {code:'snapshot_error',...browserErrorProperties(error)});
     state.error = state.info.hostedSample ? 'The sample preview could not refresh. Reload the page to reconnect.' : 'The terminal is disconnected. Your inference is unaffected. Reopen the local command to reconnect.';
     refreshInspection();
     if (state.data && !document.querySelector('dialog[open]') && !selectIsOpen()) render();

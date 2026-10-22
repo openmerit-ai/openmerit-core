@@ -24,7 +24,7 @@ export async function handleMCP(request, index, state = {}, recommendTask = (ind
   const { id, method, params = {} } = message ?? {};
   const fail = (code, message, status = 200) => json({ jsonrpc: '2.0', id: id ?? null, error: { code, message } }, status);
   if (!message || Array.isArray(message) || message.jsonrpc !== '2.0' || typeof method !== 'string' || (id !== undefined && typeof id !== 'string' && !Number.isSafeInteger(id))) return fail(-32600, 'Invalid JSON-RPC request.', 400);
-  observe(method, method === 'initialize' ? params?.clientInfo?.name : undefined);
+  observe(method, method === 'initialize' ? params?.clientInfo?.name : undefined, method === 'tools/call' ? params?.name : undefined);
   if (id === undefined) {
     if (['notifications/initialized', 'notifications/cancelled'].includes(method)) return new Response(null, { status: 202, headers: { 'Cache-Control': 'no-store' } });
     return fail(-32600, 'Unrecognized notification.', 400);
