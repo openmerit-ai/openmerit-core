@@ -45,7 +45,8 @@
         <h1 id="scout-title">Compare models for your tasks.</h1>
         <p id="index-counts">Loading index…</p>
       </div>
-      <a class="add-agent-button" href="#for-agents" title="Claude, Cursor, Codex, Amp, OpenCode and T3 Code · API &amp; MCP setup">
+      <div class="agent-install">
+      <button class="add-agent-button" type="button" aria-expanded="false" aria-controls="agent-picker">
         <span class="agent-logos" aria-hidden="true">
           <img src="/scout/agents/claude.png" width="28" height="28" alt="">
           <img src="/scout/agents/cursor.png" width="28" height="28" alt="">
@@ -55,7 +56,27 @@
           <img src="/scout/agents/t3-code.png" width="28" height="28" alt="">
         </span>
         <span>Add to your coding agent</span>
-      </a>
+      </button>
+      <div id="agent-picker" class="agent-picker" role="region" aria-labelledby="agent-picker-title" hidden>
+        <div class="agent-picker-heading"><h2 id="agent-picker-title">Choose your coding agent</h2><button id="close-agent-picker" type="button" aria-label="Close agent picker">×</button></div>
+        <div id="agent-options" class="agent-options">
+          <button type="button" data-agent="claude-code"><img src="/scout/agents/claude.png" width="24" height="24" alt=""><span>Claude Code</span></button>
+          <button type="button" data-agent="cursor"><img src="/scout/agents/cursor.png" width="24" height="24" alt=""><span>Cursor</span></button>
+          <button type="button" data-agent="codex"><img src="/scout/providers/openai.png" width="24" height="24" alt=""><span>Codex</span></button>
+          <button type="button" data-agent="amp"><img src="/scout/agents/amp.png" width="24" height="24" alt=""><span>Amp</span></button>
+          <button type="button" data-agent="opencode"><img src="/scout/agents/opencode.png" width="24" height="24" alt=""><span>OpenCode</span></button>
+          <button type="button" data-agent="t3-code"><img src="/scout/agents/t3-code.png" width="24" height="24" alt=""><span>T3 Code</span></button>
+          <button type="button" data-agent="other"><span>Other agent</span></button>
+        </div>
+        <p id="agent-copy-status" role="status" aria-live="polite"></p>
+        <div id="agent-copy-result" hidden>
+          <p id="agent-paste-hint"></p>
+          <div id="agent-manual-copy" hidden><label for="agent-instructions">Setup instructions</label><textarea id="agent-instructions" rows="5" readonly></textarea><button id="select-agent-instructions" class="quiet-button" type="button">Select instructions</button></div>
+          <button id="choose-another-agent" class="quiet-button" type="button">Choose another agent</button>
+        </div>
+        <p class="agent-picker-note">Copies setup instructions, not an installation. <a href="#for-agents">API &amp; MCP details ↗</a></p>
+      </div>
+      </div>
     </section>
     <section class="search-section" aria-label="Find models">
       <form id="scout-form" class="prompt-box">
@@ -103,14 +124,15 @@
         <details class="support-section specialist-section" data-field="specialists" hidden><summary data-field="specialists-title">Specialist models</summary><p>Related models to investigate. These are outside the ranked five; quality, cost and speed have not been compared on the same task.</p><div data-field="specialist-list"></div><p data-field="specialist-coverage"></p></details>
       </div>
     </template>
-
+    <noscript><p class="error-message">Enable JavaScript to search, or use the API in <a href="/docs/scout/">the Scout guide</a>.</p></noscript>
+  </main>
+  <footer class="scout-footer scout-wrap">
     <div class="support-sections">
       <details class="support-section" id="for-agents">
         <summary>API &amp; MCP</summary>
         <div class="agent-body">
           <p>Send a task. Get the same recommendations, model IDs, and evidence as this page.</p>
-          <div class="agent-choice"><label for="coding-agent">Your coding agent</label><select id="coding-agent" aria-describedby="agent-choice-note"><option value="unknown">Choose an agent (optional)</option value="claude-code">Claude Code</option><option value="cursor">Cursor</option><option value="codex">Codex</option><option value="amp">Amp</option><option value="opencode">OpenCode</option><option value="t3-code">T3 Code</option><option value="other">Other</option></select></div>
-          <p id="agent-choice-note" class="agent-note">The URL labels your chosen agent for usage analytics. Copying it does not install or connect Scout. Your analytics preference applies to the copied URL.</p>
+          <p class="agent-note">Use Add to your coding agent above for copy-and-paste setup instructions. Your analytics preference applies to the copied URLs.</p>
           <div class="code-heading"><span>MCP · Streamable HTTP</span><button class="quiet-button" id="copy-mcp" type="button">Copy URL</button></div><pre tabindex="0"><code id="mcp-url"></code></pre>
           <div class="code-heading"><span>JSON API</span><button class="quiet-button" id="copy-command" type="button">Copy request</button></div><pre tabindex="0"><code id="agent-code"></code></pre>
           <p class="agent-note">Both endpoints require a short-lived Clerk session token in the Authorization header. MCP clients must support custom headers; automatic OAuth sign-in is not available yet. <a id="agent-docs" href="/docs/scout/">API guide ↗</a></p>
@@ -127,9 +149,8 @@
         <p>Common sensitive patterns are removed before optional prompt sharing, but redaction cannot detect every secret or personal detail. Turning sharing off stops future collection, not required task processing or previously stored records. <a href="/docs/scout/#product-analytics">Data handling ↗</a></p>
       </details>
     </div>
-    <noscript><p class="error-message">Enable JavaScript to search, or use the API in <a href="/docs/scout/">the Scout guide</a>.</p></noscript>
-  </main>
-  <footer class="scout-footer scout-wrap"><span>Scout by OpenMerit</span><a href="/docs/scout/#current-validation-limits">Evaluation &amp; limitations <span aria-hidden="true">↗</span></a></footer>
+    <div class="footer-meta"><span>Scout by OpenMerit</span><a href="/docs/scout/#current-validation-limits">Evaluation &amp; limitations <span aria-hidden="true">↗</span></a></div>
+  </footer>
   <p class="sr-only" id="announcement" role="status" aria-live="polite"></p>
 </body>
 </html>

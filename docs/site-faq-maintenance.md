@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Scout in-place agent setup — source only, unreleased, 22 October 2026
+
+Reviewed setup, privacy and installation claims against the agent picker, automatic clipboard handoff and footer disclosures. A successful clipboard write copies public instructions, not credentials or the user's task, and does not establish an installation or authenticated connection. Existing token/header requirements and analytics opt-outs remain intact. Manual-copy fallback does not emit a successful-copy receipt. Homepage FAQ answers concern unchanged terminal/Pi integration and require no edits.
+
 ## Scout document evidence and shortlist corrections — 22 October 2026
 
 Reviewed evidence and comparison claims against the added IDP Leaderboard source, the labelled general-image fallback for document tasks, the stated-tradeoff priority and the document-evidence applicability fix. The homepage FAQ describes the terminal/Pi workflow and remains accurate; no FAQ change is needed.

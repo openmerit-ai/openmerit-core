@@ -170,6 +170,15 @@ test('agent setup attribution joins verified MCP connections, never copies, fail
     method:'POST',headers:{'content-type':'application/json',...(bearer?{authorization:`Bearer ${bearer}`} : {}),...headers},
     body:JSON.stringify({jsonrpc:'2.0',id,method,params:{protocolVersion:'2025-11-25',clientInfo:{name:privateName,version:privateName}}}),
   }),config,ctx);
+  for(const artifact of ['setup_prompt','mcp_url','api_request',privateName]){
+    for(const outcome of ['ok','error'])assert.equal((await alpha.fetch(eventRequest('scout_agent_setup_copied',{agent:'cursor',artifact,outcome,instructions:privateName},token),config,ctx)).status,204);
+  }
+  await ctx.flush();
+  assert.deepEqual(sent.filter(e=>e.event==='scout_agent_setup_copied').map(e=>[e.properties.artifact,e.properties.outcome]),
+    ['setup_prompt','mcp_url','api_request',undefined].flatMap(artifact=>[[artifact,'ok'],[artifact,'error']]));
+  assert.equal(sent.filter(e=>e.event==='scout_agent_connected').length,0,'copy successes and failures are not connections');
+  assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_CANARY/);
+  sent.length=0;
   for(const agent of ['claude-code','cursor','codex','amp','opencode','t3-code','other']){
     assert.equal((await alpha.fetch(eventRequest('scout_agent_selected',{agent,installation:true,token:privateName},token),config,ctx)).status,204);
     assert.equal((await alpha.fetch(eventRequest('scout_agent_setup_copied',{agent,artifact:'mcp_url',outcome:'ok'},token),config,ctx)).status,204);

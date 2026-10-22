@@ -308,10 +308,11 @@ const auth = initAuth(() => {
   $('#task-results').replaceChildren(); $('#results').hidden = true; $('#results').setAttribute('aria-busy', 'false'); $('#error').hidden = true;
   $('#prompt').value = ''; fitPrompt(); $('.find-button span').textContent = 'Find models'; $('.find-button').setAttribute('aria-busy', 'false');
 });
+let selectedAgent = 'unknown', pickerGeneration = 0;
 function setupURL(path) {
   const url = new URL(`${location.origin}${basePath}/${path}`);
   if (!analytics.preferences().enabled) url.searchParams.set('analytics', 'off');
-  else if ($('#coding-agent').value !== 'unknown') url.searchParams.set('agent', $('#coding-agent').value);
+  else if (selectedAgent !== 'unknown') url.searchParams.set('agent', selectedAgent);
   return url.href;
 }
 function setupCommand() {
@@ -320,17 +321,67 @@ function setupCommand() {
 function renderAgentSetup() {
   $('#mcp-url').textContent = setupURL('mcp'); $('#agent-code').textContent = setupCommand();
 }
-$('#coding-agent').addEventListener('change', () => {
-  renderAgentSetup(); analytics.track('scout_agent_selected', { agent: $('#coding-agent').value });
+function showAgentPicker(open, restoreFocus = false) {
+  pickerGeneration++;
+  $('#agent-picker').hidden = !open;
+  $('.add-agent-button').setAttribute('aria-expanded', String(open));
+  if (open) {
+    $('#agent-options').hidden = false; $('#agent-copy-result').hidden = true;
+    $('#agent-copy-status').textContent = '';
+    $('#agent-options button').focus({ preventScroll: true });
+  } else if (restoreFocus) $('.add-agent-button').focus({ preventScroll: true });
+}
+$('.add-agent-button').addEventListener('click', () => {
+  const open = $('#agent-picker').hidden;
+  showAgentPicker(open);
+  if (open) analytics.track('scout_agent_setup_opened', { source: 'button' });
 });
+$('#close-agent-picker').addEventListener('click', () => showAgentPicker(false, true));
+$('#choose-another-agent').addEventListener('click', () => showAgentPicker(true));
+document.addEventListener('pointerdown', event => {
+  if (!$('#agent-picker').hidden && !event.target.closest('.agent-install')) showAgentPicker(false);
+});
+$('.agent-install').addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !$('#agent-picker').hidden) { event.preventDefault(); showAgentPicker(false, true); }
+});
+$('.agent-install').addEventListener('focusout', event => {
+  if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) showAgentPicker(false);
+});
+$('#select-agent-instructions').addEventListener('click', () => {
+  const instructions = $('#agent-instructions'); instructions.focus(); instructions.select(); instructions.scrollTop = 0;
+});
+document.querySelectorAll('[data-agent]').forEach(button => button.addEventListener('click', async () => {
+  const agent = button.dataset.agent, name = button.textContent.trim(), generation = ++pickerGeneration;
+  selectedAgent = agent; renderAgentSetup();
+  analytics.track('scout_agent_selected', { agent });
+  const instructions = `Help me set up Scout in ${agent === 'other' ? 'this coding agent' : name} so you can discover suitable inference models for my tasks.
+
+Use the remote Streamable HTTP MCP endpoint: ${setupURL('mcp')}
+Documentation: ${location.origin}/docs/scout/
+
+Check this agent's supported MCP configuration first, preserve existing servers, and ask before changing configuration. Scout requires a current short-lived Clerk session token in the Authorization: Bearer <SCOUT_TOKEN> header on every request. Automatic OAuth is not available. Guide me through supplying the token securely using a supported private setting; never put it in chat, source files or version control, and do not read browser credentials. If this client cannot securely supply headers, explain the limitation rather than claiming setup succeeded.
+
+Preserve the endpoint's query parameters and send X-Scout-Analytics-Content: off. Once authenticated, verify initialization and tool discovery. Before the first search, ask me for a task description that contains no secrets or confidential data, then call scout_models with that prompt. Report connection and search success only after the corresponding requests succeed. Compare the returned quality, cost and latency evidence; prefer the cheapest model that meets the task's quality needs.`;
+  $('#agent-options').hidden = true; $('#agent-copy-status').textContent = 'Copying…';
+  $('#close-agent-picker').focus({ preventScroll: true });
+  let ok = false;
+  try { await navigator.clipboard.writeText(instructions); ok = true; } catch { /* Offer manual copying below. */ }
+  analytics.track('scout_agent_setup_copied', { agent, artifact: 'setup_prompt', outcome: ok ? 'ok' : 'error' });
+  if (generation !== pickerGeneration) return;
+  $('#agent-copy-status').textContent = ok ? 'Copied to clipboard' : 'Couldn’t copy automatically';
+  $('#agent-paste-hint').textContent = ok ? `Paste into ${agent === 'other' ? 'your coding agent' : name} to set up Scout.` : 'Copy the instructions below, then paste them into your coding agent.';
+  $('#agent-instructions').value = instructions;
+  $('#agent-manual-copy').hidden = ok; $('#agent-copy-result').hidden = false;
+  $('#choose-another-agent').focus({ preventScroll: true });
+}));
 for (const [id, artifact] of [['copy-mcp', 'mcp_url'], ['copy-command', 'api_request']]) {
   $(`#${id}`).addEventListener('click', async () => {
-    const agent = $('#coding-agent').value;
+    const agent = selectedAgent;
     const ok = await copy(artifact === 'mcp_url' ? setupURL('mcp') : setupCommand(), $(`#${id}`));
     analytics.track('scout_agent_setup_copied', { agent, artifact, outcome: ok ? 'ok' : 'error' });
   });
 }
-$('#agent-docs').addEventListener('click', () => analytics.track('scout_agent_docs_opened', { agent: $('#coding-agent').value }));
+$('#agent-docs').addEventListener('click', () => analytics.track('scout_agent_docs_opened', { agent: selectedAgent }));
 window.addEventListener('scout-analytics-change', renderAgentSetup);
 renderAgentSetup();
 fetch(`${basePath}/api/status`).then(response => { if (!response.ok) throw new Error(); return response.json(); }).then(data => { if (!result) showIndex(data); }).catch(() => { if (!result) { $('#index-counts').textContent = 'Index unavailable'; } });
@@ -352,11 +403,12 @@ $('#for-agents').addEventListener('toggle', () => {
 document.querySelectorAll('a[href="#for-agents"]').forEach(link => link.addEventListener('click', event => {
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
+  showAgentPicker(false);
   location.hash = '#for-agents';
   // Count deliberate clicks even if the disclosure is already open, without
   // double-counting the resulting hashchange and native toggle events.
   setupOpened = false;
-  revealSection(link.classList.contains('add-agent-button') ? 'button' : 'navigation');
+  revealSection('navigation');
   $('#for-agents').scrollIntoView({ block: 'start' });
 }));
 if (location.hash === '#for-agents') {

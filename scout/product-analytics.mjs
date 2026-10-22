@@ -22,7 +22,7 @@ const clientEvents = {
   scout_session_observed: { auth_provider: choice(['google', 'github', 'unknown']) },
   scout_agent_setup_opened: { source: choice(['button', 'navigation', 'disclosure', 'deep_link']) },
   scout_agent_selected: { agent },
-  scout_agent_setup_copied: { agent, artifact: choice(['mcp_url', 'api_request']), outcome: choice(['ok', 'error']) },
+  scout_agent_setup_copied: { agent, artifact: choice(['mcp_url', 'api_request', 'setup_prompt']), outcome: choice(['ok', 'error']) },
   scout_agent_docs_opened: { agent },
   scout_results_viewed: { ...counts, duration_ms: duration },
   scout_evidence_opened: position,
