@@ -17,6 +17,7 @@ export const sourceURLs = {
   models: 'https://openrouter.ai/api/v1/models',
   omnidoc: 'https://raw.githubusercontent.com/opendatalab/OmniDocBench/main/README.md',
   bfcl: 'https://gorilla.cs.berkeley.edu/data_overall.csv',
+  idp: 'https://www.idp-leaderboard.org/',
   bfclMethodology: 'https://gorilla.cs.berkeley.edu/leaderboard',
   bfclMemory: 'https://gorilla.cs.berkeley.edu/blogs/16_bfcl_v4_memory.html',
 };
@@ -66,6 +67,29 @@ export function parseOmniDoc(markdown) {
   return rows;
 }
 
+// The overall column averages the three component series, so it is not stored.
+export const idpSeries = [
+  ['olmocr', 'OlmOCR', 'IDP Leaderboard · OlmOCR Bench', 'OCR fidelity on about 7,000 document pages, including math equations, tables, headers/footers and reading order.'],
+  ['omnidoc', 'OmniDoc', 'IDP Leaderboard · OmniDocBench v1.5', 'Document parsing: text extraction, formula recognition, table structure (TEDS) and reading order on document images.'],
+  ['core', 'IDP', 'IDP Leaderboard · IDP Core', 'Real-world document processing on document images: key information extraction (fields such as those on invoices and receipts), handwriting OCR, table understanding and visual question answering.'],
+];
+// Read only the server-rendered leaderboard table, never page scripts.
+export function parseIDP(html) {
+  const table = [...html.matchAll(/<table\b[\s\S]*?<\/table>/g)].map(m => m[0]).find(t => {
+    const head = (t.match(/<thead[\s\S]*?<\/thead>/)?.[0] ?? '').replace(/<[^>]*>/g, '|');
+    return ['Model', 'Overall', ...idpSeries.map(s => s[1])].every(h => head.includes(`|${h}|`));
+  });
+  if (!table) throw new Error('IDP Leaderboard format changed.');
+  const header = [...table.match(/<thead[\s\S]*?<\/thead>/)[0].matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)].map(c => c[1].replace(/<[^>]*>/g, '').trim());
+  const rows = [...table.matchAll(/<tr\b[\s\S]*?<\/tr>/g)].map(m => [...m[0].matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(c => c[1])).filter(c => c.length === header.length).map(cells => {
+    const name = cells[header.indexOf('Model')].match(/<a\b[^>]*>([^<]+)<\/a>/)?.[1].trim();
+    const scores = Object.fromEntries(idpSeries.map(([id, column]) => [id, number(cells[header.indexOf(column)].replace(/<[^>]*>/g, '').trim())]));
+    return { name, scores };
+  });
+  if (rows.length < 5 || rows.some(r => !r.name || Object.values(r.scores).some(v => v === null || v < 0 || v > 100))) throw new Error('Invalid IDP Leaderboard results.');
+  return rows;
+}
+
 const aaBenchmarks = {
   gpqa: 'GPQA Diamond · AA', hle: 'Humanity’s Last Exam · AA',
   scicode: 'SciCode · AA', ifbench: 'IFBench · AA', lcr: 'AA Long Context Reasoning',
@@ -101,7 +125,7 @@ export function parseBFCL(csv) {
   });
 }
 
-export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, previous, failures = {}, checkedAt = new Date().toISOString() }) {
+export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, previous, failures = {}, checkedAt = new Date().toISOString() }) {
   const sources = [], benchmarks = [], observations = new Map();
   const descriptions = benchmarkDescriptions ?? previous?.benchmarkDescriptions ?? {};
   const priorSources = new Map(previous?.sources.map(s => [s.id, s]) ?? []);
@@ -133,7 +157,7 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     if (!alias) continue; const key = norm(alias); const previous = lookup.get(key);
     lookup.set(key, lookup.has(key) && previous !== model ? null : model);
   }
-  const explicitAliases = { 'claudesonnet4520250929': 'anthropic/claude-sonnet-4.5', 'claudehaiku4520251001': 'anthropic/claude-haiku-4.5', 'chatgpt4olatest': 'openai/chatgpt-4o-latest', 'claude37sonnet20250219': 'anthropic/claude-3.7-sonnet', 'gemini25propreview0325': 'google/gemini-2.5-pro-preview-03-25', 'gemini3flash': 'google/gemini-3-flash-preview', 'qwen3vl235b': 'qwen/qwen3-vl-235b-a22b-instruct' };
+  const explicitAliases = { 'claudesonnet4520250929': 'anthropic/claude-sonnet-4.5', 'claudehaiku4520251001': 'anthropic/claude-haiku-4.5', 'chatgpt4olatest': 'openai/chatgpt-4o-latest', 'claude37sonnet20250219': 'anthropic/claude-3.7-sonnet', 'gemini25propreview0325': 'google/gemini-2.5-pro-preview-03-25', 'gemini3flash': 'google/gemini-3-flash-preview', 'gemini31pro': 'google/gemini-3.1-pro-preview', 'claudehaiku45': 'anthropic/claude-haiku-4.5', 'qwen3vl235b': 'qwen/qwen3-vl-235b-a22b-instruct' };
   function resolve(name) {
     const base = String(name).replace(/_(?:none|low|medium|high|xhigh|max|unknown|thinking|nothinking)$/, '').replace(/\s*\([^)]*\)\s*$/, '');
     return lookup.get(norm(base)) ?? models.find(m => m.id === explicitAliases[norm(base)]);
@@ -235,6 +259,13 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     const benchmark = addBenchmark('omnidoc:v1.6_full', 'OmniDocBench v1.6 full', 'omnidoc', { title: 'OmniDocBench v1.6 full', description: 'End-to-end parsing of text, tables, formulas and layout in document images. General VLMs section; Overall score.', sourceURL: sourceURLs.omnidoc });
     for (const row of rows) add(row.name, benchmark, row.score / 100, { url: 'https://github.com/opendatalab/OmniDocBench#end-to-end-evaluation', observedAt: null, sourceModel: row.name, metric: 'Overall / 100' });
   });
+  collect('idp', 'IDP Leaderboard', sourceURLs.idp, 'Intelligent Document Processing Leaderboard by Nanonets (MIT). Component series only; per-model evaluation dates are not supplied.', () => {
+    const rows = parseIDP(idpHTML);
+    for (const [id, , name, description] of idpSeries) {
+      const benchmark = addBenchmark(`idp:${id}`, name, 'idp', { title: name, description, metric: 'Score / 100', suite: 'IDP Leaderboard', sourceURL: sourceURLs.idp });
+      for (const row of rows) add(row.name, benchmark, row.scores[id] / 100, { url: sourceURLs.idp, observedAt: null, sourceModel: row.name, metric: 'Score / 100' });
+    }
+  }, { license: 'https://opensource.org/licenses/MIT' });
   collect('bfcl', 'Berkeley Function Calling Leaderboard', 'https://gorilla.cs.berkeley.edu/leaderboard', 'BFCL v4 native function-calling evaluations. Memory uses the named external backend, not built-in model memory. Per-model measurement dates are not supplied.', () => {
     const rows = parseBFCL(bfclCSV);
     if (rows.length < 3) throw new Error('Too few native BFCL configurations.');
@@ -288,7 +319,7 @@ export async function refreshSnapshot(fetcher = fetch, previous, options = {}) {
     failed: [...(results[0].status === 'rejected' ? ['analysis'] : []), ...(results.slice(1).some(r => r.status === 'rejected') ? ['bfcl'] : [])],
   }));
   const descriptions = readEpochDefinitions(read).then(value => ({ value }), () => ({ value: previous?.benchmarkDescriptions, failed: true }));
-  const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['bfcl', 'bfclCSV', 'text'], ['modelsdev', 'modelsDev', 'json']];
+  const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['idp', 'idpHTML', 'text'], ['bfcl', 'bfclCSV', 'text'], ['modelsdev', 'modelsDev', 'json']];
   const results = await Promise.allSettled([...specs.map(([id, , type]) => read(sourceURLs[id], type)), ...hubQueries.map(query => read(query.url, 'json', 2_000_000))]);
   const inputs = { previous, failures: {} };
   results.slice(0, specs.length).forEach((result, i) => {

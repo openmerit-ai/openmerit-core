@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Scout document evidence and shortlist corrections — 22 October 2026
+
+Reviewed evidence and comparison claims against the added IDP Leaderboard source, the labelled general-image fallback for document tasks, the stated-tradeoff priority and the document-evidence applicability fix. The homepage FAQ describes the terminal/Pi workflow and remains accurate; no FAQ change is needed.
+
 ## Scout preset tasks — source only, unreleased, 22 October 2026
 
 Reviewed the new editable one-, two- and three-task examples against setup, model-selection and data claims. Selection only fills the prompt; sign-in and explicit submission still apply. Examples use normal ranking, do not execute models, and do not guarantee task counts or five candidates. The click event sends a fixed example ID, not draft text. Homepage FAQ claims about released npm behavior are unchanged.

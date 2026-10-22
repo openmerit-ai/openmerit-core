@@ -12,7 +12,7 @@ import {registry} from '../registry.mjs';
 import {createProductAnalytics} from '../product-analytics.mjs';
 
 const layers={input:{text:'Source files',origin:'explicit'},work:{text:'Review code',origin:'inferred'},output:{text:'Corrected code',origin:'explicit'},criteria:{text:null,origin:'missing'},constraints:{text:null,origin:'missing'}};
-const slot=(alternatives=[])=>({label:'Code',search:'Write source code.',alternatives,preferences:[],unresolved:[],clarification:null});
+const slot=(alternatives=[])=>({label:'Code',search:'Write source code.',alternatives,preferences:[],unresolved:[],clarification:null,priority:'balanced'});
 async function fixture(conditions=[],unresolved=[],decomposition) {
   const checkedAt=new Date().toISOString(),benchmark={id:'fixture',name:'Fixture',source:'fixture',family:'fixture',tags:['coding'],interpretation:{status:'ready'},definition:{description:'Source-code checks.'}};
   const models=Array.from({length:10},(_,i)=>({id:`lab/m${i}`,name:`Model ${i}`,provider:i%2?'Lab B':'Lab A',facts:[{field:'creator',value:i%2?'Lab B':'Lab A'},{field:'family',value:'line'},{field:'releasedAt',value:'2026-10-01'}],

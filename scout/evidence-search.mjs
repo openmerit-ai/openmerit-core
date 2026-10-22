@@ -1,6 +1,7 @@
 import {requestDecisions} from './decisions.mjs';
 import {digest,chunks,concurrent,fetchJSON} from './utils.mjs';
 import MiniSearch from 'minisearch';
+import {acceptableEvidenceTags} from './comparison.mjs';
 
 const keywordIndexes=new WeakMap();
 
@@ -55,7 +56,7 @@ export async function retrieveEvidence(task,index,{vectorize,queryVector,modelId
     if(!keywords){keywords=new MiniSearch({fields:['text']});keywords.addAll(index.documents);keywordIndexes.set(index,keywords);}
     lexical=keywords.search(task.search).flatMap(hit=>byId.has(hit.id)?[byId.get(hit.id)]:[]).slice(0,8);
   }
-  const required=new Set(task.evidenceCapabilities??Object.keys(task.weights).filter(id=>task.weights[id]>=3));
+  const required=new Set([...(task.evidenceCapabilities??Object.keys(task.weights).filter(id=>task.weights[id]>=3)),...acceptableEvidenceTags(task)]);
   // Exact terms supplement vectors, but neither similarity signal proves quality.
   // Reserve room for both lexical and semantic primary evidence before backstops.
   const primary=candidates.filter(d=>d.tags.some(t=>required.has(t))),backstop=supported.filter(d=>d.tags.some(t=>required.has(t)));
@@ -67,7 +68,8 @@ export async function assessEvidence(task,candidates,{apiKey,fetcher=fetch,timeo
   // The task interpreter establishes required abilities. This independent check
   // establishes what the benchmark scores, not equivalence to a whole workflow.
   // Domain-specific task wording must not veto a general component proxy.
-  const required=Object.keys(task.weights).filter(id=>task.weights[id]>=3),ids=task.evidenceCapabilities??(required.length?required:Object.keys(task.weights));
+  // The quality target plus any evidence the ranker requires for admission.
+  const required=Object.keys(task.weights).filter(id=>task.weights[id]>=3),ids=[...new Set([...(task.evidenceCapabilities??(required.length?required:Object.keys(task.weights))),...acceptableEvidenceTags(task)])];
   if(!ids.length)return {ids:[],assessments:[],coverage:'No primary evidence capability was established.'};
   const abilities=ids.map(id=>{const c=capabilityDefinitions.find(c=>c.id===id);return {value:id,description:c?.benchmark??c?.task??task.capabilities?.find(c=>c.id===id)?.label??id};});
   const choices=[{value:'none',description:'No required ability is a primary or separately scored evaluation target.'},{value:'unknown',description:'The evidence does not establish the measured ability.'},...abilities];

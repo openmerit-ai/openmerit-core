@@ -12,7 +12,7 @@ test('ranking requires a typed task and selects evidence from that task',()=>{
  const index=createIndex(snapshot);assert.throws(()=>recommend(index,'Invoice JSON code'),/semantic task/);
  const task=interpretDecisions(answers({documents:'required',vision:'required',task_kind:'extract'}));
  const result=recommend(index,'Uninterpreted words do not control ranking',Date.parse(snapshot.checkedAt),task);
- assert.ok(result.recommendations.length);assert.ok(result.recommendations.every(m=>m.evidence.some(e=>e.capabilities.includes('documents'))));
+ assert.ok(result.recommendations.length);assert.ok(result.recommendations.every(m=>m.evidence.some(e=>e.capabilities.includes('documents'))||m.missingEvidence?.includes('documents')&&m.evidence.some(e=>e.capabilities.includes('vision'))));
 });
 test('interpretation bounds requests, reports failures without credentials, and preserves unknown memory',async()=>{
  await assert.rejects(classifyPrompt('Example'),/configured/);

@@ -24,7 +24,9 @@ test('invoice recommendations require real document evidence, image input, JSON 
   for (const model of result.recommendations) {
     assert.ok(model.modalities.includes('image'));
     assert.ok(model.parameters.some(p => ['structured_outputs', 'response_format'].includes(p)));
-    assert.ok(model.evidence.some(e => e.capabilities.includes('documents')), model.id);
+    // Document evidence, or labelled general image evidence when no document result exists.
+    assert.ok(model.evidence.some(e => e.capabilities.includes('documents')) || model.missingEvidence?.includes('documents') && model.evidence.some(e => e.capabilities.includes('vision')), model.id);
+    if (model.missingEvidence) assert.ok(result.warnings.some(w => w.includes(model.name) && w.includes('no document-reading benchmark')));
     assert.ok(model.evidence.every(e => /^https?:/.test(e.url) && e.configurations.length));
   }
   if (result.recommendations.some(m => m.evidence.some(e => e.source === 'openvlm'))) assert.ok(result.warnings.some(w => w.includes('Newer models')));
@@ -152,7 +154,7 @@ test('a fresh table retains omitted historical observations only for an unchange
 test('refresh reads bounded benchmark methodology and catalogue feeds; total outage needs a previous index', async () => {
   const f = fixtures(); const calls = [];
   const fetcher = async url => { calls.push(url); return new Response(url.endsWith('.zip') ? f.epochZip : url.includes('artificialanalysis') ? f.analysisHTML : JSON.stringify(url.includes('OpenVLM') ? f.openvlm : f.router)); };
-  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 25); assert.equal(refreshed.models.length, 12);
+  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 26); assert.equal(refreshed.models.length, 12);
   assert.equal(refreshed.sources.find(s => s.id === 'huggingface').status, 'failed');
   await assert.rejects(refreshSnapshot(async () => new Response('Unavailable', { status: 503 })), /Invalid model catalogue/);
 });
@@ -237,4 +239,16 @@ test('a frozen runtime clock never reports a fabricated zero-millisecond computa
   const response = await handleAPI(post({ prompt: 'Debug Python code' }), index);
   assert.equal((await response.json()).elapsedMs, null);
   assert.equal(response.headers.get('server-timing'), null);
+});
+test('the IDP Leaderboard parser reads component scores from the rendered table and rejects format changes', async () => {
+  const { parseIDP } = await import('../sources.mjs');
+  const cell = v => `<td data-slot="table-cell"><span class="tabular-nums">${v}</span></td>`;
+  const row = (name, ...scores) => `<tr data-slot="table-row">${cell(1)}<td data-slot="table-cell"><a class="font-medium" href="/models/x">${name}</a><span class="ml-2">Lab</span></td>${scores.map(cell).join('')}</tr>`;
+  const head = '<thead><tr><th>#</th><th>Model</th><th>Overall</th><th>OlmOCR</th><th>OmniDoc</th><th>IDP</th></tr></thead>';
+  const html = `<table>${head}<tbody>${['A', 'B', 'C', 'D', 'E'].map((n, i) => row(`Model ${n}`, 80 - i, 70 - i, 90 - i, 60 + i)).join('')}</tbody></table>`;
+  const rows = parseIDP(html);
+  // The publisher's Overall column is an average and is not imported.
+  assert.deepEqual(rows[1], { name: 'Model B', scores: { olmocr: 69, omnidoc: 89, core: 61 } });
+  assert.throws(() => parseIDP(html.replace('<th>IDP</th>', '<th>KIE</th>')), /format changed/);
+  assert.throws(() => parseIDP(html.replace('>60<', '>n/a<')), /Invalid IDP/);
 });

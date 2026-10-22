@@ -5,7 +5,7 @@ import {structured} from './structured.mjs';
 import {factKinds} from './selection.mjs';
 import {choice,decode} from './utils.mjs';
 
-export const interpreterVersion='37';
+export const interpreterVersion='38';
 const resolutionInstructions='Resolve ambiguity internally; never ask the user a follow-up question. Choose the most likely intended deliverable from the request, using the simplest adequate interpretation. Establish a concrete output representation without adding optional workflow decisions or edge-case policies. Preserve explicit requirements and exclusions; inference must not override them. Missing runtime inputs, schemas, labels or handling policies do not block model discovery. Do not invent mandatory capabilities, evaluation criteria or numerical targets. The selected model performs the described work, not model discovery.';
 // Numeric/date limits are open values, not choices among catalogue values.
 // Canonical identity, provider, host and family vocabularies stay complete.
@@ -39,9 +39,11 @@ export function interpretationSchema(registry=seed,definitions=fields) {
   const field={type:'string',enum:Object.keys(definitions).filter(f=>f!=='other')},values={type:'array',description:'Numeric and date boundaries may be ANY requested values, including values absent from the catalogue. Compute required quantities. Vocabulary constrains canonical names, not numeric or date limits.',items:{type:['string','number','boolean']},minItems:1};
   const condition={anyOf:[object({field,op:{type:'string',enum:operators.filter(o=>!['in','not_in'].includes(o))},values:{...values,maxItems:1}}),object({field,op:{type:'string',enum:['in','not_in']},values:{...values,maxItems:240}})]};
   return object({search:{type:'string',description:'The actual work the selected model must do, with its inputs and output. Exclude restrictions on candidate model metadata and preferences.'},
+    priority:{type:'string',enum:priorities,description:'The tradeoff the user states for choosing among candidate models, judged from the whole request, including preferences that search excludes. cost: the lowest-cost model that is still accurate or good enough. quality: the best result, accepting higher price or latency. latency: fastest completion. balanced: none stated, or several goals equally. Volume alone does not imply cost.'},
     alternatives:{type:'array',maxItems:16,items:object({all:{type:'array',minItems:1,maxItems:32,items:condition}})},preferences:{type:'array',items:condition},unresolved:{type:'array',items:{type:'string'}},clarification:{type:'null',description:'Resolve the intended work internally. No follow-up questions.'}});
 }
 export const taskLimit=3,slotLimit=1;
+const priorities=['balanced','quality','cost','latency'];
 const layer=object({text:{type:['string','null'],maxLength:600},origin:{type:'string',enum:['explicit','inferred','missing']}});
 export async function decomposePrompt(prompt,{registry=seed,definitions=fields,vocabulary={},now=Date.now(),...options}={}) {
   const schema=object({overflow:{type:'boolean'},tasks:{type:'array',minItems:1,maxItems:taskLimit,items:object({
@@ -100,6 +102,9 @@ export async function interpretPrompt(prompt,{apiKey,fetcher=fetch,registry=seed
     [target]=decode([quality],semantic.answers.filter(a=>a.name===quality.name));
     if(!semantic.task.unsupported&&(semantic.task.clarification||!established()))throw Error('The primary task evidence target could not be established.');
   }
+  // Search deliberately omits preferences, so the tradeoff comes from extraction
+  // over the whole request; the work-only Decisions answer is the fallback.
+  if(priorities.includes(result.priority))semantic.task.workload={...semantic.task.workload,priority:result.priority};
   const evidenceCapabilities=established()?[target.choice]:[];
   return {task:{...semantic.task,clarification:null,evidenceCapabilities,interpreter:'openai-hybrid',interpreterVersion,search:result.search,constraints:result.alternatives,preferences:result.preferences,unresolved:result.unresolved},prepared,elapsedMs:Math.round(performance.now()-started),usage:response.usage};
 }

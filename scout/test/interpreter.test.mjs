@@ -7,7 +7,7 @@ import {matchTask} from '../matching.mjs';
 function transport(format,alternatives=[]) {
   return async(url,options)=>{
     const request=JSON.parse(options.body);
-    if(url.endsWith('/responses'))return Response.json({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({alternatives,preferences:[],unresolved:[],search:'Write source code.',clarification:null})}]}]});
+    if(url.endsWith('/responses'))return Response.json({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({alternatives,preferences:[],unresolved:[],search:'Write source code.',clarification:null,priority:'balanced'})}]}]});
     assert.ok(request.questions.some(q=>q.name==='json'));assert.ok(request.questions.some(q=>q.name==='output_format'));assert.ok(request.questions.some(q=>q.name==='vision'));
     const values={tools:'no',memory:'none',output:'supported',result_type:'absent',label_space:'absent',detection_scope:'absent',input_length:'short',output_length:'short',priority:'balanced',task_kind:'code',output_specificity:'established',catalogue_scope:'restricted',quality_target:'coding'};
     return Response.json({answers:request.questions.map(q=>({name:q.name,type:'choice',choice:q.name==='json'?(['json','other'].includes(format)?'yes':'no'):q.name==='output_format'?format:values[q.name]??(q.name==='coding'?'required':'absent'),confidence:.99}))});
@@ -84,4 +84,13 @@ test('unknown deferred identities fail closed and invented canonical names are r
   if(values.length)await assert.rejects(interpretPrompt('Opaque task.',{apiKey:'fixture',vocabulary,fetcher}),/canonical/);
   else assert.ok((await interpretPrompt('Opaque task.',{apiKey:'fixture',vocabulary,fetcher})).task.unresolved.length);
  }
+});
+test('a tradeoff stated outside the extracted work still sets the ranking priority',async()=>{
+  // Search omits preferences, so the work-only Decisions answer says balanced.
+  const base=transport('none'),fetcher=async(url,options)=>{
+    if(!url.endsWith('/responses'))return base(url,options);
+    return Response.json({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({alternatives:[],preferences:[],unresolved:[],search:'Write source code.',clarification:null,priority:'cost'})}]}]});
+  };
+  assert.equal((await interpretPrompt('Write code; prefer the cheapest model that is accurate.',{apiKey:'fixture',registry,fetcher})).task.workload.priority,'cost');
+  assert.equal((await interpretPrompt('Write code.',{apiKey:'fixture',registry,fetcher:base})).task.workload.priority,'balanced');
 });

@@ -4,6 +4,13 @@ const median = values => { const sorted = [...values].sort((a, b) => a - b); ret
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 export const benchmarkFamily = b => b.family ?? b.id ?? b.name;
 export const qualityIndifference = .02;
+// Hard evidence the ranker requires before a candidate is admitted. Evidence
+// retrieval and applicability must be able to supply these, not only the quality target.
+// Newly released models often lack document results. General image evidence can
+// admit them for document work, but the gap is labelled rather than hidden.
+export const evidenceFallbacks = { documents: 'vision' };
+export const acceptableEvidenceTags = task => [...new Set(requiredEvidenceTags(task).flatMap(tag => [tag, evidenceFallbacks[tag]].filter(Boolean)))];
+export const requiredEvidenceTags = task => [task.needsMemory && 'memory', task.needsTools && 'tools', task.needsVision && (task.weights.documents ? 'documents' : 'vision')].filter(Boolean);
 
 export function workloadFor(task) {
   const input = task.workload?.input ?? (task.weights.context ? 'long' : task.needsVision ? 'medium' : 'short');

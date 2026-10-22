@@ -109,6 +109,20 @@ Interpreter version 37 requests a short `tasks[].sourceText` excerpt in the exis
 
 Fresh hosted browser checks returned five, ten and fourteen candidates for one, two and three tasks in 7.66, 7.43 and 7.12 seconds. All three searches used interpreter 37 without result-cache hits, preserved original prompt excerpts and cost-ordered model lists, and displayed no clarification questions. A separate uncached MCP request returned five coding models. The deployed HTML, JavaScript and styles matched the checked build; desktop and 390px mobile captures were inspected, including horizontal scrolling and model evidence expansion, with no browser errors or page overflow. Full verification passed 692 tests before publication; deployment repeated 349 Scout tests and 13 documentation tests. Stable Scout, the main site, domain routing and the hourly publisher were unchanged. These checks do not establish recommended-model task accuracy, a fixed five candidates per task, or the under-five-second target.
 
+## Newer document evidence — 22 October 2026
+
+Document and image-reading tasks previously relied on document benchmarks that covered only models from OpenVLM's 17 September 2025 snapshot and four OmniDocBench entries, so receipts and invoices could return GPT-4.1 or GPT-4o. The hourly refresh now imports the [IDP Leaderboard](https://www.idp-leaderboard.org/) component series as three benchmarks. Fourteen of its 26 entries match catalogue models, including GPT-5.4, GPT-5.2, GPT-5 Mini, Gemini 3.1 Pro, Gemini 3 Flash and Claude Opus, Sonnet 4.6 and Haiku 4.5. Benchmark interpretation tags all three series as document and image evidence. Its newest entries still trail the latest releases.
+
+A model with no document-reading result can now qualify for a document task on general image-understanding evidence. Such picks carry `missingEvidence: ["documents"]` and a warning naming them. Quality is still estimated only from accepted evidence; this widens eligibility, not the evidence itself.
+
+## Shortlist corrections from user reports — source only, unreleased, 22 October 2026
+
+Three reported results had separate causes. Image-reading tasks whose primary quality target was another ability, such as structured output, returned no candidates: evidence applicability accepted only benchmarks for the quality target, while ranking still required document or vision evidence for admission. Applicability now also offers the abilities the ranker requires (documents or vision, tools, memory), so a document benchmark can satisfy that requirement.
+
+A stated preference such as "prefer the lowest-cost model that can extract these fields accurately" was lost, because ranking priority was judged from the extracted downstream work, which deliberately omits preferences. Structured extraction now also returns the stated tradeoff from the whole request (`balanced`, `quality`, `cost` or `latency`), and that value sets `workload.priority`. Requests for the cheapest model that is still accurate are `cost`; candidates still pass the relative quality screen first. Interpreter version 38; no extra model call.
+
+Similar tasks can still receive identical shortlists when one benchmark is their only accepted evidence. The result now says so: a warning names the single benchmark, and later tasks note which earlier task has the same shortlist. These are interpretation and routing checks against the published catalogue, not executions of the recommended models.
+
 ## Common quality estimate and labelled tradeoffs — source only, unreleased, 22 October 2026
 
 This source change replaces the cost-first policy below; it has not been deployed. Quality screening previously compared a model only with models that had exactly the same set of accepted benchmarks. That split the catalogue into many two- or three-model groups, so the best of a small, weak group passed the screen and cost-first ordering promoted it.
@@ -406,6 +420,7 @@ The hourly updater fetches eight independent public sources, including Models.de
 | [Epoch AI](https://epoch.ai/benchmarks) | Benchmark definitions, published results, source links, and evaluation configurations. |
 | [Artificial Analysis](https://artificialanalysis.ai/leaderboards/models) | Benchmark results, measured first-answer delay and reference generation speed. Archived evaluations remain labelled when their models are still available. |
 | [OmniDocBench](https://github.com/opendatalab/OmniDocBench#end-to-end-evaluation) | Document parsing scores from the explicitly labelled `v1.6_full` leaderboard, including newer document models than the OpenVLM snapshot. |
+| [IDP Leaderboard](https://www.idp-leaderboard.org/) | Nanonets' MIT-licensed document processing leaderboard: OlmOCR, OmniDocBench v1.5 and IDP Core (key information extraction, handwriting, tables, visual QA) component scores. The overall average is not imported; per-model dates are not supplied. |
 | [OpenCompass / VLMEvalKit](https://huggingface.co/spaces/opencompass/open_vlm_leaderboard) | Visual understanding and OCR benchmark results. Its feed currently identifies itself as 17 September 2025. |
 | [Berkeley Function Calling Leaderboard (BFCL v4)](https://gorilla.cs.berkeley.edu/leaderboard) | Native function-calling single-turn, live, and multi-turn scores; separate memory scores for key-value, vector, and recursive-summarization stores. |
 | [OpenRouter](https://openrouter.ai/api/v1/models) | Available model IDs, input modalities, declared tools and structured-output support, context limits, and advertised token prices. |

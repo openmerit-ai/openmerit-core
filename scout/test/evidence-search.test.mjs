@@ -68,3 +68,12 @@ test('explicit terms retrieve a narrow evaluation missed by vectors without bypa
  const r=await relevantEvidence('Task.',task,{documents},options);assert.deepEqual(r.ids,['target']);assert.ok(!r.assessments.some(a=>a.benchmark==='excluded'));
  const rejected=await relevantEvidence('Task.',task,{documents},{...options,fetcher:async(_url,o)=>Response.json({answers:JSON.parse(o.body).questions.map(q=>({name:q.name,type:'choice',choice:'none',confidence:.99}))})});assert.deepEqual(rejected.ids,[]);
 });
+test('image-reading tasks can accept document evidence even when another ability is the quality target',async()=>{
+  const {assessEvidence}=await import('../evidence-search.mjs');
+  const task={weights:{structured:3,documents:6,vision:3},needsVision:true,evidenceCapabilities:['structured']};
+  const docs={id:'docs',text:'Document parsing benchmark.',tags:['documents']},format={id:'format',text:'Instruction following.',tags:['structured']};
+  let offered;const fetcher=async(_url,options)=>{const {questions}=JSON.parse(options.body);offered=questions[0].choices.map(c=>c.value);
+    return Response.json({answers:[{name:'method_0',type:'choice',choice:'documents',confidence:.95},{name:'method_1',type:'choice',choice:'structured',confidence:.95}]});};
+  const result=await assessEvidence(task,[docs,format],{apiKey:'fixture',fetcher});
+  assert.ok(offered.includes('documents'));assert.deepEqual(result.ids,['docs','format']);
+});

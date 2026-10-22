@@ -29,7 +29,11 @@ async function runTasks(index,prompt,modelIds,endpointIds,options) {
       embedding:embeddings.then(r=>r.error?r:{value:[r.value[slots.indexOf(s)]]}),
     }),
   })))})));
-  const flat=results.flatMap(t=>t.slots),single=flat.length===1,capabilities=[...new Map(flat.flatMap(s=>s.task.capabilities).map(c=>[c.id,c])).values()];
+  const flat=results.flatMap(t=>t.slots),single=flat.length===1;
+  // Say so when tasks share one shortlist instead of implying separate judgements.
+  const order=s=>s.recommendations.map(m=>m.id).join('|');
+  flat.forEach((s,i)=>{const j=flat.findIndex(o=>o.recommendations.length&&order(o)===order(s));if(j>=0&&j<i)s.warnings.push(`Same shortlist as task ${j+1}: the available evidence does not distinguish these tasks.`);});
+  const capabilities=[...new Map(flat.flatMap(s=>s.task.capabilities).map(c=>[c.id,c])).values()];
   const result=single?{...flat[0]}:{...indexStatus(index,now()),selection:{modelIds,endpointIds},recommendations:[],warnings:['Each task has its own shortlist. Candidates are not ranked across tasks; combinations have not been jointly evaluated.'],
     task:{kind:'multi-task',capabilities,unsupported:flat.every(s=>s.task.unsupported),interpreter:'openai-hybrid',interpreterVersion},ranking:{version:'9',mode:'multi-task'},snapshotVersion:manifest.publication?.id};
   delete result.id;delete result.label;
