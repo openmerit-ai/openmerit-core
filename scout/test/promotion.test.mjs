@@ -10,7 +10,7 @@ const answers=(choices={},confidence={})=>decisionQuestions.map(q=>({name:q.name
 
 test('cached catalogue status cannot retain an old calibration contract or expiry',()=>{
  const index={snapshot:{sources:[]},cachedStatus:{models:321,calibration:{profiles:[]}}};
- const current=indexStatus(index),late=indexStatus(index,Date.now()+8*86400_000);
+ const current=indexStatus(index),late=indexStatus(index,Date.now()+31*86400_000);
  assert.equal(current.models,321);assert.ok(current.calibration.profiles.length);
  assert.ok(current.calibration.profiles.filter(p=>p.scope.structured).every(p=>p.scope.outputFormat==='json'));
  assert.ok(late.calibration.profiles.every(p=>!p.active));

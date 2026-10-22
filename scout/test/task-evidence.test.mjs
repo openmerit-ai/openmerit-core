@@ -39,7 +39,7 @@ test('uncertain operation, output or format cannot inherit a narrow measured pro
  assert.ok(measuredCandidates(candidates,{...task,uncertainty:['priority']},now,data));
 });
 test('expired, future, held-out, undersampled and unavailable pools fall back without padding',()=>{
- for(const mutate of [p=>p.measuredAt=new Date(now-8*86400_000).toISOString(),p=>p.measuredAt=new Date(now+1).toISOString(),p=>p.split='holdout',p=>p.models=p.models.slice(0,4),p=>p.models.forEach(m=>m.cases=5)]) {
+ for(const mutate of [p=>p.measuredAt=new Date(now-31*86400_000).toISOString(),p=>p.measuredAt=new Date(now+1).toISOString(),p=>p.split='holdout',p=>p.models=p.models.slice(0,4),p=>p.models.forEach(m=>m.cases=5)]) {
   const {candidates,data}=fixture();mutate(data.profiles[0]);assert.equal(measuredCandidates(candidates,task,now,data),null);
  }
  const {candidates,data}=fixture();assert.equal(measuredCandidates(candidates.slice(0,4),task,now,data),null);
@@ -105,7 +105,7 @@ test('matching evidence is selected by measurement recency rather than file orde
 });
 test('an applicable calibration profile past its expiry is excluded with a visible warning',async()=>{
  const {attachTaskObservations}=await import('../task-evidence.mjs');
- const {candidates,data}=fixture(),late=now+8*86400_000;
+ const {candidates,data}=fixture(),late=now+31*86400_000;
  assert.equal(attachTaskObservations(candidates,task,late,data).expired.id,'fixture');
  assert.ok(candidates.every(c=>!c.measured&&!c.taskObservation&&!c.evidence.length));
  assert.equal(attachTaskObservations(fixture().candidates,task,now,data).id,'fixture');

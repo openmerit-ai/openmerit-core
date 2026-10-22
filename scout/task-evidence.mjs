@@ -3,7 +3,8 @@ import { workloadFor } from './comparison.mjs';
 
 // Small, versioned aggregates from a separate calibration split. No prompt text,
 // answer keys, provider preferences, or per-model coefficients enter the ranker.
-export const calibrationMaxAgeMs = 7 * 86400_000;
+// Interim one-month validity until calibration is re-measured on a schedule.
+export const calibrationMaxAgeMs = 30 * 86400_000;
 export function measuredCandidates(candidates, task, now, data = bundled, {minimumModels=5,maxAgeMs=calibrationMaxAgeMs}={}) {
   if (data.version !== 1 || !task.kind || task.kind === 'other' || task.unsupported) return null;
   if (task.uncertainty?.some(id => ['task_kind', 'result_type', 'json'].includes(id))) return null;
@@ -31,7 +32,7 @@ export function measuredCandidates(candidates, task, now, data = bundled, {minim
     });
     if (selected.length < minimumModels) continue;
     for (const c of selected) c.measured = observations.get(c.model.id);
-    return { candidates: selected, profile: { id: profile.id, label: profile.label, measuredAt: profile.measuredAt, expiresAt: new Date(Date.parse(profile.measuredAt) + 7 * 86400_000).toISOString(), casesPerModel: profile.casesPerModel, testedModels: profile.models.length, eligibleTestedModels: selected.length, protocolSha256: profile.protocolSha256, qualityBasis: profile.qualityBasis ?? 'Mean task-check accuracy; required format failures score zero.', url: 'https://openmerit.ai/scout/task-evidence.json' } };
+    return { candidates: selected, profile: { id: profile.id, label: profile.label, measuredAt: profile.measuredAt, expiresAt: new Date(Date.parse(profile.measuredAt) + calibrationMaxAgeMs).toISOString(), casesPerModel: profile.casesPerModel, testedModels: profile.models.length, eligibleTestedModels: selected.length, protocolSha256: profile.protocolSha256, qualityBasis: profile.qualityBasis ?? 'Mean task-check accuracy; required format failures score zero.', url: 'https://openmerit.ai/scout/task-evidence.json' } };
   }
   return null;
 }
