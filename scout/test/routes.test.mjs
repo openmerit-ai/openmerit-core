@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {registerHooks} from 'node:module';
 import {generateKeyPairSync,sign} from 'node:crypto';
+import {createServer} from 'node:http';
 
 // Node supplies only the platform base classes; exercise the actual Worker router.
 const hook=registerHooks({resolve(specifier,context,next){
@@ -157,6 +158,24 @@ test('product events are allowlisted, identity comes from verified sessions, and
   assert.equal((await alpha.fetch(eventRequest('scout_signed_in',{},'forged'),config,ctx)).status,401);
   assert.equal((await alpha.fetch(eventRequest('scout_visited',{},undefined,{origin:'https://foreign.test'}),config,ctx)).status,403);
   await ctx.flush();assert.equal(sent.flatMap(p=>p.batch).length,6);
+});
+
+test('analytics never forwards its credentials or event body to a redirect destination',async t=>{
+  const received=[],ctx=pendingContext(),nativeFetch=globalThis.fetch;
+  const server=createServer((request,response)=>{
+    received.push(request.url);
+    request.resume();
+    response.writeHead(request.url==='/batch/'?307:200,{Location:'/redirected',Connection:'close'});
+    response.end();
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>server.close(resolve)));
+  // Exercise real HTTP redirect handling; only replace the upstream address.
+  t.mock.method(globalThis,'fetch',(url,options)=>nativeFetch(`http://127.0.0.1:${server.address().port}${new URL(url).pathname}`,options));
+  const response=await alpha.fetch(eventRequest('scout_visited'),{...authEnv,...productEnv},ctx);
+  assert.equal(response.status,204);
+  await ctx.flush();
+  assert.deepEqual(received,['/batch/']);
 });
 
 test('product opt-out and missing configuration suppress all transmissions; rejected searches remain unchanged',async t=>{

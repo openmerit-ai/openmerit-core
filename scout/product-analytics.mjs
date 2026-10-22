@@ -83,7 +83,8 @@ export function createProductAnalytics(request, env, ctx = {}) {
       const response = await fetch(`${env.POSTHOG_HOST}/batch/`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ api_key: env.POSTHOG_PROJECT_TOKEN, batch }),
-        signal: AbortSignal.timeout(1500), redirect: 'error',
+        // Workers rejects "error"; "manual" also prevents forwarding this body.
+        signal: AbortSignal.timeout(1500), redirect: 'manual',
       });
       await response.body?.cancel();
     })());
