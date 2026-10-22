@@ -220,6 +220,62 @@ for (const doc of docs) {
   await writeFile(join(directory, 'index.html'), layout(doc));
   await writeFile(join(directory, 'source.md'), doc.sourceText);
 }
+// Publish the policy with Scout without redeploying the separate main website.
+// Reuse the rendered Markdown, but not the docs shell's independently deployed
+// navigation/search assets. There is still only one maintained policy source.
+const policy = docs.find(doc => doc.source === 'scout-data-policy.md');
+const policyDirectory = join(root, 'site/scout/data-policy');
+await mkdir(policyDirectory, { recursive: true });
+await writeFile(join(policyDirectory, 'index.html'), `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
+  <title>${escape(policy.title)} · OpenMerit</title>
+  <meta name="description" content="${escape(policy.description)}">
+  <link rel="canonical" href="https://openmerit.ai/scout/data-policy/">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="${escape(policy.title)}">
+  <meta property="og:description" content="${escape(policy.description)}">
+  <meta property="og:url" content="https://openmerit.ai/scout/data-policy/">
+  <meta property="og:image" content="${escape(defaultSocialImage.url)}">
+  <meta property="og:image:type" content="${defaultSocialImage.type}">
+  <meta property="og:image:width" content="${defaultSocialImage.width}">
+  <meta property="og:image:height" content="${defaultSocialImage.height}">
+  <meta property="og:image:alt" content="${escape(defaultSocialImage.alt)}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="${escape(defaultSocialImage.url)}">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/scout/data-policy/styles.css?v=${revision}">
+  <link rel="stylesheet" href="/scout/data-policy/docs.css?v=${revision}">
+  <style>
+    .docs-header-links { flex-wrap: wrap; justify-content: flex-end; gap: 4px 18px; }
+    .docs-header-links > a:first-child { display: inline; }
+    .docs-main { max-width: 860px; margin: 32px auto; padding: 0 16px; }
+    .doc-prose h2, .doc-prose h3 { padding-right: 32px; }
+    .doc-prose .heading-anchor { position: absolute; top: 0; right: 0; margin: 0; }
+  </style>
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#doc-content">Skip to policy</a>
+  <header class="docs-header"><div class="docs-header-inner">
+    <a class="brand" href="/" aria-label="OpenMerit home">${brand}</a>
+    <nav class="docs-header-links" aria-label="Primary navigation"><a href="/scout/">Back to Scout</a><a href="/scout/#analytics-settings">Privacy settings</a></nav>
+  </div></header>
+  <main class="docs-main">
+    <article class="docs-article" id="doc-content" tabindex="-1">
+      <header class="doc-heading"><h1>${escape(policy.title)}</h1><p class="doc-description">${escape(policy.description)}</p></header>
+      <div class="doc-prose">${policy.html}</div>
+    </article>
+    <footer class="docs-footer"><a href="/scout/">Back to Scout</a><a href="/scout/data-policy/source.md">Read as Markdown</a></footer>
+  </main>
+</body>
+</html>\n`);
+await writeFile(join(policyDirectory, 'source.md'), policy.sourceText);
+for (const asset of ['styles.css', 'docs.css']) await copyFile(join(root, 'site', asset), join(policyDirectory, asset));
 await writeFile(join(root, 'site', indexUrl), JSON.stringify({ options, index: index.toJSON() }));
 await copyFile(miniSearchFile, join(root, 'site', searchLibrary));
 await copyFile(join(dirname(miniSearchFile), '../../LICENSE.txt'), join(out, 'minisearch-LICENSE.txt'));

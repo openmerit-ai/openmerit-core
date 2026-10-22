@@ -13,7 +13,7 @@ import { runInNewContext } from 'node:vm';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const site = join(root, 'site');
 const manifest = JSON.parse(await readFile(join(site, 'docs/manifest.json'), 'utf8'));
-const publishedPages = [...manifest.pages, memo];
+const publishedPages = [...manifest.pages, memo, { source: 'scout-data-policy.md', url: '/scout/data-policy/' }];
 const html = await Promise.all(['/', '/scout/', ...publishedPages.map(page => page.url)].map(async url => ({
   url, text: await readFile(join(site, url, 'index.html'), 'utf8'),
 })));

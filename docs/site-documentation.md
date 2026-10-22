@@ -6,6 +6,8 @@ The public documentation lives at https://openmerit.ai/docs/. It uses the homepa
 
 Article content has one maintained source: `docs/*.md`. Update those files alongside product changes, then rebuild and deploy. Do not edit the generated `site/docs/` files. The repository's `AGENTS.md` records this rule for future coding work.
 
+The Scout beta policy is also generated at `/scout/data-policy/` from `docs/scout-data-policy.md`. Its standalone page, downloadable source and styles are packaged with Scout, without documentation search or analytics scripts. This permits the policy rollout without replacing the divergent root-site deployment below; it does not publish the rest of `/docs/`. Never edit the ignored generated `site/scout/data-policy/` directory.
+
 ## Reference and implementation
 
 ### Website analytics — source-only, unreleased

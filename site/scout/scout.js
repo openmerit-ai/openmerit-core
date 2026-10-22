@@ -433,5 +433,6 @@ function updateAnalyticsControls() {
 }
 for (const id of ['#analytics-usage', '#analytics-content', '#analytics-unlinked']) $(id).addEventListener('change', () => analytics.setPreferences($('#analytics-usage').checked, $('#analytics-content').checked, !$('#analytics-unlinked').checked));
 $('.beta-data-notice a[href="#analytics-settings"]').addEventListener('click', () => { $('#analytics-settings').open = true; $('#analytics-settings summary').focus(); });
+if (location.hash === '#analytics-settings') $('#analytics-settings').open = true;
 window.addEventListener('scout-analytics-change', updateAnalyticsControls);
 updateAnalyticsControls();

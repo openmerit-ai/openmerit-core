@@ -26,7 +26,7 @@
   "durable_objects": { "bindings": [{ "name": "SCOUT_ACCOUNTS", "class_name": "ScoutAccounts" }] },
   "migrations": [{ "tag": "accounts-1", "new_sqlite_classes": ["ScoutAccounts"] }],
   // Product analytics remain off without POSTHOG_PROJECT_TOKEN and POSTHOG_HOST.
-  "vars": { "POSTHOG_ENVIRONMENT": "production", "POSTHOG_PROJECT_ID": "315509", "POSTHOG_CAPTURE_CONTENT": "true" },
+  "vars": { "POSTHOG_ENVIRONMENT": "production", "POSTHOG_PROJECT_ID": "315509", "POSTHOG_CAPTURE_CONTENT": "true", "SCOUT_BETA_EVALUATION_LOGGING": "true" },
   "ratelimits": [{ "name": "SCOUT_RATE", "namespace_id": "2026102101", "simple": { "limit": 60, "period": 60 } }],
   "build": {
     "command": "npm run check:scout && npm run check:docs && npm run build:scout"

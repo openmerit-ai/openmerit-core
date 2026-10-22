@@ -2,6 +2,7 @@ node_modules/
 dist/
 site/docs/
 site/memo/
+site/scout/data-policy/
 coverage/
 *.tsbuildinfo
 
