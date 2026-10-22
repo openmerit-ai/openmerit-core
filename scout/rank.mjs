@@ -73,12 +73,16 @@ export function recommend(index, prompt, now = Date.now(), interpretedTask = nul
   if (typedTask && (task.servingEngine !== 'evidence' || ['detect','segment'].includes(task.kind))) return taskEndpointResult(index, prompt, task, modelIds, status, endpointIds);
   if (openIdentification) warnings.push('No supplied answer-label set was established. Ranked generative endpoints using relevant public evidence; fixed-choice APIs and label-dependent classifiers are excluded. These benchmarks do not establish accuracy on the specific identities in your task.');
   const totalWeight = Object.values(task.weights).reduce((a, b) => a + b, 0);
+  // An accepted benchmark counts for the ability the task-specific check confirmed,
+  // not every ability its hourly interpretation lists.
+  const assessed = new Map((task.evidenceMatch?.assessments ?? []).filter(a => a.capability && task.evidenceMatch.ids.includes(a.benchmark)).map(a => [a.benchmark, a.capability]));
+  const forTask = definition => definition && assessed.has(definition.id) ? { ...definition, tags: [assessed.get(definition.id)] } : definition;
   let candidates = [];
   for (const model of expandEndpoints(index.models, index.snapshot.checkedAt, modelIds !== null)) {
     if (endpointIds !== null && !endpointIds.includes(model.endpoint.id)) continue;
     if (modelIds !== null && !modelIds.includes(model.id)) continue;
     if (!endpointSupports(model, task)) continue;
-    const evidence = model.evidence.map(e => ({ ...e, definition: index.benchmarks.get(e.benchmark) })).filter(e => e.definition && !e.definition.superseded && (task.evidenceMatch?task.evidenceMatch.ids.includes(e.benchmark):e.definition.tags.some(t => task.weights[t])));
+    const evidence = model.evidence.map(e => ({ ...e, definition: forTask(index.benchmarks.get(e.benchmark)) })).filter(e => e.definition && !e.definition.superseded && (task.evidenceMatch?task.evidenceMatch.ids.includes(e.benchmark):e.definition.tags.some(t => task.weights[t])));
     const coverage = Object.entries(task.weights).reduce((sum, [tag, weight]) => sum + (evidence.some(e => e.definition.tags.includes(tag)) ? weight : 0), 0) / totalWeight;
     const blendedPrice = Number.isFinite(model.inputPrice) && Number.isFinite(model.outputPrice) ? (model.inputPrice * 3 + model.outputPrice) / 4 : null; // Compatibility field, no longer scored.
     evidence.sort((a, b) => {
