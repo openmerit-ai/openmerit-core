@@ -77,12 +77,18 @@ export function recommend(index, prompt, now = Date.now(), interpretedTask = nul
   // not every ability its hourly interpretation lists.
   const assessed = new Map((task.evidenceMatch?.assessments ?? []).filter(a => a.capability && task.evidenceMatch.ids.includes(a.benchmark)).map(a => [a.benchmark, a.capability]));
   const forTask = definition => definition && assessed.has(definition.id) ? { ...definition, tags: [assessed.get(definition.id)] } : definition;
+  // Without tool calls, agentic evaluations mostly score the tool loop. Use
+  // them only when nothing else was accepted; coding evaluations run in such
+  // harnesses by design and keep them.
+  const agentic = new Set(task.servingEngine === 'evidence' && !task.needsTools && !task.weights.agents && !task.weights.tools && !task.weights.coding ? (task.evidenceMatch?.ids ?? []).filter(id => index.benchmarks.get(id)?.tags.some(t => t === 'agents' || t === 'tools')) : []);
+  if (agentic.size && agentic.size === task.evidenceMatch.ids.length) agentic.clear();
+  if (agentic.size) warnings.push(`Agentic tool-use evaluations (${[...agentic].map(id => index.benchmarks.get(id).name).join(', ')}) are not used: this task does not call tools.`);
   let candidates = [];
   for (const model of expandEndpoints(index.models, index.snapshot.checkedAt, modelIds !== null)) {
     if (endpointIds !== null && !endpointIds.includes(model.endpoint.id)) continue;
     if (modelIds !== null && !modelIds.includes(model.id)) continue;
     if (!endpointSupports(model, task)) continue;
-    const evidence = model.evidence.map(e => ({ ...e, definition: forTask(index.benchmarks.get(e.benchmark)) })).filter(e => e.definition && !e.definition.superseded && (task.evidenceMatch?task.evidenceMatch.ids.includes(e.benchmark):e.definition.tags.some(t => task.weights[t])));
+    const evidence = model.evidence.map(e => ({ ...e, definition: forTask(index.benchmarks.get(e.benchmark)) })).filter(e => e.definition && !e.definition.superseded && !agentic.has(e.benchmark) && (task.evidenceMatch?task.evidenceMatch.ids.includes(e.benchmark):e.definition.tags.some(t => task.weights[t])));
     const coverage = Object.entries(task.weights).reduce((sum, [tag, weight]) => sum + (evidence.some(e => e.definition.tags.includes(tag)) ? weight : 0), 0) / totalWeight;
     const blendedPrice = Number.isFinite(model.inputPrice) && Number.isFinite(model.outputPrice) ? (model.inputPrice * 3 + model.outputPrice) / 4 : null; // Compatibility field, no longer scored.
     evidence.sort((a, b) => {
@@ -111,7 +117,17 @@ export function recommend(index, prompt, now = Date.now(), interpretedTask = nul
   // shortlist only when no comparable benchmark candidates can be established.
   if (!candidates.length && typedTask) return taskEndpointResult(index, prompt, task, modelIds, status, endpointIds);
   const eligibleModels=new Set(candidates.map(c=>c.model.id)).size;
-  const comparison = task.servingEngine==='evidence'?selectPareto(candidates,task):orderCandidates(candidates, task);
+  // Document-evidenced models are ranked among themselves first, so general
+  // image scores cannot push them out of the quality band. Image-only fallbacks
+  // only fill remaining places, ranked separately and without tradeoff labels.
+  const direct = candidates.filter(c => !c.missingEvidence?.length), fallbacks = candidates.filter(c => c.missingEvidence?.length);
+  let comparison;
+  if (task.servingEngine==='evidence' && direct.length && fallbacks.length) {
+    comparison = selectPareto(direct, task);
+    const remaining = 5 - new Set(direct.map(c => c.model.id)).size;
+    if (remaining > 0) { selectPareto(fallbacks, task, { limit: remaining }); for (const c of fallbacks) c.pick = []; } else fallbacks.length = 0;
+    candidates = [...direct, ...fallbacks];
+  } else comparison = task.servingEngine==='evidence'?selectPareto(candidates,task):orderCandidates(candidates, task);
   if(comparison.frontier)warnings.push(comparison.frontier.qualityGate.status==='proxy-qualified'
     ? `Candidates are not credibly worse than the strongest model on one common benchmark-quality estimate, then ${({quality:'ordered by estimated quality',cost:'ordered by lowest known reference cost',latency:'ordered by fastest known reference time'})[comparison.frontier.priority]??'labelled as strongest, best value and fastest where supported, then ordered by estimated quality'}. This is a relative evidence policy, not proof of sufficient quality or a requested accuracy target on your task.`
     : 'No comparable quality cohort can qualify these candidates. This is an unverified discovery shortlist ordered by known estimated cost, not a claim that the models meet your required quality.');
@@ -122,7 +138,7 @@ export function recommend(index, prompt, now = Date.now(), interpretedTask = nul
   const selected = [], selectedIDs = new Set();
   for (const c of candidates) { if (selectedIDs.has(c.model.id)) continue; selectedIDs.add(c.model.id); selected.push(c); if (selected.length === 5) break; }
   const fallback = selected.filter(c => c.missingEvidence?.includes('documents'));
-  if (fallback.length) warnings.push(`${fallback.map(c => c.model.name).join(', ')} ${fallback.length === 1 ? 'has' : 'have'} no document-reading benchmark yet and ${fallback.length === 1 ? 'qualifies' : 'qualify'} on general image-understanding results. Evaluate ${fallback.length === 1 ? 'it' : 'them'} on your own documents.`);
+  if (fallback.length) warnings.push(`${fallback.map(c => c.model.name).join(', ')} ${fallback.length === 1 ? 'has' : 'have'} no document-reading benchmark yet and ${fallback.length === 1 ? 'qualifies' : 'qualify'} on general image-understanding results${selected.length > fallback.length ? ' and ' + (fallback.length === 1 ? 'is' : 'are') + ' listed after models with document results' : ''}. Evaluate ${fallback.length === 1 ? 'it' : 'them'} on your own documents.`);
   if (selected.length < 5) warnings.push(comparison.frontier?`${selected.length} distinct models remain after eligibility and supported frontier selection. Scout does not fill gaps with dominated or unsupported picks.`:`Only ${selected.length} eligible models have relevant evidence. Scout does not fill gaps with unsupported picks.`);
   if (selected.some(c => c.reference.cost === null)) warnings.push('Measured cost is unavailable for some candidates; unknown charges earn no cost advantage.');
   if (selected.some(c => c.reference.seconds === null)) warnings.push('Reference latency is unavailable for some models; missing measurements earn no speed advantage.');
@@ -156,5 +172,5 @@ export function recommend(index, prompt, now = Date.now(), interpretedTask = nul
   });
   return { prompt: prompt.trim(), task, ...status, selection: { modelIds, endpointIds }, eligibleModels, recommendations, specialists: modelIds === null && endpointIds === null ? discoverSpecialists(index.snapshot, task, prompt, selected) : { candidates: [], reason: 'Specialist discovery is outside the selected endpoint inventory.' }, warnings,
     ranking: { version: comparison.frontier?'10':'6', mode: measured ? 'measured' : 'benchmarks', profile: measured?.profile ?? null, benchmarkEligibleModels: benchmarkEligible, workload: comparison.workload, weights: comparison.weights, eligibleModels,...(comparison.frontier?{frontier:comparison.frontier}:{}) },
-    methodology: comparison.frontier?'Structured task interpretation → exact documented restrictions → semantic evidence retrieval and applicability → one latent quality estimate across connected evaluations → keep configurations within two points plus one standard error of the strongest → supported Pareto selection over quality, reference cost and time → strongest, best-value and fastest picks for balanced searches (or the explicit priority order), at most two models per provider when alternatives exist. Missing objectives and disconnected evidence remain provisional. Up to five distinct models; no verified task-accuracy threshold.':measured ? `Typed task match → calibration-only task-check accuracy, reported cost and full request time → strongest pairwise preferences without cycles → ordered top five among tested eligible models. Weights: ${comparison.weights.quality * 100}% quality, ${comparison.weights.cost * 100}% cost, ${comparison.weights.latency * 100}% latency. Small-sample evidence, not predicted accuracy on your task.` : `${task.interpreter === 'openai-decisions' ? 'OpenAI Decisions task interpretation' : 'Capability vocabulary'} → compare candidates on the same benchmarks, grouped by family → task-shaped reference cost and completion time → strongest pairwise preferences without cycles → ordered top five. Weights: ${Math.round(comparison.weights.quality * 100)}% quality, ${Math.round(comparison.weights.cost * 100)}% cost, ${Math.round(comparison.weights.latency * 100)}% latency. Scores are ranking signals, not predicted accuracy.`, elapsedMs: elapsed(start) };
+    methodology: comparison.frontier?'Structured task interpretation → exact documented restrictions → semantic evidence retrieval and applicability → one latent quality estimate across connected evaluations → keep configurations within the larger of two points and a task-relative margin, plus one standard error (including disagreement between evaluations) of the strongest → supported Pareto selection over quality, reference cost and time → strongest, best-value and fastest picks for balanced searches (or the explicit priority order), at most two models per provider when alternatives exist. Missing objectives and disconnected evidence remain provisional. Up to five distinct models; no verified task-accuracy threshold.':measured ? `Typed task match → calibration-only task-check accuracy, reported cost and full request time → strongest pairwise preferences without cycles → ordered top five among tested eligible models. Weights: ${comparison.weights.quality * 100}% quality, ${comparison.weights.cost * 100}% cost, ${comparison.weights.latency * 100}% latency. Small-sample evidence, not predicted accuracy on your task.` : `${task.interpreter === 'openai-decisions' ? 'OpenAI Decisions task interpretation' : 'Capability vocabulary'} → compare candidates on the same benchmarks, grouped by family → task-shaped reference cost and completion time → strongest pairwise preferences without cycles → ordered top five. Weights: ${Math.round(comparison.weights.quality * 100)}% quality, ${Math.round(comparison.weights.cost * 100)}% cost, ${Math.round(comparison.weights.latency * 100)}% latency. Scores are ranking signals, not predicted accuracy.`, elapsedMs: elapsed(start) };
 }

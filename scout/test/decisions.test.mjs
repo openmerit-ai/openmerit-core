@@ -14,6 +14,12 @@ test('ranking requires a typed task and selects evidence from that task',()=>{
  const result=recommend(index,'Uninterpreted words do not control ranking',Date.parse(snapshot.checkedAt),task);
  assert.ok(result.recommendations.length);assert.ok(result.recommendations.every(m=>m.evidence.some(e=>e.capabilities.includes('documents'))||m.missingEvidence?.includes('documents')&&m.evidence.some(e=>e.capabilities.includes('vision'))));
 });
+test('document evidence ranks before stronger image-only fallbacks',()=>{
+ const task={...interpretDecisions(answers({documents:'required',vision:'required',task_kind:'extract'})),servingEngine:'evidence'};
+ const models=recommend(createIndex({...snapshot,servingEngine:'evidence'}),'Extract invoice fields',Date.parse(snapshot.checkedAt),task).recommendations;
+ const first=models.findIndex(m=>m.missingEvidence);
+ assert.ok(first>0);assert.ok(models.slice(first).every(m=>m.missingEvidence?.includes('documents')&&!m.pick));
+});
 test('interpretation bounds requests, reports failures without credentials, and preserves unknown memory',async()=>{
  await assert.rejects(classifyPrompt('Example'),/configured/);
  await assert.rejects(classifyPrompt('Example',{apiKey:'private',fetcher:async()=>new Response('private',{status:429})}),{message:'Decisions returned HTTP 429.'});

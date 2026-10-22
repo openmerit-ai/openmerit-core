@@ -1,4 +1,5 @@
 import { unzipSync, strFromU8 } from 'fflate';
+import { parquetReadObjects } from 'hyparquet';
 import { refreshBenchmarks } from './benchmarks.mjs';
 import { readEpochDefinitions, analysisDescriptions, benchmarkIdentity, methodologySections } from './benchmark-metadata.mjs';
 import { catalogueURL, parseProviderCatalogue, mergeCatalogues, routerEndpoint, textOutputOnly, reportedFact, providerMetadata } from './catalogue.mjs';
@@ -18,6 +19,9 @@ export const sourceURLs = {
   omnidoc: 'https://raw.githubusercontent.com/opendatalab/OmniDocBench/main/README.md',
   bfcl: 'https://gorilla.cs.berkeley.edu/data_overall.csv',
   idp: 'https://www.idp-leaderboard.org/',
+  vectara: 'https://raw.githubusercontent.com/vectara/hallucination-leaderboard/main/README.md',
+  arena: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/text_style_control/latest-00000-of-00001.parquet',
+  arenaDocument: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/document_style_control/latest-00000-of-00001.parquet',
   bfclMethodology: 'https://gorilla.cs.berkeley.edu/leaderboard',
   bfclMemory: 'https://gorilla.cs.berkeley.edu/blogs/16_bfcl_v4_memory.html',
 };
@@ -90,6 +94,50 @@ export function parseIDP(html) {
   return rows;
 }
 
+// Summaries of supplied documents scored by HHEM. A model that declines many
+// documents is scored only on the rest, so low answer rates are excluded.
+export function parseVectara(markdown) {
+  const lines = markdown.split('\n'), start = lines.findIndex(l => /^\|\s*Model\s*\|\s*Hallucination Rate\s*\|\s*Factual Consistency Rate\s*\|\s*Answer Rate\s*\|/.test(l));
+  if (start < 0) throw new Error('Vectara leaderboard format changed.');
+  const rows = [];
+  for (const line of lines.slice(start + 2)) {
+    if (!line.startsWith('|')) break;
+    const [name, , consistency, answer] = line.split('|').slice(1, -1).map(c => c.trim());
+    rows.push({ name, consistency: number(consistency.replace(/\s*%$/, '')), answerRate: number(answer.replace(/\s*%$/, '')) });
+  }
+  if (rows.length < 20 || rows.some(r => !r.name || r.consistency === null || r.answerRate === null || r.consistency < 0 || r.consistency > 100)) throw new Error('Invalid Vectara leaderboard results.');
+  const updated = markdown.match(/Last updated on ([A-Z][a-z]+ \d{1,2}, \d{4})/)?.[1];
+  return { rows: rows.filter(r => r.answerRate >= 90), publishedAt: updated && Number.isFinite(Date.parse(`${updated} UTC`)) ? new Date(`${updated} UTC`).toISOString().slice(0, 10) : null };
+}
+// Arena text categories that describe a kind of request. Language, coding and
+// math categories are omitted; other sources measure those directly.
+export const arenaCategories = [
+  ['creative_writing', 'Arena · Creative writing', 'Human preference on prompts asking for creative writing such as stories, poems and other original prose.'],
+  ['industry_writing_and_literature_and_language', 'Arena · Writing, literature & language', 'Human preference on prompts from writing, editing, literature and language work, such as drafting, rewriting and copy editing.'],
+  ['industry_business_and_management_and_financial_operations', 'Arena · Business, management & finance', 'Human preference on prompts from business, management and financial operations work, such as analyses, plans, prioritization, recommendations and business documents.'],
+  ['instruction_following', 'Arena · Instruction following', 'Human preference on prompts with explicit instructions or constraints on the response.'],
+  ['hard_prompts', 'Arena · Hard prompts', 'Human preference on prompts classified as complex, specific and requiring problem solving.'],
+  ['multi_turn', 'Arena · Multi-turn', 'Human preference on conversations with more than one user turn.'],
+  ['longer_query', 'Arena · Longer queries', 'Human preference on prompts of 500 or more tokens, often with supplied material to work from.'],
+  ['expert', 'Arena · Expert prompts', 'Human preference on prompts judged to need expert domain knowledge.'],
+];
+// Bradley-Terry ratings become the expected win rate against the median-rated
+// model of the same leaderboard, which keeps scores on a 0-1 scale.
+export function parseArena(rows, categories) {
+  if (!Array.isArray(rows) || rows.length < 20) throw new Error('Invalid Arena leaderboard dataset.');
+  const dates = new Set(rows.map(r => r.leaderboard_publish_date));
+  if (dates.size !== 1 || !/^\d{4}-\d{2}-\d{2}$/.test([...dates][0])) throw new Error('Arena leaderboard format changed.');
+  const result = {};
+  for (const category of categories) {
+    const list = rows.filter(r => r.category === category && typeof r.model_name === 'string' && Number.isFinite(r.rating) && Number.isFinite(r.rating_lower) && Number.isFinite(r.rating_upper));
+    if (list.length < 10) throw new Error(`Arena category ${category} is missing.`);
+    const sorted = list.map(r => r.rating).sort((a, b) => a - b), median = sorted[sorted.length >> 1];
+    // Wide intervals mean few votes; those ratings are not stable enough to compare.
+    result[category] = list.filter(r => r.rating_upper - r.rating_lower <= 60).map(r => ({ name: r.model_name, score: 1 / (1 + 10 ** ((median - r.rating) / 400)) }));
+  }
+  return { categories: result, publishedAt: [...dates][0] };
+}
+
 const aaBenchmarks = {
   gpqa: 'GPQA Diamond · AA', hle: 'Humanity’s Last Exam · AA',
   scicode: 'SciCode · AA', ifbench: 'IFBench · AA', lcr: 'AA Long Context Reasoning',
@@ -125,7 +173,7 @@ export function parseBFCL(csv) {
   });
 }
 
-export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, previous, failures = {}, checkedAt = new Date().toISOString() }) {
+export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, previous, failures = {}, checkedAt = new Date().toISOString() }) {
   const sources = [], benchmarks = [], observations = new Map();
   const descriptions = benchmarkDescriptions ?? previous?.benchmarkDescriptions ?? {};
   const priorSources = new Map(previous?.sources.map(s => [s.id, s]) ?? []);
@@ -266,6 +314,23 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
       for (const row of rows) add(row.name, benchmark, row.scores[id] / 100, { url: sourceURLs.idp, observedAt: null, sourceModel: row.name, metric: 'Score / 100' });
     }
   }, { license: 'https://opensource.org/licenses/MIT' });
+  collect('vectara', 'Vectara Hallucination Leaderboard', 'https://github.com/vectara/hallucination-leaderboard', 'Vectara Hallucination Leaderboard (Apache-2.0). Summaries scored with HHEM-2.3; models answering fewer than 90% of documents are excluded. Per-model evaluation dates are not supplied.', () => {
+    const { rows, publishedAt } = parseVectara(vectaraMarkdown);
+    const benchmark = addBenchmark('vectara:factual-consistency', 'Vectara Hallucination Leaderboard · Factual consistency', 'vectara', { title: 'Vectara Hallucination Leaderboard · Factual consistency', description: 'Each model summarizes thousands of supplied news and other documents using only facts in the document. HHEM-2.3 scores whether each summary is supported by its source. Score is the share of summaries without hallucinated content.', metric: 'Factual consistency rate / 100', sourceURL: 'https://github.com/vectara/hallucination-leaderboard' });
+    // Entries use provider/model-date identifiers.
+    for (const row of rows) add(row.name.split('/').pop().replace(/[-_]\d{4}-?\d{2}-?\d{2}$/, '').replace(/:\d+$/, ''), benchmark, row.consistency / 100, { url: 'https://github.com/vectara/hallucination-leaderboard', observedAt: publishedAt, sourceModel: row.name, metric: 'Factual consistency rate / 100' });
+    return { publishedAt };
+  }, { license: 'https://www.apache.org/licenses/LICENSE-2.0' });
+  collect('arena', 'Arena', 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset', 'Arena leaderboard dataset: style-controlled ratings from crowdsourced pairwise human votes, by prompt category. Converted to expected win rate against the median-rated model; ratings with confidence intervals wider than 60 points are excluded. Human preference, not verified correctness.', () => {
+    const text = parseArena(arenaRows, arenaCategories.map(c => c[0])), document = parseArena(arenaDocumentRows, ['overall']);
+    for (const [category, name, description] of arenaCategories) {
+      const benchmark = addBenchmark(`arena:${category}`, name, 'arena', { title: name, description: `${description} Crowdsourced pairwise votes on real user prompts, style-controlled. Score is the expected win rate against the median-rated model in this category.`, metric: 'Win rate vs median model', suite: 'Arena text', sourceURL: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset' });
+      for (const row of text.categories[category]) add(row.name, benchmark, row.score, { url: 'https://arena.ai/leaderboard/text', observedAt: text.publishedAt, sourceModel: row.name, metric: 'Win rate vs median model' });
+    }
+    const benchmark = addBenchmark('arena:document', 'Arena · Document', 'arena', { title: 'Arena · Document', description: 'Human preference on prompts about uploaded documents such as PDFs: users ask questions, request summaries or extract information, and vote between two anonymous answers. Style-controlled. Score is the expected win rate against the median-rated model.', metric: 'Win rate vs median model', suite: 'Arena document', sourceURL: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset' });
+    for (const row of document.categories.overall) add(row.name, benchmark, row.score, { url: 'https://arena.ai/leaderboard/document', observedAt: document.publishedAt, sourceModel: row.name, metric: 'Win rate vs median model' });
+    return { publishedAt: text.publishedAt };
+  }, { license: 'https://creativecommons.org/licenses/by/4.0/' });
   collect('bfcl', 'Berkeley Function Calling Leaderboard', 'https://gorilla.cs.berkeley.edu/leaderboard', 'BFCL v4 native function-calling evaluations. Memory uses the named external backend, not built-in model memory. Per-model measurement dates are not supplied.', () => {
     const rows = parseBFCL(bfclCSV);
     if (rows.length < 3) throw new Error('Too few native BFCL configurations.');
@@ -307,6 +372,7 @@ export async function refreshSnapshot(fetcher = fetch, previous, options = {}) {
     while (true) { const { done, value } = await reader.read(); if (done) break; size += value.length; if (size > maxBytes) { await reader.cancel(); throw new Error('Source exceeded size limit.'); } chunks.push(value); }
     const bytes = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
     if (type === 'zip') return bytes;
+    if (type === 'parquet') return parquetReadObjects({ file: bytes.buffer, columns: ['model_name', 'rating', 'rating_lower', 'rating_upper', 'category', 'leaderboard_publish_date'] });
     const text = new TextDecoder().decode(bytes); return type === 'json' ? JSON.parse(text) : text;
   }
   const methodologies = Promise.allSettled([
@@ -319,7 +385,7 @@ export async function refreshSnapshot(fetcher = fetch, previous, options = {}) {
     failed: [...(results[0].status === 'rejected' ? ['analysis'] : []), ...(results.slice(1).some(r => r.status === 'rejected') ? ['bfcl'] : [])],
   }));
   const descriptions = readEpochDefinitions(read).then(value => ({ value }), () => ({ value: previous?.benchmarkDescriptions, failed: true }));
-  const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['idp', 'idpHTML', 'text'], ['bfcl', 'bfclCSV', 'text'], ['modelsdev', 'modelsDev', 'json']];
+  const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['idp', 'idpHTML', 'text'], ['vectara', 'vectaraMarkdown', 'text'], ['arena', 'arenaRows', 'parquet'], ['arenaDocument', 'arenaDocumentRows', 'parquet'], ['bfcl', 'bfclCSV', 'text'], ['modelsdev', 'modelsDev', 'json']];
   const results = await Promise.allSettled([...specs.map(([id, , type]) => read(sourceURLs[id], type)), ...hubQueries.map(query => read(query.url, 'json', 2_000_000))]);
   const inputs = { previous, failures: {} };
   results.slice(0, specs.length).forEach((result, i) => {

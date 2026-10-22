@@ -8,6 +8,13 @@ const priorScale=.2,noisePrior=.02,noiseStrength=4,slopeStrength=.02,minimumSlop
 // Configurations within this many standard errors (plus the indifference band)
 // of the strongest estimate are not credibly worse than it.
 export const qualityTolerance=1;
+// Gaps smaller than this share of the spread of model estimates on the task are
+// treated as practically equal, so the margin scales with the evaluations a
+// task uses. Two points remain the floor for tightly bunched cohorts.
+export const qualityIndifferenceShare=.15;
+// With three or more connected evaluations, one whose scores correlate below
+// this with the estimate from the others (over enough shared models) is left out.
+const minimumAgreement=.3,minimumAgreementModels=5;
 
 const lowerBound=(values,x)=>{let lo=0,hi=values.length;while(lo<hi){const mid=(lo+hi)>>>1;if(values[mid]<x)lo=mid+1;else hi=mid;}return lo;};
 
@@ -29,9 +36,9 @@ function observations(candidates,weights) {
   return rows;
 }
 
-export function estimateQuality(candidates,weights) {
+export function estimateQuality(candidates,weights,excluded=new Set()) {
   const rows=observations(candidates,weights),byBenchmark=new Map();
-  for(const [model,m] of rows)for(const [benchmark,o] of m){const list=byBenchmark.get(benchmark)??[];list.push({model,...o});byBenchmark.set(benchmark,list);}
+  for(const [model,m] of rows)for(const [benchmark,o] of m){if(excluded.has(benchmark))continue;const list=byBenchmark.get(benchmark)??[];list.push({model,...o});byBenchmark.set(benchmark,list);}
   // A benchmark run by one model links nothing and cannot rank it.
   for(const [id,list] of byBenchmark)if(list.length<2)byBenchmark.delete(id);
   // Correlated series in one family share that family's weight.
@@ -67,14 +74,35 @@ export function estimateQuality(candidates,weights) {
     for(let i=0;i<theta.length;i++)theta[i]*=scale;for(const b of benchmarks)b.a/=scale;
     const center=theta.reduce((a,b)=>a+b,0)/theta.length;for(let i=0;i<theta.length;i++)theta[i]-=center;for(const b of benchmarks)b.beta+=b.a*center;
   }
-  // Report each standard error on the final identified scale.
-  for(let i=0;i<models.length;i++){let den=1/priorScale**2;for(const {b} of byModel[i])den+=b.weight*b.a**2/b.noise;se[i]=1/Math.sqrt(den);}
+  // Report each standard error on the final identified scale. When a model's
+  // evaluations disagree about it, that spread is uncertainty the fitted noise
+  // alone does not capture.
+  for(let i=0;i<models.length;i++){
+    let den=1/priorScale**2;for(const {b} of byModel[i])den+=b.weight*b.a**2/b.noise;
+    const reads=byModel[i].map(({b,y})=>(y-b.beta)/b.a-theta[i]),n=reads.length;
+    se[i]=Math.sqrt(1/den+(n>1?reads.reduce((s,r)=>s+r*r,0)/(n-1)/n:0));
+  }
   const sorted=[...theta].sort((a,b)=>a-b);
   models.forEach((m,i)=>{
     const below=lowerBound(sorted,theta[i]),ties=lowerBound(sorted,theta[i]+Number.EPSILON*8)-below;
     estimates.set(m,{value:theta[i],se:se[i],percentile:(below+(ties-1)/2)/(models.length-1),benchmarks:byModel[i].map(x=>x.b.id)});
   });
-  return {estimates,models:models.length,benchmarks:benchmarks.length};
+  // An evaluation that disagrees with the factor estimated from the others
+  // measures something else. A narrow score range gives it tiny noise and
+  // outsized weight, so the factor would bend to it rather than reject it.
+  if(!excluded.size&&benchmarks.length>2){
+    const unrelated=benchmarks.filter(b=>{
+      const others=estimateQuality(candidates,weights,new Set([b.id])).estimates,pairs=b.obs.filter(o=>others.has(models[o.m])).map(o=>[o.y,others.get(models[o.m]).value]);
+      return pairs.length>=minimumAgreementModels&&correlation(pairs)<minimumAgreement;
+    });
+    if(unrelated.length&&unrelated.length<benchmarks.length)return estimateQuality(candidates,weights,new Set(unrelated.map(b=>b.id)));
+  }
+  return {estimates,models:models.length,benchmarks:benchmarks.length,spread:Math.sqrt(theta.reduce((s,x)=>s+x*x,0)/theta.length)};
+}
+function correlation(pairs) {
+  const n=pairs.length,mx=pairs.reduce((s,p)=>s+p[0],0)/n,my=pairs.reduce((s,p)=>s+p[1],0)/n;
+  let sxy=0,sxx=0,syy=0;for(const [x,y] of pairs){sxy+=(x-mx)*(y-my);sxx+=(x-mx)**2;syy+=(y-my)**2;}
+  return sxx&&syy?sxy/Math.sqrt(sxx*syy):0;
 }
 
 // Three-objective skyline. Equal triples are retained together. Missing
@@ -108,7 +136,7 @@ export function prepareObjectives(candidates,task) {
     c.comparisonCoverage=estimate&&total?Object.entries(weights).reduce((n,[t,w])=>n+(covered.has(t)?w:0),0)/total:0;
     c.frontierComplete=Number.isFinite(c.scopeQuality)&&c.reference.cost!==null&&c.reference.seconds!==null;
   }
-  return {workload,models:fit.models,benchmarks:fit.benchmarks};
+  return {workload,models:fit.models,benchmarks:fit.benchmarks,margin:Math.max(qualityIndifference,qualityIndifferenceShare*(fit.spread??0))};
 }
 export function dominates(a,b) {
   if(a.qualityScope!==b.qualityScope||!a.frontierComplete||!b.frontierComplete)return false;
@@ -124,10 +152,10 @@ export function selectPareto(candidates,task,{limit=5,providerLimit=2}={}) {
     if(!Number.isFinite(c.scopeQuality)){unverified.push(c);continue;}
     // Not credibly worse than the strongest estimate. This is a relative
     // evidence policy, NOT a verified task-accuracy threshold.
-    const gap=best.scopeQuality-c.scopeQuality,allowance=qualityIndifference+qualityTolerance*Math.hypot(c.qualitySE,best.qualitySE);
+    const gap=best.scopeQuality-c.scopeQuality,allowance=scope.margin+qualityTolerance*Math.hypot(c.qualitySE,best.qualitySE);
     if(gap<=allowance+Number.EPSILON*4)qualified.push(c);
   }
-  const qualityGate={status:qualified.length?'proxy-qualified':'unverified',margin:qualityIndifference,tolerance:qualityTolerance,qualifiedConfigurations:qualified.length,unverifiedConfigurations:unverified.length,excludedConfigurations:count-qualified.length-unverified.length};
+  const qualityGate={status:qualified.length?'proxy-qualified':'unverified',margin:scope.margin,marginShare:qualityIndifferenceShare,tolerance:qualityTolerance,qualifiedConfigurations:qualified.length,unverifiedConfigurations:unverified.length,excludedConfigurations:count-qualified.length-unverified.length};
   const frontier=supportedFrontier(qualified.length?qualified:unverified);
   const q=c=>c.scopeQuality??-Infinity,cost=c=>c.reference.cost??Infinity,time=c=>c.reference.seconds??Infinity,preference=c=>c.preference??0;
   const tie=(a,b)=>preference(b)-preference(a)||a.model.id.localeCompare(b.model.id)||a.model.endpoint.id.localeCompare(b.model.endpoint.id);
@@ -157,5 +185,5 @@ export function selectPareto(candidates,task,{limit=5,providerLimit=2}={}) {
   for(const c of selected)c.pick=[...roles].filter(([x])=>x.model.id===c.model.id).flatMap(([,r])=>r);
   candidates.splice(0,candidates.length,...selected);
   return {workload:scope.workload,weights:{quality:null,cost:null,latency:null},frontier:{version:4,scope:qualityGate.status==='proxy-qualified'&&frontier.every(c=>c.frontierComplete)?'comparable':'partial',qualityModels:scope.models,qualityBenchmarks:scope.benchmarks,qualityGate,eligibleConfigurations:frontier.length,comparedConfigurations:count,completeConfigurations:frontier.filter(c=>c.frontierComplete).length,selectedModels:selected.length,priority,
-    policy:'One latent quality estimate across all connected evaluations, with per-evaluation difficulty, scale and noise. Configurations not credibly worse than the strongest estimate (two points plus one combined standard error) enter supported Pareto selection over quality, reference cost and time. Balanced searches keep the strongest, lowest-cost and fastest frontier points, then order by estimated quality, with at most two models per provider unless places would remain empty. Unknown quality is provisional, never a pass. This does not establish a task-specific accuracy threshold.'}};
+    policy:'One latent quality estimate across all connected evaluations, with per-evaluation difficulty, scale and noise. Configurations not credibly worse than the strongest estimate (the larger of two points and 0.15 of the spread of model estimates on the task, plus one combined standard error that grows when a model’s evaluations disagree) enter supported Pareto selection over quality, reference cost and time. Balanced searches keep the strongest, lowest-cost and fastest frontier points, then order by estimated quality, with at most two models per provider unless places would remain empty. Unknown quality is provisional, never a pass. This does not establish a task-specific accuracy threshold.'}};
 }

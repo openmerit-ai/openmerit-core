@@ -5,7 +5,7 @@ import {structured} from './structured.mjs';
 import {factKinds} from './selection.mjs';
 import {choice,decode} from './utils.mjs';
 
-export const interpreterVersion='38';
+export const interpreterVersion='39';
 const resolutionInstructions='Resolve ambiguity internally; never ask the user a follow-up question. Choose the most likely intended deliverable from the request, using the simplest adequate interpretation. Establish a concrete output representation without adding optional workflow decisions or edge-case policies. Preserve explicit requirements and exclusions; inference must not override them. Missing runtime inputs, schemas, labels or handling policies do not block model discovery. Do not invent mandatory capabilities, evaluation criteria or numerical targets. The selected model performs the described work, not model discovery.';
 // Numeric/date limits are open values, not choices among catalogue values.
 // Canonical identity, provider, host and family vocabularies stay complete.

@@ -58,6 +58,22 @@
       "core": true
     },
     {
+      "id": "summarization",
+      "label": "Summarization & synthesis",
+      "task": "Condensing or synthesizing supplied source material into a faithful shorter account: summaries, themes or findings with supporting quotes, digests, meeting notes, or answers grounded only in supplied documents. Required when the deliverable must restate supplied content without adding claims the source does not support. Writing new content from instructions alone, extracting fixed data fields, or answering from general knowledge is not summarization.",
+      "benchmark": "Measuring whether summaries or answers generated from supplied source documents stay faithful to them, such as hallucination or factual-consistency rates against the source, or capture their content. Free composition without a source document, extraction into fixed fields and closed-book factual recall do not establish this.",
+      "parent": "writing",
+      "core": true
+    },
+    {
+      "id": "analysis",
+      "label": "Analysis & recommendations",
+      "task": "Applying judgment to supplied or described information to produce a reasoned deliverable: prioritizing items, weighing tradeoffs, assessing causes or impact, or recommending actions with justification, as in business, product or professional work. Formal puzzles, mathematics and source code are not this. Summarizing or reformatting content without judgment is not this.",
+      "benchmark": "Measuring the quality of professional or business analysis deliverables or open-ended expert judgment, such as recommendations, prioritization, plans or reports graded by experts or by human preference on such requests. Formal logic puzzles, mathematics, coding and closed-book trivia do not establish this.",
+      "parent": "reasoning",
+      "core": true
+    },
+    {
       "id": "vision",
       "label": "Visual understanding",
       "task": "The selected model must interpret supplied visual inputs such as photos, screenshots, scans, or diagrams. Mentioning images that are explicitly excluded does not require vision.",

@@ -7,7 +7,7 @@ import offlineTasks from './fixtures/offline-tasks.json' with {type:'json'};
 // Explicit historical task objects test arithmetic and transports, not interpretation.
 const fixtureTask = prompt => {const task=offlineTasks[prompt];if(!task)throw Error('Missing typed test fixture');return structuredClone(task);};
 const recommend=(index,prompt)=>rankTask(index,prompt,Date.now(),fixtureTask(prompt));
-import { parseCSV, parseAnalysis, compileSnapshot, refreshSnapshot, parseOmniDoc } from '../sources.mjs';
+import { parseCSV, parseAnalysis, compileSnapshot, refreshSnapshot, parseOmniDoc, parseVectara, parseArena } from '../sources.mjs';
 import { handleMCP as mcp } from '../mcp.mjs';
 import { handleAPI as api } from '../http.mjs';
 
@@ -154,7 +154,7 @@ test('a fresh table retains omitted historical observations only for an unchange
 test('refresh reads bounded benchmark methodology and catalogue feeds; total outage needs a previous index', async () => {
   const f = fixtures(); const calls = [];
   const fetcher = async url => { calls.push(url); return new Response(url.endsWith('.zip') ? f.epochZip : url.includes('artificialanalysis') ? f.analysisHTML : JSON.stringify(url.includes('OpenVLM') ? f.openvlm : f.router)); };
-  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 26); assert.equal(refreshed.models.length, 12);
+  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 29); assert.equal(refreshed.models.length, 12);
   assert.equal(refreshed.sources.find(s => s.id === 'huggingface').status, 'failed');
   await assert.rejects(refreshSnapshot(async () => new Response('Unavailable', { status: 503 })), /Invalid model catalogue/);
 });
@@ -239,6 +239,21 @@ test('a frozen runtime clock never reports a fabricated zero-millisecond computa
   const response = await handleAPI(post({ prompt: 'Debug Python code' }), index);
   assert.equal((await response.json()).elapsedMs, null);
   assert.equal(response.headers.get('server-timing'), null);
+});
+test('summary and human-preference parsers keep comparable rows and reject format changes', () => {
+  const table = Array.from({ length: 22 }, (_, i) => `|lab/model-${i}-2026-03-17|${(2 + i / 10).toFixed(1)} %|${(98 - i / 10).toFixed(1)} %|${i === 3 ? '74.3' : '99.5'} %|120.0|`);
+  const vectara = parseVectara(['Last updated on October 16, 2026', '', '|Model|Hallucination Rate|Factual Consistency Rate|Answer Rate|Average Summary Length (Words)|', '|----|----:|----:|----:|----:|', ...table, '', 'Notes'].join('\n'));
+  // A model that declines a quarter of the documents is scored only on easy ones.
+  assert.equal(vectara.rows.length, 21); assert.ok(!vectara.rows.some(r => r.name === 'lab/model-3-2026-03-17'));
+  assert.equal(vectara.rows[0].consistency, 98); assert.equal(vectara.publishedAt, '2026-10-16');
+  assert.throws(() => parseVectara('|Model|Rate|\n|--|--|'), /format changed/);
+  const rows = Array.from({ length: 21 }, (_, i) => ({ model_name: `Model ${i}`, rating: 1300 + 10 * i, rating_lower: 1295 + 10 * i, rating_upper: 1305 + 10 * i + (i === 0 ? 80 : 0), category: 'expert', leaderboard_publish_date: '2026-10-20' }));
+  const arena = parseArena(rows, ['expert']);
+  // The median-rated model scores one half; a model 400 points above it, 10/11.
+  assert.equal(arena.categories.expert.find(r => r.name === 'Model 10').score, .5);
+  assert.ok(!arena.categories.expert.some(r => r.name === 'Model 0'));
+  assert.throws(() => parseArena(rows.map((r, i) => ({ ...r, leaderboard_publish_date: i ? r.leaderboard_publish_date : '2026-09-01' })), ['expert']), /format changed/);
+  assert.throws(() => parseArena(rows, ['missing']), /missing/);
 });
 test('the IDP Leaderboard parser reads component scores from the rendered table and rejects format changes', async () => {
   const { parseIDP } = await import('../sources.mjs');

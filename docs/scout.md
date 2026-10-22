@@ -121,6 +121,27 @@ The first refresh with this source published catalogue `4efa445856c7eec97819270e
 
 In unreleased source, an accepted benchmark counts only for the ability the request-time applicability check confirmed for that task, not for every ability in its hourly interpretation. A spatial-reasoning benchmark accepted as image evidence therefore no longer counts as document evidence or carries document weight.
 
+Also unreleased: models with accepted document evidence are ranked among themselves first, so stronger general image scores elsewhere cannot push them out of the quality band. Image-only fallbacks are ranked separately and fill only the remaining places, after every document-evidenced model. They receive no strongest, best-value or fastest label, and their warning says they are listed after models with document results. With this change alone, replays against the same catalogue returned three or four document-evidenced models for the invoice and receipt prompts, with Claude Opus 5.5 as the only fallback; the margin change below brings both to five document-evidenced models. A cost-priority search lists the cheapest document-evidenced model first.
+
+## Writing, summary and analysis evidence — unreleased
+
+Task interpretation (interpreter 39) distinguishes two narrower abilities: **summarization & synthesis** (a child of writing) and **analysis & recommendations** (a child of reasoning). Searches previously reduced summarizing feedback, prioritizing fixes and writing release notes to the same writing weight, and their only accepted evidence was one creative-writing benchmark covering 20 mostly older models, so all three received one shortlist. The hourly refresh takes core abilities from the released registry; abilities discovered by research are kept.
+
+The hourly refresh adds two sources:
+
+- [Vectara Hallucination Leaderboard](https://github.com/vectara/hallucination-leaderboard) (Apache-2.0): the share of summaries of supplied documents that stay consistent with their source. Models answering fewer than 90% of documents are excluded, because their rate covers only the documents they answered. It measures faithfulness, not summary quality; smaller models often score higher.
+- [Arena leaderboard dataset](https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset) (CC BY 4.0): style-controlled human-preference ratings for eight request categories (creative writing; writing, literature and language; business, management and finance; instruction following; hard prompts; multi-turn; longer queries; expert) and the document arena. Ratings become an expected win rate against the median-rated model of the same leaderboard; ratings with confidence intervals wider than 60 points are excluded. Preference is not verified correctness.
+
+A test refresh matched 59 catalogue models to Vectara, about 142 to each Arena text category and 22 to the document arena.
+
+Three changes to quality qualification accompany them:
+
+- **Disagreeing evaluations.** With three or more connected evaluations, one whose scores correlate below 0.3 with the estimate from the others (over at least five shared models) is left out of the common quality estimate. A narrow score range gives such an evaluation very small fitted noise, so it previously dominated the estimate: models with only a Vectara result ranked above every frontier model.
+- **Margin and uncertainty.** The practical-equality margin is the larger of two points and 0.15 of the spread of model estimates on the task, so it means a similar share of model differences whichever evaluations a task uses. Each model's standard error also includes how much its own evaluations disagree about it, so one tightly measured evaluation cannot decide a result alone.
+- **Agentic evidence.** When a task calls no tools and needs no coding, evaluations interpreted as agentic or tool-calling are not used, unless they are the only accepted evidence; a warning names them. Coding evaluations normally run in agent harnesses and keep them.
+
+Replays of a three-task request (feedback themes, prioritized fixes, release notes) against a test refresh of catalogue `4efa445856c7eec97819270e48c0e658` gave three different shortlists. The summary task rests on Vectara alone and lists small, low-hallucination models. Invoice and receipt replays returned five document-evidenced models each.
+
 ## Shortlist corrections from user reports — deployed, 22 October 2026
 
 Three reported results had separate causes. Image-reading tasks whose primary quality target was another ability, such as structured output, returned no candidates: evidence applicability accepted only benchmarks for the quality target, while ranking still required document or vision evidence for admission. Applicability now also offers the abilities the ranker requires (documents or vision, tools, memory), so a document benchmark can satisfy that requirement.

@@ -132,3 +132,14 @@ test('latency preference selects the measured faster route in both task-fit and 
   m.speed = { timeToFirstAnswer: .1, tokensPerSecond: 100 };
   assert.equal(run(indexFor([m]), task('extract', 'latency'), { prompt: 'Return JSON' }).recommendations[0].endpoint.id, 'test:cheap');
 });
+test('agentic evaluations are left out when a non-coding task calls no tools, unless nothing else was accepted',()=>{
+ const index=createIndex({ version: 1, dataVersion: 5, checkedAt: snapshot.checkedAt, sources: [], availableModels: 3,
+   benchmarks: [{ id: 'prose', name: 'Prose', source: 'test', tags: ['analysis'] }, { id: 'loop', name: 'Loop', source: 'test', tags: ['analysis', 'agents', 'tools'] }],
+   models: ['lab/a', 'lab/b', 'lab/c'].map((id, i) => model(id, { evidence: [{ benchmark: 'prose', score: .6 + i / 20, url: 'https://example.com/p', configurations: ['default'] }, { benchmark: 'loop', score: .9 - i / 5, url: 'https://example.com/l', configurations: ['default'] }] })) });
+ const t={...task('other'),weights:{analysis:3},needsStructured:false,servingEngine:'evidence',evidenceMatch:{ids:['prose','loop'],assessments:[]}};
+ const result=run(index,t,{prompt:'Prioritize these fixes.'});
+ assert.ok(result.recommendations.every(m=>m.evidence.every(e=>e.benchmark==='Prose')));
+ assert.ok(result.warnings.some(w=>w.includes('Loop')&&w.includes('does not call tools')));
+ const only=run(index,{...t,evidenceMatch:{ids:['loop'],assessments:[]}},{prompt:'Prioritize these fixes.'});
+ assert.ok(only.recommendations.length&&only.recommendations.every(m=>m.evidence.some(e=>e.benchmark==='Loop')));
+});

@@ -83,3 +83,23 @@ test('disconnected evidence does not create quadratic comparisons or fabricated 
  assert.equal(result.frontier.comparedConfigurations,10000);assert.equal(result.frontier.scope,'partial');assert.ok(rows.every(c=>c.quality===null&&c.comparedModels===0));
  assert.equal(result.frontier.qualityGate.status,'unverified');assert.equal(result.frontier.qualityGate.qualifiedConfigurations,0);
 });
+test('an evaluation that disagrees with the others cannot define common quality through a narrow score range',async()=>{
+ const{estimateQuality}=await import('../pareto.mjs');
+ const row=(id,scores)=>({model:{id,endpoint:{id:`route:${id}`}},evidence:Object.entries(scores).map(([benchmark,score])=>({benchmark,score,definition:{id:benchmark,tags:['coding'],family:benchmark}}))});
+ // Three agreeing evaluations rank m7 strongest; a near-constant faithfulness
+ // score falls slightly as they rise, and two models report only that score.
+ const rows=Array.from({length:8},(_,i)=>row(`m${i}`,{a:.3+.08*i+(i%2)*.01,b:.25+.07*i,c:.35+.06*i-(i%3)*.01,faith:.95-.004*i}));
+ rows.push(row('f1',{faith:.97}),row('f2',{faith:.965}));
+ const{estimates}=estimateQuality(rows,{coding:3});
+ assert.ok(!estimates.has('f1')&&!estimates.has('f2'));
+ assert.equal([...estimates].sort((x,y)=>y[1].value-x[1].value)[0][0],'m7');
+});
+test('a model whose evaluations disagree about it carries a wider standard error',async()=>{
+ const{estimateQuality}=await import('../pareto.mjs');
+ const row=(id,scores)=>({model:{id,endpoint:{id:`route:${id}`}},evidence:Object.entries(scores).map(([benchmark,score])=>({benchmark,score,definition:{id:benchmark,tags:['coding'],family:benchmark}}))});
+ const rows=Array.from({length:8},(_,i)=>row(`m${i}`,{a:.3+.08*i,b:.25+.07*i,c:.35+.06*i}));
+ // Same average standing as m4, but the evaluations disagree sharply about it.
+ rows.push(row('split',{a:.3+.08*4+.2,b:.25+.07*4-.2,c:.35+.06*4}));
+ const{estimates}=estimateQuality(rows,{coding:3});
+ assert.ok(estimates.get('split').se>3*estimates.get('m4').se);
+});
