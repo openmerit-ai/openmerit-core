@@ -49,11 +49,11 @@ Repository metadata and usage caches live in process memory and disappear when t
 
 Hosted Scout uses Clerk Google/GitHub sign-in. The page and status are public; recommendations and every MCP method require a valid Clerk session bearer token, not just a cookie. Missing/invalid credentials return HTTP 401, and missing authentication configuration fails closed with HTTP 503. Clerk remains the identity system; the analytics integration below can synchronize selected profile fields to PostHog. Raw account IDs are used transiently for the per-user edge limiter and are not joined to historical Cloudflare prompt records. A prompt draft is temporarily stored in the current browser tab during sign-in. No Clerk Billing or automatic agent OAuth is included. See [Scout account sign-in](scout.md#account-sign-in-published-21-october-2026) for token lifetime, rate limits, data handling and the remaining real-login validation limits.
 
-### OpenMerit coding-agent reset — unreleased source
+### OpenMerit coding-agent reset — 23 October 2026
 
 The [Claude Code panel](scout.md#connect-a-coding-agent) is a web-only placeholder while the integration is rebuilt. The source no longer includes the Scout installer, persistent rules, MCP transport, agent OAuth authentication or protected-resource metadata. Removed routes return HTTP 404; browser session authentication and the JSON recommendation API remain intact. No setup prompt or credentials are copied, and opening the panel makes no connection or configuration changes.
 
-This reset is not a hosted deployment, npm release, remote grant revocation or cleanup of files previously installed on other machines. Earlier hosted MCP/authentication descriptions in this guide refer to past deployments, not this source build. Browser Google/GitHub sign-in and its Clerk account lifecycle are separate and unchanged.
+Scout serving, main-site documentation and npm publication are separate releases. This reset does not revoke remote grants or clean up files previously installed on other machines. Earlier hosted MCP/authentication descriptions in this guide refer to past deployments, not this build. Browser Google/GitHub sign-in and its Clerk account lifecycle are separate and unchanged.
 
 ## Hosted Scout analytics
 

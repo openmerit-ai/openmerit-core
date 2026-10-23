@@ -4,7 +4,7 @@ Describe what you need a model to do. Scout returns up to five model-and-endpoin
 
 Scout is a separate beta product. It does not change the OpenMerit npm package, Pi coordinator, or Inference Terminal. Recommendations are evidence-based candidates for your own evaluation, not a guarantee of task accuracy or an independently validated state-of-the-art ranking.
 
-**Coding-agent reset — unreleased source, 23 October 2026:** the Scout installer, persistent agent instructions, MCP transport, agent OAuth resource and activation tracking have been removed for a rebuild. Only a Claude Code web-interface placeholder remains; it cannot install, copy setup instructions or connect. Browser sign-in, searches and the JSON API remain available. Earlier dated MCP receipts below describe past deployments, not this source build. Existing installed client configuration and authorization grants are not automatically removed or revoked. No hosted deployment or npm release is implied.
+**Coding-agent reset — 23 October 2026:** this build removes the Scout installer, persistent agent instructions, MCP transport, agent OAuth resource and activation tracking for a rebuild. Only a Claude Code web-interface placeholder remains; it cannot install, copy setup instructions or connect. Browser sign-in, searches and the JSON API remain available. Earlier dated MCP receipts below describe past deployments, not this build. Existing installed client configuration and authorization grants are not automatically removed or revoked. Scout serving, main-site documentation and npm publication are separate releases; the removed installer was never published to npm.
 
 ## Beta evaluation logging — 22 October 2026 rollout
 
@@ -396,7 +396,7 @@ The capability index lists each area with its benchmark-series and model counts.
 
 ## Connect a coding agent
 
-**Unreleased reset:** coding-agent setup is unavailable while it is rebuilt. **Add to Claude Code** opens a web-only status panel. It does not copy a prompt, write configuration, authorize a client or submit the task draft. Escape, the close button, clicking outside or moving focus out dismisses it. Other coding-agent choices have been removed.
+Coding-agent setup is unavailable in this build while it is rebuilt. **Add to Claude Code** opens a web-only status panel. It does not copy a prompt, write configuration, authorize a client or submit the task draft. Escape, the close button, clicking outside or moving focus out dismisses it. Other coding-agent choices have been removed.
 
 The source no longer includes `openmerit agent`, Scout MCP or agent OAuth metadata. Removed endpoints return HTTP 404. Browser account sign-in remains unchanged. Use Scout in your browser for now; no replacement agent connection is implemented yet.
 

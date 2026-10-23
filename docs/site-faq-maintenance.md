@@ -1,8 +1,8 @@
 # Website FAQ maintenance
 
-## Scout coding-agent reset — unreleased source, 23 October 2026
+## Scout coding-agent reset — serving rollout, 23 October 2026
 
-Removed the Scout installer, MCP/OAuth agent backend, persistent setup instructions and agent activation tracking for a rebuild. The web interface retains only a Claude Code placeholder that cannot install or connect. Browser account sign-in, recommendations, JSON API, Inference Terminal and the separate Pi/evaluation workflows remain unchanged. Guides distinguish this source reset from historical hosted receipts, npm releases and remote grant revocation. Homepage FAQ claims still concern the unchanged terminal/Pi workflow and need no edit. No production deployment, provider setting or stored-data deletion is included.
+Removed the Scout installer, MCP/OAuth agent backend, persistent setup instructions and agent activation tracking for a rebuild. The web interface retains only a Claude Code placeholder that cannot install or connect. Browser account sign-in, recommendations, JSON API, Inference Terminal and the separate Pi/evaluation workflows remain unchanged. Guides distinguish this reset from historical hosted receipts, npm releases and remote grant revocation. Homepage FAQ claims still concern the unchanged terminal/Pi workflow and need no edit. The owner authorized restoring verified icon bytes, pushing main and deploying only the Scout serving Worker. Provider settings, stored data, the publisher, root site, router, terminal and npm publication remain outside this rollout. Authorization is not deployment acceptance; verify live assets and removed routes separately.
 
 ## PostHog instrumentation — version-5 serving rollout
 
