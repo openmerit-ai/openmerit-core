@@ -60,6 +60,7 @@ code, kbd { font-family: var(--mono); }
 .agent-picker { position: absolute; z-index: 10; top: calc(100% + 8px); right: 0; width: min(360px, calc(100vw - 40px)); max-height: 65svh; overflow-y: auto; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 12px 32px #0002; }
 .agent-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .agent-picker-heading h2 { font-size: 13px; }
+.agent-picker-intro { margin-bottom: 12px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 #close-agent-picker { flex: none; width: 32px; height: 32px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 22px; line-height: 1; }
 .agent-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .agent-options button { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 12px; text-align: left; }

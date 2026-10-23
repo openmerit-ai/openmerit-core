@@ -41,7 +41,7 @@ const server = createServer(async (req, res) => {
     // the external scheme after stripping client-supplied forwarding headers.
     const protocol = req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
     const url = new URL(req.url, `${protocol}://${req.headers.host ?? 'localhost'}`);
-    if ((url.pathname.startsWith('/scout/api/') || url.pathname === '/scout/mcp')) {
+    if ((url.pathname.startsWith('/scout/api/') || url.pathname === '/scout/mcp' || url.pathname === '/scout/.well-known/oauth-protected-resource')) {
       const request = new Request(url, { method: req.method, headers: req.headers, ...(!['GET', 'HEAD'].includes(req.method) ? { body: Readable.toWeb(req), duplex: 'half' } : {}) });
       const analytics = createProductAnalytics(request, analyticsEnv), mcp = url.pathname === '/scout/mcp';
       let response = await scoutAccess(request, analyticsEnv, analytics.identify) ?? (url.pathname === '/scout/api/analytics'

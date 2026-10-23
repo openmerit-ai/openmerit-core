@@ -10,6 +10,7 @@ import { commandTelemetry } from './telemetry.mjs';
 const help = `OpenMerit · Inference Terminal
 
   openmerit dash [path] [options]
+  openmerit agent --help             Connect Scout to your coding agent
   openmerit eval --help              Evaluate CLI changes across coding agents
 
   --port <number>      Require a specific local port (default: 4310 or a free port)
@@ -28,6 +29,7 @@ Coding-harness usage is outside this terminal's scope.
 
 async function main() {
   const args = process.argv.slice(2);
+  if (args[0] === 'agent') { const { main } = await import('./agent.mjs'); await main(args.slice(1)); return; }
   if (args[0] === 'eval') { const { main } = await import('../../eval/src/cli.mjs'); await main(args.slice(1)); return; }
   if (!args.length || args.includes('--help') || args.includes('-h')) { console.log(help); return; }
   if (args.shift() !== 'dash') throw new Error('Unknown command. Run openmerit --help.');

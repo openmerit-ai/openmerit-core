@@ -30,7 +30,7 @@ export async function handleMCP(request, index, state = {}, recommendTask = (ind
     return fail(-32600, 'Unrecognized notification.', 400);
   }
   const reply = result => json({ jsonrpc: '2.0', id, result });
-  if (method === 'initialize') return reply({ protocolVersion: versions.includes(params?.protocolVersion) ? params.protocolVersion : versions.at(-1), capabilities: { tools: {} }, serverInfo: { name: 'scout-by-openmerit', version: '0.1.0' }, instructions: 'Use scout_models before choosing a model for a task. Respect evidence limitations and freshness warnings.' });
+  if (method === 'initialize') return reply({ protocolVersion: versions.includes(params?.protocolVersion) ? params.protocolVersion : versions.at(-1), capabilities: { tools: {} }, serverInfo: { name: 'OpenMerit', version: '0.1.0' }, instructions: 'OpenMerit currently provides Scout only. Consult scout_models for new or changed application inference selections. Pass existing authorized endpointIds to constrain recommendations; never silently fall back to unauthorized endpoints or providers. Recommendations are not executions: Scout does not run inference or grant endpoint access. Respect evidence limitations and freshness warnings.' });
   if (method === 'ping') return reply({});
   if (method === 'tools/list') return reply({ tools: [tool] });
   if (method !== 'tools/call') return fail(-32601, 'Method not found.');

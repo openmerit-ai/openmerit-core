@@ -408,11 +408,71 @@ The capability index lists each area with its benchmark-series and model counts.
 
 ## Connect a coding agent
 
-**Source-only UI update, not yet deployed:** **Add to your coding agent** opens an in-place picker for Claude Code, Cursor, Codex, Amp, OpenCode, T3 Code or another agent. Selecting one immediately copies a setup prompt, then shows **Copied to clipboard** and asks you to paste it into that agent. The page does not navigate or submit your task. Escape, the close button and clicking outside dismiss the picker. If clipboard access is blocked, the picker provides selectable instructions instead of claiming success.
+**OpenMerit setup preview — source only, not deployed or published to npm:** install OpenMerit once, starting with Scout. No other OpenMerit capability, execution permission, background service or enforcement hook is installed. The first installer targets Claude Code; Cursor, Codex, Amp, OpenCode, T3 Code and other clients remain manual MCP setup, not verified installer support.
 
-The instructions name the chosen agent and the remote MCP endpoint, ask it to preserve existing configuration, and explain the short-lived token requirement. They contain no token, account identity or task draft. They ask the agent to use a secure credential setting, verify connection before claiming success, and request a task before its first search. This is a setup handoff, not an installer, automatic sign-in or a guarantee that every client supports the required headers. A current Clerk token still has to be supplied separately and renewed when it expires.
+**Add to your coding agent** opens an in-place picker. Selecting a client copies its guided setup prompt; it does not install, sign in, navigate or submit the website task draft. Clipboard success shows **Copied to clipboard**. Failure provides selectable instructions without claiming a manual copy. Escape, the close button and clicking outside dismiss the picker. The handoff includes no token, account identity or task draft, explicitly disables prompt-content analytics and preserves public endpoint query parameters. With usage analytics disabled, newly copied URLs carry `analytics=off` instead of an agent category. Existing copied URLs do not change.
 
-In this source update, **API & MCP**, **Capabilities**, **Sources**, and **Privacy & analytics** are expandable sections in the footer. The advanced API/MCP URLs and copy controls remain available there, including direct `#for-agents` links. Copied URLs retain the [activation funnel](#coding-agent-activation-funnel-source-only-not-deployed) agent category only when usage analytics is enabled; otherwise they carry `analytics=off`. The prompt explicitly disables task-content analytics. Copying does not establish a connection or count as installation.
+### Claude Code source-preview installation
+
+Requires Node.js 22.19+, Claude Code and a trusted OpenMerit source build. These commands are **not** in published npm preview.5 or stable 0.1.6. From the source checkout, run `npm ci`, `npm run build`, then `npm link` if you want the built `openmerit` command on your local PATH. Review the code before linking; there is no automatic install-time configuration.
+
+```sh
+# Inspect the proposed changes. Choose user OR project explicitly.
+openmerit agent install claude-code --scope user
+# After approving that plan:
+openmerit agent install claude-code --scope user --yes
+```
+
+User scope adds the native `openmerit` MCP server and `~/.claude/rules/openmerit.md`, making the instructions available across projects. Project scope uses `.mcp.json` and `.claude/rules/openmerit.md` in the selected working directory. `CLAUDE_CONFIG_DIR` is respected. Claude Code performs its own MCP writes; existing servers and rules are preserved. Existing `CLAUDE.md` is not edited. An installer-owned state record tracks configuration and rule hashes; rerunning repairs missing owned files or updates unchanged owned instructions. Conflicting servers in other scopes or user-modified owned files require manual resolution, not overwrite. Project installation still needs Claude's workspace trust and MCP approval. Do not run concurrent installers or edit those files during installation.
+
+The native OAuth configuration requests only `scout:recommend`. If automatic client discovery/registration is unavailable, add `--client-id <operator-provided-public-id> --callback-port <registered-port>` to the install command, both during preview and approval. These configure Claude's public OAuth client without a client secret. Do not invent the ID/port or create shared credentials. Rerunning install without overrides preserves the installed endpoint, analytics query and public OAuth client configuration; changing them requires removal and reauthorization. See [Claude Code's pre-configured OAuth setup](https://code.claude.com/docs/en/mcp#use-pre-configured-oauth-credentials).
+
+Restart Claude Code, open `/mcp`, choose **openmerit**, and authorize through its native browser flow. Claude Code owns OAuth credential storage and renewal. Do not paste browser session tokens into an agent conversation or read browser credentials. The source OAuth path must first be configured by the operator as described below; otherwise stop and report that blocker.
+
+```sh
+openmerit agent status claude-code --scope user
+openmerit agent status claude-code --scope user --check
+```
+
+The first command checks local installation only. `--check` also asks Claude Code for the effective connection status and reports a bounded result without echoing native output or credentials. A connection is not a search: separately verify initialization, `scout_models` discovery and a successful non-confidential first task. Setup-copy events remain copies; the existing [activation funnel](#coding-agent-activation-funnel-source-only-not-deployed) distinguishes verified MCP initialization and searches. No new claim of installation, adoption or successful application execution is inferred from a copy or connection.
+
+### Project inventory and later use
+
+Ask once whether this project should use **existing-only** or **existing-first**, and confirm the public catalogue endpoint IDs available through its connections. A model name, SDK or environment-variable name does not prove access. Save only user-confirmed or verified IDs; credentials and private endpoint URLs remain local and outside this policy.
+
+```sh
+openmerit agent project --policy existing-only --endpoint-id provider:protocol:model
+# After reviewing the replacement policy and inventory:
+openmerit agent project --policy existing-only --endpoint-id provider:protocol:model --yes
+```
+
+The ID above is a placeholder; use exact `endpoint.id` values from Scout. The command replaces `.openmerit/scout.json` with the chosen policy and full supplied inventory. Omitting IDs saves `[]`, which means **no endpoints**, not all endpoints. Without `--yes` it changes nothing. Discovery permission does not authorize spending or prove connectivity.
+
+The installed rule asks the agent to consult Scout before new or changed application inference selections, even when the user does not mention Scout. It skips unrelated edits and ordinary inference calls and preserves explicit user model choices and unchanged approved application selections. Both policies first pass saved `endpointIds`; existing-only never broadens, and existing-first asks before a separate unscoped search when existing routes are insufficient. An absent policy requires confirmation, not an assumed inventory. Task descriptions go to Scout/OpenAI; do not send source files, private addresses, secrets or customer records.
+
+The agent should compare model **and endpoint**, quality evidence, reference costs/time, requirements and unknowns, then help configure the actual SDK/protocol. Multiple tasks have separate `tasks[].slots[0].recommendations`; the top-level list is empty. New providers, credentials, paid checks, deployments and external writes require separate approval. Recommendations, endpoint connectivity and application checks are separate outcomes. Scout does not switch the coding agent's own model. Persistent rules encourage invocation but do not enforce it; fresh-session automatic invocation and real OAuth renewal remain acceptance gates, not established guarantees.
+
+Hosted evidence and ranking improvements use the same connection, without reinstalling for compatible server updates. Clients can cache tool definitions; reconnect when needed. Installed rules are versioned with the package and update through a reviewed release and rerunning install; no automatic executable updater or future capability permission is added. Installation hashes prevent overwriting user edits. Inspect removal first, then approve it with `--yes`:
+
+```sh
+openmerit agent remove claude-code --scope user
+openmerit agent remove claude-code --scope user --yes
+```
+
+Removal deletes only unchanged installer-owned rules/state and asks Claude Code to remove its server (and native local OAuth state). It preserves project policy and other servers. This is not account-wide grant revocation; revoke at the authorization provider when needed. For missing files, rerun install; for configuration conflicts, resolve them explicitly. If authentication, discovery or search fails, disclose the failure and pause model selection rather than silently using a remembered recommendation.
+
+### Operator OAuth setup — gated source preview
+
+The source server exposes public GET/HEAD metadata at `/scout/.well-known/oauth-protected-resource`. Its MCP 401 challenge points to that URL. Metadata names the exact `/scout/mcp` resource, the existing Clerk authorization server and `scout:recommend` scope. Until configured it returns 503; no anonymous fallback is introduced. Existing session-token browser/API behavior remains unchanged.
+
+Use Clerk's [MCP provider guidance](https://clerk.com/docs/guides/ai/mcp/build-mcp-server) rather than a custom authorization server:
+
+1. Create custom scope `scout:recommend` and a dedicated approved public OAuth client with its actual callback URIs, consent and required S256 PKCE. Use pre-registration or explicitly approved CIMD clients; publish CIMD support only when configured. Unrestricted dynamic registration is not required.
+2. Confirm the provider issues access tokens bound to the exact resource audience, normally `https://openmerit.ai/scout/mcp`, and that the client requests that resource and supports native renewal. Do not substitute a generic `openid/profile/email` token or weaken audience checks.
+3. Set `SCOUT_OAUTH_CLIENT_IDS` to approved client IDs (comma-separated), then explicitly enable `SCOUT_OAUTH_ENABLED=true` alongside the existing Clerk bindings. These are operator configuration changes requiring approval, not install actions. When automatic discovery/registration is unavailable, give installers the approved public client ID and fixed callback port for `--client-id` and `--callback-port`; the exact loopback redirect must match the registered URI.
+4. Complete real sign-in, denial, expiry/renewal, revocation and fresh-session invocation acceptance before publication claims. Clerk JWT revocation is not necessarily immediate; opaque tokens require online verification. Native credential behavior belongs to the client/provider, not this installer.
+
+Only MCP accepts the new OAuth token type, with verified resource audience, dedicated client allowlist, Scout scope and user identity; the JSON API still requires a session token. Existing account analytics preferences/deletion gates and per-user rate limiting apply to the same verified identity. Provider keys and OAuth tokens never enter setup analytics. Signed-fixture tests establish the server's rejection contract, not actual provider issuance or a completed human sign-in. Read-only discovery on 23 October found PKCE and refresh support at the production Clerk instance, but neither client registration advertisement nor the Scout scope; no provider settings or deployments were changed.
 
 Add this remote **Streamable HTTP MCP** endpoint to an agent that supports it:
 

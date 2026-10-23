@@ -74,7 +74,7 @@ export default {
     if(path==='/scout')return Response.redirect(`${url.origin}/scout/${url.search}`,308);
     // This endpoint authenticates Clerk's signature, never a browser session.
     if(path==='/scout/api/webhooks/clerk')return handleClerkWebhook(request,env);
-    if(!path.startsWith('/scout/api/')&&path!=='/scout/mcp') {
+    if(!path.startsWith('/scout/api/')&&path!=='/scout/mcp'&&path!=='/scout/.well-known/oauth-protected-resource') {
       return ['GET','HEAD'].includes(request.method)?env.ASSETS.fetch(request):json({error:'Not found.'},404);
     }
     const analytics=createProductAnalytics(request,env,ctx);

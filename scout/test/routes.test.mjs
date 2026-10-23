@@ -82,6 +82,16 @@ test('public auth configuration exposes only the publishable key and fails close
       assert.equal(result.status,503);assert.doesNotMatch(await result.text(),/sk_test|BEGIN PUBLIC KEY|invalid/);
     }
   }
+  const metadataURL='https://example.test/scout/.well-known/oauth-protected-resource';
+  const metadataEnv=Object.assign(Object.create(env),authEnv,{SCOUT_OAUTH_ENABLED:'true',SCOUT_OAUTH_CLIENT_IDS:'scout-client'});
+  for(const method of ['GET','HEAD']){
+    const result=await alpha.fetch(new Request(metadataURL,{method,headers:{origin:'https://native-client.test'}}),metadataEnv,{});
+    assert.equal(result.status,200);assert.equal(result.headers.get('access-control-allow-origin'),'*');
+    if(method==='HEAD')assert.equal(await result.text(),'');
+    else assert.deepEqual(await result.json(),{resource:'https://example.test/scout/mcp',authorization_servers:['https://scout-auth.clerk.accounts.dev'],scopes_supported:['scout:recommend'],bearer_methods_supported:['header'],resource_name:'OpenMerit Scout'});
+  }
+  assert.equal((await alpha.fetch(new Request(metadataURL),authEnv,{})).status,503);
+  assert.equal((await alpha.fetch(new Request(metadataURL,{method:'POST'}),metadataEnv,{})).status,405);
 });
 
 test('HTTP and MCP reject missing, forged, expired, foreign and pending sessions before catalogue access',async()=>{
@@ -92,7 +102,8 @@ test('HTTP and MCP reject missing, forged, expired, foreign and pending sessions
     for(const token of invalid){
       const response=await alpha.fetch(authenticatedRequest(path,token),blockedEnv,{});
       assert.equal(response.status,401,`${path}: ${token?.slice(0,20)??'anonymous'}`);
-      assert.equal(response.headers.get('www-authenticate'),'Bearer realm="Scout"');
+      if(path==='mcp')assert.match(response.headers.get('www-authenticate'),/resource_metadata="https:\/\/example.test\/scout\/\.well-known\/oauth-protected-resource"/);
+      else assert.equal(response.headers.get('www-authenticate'),'Bearer realm="Scout"');
       assert.equal(response.headers.get('cache-control'),'no-store');
       assert.equal((await response.json()).code,'sign_in_required');
     }

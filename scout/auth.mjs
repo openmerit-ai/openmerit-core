@@ -1,6 +1,7 @@
 import { createClerkClient } from '@clerk/backend';
 import { parsePublishableKey } from '@clerk/shared/keys';
 import { json } from './http.mjs';
+import { metadataPath, scoutScope, oauthConfig, resourceMetadata, challenge } from './oauth.mjs';
 import { productAnalyticsEnabled, accountSyncEnabled, betaEvaluationEnabled } from './product-analytics.mjs';
 
 // Shared by the Worker and local server. Public assets/status need no identity;
@@ -8,6 +9,16 @@ import { productAnalyticsEnabled, accountSyncEnabled, betaEvaluationEnabled } fr
 export async function scoutAccess(request, env, onAuthenticated = () => {}) {
   const { pathname: path, origin } = new URL(request.url);
   const source = request.headers.get('origin');
+  if (path === metadataPath) {
+    const unavailable = resourceMetadata(request, env);
+    if (unavailable) return unavailable;
+    try {
+      const { frontendApi } = parsePublishableKey(env.CLERK_PUBLISHABLE_KEY, { fatal: true });
+      const body = { resource: `${origin}/scout/mcp`, authorization_servers: [`https://${frontendApi}`], scopes_supported: [scoutScope], bearer_methods_supported: ['header'], resource_name: 'OpenMerit Scout' };
+      const headers = { 'Access-Control-Allow-Origin': '*' };
+      return request.method === 'HEAD' ? new Response(null, { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers } }) : json(body, 200, headers);
+    } catch { return json({ error: 'Scout OAuth is not configured.' }, 503); }
+  }
   if (source && source !== origin) return json({ error: 'Origin not allowed.' }, 403);
   if (path === '/scout/api/status') return null;
   if (!['/scout/api/auth', '/scout/api/analytics', '/scout/api/analytics/preference', '/scout/api/recommend', '/scout/mcp'].includes(path)) return json({ error: 'Not found.' }, 404);
@@ -31,7 +42,8 @@ export async function scoutAccess(request, env, onAuthenticated = () => {}) {
     // Bearer-only APIs avoid cookie handshakes and browser-login redirects for
     // agents. ClerkJS supplies a fresh short-lived session token for each search.
     const token = request.headers.get('authorization')?.match(/^Bearer ([^\s]+)$/i)?.[1];
-    const unauthorized = () => json({ error: 'Sign in to use Scout.', code: 'sign_in_required' }, 401, { 'WWW-Authenticate': 'Bearer realm="Scout"' });
+    const oauth = path === '/scout/mcp' ? oauthConfig(env) : null;
+    const unauthorized = () => json({ error: 'Sign in to use Scout.', code: 'sign_in_required' }, 401, { 'WWW-Authenticate': path === '/scout/mcp' ? challenge(request) : 'Bearer realm="Scout"' });
     if (!token) return unauthorized();
     const headers = new Headers(request.headers);
     headers.set('authorization', `Bearer ${token}`);
@@ -42,8 +54,18 @@ export async function scoutAccess(request, env, onAuthenticated = () => {}) {
       acceptsToken: 'session_token', issuer: `https://${frontendApi}`, authorizedParties: [origin],
     });
     // toAuth() also rejects pending sign-up/session tasks, unlike state alone.
-    const auth = state.toAuth();
-    if (!auth?.isAuthenticated || !auth.userId || !auth.sessionId) return unauthorized();
+    let auth = state.toAuth();
+    if (!auth?.isAuthenticated && oauth) {
+      const oauthState = await clerk.authenticateRequest(new Request(request.url, { method: request.method, headers }), {
+        acceptsToken: 'oauth_token', audience: `${origin}/scout/mcp`, issuer: `https://${frontendApi}`,
+      });
+      auth = oauthState.toAuth();
+    }
+    if (!auth?.isAuthenticated || !auth.userId) return unauthorized();
+    if (auth.tokenType === 'oauth_token') {
+      if (!oauth || !oauth.clients.includes(auth.clientId)) return unauthorized();
+      if (!auth.scopes?.includes(scoutScope)) return json({ error: 'Scout recommendation permission is required.' }, 403, { 'WWW-Authenticate': `${challenge(request)}, error="insufficient_scope"` });
+    } else if (!auth.sessionId) return unauthorized();
     if (!analytics && env.SCOUT_RATE && !(await env.SCOUT_RATE.limit({ key: `user:${auth.userId}` })).success) return limited();
     onAuthenticated(auth.userId);
     return null;
