@@ -349,36 +349,27 @@ const auth = initAuth(() => {
   $('#task-results').replaceChildren(); $('#results').hidden = true; $('#results').setAttribute('aria-busy', 'false'); $('#error').hidden = true;
   $('#prompt').value = ''; fitPrompt(); $('.find-button span').textContent = 'Find models'; $('.find-button').setAttribute('aria-busy', 'false');
 });
-let selectedAgent = 'unknown', pickerGeneration = 0;
 function setupURL(path) {
   const url = new URL(`${location.origin}${basePath}/${path}`);
   if (!analytics.preferences().enabled) url.searchParams.set('analytics', 'off');
-  else if (selectedAgent !== 'unknown') url.searchParams.set('agent', selectedAgent);
   return url.href;
 }
 function setupCommand() {
-  return `curl '${setupURL('api/recommend')}' \\\n  -H "Authorization: Bearer $SCOUT_TOKEN" \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Scout-Client: agent' \\\n  -H 'X-Scout-Analytics-Content: off' \\\n  -d '{"prompt":"Extract six invoice fields as JSON"}'`;
+  return `curl '${setupURL('api/recommend')}' \\\n  -H "Authorization: Bearer $SCOUT_TOKEN" \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Scout-Analytics-Content: off' \\\n  -d '{"prompt":"Extract six invoice fields as JSON"}'`;
 }
 function renderAgentSetup() {
-  $('#mcp-url').textContent = setupURL('mcp'); $('#agent-code').textContent = setupCommand();
+  $('#agent-code').textContent = setupCommand();
 }
 function showAgentPicker(open, restoreFocus = false) {
-  pickerGeneration++;
   $('#agent-picker').hidden = !open;
   $('.add-agent-button').setAttribute('aria-expanded', String(open));
-  if (open) {
-    $('#agent-options').hidden = false; $('#agent-copy-result').hidden = true;
-    $('#agent-copy-status').textContent = '';
-    $('#agent-options button').focus({ preventScroll: true });
-  } else if (restoreFocus) $('.add-agent-button').focus({ preventScroll: true });
+  if (open) $('#close-agent-picker').focus({ preventScroll: true });
+  else if (restoreFocus) $('.add-agent-button').focus({ preventScroll: true });
 }
 $('.add-agent-button').addEventListener('click', () => {
-  const open = $('#agent-picker').hidden;
-  showAgentPicker(open);
-  if (open) analytics.track('scout_agent_setup_opened', { source: 'button' });
+  showAgentPicker($('#agent-picker').hidden);
 });
 $('#close-agent-picker').addEventListener('click', () => showAgentPicker(false, true));
-$('#choose-another-agent').addEventListener('click', () => showAgentPicker(true));
 document.addEventListener('pointerdown', event => {
   if (!$('#agent-picker').hidden && !event.target.closest('.agent-install')) showAgentPicker(false);
 });
@@ -388,85 +379,26 @@ $('.agent-install').addEventListener('keydown', event => {
 $('.agent-install').addEventListener('focusout', event => {
   if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) showAgentPicker(false);
 });
-$('#select-agent-instructions').addEventListener('click', () => {
-  const instructions = $('#agent-instructions'); instructions.focus(); instructions.select(); instructions.scrollTop = 0;
-});
-document.querySelectorAll('[data-agent]').forEach(button => button.addEventListener('click', async () => {
-  const agent = button.dataset.agent, name = button.textContent.trim(), generation = ++pickerGeneration;
-  selectedAgent = agent; renderAgentSetup();
-  analytics.track('scout_agent_selected', { agent });
-  const setup = agent === 'claude-code'
-    ? `Use the OpenMerit Claude Code installer, which is currently SOURCE PREVIEW ONLY, not yet published to npm. First check whether the installed openmerit agent --help provides these commands. If unavailable, explain the source-build requirement from the guide; do not install an arbitrary npm version or claim it includes this preview.
-
-Ask whether I want user scope (across projects) or project scope. Run openmerit agent install claude-code --scope <chosen-scope> --url ${JSON.stringify(setupURL('mcp'))} to show the plan. If automatic OAuth client registration/discovery is unavailable, obtain the operator-provided public client ID and registered callback port and pass --client-id <public-id> --callback-port <port>; never invent these or request a shared client secret. Ask before applying the plan with --yes. Preserve other servers and rules; stop on conflicts rather than overwriting them. The installer adds the OpenMerit connection and persistent Scout instructions, not blanket permissions. Restart Claude Code, approve workspace trust if necessary, and use /mcp to authenticate the openmerit server through its native browser OAuth flow. Claude Code owns private token storage and renewal. Use openmerit agent status claude-code --scope <chosen-scope> --check for a separate connection check; it is not evidence of a successful search.`
-    : `This client has MANUAL MCP SETUP only; OpenMerit's installer currently targets Claude Code. Check this client's official remote Streamable HTTP MCP and OAuth support first. Preserve existing servers and ask before changing configuration. If the client cannot support the required OAuth flow, explain the limitation instead of claiming setup succeeded. Ask before installing persistent instructions in its supported user/project rules; a copied prompt or connected MCP server alone does not guarantee future invocation.`;
-  const instructions = `Help me connect OpenMerit in ${agent === 'other' ? 'this coding agent' : name}, starting with Scout for application inference model discovery and selection. Only Scout is being set up; this does not grant permissions to future capabilities.
-
-Use the remote Streamable HTTP MCP endpoint: ${setupURL('mcp')}
-Documentation: ${location.origin}/docs/scout/#connect-a-coding-agent
-
-${setup}
-
-Native OAuth is a source-preview server capability, disabled until configured by the operator. Follow the endpoint's protected-resource metadata and authentication challenge. If metadata is unavailable or authorization fails, report the blocker; never fall back to copying browser session tokens, reading browser credentials, or putting secrets in chat, source files or version control. Preserve URL query parameters and send X-Scout-Analytics-Content: off.
-
-Verify authenticated initialization and scout_models tool discovery separately. Before the first search, ask for a non-confidential task and confirm the project's existing-only or existing-first endpoint policy. Save approved public catalogue endpoint IDs in .openmerit/scout.json (Claude Code: openmerit agent project --policy <choice> --endpoint-id <id> ...; preview first, then --yes after approval). Send endpointIds on the first search, even when empty. Existing-only never broadens; existing-first requires approval before separate all-catalogue discovery if existing routes are insufficient. Credentials and private endpoint URLs stay local. A model name or SDK does not establish access.
-
-For future new or changed application inference model choices, consult scout_models without requiring me to mention Scout. Skip unrelated coding and ordinary inference calls. Preserve explicit user model choices and unchanged approved selections. Read each task's nested shortlist for multi-task results; compare model AND endpoint, evidence, reference cost/time and unknowns. Prefer the cheapest usable option supported by the quality evidence without claiming benchmarks prove application accuracy. Help configure the selected route in the project's SDK, respecting its protocol and provider model ID. Ask before adding providers, spending, deploying or external writes. Report recommendation success, endpoint connectivity and application checks separately, only after each succeeds. Do not switch this coding agent's own model. Explain that persistent instructions are a default, not universal enforcement. Hosted Scout improvements use the same connection; installed rules update through reviewed OpenMerit releases, without new permissions.`;
-  $('#agent-options').hidden = true; $('#agent-copy-status').textContent = 'Copying…';
-  $('#close-agent-picker').focus({ preventScroll: true });
-  let ok = false;
-  try { await navigator.clipboard.writeText(instructions); ok = true; } catch { /* Offer manual copying below. */ }
-  analytics.track('scout_agent_setup_copied', { agent, artifact: 'setup_prompt', outcome: ok ? 'ok' : 'error' });
-  if (generation !== pickerGeneration) return;
-  $('#agent-copy-status').textContent = ok ? 'Copied to clipboard' : 'Couldn’t copy automatically';
-  $('#agent-paste-hint').textContent = ok ? `Paste into ${agent === 'other' ? 'your coding agent' : name} to connect OpenMerit. ${agent === 'claude-code' ? 'Source-preview setup' : 'Manual MCP setup'}; authorization and a first search still need verification.` : 'Copy the instructions below, then paste them into your coding agent. Installation, authorization and a first search are separate steps.';
-  $('#agent-instructions').value = instructions;
-  $('#agent-manual-copy').hidden = ok; $('#agent-copy-result').hidden = false;
-  $('#choose-another-agent').focus({ preventScroll: true });
-}));
-for (const [id, artifact] of [['copy-mcp', 'mcp_url'], ['copy-command', 'api_request']]) {
-  $(`#${id}`).addEventListener('click', async () => {
-    const agent = selectedAgent;
-    const ok = await copy(artifact === 'mcp_url' ? setupURL('mcp') : setupCommand(), $(`#${id}`));
-    analytics.track('scout_agent_setup_copied', { agent, artifact, outcome: ok ? 'ok' : 'error' });
-  });
-}
-$('#agent-docs').addEventListener('click', () => analytics.track('scout_agent_docs_opened', { agent: selectedAgent }));
+$('#copy-command').addEventListener('click', () => copy(setupCommand(), $('#copy-command')));
 window.addEventListener('scout-analytics-change', renderAgentSetup);
 renderAgentSetup();
 fetch(`${basePath}/api/status`).then(response => { if (!response.ok) throw new Error(); return response.json(); }).then(data => { if (!result) showIndex(data); }).catch(() => { if (!result) { $('#index-counts').textContent = 'Index unavailable'; } });
 
 // Deep links reveal the native disclosure before moving focus to its summary.
-let setupOpened = false;
-function revealSection(source = 'deep_link', track = true) {
+function revealSection() {
   if (location.hash !== '#for-agents') return;
-  if (!setupOpened && track) analytics.track('scout_agent_setup_opened', { source });
-  setupOpened = true;
   const section = $('#for-agents'); section.open = true; section.querySelector('summary').focus({ preventScroll: true });
 }
 window.addEventListener('hashchange', () => revealSection());
-$('#for-agents').addEventListener('toggle', () => {
-  const open = $('#for-agents').open;
-  if (open && !setupOpened) analytics.track('scout_agent_setup_opened', { source: 'disclosure' });
-  setupOpened = open;
-});
 document.querySelectorAll('a[href="#for-agents"]').forEach(link => link.addEventListener('click', event => {
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
   showAgentPicker(false);
   location.hash = '#for-agents';
-  // Count deliberate clicks even if the disclosure is already open, without
-  // double-counting the resulting hashchange and native toggle events.
-  setupOpened = false;
-  revealSection('navigation');
+  revealSection();
   $('#for-agents').scrollIntoView({ block: 'start' });
 }));
-if (location.hash === '#for-agents') {
-  revealSection('deep_link', false);
-  window.addEventListener('scout-analytics-ready', () => {
-    if ($('#for-agents').open) analytics.track('scout_agent_setup_opened', { source: 'deep_link' });
-  }, { once: true });
-}
+revealSection();
 
 function updateAnalyticsControls() {
   const settings = analytics.preferences();

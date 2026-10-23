@@ -7,7 +7,6 @@ import {stageProjection} from '../projection.mjs';
 import {createIndex} from '../rank.mjs';
 import {createRecommender} from '../recommend.mjs';
 import {handleAPI} from '../http.mjs';
-import {handleMCP} from '../mcp.mjs';
 import {registry} from '../registry.mjs';
 import {createProductAnalytics} from '../product-analytics.mjs';
 
@@ -37,10 +36,9 @@ async function fixture(conditions=[],unresolved=[],decomposition) {
 async function transports(f,args) {
   const post=(path,body)=>new Request(`https://example.test/scout/${path}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
   const http=await handleAPI(post('api/recommend',args),f.index,{},f.run);assert.equal(http.status,200);
-  const rpc=await(await handleMCP(post('mcp',{jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'scout_models',arguments:args}}),f.index,{},f.run)).json();assert.equal(rpc.result.isError,false);
-  return [await http.json(),rpc.result.structuredContent];
+  return [await http.json()];
 }
-test('the evidence engine enforces SQL filters and inventory intersections through HTTP and MCP',async()=>{
+test('the evidence engine enforces SQL filters and inventory intersections through HTTP',async()=>{
   const f=await fixture([{all:[{field:'creator',op:'eq',values:['Lab A']},{field:'contextTokens',op:'gte',values:[200000]}]}]);
   for(const r of await transports(f,{prompt:'Opaque task.'})){
     assert.deepEqual(r.recommendations.map(m=>m.modelId),['lab/m0']);
@@ -95,22 +93,21 @@ test('product analytics counts one search per caller across multi-task, shared c
   const f=await fixture([],[],{overflow:false,tasks});
   // Failure in the separate prompt archive must not suppress product events.
   const run=createRecommender({apiKey:'fixture',db:f.db,fetcher:f.fetcher,observe(){throw new Error('PRIVATE_ARCHIVE_FAILURE');}});
-  async function call(mcp,user,prompt='PRIVATE_PROMPT_CANARY'){
-   const args={prompt},request=new Request(`https://example.test/scout/${mcp?'mcp?agent=amp':'api/recommend'}`,{
-    method:'POST',headers:{'content-type':'application/json','x-scout-client':mcp?'agent':'web',...(!mcp?{'x-scout-agent':user==='user_a'?'cursor':'codex'}:{})},
-    body:JSON.stringify(mcp?{jsonrpc:'2.0',id:'PRIVATE_RPC_ID',method:'tools/call',params:{name:'scout_models',arguments:args}}:args),
+  async function call(client,user,prompt='PRIVATE_PROMPT_CANARY'){
+   const args={prompt},request=new Request('https://example.test/scout/api/recommend',{
+    method:'POST',headers:{'content-type':'application/json','x-scout-client':client},
+    body:JSON.stringify(args),
    });
    const analytics=createProductAnalytics(request,env,{waitUntil:p=>pending.push(p)});analytics.identify(user);
-   const response=await(mcp?handleMCP:handleAPI)(request,f.index,{},(...args)=>run(...args,mcp?'mcp':'api',analytics.observeSearch),analytics.observeMCP);
+   const response=await handleAPI(request,f.index,{},(...args)=>run(...args,'api',analytics.observeSearch));
    analytics.complete(response);return response.json();
   }
-  await Promise.all([call(false,'user_a'),call(false,'user_b')]);
-  const calls=f.calls();await call(true,'user_a');assert.equal(f.calls(),calls);await flush();
+  await Promise.all([call('web','user_a'),call('web','user_b')]);
+  const calls=f.calls();await call('cli','user_a');assert.equal(f.calls(),calls);await flush();
   const searches=sent.filter(e=>e.event==='scout_search_completed');assert.equal(searches.length,3);
   assert.deepEqual(searches.map(e=>e.properties.cache).sort(),['hit','miss','shared']);
-  assert.deepEqual(searches.map(e=>e.properties.agent).sort(),['amp','codex','cursor'],'cached/shared results cannot inherit another agent attribution');
-  assert.equal(sent.find(e=>e.event==='scout_request_completed'&&e.properties.transport==='mcp').properties.mcp_method,'tools/call');
-  assert.equal(sent.filter(e=>e.event==='scout_agent_connected').length,0,'searches are not MCP handshakes');
+  assert.deepEqual(searches.map(e=>e.properties.client).sort(),['cli','web','web'],'cached/shared results cannot inherit another caller attribution');
+  assert.ok(searches.every(e=>e.properties.transport==='http'));
   assert.ok(searches.every(e=>e.properties.task_count===count&&e.properties.candidate_count===Math.min(count,2)&&e.properties.outcome==='ok'));
   assert.equal(new Set(searches.map(e=>e.properties.trace_id)).size,3,'shared computation must not share request traces');
   for(const search of searches){
@@ -124,16 +121,16 @@ test('product analytics counts one search per caller across multi-task, shared c
    assert.ok(details.every(e=>e.properties.layers===undefined));
   }
   const ids=searches.map(e=>e.properties.distinct_id);assert.equal(new Set(ids).size,2);
-  assert.equal(searches.find(e=>e.properties.transport==='mcp').properties.distinct_id,ids.find(id=>ids.filter(other=>id===other).length===2));
+  assert.equal(searches.find(e=>e.properties.client==='cli').properties.distinct_id,ids.find(id=>ids.filter(other=>id===other).length===2));
   assert.equal(sent.filter(e=>e.event==='scout_request_completed').length,3);
-  f.index.snapshot.publication.id='missing';await call(true,'user_a','Another private prompt');await flush();
+  f.index.snapshot.publication.id='missing';await call('cli','user_a','Another private prompt');await flush();
   assert.equal(sent.filter(e=>e.event==='scout_search_completed').at(-1).properties.outcome,'interpretation_error');
-  const failed=sent.filter(e=>e.event==='scout_request_completed').at(-1);assert.equal(failed.properties.http_status,200);assert.equal(failed.properties.outcome,'error');
+  const failed=sent.filter(e=>e.event==='scout_request_completed').at(-1);assert.equal(failed.properties.http_status,503);assert.equal(failed.properties.outcome,'error');
   assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_|user_a|user_b|Another private|Source files/);
  }
 });
 
-test('task restrictions stay independent through HTTP and MCP, including empty intersections',async()=>{
+test('task restrictions stay independent through HTTP, including empty intersections',async()=>{
  const creator=name=>[{all:[{field:'creator',op:'eq',values:[name]}]}];
  const tasks=['Lab A','Lab B','Unknown lab'].map(name=>({title:`Task for ${name}`,layers,slots:[slot(creator(name))]}));
  const f=await fixture([],[],{overflow:false,tasks});
@@ -170,7 +167,7 @@ test('task excerpts retain the original wording and prompt order without swappin
  }
 });
 
-test('one, two and three tasks return five distinct ranked models each through HTTP and MCP',async()=>{
+test('one, two and three tasks return five distinct ranked models each through HTTP',async()=>{
  for(const count of [1,2,3]){
   const tasks=Array.from({length:count},(_,i)=>({title:`Task ${i+1}`,layers,slots:[slot()]})),f=await fixture([],[],{overflow:false,tasks});
   // Nine models meet the quality band; the cheapest is too weak. Labs alternate.
@@ -204,23 +201,21 @@ test('three independent shortlists share one request deadline instead of three s
  await assert.rejects(limited(f.index,'Three tasks.'),e=>e.status===503);
 });
 
-test('HTTP and MCP accept valid searches beyond the speed target but still bound stalled providers',async t=>{
+test('HTTP accepts valid searches beyond the speed target but still bounds stalled providers',async t=>{
  const f=await fixture();t.mock.timers.enable({apis:['setTimeout']});
- for(const channel of ['http','mcp'])for(const stalled of [false,true]){
+ for(const stalled of [false,true]){
   let begin;const started=new Promise(resolve=>{begin=resolve;});
   const fetcher=async(url,options)=>{
    if(url.endsWith('/responses')){begin();await new Promise(resolve=>{if(!stalled)setTimeout(resolve,6000);});}
    return f.fetcher(url,options);
   };
   const run=createRecommender({apiKey:'fixture',db:f.db,fetcher}),args={prompt:'A task with a slow provider.'};
-  const body=channel==='http'?args:{jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'scout_models',arguments:args}};
-  const request=new Request(`https://example.test/scout/${channel==='http'?'api/recommend':'mcp'}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
-  const pending=(channel==='http'?handleAPI:handleMCP)(request,f.index,{},run);
+  const request=new Request('https://example.test/scout/api/recommend',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(args)});
+  const pending=handleAPI(request,f.index,{},run);
   await started;t.mock.timers.tick(stalled?30000:6000);
   const response=await pending,data=await response.json();
-  if(channel==='http')assert.equal(response.status,stalled?503:200);
-  else assert.equal(data.result.isError,stalled);
-  if(!stalled)assert.deepEqual((channel==='http'?data:data.result.structuredContent).recommendations.map(m=>m.modelId),['lab/m0']);
+  assert.equal(response.status,stalled?503:200);
+  if(!stalled)assert.deepEqual(data.recommendations.map(m=>m.modelId),['lab/m0']);
  }
 });
 

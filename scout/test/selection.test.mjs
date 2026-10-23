@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createIndex, recommend } from '../rank.mjs';
 import { handleAPI } from '../http.mjs';
-import { handleMCP } from '../mcp.mjs';
 const snapshot = JSON.parse(await readFile(new URL('../snapshot.json', import.meta.url)));
 const task={kind:'other',weights:{writing:3},workload:{input:'short',output:'medium'}};
 const run=(i,p,ids,endpoints)=>recommend(i,p,Date.now(),task,undefined,ids??null,endpoints??null);
@@ -29,12 +28,10 @@ test('empty, unknown and unsupported scopes never expand silently', async () => 
   }
   assert.deepEqual(recommend(index, 'Generate a video', Date.now(), task, undefined, []).selection.modelIds, []);
 });
-test('HTTP and MCP reject malformed scopes without spending an interpretation request', async () => {
+test('HTTP rejects malformed scopes without spending an interpretation request', async () => {
   let calls = 0; const run = () => { calls++; };
   for (const modelIds of [null, 'all', [42], ['a', 'a'], ['https://x?key=secret'], Array.from({ length: 101 }, (_, i) => `p/m${i}`)]) {
     assert.equal((await handleAPI(post({ prompt: 'task', modelIds }), index, {}, run)).status, 400);
-    const result = await (await handleMCP(post({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scout_models', arguments: { prompt: 'task', modelIds } } }, 'mcp'), index, {}, run)).json();
-    assert.equal(result.result.isError, true);
   }
   assert.equal(calls, 0);
 });

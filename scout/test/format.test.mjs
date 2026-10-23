@@ -6,7 +6,6 @@ import { decisionQuestions, interpretDecisions, classifyPrompt } from '../decisi
 import { createRecommender } from '../recommend.mjs';
 import { createIndex, recommend } from '../rank.mjs';
 import { handleAPI } from '../http.mjs';
-import { handleMCP } from '../mcp.mjs';
 
 const index = createIndex(snapshot);
 const answers = (choices, confidence = {}) => decisionQuestions.map(q => ({ name: q.name, type: 'choice',
@@ -52,7 +51,7 @@ for (const c of [
   { prompt: 'Return rows separated by newlines, with each pair of values separated by a tab, ready for the parser.', strict: true },
   { prompt: 'Explain JSON schemas in ordinary prose.', strict: false },
   { prompt: 'Do not return structured output. Summarize these CSV records for a human.', strict: false },
-]) test(`HTTP and MCP honor semantic format answers with one interpretation call: ${c.prompt}`, async () => {
+]) test(`HTTP honors semantic format answers with one interpretation call: ${c.prompt}`, async () => {
   let calls = 0;
   const run = createRecommender({ apiKey: 'test', fetcher: async (_url, options) => {
     calls++;
@@ -62,13 +61,10 @@ for (const c of [
     return Response.json({ answers: answers({ json: c.strict ? 'yes' : 'no', structured: c.strict ? 'required' : 'absent', writing: c.strict ? 'absent' : 'required' }) });
   } });
   const post = (path, body) => new Request(`https://example.test/scout/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  const http = await (await handleAPI(post('api/recommend', { prompt: c.prompt }), index, {}, run)).json();
-  const rpc = await (await handleMCP(post('mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scout_models', arguments: { prompt: c.prompt } } }), index, {}, run)).json();
-  assert.equal(calls, 2);
-  for (const result of [http, rpc.result.structuredContent]) {
-    assert.equal(result.task.needsStructured, c.strict);
-    assert.ok(result.recommendations.length > 0);
-    if (c.strict) assert.ok(result.recommendations.every(m => m.parameters.some(p => ['structured_outputs', 'response_format'].includes(p))));
-    else assert.equal(result.task.weights.structured, undefined);
-  }
+  const result = await (await handleAPI(post('api/recommend', { prompt: c.prompt }), index, {}, run)).json();
+  assert.equal(calls, 1);
+  assert.equal(result.task.needsStructured, c.strict);
+  assert.ok(result.recommendations.length > 0);
+  if (c.strict) assert.ok(result.recommendations.every(m => m.parameters.some(p => ['structured_outputs', 'response_format'].includes(p))));
+  else assert.equal(result.task.weights.structured, undefined);
 });

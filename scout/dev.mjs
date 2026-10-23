@@ -4,8 +4,7 @@ import { resolve, sep, extname } from 'node:path';
 import { Readable } from 'node:stream';
 import { setDefaultResultOrder } from 'node:dns';
 import { createIndex, selectSnapshot } from './rank.mjs';
-import { handleAPI } from './http.mjs';
-import { handleMCP } from './mcp.mjs';
+import { handleAPI, json, isRetiredAgentPath } from './http.mjs';
 import { refreshSnapshot } from './sources.mjs';
 import { createRecommender } from './recommend.mjs';
 import { registry } from './registry.mjs';
@@ -41,13 +40,17 @@ const server = createServer(async (req, res) => {
     // the external scheme after stripping client-supplied forwarding headers.
     const protocol = req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
     const url = new URL(req.url, `${protocol}://${req.headers.host ?? 'localhost'}`);
-    if ((url.pathname.startsWith('/scout/api/') || url.pathname === '/scout/mcp' || url.pathname === '/scout/.well-known/oauth-protected-resource')) {
+    if (isRetiredAgentPath(url.pathname)) {
+      const response = json({ error: 'Not found.' }, 404);
+      res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(req.method === 'HEAD' ? undefined : await response.text()); return;
+    }
+    if (url.pathname.startsWith('/scout/api/')) {
       const request = new Request(url, { method: req.method, headers: req.headers, ...(!['GET', 'HEAD'].includes(req.method) ? { body: Readable.toWeb(req), duplex: 'half' } : {}) });
-      const analytics = createProductAnalytics(request, analyticsEnv), mcp = url.pathname === '/scout/mcp';
+      const analytics = createProductAnalytics(request, analyticsEnv);
       let response = await scoutAccess(request, analyticsEnv, analytics.identify) ?? (url.pathname === '/scout/api/analytics'
         ? await analytics.handleEvent()
         : url.pathname === '/scout/api/analytics/preference' ? await analytics.handlePreference()
-        : await (mcp ? handleMCP : handleAPI)(request, index, refreshState, (...args) => recommendTask(...args, mcp ? 'mcp' : 'api', analytics.observeSearch), analytics.observeMCP));
+        : await handleAPI(request, index, refreshState, (...args) => recommendTask(...args, 'api', analytics.observeSearch)));
       analytics.complete(response);
       response = analytics.response(response);
       res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text()); return;
@@ -61,7 +64,7 @@ const server = createServer(async (req, res) => {
   } catch { res.writeHead(404); res.end('Not found'); }
 });
 const port = Number(process.env.SCOUT_PORT || 45833);
-server.listen(port, '127.0.0.1', () => console.log(`Scout: http://127.0.0.1:${port}/scout/`));
+server.listen(port, '127.0.0.1', () => console.log(`Scout: http://127.0.0.1:${server.address().port}/scout/`));
 const timer = setInterval(refresh, 3600_000);
 if (Date.now() - Date.parse(snapshot.checkedAt) > 3600_000) void refresh();
 function shutdown() { clearInterval(timer); server.close(); }

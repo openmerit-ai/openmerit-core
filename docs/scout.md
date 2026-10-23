@@ -1,8 +1,10 @@
 # Scout by OpenMerit
 
-Describe what you need a model to do. Scout returns up to five model-and-endpoint candidates per task. Comparable measurements support performance ranking; narrow decision and vision tasks use an explicitly labelled task-fit shortlist when quality is unmeasured. The `/scout/` page, JSON API, and MCP tool all use the same index and ranking.
+Describe what you need a model to do. Scout returns up to five model-and-endpoint candidates per task. Comparable measurements support performance ranking; narrow decision and vision tasks use an explicitly labelled task-fit shortlist when quality is unmeasured. The `/scout/` page and JSON API use the same index and ranking.
 
 Scout is a separate beta product. It does not change the OpenMerit npm package, Pi coordinator, or Inference Terminal. Recommendations are evidence-based candidates for your own evaluation, not a guarantee of task accuracy or an independently validated state-of-the-art ranking.
+
+**Coding-agent reset — unreleased source, 23 October 2026:** the Scout installer, persistent agent instructions, MCP transport, agent OAuth resource and activation tracking have been removed for a rebuild. Only a Claude Code web-interface placeholder remains; it cannot install, copy setup instructions or connect. Browser sign-in, searches and the JSON API remain available. Earlier dated MCP receipts below describe past deployments, not this source build. Existing installed client configuration and authorization grants are not automatically removed or revoked. No hosted deployment or npm release is implied.
 
 ## Beta evaluation logging — 22 October 2026 rollout
 
@@ -52,20 +54,6 @@ The browser keeps a random anonymous ID and hashed account/session transition ma
 There is no PostHog browser SDK, autocapture, session replay, DOM/text collection, feature-flag polling, geography lookup or IP forwarding. Browser events pass a typed allowlist at `/scout/api/analytics` before the server sends them to PostHog. Server search diagnostics can include bounded public source URLs and separately opted-in, best-effort-redacted prompt text as described below. Explicit exception handlers send sanitized categories and application frames, not raw messages or arbitrary stacks. Disabling analytics does not disable necessary provider processing or erase historical records.
 
 Browser Do Not Track and Global Privacy Control suppress both browser and server-side PostHog events. To opt out for this browser independently, run `localStorage.setItem('scout-analytics-opt-out', '1')` on Scout and reload; remove that item and reload to restore collection. API/MCP clients can send `X-Scout-Analytics: off`, `DNT: 1` or `Sec-GPC: 1`. The event endpoint has a separate per-IP quota, so analytics clicks do not consume the search allowance. Delivery is best effort, without retries; the Worker uses background delivery with a 1.5-second timeout, and an outage cannot block recommendations. Receipt does not prove ingestion. PostHog retention, access, spend caps and any required consent are project/operator responsibilities; Cloudflare's three-month retention does not apply to PostHog.
-
-### Coding-agent activation funnel — source only, not deployed
-
-The setup section adds an optional coding-agent selector. New explicit events distinguish opening setup (`scout_agent_setup_opened`, with button/navigation/disclosure/deep-link source), choosing an agent (`scout_agent_selected`), copying an MCP URL or API request (`scout_agent_setup_copied`, including clipboard success/failure), and opening the API guide (`scout_agent_docs_opened`). Repeated button activations count as interactions; hash changes and native disclosure toggles caused by the same activation do not add duplicate events. These are best-effort browser events, not installation receipts.
-
-**New picker flow — source only:** choosing an agent in the button's picker copies setup instructions and emits the same copy event with `artifact=setup_prompt`. Only a resolved clipboard write has `outcome=ok`; blocked clipboard access records `error` and offers selectable instructions, without claiming a manual copy occurred. No instruction text, user draft or token is sent in these events. MCP activation funnels must include successful `setup_prompt` copies alongside `mcp_url`; existing saved charts filtered to `mcp_url` alone need that update when this UI is released. API-copy funnels remain separate.
-
-Copied URLs carry a public `agent` category: `claude-code`, `cursor`, `codex`, `amp`, `opencode`, `t3-code`, or `other`. Unselected/invalid values become `unknown`. API/MCP callers may instead send `X-Scout-Agent`; the header takes precedence. Copied URLs contain no account, anonymous ID or token. Setup events add only categories, never the copied configuration, URL or raw client name; existing pseudonymous identity properties still apply. MCP is stateless, so clients must preserve the URL query or send the header on every request. Agent attribution is self-reported, not proof of which application ran it. Choosing a brand does not certify client compatibility.
-
-The server emits `scout_agent_connected` only after an authenticated successful MCP `initialize` response. Its optional client-reported name is reduced to the same fixed categories as `reported_agent`; other names become `unknown`. Discovery, ping, copies, authentication failures and tool calls cannot emit this milestone. Request outcomes include the allowlisted `mcp_method`; search and request events retain the selected `agent`, even across cached/shared computation. Browser and agent events join through the verified account pseudonym, not their separate tab/request session IDs.
-
-**Activation means the first observed successful agent search returning at least one candidate**, not local installation or successful execution of a recommended model. Build the ordered funnel from agent selection → successful MCP URL copy → connection → `scout_search_completed` with `outcome=ok`, `candidate_count>0` and `transport=mcp`, holding `agent` constant across those steps. Use seven days as the conversion window and a separate copy-to-success funnel for JSON API use, which has no MCP handshake. An overall opening → copy → connection → successful-search funnel includes users who skip the selector; keep it unsegmented and use the per-agent funnel for constant-agent attribution. Repeat use comes from subsequent successful searches; no browser-local “first ever” flag or new persistent identity is introduced. First observed use depends on retention, consent and identity linking; it is not guaranteed lifetime-first use. Missing events cannot be backfilled.
-
-When usage analytics is off, generated URLs omit the agent category and include `analytics=off`; the server honors this query opt-out as well as privacy headers and account preferences. Previously copied URLs do not change when the browser preference changes, and a copied opt-out URL stays opted out until edited or recopied. API examples explicitly disable prompt-content capture. This instrumentation has not been deployed, and production conversion counts require live acceptance after deployment.
 
 ### Unified product and search analytics — deployed, 22 October 2026
 
@@ -400,7 +388,7 @@ The initial deployed snapshot processed all 146 benchmark series: 136 have suppo
 
 Open [Scout](https://openmerit.ai/scout/), type a task, and select the arrow button (**Find models**) or press Enter. For example: “I want to upload an invoice and get the invoice number, date, vendor, subtotal, tax, and total as JSON.” The task field grows and shrinks as you type or paste. Very long prompts scroll within the field once it reaches its height limit. Shift + Enter adds a line. When the field is empty and unfocused, its placeholder cycles through detailed example tasks every ten seconds with a brief fade. Rotation pauses while you type, while the field is focused, or while the page is hidden. With reduced motion enabled, the example stays still. Placeholders never fill the input or send a request. The heading shows live counts of API catalogue models, Hugging Face repositories, benchmark series and sources. API identities and Hub repositories are separate counts and can overlap; neither count promises a runnable endpoint for every entry. The evaluation guide remains available in the fixed bottom footer, with space reserved beneath the page content.
 
-The comparison table keeps recommendations in Scout rank order. Benchmark mode shows a relative quality signal and reference cost/time estimates. Applicable calibration contributes quality evidence within its recorded scope; its episode charges and timing do not replace the common reference workload. **Candidates to evaluate** denotes task-fit mode: quality is shown as unknown, alongside known reference costs and deployment requirements. When image separation is ambiguous, Scout first offers labels, bounding boxes or pixel masks/cutouts as output choices. **Assumptions & limitations** contains the sample size, workload and measurement limits. Neither mode executes your prompt. Click a model row to expand or collapse its details, beginning with its ID and followed by measured evidence, benchmark scores, evaluation configurations, separate input/output prices, and source links. With a keyboard, focus the model name and use Enter or Space. On narrow screens, scroll the table horizontally; the model column stays visible. Provider marks appear beside provider names, without icon tiles. They are bundled and served from the same origin; Hugging Face results resolve the repository publisher, using a known lab mark or its bundled organization avatar; otherwise a Hugging Face mark identifies the repository platform. Missing or failed marks leave the provider name visible. No third-party favicon service is contacted. The page follows the device’s light or dark appearance with the Inference Terminal’s compact typography and neutral surfaces. Complete JSON responses are available through the API. **API & MCP**, **Capabilities**, and **Sources** expand beneath the search and results. **Sources** uses a compact list; expand a source for its coverage, methods, limits, collection times and refresh failures.
+The comparison table keeps recommendations in Scout rank order. Benchmark mode shows a relative quality signal and reference cost/time estimates. Applicable calibration contributes quality evidence within its recorded scope; its episode charges and timing do not replace the common reference workload. **Candidates to evaluate** denotes task-fit mode: quality is shown as unknown, alongside known reference costs and deployment requirements. When image separation is ambiguous, Scout first offers labels, bounding boxes or pixel masks/cutouts as output choices. **Assumptions & limitations** contains the sample size, workload and measurement limits. Neither mode executes your prompt. Click a model row to expand or collapse its details, beginning with its ID and followed by measured evidence, benchmark scores, evaluation configurations, separate input/output prices, and source links. With a keyboard, focus the model name and use Enter or Space. On narrow screens, scroll the table horizontally; the model column stays visible. Provider marks appear beside provider names, without icon tiles. They are bundled and served from the same origin; Hugging Face results resolve the repository publisher, using a known lab mark or its bundled organization avatar; otherwise a Hugging Face mark identifies the repository platform. Missing or failed marks leave the provider name visible. No third-party favicon service is contacted. The page follows the device’s light or dark appearance with the Inference Terminal’s compact typography and neutral surfaces. Complete JSON responses are available through the API. **JSON API**, **Capabilities**, and **Sources** expand beneath the search and results. **Sources** uses a compact list; expand a source for its coverage, methods, limits, collection times and refresh failures.
 
 The capability index lists each area with its benchmark-series and model counts. After a search, task matches appear first with a check mark. Counts describe index coverage, not the number of models eligible for your task. The source panel describes what each feed measures, its coverage, source dates, archived results, and limitations. Collection time is separate from source dates, which can be publication dates rather than measurement dates. Scout task calibration appears separately with its tested pool, scope and seven-day expiry.
 
@@ -408,101 +396,22 @@ The capability index lists each area with its benchmark-series and model counts.
 
 ## Connect a coding agent
 
-**OpenMerit setup preview — hosted handoff deployed 23 October 2026; installer not published to npm:** install OpenMerit once, starting with Scout. No other OpenMerit capability, execution permission, background service or enforcement hook is installed. The first installer targets Claude Code; Cursor, Codex, Amp, OpenCode, T3 Code and other clients remain manual MCP setup, not verified installer support. Native MCP OAuth remains disabled pending provider configuration and real-login acceptance; deployment of the handoff does not establish authenticated agent setup. Main-site documentation publication remains separate.
+**Unreleased reset:** coding-agent setup is unavailable while it is rebuilt. **Add to Claude Code** opens a web-only status panel. It does not copy a prompt, write configuration, authorize a client or submit the task draft. Escape, the close button, clicking outside or moving focus out dismisses it. Other coding-agent choices have been removed.
 
-**Add to your coding agent** opens an in-place picker. Selecting a client copies its guided setup prompt; it does not install, sign in, navigate or submit the website task draft. Clipboard success shows **Copied to clipboard**. Failure provides selectable instructions without claiming a manual copy. Escape, the close button and clicking outside dismiss the picker. The handoff includes no token, account identity or task draft, explicitly disables prompt-content analytics and preserves public endpoint query parameters. With usage analytics disabled, newly copied URLs carry `analytics=off` instead of an agent category. Existing copied URLs do not change.
-
-### Claude Code source-preview installation
-
-Requires Node.js 22.19+, Claude Code and a trusted OpenMerit source build. These commands are **not** in published npm preview.5 or stable 0.1.6. From the source checkout, run `npm ci`, `npm run build`, then `npm link` if you want the built `openmerit` command on your local PATH. Review the code before linking; there is no automatic install-time configuration.
-
-```sh
-# Inspect the proposed changes. Choose user OR project explicitly.
-openmerit agent install claude-code --scope user
-# After approving that plan:
-openmerit agent install claude-code --scope user --yes
-```
-
-User scope adds the native `openmerit` MCP server and `~/.claude/rules/openmerit.md`, making the instructions available across projects. Project scope uses `.mcp.json` and `.claude/rules/openmerit.md` in the selected working directory. `CLAUDE_CONFIG_DIR` is respected. Claude Code performs its own MCP writes; existing servers and rules are preserved. Existing `CLAUDE.md` is not edited. An installer-owned state record tracks configuration and rule hashes; rerunning repairs missing owned files or updates unchanged owned instructions. Conflicting servers in other scopes or user-modified owned files require manual resolution, not overwrite. Project installation still needs Claude's workspace trust and MCP approval. Do not run concurrent installers or edit those files during installation.
-
-The native OAuth configuration requests only `scout:recommend`. If automatic client discovery/registration is unavailable, add `--client-id <operator-provided-public-id> --callback-port <registered-port>` to the install command, both during preview and approval. These configure Claude's public OAuth client without a client secret. Do not invent the ID/port or create shared credentials. Rerunning install without overrides preserves the installed endpoint, analytics query and public OAuth client configuration; changing them requires removal and reauthorization. See [Claude Code's pre-configured OAuth setup](https://code.claude.com/docs/en/mcp#use-pre-configured-oauth-credentials).
-
-Restart Claude Code, open `/mcp`, choose **openmerit**, and authorize through its native browser flow. Claude Code owns OAuth credential storage and renewal. Do not paste browser session tokens into an agent conversation or read browser credentials. The source OAuth path must first be configured by the operator as described below; otherwise stop and report that blocker.
-
-```sh
-openmerit agent status claude-code --scope user
-openmerit agent status claude-code --scope user --check
-```
-
-The first command checks local installation only. `--check` also asks Claude Code for the effective connection status and reports a bounded result without echoing native output or credentials. A connection is not a search: separately verify initialization, `scout_models` discovery and a successful non-confidential first task. Setup-copy events remain copies; the existing [activation funnel](#coding-agent-activation-funnel-source-only-not-deployed) distinguishes verified MCP initialization and searches. No new claim of installation, adoption or successful application execution is inferred from a copy or connection.
-
-### Project inventory and later use
-
-Ask once whether this project should use **existing-only** or **existing-first**, and confirm the public catalogue endpoint IDs available through its connections. A model name, SDK or environment-variable name does not prove access. Save only user-confirmed or verified IDs; credentials and private endpoint URLs remain local and outside this policy.
-
-```sh
-openmerit agent project --policy existing-only --endpoint-id provider:protocol:model
-# After reviewing the replacement policy and inventory:
-openmerit agent project --policy existing-only --endpoint-id provider:protocol:model --yes
-```
-
-The ID above is a placeholder; use exact `endpoint.id` values from Scout. The command replaces `.openmerit/scout.json` with the chosen policy and full supplied inventory. Omitting IDs saves `[]`, which means **no endpoints**, not all endpoints. Without `--yes` it changes nothing. Discovery permission does not authorize spending or prove connectivity.
-
-The installed rule asks the agent to consult Scout before new or changed application inference selections, even when the user does not mention Scout. It skips unrelated edits and ordinary inference calls and preserves explicit user model choices and unchanged approved application selections. Both policies first pass saved `endpointIds`; existing-only never broadens, and existing-first asks before a separate unscoped search when existing routes are insufficient. An absent policy requires confirmation, not an assumed inventory. Task descriptions go to Scout/OpenAI; do not send source files, private addresses, secrets or customer records.
-
-The agent should compare model **and endpoint**, quality evidence, reference costs/time, requirements and unknowns, then help configure the actual SDK/protocol. Multiple tasks have separate `tasks[].slots[0].recommendations`; the top-level list is empty. New providers, credentials, paid checks, deployments and external writes require separate approval. Recommendations, endpoint connectivity and application checks are separate outcomes. Scout does not switch the coding agent's own model. Persistent rules encourage invocation but do not enforce it; fresh-session automatic invocation and real OAuth renewal remain acceptance gates, not established guarantees.
-
-Hosted evidence and ranking improvements use the same connection, without reinstalling for compatible server updates. Clients can cache tool definitions; reconnect when needed. Installed rules are versioned with the package and update through a reviewed release and rerunning install; no automatic executable updater or future capability permission is added. Installation hashes prevent overwriting user edits. Inspect removal first, then approve it with `--yes`:
-
-```sh
-openmerit agent remove claude-code --scope user
-openmerit agent remove claude-code --scope user --yes
-```
-
-Removal deletes only unchanged installer-owned rules/state and asks Claude Code to remove its server (and native local OAuth state). It preserves project policy and other servers. This is not account-wide grant revocation; revoke at the authorization provider when needed. For missing files, rerun install; for configuration conflicts, resolve them explicitly. If authentication, discovery or search fails, disclose the failure and pause model selection rather than silently using a remembered recommendation.
-
-### Operator OAuth setup — gated source preview
-
-The source server exposes public GET/HEAD metadata at `/scout/.well-known/oauth-protected-resource`. Its MCP 401 challenge points to that URL. Metadata names the exact `/scout/mcp` resource, the existing Clerk authorization server and `scout:recommend` scope. Until configured it returns 503; no anonymous fallback is introduced. Existing session-token browser/API behavior remains unchanged.
-
-Use Clerk's [MCP provider guidance](https://clerk.com/docs/guides/ai/mcp/build-mcp-server) rather than a custom authorization server:
-
-1. Create custom scope `scout:recommend` and a dedicated approved public OAuth client with its actual callback URIs, consent and required S256 PKCE. Use pre-registration or explicitly approved CIMD clients; publish CIMD support only when configured. Unrestricted dynamic registration is not required.
-2. Confirm the provider issues access tokens bound to the exact resource audience, normally `https://openmerit.ai/scout/mcp`, and that the client requests that resource and supports native renewal. Do not substitute a generic `openid/profile/email` token or weaken audience checks.
-3. Set `SCOUT_OAUTH_CLIENT_IDS` to approved client IDs (comma-separated), then explicitly enable `SCOUT_OAUTH_ENABLED=true` alongside the existing Clerk bindings. These are operator configuration changes requiring approval, not install actions. When automatic discovery/registration is unavailable, give installers the approved public client ID and fixed callback port for `--client-id` and `--callback-port`; the exact loopback redirect must match the registered URI.
-4. Complete real sign-in, denial, expiry/renewal, revocation and fresh-session invocation acceptance before publication claims. Clerk JWT revocation is not necessarily immediate; opaque tokens require online verification. Native credential behavior belongs to the client/provider, not this installer.
-
-Only MCP accepts the new OAuth token type, with verified resource audience, dedicated client allowlist, Scout scope and user identity; the JSON API still requires a session token. Existing account analytics preferences/deletion gates and per-user rate limiting apply to the same verified identity. Provider keys and OAuth tokens never enter setup analytics. Signed-fixture tests establish the server's rejection contract, not actual provider issuance or a completed human sign-in. Read-only discovery on 23 October found PKCE and refresh support at the production Clerk instance, but neither client registration advertisement nor the Scout scope; no provider settings or deployments were changed.
-
-Add this remote **Streamable HTTP MCP** endpoint to an agent that supports it:
-
-```text
-https://openmerit.ai/scout/mcp
-```
-
-Scout exposes one read-only tool, `scout_models`, with a required prompt:
-
-```json
-{"prompt":"Upload an invoice and extract six fields as JSON"}
-```
-
-The hosted release requires a current Clerk session bearer token for every MCP request; see [account sign-in](#account-sign-in-published-21-october-2026). Scout sends the task description to OpenAI for Decisions interpretation, structured metadata extraction and a transient query embedding, then compares its collected evidence. It does not execute the recommended models. The MCP endpoint supports protocol versions `2025-03-26`, `2025-06-18`, and `2025-11-25`, including initialization, tool discovery, and tool calls. It uses JSON responses without MCP transport sessions or a long-lived SSE stream. Browser requests must have the same origin; ordinary agent clients omit the Origin header. An unsupported protocol version is rejected. Agent configuration is client-specific; connecting an endpoint does not automatically make an agent use it.
-
-Tell the agent: “Before choosing an inference model for this feature, call Scout with the task description. Compare the five candidates, read their evidence and warnings, and evaluate the shortlist on our own examples.”
-
-The MCP response includes up to four relevant evidence entries per model and the total evidence count. Evidence satisfying required memory, tool-calling, and visual-document capabilities is shown first. The JSON API exposes the complete evidence list. When specialist discovery finds matches, MCP includes up to three separate candidates, four reported evaluation records per candidate, and each candidate’s total indexed evaluation count.
+The source no longer includes `openmerit agent`, Scout MCP or agent OAuth metadata. Removed endpoints return HTTP 404. Browser account sign-in remains unchanged. Use Scout in your browser for now; no replacement agent connection is implemented yet.
 
 ## JSON API
 
 ```sh
 curl https://openmerit.ai/scout/api/recommend \
+  -H "Authorization: Bearer $SCOUT_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"Upload an invoice and extract six fields as JSON"}'
 ```
 
-`POST /scout/api/recommend` requires `prompt`: a non-empty string of at most 4,000 characters. The JSON body is limited to 18,000 bytes. Unknown properties are rejected.
+`POST /scout/api/recommend` requires a current Clerk session bearer token and `prompt`: a non-empty string of at most 4,000 characters. The JSON body is limited to 18,000 bytes. Unknown properties are rejected.
 
-HTTP and MCP additionally accept optional `modelIds`, a unique list of up to 100 legacy OpenRouter catalogue IDs. This preserves the existing-project inventory contract; a model ID alone does not grant a direct-provider endpoint. To select specific routes instead, use `endpointIds`, a unique list of up to 100 IDs returned in `recommendations[].endpoint.id`. Both filters intersect if supplied. This filters eligible candidates before ranking; an empty or unknown-only list returns no models. The response echoes `selection.modelIds` and `selection.endpointIds` (`null` for unscoped). Scoped requests omit specialist discovery because it is outside the declared inventory. No endpoint URL or credential is accepted. The [agent evaluation runner](agent-evaluations.md) uses this for existing-project scope; the hosted API supports it as of 15 October 2026. The npm evaluation commands are available in `openmerit@0.1.7-preview.3` under the `preview` tag, separate from stable `0.1.6`.
+The JSON API additionally accepts optional `modelIds`, a unique list of up to 100 legacy OpenRouter catalogue IDs. This preserves the existing-project inventory contract; a model ID alone does not grant a direct-provider endpoint. To select specific routes instead, use `endpointIds`, a unique list of up to 100 IDs returned in `recommendations[].endpoint.id`. Both filters intersect if supplied. This filters eligible candidates before ranking; an empty or unknown-only list returns no models. The response echoes `selection.modelIds` and `selection.endpointIds` (`null` for unscoped). Scoped requests omit specialist discovery because it is outside the declared inventory. No endpoint URL or credential is accepted. The [agent evaluation runner](agent-evaluations.md) uses this for existing-project scope; the hosted API supports it as of 15 October 2026. The npm evaluation commands are available in `openmerit@0.1.7-preview.3` under the `preview` tag, separate from stable `0.1.6`.
 
 Recommendation `id` preserves legacy router IDs; a new protocol receives a distinct catalogue ID. `modelId` is the canonical model identity, while `endpoint.modelId` is the identifier to send to that provider. Clients must use the returned protocol and deployment requirements rather than treating every option as a chat-completions model. Existing npm clients using legacy `modelIds` remain scoped to their router inventory.
 
@@ -519,9 +428,9 @@ The response contains:
 - `ranking`: algorithm version, `mode` (`measured`, `benchmarks`, `task-fit`, or `clarification`), workload and tradeoff weights. A measured `profile` gives the task type, sample size, eligible tested pool, protocol hash, collection and expiry times, and public evidence URL. `benchmarkEligibleModels` reports the separate public-benchmark pool. Rank is the final shortlist order. `ranking.frontier` reports compared configurations, selected distinct models and whether the objective scope is comparable or partial. The compatibility `score` can be `null`; there is no weighted quality/cost/time composite in frontier selection.
 - `warnings`, `methodology`, `interpretationMs`, `elapsedMs`: limitations, ranking method, Decisions request time, and measured server ranking time when the runtime provides a sufficiently precise clock (`null` otherwise). Cloudflare freezes its clock during synchronous work, so the hosted page reports measured HTTP round-trip time instead of claiming zero-millisecond computation.
 
-`pricing.url` is the official provider destination, not the source of the quoted rates. It is `null` for a provider without a reviewed destination; the page then omits the link. The same rule applies to MCP responses. `pricing.basis` identifies the price source and calculation assumptions.
+`pricing.url` is the official provider destination, not the source of the quoted rates. It is `null` for a provider without a reviewed destination; the page then omits the link. `pricing.basis` identifies the price source and calculation assumptions.
 
-`GET /scout/api/status` returns index coverage, source timestamps, freshness, and scheduler state without submitting a prompt. API responses are `no-store`. Errors return JSON with `error`: 400 for invalid input, 413 for an oversized request, 415 for a non-JSON body, 405 for an unsupported method, 404 for an unknown endpoint, 429 when shared admission limits are reached, and 503 if interpretation is unavailable. A failed, malformed, refused, or timed-out Decisions response never silently falls back to keyword ranking. MCP reports these failures as tool errors.
+`GET /scout/api/status` returns index coverage, source timestamps, freshness, and scheduler state without submitting a prompt. API responses are `no-store`. Errors return JSON with `error`: 400 for invalid input, 413 for an oversized request, 415 for a non-JSON body, 405 for an unsupported method, 404 for an unknown endpoint, 429 when shared admission limits are reached, and 503 if interpretation is unavailable. A failed, malformed, refused, or timed-out Decisions response never silently falls back to keyword ranking.
 
 Scout recommends models; it does not process an uploaded invoice, execute a task, install a model, or select a provider account.
 

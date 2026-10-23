@@ -5,7 +5,6 @@ import { parseProviderCatalogue } from '../catalogue.mjs';
 import { compileSnapshot } from '../sources.mjs';
 import { createIndex, recommend, selectSnapshot } from '../rank.mjs';
 import { handleAPI } from '../http.mjs';
-import { handleMCP } from '../mcp.mjs';
 import { allowProfiles } from './helpers-specialists.mjs';
 
 const now = Date.parse(snapshot.checkedAt);
@@ -35,12 +34,10 @@ async function throughTransports(index, t, args) {
   const post = (path, body) => new Request(`https://example.test/scout/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const api = await handleAPI(post('api/recommend', args), index, {}, invoke);
   assert.equal(api.status, 200);
-  const rpc = await (await handleMCP(post('mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scout_models', arguments: args } }), index, {}, invoke)).json();
-  assert.equal(rpc.result.isError, false);
-  return [await api.json(), rpc.result.structuredContent];
+  return [await api.json()];
 }
 
-test('classification, judgments and benchmark tasks share endpoint capability requirements over HTTP and MCP', async () => {
+test('classification, judgments and benchmark tasks share endpoint capability requirements over HTTP', async () => {
   const valid = model('lab/valid');
   const invalid = [model('lab/plain', { parameters: [] }), model('lab/text-only-input', { modalities: ['text'] }),
     model('lab/mixed-output', { outputModalities: ['text', 'audio'] }), model('lab/unknown-output', { outputModalities: undefined })];
@@ -77,7 +74,7 @@ test('catalogue refresh admits text-output contracts, not text accompanying medi
   assert.equal(selectSnapshot(prepared, legacy), prepared, 'A newer legacy cache cannot restore unchecked output contracts');
 });
 
-test('unknown and partial prices survive HTTP/MCP formatting while genuine zero remains zero', async () => {
+test('unknown and partial prices survive HTTP formatting while genuine zero remains zero', async () => {
   for (const [inputPrice, outputPrice] of [[null, null], [null, 2], [1, null], [undefined, 0], [0, 0]]) {
     const index = indexFor([model('lab/pricing', { inputPrice, outputPrice })]);
     for (const t of [task(), task('classify')]) {

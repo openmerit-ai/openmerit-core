@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { hubQueries, parseHubModels, discoverSpecialists } from '../huggingface.mjs';
 import { createIndex, recommend, indexStatus } from '../rank.mjs';
-import { handleMCP } from '../mcp.mjs';
+import { handleAPI } from '../http.mjs';
 import { allowProfiles } from './helpers-specialists.mjs';
 import { specialistProfiles } from '../specialists.mjs';
 
@@ -51,7 +51,7 @@ test('discovery honors semantic compatibility and tool requirements without rere
   assert.ok(!discoverSpecialists(snapshot, interpreted, 'invoice', [{ model: { repository: 'copy/invoices' } }]).candidates.some(m => m.id === 'copy/invoices'));
 });
 
-test('specialist discovery cannot change the five rankings, and API/MCP expose its provenance separately', async () => {
+test('specialist discovery cannot change the five rankings, and HTTP exposes its full provenance separately', async () => {
   const snapshot = JSON.parse(await readFile(new URL('../snapshot.json', import.meta.url)));
   const prompt = 'Upload an invoice and return six fields as JSON';
   const base = createIndex({ ...snapshot, specialists: [] }), index = createIndex(snapshot);
@@ -59,10 +59,9 @@ test('specialist discovery cannot change the five rankings, and API/MCP expose i
   const result = recommend(index, prompt, Date.now(), interpreted);
   assert.deepEqual(result.recommendations, recommend(base, prompt, Date.now(), interpreted).recommendations);
   assert.ok(result.specialists.candidates.length);
-  const response = await handleMCP(new Request('https://example.org/scout/mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scout_models', arguments: { prompt } } }) }), index, {}, (i, p) => recommend(i, p, Date.now(), interpreted));
-  const compact = (await response.json()).result.structuredContent;
-  assert.deepEqual(compact.specialists.candidates.map(m => m.id), result.specialists.candidates.map(m => m.id));
-  assert.ok(compact.specialists.candidates.every(m => m.evaluations.length <= 4 && m.evaluationCount >= m.evaluations.length));
+  const response = await handleAPI(new Request('https://example.org/scout/api/recommend', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt }) }), index, {}, (i, p) => recommend(i, p, Date.now(), interpreted));
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).specialists, result.specialists);
   const status = indexStatus(index);
   assert.equal(status.specialistRepositories, snapshot.specialists.length);
   assert.ok(status.sources.every(s => s.role && s.limits && s.coverage));

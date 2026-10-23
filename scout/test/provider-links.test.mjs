@@ -4,7 +4,6 @@ import { readFile } from 'node:fs/promises';
 import { providerURL } from '../provider-links.mjs';
 import { createIndex, recommend } from '../rank.mjs';
 import { handleAPI } from '../http.mjs';
-import { handleMCP } from '../mcp.mjs';
 
 const snapshot = JSON.parse(await readFile(new URL('../snapshot.json', import.meta.url), 'utf8'));
 
@@ -36,14 +35,12 @@ test('Gemma and GPT-OSS lead to model documentation instead of hosted API pricin
   assert.equal(providerURL('openai/gpt-4.1-mini'), 'https://developers.openai.com/api/docs/pricing');
 });
 
-test('HTTP and MCP share provider links while retaining quoted prices and benchmark provenance', async () => {
+test('HTTP retains provider links, quoted prices and benchmark provenance', async () => {
   const run=(i,p)=>recommend(i,p,Date.now(),{kind:'extract',needsVision:true,needsStructured:true,outputFormat:'json',weights:{documents:6,vision:3,structured:3},workload:{input:'medium',output:'short'}});
 const index = createIndex(snapshot), prompt = 'Debug Python code';
   const post = (path, body) => new Request(`https://example.test/scout/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const http = await (await handleAPI(post('api/recommend', { prompt }), index, {}, run)).json();
-  const mcp = (await (await handleMCP(post('mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scout_models', arguments: { prompt } } }), index, {}, run)).json()).result.structuredContent;
   assert.equal(http.recommendations.length, 5);
-  assert.deepEqual(mcp.recommendations.map(m => m.pricing), http.recommendations.map(m => m.pricing));
   for (const model of http.recommendations) {
     const original = snapshot.models.find(m => m.id === model.modelId);
     assert.equal(model.pricing.url, providerURL(model.modelId));

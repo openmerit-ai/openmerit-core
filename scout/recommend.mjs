@@ -11,7 +11,7 @@ import {interpreterVersion} from './interpreter.mjs';
 import {matchingTimeoutMs,createTimings} from './timing.mjs';
 import {diagnosticTransport} from './utils.mjs';
 
-// Shared by HTTP and MCP; bounded admission without visitor accounts or queues.
+// HTTP search computation; bounded admission without visitor accounts or queues.
 export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, timeoutMs = matchingTimeoutMs, db, vectorize, observe = () => {},cacheOptions } = {}) {
   let inFlight = 0, windowStart = now(), requests = 0;
   const cached=createResultCache({now,...cacheOptions});

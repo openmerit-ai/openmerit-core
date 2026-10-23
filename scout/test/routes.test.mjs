@@ -27,13 +27,34 @@ test('retired preview pages and API/MCP aliases do not redirect or execute match
   }
 });
 
+test('retired agent and resource discovery routes are 404 before auth, analytics, alpha redirects or SPA fallback',async t=>{
+  t.mock.method(globalThis,'fetch',()=>assert.fail('Retired routes must not proxy or send analytics'));
+  const retiredEnv=new Proxy({SCOUT_OAUTH_ENABLED:'true',SCOUT_OAUTH_CLIENT_IDS:'obsolete-client'},{get(){assert.fail('Retired routes must not read bindings or fetch assets');}});
+  const ctx={waitUntil(){assert.fail('Retired routes must not schedule analytics');}};
+  for(const router of [worker,alpha])for(const prefix of ['/scout','/scout/alpha','/scout/alpha/alpha','/scout/v1','/scout/v2','/scout/alpha/v1']){
+    for(const suffix of ['/mcp','/mcp/','/mcp/tools','/.well-known/oauth-protected-resource','/.well-known/oauth-protected-resource/scout/mcp']){
+      for(const method of ['GET','HEAD','POST','OPTIONS','DELETE']){
+        const response=await router.fetch(new Request(`https://example.test${prefix}${suffix}?agent=claude-code`,{method,headers:{origin:'https://foreign.test',authorization:'Bearer obsolete'}}),retiredEnv,ctx);
+        assert.equal(response.status,404,`${method} ${prefix}${suffix}`);
+        assert.equal(response.headers.get('location'),null);assert.equal(response.headers.get('www-authenticate'),null);
+        assert.equal(response.headers.get('content-type'),'application/json; charset=utf-8');
+        assert.equal(response.headers.get('cache-control'),'no-store');
+        assert.deepEqual(await response.json(),{error:'Not found.'});
+      }
+    }
+  }
+  for(const router of [worker,alpha])for(const suffix of ['','/scout/mcp']){
+    assert.equal((await router.fetch(new Request(`https://example.test/.well-known/oauth-protected-resource${suffix}`),retiredEnv,ctx)).status,404);
+  }
+});
+
 test('promoted Scout serves the canonical page and redirects former alpha paths',async t=>{
   t.mock.method(globalThis,'fetch',()=>new Response('Original site'));
   const redirect=await alpha.fetch(new Request('https://example.test/scout?q=a%20b'),env,{});
   assert.equal(redirect.status,308);assert.equal(redirect.headers.get('location'),'https://example.test/scout/?q=a%20b');
   const page=await alpha.fetch(new Request('https://example.test/scout/'),env,{});
   assert.equal(await page.text(),'Scout');assert.equal(page.headers.get('x-robots-tag'),null);
-  for(const suffix of ['', '/', '/scout.js', '/api/status', '/api/recommend', '/mcp'])for(const method of ['GET','HEAD','POST']){
+  for(const suffix of ['', '/', '/scout.js', '/api/status', '/api/recommend'])for(const method of ['GET','HEAD','POST']){
     const response=await alpha.fetch(new Request(`https://example.test/scout/alpha${suffix}?q=a%20b`,{method}),env,{});
     assert.equal(response.status,308);assert.equal(response.headers.get('location'),`https://example.test/scout${suffix||'/'}?q=a%20b`);
     assert.equal(response.headers.get('cache-control'),'no-store');assert.equal(await response.text(),'');
@@ -44,10 +65,10 @@ test('promoted Scout serves the canonical page and redirects former alpha paths'
   for(const path of ['/scout/alpha-other','/scout/alphabets','/scout/v1/','/scout/v2/'])assert.equal((await alpha.fetch(new Request(`https://example.test${path}`),env,{})).status,404);
 });
 
-test('promoted Scout preserves canonical API and MCP bodies and leaves non-Scout routes untouched',async t=>{
+test('promoted Scout preserves canonical API bodies and leaves non-Scout routes untouched',async t=>{
   t.mock.method(globalThis,'fetch',request=>new Response(`Original route: ${new URL(request.url).pathname}`));
   t.mock.method(worker,'fetch',async request=>Response.json({path:new URL(request.url).pathname,query:new URL(request.url).search,method:request.method,origin:request.headers.get('origin'),body:await request.json()}));
-  for(const path of ['api/recommend','mcp']){
+  for(const path of ['api/recommend']){
     const response=await alpha.fetch(new Request(`https://example.test/scout/${path}?test=1`,{method:'POST',headers:{origin:'https://example.test','content-type':'application/json'},body:'{"prompt":"Keep my task"}'}),{},{});
     assert.deepEqual(await response.json(),{path:`/scout/${path}`,query:'?test=1',method:'POST',origin:'https://example.test',body:{prompt:'Keep my task'}});
   }
@@ -70,40 +91,29 @@ function sessionToken(changes={},key=keys.privateKey){
   const input=`${encode({alg:'RS256',typ:'JWT',kid:'local-fixture'})}.${encode(payload)}`;
   return `${input}.${sign('RSA-SHA256',Buffer.from(input),key).toString('base64url')}`;
 }
-const authenticatedRequest=(path,token,headers={})=>new Request(`https://example.test/scout/${path}`,{method:'POST',headers:{'content-type':'application/json',...(token?{authorization:`Bearer ${token}`} : {}),...headers},body:JSON.stringify(path==='mcp'?{jsonrpc:'2.0',id:7,method:'ping'}:{invalid:'body preserved'})});
+const authenticatedRequest=(path,token,headers={})=>new Request(`https://example.test/scout/${path}`,{method:'POST',headers:{'content-type':'application/json',...(token?{authorization:`Bearer ${token}`} : {}),...headers},body:JSON.stringify({invalid:'body preserved'})});
 
 test('public auth configuration exposes only the publishable key and fails closed when incomplete',async()=>{
   const response=await alpha.fetch(new Request('https://example.test/scout/api/auth'),authEnv,{});
   assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
   assert.deepEqual(await response.json(),{publishableKey:authEnv.CLERK_PUBLISHABLE_KEY,frontendApi:'scout-auth.clerk.accounts.dev',analytics:{enabled:false,accountSync:false,content:false,contentDefault:false}});
   for(const config of [{},{CLERK_PUBLISHABLE_KEY:authEnv.CLERK_PUBLISHABLE_KEY},{...authEnv,CLERK_PUBLISHABLE_KEY:'invalid'}]){
-    for(const path of ['api/auth','api/recommend','mcp']){
+    for(const path of ['api/auth','api/recommend']){
       const result=await alpha.fetch(new Request(`https://example.test/scout/${path}`),config,{});
       assert.equal(result.status,503);assert.doesNotMatch(await result.text(),/sk_test|BEGIN PUBLIC KEY|invalid/);
     }
   }
-  const metadataURL='https://example.test/scout/.well-known/oauth-protected-resource';
-  const metadataEnv=Object.assign(Object.create(env),authEnv,{SCOUT_OAUTH_ENABLED:'true',SCOUT_OAUTH_CLIENT_IDS:'scout-client'});
-  for(const method of ['GET','HEAD']){
-    const result=await alpha.fetch(new Request(metadataURL,{method,headers:{origin:'https://native-client.test'}}),metadataEnv,{});
-    assert.equal(result.status,200);assert.equal(result.headers.get('access-control-allow-origin'),'*');
-    if(method==='HEAD')assert.equal(await result.text(),'');
-    else assert.deepEqual(await result.json(),{resource:'https://example.test/scout/mcp',authorization_servers:['https://scout-auth.clerk.accounts.dev'],scopes_supported:['scout:recommend'],bearer_methods_supported:['header'],resource_name:'OpenMerit Scout'});
-  }
-  assert.equal((await alpha.fetch(new Request(metadataURL),authEnv,{})).status,503);
-  assert.equal((await alpha.fetch(new Request(metadataURL,{method:'POST'}),metadataEnv,{})).status,405);
 });
 
-test('HTTP and MCP reject missing, forged, expired, foreign and pending sessions before catalogue access',async()=>{
+test('HTTP rejects missing, forged, expired, foreign and pending sessions before catalogue access',async()=>{
   const otherKey=generateKeyPairSync('rsa',{modulusLength:2048}).privateKey;
   const invalid=[null,'malformed',sessionToken({},otherKey),sessionToken({exp:Math.floor(Date.now()/1000)-60}),sessionToken({nbf:Math.floor(Date.now()/1000)+120}),sessionToken({iss:'https://other.clerk.accounts.dev'}),sessionToken({azp:'https://untrusted.example'}),sessionToken({sts:'pending'}),sessionToken({sid:''}),sessionToken({sub:''})];
   const blockedEnv=Object.assign(Object.create(env),authEnv);
-  for(const path of ['api/recommend','mcp']){
+  for(const path of ['api/recommend']){
     for(const token of invalid){
       const response=await alpha.fetch(authenticatedRequest(path,token),blockedEnv,{});
       assert.equal(response.status,401,`${path}: ${token?.slice(0,20)??'anonymous'}`);
-      if(path==='mcp')assert.match(response.headers.get('www-authenticate'),/resource_metadata="https:\/\/example.test\/scout\/\.well-known\/oauth-protected-resource"/);
-      else assert.equal(response.headers.get('www-authenticate'),'Bearer realm="Scout"');
+      assert.equal(response.headers.get('www-authenticate'),'Bearer realm="Scout"');
       assert.equal(response.headers.get('cache-control'),'no-store');
       assert.equal((await response.json()).code,'sign_in_required');
     }
@@ -113,24 +123,22 @@ test('HTTP and MCP reject missing, forged, expired, foreign and pending sessions
   }
 });
 
-test('verified sessions reach HTTP/MCP handlers, while account and IP limits remain independent',async()=>{
+test('verified sessions reach HTTP handlers, while account and IP limits remain independent',async()=>{
   const manifest={publication:{id:'auth-fixture'},sources:[],publicStatus:{models:0},servingEngine:'evidence'};
   const bucket={async get(key){const data=key==='active.json'?{key:'manifest.json',publication:manifest.publication}:key==='manifest.json'?manifest:null;return data?{json:async()=>data}:null;}};
   const configured={...authEnv,SCOUT_CATALOGUE:bucket};
   const token=sessionToken();
   const api=await alpha.fetch(authenticatedRequest('api/recommend',token),configured,{});
   assert.equal(api.status,400,await api.clone().text());assert.equal((await api.json()).error,'Provide prompt and optionally modelIds or endpointIds.');
-  const ping=await alpha.fetch(authenticatedRequest('mcp',token),configured,{});
-  assert.equal(ping.status,200);assert.deepEqual(await ping.json(),{jsonrpc:'2.0',id:7,result:{}});
   const status=await alpha.fetch(new Request('https://example.test/scout/api/status'),configured,{});
   assert.equal(status.status,200);assert.equal((await status.json()).snapshotVersion,'auth-fixture');
 
   const counts=new Map();configured.SCOUT_RATE={async limit({key}){const count=(counts.get(key)??0)+1;counts.set(key,count);return {success:count<=2};}};
-  const call=(sub,ip)=>alpha.fetch(authenticatedRequest('mcp',sessionToken({sub}),{'cf-connecting-ip':ip}),configured,{});
-  assert.equal((await call('user_alice','192.0.2.1')).status,200);
-  assert.equal((await call('user_alice','192.0.2.2')).status,200);
+  const call=(sub,ip)=>alpha.fetch(authenticatedRequest('api/recommend',sessionToken({sub}),{'cf-connecting-ip':ip}),configured,{});
+  assert.equal((await call('user_alice','192.0.2.1')).status,400);
+  assert.equal((await call('user_alice','192.0.2.2')).status,400);
   const accountLimit=await call('user_alice','192.0.2.3');assert.equal(accountLimit.status,429);assert.equal(accountLimit.headers.get('retry-after'),'60');
-  assert.equal((await call('user_bob','192.0.2.3')).status,200);
+  assert.equal((await call('user_bob','192.0.2.3')).status,400);
   assert.equal((await call('user_charlie','192.0.2.3')).status,429);
 });
 
@@ -167,60 +175,11 @@ test('product events are allowlisted, identity comes from verified sessions, and
   assert.ok(sent.every(p=>p.url==='https://eu.i.posthog.com/batch/'&&Object.keys(p.headers).join()==='Content-Type'));
   assert.ok(events.every(e=>e.properties.$geoip_disable===true&&e.properties.$ip===null&&e.properties.environment==='test'));
   for(const event of ['scout_search_completed','scout_signed_in','scout_signed_up','scout_signed_out','$identify','constructor',{toString:false}])assert.equal((await alpha.fetch(eventRequest(event),config,ctx)).status,400);
+  for(const event of ['scout_agent_setup_opened','scout_agent_selected','scout_agent_setup_copied','scout_agent_docs_opened','scout_agent_connected'])assert.equal((await alpha.fetch(eventRequest(event),config,ctx)).status,400);
   assert.equal((await alpha.fetch(eventRequest('scout_session_observed'),config,ctx)).status,401);
   assert.equal((await alpha.fetch(eventRequest('scout_session_observed',{},'forged'),config,ctx)).status,401);
   assert.equal((await alpha.fetch(eventRequest('scout_visited',{},undefined,{origin:'https://foreign.test'}),config,ctx)).status,403);
   await ctx.flush();assert.equal(sent.flatMap(p=>p.batch).length,10);
-});
-
-test('agent setup attribution joins verified MCP connections, never copies, failed auth or unrelated requests',async t=>{
-  const sent=[],ctx=pendingContext(),config={...authEnv,...productEnv};
-  t.mock.method(globalThis,'fetch',async(_url,options)=>{sent.push(...JSON.parse(options.body).batch);return new Response(null,{status:200});});
-  const token=sessionToken(),privateName='PRIVATE_CANARY_person@example.invalid';
-  const call=(query,method='initialize',headers={},bearer=token,id=1)=>alpha.fetch(new Request(`https://example.test/scout/mcp${query}`,{
-    method:'POST',headers:{'content-type':'application/json',...(bearer?{authorization:`Bearer ${bearer}`} : {}),...headers},
-    body:JSON.stringify({jsonrpc:'2.0',id,method,params:{protocolVersion:'2025-11-25',clientInfo:{name:privateName,version:privateName}}}),
-  }),config,ctx);
-  for(const artifact of ['setup_prompt','mcp_url','api_request',privateName]){
-    for(const outcome of ['ok','error'])assert.equal((await alpha.fetch(eventRequest('scout_agent_setup_copied',{agent:'cursor',artifact,outcome,instructions:privateName},token),config,ctx)).status,204);
-  }
-  await ctx.flush();
-  assert.deepEqual(sent.filter(e=>e.event==='scout_agent_setup_copied').map(e=>[e.properties.artifact,e.properties.outcome]).sort(),
-    ['setup_prompt','mcp_url','api_request',undefined].flatMap(artifact=>[[artifact,'ok'],[artifact,'error']]).sort());
-  assert.equal(sent.filter(e=>e.event==='scout_agent_connected').length,0,'copy successes and failures are not connections');
-  assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_CANARY/);
-  sent.length=0;
-  for(const agent of ['claude-code','cursor','codex','amp','opencode','t3-code','other']){
-    assert.equal((await alpha.fetch(eventRequest('scout_agent_selected',{agent,installation:true,token:privateName},token),config,ctx)).status,204);
-    assert.equal((await alpha.fetch(eventRequest('scout_agent_setup_copied',{agent,artifact:'mcp_url',outcome:'ok'},token),config,ctx)).status,204);
-    const result=await call(`?agent=${agent}`);assert.equal((await result.json()).result.protocolVersion,'2025-11-25');
-  }
-  await ctx.flush();
-  const connections=sent.filter(e=>e.event==='scout_agent_connected');assert.equal(connections.length,7);
-  assert.deepEqual(connections.map(e=>e.properties.agent).sort(),['amp','claude-code','codex','cursor','opencode','other','t3-code']);
-  assert.ok(connections.every(e=>e.properties.reported_agent==='unknown'&&e.properties.client==='agent'&&e.properties.transport==='mcp'));
-  assert.equal(new Set(sent.map(e=>e.properties.distinct_id)).size,1,'setup and connection share the verified account');
-  assert.ok(sent.filter(e=>e.event==='scout_request_completed').every(e=>e.properties.mcp_method==='initialize'&&e.properties.outcome==='ok'));
-  assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_CANARY|user_alice|sess_alice|installation|Bearer/);
-
-  for(const method of ['ping','tools/list','tools/call','PRIVATE_CANARY'])await call('?agent=cursor',method);
-  assert.equal((await call('?agent=cursor','initialize',{},null)).status,401);
-  assert.equal((await call('?agent=cursor','initialize',{},'forged')).status,401);
-  assert.equal((await call('?agent=cursor','initialize',{'mcp-protocol-version':'invalid'})).status,400);
-  assert.equal((await call('?agent=cursor','initialize',{},token,null)).status,400);
-  assert.equal((await alpha.fetch(eventRequest('scout_agent_connected',{agent:'cursor'},token),config,ctx)).status,400,'browser cannot claim a server connection');
-  await ctx.flush();
-  assert.equal(sent.filter(e=>e.event==='scout_agent_connected').length,7);
-  assert.equal(sent.filter(e=>e.event==='scout_request_completed'&&e.properties.mcp_method==='tools/call').at(-1).properties.outcome,'error');
-  assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_CANARY/);
-
-  sent.length=0;
-  for(const headers of [{dnt:'1'},{'sec-gpc':'1'},{'x-scout-analytics':'off'}])await call('?agent=amp','initialize',headers);
-  await call('?agent=amp&analytics=off');await ctx.flush();assert.equal(sent.length,0);
-  await call('?agent=PRIVATE_CANARY&private=PRIVATE_CANARY');
-  await call('?agent=cursor','initialize',{'x-scout-agent':'amp'});
-  await ctx.flush();assert.deepEqual(sent.filter(e=>e.event==='scout_agent_connected').map(e=>e.properties.agent).sort(),['amp','unknown']);
-  assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_CANARY/);
 });
 
 test('analytics never forwards its credentials or event body to a redirect destination',async t=>{
@@ -251,7 +210,7 @@ test('product opt-out and missing configuration suppress all transmissions; reje
   }
   for(const config of [{...authEnv},{...authEnv,...productEnv,POSTHOG_PROJECT_TOKEN:''},{...authEnv,...productEnv,POSTHOG_HOST:'https://unexpected.test'},{...authEnv,...productEnv,POSTHOG_ENVIRONMENT:''}]){
     assert.equal((await alpha.fetch(eventRequest('scout_visited'),config,ctx)).status,204);
-    assert.equal((await alpha.fetch(authenticatedRequest('mcp'),config,ctx)).status,401);
+    assert.equal((await alpha.fetch(authenticatedRequest('api/recommend'),config,ctx)).status,401);
   }
   await ctx.flush();assert.equal(sent.length,0);
   assert.equal((await alpha.fetch(authenticatedRequest('api/recommend',null,{'x-scout-client':'cli'}),{...authEnv,...productEnv},ctx)).status,401);

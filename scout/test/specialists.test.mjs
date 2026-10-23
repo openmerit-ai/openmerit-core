@@ -8,7 +8,6 @@ import { createIndex } from '../rank.mjs';
 import { decisionQuestions } from '../decisions.mjs';
 import snapshot from '../snapshot.json' with { type: 'json' };
 import { handleAPI } from '../http.mjs';
-import { handleMCP } from '../mcp.mjs';
 import { semanticAnswers } from './helpers-specialists.mjs';
 
 const checkedAt = '2026-10-15T00:00:00.000Z';
@@ -106,7 +105,7 @@ test('unprepared or unverified repositories never enter either result path', asy
   assert.deepEqual(discoverSpecialists({ specialists }, visual, 'model general photographs').candidates, []);
 });
 
-test('HTTP and MCP use two bounded Decisions calls, never fetch Hub metadata while matching, and retain unknown metrics', async () => {
+test('HTTP uses two bounded Decisions calls, never fetches Hub metadata while matching, and retains unknown metrics', async () => {
   const specialists = await prepareSpecialists(rows(), [], options);
   const index = createIndex({ ...snapshot, specialists, specialistProfiles: specialistProfiles(specialists) });
   let calls = 0;
@@ -117,15 +116,12 @@ test('HTTP and MCP use two bounded Decisions calls, never fetch Hub metadata whi
   } });
   const request = (path, body) => new Request(`https://example.test/scout/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const args = { prompt: 'Classify photos as indoors or outdoors.' };
-  const http = await (await handleAPI(request('api/recommend', args), index, {}, run)).json();
-  const rpc = (await (await handleMCP(request('mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scout_models', arguments: args } }), index, {}, run)).json()).result.structuredContent;
-  assert.equal(calls, 4);
-  for (const result of [http, rpc]) {
-    const hub = result.recommendations.filter(m => m.endpoint.source === 'huggingface');
-    assert.ok(hub.length);
-    assert.ok(hub.every(m => m.quality === null && m.reference.costUsd === null && m.reference.completionSeconds === null));
-    assert.ok(hub.every(m => m.endpoint.semanticProfile.version === '1' && m.endpoint.semanticMatch.confidence === .95));
-  }
+  const result = await (await handleAPI(request('api/recommend', args), index, {}, run)).json();
+  assert.equal(calls, 2);
+  const hub = result.recommendations.filter(m => m.endpoint.source === 'huggingface');
+  assert.ok(hub.length);
+  assert.ok(hub.every(m => m.quality === null && m.reference.costUsd === null && m.reference.completionSeconds === null));
+  assert.ok(hub.every(m => m.endpoint.semanticProfile.version === '1' && m.endpoint.semanticMatch.confidence === .95));
 });
 
 test('specialist outage omits Hub candidates without hiding ordinary results; explicit inventories skip unnecessary requests', async () => {

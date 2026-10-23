@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Scout coding-agent reset — unreleased source, 23 October 2026
+
+Removed the Scout installer, MCP/OAuth agent backend, persistent setup instructions and agent activation tracking for a rebuild. The web interface retains only a Claude Code placeholder that cannot install or connect. Browser account sign-in, recommendations, JSON API, Inference Terminal and the separate Pi/evaluation workflows remain unchanged. Guides distinguish this source reset from historical hosted receipts, npm releases and remote grant revocation. Homepage FAQ claims still concern the unchanged terminal/Pi workflow and need no edit. No production deployment, provider setting or stored-data deletion is included.
+
 ## PostHog instrumentation — version-5 serving rollout
 
 Reviewed homepage data, background, cost and evaluation claims against the current source upgrade. The FAQ describes released terminal/Pi behavior; optional source-only telemetry does not add inference execution or alter that workflow, so website code needs no edit. Source guides now qualify native public-page lifecycle/CTA events, allowlisted acquisition/UTM/device categories, support-dependent sampled performance, same-tab linked signup/search identity versus request-only unlinking, HTTP-200 logical MCP errors, bounded stage/provider codes and actual attempt tokens. Recommendations are not executions, and unknown costs are not invented. Feedback uses fixed ratings/reasons with trace/retry correlation; CLI version/platform/runtime and sanitized frames remain opt-in. Prompt sharing and retention controls are unchanged.

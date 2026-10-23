@@ -8,11 +8,9 @@ import offlineTasks from './fixtures/offline-tasks.json' with {type:'json'};
 const fixtureTask = prompt => {const task=offlineTasks[prompt];if(!task)throw Error('Missing typed test fixture');return structuredClone(task);};
 const recommend=(index,prompt)=>rankTask(index,prompt,Date.now(),fixtureTask(prompt));
 import { parseCSV, parseAnalysis, compileSnapshot, refreshSnapshot, parseOmniDoc, parseVectara, parseArena } from '../sources.mjs';
-import { handleMCP as mcp } from '../mcp.mjs';
 import { handleAPI as api } from '../http.mjs';
 
 const handleAPI=(request,index)=>api(request,index,{},recommend);
-const handleMCP=(request,index)=>mcp(request,index,{},recommend);
 const snapshot = JSON.parse(await readFile(new URL('../snapshot.json', import.meta.url), 'utf8'));
 const index = createIndex(snapshot);
 const post = body => new Request('http://localhost/scout/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -80,7 +78,9 @@ test('API validates method, content type, shape, empty and oversized input; prom
   const valid = await handleAPI(post({ prompt: 'Debug Python code' }), index);
   assert.equal(valid.status, 200); assert.equal(valid.headers.get('cache-control'), 'no-store');
   assert.ok(valid.headers.get('server-timing').startsWith('scout;dur='));
-  assert.equal((await valid.json()).recommendations.length, 5);
+  const result = await valid.json();
+  assert.equal(result.recommendations.length, 5);
+  assert.deepEqual(result.recommendations.map(m => m.id), recommend(index, 'Debug Python code').recommendations.map(m => m.id));
   for (const body of [{ prompt: '' }, { prompt: ' ' }, { prompt: 5 }, { prompt: 'x'.repeat(4001) }, { prompt: 'hello', limit: 5 }, null, []]) assert.equal((await handleAPI(post(body), index)).status, 400);
   assert.equal((await handleAPI(new Request('http://localhost/scout/api/recommend'), index)).status, 405);
   assert.equal((await handleAPI(new Request('http://localhost/scout/api/recommend', { method: 'POST', body: '{}' }), index)).status, 415);
@@ -207,31 +207,6 @@ test('partial refresh preserves only failed sources with original timestamps whi
   assert.equal(noCatalogue.sources.find(s => s.id === 'models').status, 'failed');
 });
 
-
-
-const rpc = (method, params, headers = {}, id = 1) => new Request('http://localhost/scout/mcp', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...headers }, body: JSON.stringify({ jsonrpc: '2.0', id, method, params }) });
-
-test('MCP initializes, discovers its tool and executes the same live ranking', async () => {
-  const init = await (await handleMCP(rpc('initialize', { protocolVersion: '2025-11-25' }), index)).json();
-  assert.equal(init.result.protocolVersion, '2025-11-25');
-  const listed = await (await handleMCP(rpc('tools/list'), index)).json();
-  assert.equal(listed.result.tools[0].name, 'scout_models');
-  const response = await handleMCP(rpc('tools/call', { name: 'scout_models', arguments: { prompt: 'Debug Python code' } }), index);
-  assert.equal(response.headers.get('cache-control'), 'no-store');
-  const called = await response.json();
-  assert.deepEqual(called.result.structuredContent.recommendations.map(m => m.id), recommend(index, 'Debug Python code').recommendations.map(m => m.id));
-  assert.ok(called.result.structuredContent.recommendations.every(m => m.evidence.length <= 4));
-  const notification = rpc('notifications/initialized'); const body = await notification.json(); delete body.id;
-  assert.equal((await handleMCP(new Request(notification.url, { method: 'POST', headers: notification.headers, body: JSON.stringify(body) }), index)).status, 202);
-});
-
-test('MCP rejects foreign origins, invalid versions, unknown tools and unsupported inputs', async () => {
-  assert.equal((await handleMCP(rpc('tools/list', {}, { origin: 'https://foreign.example' }), index)).status, 403);
-  assert.equal((await handleMCP(rpc('tools/list', {}, { 'mcp-protocol-version': 'invalid' }), index)).status, 400);
-  assert.equal((await handleMCP(new Request('http://localhost/scout/mcp'), index)).status, 405);
-  const unknown = await (await handleMCP(rpc('tools/call', { name: 'unknown' }), index)).json(); assert.equal(unknown.error.code, -32602);
-  const invalid = await (await handleMCP(rpc('tools/call', { name: 'scout_models', arguments: { prompt: '' } }), index)).json(); assert.ok(invalid.result.isError);
-});
 
 
 test('a frozen runtime clock never reports a fabricated zero-millisecond computation', async t => {

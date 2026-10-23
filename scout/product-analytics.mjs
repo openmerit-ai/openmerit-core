@@ -13,8 +13,6 @@ const counts = { task_count: integer(0, 3), candidate_count: integer(0, 15) };
 const position = { rank: integer(1, 5), task_index: integer(1, 3) };
 const command = choice(['help', 'dash', 'eval_init', 'eval_doctor', 'eval_plan', 'eval_run', 'eval_watch', 'eval_report', 'unknown']);
 const mode = choice(['sample', 'live']), page = choice(['home', 'docs']);
-const agent = choice(['claude-code', 'cursor', 'codex', 'amp', 'opencode', 't3-code', 'other', 'unknown']);
-const mcpMethod = choice(['initialize', 'ping', 'tools/list', 'tools/call', 'notifications/initialized', 'notifications/cancelled']);
 const exception = { error_type: errorType, frames: safeFrames };
 const failure = { failure_stage: choice([...timingStages, 'matching']), failure_code: value => failureCodes.has(value) ? value : undefined, provider_status: integer(100, 599) };
 const version = value => typeof value === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[a-z0-9.]{1,30})?$/.test(value) ? value : undefined;
@@ -24,10 +22,6 @@ const clientEvents = {
   scout_sign_in_opened: {},
   scout_example_selected: { example: choice(['invoice-extraction', 'support-workflow', 'feedback-workflow']) },
   scout_session_observed: { auth_provider: choice(['google', 'github', 'unknown']) },
-  scout_agent_setup_opened: { source: choice(['button', 'navigation', 'disclosure', 'deep_link']) },
-  scout_agent_selected: { agent },
-  scout_agent_setup_copied: { agent, artifact: choice(['mcp_url', 'api_request', 'setup_prompt']), outcome: choice(['ok', 'error']) },
-  scout_agent_docs_opened: { agent },
   scout_results_viewed: { ...counts, duration_ms: duration },
   scout_evidence_opened: position,
   scout_model_id_copied: position,
@@ -51,8 +45,7 @@ const schemas = {
     ...counts, ...failure, duration_ms: duration, cache: choice(['miss', 'hit', 'shared', 'unknown']),
     outcome: choice(['ok', 'empty', 'unsupported', 'clarification', 'rate_limited', 'interpretation_error', 'selection_error', 'internal_error']),
   },
-  scout_request_completed: { route: choice(['recommend', 'mcp']), mcp_method: mcpMethod, http_status: integer(100, 599), duration_ms: duration, outcome: choice(['ok', 'error']) },
-  scout_agent_connected: { reported_agent: agent },
+  scout_request_completed: { route: choice(['recommend']), http_status: integer(100, 599), duration_ms: duration, outcome: choice(['ok', 'error']) },
   scout_server_error: { code: choice(['catalogue_error', 'interpretation_error', 'selection_error', 'internal_error', 'auth_error', 'request_error']), ...exception, ...failure },
 };
 const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) ? value.toLowerCase() : null;
@@ -107,10 +100,7 @@ export function createProductAnalytics(request, env, ctx = {}) {
     request.headers.get('sec-gpc') !== '1' && request.headers.get('x-scout-analytics') !== 'off' && url.searchParams.get('analytics') !== 'off';
   const path = url.pathname, started = performance.now();
   const observedAt = Date.now();
-  // Setup URLs carry only a public agent category, never an account or token.
-  // These caller hints are attribution, not authentication or proof of installation.
-  const selectedAgent = agent(request.headers.get('x-scout-agent') ?? url.searchParams.get('agent')) ?? 'unknown';
-  const client = choice(['web', 'cli', 'agent'])(request.headers.get('x-scout-client')) ?? (selectedAgent !== 'unknown' ? 'agent' : 'unknown');
+  const client = choice(['web', 'cli'])(request.headers.get('x-scout-client')) ?? 'unknown';
   const linkAccount = request.headers.get('x-scout-analytics-account') !== 'off';
   const anonymousId = uuid(request.headers.get('x-scout-anonymous-id')) ?? crypto.randomUUID();
   // Correlation is not authentication. Accept only a random operation ID; never
@@ -120,7 +110,7 @@ export function createProductAnalytics(request, env, ctx = {}) {
   const contentChoice = request.headers.get('x-scout-analytics-content');
   const contentAllowed = env.POSTHOG_CAPTURE_CONTENT === 'true' && accountSyncEnabled(env) &&
     (contentChoice === 'on' || contentChoice === null && client === 'web' && betaEvaluationEnabled(env));
-  let userId, method, toolName, serverErrorReported = false, reportedAgent = 'unknown';
+  let userId, serverErrorReported = false;
 
   function background(promise) {
     const safe = promise.catch(() => {});
@@ -151,12 +141,11 @@ export function createProductAnalytics(request, env, ctx = {}) {
       const common = {
         distinct_id: distinctId, $process_person_profile: !!identity, $geoip_disable: true, $ip: null,
         product: event.startsWith('cli_') || event.startsWith('terminal_') ? 'openmerit' : event.startsWith('website_') || web && safe.page !== 'scout' ? 'website' : 'scout', environment: env.POSTHOG_ENVIRONMENT,
-        client: options.client ?? client, transport: path === '/scout/mcp' ? 'mcp' : 'http',
-        agent: selectedAgent,
+        client: options.client ?? client, transport: 'http',
         request_id: traceId, trace_id: safe.trace_id ?? traceId, $session_id: linkAccount ? safe.session_id ?? uuid(request.headers.get('x-scout-session-id')) ?? anon : anon,
         ...(retryOf ? { retry_of: retryOf } : {}),
         analytics_version: 5, account_linked: !!identity,
-        ...(safe.trace_id || ['/scout/api/recommend', '/scout/mcp'].includes(path) ? { $ai_trace_id: safe.trace_id ?? traceId } : {}),
+        ...(safe.trace_id || path === '/scout/api/recommend' ? { $ai_trace_id: safe.trace_id ?? traceId } : {}),
         ...(env.CF_VERSION_METADATA?.id ? { release: env.CF_VERSION_METADATA.id } : {}),
       };
       const native = web ? {
@@ -201,15 +190,9 @@ export function createProductAnalytics(request, env, ctx = {}) {
   }
 
   return {
-    observeMCP(value, clientName, tool) {
-      method = mcpMethod(value);
-      toolName = tool === 'scout_models' ? tool : 'unknown';
-      // Never retain arbitrary client names/versions; some contain local paths.
-      reportedAgent = agent(clientName) ?? 'unknown';
-    },
     identify(id) {
       userId = id;
-      // An opted-out authenticated API/MCP call also stops background sync.
+      // An opted-out authenticated API call also stops background sync.
       if (!enabled && env.SCOUT_ACCOUNTS) background((async () => {
         await (await accountAnalytics(env, id)).preference(id, false, observedAt);
       })());
@@ -255,28 +238,12 @@ export function createProductAnalytics(request, env, ctx = {}) {
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     },
     complete(response) {
-      if (!enabled || !['/scout/api/recommend', '/scout/mcp'].includes(path)) return;
+      if (!enabled || path !== '/scout/api/recommend') return;
       const duration_ms = milliseconds(performance.now() - started);
-      background((async () => {
-        // MCP tool/protocol failures can have HTTP 200. Inspect the outcome, but
-        // never copy its body, error message or JSON-RPC ID into an event.
-        const body = path === '/scout/mcp' ? await response.clone().json().catch(() => null) : null;
-        const ok = response.ok && !body?.error && !body?.result?.isError;
-        const entries = method === 'tools/call' ? [{ event: '$mcp_tool_call', properties: {
-          $mcp_server_name: 'scout-by-openmerit', $mcp_tool_name: toolName,
-          $mcp_duration_ms: duration_ms, $mcp_is_error: !ok,
-          $mcp_client_name: selectedAgent !== 'unknown' ? selectedAgent : reportedAgent,
-          ...(ok ? {} : { $mcp_error_type: body?.error ? 'protocol_error' : body?.result?.isError ? 'tool_error' : 'http_error' }),
-        } }] : method === 'tools/list' && ok ? [{ event: '$mcp_tools_list', properties: { $mcp_server_name: 'scout-by-openmerit', $mcp_listed_tool_names: ['scout_models'] } }] : [];
-        capture('scout_request_completed', {
-          route: path === '/scout/mcp' ? 'mcp' : 'recommend', http_status: response.status, duration_ms,
-          ...(method ? { mcp_method: method } : {}), outcome: ok ? 'ok' : 'error',
-        }, { entries });
-        if (response.status >= 500 && !serverErrorReported) capture('scout_server_error', { code: 'request_error' });
-        if (userId && method === 'initialize' && ok && body?.result?.protocolVersion) {
-          capture('scout_agent_connected', { reported_agent: reportedAgent });
-        }
-      })());
+      capture('scout_request_completed', {
+        route: 'recommend', http_status: response.status, duration_ms, outcome: response.ok ? 'ok' : 'error',
+      });
+      if (response.status >= 500 && !serverErrorReported) capture('scout_server_error', { code: 'request_error' });
     },
     async handleEvent() {
       if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405, { Allow: 'POST' });

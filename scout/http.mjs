@@ -2,6 +2,8 @@ import { indexStatus, recommend } from './rank.mjs';
 import { validateSelection } from './selection.mjs';
 
 export const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...extra } });
+// Reject retired agent endpoints before auth, redirects or asset/SPA fallback.
+export const isRetiredAgentPath = path => /^\/scout\/(?:(?:alpha|v1|v2)\/)*(?:mcp|\.well-known\/oauth-protected-resource)(?:\/|$)/.test(path) || /^\/\.well-known\/oauth-protected-resource(?:\/|$)/.test(path);
 export async function handleAPI(request, index, refresh = {}, recommendTask = (index, prompt, modelIds, endpointIds) => recommend(index, prompt, Date.now(), null, undefined, modelIds ?? null, endpointIds ?? null)) {
   const path = new URL(request.url).pathname;
   if (path === '/scout/api/status') {

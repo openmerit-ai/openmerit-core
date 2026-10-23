@@ -52,7 +52,7 @@ export function indexStatus(index, now = Date.now()) {
   return { ...status, calibration: calibrationStatus(now), stale: staleSources(index.snapshot, now), degraded: index.snapshot.sources.some(s=>s.status==='failed') };
 }
 
-// HTTP/MCP provide the same server-interpreted task. Client-supplied task objects
+// HTTP provides a server-interpreted task. Client-supplied task objects
 // are never accepted. Every search uses the same semantic task contract.
 export function recommend(index, prompt, now = Date.now(), interpretedTask = null, taskEvidence = undefined, modelIds = null, endpointIds = null) {
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('Describe a task in 1–4,000 characters.');

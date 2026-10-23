@@ -7,7 +7,6 @@ import { referenceWork } from '../comparison.mjs';
 import { createIndex, recommend } from '../rank.mjs';
 import { decisionQuestions, interpretDecisions } from '../decisions.mjs';
 import { handleAPI } from '../http.mjs';
-import { handleMCP } from '../mcp.mjs';
 import { allowProfiles } from './helpers-specialists.mjs';
 const task = (kind, vision = false) => ({ kind, labelSpace: kind === 'classify' ? 'supplied' : null, needsVision: vision, weights: vision ? { vision: 3 } : { structured: 3 }, workload: { input: 'short', output: 'short', priority: 'balanced' }, outputContract: kind === 'classify' ? 'labels' : kind === 'detect' ? 'boxes' : 'masks' });
 const index = createIndex(snapshot);
@@ -73,14 +72,12 @@ test('fixed label sets and domain-specific models do not become arbitrary classi
   assert.equal(hubEndpointModels({ specialists: [{ ...repo, id: 'lab/medical', pipeline: 'zero-shot-image-classification' }] }, task('classify', true), 'Label indoor or outdoor').length, 0);
   assert.equal(hubEndpointModels({ specialists: [{ ...repo, pipeline: 'zero-shot-object-detection' }] }, task('segment', true), 'Mask the object').length, 0);
 });
-test('HTTP/MCP endpoint selection is exact; legacy model inventory cannot grant a direct endpoint', async () => {
+test('HTTP endpoint selection is exact; legacy model inventory cannot grant a direct endpoint', async () => {
   const endpoint = contractModels()[0];
   const t = task('classify', true), run = (i, p, models, endpoints) => recommend(i, p, Date.now(), t, undefined, models ?? null, endpoints ?? null);
   const args = { prompt: 'Label a photo', endpointIds: [endpoint.endpoint.id] };
   const request = (path, data) => new Request(`https://example.test/scout/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
   const http = await (await handleAPI(request('api/recommend', args), index, {}, run)).json();
-  const mcp = (await (await handleMCP(request('mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scout_models', arguments: args } }), index, {}, run)).json()).result.structuredContent;
-  assert.deepEqual(http.recommendations, mcp.recommendations.map(({ evidenceCount: _c, ...m }) => m));
   assert.equal(http.recommendations.length, 1); assert.equal(http.recommendations[0].endpoint.id, endpoint.endpoint.id);
   assert.equal(run(index, args.prompt, [], undefined).recommendations.length, 0);
   assert.equal(run(index, args.prompt, undefined, []).recommendations.length, 0);

@@ -7,7 +7,6 @@ import { createIndex, recommend } from '../rank.mjs';
 import { capabilities } from '../capabilities.mjs';
 import { decisionQuestions } from '../decisions.mjs';
 import { handleAPI } from '../http.mjs';
-import { handleMCP } from '../mcp.mjs';
 import { gzipSync, strToU8 } from 'fflate';
 import { createProductAnalytics } from '../product-analytics.mjs';
 
@@ -46,14 +45,12 @@ test('a data point keeps the five in order, with true zeros distinct from unknow
   result.ranking.mode = 'task-fit'; assert.equal(decode(searchDataPoint({ result })).top5[0].quality, null);
 });
 
-test('real HTTP/MCP recommendations retain exact prompts and ordered five without visitor metadata', async () => {
+test('real HTTP recommendations retain exact prompts and ordered five without visitor metadata', async () => {
   const points = []; const observe = createSearchObserver({ writeDataPoint: p => points.push(p) });
   const run = createRecommender({ apiKey: 'provider-secret', observe, fetcher: async () => Response.json({ answers: answers({ vision: 'required' }) }) });
   const prompt = `  Classify photos into cat or dog labels.\n${secret}  `;
   const result = await (await handleAPI(post({ prompt }), index, {}, run)).json();
-  const request = new Request('https://example.test/scout/mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: secret, method: 'tools/call', params: { name: 'scout_models', arguments: { prompt } } }) });
-  const mcp = await (await handleMCP(request, index, {}, (...args) => run(...args, 'mcp'))).json();
-  assert.equal(points.length, 2); assert.equal(mcp.result.isError, false);
+  assert.equal(points.length, 1);
   for (const point of points) {
     assert.equal(point.blobs[0], '3'); assert.equal(decode(point).prompt, prompt);
     assert.doesNotMatch(JSON.stringify(point), /192.0.2.99|private-device|provider-secret|visitor/);
@@ -61,11 +58,11 @@ test('real HTTP/MCP recommendations retain exact prompts and ordered five withou
     assert.deepEqual(decode(point).top5.map(m => [m.model, m.endpoint]), result.recommendations.map(m => [m.modelId, m.endpoint.id]));
     assert.equal(point.blobs[2], 'ok'); assert.equal(point.blobs[4], 'task-fit');
   }
-  assert.deepEqual(points.map(p => p.blobs[1]), ['api', 'mcp']);
+  assert.deepEqual(points.map(p => p.blobs[1]), ['api']);
   await handleAPI(new Request('https://example.test/scout/api/status'), index, {}, run);
   await handleAPI(post({ prompt: 'bad', extra: secret }), index, {}, run);
   await handleAPI(post({ prompt: '' }), index, {}, run);
-  assert.equal(points.length, 2, 'status and rejected requests are not searches');
+  assert.equal(points.length, 1, 'status and rejected requests are not searches');
 });
 
 test('empty inventories, clarification and unsupported tasks have distinct empty-list outcomes', async () => {
@@ -442,19 +439,18 @@ test('native web, feedback and CLI errors preserve correlation without bypassing
   assert.equal(sent.length, before, 'opt-out and the account gate suppress every derived event');
 });
 
-test('actual computation attempts, failed stages and HTTP-200 MCP failures have native diagnostics', async t => {
+test('actual computation attempts, failed stages and HTTP failures have native diagnostics', async t => {
   const sent = [], pending = [], env = { POSTHOG_PROJECT_TOKEN: 'phc_fixture', POSTHOG_HOST: 'https://eu.i.posthog.com', POSTHOG_ENVIRONMENT: 'test' };
   t.mock.method(globalThis, 'fetch', async (_, options) => { sent.push(...JSON.parse(options.body).batch); return new Response(null, { status: 200 }); });
   const trace = crypto.randomUUID(), retry = crypto.randomUUID(), startedAt = '2026-10-22T01:02:03.000Z';
-  const analytics = createProductAnalytics(new Request('https://example.test/scout/mcp', { headers: { 'X-Scout-Trace-Id': trace, 'X-Scout-Retry-Of': retry, 'X-Scout-Agent': 'claude-code' } }), env, { waitUntil: p => pending.push(p) });
+  const analytics = createProductAnalytics(new Request('https://example.test/scout/api/recommend', { headers: { 'X-Scout-Trace-Id': trace, 'X-Scout-Retry-Of': retry, 'X-Scout-Client': 'web' } }), env, { waitUntil: p => pending.push(p) });
   const span = (stage, rest = {}) => ({ id: crypto.randomUUID(), stage, durationMs: 43, startedAt, failed: false, ...rest });
   const attempt = rest => ({ id: crypto.randomUUID(), operation: 'responses', durationMs: 19, startedAt, ...rest });
   const diagnostics = { failure: { stage: 'decisions', code: 'rate_limited', providerStatus: 429 }, pendingStages: ['decisions'],
     spans: [span('decisions', { failed: true }), span('decisions', { pending: true }), span('decisions')],
     generations: [attempt({ code: 'rate_limited', providerStatus: 429 }), attempt({ model: 'gpt-6-luna', inputTokens: 83, outputTokens: 7, cachedInputTokens: 0 }), attempt({ operation: 'embeddings', inputTokens: 11, model: 'text-embedding-3-small' })] };
   analytics.observeSearch({ prompt: secret, outcome: 'interpretation_error', durationMs: 72, error: new TypeError(secret), diagnostics });
-  analytics.observeMCP('tools/call', secret, 'scout_models');
-  analytics.complete(Response.json({ result: { isError: true, content: [{ text: secret }] } }));
+  analytics.complete(Response.json({ error: secret }, { status: 503 }));
   while (pending.length) await Promise.all(pending.splice(0));
   const search = sent.find(e => e.event === 'scout_search_completed').properties;
   assert.equal(search.trace_id, trace); assert.equal(search.retry_of, retry); assert.equal(search.failure_stage, 'decisions'); assert.equal(search.failure_code, 'rate_limited'); assert.equal(search.provider_status, 429);
@@ -465,8 +461,7 @@ test('actual computation attempts, failed stages and HTTP-200 MCP failures have 
   assert.equal(generations[1].properties.$ai_total_cost_usd, undefined); assert.equal(generations[1].properties.$ai_parent_id, trace); assert.equal(generations[1].timestamp, startedAt);
   assert.equal(sent.find(e => e.event === '$ai_embedding').properties.$ai_input_tokens, 11);
   assert.equal(sent.find(e => e.event === 'scout_request_completed').properties.outcome, 'error');
-  assert.equal(sent.find(e => e.event === '$mcp_tool_call').properties.$mcp_is_error, true);
-  assert.equal(sent.find(e => e.event === '$mcp_tool_call').properties.$mcp_tool_name, 'scout_models');
+  assert.equal(sent.find(e => e.event === 'scout_request_completed').properties.http_status, 503);
   assert.equal(sent.filter(e => e.event === '$exception').length, 1);
   assert.doesNotMatch(JSON.stringify(sent), /PRIVATE_CANARY|example.invalid/);
   for (const cache of ['hit', 'shared']) analytics.observeSearch({ result: { tasks: [] }, outcome: 'empty', durationMs: 3, diagnostics: { ...diagnostics, failure: undefined, cache } });

@@ -35,7 +35,7 @@
     <div class="scout-wrap header-inner">
       <a class="parent-brand" href="/" aria-label="OpenMerit home"><svg width="22" height="25" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span>openmerit</span></a>
       <a class="scout-brand" href="/scout/">Scout <span class="beta-label">Beta</span></a>
-      <nav aria-label="Scout navigation"><a href="/docs/scout/">Docs</a><a href="#for-agents">API &amp; MCP <span aria-hidden="true">↗</span></a></nav>
+      <nav aria-label="Scout navigation"><a href="/docs/scout/">Docs</a><a href="#for-agents">API <span aria-hidden="true">↗</span></a></nav>
       <div class="account-controls"><button id="sign-in" class="sign-in-button" type="button">Sign in</button><div id="user-account" aria-label="Your account" hidden></div></div>
     </div>
   </header>
@@ -49,33 +49,13 @@
       <button class="add-agent-button" type="button" aria-expanded="false" aria-controls="agent-picker">
         <span class="agent-logos" aria-hidden="true">
           <img src="/scout/agents/claude.png" width="28" height="28" alt="">
-          <img src="/scout/agents/cursor.png" width="28" height="28" alt="">
-          <img src="/scout/providers/openai.png" width="28" height="28" alt="">
-          <img src="/scout/agents/amp.png" width="28" height="28" alt="">
-          <img src="/scout/agents/opencode.png" width="28" height="28" alt="">
-          <img src="/scout/agents/t3-code.png" width="28" height="28" alt="">
         </span>
-        <span>Add to your coding agent</span>
+        <span>Add to Claude Code</span>
       </button>
       <div id="agent-picker" class="agent-picker" role="region" aria-labelledby="agent-picker-title" hidden>
-        <div class="agent-picker-heading"><h2 id="agent-picker-title">Choose your coding agent</h2><button id="close-agent-picker" type="button" aria-label="Close agent picker">×</button></div>
-        <p class="agent-picker-intro">Connect OpenMerit, starting with Scout. Claude Code has a source-preview installer; other agents use manual MCP setup.</p>
-        <div id="agent-options" class="agent-options">
-          <button type="button" data-agent="claude-code"><img src="/scout/agents/claude.png" width="24" height="24" alt=""><span>Claude Code</span></button>
-          <button type="button" data-agent="cursor"><img src="/scout/agents/cursor.png" width="24" height="24" alt=""><span>Cursor</span></button>
-          <button type="button" data-agent="codex"><img src="/scout/providers/openai.png" width="24" height="24" alt=""><span>Codex</span></button>
-          <button type="button" data-agent="amp"><img src="/scout/agents/amp.png" width="24" height="24" alt=""><span>Amp</span></button>
-          <button type="button" data-agent="opencode"><img src="/scout/agents/opencode.png" width="24" height="24" alt=""><span>OpenCode</span></button>
-          <button type="button" data-agent="t3-code"><img src="/scout/agents/t3-code.png" width="24" height="24" alt=""><span>T3 Code</span></button>
-          <button type="button" data-agent="other"><span>Other agent</span></button>
-        </div>
-        <p id="agent-copy-status" role="status" aria-live="polite"></p>
-        <div id="agent-copy-result" hidden>
-          <p id="agent-paste-hint"></p>
-          <div id="agent-manual-copy" hidden><label for="agent-instructions">Setup instructions</label><textarea id="agent-instructions" rows="5" readonly></textarea><button id="select-agent-instructions" class="quiet-button" type="button">Select instructions</button></div>
-          <button id="choose-another-agent" class="quiet-button" type="button">Choose another agent</button>
-        </div>
-        <p class="agent-picker-note">Install → authorize → verify → first task. Copying is only the first step. Setup changes need your approval; new capabilities do not grant new permissions. <a href="#for-agents">API &amp; MCP details ↗</a></p>
+        <div class="agent-picker-heading"><h2 id="agent-picker-title">Claude Code</h2><button id="close-agent-picker" type="button" aria-label="Close Claude Code panel">×</button></div>
+        <p class="agent-picker-intro">Integration is being rebuilt. Setup is not available yet.</p>
+        <p class="agent-picker-note">For now, use Scout in your browser. This panel does not install or connect anything.</p>
       </div>
       </div>
     </section>
@@ -131,13 +111,11 @@
   <footer class="scout-footer scout-wrap">
     <div class="support-sections">
       <details class="support-section" id="for-agents">
-        <summary>API &amp; MCP</summary>
+        <summary>JSON API</summary>
         <div class="agent-body">
-          <p>Connect OpenMerit to discover inference models with Scout. Get the same recommendations, endpoint IDs, and evidence as this page.</p>
-          <p class="agent-note">Add to your coding agent copies guided setup instructions. Claude Code's installer is source-preview only, not yet published to npm. Other clients require manual setup. Your usage-analytics preference applies to newly copied URLs.</p>
-          <div class="code-heading"><span>MCP · Streamable HTTP</span><button class="quiet-button" id="copy-mcp" type="button">Copy URL</button></div><pre tabindex="0"><code id="mcp-url"></code></pre>
+          <p>Get the same recommendations, endpoint IDs, and evidence as this page through the JSON API.</p>
           <div class="code-heading"><span>JSON API</span><button class="quiet-button" id="copy-command" type="button">Copy request</button></div><pre tabindex="0"><code id="agent-code"></code></pre>
-          <p class="agent-note">Browser-session bearer tokens remain required for the JSON API. Native MCP OAuth is a source-preview path and stays disabled until configured by the operator; copying does not sign you in. Never paste tokens into an agent conversation. <a id="agent-docs" href="/docs/scout/#connect-a-coding-agent">Setup, recovery &amp; API guide ↗</a></p>
+          <p class="agent-note">A current browser-session bearer token is required. Never paste tokens into an agent conversation. <a href="/docs/scout/#json-api">API guide ↗</a></p>
         </div>
       </details>
       <details class="support-section" id="capability-index"><summary>Capabilities</summary><p>Coverage in the index. Task matches appear first.</p><ul id="capability-list" class="capability-list" aria-label="Indexed capabilities"></ul></details>

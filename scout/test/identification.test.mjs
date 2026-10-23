@@ -8,7 +8,6 @@ import { contractModels, endpointSupports, hubEndpointModels } from '../endpoint
 import { measuredCandidates } from '../task-evidence.mjs';
 import { workloadFor } from '../comparison.mjs';
 import { handleAPI } from '../http.mjs';
-import { handleMCP } from '../mcp.mjs';
 import { semanticAnswers } from './helpers-specialists.mjs';
 
 const now = Date.parse(snapshot.checkedAt), index = createIndex(snapshot);
@@ -21,7 +20,7 @@ const cases = [
   { name: 'supplied ticket labels with JSON', prompt: 'Classify support tickets into billing, technical or account. Return strict JSON with category and confidence.', labelSpace: 'supplied', vision: false, json: true },
 ];
 
-for (const c of cases) test(`${c.name}: HTTP and MCP preserve label contracts and batch specialist compatibility`, async () => {
+for (const c of cases) test(`${c.name}: HTTP preserves label contracts and batch specialist compatibility`, async () => {
   let calls = 0;
   const invoke = createRecommender({ apiKey: 'test-only', now: () => now, fetcher: async (url, options) => {
     calls++; assert.equal(url, 'https://api.openai.com/v1/decisions');
@@ -35,25 +34,21 @@ for (const c of cases) test(`${c.name}: HTTP and MCP preserve label contracts an
   const post = (path, body) => new Request(`https://example.test/scout/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const api = await handleAPI(post('api/recommend', { prompt: c.prompt }), index, {}, invoke);
   assert.equal(api.status, 200);
-  const rpc = await (await handleMCP(post('mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scout_models', arguments: { prompt: c.prompt } } }), index, {}, invoke)).json();
-  assert.equal(rpc.result.isError, false); assert.equal(calls, c.vision && c.labelSpace === 'supplied' ? 4 : 2);
-  const results = [await api.json(), rpc.result.structuredContent];
-  assert.deepEqual(results[0].recommendations.map(m => m.id), results[1].recommendations.map(m => m.id));
-  for (const result of results) {
-    assert.equal(result.task.labelSpace, c.labelSpace);
-    assert.equal(result.recommendations.length, 5);
-    assert.equal(result.ranking.mode, c.labelSpace === 'open' ? 'benchmarks' : 'task-fit');
-    if (c.labelSpace === 'open') {
-      assert.ok(result.recommendations.every(m => !m.endpoint.operations && m.modalities.includes('image')));
-      assert.ok(result.recommendations.every(m => m.evidence.length > 0));
-      assert.deepEqual(result.specialists.candidates, [], 'Label-dependent classifiers cannot reappear through discovery');
-      assert.ok(result.warnings.some(w => /specific identities/.test(w)));
-    } else {
-      assert.ok(result.recommendations.some(m => m.endpoint.protocol === 'decisions'));
-      if (c.vision) assert.ok(result.recommendations.some(m => m.endpoint.protocol === 'zero-shot-image-classification'));
-    }
-    if (c.json) assert.ok(result.recommendations.every(m => m.parameters.some(p => ['structured_outputs', 'response_format'].includes(p))));
+  assert.equal(calls, c.vision && c.labelSpace === 'supplied' ? 2 : 1);
+  const result = await api.json();
+  assert.equal(result.task.labelSpace, c.labelSpace);
+  assert.equal(result.recommendations.length, 5);
+  assert.equal(result.ranking.mode, c.labelSpace === 'open' ? 'benchmarks' : 'task-fit');
+  if (c.labelSpace === 'open') {
+    assert.ok(result.recommendations.every(m => !m.endpoint.operations && m.modalities.includes('image')));
+    assert.ok(result.recommendations.every(m => m.evidence.length > 0));
+    assert.deepEqual(result.specialists.candidates, [], 'Label-dependent classifiers cannot reappear through discovery');
+    assert.ok(result.warnings.some(w => /specific identities/.test(w)));
+  } else {
+    assert.ok(result.recommendations.some(m => m.endpoint.protocol === 'decisions'));
+    if (c.vision) assert.ok(result.recommendations.some(m => m.endpoint.protocol === 'zero-shot-image-classification'));
   }
+  if (c.json) assert.ok(result.recommendations.every(m => m.parameters.some(p => ['structured_outputs', 'response_format'].includes(p))));
 });
 
 test('missing, uncertain and low-confidence label sets cannot grant fixed-choice eligibility', () => {

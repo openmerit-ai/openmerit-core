@@ -5,14 +5,12 @@ import { decisionQuestions, interpretDecisions, classifyPrompt } from '../decisi
 import { createRecommender } from '../recommend.mjs';
 import { createIndex, recommend } from '../rank.mjs';
 import { handleAPI } from '../http.mjs';
-import { handleMCP } from '../mcp.mjs';
 import { bfclMetrics, parseBFCL, compileSnapshot } from '../sources.mjs';
 
 const snapshot = JSON.parse(await readFile(new URL('../snapshot.json', import.meta.url), 'utf8'));
 const index = createIndex(snapshot);
 const answers = (choices = {}) => decisionQuestions.map(q => ({ name: q.name, type: 'choice', confidence: .9, choice: choices[q.name] ?? ({ tools: 'no', memory: 'none', json: 'no', output_format: 'unspecified', output_specificity: 'established', output: 'supported', input_length: 'medium', output_length: 'medium', priority: 'balanced', task_kind: 'other' }[q.name] ?? 'absent') }));
 const post = (body, path = 'api/recommend') => new Request(`https://example.test/scout/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-const rpc = prompt => post({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scout_models', arguments: { prompt } } }, 'mcp');
 
 // Reproduce the observed false positives, including low-confidence format answers.
 test('a mention of tools or agents and a spurious JSON answer cannot force action or schema requirements', () => {
@@ -38,7 +36,7 @@ test('invalid, missing, duplicate, refused or uncalibrated answers fail closed',
   }
 });
 
-test('HTTP and MCP make one server-side interpretation each and retain required memory/tool evidence in compact results', async () => {
+test('HTTP makes one server-side interpretation and retains required memory/tool evidence', async () => {
   let calls = 0;
   const run = createRecommender({ apiKey: 'test-secret', fetcher: async (url, options) => {
     calls++; assert.equal(url, 'https://api.openai.com/v1/decisions'); assert.ok(options.signal);
@@ -47,15 +45,12 @@ test('HTTP and MCP make one server-side interpretation each and retain required 
   } });
   const prompt = 'Use functions to save supplier details and recall them across future sessions.';
   const http = await (await handleAPI(post({ prompt }), index, {}, run)).json();
-  const mcp = (await (await handleMCP(rpc(prompt), index, {}, run)).json()).result.structuredContent;
-  assert.equal(calls, 2); assert.equal(http.task.interpreter, 'openai-decisions');
+  assert.equal(calls, 1); assert.equal(http.task.interpreter, 'openai-decisions');
   assert.equal(http.recommendations.length, 5);
-  assert.deepEqual(mcp.recommendations.map(m => m.id), http.recommendations.map(m => m.id));
-  for (const model of mcp.recommendations) {
+  for (const model of http.recommendations) {
     assert.ok(model.parameters.includes('tools'));
     assert.ok(model.evidence.some(e => e.capabilities.includes('memory')));
     assert.ok(model.evidence.some(e => e.capabilities.includes('tools')));
-    assert.ok(model.evidence.length <= 4);
   }
   assert.ok(http.warnings.some(w => /external key-value/.test(w)));
 });
@@ -79,7 +74,6 @@ test('invalid requests spend no provider calls and provider failure is unavailab
   assert.equal(calls, 0);
   const failed = await handleAPI(post({ prompt: 'Write a story' }), index, {}, run);
   assert.equal(failed.status, 503); assert.doesNotMatch(await failed.text(), /test-secret/);
-  assert.equal((await (await handleMCP(rpc('Write a story'), index, {}, run)).json()).result.isError, true);
   await assert.rejects(createRecommender()(index, 'Task'), e => e.status === 503);
   await assert.rejects(classifyPrompt('Task', { apiKey: 'test', timeoutMs: 5, fetcher: (_u, { signal }) => new Promise((_resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('timeout did not fire')), 100);

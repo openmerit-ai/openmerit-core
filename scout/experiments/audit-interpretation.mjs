@@ -17,17 +17,15 @@ if (!live && !process.env.OPENAI_API_KEY) throw new Error('Local semantic accept
 const cases = [...interpretationCases, ...formatCases, ...sqlCases, ...specialistCases];
 const index = live ? null : createIndex(snapshot), results = [];
 for (const c of cases) {
-  const started = performance.now(), channel = live ? (results.length % 2 ? 'mcp' : 'api') : 'local';
+  const started = performance.now(), channel = live ? 'api' : 'local';
   let result, interpretation, rankingMs = null;
   if (live) {
-    const request = channel === 'api' ? { prompt: c.prompt } : { jsonrpc: '2.0', id: results.length + 1, method: 'tools/call', params: { name: 'scout_models', arguments: { prompt: c.prompt } } };
-    const response = await fetch(`https://openmerit.ai/scout/${channel === 'api' ? 'api/recommend' : 'mcp'}`, {
+    const request = { prompt: c.prompt };
+    const response = await fetch('https://openmerit.ai/scout/api/recommend', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request), signal: AbortSignal.timeout(20_000),
     });
     if (!response.ok) throw new Error(`${c.id}: HTTP ${response.status}`);
-    const body = await response.json();
-    if (channel === 'mcp' && (!body.result || body.result.isError)) throw new Error(`${c.id}: MCP error`);
-    result = channel === 'api' ? body : body.result.structuredContent;
+    result = await response.json();
   } else {
     interpretation = await classifyPrompt(c.prompt, { apiKey: process.env.OPENAI_API_KEY });
     interpretation.task.specialistMatch = await matchSpecialists(c.prompt, interpretation.task, index.snapshot.specialistProfiles ?? [], { apiKey: process.env.OPENAI_API_KEY });
