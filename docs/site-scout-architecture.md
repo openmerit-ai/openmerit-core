@@ -1,5 +1,11 @@
 # Scout architecture and operations
 
+## OpenMerit coding-agent handoff — deployed, 23 October 2026
+
+The owner approved committing/pushing all changes and deploying only Scout. Serving version `46efc73f-2e08-4ccc-a9a2-7581b1f48bda`, built from [ac8aab9](https://github.com/laz-aslam/openmerit/commit/ac8aab99b29bcd5092c358aff2acb64a9afdea9c), serves 100% of Scout traffic. The first asset-upload attempt failed without creating a version; the retry succeeded. Full `npm run verify` passed 752 tests with one existing skip and no ignored failures; GitHub verification and package-smoke jobs passed. The two pre-existing DeepSeek icon edits were restored to verified official bytes with the owner's approval rather than bypassing integrity checks.
+
+Live HTML, Scout scripts/styles and the data policy match built bytes. The production picker copied the HTTPS endpoint, analytics opt-out and public-client setup instructions; browser captures were inspected. Anonymous API/MCP requests remain 401, the MCP challenge advertises protected-resource metadata, and metadata remains 503 because OAuth is unconfigured. Existing browser-auth/account-sync configuration and the exact `SCOUT_ACCOUNTS` namespace are preserved. Root website, main-site Scout documentation and neighboring-path responses are unchanged; publisher, root-site, router and terminal deployment IDs are unchanged. No Clerk settings, access controls or npm release changed. The Claude Code installer remains source-preview only; real OAuth issuance, sign-in/renewal and fresh-session invocation are not established by this serving rollout.
+
 ## Version-5 instrumentation rollout
 
 The implementation adds the [version-5 instrumentation contract](scout.md#version-5-instrumentation): native web lifecycle/CTA events, allowlisted acquisition/device categories, support-dependent sampled vitals, same-tab linked identity, logical MCP failures, stage/provider failure codes, bounded real computation attempts/tokens and feedback/retry correlation. Shared cache followers have no generation attempts of their own. Unknown usage/cost stays unknown; shortlist evidence is not model execution. Prompt-content and retention controls are unchanged. CLI version/platform/runtime and sanitized application frames remain explicitly opt-in. Replay is a separate spike and is not activated.
