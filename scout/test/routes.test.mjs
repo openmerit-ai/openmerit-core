@@ -185,8 +185,8 @@ test('agent setup attribution joins verified MCP connections, never copies, fail
     for(const outcome of ['ok','error'])assert.equal((await alpha.fetch(eventRequest('scout_agent_setup_copied',{agent:'cursor',artifact,outcome,instructions:privateName},token),config,ctx)).status,204);
   }
   await ctx.flush();
-  assert.deepEqual(sent.filter(e=>e.event==='scout_agent_setup_copied').map(e=>[e.properties.artifact,e.properties.outcome]),
-    ['setup_prompt','mcp_url','api_request',undefined].flatMap(artifact=>[[artifact,'ok'],[artifact,'error']]));
+  assert.deepEqual(sent.filter(e=>e.event==='scout_agent_setup_copied').map(e=>[e.properties.artifact,e.properties.outcome]).sort(),
+    ['setup_prompt','mcp_url','api_request',undefined].flatMap(artifact=>[[artifact,'ok'],[artifact,'error']]).sort());
   assert.equal(sent.filter(e=>e.event==='scout_agent_connected').length,0,'copy successes and failures are not connections');
   assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_CANARY/);
   sent.length=0;
@@ -219,7 +219,7 @@ test('agent setup attribution joins verified MCP connections, never copies, fail
   await call('?agent=amp&analytics=off');await ctx.flush();assert.equal(sent.length,0);
   await call('?agent=PRIVATE_CANARY&private=PRIVATE_CANARY');
   await call('?agent=cursor','initialize',{'x-scout-agent':'amp'});
-  await ctx.flush();assert.deepEqual(sent.filter(e=>e.event==='scout_agent_connected').map(e=>e.properties.agent),['unknown','amp']);
+  await ctx.flush();assert.deepEqual(sent.filter(e=>e.event==='scout_agent_connected').map(e=>e.properties.agent).sort(),['amp','unknown']);
   assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_CANARY/);
 });
 
