@@ -10,7 +10,8 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (isRetiredAgentPath(url.pathname)) return json({ error: 'Not found.' }, 404);
-    if (url.pathname !== '/scout' && !url.pathname.startsWith('/scout/')) return fetch(request);
+    const connect = url.pathname === '/connect' || url.pathname.startsWith('/connect/');
+    if (!connect && url.pathname !== '/scout' && !url.pathname.startsWith('/scout/')) return fetch(request);
     if (url.pathname === base || url.pathname.startsWith(`${base}/`)) {
       url.pathname = `/scout${url.pathname.slice(base.length) || '/'}`;
       // 308 preserves POST bodies for old API clients; no-store permits a

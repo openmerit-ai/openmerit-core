@@ -357,8 +357,17 @@ function setupURL(path) {
 function setupCommand() {
   return `curl '${setupURL('api/recommend')}' \\\n  -H "Authorization: Bearer $SCOUT_TOKEN" \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Scout-Analytics-Content: off' \\\n  -d '{"prompt":"Extract six invoice fields as JSON"}'`;
 }
+// Static and secret-free: the CLI signs the device in through the browser.
+const agentPrompt = `Connect OpenMerit Scout to Claude Code for me.
+
+Run: npx -y openmerit@preview install --client claude-code
+
+If it prints an approval link and code, show them to me, wait until I say I approved, then run the same command again. It resumes the same request. Do not edit configuration files yourself and never ask me for a key. If it reports a conflict or another error, show me its message and stop.
+
+When it finishes, tell me to restart Claude Code (or reconnect "openmerit" in /mcp), then help me try Scout on a non-confidential task.`;
 function renderAgentSetup() {
   $('#agent-code').textContent = setupCommand();
+  $('#agent-prompt').textContent = agentPrompt;
 }
 function showAgentPicker(open, restoreFocus = false) {
   $('#agent-picker').hidden = !open;
@@ -380,6 +389,10 @@ $('.agent-install').addEventListener('focusout', event => {
   if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) showAgentPicker(false);
 });
 $('#copy-command').addEventListener('click', () => copy(setupCommand(), $('#copy-command')));
+$('#copy-agent-prompt').addEventListener('click', async () => {
+  const copied = await copy(agentPrompt, $('#copy-agent-prompt'), 'Copied to clipboard');
+  analytics.track('scout_agent_setup_copied', { agent: 'claude-code', outcome: copied ? 'ok' : 'error' });
+});
 window.addEventListener('scout-analytics-change', renderAgentSetup);
 renderAgentSetup();
 fetch(`${basePath}/api/status`).then(response => { if (!response.ok) throw new Error(); return response.json(); }).then(data => { if (!result) showIndex(data); }).catch(() => { if (!result) { $('#index-counts').textContent = 'Index unavailable'; } });

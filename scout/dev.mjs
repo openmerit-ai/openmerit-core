@@ -5,16 +5,29 @@ import { Readable } from 'node:stream';
 import { setDefaultResultOrder } from 'node:dns';
 import { createIndex, selectSnapshot } from './rank.mjs';
 import { handleAPI, json, isRetiredAgentPath } from './http.mjs';
+import { handleMCP } from './mcp.mjs';
+import { handleConnect } from './connect.mjs';
+import { DatabaseSync } from 'node:sqlite';
 import { refreshSnapshot } from './sources.mjs';
 import { createRecommender } from './recommend.mjs';
 import { registry } from './registry.mjs';
-import { scoutAccess } from './auth.mjs';
+import { scoutAccess, sessionUser } from './auth.mjs';
 import { createProductAnalytics } from './product-analytics.mjs';
 import '../scripts/build-web-analytics.mjs';
 
 const root = resolve(import.meta.dirname, '../site');
 const recommendTask = createRecommender({ apiKey: process.env.OPENAI_API_KEY });
-const analyticsEnv = { ...process.env, POSTHOG_ENVIRONMENT: 'development' };
+// Local stand-in for the D1 binding that stores device logins and keys.
+function localD1(file) {
+  const db = new DatabaseSync(file);
+  return {
+    async exec(sql) { db.exec(sql); },
+    prepare(sql) { let values = []; return { bind(...v) { values = v; return this; }, async first() { return db.prepare(sql).get(...values) ?? null; }, async all() { return { results: db.prepare(sql).all(...values) }; }, async run() { db.prepare(sql).run(...values); return { success: true }; } }; },
+  };
+}
+const connectDB = process.env.OPENMERIT_CONNECT_DB ?? resolve(import.meta.dirname, '../.openmerit/scout/connect.sqlite');
+if (connectDB !== ':memory:') await mkdir(resolve(connectDB, '..'), { recursive: true });
+const analyticsEnv = { ...process.env, POSTHOG_ENVIRONMENT: 'development', SCOUT_INDEX: localD1(connectDB) };
 setDefaultResultOrder('ipv4first');
 const cache = resolve(import.meta.dirname, '../.openmerit/scout/snapshot.json');
 let snapshot;
@@ -44,13 +57,19 @@ const server = createServer(async (req, res) => {
       const response = json({ error: 'Not found.' }, 404);
       res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(req.method === 'HEAD' ? undefined : await response.text()); return;
     }
-    if (url.pathname.startsWith('/scout/api/')) {
-      const request = new Request(url, { method: req.method, headers: req.headers, ...(!['GET', 'HEAD'].includes(req.method) ? { body: Readable.toWeb(req), duplex: 'half' } : {}) });
+    const toRequest = () => new Request(url, { method: req.method, headers: req.headers, ...(!['GET', 'HEAD'].includes(req.method) ? { body: Readable.toWeb(req), duplex: 'half' } : {}) });
+    if (url.pathname === '/connect') { res.writeHead(308, { Location: `/connect/${url.search}` }); res.end(); return; }
+    if (url.pathname.startsWith('/connect/api/')) {
+      const request = toRequest(), response = await handleConnect(request, analyticsEnv, { session: request => sessionUser(request, analyticsEnv) });
+      res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text()); return;
+    }
+    if (url.pathname.startsWith('/scout/api/') || url.pathname === '/scout/mcp') {
+      const request = toRequest(), mcp = url.pathname === '/scout/mcp';
       const analytics = createProductAnalytics(request, analyticsEnv);
       let response = await scoutAccess(request, analyticsEnv, analytics.identify) ?? (url.pathname === '/scout/api/analytics'
         ? await analytics.handleEvent()
         : url.pathname === '/scout/api/analytics/preference' ? await analytics.handlePreference()
-        : await handleAPI(request, index, refreshState, (...args) => recommendTask(...args, 'api', analytics.observeSearch)));
+        : await (mcp ? handleMCP : handleAPI)(request, index, refreshState, (...args) => recommendTask(...args, mcp ? 'mcp' : 'api', analytics.observeSearch)));
       analytics.complete(response);
       response = analytics.response(response);
       res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text()); return;

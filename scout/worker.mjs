@@ -1,11 +1,13 @@
 import { DurableObject, WorkflowEntrypoint } from 'cloudflare:workers';
 import { handleAPI, json, isRetiredAgentPath } from './http.mjs';
+import { handleMCP } from './mcp.mjs';
+import { handleConnect } from './connect.mjs';
 import { createRecommender } from './recommend.mjs';
 import { createSnapshotReader, getJSON, putJSON } from './store.mjs';
 import { runRefresh } from './pipeline.mjs';
 import { ParallelResearch } from './research.mjs';
 import { indexStatus } from './rank.mjs';
-import { scoutAccess } from './auth.mjs';
+import { scoutAccess, sessionUser } from './auth.mjs';
 import { createProductAnalytics } from './product-analytics.mjs';
 import { handleClerkWebhook } from './account-analytics.mjs';
 
@@ -72,9 +74,12 @@ export default {
     const url=new URL(request.url),path=url.pathname;
     if(isRetiredAgentPath(path))return json({error:'Not found.'},404);
     if(path==='/scout')return Response.redirect(`${url.origin}/scout/${url.search}`,308);
+    if(path==='/connect')return Response.redirect(`${url.origin}/connect/${url.search}`,308);
+    // Product-level device sign-in for coding agents. The page is a static asset.
+    if(path.startsWith('/connect/api/'))return handleConnect(request,env,{session:request=>sessionUser(request,env)});
     // This endpoint authenticates Clerk's signature, never a browser session.
     if(path==='/scout/api/webhooks/clerk')return handleClerkWebhook(request,env);
-    if(!path.startsWith('/scout/api/')) {
+    if(!path.startsWith('/scout/api/')&&path!=='/scout/mcp') {
       return ['GET','HEAD'].includes(request.method)?env.ASSETS.fetch(request):json({error:'Not found.'},404);
     }
     const analytics=createProductAnalytics(request,env,ctx);
@@ -91,7 +96,8 @@ export default {
         const health=await getJSON(env.SCOUT_CATALOGUE,'health.json').catch(()=>null);
         return json({...status,scheduler:'cloudflare-hourly',refreshStatus:status.degraded?'degraded':'idle',...health,snapshotVersion:index.snapshot.publication.id,refreshSummary:index.snapshot.refreshSummary});
       }
-      response=await handleAPI(request,index,{},(...args)=>recommend(...args,'api',analytics.observeSearch));
+      const mcp=path==='/scout/mcp';
+      response=await (mcp?handleMCP:handleAPI)(request,index,{},(...args)=>recommend(...args,mcp?'mcp':'api',analytics.observeSearch));
     } catch (error) {analytics.exception(error);response=json({error:'Scout could not load its prepared catalogue. Please try again shortly.'},503);}
     analytics.complete(response);return analytics.response(response);
   },

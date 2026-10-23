@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 
-test('dev server retires agent routes while preserving browser assets and HTTP auth/status', { timeout: 20_000 }, async t => {
+test('dev server serves only canonical MCP, retires aliases and keeps browser assets and HTTP auth/status', { timeout: 20_000 }, async t => {
   // Exercise the actual HTTP server without rebuilding site assets, refreshing
   // the catalogue, sending analytics or inheriting developer credentials.
   const entry = new URL('../dev.mjs', import.meta.url).href;
@@ -21,7 +21,7 @@ test('dev server retires agent routes while preserving browser assets and HTTP a
   `;
   const child = spawn(process.execPath, ['--input-type=module', '--eval', script], {
     cwd: new URL('../../', import.meta.url),
-    env: { SCOUT_PORT: '0', SCOUT_OAUTH_ENABLED: 'true', SCOUT_OAUTH_CLIENT_IDS: 'obsolete-client',
+    env: { SCOUT_PORT: '0', OPENMERIT_CONNECT_DB: ':memory:', SCOUT_OAUTH_ENABLED: 'true', SCOUT_OAUTH_CLIENT_IDS: 'obsolete-client',
       CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from('dev-auth.clerk.accounts.dev$').toString('base64')}`, CLERK_SECRET_KEY: 'sk_test_disposable' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -43,6 +43,7 @@ test('dev server retires agent routes while preserving browser assets and HTTP a
   });
   for (const prefix of ['/scout', '/scout/alpha', '/scout/v1', '/scout/v2']) {
     for (const suffix of ['/mcp', '/mcp/', '/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/scout/mcp']) {
+      if (prefix === '/scout' && suffix === '/mcp') continue;
       for (const method of ['GET', 'HEAD', 'POST', 'OPTIONS', 'DELETE']) {
         const response = await fetch(`${origin}${prefix}${suffix}?agent=claude-code`, { method, redirect: 'manual', headers: { origin: 'https://foreign.test', authorization: 'Bearer obsolete' } });
         assert.equal(response.status, 404, `${method} ${prefix}${suffix}`);
@@ -62,4 +63,9 @@ test('dev server retires agent routes while preserving browser assets and HTTP a
   assert.equal(auth.status, 200); assert.equal((await auth.json()).frontendApi, 'dev-auth.clerk.accounts.dev');
   const search = await fetch(`${origin}/scout/api/recommend`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"prompt":"A task"}' });
   assert.equal(search.status, 401); assert.equal((await search.json()).code, 'sign_in_required');
+  // Canonical MCP needs a device key; a browser session token or no token is refused.
+  const mcp = await fetch(`${origin}/scout/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer om_unknown' }, body: '{}' });
+  assert.equal(mcp.status, 401); assert.equal((await mcp.json()).code, 'device_key_required');
+  const start = await fetch(`${origin}/connect/api/device`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ client: 'claude-code', scope: 'user', device_name: 'test' }) });
+  assert.equal(start.status, 200); assert.match((await start.json()).verification_uri, /\/connect$/);
 });

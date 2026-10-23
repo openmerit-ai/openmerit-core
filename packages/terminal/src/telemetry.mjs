@@ -5,7 +5,7 @@ let clientVersion;
 for (const path of ['../../../package.json', '../../../../package.json']) {
   try { const pkg = JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')); if (pkg.name === 'openmerit') { clientVersion = pkg.version; break; } } catch {}
 }
-export const frameFiles = Object.freeze(['cli.mjs', 'server.mjs', 'collect.mjs', 'repository-index.mjs', 'scout.mjs', 'config.mjs', 'runner.mjs', 'adapters.mjs', 'process.mjs', 'report.mjs', 'app.js']);
+export const frameFiles = Object.freeze(['cli.mjs', 'server.mjs', 'collect.mjs', 'repository-index.mjs', 'install.mjs', 'scout.mjs', 'config.mjs', 'runner.mjs', 'adapters.mjs', 'process.mjs', 'report.mjs', 'app.js']);
 const applicationURLs = frameFiles.flatMap(file => ['terminal/src/', 'eval/src/'].map(dir => new URL(`../../${dir}${file}`, import.meta.url).href));
 const diagnostics = new WeakMap();
 export function scoutDiagnostic(error, trace, code) {
@@ -84,8 +84,9 @@ export function commandTelemetry(args) {
   const started = performance.now();
   const command_id = randomUUID();
   const actions = ['init', 'doctor', 'plan', 'run', 'watch', 'report'];
+  const setup = ['install', 'status', 'remove', 'login', 'logout', 'project', 'doctor'];
   const command = !args.length || args.includes('--help') || args.includes('-h') || args[0] === 'eval' && args.length === 1
-    ? 'help' : args[0] === 'dash' ? 'dash' : args[0] === 'eval' && actions.includes(args[1]) ? `eval_${args[1]}` : 'unknown';
+    ? 'help' : args[0] === 'dash' ? 'dash' : setup.includes(args[0]) ? args[0] : args[0] === 'eval' && actions.includes(args[1]) ? `eval_${args[1]}` : 'unknown';
   async function send(event, properties) {
     if (!telemetryEnabled()) return;
     const controller = new AbortController();
@@ -104,12 +105,13 @@ export function commandTelemetry(args) {
   }
   const pending = send('cli_command_started', { command });
   let completed = false;
-  return async (outcome, error) => {
+  // code: a content-free setup outcome such as approval_pending; never a message.
+  return async (outcome, error, code) => {
     if (completed) return;
     completed = true;
     await Promise.all([pending, send('cli_command_completed', {
       command, outcome: outcome === 'ok' ? 'ok' : 'error',
-      ...(outcome === 'ok' ? {} : { code: 'command_error', ...errorProperties(error) }),
+      ...(outcome === 'ok' ? {} : { code: code ?? 'command_error', ...(error ? errorProperties(error) : {}) }),
       duration_ms: Math.min(86400000, Math.max(0, Math.round(performance.now() - started))),
     })]);
   };

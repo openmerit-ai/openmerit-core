@@ -6,7 +6,7 @@ import './build-web-analytics.mjs';
 // must not become reachable through the independently deployed Scout Worker.
 const root = resolve(import.meta.dirname, '..'), output = resolve(root, 'dist/scout-site');
 await rm(output, { recursive: true, force: true });
-for (const path of ['scout', 'docs', 'styles.css', 'docs.css', 'docs.js', 'docs-search.js', 'product-analytics.js', 'favicon.svg',
+for (const path of ['scout', 'connect', 'docs', 'styles.css', 'docs.css', 'docs.js', 'docs-search.js', 'product-analytics.js', 'favicon.svg',
   'assets/inter-latin.woff2', 'assets/inter-LICENSE.txt', 'assets/openmerit-og-v1.png']) {
   const destination = resolve(output, path); await mkdir(dirname(destination), { recursive: true });
   await cp(resolve(root, 'site', path), destination, { recursive: true });

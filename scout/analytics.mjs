@@ -98,7 +98,7 @@ export function searchDataPoint(event = {}) {
   let { result, outcome = 'internal_error', channel = 'api', durationMs } = event;
   const record = searchRecord(event), { task: safeTask, top5, context } = record;
   const mode = pick(result?.ranking?.mode, modes);
-  channel = pick(channel, ['api']);
+  channel = pick(channel, ['api', 'mcp']);
   outcome = pick(outcome, ['ok', 'empty', 'clarification', 'unsupported', 'rate_limited', 'interpretation_error', 'internal_error']);
   // Keep legacy columns reserved. One payload holds the prompt, all five, and
   // their source evidence; compression avoids duplicating long source strings.

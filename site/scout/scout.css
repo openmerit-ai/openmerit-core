@@ -61,6 +61,10 @@ code, kbd { font-family: var(--mono); }
 .agent-picker-heading h2 { font-size: 13px; }
 .agent-picker-intro { margin-bottom: 12px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 #close-agent-picker { flex: none; width: 32px; height: 32px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 22px; line-height: 1; }
+.agent-prompt { margin: 0 0 10px; padding: 10px 12px; border-radius: 6px; background: var(--input); font: 11px/1.6 var(--mono); white-space: pre-wrap; }
+.copy-prompt-button { width: 100%; min-height: 36px; border: 0; border-radius: 6px; background: var(--button); color: var(--button-ink); font-weight: 600; }
+.copy-prompt-button:hover { background: var(--button-hover); }
+.agent-picker-note a { text-decoration: underline; text-underline-offset: 3px; }
 .agent-picker .agent-picker-note { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; font-size: 11px; line-height: 1.7; }
 #index-counts { display: flex; flex-wrap: wrap; row-gap: 3px; }
 #index-counts > span { white-space: nowrap; }

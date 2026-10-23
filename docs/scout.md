@@ -4,7 +4,7 @@ Describe what you need a model to do. Scout returns up to five model-and-endpoin
 
 Scout is a separate beta product. It does not change the OpenMerit npm package, Pi coordinator, or Inference Terminal. Recommendations are evidence-based candidates for your own evaluation, not a guarantee of task accuracy or an independently validated state-of-the-art ranking.
 
-**Coding-agent reset — 23 October 2026:** this build removes the Scout installer, persistent agent instructions, MCP transport, agent OAuth resource and activation tracking for a rebuild. Only a Claude Code web-interface placeholder remains; it cannot install, copy setup instructions or connect. Browser sign-in, searches and the JSON API remain available. Earlier dated MCP receipts below describe past deployments, not this build. Existing installed client configuration and authorization grants are not automatically removed or revoked. Scout serving, main-site documentation and npm publication are separate releases; the removed installer was never published to npm.
+**Coding-agent reset — 23 October 2026:** this build removes the Scout installer, persistent agent instructions, MCP transport, agent OAuth resource and activation tracking for a rebuild. Only a Claude Code web-interface placeholder remains; it cannot install, copy setup instructions or connect. Browser sign-in, searches and the JSON API remain available. Earlier dated MCP receipts below describe past deployments, not this build. Existing installed client configuration and authorization grants are not automatically removed or revoked. Scout serving, main-site documentation and npm publication are separate releases; the removed installer was never published to npm. A replacement [device sign-in setup](#connect-a-coding-agent) now exists in source only.
 
 ## Beta evaluation logging — 22 October 2026 rollout
 
@@ -396,9 +396,60 @@ The capability index lists each area with its benchmark-series and model counts.
 
 ## Connect a coding agent
 
-Coding-agent setup is unavailable in this build while it is rebuilt. **Add to Claude Code** opens a web-only status panel. It does not copy a prompt, write configuration, authorize a client or submit the task draft. Escape, the close button, clicking outside or moving focus out dismisses it. Other coding-agent choices have been removed.
+**Device sign-in setup — source only, not deployed or published (23 October 2026):** the commands below exist in source. They are not in published npm `0.1.7-preview.5`, and the hosted site does not yet serve `/connect` or `/scout/mcp`. Until both the Scout Worker and an npm preview are released, the Scout page's copied prompt cannot complete. Claude Code is the only supported client; other agents are not yet supported.
 
-The source no longer includes `openmerit agent`, Scout MCP or agent OAuth metadata. Removed endpoints return HTTP 404. Browser account sign-in remains unchanged. Use Scout in your browser for now; no replacement agent connection is implemented yet.
+**Add to Claude Code** on the Scout page opens a panel with a short prompt and a **Copy prompt** button. The prompt contains no key, account data or task draft. Paste it into Claude Code. It asks the agent to run one command:
+
+```sh
+npx -y openmerit@preview install --client claude-code
+```
+
+1. With no saved device key, the command starts a device sign-in. It prints an approval link and an eight-character code, opens the browser if it can, and waits up to 90 seconds.
+2. On `https://openmerit.ai/connect`, sign in if needed, check that the code matches the one in your agent, and click **Approve** (or **Deny**). The page shows the client, device name, scope and the only permission granted: Scout recommendations through MCP.
+3. If approval takes longer, the command exits with code 10. Rerunning the same command resumes the same request; it does not issue a new code. Codes expire after ten minutes and can be used once.
+4. Once approved, the command stores the device key, adds the `openmerit` MCP server to Claude Code with `claude mcp add-json`, writes the Scout skill, and checks the connection with a real MCP `initialize` and tool discovery. The check is not a search.
+5. Restart Claude Code, or reconnect `openmerit` in `/mcp`, then try Scout on a non-confidential task.
+
+`--client` defaults to the agent running the command (Claude Code sets `CLAUDECODE=1`). `--scope` defaults to `user`, which makes Scout available in every project. `--scope project` writes the skill to `.claude/skills/` in the current project and stores the MCP server in Claude Code's private per-project (`local`) configuration, so the key never enters the repository. `--plan` lists the changes without making them. `--json` prints one result object for agents.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Done |
+| 10 | Approval pending; open the link, approve, rerun |
+| 11 | Denied, expired or rejected key; rerun for a new code |
+| 20 | Conflict; nothing was changed |
+| 30 | OpenMerit unreachable |
+| 1 | Other error |
+
+**Conflicts are never overwritten.** Install stops if Claude Code already has an `openmerit` server it did not create, if an installed file was edited, or if `openmerit` exists in another Claude Code scope or `.mcp.json`. An install record stores hashes of what it wrote, so rerunning repairs missing files and updates unchanged ones. An unchanged rule file from the earlier source preview (`rules/openmerit.md`) is removed; an edited one is left alone.
+
+### Device keys
+
+Each approval creates one key for one device and client, limited to `scout:recommend`. It is accepted only on `/scout/mcp`; the JSON API and browser still require a Clerk session. The server stores only SHA-256 hashes of keys and device codes. A key expires after 90 days without use; each use extends it. The usual per-user rate limits and analytics preferences apply.
+
+On the device, the key is stored in `~/.config/openmerit/credentials.json` (mode 600; `OPENMERIT_CONFIG_DIR` or `XDG_CONFIG_HOME` override the location) and in Claude Code's MCP header configuration, which Claude Code stores in plain text. The CLI never prints the key and scrubs it from any failing `claude` output. Do not paste keys into a chat.
+
+Revoke devices under **Connected devices** on `/connect`. `openmerit remove` and `openmerit logout` also revoke this device's key.
+
+### Commands
+
+```sh
+openmerit install [--client claude-code] [--scope user|project] [--plan] [--json] [--no-open]
+openmerit status  [--client claude-code] [--scope user|project] [--check] [--json]
+openmerit remove  [--client claude-code] [--scope user|project] [--plan] [--json]
+openmerit login   # replace an expired or revoked key, then rerun install
+openmerit logout  # revoke and delete this device's key
+openmerit project --policy existing-only|existing-first [--endpoint-id <id> ...] [--plan]
+openmerit doctor  # Node.js, claude, reachability, key, MCP check and install state
+```
+
+Removal deletes the MCP server, the unchanged skill and the install record, and revokes the key. It keeps edited files and `.openmerit/scout.json`.
+
+### Using Scout from the agent
+
+The `openmerit-scout` skill loads when an application inference model is being chosen, even if you do not mention Scout. It is not loaded for unrelated edits, ordinary inference calls or the agent's own model. On first use in a project, it asks once whether the project is **existing-only** or **existing-first** and which public catalogue endpoint IDs it can reach, then saves them with `openmerit project`. Every search passes the saved `endpointIds`, including `[]`. Existing-only never broadens; existing-first asks before an unscoped search. Task descriptions go to Scout and OpenAI; do not send source files, secrets or customer records.
+
+The agent compares model and endpoint, evidence, reference cost/time and unknowns, and helps configure the chosen route. New providers, credentials, spending and deployments need separate approval. A skill is a default, not enforcement. The MCP tool, `scout_models`, is read-only and does not execute models.
 
 ## JSON API
 

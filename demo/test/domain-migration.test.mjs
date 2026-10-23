@@ -12,8 +12,8 @@ test('upgraded connections retain the original Cloudflare WebSocket response', a
 test('Scout uses one service without capturing unrelated paths or docs',async()=>{
   const {default:router}=await import('../domain-router.mjs');
   const env={...enabled,SITE:{fetch:()=>new Response('site')},SCOUT:{fetch:()=>new Response('scout')}};
-  for(const path of ['/scout','/scout/','/scout/api/status','/scout/api/recommend','/scout/mcp','/scout/providers/openai.svg'])assert.equal(await(await router.fetch(new Request('https://openmerit.ai'+path),env)).text(),'scout');
-  for(const path of ['/docs/scout/','/scouts','/scoutish'])assert.equal(await(await router.fetch(new Request('https://openmerit.ai'+path),env)).text(),'site');
+  for(const path of ['/scout','/scout/','/scout/api/status','/scout/api/recommend','/scout/mcp','/scout/providers/openai.svg','/connect','/connect/','/connect/api/device'])assert.equal(await(await router.fetch(new Request('https://openmerit.ai'+path),env)).text(),'scout');
+  for(const path of ['/docs/scout/','/scouts','/scoutish','/connections','/docs/connect'])assert.equal(await(await router.fetch(new Request('https://openmerit.ai'+path),env)).text(),'site');
 });
 test('legacy pages preserve path and query while redirecting to the matching primary host', async () => {
   for (const [kind, from, to] of [

@@ -10,6 +10,7 @@ import { commandTelemetry } from './telemetry.mjs';
 const help = `OpenMerit · Inference Terminal
 
   openmerit dash [path] [options]
+  openmerit install --help           Connect OpenMerit to your coding agent
   openmerit eval --help              Evaluate CLI changes across coding agents
 
   --port <number>      Require a specific local port (default: 4310 or a free port)
@@ -28,6 +29,7 @@ Coding-harness usage is outside this terminal's scope.
 
 async function main() {
   const args = process.argv.slice(2);
+  if (['install', 'status', 'remove', 'login', 'logout', 'project', 'doctor'].includes(args[0])) { const { main } = await import('./install.mjs'); process.exitCode = await main(args); return; }
   if (args[0] === 'eval') { const { main } = await import('../../eval/src/cli.mjs'); await main(args.slice(1)); return; }
   if (!args.length || args.includes('--help') || args.includes('-h')) { console.log(help); return; }
   if (args.shift() !== 'dash') throw new Error('Unknown command. Run openmerit --help.');
@@ -64,7 +66,8 @@ async function main() {
   if (!noOpen && !await openBrowser(terminal.url)) console.log('  Open the local URL above in your browser.');
 }
 const completeTelemetry = commandTelemetry(process.argv.slice(2));
-main().then(() => completeTelemetry(process.exitCode ? 'error' : 'ok'), async error => {
+const setupCodes = { 10: 'approval_pending', 11: 'access_denied', 20: 'install_conflict', 30: 'openmerit_unreachable' };
+main().then(() => completeTelemetry(process.exitCode ? 'error' : 'ok', undefined, setupCodes[process.exitCode]), async error => {
   console.error(`\n  ${error.code === 'EADDRINUSE' ? 'Port is in use. Choose another with --port.' : error.message}\n`);
   process.exitCode = 1;
   await completeTelemetry('error', error);

@@ -33,6 +33,7 @@ test('retired agent and resource discovery routes are 404 before auth, analytics
   const ctx={waitUntil(){assert.fail('Retired routes must not schedule analytics');}};
   for(const router of [worker,alpha])for(const prefix of ['/scout','/scout/alpha','/scout/alpha/alpha','/scout/v1','/scout/v2','/scout/alpha/v1']){
     for(const suffix of ['/mcp','/mcp/','/mcp/tools','/.well-known/oauth-protected-resource','/.well-known/oauth-protected-resource/scout/mcp']){
+      if(prefix==='/scout'&&suffix==='/mcp')continue; // Canonical MCP is served; see device-key tests.
       for(const method of ['GET','HEAD','POST','OPTIONS','DELETE']){
         const response=await router.fetch(new Request(`https://example.test${prefix}${suffix}?agent=claude-code`,{method,headers:{origin:'https://foreign.test',authorization:'Bearer obsolete'}}),retiredEnv,ctx);
         assert.equal(response.status,404,`${method} ${prefix}${suffix}`);
@@ -175,7 +176,7 @@ test('product events are allowlisted, identity comes from verified sessions, and
   assert.ok(sent.every(p=>p.url==='https://eu.i.posthog.com/batch/'&&Object.keys(p.headers).join()==='Content-Type'));
   assert.ok(events.every(e=>e.properties.$geoip_disable===true&&e.properties.$ip===null&&e.properties.environment==='test'));
   for(const event of ['scout_search_completed','scout_signed_in','scout_signed_up','scout_signed_out','$identify','constructor',{toString:false}])assert.equal((await alpha.fetch(eventRequest(event),config,ctx)).status,400);
-  for(const event of ['scout_agent_setup_opened','scout_agent_selected','scout_agent_setup_copied','scout_agent_docs_opened','scout_agent_connected'])assert.equal((await alpha.fetch(eventRequest(event),config,ctx)).status,400);
+  for(const event of ['scout_agent_setup_opened','scout_agent_selected','scout_agent_docs_opened','scout_agent_connected'])assert.equal((await alpha.fetch(eventRequest(event),config,ctx)).status,400);
   assert.equal((await alpha.fetch(eventRequest('scout_session_observed'),config,ctx)).status,401);
   assert.equal((await alpha.fetch(eventRequest('scout_session_observed',{},'forged'),config,ctx)).status,401);
   assert.equal((await alpha.fetch(eventRequest('scout_visited',{},undefined,{origin:'https://foreign.test'}),config,ctx)).status,403);

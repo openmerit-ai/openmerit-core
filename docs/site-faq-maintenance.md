@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Coding-agent device sign-in — source only, 23 October 2026
+
+Added a source-only rebuild of coding-agent setup: a secret-free copied prompt, `openmerit install` with browser device approval at the product-level `/connect`, per-device MCP keys and a Scout skill for Claude Code. Nothing is deployed or published. Homepage FAQ claims describe the terminal/Pi workflow and are unaffected; no FAQ edit is needed. Guides label the setup as unreleased until the Scout Worker, D1 tables and an npm preview ship.
+
 ## Scout coding-agent reset — serving rollout, 23 October 2026
 
 Removed the Scout installer, MCP/OAuth agent backend, persistent setup instructions and agent activation tracking for a rebuild. The web interface retains only a Claude Code placeholder that cannot install or connect. Browser account sign-in, recommendations, JSON API, Inference Terminal and the separate Pi/evaluation workflows remain unchanged. Guides distinguish this reset from historical hosted receipts, npm releases and remote grant revocation. Homepage FAQ claims still concern the unchanged terminal/Pi workflow and need no edit. The owner authorized restoring verified icon bytes, pushing main and deploying only the Scout serving Worker. Provider settings, stored data, the publisher, root site, router, terminal and npm publication remain outside this rollout. Authorization is not deployment acceptance; verify live assets and removed routes separately.

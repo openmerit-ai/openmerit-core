@@ -10,7 +10,9 @@
   // Canonical Scout now overrides the router's older serving implementation;
   // adjacent paths such as /scouting still pass through to the Custom Domain.
   "routes": [
-    { "pattern": "openmerit.ai/scout*", "zone_id": "4192d54a67b16e3af7e1503a7590dc65" }
+    { "pattern": "openmerit.ai/scout*", "zone_id": "4192d54a67b16e3af7e1503a7590dc65" },
+    // Product-level coding-agent device sign-in (/connect and /connect/api/*).
+    { "pattern": "openmerit.ai/connect*", "zone_id": "4192d54a67b16e3af7e1503a7590dc65" }
   ],
   "assets": {
     "directory": "./dist/scout-site",

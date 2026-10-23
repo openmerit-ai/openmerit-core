@@ -11,7 +11,7 @@ const integer = (min, max) => value => Number.isInteger(value) && value >= min &
 const duration = integer(0, 86_400_000);
 const counts = { task_count: integer(0, 3), candidate_count: integer(0, 15) };
 const position = { rank: integer(1, 5), task_index: integer(1, 3) };
-const command = choice(['help', 'dash', 'eval_init', 'eval_doctor', 'eval_plan', 'eval_run', 'eval_watch', 'eval_report', 'unknown']);
+const command = choice(['help', 'dash', 'install', 'status', 'remove', 'login', 'logout', 'project', 'doctor', 'eval_init', 'eval_doctor', 'eval_plan', 'eval_run', 'eval_watch', 'eval_report', 'unknown']);
 const mode = choice(['sample', 'live']), page = choice(['home', 'docs']);
 const exception = { error_type: errorType, frames: safeFrames };
 const failure = { failure_stage: choice([...timingStages, 'matching']), failure_code: value => failureCodes.has(value) ? value : undefined, provider_status: integer(100, 599) };
@@ -25,11 +25,12 @@ const clientEvents = {
   scout_results_viewed: { ...counts, duration_ms: duration },
   scout_evidence_opened: position,
   scout_model_id_copied: position,
+  scout_agent_setup_copied: { agent: choice(['claude-code']), outcome: choice(['ok', 'error']) },
   scout_provider_opened: position,
   scout_recommendation_feedback: { rating: choice(['useful', 'not_useful']), reason: choice(['wrong_task', 'missing_model', 'too_expensive', 'insufficient_evidence', 'other']), ...counts },
   scout_client_error: { code: choice(['auth_unavailable', 'search_timeout', 'network_error', 'http_error', 'invalid_response', 'render_error', 'uncaught_error']), http_status: integer(400, 599), duration_ms: duration, ...exception },
   cli_command_started: { command },
-  cli_command_completed: { command, outcome: choice(['ok', 'error']), duration_ms: duration, code: choice(['command_error', 'scout_network_error', 'scout_http_error', 'scout_response_error', 'scout_timeout']), operation: choice(['scout_recommend']), ...exception },
+  cli_command_completed: { command, outcome: choice(['ok', 'error']), duration_ms: duration, code: choice(['command_error', 'approval_pending', 'access_denied', 'install_conflict', 'openmerit_unreachable', 'scout_network_error', 'scout_http_error', 'scout_response_error', 'scout_timeout']), operation: choice(['scout_recommend']), ...exception },
   terminal_visited: { mode },
   terminal_page_viewed: { mode, page: choice(['overview', 'models', 'services', 'activity', 'compute', 'sources', 'connections']) },
   terminal_interaction: { mode, action: choice(['inspect', 'filter', 'search', 'map_expand', 'mode', 'command']), kind: choice(['model', 'agent', 'task', 'service', 'source', 'host', 'deployment', 'pool', 'record', 'path', 'other']) },
@@ -45,7 +46,7 @@ const schemas = {
     ...counts, ...failure, duration_ms: duration, cache: choice(['miss', 'hit', 'shared', 'unknown']),
     outcome: choice(['ok', 'empty', 'unsupported', 'clarification', 'rate_limited', 'interpretation_error', 'selection_error', 'internal_error']),
   },
-  scout_request_completed: { route: choice(['recommend']), http_status: integer(100, 599), duration_ms: duration, outcome: choice(['ok', 'error']) },
+  scout_request_completed: { route: choice(['recommend', 'mcp']), http_status: integer(100, 599), duration_ms: duration, outcome: choice(['ok', 'error']) },
   scout_server_error: { code: choice(['catalogue_error', 'interpretation_error', 'selection_error', 'internal_error', 'auth_error', 'request_error']), ...exception, ...failure },
 };
 const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) ? value.toLowerCase() : null;
@@ -141,11 +142,11 @@ export function createProductAnalytics(request, env, ctx = {}) {
       const common = {
         distinct_id: distinctId, $process_person_profile: !!identity, $geoip_disable: true, $ip: null,
         product: event.startsWith('cli_') || event.startsWith('terminal_') ? 'openmerit' : event.startsWith('website_') || web && safe.page !== 'scout' ? 'website' : 'scout', environment: env.POSTHOG_ENVIRONMENT,
-        client: options.client ?? client, transport: 'http',
+        client: options.client ?? client, transport: path === '/scout/mcp' ? 'mcp' : 'http',
         request_id: traceId, trace_id: safe.trace_id ?? traceId, $session_id: linkAccount ? safe.session_id ?? uuid(request.headers.get('x-scout-session-id')) ?? anon : anon,
         ...(retryOf ? { retry_of: retryOf } : {}),
         analytics_version: 5, account_linked: !!identity,
-        ...(safe.trace_id || path === '/scout/api/recommend' ? { $ai_trace_id: safe.trace_id ?? traceId } : {}),
+        ...(safe.trace_id || ['/scout/api/recommend', '/scout/mcp'].includes(path) ? { $ai_trace_id: safe.trace_id ?? traceId } : {}),
         ...(env.CF_VERSION_METADATA?.id ? { release: env.CF_VERSION_METADATA.id } : {}),
       };
       const native = web ? {
@@ -238,10 +239,10 @@ export function createProductAnalytics(request, env, ctx = {}) {
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     },
     complete(response) {
-      if (!enabled || path !== '/scout/api/recommend') return;
+      if (!enabled || !['/scout/api/recommend', '/scout/mcp'].includes(path)) return;
       const duration_ms = milliseconds(performance.now() - started);
       capture('scout_request_completed', {
-        route: 'recommend', http_status: response.status, duration_ms, outcome: response.ok ? 'ok' : 'error',
+        route: path === '/scout/mcp' ? 'mcp' : 'recommend', http_status: response.status, duration_ms, outcome: response.ok ? 'ok' : 'error',
       });
       if (response.status >= 500 && !serverErrorReported) capture('scout_server_error', { code: 'request_error' });
     },

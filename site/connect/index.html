@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="robots" content="noindex">
+  <meta name="referrer" content="no-referrer">
+  <title>Connect a coding agent · OpenMerit</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/scout/scout.css">
+  <link rel="stylesheet" href="/connect/connect.css">
+  <script src="/connect/connect.js" type="module"></script>
+</head>
+<body class="connect-page">
+  <header class="scout-header">
+    <div class="scout-wrap header-inner">
+      <a class="parent-brand" href="/" aria-label="OpenMerit home"><svg width="22" height="25" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span>openmerit</span></a>
+      <div class="account-controls"><div id="user-account" aria-label="Your account" hidden></div></div>
+    </div>
+  </header>
+  <main class="connect-wrap" id="main">
+    <section class="connect-card" aria-labelledby="connect-title" aria-live="polite">
+      <h1 id="connect-title">Connect a coding agent</h1>
+      <p id="connect-status" class="connect-muted">Loading…</p>
+
+      <form id="code-form" hidden>
+        <label for="code-input">Enter the code shown by your coding agent</label>
+        <div class="code-row"><input id="code-input" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="9" placeholder="XXXX-XXXX" required><button type="submit">Continue</button></div>
+      </form>
+
+      <div id="request" hidden>
+        <dl class="connect-facts">
+          <dt>Agent</dt><dd id="request-client"></dd>
+          <dt>Device</dt><dd id="request-device"></dd>
+          <dt>Scope</dt><dd id="request-scope"></dd>
+          <dt>Allows</dt><dd>Scout model recommendations through MCP. No code access, spending or other permissions.</dd>
+        </dl>
+        <p class="code-check">Confirm this code matches your coding agent:</p>
+        <p id="request-code" class="code-display"></p>
+        <p class="connect-muted">Only approve a request you started yourself. If someone sent you this link, deny it.</p>
+        <div class="connect-actions"><button id="deny" type="button" class="quiet-button">Deny</button><button id="approve" type="button" class="approve-button">Approve</button></div>
+      </div>
+
+      <section id="devices" hidden aria-labelledby="devices-title">
+        <h2 id="devices-title">Connected devices</h2>
+        <ul id="device-list"></ul>
+      </section>
+    </section>
+  </main>
+</body>
+</html>
