@@ -52,13 +52,31 @@ async function showDevices(client) {
   }));
 }
 
+// Success means the CLI collected its key, not only that this page said yes.
+async function showConnected(client, login) {
+  say(`Waiting for ${login.clientName} to finish…`);
+  for (let i = 0; i < 60; i++) {
+    const current = await api(client, `login?code=${encodeURIComponent(code)}`).catch(() => null);
+    if (current?.status === 'collected') {
+      $('#connect-title').textContent = `${login.clientName} is connected`;
+      say(`Scout is set up on ${login.deviceName}. You can close this tab; ${login.clientName} reports the result.`);
+      $('#connect-status').classList.add('connect-success');
+      await showDevices(client).catch(() => {});
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  say(`Approved. Return to ${login.clientName}; it finishes setup automatically.`);
+}
+
 async function showRequest(client) {
   $('#code-form').hidden = true;
   let login;
   try { login = await api(client, `login?code=${encodeURIComponent(code)}`); }
   catch (error) { say(error.message, true); $('#code-form').hidden = false; return; }
+  if (['approved', 'collected'].includes(login.status)) return showConnected(client, login);
   if (login.status !== 'pending') {
-    say(login.status === 'expired' ? 'This code has expired. Run the install command again for a new code.' : login.status === 'denied' ? 'This request was denied. Nothing was connected.' : 'This request is already approved. Return to your coding agent.', login.status === 'expired');
+    say(login.status === 'expired' ? 'This code has expired. Run the install command again for a new code.' : 'This request was denied. Nothing was connected.', login.status === 'expired');
     return;
   }
   say('');
@@ -72,8 +90,8 @@ async function showRequest(client) {
     try {
       await api(client, 'login', { method: 'POST', body: JSON.stringify({ code, decision }) });
       $('#request').hidden = true;
-      say(decision === 'approve' ? `${login.clientName} is connected. Return to your coding agent; it finishes setup automatically.` : 'Denied. Nothing was connected.');
-      await showDevices(client);
+      if (decision === 'approve') await showConnected(client, login);
+      else { say('Denied. Nothing was connected.'); await showDevices(client); }
     } catch (error) { say(error.message, true); $('#approve').disabled = $('#deny').disabled = false; }
   };
 }

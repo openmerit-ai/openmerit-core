@@ -398,17 +398,21 @@ The capability index lists each area with its benchmark-series and model counts.
 
 **Device sign-in setup — source only, not deployed or published (23 October 2026):** the commands below exist in source. They are not in published npm `0.1.7-preview.5`, and the hosted site does not yet serve `/connect` or `/scout/mcp`. Until both the Scout Worker and an npm preview are released, the Scout page's copied prompt cannot complete. Claude Code is the only supported client; other agents are not yet supported.
 
-**Add to Claude Code** on the Scout page opens a panel with a short prompt and a **Copy prompt** button. The prompt contains no key, account data or task draft. Paste it into Claude Code. It asks the agent to run one command:
+Setup takes four steps, and you act in each one only once:
 
-```sh
-npx -y openmerit@preview install --client claude-code
-```
+1. **Click Add to Claude Code** on the Scout page. It copies a short setup prompt, shows **Copied to clipboard** above the button and opens a `claude-cli://open?q=…` link. Your browser may ask once whether to open Claude Code. Claude Code starts in a new terminal window, in your home directory, with the prompt already typed in and marked *Prompt from an external link*.
+2. **Press Enter in Claude Code**, then allow the command it asks to run. Claude Code never sends a linked prompt or runs a command by itself. The prompt asks it to run one command, with a 10-minute timeout:
 
-1. With no saved device key, the command starts a device sign-in. It prints an approval link and an eight-character code, opens the browser if it can, and waits up to 90 seconds.
-2. On `https://openmerit.ai/connect`, sign in if needed, check that the code matches the one in your agent, and click **Approve** (or **Deny**). The page shows the client, device name, scope and the only permission granted: Scout recommendations through MCP.
-3. If approval takes longer, the command exits with code 10. Rerunning the same command resumes the same request; it does not issue a new code. Codes expire after ten minutes and can be used once.
-4. Once approved, the command stores the device key, adds the `openmerit` MCP server to Claude Code with `claude mcp add-json`, writes the Scout skill, and checks the connection with a real MCP `initialize` and tool discovery. The check is not a search.
-5. Restart Claude Code, or reconnect `openmerit` in `/mcp`, then try Scout on a non-confidential task.
+   ```sh
+   npx -y openmerit@preview install --client claude-code
+   ```
+
+3. **Click Approve** on `https://openmerit.ai/connect`, which the command opens for you. Sign in first if needed. The page shows the client, the device name, the scope, an eight-character code that matches the command's output, and the only permission granted: Scout recommendations through MCP. Only approve a request you started yourself.
+4. **Done.** The command has kept waiting, so nothing needs rerunning. It stores the device key, adds the `openmerit` MCP server with `claude mcp add-json`, writes the Scout skill and checks the connection with a real MCP `initialize` and tool discovery (not a search). The approval page switches to *Claude Code is connected* once the command has collected its key, and Claude Code reports the result. Scout is available in new Claude Code sessions; in a session that is already open, reconnect `openmerit` in `/mcp`.
+
+The prompt contains no key, account data or task draft. Claude Code registers the `claude-cli://` handler after you send your first prompt in an interactive session. On a machine where that hasn't happened, or where the browser blocks the link, nothing opens: paste the copied prompt into Claude Code instead. See [Claude Code deep links](https://code.claude.com/docs/en/deep-links).
+
+When the command can open a browser, it waits up to nine minutes for the Approve click. When it can't, for example over SSH, it prints the link and code and returns after 30 seconds with exit code 10 so the agent can show them. Rerunning the same command resumes the same request; it does not issue a new code. Codes expire after ten minutes and can be used once. `OPENMERIT_LOGIN_WAIT` sets the wait in seconds.
 
 `--client` defaults to the agent running the command (Claude Code sets `CLAUDECODE=1`). `--scope` defaults to `user`, which makes Scout available in every project. `--scope project` writes the skill to `.claude/skills/` in the current project and stores the MCP server in Claude Code's private per-project (`local`) configuration, so the key never enters the repository. `--plan` lists the changes without making them. `--json` prints one result object for agents.
 

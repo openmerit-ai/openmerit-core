@@ -358,41 +358,33 @@ function setupCommand() {
   return `curl '${setupURL('api/recommend')}' \\\n  -H "Authorization: Bearer $SCOUT_TOKEN" \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Scout-Analytics-Content: off' \\\n  -d '{"prompt":"Extract six invoice fields as JSON"}'`;
 }
 // Static and secret-free: the CLI signs the device in through the browser.
-const agentPrompt = `Connect OpenMerit Scout to Claude Code for me.
+const agentPrompt = `Connect OpenMerit Scout to Claude Code.
 
-Run: npx -y openmerit@preview install --client claude-code
+Run this command with a 10-minute timeout, without asking me anything first:
+npx -y openmerit@preview install --client claude-code
 
-If it prints an approval link and code, show them to me, wait until I say I approved, then run the same command again. It resumes the same request. Do not edit configuration files yourself and never ask me for a key. If it reports a conflict or another error, show me its message and stop.
-
-When it finishes, tell me to restart Claude Code (or reconnect "openmerit" in /mcp), then help me try Scout on a non-confidential task.`;
+It opens my browser so I can approve this device, then finishes by itself. If it exits with "approval pending", show me the link and code it printed and run the same command again. Don't edit configuration files yourself or ask me for a key. If it reports a conflict or another error, show me its message and stop. When it succeeds, tell me in one line that Scout is connected.`;
 function renderAgentSetup() {
   $('#agent-code').textContent = setupCommand();
-  $('#agent-prompt').textContent = agentPrompt;
 }
-function showAgentPicker(open, restoreFocus = false) {
-  $('#agent-picker').hidden = !open;
-  $('.add-agent-button').setAttribute('aria-expanded', String(open));
-  if (open) $('#close-agent-picker').focus({ preventScroll: true });
-  else if (restoreFocus) $('.add-agent-button').focus({ preventScroll: true });
+let toastTimer;
+function toast(text) {
+  const el = $('#toast'); el.textContent = text; el.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
 }
-$('.add-agent-button').addEventListener('click', () => {
-  showAgentPicker($('#agent-picker').hidden);
-});
-$('#close-agent-picker').addEventListener('click', () => showAgentPicker(false, true));
-document.addEventListener('pointerdown', event => {
-  if (!$('#agent-picker').hidden && !event.target.closest('.agent-install')) showAgentPicker(false);
-});
-$('.agent-install').addEventListener('keydown', event => {
-  if (event.key === 'Escape' && !$('#agent-picker').hidden) { event.preventDefault(); showAgentPicker(false, true); }
-});
-$('.agent-install').addEventListener('focusout', event => {
-  if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) showAgentPicker(false);
+// One click: copy the prompt (before focus moves to another app, which would
+// block the clipboard write), then hand it to Claude Code's claude-cli:// handler.
+// Claude Code opens with the prompt typed in but never sends it by itself. If the
+// handler isn't registered, the prompt is still on the clipboard to paste.
+$('.add-agent-button').addEventListener('click', async () => {
+  let copied = false;
+  try { await navigator.clipboard.writeText(agentPrompt); copied = true; } catch { /* The deep link still carries the prompt. */ }
+  const message = copied ? 'Copied to clipboard' : 'Opening Claude Code';
+  toast(message); $('#announcement').textContent = message;
+  analytics.track('scout_agent_setup_copied', { agent: 'claude-code', outcome: copied ? 'ok' : 'error' });
+  location.href = `claude-cli://open?q=${encodeURIComponent(agentPrompt)}`;
 });
 $('#copy-command').addEventListener('click', () => copy(setupCommand(), $('#copy-command')));
-$('#copy-agent-prompt').addEventListener('click', async () => {
-  const copied = await copy(agentPrompt, $('#copy-agent-prompt'), 'Copied to clipboard');
-  analytics.track('scout_agent_setup_copied', { agent: 'claude-code', outcome: copied ? 'ok' : 'error' });
-});
 window.addEventListener('scout-analytics-change', renderAgentSetup);
 renderAgentSetup();
 fetch(`${basePath}/api/status`).then(response => { if (!response.ok) throw new Error(); return response.json(); }).then(data => { if (!result) showIndex(data); }).catch(() => { if (!result) { $('#index-counts').textContent = 'Index unavailable'; } });
@@ -406,7 +398,6 @@ window.addEventListener('hashchange', () => revealSection());
 document.querySelectorAll('a[href="#for-agents"]').forEach(link => link.addEventListener('click', event => {
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
-  showAgentPicker(false);
   location.hash = '#for-agents';
   revealSection();
   $('#for-agents').scrollIntoView({ block: 'start' });

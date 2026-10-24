@@ -20,3 +20,5 @@
 #device-list li span { color: var(--muted); }
 #device-list button { padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; font-size: 12px; }
 .connect-error { color: var(--error); }
+.connect-success { color: var(--ink); font-size: 13px; }
+.connect-success::before { content: "✓ "; font-weight: 700; }

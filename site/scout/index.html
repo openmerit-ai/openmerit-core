@@ -46,19 +46,14 @@
         <p id="index-counts">Loading index…</p>
       </div>
       <div class="agent-install">
-      <button class="add-agent-button" type="button" aria-expanded="false" aria-controls="agent-picker">
+      <button class="add-agent-button" type="button" aria-describedby="agent-install-hint">
         <span class="agent-logos" aria-hidden="true">
           <img src="/scout/agents/claude.png" width="28" height="28" alt="">
         </span>
         <span>Add to Claude Code</span>
       </button>
-      <div id="agent-picker" class="agent-picker" role="region" aria-labelledby="agent-picker-title" hidden>
-        <div class="agent-picker-heading"><h2 id="agent-picker-title">Claude Code</h2><button id="close-agent-picker" type="button" aria-label="Close Claude Code panel">×</button></div>
-        <p class="agent-picker-intro">Copy this prompt and paste it into Claude Code. It runs one command, and you approve the connection once in your browser.</p>
-        <pre class="agent-prompt" tabindex="0"><code id="agent-prompt"></code></pre>
-        <button id="copy-agent-prompt" class="copy-prompt-button" type="button">Copy prompt</button>
-        <p class="agent-picker-note">Preview. The prompt contains no key or account data. Installs the OpenMerit MCP server and a Scout skill; needs Node.js 22.19+. <a href="/docs/scout/#connect-a-coding-agent">Setup guide ↗</a></p>
-      </div>
+      <span id="agent-install-hint" class="sr-only">Copies a setup prompt and opens Claude Code with it filled in.</span>
+      <div id="toast" class="toast" aria-hidden="true" hidden></div>
       </div>
     </section>
     <section class="search-section" aria-label="Find models">

@@ -82,7 +82,9 @@ export const help = `OpenMerit · coding-agent setup (preview)
 
 install signs this device in through the browser (one Approve click), adds the
 OpenMerit MCP server and the Scout skill, then verifies the connection.
-Rerun the same command when it reports that approval is pending.
+It opens the approval page and waits up to 9 minutes for the Approve click
+(30 seconds when no browser could be opened). If it exits with approval
+pending, rerun the same command: it resumes the same request.
 --client defaults to the coding agent running the command. --scope defaults to user.
 --plan shows the changes without making them. Keys are never printed.
 
@@ -202,9 +204,18 @@ async function login({ client, scope, open, log, wait }) {
     pending = { server: server(), deviceCode: data.device_code, userCode: data.user_code, url: data.verification_uri_complete, interval: data.interval, expiresAt: Date.now() + data.expires_in * 1000, opened: false };
     await save(pendingPath(), pending);
   }
-  log(`Approve this device in your browser:\n\n  ${pending.url}\n\n  Code: ${pending.userCode} (expires ${new Date(pending.expiresAt).toLocaleTimeString()})\n`);
-  if (open && !pending.opened) { await openBrowser(pending.url).catch(() => false); await save(pendingPath(), { ...pending, opened: true }); }
-  const deadline = Date.now() + wait * 1000;
+  log(`Approve this device in your browser (opening it now):\n\n  ${pending.url}\n\n  Code: ${pending.userCode} (expires ${new Date(pending.expiresAt).toLocaleTimeString()})\n`);
+  if (open && !pending.opened && !pending.openFailed) {
+    // Only the approval page on the configured OpenMerit server may be opened.
+    const approvalPage = url => { const u = new URL(url); return `${u.origin}` === server() && u.pathname === '/connect' && [...u.searchParams.keys()].join() === 'code' && !u.username && !u.password && !u.hash; };
+    const opened = await openBrowser(pending.url, { allowed: approvalPage }).catch(() => false);
+    pending = { ...pending, ...(opened ? { opened: true } : { openFailed: true }) };
+    await save(pendingPath(), pending);
+  }
+  // With the approval page open, keep waiting for the Approve click (inside a
+  // coding agent's 10-minute command limit) so nobody has to rerun anything.
+  // Without a browser, return soon so the agent can show the link.
+  const deadline = Date.now() + (wait ?? (pending.opened ? 540 : 30)) * 1000;
   let interval = (pending.interval ?? 5) * 1000;
   for (;;) {
     const { status, data } = await request('/connect/api/token', { method: 'POST', body: { device_code: pending.deviceCode } });
@@ -267,7 +278,7 @@ async function install(root, { client, scope, plan, open, log, wait }) {
   if (connection === 'key_rejected') throw new Stop('OpenMerit rejected this device key (expired or revoked).', exitCodes.denied, 'Run "openmerit login", then rerun install.');
   return { action: 'install', applied: true, client, scope, changes, connection,
     next: connection === 'connected'
-      ? `Restart ${clients[client]} (or run /mcp and reconnect "openmerit"), then try Scout on a non-confidential task.`
+      ? `Scout is ready in new ${clients[client]} sessions. In a session that is already open, run /mcp and reconnect "openmerit".`
       : 'Installed, but the connection check failed. Run "openmerit doctor".' };
 }
 
@@ -367,7 +378,7 @@ export async function main(args, { root = process.cwd(), print = console.log, pr
   }
   root = resolve(root);
   // Agents run commands with a few-minute timeout; wait well inside it, then resume.
-  const wait = Number(process.env.OPENMERIT_LOGIN_WAIT ?? 90);
+  const wait = process.env.OPENMERIT_LOGIN_WAIT === undefined ? undefined : Number(process.env.OPENMERIT_LOGIN_WAIT);
   const log = text => (options.json ? printError : print)(text);
   try {
     const result = action === 'install' ? await install(root, { ...options, log, wait })

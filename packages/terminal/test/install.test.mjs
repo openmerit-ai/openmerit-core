@@ -131,3 +131,17 @@ test('a failing claude command never leaks the key, and project scope keeps it o
   await assert.rejects(readFile(join(h.root, '.mcp.json')));
   assert.match(await readFile(join(h.root, '.claude/skills/openmerit-scout/SKILL.md'), 'utf8'), /openmerit-scout/);
 });
+
+test('install opens only the approval page, once, and resumes without reopening it', { skip: process.platform !== 'linux' }, async t => {
+  const h = await harness(t);
+  const opener = join(h.dir, 'bin', 'xdg-open'), opened = join(h.dir, 'opened.log');
+  await writeFile(opener, `#!/bin/sh\necho "$1" >> ${JSON.stringify(opened)}\n`); await chmod(opener, 0o755);
+  process.env.DISPLAY = ':0'; delete process.env.SSH_CONNECTION; delete process.env.SSH_TTY;
+  const first = await h.run('install', '--client', 'claude-code');
+  assert.equal(first.code, 10);
+  const userCode = first.out.match(/Code: (\S+)/)[1];
+  assert.deepEqual((await readFile(opened, 'utf8')).trim().split('\n'), [`${process.env.OPENMERIT_URL}/connect?code=${userCode}`]);
+  await h.approve(userCode);
+  assert.equal((await h.run('install', '--client', 'claude-code')).code, 0);
+  assert.equal((await readFile(opened, 'utf8')).trim().split('\n').length, 1, 'a resumed login does not open a second tab');
+});
