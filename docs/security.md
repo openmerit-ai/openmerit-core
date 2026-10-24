@@ -57,6 +57,8 @@ The [coding-agent setup](scout.md#connect-a-coding-agent) in npm 0.1.7 uses host
 
 **Historical reset, superseded by npm 0.1.7 and hosted device setup.** The reset temporarily removed the installer and MCP transport. The current [Claude Code setup](scout.md#connect-a-coding-agent) uses browser-approved, device-specific keys scoped to MCP recommendations, not pasted session tokens or agent OAuth. The key is stored locally in mode-600 credentials and Claude Code's plain-text MCP configuration. Setup installs an owned Scout skill; conflicts are not overwritten, and removal revokes the device key. Browser Google/GitHub sign-in remains separate.
 
+**npm 0.1.8:** setup also installs an owned, always-loaded `rules/openmerit-scout.md` instruction requiring Scout before implicit or explicit application-model choices, including pretrained/local/browser models and SDK defaults. Edited or unowned rules are not overwritten or removed. Missing policy requires asking; unavailable Scout or insufficient coverage requires pausing model selection. This is model guidance, not an enforced tool gate or authorization to download weights, add providers, spend or deploy. Scope, device-key permissions and task-data handling are unchanged. New sessions are required after upgrading; older npm 0.1.7 installations remain skill-only until upgraded.
+
 Scout serving, main-site documentation and npm publication are separate releases. This reset does not revoke remote grants or clean up files previously installed on other machines. Earlier hosted MCP/authentication descriptions in this guide refer to past deployments, not this build. Browser Google/GitHub sign-in and its Clerk account lifecycle are separate and unchanged.
 
 ## Hosted Scout analytics

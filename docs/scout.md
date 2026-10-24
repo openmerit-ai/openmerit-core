@@ -396,7 +396,7 @@ The capability index lists each area with its benchmark-series and model counts.
 
 ## Connect a coding agent
 
-**Device sign-in setup — npm 0.1.7:** use the stable `latest` tag for the commands below. Hosted Scout serves `/connect` and `/scout/mcp` independently of npm. Claude Code is the only supported client; other agents are not yet supported. The older `0.1.7-preview.5` package does not contain these commands.
+**Device sign-in setup — npm 0.1.8:** use the stable `latest` tag for the commands below. Version 0.1.8 adds the startup model-decision rule to the device setup introduced in 0.1.7. Hosted Scout serves `/connect` and `/scout/mcp` independently of npm. Claude Code is the only supported client; other agents are not yet supported. The older `0.1.7-preview.5` package does not contain these commands.
 
 Setup takes four steps, and you act in each one only once:
 
@@ -408,13 +408,13 @@ Setup takes four steps, and you act in each one only once:
    ```
 
 3. **Click Approve** on `https://openmerit.ai/connect`, which the command opens for you. Sign in first if needed. The page shows the client, the device name, the scope, an eight-character code that matches the command's output, and the only permission granted: Scout recommendations through MCP. Only approve a request you started yourself.
-4. **Done.** The command has kept waiting, so nothing needs rerunning. It stores the device key, adds the `openmerit` MCP server with `claude mcp add-json`, writes the Scout skill and checks the connection with a real MCP `initialize` and tool discovery (not a search). The approval page switches to *Claude Code is connected* once the command has collected its key, and Claude Code reports the result. Scout is available in new Claude Code sessions; in a session that is already open, reconnect `openmerit` in `/mcp`.
+4. **Done.** The command has kept waiting, so nothing needs rerunning. It stores the device key, adds the `openmerit` MCP server with `claude mcp add-json`, writes the Scout skill and startup rule, and checks the connection with a real MCP `initialize` and tool discovery (not a search). The approval page switches to *Claude Code is connected* once the command has collected its key, and Claude Code reports the result. **Start a new Claude Code session** to load the startup instructions; reconnecting `openmerit` in `/mcp` alone is not enough.
 
 The prompt contains no key, account data or task draft. If the Claude desktop app isn't installed or your browser blocks the link, paste the copied prompt into Claude Code instead. The command needs `npx` (Node.js 22.19 or newer) and the `claude` CLI on the PATH of that session; the installer runs `claude mcp add-json`. Having the desktop app alone does not establish that those commands are available. See [Claude Desktop](https://code.claude.com/docs/en/desktop).
 
 When the command can open a browser, it waits up to nine minutes for the Approve click. When it can't, for example over SSH, it prints the link and code and returns after 30 seconds with exit code 10 so the agent can show them. Rerunning the same command resumes the same request; it does not issue a new code. Codes expire after ten minutes and can be used once. `OPENMERIT_LOGIN_WAIT` sets the wait in seconds.
 
-`--client` defaults to the agent running the command (Claude Code sets `CLAUDECODE=1`). `--scope` defaults to `user`, which makes Scout available in every project. `--scope project` writes the skill to `.claude/skills/` in the current project and stores the MCP server in Claude Code's private per-project (`local`) configuration, so the key never enters the repository. `--plan` lists the changes without making them. `--json` prints one result object for agents.
+`--client` defaults to the agent running the command (Claude Code sets `CLAUDECODE=1`). `--scope` defaults to `user`, which makes Scout available in every project. `--scope project` writes the skill to `.claude/skills/` and startup rule to `.claude/rules/` in the current project and stores the MCP server in Claude Code's private per-project (`local`) configuration, so the key never enters the repository. `--plan` lists the changes without making them. `--json` prints one result object for agents.
 
 | Exit code | Meaning |
 |---|---|
@@ -449,13 +449,23 @@ openmerit project --policy existing-only|existing-first [--endpoint-id <id> ...]
 openmerit doctor  # Node.js, claude, reachability, key, MCP check and install state
 ```
 
-Removal deletes the MCP server, the unchanged skill and the install record, and revokes the key. It keeps edited files and `.openmerit/scout.json`.
+Removal deletes the MCP server, the unchanged skill and startup rule, and the install record, and revokes the key. It keeps edited files and `.openmerit/scout.json`.
 
 ### Using Scout from the agent
 
-The `openmerit-scout` skill loads when an application inference model is being chosen, even if you do not mention Scout. It is not loaded for unrelated edits, ordinary inference calls or the agent's own model. On first use in a project, it asks once whether the project is **existing-only** or **existing-first** and which public catalogue endpoint IDs it can reach, then saves them with `openmerit project`. Every search passes the saved `endpointIds`, including `[]`. Existing-only never broadens; existing-first asks before an unscoped search. Task descriptions go to Scout and OpenAI; do not send source files, secrets or customer records.
+Claude can load the `openmerit-scout` skill when choosing an application inference model, even if you do not mention Scout. The skill-only setup in npm 0.1.7 can miss implicit choices while building an app, including selecting pretrained browser models. Availability in the skill list does not prove invocation. Unrelated edits, ordinary inference calls and the coding agent's own model are outside its scope. On first use in a project, the skill instructs Claude to ask once whether the project is **existing-only** or **existing-first** and which public catalogue endpoint IDs it can reach, then save them with `openmerit project`. Every search passes the saved `endpointIds`, including `[]`. Existing-only never broadens; existing-first asks before an unscoped search. Task descriptions go to Scout and OpenAI; do not send source files, secrets or customer records.
 
 The agent compares model and endpoint, evidence, reference cost/time and unknowns, and helps configure the chosen route. New providers, credentials, spending and deployments need separate approval. A skill is a default, not enforcement. The MCP tool, `scout_models`, is read-only and does not execute models.
+
+### Startup model-decision rule — npm 0.1.8
+
+The 0.1.8 installer adds `rules/openmerit-scout.md` alongside the skill. Unlike an on-demand skill, an unscoped [Claude Code rule](https://code.claude.com/docs/en/memory#organize-rules-with-claude/rules/) loads at session startup. The rule requires loading the skill and consulting Scout before any application-model choice, even when the user only asks for a feature. It explicitly includes pretrained/local/browser models, weight downloads, SDK defaults, embeddings, OCR, speech, classification, detection and segmentation. An explicit user model choice must be assessed, not silently replaced. Unchanged approved models and ordinary inference calls do not require another search.
+
+Rerunning `npx -y openmerit@latest install --client claude-code` with version 0.1.8 or later upgrades an unchanged npm 0.1.7 installation without another device approval. User scope writes the rule under `~/.claude/rules/` (or `CLAUDE_CONFIG_DIR`) and covers new projects and Desktop's no-folder sessions. Project scope writes `.claude/rules/openmerit-scout.md` and applies only in that project. The existing skill, private MCP entry and key locations are unchanged. Start a **new Claude Code session** after installation or upgrade; reconnecting `/mcp` alone does not reload startup instructions.
+
+The installer records rule ownership, repairs missing rules, resumes interrupted updates and refuses to overwrite edited or unowned rules. `--plan` includes the rule without writing it; `status` reports its state and `doctor` treats a missing rule as incomplete. `remove` deletes only the unchanged owned rule and retains edited rules and other user instructions.
+
+If policy is missing, Claude must ask before searching. If Scout is unavailable or has no suitable evidence/candidate for the required deployment, the instructions require disclosing the gap and pausing model selection, not choosing from memory or an SDK default. Model-independent work may continue. Catalogue coverage is not guaranteed for local/browser models. These are behavioral instructions, **not hard enforcement**; Claude can still fail to follow them. Older 0.1.7 installations remain skill-only until upgraded; website deployment alone does not update an installed client.
 
 ## JSON API
 

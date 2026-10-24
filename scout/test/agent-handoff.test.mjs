@@ -42,6 +42,8 @@ test('Add to Claude Code opens a prefilled Desktop link without waiting for clip
     assert.deepEqual([...link.searchParams.keys()], ['q']);
     assert.equal(link.searchParams.get('q'), clipboard);
     assert.match(clipboard, /npx -y openmerit@latest install --client claude-code/);
+    assert.match(clipboard, /start a new Claude Code session/);
+    assert.match(clipboard, /reconnecting \/mcp alone is not enough/);
     if (copied) resolveCopy(); else rejectCopy(new Error('Clipboard denied'));
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(querySelector('#toast').hidden, false);

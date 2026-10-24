@@ -363,7 +363,7 @@ const agentPrompt = `Connect OpenMerit Scout to Claude Code.
 Run this command with a 10-minute timeout, without asking me anything first:
 npx -y openmerit@latest install --client claude-code
 
-It opens my browser so I can approve this device, then finishes by itself. If it exits with "approval pending", show me the link and code it printed and run the same command again. Don't edit configuration files yourself or ask me for a key. If it reports a conflict or another error, show me its message and stop. When it succeeds, tell me in one line that Scout is connected.`;
+It opens my browser so I can approve this device, then finishes by itself. If it exits with "approval pending", show me the link and code it printed and run the same command again. Don't edit configuration files yourself or ask me for a key. If it reports a conflict or another error, show me its message and stop. When it succeeds, tell me in one line that Scout is connected and I must start a new Claude Code session to load its startup instructions; reconnecting /mcp alone is not enough.`;
 function renderAgentSetup() {
   $('#agent-code').textContent = setupCommand();
 }

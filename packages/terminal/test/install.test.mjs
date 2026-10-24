@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { Readable } from 'node:stream';
 import { mkdtemp, mkdir, writeFile, readFile, chmod, rm, realpath } from 'node:fs/promises';
@@ -8,7 +9,7 @@ import { join } from 'node:path';
 import { LocalD1 } from '../../../scout/test/helpers-projection.mjs';
 import { handleConnect, deviceKeyUser } from '../../../scout/connect.mjs';
 import { handleMCP } from '../../../scout/mcp.mjs';
-import { main } from '../src/install.mjs';
+import { main, rule } from '../src/install.mjs';
 
 // A fake `claude` that stores MCP servers like Claude Code does (user or local
 // scope in .claude.json) and, on request, fails while echoing its arguments.
@@ -86,12 +87,44 @@ test('install signs in once, resumes a pending approval, installs, verifies and 
   assert.equal((await deviceKeyUser(h.env, key)).userId, 'user_alice');
   assert.ok(!done.out.includes(key), 'the key is never printed');
   assert.match(await readFile(join(h.claudeDir, 'skills/openmerit-scout/SKILL.md'), 'utf8'), /^---\nname: openmerit-scout\n/);
+  assert.equal(await readFile(join(h.claudeDir, 'rules/openmerit-scout.md'), 'utf8'), rule);
 
   const calls = (await readFile(process.env.FAKE_CLAUDE_LOG, 'utf8')).trim().split('\n').length;
   const again = await h.run('install', '--json');
   assert.equal(again.code, 0); assert.equal(JSON.parse(again.out).connection, 'connected');
   assert.equal((await readFile(process.env.FAKE_CLAUDE_LOG, 'utf8')).trim().split('\n').length, calls, 'an unchanged install does not rewrite Claude config');
   assert.equal(JSON.parse((await h.run('status', '--check', '--json')).out).installed, true);
+
+  const rulePath = join(h.claudeDir, 'rules/openmerit-scout.md');
+  const recordPath = join(h.claudeDir, 'openmerit-install.json');
+  const record = JSON.parse(await readFile(recordPath, 'utf8'));
+  // Upgrade an existing stable skill-only installation without signing in again.
+  delete record.ruleHash; record.version = 2;
+  await writeFile(recordPath, JSON.stringify(record));
+  await rm(rulePath);
+  const beforeUpgrade = JSON.parse((await h.run('status', '--json')).out);
+  assert.equal(beforeUpgrade.installed, false); assert.equal(beforeUpgrade.rule, 'missing');
+  assert.equal(JSON.parse((await h.run('doctor', '--json')).out).checks.find(c => c.name === 'install').ok, false);
+  const plan = await h.run('install', '--plan');
+  assert.match(plan.out, /rules\/openmerit-scout.md/);
+  await assert.rejects(readFile(rulePath), { code: 'ENOENT' }, 'plan does not write the rule');
+  assert.equal((await h.run('install')).code, 0);
+  assert.equal((await h.claudeConfig()).mcpServers.openmerit.headers.Authorization, `Bearer ${key}`);
+  assert.equal(await readFile(rulePath, 'utf8'), rule);
+  assert.equal(JSON.parse((await h.run('status', '--json')).out).rule, 'matches');
+
+  // Rerun after interruption between writing the new rule and finalizing ownership.
+  const interrupted = JSON.parse(await readFile(recordPath, 'utf8'));
+  interrupted.ruleHash = createHash('sha256').update('previous rule').digest('hex');
+  interrupted.pendingRule = createHash('sha256').update(rule).digest('hex');
+  await writeFile(recordPath, JSON.stringify(interrupted));
+  assert.equal((await h.run('install')).code, 0);
+  await rm(rulePath);
+  assert.equal((await h.run('install')).code, 0, 'missing owned rule is repaired');
+  await writeFile(join(h.claudeDir, 'rules/personal.md'), 'Keep my instructions');
+  assert.equal((await h.run('remove')).code, 0);
+  await assert.rejects(readFile(rulePath), { code: 'ENOENT' });
+  assert.equal(await readFile(join(h.claudeDir, 'rules/personal.md'), 'utf8'), 'Keep my instructions');
 });
 
 test('install refuses to overwrite user edits or foreign servers, and remove revokes the key', async t => {
@@ -101,6 +134,14 @@ test('install refuses to overwrite user edits or foreign servers, and remove rev
   assert.equal(foreign.code, 20); assert.match(foreign.out, /did not create/);
   await writeFile(join(h.claudeDir, '.claude.json'), '{}');
 
+  const rulePath = join(h.claudeDir, 'rules/openmerit-scout.md');
+  await mkdir(join(h.claudeDir, 'rules'));
+  await writeFile(rulePath, 'My own Scout instructions');
+  assert.equal((await h.run('install', '--client', 'claude-code')).code, 20);
+  await assert.rejects(readFile(join(h.dir, 'openmerit/login.json')), { code: 'ENOENT' }, 'conflict is caught before sign-in');
+  assert.equal(await readFile(rulePath, 'utf8'), 'My own Scout instructions');
+  await rm(rulePath);
+
   const userCode = (await h.run('install', '--client', 'claude-code', '--no-open')).out.match(/Code: (\S+)/)[1];
   await h.approve(userCode);
   assert.equal((await h.run('install', '--client', 'claude-code')).code, 0);
@@ -108,12 +149,16 @@ test('install refuses to overwrite user edits or foreign servers, and remove rev
   await writeFile(skillPath, 'my edits');
   const edited = await h.run('install', '--client', 'claude-code');
   assert.equal(edited.code, 20); assert.equal(await readFile(skillPath, 'utf8'), 'my edits');
+  await writeFile(rulePath, 'my rule edits');
+  assert.equal((await h.run('install', '--client', 'claude-code')).code, 20);
+  assert.equal(JSON.parse((await h.run('status', '--client', 'claude-code', '--json')).out).rule, 'modified_or_unowned');
 
   const key = (await h.claudeConfig()).mcpServers.openmerit.headers.Authorization.slice(7);
   const removed = await h.run('remove', '--client', 'claude-code', '--json');
   assert.equal(removed.code, 0); assert.equal(JSON.parse(removed.out).keyRevoked, true);
   assert.equal((await h.claudeConfig()).mcpServers.openmerit, undefined);
   assert.equal(await readFile(skillPath, 'utf8'), 'my edits', 'edited skill is kept');
+  assert.equal(await readFile(rulePath, 'utf8'), 'my rule edits', 'edited startup rule is kept');
   assert.equal(await deviceKeyUser(h.env, key), null);
 });
 
@@ -130,6 +175,8 @@ test('a failing claude command never leaks the key, and project scope keeps it o
   assert.ok((await h.claudeConfig()).projects[h.root].mcpServers.openmerit, 'stored in Claude private local scope');
   await assert.rejects(readFile(join(h.root, '.mcp.json')));
   assert.match(await readFile(join(h.root, '.claude/skills/openmerit-scout/SKILL.md'), 'utf8'), /openmerit-scout/);
+  assert.equal(await readFile(join(h.root, '.claude/rules/openmerit-scout.md'), 'utf8'), rule);
+  await assert.rejects(readFile(join(h.claudeDir, 'rules/openmerit-scout.md')), { code: 'ENOENT' });
 });
 
 test('install opens only the approval page, once, and resumes without reopening it', { skip: process.platform !== 'linux' }, async t => {

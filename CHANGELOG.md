@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.8 — 2026-10-24
+
+- Install an owned startup rule requiring Scout before explicit or implicit application-model choices, including pretrained/local/browser models, weight downloads and SDK defaults. Keep detailed access-policy and search instructions in the skill. These instructions are guidance, not hard enforcement.
+- Upgrade unchanged skill-only installations without another device approval; include rule ownership, conflict detection, interrupted-update recovery, status, diagnostics and safe removal.
+- Require a new Claude Code session after setup or upgrade; reconnecting `/mcp` alone does not reload startup instructions. Pause model selection when Scout is unavailable or lacks suitable candidates rather than falling back to a remembered model.
+
 ## 0.1.7 — 2026-10-24
 
 - Release coding-agent device sign-in, Claude Code MCP/Scout skill installation, status, diagnostics, removal and project endpoint policy on the stable `latest` channel. Setup requires browser approval; it never requests a pasted key.

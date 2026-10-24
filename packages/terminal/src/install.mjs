@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { openBrowser } from './browser.mjs';
 
 // One-command coding-agent setup: device sign-in in the browser, then the MCP
-// server and Scout skill. Built to be run by a person or by a coding agent:
+// server, startup rule and Scout skill. Built to be run by a person or by a coding agent:
 // no interactive prompts, bounded waits, resumable logins and explicit exit codes.
 export const exitCodes = { ok: 0, error: 1, pending: 10, denied: 11, conflict: 20, unreachable: 30 };
 const exec = promisify(execFile);
@@ -15,18 +15,45 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 const policyPath = '.openmerit/scout.json';
 const clients = { 'claude-code': 'Claude Code' };
 
+// No paths frontmatter: Claude loads this before the first model decision,
+// including user-scope sessions in Desktop's automatically created folders.
+export const rule = `# Application model decisions · OpenMerit Scout
+
+Before choosing, recommending, adding, downloading, replacing or configuring
+ANY application inference model, load the \`openmerit-scout\` skill and consult
+\`scout_models\` on the \`openmerit\` MCP server before committing to a model.
+This applies even when the user only asks you to build a feature, never mentions
+models or Scout, or names a model themselves (assess it; do not silently replace it).
+
+A pretrained model, local weights, browser inference, an SDK's default model,
+embeddings, OCR, speech, image classification, detection and segmentation all
+count as model choices, not implementation details. Identify this decision before
+writing model-specific code, installing a model package or downloading weights.
+
+Follow the skill's project access policy. If it is missing, ask and save it first.
+If Scout is unavailable, fails or has no suitable evidence/candidate, disclose the
+gap and pause the model decision; do not fall back to a remembered or SDK-default
+model. You may continue work that does not commit to a model.
+
+Do not consult Scout for unrelated edits, normal inference calls using an unchanged
+approved model, or this coding agent's own model. Do not reselect approved models
+unless the task introduces or changes a model decision.
+`;
+
 export const skill = `---
 name: openmerit-scout
-description: Use when choosing, adding, replacing or configuring an application inference model (an LLM or other model the user's application calls), for example when building extraction, classification, generation or agent features. Consults OpenMerit Scout for an evidence-based shortlist. Not for unrelated edits, ordinary inference calls or this coding agent's own model.
+description: Consults OpenMerit Scout before choosing, adding, downloading, replacing or configuring any application inference model, including implicit choices while building features, pretrained browser/local models, SDK defaults, embeddings, OCR, speech, classification, detection, segmentation, LLMs and agents. Not for unrelated edits, ordinary inference calls or this coding agent's own model.
 ---
 
 # OpenMerit · Scout
 
 Before introducing, recommending, replacing or configuring an application
 inference model, call the \`scout_models\` tool on the \`openmerit\` MCP server.
-This applies even when the user never mentions Scout. Preserve the user's explicit
-model choice; assess it rather than silently replacing it. Leave unchanged,
-approved application selections in place.
+This applies even when the user never mentions models or Scout. Downloading local
+weights, using a pretrained browser model or accepting an SDK default is a model
+decision: consult Scout before model-specific code, installs or downloads.
+Preserve the user's explicit model choice; assess it rather than silently replacing
+it. Leave unchanged, approved application selections in place.
 
 ## Project policy
 
@@ -64,8 +91,10 @@ writes. Report recommendation, endpoint connectivity and application checks as
 separate results, each only after it succeeds. Do not switch this coding agent's
 own model.
 
-If Scout fails, say so and pause the model decision; do not substitute a
-remembered recommendation. If it reports that the device key is missing,
+If Scout fails or has no suitable candidate/evidence for the required deployment,
+say so and pause the model decision; do not substitute a remembered recommendation
+or SDK default. Continue only model-independent work. Local/browser models are not
+exempt when the catalogue lacks coverage. If it reports that the device key is missing,
 expired or revoked, run \`npx -y openmerit@latest login\` and then
 \`npx -y openmerit@latest install\` again. Never ask the user to paste a key.
 `;
@@ -81,7 +110,7 @@ export const help = `OpenMerit · coding-agent setup
   openmerit doctor  [--json]
 
 install signs this device in through the browser (one Approve click), adds the
-OpenMerit MCP server and the Scout skill, then verifies the connection.
+OpenMerit MCP server, startup rule and Scout skill, then verifies the connection.
 It opens the approval page and waits up to 9 minutes for the Approve click
 (30 seconds when no browser could be opened). If it exits with approval
 pending, rerun the same command: it resumes the same request.
@@ -134,12 +163,13 @@ function detectClient() {
 }
 
 // Claude Code locations. Project scope keeps the key out of the repository:
-// the MCP entry uses Claude's private "local" scope, only the skill is in the project.
+// the MCP entry uses Claude's private "local" scope; rule and skill are in the project.
 function claudePaths(root, scope) {
   const config = resolve(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'));
   const base = scope === 'user' ? config : join(root, '.claude');
   return {
     skill: join(base, 'skills/openmerit-scout/SKILL.md'),
+    rule: join(base, 'rules/openmerit-scout.md'),
     legacyRule: join(base, 'rules/openmerit.md'),
     record: join(base, 'openmerit-install.json'),
     mcpFile: process.env.CLAUDE_CONFIG_DIR ? join(config, '.claude.json') : join(homedir(), '.claude.json'),
@@ -164,16 +194,17 @@ async function claude(args, root, key) {
 // Inspect the current Claude Code installation without changing anything.
 async function inspect(root, scope) {
   const paths = claudePaths(root, scope);
-  const [record, config, installedSkill, legacyRule] = await Promise.all([object(paths.record), object(paths.mcpFile), optional(paths.skill), optional(paths.legacyRule)]);
-  const owned = record.version === 2 && record.scope === scope;
+  const [record, config, installedSkill, installedRule, legacyRule] = await Promise.all([object(paths.record), object(paths.mcpFile), optional(paths.skill), optional(paths.rule), optional(paths.legacyRule)]);
+  const owned = [2, 3].includes(record.version) && record.scope === scope;
   const current = configuredServer(config, root, scope);
   const otherScope = configuredServer(config, root, scope === 'user' ? 'project' : 'user');
   const projectFile = await object(join(root, '.mcp.json'));
   return {
-    paths, record, owned, current, installedSkill,
+    paths, record, owned, current, installedSkill, installedRule,
     // A pending header hash covers an install interrupted between add and record.
     serverOwned: !current || owned && (serverHash(current) === record.serverHash || !!record.pendingAuth && hash(current.headers?.Authorization ?? '') === record.pendingAuth),
     skillOwned: installedSkill === null || owned && [record.skillHash, record.pendingSkill].includes(hash(installedSkill)),
+    ruleOwned: installedRule === null || owned && record.version === 3 && [record.ruleHash, record.pendingRule].includes(hash(installedRule)),
     // The pre-release installer recorded its rule hash; only an unchanged rule is removed.
     legacyRule: legacyRule !== null && record.version === 1 && hash(legacyRule) === record.ruleHash ? 'remove' : legacyRule !== null ? 'keep' : 'none',
     shadowed: !!(otherScope || projectFile.mcpServers?.openmerit),
@@ -184,6 +215,7 @@ function conflicts(state) {
   const found = [];
   if (!state.serverOwned) found.push('Claude Code already has an MCP server named "openmerit" that this installer did not create or that was edited. Remove it with "claude mcp remove openmerit", then retry.');
   if (!state.skillOwned) found.push(`${state.paths.skill} exists and was not created by this installer or was edited. Move or delete it, then retry.`);
+  if (!state.ruleOwned) found.push(`${state.paths.rule} exists and was not created by this installer or was edited. Move or delete it, then retry.`);
   if (state.shadowed) found.push('An "openmerit" MCP server exists in another Claude Code scope (or in .mcp.json). Remove it, then retry.');
   return found;
 }
@@ -251,6 +283,7 @@ async function install(root, { client, scope, plan, open, log, wait }) {
   const changes = [
     `${state.current ? 'Update' : 'Add'} MCP server "openmerit" in Claude Code (${state.paths.mcpScope} scope, ${state.paths.mcpFile})`,
     `${state.installedSkill === null ? 'Create' : 'Update'} ${state.paths.skill}`,
+    `${state.installedRule === null ? 'Create' : 'Update'} ${state.paths.rule} (loaded at session startup)`,
     ...(state.legacyRule === 'remove' ? [`Remove the unchanged earlier instructions at ${state.paths.legacyRule}`] : []),
     ...(await credentials() ? [] : [`Sign this device in through the browser and store its key in ${credentialsPath()} (mode 600)`]),
   ];
@@ -263,31 +296,33 @@ async function install(root, { client, scope, plan, open, log, wait }) {
   key ??= await login({ client, scope, open, log, wait });
   const next = serverConfig(key);
   // Record intent first so an interrupted install is repaired by rerunning.
-  await save(state.paths.record, { version: 2, scope, client, serverHash: serverHash(state.current), skillHash: state.installedSkill === null ? null : hash(state.installedSkill), pendingAuth: hash(next.headers.Authorization), pendingSkill: hash(skill) });
+  await save(state.paths.record, { version: 3, scope, client, serverHash: serverHash(state.current), skillHash: state.installedSkill === null ? null : hash(state.installedSkill), ruleHash: state.installedRule === null ? null : hash(state.installedRule), pendingAuth: hash(next.headers.Authorization), pendingSkill: hash(skill), pendingRule: hash(rule) });
   if (state.current?.url !== next.url || state.current?.headers?.Authorization !== next.headers.Authorization) {
     if (state.current) await claude(['mcp', 'remove', '--scope', state.paths.mcpScope, 'openmerit'], root, key);
     await claude(['mcp', 'add-json', '--scope', state.paths.mcpScope, 'openmerit', JSON.stringify(next)], root, key);
   }
   await save(state.paths.skill, skill);
+  await save(state.paths.rule, rule);
   if (state.legacyRule === 'remove') await rm(state.paths.legacyRule, { force: true });
   // Record what Claude actually wrote, so later edits are detected precisely.
   const written = configuredServer(await object(state.paths.mcpFile), root, scope);
   if (!written) throw new Stop('Claude Code did not save the "openmerit" MCP server.', exitCodes.error, 'Run "openmerit doctor".');
-  await save(state.paths.record, { version: 2, scope, client, serverHash: serverHash(written), skillHash: hash(skill), installedAt: new Date().toISOString() });
+  await save(state.paths.record, { version: 3, scope, client, serverHash: serverHash(written), skillHash: hash(skill), ruleHash: hash(rule), installedAt: new Date().toISOString() });
   const connection = await verify(key);
   if (connection === 'key_rejected') throw new Stop('OpenMerit rejected this device key (expired or revoked).', exitCodes.denied, 'Run "openmerit login", then rerun install.');
   return { action: 'install', applied: true, client, scope, changes, connection,
     next: connection === 'connected'
-      ? `Scout is ready in new ${clients[client]} sessions. In a session that is already open, run /mcp and reconnect "openmerit".`
+      ? `Scout is ready in new ${clients[client]} sessions. Start a new session to load the startup rule and updated skill; reconnecting /mcp alone does not reload instructions.`
       : 'Installed, but the connection check failed. Run "openmerit doctor".' };
 }
 
 async function status(root, { client, scope, check }) {
   const state = await inspect(root, scope), saved = await credentials();
-  const installed = state.owned && !!state.current && state.serverOwned && state.installedSkill !== null && state.skillOwned && !state.shadowed;
+  const installed = state.owned && !!state.current && state.serverOwned && state.installedSkill !== null && state.skillOwned && state.installedRule !== null && state.ruleOwned && !state.shadowed;
   return { action: 'status', client, scope, installed, signedIn: !!saved,
     server: state.current ? state.serverOwned ? 'matches' : 'modified_or_unowned' : 'missing',
     skill: state.installedSkill === null ? 'missing' : state.skillOwned ? 'matches' : 'modified_or_unowned',
+    rule: state.installedRule === null ? 'missing' : state.ruleOwned ? 'matches' : 'modified_or_unowned',
     conflicts: conflicts(state), connection: check && saved ? await verify(saved.key) : 'not_checked' };
 }
 
@@ -303,11 +338,13 @@ async function remove(root, { client, scope, plan }) {
   const state = await inspect(root, scope);
   if (!state.owned) return { action: 'remove', applied: false, client, scope, changes: [], note: 'No OpenMerit installation by this installer in this scope.' };
   const changes = [...(state.current && state.serverOwned ? [`Remove MCP server "openmerit" (${state.paths.mcpScope} scope)`] : []),
-    ...(state.installedSkill !== null && state.skillOwned ? [`Delete ${state.paths.skill}`] : []), 'Revoke and delete this device key'];
-  const kept = [...(state.serverOwned ? [] : ['the edited "openmerit" MCP server']), ...(state.skillOwned ? [] : [state.paths.skill]), policyPath];
+    ...(state.installedSkill !== null && state.skillOwned ? [`Delete ${state.paths.skill}`] : []),
+    ...(state.installedRule !== null && state.ruleOwned ? [`Delete ${state.paths.rule}`] : []), 'Revoke and delete this device key'];
+  const kept = [...(state.serverOwned ? [] : ['the edited "openmerit" MCP server']), ...(state.skillOwned ? [] : [state.paths.skill]), ...(state.ruleOwned ? [] : [state.paths.rule]), policyPath];
   if (plan) return { action: 'remove', applied: false, client, scope, changes, keeps: kept };
   if (state.current && state.serverOwned) await claude(['mcp', 'remove', '--scope', state.paths.mcpScope, 'openmerit'], root);
   if (state.installedSkill !== null && state.skillOwned) await rm(dirname(state.paths.skill), { recursive: true, force: true });
+  if (state.installedRule !== null && state.ruleOwned) await rm(state.paths.rule, { force: true });
   await rm(state.paths.record, { force: true });
   const revoked = await revokeKey();
   return { action: 'remove', applied: true, client, scope, changes, keeps: kept, keyRevoked: revoked };
@@ -335,13 +372,13 @@ async function doctor(root, { scope }) {
   add('key', !!saved, saved ? `Device key ${saved.keyId ?? ''} stored in ${credentialsPath()}` : 'Not signed in. Run "openmerit install" or "openmerit login".');
   if (saved && reach.status === 200) { const connection = await verify(saved.key); add('mcp', connection === 'connected', `MCP check: ${connection}`); }
   const state = await inspect(root, scope).catch(() => null);
-  if (state) add('install', state.owned && !conflicts(state).length, state.owned ? conflicts(state).join(' ') || `Installed (${scope} scope)` : `Not installed in ${scope} scope`);
+  if (state) add('install', state.owned && !!state.current && state.installedSkill !== null && state.installedRule !== null && !conflicts(state).length, state.owned ? conflicts(state).join(' ') || (state.current && state.installedSkill !== null && state.installedRule !== null ? `Installed (${scope} scope)` : 'Installation incomplete. Rerun "openmerit install".') : `Not installed in ${scope} scope`);
   return { action: 'doctor', ok: checks.every(check => check.ok), checks };
 }
 
 function render(result) {
   if (result.action === 'doctor') return result.checks.map(c => `${c.ok ? '✓' : '✗'} ${c.name}: ${c.detail}`).join('\n');
-  if (result.action === 'status') return [`OpenMerit in ${clients[result.client]} (${result.scope} scope): ${result.installed ? 'installed' : 'not installed'}`, `Signed in: ${result.signedIn ? 'yes' : 'no'} · MCP server: ${result.server} · skill: ${result.skill} · connection: ${result.connection}`, ...result.conflicts].join('\n');
+  if (result.action === 'status') return [`OpenMerit in ${clients[result.client]} (${result.scope} scope): ${result.installed ? 'installed' : 'not installed'}`, `Signed in: ${result.signedIn ? 'yes' : 'no'} · MCP server: ${result.server} · skill: ${result.skill} · rule: ${result.rule} · connection: ${result.connection}`, ...result.conflicts].join('\n');
   if (result.action === 'project') return `${result.applied ? 'Saved' : 'Would save'} ${result.path}: ${result.policy.policy}, ${result.policy.endpointIds.length} endpoint ID(s). ${result.note}`;
   if (result.action === 'login') return result.note;
   if (result.action === 'logout') return result.note;
