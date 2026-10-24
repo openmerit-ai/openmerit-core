@@ -55,7 +55,7 @@ export async function scoutAccess(request, env, onAuthenticated = () => {}) {
     // MCP additionally accepts an OpenMerit device key from `openmerit install`.
     const token = request.headers.get('authorization')?.match(/^Bearer ([^\s]+)$/i)?.[1];
     const mcp = path === '/scout/mcp';
-    const unauthorized = () => json(mcp ? { error: 'Connect this coding agent with: npx -y openmerit@preview install', code: 'device_key_required' } : { error: 'Sign in to use Scout.', code: 'sign_in_required' }, 401, { 'WWW-Authenticate': 'Bearer realm="Scout"' });
+    const unauthorized = () => json(mcp ? { error: 'Connect this coding agent with: npx -y openmerit@latest install', code: 'device_key_required' } : { error: 'Sign in to use Scout.', code: 'sign_in_required' }, 401, { 'WWW-Authenticate': 'Bearer realm="Scout"' });
     if (!token) return unauthorized();
     const userId = token.startsWith('om_') ? mcp ? (await deviceKeyUser(env, token))?.userId : null : await sessionUser(request, env);
     if (!userId) return unauthorized();

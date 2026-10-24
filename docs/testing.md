@@ -1,5 +1,15 @@
 # Testing and validation
 
+## Stable 0.1.7 acceptance — 24 October 2026
+
+Published `openmerit@0.1.7` to npm's `latest` channel after full repository verification: 757 passing tests, one existing skip, syntax/type checks, builds and documentation checks. The `preview` tag remains `0.1.7-preview.5`. A fresh registry installation on macOS ARM64 with Node.js 22.23.1 matched the tested 104-file tarball byte-for-byte. Packed core/protocol/Pi exports and the installed terminal runtime smoke checks passed, including passive collection, source removal, runtime outage/recovery and shutdown.
+
+The live Scout button opened a prefilled Claude Desktop Code session through Chrome. That session ran `npx -y openmerit@latest install --client claude-code`, opened the real device-approval page, and completed after approval of the matching code. This was a clean setup after removing and revoking this test's earlier source installation, not reuse of an existing key. Status then reported the MCP server and skill installed and connected; credentials had mode 600 and other MCP servers were preserved.
+
+A fresh Desktop session received an application-model request that never mentioned Scout. It loaded `openmerit-scout` and called the real `scout_models` tool with the saved empty inventory, returning zero candidates. It asked before broadening; after separate approval, its second MCP call returned five candidates and it produced a provisional recommendation. No application code, providers, candidate inference or deployments were performed by that session. Anonymous MCP access and use of the device key on the JSON API both returned 401, while authenticated tool discovery succeeded.
+
+These are integration observations, not a general guarantee that every agent follows the skill. Both search responses reported stale/degraded source data, including incomplete Parallel research. Their approximately 228,000- and 538,000-character payloads exceeded Desktop's inline tool limit; Claude recovered through saved tool-result files. The flow works, but these checks do not establish catalogue freshness, task accuracy or small response size. A separate recovery-path check exposed an obsolete preview install command in the MCP 401 message; its stable-command regression test failed before the source correction and passed afterward. Hosted correction is a separate deployment from the npm release.
+
 ## Published preview.5 acceptance — 17 October 2026
 
 Published `0.1.7-preview.5` to npm's `preview` channel after all **679 repository tests**, syntax/type checks, builds and documentation checks passed, including 336 Scout tests. Registry integrity matches the reviewed tarball and stable `latest` remains `0.1.6`. All 101 packaged files are accounted for; runtime bytes, public exports and legal metadata are unchanged from preview.4. Version metadata and public guides carry this release. The frozen package contains the preparation record; this post-publication result is maintained here after the registry and VM checks.

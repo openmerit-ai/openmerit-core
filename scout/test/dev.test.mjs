@@ -65,7 +65,10 @@ test('dev server serves only canonical MCP, retires aliases and keeps browser as
   assert.equal(search.status, 401); assert.equal((await search.json()).code, 'sign_in_required');
   // Canonical MCP needs a device key; a browser session token or no token is refused.
   const mcp = await fetch(`${origin}/scout/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer om_unknown' }, body: '{}' });
-  assert.equal(mcp.status, 401); assert.equal((await mcp.json()).code, 'device_key_required');
+  assert.equal(mcp.status, 401);
+  const missingKey = await mcp.json();
+  assert.equal(missingKey.code, 'device_key_required');
+  assert.match(missingKey.error, /npx -y openmerit@latest install/);
   const start = await fetch(`${origin}/connect/api/device`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ client: 'claude-code', scope: 'user', device_name: 'test' }) });
   assert.equal(start.status, 200); assert.match((await start.json()).verification_uri, /\/connect$/);
 });

@@ -431,6 +431,8 @@ When the command can open a browser, it waits up to nine minutes for the Approve
 
 Each approval creates one key for one device and client, limited to `scout:recommend`. It is accepted only on `/scout/mcp`; the JSON API and browser still require a Clerk session. The server stores only SHA-256 hashes of keys and device codes. A key expires after 90 days without use; each use extends it. The usual per-user rate limits and analytics preferences apply.
 
+Missing or invalid MCP credentials return HTTP 401 with `device_key_required`. The recovery command is `npx -y openmerit@latest install`; the older preview package does not include the installer.
+
 On the device, the key is stored in `~/.config/openmerit/credentials.json` (mode 600; `OPENMERIT_CONFIG_DIR` or `XDG_CONFIG_HOME` override the location) and in Claude Code's MCP header configuration, which Claude Code stores in plain text. The CLI never prints the key and scrubs it from any failing `claude` output. Do not paste keys into a chat.
 
 Revoke devices under **Connected devices** on `/connect`. `openmerit remove` and `openmerit logout` also revoke this device's key.
