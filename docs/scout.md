@@ -400,8 +400,8 @@ The capability index lists each area with its benchmark-series and model counts.
 
 Setup takes four steps, and you act in each one only once:
 
-1. **Click Add to Claude Code** on the Scout page. It copies a short setup prompt, shows **Copied to clipboard** above the button and opens a `claude-cli://open?q=…` link. Your browser may ask once whether to open Claude Code. Claude Code starts in a new terminal window, in your home directory, with the prompt already typed in and marked *Prompt from an external link*.
-2. **Press Enter in Claude Code**, then allow the command it asks to run. Claude Code never sends a linked prompt or runs a command by itself. The prompt asks it to run one command, with a 10-minute timeout:
+1. **Click Add to Claude Code** on the Scout page. It copies a short setup prompt, shows **Copied to clipboard** above the button and opens a `claude://code/new?q=…` link. Your browser may ask once whether to open the Claude desktop app. Desktop opens a new Code session with the prompt filled in; it never sends the prompt for you.
+2. **Send the prompt in Claude**, then allow the command it asks to run. The prompt asks it to run one command, with a 10-minute timeout:
 
    ```sh
    npx -y openmerit@preview install --client claude-code
@@ -410,7 +410,7 @@ Setup takes four steps, and you act in each one only once:
 3. **Click Approve** on `https://openmerit.ai/connect`, which the command opens for you. Sign in first if needed. The page shows the client, the device name, the scope, an eight-character code that matches the command's output, and the only permission granted: Scout recommendations through MCP. Only approve a request you started yourself.
 4. **Done.** The command has kept waiting, so nothing needs rerunning. It stores the device key, adds the `openmerit` MCP server with `claude mcp add-json`, writes the Scout skill and checks the connection with a real MCP `initialize` and tool discovery (not a search). The approval page switches to *Claude Code is connected* once the command has collected its key, and Claude Code reports the result. Scout is available in new Claude Code sessions; in a session that is already open, reconnect `openmerit` in `/mcp`.
 
-The prompt contains no key, account data or task draft. Claude Code registers the `claude-cli://` handler after you send your first prompt in an interactive session. On a machine where that hasn't happened, or where the browser blocks the link, nothing opens: paste the copied prompt into Claude Code instead. See [Claude Code deep links](https://code.claude.com/docs/en/deep-links).
+The prompt contains no key, account data or task draft. If the Claude desktop app isn't installed or your browser blocks the link, paste the copied prompt into Claude Code instead. The command needs `npx` (Node.js 22.19 or newer) and the `claude` CLI on the PATH of that session; the installer runs `claude mcp add-json`. Having the desktop app alone does not establish that those commands are available. See [Claude Desktop](https://code.claude.com/docs/en/desktop).
 
 When the command can open a browser, it waits up to nine minutes for the Approve click. When it can't, for example over SSH, it prints the link and code and returns after 30 seconds with exit code 10 so the agent can show them. Rerunning the same command resumes the same request; it does not issue a new code. Codes expire after ten minutes and can be used once. `OPENMERIT_LOGIN_WAIT` sets the wait in seconds.
 

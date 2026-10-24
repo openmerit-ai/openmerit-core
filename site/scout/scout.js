@@ -372,17 +372,18 @@ function toast(text) {
   const el = $('#toast'); el.textContent = text; el.hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
 }
-// One click: copy the prompt (before focus moves to another app, which would
-// block the clipboard write), then hand it to Claude Code's claude-cli:// handler.
-// Claude Code opens with the prompt typed in but never sends it by itself. If the
-// handler isn't registered, the prompt is still on the clipboard to paste.
+// Start copying while the page has focus, then open Desktop in the same click
+// task: awaiting the clipboard first can lose external-app user activation.
+// Desktop fills the prompt but never sends it. Keep a clipboard fallback for
+// browsers that block the link or machines without the Claude desktop app.
 $('.add-agent-button').addEventListener('click', async () => {
+  const copying = navigator.clipboard.writeText(agentPrompt);
+  location.href = `claude://code/new?q=${encodeURIComponent(agentPrompt)}`;
   let copied = false;
-  try { await navigator.clipboard.writeText(agentPrompt); copied = true; } catch { /* The deep link still carries the prompt. */ }
-  const message = copied ? 'Copied to clipboard' : 'Opening Claude Code';
+  try { await copying; copied = true; } catch { /* The deep link still carries the prompt. */ }
+  const message = copied ? 'Copied to clipboard' : 'Opening Claude';
   toast(message); $('#announcement').textContent = message;
   analytics.track('scout_agent_setup_copied', { agent: 'claude-code', outcome: copied ? 'ok' : 'error' });
-  location.href = `claude-cli://open?q=${encodeURIComponent(agentPrompt)}`;
 });
 $('#copy-command').addEventListener('click', () => copy(setupCommand(), $('#copy-command')));
 window.addEventListener('scout-analytics-change', renderAgentSetup);
