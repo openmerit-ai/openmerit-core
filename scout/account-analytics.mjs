@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import { verifyWebhook } from '@clerk/backend/webhooks';
-import { accountAnalytics, accountId, accountSyncEnabled, sendProductBatch } from './product-analytics.mjs';
+import { accountAnalytics, accountId, accountSyncEnabled, sendProductBatch, deliveryDiagnostic } from './product-analytics.mjs';
 import { json } from './http.mjs';
 
 const week = 7 * 86400_000;
@@ -56,6 +56,7 @@ export class ScoutAccounts extends DurableObject {
     return this.ctx.blockConcurrencyWhile(async () => {
       const state = await this.ctx.storage.get('state') ?? {};
       if (!state.deleted && state.enabled !== false) await sendProductBatch(this.env, batch);
+      else deliveryDiagnostic('account_suppressed', 0, batch.length);
     });
   }
 

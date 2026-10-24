@@ -215,3 +215,52 @@ test('website entry emits shared-module sanitized error frames and explicit unli
   assert.equal(error.headers['X-Scout-Analytics-Account'], 'off');
   assert.doesNotMatch(JSON.stringify(error), /PRIVATE|private.example|unknown.js|secret/);
 });
+
+test('connect observation has no Scout visit/pageview and retries only transient failures with one event identity', async t => {
+  const f = fixture(); f.collector.stop(); f.env.location.pathname = '/connect/';
+  const sent = []; let respond = async () => ({ ok: true, status: 200 });
+  const globals = { navigator: f.env.navigator, document: f.env.document, location: f.env.location,
+    localStorage: f.env.localStorage, sessionStorage: f.env.sessionStorage,
+    addEventListener: f.env.addEventListener.bind(f.env), dispatchEvent: f.env.dispatchEvent.bind(f.env),
+    fetch: async (url, options) => { sent.push(JSON.parse(options.body)); return respond(); } };
+  for (const [name, value] of Object.entries(globals)) {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+    t.after(() => descriptor ? Object.defineProperty(globalThis, name, descriptor) : delete globalThis[name]);
+  }
+  const { analytics } = await import(`../../site/scout/analytics.js?retry=${crypto.randomUUID()}`);
+  analytics.configure(true, false, false, false, { page: 'connect' });
+  analytics.account(null, null);
+  assert.equal(await analytics.track('scout_agent_setup_started', { agent: 'claude-code' }), true);
+  assert.deepEqual(sent.map(row => row.event), ['scout_agent_setup_started']);
+  for (const failure of [429, 500, 503, 599, 'network', 400, 401, 403, 408, 422]) {
+    sent.length = 0; let calls = 0;
+    respond = async () => {
+      if (calls++ > 0) return { ok: true, status: 200 };
+      if (failure === 'network') throw Error('PRIVATE network details');
+      return { ok: false, status: failure };
+    };
+    const retry = failure === 'network' || failure === 429 || failure >= 500;
+    assert.equal(await analytics.track('scout_agent_setup_started', { agent: 'claude-code' }), retry, `${failure}`);
+    assert.equal(sent.length, retry ? 2 : 1, `${failure}`);
+    assert.ok(uuidV4(sent[0].event_id));
+    if (retry) assert.deepEqual(sent[0], sent[1], 'retry must reuse the entire payload');
+  }
+  sent.length = 0;
+  respond = async () => { throw Error('offline'); };
+  assert.equal(await analytics.track('scout_agent_setup_started'), false);
+  assert.equal(sent.length, 2, 'persistent network failure is bounded');
+  for (const change of [
+    () => analytics.setPreferences(false, false, true),
+    () => analytics.setPreferences(true, false, false),
+    () => { f.env.navigator.globalPrivacyControl = true; },
+    () => { f.env.localStorage.setItem('scout-analytics-account-link', '0'); },
+    () => analytics.account('different-user', null),
+  ]) {
+    f.env.navigator.globalPrivacyControl = false; analytics.setPreferences(true, false, true);
+    sent.length = 0;
+    respond = async () => { change(); return { ok: false, status: 503 }; };
+    assert.equal(await analytics.track('scout_agent_setup_started'), false);
+    assert.equal(sent.filter(row => row.event === 'scout_agent_setup_started').length, 1, 'privacy/account changes suppress retry');
+  }
+});

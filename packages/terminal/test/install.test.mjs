@@ -10,6 +10,7 @@ import { LocalD1 } from '../../../scout/test/helpers-projection.mjs';
 import { handleConnect, deviceKeyUser } from '../../../scout/connect.mjs';
 import { handleMCP } from '../../../scout/mcp.mjs';
 import { main, rule } from '../src/install.mjs';
+import { clientVersion, setupUUID } from '../src/telemetry.mjs';
 
 // A fake `claude` that stores MCP servers like Claude Code does (user or local
 // scope in .claude.json) and, on request, fails while echoing its arguments.
@@ -34,35 +35,51 @@ async function harness(t) {
   const bin = join(dir, 'bin'), root = join(dir, 'project'), claudeDir = join(dir, 'claude');
   await Promise.all([mkdir(bin), mkdir(root), mkdir(claudeDir)]);
   await writeFile(join(bin, 'claude'), fakeClaude); await chmod(join(bin, 'claude'), 0o755);
-  const env = { SCOUT_INDEX: new LocalD1() };
+  const env = { SCOUT_INDEX: new LocalD1() }, requests = [], events = [], transport = {};
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
+    requests.push({ path: url.pathname, headers: req.headers });
     const request = new Request(`http://${req.headers.host}${req.url}`, { method: req.method, headers: req.headers, ...(req.method === 'GET' ? {} : { body: Readable.toWeb(req), duplex: 'half' }) });
     let response;
     if (url.pathname.startsWith('/connect/api/')) response = await handleConnect(request, env, { session: async () => null });
     else if (url.pathname === '/scout/mcp') {
       const token = req.headers.authorization?.replace(/^Bearer /, '');
-      response = await deviceKeyUser(env, token ?? '') ? await handleMCP(request, {}) : Response.json({ code: 'device_key_required' }, { status: 401 });
+      response = transport.mcpStatus ? Response.json({}, { status: transport.mcpStatus }) : await deviceKeyUser(env, token ?? '') ? await handleMCP(request, {}) : Response.json({ code: 'device_key_required' }, { status: 401 });
     } else response = Response.json({ ok: true });
     res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text());
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const saved = { ...process.env };
   Object.assign(process.env, { PATH: `${bin}:${process.env.PATH}`, OPENMERIT_URL: `http://127.0.0.1:${server.address().port}`, OPENMERIT_CONFIG_DIR: join(dir, 'openmerit'),
-    CLAUDE_CONFIG_DIR: claudeDir, OPENMERIT_LOGIN_WAIT: '0', OPENMERIT_DEVICE_NAME: 'test-laptop', FAKE_CLAUDE_LOG: join(dir, 'claude.log') });
+    CLAUDE_CONFIG_DIR: claudeDir, OPENMERIT_LOGIN_WAIT: '0', OPENMERIT_DEVICE_NAME: 'test-laptop', FAKE_CLAUDE_LOG: join(dir, 'claude.log'), OPENMERIT_TELEMETRY: '', DO_NOT_TRACK: '', OPENMERIT_ANALYTICS_ACCOUNT: '' });
   delete process.env.CLAUDECODE; delete process.env.CLAUDE_CODE_ENTRYPOINT;
-  t.after(async () => { process.env = saved; server.close(); await rm(dir, { recursive: true, force: true }); });
+  const fetcher = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    if (url === 'https://openmerit.ai/scout/api/analytics') {
+      events.push({ ...JSON.parse(options.body), headers: options.headers });
+      if (transport.analytics === 'hang') return new Promise(() => {});
+      if (transport.analytics === 'fail') throw new Error('PRIVATE analytics failure');
+      return new Response(null);
+    }
+    if (new URL(url).pathname === '/connect/api/keys/self') {
+      if (transport.revokeStatus) return Response.json({}, { status: transport.revokeStatus });
+      if (transport.revokeUnreachable) throw new Error('PRIVATE revocation network failure');
+    }
+    if (transport.unreachable && new URL(url).pathname === '/scout/mcp') throw new Error('PRIVATE network failure');
+    return fetcher(url, options);
+  };
+  t.after(async () => { globalThis.fetch = fetcher; process.env = saved; server.close(); await rm(dir, { recursive: true, force: true }); });
   const run = async (...args) => {
-    let out = '';
-    const code = await main(args, { root, print: text => { out += `${text}\n`; }, printError: text => { out += `${text}\n`; } });
-    return { code, out };
+    let out = '', stdout = '', stderr = '';
+    const code = await main(args, { root, print: text => { out += `${text}\n`; stdout += `${text}\n`; }, printError: text => { out += `${text}\n`; stderr += `${text}\n`; } });
+    return { code, out, stdout, stderr };
   };
   const approve = async userCode => {
     const response = await handleConnect(new Request('http://x/connect/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: userCode, decision: 'approve' }) }), env, { session: async () => 'user_alice' });
     assert.equal(response.status, 200);
   };
   const claudeConfig = async () => JSON.parse(await readFile(join(claudeDir, '.claude.json'), 'utf8'));
-  return { run, approve, claudeConfig, env, root, claudeDir, dir };
+  return { run, approve, claudeConfig, env, root, claudeDir, dir, requests, events, transport };
 }
 
 test('install signs in once, resumes a pending approval, installs, verifies and stays idempotent', async t => {
@@ -191,4 +208,235 @@ test('install opens only the approval page, once, and resumes without reopening 
   await h.approve(userCode);
   assert.equal((await h.run('install', '--client', 'claude-code')).code, 0);
   assert.equal((await readFile(opened, 'utf8')).trim().split('\n').length, 1, 'a resumed login does not open a second tab');
+});
+
+const setupId = '359afdd2-0e4e-4f5b-9a91-2213814b1234';
+const installArgs = ['install', '--client', 'claude-code', '--no-open'];
+
+test('opt-in lifecycle correlates browser setup, resumed login, ownership, verification, status and remove', async t => {
+  const h = await harness(t);
+  process.env.OPENMERIT_TELEMETRY = '1';
+  const pending = await h.run(...installArgs, '--setup-id', setupId);
+  assert.equal(pending.code, 10);
+  const login = JSON.parse(await readFile(join(h.dir, 'openmerit/login.json'), 'utf8'));
+  assert.equal(login.setup_id, setupId); assert.ok(setupUUID(login.installation_id));
+  const approval = new URL(login.url);
+  assert.equal(approval.searchParams.get('setup_id'), setupId);
+  assert.equal(approval.searchParams.has('analytics'), false);
+  assert.equal(h.events.at(-1).properties.outcome, 'pending');
+  assert.equal(h.events.at(-1).properties.code, 'approval_pending');
+  await h.approve(login.userCode);
+  const start = h.events.length;
+  assert.equal((await h.run(...installArgs)).code, 0);
+  const record = JSON.parse(await readFile(join(h.claudeDir, 'openmerit-install.json'), 'utf8'));
+  assert.equal(record.setup_id, setupId); assert.equal(record.installation_id, login.installation_id);
+  const headers = (await h.claudeConfig()).mcpServers.openmerit.headers;
+  assert.equal(headers['X-Scout-Client'], 'agent');
+  assert.equal(headers['X-Scout-Agent'], 'claude-code');
+  assert.equal(headers['X-Scout-Client-Version'], clientVersion);
+  assert.equal(headers['X-Scout-Setup-Id'], setupId);
+  assert.equal(headers['X-Scout-Installation-Id'], record.installation_id);
+  assert.equal(headers['X-Scout-Analytics'], undefined, 'default MCP analytics is not overridden');
+  const lifecycle = h.events.slice(start);
+  assert.ok(lifecycle.some(e => e.properties.stage === 'configuration' && e.properties.outcome === 'ok'));
+  assert.ok(lifecycle.some(e => e.properties.stage === 'verification' && e.properties.connection === 'connected'));
+  assert.deepEqual(Object.fromEntries(['applied', 'installed', 'rule_status', 'skill_status', 'server_status', 'connection'].map(k => [k, lifecycle.at(-1).properties[k]])),
+    { applied: true, installed: true, rule_status: 'matches', skill_status: 'matches', server_status: 'matches', connection: 'connected' });
+  for (const event of lifecycle) {
+    assert.equal(event.properties.setup_id, setupId); assert.equal(event.properties.installation_id, record.installation_id);
+  }
+  for (const request of h.requests) {
+    assert.equal(request.headers['x-scout-client'], 'cli');
+    assert.equal(request.headers['x-scout-agent'], 'claude-code');
+    assert.equal(request.headers['x-scout-client-version'], clientVersion);
+    assert.equal(request.headers['x-scout-setup-id'], setupId);
+    assert.equal(request.headers['x-scout-installation-id'], record.installation_id);
+    assert.equal(request.headers['x-scout-analytics'], 'on');
+  }
+  await h.run(...installArgs);
+  assert.equal(JSON.parse(await readFile(join(h.claudeDir, 'openmerit-install.json'), 'utf8')).installation_id, record.installation_id, 'upgrades retain identity');
+  await writeFile(join(h.claudeDir, 'rules/openmerit-scout.md'), 'PRIVATE edited rule');
+  const status = await h.run('status', '--client', 'claude-code', '--check', '--json');
+  assert.equal(JSON.parse(status.out).rule, 'modified_or_unowned');
+  const statusEvent = h.events.findLast(e => e.properties.stage === 'status');
+  assert.equal(statusEvent.properties.rule_status, 'modified_or_unowned');
+  assert.equal(statusEvent.properties.installed, false); assert.equal(statusEvent.properties.outcome, 'conflict');
+  await h.run('remove', '--client', 'claude-code');
+  assert.equal(h.events.at(-1).properties.installation_id, record.installation_id);
+  assert.equal(h.events.at(-1).properties.installed, false);
+  assert.equal(new Set(h.events.map(e => e.event_id)).size, h.events.length);
+  for (const event of h.events) { assert.equal(event.event, 'scout_installation_step'); assert.ok(setupUUID(event.event_id)); }
+  assert.doesNotMatch(JSON.stringify(h.events), /PRIVATE|om_[A-Za-z0-9_-]{20,}|Bearer|test-laptop|deviceCode|userCode/);
+  assert.ok(!JSON.stringify(h.events).includes(h.dir), 'paths never leave the device');
+});
+
+test('verification failures are errors in telemetry even when install/status retain successful exit semantics', async t => {
+  const h = await harness(t);
+  process.env.OPENMERIT_TELEMETRY = '1';
+  const pending = await h.run(...installArgs, '--setup-id', setupId);
+  await h.approve(pending.out.match(/Code: (\S+)/)[1]);
+  h.transport.mcpStatus = 503;
+  const result = await h.run(...installArgs, '--json');
+  assert.equal(result.code, 0); assert.equal(JSON.parse(result.stdout).connection, 'failed');
+  assert.equal(h.events.at(-1).properties.outcome, 'error');
+  assert.equal(h.events.at(-1).properties.installed, true);
+  assert.ok(h.events.some(e => e.properties.stage === 'verification' && e.properties.outcome === 'error' && e.properties.connection === 'failed'));
+  assert.equal((await h.run('status', '--client', 'claude-code', '--check')).code, 0);
+  assert.equal(h.events.at(-1).properties.outcome, 'error');
+  h.transport.mcpStatus = 401;
+  await h.run('status', '--client', 'claude-code', '--check');
+  assert.equal(h.events.at(-1).properties.connection, 'key_rejected');
+  h.transport.unreachable = true;
+  assert.equal((await h.run('status', '--client', 'claude-code', '--check')).code, 30);
+  assert.equal(h.events.at(-2).properties.stage, 'verification');
+  assert.equal(h.events.at(-2).properties.code, 'openmerit_unreachable');
+});
+
+test('failed remote revocation is recorded even when local removal or logout succeeds', async t => {
+  for (const command of ['remove', 'logout']) await t.test(command, async t => {
+    const h = await harness(t);
+    process.env.OPENMERIT_TELEMETRY = '1';
+    const pending = await h.run(...installArgs, '--setup-id', setupId);
+    await h.approve(pending.out.match(/Code: (\S+)/)[1]);
+    await h.run(...installArgs);
+    if (command === 'remove') h.transport.revokeStatus = 503;
+    else h.transport.revokeUnreachable = true;
+    const result = await h.run(command, ...(command === 'remove' ? ['--client', 'claude-code'] : []), '--json');
+    assert.equal(result.code, 0, 'existing local command exit semantics are unchanged');
+    assert.equal(JSON.parse(result.out)[command === 'remove' ? 'keyRevoked' : 'revoked'], false);
+    assert.equal(h.events.at(-1).properties.outcome, 'error');
+    assert.equal(h.events.at(-1).properties.code, command === 'remove' ? 'command_error' : 'openmerit_unreachable');
+    assert.ok(h.events.some(e => e.properties.command === command && e.properties.stage === 'remove' && e.properties.outcome === 'error'));
+    await assert.rejects(readFile(join(h.dir, 'openmerit/credentials.json')), { code: 'ENOENT' });
+    assert.doesNotMatch(JSON.stringify(h.events), /PRIVATE|om_[A-Za-z0-9_-]{20,}|Bearer/);
+  });
+});
+
+test('setup-id never opts in; CLI refusal and DNT do not export IDs, while MCP defaults and account refusals are preserved', async t => {
+  for (const mode of ['default', 'dnt', 'account-off', 'unlinked']) await t.test(mode, async t => {
+    const h = await harness(t);
+    if (mode === 'dnt') { process.env.OPENMERIT_TELEMETRY = '1'; process.env.DO_NOT_TRACK = '1'; }
+    if (mode === 'account-off') { process.env.OPENMERIT_TELEMETRY = '1'; process.env.OPENMERIT_ANALYTICS_ACCOUNT = 'off'; }
+    if (mode === 'unlinked') process.env.OPENMERIT_ANALYTICS_ACCOUNT = 'off';
+    const pending = await h.run(...installArgs, '--setup-id', setupId);
+    const login = JSON.parse(await readFile(join(h.dir, 'openmerit/login.json'), 'utf8'));
+    const url = new URL(login.url);
+    assert.equal(url.searchParams.get('analytics'), mode === 'dnt' ? 'off' : null);
+    assert.equal(url.searchParams.get('setup_id'), null);
+    assert.equal(url.searchParams.get('analytics_account'), mode === 'default' ? null : 'off');
+    await h.approve(pending.out.match(/Code: (\S+)/)[1]);
+    assert.equal((await h.run(...installArgs)).code, 0);
+    const headers = (await h.claudeConfig()).mcpServers.openmerit.headers;
+    assert.equal(headers['X-Scout-Analytics'], mode === 'dnt' ? 'off' : undefined);
+    assert.equal(headers['X-Scout-Analytics-Account'], mode === 'default' ? undefined : 'off');
+    assert.equal(headers['X-Scout-Installation-Id'], undefined);
+    assert.equal(login.installation_id, undefined, 'refused correlation must not create an identity');
+    for (const request of h.requests) {
+      assert.equal(request.headers['x-scout-analytics'], mode === 'account-off' ? 'on' : 'off');
+      assert.equal(request.headers['x-scout-installation-id'], undefined);
+      assert.equal(request.headers['x-scout-setup-id'], undefined);
+    }
+    if (mode !== 'account-off') assert.deepEqual(h.events, []);
+    else assert.ok(h.events.every(e => e.headers['X-Scout-Analytics-Account'] === 'off' && !e.properties.setup_id && !e.properties.installation_id));
+  });
+});
+
+test('plan and status are read-only, validate UUIDs, and stage thrown/configuration errors without private text', async t => {
+  const h = await harness(t);
+  process.env.OPENMERIT_TELEMETRY = '1';
+  await assert.rejects(h.run(...installArgs, '--setup-id', 'PRIVATE invalid id'), /UUID v4/);
+  assert.equal(h.events.at(-1).properties.code, 'command_error');
+  h.events.length = 0;
+  await h.run(...installArgs, '--setup-id', setupId, '--plan');
+  await h.run('status', '--client', 'claude-code');
+  assert.ok(h.events.every(e => !e.properties.installed && !e.properties.applied && !e.properties.installation_id));
+  assert.equal(h.events.at(-1).properties.outcome, 'not_installed');
+  await assert.rejects(readFile(join(h.dir, 'openmerit/login.json')), { code: 'ENOENT' });
+  await assert.rejects(readFile(join(h.claudeDir, 'openmerit-install.json')), { code: 'ENOENT' });
+  const pending = await h.run(...installArgs, '--setup-id', setupId);
+  await h.approve(pending.out.match(/Code: (\S+)/)[1]);
+  process.env.FAKE_CLAUDE_FAIL = '1';
+  assert.equal((await h.run(...installArgs)).code, 1);
+  assert.equal(h.events.at(-2).properties.stage, 'configuration');
+  assert.equal(h.events.at(-2).properties.outcome, 'error');
+  delete process.env.FAKE_CLAUDE_FAIL;
+  assert.equal((await h.run(...installArgs)).code, 0, 'interrupted intent record is repaired');
+  const config = await h.claudeConfig();
+  config.mcpServers.openmerit.headers['X-Scout-Client'] = 'PRIVATE user edit';
+  await writeFile(join(h.claudeDir, '.claude.json'), JSON.stringify(config));
+  assert.equal((await h.run(...installArgs)).code, 20, 'edited headers remain protected');
+  assert.equal(h.events.at(-2).properties.stage, 'preflight');
+  assert.equal(h.events.at(-2).properties.outcome, 'conflict');
+  assert.doesNotMatch(JSON.stringify(h.events), /PRIVATE|Bearer|om_[A-Za-z0-9_-]{20,}/);
+});
+
+test('owned headers update on consent changes without changing installation identity', async t => {
+  const h = await harness(t);
+  process.env.OPENMERIT_TELEMETRY = '1';
+  const pending = await h.run(...installArgs, '--setup-id', setupId);
+  await h.approve(pending.out.match(/Code: (\S+)/)[1]);
+  await h.run(...installArgs);
+  const id = (await h.claudeConfig()).mcpServers.openmerit.headers['X-Scout-Installation-Id'];
+  process.env.OPENMERIT_TELEMETRY = '';
+  await h.run(...installArgs);
+  const defaultHeaders = (await h.claudeConfig()).mcpServers.openmerit.headers;
+  assert.equal(defaultHeaders['X-Scout-Analytics'], undefined);
+  assert.equal(defaultHeaders['X-Scout-Installation-Id'], undefined);
+  assert.equal(defaultHeaders['X-Scout-Setup-Id'], undefined);
+  process.env.OPENMERIT_TELEMETRY = '1';
+  process.env.DO_NOT_TRACK = '1';
+  assert.equal((await h.run(...installArgs)).code, 0);
+  let headers = (await h.claudeConfig()).mcpServers.openmerit.headers;
+  assert.equal(headers['X-Scout-Analytics'], 'off'); assert.equal(headers['X-Scout-Setup-Id'], undefined);
+  assert.equal(headers['X-Scout-Installation-Id'], undefined);
+  process.env.DO_NOT_TRACK = '';
+  await h.run(...installArgs);
+  headers = (await h.claudeConfig()).mcpServers.openmerit.headers;
+  assert.equal(headers['X-Scout-Installation-Id'], id); assert.equal(headers['X-Scout-Setup-Id'], setupId);
+  assert.equal(headers['X-Scout-Analytics'], undefined);
+});
+
+test('telemetry delivery failures and ignored aborts are bounded and do not break public main', async t => {
+  const h = await harness(t);
+  process.env.OPENMERIT_TELEMETRY = '1';
+  for (const mode of ['fail', 'hang']) {
+    h.transport.analytics = mode;
+    const start = performance.now();
+    const result = await h.run(...installArgs, '--plan', '--json');
+    assert.equal(result.code, 0); assert.equal(JSON.parse(result.out).applied, false);
+    assert.ok(performance.now() - start < 7000, 'four milestone deliveries have a hard 1.5-second bound each');
+  }
+});
+
+test('explicit login resumes and passes its setup ID to subsequent install without generating an installation ID', async t => {
+  const h = await harness(t);
+  process.env.OPENMERIT_TELEMETRY = '1';
+  const first = await h.run('login', '--no-open', '--setup-id', setupId);
+  assert.equal(first.code, 10);
+  const code = first.out.match(/Code: (\S+)/)[1];
+  assert.equal(JSON.parse(await readFile(join(h.dir, 'openmerit/login.json'), 'utf8')).installation_id, undefined);
+  await h.approve(code);
+  assert.equal((await h.run('login', '--no-open')).code, 0);
+  assert.ok(h.events.every(e => e.properties.installation_id === undefined));
+  assert.equal(h.events.at(-1).properties.setup_id, setupId);
+  assert.equal((await h.run(...installArgs)).code, 0);
+  assert.equal((await h.claudeConfig()).mcpServers.openmerit.headers['X-Scout-Setup-Id'], setupId);
+  assert.ok(setupUUID(h.events.at(-1).properties.installation_id));
+});
+
+test('resumed approval rebuilds its URL and requests after a telemetry refusal', async t => {
+  const h = await harness(t);
+  process.env.OPENMERIT_TELEMETRY = '1';
+  const first = await h.run(...installArgs, '--setup-id', setupId);
+  const code = first.out.match(/Code: (\S+)/)[1];
+  const count = h.events.length;
+  process.env.DO_NOT_TRACK = '1';
+  const resumed = await h.run(...installArgs);
+  assert.equal(resumed.code, 10); assert.equal(h.events.length, count);
+  const pending = JSON.parse(await readFile(join(h.dir, 'openmerit/login.json'), 'utf8'));
+  assert.equal(pending.userCode, code); assert.equal(pending.setup_id, setupId);
+  assert.equal(new URL(pending.url).searchParams.has('setup_id'), false);
+  assert.equal(new URL(pending.url).searchParams.get('analytics'), 'off');
+  assert.equal(h.requests.at(-1).headers['x-scout-setup-id'], undefined);
+  assert.equal(h.requests.at(-1).headers['x-scout-analytics'], 'off');
 });

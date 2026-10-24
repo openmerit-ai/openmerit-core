@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { LocalD1 } from './helpers-projection.mjs';
 import { handleConnect, deviceKeyUser } from '../connect.mjs';
 import { scoutAccess } from '../auth.mjs';
+import { createProductAnalytics } from '../product-analytics.mjs';
 
 const origin = 'https://example.test';
 function setup() {
@@ -94,4 +95,37 @@ test('device keys authorize MCP only, and revocation and idle expiry take effect
   assert.ok(await deviceKeyUser(env, idle, undefined, ctx.now() + 89 * 86400_000), 'use within 90 days extends the key');
   assert.ok(await deviceKeyUser(env, idle, undefined, ctx.now() + 170 * 86400_000));
   assert.equal(await deviceKeyUser(env, idle, undefined, ctx.now() + 300 * 86400_000), null);
+});
+
+test('device lifecycle telemetry distinguishes pending, approval, collection, denial, expiry and revocation without secrets', async t => {
+  const sent = [], pending = [], setup_id = crypto.randomUUID();
+  t.mock.method(globalThis, 'fetch', async (_, options) => { sent.push(...JSON.parse(options.body).batch); return new Response(null, { status: 200 }); });
+  const env = { SCOUT_INDEX: new LocalD1(), POSTHOG_PROJECT_TOKEN: 'phc_fixture', POSTHOG_HOST: 'https://eu.i.posthog.com', POSTHOG_ENVIRONMENT: 'test' };
+  let now = Date.now();
+  async function call(path, body, user = null, method = 'POST', headers = {}) {
+    const request = new Request(`${origin}/connect/api/${path}`, { method, headers: { 'Content-Type': 'application/json', 'X-Scout-Setup-Id': setup_id, ...headers }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const analytics = createProductAnalytics(request, env, { waitUntil: p => pending.push(p) });
+    const response = await handleConnect(request, env, { session: async () => user, now, analytics });
+    while (pending.length) await Promise.all(pending.splice(0));
+    return response.json();
+  }
+  const login = await call('device', { client: 'claude-code', scope: 'user', device_name: 'PRIVATE_DEVICE' });
+  await call('token', { device_code: login.device_code });
+  assert.equal(sent.filter(e => e.event === '$exception').length, 0, 'expected approval polling is not a failure');
+  await call('login', { code: login.user_code, decision: 'approve' }, 'PRIVATE_USER');
+  const key = await call('token', { device_code: login.device_code });
+  await call('keys/self', undefined, null, 'DELETE', { Authorization: `Bearer ${key.access_token}` });
+  const denied = await call('device', { client: 'claude-code', scope: 'user', device_name: 'PRIVATE_DEVICE' });
+  await call('login', { code: denied.user_code, decision: 'deny' }, 'PRIVATE_USER');
+  await call('token', { device_code: denied.device_code });
+  const expired = await call('device', { client: 'claude-code', scope: 'user', device_name: 'PRIVATE_DEVICE' });
+  now += 601000;
+  await call('token', { device_code: expired.device_code });
+  const states = sent.filter(e => e.event === 'scout_connect_step').map(e => [e.properties.stage, e.properties.status, e.properties.outcome]);
+  assert.deepEqual(states, [['device', undefined, 'ok'], ['token', 'pending', 'pending'], ['login', 'approved', 'ok'], ['token', 'collected', 'ok'], ['revoke', 'revoked', 'ok'], ['device', undefined, 'ok'], ['login', 'denied', 'denied'], ['token', 'denied', 'denied'], ['device', undefined, 'ok'], ['token', 'expired', 'error']]);
+  assert.ok(sent.every(e => e.properties.setup_id === setup_id));
+  assert.doesNotMatch(JSON.stringify(sent), new RegExp(`PRIVATE_|${login.device_code}|${login.user_code}|${key.access_token}|${key.key_id}`));
+  const count = sent.length;
+  await call('device', { client: 'claude-code', scope: 'user', device_name: 'PRIVATE_DEVICE' }, null, 'POST', { DNT: '1' });
+  assert.equal(sent.length, count);
 });

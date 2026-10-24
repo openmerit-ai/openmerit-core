@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-let clientVersion;
+export let clientVersion;
 for (const path of ['../../../package.json', '../../../../package.json']) {
   try { const pkg = JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')); if (pkg.name === 'openmerit') { clientVersion = pkg.version; break; } } catch {}
 }
@@ -31,6 +31,74 @@ const environment = () => ({ ...(clientVersion ? { client_version: clientVersion
 
 const anonymousId = randomUUID();
 export const telemetryEnabled = () => process.env.OPENMERIT_TELEMETRY === '1' && process.env.DO_NOT_TRACK !== '1';
+export const setupCorrelationEnabled = () => telemetryEnabled() && process.env.OPENMERIT_ANALYTICS_ACCOUNT !== 'off';
+export const setupUUID = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+// Device/verifier traffic is CLI opt-in. Installed MCP usage retains its existing
+// default, but explicit privacy refusals must survive into future agent sessions.
+export function setupHeaders(ids = {}, client = 'cli') {
+  return {
+    'X-Scout-Client': client,
+    'X-Scout-Agent': 'claude-code',
+    ...(clientVersion ? { 'X-Scout-Client-Version': clientVersion } : {}),
+    'X-Scout-Analytics-Content': 'off',
+    ...(client === 'cli' ? { 'X-Scout-Analytics': telemetryEnabled() ? 'on' : 'off' } : process.env.DO_NOT_TRACK === '1' ? { 'X-Scout-Analytics': 'off' } : {}),
+    ...(process.env.OPENMERIT_ANALYTICS_ACCOUNT === 'off' || process.env.DO_NOT_TRACK === '1' ? { 'X-Scout-Analytics-Account': 'off' } : {}),
+    ...(setupCorrelationEnabled() && setupUUID(ids.setup_id) ? { 'X-Scout-Setup-Id': ids.setup_id } : {}),
+    ...(setupCorrelationEnabled() && setupUUID(ids.installation_id) ? { 'X-Scout-Installation-Id': ids.installation_id } : {}),
+  };
+}
+export function installationProperties(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const out = {};
+  const enums = {
+    stage: ['started', 'preflight', 'login', 'browser_open', 'configuration', 'verification', 'status', 'remove', 'completed'],
+    outcome: ['started', 'ok', 'error', 'pending', 'denied', 'conflict', 'not_installed'],
+    command: ['install', 'status', 'remove', 'login', 'logout', 'project', 'doctor', 'unknown'],
+    agent: ['claude-code'], scope: ['user', 'project'],
+    rule_status: ['matches', 'missing', 'modified_or_unowned'],
+    skill_status: ['matches', 'missing', 'modified_or_unowned'],
+    server_status: ['matches', 'missing', 'modified_or_unowned'],
+    connection: ['connected', 'failed', 'key_rejected', 'not_checked'],
+    code: ['command_error', 'approval_pending', 'access_denied', 'install_conflict', 'openmerit_unreachable'],
+  };
+  for (const [key, values] of Object.entries(enums)) {
+    if (input[key] === undefined && !['stage', 'outcome'].includes(key)) continue;
+    if (!values.includes(input[key])) return null;
+    out[key] = input[key];
+  }
+  for (const key of ['setup_id', 'installation_id']) if (setupUUID(input[key])) out[key] = input[key];
+  for (const key of ['applied', 'installed']) if (typeof input[key] === 'boolean') out[key] = input[key];
+  return out;
+}
+export async function sendInstallationEvent(input) {
+  if (!telemetryEnabled()) return;
+  const properties = installationProperties(input);
+  if (!properties) return;
+  if (!setupCorrelationEnabled()) { delete properties.setup_id; delete properties.installation_id; }
+  // One immutable envelope across a transient retry. A hard total deadline
+  // bounds awaited milestones even if the transport ignores cancellation.
+  const body = JSON.stringify({ event: 'scout_installation_step', event_id: randomUUID(), anonymousId, properties: { ...properties, ...environment() } });
+  const controller = new AbortController();
+  let timer;
+  try {
+    await Promise.race([
+      (async () => {
+        for (let attempt = 0; attempt < 2 && !controller.signal.aborted && telemetryEnabled(); attempt++) {
+          try {
+            const response = await fetch('https://openmerit.ai/scout/api/analytics', {
+              method: 'POST', headers: { 'Content-Type': 'application/json', ...setupHeaders(properties) },
+              body, signal: controller.signal, redirect: 'error',
+            });
+            await response.body?.cancel();
+            if (response.ok || response.status !== 429 && response.status < 500) return;
+          } catch { /* Only a bounded retry; never export error text. */ }
+        }
+      })(),
+      new Promise(resolve => { timer = setTimeout(() => { controller.abort(); resolve(); }, 1500); }),
+    ]);
+  } catch { /* Never affect setup, even if the transport ignores abort. */ }
+  finally { clearTimeout(timer); }
+}
 export const errorType = error => ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'URIError', 'EvalError', 'AggregateError', 'AbortError'].includes(error?.name) ? error.name : 'Error';
 export function terminalProperties(event, input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
@@ -65,12 +133,13 @@ export function sendTerminalEvent(event, input) {
 }
 async function sendAnalytics(event, properties) {
   const controller = new AbortController();
+  const body = JSON.stringify({ event, event_id: randomUUID(), anonymousId, properties: { ...properties, ...environment() } });
   let timer;
   try {
     await Promise.race([
       Promise.resolve().then(() => fetch('https://openmerit.ai/scout/api/analytics', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Scout-Client': 'cli', 'X-Scout-Analytics': 'on' },
-        body: JSON.stringify({ event, anonymousId, properties: { ...properties, ...environment() } }), signal: controller.signal, redirect: 'error',
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Scout-Client': 'cli', 'X-Scout-Analytics': 'on', ...(process.env.OPENMERIT_ANALYTICS_ACCOUNT === 'off' ? { 'X-Scout-Analytics-Account': 'off' } : {}) },
+        body, signal: controller.signal, redirect: 'error',
       })).then(response => response.body?.cancel()),
       new Promise(resolve => { timer = setTimeout(() => { controller.abort(); resolve(); }, 750); timer.unref(); }),
     ]);
@@ -78,7 +147,8 @@ async function sendAnalytics(event, properties) {
   finally { clearTimeout(timer); }
 }
 
-// Consent is independent of terminal discovery. Never persist an identity.
+// Consent is independent of terminal discovery. Command identity is ephemeral;
+// the installer separately manages the owned installation's correlation IDs.
 export function commandTelemetry(args) {
   if (process.env.OPENMERIT_TELEMETRY !== '1' || process.env.DO_NOT_TRACK === '1') return async () => {};
   const started = performance.now();
@@ -90,12 +160,13 @@ export function commandTelemetry(args) {
   async function send(event, properties) {
     if (!telemetryEnabled()) return;
     const controller = new AbortController();
+    const body = JSON.stringify({ event, event_id: randomUUID(), anonymousId, properties: { ...properties, ...environment(), command_id } });
     let timer;
     try {
       await Promise.race([
         Promise.resolve().then(() => fetch('https://openmerit.ai/scout/api/analytics', {
-          method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Scout-Client': 'cli', 'X-Scout-Analytics': 'on' },
-          body: JSON.stringify({ event, anonymousId, properties: { ...properties, ...environment(), command_id } }),
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Scout-Client': 'cli', 'X-Scout-Analytics': 'on', ...(process.env.OPENMERIT_ANALYTICS_ACCOUNT === 'off' ? { 'X-Scout-Analytics-Account': 'off' } : {}) },
+          body,
           signal: controller.signal, redirect: 'error',
         })).then(response => response.body?.cancel()),
         new Promise(resolve => { timer = setTimeout(() => { controller.abort(); resolve(); }, 750); }),

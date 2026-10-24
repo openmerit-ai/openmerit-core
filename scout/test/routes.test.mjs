@@ -222,7 +222,8 @@ test('product opt-out and missing configuration suppress all transmissions; reje
 test('analytics has a separate IP quota and unavailable delivery cannot fail or block requests',async t=>{
   const keys=[],ctx=pendingContext();let release;
   const config={...authEnv,...productEnv,SCOUT_RATE:{async limit({key}){keys.push(key);return {success:true};}}};
-  t.mock.method(globalThis,'fetch',()=>new Promise((_,reject)=>{release=()=>reject(new Error('PRIVATE_CANARY'));}));
+  let unavailable=false;
+  t.mock.method(globalThis,'fetch',()=>unavailable?Promise.reject(new Error('PRIVATE_CANARY')):new Promise((_,reject)=>{release=()=>{unavailable=true;reject(new Error('PRIVATE_CANARY'));};}));
   const response=await alpha.fetch(eventRequest('scout_session_observed',{},sessionToken()),config,ctx);
   assert.equal(response.status,204);assert.deepEqual(keys,['analytics:ip:unknown']);
   // The response arrived while PostHog is still unresolved. Drain its failed
@@ -315,11 +316,12 @@ test('webhook signatures and preference authentication fail closed, and opt-outs
   assert.equal((await alpha.fetch(preferenceRequest(true, {}, 'forged'), config, ctx)).status, 401);
   assert.equal(sent.length, 0);
   for (const headers of [{ dnt: '1' }, { 'sec-gpc': '1' }, { 'x-scout-analytics': 'off' }]) {
-    // Re-enable only through a later authenticated preference, then suppress
-    // again through an ordinary event request (not just the preference route).
+    // Account-wide changes require the explicit preference route. A disabled
+    // request alone must not silently opt every other client out.
     await new Promise(resolve => setTimeout(resolve, 2));
     assert.equal((await alpha.fetch(preferenceRequest(true), config, ctx)).status, 204);
     assert.equal((await alpha.fetch(eventRequest('scout_visited', {}, sessionToken(), headers), config, ctx)).status, 204);
+    assert.equal((await alpha.fetch(preferenceRequest(false, headers), config, ctx)).status, 204);
     await ctx.flush(); const before = sent.length;
     assert.equal((await alpha.fetch(webhookRequest('session.created', { user_id: 'user_alice' }), config, ctx)).status, 200);
     assert.equal((await alpha.fetch(webhookRequest('user.updated', { id: 'user_alice' }), config, ctx)).status, 200);
@@ -389,7 +391,7 @@ test('delivery retries preserve IDs and deletion tombstones block late updates a
   assert.equal((await alpha.fetch(event.clone(), config, ctx)).status, 200);
   assert.equal((await alpha.fetch(event, config, ctx)).status, 200);
   const retries = attempts.filter(e => e.event === 'scout_signed_in');
-  assert.equal(retries.length, 2); assert.equal(retries[0].uuid, retries[1].uuid);
+  assert.equal(retries.length, 4); assert.equal(new Set(retries.map(e => e.uuid)).size, 1);
   const deleted = webhookRequest('user.deleted', { id: 'user_alice', deleted: true });
   const failed = await alpha.fetch(deleted.clone(), config, ctx);
   assert.equal(failed.status, 503); assert.doesNotMatch(await failed.text(), /PRIVATE_CANARY/);

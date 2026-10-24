@@ -5,10 +5,11 @@ const endpoint = new URL('./api/analytics', import.meta.url).pathname;
 const storageKey = 'scout-product-analytics';
 let enabled = false, accountSync = false, contentAvailable = false, contentDefault = false, state, session, currentUser, lastAllowed, lastLinked, generation = 0, visited = false, ready = Promise.resolve();
 let usageChoice, contentChoice, linkChoice, errors = 0;
+let page = 'scout', requestUsage = true, requestLink = true;
 let web;
 const fresh = () => ({ anonymousId: accountLinked() && web?.identity()?.anonymousId || crypto.randomUUID(), user: null, session: null, linked: accountLinked() });
 function allowed() {
-  if (!enabled || !webPermitted()) return false;
+  if (!enabled || !requestUsage || !webPermitted()) return false;
   if (usageChoice !== undefined) return usageChoice;
   try { return localStorage.getItem('scout-analytics-opt-out') !== '1'; } catch { return false; }
 }
@@ -21,7 +22,7 @@ function contentAllowed() {
   } catch { return false; } // An unreadable existing refusal must not become consent.
 }
 function accountLinked() {
-  try { return localStorage.getItem('scout-analytics-account-link') !== '0' && linkChoice !== false; } catch { return false; }
+  try { return requestLink && localStorage.getItem('scout-analytics-account-link') !== '0' && linkChoice !== false; } catch { return false; }
 }
 function save() {
   try { sessionStorage.setItem(storageKey, JSON.stringify(state)); } catch { /* Optional tab storage. */ }
@@ -47,8 +48,11 @@ async function preference(active, current, value) {
 }
 
 export const analytics = {
-  configure(value, sync = false, content = false, beta = false) {
-    enabled = value === true; accountSync = sync === true; contentAvailable = content === true; contentDefault = beta === true; currentUser = undefined; lastAllowed = undefined; lastLinked = undefined; generation++;
+  configure(value, sync = false, content = false, beta = false, context = {}) {
+    page = context.page === 'connect' ? 'connect' : 'scout';
+    requestUsage = context.usage !== false; requestLink = context.linkAccount !== false;
+    // An installer URL refusal is request-local, not a new account preference.
+    enabled = value === true; accountSync = sync === true && requestUsage; contentAvailable = content === true; contentDefault = beta === true; currentUser = undefined; lastAllowed = undefined; lastLinked = undefined; generation++;
     globalThis.dispatchEvent?.(new Event('scout-analytics-change'));
     if (!web && globalThis.document?.addEventListener && globalThis.location) {
       web = createWebAnalytics({ permitted: allowed, accountLink: accountLinked, autoStart: false,
@@ -110,7 +114,7 @@ export const analytics = {
       const signedIn = !!user && state.session !== sessionId;
       state.user = user; state.session = sessionId; save();
       web?.navigate();
-      if (!visited) {
+      if (page === 'scout' && !visited) {
         visited = true; analytics.track('scout_visited');
         globalThis.dispatchEvent?.(new Event('scout-analytics-ready'));
       }
@@ -151,12 +155,22 @@ export const analytics = {
       const headers = analytics.headers();
       if (current !== generation || !allowed()) return false;
       if (properties.session_id) headers['X-Scout-Session-Id'] = properties.session_id;
-      const response = await fetch(endpoint, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...headers, 'X-Scout-Anonymous-Id': anonymousId, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ event, anonymousId, properties: properties.session_id ? properties : { ...properties, ...(headers['X-Scout-Session-Id'] ? { session_id: headers['X-Scout-Session-Id'] } : {}) } }),
-        signal: AbortSignal.timeout(2000), keepalive: true, redirect: 'error',
-      });
-      return response.ok === true;
+      // One event identity across both attempts lets the receiver deduplicate
+      // an accepted request whose response was lost. Never retry a refusal.
+      const body = JSON.stringify({ event, event_id: crypto.randomUUID(), anonymousId, properties: properties.session_id ? properties : { ...properties, ...(headers['X-Scout-Session-Id'] ? { session_id: headers['X-Scout-Session-Id'] } : {}) } });
+      for (let attempt = 0; attempt < 2; attempt++) {
+        analytics.headers(); // Observe an unlink even before its storage event.
+        if (current !== generation || !allowed()) return false;
+        try {
+          const response = await fetch(endpoint, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', ...headers, 'X-Scout-Anonymous-Id': anonymousId, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+            body, signal: AbortSignal.timeout(2000), keepalive: true, redirect: 'error',
+          });
+          if (response.ok) return true;
+          if (response.status !== 429 && !(response.status >= 500 && response.status <= 599)) return false;
+        } catch { /* Network failures (including timeout) get at most one retry. */ }
+      }
+      return false;
     })().catch(() => false);
   },
 };
@@ -167,5 +181,5 @@ globalThis.addEventListener?.('storage', event => {
   analytics.account(currentUser, session);
   globalThis.dispatchEvent?.(new Event('scout-analytics-change'));
 });
-globalThis.addEventListener?.('error', event => { if (event.error) analytics.exception(event.error); });
-globalThis.addEventListener?.('unhandledrejection', event => analytics.exception(event.reason));
+globalThis.addEventListener?.('error', event => { if (page !== 'connect' && event.error) analytics.exception(event.error); });
+globalThis.addEventListener?.('unhandledrejection', event => { if (page !== 'connect') analytics.exception(event.reason); });

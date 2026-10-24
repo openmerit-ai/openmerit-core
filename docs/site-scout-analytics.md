@@ -1,6 +1,8 @@
 # Scout private search storage
 
-Scout has no analytics report, export command, dashboard, or sign-in. The existing Worker writes private `scout_searches` Analytics Engine records. The owner asks for a query when needed; use authenticated Cloudflare account access and return the answer directly.
+**Historical reference only:** new Analytics Engine search writes stopped on 22 October 2026. Hosted Scout now requires sign-in for searches and uses PostHog; see the [current analytics contract](scout.md#product-analytics). The queries and storage descriptions below apply only to historical Cloudflare records, not current ingestion or dashboards. Never use the absence of new records here as evidence of no Scout usage.
+
+At the time of this historical implementation, Scout had no analytics report, export command, dashboard, or sign-in. The Worker wrote private `scout_searches` Analytics Engine records. The owner asked for a query when needed; use authenticated Cloudflare account access and return the answer directly.
 
 One record keeps the submitted task prompt, fixed task requirements, ordered five model/endpoint choices, metrics, and source evidence together. Each model's evidence snapshot contains applicable benchmark results (including source URLs, dates, configurations and cohorts), calibration observations/protocol, pricing/speed sources, and endpoint/model-card contract details. Model-card claims remain unverified; unknown quality, costs and speed remain unknown. These are recommendation inputs, not execution results for the submitted prompt. Evidence snapshots do not refresh when their public sources change.
 

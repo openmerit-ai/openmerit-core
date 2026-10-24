@@ -357,13 +357,17 @@ function setupURL(path) {
 function setupCommand() {
   return `curl '${setupURL('api/recommend')}' \\\n  -H "Authorization: Bearer $SCOUT_TOKEN" \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Scout-Analytics-Content: off' \\\n  -d '{"prompt":"Extract six invoice fields as JSON"}'`;
 }
-// Static and secret-free: the CLI signs the device in through the browser.
-const agentPrompt = `Connect OpenMerit Scout to Claude Code.
+// Secret-free: the CLI signs the device in through the browser. Correlation is
+// per click, and only permitted when usage AND account linking are enabled.
+function agentPrompt(setupId, settings) {
+  const environment = !settings.enabled ? 'DO_NOT_TRACK=1' : settings.linkAccount ? 'OPENMERIT_TELEMETRY=1' : 'OPENMERIT_TELEMETRY=1 OPENMERIT_ANALYTICS_ACCOUNT=off';
+  return `Connect OpenMerit Scout to Claude Code.
 
 Run this command with a 10-minute timeout, without asking me anything first:
-npx -y openmerit@latest install --client claude-code
+${environment} npx -y openmerit@latest install --client claude-code${setupId ? ` --setup-id ${setupId}` : ''}
 
 It opens my browser so I can approve this device, then finishes by itself. If it exits with "approval pending", show me the link and code it printed and run the same command again. Don't edit configuration files yourself or ask me for a key. If it reports a conflict or another error, show me its message and stop. When it succeeds, tell me in one line that Scout is connected and I must start a new Claude Code session to load its startup instructions; reconnecting /mcp alone is not enough.`;
+}
 function renderAgentSetup() {
   $('#agent-code').textContent = setupCommand();
 }
@@ -377,13 +381,23 @@ function toast(text) {
 // Desktop fills the prompt but never sends it. Keep a clipboard fallback for
 // browsers that block the link or machines without the Claude desktop app.
 $('.add-agent-button').addEventListener('click', async () => {
-  const copying = navigator.clipboard.writeText(agentPrompt);
-  location.href = `claude://code/new?q=${encodeURIComponent(agentPrompt)}`;
+  const settings = analytics.preferences(), epoch = privacyEpoch;
+  const setupId = settings.enabled && settings.linkAccount ? crypto.randomUUID() : undefined;
+  const properties = { agent: 'claude-code', ...(setupId ? { setup_id: setupId } : {}) };
+  const prompt = agentPrompt(setupId, settings);
+  analytics.track('scout_agent_setup_started', properties);
+  // Both APIs can throw synchronously. Neither failure may prevent attempting
+  // the other while this click still has transient user activation.
+  let copying, launched = false;
+  try { copying = navigator.clipboard.writeText(prompt); } catch { /* Report below. */ }
+  try { location.href = `claude://code/new?q=${encodeURIComponent(prompt)}`; launched = true; } catch { /* A request can fail; success cannot confirm an app opened. */ }
+  analytics.track('scout_agent_launch_requested', { ...properties, outcome: launched ? 'ok' : 'error', ...(!launched ? { code: 'launch_error' } : {}) });
   let copied = false;
-  try { await copying; copied = true; } catch { /* The deep link still carries the prompt. */ }
-  const message = copied ? 'Copied to clipboard' : 'Opening Claude';
+  try { if (copying) { await copying; copied = true; } } catch { /* The deep link still carries the prompt. */ }
+  const message = copied ? 'Copied to clipboard' : launched ? 'Claude launch requested' : 'Couldn’t copy or request Claude. Please try again.';
   toast(message); $('#announcement').textContent = message;
-  analytics.track('scout_agent_setup_copied', { agent: 'claude-code', outcome: copied ? 'ok' : 'error' });
+  const current = analytics.preferences();
+  if (epoch === privacyEpoch && current.enabled === settings.enabled && current.linkAccount === settings.linkAccount) analytics.track('scout_agent_setup_copied', { ...properties, outcome: copied ? 'ok' : 'error', ...(!copied ? { code: 'clipboard_error' } : {}) });
 });
 $('#copy-command').addEventListener('click', () => copy(setupCommand(), $('#copy-command')));
 window.addEventListener('scout-analytics-change', renderAgentSetup);

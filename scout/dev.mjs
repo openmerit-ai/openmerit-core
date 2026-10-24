@@ -60,7 +60,8 @@ const server = createServer(async (req, res) => {
     const toRequest = () => new Request(url, { method: req.method, headers: req.headers, ...(!['GET', 'HEAD'].includes(req.method) ? { body: Readable.toWeb(req), duplex: 'half' } : {}) });
     if (url.pathname === '/connect') { res.writeHead(308, { Location: `/connect/${url.search}` }); res.end(); return; }
     if (url.pathname.startsWith('/connect/api/')) {
-      const request = toRequest(), response = await handleConnect(request, analyticsEnv, { session: request => sessionUser(request, analyticsEnv) });
+      const request = toRequest(), analytics = createProductAnalytics(request, analyticsEnv);
+      const response = analytics.response(await handleConnect(request, analyticsEnv, { session: request => sessionUser(request, analyticsEnv), analytics }));
       res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text()); return;
     }
     if (url.pathname.startsWith('/scout/api/') || url.pathname === '/scout/mcp') {
@@ -69,8 +70,8 @@ const server = createServer(async (req, res) => {
       let response = await scoutAccess(request, analyticsEnv, analytics.identify) ?? (url.pathname === '/scout/api/analytics'
         ? await analytics.handleEvent()
         : url.pathname === '/scout/api/analytics/preference' ? await analytics.handlePreference()
-        : await (mcp ? handleMCP : handleAPI)(request, index, refreshState, (...args) => recommendTask(...args, mcp ? 'mcp' : 'api', analytics.observeSearch)));
-      analytics.complete(response);
+        : await (mcp ? handleMCP : handleAPI)(request, index, refreshState, (...args) => recommendTask(...args, mcp ? 'mcp' : 'api', analytics.observeSearch), analytics.observeMCP));
+      await analytics.complete(response);
       response = analytics.response(response);
       res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text()); return;
     }

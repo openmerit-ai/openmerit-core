@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.9 — 2026-10-24
+
+- Add opt-in coding-agent installation milestones, component/connection diagnostics and consent-gated setup/installation correlation retained across resumed approval and upgrades. Carry browser usage and unlink choices into setup; keep standalone CLI analytics default-off and MCP prompt-content capture off.
+- Add bounded installation-event retries with stable delivery IDs. Report verification and remote revocation failures even when existing local command exit semantics remain successful.
+- Coordinate the independently released Scout browser/device/MCP lifecycle telemetry, correct HTTP-200 logical-error accounting, and distinguish key authorization from verified installation. These are observed events, not skipped-call detection, guaranteed delivery or downstream model-execution tracking.
+- Preserve existing package exports, model-decision guidance and legal metadata. Existing installations need an installer rerun; npm publication does not deploy Scout or the main website.
+
 ## 0.1.8 — 2026-10-24
 
 - Install an owned startup rule requiring Scout before explicit or implicit application-model choices, including pretrained/local/browser models, weight downloads and SDK defaults. Keep detailed access-policy and search instructions in the skill. These instructions are guidance, not hard enforcement.

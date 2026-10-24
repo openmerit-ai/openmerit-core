@@ -8,7 +8,8 @@ import { capabilities } from '../capabilities.mjs';
 import { decisionQuestions } from '../decisions.mjs';
 import { handleAPI } from '../http.mjs';
 import { gzipSync, strToU8 } from 'fflate';
-import { createProductAnalytics } from '../product-analytics.mjs';
+import { createProductAnalytics, sendProductBatch } from '../product-analytics.mjs';
+import { handleMCP } from '../mcp.mjs';
 
 const snapshot = JSON.parse(await readFile(new URL('../snapshot.json', import.meta.url), 'utf8'));
 const index = createIndex(snapshot);
@@ -468,4 +469,81 @@ test('actual computation attempts, failed stages and HTTP failures have native d
   while (pending.length) await Promise.all(pending.splice(0));
   assert.equal(sent.filter(e => e.event === '$ai_generation').length, 2, 'cached/shared requests cannot double-count provider usage');
   assert.equal(sent.filter(e => e.event === 'scout_search_completed').length, 3, 'each request still counts as one search');
+});
+
+test('MCP invocations preserve installation correlation and classify logical failures, not just HTTP status', async t => {
+  const sent = [], pending = [];
+  t.mock.method(globalThis, 'fetch', async (_, options) => { sent.push(...JSON.parse(options.body).batch); return new Response(null, { status: 200 }); });
+  const env = { POSTHOG_PROJECT_TOKEN: 'phc_fixture', POSTHOG_HOST: 'https://eu.i.posthog.com', POSTHOG_ENVIRONMENT: 'test' };
+  const setup_id = crypto.randomUUID(), installation_id = crypto.randomUUID();
+  for (const [method, params, failed, code] of [
+    ['unknown_private_method', {}, true, -32601],
+    ['tools/call', { name: secret }, true, -32602],
+    ['tools/call', { name: 'scout_models', arguments: { prompt: secret } }, true, undefined],
+    ['tools/call', { name: 'scout_models', arguments: { prompt: 'Classify messages' } }, false, undefined],
+    ['initialize', { clientInfo: { name: 'claude-code', version: '2.1.19' } }, false, undefined],
+    ['ping', {}, false, undefined],
+  ]) {
+    sent.length = 0;
+    const request = new Request('https://example.test/scout/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Scout-Client': 'agent', 'X-Scout-Agent': 'claude-code', 'X-Scout-Client-Version': '0.1.8', 'X-Scout-Setup-Id': setup_id, 'X-Scout-Installation-Id': installation_id }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+    const analytics = createProductAnalytics(request, env, { waitUntil: p => pending.push(p) });
+    const response = await handleMCP(request, index, {}, async (_, prompt) => {
+      if (prompt === secret) throw new Error(secret);
+      const result = recommend(index, prompt, Date.parse(snapshot.checkedAt), { kind: 'classify', weights: { reasoning: 3 }, workload: { input: 'short', output: 'short' } });
+      analytics.observeSearch({ prompt, result, outcome: 'ok', durationMs: 20 });
+      return result;
+    }, analytics.observeMCP);
+    assert.equal(response.status, 200);
+    await analytics.complete(response);
+    while (pending.length) await Promise.all(pending.splice(0));
+    const completed = sent.find(e => e.event === 'scout_request_completed').properties;
+    assert.equal(completed.outcome, failed ? 'error' : 'ok');
+    assert.equal(completed.protocol_error, code);
+    assert.equal(completed.setup_id, setup_id); assert.equal(completed.installation_id, installation_id);
+    assert.equal(completed.client, 'agent'); assert.equal(completed.agent, 'claude-code'); assert.equal(completed.client_version, '0.1.8');
+    if (method === 'initialize') { assert.equal(completed.harness, 'claude-code'); assert.equal(completed.harness_version, '2.1.19'); }
+    assert.equal(sent.filter(e => e.event === '$exception').length, failed ? 1 : 0);
+    if (method === 'tools/call') {
+      assert.equal(sent.filter(e => e.event === 'scout_tool_invocation_started').length, 1);
+      const invocation = sent.find(e => e.event === 'scout_tool_invocation_completed').properties;
+      assert.equal(invocation.outcome, failed ? 'error' : 'ok');
+      if (!failed) {
+        assert.equal(invocation.task_count, 1); assert.equal(invocation.candidate_count, 5);
+        assert.equal(sent.filter(e => e.event === 'scout_search_details').length, 1);
+        assert.equal(new Set(sent.map(e => e.properties.trace_id)).size, 1);
+      }
+    }
+    assert.doesNotMatch(JSON.stringify(sent), /PRIVATE_CANARY|example.invalid|unknown_private_method/);
+  }
+});
+
+test('setup event retries deduplicate and unlinked or opted-out requests cannot retain installation identities', async t => {
+  const sent = [], pending = [], preferences = [];
+  t.mock.method(globalThis, 'fetch', async (_, options) => { sent.push(...JSON.parse(options.body).batch); return new Response(null, { status: 200 }); });
+  const env = { POSTHOG_PROJECT_TOKEN: 'phc_fixture', POSTHOG_HOST: 'https://eu.i.posthog.com', POSTHOG_ENVIRONMENT: 'test', SCOUT_ACCOUNTS: { idFromName: v => v, get: () => ({ capture: async batch => sent.push(...batch), preference: async (...args) => preferences.push(args) }) } };
+  const setup_id = crypto.randomUUID(), installation_id = crypto.randomUUID(), event_id = crypto.randomUUID();
+  for (const headers of [{}, {}, { 'X-Scout-Analytics-Account': 'off' }, { DNT: '1' }]) {
+    const request = new Request('https://example.test/scout/api/analytics', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Scout-Setup-Id': setup_id, 'X-Scout-Installation-Id': installation_id, ...headers }, body: JSON.stringify({ event: 'scout_installation_step', event_id, anonymousId: crypto.randomUUID(), properties: { stage: 'verification', outcome: 'error', connection: 'failed', applied: true, setup_id, installation_id, path: secret } }) });
+    const analytics = createProductAnalytics(request, env, { waitUntil: p => pending.push(p) });
+    analytics.identify('private_user');
+    assert.equal((await analytics.handleEvent()).status, 204);
+    while (pending.length) await Promise.all(pending.splice(0));
+  }
+  assert.equal(sent.length, 6);
+  assert.equal(sent[0].uuid, event_id); assert.equal(sent[2].uuid, event_id);
+  assert.equal(sent[1].uuid, sent[3].uuid, 'derived exceptions also deduplicate');
+  assert.doesNotMatch(JSON.stringify(sent.slice(4)), new RegExp(`${setup_id}|${installation_id}|private_user`));
+  assert.equal(preferences.length, 0, 'a request-only refusal must not permanently disable account analytics');
+  assert.doesNotMatch(JSON.stringify(sent), /PRIVATE_CANARY|example.invalid/);
+});
+
+test('analytics retries transient failures with identical event UUIDs and exposes terminal delivery failure', async t => {
+  const bodies = [], statuses = [503, 429, 200, 400];
+  t.mock.method(globalThis, 'fetch', async (_, options) => { bodies.push(options.body); return new Response(null, { status: statuses.shift() }); });
+  const env = { POSTHOG_PROJECT_TOKEN: 'phc_fixture', POSTHOG_HOST: 'https://eu.i.posthog.com' };
+  const batch = [{ uuid: crypto.randomUUID(), event: 'scout_installation_step', timestamp: new Date().toISOString(), properties: { stage: 'completed' } }];
+  await sendProductBatch(env, batch);
+  assert.equal(bodies.length, 3); assert.equal(new Set(bodies).size, 1);
+  await assert.rejects(sendProductBatch(env, batch), /Analytics delivery unavailable/);
+  assert.equal(bodies.length, 4, 'permanent 4xx errors must not retry');
 });

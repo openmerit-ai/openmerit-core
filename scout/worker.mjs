@@ -76,7 +76,11 @@ export default {
     if(path==='/scout')return Response.redirect(`${url.origin}/scout/${url.search}`,308);
     if(path==='/connect')return Response.redirect(`${url.origin}/connect/${url.search}`,308);
     // Product-level device sign-in for coding agents. The page is a static asset.
-    if(path.startsWith('/connect/api/'))return handleConnect(request,env,{session:request=>sessionUser(request,env)});
+    if(path.startsWith('/connect/api/')) {
+      const analytics=createProductAnalytics(request,env,ctx);
+      const response=await handleConnect(request,env,{session:request=>sessionUser(request,env),analytics});
+      return analytics.response(response);
+    }
     // This endpoint authenticates Clerk's signature, never a browser session.
     if(path==='/scout/api/webhooks/clerk')return handleClerkWebhook(request,env);
     if(!path.startsWith('/scout/api/')&&path!=='/scout/mcp') {
@@ -84,7 +88,7 @@ export default {
     }
     const analytics=createProductAnalytics(request,env,ctx);
     const access=await scoutAccess(request,env,analytics.identify);
-    if(access){analytics.complete(access);return analytics.response(access);}
+    if(access){await analytics.complete(access);return analytics.response(access);}
     if(path==='/scout/api/analytics')return analytics.handleEvent();
     if(path==='/scout/api/analytics/preference')return analytics.handlePreference();
     let response;
@@ -97,9 +101,9 @@ export default {
         return json({...status,scheduler:'cloudflare-hourly',refreshStatus:status.degraded?'degraded':'idle',...health,snapshotVersion:index.snapshot.publication.id,refreshSummary:index.snapshot.refreshSummary});
       }
       const mcp=path==='/scout/mcp';
-      response=await (mcp?handleMCP:handleAPI)(request,index,{},(...args)=>recommend(...args,mcp?'mcp':'api',analytics.observeSearch));
+      response=await (mcp?handleMCP:handleAPI)(request,index,{},(...args)=>recommend(...args,mcp?'mcp':'api',analytics.observeSearch),analytics.observeMCP);
     } catch (error) {analytics.exception(error);response=json({error:'Scout could not load its prepared catalogue. Please try again shortly.'},503);}
-    analytics.complete(response);return analytics.response(response);
+    await analytics.complete(response);return analytics.response(response);
   },
   async scheduled(event,env,ctx) {
     const id=`hour-${Math.floor(event.scheduledTime/3600_000)}`;

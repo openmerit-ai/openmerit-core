@@ -33,5 +33,10 @@
   "build": {
     "command": "npm run check:scout && npm run check:docs && npm run build:scout"
   },
-  "observability": { "enabled": false }
+  // Persist sanitized delivery counters, not request URLs/device approval codes.
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false }
+  }
 }

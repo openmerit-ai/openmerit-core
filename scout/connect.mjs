@@ -40,7 +40,25 @@ export async function deviceKeyUser(env, token, permission = scoutPermission, no
 
 // /connect/api/* routes. `session` verifies a Clerk browser session and returns a
 // user ID or null; it is injected so tests and the local server share one path.
-export async function handleConnect(request, env, { session, now = Date.now() } = {}) {
+export async function handleConnect(request, env, options = {}) {
+  const { analytics } = options, started = performance.now();
+  const response = await connect(request, env, options);
+  if (analytics) {
+    let body;
+    try { body = await response.clone().json(); } catch { body = {}; }
+    const path = new URL(request.url).pathname.slice('/connect/api/'.length);
+    const stage = ['device', 'token', 'login', 'keys'].includes(path) ? path : path.startsWith('keys/') ? 'revoke' : 'request';
+    const status = body.access_token ? 'collected' : body.revoked ? 'revoked' : body.status ?? ({
+      authorization_pending: 'pending', slow_down: 'slow_down', expired_token: 'expired', access_denied: 'denied', invalid_grant: 'invalid',
+    }[body.error]);
+    analytics.connectStep({ stage, status, http_status: response.status, duration_ms: Math.round(performance.now() - started),
+      outcome: ['pending', 'slow_down'].includes(status) ? 'pending' : status === 'denied' ? 'denied' : response.ok ? 'ok' : 'error' });
+    if (response.status >= 400 && !['pending', 'slow_down', 'denied'].includes(status)) analytics.exception(null, 'connect_error');
+  }
+  return response;
+}
+
+async function connect(request, env, { session, now = Date.now(), analytics } = {}) {
   const url = new URL(request.url), path = url.pathname.slice('/connect/api/'.length), method = request.method;
   const origin = request.headers.get('origin');
   if (origin && origin !== url.origin) return json({ error: 'Origin not allowed.' }, 403);
@@ -67,6 +85,7 @@ export async function handleConnect(request, env, { session, now = Date.now() } 
       const db = await database(env), hash = await sha256(deviceCode);
       const login = await db.prepare('SELECT * FROM openmerit_device_logins WHERE device_hash=?').bind(hash).first();
       if (!login || login.status === 'collected') return oauthError('invalid_grant');
+      if (login.user_id) analytics?.identify(login.user_id);
       if (login.expires_at <= now) return oauthError('expired_token');
       if (login.status === 'denied') return oauthError('access_denied');
       if (login.status === 'pending') {
@@ -86,6 +105,7 @@ export async function handleConnect(request, env, { session, now = Date.now() } 
     if (path === 'keys/self' && method === 'DELETE') {
       const owner = bearer && await deviceKeyUser(env, bearer, scoutPermission, now);
       if (!owner) return json({ error: 'Unknown or inactive device key.' }, 401);
+      analytics?.identify(owner.userId);
       await (await database(env)).prepare('UPDATE openmerit_device_keys SET revoked_at=? WHERE id=?').bind(now, owner.keyId).run();
       return json({ revoked: owner.keyId });
     }
@@ -93,6 +113,7 @@ export async function handleConnect(request, env, { session, now = Date.now() } 
     // Everything below acts for a signed-in person in the browser.
     const userId = await session(request);
     if (!userId) return json({ error: 'Sign in to continue.', code: 'sign_in_required' }, 401, { 'WWW-Authenticate': 'Bearer realm="OpenMerit"' });
+    analytics?.identify(userId);
     if (!await limit(`connect:user:${userId}`)) return json({ error: 'Too many requests. Please try again shortly.' }, 429, { 'Retry-After': '60' });
     const db = await database(env);
     if (path === 'login' && method === 'GET') {

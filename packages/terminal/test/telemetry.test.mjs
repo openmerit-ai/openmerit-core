@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { readFileSync } from 'node:fs';
 import { startTerminal } from '../src/server.mjs';
-import { commandTelemetry, errorProperties, safeFrames, terminalProperties } from '../src/telemetry.mjs';
+import { commandTelemetry, errorProperties, safeFrames, terminalProperties, installationProperties, setupUUID } from '../src/telemetry.mjs';
 import { createAnalytics, browserErrorProperties } from '../client/analytics.mjs';
 
 const cli = new URL('../src/cli.mjs', import.meta.url);
@@ -157,14 +157,25 @@ test('opted-in CLI sends only allowlisted payloads with ephemeral UUID identity'
     assert.notEqual(id, previousId); previousId = id;
     const common = { ...clientEnvironment, command_id: bodies[0].properties.command_id };
     assert.match(common.command_id, /^[0-9a-f-]{36}$/);
-    assert.deepEqual(bodies[0], { event: 'cli_command_started', anonymousId: id, properties: { command, ...common } });
+    assert.ok(bodies.every(body => setupUUID(body.event_id)));
+    assert.notEqual(bodies[0].event_id, bodies[1].event_id);
+    assert.deepEqual(bodies[0], { event: 'cli_command_started', event_id: bodies[0].event_id, anonymousId: id, properties: { command, ...common } });
     const duration = bodies[1].properties.duration_ms;
     assert.ok(Number.isInteger(duration) && duration >= 0 && duration <= 86400000);
     const diagnostic = outcome === 'ok' ? {} : { code: 'command_error', error_type: 'Error', frames: bodies[1].properties.frames };
     if (outcome === 'error') assert.ok(diagnostic.frames.some(f => f.filename === 'cli.mjs'));
-    assert.deepEqual(bodies[1], { event: 'cli_command_completed', anonymousId: id, properties: { command, outcome, ...diagnostic, duration_ms: duration, ...common } });
+    assert.deepEqual(bodies[1], { event: 'cli_command_completed', event_id: bodies[1].event_id, anonymousId: id, properties: { command, outcome, ...diagnostic, duration_ms: duration, ...common } });
     assert.doesNotMatch(JSON.stringify(bodies), /private-|secret|@example|\/Users\/|file:\/\//);
   }
+});
+
+test('installation telemetry projects only exact lifecycle enums, UUID v4 identities and booleans', () => {
+  const id = '359afdd2-0e4e-4f5b-9a91-2213814b1234';
+  const allowed = { stage: 'status', outcome: 'conflict', agent: 'claude-code', scope: 'project', setup_id: id, installation_id: id,
+    applied: false, installed: false, rule_status: 'matches', skill_status: 'missing', server_status: 'modified_or_unowned', connection: 'not_checked', code: 'install_conflict' };
+  assert.deepEqual(installationProperties({ ...allowed, root: 'PRIVATE', message: 'PRIVATE', key: 'PRIVATE', prompt: 'PRIVATE' }), allowed);
+  assert.deepEqual(installationProperties({ stage: 'started', outcome: 'started', setup_id: 'PRIVATE', installation_id: id.replace('-4f5b-', '-1f5b-'), installed: 'true' }), { stage: 'started', outcome: 'started' });
+  for (const invalid of [null, [], {}, { ...allowed, stage: 'PRIVATE' }, { ...allowed, outcome: 'success' }, { ...allowed, scope: 'PRIVATE' }, { ...allowed, connection: 'PRIVATE' }, { ...allowed, rule_status: 'PRIVATE' }, { ...allowed, code: 'PRIVATE' }]) assert.equal(installationProperties(invalid), null);
 });
 
 test('network errors and hung transport are silent, bounded, and preserve JSON and exit status', async () => {
