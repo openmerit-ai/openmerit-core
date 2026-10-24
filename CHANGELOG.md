@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.7 — 2026-10-24
+
+- Release coding-agent device sign-in, Claude Code MCP/Scout skill installation, status, diagnostics, removal and project endpoint policy on the stable `latest` channel. Setup requires browser approval; it never requests a pasted key.
+- Use `openmerit@latest` in setup and installed skill commands. Scout's independently deployed button opens a prefilled Claude Desktop Code session; the user sends the prompt.
+- Promote the agent-evaluation CLI, explicit scope/budget selection and corrected accounting from the preview channel. Provider billing, native permissions and unknown costs remain separate from local reservations.
+- Include automatic light/dark terminal appearance and optional, default-off CLI/terminal analytics with bounded diagnostics. Do Not Track overrides opt-in; prompts, credentials, local names and raw errors are excluded.
+- Preserve existing package exports and legal metadata. The hosted Scout service and website deploy independently; npm installation does not start hourly research or execute recommended models.
+
 ## 0.1.7-preview.5 — 2026-10-17
 
 - Update packaged Scout documentation for the independently deployed matching repair: shared evidence targeting, retrieval coverage and bounded semantic consistency checks.

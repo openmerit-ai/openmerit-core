@@ -1,27 +1,27 @@
 # Evaluate CLI changes across coding agents
 
-**npm preview `0.1.7-preview.3`.** Install from the `preview` tag; stable `openmerit@0.1.6` does not include these commands. This evaluates the coding agent with your CLI and documentation. The [Pi workflow](getting-started.md) still evaluates application inference; the [Inference Terminal](inference-terminal.md) remains read-only. Scout's hosted API and MCP service deploy independently; npm installation does not start or bundle the hourly research service.
+**Stable npm `0.1.7`.** Install from the `latest` tag. This evaluates the coding agent with your CLI and documentation. The [Pi workflow](getting-started.md) still evaluates application inference; the [Inference Terminal](inference-terminal.md) remains read-only. Scout's hosted API and MCP service deploy independently; npm installation does not start or bundle the hourly research service.
 
 Compared with `0.1.7-preview.1`, this version adds [corrected cost accounting and blocked-execution handling](#accounting-and-blocked-executions), plus [budget selection after model scope](#budget-selection). It does not claim reconciled provider billing or a guaranteed exact model order.
 
 One local runner supports Claude Code, Codex and OpenCode. Scout supplies candidates; local task checks measure each model/agent/CLI combination. Installing npm alone does not install or authenticate agents, modify project instructions, or start paid evaluations.
 
-## Optional CLI product analytics (source checkout only)
+## Optional CLI product analytics
 
-Unreleased source builds support the [opt-in CLI analytics contract](inference-terminal.md#optional-cli-product-analytics-source-checkout-only). Only `OPENMERIT_TELEMETRY=1` enables command start/completion events; `DO_NOT_TRACK=1` overrides it. A process-only random ID accompanies command categories, completion outcomes and bounded durations, never task descriptions, model IDs, arguments, paths, error text or configuration. No project key is distributed. Transport failures cannot change JSON output or exit status.
+Npm 0.1.7 supports the [opt-in CLI analytics contract](inference-terminal.md#optional-cli-product-analytics). Only `OPENMERIT_TELEMETRY=1` enables command start/completion events; `DO_NOT_TRACK=1` overrides it. A process-only random ID accompanies command categories, completion outcomes and bounded durations, never task descriptions, model IDs, arguments, paths, error text or configuration. No project key is distributed. Transport failures cannot change JSON output or exit status.
 
 `eval watch` completes only when its loop returns, not after each iteration; forced exits can leave a start without a completion. An `ok` command outcome is not evidence of model quality or reconciled charges. Direct imports of the evaluation module do not emit CLI lifecycle events.
 
-**Instrumentation upgrade — UNRELEASED, 22 October 2026:** opt-in diagnostics additionally include sanitized package version, platform/runtime categories, random command correlation and up to eight allowlisted application basename/line/column frames. Scout failure categories and validated request traces can correlate planning failures without raw error text, task content or absolute paths. See the [full CLI contract](inference-terminal.md#optional-cli-product-analytics-source-checkout-only). This is not npm-published behavior. Prompt-content/retention controls are unchanged. Negative feedback may inform only [reviewed sanitized evaluation cases](site-scout-architecture.md#reviewed-feedback-and-future-experiments), never automatic private-content copying or expanded retention. Future controlled ranking experiments require an offline baseline first; no experiment is active.
+**Instrumentation in 0.1.7:** opt-in diagnostics additionally include sanitized package version, platform/runtime categories, random command correlation and up to eight allowlisted application basename/line/column frames. Scout failure categories and validated request traces can correlate planning failures without raw error text, task content or absolute paths. See the [full CLI contract](inference-terminal.md#optional-cli-product-analytics). Prompt-content/retention controls are unchanged. Negative feedback may inform only [reviewed sanitized evaluation cases](site-scout-architecture.md#reviewed-feedback-and-future-experiments), never automatic private-content copying or expanded retention. Future controlled ranking experiments require an offline baseline first; no experiment is active.
 
-Scout planning requests carry `X-Scout-Client: cli` and `X-Scout-Analytics: off` unless explicitly opted in without Do Not Track. They always include `X-Scout-Analytics-Content: off`, so task descriptions required for planning are not opted into richer product-analytics content collection even when command analytics is enabled. The server owns search-completion counts; the CLI does not emit another search event. This opt-out affects optional PostHog product events, not task processing or the existing private Cloudflare prompt archive. Planning still sends the task descriptions and model scope required by its protocol. No CLI authentication is added; clients without a current Clerk session token still cannot use the protected hosted service. This source change has not been published to npm.
+Scout planning requests carry `X-Scout-Client: cli` and `X-Scout-Analytics: off` unless explicitly opted in without Do Not Track. They always include `X-Scout-Analytics-Content: off`, so task descriptions required for planning are not opted into richer product-analytics content collection even when command analytics is enabled. The server owns search-completion counts; the CLI does not emit another search event. This opt-out affects optional PostHog product events, not task processing or historical private Cloudflare prompt records. Planning still sends the task descriptions and model scope required by its protocol. Evaluation planning requires a current Clerk session token; the separate device key from coding-agent setup grants MCP recommendations only, not JSON API access.
 
 ## Set up
 
-Install the preview and initialize it inside the project you want to evaluate:
+Install the stable release and initialize it inside the project you want to evaluate:
 
 ```sh
-npm install -g openmerit@preview
+npm install -g openmerit@latest
 openmerit eval init
 openmerit eval doctor
 ```

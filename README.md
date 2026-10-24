@@ -14,15 +14,19 @@ cd /path/to/your/application
 openmerit dash
 ```
 
-Stable `openmerit@0.1.6` includes the terminal. No Pi installation or provider API key is needed. It opens a browser connected to a read-only loopback service. Supported source/configuration declarations establish inventory; existing application logs or exports supply request history. Prompts, responses, and credentials are not retained. Unsupported or missing evidence remains unknown.
+Stable `openmerit@0.1.7` includes the terminal. No Pi installation or provider API key is needed. It opens a browser connected to a read-only loopback service. Supported source/configuration declarations establish inventory; existing application logs or exports supply request history. Prompts, responses, and credentials are not retained. Unsupported or missing evidence remains unknown.
 
-The source interface and hosted dashboard follow the device's light/dark preference without a theme control. This appearance change is not included in npm 0.1.6.
+The terminal and hosted dashboard follow the device's light/dark preference without a theme control. CLI and terminal product analytics are off unless explicitly enabled; see [the analytics contract](docs/inference-terminal.md#optional-cli-product-analytics).
 
 Explore the [hosted sample](https://dash.openmerit.ai/) or [before/after dashboard demo](https://dash.openmerit.ai/demo). Both use fictional data and make no inference calls. See [the terminal guide](docs/inference-terminal.md) for configuration, discovery, diagnostics, history limits, and agent access.
 
+## Connect Scout to Claude Code
+
+Run `npx -y openmerit@latest install --client claude-code`, then approve the device in your browser. The command installs the MCP server and Scout skill and checks the connection. New Claude Code sessions can consult Scout before choosing application models. Requires the `claude` CLI on PATH; see [setup, project policy and removal](docs/scout.md#connect-a-coding-agent). Installing the npm package alone makes no agent configuration changes.
+
 ## Compare models with Pi
 
-The **npm preview** provides `openmerit eval` for evaluating Claude Code, Codex and OpenCode with your CLI. Choose model scope and a $10, custom or no-fixed-cap budget, freeze Scout's shortlist, and compare 3–10 fresh attempts after source changes. Budget and sandbox blocks stay separate from task scores; unknown costs stay unknown. Install with `npm install -g openmerit@preview`. See [agent evaluations](https://unpkg.com/openmerit@preview/docs/agent-evaluations.md) for setup, graders, budgets and availability. Scout's hosted API and MCP service update independently of the npm package. This is separate from the Pi workflow below.
+Stable **npm 0.1.7** provides `openmerit eval` for evaluating Claude Code, Codex and OpenCode with your CLI. Choose model scope and a $10, custom or no-fixed-cap budget, freeze Scout's shortlist, and compare 3–10 fresh attempts after source changes. Budget and sandbox blocks stay separate from task scores; unknown costs stay unknown. Install with `npm install -g openmerit@latest`. See [agent evaluations](docs/agent-evaluations.md) for setup, graders, budgets and availability. Scout's hosted API and MCP service update independently of the npm package. This is separate from the Pi workflow below.
 
 With Pi 0.87 and a model provider configured:
 

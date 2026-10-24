@@ -36,7 +36,7 @@ project uses **existing-only** (only endpoints it can already reach) or
 which public catalogue endpoint IDs it can access. Save the answer:
 
 \`\`\`sh
-npx -y openmerit@preview project --policy existing-only --endpoint-id <id> ...
+npx -y openmerit@latest project --policy existing-only --endpoint-id <id> ...
 \`\`\`
 
 Never infer access from a model name, SDK or environment-variable name. Never
@@ -66,11 +66,11 @@ own model.
 
 If Scout fails, say so and pause the model decision; do not substitute a
 remembered recommendation. If it reports that the device key is missing,
-expired or revoked, run \`npx -y openmerit@preview login\` and then
-\`npx -y openmerit@preview install\` again. Never ask the user to paste a key.
+expired or revoked, run \`npx -y openmerit@latest login\` and then
+\`npx -y openmerit@latest install\` again. Never ask the user to paste a key.
 `;
 
-export const help = `OpenMerit · coding-agent setup (preview)
+export const help = `OpenMerit · coding-agent setup
 
   openmerit install [--client claude-code] [--scope user|project] [--plan] [--json] [--no-open]
   openmerit status  [--client claude-code] [--scope user|project] [--check] [--json]

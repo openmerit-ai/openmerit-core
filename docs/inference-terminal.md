@@ -4,25 +4,25 @@ The terminal gives people and agents a local overview of an application's models
 
 It reads existing evidence independently of inference. It does not call a model, change a route, run evaluations, load or unload models, or retain prompts and responses. Closing it does not stop your workloads. Collection uses local CPU, memory, and authorized runtime API capacity.
 
-## Optional CLI product analytics (source checkout only)
+## Optional CLI product analytics
 
-This unreleased source-checkout behavior does not describe the published npm package. CLI product analytics are off unless `OPENMERIT_TELEMETRY=1`; `DO_NOT_TRACK=1` always disables them. Terminal `discovery` configuration and `--no-discovery` are unrelated to analytics consent.
+Available in npm 0.1.7. CLI product analytics are off unless `OPENMERIT_TELEMETRY=1`; `DO_NOT_TRACK=1` always disables them. Terminal `discovery` configuration and `--no-discovery` are unrelated to analytics consent.
 
 When explicitly enabled, the CLI posts `cli_command_started` and `cli_command_completed` to `https://openmerit.ai/scout/api/analytics`, with a fresh `crypto.randomUUID()` identity for that process only. No identity file, cookie, or installation ID is stored. Properties contain only a command category (`help`, `dash`, `eval_init`, `eval_doctor`, `eval_plan`, `eval_run`, `eval_watch`, `eval_report`, or `unknown`), plus completion outcome (`ok` or `error`) and integer elapsed milliseconds capped at one day. Paths, arguments, prompts, configuration, model IDs, error text, environment contents, machine names, and email are not included.
 
-Transport is best-effort, silent, has no retries, and is bounded to about 750 ms per event. It does not change command exit status or JSON output. For a long-running `dash`, completion means startup readiness and the browser-opening attempt finished, not that the server session ended or collection succeeded. JSON and diagnostics modes complete after producing their output. Abrupt termination can lose events. See [evaluation analytics notes](agent-evaluations.md#optional-cli-product-analytics-source-checkout-only) for watch and Scout request behavior.
+Transport is best-effort, silent, has no retries, and is bounded to about 750 ms per event. It does not change command exit status or JSON output. For a long-running `dash`, completion means startup readiness and the browser-opening attempt finished, not that the server session ended or collection succeeded. JSON and diagnostics modes complete after producing their output. Abrupt termination can lose events. See [evaluation analytics notes](agent-evaluations.md#optional-cli-product-analytics) for watch and Scout request behavior.
 
-**Instrumentation upgrade — UNRELEASED, 22 October 2026:** the opt-in schema additionally sends a sanitized package version, platform (`darwin`, `linux`, `win32`, `unknown`), supported Node major and random command ID. Errors can include at most eight allowlisted application-basename/line/column frames, never arbitrary stack text, function names, absolute paths or source context. Scout failures use fixed network/HTTP/response/timeout codes and a validated request trace when available; trace correlation is not authentication. These additions qualify the earlier minimal-property descriptions here; they do not include environment contents, change content-sharing/retention controls or enable replay. No npm publication is included.
+**Instrumentation in 0.1.7:** the opt-in schema additionally sends a sanitized package version, platform (`darwin`, `linux`, `win32`, `unknown`), supported Node major and random command ID. Errors can include at most eight allowlisted application-basename/line/column frames, never arbitrary stack text, function names, absolute paths or source context. Scout failures use fixed network/HTTP/response/timeout codes and a validated request trace when available; trace correlation is not authentication. These additions qualify the earlier minimal-property descriptions here; they do not include environment contents, change content-sharing/retention controls or enable replay.
 
 The same opt-in enables local terminal events using that process-only UUID: `terminal_visited` (sample/live mode), `terminal_page_viewed` (fixed page category, including the connections map), `terminal_interaction` (inspect, filter, search, map expansion, mode or command action and entity kind only), `terminal_snapshot` (retained model, record, source, host, deployment and distinct observed-agent counts), and `terminal_error` (fixed collection/snapshot/render/uncaught error code and standard error class only). Counts are integers from 0 through 1,000,000,000; they describe the retained view, not complete environment totals. No entity keys, names, search values, source paths, raw source, prompts, credentials, hostname, arbitrary error messages or stacks are transmitted. No session replay or login is added.
 
-This instrumentation covers the local terminal, not the hosted fictional preview at `dash.openmerit.ai`. The hosted preview remains uninstrumented; publishing CLI changes to npm is a separate release.
+This instrumentation covers the local terminal, not the hosted fictional preview at `dash.openmerit.ai`. The hosted preview remains uninstrumented and deploys separately.
 
 `GET /api/info` exposes the boolean `telemetry` capability. Browser events additionally respect browser Do Not Track, Global Privacy Control and `localStorage['scout-analytics-opt-out'] === '1'`. They go only to the same-origin `POST /api/analytics` relay; the browser CSP still permits connections only to self. The loopback Host/Origin/cross-site guards apply to the relay, which projects every accepted event onto a fixed allowlist, limits JSON bodies to 2 KiB and body arrival to one second. Forwarding has no queue or retries, permits at most 60 terminal events per minute across the process and four in flight, and times out after 750 ms. Browser submission is separately capped at 60 events per minute and two in flight with a one-second timeout. Events can be dropped without affecting collection or UI requests. Collection errors follow process consent independently of browser controls. Outbound analytics carries `X-Scout-Client: cli` and `X-Scout-Analytics: on`.
 
 ## Install
 
-Requires **Node.js 22.19 or newer** and npm. Stable `openmerit@0.1.6` includes the terminal:
+Requires **Node.js 22.19 or newer** and npm. Stable `openmerit@0.1.7` includes the terminal:
 
 ```sh
 npm install -g openmerit
@@ -36,7 +36,7 @@ The CLI starts a server bound to `127.0.0.1` and opens the browser before initia
 
 If npm reports `EACCES`, use a user-owned Node installation/npm prefix rather than `sudo`. If the command is not found after installation, reopen the shell and check that npm's global executable directory is on `PATH`.
 
-The **source interface and hosted dashboard** follow the device's light/dark preference, including charts and inspectors, and update when that preference changes. There is no theme control or saved override. This appearance change is not included in npm 0.1.6.
+The **terminal and hosted dashboard** follow the device's light/dark preference, including charts and inspectors, and update when that preference changes. There is no theme control or saved override. The npm terminal includes this appearance behavior in 0.1.7.
 
 Keep the CLI running while using the dashboard. Files unreadable by your user are reported as unavailable. Configuration can identify services but cannot supply missing request history.
 

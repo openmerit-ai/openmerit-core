@@ -1,6 +1,6 @@
 # Getting started
 
-The [npm agent-evaluation preview](agent-evaluations.md) adds a separate CLI-change loop for Claude Code, Codex and OpenCode. It is not part of stable npm 0.1.6 or the Pi setup below.
+Stable npm 0.1.7 includes a separate [agent-evaluation CLI-change loop](agent-evaluations.md) for Claude Code, Codex and OpenCode, plus [Scout device setup for Claude Code](scout.md#connect-a-coding-agent). Neither is part of the Pi setup below.
 
 ## Open your inference environment
 
@@ -12,7 +12,7 @@ cd /path/to/your/application
 openmerit dash
 ```
 
-The Inference Terminal is included in stable `openmerit@0.1.6`. It opens a local, read-only view of the selected application's services, models, recorded requests, and linked compute. It does not require Pi or a provider API key, make inference calls, or change model assignments. Supported code/configuration declarations identify inventory; request history requires existing supported logs or exports. See [the terminal guide](inference-terminal.md) for collection, privacy, configuration, and diagnostics.
+The Inference Terminal is included in stable `openmerit@0.1.7`. It opens a local, read-only view of the selected application's services, models, recorded requests, and linked compute. It does not require Pi or a provider API key, make inference calls, or change model assignments. Supported code/configuration declarations identify inventory; request history requires existing supported logs or exports. See [the terminal guide](inference-terminal.md) for collection, privacy, configuration, and diagnostics.
 
 To inspect fictional data without installation, open the [hosted dashboard](https://dash.openmerit.ai/) or its [before/after comparison](https://dash.openmerit.ai/demo). Neither connects to your machine.
 

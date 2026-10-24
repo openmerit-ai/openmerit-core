@@ -532,3 +532,7 @@ Reviewed evidence, freshness, background work and readiness claims after preview
 ## Preview.5 package publication — 17 October 2026
 
 Reviewed setup, readiness, evidence and scheduling claims for packaging the hosted matching-repair guides. Preview.5 is published to the preview channel, with stable latest retained at 0.1.6; runtime bytes, legal metadata, terminal/Pi approvals, budgets and routing are unchanged. All 679 repository tests passed before publication and the fresh registry installation passed 203/203 VM HTTP/MCP/CLI assertions afterward. Scout remains independently deployed with hourly preparation and bounded matching. These integration samples do not establish exact task quality or universal latency. Existing homepage FAQ copy needs no changes; detailed results and retained limitations are in the testing guide.
+
+## Stable 0.1.7 release preparation — 24 October 2026
+
+Reviewed setup, permissions, data, evaluations and budget claims against the stable package. Explicit device approval installs Claude Code's MCP server and Scout skill; npm installation alone does not configure an agent. Evaluation commands retain native permissions, explicit scope and budget, and unknown billing. Terminal analytics remain default-off and the terminal still reads evidence without routing or inference. These preserve the homepage FAQ's terminal/Pi claims; no FAQ wording change is required. Scout, npm and main-site documentation deploy independently; publication and real Desktop acceptance are verified separately.

@@ -1,6 +1,6 @@
 # OpenMerit documentation
 
-These guides describe the implementation on **main**. The standalone Inference Terminal is included in stable npm `openmerit@0.1.6`; interface changes available in source and the hosted dashboard but absent from that npm release are identified separately. The website, hosted samples, and npm package are deployed independently.
+These guides describe the implementation on **main**. Stable npm `openmerit@0.1.7` includes the Inference Terminal, agent-evaluation CLI and Scout device setup for Claude Code. The website, hosted samples, Scout service and npm package are deployed independently; dated receipts describe the versions actually tested.
 
 ## See your inference environment
 
