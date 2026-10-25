@@ -31,7 +31,7 @@ test('stored research keeps one copy of each record and cached inspections still
 });
 test('published research lives beside the records so collection never parses it, and older generations still load',async()=>{
  const {stageCatalogue,putJSON,readPublished,researchKey}=await import('../store.mjs');
- const bucket={data:new Map(),reads:[],async put(k,v){this.data.set(k,String(v));},async get(k){this.reads.push(k);const v=this.data.get(k);return v===undefined?null:{json:async()=>JSON.parse(v)};},async head(k){return this.data.has(k)?{}:null;}};
+ const bucket={data:new Map(),reads:[],async put(k,v){this.data.set(k,(typeof v==='string'?v:new TextDecoder().decode(v)));},async get(k){this.reads.push(k);const v=this.data.get(k);return v===undefined?null:{json:async()=>JSON.parse(v)};},async head(k){return this.data.has(k)?{}:null;}};
  const research=[{id:'research:x',kind:'benchmark',name:'Fixture',citations:[{url:'https://example.com',excerpts:['x'.repeat(5000)]}]}];
  const staged=await stageCatalogue(bucket,toRecords({...snapshot,research}));await putJSON(bucket,'active.json',staged);
  const manifest=JSON.parse(bucket.data.get(staged.key));
@@ -44,4 +44,13 @@ test('published research lives beside the records so collection never parses it,
  bucket.data.delete(researchKey(manifest.recordsKey));bucket.data.set(manifest.recordsKey,JSON.stringify({...JSON.parse(bucket.data.get(manifest.recordsKey)),research}));
  const legacy=await readPublished(bucket,{research:true});assert.deepEqual(legacy.research.map(r=>r.id),['research:x']);assert.equal(legacy.records.research,undefined);
  assert.equal(await readPublished({get:async()=>null}),null);
+});
+test('stored JSON is pure ASCII and parses to exactly what JSON.stringify would store',async()=>{
+ const {encodeJSON}=await import('../store.mjs');
+ const tricky={skipped:undefined,'clé ✓':['é','😀',' ','\ud800',undefined,()=>1,NaN,{a:undefined,b:[[[[undefined,'ü']]]]}],at:new Date(0),empty:{},none:[],nested:{x:{y:{z:{w:{v:'深い',u:undefined}}}}},fn:()=>1,n:-0.5,t:true,nil:null};
+ for(const value of [tricky,[undefined,tricky],snapshot,'naïve',7,null]) {
+  const bytes=encodeJSON(value);
+  assert.ok(bytes.every(b=>b<0x80),'stored JSON must be ASCII');
+  assert.deepEqual(JSON.parse(new TextDecoder().decode(bytes)),JSON.parse(JSON.stringify(value)));
+ }
 });

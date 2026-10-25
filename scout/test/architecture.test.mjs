@@ -15,7 +15,7 @@ const mock=(capture=()=>{})=>async(_url,options)=>{const body=JSON.parse(options
 const options=fetcher=>({apiKey:'fixture',fetcher});
 class Bucket {
   data=new Map();reads=[];
-  async put(key,data){this.data.set(key,String(data));}
+  async put(key,data){this.data.set(key,typeof data==='string'?data:new TextDecoder().decode(data));}
   async get(key){this.reads.push(key);const value=this.data.get(key);return value===undefined?null:{json:async()=>JSON.parse(value)};}
   async head(key){return this.data.has(key)?{}:null;}
 }

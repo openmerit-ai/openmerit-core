@@ -1,22 +1,30 @@
 # Scout architecture and operations
 
-## Refresh memory: research stored separately — 25 October 2026
+## Refresh memory: smaller documents and ASCII storage — 25 October 2026
 
-The `collect-public-feeds` memory failure returned: 37 of the 50 hourly runs before the twice-daily change failed with "Worker exceeded memory limit". The published records file had grown to 41.4 MB, with 1,476 research records taking 19.0 MB and 360 benchmarks taking 16.5 MB. Of the benchmark total, 10.9 MB is per-capability interpretation across the 210 registry capabilities. Parsing that single file set the collect step's peak. It contains non-Latin-1 text, so V8 holds it as a two-byte string before any objects exist. The step then wrote a 62 MB `collected.json` holding both the new snapshot and the previous generation.
+The memory failure returned in two steps. 37 of the 50 hourly runs before the twice-daily change failed. `collect-public-feeds` usually failed, and runs that got past it then failed in `interpret-evidence`; a manual run after the first fix below did exactly that. The published records file had grown to 41.4 MB. Research took 19.0 MB of it, across 1,476 records. The 360 benchmarks took 16.5 MB, of which 10.9 MB is per-capability interpretation over the 210 registry capabilities.
 
-Publication now writes research to `catalogues/<id>.research.json` beside `catalogues/<id>.json`, and `store.mjs` `readPublished` loads either part. Collection reads only the records file and writes `collected.json` as `{next}`. Research planning reads only the research object. Evidence interpretation re-reads the published generation, which the refresh lock keeps unchanged until this run publishes. The catalogue content and publication digest are unchanged. Generations published before the split, which embed research, still load.
+Measurement showed that peak memory comes from parsing single large documents, not from holding the parsed data. Parsing one document transiently needs about four to five times its size. The files also contain non-Latin-1 text, so V8 holds each whole document as a two-byte string.
 
-Measured on the production generation `e8b5c21256a782acbd45247c34b1fdf9` with recorded feed responses replayed, as the minimum Node heap for the collect step:
+The changes:
 
-| Case | Before | After |
-| --- | --- | --- |
-| Collect step, current code path | 161 MB | 122 MB |
-| 22 October harness (also re-parses the output) | 375 MB | 135 MB (192 MB when refreshes last succeeded reliably) |
-| `collected.json` | 62.0 MB | 18.3 MB |
+- **Research stored separately.** Publication writes research to `catalogues/<id>.research.json` beside the records file, and `store.mjs` `readPublished` loads either part. Collection reads only the records and writes `collected.json` as `{next}` without the previous generation. Research planning reads only research. Evidence interpretation re-reads the published generation, which the refresh lock keeps unchanged until this run publishes.
+- **ASCII, piecewise writes.** `putJSON` escapes non-ASCII as `\uXXXX` and serializes large containers piecewise into one byte buffer. Every stored document therefore parses as a one-byte string, and no step builds a whole-document string.
+- **Interpretation loads largest first.** It parses the published generation before its own snapshot and releases inputs once `integrateResearch` has copied them. `integrateResearch` no longer deep-clones research records, which it only replaces. The candidate's research goes to `runs/<id>/candidate.research.json`, which staging reads back.
 
-The first run after deployment still reads the single-file generation, at the old 161 MB peak; once one run publishes, later runs use the split files. A collect failure happens before research planning, so retrying it starts no paid Parallel jobs. Node's figures include runtime overhead absent from Workers, so only the relative change is meaningful.
+Catalogue content and the publication digest are unchanged, and generations published before the split still load. Escaped JSON parses to identical values, so serving readers are unaffected.
 
-**Rollback hazard:** a publisher older than this change reads a split generation as having no research and would publish without it. To roll back, restore the research file's content into the records file first, or roll back only to a version that includes `readPublished`. Growth remains. Research adds up to 24 records per run, and every capability that research adds is stored on every benchmark's interpretation, so benchmark size grows with capabilities × benchmarks. Compacting that interpretation map is the next lever if the peak climbs again.
+Measured on production generation `e8b5c21256a782acbd45247c34b1fdf9` with recorded feeds replayed and semantic calls stubbed, as the minimum Node heap including R2 byte encoding:
+
+| Step | Before | After (first run) | After (steady state) |
+| --- | --- | --- | --- |
+| `collect-public-feeds` | 161 MB | 161 MB | 97 MB |
+| `interpret-evidence` (no new research) | 219 MB | 144 MB | 118 MB |
+| `collected.json` | 62.0 MB | 18.3 MB | 18.3 MB |
+
+"First run" means reading today's single-file, non-ASCII generation, which happens once; its first publication writes the split ASCII format. A scratch end-to-end `runRefresh` ran twice against that generation with an in-memory bucket. Both runs published 392 models, 360 benchmarks and 5,211 observations, with all 1,476 research records in the separate file. Node's figures include runtime overhead absent from Workers, so only the relative change is meaningful. Completed research batches add to interpretation memory in proportion to their size.
+
+**Rollback hazard:** a publisher older than this change reads a split generation as having no research and would publish without it. Roll back only to a version that includes `readPublished`, or first restore research into the records file. Growth remains. Research adds up to 24 records per run, and every capability that research adds is stored on every benchmark's interpretation, so that data grows with capabilities × benchmarks. Compacting the interpretation map saved little peak memory in measurement (131 MB to 127 MB), so the next lever is splitting benchmark records the same way.
 
 ## Twice-daily refresh — deployed, 25 October 2026
 

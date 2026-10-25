@@ -6,7 +6,7 @@ import { registry } from './registry.mjs';
 import { ParallelResearch, planResearch } from './research.mjs';
 import { integrateResearch } from './enrich.mjs';
 import { toRecords, toSnapshot, publicationPredecessor } from './records.mjs';
-import { getJSON, putJSON, stageCatalogue, readPublished } from './store.mjs';
+import { getJSON, putJSON, stageCatalogue, readPublished, researchKey } from './store.mjs';
 import { digest, concurrent, choice, decode } from './utils.mjs';
 import { requestDecisions } from './decisions.mjs';
 import { refreshModelMetadata } from './metadata.mjs';
@@ -107,10 +107,11 @@ export async function runRefresh(env,step,id) {
     });
     const candidateKey=await step.do('interpret-evidence',{retries:{limit:1,delay:'15 seconds'},timeout:'15 minutes'},async()=>{
       // The refresh lock keeps the published generation unchanged until this run publishes.
-      const {next}=await getJSON(bucket,baseKey),published=await readPublished(bucket,{research:true}),previous=published?toSnapshot(published.records):seed,batches=await Promise.all(results.filter(r=>r.status==='completed').map(r=>getJSON(bucket,r.key)));
-      next.research=published?.research??[];
-      const prepared=await refreshModelMetadata(next,previous,options);
-      let candidate=await integrateResearch(prepared,batches,options);
+      // Parse it first, before this run's snapshot, and drop inputs once copied.
+      let published=await readPublished(bucket,{research:true});const previous=published?toSnapshot(published.records):seed;
+      let {next}=await getJSON(bucket,baseKey);next.research=published?.research??[];published=null;
+      const batches=await Promise.all(results.filter(r=>r.status==='completed').map(r=>getJSON(bucket,r.key)));
+      let candidate=await integrateResearch(await refreshModelMetadata(next,previous,options),batches,options);next=null;
       candidate.researchPending=(await Promise.all(results.filter(r=>r.key&&r.status!=='completed').map(async r=>{
         const receipt=await getJSON(bucket,r.key);return receipt?.runId?{job:jobs.find(j=>j.id===r.subjectId),key:r.key}:null;
       }))).filter(Boolean);
@@ -119,10 +120,12 @@ export async function runRefresh(env,step,id) {
       candidate=await refreshSpecialists(candidate,previous,options);
       candidate.sources.push({id:'parallel',name:'Parallel research',url:'https://parallel.ai',status:results.some(r=>r.status!=='completed')?'failed':'ok',checkedAt:new Date().toISOString(),publishedAt:null,attribution:'Hourly incremental public-source research. Original publishers retain attribution. Pending jobs do not overwrite validated records.'});
       candidate.refreshSummary={jobs:results.length,completed:results.filter(r=>r.status==='completed').length,pending:results.filter(r=>r.status!=='completed').length};
-      const records=toRecords(candidate),key=`runs/${id}/candidate.json`;await putJSON(bucket,key,{records,previous:publicationPredecessor(previous)});return key;
+      // Research is written separately so no single document holds the whole candidate.
+      const {research,...records}=toRecords(candidate),key=`runs/${id}/candidate.json`;
+      await putJSON(bucket,researchKey(key),research);await putJSON(bucket,key,{records,previous:publicationPredecessor(previous)});return key;
     });
     const staged=await step.do('validate-and-stage',{retries:{limit:12,delay:'10 seconds',backoff:'constant'},timeout:'10 minutes'},async()=>{
-      const {records,previous}=await getJSON(bucket,candidateKey);return {...await stageCatalogue(bucket,records,previous,{...options,db:env.SCOUT_INDEX,vectorize:env.SCOUT_EVIDENCE}),completedResearchSubjects:results.filter(r=>r.status==='completed').map(r=>r.subjectId),completedResearchKeys:results.filter(r=>r.status==='completed').map(r=>r.key)};
+      const {records,previous}=await getJSON(bucket,candidateKey);records.research=await getJSON(bucket,researchKey(candidateKey))??[];return {...await stageCatalogue(bucket,records,previous,{...options,db:env.SCOUT_INDEX,vectorize:env.SCOUT_EVIDENCE}),completedResearchSubjects:results.filter(r=>r.status==='completed').map(r=>r.subjectId),completedResearchKeys:results.filter(r=>r.status==='completed').map(r=>r.key)};
     });
     await step.do('publish',()=>coordinator.publish(id,staged));
     return {status:'published',version:staged.publication.id,research:results.map(r=>({subject:r.subjectId,status:r.status}))};

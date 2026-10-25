@@ -14,7 +14,7 @@ async function fixture() {
     fn();if(fail)throw Error('Injected lost acknowledgement');
   };
   const bucket={get:async key=>objects.has(key)?{json:async()=>JSON.parse(objects.get(key))}:null,
-    put:async(key,value)=>write(key,value,()=>objects.set(key,value))};
+    put:async(key,value)=>write(key,value,()=>objects.set(key,typeof value==='string'?value:new TextDecoder().decode(value)))};
   const ctx={storage:{get:async key=>storage.get(key),put:async(key,value)=>storage.set(key,value),
     delete:async key=>write('lease',null,()=>storage.delete(key))},
     blockConcurrencyWhile:fn=>{const result=queue.then(fn);queue=result.catch(()=>{});return result;}};

@@ -26,7 +26,7 @@ test('oversized results do not evict a small reusable entry',async()=>{
  await cached('big',async()=>({...result(),padding:'x'.repeat(1000)}));assert.equal((await cached('small',async()=>assert.fail())).status,'hit');
 });
 test('hourly packs retain scoped specialist records with bounded reads and immutable cache reuse',async()=>{
- const objects=new Map(),reads=[];const bucket={head:async k=>objects.has(k),get:async k=>{reads.push(k);return objects.has(k)?{json:async()=>JSON.parse(objects.get(k))}:null;},put:async(k,v)=>objects.set(k,v)};
+ const objects=new Map(),reads=[];const bucket={head:async k=>objects.has(k),get:async k=>{reads.push(k);return objects.has(k)?{json:async()=>JSON.parse(objects.get(k))}:null;},put:async(k,v)=>objects.set(k,(typeof v==='string'?v:new TextDecoder().decode(v)))};
  const specialists=Array.from({length:80},(_,i)=>({id:`lab/model${i}`,revision:'same',metadata:{exact:i}}));
  const profiles=specialists.map((s,i)=>({id:`profile${i}`,operation:'image_labels',repositories:[s.id]}));
  const packs=await stageSpecialistPacks(bucket,{specialists,specialistProfiles:profiles});

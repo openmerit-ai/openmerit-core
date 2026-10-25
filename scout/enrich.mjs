@@ -43,7 +43,8 @@ export async function expandRegistry(registry, records, options) {
 }
 
 export async function integrateResearch(snapshot, batches, options) {
-  const next=structuredClone(snapshot), prior=new Map((snapshot.research??[]).map(r=>[r.id,r]));
+  // Research records are replaced, never mutated, so only the rest needs a copy.
+  const next=structuredClone({...snapshot,research:[]}), prior=new Map((snapshot.research??[]).map(r=>[r.id,r]));
   next.registry=next.registry??seed; next.researchState={...snapshot.researchState};
   const incoming=batches.flatMap(batch=>(batch.records??[]).map(r=>({...r,subjectId:batch.subjectId,subjectHash:batch.subjectHash})));
   const inspected=await concurrent(incoming,next.registry.policy.refreshConcurrency,async r=>{

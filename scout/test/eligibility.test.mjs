@@ -17,7 +17,7 @@ const directory={version:'1',profiles:[
  {modelId:'a',endpointId:'a-direct',source:'native',facts:{creator:'Maker',contextTokens:256000}},
  {modelId:'b',endpointId:'b-router',source:'models',facts:{creator:'Maker',contextTokens:null}},
 ]};
-class Bucket{data=new Map();reads=[];async put(k,v){this.data.set(k,String(v));}async get(k){this.reads.push(k);const v=this.data.get(k);return v===undefined?null:{json:async()=>JSON.parse(v)};}async head(k){return this.data.has(k)?{}:null;}}
+class Bucket{data=new Map();reads=[];async put(k,v){this.data.set(k,(typeof v==='string'?v:new TextDecoder().decode(v)));}async get(k){this.reads.push(k);const v=this.data.get(k);return v===undefined?null:{json:async()=>JSON.parse(v)};}async head(k){return this.data.has(k)?{}:null;}}
 
 test('semantic metadata checks deduplicate relevant facts, not model names',async()=>{
  let request;

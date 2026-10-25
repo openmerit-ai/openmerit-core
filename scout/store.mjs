@@ -13,7 +13,36 @@ export function shardFor(id) {
   return (hash>>>0).toString(16).padStart(8,'0').slice(0,3);
 }
 export const getJSON = async (bucket,key) => { const object=await bucket.get(key);return object?object.json():null; };
-export const putJSON = (bucket,key,data) => bucket.put(key,JSON.stringify(data),{httpMetadata:{contentType:'application/json'}});
+// Stored JSON escapes non-ASCII text, so a step parsing a large document holds a
+// one-byte string rather than a two-byte one. Large containers are serialized
+// piecewise into one byte buffer instead of one string per document.
+const ascii = text => text.replace(/[\u0080-\uffff]/g,c=>`\\u${c.charCodeAt(0).toString(16).padStart(4,'0')}`);
+function jsonPieces(value,depth,out) {
+  if(depth>0&&value&&typeof value==='object'&&typeof value.toJSON!=='function') {
+    if(Array.isArray(value)) {
+      out.push('[');
+      value.forEach((item,i)=>{if(i)out.push(',');const at=out.length;jsonPieces(item,depth-1,out);if(out.length===at)out.push('null');});
+      out.push(']');return;
+    }
+    out.push('{');let first=true;
+    for(const [key,item] of Object.entries(value)) {
+      const mark=out.length;out.push(`${first?'':','}${ascii(JSON.stringify(key))}:`);
+      const at=out.length;jsonPieces(item,depth-1,out);
+      if(out.length===at){out.length=mark;continue;}
+      first=false;
+    }
+    out.push('}');return;
+  }
+  const text=JSON.stringify(value);if(text!==undefined)out.push(ascii(text));
+}
+export function encodeJSON(data) {
+  const pieces=[];jsonPieces(data,4,pieces);
+  let size=0;for(const piece of pieces)size+=piece.length;
+  const bytes=new Uint8Array(size),encoder=new TextEncoder();let at=0;
+  for(const piece of pieces)at+=encoder.encodeInto(piece,bytes.subarray(at)).written;
+  return bytes;
+}
+export const putJSON = (bucket,key,data) => bucket.put(key,encodeJSON(data),{httpMetadata:{contentType:'application/json'}});
 
 // Research is stored beside the published records, so refresh steps that do
 // not use it never parse it. Generations published before the split embed it.
