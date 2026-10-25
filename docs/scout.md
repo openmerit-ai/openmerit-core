@@ -8,9 +8,9 @@ Scout is a separate hosted beta product. Npm 0.1.7 includes optional Claude Code
 
 **Coding-agent setup — 24 October 2026:** stable npm 0.1.7 includes [device sign-in setup](#connect-a-coding-agent). Hosted Scout serves `/connect` and `/scout/mcp`; the button opens Claude Desktop with a setup prompt. This supersedes the 23 October web-placeholder reset. Existing older client configuration and authorization grants are not automatically removed or revoked. Scout serving, main-site documentation and npm publication remain separate releases; dated receipts below describe their original versions, not acceptance of every later build.
 
-## Twice-daily catalogue refresh — source only, 25 October 2026
+## Twice-daily catalogue refresh — deployed, 25 October 2026
 
-The hosted catalogue publisher refreshes twice a day, at 00:07 and 12:07 UTC (05:37 and 17:37 IST), instead of hourly. Each run is unchanged: the same feeds, discovery pages, up to 24 Parallel research jobs and the same publication checks. Daily paid research therefore drops from at most 576 to at most 48 jobs, and Hugging Face discovery pages advance twelve times more slowly. Public feeds are reported stale 13 hours after their last successful check, which is one missed run plus an hour's grace. A single failed run can therefore leave up to roughly a day between source checks. The local `npm run scout` preview still refreshes its bundled feeds hourly. This change is in source only: the hosted publisher stays hourly until its separately approved deployment.
+The hosted catalogue publisher refreshes twice a day, at 00:07 and 12:07 UTC (05:37 and 17:37 IST), instead of hourly. Each run is unchanged: the same feeds, discovery pages, up to 24 Parallel research jobs and the same publication checks. Daily paid research therefore drops from at most 576 to at most 48 jobs, and Hugging Face discovery pages advance twelve times more slowly. Public feeds are reported stale 13 hours after their last successful check, which is one missed run plus an hour's grace. A single failed run can therefore leave up to roughly a day between source checks. The local `npm run scout` preview still refreshes its bundled feeds hourly. The owner-approved publisher and serving deployments went live on 25 October 2026 at 17:00 UTC.
 
 ## Beta evaluation logging — 22 October 2026 rollout
 
