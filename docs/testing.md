@@ -56,7 +56,7 @@ npm run verify
 npm pack --dry-run
 ```
 
-`verify` runs workspace tests, syntax checks, TypeScript checks, the package build, demo tests, generated-documentation checks, and whitespace validation. It does not publish a package or deploy the website.
+`verify` runs workspace tests, syntax checks, strict TypeScript checks and the TypeScript migration ratchet, the package build, demo tests, generated-documentation checks, and whitespace validation. It does not publish a package or deploy the website.
 
 ## Coordinator and Pi coverage
 

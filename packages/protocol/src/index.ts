@@ -552,16 +552,16 @@ export type ImprovementStage =
 
 export interface ImprovementCycleState {
   readonly id: string;
-  readonly targetId?: string;
-  readonly taskProfileId?: string;
+  readonly targetId?: string | undefined;
+  readonly taskProfileId?: string | undefined;
   readonly stage: ImprovementStage;
-  readonly activeCandidateId?: string;
-  readonly previousCandidateId?: string;
-  readonly proposedCandidateId?: string;
+  readonly activeCandidateId?: string | undefined;
+  readonly previousCandidateId?: string | undefined;
+  readonly proposedCandidateId?: string | undefined;
   readonly verifiedSwapCount: number;
   readonly baselineEvidenceSufficient: boolean;
   readonly observabilityReady?: boolean;
-  readonly policy?: SupervisedGraduationPolicy;
+  readonly policy?: SupervisedGraduationPolicy | undefined;
 }
 
 export interface OpenMeritProjectConfig {
@@ -575,13 +575,13 @@ export interface OpenMeritProjectConfig {
 export interface OpenMeritProjectState {
   readonly schemaVersion: 1;
   readonly cycle: ImprovementCycleState;
-  readonly activeIntent?: OpenMeritIntent;
-  readonly lastResult?: IntentResult;
+  readonly activeIntent?: OpenMeritIntent | undefined;
+  readonly lastResult?: IntentResult | undefined;
   /** Durable handoffs between discovery, trials, and frontier calculation. */
-  readonly candidates?: readonly CandidateDescriptor[];
-  readonly assessments?: readonly CandidateAssessment[];
-  readonly experimentManifest?: EvidenceReference;
-  readonly observability?: ObservabilityCoverage;
+  readonly candidates?: readonly CandidateDescriptor[] | undefined;
+  readonly assessments?: readonly CandidateAssessment[] | undefined;
+  readonly experimentManifest?: EvidenceReference | undefined;
+  readonly observability?: ObservabilityCoverage | undefined;
   readonly automation: {
     readonly paused?: boolean;
     readonly setupNudgeShown: boolean;
@@ -590,9 +590,9 @@ export interface OpenMeritProjectState {
     readonly modelCatalogFingerprint?: string;
     readonly modelCatalogChangedAt?: string;
     readonly processedSignalIds?: readonly string[];
-    readonly pendingIntentKind?: IntentKind;
-    readonly pendingIntentReason?: string;
-    readonly lastAssessmentAt?: string;
+    readonly pendingIntentKind?: IntentKind | undefined;
+    readonly pendingIntentReason?: string | undefined;
+    readonly lastAssessmentAt?: string | undefined;
     readonly baselineStartedAt?: string;
     readonly lastReassessmentTaskCount?: number;
     readonly lastReassessmentAt?: string;
