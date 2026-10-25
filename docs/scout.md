@@ -675,7 +675,7 @@ The 17 October post-deployment recovery reused all 24 saved research jobs and pu
 
 Prepared capability pools can overlap. Searches use their prepared ID lists to choose a smaller covering set of pools, preserving the selected candidates and complete evidence while avoiding repeated downloads of the same model records. Explicit model and endpoint inventories retain their existing scope checks. These metadata reads do not fetch source pages or redo hourly research.
 
-`demo/domain-router.mjs` routes the landing page, Scout and `/connect/` to the Scout serving service. Hosted docs, demos, engineering articles and terminal pages/APIs are offline during the rebuild. The separately protected memo has a router-only restoration prepared but not deployed; see the [cutover record](site-domain-migration.md). There is no Scout admin/report route. Do not deploy the older root `wrangler.jsonc` to publish Scout. `npm run build:scout` packages the landing page, Scout, `/connect/`, the standalone Scout data policy and required shared assets; generated docs, memo and demo applications are excluded.
+`demo/domain-router.mjs` routes the landing page, Scout and `/connect/` to the Scout serving service. Hosted docs, demos, engineering articles and terminal pages/APIs are offline during the rebuild. The separately protected memo was restored through the router on 25 October 2026; see the [cutover record](site-domain-migration.md). There is no Scout admin/report route. Do not deploy the older root `wrangler.jsonc` to publish Scout. `npm run build:scout` packages the landing page, Scout, `/connect/`, the standalone Scout data policy and required shared assets; generated docs, memo and demo applications are excluded.
 
 ```sh
 npm run check:scout

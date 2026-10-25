@@ -1,6 +1,6 @@
 # Primary domain migration
 
-## Protected memo restoration — prepared 25 October 2026, not deployed
+## Protected memo restoration — published 25 October 2026
 
 The owner requested `/memo` back after the rebuild cutover. The router now
 reserves `/memo`, `/memo/*`, `/memo.css`, `/memo-access.css` and `/memo-access.js`
@@ -9,18 +9,31 @@ sign-in, protected Markdown, administrator-only reader list, cookies and storage
 No memo HTML or Markdown is added to Scout's public asset bundle. Shared styles,
 fonts and images still come from the existing landing-page/Scout bundle.
 
-This restoration requires only a domain-router deployment with
-`wrangler.domains.jsonc`, after explicit approval. Do not redeploy the protected
-application, reopen its direct Worker URLs or redeploy Scout for this change.
+The owner approved publication. Only the domain router was deployed with
+`wrangler.domains.jsonc`, as version `17dc6a75-264e-47ef-ab89-d612c254ff72`.
+The protected application and Scout were not redeployed, and the old site's
+direct Worker URLs remain disabled.
 The landing page and Scout keep their current routes; docs, demos, engineering
 articles and terminal pages/APIs remain offline. The homepage navigation is
 unchanged. Legacy memo page URLs canonicalize to `.ai`; existing legacy
 `/memo/auth/` calls retain their original origin checks.
 
 The local routing regression checks request bodies, query strings, cookies,
-protected response status/cache headers and neighboring-path rejection. A local
-pass is not evidence of restored production access or successful OTP delivery;
-verify the live sign-in gate and assets after an approved deployment.
+protected response status/cache headers and neighboring-path rejection.
+After deployment, 64 live HTTP checks passed. The memo page, Markdown download,
+reader list and CSV export present the sign-in gate without a session; memo
+styles and JavaScript load, invalid authentication payloads and untrusted
+origins are rejected, aliases preserve query strings, and retired pages remain
+404. Landing-page, Scout page/client assets, connection page and public auth
+configuration controls were byte-identical before and after deployment.
+The protected application and Scout serving versions were unchanged.
+
+Chromium rendered the live memo gate at desktop and narrow widths with no
+horizontal overflow or browser runtime errors. Scout retained its heading,
+sign-in button and data-policy link without retired navigation links. No OTP
+was sent, authenticated memo or administrator access was not exercised, and
+this verification does not establish inbox delivery or authenticated Scout
+recommendations.
 
 ## Landing page and Scout rebuild — published 24 October 2026
 
