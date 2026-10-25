@@ -1,5 +1,11 @@
 # Website FAQ maintenance
 
+## Homepage scope note removal — source only, 25 October 2026
+
+At the owner's request, the shared beta scope note is removed below the setup
+CTA in both reading modes. This is a copy-only, undeployed change; it adds no
+product capability. The supplied prose and Scout beta invitation are unchanged.
+
 ## Conversational homepage — published 25 October 2026
 
 The owner requested a single hero with two conversational paragraphs and a

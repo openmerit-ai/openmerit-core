@@ -2,6 +2,13 @@
 
 Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
 
+## Homepage scope note removal — source only, 25 October 2026
+
+The owner requested removal of the scope note below the Claude setup CTA.
+It is removed from the shared actions in both reading modes. The supplied
+homepage copy, toggle and setup behavior are unchanged. This removal has not
+been deployed; the publication record below describes the preceding version.
+
 ## Conversational homepage — published 25 October 2026
 
 The homepage is now one text-only hero: two owner-supplied conversational
