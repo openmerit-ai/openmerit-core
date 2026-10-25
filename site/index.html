@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="See your application's models, recorded activity, and cost with the Inference Terminal. Use OpenMerit's Pi integration to evaluate model changes against real tasks.">
+  <meta name="description" content="Less time speed-dating models. More time building for customers. Meet Scout, OpenMerit's model-discovery beta for Claude Code.">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#171915" media="(prefers-color-scheme: dark)">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="OpenMerit — Let the work decide.">
-  <meta property="og:description" content="See your application's models, recorded activity, and cost with the Inference Terminal. Use OpenMerit's Pi integration to evaluate model changes against real tasks.">
+  <meta property="og:title" content="OpenMerit — Your team has better things to build.">
+  <meta property="og:description" content="Less time speed-dating models. More time building for customers. Meet Scout, OpenMerit's model-discovery beta for Claude Code.">
   <meta property="og:url" content="https://openmerit.ai/">
   <meta property="og:site_name" content="OpenMerit">
   <meta property="og:image" content="https://openmerit.ai/assets/openmerit-og-v1.png">
@@ -20,125 +20,53 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://openmerit.ai/assets/openmerit-og-v1.png">
   <meta name="twitter:image:alt" content="Good models prove themselves in the work. Three miniature makers compare tools at a wooden workbench.">
-  <title>OpenMerit — Let the work decide.</title>
+  <title>OpenMerit — Your team has better things to build.</title>
   <link rel="canonical" href="https://openmerit.ai/">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preload" href="/assets/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/styles.css?v=20261014-transparent-art">
-  <script src="/script.js?v=20260923-install" defer></script>
-  <script src="/illustrations.js?v=20261014-registered-motion" defer></script>
+  <link rel="stylesheet" href="/styles.css?v=20261025-reading">
+  <script src="/script.js?v=20261025-reading" defer></script>
 </head>
-<body>
+<body class="landing-page">
   <a class="skip-link" href="#main">Skip to content</a>
-  <header class="site-header wrap">
+  <header class="letter-header">
     <a class="brand" href="/" aria-label="OpenMerit home">
       <svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M4 24V8l12 10L28 8v16M4 8l12 16L28 8" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
       <span>openmerit</span>
     </a>
-    <button class="menu-toggle" aria-controls="primary-nav" aria-expanded="false" hidden>Menu <span aria-hidden="true">+</span></button>
-    <nav class="primary-nav" id="primary-nav" aria-label="Primary navigation">
-      <a href="#faq">FAQ</a>
-      <a href="/scout/">Scout</a>
-      <a class="nav-github" href="https://github.com/laz-aslam/openmerit">GitHub <span class="small-arrow" aria-hidden="true">↗</span></a>
-      <a class="button button-dark" href="#get-started">Get started <span aria-hidden="true">↗</span></a>
-    </nav>
+    <nav aria-label="Primary navigation"><a href="/scout/">Scout</a><a href="/memo/">Memo</a></nav>
   </header>
-  <main id="main">
-    <section class="hero" aria-labelledby="hero-title">
-      <div class="hero-copy wrap">
-        <h1 id="hero-title">Good models prove themselves in the work. <span>See the models your application uses, understand its recorded activity and cost, and use Pi to evaluate model changes against real tasks.</span></h1>
+  <main id="main" class="letter-main">
+    <section aria-labelledby="hero-title">
+      <h1 id="hero-title" class="sr-only">OpenMerit</h1>
+      <button class="letter-reading-toggle" id="reading-toggle" type="button" aria-controls="letter-full" aria-expanded="true" hidden>TL;DR</button>
+      <div id="letter-story">
+      <div id="letter-full">
+      <div class="letter-copy">
+        <p>The frontier is moving faster than ever, and there are more great models to choose from than at any point in history. We love that. It also means the best model for your task last month might not be the best one today, and no public leaderboard is going to tell you which one it is. OpenMerit exists to make sure you get the most out of all that progress. We pick the best model for every task in your app, judged on your own evals, and keep updating that pick all day, every day if needed. Your harness changes, the catalogue keeps growing, and nobody (human or agent) should spend their life benchmarking models against every agent and task. Your product team should be building for customers, not speed-dating models.</p>
+        <p>Now, we know what you’re thinking: “Cool, so it’s a router.” It’s not a router. “Auto” routers guess per query, sit in your live path, and optimize for metrics that aren’t yours. Even if one could see your evals, it couldn’t run them mid-request, because your real quality bar lives in product evals written by you (or your agent) for your app, not in a millisecond guess. And let’s be honest, writing and running those evals is the bane of your existence. We get it. That’s why we plug into the eval setup you already have and do the heavy lifting for you. We don’t touch your calls, and we don’t sell you tokens (we checked, it’s a very crowded business).</p>
       </div>
-      <figure class="hero-art"><img src="/assets/motion/hero-frame-0-transparent-v3.webp" width="2172" height="724" alt="A diverse group of six miniature makers in linen aprons measuring, comparing, and selecting tools at wooden benches, with a dog resting beneath." fetchpriority="high" decoding="async"></figure>
-      <div class="hero-foot wrap"><p>Start with visibility. Make changes with evidence.</p><a href="https://pi.dev/">Works with <img class="pi-logo" src="/assets/pi-logo.svg" width="40" height="40" alt="pi"> <span aria-hidden="true">↗</span></a></div>
-    </section>
-    <section class="start-section" id="get-started" aria-labelledby="start-title">
-      <div class="wrap start-layout">
-        <div class="start-copy">
-          <p class="eyebrow">Put it to work</p>
-          <h2 id="start-title">Start with the work<br><span>you already do.</span></h2>
-          <p>Open the Inference Terminal from your application directory to inspect its models, services, recorded requests, and linked compute. It reads existing evidence without making model calls or changing routes. Use the separate Pi integration when you are ready to establish evaluations and compare models.</p>
-          <figure class="section-art setup-art" aria-hidden="true"><img src="/assets/motion/setup-poster-transparent-v2.webp" width="543" height="362" alt="" loading="lazy" decoding="async"></figure>
+      <div class="letter-invitation">
+        <p>Meet <a href="/scout/">Scout</a>, the part of OpenMerit that makes finding models easier for you. It’s in beta, which means it occasionally asks for directions. Help us shape it.</p>
+      </div>
+      </div>
+      <div id="letter-short" hidden>
+        <div class="letter-copy">
+          <p>New models drop every week. OpenMerit finds the best one for each task in your app, using your own evals, and keeps that pick up to date. It’s not a router. we never touch your calls or sell you tokens.</p>
         </div>
-        <div class="install">
-          <div class="install-header"><span>Run in your terminal</span><button class="copy-button" type="button" data-copy hidden><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3V2.5h-8v8H3"/></svg><span>Copy command</span></button></div>
-          <pre tabindex="0" aria-label="Installation command"><code id="install-code">npm install -g openmerit
-openmerit dash</code></pre>
-          <p class="install-note">Requires Node.js 22.19+ and npm. No Pi installation or API key needed for the terminal.</p>
-          <div class="install-next"><p>Run from your application directory.</p><span>Existing supported logs supply activity; configuration alone cannot supply request history.</span></div>
-          <p class="development-note"><span class="open-dot" aria-hidden="true"></span> Start with visibility. Try model comparisons in a supervised Pi session.</p>
-          <p class="sr-only" id="copy-status" role="status" aria-live="polite"></p>
+        <div class="letter-invitation">
+          <p><a href="/scout/">Scout</a>. Our model finder, is in beta. give it a go.</p>
         </div>
       </div>
-    </section>
-    <section class="section questions wrap" id="faq" aria-labelledby="questions-title">
-      <div class="questions-intro">
-        <div><p class="eyebrow">A few useful details</p><h2 id="questions-title">Fair questions.</h2></div>
-        <figure class="section-art questions-art" aria-hidden="true"><img src="/assets/motion/questions-poster-transparent-v2.webp" width="543" height="362" alt="" loading="lazy" decoding="async"></figure>
+      <div class="letter-actions">
+        <a class="letter-cta" id="add-to-claude" href="/scout/" aria-describedby="setup-hint"><img src="/scout/agents/claude.png" width="23" height="23" alt="">Add OpenMerit to Claude Code</a>
+        <p class="letter-hint" id="setup-hint">Copies a setup prompt and opens Claude Code. You approve the connection.</p>
+        <p class="letter-status" id="setup-status" role="status" aria-live="polite"></p>
+        <noscript><p class="letter-hint">Enable JavaScript for the direct handoff, or use the setup button on <a href="/scout/">Scout</a>.</p></noscript>
+        <p class="letter-scope">Scout is the beta available today. Continuous traffic replay and decision-based pricing describe our direction, not the current beta.</p>
       </div>
-      <!-- Review FAQ claims against main and distinguish published behavior; see docs/site-faq-maintenance.md. -->
-      <div class="faq-list">
-        <details id="faq-agent">
-          <summary>Is OpenMerit an agent?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>The terminal is a passive view of existing application evidence. For evaluations and model changes, OpenMerit works with your coding harness, such as Pi. The harness understands the project, builds evaluations, tests models, and performs authorized changes. OpenMerit coordinates the workflow and validates structured results and comparisons; it relies on the harness to perform the work and report honest evidence.</p></div>
-        </details>
-        <details id="faq-harnesses">
-          <summary>Which harnesses does it work with?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>The standalone terminal runs without a coding harness. Pi 0.87 is the implemented adapter for the separate comparison workflow. Other coding agents need an adapter to use the coordinator and protocol; installing the package does not add that integration automatically.</p></div>
-        </details>
-        <details id="faq-evaluations">
-          <summary>Do I need evaluations before I start?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>The terminal needs no evaluation suite. For model comparisons, setup in an interactive Pi session asks Pi to understand your task, confirm your requirements and permissions, and establish the necessary evaluations and measurements. Those checks need to reflect your actual product. Ordinary coding activity alone doesn’t measure product quality.</p></div>
-        </details>
-        <details id="faq-comparisons">
-          <summary>Does it always choose the cheapest model?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>No. Comparisons use the quality, cost, speed, and other requirements you confirm. Several models may offer useful tradeoffs. OpenMerit checks the harness’s comparison of tested candidates against those requirements; it doesn’t promise one model that is best for every task, or guaranteed savings.</p></div>
-        </details>
-        <details id="faq-evidence">
-          <summary>How much evidence does a recommendation need?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>That depends on your task and the sample requirements you confirm during setup. Reliability and consistency need repeated, representative runs. Missing or insufficient required measurements leave a candidate unresolved in the comparison. OpenMerit checks the reported measurements and comparison rules, but doesn’t independently prove that an external evidence source is truthful.</p></div>
-        </details>
-        <details id="faq-approval">
-          <summary>Will it change my model without asking?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>A proposal waits for <code>/openmerit approve</code> unless your policy enables automatic swaps and its required number of verified swaps has been reached. That number can be zero, so check the policy you confirm during setup. After a change, the workflow requires the harness to evaluate the new model and report the result. Model changes are carried out by the harness.</p></div>
-        </details>
-        <details id="faq-regressions">
-          <summary>What if a new model performs worse?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>If post-swap evaluation reports a regression and your policy enables rollback, OpenMerit asks the harness to restore the previous model configuration. Otherwise it waits for your decision. Detection depends on the measurements and checks your harness provides; rollback depends on the harness being able to restore that configuration.</p></div>
-        </details>
-        <details id="faq-background">
-          <summary>Does it keep running when Pi is closed?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>The terminal collects only while its CLI is running. For Pi comparisons, an explicitly authorized persistent policy can install a per-project macOS LaunchAgent. It checks for due work every five minutes while the user is logged in and requires working headless Pi authentication. Other platforms need an external scheduler. Unattended candidate discovery and model changes still need representative product validation.</p></div>
-        </details>
-        <details id="faq-pause">
-          <summary>Can I pause automatic checks?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>The <code>/openmerit pause</code> command persists across Pi restarts, blocks automatic due decisions and lifecycle follow-ups, and unloads the managed macOS LaunchAgent. It still records incoming signals and does not cancel already-active work or disable explicit commands. Resume restores scheduling only when the policy authorizes it. The standalone terminal is independent; stop its CLI to stop collection.</p></div>
-        </details>
-        <details id="faq-data">
-          <summary>Where does my data live?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>The terminal reads supported application code, configuration, request logs, exports, and authorized loopback runtime endpoints. It retains selected metadata in memory, without prompts, responses, or credentials, and clears its caches on exit. The Pi workflow separately stores project state, audit events, and evidence references in <code>.openmerit/</code> and records entries in Pi history. Its configured providers and tools may receive project or evaluation data.</p></div>
-        </details>
-        <details id="faq-cost">
-          <summary>What does it cost to run?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>OpenMerit has no subscription fee. The terminal makes no inference calls, though collection uses local resources. Provider usage charges apply to Pi setup, candidate work, and verification; paid tools or infrastructure may add costs.</p></div>
-        </details>
-        <details id="faq-budget">
-          <summary>Is the evaluation budget a hard spending limit?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>OpenMerit tracks reported challenger spend, supplies the remaining allowance, rejects challenger results over the approved limit, and blocks another challenger intent when the allowance is exhausted. It does not independently meter provider billing or stop an in-flight request. Setup, baseline work, and swap verification have separate costs. Use provider spending controls as well as the evaluation policy.</p></div>
-        </details>
-        <details id="faq-readiness">
-          <summary>Is OpenMerit ready for production?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>The terminal provides visibility into supported existing evidence; missing or incomplete sources remain visible. Pi model comparisons are intended for supervised product trials. Tests cover the implementation but do not establish better model choices or reliability for your workload. Inspect the evaluations and validate a supervised swap and rollback before relying on automation.</p></div>
-        </details>
       </div>
     </section>
   </main>
-  <footer class="site-footer wrap">
-    <div class="footer-top">
-      <figure class="section-art footer-art" aria-hidden="true"><img src="/assets/motion/rest-poster-transparent-v2.webp" width="543" height="362" alt="" loading="lazy" decoding="async"></figure>
-      <a class="brand" href="/" aria-label="OpenMerit home"><svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M4 24V8l12 10L28 8v16M4 8l12 16L28 8" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg><span>openmerit</span></a>
-      <p>Better tools. On their merits.</p>
-    </div>
-    <div class="footer-bottom"><nav aria-label="Footer navigation"><a href="https://github.com/laz-aslam/openmerit">GitHub <span aria-hidden="true">↗</span></a><a href="/scout/">Scout <span aria-hidden="true">↗</span></a></nav><div class="footer-controls"><button class="motion-toggle" type="button" aria-label="Pause illustration motion" hidden>Pause motion</button><a class="back-top" href="#main">Back to top <span aria-hidden="true">↑</span></a></div></div>
-  </footer>
 </body>
 </html>

@@ -1,5 +1,26 @@
 # Website FAQ maintenance
 
+## Conversational homepage — published 25 October 2026
+
+The owner requested a single hero with two conversational paragraphs and a
+Scout invitation, replacing the thirteen-question FAQ and terminal setup.
+Reviewed model-selection, background work, traffic replay, pricing and setup
+claims. The hero begins directly with the supplied prose, without an eyebrow;
+a visible beta note says continuous traffic replay and decision-based pricing
+are direction, not current beta behavior. Scout's recommendations remain
+evidence-based candidates, not guaranteed best models or application results.
+The CTA hands off a public installer prompt, requires device approval and
+starts no evaluation or billing operation from the browser. Homepage setup
+is explicitly telemetry-off, with no correlated setup ID. Clipboard and app
+launch are distinguished from completed installation. The single CTA copies
+the prompt directly, with an inline confirmation or permission-error message
+and no separate prompt section. Scout and protected
+memo handlers are unchanged. The owner-approved deployment is recorded in
+[site design](site-design.md#conversational-homepage--published-25-october-2026).
+The mobile-default TL;DR repeats the supplied model-selection and no-router
+claims; both reading modes retain the same visible beta scope note and setup
+CTA. Switching versions changes presentation only, not product capabilities.
+
 ## Coding-agent device sign-in — source only, 23 October 2026
 
 Added a source-only rebuild of coding-agent setup: a secret-free copied prompt, `openmerit install` with browser device approval at the product-level `/connect`, per-device MCP keys and a Scout skill for Claude Code. Nothing is deployed or published. Homepage FAQ claims describe the terminal/Pi workflow and are unaffected; no FAQ edit is needed. Guides label the setup as unreleased until the Scout Worker, D1 tables and an npm preview ship.

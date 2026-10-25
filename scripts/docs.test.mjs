@@ -23,7 +23,7 @@ test('all website, Scout and generated documentation links resolve', async () =>
     for (const match of page.text.matchAll(/(?:href|src)="([^"]+)"/g)) {
       const url = new URL(match[1].replaceAll('&amp;', '&'), `https://openmerit.ai${page.url}`);
       if (url.origin !== 'https://openmerit.ai') continue;
-      if (page.url === '/' || page.url.startsWith('/scout/')) assert.ok(!/^\/(docs|memo|demo|engineering)(\/|$)/.test(url.pathname), `${page.url}: retired page link ${url.pathname}`);
+      if (page.url === '/' || page.url.startsWith('/scout/')) assert.ok(!/^\/(docs|demo|engineering)(\/|$)/.test(url.pathname), `${page.url}: retired page link ${url.pathname}`);
       // The alpha Worker serves the same Scout sources under its own prefix.
       const assetPath = url.pathname.replace(/^\/scout\/alpha(?=\/|$)/, '/scout');
       let path = join(site, decodeURIComponent(assetPath));
@@ -40,7 +40,7 @@ test('all website, Scout and generated documentation links resolve', async () =>
 });
 
 test('pages have one H1, distinct section IDs, and a canonical address', () => {
-  for (const page of html.slice(1)) {
+  for (const page of html) {
     assert.equal([...page.text.matchAll(/<h1(?:\s|>)/g)].length, 1, page.url);
     const ids = [...page.text.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
     assert.equal(ids.length, new Set(ids).size, `Duplicate IDs on ${page.url}`);
@@ -331,4 +331,80 @@ test('website analytics rechecks privacy before sends and handles denied session
   const storage = new Map([['openmerit-website-tab-id', 'abcdefab-1234-4123-8123-123456789abc']]);
   const browser = await websiteBrowser({ storage });
   assert.equal(browser.events()[0].anonymousId, storage.get('openmerit-website-tab-id'));
+});
+
+async function homepageBrowser({ clipboard, narrow = false, reducedMotion = false } = {}) {
+  const nodes = Object.fromEntries(['add-to-claude', 'setup-status', 'reading-toggle', 'letter-story', 'letter-full', 'letter-short'].map(id => [id, {
+    hidden: id === 'reading-toggle' || id === 'letter-short',
+    handlers: {},
+    addEventListener(type, handler) { this.handlers[type] = handler; },
+    setAttribute(name, value) { this[name] = value; },
+  }]));
+  const viewport = { matches: narrow, addEventListener(type, handler) { this.change = handler; } };
+  const source = await readFile(join(site, 'script.js'), 'utf8');
+  runInNewContext(source, {
+    document: { querySelector: selector => nodes[selector.slice(1)], documentElement: {} },
+    navigator: { clipboard },
+    matchMedia: query => query.includes('max-width') ? viewport : { matches: reducedMotion },
+    getComputedStyle: () => ({ opacity: '1', getPropertyValue: () => 'cubic-bezier(.23, 1, .32, 1)' }),
+  });
+  return { nodes, viewport };
+}
+
+test('the homepage CTA copies the same prompt it sends to Claude without a separate prompt section', async () => {
+  assert.doesNotMatch(html[0].text, /<textarea|id="setup-fallback"/);
+  for (const mode of ['allowed', 'denied', 'missing']) {
+    let copied, resolveCopy, rejectCopy;
+    const copying = new Promise((resolve, reject) => { resolveCopy = resolve; rejectCopy = reject; });
+    const { nodes } = await homepageBrowser({
+      clipboard: mode === 'missing' ? undefined : { writeText: text => { copied = text; return copying; } },
+    });
+    const cta = nodes['add-to-claude'];
+    const status = nodes['setup-status'];
+    const link = new URL(cta.href);
+    assert.equal(link.protocol, 'claude:');
+    assert.equal(link.host, 'code');
+    assert.equal(link.pathname, '/new');
+    const prompt = link.searchParams.get('q');
+    assert.match(prompt, /DO_NOT_TRACK=1 npx -y openmerit@latest install --client claude-code/);
+    assert.match(prompt, /approve this device/);
+    assert.match(prompt, /start a new Claude Code session/);
+    assert.doesNotMatch(prompt, /--setup-id|OPENMERIT_TELEMETRY=1/);
+    const completion = cta.handlers.click();
+    if (mode !== 'missing') {
+      assert.equal(copied, prompt);
+      assert.doesNotMatch(status.textContent, /prompt copied/, 'permission must resolve before claiming success');
+      if (mode === 'allowed') resolveCopy(); else rejectCopy(new Error('Clipboard blocked'));
+    }
+    await completion;
+    assert.match(status.textContent, mode === 'allowed' ? /prompt copied/ : /Allow clipboard access and try again/);
+    assert.equal(new URL(cta.href).searchParams.get('q'), prompt, 'clipboard failure must not remove the deep-link prompt');
+  }
+});
+
+test('homepage reading defaults follow width until chosen; keyboard and reduced-motion switches are immediate', async () => {
+  for (const narrow of [false, true]) {
+    for (const reducedMotion of [false, true]) {
+      const { nodes, viewport } = await homepageBrowser({ narrow, reducedMotion });
+      const toggle = nodes['reading-toggle'];
+      const check = shortened => {
+        assert.equal(nodes['letter-full'].hidden, shortened);
+        assert.equal(nodes['letter-short'].hidden, !shortened);
+        assert.equal(toggle.hidden, false);
+        assert.equal(toggle.textContent, shortened ? 'Read full' : 'TL;DR');
+        assert.equal(toggle['aria-expanded'], String(!shortened));
+      };
+      check(narrow);
+      viewport.matches = !narrow;
+      viewport.change();
+      check(!narrow);
+      // No animate() mock: these input modes must complete without animation.
+      await toggle.handlers.click({ detail: reducedMotion ? 1 : 0 });
+      check(narrow);
+      viewport.change();
+      check(narrow);
+      await toggle.handlers.click({ detail: 0 });
+      check(!narrow);
+    }
+  }
 });

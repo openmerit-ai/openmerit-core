@@ -1,54 +1,71 @@
-document.documentElement.classList.add('js');
+// This page has no analytics preference UI, so setup stays unlinked and opted out.
+// Device approval and installation still happen in the existing CLI/Scout flow.
+const prompt = `Connect OpenMerit Scout to Claude Code.
 
-const menuButton = document.querySelector('.menu-toggle');
-const navigation = document.querySelector('#primary-nav');
-menuButton.hidden = false;
+Run this command with a 10-minute timeout:
+DO_NOT_TRACK=1 npx -y openmerit@latest install --client claude-code
 
-function closeMenu() {
-  menuButton.setAttribute('aria-expanded', 'false');
-  navigation.classList.remove('is-open');
+It opens my browser so I can approve this device, then finishes by itself. If it exits with "approval pending", show me the link and code it printed and run the same command again. Don't edit configuration files yourself or ask me for a key. If it reports a conflict or another error, show me its message and stop. When it succeeds, tell me that Scout is connected and I must start a new Claude Code session to load its startup instructions; reconnecting /mcp alone is not enough.`;
+
+const cta = document.querySelector('#add-to-claude');
+const status = document.querySelector('#setup-status');
+cta.href = `claude://code/new?q=${encodeURIComponent(prompt)}`;
+
+cta.addEventListener('click', async () => {
+  // Native link navigation keeps external-app user activation. Start the copy
+  // before navigation; clipboard permission must never hold up the handoff.
+  status.textContent = 'Claude launch requested. Copying the setup prompt…';
+  try {
+    await navigator.clipboard.writeText(prompt);
+    status.textContent = 'Setup prompt copied. If Claude doesn’t open, paste it into Claude Code.';
+  } catch {
+    status.textContent = 'Couldn’t copy the setup prompt. Allow clipboard access and try again. The Claude link still includes the prompt.';
+  }
+});
+
+const readingToggle = document.querySelector('#reading-toggle');
+const story = document.querySelector('#letter-story');
+const full = document.querySelector('#letter-full');
+const short = document.querySelector('#letter-short');
+const narrow = matchMedia('(max-width: 600px)');
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const easing = getComputedStyle(document.documentElement).getPropertyValue('--ease-out');
+let shortened = narrow.matches;
+let chosen = false;
+let animation;
+
+function showReadingMode() {
+  full.hidden = shortened;
+  short.hidden = !shortened;
+  readingToggle.textContent = shortened ? 'Read full' : 'TL;DR';
+  readingToggle.setAttribute('aria-expanded', String(!shortened));
 }
 
-menuButton.addEventListener('click', () => {
-  const open = menuButton.getAttribute('aria-expanded') !== 'true';
-  menuButton.setAttribute('aria-expanded', String(open));
-  navigation.classList.toggle('is-open', open);
+showReadingMode();
+readingToggle.hidden = false;
+narrow.addEventListener('change', () => {
+  if (chosen) return;
+  shortened = narrow.matches;
+  showReadingMode();
 });
-navigation.addEventListener('click', (event) => {
-  if (event.target.closest('a')) closeMenu();
-});
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && menuButton.getAttribute('aria-expanded') === 'true') {
-    closeMenu();
-    menuButton.focus();
-  }
-});
-document.addEventListener('click', (event) => {
-  if (!event.target.closest('.site-header')) closeMenu();
-});
-window.matchMedia('(max-width: 580px)').addEventListener('change', closeMenu);
 
-const copyButton = document.querySelector('[data-copy]');
-copyButton.hidden = false;
-let copyReset;
-copyButton.addEventListener('click', async () => {
-  const code = document.querySelector('#install-code');
-  const status = document.querySelector('#copy-status');
-  const label = copyButton.querySelector('span');
-  clearTimeout(copyReset);
-  try {
-    await navigator.clipboard.writeText(code.textContent.trim());
-    label.textContent = 'Copied';
-    status.textContent = 'Installation command copied to clipboard.';
-  } catch {
-    const range = document.createRange();
-    range.selectNodeContents(code);
-    const selection = window.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
-    code.parentElement.focus();
-    label.textContent = 'Select & copy';
-    status.textContent = 'Clipboard access is unavailable. Command selected; press Command+C or Control+C to copy.';
+readingToggle.addEventListener('click', async event => {
+  chosen = true;
+  shortened = !shortened;
+  const opacity = getComputedStyle(story).opacity;
+  animation?.cancel();
+  // Keyboard and reduced-motion switches are immediate. Fade pointer switches
+  // while changing the layout, keeping the shared CTA with the story.
+  if (event.detail === 0 || reducedMotion.matches) {
+    showReadingMode();
+    return;
   }
-  copyReset = setTimeout(() => { label.textContent = 'Copy command'; status.textContent = ''; }, 3500);
+  animation = story.animate([{ opacity }, { opacity: 0 }], { duration: 100, easing });
+  try {
+    await animation.finished;
+  } catch {
+    return; // A newer choice interrupted this switch.
+  }
+  showReadingMode();
+  animation = story.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing });
 });

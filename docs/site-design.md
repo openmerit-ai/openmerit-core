@@ -2,6 +2,56 @@
 
 Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
 
+## Conversational homepage — published 25 October 2026
+
+The homepage is now one text-only hero: two owner-supplied conversational
+paragraphs, a short Scout beta invitation and **Add OpenMerit to Claude Code**.
+A centered editorial column replaces the illustrations, installation section,
+FAQ and footer. The header keeps Scout and the restored protected memo links.
+The existing paper/ink colors follow the device's light or dark preference;
+new letter styles do not change the memo or Scout layouts.
+
+The page starts directly with the prose, without an eyebrow or visible heading.
+A screen-reader-only OpenMerit heading preserves the page structure.
+At widths up to 600px, the supplied TL;DR is the default; larger screens start
+with the full copy. An underlined **Read full** / **TL;DR** button switches
+between them. Defaults follow resizing until the visitor chooses a version;
+that choice lasts until reload. Pointer switches fade out for 100ms and in for
+180ms using the existing ease-out token. Keyboard and reduced-motion switches
+are immediate. Without JavaScript the full copy remains readable.
+The first two paragraphs describe the OpenMerit direction, not a released
+continuous traffic-replay or decision-based billing service. The beta note
+makes that distinction. Scout remains the available beta;
+this redesign does not add model evaluations, automatic changes or billing.
+
+The CTA copies a secret-free installer prompt and requests the existing
+`claude://code/new` handoff. It installs Scout through the existing
+`openmerit install --client claude-code` command and browser device approval;
+a new Claude Code session must load the installed startup instructions.
+The homepage has no analytics preference UI, so its copied command explicitly
+uses `DO_NOT_TRACK=1`, with no setup correlation ID. Scout's own setup and
+privacy controls are unchanged. A successful copy or launch request does not
+establish installation, approval, app launch or invocation.
+
+The CTA itself copies the same prompt carried by the Claude link and confirms
+success inline. There is no separate prompt section or disclosure. If clipboard
+access fails, an inline message asks the visitor to allow access and retry;
+the Claude link still carries the prompt. Without JavaScript the CTA leads
+to Scout's existing setup page.
+
+The owner approved publication through `wrangler.scout-alpha.jsonc` as
+`openmerit-scout-alpha` version `6b30c07d-207c-4873-8c79-80cccf04d4f7`.
+The router, protected memo service and catalogue publisher were not redeployed;
+the older root application configuration was not used.
+Fifteen live HTTP checks passed: the homepage HTML, script and stylesheet match
+source byte-for-byte; Scout's page/client assets, memo sign-in gate and connection
+page are unchanged; retired routes remain 404; www and legacy redirects preserve
+queries. Production Chromium verified both reading modes at desktop and narrow
+widths, correct defaults and expansion state, no horizontal overflow and no
+runtime errors. Both default layouts were captured and inspected. Native Claude
+launch, completed installation and authenticated Scout/memo flows were not
+exercised by this homepage deployment check.
+
 The website lives in `site/` and uses the existing Cloudflare asset configuration in `wrangler.jsonc`. The homepage is plain HTML, CSS, and JavaScript. The [documentation section](site-documentation.md) is generated from curated Markdown at build time; no browser framework is required. The [guided demo](site-demo.md) adds a Worker API and temporary Cloudflare Containers; Docker must be running for deployment.
 
 The playback-only revision is published as Worker `31c181c9-c083-4eb4-85a4-f47516eba877`, build `demo-20260928-fieldkit-v1`. It removes live sandbox controls, disables public session creation, adds a dedicated Demo documentation group, and adds the six-task Field kit recording. Each of the five examples has a persistent two-sentence description below its tabs. Both Field kit paths already use six distinct models; five assignments change while the feasibility model is retained. The recorded comparison shows 22% lower observed cost and 13% lower mean latency, with 4/4 evaluation and 4/4 separate verification goals passing. The deployment history below describes earlier published behavior.
