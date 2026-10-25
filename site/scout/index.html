@@ -35,7 +35,7 @@
     <div class="scout-wrap header-inner">
       <a class="parent-brand" href="/" aria-label="OpenMerit home"><svg width="22" height="25" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span>openmerit</span></a>
       <a class="scout-brand" href="/scout/">Scout <span class="beta-label">Beta</span></a>
-      <nav aria-label="Scout navigation"><a href="/docs/scout/">Docs</a><a href="#for-agents">API <span aria-hidden="true">↗</span></a></nav>
+      <nav aria-label="Scout navigation"><a href="#for-agents">API <span aria-hidden="true">↗</span></a></nav>
       <div class="account-controls"><button id="sign-in" class="sign-in-button" type="button">Sign in</button><div id="user-account" aria-label="Your account" hidden></div></div>
     </div>
   </header>
@@ -103,7 +103,7 @@
         <details class="support-section specialist-section" data-field="specialists" hidden><summary data-field="specialists-title">Specialist models</summary><p>Related models to investigate. These are outside the ranked five; quality, cost and speed have not been compared on the same task.</p><div data-field="specialist-list"></div><p data-field="specialist-coverage"></p></details>
       </div>
     </template>
-    <noscript><p class="error-message">Enable JavaScript to search, or use the API in <a href="/docs/scout/">the Scout guide</a>.</p></noscript>
+    <noscript><p class="error-message">Enable JavaScript to search. The <a href="#for-agents">JSON API</a> also provides recommendations.</p></noscript>
   </main>
   <footer class="scout-footer scout-wrap">
     <div class="support-sections">
@@ -112,7 +112,7 @@
         <div class="agent-body">
           <p>Get the same recommendations, endpoint IDs, and evidence as this page through the JSON API.</p>
           <div class="code-heading"><span>JSON API</span><button class="quiet-button" id="copy-command" type="button">Copy request</button></div><pre tabindex="0"><code id="agent-code"></code></pre>
-          <p class="agent-note">A current browser-session bearer token is required. Never paste tokens into an agent conversation. <a href="/docs/scout/#json-api">API guide ↗</a></p>
+          <p class="agent-note">A current browser-session bearer token is required. Never paste tokens into an agent conversation.</p>
         </div>
       </details>
       <details class="support-section" id="capability-index"><summary>Capabilities</summary><p>Coverage in the index. Task matches appear first.</p><ul id="capability-list" class="capability-list" aria-label="Indexed capabilities"></ul></details>
@@ -129,7 +129,7 @@
         <p>Don't submit confidential or sensitive information. Redaction cannot detect every secret or personal detail. Turning sharing off stops future collection, not required task processing or previously stored records. <a href="/scout/data-policy/">Read the beta data policy ↗</a></p>
       </details>
     </div>
-    <div class="footer-meta"><span>Scout by OpenMerit</span><a href="/docs/scout/#current-validation-limits">Evaluation &amp; limitations <span aria-hidden="true">↗</span></a></div>
+    <div class="footer-meta"><span>Scout by OpenMerit</span><a href="/scout/data-policy/">Data policy <span aria-hidden="true">↗</span></a></div>
   </footer>
   <p class="sr-only" id="announcement" role="status" aria-live="polite"></p>
 </body>

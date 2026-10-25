@@ -23,6 +23,7 @@ test('all website, Scout and generated documentation links resolve', async () =>
     for (const match of page.text.matchAll(/(?:href|src)="([^"]+)"/g)) {
       const url = new URL(match[1].replaceAll('&amp;', '&'), `https://openmerit.ai${page.url}`);
       if (url.origin !== 'https://openmerit.ai') continue;
+      if (page.url === '/' || page.url.startsWith('/scout/')) assert.ok(!/^\/(docs|memo|demo|engineering)(\/|$)/.test(url.pathname), `${page.url}: retired page link ${url.pathname}`);
       // The alpha Worker serves the same Scout sources under its own prefix.
       const assetPath = url.pathname.replace(/^\/scout\/alpha(?=\/|$)/, '/scout');
       let path = join(site, decodeURIComponent(assetPath));
@@ -256,9 +257,9 @@ async function websiteBrowser(options = {}) {
   };
 }
 
-test('website analytics only loads on homepage/public guides, never memo or demos', () => {
+test('website analytics remains source-only on generated guides, not the preserved landing page', () => {
   for (const page of html) {
-    const expected = page.url === '/' || (page.url.startsWith('/docs/') && !page.url.startsWith('/docs/demo/'));
+    const expected = page.url.startsWith('/docs/') && !page.url.startsWith('/docs/demo/');
     assert.equal(page.text.includes('type="module" src="/product-analytics.js"'), expected, page.url);
   }
 });

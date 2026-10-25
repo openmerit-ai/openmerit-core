@@ -1,5 +1,84 @@
 # Primary domain migration
 
+## Protected memo restoration — prepared 25 October 2026, not deployed
+
+The owner requested `/memo` back after the rebuild cutover. The router now
+reserves `/memo`, `/memo/*`, `/memo.css`, `/memo-access.css` and `/memo-access.js`
+for the preserved `openmerit-site` service. The service retains its email-code
+sign-in, protected Markdown, administrator-only reader list, cookies and storage.
+No memo HTML or Markdown is added to Scout's public asset bundle. Shared styles,
+fonts and images still come from the existing landing-page/Scout bundle.
+
+This restoration requires only a domain-router deployment with
+`wrangler.domains.jsonc`, after explicit approval. Do not redeploy the protected
+application, reopen its direct Worker URLs or redeploy Scout for this change.
+The landing page and Scout keep their current routes; docs, demos, engineering
+articles and terminal pages/APIs remain offline. The homepage navigation is
+unchanged. Legacy memo page URLs canonicalize to `.ai`; existing legacy
+`/memo/auth/` calls retain their original origin checks.
+
+The local routing regression checks request bodies, query strings, cookies,
+protected response status/cache headers and neighboring-path rejection. A local
+pass is not evidence of restored production access or successful OTP delivery;
+verify the live sign-in gate and assets after an approved deployment.
+
+## Landing page and Scout rebuild — published 24 October 2026
+
+The rebuild configuration preserves the existing landing page at `/` and Scout
+at `/scout/`, without redirecting one to the other. Scout's data policy,
+coding-agent sign-in at `/connect/`, and required assets remain public.
+All `/docs/` routes (including Scout guides and
+Markdown downloads), memo, demos, engineering articles and hosted terminal
+pages/APIs return 404. Legacy website aliases still canonicalize to `.ai`;
+legacy demo/auth API exceptions no longer reach the retired application.
+Cloudflare-managed `robots.txt` responses remain outside the Worker boundary.
+
+The domain router binds to `openmerit-scout-alpha`, the current Scout serving
+Worker, not the separate hourly catalogue publisher. The old site and terminal
+services are no longer router bindings. Their source, data and deployments are
+preserved for the rebuild. The serving asset bundle includes the landing page,
+its styles, scripts and illustrations, but excludes the generated docs site.
+The generated `/scout/data-policy/` remains available. Homepage and Scout links
+to retired pages are removed. Homepage copy, FAQ answers and illustrations are
+unchanged. The unpublished homepage analytics loader is not activated; its
+absence matches the current live page. Ranking, authentication, privacy controls
+and agent connection contracts are unchanged.
+
+Deployment requires separate approval for the Scout serving Worker and domain
+router. Deploy Scout first with `wrangler.scout-alpha.jsonc`, then the router
+with `wrangler.domains.jsonc`. Do not deploy `wrangler.jsonc`: its source still
+lags the protected production application described below. Disabling the old
+application's public `workers.dev`/preview URLs also requires explicit approval;
+the domain router cannot intercept requests sent directly to that application.
+Do not delete Workers, storage, DNS or mail configuration as part of this cutover.
+
+The owner approved the cutover. Scout serving version
+`68018b3f-e3f4-475b-a865-cc8ab4185d0c` was deployed first, then domain-router
+version `770a60ed-4e47-48e1-8af6-ea19f7fd8eb9`. The old site's `workers.dev`
+and version-preview URLs are disabled; its application version remains
+`9b0ea195-8c33-40b0-a5ee-a21f3e31a46d`. No Worker, storage, DNS or mail
+configuration was deleted, and the catalogue publisher was not redeployed.
+
+Verification passed 74 live route cases across apex, www, legacy and dash hosts,
+including retained pages and retired page/API denials. All 181 retained-page
+files matched the deployment bundle byte-for-byte. Scout's eight principal
+client assets, public auth configuration, secret bindings, account namespace,
+rate limit, D1, R2 and Vectorize bindings match their pre-deployment state. `/scout`
+still redirects to `/scout/`, preserving query parameters.
+
+Production Chromium checks loaded the catalogue counts, opened the GitHub/Google
+sign-in modal, populated the invoice example and confirmed that a signed-out
+search requires sign-in without losing the draft. The landing page retained
+its hero and 13 FAQ answers, with no links to retired pages. No browser runtime
+errors were observed. OAuth completion, an authenticated recommendation and a
+new agent authorization were not exercised live; automated Scout tests cover
+those handler contracts with disposable fixtures. No real user data or keys
+were created or revoked for the check.
+
+Documentation still builds locally for source validation, but the generated
+docs site is not in the serving bundle. Historical records below describe the
+earlier full website, not the rebuild's current public surface.
+
 ## Production migration — 12 October 2026
 
 The primary website is `https://openmerit.ai`, with the hosted terminal at `https://dash.openmerit.ai`. The domain stays registered at GoDaddy; DNS is delegated to `anton.ns.cloudflare.com` and `elinore.ns.cloudflare.com` in the existing Cloudflare account. Public TLS, email delivery, memo sign-in, and redirect cutover were verified separately.

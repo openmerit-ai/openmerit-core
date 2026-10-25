@@ -2,12 +2,11 @@ import { cp, mkdir, rm } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import './build-web-analytics.mjs';
 
-// Package only Scout and public docs. The main site's protected memo and demos
-// must not become reachable through the independently deployed Scout Worker.
+// Package the existing landing page, Scout, agent sign-in and their assets.
+// The data policy is generated under scout/; the docs site stays unpublished.
 const root = resolve(import.meta.dirname, '..'), output = resolve(root, 'dist/scout-site');
 await rm(output, { recursive: true, force: true });
-for (const path of ['scout', 'connect', 'docs', 'styles.css', 'docs.css', 'docs.js', 'docs-search.js', 'product-analytics.js', 'favicon.svg',
-  'assets/inter-latin.woff2', 'assets/inter-LICENSE.txt', 'assets/openmerit-og-v1.png']) {
+for (const path of ['index.html', 'styles.css', 'script.js', 'illustrations.js', 'assets', 'scout', 'connect', 'favicon.svg']) {
   const destination = resolve(output, path); await mkdir(dirname(destination), { recursive: true });
   await cp(resolve(root, 'site', path), destination, { recursive: true });
 }

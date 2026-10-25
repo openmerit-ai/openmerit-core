@@ -4,6 +4,8 @@ Describe what you need a model to do. Scout returns up to five model-and-endpoin
 
 Scout is a separate hosted beta product. Npm 0.1.7 includes optional Claude Code setup for it; the hosted service does not change the Pi coordinator or Inference Terminal. Recommendations are evidence-based candidates for your own evaluation, not a guarantee of task accuracy or an independently validated state-of-the-art ranking.
 
+**Website rebuild — published 24 October 2026:** the rebuild preserves the existing landing page at `/` and Scout at `/scout/`, and takes all hosted `/docs/` pages offline, including this guide. `/connect/`, the JSON API/MCP and the standalone `/scout/data-policy/` remain available. The guide remains maintained in Markdown; this does not remove the local CLI or its documentation from the package. See the [cutover notes](site-domain-migration.md) for publication and verification details.
+
 **Coding-agent setup — 24 October 2026:** stable npm 0.1.7 includes [device sign-in setup](#connect-a-coding-agent). Hosted Scout serves `/connect` and `/scout/mcp`; the button opens Claude Desktop with a setup prompt. This supersedes the 23 October web-placeholder reset. Existing older client configuration and authorization grants are not automatically removed or revoked. Scout serving, main-site documentation and npm publication remain separate releases; dated receipts below describe their original versions, not acceptance of every later build.
 
 ## Beta evaluation logging — 22 October 2026 rollout
@@ -673,7 +675,7 @@ The 17 October post-deployment recovery reused all 24 saved research jobs and pu
 
 Prepared capability pools can overlap. Searches use their prepared ID lists to choose a smaller covering set of pools, preserving the selected candidates and complete evidence while avoiding repeated downloads of the same model records. Explicit model and endpoint inventories retain their existing scope checks. These metadata reads do not fetch source pages or redo hourly research.
 
-`demo/domain-router.mjs` routes Scout paths to this service while retaining the existing website, protected memo, authentication, and terminal services. There is no Scout admin/report route. The public guide is generated and published with the main documentation. Do not deploy the older root `wrangler.jsonc` to publish Scout. `npm run build:scout` packages only Scout, public documentation, and its shared assets; private memo and demo applications are excluded.
+`demo/domain-router.mjs` routes the landing page, Scout and `/connect/` to the Scout serving service. Hosted docs, demos, engineering articles and terminal pages/APIs are offline during the rebuild. The separately protected memo has a router-only restoration prepared but not deployed; see the [cutover record](site-domain-migration.md). There is no Scout admin/report route. Do not deploy the older root `wrangler.jsonc` to publish Scout. `npm run build:scout` packages the landing page, Scout, `/connect/`, the standalone Scout data policy and required shared assets; generated docs, memo and demo applications are excluded.
 
 ```sh
 npm run check:scout

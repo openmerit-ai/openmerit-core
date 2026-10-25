@@ -7,8 +7,8 @@
   "workers_dev": false,
   "preview_urls": false,
   // Keep the existing fetch-only Worker identity and secrets.
-  // Canonical Scout now overrides the router's older serving implementation;
-  // adjacent paths such as /scouting still pass through to the Custom Domain.
+  // Canonical Scout and the router's landing-page service binding share this
+  // serving Worker. Adjacent paths such as /scouting return 404 during rebuilding.
   "routes": [
     { "pattern": "openmerit.ai/scout*", "zone_id": "4192d54a67b16e3af7e1503a7590dc65" },
     // Product-level coding-agent device sign-in (/connect and /connect/api/*).

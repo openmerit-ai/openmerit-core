@@ -27,7 +27,6 @@
   <link rel="stylesheet" href="/styles.css?v=20261014-transparent-art">
   <script src="/script.js?v=20260923-install" defer></script>
   <script src="/illustrations.js?v=20261014-registered-motion" defer></script>
-  <script type="module" src="/product-analytics.js"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -40,9 +39,6 @@
     <nav class="primary-nav" id="primary-nav" aria-label="Primary navigation">
       <a href="#faq">FAQ</a>
       <a href="/scout/">Scout</a>
-      <a href="/docs/demo/">Demos</a>
-      <a href="/memo/">Memo</a>
-      <a href="/docs/">Documentation</a>
       <a class="nav-github" href="https://github.com/laz-aslam/openmerit">GitHub <span class="small-arrow" aria-hidden="true">↗</span></a>
       <a class="button button-dark" href="#get-started">Get started <span aria-hidden="true">↗</span></a>
     </nav>
@@ -61,7 +57,6 @@
           <p class="eyebrow">Put it to work</p>
           <h2 id="start-title">Start with the work<br><span>you already do.</span></h2>
           <p>Open the Inference Terminal from your application directory to inspect its models, services, recorded requests, and linked compute. It reads existing evidence without making model calls or changing routes. Use the separate Pi integration when you are ready to establish evaluations and compare models.</p>
-          <a class="text-link" href="/docs/getting-started/">Read the getting started guide <span aria-hidden="true">↗</span></a>
           <figure class="section-art setup-art" aria-hidden="true"><img src="/assets/motion/setup-poster-transparent-v2.webp" width="543" height="362" alt="" loading="lazy" decoding="async"></figure>
         </div>
         <div class="install">
@@ -88,11 +83,11 @@ openmerit dash</code></pre>
         </details>
         <details id="faq-harnesses">
           <summary>Which harnesses does it work with?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>The standalone terminal runs without a coding harness. Pi 0.87 is the implemented adapter for the separate comparison workflow. Other coding agents need an adapter to use the coordinator and protocol; installing the package does not add that integration automatically.</p><a class="text-link" href="/docs/adapter-guide/">Building a harness adapter <span aria-hidden="true">↗</span></a></div>
+          <div class="faq-answer"><p>The standalone terminal runs without a coding harness. Pi 0.87 is the implemented adapter for the separate comparison workflow. Other coding agents need an adapter to use the coordinator and protocol; installing the package does not add that integration automatically.</p></div>
         </details>
         <details id="faq-evaluations">
           <summary>Do I need evaluations before I start?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>The terminal needs no evaluation suite. For model comparisons, setup in an interactive Pi session asks Pi to understand your task, confirm your requirements and permissions, and establish the necessary evaluations and measurements. Those checks need to reflect your actual product. Ordinary coding activity alone doesn’t measure product quality.</p><a class="text-link" href="/docs/getting-started/#set-up-model-comparisons-with-pi">Setting up your first task <span aria-hidden="true">↗</span></a></div>
+          <div class="faq-answer"><p>The terminal needs no evaluation suite. For model comparisons, setup in an interactive Pi session asks Pi to understand your task, confirm your requirements and permissions, and establish the necessary evaluations and measurements. Those checks need to reflect your actual product. Ordinary coding activity alone doesn’t measure product quality.</p></div>
         </details>
         <details id="faq-comparisons">
           <summary>Does it always choose the cheapest model?<span aria-hidden="true">+</span></summary>
@@ -100,7 +95,7 @@ openmerit dash</code></pre>
         </details>
         <details id="faq-evidence">
           <summary>How much evidence does a recommendation need?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>That depends on your task and the sample requirements you confirm during setup. Reliability and consistency need repeated, representative runs. Missing or insufficient required measurements leave a candidate unresolved in the comparison. OpenMerit checks the reported measurements and comparison rules, but doesn’t independently prove that an external evidence source is truthful.</p><a class="text-link" href="/docs/metrics-and-evidence/">Understanding the evidence <span aria-hidden="true">↗</span></a></div>
+          <div class="faq-answer"><p>That depends on your task and the sample requirements you confirm during setup. Reliability and consistency need repeated, representative runs. Missing or insufficient required measurements leave a candidate unresolved in the comparison. OpenMerit checks the reported measurements and comparison rules, but doesn’t independently prove that an external evidence source is truthful.</p></div>
         </details>
         <details id="faq-approval">
           <summary>Will it change my model without asking?<span aria-hidden="true">+</span></summary>
@@ -112,15 +107,15 @@ openmerit dash</code></pre>
         </details>
         <details id="faq-background">
           <summary>Does it keep running when Pi is closed?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>The terminal collects only while its CLI is running. For Pi comparisons, an explicitly authorized persistent policy can install a per-project macOS LaunchAgent. It checks for due work every five minutes while the user is logged in and requires working headless Pi authentication. Other platforms need an external scheduler. Unattended candidate discovery and model changes still need representative product validation.</p><a class="text-link" href="/docs/automation/">How scheduled checks work <span aria-hidden="true">↗</span></a></div>
+          <div class="faq-answer"><p>The terminal collects only while its CLI is running. For Pi comparisons, an explicitly authorized persistent policy can install a per-project macOS LaunchAgent. It checks for due work every five minutes while the user is logged in and requires working headless Pi authentication. Other platforms need an external scheduler. Unattended candidate discovery and model changes still need representative product validation.</p></div>
         </details>
         <details id="faq-pause">
           <summary>Can I pause automatic checks?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>The <code>/openmerit pause</code> command persists across Pi restarts, blocks automatic due decisions and lifecycle follow-ups, and unloads the managed macOS LaunchAgent. It still records incoming signals and does not cancel already-active work or disable explicit commands. Resume restores scheduling only when the policy authorizes it. The standalone terminal is independent; stop its CLI to stop collection.</p><a class="text-link" href="/docs/roadmap/">Current limitations <span aria-hidden="true">↗</span></a></div>
+          <div class="faq-answer"><p>The <code>/openmerit pause</code> command persists across Pi restarts, blocks automatic due decisions and lifecycle follow-ups, and unloads the managed macOS LaunchAgent. It still records incoming signals and does not cancel already-active work or disable explicit commands. Resume restores scheduling only when the policy authorizes it. The standalone terminal is independent; stop its CLI to stop collection.</p></div>
         </details>
         <details id="faq-data">
           <summary>Where does my data live?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>The terminal reads supported application code, configuration, request logs, exports, and authorized loopback runtime endpoints. It retains selected metadata in memory, without prompts, responses, or credentials, and clears its caches on exit. The Pi workflow separately stores project state, audit events, and evidence references in <code>.openmerit/</code> and records entries in Pi history. Its configured providers and tools may receive project or evaluation data.</p><a class="text-link" href="/docs/security/">Read the security notes <span aria-hidden="true">↗</span></a></div>
+          <div class="faq-answer"><p>The terminal reads supported application code, configuration, request logs, exports, and authorized loopback runtime endpoints. It retains selected metadata in memory, without prompts, responses, or credentials, and clears its caches on exit. The Pi workflow separately stores project state, audit events, and evidence references in <code>.openmerit/</code> and records entries in Pi history. Its configured providers and tools may receive project or evaluation data.</p></div>
         </details>
         <details id="faq-cost">
           <summary>What does it cost to run?<span aria-hidden="true">+</span></summary>
@@ -132,7 +127,7 @@ openmerit dash</code></pre>
         </details>
         <details id="faq-readiness">
           <summary>Is OpenMerit ready for production?<span aria-hidden="true">+</span></summary>
-          <div class="faq-answer"><p>The terminal provides visibility into supported existing evidence; missing or incomplete sources remain visible. Pi model comparisons are intended for supervised product trials. Tests cover the implementation but do not establish better model choices or reliability for your workload. Inspect the evaluations and validate a supervised swap and rollback before relying on automation.</p><a class="text-link" href="/docs/roadmap/">Read the roadmap <span aria-hidden="true">↗</span></a></div>
+          <div class="faq-answer"><p>The terminal provides visibility into supported existing evidence; missing or incomplete sources remain visible. Pi model comparisons are intended for supervised product trials. Tests cover the implementation but do not establish better model choices or reliability for your workload. Inspect the evaluations and validate a supervised swap and rollback before relying on automation.</p></div>
         </details>
       </div>
     </section>
@@ -143,7 +138,7 @@ openmerit dash</code></pre>
       <a class="brand" href="/" aria-label="OpenMerit home"><svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M4 24V8l12 10L28 8v16M4 8l12 16L28 8" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg><span>openmerit</span></a>
       <p>Better tools. On their merits.</p>
     </div>
-    <div class="footer-bottom"><nav aria-label="Footer navigation"><a href="https://github.com/laz-aslam/openmerit">GitHub <span aria-hidden="true">↗</span></a><a href="/docs/">Documentation <span aria-hidden="true">↗</span></a><a href="/docs/roadmap/">Roadmap <span aria-hidden="true">↗</span></a></nav><div class="footer-controls"><button class="motion-toggle" type="button" aria-label="Pause illustration motion" hidden>Pause motion</button><a class="back-top" href="#main">Back to top <span aria-hidden="true">↑</span></a></div></div>
+    <div class="footer-bottom"><nav aria-label="Footer navigation"><a href="https://github.com/laz-aslam/openmerit">GitHub <span aria-hidden="true">↗</span></a><a href="/scout/">Scout <span aria-hidden="true">↗</span></a></nav><div class="footer-controls"><button class="motion-toggle" type="button" aria-label="Pause illustration motion" hidden>Pause motion</button><a class="back-top" href="#main">Back to top <span aria-hidden="true">↑</span></a></div></div>
   </footer>
 </body>
 </html>

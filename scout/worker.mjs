@@ -10,6 +10,7 @@ import { indexStatus } from './rank.mjs';
 import { scoutAccess, sessionUser } from './auth.mjs';
 import { createProductAnalytics } from './product-analytics.mjs';
 import { handleClerkWebhook } from './account-analytics.mjs';
+import { publicSiteResponse } from './public-site.mjs';
 
 // Publication coordination only. User searches do not pass through this object.
 export class ScoutPublication extends DurableObject {
@@ -73,6 +74,8 @@ export default {
   async fetch(request,env,ctx) {
     const url=new URL(request.url),path=url.pathname;
     if(isRetiredAgentPath(path))return json({error:'Not found.'},404);
+    const unavailable=publicSiteResponse(request);
+    if(unavailable)return unavailable;
     if(path==='/scout')return Response.redirect(`${url.origin}/scout/${url.search}`,308);
     if(path==='/connect')return Response.redirect(`${url.origin}/connect/${url.search}`,308);
     // Product-level device sign-in for coding agents. The page is a static asset.

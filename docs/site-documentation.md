@@ -2,7 +2,9 @@
 
 Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
 
-The public documentation lives at https://openmerit.ai/docs/. It uses the homepage's typography, colors, and Cloudflare hosting. Twenty-four guides are generated from Markdown in `docs/`. The terminal is in Get started; demos distinguish hosted samples from the five historical recordings retained in main. Internal website design and maintenance notes are excluded.
+**Website rebuild — published 24 October 2026:** `/docs/` and its downloads are offline. The existing landing page at `/`, Scout at `/scout/`, its connection flow and standalone data policy remain public. The guides and generator are retained for local validation and the rebuild; the historical implementation notes below do not describe currently available public docs. See the [cutover and verification record](site-domain-migration.md).
+
+Before this cutover, the public documentation lived at https://openmerit.ai/docs/ and used the homepage's typography, colors, and Cloudflare hosting. The guides are generated from Markdown in `docs/`. The terminal is in Get started; demos distinguish hosted samples from the five historical recordings retained in main. Internal website design and maintenance notes are excluded.
 
 Article content has one maintained source: `docs/*.md`. Update those files alongside product changes, then rebuild and deploy. Do not edit the generated `site/docs/` files. The repository's `AGENTS.md` records this rule for future coding work.
 
@@ -12,7 +14,7 @@ The Scout beta policy is also generated at `/scout/data-policy/` from `docs/scou
 
 ### Website analytics — source-only, unreleased
 
-The homepage and generated public guides load the first-party ES module `site/product-analytics.js`; protected memo and demo pages are not instrumented. This source change is not evidence of a live deployment. It loads no Clerk SDK, PostHog SDK or replay and exposes no project token. It fetches same-origin `/scout/api/auth` for `analytics.enabled`, then best-effort posts to `/scout/api/analytics` with the web client and analytics-on headers. Requests omit credentials and referrers, reject redirects, and time out after three seconds.
+Generated public guides load the first-party ES module `site/product-analytics.js`; protected memo and demo pages are not instrumented. The landing-page/Scout rebuild preserves the live homepage's absence of this unpublished loader and takes the generated docs site offline; see the [rebuild boundary](site-domain-migration.md). This source change is not evidence of a live deployment. It loads no Clerk SDK, PostHog SDK or replay and exposes no project token. It fetches same-origin `/scout/api/auth` for `analytics.enabled`, then best-effort posts to `/scout/api/analytics` with the web client and analytics-on headers. Requests omit credentials and referrers, reject redirects, and time out after three seconds.
 
 Publication is blocked as of 22 October 2026. The main site's active version remains `9b0ea195-8c33-40b0-a5ee-a21f3e31a46d`; the root checkout predates its memo authentication, and the complete previous static-asset staging manifest is unavailable. A version-only upload preserving all deployed modules/bindings/assets retained the old assets-first routing despite a requested configuration change, so its loader would not run on homepage/docs responses. Candidate `f6c5d9ae-107a-49e9-883a-5046e57d810c` was **not deployed**. Do not activate it or deploy the root configuration. Recover/reconcile the complete production application and asset bundle before publishing this module and updated public guides. Scout's independent analytics deployment is live; the main website, router, terminal and publisher are unchanged. Private version backups and comparison evidence are retained under `.amp/in/`.
 

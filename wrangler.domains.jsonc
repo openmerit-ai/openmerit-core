@@ -9,15 +9,8 @@
     "command": "node --test demo/test/domain-migration.test.mjs && npm run check:docs"
   },
   "services": [
-    { "binding": "SCOUT", "service": "openmerit-scout" },
-    {
-      "binding": "SITE",
-      "service": "openmerit-site"
-    },
-    {
-      "binding": "TERMINAL",
-      "service": "openmerit-terminal-preview"
-    }
+    { "binding": "SCOUT", "service": "openmerit-scout-alpha" },
+    { "binding": "SITE", "service": "openmerit-site" }
   ],
   "vars": {
     "DOMAIN_REDIRECTS_ENABLED": "true"

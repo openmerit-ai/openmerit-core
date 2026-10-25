@@ -13,6 +13,7 @@ import { createRecommender } from './recommend.mjs';
 import { registry } from './registry.mjs';
 import { scoutAccess, sessionUser } from './auth.mjs';
 import { createProductAnalytics } from './product-analytics.mjs';
+import { publicSiteResponse } from './public-site.mjs';
 import '../scripts/build-web-analytics.mjs';
 
 const root = resolve(import.meta.dirname, '../site');
@@ -58,6 +59,10 @@ const server = createServer(async (req, res) => {
       res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(req.method === 'HEAD' ? undefined : await response.text()); return;
     }
     const toRequest = () => new Request(url, { method: req.method, headers: req.headers, ...(!['GET', 'HEAD'].includes(req.method) ? { body: Readable.toWeb(req), duplex: 'half' } : {}) });
+    const unavailable = publicSiteResponse(new Request(url, { method: req.method }));
+    if (unavailable) {
+      res.writeHead(unavailable.status, Object.fromEntries(unavailable.headers)); res.end(req.method === 'HEAD' ? undefined : await unavailable.text()); return;
+    }
     if (url.pathname === '/connect') { res.writeHead(308, { Location: `/connect/${url.search}` }); res.end(); return; }
     if (url.pathname.startsWith('/connect/api/')) {
       const request = toRequest(), analytics = createProductAnalytics(request, analyticsEnv);
