@@ -15,6 +15,21 @@ export function shardFor(id) {
 export const getJSON = async (bucket,key) => { const object=await bucket.get(key);return object?object.json():null; };
 export const putJSON = (bucket,key,data) => bucket.put(key,JSON.stringify(data),{httpMetadata:{contentType:'application/json'}});
 
+// Research is stored beside the published records, so refresh steps that do
+// not use it never parse it. Generations published before the split embed it.
+export const researchKey = recordsKey => recordsKey.replace(/\.json$/,'.research.json');
+export async function readPublished(bucket,{records:withRecords=true,research:withResearch=false}={}) {
+  const pointer=await getJSON(bucket,'active.json'),manifest=pointer?await getJSON(bucket,pointer.key):null;
+  if(!manifest)return null;
+  let research=withResearch?await getJSON(bucket,researchKey(manifest.recordsKey)):null,records=null;
+  if(withRecords||(withResearch&&!research)) {
+    records=await getJSON(bucket,manifest.recordsKey);
+    if(withResearch)research??=records.research??[];
+    delete records.research;
+  }
+  return {records:withRecords?records:null,research};
+}
+
 // Refresh-time materialization replaces a wave of per-repository remote reads.
 // Profiles remain the selection index; a pack does not limit eligible models.
 export async function stageSpecialistPacks(bucket,snapshot) {
@@ -68,8 +83,9 @@ export async function stageCatalogue(bucket,records,previous,options={}) {
     if(!await bucket.head(key))await putJSON(bucket,key,sorted);
     shards[name]=key;
   });
-  const recordsKey=`catalogues/${publication.id}.json`;
-  await putJSON(bucket,recordsKey,{...records,publication});
+  const recordsKey=`catalogues/${publication.id}.json`,{research:archivedResearch,...archive}=records;
+  await putJSON(bucket,researchKey(recordsKey),archivedResearch??[]);
+  await putJSON(bucket,recordsKey,{...archive,publication});
   if(options.db&&options.vectorize) {
     const directory=prepareEligibility(snapshot),projection=await stageProjection(options.db,publication.id,snapshot,directory);
     const evidenceKey=`serving-evidence/${publication.id}.json`;

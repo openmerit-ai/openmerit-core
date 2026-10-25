@@ -6,7 +6,7 @@ import { registry } from './registry.mjs';
 import { ParallelResearch, planResearch } from './research.mjs';
 import { integrateResearch } from './enrich.mjs';
 import { toRecords, toSnapshot, publicationPredecessor } from './records.mjs';
-import { getJSON, putJSON, stageCatalogue } from './store.mjs';
+import { getJSON, putJSON, stageCatalogue, readPublished } from './store.mjs';
 import { digest, concurrent, choice, decode } from './utils.mjs';
 import { requestDecisions } from './decisions.mjs';
 import { refreshModelMetadata } from './metadata.mjs';
@@ -54,8 +54,8 @@ export async function runRefresh(env,step,id) {
       return {available:true};
     });
     const baseKey=await step.do('collect-public-feeds',{retries:{limit:2,delay:'10 seconds'},timeout:'5 minutes'},async()=>{
-      const pointer=await getJSON(bucket,'active.json'),manifest=pointer?await getJSON(bucket,pointer.key):null;
-      const previous=manifest?toSnapshot(await getJSON(bucket,manifest.recordsKey)):seed;
+      // Collection never reads research; the steps that do load it themselves.
+      const published=await readPublished(bucket),previous=published?toSnapshot(published.records):seed;
       let next=await refreshSnapshot(fetch,previous,{collectOnly:true});
       // Preserve research-owned records while independently refreshing known feeds.
       next=retainResearch(next,previous);
@@ -66,11 +66,12 @@ export async function runRefresh(env,step,id) {
         await archiveListings(env.SCOUT_INDEX,extra,next.checkedAt);
         next=await discoverInventory(next,previous,{archiveDb:env.SCOUT_INDEX,pages:next.registry.policy.discoveryPagesPerHour??2});
       }
-      // next already carries the retained research; later steps never read the previous copy.
-      const key=`runs/${id}/collected.json`;await putJSON(bucket,key,{next,previous:{...previous,research:[]}});return key;
+      // Later steps re-read the unchanged published generation instead of a copy here.
+      const key=`runs/${id}/collected.json`;await putJSON(bucket,key,{next});return key;
     });
     const jobs=await step.do('plan-research',async()=>{
       const {next}=await getJSON(bucket,baseKey);
+      next.research=(await readPublished(bucket,{records:false,research:true}))?.research??[];
       const backlog=await getJSON(bucket,'research-backlog.json')??[];
       next.researchPending=[...new Map([...(next.researchPending??[]),...backlog].map(p=>[p.job.id,p])).values()];
       const prior=Object.entries(next.researchState).map(([subjectId,v])=>({subjectId,...v}));
@@ -105,7 +106,9 @@ export async function runRefresh(env,step,id) {
       return {key:jobKey,status:'pending',subjectId:job.id};
     });
     const candidateKey=await step.do('interpret-evidence',{retries:{limit:1,delay:'15 seconds'},timeout:'15 minutes'},async()=>{
-      const {next,previous}=await getJSON(bucket,baseKey),batches=await Promise.all(results.filter(r=>r.status==='completed').map(r=>getJSON(bucket,r.key)));
+      // The refresh lock keeps the published generation unchanged until this run publishes.
+      const {next}=await getJSON(bucket,baseKey),published=await readPublished(bucket,{research:true}),previous=published?toSnapshot(published.records):seed,batches=await Promise.all(results.filter(r=>r.status==='completed').map(r=>getJSON(bucket,r.key)));
+      next.research=published?.research??[];
       const prepared=await refreshModelMetadata(next,previous,options);
       let candidate=await integrateResearch(prepared,batches,options);
       candidate.researchPending=(await Promise.all(results.filter(r=>r.key&&r.status!=='completed').map(async r=>{

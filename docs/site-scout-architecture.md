@@ -1,5 +1,23 @@
 # Scout architecture and operations
 
+## Refresh memory: research stored separately — 25 October 2026
+
+The `collect-public-feeds` memory failure returned: 37 of the 50 hourly runs before the twice-daily change failed with "Worker exceeded memory limit". The published records file had grown to 41.4 MB, with 1,476 research records taking 19.0 MB and 360 benchmarks taking 16.5 MB. Of the benchmark total, 10.9 MB is per-capability interpretation across the 210 registry capabilities. Parsing that single file set the collect step's peak. It contains non-Latin-1 text, so V8 holds it as a two-byte string before any objects exist. The step then wrote a 62 MB `collected.json` holding both the new snapshot and the previous generation.
+
+Publication now writes research to `catalogues/<id>.research.json` beside `catalogues/<id>.json`, and `store.mjs` `readPublished` loads either part. Collection reads only the records file and writes `collected.json` as `{next}`. Research planning reads only the research object. Evidence interpretation re-reads the published generation, which the refresh lock keeps unchanged until this run publishes. The catalogue content and publication digest are unchanged. Generations published before the split, which embed research, still load.
+
+Measured on the production generation `e8b5c21256a782acbd45247c34b1fdf9` with recorded feed responses replayed, as the minimum Node heap for the collect step:
+
+| Case | Before | After |
+| --- | --- | --- |
+| Collect step, current code path | 161 MB | 122 MB |
+| 22 October harness (also re-parses the output) | 375 MB | 135 MB (192 MB when refreshes last succeeded reliably) |
+| `collected.json` | 62.0 MB | 18.3 MB |
+
+The first run after deployment still reads the single-file generation, at the old 161 MB peak; once one run publishes, later runs use the split files. A collect failure happens before research planning, so retrying it starts no paid Parallel jobs. Node's figures include runtime overhead absent from Workers, so only the relative change is meaningful.
+
+**Rollback hazard:** a publisher older than this change reads a split generation as having no research and would publish without it. To roll back, restore the research file's content into the records file first, or roll back only to a version that includes `readPublished`. Growth remains. Research adds up to 24 records per run, and every capability that research adds is stored on every benchmark's interpretation, so benchmark size grows with capabilities × benchmarks. Compacting that interpretation map is the next lever if the peak climbs again.
+
 ## Twice-daily refresh — deployed, 25 October 2026
 
 At the owner's request, the publisher cron in `wrangler.scout.jsonc` changes from `7 * * * *` to `7 0,12 * * *` (00:07 and 12:07 UTC). Status reports `scheduler: "cloudflare-twice-daily"`, and the registry's `maxSourceAgeHours` rises from 2 to 13 so feeds are not reported stale between scheduled runs. Each run keeps the same 24-job research budget (`researchPerHour` now means a per-run budget) and two Hub discovery pages. Paid research and discovery throughput therefore fall to a twelfth. Run IDs keep the `hour-<n>` form, which remains unique per run.
