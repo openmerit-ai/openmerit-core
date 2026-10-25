@@ -28,3 +28,6 @@ packages/terminal/public/flow.css
 
 # Amp orb portal registrations
 .amp/portals/*
+
+# Local deployment receipts from scripts/deploy.ts
+.deploys/
