@@ -8,6 +8,10 @@ Orbs receive a project-wide `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` f
 
 Orbs also receive an `NPM_TOKEN` project secret limited to the `openmerit` package; `.agents/setup` points `~/.npmrc` at it. `npm publish` and dist-tag changes need the user's explicit approval each time.
 
+# TypeScript
+
+Write new first-party code, tests and tooling in TypeScript; do not add `.js`, `.mjs`, `.cjs` or `.jsx` files. `npm run check:typescript` enforces this, and explicit `any`, `@ts-expect-error`, `@ts-ignore` and `@ts-nocheck` are not allowed. Strictness lives in `tsconfig.base.json`; do not relax it per project. Migrate existing JavaScript one boundary at a time without behavior changes, following `docs/site-typescript-migration.md`. After changing a Wrangler configuration, run `npm run types:workers` and commit the result.
+
 # Documentation maintenance
 
 The Markdown files in `docs/` are the source of truth for public documentation. The website at `/docs/` is generated from those files by `scripts/build-docs.mjs`. Do not edit generated files in `site/docs/` or maintain a second copy of an article in website code.

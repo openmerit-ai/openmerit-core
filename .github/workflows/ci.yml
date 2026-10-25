@@ -20,6 +20,18 @@ jobs:
       - run: npm ci
       - run: npm run verify
 
+  # Separate job so the slow `wrangler types --check` runs in parallel with verify.
+  worker-types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - run: npm ci
+      - run: npm run check:worker-types
+
   package-smoke:
     runs-on: ubuntu-latest
     steps:

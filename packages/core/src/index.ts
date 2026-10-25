@@ -49,13 +49,13 @@ export interface HarnessAdapter {
 }
 
 export interface IntentFactoryOptions {
-  readonly taskProfileId?: string;
+  readonly taskProfileId?: string | undefined;
   readonly authorizationPolicyId?: string;
-  readonly policy?: SupervisedGraduationPolicy;
+  readonly policy?: SupervisedGraduationPolicy | undefined;
   readonly id?: string;
   readonly requestedAt?: string;
-  readonly evaluationSpend?: number;
-  readonly targetId?: string;
+  readonly evaluationSpend?: number | undefined;
+  readonly targetId?: string | undefined;
   readonly additionalConstraints?: Readonly<Record<string, JsonValue>>;
 }
 
@@ -212,8 +212,8 @@ export interface VerificationResult {
 
 export interface ResultInterpretation extends VerificationResult {
   readonly nextStage?: ImprovementCycleState["stage"];
-  readonly config?: OpenMeritProjectConfig;
-  readonly cyclePatch?: Partial<ImprovementCycleState>;
+  readonly config?: OpenMeritProjectConfig | undefined;
+  readonly cyclePatch?: Partial<ImprovementCycleState> | undefined;
 }
 
 const knownMetricIds = new Set(METRIC_CATALOG.map((metric) => metric.id));
@@ -986,7 +986,7 @@ export interface IssuedIntent {
 }
 
 export interface CoordinatorIssueOptions {
-  readonly additionalConstraints?: Readonly<Record<string, JsonValue>>;
+  readonly additionalConstraints?: Readonly<Record<string, JsonValue>> | undefined;
 }
 
 export interface AcceptedIntentResult {

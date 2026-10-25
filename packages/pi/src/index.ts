@@ -654,7 +654,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
     await dispatchIntent(pi, ctx, state, store, "establish_evals", registerCompletionTool, {
       applicationTargetRequired: true,
       detectedApplicationTargets: detectedTargetsConstraint(detectedApplicationTargets),
-      ...(detectedApplicationTargets.length === 1 && detectedApplicationTargets[0].configuredModelId ? { expectedIncumbentModelId: detectedApplicationTargets[0].configuredModelId } : {}),
+      ...(detectedApplicationTargets.length === 1 && detectedApplicationTargets[0]?.configuredModelId ? { expectedIncumbentModelId: detectedApplicationTargets[0]?.configuredModelId } : {}),
     });
   });
 
@@ -692,7 +692,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
             await dispatchIntent(pi, ctx, state, store, "establish_evals", registerCompletionTool, {
               applicationTargetRequired: true,
               detectedApplicationTargets: detectedTargetsConstraint(detectedApplicationTargets),
-              ...(detectedApplicationTargets.length === 1 && detectedApplicationTargets[0].configuredModelId ? { expectedIncumbentModelId: detectedApplicationTargets[0].configuredModelId } : {}),
+              ...(detectedApplicationTargets.length === 1 && detectedApplicationTargets[0]?.configuredModelId ? { expectedIncumbentModelId: detectedApplicationTargets[0]?.configuredModelId } : {}),
             });
           }
         } else if (state.proactiveNudgesPaused) {
@@ -739,7 +739,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
         await dispatchIntent(pi, ctx, state, store, "establish_evals", registerCompletionTool, {
           applicationTargetRequired: true,
           detectedApplicationTargets: detectedTargetsConstraint(detectedApplicationTargets),
-          ...(detectedApplicationTargets.length === 1 && detectedApplicationTargets[0].configuredModelId ? { expectedIncumbentModelId: detectedApplicationTargets[0].configuredModelId } : {}),
+          ...(detectedApplicationTargets.length === 1 && detectedApplicationTargets[0]?.configuredModelId ? { expectedIncumbentModelId: detectedApplicationTargets[0]?.configuredModelId } : {}),
         });
       } else {
         ctx.ui.notify("openmerit: no application LLM call detected yet; automatic setup will check again after Pi finishes a build turn (/openmerit setup is available for recovery)", "info");
@@ -769,7 +769,7 @@ export default function openMeritExtension(pi: ExtensionAPI): void {
             await dispatchIntent(pi, ctx, state, store, "establish_evals", registerCompletionTool, {
             applicationTargetRequired: true,
             detectedApplicationTargets: detectedTargetsConstraint(detectedApplicationTargets),
-            ...(detectedApplicationTargets.length === 1 && detectedApplicationTargets[0].configuredModelId ? { expectedIncumbentModelId: detectedApplicationTargets[0].configuredModelId } : {}),
+            ...(detectedApplicationTargets.length === 1 && detectedApplicationTargets[0]?.configuredModelId ? { expectedIncumbentModelId: detectedApplicationTargets[0]?.configuredModelId } : {}),
             });
           }
           return;

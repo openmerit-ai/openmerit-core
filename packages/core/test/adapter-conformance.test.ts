@@ -327,7 +327,9 @@ test("preliminary leads cannot name another target or duplicate a model", () => 
   const cycle = { id: "cycle", stage: "establishing_evidence" as const, verifiedSwapCount: 0, baselineEvidenceSufficient: false };
   const config = { schemaVersion: 1 as const, taskProfiles: [] };
   assert.match(interpretIntentResult(intent, result, cycle, config).errors.join("; "), /preliminary lead.*target/);
-  const duplicate = { ...outputs.preliminaryModelLeads[0], targetId: applicationTarget.id };
+  const [lead] = outputs.preliminaryModelLeads;
+  assert.ok(lead);
+  const duplicate = { ...lead, targetId: applicationTarget.id };
   const duplicated = { ...result, outputs: { ...outputs, preliminaryModelLeads: [duplicate, duplicate] } };
   assert.match(interpretIntentResult(intent, duplicated, cycle, config).errors.join("; "), /duplicate preliminary model lead/);
 });
