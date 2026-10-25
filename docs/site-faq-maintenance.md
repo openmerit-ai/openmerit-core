@@ -1,10 +1,12 @@
 # Website FAQ maintenance
 
-## Homepage scope note removal — source only, 25 October 2026
+## Homepage scope note removal — published 25 October 2026
 
 At the owner's request, the shared beta scope note is removed below the setup
-CTA in both reading modes. This is a copy-only, undeployed change; it adds no
+CTA in both reading modes. This is a copy-only, published change; it adds no
 product capability. The supplied prose and Scout beta invitation are unchanged.
+The owner-approved deployment and live checks are recorded in
+[site design](site-design.md).
 
 ## Conversational homepage — published 25 October 2026
 

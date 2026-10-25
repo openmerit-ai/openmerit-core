@@ -2,12 +2,17 @@
 
 Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
 
-## Homepage scope note removal — source only, 25 October 2026
+## Homepage scope note removal — published 25 October 2026
 
 The owner requested removal of the scope note below the Claude setup CTA.
 It is removed from the shared actions in both reading modes. The supplied
-homepage copy, toggle and setup behavior are unchanged. This removal has not
-been deployed; the publication record below describes the preceding version.
+homepage copy, toggle and setup behavior are unchanged. The owner approved
+deployment through `wrangler.scout-alpha.jsonc` as `openmerit-scout-alpha`
+version `50d3b178-e0cd-49f9-b05f-b7c69bb884bd`; only the homepage HTML asset
+changed. Live HTML matches source, the note is absent in both reading modes,
+and Scout, memo and connection routes remain available while docs/demo remain
+404. Desktop and narrow Chromium captures were inspected with no overflow or
+runtime errors. The router and protected memo service were not redeployed.
 
 ## Conversational homepage — published 25 October 2026
 
