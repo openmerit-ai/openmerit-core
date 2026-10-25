@@ -366,10 +366,10 @@ test('the homepage CTA copies the same prompt it sends to Claude without a separ
     assert.equal(link.host, 'code');
     assert.equal(link.pathname, '/new');
     const prompt = link.searchParams.get('q');
-    assert.match(prompt, /DO_NOT_TRACK=1 npx -y openmerit@latest install --client claude-code/);
+    assert.match(prompt, /\nnpx -y openmerit@latest install --client claude-code\n/);
     assert.match(prompt, /approve this device/);
     assert.match(prompt, /start a new Claude Code session/);
-    assert.doesNotMatch(prompt, /--setup-id|OPENMERIT_TELEMETRY=1/);
+    assert.doesNotMatch(prompt, /--setup-id|OPENMERIT_TELEMETRY|DO_NOT_TRACK/);
     const completion = cta.handlers.click();
     if (mode !== 'missing') {
       assert.equal(copied, prompt);

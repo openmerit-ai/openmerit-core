@@ -30,19 +30,19 @@ export function errorProperties(error) {
 const environment = () => ({ ...(clientVersion ? { client_version: clientVersion } : {}), platform: ['darwin', 'linux', 'win32'].includes(process.platform) ? process.platform : 'unknown', runtime_major: Number(process.versions.node.split('.')[0]) });
 
 const anonymousId = randomUUID();
-export const telemetryEnabled = () => process.env.OPENMERIT_TELEMETRY === '1' && process.env.DO_NOT_TRACK !== '1';
-export const setupCorrelationEnabled = () => telemetryEnabled() && process.env.OPENMERIT_ANALYTICS_ACCOUNT !== 'off';
+export const telemetryEnabled = (defaultEnabled = false) => (process.env.OPENMERIT_TELEMETRY ? process.env.OPENMERIT_TELEMETRY === '1' : defaultEnabled) && process.env.DO_NOT_TRACK !== '1';
+export const setupCorrelationEnabled = () => telemetryEnabled(true) && process.env.OPENMERIT_ANALYTICS_ACCOUNT !== 'off';
 export const setupUUID = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-// Device/verifier traffic is CLI opt-in. Installed MCP usage retains its existing
-// default, but explicit privacy refusals must survive into future agent sessions.
+// Scout setup defaults to analytics on; explicit privacy refusals must survive
+// device approval and future agent sessions. Prompt content stays off.
 export function setupHeaders(ids = {}, client = 'cli') {
   return {
     'X-Scout-Client': client,
     'X-Scout-Agent': 'claude-code',
     ...(clientVersion ? { 'X-Scout-Client-Version': clientVersion } : {}),
     'X-Scout-Analytics-Content': 'off',
-    ...(client === 'cli' ? { 'X-Scout-Analytics': telemetryEnabled() ? 'on' : 'off' } : process.env.DO_NOT_TRACK === '1' ? { 'X-Scout-Analytics': 'off' } : {}),
-    ...(process.env.OPENMERIT_ANALYTICS_ACCOUNT === 'off' || process.env.DO_NOT_TRACK === '1' ? { 'X-Scout-Analytics-Account': 'off' } : {}),
+    ...(client === 'cli' ? { 'X-Scout-Analytics': telemetryEnabled(true) ? 'on' : 'off' } : !telemetryEnabled(true) ? { 'X-Scout-Analytics': 'off' } : {}),
+    ...(process.env.OPENMERIT_ANALYTICS_ACCOUNT === 'off' || !telemetryEnabled(true) ? { 'X-Scout-Analytics-Account': 'off' } : {}),
     ...(setupCorrelationEnabled() && setupUUID(ids.setup_id) ? { 'X-Scout-Setup-Id': ids.setup_id } : {}),
     ...(setupCorrelationEnabled() && setupUUID(ids.installation_id) ? { 'X-Scout-Installation-Id': ids.installation_id } : {}),
   };
@@ -71,7 +71,7 @@ export function installationProperties(input) {
   return out;
 }
 export async function sendInstallationEvent(input) {
-  if (!telemetryEnabled()) return;
+  if (!telemetryEnabled(true)) return;
   const properties = installationProperties(input);
   if (!properties) return;
   if (!setupCorrelationEnabled()) { delete properties.setup_id; delete properties.installation_id; }
@@ -83,7 +83,7 @@ export async function sendInstallationEvent(input) {
   try {
     await Promise.race([
       (async () => {
-        for (let attempt = 0; attempt < 2 && !controller.signal.aborted && telemetryEnabled(); attempt++) {
+        for (let attempt = 0; attempt < 2 && !controller.signal.aborted && telemetryEnabled(true); attempt++) {
           try {
             const response = await fetch('https://openmerit.ai/scout/api/analytics', {
               method: 'POST', headers: { 'Content-Type': 'application/json', ...setupHeaders(properties) },
@@ -150,15 +150,16 @@ async function sendAnalytics(event, properties) {
 // Consent is independent of terminal discovery. Command identity is ephemeral;
 // the installer separately manages the owned installation's correlation IDs.
 export function commandTelemetry(args) {
-  if (process.env.OPENMERIT_TELEMETRY !== '1' || process.env.DO_NOT_TRACK === '1') return async () => {};
+  const setup = ['install', 'status', 'remove', 'login', 'logout', 'project', 'doctor'];
+  const enabled = () => telemetryEnabled(setup.includes(args[0]));
+  if (!enabled()) return async () => {};
   const started = performance.now();
   const command_id = randomUUID();
   const actions = ['init', 'doctor', 'plan', 'run', 'watch', 'report'];
-  const setup = ['install', 'status', 'remove', 'login', 'logout', 'project', 'doctor'];
   const command = !args.length || args.includes('--help') || args.includes('-h') || args[0] === 'eval' && args.length === 1
     ? 'help' : args[0] === 'dash' ? 'dash' : setup.includes(args[0]) ? args[0] : args[0] === 'eval' && actions.includes(args[1]) ? `eval_${args[1]}` : 'unknown';
   async function send(event, properties) {
-    if (!telemetryEnabled()) return;
+    if (!enabled()) return;
     const controller = new AbortController();
     const body = JSON.stringify({ event, event_id: randomUUID(), anonymousId, properties: { ...properties, ...environment(), command_id } });
     let timer;

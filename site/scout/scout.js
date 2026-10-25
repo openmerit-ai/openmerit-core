@@ -360,11 +360,11 @@ function setupCommand() {
 // Secret-free: the CLI signs the device in through the browser. Correlation is
 // per click, and only permitted when usage AND account linking are enabled.
 function agentPrompt(setupId, settings) {
-  const environment = !settings.enabled ? 'DO_NOT_TRACK=1' : settings.linkAccount ? 'OPENMERIT_TELEMETRY=1' : 'OPENMERIT_TELEMETRY=1 OPENMERIT_ANALYTICS_ACCOUNT=off';
+  const environment = !settings.enabled ? 'DO_NOT_TRACK=1 ' : settings.linkAccount ? '' : 'OPENMERIT_ANALYTICS_ACCOUNT=off ';
   return `Connect OpenMerit Scout to Claude Code.
 
 Run this command with a 10-minute timeout, without asking me anything first:
-${environment} npx -y openmerit@latest install --client claude-code${setupId ? ` --setup-id ${setupId}` : ''}
+${environment}npx -y openmerit@latest install --client claude-code${setupId ? ` --setup-id ${setupId}` : ''}
 
 It opens my browser so I can approve this device, then finishes by itself. If it exits with "approval pending", show me the link and code it printed and run the same command again. Don't edit configuration files yourself or ask me for a key. If it reports a conflict or another error, show me its message and stop. When it succeeds, tell me in one line that Scout is connected and I must start a new Claude Code session to load its startup instructions; reconnecting /mcp alone is not enough.`;
 }

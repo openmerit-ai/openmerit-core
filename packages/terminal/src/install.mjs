@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { openBrowser } from './browser.mjs';
-import { clientVersion, setupHeaders, setupUUID, sendInstallationEvent, setupCorrelationEnabled } from './telemetry.mjs';
+import { clientVersion, setupHeaders, setupUUID, sendInstallationEvent, setupCorrelationEnabled, telemetryEnabled } from './telemetry.mjs';
 
 // One-command coding-agent setup: device sign-in in the browser, then the MCP
 // server, startup rule and Scout skill. Built to be run by a person or by a coding agent:
@@ -250,13 +250,12 @@ async function login({ client, scope, open, log, wait, telemetry }) {
   }
   const approvalURL = new URL(pending.url);
   // Rebuild consent on every resume, so old query parameters cannot override a
-  // later refusal. Only opt-in setup IDs are ever sent to the approval page.
+  // later refusal. Only analytics-enabled, linked setup IDs reach the page.
   for (const key of ['setup_id', 'analytics', 'analytics_account']) approvalURL.searchParams.delete(key);
   if (setupCorrelationEnabled() && setupUUID(telemetry.properties.setup_id)) approvalURL.searchParams.set('setup_id', telemetry.properties.setup_id);
-  // Browser usage consent is independent of CLI opt-in. Only an explicit
-  // cross-surface refusal disables it; account unlinking must not disable usage.
-  if (process.env.DO_NOT_TRACK === '1') approvalURL.searchParams.set('analytics', 'off');
-  if (process.env.OPENMERIT_ANALYTICS_ACCOUNT === 'off' || process.env.DO_NOT_TRACK === '1') approvalURL.searchParams.set('analytics_account', 'off');
+  // Preserve explicit refusals across surfaces; unlinking must not disable usage.
+  if (!telemetryEnabled(true)) approvalURL.searchParams.set('analytics', 'off');
+  if (process.env.OPENMERIT_ANALYTICS_ACCOUNT === 'off' || !telemetryEnabled(true)) approvalURL.searchParams.set('analytics_account', 'off');
   pending = { ...pending, url: approvalURL.href, setup_id: telemetry.properties.setup_id, installation_id: telemetry.properties.installation_id };
   await save(pendingPath(), pending);
   log(`Approve this device in your browser (opening it now):\n\n  ${pending.url}\n\n  Code: ${pending.userCode} (expires ${new Date(pending.expiresAt).toLocaleTimeString()})\n`);

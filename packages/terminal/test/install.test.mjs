@@ -51,7 +51,7 @@ async function harness(t) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const saved = { ...process.env };
   Object.assign(process.env, { PATH: `${bin}:${process.env.PATH}`, OPENMERIT_URL: `http://127.0.0.1:${server.address().port}`, OPENMERIT_CONFIG_DIR: join(dir, 'openmerit'),
-    CLAUDE_CONFIG_DIR: claudeDir, OPENMERIT_LOGIN_WAIT: '0', OPENMERIT_DEVICE_NAME: 'test-laptop', FAKE_CLAUDE_LOG: join(dir, 'claude.log'), OPENMERIT_TELEMETRY: '', DO_NOT_TRACK: '', OPENMERIT_ANALYTICS_ACCOUNT: '' });
+    CLAUDE_CONFIG_DIR: claudeDir, OPENMERIT_LOGIN_WAIT: '0', OPENMERIT_DEVICE_NAME: 'test-laptop', FAKE_CLAUDE_LOG: join(dir, 'claude.log'), OPENMERIT_TELEMETRY: '0', DO_NOT_TRACK: '', OPENMERIT_ANALYTICS_ACCOUNT: '' });
   delete process.env.CLAUDECODE; delete process.env.CLAUDE_CODE_ENTRYPOINT;
   const fetcher = globalThis.fetch;
   globalThis.fetch = async (url, options) => {
@@ -198,6 +198,7 @@ test('a failing claude command never leaks the key, and project scope keeps it o
 
 test('install opens only the approval page, once, and resumes without reopening it', { skip: process.platform !== 'linux' }, async t => {
   const h = await harness(t);
+  delete process.env.OPENMERIT_TELEMETRY;
   const opener = join(h.dir, 'bin', 'xdg-open'), opened = join(h.dir, 'opened.log');
   await writeFile(opener, `#!/bin/sh\necho "$1" >> ${JSON.stringify(opened)}\n`); await chmod(opener, 0o755);
   process.env.DISPLAY = ':0'; delete process.env.SSH_CONNECTION; delete process.env.SSH_TTY;
@@ -213,9 +214,9 @@ test('install opens only the approval page, once, and resumes without reopening 
 const setupId = '359afdd2-0e4e-4f5b-9a91-2213814b1234';
 const installArgs = ['install', '--client', 'claude-code', '--no-open'];
 
-test('opt-in lifecycle correlates browser setup, resumed login, ownership, verification, status and remove', async t => {
+test('default lifecycle correlates browser setup, resumed login, ownership, verification, status and remove', async t => {
   const h = await harness(t);
-  process.env.OPENMERIT_TELEMETRY = '1';
+  delete process.env.OPENMERIT_TELEMETRY;
   const pending = await h.run(...installArgs, '--setup-id', setupId);
   assert.equal(pending.code, 10);
   const login = JSON.parse(await readFile(join(h.dir, 'openmerit/login.json'), 'utf8'));
@@ -312,23 +313,22 @@ test('failed remote revocation is recorded even when local removal or logout suc
   });
 });
 
-test('setup-id never opts in; CLI refusal and DNT do not export IDs, while MCP defaults and account refusals are preserved', async t => {
-  for (const mode of ['default', 'dnt', 'account-off', 'unlinked']) await t.test(mode, async t => {
+test('explicit opt-outs suppress setup and installed analytics; unlinking keeps usage without IDs', async t => {
+  for (const mode of ['off', 'dnt', 'account-off']) await t.test(mode, async t => {
     const h = await harness(t);
     if (mode === 'dnt') { process.env.OPENMERIT_TELEMETRY = '1'; process.env.DO_NOT_TRACK = '1'; }
-    if (mode === 'account-off') { process.env.OPENMERIT_TELEMETRY = '1'; process.env.OPENMERIT_ANALYTICS_ACCOUNT = 'off'; }
-    if (mode === 'unlinked') process.env.OPENMERIT_ANALYTICS_ACCOUNT = 'off';
+    if (mode === 'account-off') { delete process.env.OPENMERIT_TELEMETRY; process.env.OPENMERIT_ANALYTICS_ACCOUNT = 'off'; }
     const pending = await h.run(...installArgs, '--setup-id', setupId);
     const login = JSON.parse(await readFile(join(h.dir, 'openmerit/login.json'), 'utf8'));
     const url = new URL(login.url);
-    assert.equal(url.searchParams.get('analytics'), mode === 'dnt' ? 'off' : null);
+    assert.equal(url.searchParams.get('analytics'), mode === 'account-off' ? null : 'off');
     assert.equal(url.searchParams.get('setup_id'), null);
-    assert.equal(url.searchParams.get('analytics_account'), mode === 'default' ? null : 'off');
+    assert.equal(url.searchParams.get('analytics_account'), 'off');
     await h.approve(pending.out.match(/Code: (\S+)/)[1]);
     assert.equal((await h.run(...installArgs)).code, 0);
     const headers = (await h.claudeConfig()).mcpServers.openmerit.headers;
-    assert.equal(headers['X-Scout-Analytics'], mode === 'dnt' ? 'off' : undefined);
-    assert.equal(headers['X-Scout-Analytics-Account'], mode === 'default' ? undefined : 'off');
+    assert.equal(headers['X-Scout-Analytics'], mode === 'account-off' ? undefined : 'off');
+    assert.equal(headers['X-Scout-Analytics-Account'], 'off');
     assert.equal(headers['X-Scout-Installation-Id'], undefined);
     assert.equal(login.installation_id, undefined, 'refused correlation must not create an identity');
     for (const request of h.requests) {
@@ -377,10 +377,10 @@ test('owned headers update on consent changes without changing installation iden
   await h.approve(pending.out.match(/Code: (\S+)/)[1]);
   await h.run(...installArgs);
   const id = (await h.claudeConfig()).mcpServers.openmerit.headers['X-Scout-Installation-Id'];
-  process.env.OPENMERIT_TELEMETRY = '';
+  process.env.OPENMERIT_TELEMETRY = '0';
   await h.run(...installArgs);
   const defaultHeaders = (await h.claudeConfig()).mcpServers.openmerit.headers;
-  assert.equal(defaultHeaders['X-Scout-Analytics'], undefined);
+  assert.equal(defaultHeaders['X-Scout-Analytics'], 'off');
   assert.equal(defaultHeaders['X-Scout-Installation-Id'], undefined);
   assert.equal(defaultHeaders['X-Scout-Setup-Id'], undefined);
   process.env.OPENMERIT_TELEMETRY = '1';

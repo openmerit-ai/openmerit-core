@@ -2,6 +2,16 @@
 
 Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
 
+## Scout setup analytics default — source only, 25 October 2026
+
+The homepage's copied/deep-linked command now starts with `npx`, without
+`DO_NOT_TRACK=1` or an analytics-enabling prefix. Scout setup analytics defaults
+on in the source installer; terminal/evaluation analytics stay opt-in. Explicit
+opt-outs remain supported, including Scout's privacy-aware handoff. The homepage
+still generates no browser setup ID. Publish the updated npm installer before
+deploying these prompts; neither release is implied by local checks. See the
+[setup contract](scout.md#scout-setup-analytics-default-source-only-25-october-2026).
+
 ## Homepage scope note removal — published 25 October 2026
 
 The owner requested removal of the scope note below the Claude setup CTA.

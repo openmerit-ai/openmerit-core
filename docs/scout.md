@@ -26,6 +26,12 @@ Examples go through the same interpretation and ranking as typed prompts, with n
 
 ## Product analytics
 
+### Scout setup analytics default — source only, 25 October 2026
+
+Unreleased source enables usage and installation diagnostics by default for Scout's `install`, `login`, `status`, `remove`, `logout`, `project` and `doctor` commands. The normal homepage and Scout handoff prompts use `npx -y openmerit@latest install --client claude-code` without an analytics-enabling environment prefix. Terminal and evaluation analytics remain opt-in. Publish the updated npm installer before deploying these prompts; npm 0.1.9 still uses the opt-in setup behavior below.
+
+`OPENMERIT_TELEMETRY=0` or `DO_NOT_TRACK=1` disables setup analytics, strips outgoing correlation IDs and carries the refusal into the approval URL and installed MCP headers. Scout's usage-disabled handoff still includes `DO_NOT_TRACK=1`, and its unlinked handoff includes `OPENMERIT_ANALYTICS_ACCOUNT=off`. Browser DNT/GPC, saved browser choices and server-side account opt-outs remain effective. Analytics-enabled, linked installations retain the random installation UUID described below. The homepage creates no browser setup ID. MCP prompt-content capture stays off; beta status does not establish consent or another legal basis. No release or live ingestion is implied by this source change.
+
 ### Coding-agent lifecycle instrumentation — npm 0.1.9
 
 Npm 0.1.9 includes these installer changes; browser/server instrumentation requires the matching independent Scout deployment. Release acceptance is recorded separately. Rerun the installer to update existing 0.1.8 installations; nothing backfills historical events. This contract supersedes the no-retry and process-only setup-identity descriptions below for lifecycle-enabled builds. Homepage/docs deployment remains separate.

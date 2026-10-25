@@ -1,6 +1,8 @@
 # Scout beta data policy
 
-Updated 24 October 2026.
+Updated 25 October 2026.
+
+**Source only, not released:** Scout setup usage/installation analytics now defaults on without an analytics-enabling prefix in the normal copied command. `OPENMERIT_TELEMETRY=0` or `DO_NOT_TRACK=1` disables it and propagates to device approval and installed MCP headers. Scout's browser usage/unlink choices and account opt-outs remain effective; MCP prompt-content capture stays off. Terminal/evaluation analytics remain opt-in. These defaults require an updated npm release before prompt deployment; npm 0.1.9 still has the opt-in setup behavior described below.
 
 **Coding-agent setup, 24 October 2026:** hosted Scout supports device sign-in and MCP; stable npm 0.1.8 installs Claude Code's MCP configuration, startup rule and Scout skill after approval. This supersedes the 23 October web-placeholder reset. Scout stores the approving account, device name you chose (the host name by default), client, scope, timestamps and hashes of device codes and keys, but never a plaintext key. Local setup stores the key in private configuration; external coding agents have their own data handling. Installation and startup guidance do not guarantee an agent will invoke Scout.
 

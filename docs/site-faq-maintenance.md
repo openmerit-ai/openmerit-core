@@ -1,5 +1,15 @@
 # Website FAQ maintenance
 
+## Scout setup analytics default — source only, 25 October 2026
+
+Reviewed setup and data claims against the requested beta default. The normal
+copied command has no analytics prefix, and Scout setup diagnostics default on
+in source. Privacy opt-outs and unlinking remain effective; installed MCP
+content stays off. Terminal/Pi and evaluation claims are unchanged, and no FAQ
+copy change is needed. The installer must be published before the updated
+homepage/Scout prompts are deployed. Earlier publication receipts below retain
+their historical telemetry-off homepage behavior.
+
 ## Homepage scope note removal — published 25 October 2026
 
 At the owner's request, the shared beta scope note is removed below the setup

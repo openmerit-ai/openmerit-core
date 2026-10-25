@@ -50,7 +50,7 @@ test('Add to Claude Code opens a prefilled Desktop link without waiting for clip
     assert.match(clipboard, /npx -y openmerit@latest install --client claude-code/);
     assert.match(clipboard, /start a new Claude Code session/);
     assert.match(clipboard, /reconnecting \/mcp alone is not enough/);
-    assert.match(clipboard, /OPENMERIT_TELEMETRY=1 npx/);
+    assert.doesNotMatch(clipboard, /OPENMERIT_TELEMETRY|DO_NOT_TRACK/);
     const setupId = sent[0].setup_id;
     assert.match(setupId, /^[0-9a-f-]{36}$/);
     assert.ok(clipboard.includes(`--setup-id ${setupId}`));
@@ -77,7 +77,7 @@ test('privacy choices propagate into the copied and deep-linked command without 
     f.click(); await settle();
     assert.equal(new URL(f.location.href).searchParams.get('q'), prompt);
     assert.doesNotMatch(prompt, /--setup-id/);
-    assert.match(prompt, settings.enabled ? /OPENMERIT_TELEMETRY=1 OPENMERIT_ANALYTICS_ACCOUNT=off npx/ : /DO_NOT_TRACK=1 npx/);
+    assert.match(prompt, settings.enabled ? /OPENMERIT_ANALYTICS_ACCOUNT=off npx/ : /DO_NOT_TRACK=1 npx/);
     assert.ok(f.sent.every(row => row.setup_id === undefined));
     assert.equal(f.sent.length, settings.enabled ? 3 : 0);
   }

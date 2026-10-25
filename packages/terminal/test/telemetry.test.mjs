@@ -133,6 +133,21 @@ test('CLI telemetry is default-off, exact opt-in only, and DO_NOT_TRACK override
   }
 });
 
+test('Scout setup CLI analytics defaults on without enabling evaluation analytics or bypassing opt-outs', async () => {
+  for (const [args, env, enabled] of [
+    [['install', '--help'], {}, true],
+    [['install', '--help'], { OPENMERIT_TELEMETRY: '0' }, false],
+    [['install', '--help'], { DO_NOT_TRACK: '1' }, false],
+    [['eval', '--help'], {}, false],
+  ]) {
+    const result = await run(args, env);
+    assert.equal(result.code, 0);
+    assert.deepEqual(result.events.map(e => JSON.parse(e.body)).filter(e => e.event !== 'scout_installation_step').map(e => e.event),
+      enabled ? ['cli_command_started', 'cli_command_completed'] : []);
+    if (!enabled) assert.deepEqual(result.events, []);
+  }
+});
+
 test('opted-in CLI sends only allowlisted payloads with ephemeral UUID identity', async () => {
   let previousId;
   for (const [args, command, outcome] of [
