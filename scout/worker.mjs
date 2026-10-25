@@ -19,7 +19,7 @@ export class ScoutPublication extends DurableObject {
     const active=await this.ctx.storage.get('run');
     if(active&&active.id!==id&&Date.now()-active.startedAt<55*60_000)return {acquired:false};
     if(active?.id!==id)await this.ctx.storage.put('run',{id,startedAt:Date.now()});
-    await putJSON(this.env.SCOUT_CATALOGUE,'health.json',{refreshStatus:'running',scheduler:'cloudflare-hourly',lastAttemptAt:new Date().toISOString()});return {acquired:true};
+    await putJSON(this.env.SCOUT_CATALOGUE,'health.json',{refreshStatus:'running',scheduler:'cloudflare-twice-daily',lastAttemptAt:new Date().toISOString()});return {acquired:true};
     });
   }
   async publish(id,staged) {
@@ -40,7 +40,7 @@ export class ScoutPublication extends DurableObject {
     const completed=new Set(staged.completedResearchKeys??[]),backlog=await getJSON(this.env.SCOUT_CATALOGUE,'research-backlog.json')??[];
     await putJSON(this.env.SCOUT_CATALOGUE,'research-backlog.json',backlog.filter(p=>!completed.has(p.key)));
     if(this.env.SCOUT_INDEX&&staged.completedResearchSubjects?.length)await this.env.SCOUT_INDEX.prepare('UPDATE scout_discovery SET researched_at=? WHERE id IN (SELECT value FROM json_each(?))').bind(new Date().toISOString(),JSON.stringify(staged.completedResearchSubjects)).run();
-    await putJSON(this.env.SCOUT_CATALOGUE,'health.json',{refreshStatus:'idle',scheduler:'cloudflare-hourly',lastAttemptAt:new Date().toISOString(),snapshotVersion:staged.publication.id});
+    await putJSON(this.env.SCOUT_CATALOGUE,'health.json',{refreshStatus:'idle',scheduler:'cloudflare-twice-daily',lastAttemptAt:new Date().toISOString(),snapshotVersion:staged.publication.id});
     await putJSON(this.env.SCOUT_CATALOGUE,receiptKey,{runId:id,publicationId:staged.publication.id});
     await this.ctx.storage.delete('run');return {published:staged.publication.id};
     });
@@ -48,7 +48,7 @@ export class ScoutPublication extends DurableObject {
   async fail(id,message) {
     return this.ctx.blockConcurrencyWhile(async()=>{
     const run=await this.ctx.storage.get('run');if(run?.id!==id)return;
-    await putJSON(this.env.SCOUT_CATALOGUE,'health.json',{refreshStatus:'failed',scheduler:'cloudflare-hourly',lastAttemptAt:new Date().toISOString(),refreshError:message});
+    await putJSON(this.env.SCOUT_CATALOGUE,'health.json',{refreshStatus:'failed',scheduler:'cloudflare-twice-daily',lastAttemptAt:new Date().toISOString(),refreshError:message});
     await this.ctx.storage.delete('run');
     });
   }
@@ -101,7 +101,7 @@ export default {
         if(request.method!=='GET')return json({error:'Use GET.'},405);
         const status=indexStatus(index);
         const health=await getJSON(env.SCOUT_CATALOGUE,'health.json').catch(()=>null);
-        return json({...status,scheduler:'cloudflare-hourly',refreshStatus:status.degraded?'degraded':'idle',...health,snapshotVersion:index.snapshot.publication.id,refreshSummary:index.snapshot.refreshSummary});
+        return json({...status,scheduler:'cloudflare-twice-daily',refreshStatus:status.degraded?'degraded':'idle',...health,snapshotVersion:index.snapshot.publication.id,refreshSummary:index.snapshot.refreshSummary});
       }
       const mcp=path==='/scout/mcp';
       response=await (mcp?handleMCP:handleAPI)(request,index,{},(...args)=>recommend(...args,mcp?'mcp':'api',analytics.observeSearch),analytics.observeMCP);

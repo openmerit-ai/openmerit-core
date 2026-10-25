@@ -56,7 +56,7 @@ Enabled signed-in analytics normally uses a stable account identifier linked to 
 | Clerk, Google and GitHub | Provide authentication and account/session handling. Google or GitHub is contacted according to the sign-in method you choose. |
 | PostHog | Stores optional product/account analytics, recommendation diagnostics and separately enabled prompt content. Scout uses PostHog's EU ingestion endpoint; this is not a claim that every provider processes data only in the EU. |
 
-Scout's hourly research uses Parallel and public model/benchmark sources. Visitor prompts are not sent to Parallel, benchmark publishers or the recommended-model providers as part of that research. Opening a provider link takes you to a separate service under its own policies.
+Scout's twice-daily research uses Parallel and public model/benchmark sources. Visitor prompts are not sent to Parallel, benchmark publishers or the recommended-model providers as part of that research. Opening a provider link takes you to a separate service under its own policies.
 
 ## Storage and retention
 

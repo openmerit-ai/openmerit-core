@@ -31,9 +31,9 @@ export function retainResearch(next,previous) {
     for(const e of retained)if(!measured.evidence.some(x=>x.benchmark===e.benchmark))measured.evidence.push(e);
   }
   next.sources.push(...previous.sources.filter(s=>s.id.startsWith('research:')&&!next.sources.some(x=>x.id===s.id)).map(s=>({...s,maxAgeHours:(previous.registry??registry).policy.maxResearchAgeHours})));
-  // Core capabilities come from the released seed; discovered ones persist.
+  // Core capabilities and operating policy come from the released seed; discovered capabilities persist.
   const prior=previous.registry??registry,discovered=prior.capabilities.filter(c=>!c.core&&!registry.capabilities.some(x=>x.id===c.id));
-  next.registry={...prior,capabilities:[...registry.capabilities,...discovered],policy:{...registry.policy,...previous.registry?.policy},questions:registry.questions,operations:registry.operations};next.research=previous.research??[];next.researchState=previous.researchState??{};next.researchPending=previous.researchPending??[];
+  next.registry={...prior,capabilities:[...registry.capabilities,...discovered],policy:{...previous.registry?.policy,...registry.policy},questions:registry.questions,operations:registry.operations};next.research=previous.research??[];next.researchState=previous.researchState??{};next.researchPending=previous.researchPending??[];
   for(const b of next.benchmarks){const old=previous.benchmarks.find(x=>x.id===b.id);if(old?.research)b.research=old.research;}
   return next;
 }

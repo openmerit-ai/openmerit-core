@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Twice-daily catalogue refresh — source only, 25 October 2026
+
+Reviewed scheduling and freshness claims. The homepage has no Scout refresh-cadence claim, so no FAQ copy changes. The Scout page's source note, the Scout guide, the data policy and the security guide now say twice daily. The publisher and serving deployments that would make this live have not happened.
+
 ## Scout setup analytics default — source only, 25 October 2026
 
 Reviewed setup and data claims against the requested beta default. The normal

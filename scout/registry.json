@@ -502,6 +502,6 @@
     "researchPerHour": 24,
     "researchProcessor": "base",
     "maxResearchAgeHours": 168,
-    "maxSourceAgeHours": 2
+    "maxSourceAgeHours": 13
   }
 }

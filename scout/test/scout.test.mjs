@@ -55,7 +55,9 @@ test('scores are finite, quality is bounded, missing speed stays null, and incre
 test('limited evidence never fills five slots and stale status comes from source check time', () => {
   const tiny = createIndex({ ...snapshot, models: snapshot.models.slice(0, 1) });
   assert.ok(recommend(tiny, 'Read an invoice').recommendations.length < 5);
-  assert.ok(indexStatus(index, Date.parse(snapshot.checkedAt) + 3 * 3600_000).stale);
+  // Feeds refresh every twelve hours: a fresh run is never stale, a missed one is.
+  assert.equal(indexStatus(index, Date.parse(snapshot.checkedAt) + 12 * 3600_000).stale, false);
+  assert.ok(indexStatus(index, Date.parse(snapshot.checkedAt) + 14 * 3600_000).stale);
   assert.equal(indexStatus(index, Date.parse(snapshot.checkedAt)).stale, false);
 });
 

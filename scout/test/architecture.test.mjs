@@ -124,9 +124,11 @@ test('research observations and routes survive an independent known-feed refresh
   const {retainResearch}=await import('../pipeline.mjs');
   const route={id:'research-route',source:'research:example.com'};
   const observation={benchmark:'b',score:.6,provenance:[{url:'https://example.com'}],raw:{value:60}};
-  const previous={benchmarks:[{id:'b',source:'research:example.com'}],models:[{id:'m',evidence:[observation]}],catalogue:[{id:'m',endpoints:[route]}],sources:[],registry};
+  const previous={benchmarks:[{id:'b',source:'research:example.com'}],models:[{id:'m',evidence:[observation]}],catalogue:[{id:'m',endpoints:[route]}],sources:[],registry:{...registry,policy:{...registry.policy,maxSourceAgeHours:registry.policy.maxSourceAgeHours+100,retiredSetting:1}}};
   const next={benchmarks:[],models:[],catalogue:[{id:'m',endpoints:[]}],sources:[]};retainResearch(next,previous);
   assert.deepEqual(next.models[0].evidence,[observation]);assert.deepEqual(next.catalogue[0].endpoints,[route]);
+  // A released policy change reaches the next publication instead of being masked by the previous one.
+  assert.equal(next.registry.policy.maxSourceAgeHours,registry.policy.maxSourceAgeHours);assert.equal(next.registry.policy.retiredSetting,1);
 });
 
 test('published-reader candidate pool equals local retrieval and is independent of route inventory',async()=>{

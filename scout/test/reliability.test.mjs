@@ -54,7 +54,7 @@ test('freshness follows source policy, including unknown dates and genuine feed 
   const current=()=>createIndex({...snapshot,registry,sources});
   assert.equal(indexStatus(current(),now).stale,false);
   sources[1].checkedAt=hours(169);assert.equal(indexStatus(current(),now).stale,true);
-  sources[1].checkedAt=hours(24);sources[0].checkedAt=hours(3);sources[0].status='failed';
+  sources[1].checkedAt=hours(24);sources[0].checkedAt=hours(14);sources[0].status='failed';
   assert.equal(indexStatus(current(),now).stale,true);assert.equal(indexStatus(current(),now).degraded,true);
   sources[0].checkedAt='invalid';assert.equal(indexStatus(current(),now).stale,true);
 });
