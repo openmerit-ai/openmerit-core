@@ -77,6 +77,12 @@ test('contradictory semantic fields receive one bounded reconciliation instead o
   assert.equal(calls,2);
  }
 });
+test('a split quality-target vote falls back to the required ability it favours instead of failing',async()=>{
+ let calls=0;const inner=transport('none'),fetcher=async(url,o)=>{const response=await inner(url,o);if(!url.endsWith('/decisions'))return response;calls++;const body=await response.json();
+  for(const a of body.answers)if(a.name==='quality_target')Object.assign(a,{choice:'reasoning',confidence:.3,probabilities:[{value:'reasoning',probability:.3},{value:'coding',probability:.25}]});return Response.json(body);};
+ const r=await interpretPrompt('Opaque task.',{apiKey:'fixture',fetcher});
+ assert.deepEqual(r.task.evidenceCapabilities,['coding']);assert.equal(r.task.evidenceTargetUncertain,true);assert.equal(calls,2);
+});
 test('unknown deferred identities fail closed and invented canonical names are rejected',async()=>{
  for(const values of [[],['Invented model']]){
   const vocabulary={identity:['Verified Model',...Array.from({length:500},(_,i)=>`Catalogue model ${i}`)]},base=transport('none',[{all:[{field:'identity',op:'eq',values:['alias']}]}]);

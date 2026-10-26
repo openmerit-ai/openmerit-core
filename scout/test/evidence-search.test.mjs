@@ -44,7 +44,7 @@ test('a primary scored target excludes supporting modalities and an unresolved t
 });
 test('required capability memberships backstop a vector result with only incidental abilities within one bounded batch',async()=>{
  const unrelated=Array.from({length:20},(_,i)=>({id:'incidental'+i,tags:['incidental'],text:'Another ability.'})),core={id:'core',tags:['required'],text:'Required operation.'};let size=0;
- const result=await relevantEvidence('Create an artifact.',{weights:{required:3,incidental:1}},{documents:[...unrelated,core]},{apiKey:'fixture',vectorize:{query:async()=>({matches:unrelated.map(d=>({metadata:{benchmark:d.id}}))})},queryVector:[],fetcher:async(_url,o)=>{const q=JSON.parse(o.body);size=q.questions.length;assert.ok(q.questions[0].instructions.endsWith(core.text));return Response.json({answers:q.questions.map((q,i)=>({name:q.name,type:'choice',choice:i===0?'required':'none',confidence:.95}))});}});
+ const result=await relevantEvidence('Create an artifact.',{weights:{required:3,incidental:1}},{documents:[...unrelated,core]},{apiKey:'fixture',vectorize:{query:async()=>({matches:unrelated.map(d=>({metadata:{benchmark:d.id}}))})},queryVector:[],fetcher:async(_url,o)=>{const q=JSON.parse(o.body);size=q.questions.length;assert.ok(q.questions.slice(0,4).every((q,i)=>q.instructions.endsWith(unrelated[i].text)));return Response.json({answers:q.questions.map(q=>({name:q.name,type:'choice',choice:q.instructions.endsWith(core.text)?'required':'none',confidence:.95}))});}});
  assert.equal(size,16);assert.deepEqual(result.ids,['core']);
 });
 test('one retrieved primary method cannot suppress other prepared primary evidence for a scoped inventory',async()=>{
@@ -78,12 +78,13 @@ test('image-reading tasks can accept document evidence even when another ability
   assert.ok(offered.includes('documents'));assert.deepEqual(result.ids,['docs','format']);
 });
 test('task-domain evidence is accepted, confidently unrelated proxies are withheld and a missing domain answer stays a general proxy',async()=>{
- const docs=[{id:'coding-benchmark',tags:[],text:'Assign diagnosis codes to clinical notes.'},{id:'contest-maths',tags:['knowledge'],text:'Competition mathematics.'},{id:'science-qa',tags:['knowledge'],text:'Graduate science questions.'}];
- const method={'coding-benchmark':['unknown',.9],'contest-maths':['knowledge',.95],'science-qa':['knowledge',.95]},domain={'coding-benchmark':['direct',.95],'contest-maths':['unrelated',.9]};
+ const docs=[{id:'coding-benchmark',tags:[],text:'Assign diagnosis codes to clinical notes.'},{id:'contest-maths',tags:['knowledge'],text:'Competition mathematics.'},{id:'science-qa',tags:['knowledge'],text:'Graduate science questions.'},{id:'billing-qa',tags:[],text:'Assign billing codes to invoices.'}];
+ // billing-qa splits its task-specific vote between direct and domain; together they are confident.
+ const method={'coding-benchmark':['unknown',.9],'contest-maths':['knowledge',.95],'science-qa':['knowledge',.95],'billing-qa':['none',.6]},domain={'coding-benchmark':['direct',.95],'contest-maths':['unrelated',.9],'billing-qa':['domain',.5,[{value:'direct',probability:.3},{value:'domain',probability:.5},{value:'generic',probability:.2}]]};
  const task={search:'Assign ICD-10 codes to discharge summaries.',weights:{knowledge:3},evidenceCapabilities:['knowledge']};
  const r=await relevantEvidence('Task.',task,{documents:docs},{apiKey:'fixture',fetcher:async(_url,o)=>{const q=JSON.parse(o.body);
-  const answers=q.questions.flatMap(q=>{const kind=q.name.split('_')[0],doc=docs.find(d=>q.instructions.endsWith(d.text)),a=(kind==='method'?method:domain)[doc.id];if(kind==='domain')assert.ok(q.instructions.includes(task.search));return a?[{name:q.name,type:'choice',choice:a[0],confidence:a[1]}]:[];});
+  const answers=q.questions.flatMap(q=>{const kind=q.name.split('_')[0],doc=docs.find(d=>q.instructions.endsWith(d.text)),a=(kind==='method'?method:domain)[doc.id];if(kind==='domain')assert.ok(q.instructions.includes(task.search));return a?[{name:q.name,type:'choice',choice:a[0],confidence:a[1],...(a[2]?{probabilities:a[2]}:{})}]:[];});
   return Response.json({answers});}});
- assert.deepEqual([...r.ids].sort(),['coding-benchmark','science-qa']);
- assert.deepEqual(r.assessments.map(a=>[a.benchmark,a.capability,a.relevance]).sort(),[['coding-benchmark','knowledge','direct'],['contest-maths','knowledge','unrelated'],['science-qa','knowledge','generic']]);
+ assert.deepEqual([...r.ids].sort(),['billing-qa','coding-benchmark','science-qa']);
+ assert.deepEqual(r.assessments.map(a=>[a.benchmark,a.capability,a.relevance]).sort(),[['billing-qa','knowledge','domain'],['coding-benchmark','knowledge','direct'],['contest-maths','knowledge','unrelated'],['science-qa','knowledge','generic']]);
 });

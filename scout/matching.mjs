@@ -105,6 +105,7 @@ async function runMatch(index,prompt,modelIds,endpointIds,{apiKey,fetcher,db,vec
   if(performance.now()>deadline)throw Error('Matching deadline exceeded.');
   const result={...await trace.measure('ranking',()=>recommend(scoped,prompt,now(),task,undefined,modelIds,endpointIds)),interpretationMs:interpreted.elapsedMs,snapshotVersion:manifest.publication?.id,retrieval:{catalogueModels:manifest.publicStatus?.models??manifest.catalogue.length,consideredModels:rows.length,exhaustive:true,evidenceExhaustive:false,evidenceBenchmarks:task.evidenceMatch.ids.length}};
   result.warnings.push(...eligibilityWarnings(task));
+  if(task.evidenceTargetUncertain)result.warnings.push(`No single ability clearly determines quality for this task. Benchmark evidence was selected for ${task.capabilities?.find(c=>c.id===task.evidenceCapabilities[0])?.label??task.evidenceCapabilities[0]}, the most likely of its required abilities.`);
   if(task.evidenceMatch.degraded)result.warnings.push('Some task-specific evidence applicability checks were unavailable. Unverified evidence was withheld from ranking.');
   if(!selected.length&&task.selection.required.length)result.warnings.unshift('No verified model endpoint satisfies the requested restrictions in the available catalogue and selected inventory.');
   if(task.unresolved.length)result.warnings.unshift(`The following requirements could not be verified: ${task.unresolved.join('; ')}.`);

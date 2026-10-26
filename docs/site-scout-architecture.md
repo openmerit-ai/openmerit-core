@@ -1,6 +1,29 @@
 # Scout architecture and operations
 
-## Domain-aware evidence and cross-source benchmark families (not yet deployed)
+## Vertical benchmark retrieval and split quality targets (not yet deployed)
+
+The owner asked to continue with the gaps left by the change below: vertical benchmarks that were never retrieved, and intermittent interpreter failures.
+
+- **Retrieval:** TaxEval, ClaimBench, Public Benefits Bench and MMMLU were each the nearest vector match for their prompts but were never assessed. Their prepared tags lacked the task's evidence capability (for example "analysis"), and tagged benchmarks filled all 16 slots. `retrieveEvidence` now reserves four slots for the nearest vector matches, whatever their tags.
+- **Tier threshold:** the Decisions service often splits one task-specific vote between direct and domain (TaxEval: domain 0.74, direct 0.26). Tiers now use P(direct) + P(domain) ≥ 0.7, then pick the larger of the two. Direct and domain evidence is accepted whatever the generic ability check says; MMMLU, for example, measures no "writing" but matches the language domain. Unrelated still needs 0.8.
+- **Interpreter:** "The primary task evidence target could not be established" failed 3–6 of 30 prompts per run, which users saw as a 503. Multi-skill work splits the quality-target vote; security review gave coding 0.33 and analysis 0.33, below the 0.4 bar. After the existing reconciliation pass, `interpretPrompt` now sums both passes' votes, picks the most favoured ability among those the task requires (weight ≥ 3), and sets `evidenceTargetUncertain`. Matching then adds a warning. A task that requires no ability, or one that still needs clarification, fails as before.
+
+**Measured locally** on the same 30 prompts against live generation `fb379087`, with two runs each:
+
+| | Morning baseline | Change below | Retrieval and interpreter |
+|---|---|---|---|
+| Cases passing | 17, 15 | 20, 22 | 26, 28 |
+| No avoided benchmark accepted | 26, 27 | 30, 30 | 29, 30 |
+| Expected evidence on the top recommendation | 9, 7 | 11, 10 | 13, 14 |
+| Interpreter errors | 3, 5 | 3, 4 | 0, 0 |
+
+**Remaining:** corporate finance (CorpFin and Finance Agent are not retrieved for 10-K questions) and formatting rules (IFBench and Arena Instruction following are retrieved but judged generic) fail in both runs. ClaimBench is withheld in one run. One run accepted MathVista for tax review. The 0.7 threshold also labels some general benchmarks as domain, for example GPQA Diamond for clinical questions.
+
+**Also observed:** live status reports `stale` and `degraded` because the `parallel` research-discovery source fails. The `research:*` sources were last checked on 15 October, past their 168-hour limit. This predates both changes.
+
+## Domain-aware evidence and cross-source benchmark families — deployed, 26 October 2026
+
+**Deployment receipt:** the owner approved the push and deployment. Commit [fdea962](https://github.com/laz-aslam/openmerit/commit/fdea962) is on `origin/main`, rebased onto PR #22 (Scout disclosures and privacy page). Version `e92958ac` was first deployed from the pre-rebase commit, without #22. The owner then asked to give #22 preference, and version `afdcada6` was deployed from `main` with both; `/scout/privacy/` returns 200. These are query-time changes, so no manual run was needed.
 
 The owner approved two ranking changes and a fixed prompt test set. They followed a replay where "Answer clinical questions" rejected HealthBench Professional but accepted AIME and FrontierMath, and where ICD-10 coding accepted ARC-C and CharXiv next to MedCode. GPQA also counted three times: once each from Epoch AI, Artificial Analysis and vendor reports.
 

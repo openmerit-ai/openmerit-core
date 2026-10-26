@@ -3,6 +3,9 @@
 ## Scout input examples — source only, 26 October 2026
 
 Moved the example controls into the task field, with a short Try label, 1/2/3 numbering and rounded pills that hide for any nonempty draft. Presets still fill editable text without submitting. Removed visible input-helper copy and the CSS-imposed white background behind the already-transparent Claude Code logo. The homepage FAQ makes no affected claims and needs no change. No deployment is included.
+## Vertical benchmark retrieval and split quality targets — 26 October 2026
+
+Reviewed ranking and availability claims against the change that always assesses the nearest benchmark methodologies and replaces the "could not establish" failure for multi-skill tasks with a warned fallback. The homepage and the Scout page make no claims about evidence selection or failure rates, so no FAQ copy changes. The Scout guide's evidence-assessment paragraph describes both.
 
 ## Domain-aware evidence weighting and cross-source benchmark families — 26 October 2026
 

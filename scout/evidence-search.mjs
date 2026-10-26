@@ -59,8 +59,11 @@ export async function retrieveEvidence(task,index,{vectorize,queryVector,modelId
   const required=new Set([...(task.evidenceCapabilities??Object.keys(task.weights).filter(id=>task.weights[id]>=3)),...acceptableEvidenceTags(task)]);
   // Exact terms supplement vectors, but neither similarity signal proves quality.
   // Reserve room for both lexical and semantic primary evidence before backstops.
+  // The nearest methodologies are kept whatever their prepared tags: a domain
+  // benchmark (TaxEval for tax review) is often tagged for another ability, and
+  // the task-specific assessment decides whether it applies.
   const primary=candidates.filter(d=>d.tags.some(t=>required.has(t))),backstop=supported.filter(d=>d.tags.some(t=>required.has(t)));
-  candidates=[...new Map([...lexical.filter(d=>d.tags.some(t=>required.has(t))).slice(0,4),...primary,...backstop,...lexical,...candidates].map(d=>[d.id,d])).values()];
+  candidates=[...new Map([...lexical.filter(d=>d.tags.some(t=>required.has(t))).slice(0,4),...(vectorize?candidates.slice(0,4):[]),...primary,...backstop,...lexical,...candidates].map(d=>[d.id,d])).values()];
   return candidates.slice(0,16);
 }
 const relationChoices=[{value:'direct',description:'Scores the same kind of work as the task in the same subject domain.'},{value:'domain',description:"Built from the task's specific subject domain, profession or language, but scores a different form of work."},{value:'generic',description:"Scores a general ability the task uses; its subject matter is not the task's domain."},{value:'unrelated',description:'Neither its subject nor its scored work relates to the task.'}];
@@ -86,11 +89,14 @@ export async function assessEvidence(task,candidates,{apiKey,fetcher=fetch,timeo
     const answer=(name,valid)=>{const matches=body.answers?.filter(a=>a.name===name)??[],a=matches[0];return matches.length===1&&a.type==='choice'&&valid.some(c=>c.value===a.choice)&&Number.isFinite(a.confidence)&&a.confidence>=0&&a.confidence<=1?a:null;};
     answers=questions.map((q,i)=>{
       const a=answer(q.name,choices);if(!a)throw Error('Invalid evidence assessment.');
-      const r=relations.length?answer(`domain_${i}`,relationChoices):null,decided=r&&r.confidence>=.8?r.choice:'generic';
-      // Direct or domain evidence is accepted for the task's quality target even
-      // when the ability check alone was inconclusive. A general proxy stays
-      // fallback evidence unless it is confidently unrelated to the task.
-      const relevance=decided==='unrelated'?'generic':decided,proxy=ids.includes(a.choice)&&a.confidence>=.8&&decided!=='unrelated',specific=relevance!=='generic'&&a.choice!=='none';
+      // Direct and domain split one "specific to this task" vote, so their
+      // probabilities are judged together before choosing between them.
+      const r=relations.length?answer(`domain_${i}`,relationChoices):null,p=v=>r?.probabilities?.find(x=>x.value===v)?.probability??(r?.choice===v?r.confidence:0);
+      const decided=p('direct')+p('domain')>=.7?(p('direct')>=p('domain')?'direct':'domain'):p('unrelated')>=.8?'unrelated':'generic';
+      // Direct and domain evidence is accepted for the task's quality target
+      // whatever the generic ability check says; tiers weight it in ranking.
+      // A general proxy stays fallback evidence unless confidently unrelated.
+      const relevance=decided==='unrelated'?'generic':decided,proxy=ids.includes(a.choice)&&a.confidence>=.8&&decided!=='unrelated',specific=relevance==='direct'||relevance==='domain';
       return {benchmark:candidates[i].id,capability:proxy?a.choice:specific?ids[0]:ids.includes(a.choice)?a.choice:null,applicability:proxy||specific?'proxy':a.choice==='none'||decided==='unrelated'?'irrelevant':'unknown',confidence:a.confidence,relevance:decided};
     });
   }catch{answers=candidates.map(d=>({benchmark:d.id,applicability:'unknown',confidence:0,unavailable:true}));}
