@@ -1,6 +1,15 @@
 # Scout architecture and operations
 
-## Evidence ledger in D1 — 26 October 2026 (not yet deployed)
+## Evidence ledger in D1 — deployed, 26 October 2026
+
+**Deployment receipt:** the owner approved the deployment and a manual run. Commit [7d66964](https://github.com/laz-aslam/openmerit/commit/7d66964) is on `origin/main`, and `npm run verify` passed. Publisher `openmerit-scout` moved from `62b3fe80-ccb4-4282-85b5-f1a4180eaa07` to `40cf2409-8653-45b3-9b8a-35416c7b3ea9`, with schedule `7 0,12 * * *`. Manual run `manual-20261026-ledger-1` completed and published at 04:58 UTC, ending the run of memory failures:
+
+- `migrate-evidence-ledger` moved 1,476 research records and 75,600 capability answers for 360 benchmarks from generation `e8b5c21256a782acbd45247c34b1fdf9`.
+- `interpret-evidence` succeeded in about a minute.
+- The new generation was checked at 04:55 UTC, with 371 benchmarks, all prepared.
+- The `cat_*` catalogue steps also ran in production for the first time: 8,940 Models.dev and 4,201 LiteLLM listings, 659 models and 12,095 offerings.
+
+Status still reported stale and degraded. Stale comes from research sources last checked on 15–16 October. Degraded comes from the `parallel` source, which reports failed while any research job is pending.
 
 `interpret-evidence` kept failing with "Worker exceeded memory limit" because two caches that only the refresh uses travelled inside the published records file. Research inspections took 19 MB (1,476 records), and per-capability benchmark answers took 10.9 MB (360 benchmarks × 210 capabilities). Every interpretation parsed both.
 
