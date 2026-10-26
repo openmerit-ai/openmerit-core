@@ -77,7 +77,7 @@
 
     <section class="results-section" id="results" aria-labelledby="results-title" aria-busy="false" hidden>
       <div class="results-heading"><h2 id="results-title">Recommendations</h2><span class="query-time" id="query-time"></span></div>
-      <p class="results-basis" id="results-basis">Up to five candidates per task · quality, cost and latency trade-offs</p>
+      <p class="results-basis" id="results-basis">Up to five model choices · quality, cost and latency trade-offs</p>
       <div id="task-results"></div>
     </section>
 
@@ -86,7 +86,7 @@
       <div class="table-frame">
         <div class="table-scroll" role="region" aria-label="Model comparison" tabindex="0">
           <table class="data-table model-table">
-            <caption class="sr-only">Models in task order, aligned by rank within each task. Read a row left to right. These combinations have not been jointly evaluated; quality scores are not comparable across tasks. Expand a model for its evidence.</caption>
+            <caption class="sr-only">Model choices grouped by task. Quality scores are not comparable across tasks. Expand a model for its evidence.</caption>
             <thead><tr>
               <th scope="col" class="model-column">Model</th>
               <th scope="col" class="numeric-column" data-field="quality-heading">Quality <span class="column-unit">relative / 100</span></th>
@@ -97,13 +97,7 @@
         </div>
       </div>
       <p class="table-scroll-hint" hidden>Scroll to compare <span aria-hidden="true">↔</span></p>
-      <details class="evidence-note"><summary>Assumptions &amp; limitations</summary><p>Columns follow task order in the prompt, not verified model-to-model dependencies. Rows align independently ranked alternatives, not jointly evaluated workflows. Missing candidates are not repeated to complete a sequence. Costs are USD per 1,000 reference tasks, not a quote for your dataset.</p><div data-field="contexts"></div><p>Measured results come from separate calibration cases. Benchmark results use a reference workload. Neither predicts exact performance on your task.</p></details>
-      </div>
-    </template>
-    <template id="result-context-template">
-      <div class="result-context">
-        <p data-field="task-title" hidden></p><p data-field="ranking-note"></p><p data-field="workload-note"></p><div data-field="warnings"></div>
-        <details class="support-section specialist-section" data-field="specialists" hidden><summary data-field="specialists-title">Specialist models</summary><p>Related models to investigate. These are outside the ranked five; quality, cost and speed have not been compared on the same task.</p><div data-field="specialist-list"></div><p data-field="specialist-coverage"></p></details>
+      <p class="results-warning">Results could be wrong. Please verify before choosing a model.</p>
       </div>
     </template>
     <noscript><p class="error-message">Enable JavaScript to search.</p></noscript>

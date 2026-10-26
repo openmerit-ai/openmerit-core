@@ -1,5 +1,13 @@
 # Website FAQ maintenance
 
+## Scout results and loading state — source only, 26 October 2026
+
+Replaced the Assumptions & limitations UI (including its nested supplementary specialist list) with a short verification warning; per-model evidence and API contracts remain unchanged. Removed visible rank numbering and the multi-task reading instruction, renamed the total to Model Choices, and aligned feedback controls to one height. Loading now includes submitted-task context, rotating messages with a short reduced-motion-aware transition, and submission-to-response elapsed time including authentication. Messages are not claimed backend progress, and cache hits can be fast. The homepage FAQ makes no affected claims and needs no change. No deployment is included.
+
+## Scout input focus — source only, 26 October 2026
+
+Removed the task input container's active outline, retaining its focused background and the keyboard focus outlines on other controls. The homepage FAQ requires no change. No deployment is included.
+
 ## Scout input examples — source only, 26 October 2026
 
 Moved the example controls into the task field, with a short Try label, 1/2/3 numbering and rounded pills that hide for any nonempty draft. Presets still fill editable text without submitting. Removed visible input-helper copy and the CSS-imposed white background behind the already-transparent Claude Code logo. The homepage FAQ makes no affected claims and needs no change. No deployment is included.

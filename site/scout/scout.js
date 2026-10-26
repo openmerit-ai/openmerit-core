@@ -44,11 +44,10 @@ function modelEntry(model, prefix, taskTitle, steps = 0, taskIndex = 1) {
   const provider = providerIdentity(model), identity = element('span', 'model-identity'), name = element('span'), title = element('span', 'model-title', model.name), byline = element('span', 'model-provider', provider.label);
   const toggle = element('button', 'model-toggle'); toggle.type = 'button';
   toggle.setAttribute('aria-label', `Details for ${model.name}${taskTitle ? ` · ${taskTitle}` : ''}`); toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', `${prefix}-model-${model.rank}`);
-  if (taskTitle) toggle.title = `${taskTitle} · rank ${model.rank}`;
+  if (taskTitle) toggle.title = taskTitle;
   const icon = providerIcon(provider); if (icon) byline.prepend(icon);
   if (model.endpoint) byline.append(document.createTextNode(` · ${model.endpoint.protocol === 'decisions' ? 'Decisions' : model.endpoint.protocol === 'systemone' ? 'System One' : model.endpoint.deployment === 'self-hosted' ? 'Self-hosted' : model.endpoint.provider}`));
   name.append(title, byline);
-  if (!steps) identity.append(element('span', 'model-number', String(model.rank).padStart(2, '0')));
   identity.append(name); toggle.append(identity); nameCell.append(toggle);
   const qualityValue = model.measured ? model.measured.quality * 100 : model.quality;
   const tag = steps ? 'dd' : 'td';
@@ -63,7 +62,7 @@ function modelEntry(model, prefix, taskTitle, steps = 0, taskIndex = 1) {
     }
     row.append(metrics);
   } else row.append(quality, cost, time);
-  const detail = element('tr', 'model-detail'), detailCell = element('td', 'model-detail-cell'); detailCell.colSpan = steps ? steps + 1 : 4; detail.id = `${prefix}-model-${model.rank}`; detail.hidden = true;
+  const detail = element('tr', 'model-detail'), detailCell = element('td', 'model-detail-cell'); detailCell.colSpan = steps || 4; detail.id = `${prefix}-model-${model.rank}`; detail.hidden = true;
   toggle.addEventListener('click', () => { detail.hidden = !detail.hidden; toggle.setAttribute('aria-expanded', String(!detail.hidden)); row.dataset.expanded = String(!detail.hidden); if (!detail.hidden) analytics.track('scout_evidence_opened', position()); });
   // Preserve table semantics and native Enter/Space behavior; any other part of
   // the row activates the same button. Links and buttons keep their own action.
@@ -93,24 +92,6 @@ function modelEntry(model, prefix, taskTitle, steps = 0, taskIndex = 1) {
   if (model.speed && !model.measured) { const speed = element('p', 'price-detail'); speed.append(link('Reference timing by Artificial Analysis ↗', model.speed.url), document.createTextNode(` · ${model.speed.configurations.join(', ')}. ${model.speed.historical ? 'Archived reference measurement. ' : ''}Endpoint performance may differ.`)); body.append(speed); }
   detailCell.append(body); detail.append(detailCell); return { row, detail };
 }
-function showSpecialists(discovery, root) {
-  const $ = selector => root.querySelector(`[data-field="${selector.slice(1)}"]`);
-  const candidates = discovery?.candidates ?? [];
-  $('#specialists').hidden = !candidates.length;
-  $('#specialists-title').textContent = `Specialist models · ${candidates.length}`;
-  $('#specialist-list').replaceChildren(...candidates.map(m => {
-    const item = element('article', 'specialist-item'), title = element('p', 'specialist-title');
-    const icon = providerIcon(providerIdentity({ ...m, source: 'huggingface', provider: m.id.split('/')[0] }));
-    if (icon) title.append(icon); title.append(link(`${m.id} ↗`, m.url)); item.append(title, element('p', '', m.fit));
-    item.append(element('p', 'source-dates', `${m.pipeline} · ${m.languages.length ? m.languages.join(', ') : 'Language not declared'} · ${m.library ?? 'Runtime not declared'}. ${m.parameters ? `${(m.parameters / 1e6).toFixed(0)}M parameters; hardware needs unmeasured.` : 'Size and hardware needs not established.'}`));
-    const license = element('p', 'source-dates'); license.append(link(`Declared license: ${m.license ?? 'not supplied'} ↗`, m.licenseURL), document.createTextNode(` · ${m.gated ? 'Access approval required' : 'Not marked gated'}. ${m.providers.length ? `Hub lists hosting via ${m.providers.map(p => p.provider).join(', ')}; prices and latency unmeasured.` : 'No live hosting route listed by the Hub; check hosting or local deployment.'}`)); item.append(license);
-    const evidence = element('details', 'specialist-evidence'); evidence.append(element('summary', '', m.evaluations.length ? `${m.evaluations.length} reported evaluation results` : 'No structured evaluation results indexed'));
-    if (m.evaluations.length) evidence.append(element('p', 'source-dates', 'Reported by the repository or evaluation source; not independently verified by Scout. Scores keep their original units. Dates may be publication dates.'));
-    for (const e of m.evaluations) { const p = element('p'); p.append(link(`${e.dataset} · ${e.metric ?? e.task} · ${e.value} ↗`, e.url), element('small', 'source-dates', `${e.split ? ` Split: ${e.split}.` : ''}${e.configuration ? ` Configuration: ${e.configuration}.` : ''}${e.date ? ` Reported ${e.date.slice(0, 10)}.` : ' Date not supplied.'}${e.notes ? ` ${e.notes}` : ''}`)); evidence.append(p); }
-    const card = element('p'); card.append(link('Pinned model card ↗', m.cardURL), document.createTextNode(` · checked ${new Date(m.checkedAt).toLocaleDateString()}`)); evidence.append(card); item.append(evidence); return item;
-  }));
-  $('#specialist-coverage').textContent = candidates.length ? `${discovery.indexedRepositories} repositories indexed in a bounded Hub sample. Matches use task metadata, not measured performance. Model-card claims and licenses need checking; missing results do not mean a model is poor.` : '';
-}
 const tableObserver = new ResizeObserver(entries => {
   for (const {target} of entries) {
     const horizontal = target.scrollWidth > target.clientWidth + 1, vertical = target.scrollHeight > target.clientHeight + 1;
@@ -119,18 +100,6 @@ const tableObserver = new ResizeObserver(entries => {
     hint.querySelector('span').textContent = [vertical ? '↕' : '', horizontal ? '↔' : ''].filter(Boolean).join(' ');
   }
 });
-function renderContext(data, taskTitle) {
-  const root = $('#result-context-template').content.firstElementChild.cloneNode(true);
-  const field = name => root.querySelector(`[data-field="${name}"]`);
-  const qualityGate = data.ranking?.frontier?.qualityGate;
-  field('task-title').textContent = taskTitle ?? ''; field('task-title').hidden = !taskTitle;
-  field('warnings').replaceChildren(...data.warnings.map(warning => element('p', '', warning)));
-  const workload = data.ranking?.workload, profile = data.ranking?.profile;
-  field('ranking-note').textContent = data.ranking?.mode === 'task-fit' ? 'Candidates ordered by task fit and deployment readiness, then known reference costs. Quality is unmeasured.' : profile ? 'Models in Scout rank order among tested eligible candidates. Accuracy, mean cost and median full task time come from separate calibration cases, not executions of your prompt.' : qualityGate?.status === 'unverified' ? 'Unverified shortlist: no comparable quality cohort. Known reference cost first; these candidates have not passed the relative quality screen.' : qualityGate ? ({ cost: 'Lowest known reference cost first among models not credibly worse than the strongest benchmark estimate.', latency: 'Fastest known reference time first among models not credibly worse than the strongest benchmark estimate.' }[data.ranking.frontier.priority] ?? 'Strongest benchmark estimate first, keeping the best-value and fastest qualifying models. Quality uses one relative benchmark estimate, not verified task accuracy.') : 'Models in Scout rank order using shared benchmarks and an illustrative workload. Quality is a ranking signal, not predicted task accuracy.';
-  field('workload-note').textContent = data.ranking?.mode === 'task-fit' ? 'Task-compatible shortlist. No comparable endpoint-quality measurements; self-hosted costs and unmeasured latency remain unknown.' : profile ? `${profile.casesPerModel} calibration cases per model · ${profile.eligibleTestedModels} tested models · ${new Date(profile.measuredAt).toLocaleDateString()}. Not measured on your task.` : workload ? `Reference workload: ${workload.inputTokens.toLocaleString()} input + ${workload.outputTokens.toLocaleString()} output tokens per task · ${workload.priority} priority. Cost and time are comparisons, not task-specific measurements.` : 'Based on published benchmarks. Evaluate these models on your own examples.';
-  showSpecialists(data.specialists, root);
-  return root;
-}
 function resultFeedback(taskCount, candidateCount) {
   const root = element('div', 'result-feedback'), question = element('span', '', 'Was this shortlist useful?');
   const controls = element('div', 'feedback-controls'), useful = element('button', '', 'Useful'), notUseful = element('button', '', 'Not useful');
@@ -163,9 +132,9 @@ function resultFeedback(taskCount, candidateCount) {
 function showResult(data, roundTripMs) {
   result = data; tableObserver.disconnect();
   const tasks = data.tasks ?? [{title:'Your task',slots:[data]}], count = tasks.reduce((n,t) => n+t.slots.reduce((n,s) => n+s.recommendations.length,0),0);
-  $('#results-title').textContent = `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'} · ${count} candidates`;
-  $('#query-time').textContent = `Search ${(roundTripMs / 1000).toFixed(2)}s`;
-  $('#query-time').title = 'Total search time, including task interpretation and network time';
+  $('#results-title').textContent = `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'} · ${count} Model ${count === 1 ? 'Choice' : 'Choices'}`;
+  $('#query-time').textContent = `Took ${(roundTripMs / 1000).toFixed(1)}s`;
+  $('#query-time').title = 'Elapsed time from submission to response, including authentication, task interpretation and network time';
   $('#results-basis').hidden = false;
   const root = $('#result-template').content.firstElementChild.cloneNode(true), table = root.querySelector('table');
   const steps = tasks.map(task => ({ task, data: task.slots[0], text: task.sourceText ?? (tasks.length === 1 ? data.prompt : null) }));
@@ -179,21 +148,20 @@ function showResult(data, roundTripMs) {
   if (steps.length === 1) {
     const step = steps[0], slot = step.data, profile = slot.ranking?.profile;
     root.prepend(heading(step, 0));
-    $('#results-basis').textContent = 'Up to five candidates · quality, cost and latency trade-offs';
+    $('#results-basis').textContent = 'Up to five model choices · quality, cost and latency trade-offs';
     root.querySelector('[data-field="quality-heading"]').replaceChildren(document.createTextNode(profile ? 'Accuracy ' : 'Quality '), element('span', 'column-unit', profile ? 'calibration cases' : slot.ranking?.mode === 'task-fit' ? 'not measured' : 'relative / 100'));
     root.querySelector('[data-field="time-unit"]').textContent = profile ? 'measured seconds' : 'reference seconds';
     for (const model of slot.recommendations) { const entry = modelEntry(model, 'task-1', step.text ?? step.task.title); body.append(entry.row, entry.detail); }
     if (!slot.recommendations.length) body.append(tableMessage(slot.warnings[0] || 'No matching models with verified evidence.'));
   } else {
     root.dataset.sequence = ''; table.className = 'data-table sequence-table'; table.style.setProperty('--steps', steps.length);
-    $('#results-basis').textContent = 'Read left to right · alternatives ranked within each task';
-    const header = element('tr'), rank = element('th', 'rank-column', 'Rank'); rank.scope = 'col'; header.append(rank);
+    $('#results-basis').hidden = true;
+    const header = element('tr');
     steps.forEach((step, i) => { const cell = element('th', 'step-column'); cell.scope = 'col'; cell.append(heading(step, i)); header.append(cell); });
     table.querySelector('thead').replaceChildren(header);
     const rows = Math.max(1, ...steps.map(step => step.data.recommendations.length));
     for (let i = 0; i < rows; i++) {
-      const row = element('tr', 'sequence-row'), number = element('th', 'sequence-rank', String(i + 1).padStart(2, '0')), details = [];
-      number.scope = 'row'; row.append(number);
+      const row = element('tr', 'sequence-row'), details = [];
       steps.forEach((step, j) => {
         const model = step.data.recommendations[i];
         if (!model) { row.append(element('td', 'sequence-empty', step.data.recommendations.length ? 'No further candidate' : 'No eligible model')); return; }
@@ -204,11 +172,10 @@ function showResult(data, roundTripMs) {
     }
   }
   table.append(body);
-  steps.forEach(step => root.querySelector('[data-field="contexts"]').append(renderContext(step.data, step.text ?? step.task.title)));
   $('#task-results').replaceChildren(root, resultFeedback(tasks.length, count));
   tableObserver.observe(root.querySelector('.table-scroll'));
   showIndex(data);
-  $('#announcement').textContent = `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}. ${count} model candidates.`;
+  $('#announcement').textContent = `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}. ${count} model ${count === 1 ? 'choice' : 'choices'}.`;
   analytics.track('scout_results_viewed', { task_count: tasks.length, candidate_count: count, duration_ms: Math.round(roundTripMs), trace_id: resultTrace });
 }
 function showIndex(data) {
@@ -218,26 +185,49 @@ function showIndex(data) {
 async function search() {
   const prompt = $('#prompt').value.trim(); if (!prompt) { $('#error').textContent = 'Describe the task you want a model to do.'; $('#error').hidden = false; $('#prompt').focus(); return; }
   activeRequest?.abort(); const controller = new AbortController(); activeRequest = controller; const id = ++requestID;
-  let token;
-  try { token = await auth.getToken(); }
-  catch (error) { if (id === requestID) { $('#error').textContent = error.message; $('#error').hidden = false; } return; }
-  if (!token || id !== requestID) return;
+  const started = performance.now();
   $('#results').hidden = false; $('#error').hidden = true; $('#results').setAttribute('aria-busy', 'true');
-  result = null; tableObserver.disconnect(); $('#results-title').textContent = 'Searching…';
-  $('#task-results').replaceChildren(element('p', 'search-state', 'Understanding tasks and comparing the prepared index…'));
-  $('#query-time').textContent = ''; $('#results-basis').hidden = true;
-  $('#announcement').textContent = 'Searching the prepared index.';
+  result = null; tableObserver.disconnect(); $('#results-title').textContent = 'Finding model choices';
+  const loading = element('div', 'search-state'), status = element('p', 'search-status', 'Preparing your search');
+  status.setAttribute('role', 'status');
+  const context = element('p', 'search-context', prompt); context.title = prompt;
+  loading.append(status, context); $('#task-results').replaceChildren(loading);
+  $('#query-time').textContent = '0.0s elapsed'; $('#query-time').title = 'Live elapsed time since submission'; $('#results-basis').hidden = true;
+  $('#announcement').textContent = 'Finding model choices for your task.';
   $('.find-button span').textContent = 'Searching…'; $('.find-button').setAttribute('aria-busy', 'true');
-  const started = performance.now(), timeout = setTimeout(() => controller.abort(), 35_000);
-  const epoch = privacyEpoch, settings = analytics.preferences(), headers = analytics.headers();
-  let failureCode = 'network_error', httpStatus, traceId = settings.enabled && settings.linkAccount ? crypto.randomUUID() : undefined;
-  if (traceId) headers['X-Scout-Trace-Id'] = traceId;
-  // Compare only this tab's last failed draft, in memory. Never transmit the
-  // comparison text or a fingerprint; retry attribution is not authentication.
-  if (traceId && failedSearch?.prompt === prompt && Date.now() - failedSearch.at < 300000) headers['X-Scout-Retry-Of'] = failedSearch.trace;
-  failedSearch = undefined;
-  analytics.webInteraction('search_submit');
+  const messages = ['Matching models to your requirements', 'Considering quality, cost and speed', 'Looking for supporting model evidence'];
+  let authenticated = false, lastMessage = '', timeout, epoch = privacyEpoch, traceId, httpStatus, failureCode = 'auth_unavailable';
+  const updateProgress = () => {
+    const elapsed = performance.now() - started;
+    $('#query-time').textContent = `${(elapsed / 1000).toFixed(1)}s elapsed`;
+    // These are rotating search perspectives, not reported backend stages.
+    const message = authenticated ? messages[Math.floor(elapsed / 4000) % messages.length] : 'Preparing your search';
+    if (message === lastMessage) return;
+    status.textContent = message;
+    if (lastMessage && !matchMedia('(prefers-reduced-motion: reduce)').matches) status.animate(
+      [{ opacity: .4, transform: 'translateY(3px)' }, { opacity: 1, transform: 'translateY(0)' }],
+      { duration: 180, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' },
+    );
+    lastMessage = message;
+  };
+  updateProgress();
+  const progress = setInterval(updateProgress, 250);
+  controller.signal.addEventListener('abort', () => clearInterval(progress), { once: true });
   try {
+    const token = await auth.getToken();
+    if (id !== requestID) return;
+    if (!token) { $('#results').hidden = true; $('#query-time').textContent = ''; return; }
+    authenticated = true; updateProgress();
+    timeout = setTimeout(() => controller.abort(), 35_000);
+    epoch = privacyEpoch;
+    const settings = analytics.preferences(), headers = analytics.headers();
+    traceId = settings.enabled && settings.linkAccount ? crypto.randomUUID() : undefined;
+    if (traceId) headers['X-Scout-Trace-Id'] = traceId;
+    // Retry attribution compares only this tab's failed draft, in memory.
+    if (traceId && failedSearch?.prompt === prompt && Date.now() - failedSearch.at < 300000) headers['X-Scout-Retry-Of'] = failedSearch.trace;
+    failedSearch = undefined;
+    analytics.webInteraction('search_submit');
+    failureCode = 'network_error';
     const response = await fetch(`${basePath}/api/recommend`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...headers }, body: JSON.stringify({ prompt }), signal: controller.signal });
     if (id !== requestID) return;
     const receivedTrace = response.headers.get('x-scout-trace-id');
@@ -255,7 +245,7 @@ async function search() {
     analytics.exception(error, error.name === 'AbortError' ? 'search_timeout' : failureCode, { trace_id: traceId, duration_ms: Math.round(performance.now() - started), ...(httpStatus >= 400 ? { http_status: httpStatus } : {}) });
     result = null; tableObserver.disconnect(); $('#task-results').replaceChildren(); $('#results-title').textContent = 'Search unavailable'; $('#query-time').textContent = '';
     $('#error').textContent = error.name === 'AbortError' ? 'This request took too long. Please try again.' : error instanceof TypeError ? 'Couldn’t reach Scout. Check the connection and try again.' : error.message; $('#error').hidden = false;
-  } finally { clearTimeout(timeout); if (id === requestID) { $('#results').setAttribute('aria-busy', 'false'); $('.find-button span').textContent = 'Find models'; $('.find-button').setAttribute('aria-busy', 'false'); } }
+  } finally { clearTimeout(timeout); clearInterval(progress); if (id === requestID) { $('#results').setAttribute('aria-busy', 'false'); $('.find-button span').textContent = 'Find models'; $('.find-button').setAttribute('aria-busy', 'false'); } }
 }
 // Re-measure after content or width changes; CSS bounds very long prompts.
 function fitPrompt() {
