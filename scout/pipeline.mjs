@@ -15,6 +15,7 @@ import {embed} from './evidence-search.mjs';
 import {discoverInventory,archiveListings,discoveryBacklog} from './discovery.mjs';
 import {catalogueInventory} from './catalogue.mjs';
 import {catalogueSources,importCatalogueSource,rebuildOfferings} from './catalogue-db.ts';
+import {refreshHubOrgs,crawlHubModels} from './catalogue-hub.ts';
 import {evidenceLedger,migrateGeneration} from './evidence-db.ts';
 
 export function retainResearch(next,previous) {
@@ -58,8 +59,13 @@ export async function runRefresh(env,step,id) {
     // The D1 model catalogue is independent of the serving snapshot. Each source
     // records its own run; a failure there never blocks the rest of the refresh.
     if(env.SCOUT_INDEX){
-      for(const source of [...Object.keys(catalogueSources),'offerings'])
-        try{await step.do(`catalogue-${source}`,{retries:{limit:1,delay:'30 seconds'},timeout:'5 minutes'},()=>source==='offerings'?rebuildOfferings(env.SCOUT_INDEX):importCatalogueSource(env.SCOUT_INDEX,source,{bucket,run:`${id}-${source}`}));}catch{}
+      const hubOptions={token:env.HF_TOKEN,run:`${id}-huggingface`},steps={
+        ...Object.fromEntries(Object.keys(catalogueSources).map(source=>[source,()=>importCatalogueSource(env.SCOUT_INDEX,source,{bucket,run:`${id}-${source}`})])),
+        // The Hub crawl needs HF_TOKEN; it covers part of the organisations per run.
+        ...(env.HF_TOKEN?{'hub-orgs':()=>refreshHubOrgs(env.SCOUT_INDEX,hubOptions),'hub-models':()=>crawlHubModels(env.SCOUT_INDEX,hubOptions)}:{}),
+        offerings:()=>rebuildOfferings(env.SCOUT_INDEX)};
+      for(const [name,run] of Object.entries(steps))
+        try{await step.do(`catalogue-${name}`,{retries:{limit:1,delay:'30 seconds'},timeout:'10 minutes'},run);}catch{}
     }
     await step.do('check-semantic-service',{retries:{limit:0,delay:'1 second'},timeout:'1 minute'},async()=>{
       const questions=[choice('ready','Is this an availability check?',{yes:'Availability check.',no:'Another request.'})];

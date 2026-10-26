@@ -1,5 +1,26 @@
 # Scout architecture and operations
 
+## D1 model catalogue: Hugging Face organisations — 26 October 2026 (not yet deployed)
+
+`scout/catalogue-hub.ts` catalogues every model published by admitted Hugging Face organisations. It runs as two refresh steps before offerings are rebuilt, only when the publisher has an `HF_TOKEN` secret.
+
+- **`catalogue-hub-orgs`** collects candidate organisations from three places:
+  - authors of `hf_id`s in `cat_listings`
+  - Epoch's Hugging Face developer IDs
+  - authors of the 1,000 most-downloaded text-generation, image-text-to-text and text-to-image models
+
+  It then checks up to 400 organisation overviews per run, oldest first, and rechecks each weekly. The Hub has no endpoint that lists verified organisations.
+- **Admission:** an organisation is admitted when the Hub verifies it, or when a catalogue source names it as a model's home. Several major labs are not verified, including Qwen, Z.ai, Moonshot, MiniMax and LG EXAONE. Unverified organisations that only appear through download rankings are not admitted, and nor are personal accounts.
+- **`catalogue-hub-models`** crawls admitted organisations that are due, oldest first, within a budget of 250 pages of up to 1,000 models. Each organisation is recrawled weekly. A run stays near 650 requests, under the Hub's limit of 1,000 per 5 minutes.
+  - `cat_hf_models` stores each repository's task, library, dates, popularity, licence, gating, parameter count, lineage (`base_model` relation and repositories) and papers.
+  - It links a repository to a canonical model when another source's `hf_id` maps it to exactly one model.
+  - Live inference routes become `huggingface:<backend>` listings with their prices.
+- **Failure handling:** an organisation is stored whole or not at all. `storeCatalogue` now takes an owner scope, so a crawl withdraws routes and closes prices only for the organisations it crawled. A failed organisation stays due. A rate limit (HTTP 429) stops the step without marking or withdrawing anything.
+
+A local run against the live Hub found 1,033 candidate organisations. After the first 400 checks, 187 were admitted: 62 verified and the rest catalogue-named. Crawling them took 191 pages and about 11 seconds, and produced 15,929 models, 1,155 live inference routes and 14,332 merged offerings, up from 13,225. Licences are known for 13,062 of these models and lineage for 3,850. The crawl completed under a 64 MB heap cap. The remaining candidates are checked over the next runs.
+
+Known gap: only 139 Hub repositories link to a canonical model so far, because linking needs another source's `hf_id`. Most open-weight checkpoints therefore stand alone until an alias step relates them to Models.dev identities.
+
 ## D1 model catalogue: OpenRouter, Vercel, genai-prices and Epoch — deployed, 26 October 2026
 
 **Deployment receipt:** the owner approved the deployment and a manual run. Commit [dc1fd11](https://github.com/laz-aslam/openmerit/commit/dc1fd11) is on `origin/main`. Publisher `openmerit-scout` moved from `40cf2409-8653-45b3-9b8a-35416c7b3ea9` to `f5b68add-7c96-4c0f-8c0b-b6e9e3d6e332`, with schedule `7 0,12 * * *`. Manual run `manual-20261026-sources-1` completed and published at 05:41 UTC. All six catalogue steps succeeded, and production D1 matched the local run: 13,225 offerings across 301 providers, 436 with a Hugging Face ID, and 3,636 Epoch models, 224 of them linked. The published generation, checked at 05:30 UTC, has 381 benchmarks, all prepared.

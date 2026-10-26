@@ -55,25 +55,30 @@ export const catalogueSchema = [
   // Each keeps its own identity; model_id links it to a canonical model when resolved.
   'CREATE TABLE IF NOT EXISTS cat_source_models (source TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, organization TEXT, country TEXT, domain TEXT, task TEXT, release_date TEXT, parameters REAL, training_compute REAL, accessibility TEXT, open_weights INTEGER, base_model TEXT, hf_developer TEXT, link TEXT, model_id TEXT, model_basis TEXT, payload TEXT NOT NULL, payload_hash TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, withdrawn_at TEXT, PRIMARY KEY(source,id))',
   'CREATE INDEX IF NOT EXISTS cat_source_models_model ON cat_source_models(model_id)',
+  // Hugging Face Hub organisations and their models (catalogue-hub.ts).
+  'CREATE TABLE IF NOT EXISTS cat_hf_orgs (name TEXT PRIMARY KEY, full_name TEXT, is_org INTEGER, verified INTEGER, plan TEXT, num_models INTEGER, referenced INTEGER NOT NULL DEFAULT 0, discovered INTEGER NOT NULL DEFAULT 0, checked_at TEXT, crawled_at TEXT, crawl_status TEXT, crawl_error TEXT, models INTEGER, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL)',
+  'CREATE TABLE IF NOT EXISTS cat_hf_models (id TEXT PRIMARY KEY, author TEXT NOT NULL, pipeline_tag TEXT, library TEXT, created_at TEXT, last_modified TEXT, downloads INTEGER, likes INTEGER, license TEXT, gated TEXT, parameters INTEGER, base_models TEXT, relation TEXT, arxiv TEXT, tags TEXT, routes INTEGER, model_id TEXT, model_basis TEXT, payload_hash TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, withdrawn_at TEXT)',
+  'CREATE INDEX IF NOT EXISTS cat_hf_models_author ON cat_hf_models(author)',
+  'CREATE INDEX IF NOT EXISTS cat_hf_models_model ON cat_hf_models(model_id)',
 ];
 // Columns added after a table first shipped; CREATE TABLE IF NOT EXISTS does not add them.
 const addedColumns: Array<[table: string, column: string, type: string]> = [['cat_listings', 'hf_id', 'TEXT'], ['cat_offerings', 'hf_id', 'TEXT']];
 
-const isObject = (v: unknown): v is Json => !!v && typeof v === 'object' && !Array.isArray(v);
-const obj = (v: unknown): Json => isObject(v) ? v : {};
-const text = (v: unknown): string | null => typeof v === 'string' && v.trim() ? v.trim().slice(0, 4000) : null;
+export const isObject = (v: unknown): v is Json => !!v && typeof v === 'object' && !Array.isArray(v);
+export const obj = (v: unknown): Json => isObject(v) ? v : {};
+export const text = (v: unknown): string | null => typeof v === 'string' && v.trim() ? v.trim().slice(0, 4000) : null;
 const bool = (v: unknown): number | null => typeof v === 'boolean' ? Number(v) : null;
-const int = (v: unknown): number | null => typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : null;
-const list = (v: unknown): string | null => Array.isArray(v) && v.length && v.every(x => typeof x === 'string') ? JSON.stringify(v) : null;
-const date = (v: unknown): string | null => typeof v === 'string' && /^\d{4}-\d{2}(-\d{2})?/.test(v) ? v.slice(0, 10) : null;
-const id = (v: unknown): string | null => typeof v === 'string' && v.length > 0 && v.length <= 300 ? v : null;
+export const int = (v: unknown): number | null => typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : null;
+export const list = (v: unknown): string | null => Array.isArray(v) && v.length && v.every(x => typeof x === 'string') ? JSON.stringify(v) : null;
+export const date = (v: unknown): string | null => typeof v === 'string' && /^\d{4}-\d{2}(-\d{2})?/.test(v) ? v.slice(0, 10) : null;
+export const id = (v: unknown): string | null => typeof v === 'string' && v.length > 0 && v.length <= 300 ? v : null;
 // Rate arithmetic (per token × 1e6) must not create spurious price changes.
-const money = (v: unknown): number | null => typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Number(v.toPrecision(12)) : null;
+export const money = (v: unknown): number | null => typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Number(v.toPrecision(12)) : null;
 
 // Content hash with sorted object keys, so key order never changes a hash.
 const stable = (value: unknown): string => JSON.stringify(value, (_key, v: unknown) => isObject(v) ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v) ?? 'null';
 const hex = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2, '0')).join('');
-const digest = (value: unknown): Promise<string> => hex(new TextEncoder().encode(stable(value)));
+export const digest = (value: unknown): Promise<string> => hex(new TextEncoder().encode(stable(value)));
 
 export interface Price { kind: string; tier: string; unit: string; amount: number }
 export interface Provider { id: string; name: string | null; api: string | null; doc: string | null; npm: string | null; env: string | null }
@@ -212,7 +217,7 @@ export function parseLiteLLM(data: unknown, knownProviders: ReadonlySet<string> 
   return { providers: [...providers.values()], listings: [...listings.values()], models: [] };
 }
 
-const num = (v: unknown): number | null => { const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : NaN; return Number.isFinite(n) ? n : null; };
+export const num = (v: unknown): number | null => { const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : NaN; return Number.isFinite(n) ? n : null; };
 // Gateways quote USD per token as strings; negative values mean "variable" (routers).
 const perToken = (v: unknown): number | null => { const n = num(v); return n !== null && n >= 0 ? money(n * 1e6) : null; };
 const flag = (on: boolean, known: boolean): number | null => known ? Number(on) : null;
@@ -402,13 +407,13 @@ const listingColumns = ['provider_id', 'provider_model_id', 'model_id', 'model_b
   'input_modalities', 'output_modalities', 'reasoning', 'tool_call', 'structured_output', 'attachment', 'open_weights', 'hf_id', 'payload', 'payload_hash'];
 const modelColumns = ['id', 'lab_id', 'name', 'family', 'description', 'type', 'release_date', 'last_updated', 'knowledge', 'open_weights', 'license', 'weights', 'input_modalities', 'output_modalities',
   'reasoning', 'tool_call', 'attachment', 'temperature', 'context', 'max_output', 'basis', 'payload', 'payload_hash'];
-type Row = Record<string, Value>;
-const pick = (columns: string[], row: Record<string, unknown>): Row => Object.fromEntries(columns.map(c => { const v = row[c]; return [c, typeof v === 'string' || typeof v === 'number' ? v : null]; }));
-const extract = (columns: string[]) => columns.map(c => `json_extract(value,'$.${c}')`).join(',');
-const updates = (columns: string[], skip: string[]) => columns.filter(c => !skip.includes(c)).map(c => `${c}=excluded.${c}`).join(',');
+export type Row = Record<string, Value>;
+export const pick = (columns: string[], row: Record<string, unknown>): Row => Object.fromEntries(columns.map(c => { const v = row[c]; return [c, typeof v === 'string' || typeof v === 'number' ? v : null]; }));
+export const extract = (columns: string[]) => columns.map(c => `json_extract(value,'$.${c}')`).join(',');
+export const updates = (columns: string[], skip: string[]) => columns.filter(c => !skip.includes(c)).map(c => `${c}=excluded.${c}`).join(',');
 
 // Rows go to D1 as JSON arrays expanded by json_each, bounded per statement.
-async function chunked(db: Database, sql: string, rows: readonly object[], bindings: Value[], size = 150): Promise<void> {
+export async function chunked(db: Database, sql: string, rows: readonly object[], bindings: Value[], size = 150): Promise<void> {
   for (let i = 0; i < rows.length; i += size * 8) {
     const statements: Statement[] = [];
     for (let j = i; j < Math.min(rows.length, i + size * 8); j += size) statements.push(db.prepare(sql).bind(...bindings, JSON.stringify(rows.slice(j, j + size))));
@@ -425,9 +430,13 @@ export async function ensureCatalogueSchema(db: Database): Promise<void> {
 }
 
 export interface StoreStats { listings: number; added: number; changed: number; withdrawn: number; unresolved: number; prices_opened: number; prices_closed: number }
-export async function storeCatalogue(db: Database, source: string, parsed: Parsed, { now, run, backbone }: { now: string; run: string; backbone: Backbone | null }): Promise<StoreStats> {
-  const listings = backbone ? resolveListings(parsed.listings, backbone) : parsed.listings;
-  const existing = await db.prepare('SELECT provider_id,provider_model_id,payload_hash,withdrawn_at FROM cat_listings WHERE source=?').bind(source)
+// A scoped store covers only routes whose provider model ID starts with one of
+// the given owners ("owner/..."): a source crawled in parts, such as the Hub,
+// withdraws and closes prices only for the owners it crawled this run.
+const owned = (column: string, n: number) => `(?${n} IS NULL OR substr(${column},1,instr(${column},'/')-1) IN (SELECT value FROM json_each(?${n})))`;
+export async function storeCatalogue(db: Database, source: string, parsed: Parsed, { now, run, backbone, scope = null }: { now: string; run: string; backbone: Backbone | null; scope?: string[] | null }): Promise<StoreStats> {
+  const listings = backbone ? resolveListings(parsed.listings, backbone) : parsed.listings, owners = scope ? JSON.stringify(scope) : null;
+  const existing = await db.prepare(`SELECT provider_id,provider_model_id,payload_hash,withdrawn_at FROM cat_listings WHERE source=?1 AND ${owned('provider_model_id', 2)}`).bind(source, owners)
     .all<{ provider_id: string; provider_model_id: string; payload_hash: string; withdrawn_at: string | null }>();
   const prior = new Map(existing.results.map(r => [`${r.provider_id}|${r.provider_model_id}`, r]));
   const active = [...prior.values()].filter(r => !r.withdrawn_at).length;
@@ -443,7 +452,7 @@ export async function storeCatalogue(db: Database, source: string, parsed: Parse
   }
   await chunked(db, `INSERT INTO cat_listings (source,${listingColumns.join(',')},first_seen,last_seen,withdrawn_at) SELECT ?1,${extract(listingColumns)},?2,?2,NULL FROM json_each(?3) WHERE true
     ON CONFLICT(source,provider_id,provider_model_id) DO UPDATE SET ${updates(listingColumns, ['provider_id', 'provider_model_id'])},last_seen=excluded.last_seen,withdrawn_at=NULL`, rows, [source, now]);
-  const withdrawn = (await db.prepare('UPDATE cat_listings SET withdrawn_at=?1 WHERE source=?2 AND last_seen<?1 AND withdrawn_at IS NULL').bind(now, source).run()).meta.changes;
+  const withdrawn = (await db.prepare(`UPDATE cat_listings SET withdrawn_at=?1 WHERE source=?2 AND last_seen<?1 AND withdrawn_at IS NULL AND ${owned('provider_model_id', 3)}`).bind(now, source, owners).run()).meta.changes;
   await chunked(db, `INSERT INTO cat_providers (source,id,name,api,doc,npm,env,first_seen,last_seen) SELECT ?1,${extract(['id', 'name', 'api', 'doc', 'npm', 'env'])},?2,?2 FROM json_each(?3) WHERE true
     ON CONFLICT(source,id) DO UPDATE SET name=excluded.name,api=excluded.api,doc=excluded.doc,npm=excluded.npm,env=excluded.env,last_seen=excluded.last_seen`, parsed.providers, [source, now]);
   if (parsed.models.length) {
@@ -460,7 +469,7 @@ export async function storeCatalogue(db: Database, source: string, parsed: Parse
   await chunked(db, `INSERT INTO cat_price_stage SELECT ?1,?2,${extract(['provider_id', 'provider_model_id', 'kind', 'tier', 'unit', 'amount'])} FROM json_each(?3)`, prices, [run, source], 400);
   const same = 's.run=?3 AND s.provider_id=p.provider_id AND s.provider_model_id=p.provider_model_id AND s.kind=p.kind AND s.tier=p.tier AND s.unit=p.unit AND s.amount=p.amount';
   const [closed, opened] = await db.batch([
-    db.prepare(`UPDATE cat_prices AS p SET valid_to=?1 WHERE p.source=?2 AND p.valid_to IS NULL AND NOT EXISTS (SELECT 1 FROM cat_price_stage s WHERE ${same})`).bind(now, source, run),
+    db.prepare(`UPDATE cat_prices AS p SET valid_to=?1 WHERE p.source=?2 AND p.valid_to IS NULL AND ${owned('p.provider_model_id', 4)} AND NOT EXISTS (SELECT 1 FROM cat_price_stage s WHERE ${same})`).bind(now, source, run, owners),
     db.prepare(`INSERT INTO cat_prices SELECT s.source,s.provider_id,s.provider_model_id,s.kind,s.tier,s.unit,s.amount,?1,NULL FROM cat_price_stage s WHERE s.run=?3 AND s.source=?2
       AND NOT EXISTS (SELECT 1 FROM cat_prices p WHERE p.source=?2 AND p.valid_to IS NULL AND ${same})`).bind(now, source, run),
     db.prepare('DELETE FROM cat_price_stage WHERE run=?').bind(run),

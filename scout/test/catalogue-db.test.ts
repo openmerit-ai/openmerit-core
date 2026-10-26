@@ -1,20 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
-import { importCatalogueSource, rebuildOfferings, type Bucket, type Database, type ImportResult, type Statement } from '../catalogue-db.ts';
+import { importCatalogueSource, rebuildOfferings, type Bucket, type ImportResult } from '../catalogue-db.ts';
+import { d1 } from './helpers-d1.ts';
 
-type Value = string | number | null;
-
-// A D1-shaped wrapper over SQLite: prepare/bind/run/all/first and transactional batch.
-function d1(): Database & { all(sql: string, ...args: Value[]): Record<string, unknown>[] } {
-  const db = new DatabaseSync(':memory:');
-  // node:sqlite rejects D1's numbered ?N placeholders; expand them positionally.
-  const positional = (sql: string, args: Value[]): [string, Value[]] => { const order: Value[] = []; return [sql.replace(/\?(\d+)/g, (_, n: string) => (order.push(args[Number(n) - 1] ?? null), '?')), order.length ? order : args]; };
-  const statement = (sql: string, args: Value[] = []): Statement => { const [q, a] = positional(sql, args); return { bind: (...b: Value[]) => statement(sql, b), run: async () => ({ meta: { changes: Number(db.prepare(q).run(...a).changes) } }),
-    all: async <Row>() => ({ results: db.prepare(q).all(...a) as Row[] }) }; };
-  return { prepare: (sql: string) => statement(sql), all: (sql: string, ...a: Value[]) => db.prepare(sql).all(...a),
-    batch: async (statements: Statement[]) => { db.exec('BEGIN'); try { const out = []; for (const s of statements) out.push(await s.run()); db.exec('COMMIT'); return out; } catch (e) { db.exec('ROLLBACK'); throw e; } } };
-}
 const bucket = (): Bucket & { data: Map<string, Uint8Array> } => { const data = new Map<string, Uint8Array>(); return { data, head: async (k: string) => data.has(k) ? {} : null, put: async (k: string, v: Uint8Array) => data.set(k, v) }; };
 const serve = (files: Record<string, unknown>) => async (url: string) => { const f = files[url]; return f === undefined ? new Response('missing', { status: 500 }) : new Response(typeof f === 'string' ? f : JSON.stringify(f)); };
 const MD = 'https://models.dev/api.json', MDM = 'https://models.dev/models.json', LL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
