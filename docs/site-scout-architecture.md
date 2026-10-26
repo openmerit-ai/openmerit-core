@@ -1,6 +1,8 @@
 # Scout architecture and operations
 
-## Catalogue host routes in Scout recommendations — 26 October 2026 (not yet deployed)
+## Catalogue host routes in Scout recommendations — deployed, 26 October 2026
+
+**Deployment receipt:** the owner approved the deployment and a manual run. Commit [b61e181](https://github.com/laz-aslam/openmerit/commit/b61e181) is on `origin/main`. Publisher `openmerit-scout` moved from `ca47b624-b254-4b54-a8e6-e70b86799790` to `27bd6884-8d8d-4b7c-be7a-1d13d05dd397`, with schedule `7 0,12 * * *`. Manual run `manual-20261026-routes-1` published generation `fc490025fce766c12512c006fb8fc3ab` at 08:10 UTC, with the `catalogue` source `ok`. Endpoints rose from 513 to 1,149, as the local measurement below predicted.
 
 `collect-public-feeds` now calls `addCatalogueRoutes` in `pipeline.mjs`, which uses `scout/catalogue-routes.ts`. It attaches hosted routes from the D1 catalogue to Scout's own models.
 
