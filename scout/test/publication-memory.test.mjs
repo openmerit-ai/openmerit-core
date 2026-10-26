@@ -29,20 +29,29 @@ test('stored research keeps one copy of each record and cached inspections still
  const next=await integrateResearch(toSnapshot(records),[{subjectId:'none',subjectHash:'h',records:[record]}],{fetcher,apiKey:'fixture'});
  assert.equal(calls,0);assert.equal(next.research.length,1);assert.equal(toRecords(next).research[0].inspection.record,undefined);
 });
-test('published research lives beside the records so collection never parses it, and older generations still load',async()=>{
- const {stageCatalogue,putJSON,readPublished,researchKey}=await import('../store.mjs');
- const bucket={data:new Map(),reads:[],async put(k,v){this.data.set(k,(typeof v==='string'?v:new TextDecoder().decode(v)));},async get(k){this.reads.push(k);const v=this.data.get(k);return v===undefined?null:{json:async()=>JSON.parse(v)};},async head(k){return this.data.has(k)?{}:null;}};
- const research=[{id:'research:x',kind:'benchmark',name:'Fixture',citations:[{url:'https://example.com',excerpts:['x'.repeat(5000)]}]}];
+test('a published generation moves research and capability answers into the D1 ledger once, then loads without them',async()=>{
+ const {stageCatalogue,putJSON,readPublished}=await import('../store.mjs'),{migratePublished}=await import('../pipeline.mjs');
+ const {evidenceLedger}=await import('../evidence-db.ts'),{LocalD1}=await import('./helpers-projection.mjs');
+ const bucket={data:new Map(),async put(k,v){this.data.set(k,(typeof v==='string'?v:new TextDecoder().decode(v)));},async get(k){const v=this.data.get(k);return v===undefined?null:{json:async()=>JSON.parse(v)};},async head(k){return this.data.has(k)?{}:null;}};
+ const research=[{id:'research:x',kind:'provider',name:'Fixture',url:'https://example.com',contentHash:'p',citations:[{url:'https://example.com',excerpts:['x'.repeat(5000)]}]}];
  const staged=await stageCatalogue(bucket,toRecords({...snapshot,research}));await putJSON(bucket,'active.json',staged);
- const manifest=JSON.parse(bucket.data.get(staged.key));
- assert.equal(JSON.parse(bucket.data.get(manifest.recordsKey)).research,undefined);
- assert.deepEqual(JSON.parse(bucket.data.get(researchKey(manifest.recordsKey))),toRecords({...snapshot,research}).research);
- const collected=await readPublished(bucket);assert.equal(collected.research,null);assert.equal(collected.records.research,undefined);assert.equal(collected.records.models.length,toRecords(snapshot).models.length);
- bucket.reads=[];const planned=await readPublished(bucket,{records:false,research:true});
- assert.deepEqual(planned.research.map(r=>r.id),['research:x']);assert.ok(!bucket.reads.includes(manifest.recordsKey),'research-only reads must not parse the records file');
- // A generation published before the split embeds research in the records file.
- bucket.data.delete(researchKey(manifest.recordsKey));bucket.data.set(manifest.recordsKey,JSON.stringify({...JSON.parse(bucket.data.get(manifest.recordsKey)),research}));
- const legacy=await readPublished(bucket,{research:true});assert.deepEqual(legacy.research.map(r=>r.id),['research:x']);assert.equal(legacy.records.research,undefined);
+ const recordsKey=JSON.parse(bucket.data.get(staged.key)).recordsKey;
+ // Generations from before the ledger embed research and capability answers in the records file.
+ const legacy=JSON.parse(bucket.data.get(recordsKey)),embedded=legacy.benchmarks.filter(b=>b.interpretation?.status==='ready'&&b.interpretation.capabilities);
+ const answers={coding:{choice:'supported',confidence:.9,definitionHash:'d1'},vision:{choice:'absent',confidence:.8,definitionHash:'d2'}};
+ embedded[0].interpretation.capabilities={...answers,stale:{choice:'absent',confidence:1}};
+ bucket.data.set(recordsKey,JSON.stringify({...legacy,research}));
+ const db=new LocalD1();
+ assert.deepEqual(await migratePublished(bucket,db),{research:1,interpretations:embedded.length});
+ const records=JSON.parse(bucket.data.get(recordsKey));
+ assert.equal(records.research,undefined);assert.ok(records.benchmarks.every(b=>!b.interpretation?.capabilities));
+ assert.equal(records.benchmarks.filter(b=>b.interpretation?.status==='ready').length,snapshot.benchmarks.filter(b=>b.interpretation?.status==='ready').length);
+ const {research:ledger,interpretations}=await evidenceLedger(db),[b]=embedded;
+ assert.deepEqual((await ledger.providers()).map(r=>r.id),['research:x']);
+ // Answers without a definition hash could never be reused, so they are not kept.
+ assert.deepEqual(await interpretations.get(b.id,b.interpretation.sourceHash),answers);
+ assert.deepEqual(await migratePublished(bucket,db),{skipped:true});
+ assert.equal((await readPublished(bucket)).records.models.length,toRecords(snapshot).models.length);
  assert.equal(await readPublished({get:async()=>null}),null);
 });
 test('stored JSON is pure ASCII and parses to exactly what JSON.stringify would store',async()=>{

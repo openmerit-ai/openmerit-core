@@ -42,11 +42,15 @@ export async function expandRegistry(registry, records, options) {
   return next;
 }
 
+// Inspected research is a cache keyed by inspection hash. A ledger (D1 in the
+// hosted refresh) returns only this batch's prior entries; without one the
+// snapshot carries every entry.
 export async function integrateResearch(snapshot, batches, options) {
   // Research records are replaced, never mutated, so only the rest needs a copy.
-  const next=structuredClone({...snapshot,research:[]}), prior=new Map((snapshot.research??[]).map(r=>[r.id,r]));
+  const next=structuredClone({...snapshot,research:[]}), ledger=options.research;
   next.registry=next.registry??seed; next.researchState={...snapshot.researchState};
   const incoming=batches.flatMap(batch=>(batch.records??[]).map(r=>({...r,subjectId:batch.subjectId,subjectHash:batch.subjectHash})));
+  const prior=ledger?await ledger.get(incoming.map(r=>r.id)):new Map((snapshot.research??[]).map(r=>[r.id,r])),inspectedEntries=[];
   const inspected=await concurrent(incoming,next.registry.policy.refreshConcurrency,async r=>{
     const subject=next.benchmarks.find(b=>b.id===r.subjectId);
     const inspectionHash=await digest(['22',r.contentHash,r.subjectId,subject?.definition??null]);
@@ -58,7 +62,7 @@ export async function integrateResearch(snapshot, batches, options) {
   });
   for(const [i,inspection] of inspected.entries()) {
     if(!inspection)continue;
-    const r=incoming[i];prior.set(r.id,{...r,inspectionHash:inspection.inspectionHash,verifiedAt:inspection.verifiedAt,inspection});
+    const r=incoming[i],entry={...r,inspectionHash:inspection.inspectionHash,verifiedAt:inspection.verifiedAt,inspection};prior.set(r.id,entry);inspectedEntries.push(entry);
     const sourceId=`research:${new URL(r.url).hostname}`;
     if(!next.sources.some(s=>s.id===sourceId))next.sources.push({id:sourceId,name:r.publisher??new URL(r.url).hostname,url:r.url,status:'ok',checkedAt:r.collectedAt,publishedAt:r.publishedAt,maxAgeHours:next.registry.policy.maxResearchAgeHours,attribution:'Original public evidence discovered by Parallel and interpreted by Decisions. Claims are not independently reproduced.'});
     let target;
@@ -101,7 +105,7 @@ export async function integrateResearch(snapshot, batches, options) {
       model.evidence.push({benchmark,score,metric:observation.unit,url:observation.url,observedAt:observation.measuredAt,configurations:[observation.configuration],raw:observation,provenance:r.citations});
     }
   }
-  next.research=[...prior.values()];
+  if(ledger)await ledger.save(inspectedEntries);else next.research=[...prior.values()];
   next.registry=await expandRegistry(next.registry,inspected.filter(Boolean).map(x=>x.record),options);
   next.availableModels=next.catalogue.length;
   return next;

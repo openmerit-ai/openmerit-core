@@ -44,19 +44,19 @@ export function encodeJSON(data) {
 }
 export const putJSON = (bucket,key,data) => bucket.put(key,encodeJSON(data),{httpMetadata:{contentType:'application/json'}});
 
-// Research is stored beside the published records, so refresh steps that do
-// not use it never parse it. Generations published before the split embed it.
+// Research is stored beside the published records when a generation has any.
+// The hosted refresh keeps it in its D1 evidence ledger instead; generations
+// from before the ledger are migrated there once (evidence-db.ts).
 export const researchKey = recordsKey => recordsKey.replace(/\.json$/,'.research.json');
-export async function readPublished(bucket,{records:withRecords=true,research:withResearch=false}={}) {
+export async function publishedRecordsKey(bucket) {
   const pointer=await getJSON(bucket,'active.json'),manifest=pointer?await getJSON(bucket,pointer.key):null;
-  if(!manifest)return null;
-  let research=withResearch?await getJSON(bucket,researchKey(manifest.recordsKey)):null,records=null;
-  if(withRecords||(withResearch&&!research)) {
-    records=await getJSON(bucket,manifest.recordsKey);
-    if(withResearch)research??=records.research??[];
-    delete records.research;
-  }
-  return {records:withRecords?records:null,research};
+  return manifest?.recordsKey??null;
+}
+export async function readPublished(bucket) {
+  const key=await publishedRecordsKey(bucket);
+  if(!key)return null;
+  const records=await getJSON(bucket,key);delete records.research;
+  return {records};
 }
 
 // Refresh-time materialization replaces a wave of per-repository remote reads.
@@ -113,7 +113,8 @@ export async function stageCatalogue(bucket,records,previous,options={}) {
     shards[name]=key;
   });
   const recordsKey=`catalogues/${publication.id}.json`,{research:archivedResearch,...archive}=records;
-  await putJSON(bucket,researchKey(recordsKey),archivedResearch??[]);
+  // The hosted refresh keeps research in its D1 ledger, so its records carry none.
+  if(archivedResearch?.length)await putJSON(bucket,researchKey(recordsKey),archivedResearch);
   await putJSON(bucket,recordsKey,{...archive,publication});
   if(options.db&&options.vectorize) {
     const directory=prepareEligibility(snapshot),projection=await stageProjection(options.db,publication.id,snapshot,directory);

@@ -201,6 +201,25 @@ test('rediscovered benchmark primary keys update once when semantic linking decl
  const next=await integrateResearch(repeated,[{subjectId:'discovery',records:[distinct]}],{apiKey:'fixture',fetcher});assert.equal(next.benchmarks.length,first.benchmarks.length+1);validateRecords(toRecords(next));
 });
 
+test('the D1 research ledger reuses verified inspections per record and feeds provider planning',async()=>{
+ const {integrateResearch}=await import('../enrich.mjs'),{evidenceLedger}=await import('../evidence-db.ts'),{LocalD1}=await import('./helpers-projection.mjs');
+ const db=new LocalD1(),{research}=await evidenceLedger(db);
+ const record={id:'benchmark:opaque',kind:'benchmark',name:'Opaque evaluation',url:'https://example.com/evaluation',version:'1',description:'Updated methodology.',contentHash:'source-v1',citations:[{url:'https://example.com/evaluation',excerpts:['Updated methodology.']}],capabilities:[],observations:[],endpoints:[]};
+ const base={...snapshot,registry,benchmarks:[...snapshot.benchmarks,{...bench(record.id),name:record.name}]};
+ const fetcher=async(_url,options)=>Response.json({answers:JSON.parse(options.body).questions.map(q=>({name:q.name,type:'choice',choice:q.name==='identity'?'none':'yes',confidence:.99}))});
+ const first=await integrateResearch(base,[{subjectId:'discovery',records:[record]}],{apiKey:'fixture',fetcher,research});
+ assert.deepEqual(first.research,[]);
+ // The snapshot carries no research; the reused inspection can only come from the ledger.
+ const repeated=await integrateResearch(base,[{subjectId:'discovery',records:[record]}],{apiKey:'fixture',fetcher:()=>assert.fail('An unchanged verified inspection must be reused'),research});
+ assert.equal(repeated.benchmarks.find(b=>b.id===record.id).research.description,record.description);
+ const changed=await integrateResearch(base,[{subjectId:'discovery',records:[{...record,contentHash:'source-v2'}]}],{apiKey:'fixture',fetcher:async()=>Response.json({error:{code:'credit_balance_exhausted'}},{status:429}),research}).catch(e=>e);
+ assert.match(String(changed),/HTTP 429/);
+ const provider={id:'provider:lab',kind:'provider',name:'Lab',url:'https://example.com/models',contentHash:'p1'};
+ await research.save([provider]);
+ const jobs=await planResearch({benchmarks:[],catalogue:[]},[],{limit:5,providers:await research.providers()});
+ assert.ok(jobs.some(j=>j.id===provider.id&&j.subjectHash==='p1'&&j.objective.includes(provider.url)));
+});
+
 test('rediscovered model primary keys update routes instead of duplicating catalogue entries',async()=>{
  const {integrateResearch}=await import('../enrich.mjs');
  const record={id:'model:opaque',kind:'model',name:'Opaque checkpoint',publisher:'Lab',url:'https://example.com/model',version:'1',description:'A documented model.',contentHash:'model-v1',citations:[{url:'https://example.com/model',excerpts:['A documented model.']}],capabilities:[],observations:[],facts:[],endpoints:[{provider:'Lab',modelId:'opaque-1',protocol:'openai-chat',api:'https://example.com/v1/chat/completions',url:'https://example.com/model',inputs:['text'],outputs:['text'],parameters:[],contextTokens:null,inputPerMillion:null,outputPerMillion:null}]};

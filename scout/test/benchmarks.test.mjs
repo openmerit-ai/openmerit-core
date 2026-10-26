@@ -23,6 +23,26 @@ test('unknown scopes and weak positive answers remain unclassified', async () =>
   assert.deepEqual(b.tags, []); assert.equal(b.interpretation.status, 'ready');
 });
 
+test('a D1 ledger holds capability answers: records drop them, and legacy, lost or unchanged generations reuse them', async () => {
+  const { evidenceLedger } = await import('../evidence-db.ts'), { LocalD1 } = await import('./helpers-projection.mjs');
+  const { interpretations } = await evidenceLedger(new LocalD1()), coding = q => q.name === 'coding' ? 'supported' : 'absent';
+  let asked = [];
+  const ledgered = choose => ({ ...settings(mock(choose, b => asked.push(JSON.parse(b.input.split('\n').at(-1)).benchmark.id))), interpretations });
+  // A generation published before the ledger embeds answers; they move into it without requests.
+  const legacy = await prepareBenchmarks([bench('a'), bench('b')], [], settings(mock(coding)));
+  const migrated = await prepareBenchmarks(legacy, legacy, ledgered(coding));
+  assert.deepEqual(asked, []); assert.deepEqual(migrated.map(b => b.tags), [['coding'], ['coding']]);
+  assert.ok(migrated.every(b => b.interpretation.status === 'ready' && !b.interpretation.capabilities && b.interpretation.definitions));
+  // Answers from a run that never published survive even when the previous generation lacks the benchmark.
+  const lost = await prepareBenchmarks([bench('a'), bench('b')], [], ledgered(coding));
+  assert.deepEqual(asked, []); assert.deepEqual(lost.map(b => b.tags), [['coding'], ['coding']]);
+  // Changed evidence is a new source: only that benchmark is asked again, and its old answers do not apply.
+  const changed = await prepareBenchmarks([bench('a', 'Changed scope'), bench('b')], migrated, ledgered(q => q.name === 'vision' ? 'supported' : 'absent'));
+  assert.deepEqual([...new Set(asked)], ['a']); assert.deepEqual(changed.map(b => b.tags), [['vision'], ['coding']]);
+  asked = [];
+  assert.deepEqual((await prepareBenchmarks(changed, changed, ledgered(coding))).map(b => b.tags), [['vision'], ['coding']]); assert.deepEqual(asked, []);
+});
+
 test('unchanged metadata, score updates, timestamps and ordering reuse interpretations with zero requests', async () => {
   const before = await prepareBenchmarks([bench('a'), bench('b')], [], settings(mock()));
   let calls = 0;

@@ -1,5 +1,27 @@
 # Scout architecture and operations
 
+## Evidence ledger in D1 — 26 October 2026 (not yet deployed)
+
+`interpret-evidence` kept failing with "Worker exceeded memory limit" because two caches that only the refresh uses travelled inside the published records file. Research inspections took 19 MB (1,476 records), and per-capability benchmark answers took 10.9 MB (360 benchmarks × 210 capabilities). Every interpretation parsed both.
+
+`scout/evidence-db.ts` moves both into the `openmerit-scout-index` D1 database:
+
+- `ev_research`: one row per research record and its inspection, keyed by record ID. `integrateResearch` reads only the IDs in the current batch and writes back the records it inspected. Research planning reads provider rows (`kind='provider'`) instead of the whole research list.
+- `ev_capabilities`: one row per benchmark × capability answer, with its source and definition hashes. `prepareBenchmarks` reuses an interpretation without reading the ledger when its source hash and a digest of the capability definitions (`interpretation.definitions`) are unchanged. Otherwise it reads that benchmark's rows for the current source. Answers are written before publication, so a run that never publishes does not lose its Decisions work.
+- `ev_meta`: one marker per migrated generation.
+
+The new `migrate-evidence-ledger` step runs before collection. Once per generation, it moves the research and capability answers embedded in the published records file into the ledger, then rewrites that file without them. Answers without a definition hash, which could never be reused, are dropped. Serving reads manifests and chunks, not the records file, so serving is unaffected. Without a ledger, as in local `npm run scout:refresh`, both caches stay embedded in the snapshot as before.
+
+Measured on production generation `e8b5c21256a782acbd45247c34b1fdf9` with semantic calls stubbed, as the minimum Node heap:
+
+| | Before | After |
+| --- | --- | --- |
+| `interpret-evidence` | 202 MB | 70 MB |
+| Records file written per run | 41.5 MB | 11.5 MB |
+| `migrate-evidence-ledger` (once) | — | 149 MB, against 135 MB to parse the legacy file and 161 MB for `collect-public-feeds`, which already passes |
+
+The first run after migration made no Decisions calls and left all 360 benchmark interpretations unchanged. Rollback hazard: a publisher from before this change reads a migrated generation without capability answers and would ask Decisions for every benchmark again.
+
 ## D1 model catalogue, first slice — deployed, 26 October 2026
 
 `scout/catalogue-db.ts` (Scout's first TypeScript module, checked by `tsconfig.scout.json`) starts the database-backed catalogue the owner chose, with Models.dev as the backbone. It writes `cat_*` tables in the existing `openmerit-scout-index` D1 database:

@@ -6,7 +6,7 @@ import { registry } from './registry.mjs';
 import { ParallelResearch, planResearch } from './research.mjs';
 import { integrateResearch } from './enrich.mjs';
 import { toRecords, toSnapshot, publicationPredecessor } from './records.mjs';
-import { getJSON, putJSON, stageCatalogue, readPublished, researchKey } from './store.mjs';
+import { getJSON, putJSON, stageCatalogue, readPublished, publishedRecordsKey, researchKey } from './store.mjs';
 import { digest, concurrent, choice, decode } from './utils.mjs';
 import { requestDecisions } from './decisions.mjs';
 import { refreshModelMetadata } from './metadata.mjs';
@@ -15,6 +15,7 @@ import {embed} from './evidence-search.mjs';
 import {discoverInventory,archiveListings,discoveryBacklog} from './discovery.mjs';
 import {catalogueInventory} from './catalogue.mjs';
 import {catalogueSources,importCatalogueSource,rebuildOfferings} from './catalogue-db.ts';
+import {evidenceLedger,migrateGeneration} from './evidence-db.ts';
 
 export function retainResearch(next,previous) {
   for(const b of previous.benchmarks.filter(b=>b.source.startsWith('research:')))if(!next.benchmarks.some(x=>x.id===b.id))next.benchmarks.push(b);
@@ -39,6 +40,15 @@ export function retainResearch(next,previous) {
   return next;
 }
 
+// Moves the published generation's embedded research and capability answers
+// into the evidence ledger and rewrites its records without them, once.
+export async function migratePublished(bucket,db) {
+  const key=await publishedRecordsKey(bucket);
+  return key?migrateGeneration(db,await evidenceLedger(db),key,{
+    load:async()=>{const records=await getJSON(bucket,key);return {records,research:records.research??await getJSON(bucket,researchKey(key))??[]};},
+    save:records=>putJSON(bucket,key,records)}):{skipped:true};
+}
+
 export async function runRefresh(env,step,id) {
   const bucket=env.SCOUT_CATALOGUE,coordinator=env.SCOUT_CONTROL.getByName('publication');
   const lock=await step.do('claim-refresh',()=>coordinator.begin(id));
@@ -60,6 +70,11 @@ export async function runRefresh(env,step,id) {
       ]);
       return {available:true};
     });
+    // Research inspections and capability interpretations live in the D1
+    // evidence ledger. Generations published before it embed both; move them once.
+    if(!env.SCOUT_INDEX)throw new Error('The evidence ledger needs the SCOUT_INDEX D1 binding.');
+    const ledger=()=>evidenceLedger(env.SCOUT_INDEX);
+    await step.do('migrate-evidence-ledger',{retries:{limit:2,delay:'10 seconds'},timeout:'10 minutes'},()=>migratePublished(bucket,env.SCOUT_INDEX));
     const baseKey=await step.do('collect-public-feeds',{retries:{limit:2,delay:'10 seconds'},timeout:'5 minutes'},async()=>{
       // Collection never reads research; the steps that do load it themselves.
       const published=await readPublished(bucket),previous=published?toSnapshot(published.records):seed;
@@ -78,13 +93,12 @@ export async function runRefresh(env,step,id) {
     });
     const jobs=await step.do('plan-research',async()=>{
       const {next}=await getJSON(bucket,baseKey);
-      next.research=(await readPublished(bucket,{records:false,research:true}))?.research??[];
       const backlog=await getJSON(bucket,'research-backlog.json')??[];
       next.researchPending=[...new Map([...(next.researchPending??[]),...backlog].map(p=>[p.job.id,p])).values()];
       const prior=Object.entries(next.researchState).map(([subjectId,v])=>({subjectId,...v}));
       const limit=Number(env.RESEARCH_PER_HOUR??next.registry.policy.researchPerHour);
       const discoveryCandidates=env.SCOUT_INDEX?await discoveryBacklog(env.SCOUT_INDEX,{limit,maxAgeHours:next.registry.policy.maxResearchAgeHours}):[];
-      return planResearch(next,prior,{limit,maxAgeHours:next.registry.policy.maxResearchAgeHours,discoveryCandidates});
+      return planResearch(next,prior,{limit,maxAgeHours:next.registry.policy.maxResearchAgeHours,discoveryCandidates,providers:await (await ledger()).research.providers()});
     });
     await step.do('persist-research-plan',async()=>{
       const prior=await getJSON(bucket,'research-backlog.json')??[];
@@ -114,25 +128,25 @@ export async function runRefresh(env,step,id) {
     });
     const candidateKey=await step.do('interpret-evidence',{retries:{limit:1,delay:'15 seconds'},timeout:'15 minutes'},async()=>{
       // The refresh lock keeps the published generation unchanged until this run publishes.
-      // Parse it first, before this run's snapshot, and drop inputs once copied.
-      let published=await readPublished(bucket,{research:true});const previous=published?toSnapshot(published.records):seed;
-      let {next}=await getJSON(bucket,baseKey);next.research=published?.research??[];published=null;
+      // Parse it first, before this run's snapshot. Research and capability
+      // answers are read from the ledger per subject, never as a whole.
+      const published=await readPublished(bucket),previous=published?toSnapshot(published.records):seed,{research,interpretations}=await ledger();
+      let {next}=await getJSON(bucket,baseKey);
       const batches=await Promise.all(results.filter(r=>r.status==='completed').map(r=>getJSON(bucket,r.key)));
-      let candidate=await integrateResearch(await refreshModelMetadata(next,previous,options),batches,options);next=null;
+      let candidate=await integrateResearch(await refreshModelMetadata(next,previous,options),batches,{...options,research});next=null;
       candidate.researchPending=(await Promise.all(results.filter(r=>r.key&&r.status!=='completed').map(async r=>{
         const receipt=await getJSON(bucket,r.key);return receipt?.runId?{job:jobs.find(j=>j.id===r.subjectId),key:r.key}:null;
       }))).filter(Boolean);
       for(const batch of batches)candidate.researchState[batch.subjectId]={subjectHash:batch.subjectHash,checkedAt:batch.checkedAt,status:'completed'};
-      candidate=await refreshBenchmarks(candidate,previous,{...options,registry:candidate.registry});
+      candidate=await refreshBenchmarks(candidate,previous,{...options,registry:candidate.registry,interpretations});
       candidate=await refreshSpecialists(candidate,previous,options);
       candidate.sources.push({id:'parallel',name:'Parallel research',url:'https://parallel.ai',status:results.some(r=>r.status!=='completed')?'failed':'ok',checkedAt:new Date().toISOString(),publishedAt:null,attribution:'Hourly incremental public-source research. Original publishers retain attribution. Pending jobs do not overwrite validated records.'});
       candidate.refreshSummary={jobs:results.length,completed:results.filter(r=>r.status==='completed').length,pending:results.filter(r=>r.status!=='completed').length};
-      // Research is written separately so no single document holds the whole candidate.
-      const {research,...records}=toRecords(candidate),key=`runs/${id}/candidate.json`;
-      await putJSON(bucket,researchKey(key),research);await putJSON(bucket,key,{records,previous:publicationPredecessor(previous)});return key;
+      const {research:_ledgered,...records}=toRecords(candidate),key=`runs/${id}/candidate.json`;
+      await putJSON(bucket,key,{records,previous:publicationPredecessor(previous)});return key;
     });
     const staged=await step.do('validate-and-stage',{retries:{limit:12,delay:'10 seconds',backoff:'constant'},timeout:'10 minutes'},async()=>{
-      const {records,previous}=await getJSON(bucket,candidateKey);records.research=await getJSON(bucket,researchKey(candidateKey))??[];return {...await stageCatalogue(bucket,records,previous,{...options,db:env.SCOUT_INDEX,vectorize:env.SCOUT_EVIDENCE}),completedResearchSubjects:results.filter(r=>r.status==='completed').map(r=>r.subjectId),completedResearchKeys:results.filter(r=>r.status==='completed').map(r=>r.key)};
+      const {records,previous}=await getJSON(bucket,candidateKey);return {...await stageCatalogue(bucket,records,previous,{...options,db:env.SCOUT_INDEX,vectorize:env.SCOUT_EVIDENCE}),completedResearchSubjects:results.filter(r=>r.status==='completed').map(r=>r.subjectId),completedResearchKeys:results.filter(r=>r.status==='completed').map(r=>r.key)};
     });
     await step.do('publish',()=>coordinator.publish(id,staged));
     return {status:'published',version:staged.publication.id,research:results.map(r=>({subject:r.subjectId,status:r.status}))};

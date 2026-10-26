@@ -89,7 +89,7 @@ export async function planResearch(snapshot, previous = [], options = {}) {
     if (old?.subjectHash===hash && now-Date.parse(old.checkedAt)<maxAge) continue;
     jobs.push({id:m.id,subjectHash:hash,evidence,priority:m.facts?.some(f=>f.field==='family')&&m.facts?.some(f=>f.field==='releasedAt')?2:.5,objective:`Research the exact model checkpoint and its officially documented creator, family, release date, context capacity, deployment routes, supported inputs/outputs, task restrictions and current complete prices. Return one model record with primary citations. Do not substitute a similarly named version. Existing metadata: ${JSON.stringify(evidence)}`});
   }
-  for (const r of snapshot.research ?? []) if (r.kind==='provider') {
+  for (const r of options.providers ?? (snapshot.research ?? []).filter(r=>r.kind==='provider')) {
     const old=bySubject.get(r.id);if(old && now-Date.parse(old.checkedAt)<maxAge)continue;
     jobs.push({id:r.id,subjectHash:r.contentHash,priority:1,objective:`From this provider's official model catalogue and documentation, discover up to 12 precisely identified model deployments with complete documented endpoint contracts and primary citations. Provider: ${r.name}; official source: ${r.url}. Return model records, not another provider overview.`});
   }
