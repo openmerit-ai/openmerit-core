@@ -1,5 +1,18 @@
 # Scout architecture and operations
 
+## Vendor-reported scores from LLM Stats (not yet deployed)
+
+The owner asked for vendor-reported scores and decided earlier that they may affect ranking. LLM Stats (llm-stats.com) compiles the results developers publish. Its terms (updated 8 October 2026) allow reuse, including commercial reuse, with visible attribution. Its public API at `api.llm-stats.com` sets no content signals.
+
+- **Feed:** `GET /leaderboard/benchmarks/matrix?top_n=100` returns, in one 650 KB response, the 100 benchmarks with the most reported results (17 to 256 models each) and every model's score. Each score is flagged `self_reported` and `verified`. On 26 October, 3,858 of 3,971 scores were self-reported and none were verified.
+- **Series:** `parseVendorScores` keeps only `self_reported` scores on 0–1 or 0–100 scales. That drops one Elo-style benchmark (Codeforces), and benchmarks with fewer than five vendor results. The source fails, retaining previous evidence, if fewer than 20 benchmarks remain. Each benchmark becomes `vendor:<id>`, named `<benchmark> · vendor-reported`, with its own suite and `definition.reportedBy: 'vendor'`. Vendor GPQA therefore never merges with Artificial Analysis' or Epoch's GPQA measurements; the quality estimate treats it as a separate evaluation, and the disagreement screen applies as usual.
+- **Provenance:** evidence links the LLM Stats model page, which cites the vendor's announcement (for example, OpenAI's GPT-6 Astra launch post). The per-score source URL is available only through one API call per model, which collection does not make.
+- **Matching:** row IDs, then the ID without a date suffix (`gpt-5.1-medium-2025-11-12`), then the display name. `resolve()` now refuses any name whose parenthetical says "Base", in any feed. Otherwise "Mistral Large 3 (675B Base)" would have counted toward the instruct model. No published evidence used such a name.
+
+**Measured locally** on the 26 October feed: 98 vendor series loaded, and 226 of 381 reporting models matched. Benchmark-backed models rose from 279 to 298. `refreshBenchmarks` prepared all 98 as `ready`; INCLUDE and AA-LCR received no capability tags, so they inform no task. Unmatched names are mostly retired models (Claude 3, Gemini 1.5, Grok 2–4), base checkpoints and small open models Scout does not list. In a local replay with real interpretation and embedding retrieval, translation used vendor WMT24++ and repository repair used vendor NL2Repo. A clinical-questions prompt used vendor HLE rather than HealthBench Professional.
+
+**Not added:** the Hub's official benchmark leaderboards (51 datasets, for example HLE and GPQA). Most of their entries are open pull requests, marked community-provided, rather than results merged by the model's own organisation.
+
 ## Vertical benchmarks: Vals AI and Arena industry categories — deployed, 26 October 2026
 
 **Deployment receipt:** the owner approved the push and deployment. Commits [c6bf453](https://github.com/laz-aslam/openmerit/commit/c6bf453), [374a84e](https://github.com/laz-aslam/openmerit/commit/374a84e) and [1c60b92](https://github.com/laz-aslam/openmerit/commit/1c60b92) are on `origin/main`. Publisher `openmerit-scout` moved from `f10ebd46-2385-475d-a26c-24eceb5c43dd` to `b87a4068-82df-4f52-8330-c8071731c8fb` on 26 October 2026 at 11:04 UTC, with schedule `7 0,12 * * *`. No manual run was made; the 12:07 UTC refresh is the first to use it. The only static asset that changed was the data policy page, and only its stylesheet cache key changed.

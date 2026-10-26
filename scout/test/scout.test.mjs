@@ -8,7 +8,7 @@ import offlineTasks from './fixtures/offline-tasks.json' with {type:'json'};
 // Explicit historical task objects test arithmetic and transports, not interpretation.
 const fixtureTask = prompt => {const task=offlineTasks[prompt];if(!task)throw Error('Missing typed test fixture');return structuredClone(task);};
 const recommend=(index,prompt)=>rankTask(index,prompt,Date.now(),fixtureTask(prompt));
-import { parseCSV, parseAnalysis, compileSnapshot, refreshSnapshot, parseOmniDoc, parseVectara, parseArena, parseVals, readVals, valsSlugs } from '../sources.mjs';
+import { parseCSV, parseAnalysis, compileSnapshot, refreshSnapshot, parseOmniDoc, parseVectara, parseArena, parseVals, readVals, valsSlugs, parseVendorScores } from '../sources.mjs';
 import { handleAPI as api } from '../http.mjs';
 
 const handleAPI=(request,index)=>api(request,index,{},recommend);
@@ -202,7 +202,7 @@ test('a fresh table retains omitted historical observations only for an unchange
 test('refresh reads bounded benchmark methodology and catalogue feeds; total outage needs a previous index', async () => {
   const f = fixtures(); const calls = [];
   const fetcher = async url => { calls.push(url); return new Response(url.endsWith('.zip') ? f.epochZip : url.includes('artificialanalysis') ? f.analysisHTML : JSON.stringify(url.includes('OpenVLM') ? f.openvlm : f.router)); };
-  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 58, 'feeds, plus one page per Vals AI benchmark'); assert.equal(refreshed.models.length, 12);
+  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 59, 'feeds, plus one page per Vals AI benchmark'); assert.equal(refreshed.models.length, 12);
   assert.equal(refreshed.sources.find(s => s.id === 'huggingface').status, 'failed');
   await assert.rejects(refreshSnapshot(async () => new Response('Unavailable', { status: 503 })), /Invalid model catalogue/);
 });
@@ -304,6 +304,30 @@ test('Vals AI benchmarks keep overall accuracy, read model keys and keep a faile
   assert.equal(score('lab/model-0', 'vals:medscribe'), .8);
   assert.equal(snap.benchmarks.find(b => b.id === 'vals:medcode').definition.suite, 'Vals AI · medcode');
   assert.equal(valsSlugs.length, new Set(valsSlugs).size);
+});
+
+test('vendor-reported scores keep only self-reported results on comparable scales and never match base checkpoints', () => {
+  const bench = (id, max_score) => ({ benchmark_id: id, name: id.toUpperCase(), description: `${id} test.`, max_score, modality: 'text' });
+  const score = (s, self_reported = true) => ({ score: s, self_reported, verified: false });
+  // Model 1 reports a dated ID with an effort suffix; a Base row must not land on model 2's instruct entry.
+  const models = Array.from({ length: 6 }, (_, i) => ({ model_id: `model-${i}`, name: `Model ${i}`, benchmark_scores: { gpqa: score(.1 * i), pct: score(10 * i), elo: score(1200 + i) } }));
+  models[1].model_id = 'model-1-high-2026-01-02';
+  models.push({ model_id: 'model-2-base', name: 'Model 2 (Base)', benchmark_scores: { gpqa: score(.99) } }, { model_id: 'model-3', name: 'Model 3', benchmark_scores: {} });
+  models[4].benchmark_scores.gpqa = score(.95, false);
+  const data = { benchmarks: [bench('gpqa', 1), bench('pct', 100), bench('elo', 3000), ...Array.from({ length: 20 }, (_, i) => bench(`b${i}`, 1))], models };
+  for (let i = 0; i < 20; i++) for (const m of models.slice(0, 5)) m.benchmark_scores[`b${i}`] = score(.5);
+  const parsed = parseVendorScores(data);
+  assert.ok(!parsed.some(b => b.id === 'elo'), 'Elo-style scales are not comparable');
+  assert.equal(parsed.find(b => b.id === 'pct').rows.find(r => r.id === 'model-3').score, .3);
+  assert.ok(!parsed.find(b => b.id === 'gpqa').rows.some(r => r.id === 'model-4'), 'a third-party score is not vendor-reported');
+  const snap = compileSnapshot({ ...fixtures(), vendorScores: data });
+  const ev = (id, b) => snap.models.find(m => m.id === id)?.evidence.find(e => e.benchmark === b);
+  assert.equal(ev('lab/model-1', 'vendor:gpqa').score, .1);
+  assert.equal(ev('lab/model-2', 'vendor:gpqa').score, .2);
+  assert.equal(ev('lab/model-2', 'vendor:gpqa').url, 'https://llm-stats.com/models/model-2');
+  assert.equal(snap.benchmarks.find(b => b.id === 'vendor:gpqa').definition.reportedBy, 'vendor');
+  assert.deepEqual(snap.unmatchedRows.vendor, ['model-2-base']);
+  assert.throws(() => parseVendorScores({ benchmarks: [], models: [] }), /Too few/);
 });
 
 test('the IDP Leaderboard parser reads component scores from the rendered table and rejects format changes', async () => {

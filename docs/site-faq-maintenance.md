@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Vendor-reported benchmark scores — 26 October 2026
+
+Reviewed evidence and provenance claims against the change that adds developer-reported scores from LLM Stats. The homepage and the Scout page make no claim that every score is independently measured, so no FAQ copy changes. The Scout guide's source table now has an LLM Stats row that states the results are vendor-reported, unverified and counted in ranking.
+
 ## Vals AI and Arena industry benchmarks — 26 October 2026
 
 Reviewed benchmark-source and coverage claims against the change that adds 27 Vals AI benchmarks and four Arena industry categories. The homepage and the Scout page name no benchmark publishers or vertical coverage, so no FAQ copy changes. The Scout guide's source table now has a Vals AI row and lists the Arena industry categories.

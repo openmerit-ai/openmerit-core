@@ -25,6 +25,8 @@ export const sourceURLs = {
   arenaDocument: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/document_style_control/latest-00000-of-00001.parquet',
   arenaVision: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/vision_style_control/latest-00000-of-00001.parquet',
   arenaWebdev: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/webdev/latest-00000-of-00001.parquet',
+  // LLM Stats' public API: its 100 most-reported benchmarks with every model's score.
+  vendor: 'https://api.llm-stats.com/leaderboard/benchmarks/matrix?top_n=100',
   bfclMethodology: 'https://gorilla.cs.berkeley.edu/leaderboard',
   bfclMemory: 'https://gorilla.cs.berkeley.edu/blogs/16_bfcl_v4_memory.html',
 };
@@ -132,6 +134,24 @@ export async function readVals(read) {
   }
   if (found.length < valsSlugs.length / 2) throw new Error('Most Vals AI benchmarks were unavailable.');
   return { benchmarks: found, missing };
+}
+// Developer-reported scores compiled by LLM Stats. Only scores it marks self-reported
+// are kept, on 0–1 or 0–100 scales; Elo-style and unbounded scales are not comparable.
+export function parseVendorScores(data) {
+  if (!Array.isArray(data?.benchmarks) || !Array.isArray(data?.models)) throw new Error('LLM Stats format changed.');
+  const benchmarks = data.benchmarks.filter(b => typeof b?.benchmark_id === 'string' && typeof b.name === 'string' && (b.max_score === 1 || b.max_score === 100))
+    .map(b => ({ id: b.benchmark_id, name: b.name, description: typeof b.description === 'string' ? b.description : '', scale: b.max_score, modality: b.modality ?? null, rows: [] }));
+  const byId = new Map(benchmarks.map(b => [b.id, b]));
+  for (const m of data.models) {
+    if (typeof m?.model_id !== 'string') continue;
+    for (const [id, r] of Object.entries(m.benchmark_scores ?? {})) {
+      const b = byId.get(id), score = Number.isFinite(r?.score) ? r.score / (b?.scale ?? 1) : null;
+      if (b && r.self_reported === true && score !== null && score >= 0 && score <= 1) b.rows.push({ id: m.model_id, name: typeof m.name === 'string' ? m.name : m.model_id, organization: m.organization ?? null, score });
+    }
+  }
+  const kept = benchmarks.filter(b => b.rows.length >= 5);
+  if (kept.length < 20) throw new Error('Too few LLM Stats benchmarks.');
+  return kept;
 }
 export function parseVectara(markdown) {
   const lines = markdown.split('\n'), start = lines.findIndex(l => /^\|\s*Model\s*\|\s*Hallucination Rate\s*\|\s*Factual Consistency Rate\s*\|\s*Answer Rate\s*\|/.test(l));
@@ -245,7 +265,7 @@ export function parseBFCL(csv) {
   });
 }
 
-export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, arenaVisionRows, arenaWebdevRows, vals, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, catalogueSupply, previous, failures = {}, checkedAt = new Date().toISOString() }) {
+export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, arenaVisionRows, arenaWebdevRows, vals, vendorScores, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, catalogueSupply, previous, failures = {}, checkedAt = new Date().toISOString() }) {
   const sources = [], benchmarks = [], observations = new Map();
   const descriptions = benchmarkDescriptions ?? previous?.benchmarkDescriptions ?? {};
   const priorSources = new Map(previous?.sources.map(s => [s.id, s]) ?? []);
@@ -291,6 +311,8 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
   // name is ambiguous to Scout. It still resolves when the catalogue links every claimant to one model family.
   const sameModel = key => { const ids = [...claimants.get(key) ?? []], first = linked.get(ids[0]); return !!first && ids.every(id => linked.get(id) === first); };
   function resolve(name) {
+    // A parenthetical naming a base (pretrained) checkpoint names a different model, never a run setting.
+    if (/\([^)]*\bbase\b[^)]*\)/i.test(String(name))) return { model: undefined, tier: 1 };
     const base = String(name).replace(/_(?:none|low|medium|high|xhigh|max|unknown|thinking|nothinking)$/, '').replace(/\s*\([^)]*\)\s*$/, '');
     // Then without run settings: reasoning effort, thinking budgets and every trailing parenthetical.
     // A dash suffix is stripped only for efforts and budgets; "-max" and "-thinking" name distinct models.
@@ -474,6 +496,19 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     }
     return { publishedAt: vals.benchmarks.map(v => v.updated).filter(Boolean).sort().at(-1) ?? null };
   });
+  // Vendor-reported results are their own series, never merged into third-party measurements of the same benchmark.
+  collect('vendor', 'Vendor-reported · LLM Stats', 'https://llm-stats.com/benchmarks', 'Benchmark scores model developers report in their announcements, papers and model cards, compiled by LLM Stats (llm-stats.com). Self-reported by each vendor and not independently verified; settings such as tools, attempts and reasoning effort follow the vendor and can differ between models.', () => {
+    for (const v of parseVendorScores(vendorScores)) {
+      const benchmark = addBenchmark(`vendor:${v.id}`, `${v.name} · vendor-reported`, 'vendor', { title: v.name, description: `${v.description} Scores reported by each model's developer, compiled by LLM Stats; not independently verified.`,
+        metric: v.scale === 100 ? 'Reported score / 100' : 'Reported score', suite: `Vendor-reported · ${v.id}`, sourceURL: `https://llm-stats.com/benchmarks/${encodeURIComponent(v.id)}`, reportedBy: 'vendor' });
+      for (const row of v.rows) {
+        // IDs carry dates and effort settings ("gpt-5.1-medium-2025-11-12"); the display name is a fallback.
+        const undated = row.id.replace(/-(?:\d{4}-\d{2}-\d{2}|\d{8})$/, '');
+        const name = [row.id, undated, row.name].find(n => resolve(n).model) ?? row.id;
+        add(name, benchmark, row.score, { url: `https://llm-stats.com/models/${encodeURIComponent(row.id)}`, observedAt: null, sourceModel: row.id, metric: benchmark.definition.metric });
+      }
+    }
+  }, { license: 'https://llm-stats.com/terms' });
   collect('bfcl', 'Berkeley Function Calling Leaderboard', 'https://gorilla.cs.berkeley.edu/leaderboard', 'BFCL v4 native function-calling evaluations. Memory uses the named external backend, not built-in model memory. Per-model measurement dates are not supplied.', () => {
     const rows = parseBFCL(bfclCSV);
     if (rows.length < 3) throw new Error('Too few native BFCL configurations.');
@@ -531,7 +566,7 @@ export async function refreshSnapshot(fetcher = fetch, previous, options = {}) {
   }));
   const valsRead = readVals(read);
   const descriptions = readEpochDefinitions(read).then(value => ({ value }), () => ({ value: previous?.benchmarkDescriptions, failed: true }));
-  const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['idp', 'idpHTML', 'text'], ['vectara', 'vectaraMarkdown', 'text'], ['arena', 'arenaRows', 'parquet'], ['arenaDocument', 'arenaDocumentRows', 'parquet'], ['arenaVision', 'arenaVisionRows', 'parquet'], ['arenaWebdev', 'arenaWebdevRows', 'parquet'], ['bfcl', 'bfclCSV', 'text'], ['modelsdev', 'modelsDev', 'json']];
+  const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['idp', 'idpHTML', 'text'], ['vectara', 'vectaraMarkdown', 'text'], ['arena', 'arenaRows', 'parquet'], ['arenaDocument', 'arenaDocumentRows', 'parquet'], ['arenaVision', 'arenaVisionRows', 'parquet'], ['arenaWebdev', 'arenaWebdevRows', 'parquet'], ['vendor', 'vendorScores', 'json'], ['bfcl', 'bfclCSV', 'text'], ['modelsdev', 'modelsDev', 'json']];
   const results = await Promise.allSettled([...specs.map(([id, , type]) => read(sourceURLs[id], type)), ...hubQueries.map(query => read(query.url, 'json', 2_000_000))]);
   const inputs = { previous, failures: {}, catalogueSupply: options.catalogueSupply };
   results.slice(0, specs.length).forEach((result, i) => {
