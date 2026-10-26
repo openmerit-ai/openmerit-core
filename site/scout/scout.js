@@ -260,6 +260,7 @@ async function search() {
 // Re-measure after content or width changes; CSS bounds very long prompts.
 function fitPrompt() {
   const input = $('#prompt');
+  $('.prompt-examples').hidden = input.value.length > 0;
   input.style.height = 'auto';
   input.style.height = `${input.scrollHeight}px`;
 }

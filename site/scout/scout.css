@@ -53,24 +53,26 @@ code, kbd { font-family: var(--mono); }
 .agent-install { position: relative; max-width: 100%; }
 .add-agent-button { display: inline-flex; align-items: center; gap: 12px; flex: none; min-height: 44px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: 12px; font-weight: 500; }
 .agent-logos { display: inline-flex; align-items: center; flex: none; padding-left: 2px; }
-.agent-logos img { display: block; position: relative; width: 28px; height: 28px; border: 2px solid var(--surface); border-radius: 50%; background: #fff; object-fit: contain; }
+.agent-logos img { display: block; width: 28px; height: 28px; object-fit: contain; }
 #index-counts { display: flex; flex-wrap: wrap; row-gap: 3px; }
 #index-counts > span { white-space: nowrap; }
 #index-counts > span:not(:last-child)::after { content: "·"; margin-inline: 7px; color: var(--quiet); }
 .prompt-box { padding: 0; background: transparent; border: 0; }
 .prompt-box label { display: block; margin-bottom: 9px; font-size: 12px; font-weight: 500; }
-.prompt-box textarea { display: block; width: 100%; min-height: 112px; max-height: min(420px, 55svh); padding: 12px 14px; border: 0; border-radius: 6px; resize: none; overflow-y: auto; color: var(--ink); background: var(--input); font-size: 15px; line-height: 1.6; }
+.prompt-field { background: var(--input); border-radius: 6px; }
+.prompt-field:focus-within { background: var(--input-active); }
+.prompt-field:has(textarea:focus-visible) { outline: 2px solid var(--focus); outline-offset: 4px; }
+.prompt-box textarea { display: block; width: 100%; min-height: 112px; max-height: min(420px, 55svh); padding: 12px 14px; border: 0; border-radius: 6px; resize: none; overflow-y: auto; color: var(--ink); background: transparent; font-size: 15px; line-height: 1.6; }
 .prompt-box textarea::placeholder { color: var(--quiet); opacity: 1; transition: opacity 240ms cubic-bezier(.22, 1, .36, 1); }
 .prompt-box textarea.example-changing::placeholder { opacity: 0; transition-duration: 180ms; }
 .prompt-box textarea:focus::placeholder { transition: none; }
-.prompt-box textarea:focus { outline: none; background: var(--input-active); }
-.prompt-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 12px; }
-.prompt-footer > span { color: var(--quiet); font-size: 11px; }
-.prompt-examples { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+.prompt-box textarea:focus { outline: none; }
+.prompt-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 0 14px 12px; }
+.prompt-examples { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px; }
 #examples-label { margin-right: 4px; color: var(--muted); font-size: 11px; }
-.prompt-examples button { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink); font-size: 12px; text-align: left; }
+.prompt-examples button { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--field-line); border-radius: 999px; background: transparent; color: var(--ink); font-size: 12px; text-align: left; }
 .example-count { flex: none; color: var(--quiet); font: 10px var(--mono); }
-.find-button { display: inline-flex; justify-content: center; align-items: center; flex: none; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; color: var(--button-ink); background: var(--button); }
+.find-button { display: inline-flex; justify-content: center; align-items: center; flex: none; width: 36px; height: 36px; margin-left: auto; padding: 0; border: 0; border-radius: 50%; color: var(--button-ink); background: var(--button); }
 .find-button[aria-busy="true"] { opacity: .5; }
 .results-section { margin-top: 33px; }
 .results-heading { display: flex; align-items: baseline; gap: 14px; }
@@ -151,9 +153,7 @@ summary::-webkit-details-marker { display: none; }
   .add-agent-button { gap: 10px; padding-inline: 10px; }
   .agent-logos img { width: 24px; height: 24px; }
   .prompt-box textarea { font-size: 16px; min-height: 208px; }
-  #examples-label { flex-basis: 100%; }
   .find-button { width: 44px; height: 44px; }
-  .newline-hint { display: none; }
   .quiet-button { min-height: 40px; }
   .results-section { margin-top: 25px; }
   .query-time { margin-top: 2px; }
