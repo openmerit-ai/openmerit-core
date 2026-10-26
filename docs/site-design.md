@@ -10,7 +10,7 @@ on in the source installer; terminal/evaluation analytics stay opt-in. Explicit
 opt-outs remain supported, including Scout's privacy-aware handoff. The homepage
 still generates no browser setup ID. Publish the updated npm installer before
 deploying these prompts; neither release is implied by local checks. See the
-[setup contract](scout.md#scout-setup-analytics-default-source-only-25-october-2026).
+[setup contract](scout.md#scout-setup-analytics-default-version-0110).
 
 ## Homepage scope note removal — published 25 October 2026
 

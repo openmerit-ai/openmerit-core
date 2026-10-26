@@ -6,7 +6,7 @@ It reads existing evidence independently of inference. It does not call a model,
 
 ## Optional CLI product analytics
 
-**Source only, 25 October 2026:** Scout setup commands now default analytics on without a prompt prefix, with `OPENMERIT_TELEMETRY=0` and `DO_NOT_TRACK=1` opt-outs. Terminal and evaluation commands retain the opt-in behavior below. Npm publication is pending; see the [setup default contract](scout.md#scout-setup-analytics-default-source-only-25-october-2026).
+**Version 0.1.10:** Scout setup commands default analytics on without a prompt prefix, with `OPENMERIT_TELEMETRY=0` and `DO_NOT_TRACK=1` opt-outs. Terminal and evaluation commands retain the opt-in behavior below. See the [setup default contract](scout.md#scout-setup-analytics-default-version-0110).
 
 **Coding-agent setup telemetry — npm 0.1.9:** opted-in setup adds stage/outcome/component/connection diagnostics and random setup/installation correlation, described in the [Scout lifecycle contract](scout.md#coding-agent-lifecycle-instrumentation-npm-019). Unlike the process-only terminal identity below, an opted-in setup stores its installation UUID in the existing ownership record and installed MCP headers for later calls. No paths, credentials, device names or task content are exported. The copied website prompt explicitly carries usage/unlink preferences; standalone commands still require `OPENMERIT_TELEMETRY=1`, and `DO_NOT_TRACK=1` overrides it. Plans and status checks do not create an installation identity. Older npm 0.1.8 installations need an installer rerun; hosted browser/server collection requires the matching independent Scout deployment.
 

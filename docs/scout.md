@@ -30,11 +30,11 @@ Examples go through the same interpretation and ranking as typed prompts, with n
 
 ## Product analytics
 
-### Scout setup analytics default — source only, 25 October 2026
+### Scout setup analytics default — version 0.1.10
 
-Unreleased source enables usage and installation diagnostics by default for Scout's `install`, `login`, `status`, `remove`, `logout`, `project` and `doctor` commands. The normal homepage and Scout handoff prompts use `npx -y openmerit@latest install --client claude-code` without an analytics-enabling environment prefix. Terminal and evaluation analytics remain opt-in. Publish the updated npm installer before deploying these prompts; npm 0.1.9 still uses the opt-in setup behavior below.
+Version 0.1.10 enables usage and installation diagnostics by default for Scout's `install`, `login`, `status`, `remove`, `logout`, `project` and `doctor` commands. The normal homepage and Scout handoff prompts use `npx -y openmerit@latest install --client claude-code` without an analytics-enabling environment prefix. Terminal and evaluation analytics remain opt-in. npm 0.1.9 uses the opt-in setup behavior below; publish 0.1.10 before deploying these prompts.
 
-`OPENMERIT_TELEMETRY=0` or `DO_NOT_TRACK=1` disables setup analytics, strips outgoing correlation IDs and carries the refusal into the approval URL and installed MCP headers. Scout's usage-disabled handoff still includes `DO_NOT_TRACK=1`, and its unlinked handoff includes `OPENMERIT_ANALYTICS_ACCOUNT=off`. Browser DNT/GPC, saved browser choices and server-side account opt-outs remain effective. Analytics-enabled, linked installations retain the random installation UUID described below. The homepage creates no browser setup ID. MCP prompt-content capture stays off; beta status does not establish consent or another legal basis. No release or live ingestion is implied by this source change.
+`OPENMERIT_TELEMETRY=0` or `DO_NOT_TRACK=1` disables setup analytics, strips outgoing correlation IDs and carries the refusal into the approval URL and installed MCP headers. Scout's usage-disabled handoff still includes `DO_NOT_TRACK=1`, and its unlinked handoff includes `OPENMERIT_ANALYTICS_ACCOUNT=off`. Browser DNT/GPC, saved browser choices and server-side account opt-outs remain effective. Analytics-enabled, linked installations retain the random installation UUID described below. The homepage creates no browser setup ID. MCP prompt-content capture stays off; beta status does not establish consent or another legal basis. Package and hosted publication are independent; these changes alone do not establish live event ingestion.
 
 ### Coding-agent lifecycle instrumentation — npm 0.1.9
 
@@ -491,9 +491,9 @@ Claude can load the `openmerit-scout` skill when choosing an application inferen
 
 The agent compares model and endpoint, evidence, reference cost/time and unknowns, and helps configure the chosen route. New providers, credentials, spending and deployments need separate approval. A skill is a default, not enforcement. The MCP tool, `scout_models`, is read-only and does not execute models.
 
-### Automatic instruction updates — unreleased
+### Automatic instruction updates — version 0.1.10
 
-Source adds default-on updates for the installed Scout skill and startup rule. **npm 0.1.9 does not contain the updater.** After a release containing it is published, existing installations need one explicit installer rerun in their original scope to acquire it. A website or Scout deployment cannot bootstrap files on someone else's machine. Compatible hosted Scout changes already reach agents through their next MCP request.
+Version 0.1.10 adds default-on updates for the installed Scout skill and startup rule. **npm 0.1.9 does not contain the updater.** After 0.1.10 is published, existing installations need one explicit installer rerun in their original scope to acquire it. A website or Scout deployment cannot bootstrap files on someone else's machine. Compatible hosted Scout changes already reach agents through their next MCP request.
 
 Setup discloses automatic updates and installs asynchronous `SessionStart` and `Stop` command hooks. They check npm's stable `latest` release at most once per 24 hours per installation. Offline or failed checks retain the installed version and retry at the next eligible hook after 15 minutes. `Stop` means Claude finished responding, not that the user's task succeeded. No background service watches connectivity while Claude Code is closed, and checks never ask Claude to keep working. A one-shot `claude -p` process can exit before an asynchronous Stop hook finishes; startup checks and later sessions provide the retry path. Managed policies or disabled hooks can prevent automatic checks; an explicit manual update remains available.
 
@@ -505,7 +505,7 @@ Only bundles declaring the supported instruction/permission contract update auto
 
 Start a **new Claude Code session** after an update to reliably load the new instructions. A running session may retain earlier instructions; reconnecting `/mcp` does not reload the startup rule. The installed rule tells Claude how to handle “update openmerit”; this natural-language trigger is guidance, not an enforced command.
 
-Commands in updater-enabled releases:
+Commands in version 0.1.10 and later:
 
 ```sh
 openmerit update                         # check immediately, even if auto updates are off

@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.1.10 — 2026-10-26
 
 - Add default-on Claude Code background checks for compatible Scout skill/startup-rule updates, with daily checks, 15-minute failure backoff, non-blocking failure notices with the “update openmerit” fallback, manual `openmerit update`, persistent opt-out and a natural-language update instruction.
 - Verify npm package integrity and read a bounded instruction bundle without executing downloaded code. Preserve edited files, credentials, MCP configuration, privacy settings and project policy; serialize maintenance and recover interrupted instruction writes.
-- Disclose setup behavior, retain other Claude hooks/settings and require a new session to reliably load updated instructions. Existing installations need a one-time installer rerun after publication; incompatible releases require a reviewed manual upgrade. No npm or hosted publication is included.
+- Disclose setup behavior, retain other Claude hooks/settings and require a new session to reliably load updated instructions. Existing installations need a one-time installer rerun after publication; incompatible releases require a reviewed manual upgrade. Hosted Scout and npm remain separate releases.
+- Enable Scout setup usage/installation diagnostics by default, honoring telemetry, DNT and account-unlink opt-outs. Terminal/evaluation analytics remain opt-in; MCP prompt-content capture remains off.
 
 ## 0.1.9 — 2026-10-24
 
