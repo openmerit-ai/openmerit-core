@@ -1,0 +1,4 @@
+# Vendored unchanged from cloudflare/skills; keep upstream whitespace.
+wrangler/** -whitespace
+workers-best-practices/** -whitespace
+durable-objects/** -whitespace
