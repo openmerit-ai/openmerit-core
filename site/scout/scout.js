@@ -93,23 +93,6 @@ function modelEntry(model, prefix, taskTitle, steps = 0, taskIndex = 1) {
   if (model.speed && !model.measured) { const speed = element('p', 'price-detail'); speed.append(link('Reference timing by Artificial Analysis ↗', model.speed.url), document.createTextNode(` · ${model.speed.configurations.join(', ')}. ${model.speed.historical ? 'Archived reference measurement. ' : ''}Endpoint performance may differ.`)); body.append(speed); }
   detailCell.append(body); detail.append(detailCell); return { row, detail };
 }
-function showSources(sources, calibration) {
-  $('#source-list').replaceChildren(...sources.map(source => {
-    const detail = element('details', 'source-detail'), heading = element('summary'), coverage = source.coverage;
-    heading.append(element('span', '', source.name), element('span', 'source-role', source.role ?? 'Public source')); detail.append(heading);
-    if (coverage) detail.append(element('p', 'source-counts', source.refreshPolicy === 'manual-contract-review' ? 'Reviewed endpoint contract' : ['models', 'modelsdev'].includes(source.id) ? `${coverage.cataloguedModels} catalogued models` : source.id === 'huggingface' ? `${coverage.repositories} repositories · ${coverage.repositoriesWithReportedResults} with structured reported results` : `${coverage.benchmarkSeries} benchmark series · ${coverage.matchedModels} matched models · ${coverage.measurements} results`));
-    detail.append(element('p', '', source.measures ?? source.attribution), element('p', '', source.limits));
-    const date = element('p', 'source-dates', `${source.refreshPolicy === 'manual-contract-review' ? 'Contract reviewed' : 'Collected'} ${source.checkedAt ? new Date(source.checkedAt).toLocaleString() : '—'}.${source.publishedAt ? ` Published ${source.publishedAt}.` : ''}${source.status === 'failed' ? ' Refresh failed; previous data retained.' : ''}`);
-    if (coverage?.measurements) date.append(document.createTextNode(` Source dates supplied for ${coverage.datedResults}/${coverage.measurements} results; these may be publication dates.${coverage.latestSourceDate ? ` Latest: ${coverage.latestSourceDate.slice(0, 10)}.` : ''}${coverage.historicalResults ? ` Includes ${coverage.historicalResults} archived results.` : ''}`));
-    detail.append(date); const links = element('p', 'source-links'); links.append(link('Source ↗', source.url));
-    if (source.license) links.append(link('Source license ↗', source.license)); detail.append(links); return detail;
-  }));
-  if (calibration) {
-    const detail = element('details', 'source-detail'); detail.append(element('summary', '', calibration.name), element('p', '', calibration.limits));
-    for (const p of calibration.profiles) detail.append(element('p', 'source-dates', `${p.label} · ${p.casesPerModel} cases × ${p.testedModels} models · measured ${new Date(p.measuredAt).toLocaleDateString()} · ${p.active ? 'within seven-day window' : 'expired'}. ${p.scope.input} input / ${p.scope.output} output.`));
-    const links = element('p', 'source-links'); links.append(link('Calibration data ↗', calibration.url)); detail.append(links); $('#source-list').append(detail);
-  }
-}
 function showSpecialists(discovery, root) {
   const $ = selector => root.querySelector(`[data-field="${selector.slice(1)}"]`);
   const candidates = discovery?.candidates ?? [];
@@ -231,19 +214,6 @@ function showResult(data, roundTripMs) {
 function showIndex(data) {
   $('#index-counts').replaceChildren(...[`${data.availableModels ?? data.models} API models`, `${data.specialistRepositories ?? 0} HF repositories`, `${data.benchmarks} benchmark series`, `${data.sources.length} sources`].map(text => element('span', '', text)));
   $('#index-counts').title = `${data.benchmarksWithResults} benchmark series have matched results · ${data.endpoints ?? data.models} hosted endpoints · ${data.independentModels ?? 0} models with independent provider metadata · ${data.specialistRepositories ?? 0} specialist repositories`;
-  showSources(data.sources, data.calibration);
-  const capabilities = (data.wordCloud ?? []).map(c => ({ ...c, matched: !!data.task?.capabilities?.some(match => match.id === c.id) }));
-  capabilities.sort((a, b) => Number(b.matched) - Number(a.matched));
-  $('#capability-list').replaceChildren(...capabilities.map(c => {
-    const item = element('li', 'capability-item'), name = element('div', 'capability-name', c.label);
-    item.dataset.matched = String(c.matched);
-    if (c.matched) {
-      const match = element('span', 'capability-match', '✓'); match.setAttribute('aria-hidden', 'true'); match.title = 'Task match';
-      name.append(match, element('span', 'sr-only', ' — Task match'));
-    }
-    item.append(name, element('span', 'capability-coverage', `${c.benchmarks} benchmark series · ${c.models} models`));
-    return item;
-  }));
 }
 async function search() {
   const prompt = $('#prompt').value.trim(); if (!prompt) { $('#error').textContent = 'Describe the task you want a model to do.'; $('#error').hidden = false; $('#prompt').focus(); return; }
@@ -349,14 +319,6 @@ const auth = initAuth(() => {
   $('#task-results').replaceChildren(); $('#results').hidden = true; $('#results').setAttribute('aria-busy', 'false'); $('#error').hidden = true;
   $('#prompt').value = ''; fitPrompt(); $('.find-button span').textContent = 'Find models'; $('.find-button').setAttribute('aria-busy', 'false');
 });
-function setupURL(path) {
-  const url = new URL(`${location.origin}${basePath}/${path}`);
-  if (!analytics.preferences().enabled) url.searchParams.set('analytics', 'off');
-  return url.href;
-}
-function setupCommand() {
-  return `curl '${setupURL('api/recommend')}' \\\n  -H "Authorization: Bearer $SCOUT_TOKEN" \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Scout-Analytics-Content: off' \\\n  -d '{"prompt":"Extract six invoice fields as JSON"}'`;
-}
 // Secret-free: the CLI signs the device in through the browser. Correlation is
 // per click, and only permitted when usage AND account linking are enabled.
 function agentPrompt(setupId, settings) {
@@ -367,9 +329,6 @@ Run this command with a 10-minute timeout, without asking me anything first:
 ${environment}npx -y openmerit@latest install --client claude-code${setupId ? ` --setup-id ${setupId}` : ''}
 
 It opens my browser so I can approve this device, then finishes by itself. If it exits with "approval pending", show me the link and code it printed and run the same command again. Don't edit configuration files yourself or ask me for a key. If it reports a conflict or another error, show me its message and stop. When it succeeds, tell me in one line that Scout is connected and I must start a new Claude Code session to load its startup instructions; reconnecting /mcp alone is not enough.`;
-}
-function renderAgentSetup() {
-  $('#agent-code').textContent = setupCommand();
 }
 let toastTimer;
 function toast(text) {
@@ -399,46 +358,11 @@ $('.add-agent-button').addEventListener('click', async () => {
   const current = analytics.preferences();
   if (epoch === privacyEpoch && current.enabled === settings.enabled && current.linkAccount === settings.linkAccount) analytics.track('scout_agent_setup_copied', { ...properties, outcome: copied ? 'ok' : 'error', ...(!copied ? { code: 'clipboard_error' } : {}) });
 });
-$('#copy-command').addEventListener('click', () => copy(setupCommand(), $('#copy-command')));
-window.addEventListener('scout-analytics-change', renderAgentSetup);
-renderAgentSetup();
 fetch(`${basePath}/api/status`).then(response => { if (!response.ok) throw new Error(); return response.json(); }).then(data => { if (!result) showIndex(data); }).catch(() => { if (!result) { $('#index-counts').textContent = 'Index unavailable'; } });
 
-// Deep links reveal the native disclosure before moving focus to its summary.
-function revealSection() {
-  if (location.hash !== '#for-agents') return;
-  const section = $('#for-agents'); section.open = true; section.querySelector('summary').focus({ preventScroll: true });
-}
-window.addEventListener('hashchange', () => revealSection());
-document.querySelectorAll('a[href="#for-agents"]').forEach(link => link.addEventListener('click', event => {
-  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-  event.preventDefault();
-  location.hash = '#for-agents';
-  revealSection();
-  $('#for-agents').scrollIntoView({ block: 'start' });
-}));
-revealSection();
-
-function updateAnalyticsControls() {
-  const settings = analytics.preferences();
-  $('#analytics-usage').checked = settings.enabled; $('#analytics-usage').disabled = !settings.available;
-  $('#analytics-content').checked = settings.content; $('#analytics-content').disabled = !settings.enabled || !settings.contentAvailable;
-  $('#analytics-unlinked').checked = !settings.linkAccount; $('#analytics-unlinked').disabled = !settings.enabled;
-  $('#beta-data-notice').textContent = settings.content
-    ? 'Beta: we log task text and recommendations to improve Scout. Task text has a 30-day retention window in PostHog. Don’t include confidential data.'
-    : 'Task text sharing is off. OpenAI still processes your task. Don’t include confidential data.';
-  $('#analytics-status').textContent = !settings.available ? 'Analytics is unavailable or disabled by your browser privacy settings.'
-    : !settings.contentAvailable ? 'Prompt sharing is not enabled on this deployment.'
-    : settings.contentDefault ? 'Beta prompt logging defaults on unless you previously opted out. Task text uses PostHog’s 30-day AI storage; recommendation metrics remain longer.'
-    : 'Prompt sharing is optional and off by default on this deployment. Shared task text uses PostHog’s 30-day AI storage.';
-}
-for (const id of ['#analytics-usage', '#analytics-content', '#analytics-unlinked']) $(id).addEventListener('change', () => analytics.setPreferences($('#analytics-usage').checked, $('#analytics-content').checked, !$('#analytics-unlinked').checked));
-$('.beta-data-notice a[href="#analytics-settings"]').addEventListener('click', () => { $('#analytics-settings').open = true; $('#analytics-settings summary').focus(); });
-if (location.hash === '#analytics-settings') $('#analytics-settings').open = true;
+if (location.hash === '#analytics-settings') location.replace('/scout/privacy/');
 window.addEventListener('scout-analytics-change', () => {
   privacyEpoch++; failedSearch = undefined; resultTrace = undefined;
   // Existing result closures must not carry an earlier identity into feedback.
   document.querySelector('.result-feedback')?.remove();
-  updateAnalyticsControls();
 });
-updateAnalyticsControls();

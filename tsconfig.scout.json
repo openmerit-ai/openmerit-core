@@ -3,7 +3,8 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM"],
+    "allowJs": true,
     "types": ["node"]
   },
-  "include": ["scout/**/*.ts"]
+  "include": ["scout/**/*.ts", "site/scout/privacy/**/*.ts"]
 }

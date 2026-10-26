@@ -18,11 +18,11 @@ function loadScript(src, publishableKey) {
 export function initAuth(onAccountChange) {
   const button = document.querySelector('#sign-in'), account = document.querySelector('#user-account');
   const prompt = document.querySelector('#prompt'), error = document.querySelector('#error');
-  const returnUrl = `${location.origin}${basePath}/`;
+  const returnUrl = `${location.origin}${location.pathname}`;
   let loading, previousUser, mounted = false;
   try {
-    const draft = sessionStorage.getItem(draftKey); sessionStorage.removeItem(draftKey);
-    if (draft && !prompt.value) { prompt.value = draft.slice(0, 4000); prompt.dispatchEvent(new Event('input')); }
+    const draft = sessionStorage.getItem(draftKey); if (prompt) sessionStorage.removeItem(draftKey);
+    if (draft && prompt && !prompt.value) { prompt.value = draft.slice(0, 4000); prompt.dispatchEvent(new Event('input')); }
   } catch { /* Storage can be disabled; sign-in still works. */ }
 
   function client() {
@@ -62,7 +62,7 @@ export function initAuth(onAccountChange) {
 
   async function signIn() {
     const clerk = await client();
-    try { if (prompt.value) sessionStorage.setItem(draftKey, prompt.value); } catch { /* Optional storage. */ }
+    try { if (prompt?.value) sessionStorage.setItem(draftKey, prompt.value); } catch { /* Optional storage. */ }
     clerk.openSignIn({ forceRedirectUrl: returnUrl, signUpForceRedirectUrl: returnUrl });
     analytics.track('scout_sign_in_opened');
   }
