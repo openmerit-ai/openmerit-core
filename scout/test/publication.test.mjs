@@ -22,20 +22,18 @@ async function fixture() {
   const get=key=>JSON.parse(objects.get(key));
   objects.set('active.json',JSON.stringify({key:'manifests/old.json',publication:{id:'old'}}));
   objects.set('previous.json',JSON.stringify({publication:{id:'older'}}));
-  objects.set('research-backlog.json',JSON.stringify([{key:'done'},{key:'pending'}]));
   await coordinator().begin('run');
-  const staged={key:'manifests/new.json',previousVersion:'old',publication:{id:'new'},completedResearchKeys:['done']};
+  const staged={key:'manifests/new.json',previousVersion:'old',publication:{id:'new'}};
   return {coordinator,storage,objects,get,staged,interrupt:(key,after)=>{fault={key,after};}};
 }
 
-for(const key of ['previous.json','active.json','research-backlog.json','health.json','publications/new.json','lease'])for(const after of [false,true]) {
+for(const key of ['previous.json','active.json','health.json','publications/new.json','lease'])for(const after of [false,true]) {
   test(`publication resumes after interruption ${after?'after':'before'} ${key}`,async()=>{
     const f=await fixture();f.interrupt(key,after);
     await assert.rejects(f.coordinator().publish('run',f.staged),/Injected/);
     assert.deepEqual(await f.coordinator().publish('run',f.staged),{published:'new'});
     assert.equal(f.get('active.json').publication.id,'new');
     assert.equal(f.get('previous.json').publication.id,'old');
-    assert.deepEqual(f.get('research-backlog.json'),[{key:'pending'}]);
     assert.equal(f.get('health.json').snapshotVersion,'new');
     assert.equal(f.get('health.json').refreshStatus,'idle');
     assert.equal(f.get('publications/new.json').runId,'run');

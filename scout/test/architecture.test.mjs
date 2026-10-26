@@ -7,7 +7,6 @@ import {toRecords,toSnapshot,validateRecords,validatePublication} from '../recor
 import {stageCatalogue,createSnapshotReader,putJSON} from '../store.mjs';
 import {createIndex,recommend} from '../rank.mjs';
 import {retrieve,narrowIndex,prepareSearch} from '../search-index.mjs';
-import {validatedResearch,ParallelResearch,planResearch} from '../research.mjs';
 import {publicURL} from '../utils.mjs';
 
 const bench=(id,description='Visual test')=>({id,name:id,source:'fixture',tags:[],definition:{description,sourceURL:'https://example.com/method'}});
@@ -55,32 +54,6 @@ test('publication refuses to lose previously validated evidence and leaves activ
   const records=toRecords(snapshot),bad=structuredClone(records);bad.benchmarks=bad.benchmarks.filter(b=>b.id!==records.benchmarks[0].id);bad.observations=bad.observations.filter(e=>e.benchmark!==records.benchmarks[0].id);
   await assert.rejects(validatePublication(bad,records),/discard/);
 });
-test('research requires per-record citations with excerpts; list-level citations cannot authorize rows',async()=>{
-  const output={type:'json',content:{records:[{kind:'benchmark',name:'New',url:'https://example.com',description:'Real scope'}]},basis:[{field:'records',citations:[{url:'https://example.com',excerpts:['A real benchmark.']}]}]};
-  assert.deepEqual(await validatedResearch({output}),[]);output.basis[0].field='records.0';assert.equal((await validatedResearch({output})).length,1);
-  output.basis[0].citations[0].url='http://127.0.0.1/private';assert.deepEqual(await validatedResearch({output}),[]);
-});
-test('Parallel uses only server credentials and rejects invalid runs and malformed structured results',async()=>{
-  let called=0;const p=new ParallelResearch({apiKey:'server-secret',fetcher:async(url,o)=>{called++;assert.equal(o.headers['x-api-key'],'server-secret');assert.ok(url.startsWith('https://api.parallel.ai/'));return Response.json({run_id:'trun_test'});}});
-  assert.equal(await p.start({objective:'Public benchmark research'}),'trun_test');await assert.rejects(p.poll('../secret'),/Invalid/);assert.equal(called,1);
-  assert.equal(publicURL('http://169.254.169.254/latest'),null);
-});
-test('unchanged recently researched subjects are not researched again',async()=>{
-  const tiny={benchmarks:[bench('a')],catalogue:[]},jobs=await planResearch(tiny,[],{limit:2});
-  const next=await planResearch(tiny,[{subjectId:'a',subjectHash:jobs[0].subjectHash,checkedAt:new Date().toISOString()}],{limit:2});assert.deepEqual(next.map(x=>x.id),['discovery']);
-});
-test('hourly research covers six source categories within budget and preserves pending paid jobs',async()=>{
- const tiny={benchmarks:Array.from({length:30},(_,i)=>bench(`b${i}`)),catalogue:[]},now=Date.parse('2026-10-21T00:00:00Z');
- const jobs=await planResearch(tiny,[],{now}),discovery=jobs.filter(j=>j.id.startsWith('discovery'));
- assert.equal(jobs.length,24);assert.equal(discovery.length,6);
- const objectives=discovery.map(j=>j.objective).join('\n');
- for(const source of ['openrouter.ai','vercel.com/docs/ai-gateway','Lab launch','artificialanalysis.ai','arena.ai','semianalysis.com','citriniresearch.com','huggingface.co','docs.vllm.ai','industry-specialist'])assert.ok(objectives.includes(source),source);
- const pending=jobs.slice(-4).map(job=>({job,key:'saved'}));
- const next=await planResearch({...tiny,researchPending:pending},[],{now:now+3600_000,limit:5});
- assert.equal(next.length,5);assert.deepEqual(next.slice(0,4),pending.map(p=>p.job));assert.equal(new Set(next.map(j=>j.id)).size,5);
- const focused=[];for(let i=0;i<6;i++)focused.push((await planResearch(tiny,[],{now:now+i*3600_000,limit:1}))[0].objective);
- assert.equal(new Set(focused).size,6);assert.deepEqual(await planResearch(tiny,[],{now,limit:0}),[]);
-});
 test('candidate retrieval remains bounded and explicit inventories never widen',()=>{
   const index=createIndex(snapshot),task={weights:{coding:3},workload:{priority:'balanced'}};
   assert.ok(retrieve(index,task).length<=registry.policy.candidateLimit+index.search.calibrationModels.length);
@@ -124,9 +97,14 @@ test('research observations and routes survive an independent known-feed refresh
   const {retainResearch}=await import('../pipeline.mjs');
   const route={id:'research-route',source:'research:example.com'};
   const observation={benchmark:'b',score:.6,provenance:[{url:'https://example.com'}],raw:{value:60}};
-  const previous={benchmarks:[{id:'b',source:'research:example.com'}],models:[{id:'m',evidence:[observation]}],catalogue:[{id:'m',endpoints:[route]}],sources:[],registry:{...registry,policy:{...registry.policy,maxSourceAgeHours:registry.policy.maxSourceAgeHours+100,retiredSetting:1}}};
-  const next={benchmarks:[],models:[],catalogue:[{id:'m',endpoints:[]}],sources:[]};retainResearch(next,previous);
+  const research={description:'Collected methodology description.'};
+  const previous={benchmarks:[{id:'b',source:'research:example.com'},{id:'feed-b',source:'epoch',research}],models:[{id:'m',evidence:[observation]}],catalogue:[{id:'m',endpoints:[route]}],sources:[{id:'research:example.com',status:'ok',checkedAt:'2026-01-01T00:00:00Z',maxAgeHours:168}],registry:{...registry,policy:{...registry.policy,maxSourceAgeHours:registry.policy.maxSourceAgeHours+100,retiredSetting:1}}};
+  const next={benchmarks:[{id:'feed-b',source:'epoch'}],models:[],catalogue:[{id:'m',endpoints:[]}],sources:[]};retainResearch(next,previous);
   assert.deepEqual(next.models[0].evidence,[observation]);assert.deepEqual(next.catalogue[0].endpoints,[route]);
+  // Research is no longer collected: its descriptions stay and its sources are never due.
+  assert.deepEqual(next.benchmarks.find(b=>b.id==='feed-b').research,research);
+  assert.equal(next.sources[0].refreshPolicy,'retained');
+  assert.equal(createIndex({...snapshot,registry,sources:next.sources}).cachedStatus.stale,false);
   // A released policy change reaches the next publication instead of being masked by the previous one.
   assert.equal(next.registry.policy.maxSourceAgeHours,registry.policy.maxSourceAgeHours);assert.equal(next.registry.policy.retiredSetting,1);
 });
@@ -137,12 +115,6 @@ test('published-reader candidate pool equals local retrieval and is independent 
   const lazy=await(await createSnapshotReader(bucket).view()).loadTask(task,null,null),local=narrowIndex(createIndex({...snapshot,registry}),task,null,null);
   assert.deepEqual(lazy.models.map(m=>m.id).sort(),local.models.map(m=>m.id).sort());
   assert.ok(lazy.models.length<=registry.policy.candidateLimit+lazy.search.calibrationModels.length);
-});
-
-test('periodic research gets a new receipt epoch without invalidating semantic content identities',async()=>{
-  const tiny={benchmarks:[bench('a')],catalogue:[]};const now=Date.now();
-  const a=await planResearch(tiny,[],{now,limit:2}),b=await planResearch(tiny,[],{now:now+8*86400_000,limit:2});
-  assert.equal(a[0].subjectHash,b[0].subjectHash);assert.notEqual(a[0].epoch,b[0].epoch);
 });
 
 test('cold search reads a bounded number of prepared pools instead of model point reads',async()=>{
@@ -171,55 +143,6 @@ test('overlapping capability pools preserve candidates and full evidence with fe
  for(const m of index.models)assert.deepEqual(raw(m.evidence),raw(snapshot.models.find(x=>x.id===m.id).evidence));
 });
 
-test('Parallel calls fetch without rebinding the native Worker receiver',async()=>{
- const fetcher=async function(){assert.equal(this,undefined);return Response.json({run_id:'trun_test'});};
- assert.equal(await new ParallelResearch({apiKey:'fixture',fetcher}).start({objective:'Fixture'}),'trun_test');
-});
-
-test('unfinished discovery resumes its original paid run across an hourly boundary',async()=>{
- const tiny={benchmarks:[bench('a')],catalogue:[]};const now=Date.now();
- const jobs=await planResearch(tiny,[],{now,limit:2}),discovery=jobs.find(j=>j.id==='discovery');
- const next=await planResearch({...tiny,researchPending:[{job:discovery,key:'existing-receipt'}]},[],{now:now+3600_000,limit:2});
- assert.equal(next[0].id,'discovery');assert.equal(next[0].subjectHash,discovery.subjectHash);assert.equal(next.filter(j=>j.id==='discovery').length,1);assert.equal(next.length,2);
-});
-
-test('research interpretation outage is not recorded as a successful rejection or empty update',async()=>{
- const {integrateResearch}=await import('../enrich.mjs');
- const r={id:'benchmark:fixture',kind:'benchmark',name:'Fixture',url:'https://example.com',description:'Read diagrams.',contentHash:'changed',citations:[{url:'https://example.com',excerpts:['Read diagrams.']}],capabilities:[],observations:[],endpoints:[]};
- await assert.rejects(integrateResearch({...snapshot,registry},[{subjectId:'new',records:[r]}],{apiKey:'fixture',fetcher:async()=>Response.json({error:{code:'credit_balance_exhausted'}},{status:429})}),/HTTP 429/);
-});
-
-test('rediscovered benchmark primary keys update once when semantic linking declines a cross-record match',async()=>{
- const {integrateResearch}=await import('../enrich.mjs');
- const record={id:'benchmark:opaque',kind:'benchmark',name:'Opaque evaluation',url:'https://example.com/evaluation',version:'1',description:'Updated methodology.',contentHash:'source-v1',citations:[{url:'https://example.com/evaluation',excerpts:['Updated methodology.']}],capabilities:[],observations:[],endpoints:[]};
- const existing={...bench(record.id),name:record.name},base={...snapshot,registry,benchmarks:[...snapshot.benchmarks,existing]};
- const fetcher=async(_url,options)=>Response.json({answers:JSON.parse(options.body).questions.map(q=>({name:q.name,type:'choice',choice:q.name==='identity'?'none':'yes',confidence:.99}))});
- const first=await integrateResearch(base,[{subjectId:'discovery',records:[record,record]}],{apiKey:'fixture',fetcher});
- assert.equal(first.benchmarks.filter(b=>b.id===record.id).length,1);assert.equal(first.benchmarks.length,base.benchmarks.length);assert.equal(first.benchmarks.find(b=>b.id===record.id).research.description,record.description);validateRecords(toRecords(first));
- const repeated=await integrateResearch(first,[{subjectId:'discovery',records:[record]}],{apiKey:'fixture',fetcher:()=>assert.fail('An unchanged verified inspection must be reused')});assert.equal(repeated.benchmarks.length,first.benchmarks.length);
- const distinct={...record,id:'benchmark:another-version',version:'2',contentHash:'source-v2'};
- const next=await integrateResearch(repeated,[{subjectId:'discovery',records:[distinct]}],{apiKey:'fixture',fetcher});assert.equal(next.benchmarks.length,first.benchmarks.length+1);validateRecords(toRecords(next));
-});
-
-test('the D1 research ledger reuses verified inspections per record and feeds provider planning',async()=>{
- const {integrateResearch}=await import('../enrich.mjs'),{evidenceLedger}=await import('../evidence-db.ts'),{LocalD1}=await import('./helpers-projection.mjs');
- const db=new LocalD1(),{research}=await evidenceLedger(db);
- const record={id:'benchmark:opaque',kind:'benchmark',name:'Opaque evaluation',url:'https://example.com/evaluation',version:'1',description:'Updated methodology.',contentHash:'source-v1',citations:[{url:'https://example.com/evaluation',excerpts:['Updated methodology.']}],capabilities:[],observations:[],endpoints:[]};
- const base={...snapshot,registry,benchmarks:[...snapshot.benchmarks,{...bench(record.id),name:record.name}]};
- const fetcher=async(_url,options)=>Response.json({answers:JSON.parse(options.body).questions.map(q=>({name:q.name,type:'choice',choice:q.name==='identity'?'none':'yes',confidence:.99}))});
- const first=await integrateResearch(base,[{subjectId:'discovery',records:[record]}],{apiKey:'fixture',fetcher,research});
- assert.deepEqual(first.research,[]);
- // The snapshot carries no research; the reused inspection can only come from the ledger.
- const repeated=await integrateResearch(base,[{subjectId:'discovery',records:[record]}],{apiKey:'fixture',fetcher:()=>assert.fail('An unchanged verified inspection must be reused'),research});
- assert.equal(repeated.benchmarks.find(b=>b.id===record.id).research.description,record.description);
- const changed=await integrateResearch(base,[{subjectId:'discovery',records:[{...record,contentHash:'source-v2'}]}],{apiKey:'fixture',fetcher:async()=>Response.json({error:{code:'credit_balance_exhausted'}},{status:429}),research}).catch(e=>e);
- assert.match(String(changed),/HTTP 429/);
- const provider={id:'provider:lab',kind:'provider',name:'Lab',url:'https://example.com/models',contentHash:'p1'};
- await research.save([provider]);
- const jobs=await planResearch({benchmarks:[],catalogue:[]},[],{limit:5,providers:await research.providers()});
- assert.ok(jobs.some(j=>j.id===provider.id&&j.subjectHash==='p1'&&j.objective.includes(provider.url)));
-});
-
 test('catalogue routes are replaced each collection and, if D1 fails, the previous routes stay with a failed source',async()=>{
  const {addCatalogueRoutes}=await import('../pipeline.mjs'),{loadCatalogue}=await import('../catalogue-routes.ts');
  const route={id:'catalogue:host:chat-completions:m',provider:'Host',modelId:'m',source:'catalogue'};
@@ -234,16 +157,7 @@ test('catalogue routes are replaced each collection and, if D1 fails, the previo
  assert.deepEqual(fresh.catalogue[0].endpoints.map(e=>e.id),['or'],'a route the catalogue no longer lists is dropped');assert.equal(fresh.sources[0].status,'ok');
 });
 
-test('rediscovered model primary keys update routes instead of duplicating catalogue entries',async()=>{
- const {integrateResearch}=await import('../enrich.mjs');
- const record={id:'model:opaque',kind:'model',name:'Opaque checkpoint',publisher:'Lab',url:'https://example.com/model',version:'1',description:'A documented model.',contentHash:'model-v1',citations:[{url:'https://example.com/model',excerpts:['A documented model.']}],capabilities:[],observations:[],facts:[],endpoints:[{provider:'Lab',modelId:'opaque-1',protocol:'openai-chat',api:'https://example.com/v1/chat/completions',url:'https://example.com/model',inputs:['text'],outputs:['text'],parameters:[],contextTokens:null,inputPerMillion:null,outputPerMillion:null}]};
- const base={...snapshot,registry,catalogue:[...(snapshot.catalogue??snapshot.models),{id:record.id,name:record.name,provider:'Lab',modalities:[],parameters:[],endpoints:[]}]};
- const fetcher=async(_url,options)=>Response.json({answers:JSON.parse(options.body).questions.map(q=>({name:q.name,type:'choice',choice:q.name==='identity'?'none':'yes',confidence:.99}))});
- const result=await integrateResearch(base,[{subjectId:'discovery',records:[record,record]}],{apiKey:'fixture',fetcher});
- const rows=result.catalogue.filter(m=>m.id===record.id);assert.equal(rows.length,1);assert.equal(rows[0].endpoints.length,1);assert.equal(rows[0].endpoints[0].modelId,'opaque-1');validateRecords(toRecords(result));
-});
-
-test('semantic-service admission failure prevents any new paid research work',async()=>{
+test('semantic-service admission failure stops the refresh before any paid work',async()=>{
  const {runRefresh}=await import('../pipeline.mjs');let failure=null;const calls=[];
  const coordinator={begin:async()=>({acquired:true}),fail:async(_id,message)=>{failure=message;}};
  const env={SCOUT_CATALOGUE:new Bucket(),SCOUT_CONTROL:{getByName:()=>coordinator},OPENAI_API_KEY:'fixture'};

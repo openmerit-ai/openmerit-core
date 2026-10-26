@@ -12,7 +12,7 @@ const round = (value, places = 2) => Number.isFinite(value) ? Math.round(value *
 // Workers can freeze the clock during synchronous execution. Zero is not a timing measurement.
 const elapsed = start => { const duration = performance.now() - start; return duration > 0 ? Math.max(.01, round(duration)) : null; };
 const staleSources = (snapshot, now) => snapshot.sources.some(s => {
-  if (s.refreshPolicy === 'manual-contract-review') return false;
+  if (s.refreshPolicy === 'manual-contract-review' || s.refreshPolicy === 'retained') return false;
   const hours = s.maxAgeHours ?? snapshot.registry?.policy.maxSourceAgeHours ?? defaultRegistry.policy.maxSourceAgeHours;
   return !Number.isFinite(Date.parse(s.checkedAt)) || now - Date.parse(s.checkedAt) > hours * 3600_000;
 });

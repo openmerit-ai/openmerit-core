@@ -50,7 +50,7 @@ test('slow optional verification returns conservative answers before its own dea
 });
 test('freshness follows source policy, including unknown dates and genuine feed failures',()=>{
   const now=Date.now(),hours=ago=>new Date(now-ago*3600_000).toISOString();
-  const sources=[{id:'feed',status:'ok',checkedAt:hours(.5)},{id:'arbitrary-research-publisher',status:'ok',checkedAt:hours(24),maxAgeHours:registry.policy.maxResearchAgeHours},{id:'contract',status:'ok',checkedAt:null,refreshPolicy:'manual-contract-review'}];
+  const sources=[{id:'feed',status:'ok',checkedAt:hours(.5)},{id:'arbitrary-research-publisher',status:'ok',checkedAt:hours(24),maxAgeHours:168},{id:'contract',status:'ok',checkedAt:null,refreshPolicy:'manual-contract-review'},{id:'research:retained',status:'ok',checkedAt:hours(24*30),refreshPolicy:'retained'}];
   const current=()=>createIndex({...snapshot,registry,sources});
   assert.equal(indexStatus(current(),now).stale,false);
   sources[1].checkedAt=hours(169);assert.equal(indexStatus(current(),now).stale,true);

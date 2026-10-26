@@ -23,16 +23,6 @@ export function providerMetadata(data) {
   if(!data||typeof data!=='object')return [];
   return Object.values(data).flatMap(feed=>typeof feed?.name==='string'?Object.values(feed.models??{}).flatMap(m=>safe(m.id)?[{service:feed.name,modelId:m.id,name:m.name??m.id,family:typeof m.family==='string'?m.family:null,release_date:typeof m.release_date==='string'&&Number.isFinite(Date.parse(m.release_date))?m.release_date:null,url:catalogueURL}]:[]):[]);
 }
-export async function catalogueInventory(reported,existing,checkedAt) {
-  const covered=new Set(existing.flatMap(m=>(m.endpoints??[]).map(e=>JSON.stringify([e.provider,e.modelId]))));
-  const rows=[];
-  for(const record of reported) {
-    if(covered.has(JSON.stringify([record.service,record.modelId])))continue;
-    rows.push({id:`listed:${await digest([record.service,record.modelId])}`,name:record.name,provider:null,endpoints:[],evidence:[],facts:[],modalities:[],outputModalities:[],parameters:[],inputPrice:null,outputPrice:null,speed:null,
-      catalogueSource:{service:record.service,modelId:record.modelId},discovery:{source:'modelsdev',url:record.url,checkedAt}});
-  }
-  return rows;
-}
 // A text side output (for example lyrics accompanying audio) is not a general
 // text-generation contract. Mixed-output endpoints need a reviewed task contract.
 export const textOutputOnly = outputs => Array.isArray(outputs) && outputs.length === 1 && outputs[0] === 'text';

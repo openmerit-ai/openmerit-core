@@ -499,9 +499,6 @@
     "candidateLimit": 128,
     "profileLimit": 64,
     "refreshConcurrency": 6,
-    "researchPerHour": 24,
-    "researchProcessor": "base",
-    "maxResearchAgeHours": 168,
     "maxSourceAgeHours": 13
   }
 }

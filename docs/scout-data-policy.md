@@ -57,9 +57,8 @@ We use third-party service providers for the following roles:
 | AI task processing | Processes task descriptions and related public evidence for interpretation, matching and query embeddings. The provider's API retention policies apply; Scout does not promise zero retention by that provider. |
 | Authentication and identity | Provides sign-in and account/session handling. The identity service you choose is contacted during sign-in. |
 | Product analytics | Stores optional product/account analytics, recommendation diagnostics and separately enabled prompt content. Scout uses an EU analytics ingestion endpoint; this is not a claim that every provider processes data only in the EU. |
-| Public-source research | Helps research public model and benchmark information, without receiving visitor prompts. |
 
-Scout's twice-daily research uses public model/benchmark sources and a research service provider. Visitor prompts are not sent to that research provider, benchmark publishers or the recommended-model providers as part of that research. Opening a provider link takes you to a separate service under its own policies.
+Scout's twice-daily refresh reads public model and benchmark sources directly; it no longer uses a research service provider. Visitor prompts are not sent to benchmark publishers or the recommended-model providers as part of that refresh. Opening a provider link takes you to a separate service under its own policies.
 
 ## Storage and retention
 

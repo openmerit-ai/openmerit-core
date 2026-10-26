@@ -141,17 +141,21 @@ test('methodology extraction retains section boundaries and excludes scripts', (
 
 test('shared methodology is narrowed before capability interpretation; sibling sections cannot lend evidence', async () => {
   let calls = 0;
-  const methodologies = { fixture: { url: 'https://example.org/method', sections: [{ title: 'Sibling', text: 'Persistent memory with tools' }, { title: 'Exact subset', text: 'Plain text spelling accuracy' }] } };
+  // Page order puts the shared overview first; the benchmark's own section must lead.
+  const methodologies = { fixture: { url: 'https://example.org/method', sections: [{ title: 'Overview', text: 'Shared testing parameters' }, { title: 'Sibling', text: 'Persistent memory with tools' }, { title: 'Exact subset', text: 'Plain text spelling accuracy' }] } };
+  // The section titled with the benchmark's name is kept without asking; Decisions judges the rest.
+  const [overview, , exact] = methodologies.fixture.sections;
   const fetcher = async (_u, o) => {
     const body = JSON.parse(o.body); calls++;
-    if (body.questions[0].name.startsWith('section_')) return Response.json({answers:body.questions.map((q,i)=>({name:q.name,type:'choice',choice:i===1?'yes':'no',confidence:.99}))});
+    if (body.questions[0].name.startsWith('section_')) {assert.equal(body.questions.length,2);return Response.json({answers:body.questions.map((q,i)=>({name:q.name,type:'choice',choice:i===0?'yes':'no',confidence:.99}))});}
     const input = JSON.parse(body.input.split('\n').at(-1));
-    assert.deepEqual(input.methodology, [methodologies.fixture.sections[1]]);
+    assert.deepEqual(input.methodology, [exact, overview]);
     assert.ok(!body.input.includes('Persistent memory'));
     return mock()(_u, o);
   };
-  const prepared = await prepareBenchmarks([bench('exact')], [], { ...settings(fetcher), methodologies });
-  assert.equal(calls, 2); assert.deepEqual(prepared[0].methodologySelection.sections.map(s=>s.title), ['Exact subset']);
+  // An earlier research description no longer suppresses the publisher's methodology.
+  const prepared = await prepareBenchmarks([{ ...bench('exact'), research: { description: 'Collected.', methodology: 'Collected methodology.' } }], [], { ...settings(fetcher), methodologies });
+  assert.equal(calls, 2); assert.deepEqual(prepared[0].methodologySelection.sections.map(s=>s.title), ['Exact subset', 'Overview']);
   await prepareBenchmarks(prepared, prepared, { ...settings(fetcher), methodologies }); assert.equal(calls, 2);
 });
 

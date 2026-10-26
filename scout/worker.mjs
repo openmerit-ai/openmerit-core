@@ -5,7 +5,6 @@ import { handleConnect } from './connect.mjs';
 import { createRecommender } from './recommend.mjs';
 import { createSnapshotReader, getJSON, putJSON } from './store.mjs';
 import { runRefresh } from './pipeline.mjs';
-import { ParallelResearch } from './research.mjs';
 import { indexStatus } from './rank.mjs';
 import { scoutAccess, sessionUser } from './auth.mjs';
 import { createProductAnalytics } from './product-analytics.mjs';
@@ -37,9 +36,6 @@ export class ScoutPublication extends DurableObject {
     if((current?.publication.id??null)!==staged.previousVersion&&current?.publication.id!==staged.publication.id)throw new Error('Newer catalogue already published.');
     if(current&&current.publication.id!==staged.publication.id)await putJSON(this.env.SCOUT_CATALOGUE,'previous.json',current);
     if(current?.publication.id!==staged.publication.id)await putJSON(this.env.SCOUT_CATALOGUE,'active.json',{...staged,runId:id,publishedAt:new Date().toISOString()});
-    const completed=new Set(staged.completedResearchKeys??[]),backlog=await getJSON(this.env.SCOUT_CATALOGUE,'research-backlog.json')??[];
-    await putJSON(this.env.SCOUT_CATALOGUE,'research-backlog.json',backlog.filter(p=>!completed.has(p.key)));
-    if(this.env.SCOUT_INDEX&&staged.completedResearchSubjects?.length)await this.env.SCOUT_INDEX.prepare('UPDATE scout_discovery SET researched_at=? WHERE id IN (SELECT value FROM json_each(?))').bind(new Date().toISOString(),JSON.stringify(staged.completedResearchSubjects)).run();
     await putJSON(this.env.SCOUT_CATALOGUE,'health.json',{refreshStatus:'idle',scheduler:'cloudflare-twice-daily',lastAttemptAt:new Date().toISOString(),snapshotVersion:staged.publication.id});
     await putJSON(this.env.SCOUT_CATALOGUE,receiptKey,{runId:id,publicationId:staged.publication.id});
     await this.ctx.storage.delete('run');return {published:staged.publication.id};
@@ -55,12 +51,6 @@ export class ScoutPublication extends DurableObject {
 }
 export class ScoutRefresh extends WorkflowEntrypoint {
   async run(event,step) {
-    // Administrative, read-only credential check through Cloudflare's workflow
-    // control plane. This is never exposed as a public HTTP route.
-    if(event.payload?.probeRunId)return step.do('check-research-access',async()=>{
-      try{return {status:(await new ParallelResearch({apiKey:this.env.PARALLEL_API_KEY}).poll(event.payload.probeRunId)).status};}
-      catch(error){return {status:'unavailable',error:error.message,configured:!!this.env.PARALLEL_API_KEY};}
-    });
     return runRefresh(this.env,step,event.instanceId);
   }
 }

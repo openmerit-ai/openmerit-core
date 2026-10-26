@@ -3,17 +3,13 @@ import { refreshSnapshot } from './sources.mjs';
 import { refreshBenchmarks } from './benchmarks.mjs';
 import { refreshSpecialists } from './specialists.mjs';
 import { registry } from './registry.mjs';
-import { ParallelResearch, planResearch } from './research.mjs';
-import { integrateResearch } from './enrich.mjs';
 import { toRecords, toSnapshot, publicationPredecessor } from './records.mjs';
 import { getJSON, putJSON, stageCatalogue, readPublished, publishedRecordsKey, researchKey } from './store.mjs';
-import { digest, concurrent, choice, decode } from './utils.mjs';
+import { choice, decode } from './utils.mjs';
 import { requestDecisions } from './decisions.mjs';
 import { refreshModelMetadata } from './metadata.mjs';
 import {structured} from './structured.mjs';
 import {embed} from './evidence-search.mjs';
-import {discoverInventory,archiveListings,discoveryBacklog} from './discovery.mjs';
-import {catalogueInventory} from './catalogue.mjs';
 import {catalogueSources,importCatalogueSource,rebuildOfferings} from './catalogue-db.ts';
 import {refreshHubOrgs,crawlHubModels} from './catalogue-hub.ts';
 import {loadCatalogue,catalogueRouteSource} from './catalogue-routes.ts';
@@ -35,7 +31,9 @@ export function retainResearch(next,previous) {
     if(!measured){measured={...model,evidence:[]};next.models.push(measured);}
     for(const e of retained)if(!measured.evidence.some(x=>x.benchmark===e.benchmark))measured.evidence.push(e);
   }
-  next.sources.push(...previous.sources.filter(s=>s.id.startsWith('research:')&&!next.sources.some(x=>x.id===s.id)).map(s=>({...s,maxAgeHours:(previous.registry??registry).policy.maxResearchAgeHours})));
+  // Research is no longer collected; its descriptions are kept as retained records
+  // that are not refreshed, so they never make the catalogue stale.
+  next.sources.push(...previous.sources.filter(s=>s.id.startsWith('research:')&&!next.sources.some(x=>x.id===s.id)).map(({maxAgeHours:_age,...s})=>({...s,refreshPolicy:'retained'})));
   // Core capabilities and operating policy come from the released seed; discovered capabilities persist.
   const prior=previous.registry??registry,discovered=prior.capabilities.filter(c=>!c.core&&!registry.capabilities.some(x=>x.id===c.id));
   next.registry={...prior,capabilities:[...registry.capabilities,...discovered],policy:{...previous.registry?.policy,...registry.policy},questions:registry.questions,operations:registry.operations};next.research=previous.research??[];next.researchState=previous.researchState??{};next.researchPending=previous.researchPending??[];
@@ -111,75 +109,27 @@ export async function runRefresh(env,step,id) {
       let next=await refreshSnapshot(fetch,previous,{collectOnly:true,catalogueSupply:supply});
       // Preserve research-owned records while independently refreshing known feeds.
       next=retainResearch(next,previous);
-      if(env.SCOUT_INDEX&&env.SCOUT_EVIDENCE){
-        // The collection step already captured reported metadata independently
-        // of protocol adapters. Preserve listings without inventing endpoints.
-        const extra=await catalogueInventory(next.providerMetadata??[],next.catalogue,next.checkedAt);
-        await archiveListings(env.SCOUT_INDEX,extra,next.checkedAt);
-        next=await discoverInventory(next,previous,{archiveDb:env.SCOUT_INDEX,pages:next.registry.policy.discoveryPagesPerHour??2});
-      }
       if(env.SCOUT_INDEX)next=addCatalogueRoutes(next,previous,supply,supplyError);
       // Later steps re-read the unchanged published generation instead of a copy here.
       const key=`runs/${id}/collected.json`;await putJSON(bucket,key,{next});return key;
-    });
-    const jobs=await step.do('plan-research',async()=>{
-      const {next}=await getJSON(bucket,baseKey);
-      const backlog=await getJSON(bucket,'research-backlog.json')??[];
-      next.researchPending=[...new Map([...(next.researchPending??[]),...backlog].map(p=>[p.job.id,p])).values()];
-      const prior=Object.entries(next.researchState).map(([subjectId,v])=>({subjectId,...v}));
-      const limit=Number(env.RESEARCH_PER_HOUR??next.registry.policy.researchPerHour);
-      const discoveryCandidates=env.SCOUT_INDEX?await discoveryBacklog(env.SCOUT_INDEX,{limit,maxAgeHours:next.registry.policy.maxResearchAgeHours}):[];
-      return planResearch(next,prior,{limit,maxAgeHours:next.registry.policy.maxResearchAgeHours,discoveryCandidates,providers:await (await ledger()).research.providers()});
-    });
-    await step.do('persist-research-plan',async()=>{
-      const prior=await getJSON(bucket,'research-backlog.json')??[];
-      const planned=await Promise.all(jobs.map(async job=>({job,key:`research-jobs/${await digest([job.id,job.subjectHash,job.epoch])}.json`})));
-      await putJSON(bucket,'research-backlog.json',[...new Map([...prior,...planned].map(p=>[p.key,p])).values()]);
-    });
-    const client=new ParallelResearch({apiKey:env.PARALLEL_API_KEY,processor:registry.policy.researchProcessor});
-    const results=await concurrent(jobs,registry.policy.refreshConcurrency,async(job,j)=>{
-      const jobKey=`research-jobs/${await digest([job.id,job.subjectHash,job.epoch])}.json`;
-      const run=await step.do(`research-start-${j}`,{retries:{limit:0,delay:'1 second'},timeout:'1 minute'},async()=>{
-        const prior=await getJSON(bucket,jobKey);if(prior)return prior;
-        await putJSON(bucket,jobKey,{status:'uncertain',subjectId:job.id,subjectHash:job.subjectHash,startedAt:new Date().toISOString()});
-        try{const runId=await client.start(job);const receipt={status:'pending',runId,subjectId:job.id,subjectHash:job.subjectHash};await putJSON(bucket,jobKey,receipt);return receipt;}
-        catch(error){const receipt={status:'unavailable',subjectId:job.id,error:error.message};await putJSON(bucket,jobKey,receipt);return receipt;}
-      });
-      if(!run.runId)return {subjectId:job.id,status:run.status};
-      if(run.status==='completed')return {key:jobKey,status:'completed',subjectId:job.id};
-      for(let poll=0;poll<20;poll++) {
-        const status=await step.do(`research-poll-${j}-${poll}`,{retries:{limit:2,delay:'5 seconds'},timeout:'1 minute'},async()=>{
-          try{const result=await client.poll(run.runId);if(result.status==='completed'){await putJSON(bucket,jobKey,{...result,subjectId:job.id,subjectHash:job.subjectHash,checkedAt:new Date().toISOString()});return 'completed';}return 'pending';}catch(error){await putJSON(bucket,`runs/${id}/research-error-${j}.json`,{error:error.message});return 'unavailable';}
-        });
-        if(status==='completed')return {key:jobKey,status,subjectId:job.id};
-        if(status==='unavailable')return {key:jobKey,status,subjectId:job.id};
-        await step.sleep(`research-wait-${j}-${poll}`,'20 seconds');
-      }
-      return {key:jobKey,status:'pending',subjectId:job.id};
     });
     const candidateKey=await step.do('interpret-evidence',{retries:{limit:1,delay:'15 seconds'},timeout:'15 minutes'},async()=>{
       // The refresh lock keeps the published generation unchanged until this run publishes.
       // Parse it first, before this run's snapshot. Research and capability
       // answers are read from the ledger per subject, never as a whole.
-      const published=await readPublished(bucket),previous=published?toSnapshot(published.records):seed,{research,interpretations}=await ledger();
+      const published=await readPublished(bucket),previous=published?toSnapshot(published.records):seed,{interpretations}=await ledger();
       let {next}=await getJSON(bucket,baseKey);
-      const batches=await Promise.all(results.filter(r=>r.status==='completed').map(r=>getJSON(bucket,r.key)));
-      let candidate=await integrateResearch(await refreshModelMetadata(next,previous,options),batches,{...options,research});next=null;
-      candidate.researchPending=(await Promise.all(results.filter(r=>r.key&&r.status!=='completed').map(async r=>{
-        const receipt=await getJSON(bucket,r.key);return receipt?.runId?{job:jobs.find(j=>j.id===r.subjectId),key:r.key}:null;
-      }))).filter(Boolean);
-      for(const batch of batches)candidate.researchState[batch.subjectId]={subjectHash:batch.subjectHash,checkedAt:batch.checkedAt,status:'completed'};
+      let candidate=await refreshModelMetadata(next,previous,options);next=null;
+      candidate.availableModels=candidate.catalogue.length;candidate.researchPending=[];
       candidate=await refreshBenchmarks(candidate,previous,{...options,registry:candidate.registry,interpretations});
       candidate=await refreshSpecialists(candidate,previous,options);
-      candidate.sources.push({id:'parallel',name:'Parallel research',url:'https://parallel.ai',status:results.some(r=>r.status!=='completed')?'failed':'ok',checkedAt:new Date().toISOString(),publishedAt:null,attribution:'Hourly incremental public-source research. Original publishers retain attribution. Pending jobs do not overwrite validated records.'});
-      candidate.refreshSummary={jobs:results.length,completed:results.filter(r=>r.status==='completed').length,pending:results.filter(r=>r.status!=='completed').length};
       const {research:_ledgered,...records}=toRecords(candidate),key=`runs/${id}/candidate.json`;
       await putJSON(bucket,key,{records,previous:publicationPredecessor(previous)});return key;
     });
     const staged=await step.do('validate-and-stage',{retries:{limit:12,delay:'10 seconds',backoff:'constant'},timeout:'10 minutes'},async()=>{
-      const {records,previous}=await getJSON(bucket,candidateKey);return {...await stageCatalogue(bucket,records,previous,{...options,db:env.SCOUT_INDEX,vectorize:env.SCOUT_EVIDENCE}),completedResearchSubjects:results.filter(r=>r.status==='completed').map(r=>r.subjectId),completedResearchKeys:results.filter(r=>r.status==='completed').map(r=>r.key)};
+      const {records,previous}=await getJSON(bucket,candidateKey);return stageCatalogue(bucket,records,previous,{...options,db:env.SCOUT_INDEX,vectorize:env.SCOUT_EVIDENCE});
     });
     await step.do('publish',()=>coordinator.publish(id,staged));
-    return {status:'published',version:staged.publication.id,research:results.map(r=>({subject:r.subjectId,status:r.status}))};
+    return {status:'published',version:staged.publication.id};
   } catch(error) {await step.do('record-failure',()=>coordinator.fail(id,'Refresh did not finish; serving the last committed catalogue.'));throw error;}
 }

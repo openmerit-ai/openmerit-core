@@ -1,5 +1,20 @@
 # Scout architecture and operations
 
+## Parallel research removed; publisher methodology first (not yet deployed)
+
+The owner agreed to stop Parallel research after a review of what it contributed to live generation `fb379087`:
+- **Benchmarks:** 234 of the 543 benchmarks came from research, and none had a single model result. Every ranked result comes from a direct feed.
+- **Descriptions:** research descriptions were attached to 164 feed benchmarks. For 28 of them that have results, mostly Artificial Analysis rows, this was the only description.
+- **Endpoints and facts:** 28 of about 1,330 endpoints came from research, mostly duplicates of catalogue routes, plus a handful of lifecycle facts.
+- **Status:** the source reported `failed` whenever a job was still pending after about seven minutes (13 of 24 in the last run). Its 190 `research:*` sources could not be rechecked within 168 hours, so status stayed `stale` and `degraded`.
+- **Cost:** about $15 a month on the `base` processor, plus Decisions calls and up to seven minutes per refresh.
+
+Changes:
+- **Removed:** the pipeline's plan, persist, start and poll research steps, the `parallel` source, the publisher's research-backlog and `scout_discovery` updates, and the workflow's research-access probe. `research.mjs`, `enrich.mjs` and `discovery.mjs` were deleted. The Hugging Face recently-modified listing crawl (`discoverInventory`) and Models.dev listing archive only fed the research backlog, so they went too. The verified-organisation Hub catalogue is separate and unchanged. The policy settings `researchPerHour`, `researchProcessor` and `maxResearchAgeHours` were removed.
+- **Kept:** `retainResearch` still carries research descriptions, sources, routes and cited observations forward. Research sources now have `refreshPolicy: 'retained'`, which the freshness check skips.
+- **Methodology:** `methodologyFor` skipped the publisher's methodology whenever a research description existed, so 25 Artificial Analysis benchmarks never got their own section. It now always applies. Sections titled with the benchmark's name (by the same evaluation key as cross-source families) come first and skip the Decisions question; other sections are judged as before. On the live page, 22 of the 29 AA benchmarks with results get a title-matched section. The other seven are AA-LCR, τ³-Banking, ITBench, the two Omniscience rows and two win-rate rows. The selection cache key changed, so the next refresh reselects AA sections and re-interprets the affected benchmarks once.
+- **Not changed:** the `PARALLEL_API_KEY` Worker secret, the `scout_discovery` D1 table and stored research ledger rows. Deleting them is a separate cleanup.
+
 ## Vertical benchmark retrieval and split quality targets (not yet deployed)
 
 The owner asked to continue with the gaps left by the change below: vertical benchmarks that were never retrieved, and intermittent interpreter failures.
