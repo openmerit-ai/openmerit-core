@@ -1,6 +1,12 @@
 # Scout architecture and operations
 
-## Artificial Analysis score format — 26 October 2026 (not yet deployed)
+## Artificial Analysis score format — deployed, 26 October 2026
+
+**Deployment receipt:** the owner approved the push, the deployment and a manual run. Commit [81510b6](https://github.com/laz-aslam/openmerit/commit/81510b6) is on `origin/main`. Publisher `openmerit-scout` moved from `07118166-8674-4003-83ad-d3150652d6bb` to `f10ebd46-2385-475d-a26c-24eceb5c43dd`, with schedule `7 0,12 * * *`. The manual run `manual-20261026-aa-1` also put the catalogue models change into production for the first time. It published generation `04c70031f2d10174e21049ef73aedde9`, checked at 09:16 UTC.
+- The `analysis` and `catalogue` sources are `ok`.
+- Benchmark-backed models rose from 233 to 263, and catalogue entries from 391 to 454.
+- Benchmarks rose from 391 to 404, hosted routes from 1,149 to 1,326, and observations from 5,189 to 5,871.
+- Production D1 has 844 canonical models, as in the local measurement.
 
 Artificial Analysis now publishes each model's results under `scores`, keyed by evaluation slug (for example `gpqa-diamond` and `tau2-bench`), instead of flat fields. It also no longer publishes the `…SubLabel` descriptions. Scout's coverage guard caught the change: every one of the 17 fields it read was empty across 272 rows. From 04:55 UTC on 26 October, production kept the previous AA evidence with the source marked failed.
 
