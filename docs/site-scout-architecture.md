@@ -1,6 +1,8 @@
 # Scout architecture and operations
 
-## Vertical benchmarks: Vals AI and Arena industry categories (not yet deployed)
+## Vertical benchmarks: Vals AI and Arena industry categories — deployed, 26 October 2026
+
+**Deployment receipt:** the owner approved the push and deployment. Commits [c6bf453](https://github.com/laz-aslam/openmerit/commit/c6bf453), [374a84e](https://github.com/laz-aslam/openmerit/commit/374a84e) and [1c60b92](https://github.com/laz-aslam/openmerit/commit/1c60b92) are on `origin/main`. Publisher `openmerit-scout` moved from `f10ebd46-2385-475d-a26c-24eceb5c43dd` to `b87a4068-82df-4f52-8330-c8071731c8fb` on 26 October 2026 at 11:04 UTC, with schedule `7 0,12 * * *`. No manual run was made; the 12:07 UTC refresh is the first to use it. The only static asset that changed was the data policy page, and only its stylesheet cache key changed.
 
 The owner asked for benchmarks covering a wider range of tasks and specific industries such as healthcare and insurance.
 
@@ -46,7 +48,9 @@ Selection and scope:
 
 TaxEval and Public Benefits Bench were not selected for their own prompts, and MedScribe was selected only without vectors. ClaimBench for the insurance prompt is a weak proxy: it checks claims against SEC filings. These are retrieval and applicability results, not executions of the recommended models.
 
-## Arena Vision and WebDev boards (not yet deployed)
+## Arena Vision and WebDev boards — deployed, 26 October 2026
+
+Deployed with the vertical benchmarks above; see that receipt.
 
 The Arena leaderboard dataset (CC BY 4.0, updated 24 October 2026) publishes 24 boards. Scout read two of them, text and document. Collection now also reads two more, each as its own source, so a missing board withholds only itself:
 - **`arenaVision`** (`vision_style_control`): `arena:vision` (overall), plus `:ocr`, `:diagram`, `:homework` and `:creative_writing_vision`. Captioning and entity recognition are left out, because only 3 of 34 and 5 of 51 ratings have intervals within 60 points.
@@ -70,7 +74,9 @@ The Arena leaderboard dataset (CC BY 4.0, updated 24 October 2026) publishes 24 
 
 Missed names are mostly older models Scout no longer lists, such as Claude 3, Gemini 1.5, LLaVA and InternVL2.
 
-## Benchmark-row matching through catalogue aliases (not yet deployed)
+## Benchmark-row matching through catalogue aliases — deployed, 26 October 2026
+
+Deployed with the vertical benchmarks above; see that receipt.
 
 Before this change, Scout placed a benchmark row only when its normalized name equalled a Scout model's ID suffix, canonical slug or name, after stripping one effort suffix and one trailing parenthetical, plus nine hand-written aliases. Measured against generation `04c70031f2d10174e21049ef73aedde9` and the 26 October feeds, 911 of 2,113 distinct scored row names (43%) matched.
 
