@@ -3,6 +3,30 @@ const mean = values => values.reduce((sum, value) => sum + value, 0) / values.le
 const median = values => { const sorted = [...values].sort((a, b) => a - b); return (sorted[Math.floor((sorted.length - 1) / 2)] + sorted[Math.floor(sorted.length / 2)]) / 2; };
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 export const benchmarkFamily = b => b.family ?? b.id ?? b.name;
+// The name of the evaluation a record reports, without its publisher's label,
+// so third-party and vendor-reported copies of one benchmark compare equal.
+// Versions and splits stay in the key; only spellings of one name are aliased.
+const evaluationAliases = { hle: 'humanityslastexam', gpqadiamond: 'gpqa', tau2: 'tau2bench', t2bench: 'tau2bench', mmmuval: 'mmmu' };
+export function evaluationKey(name) {
+  const key = String(name).normalize('NFKC').toLowerCase().replace(/[’‘]/g, "'").replace(/τ/g, 'tau')
+    .replace(/\s*·\s*(vendor-reported|aa|vals ai)$/, '').replace(/\s*\((artificial analysis[^)]*|vals ai run)\)$/, '').replace(/\s*—\s*(artificial analysis|vals ai) evaluation$/, '').replace(/-aa$/, '')
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+  return evaluationAliases[key] ?? key;
+}
+// Copies of one evaluation from several publishers are one family, so they share
+// one evaluation's weight in the quality estimate instead of each counting fully.
+// Their scores remain separate series; vendors and third parties use different harnesses.
+export function linkFamilies(benchmarks) {
+  const parent = new Map(), root = f => { while (parent.get(f) !== f) f = parent.get(f); return f; };
+  const join = (a, b) => { const [x, y] = [root(a), root(b)].sort(); parent.set(y, x); };
+  const byKey = new Map();
+  for (const b of benchmarks) {
+    const family = benchmarkFamily(b), key = evaluationKey(b.name ?? b.id);
+    if (!parent.has(family)) parent.set(family, family);
+    if (byKey.has(key)) join(byKey.get(key), family); else byKey.set(key, family);
+  }
+  return benchmarks.map(b => { const family = root(benchmarkFamily(b)); return family === benchmarkFamily(b) ? b : { ...b, family }; });
+}
 export const qualityIndifference = .02;
 // Hard evidence the ranker requires before a candidate is admitted. Evidence
 // retrieval and applicability must be able to supply these, not only the quality target.

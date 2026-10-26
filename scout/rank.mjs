@@ -1,6 +1,6 @@
 import { labels, registry as defaultRegistry } from './registry.mjs';
 import { attachSearch } from './search-index.mjs';
-import { orderCandidates, benchmarkFamily, requiredEvidenceTags, evidenceFallbacks } from './comparison.mjs';
+import { orderCandidates, benchmarkFamily, linkFamilies, requiredEvidenceTags, evidenceFallbacks } from './comparison.mjs';
 import { measuredCandidates,attachTaskObservations } from './task-evidence.mjs';
 import { providerURL } from './provider-links.mjs';
 import { describeSources, calibrationStatus } from './source-details.mjs';
@@ -21,7 +21,7 @@ export function selectSnapshot(seed, saved) {
 }
 export function createIndex(snapshot) {
   if (snapshot.version !== 1 || (!snapshot.models?.length && !snapshot.publicStatus)) throw new Error('Unsupported Scout index.');
-  const benchmarks = new Map(snapshot.benchmarks.map(b => [b.id, b]));
+  const benchmarks = new Map(linkFamilies(snapshot.benchmarks).map(b => [b.id, b]));
   const counts = new Map();
   for (const model of snapshot.models) for (const e of model.evidence) counts.set(e.benchmark, (counts.get(e.benchmark) ?? 0) + 1);
   const models = snapshot.models.map(model => ({ ...model, evidence: model.evidence.map(e => ({ ...e, cohortSize: counts.get(e.benchmark) })) }));
@@ -75,8 +75,8 @@ export function recommend(index, prompt, now = Date.now(), interpretedTask = nul
   const totalWeight = Object.values(task.weights).reduce((a, b) => a + b, 0);
   // An accepted benchmark counts for the ability the task-specific check confirmed,
   // not every ability its hourly interpretation lists.
-  const assessed = new Map((task.evidenceMatch?.assessments ?? []).filter(a => a.capability && task.evidenceMatch.ids.includes(a.benchmark)).map(a => [a.benchmark, a.capability]));
-  const forTask = definition => definition && assessed.has(definition.id) ? { ...definition, tags: [assessed.get(definition.id)] } : definition;
+  const assessed = new Map((task.evidenceMatch?.assessments ?? []).filter(a => a.capability && task.evidenceMatch.ids.includes(a.benchmark)).map(a => [a.benchmark, a]));
+  const forTask = definition => definition && assessed.has(definition.id) ? { ...definition, tags: [assessed.get(definition.id).capability], relevance: assessed.get(definition.id).relevance ?? 'generic' } : definition;
   // Without tool calls, agentic evaluations mostly score the tool loop. Use
   // them only when nothing else was accepted; coding evaluations run in such
   // harnesses by design and keep them.
@@ -92,7 +92,7 @@ export function recommend(index, prompt, now = Date.now(), interpretedTask = nul
     const coverage = Object.entries(task.weights).reduce((sum, [tag, weight]) => sum + (evidence.some(e => e.definition.tags.includes(tag)) ? weight : 0), 0) / totalWeight;
     const blendedPrice = Number.isFinite(model.inputPrice) && Number.isFinite(model.outputPrice) ? (model.inputPrice * 3 + model.outputPrice) / 4 : null; // Compatibility field, no longer scored.
     evidence.sort((a, b) => {
-      if(task.evidenceMatch){const assessment=id=>task.evidenceMatch.assessments.find(e=>e.benchmark===id)?.applicability;const direct=id=>assessment(id)==='direct'?2:assessment(id)==='proxy'?1:0;const delta=direct(b.benchmark)-direct(a.benchmark);if(delta)return delta;}
+      if(task.evidenceMatch){const assessment=id=>task.evidenceMatch.assessments.find(e=>e.benchmark===id)?.applicability;const direct=id=>assessment(id)==='direct'?2:assessment(id)==='proxy'?1:0;const tier=e=>({direct:2,domain:1})[e.definition.relevance]??0;const delta=direct(b.benchmark)-direct(a.benchmark)||tier(b)-tier(a);if(delta)return delta;}
       const weight = e => e.definition.tags.reduce((sum, t) => sum + (task.weights[t] ?? 0), 0);
       return weight(b) - weight(a) || b.cohortSize - a.cohortSize || a.benchmark.localeCompare(b.benchmark);
     });

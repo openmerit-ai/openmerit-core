@@ -77,3 +77,13 @@ test('image-reading tasks can accept document evidence even when another ability
   const result=await assessEvidence(task,[docs,format],{apiKey:'fixture',fetcher});
   assert.ok(offered.includes('documents'));assert.deepEqual(result.ids,['docs','format']);
 });
+test('task-domain evidence is accepted, confidently unrelated proxies are withheld and a missing domain answer stays a general proxy',async()=>{
+ const docs=[{id:'coding-benchmark',tags:[],text:'Assign diagnosis codes to clinical notes.'},{id:'contest-maths',tags:['knowledge'],text:'Competition mathematics.'},{id:'science-qa',tags:['knowledge'],text:'Graduate science questions.'}];
+ const method={'coding-benchmark':['unknown',.9],'contest-maths':['knowledge',.95],'science-qa':['knowledge',.95]},domain={'coding-benchmark':['direct',.95],'contest-maths':['unrelated',.9]};
+ const task={search:'Assign ICD-10 codes to discharge summaries.',weights:{knowledge:3},evidenceCapabilities:['knowledge']};
+ const r=await relevantEvidence('Task.',task,{documents:docs},{apiKey:'fixture',fetcher:async(_url,o)=>{const q=JSON.parse(o.body);
+  const answers=q.questions.flatMap(q=>{const kind=q.name.split('_')[0],doc=docs.find(d=>q.instructions.endsWith(d.text)),a=(kind==='method'?method:domain)[doc.id];if(kind==='domain')assert.ok(q.instructions.includes(task.search));return a?[{name:q.name,type:'choice',choice:a[0],confidence:a[1]}]:[];});
+  return Response.json({answers});}});
+ assert.deepEqual([...r.ids].sort(),['coding-benchmark','science-qa']);
+ assert.deepEqual(r.assessments.map(a=>[a.benchmark,a.capability,a.relevance]).sort(),[['coding-benchmark','knowledge','direct'],['contest-maths','knowledge','unrelated'],['science-qa','knowledge','generic']]);
+});

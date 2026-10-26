@@ -1,5 +1,8 @@
 # Website FAQ maintenance
 
+## Domain-aware evidence weighting and cross-source benchmark families — 26 October 2026
+
+Reviewed ranking and evidence claims against the change that weights task-domain benchmarks above general proxies and counts copies of one evaluation from several publishers once. The homepage and the Scout page describe ranking only as using measured results, public benchmarks, cost and speed, so no FAQ copy changes. The Scout guide's quality-estimate and evidence-assessment paragraphs now describe the relevance tiers and cross-source families.
 ## Scout privacy settings page — source only, 26 October 2026
 
 Moved Privacy & analytics to `/scout/privacy/`, linked from Scout's footer and the data policy. The notice and sharing controls are unchanged; sign-in returns to the settings page and existing saved preferences continue to apply to Scout. The old settings fragment forwards to the new page. The homepage FAQ requires no change. No deployment is included.

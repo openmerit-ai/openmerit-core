@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';import{selectPareto,dominates}from'../pareto.mjs';
+import test from 'node:test';import assert from 'node:assert/strict';import{selectPareto,dominates,estimateQuality}from'../pareto.mjs';
 const task={weights:{coding:3},workload:{input:'short',output:'short',priority:'balanced'}};
 const candidate=(id,q,c,t,benchmark='same',provider)=>({model:{id,provider,endpoint:{id:`route:${id}`},inputPrice:c,outputPrice:c,speed:t===null?null:{timeToFirstAnswer:t,tokensPerSecond:100}},evidence:[{benchmark,metric:'accuracy',score:q,definition:{id:benchmark,tags:['coding'],family:benchmark}}]});
 test('a single supported dominator removes every dominated model instead of filling five',()=>{
@@ -102,4 +102,10 @@ test('a model whose evaluations disagree about it carries a wider standard error
  rows.push(row('split',{a:.3+.08*4+.2,b:.25+.07*4-.2,c:.35+.06*4}));
  const{estimates}=estimateQuality(rows,{coding:3});
  assert.ok(estimates.get('split').se>3*estimates.get('m4').se);
+});
+test('task-domain evidence outweighs a majority of general proxies that disagree with it',()=>{
+ const row=(id,domain,general,relevance)=>({model:{id},evidence:[{benchmark:'clinical',score:domain,definition:{id:'clinical',tags:['knowledge'],family:'clinical',relevance}},...[1,2,3,4].map(i=>({benchmark:`general${i}`,score:general+i/100,definition:{id:`general${i}`,tags:['knowledge'],family:`general${i}`,relevance:'generic'}}))]});
+ const leader=relevance=>{const r=estimateQuality([row('domain-leader',.8,.5,relevance),row('general-leader',.6,.7,relevance),row('middle',.7,.6,relevance)],{knowledge:3}).estimates;return [...r].sort((a,b)=>b[1].value-a[1].value)[0][0];};
+ assert.equal(leader('domain'),'domain-leader');
+ assert.equal(leader('generic'),'general-leader');
 });

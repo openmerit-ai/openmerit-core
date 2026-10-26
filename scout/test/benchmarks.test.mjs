@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { prepareBenchmarks, refreshBenchmarks, benchmarkVersion } from '../benchmarks.mjs';
 import { parseEpochDefinitions, readEpochDefinitions, benchmarkIdentity, methodologySections } from '../benchmark-metadata.mjs';
 import { createIndex, recommend } from '../rank.mjs';
-import { benchmarkFamily } from '../comparison.mjs';
+import { benchmarkFamily, linkFamilies } from '../comparison.mjs';
 
 const bench = (id, description = 'Test scope') => ({ id, name: id, source: 'fixture', definition: { title: id, description }, tags: ['reasoning'] });
 const mock = (choose = () => 'absent', capture = () => {}) => async (_url, options) => {
@@ -160,4 +160,21 @@ test('publisher-declared suite identity groups metrics without benchmark-name ru
   for (const b of entries.slice(0, 2)) b.definition.suite = 'Publisher-declared suite v9';
   const prepared = await prepareBenchmarks(entries, [], settings(mock()));
   assert.equal(prepared[0].family,prepared[1].family);assert.match(prepared[0].family,/^suite:/);assert.equal(prepared[2].family,'c');
+});
+
+test('third-party and vendor-reported copies of one evaluation form one family, versions stay apart', () => {
+  const rows = [
+    { id: 'epoch:GPQA diamond', name: 'GPQA diamond', family: 'family:epoch-gpqa' }, { id: 'aa:gpqa', name: 'GPQA Diamond · AA', family: 'family:aa-gpqa' },
+    { id: 'vendor:gpqa', name: 'GPQA · vendor-reported', family: 'suite:vendor-gpqa' }, { id: 'aa:hle', name: 'Humanity’s Last Exam · AA' },
+    { id: 'vendor:hle', name: "Humanity's Last Exam · vendor-reported", family: 'suite:vendor-hle' }, { id: 'epoch:HLE', name: 'HLE' },
+    { id: 'aa:tb21', name: 'Terminal-Bench 2.1 · AA' }, { id: 'vendor:tb40', name: 'Terminal-Bench 4.0 · vendor-reported', family: 'suite:vendor-tb40' },
+    { id: 'vendor:simpleqa', name: 'SimpleQA · vendor-reported' }, { id: 'epoch:SimpleQA Verified', name: 'SimpleQA Verified' },
+  ];
+  const family = new Map(linkFamilies(rows).map(b => [b.id, benchmarkFamily(b)]));
+  const same = ids => new Set(ids.map(id => family.get(id))).size === 1;
+  assert.ok(same(['epoch:GPQA diamond', 'aa:gpqa', 'vendor:gpqa']));
+  assert.ok(same(['aa:hle', 'vendor:hle', 'epoch:HLE']));
+  assert.ok(!same(['aa:tb21', 'vendor:tb40']));
+  assert.ok(!same(['vendor:simpleqa', 'epoch:SimpleQA Verified']));
+  assert.ok(!same(['aa:gpqa', 'aa:hle']));
 });

@@ -27,10 +27,10 @@ function observations(candidates,weights) {
     const m=new Map();
     for(const e of c.evidence){
       const tags=e.definition?.tags??[],weight=tags.reduce((n,t)=>n+(weights[t]??0),0);
-      if(weight>0&&Number.isFinite(e.score))m.set(e.benchmark,{score:e.score,weight,family:e.definition.family??e.benchmark,tags});
+      if(weight>0&&Number.isFinite(e.score))m.set(e.benchmark,{score:e.score,weight,family:e.definition.family??e.benchmark,tags,relevance:e.definition.relevance??'generic'});
     }
     const direct=c.taskObservation??c.measured,quality=direct&&(direct.effectiveQuality??direct.quality);
-    if(Number.isFinite(quality)){const id=`calibration:${direct.profile?.id??direct.profileId??''}`,prior=m.get(id);m.set(id,{score:quality,weight:prior?.weight??total,family:id,tags:prior?.tags??Object.keys(weights)});}
+    if(Number.isFinite(quality)){const id=`calibration:${direct.profile?.id??direct.profileId??''}`,prior=m.get(id);m.set(id,{score:quality,weight:prior?.weight??total,family:id,tags:prior?.tags??Object.keys(weights),relevance:'calibration'});}
     rows.set(c.model.id,m);
   }
   return rows;
@@ -50,7 +50,11 @@ export function estimateQuality(candidates,weights,excluded=new Set()) {
   const estimates=new Map();
   if(root===undefined||sizes.get(root)<2)return {estimates,models:0,benchmarks:0};
   const models=[...parent.keys()].filter(m=>find(m)===root),index=new Map(models.map((m,i)=>[m,i]));
-  const benchmarks=[...byBenchmark].filter(([,list])=>index.has(list[0].model)).map(([id,list])=>({id,weight:list[0].weight/families.get(list[0].family),obs:list.map(o=>({m:index.get(o.model),y:o.score}))}));
+  const benchmarks=[...byBenchmark].filter(([,list])=>index.has(list[0].model)).map(([id,list])=>({id,weight:list[0].weight*(list[0].relevance==='direct'?2:1)/families.get(list[0].family),relevance:list[0].relevance,obs:list.map(o=>({m:index.get(o.model),y:o.score}))}));
+  // Evidence from the task's own domain carries at least three quarters of the
+  // weight when present; general proxies still connect and fill in the rest.
+  const sum=list=>list.reduce((n,b)=>n+b.weight,0),general=benchmarks.filter(b=>b.relevance==='generic'),specific=sum(benchmarks.filter(b=>b.relevance==='direct'||b.relevance==='domain'));
+  if(specific>0&&sum(general)>specific/3){const scale=specific/3/sum(general);for(const b of general)b.weight*=scale;}
   const meanWeight=benchmarks.reduce((n,b)=>n+b.weight,0)/benchmarks.length;
   for(const b of benchmarks){b.weight/=meanWeight;b.a=1;b.mean=b.obs.reduce((n,o)=>n+o.y,0)/b.obs.length;b.beta=b.mean;b.noise=noisePrior**2;}
   const byModel=models.map(()=>[]);for(const b of benchmarks)for(const o of b.obs)byModel[o.m].push({b,y:o.y});

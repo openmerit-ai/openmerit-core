@@ -1,5 +1,28 @@
 # Scout architecture and operations
 
+## Domain-aware evidence and cross-source benchmark families (not yet deployed)
+
+The owner approved two ranking changes and a fixed prompt test set. They followed a replay where "Answer clinical questions" rejected HealthBench Professional but accepted AIME and FrontierMath, and where ICD-10 coding accepted ARC-C and CharXiv next to MedCode. GPQA also counted three times: once each from Epoch AI, Artificial Analysis and vendor reports.
+
+- **Test set:** `scout/experiments/evidence-cases.json` holds 30 prompts covering healthcare, insurance, tax, public benefits, legal, finance, coding, tools, documents, vision, languages, writing, facts, security and science. Each prompt lists benchmark-name patterns that accepted evidence should include and patterns it must not include. `node scout/experiments/audit-evidence.ts <records.json> <report.json> [case-id …]` replays one published records file locally. It embeds the evidence documents, uses exact cosine search in place of Vectorize, runs the recommender with `OPENAI_API_KEY` (paid) and reports misses, intrusions and withheld expected evidence.
+- **Relevance tiers:** `assessEvidence` asks one more Decisions question per retrieved benchmark. It compares the benchmark with `task.search`: direct, domain, generic or unrelated. Each question quotes the evaluation text, because the Decisions service answers each question on its own; a version that referred to another question's text got near-uniform answers. Confident (≥ 0.8) direct or domain evidence is accepted for the task's quality target even when the ability check is inconclusive. A confident "unrelated" withholds a general proxy. A missing or invalid tier answer leaves the benchmark generic, which is the previous behaviour.
+- **Weighting:** in `estimateQuality`, direct series count twice, and direct plus domain series carry at least three quarters of the total weight when present. Generic proxies share the rest and still connect models without domain results. Calibration observations are unchanged. Recommendations list direct and domain evidence first.
+- **Families:** `linkFamilies` (in `comparison.mjs`, applied in `createIndex`) joins families whose benchmark names agree once publisher labels such as "· AA", "· vendor-reported", "· Vals AI" and "(Artificial Analysis …)" are removed, plus a short alias table (HLE, GPQA Diamond, τ²-Bench, MMMU val). Versions and splits stay distinct; SimpleQA and SimpleQA Verified, for example, remain separate. Stored records are unchanged. On live generation `fb379087`, 478 families became 385, across 65 merged groups.
+
+**Measured locally** against live generation `fb379087`, with two full runs on each side:
+
+| | Before | After |
+|---|---|---|
+| Cases passing (expected found, no intrusion) | 17, 15 | 20, 22 |
+| Expected evidence found | 20, 18 | 20, 22 |
+| No avoided benchmark accepted | 26, 27 | 30, 30 |
+| Expected evidence on the top recommendation | 9, 7 | 11, 10 |
+| Interpreter errors | 3, 5 | 3, 4 |
+
+Sixteen-document assessment batches took 0.3–1.3 s both with and without the tier questions; none reached the 1.8 s budget. All Scout tests pass.
+
+**Remaining gaps:** most remaining failures happen before assessment. Retrieval does not propose TaxEval, ClaimBench, Public Benefits Bench, CorpFin, IFEval or MGSM for their prompts, so they are never assessed. Security review, Excel modelling, web research and chart questions intermittently fail in the task interpreter ("The primary task evidence target could not be established").
+
 ## Vendor-reported scores from LLM Stats — deployed, 26 October 2026
 
 **Deployment receipt:** the owner approved the push, the deployment and a manual run. Commit [13a9dd2](https://github.com/laz-aslam/openmerit/commit/13a9dd2) is on `origin/main`. Publisher `openmerit-scout` moved from `b87a4068-82df-4f52-8330-c8071731c8fb` to `5f10f048-1475-4a06-84c0-7d0386e0e37e` at 11:44 UTC, with schedule `7 0,12 * * *`. Manual run `manual-20261026-vendor-1` published generation `fb379087c03be796e9a3f758f11174fc` (checked 11:46 UTC). That generation is also the first to carry the alias matching, Arena Vision and WebDev, Arena industry and Vals AI changes recorded below.
