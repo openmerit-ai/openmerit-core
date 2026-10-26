@@ -1,6 +1,8 @@
 # Scout architecture and operations
 
-## Catalogue identities and catalogue models in Scout — 26 October 2026 (not yet deployed)
+## Catalogue identities and catalogue models in Scout — deployed, 26 October 2026
+
+**Deployment receipt:** the owner approved the push and deployment. Commit [3364230](https://github.com/laz-aslam/openmerit/commit/3364230) is on `origin/main`. Publisher `openmerit-scout` moved from `27bd6884-8d8d-4b7c-be7a-1d13d05dd397` to `07118166-8674-4003-83ad-d3150652d6bb`, with schedule `7 0,12 * * *`. No manual run was made; the 12:07 UTC refresh is the first to use it.
 
 Two changes widen what reaches Scout from the D1 catalogue.
 
