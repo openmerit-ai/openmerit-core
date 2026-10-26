@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Started by merge-when-green.yml, whose GITHUB_TOKEN merges trigger no push run.
+  workflow_dispatch:
 
 permissions:
   contents: read
