@@ -187,11 +187,10 @@ async function search() {
   activeRequest?.abort(); const controller = new AbortController(); activeRequest = controller; const id = ++requestID;
   const started = performance.now();
   $('#results').hidden = false; $('#error').hidden = true; $('#results').setAttribute('aria-busy', 'true');
-  result = null; tableObserver.disconnect(); $('#results-title').textContent = 'Finding model choices';
-  const loading = element('div', 'search-state'), status = element('p', 'search-status', 'Preparing your search');
+  result = null; tableObserver.disconnect();
+  const status = element('span', 'search-status', 'Preparing your search');
   status.setAttribute('role', 'status');
-  const context = element('p', 'search-context', prompt); context.title = prompt;
-  loading.append(status, context); $('#task-results').replaceChildren(loading);
+  $('#results-title').replaceChildren(status); $('#task-results').replaceChildren();
   $('#query-time').textContent = '0.0s elapsed'; $('#query-time').title = 'Live elapsed time since submission'; $('#results-basis').hidden = true;
   $('#announcement').textContent = 'Finding model choices for your task.';
   $('.find-button span').textContent = 'Searching…'; $('.find-button').setAttribute('aria-busy', 'true');

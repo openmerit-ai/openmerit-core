@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Scout compact loading header — source only, 26 October 2026
+
+Removed the repeated prompt excerpt and separate loading heading. Rotating messages now occupy the results-title position with a tiny pulsing orb before the text; reduced motion disables the pulse and text transitions. Timing and result rendering are unchanged. The homepage FAQ makes no affected claims and needs no change. No deployment is included.
+
 ## Scout results and loading state — source only, 26 October 2026
 
 Replaced the Assumptions & limitations UI (including its nested supplementary specialist list) with a short verification warning; per-model evidence and API contracts remain unchanged. Removed visible rank numbering and the multi-task reading instruction, renamed the total to Model Choices, and aligned feedback controls to one height. Loading now includes submitted-task context, rotating messages with a short reduced-motion-aware transition, and submission-to-response elapsed time including authentication. Messages are not claimed backend progress, and cache hits can be fast. The homepage FAQ makes no affected claims and needs no change. No deployment is included.
