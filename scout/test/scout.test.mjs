@@ -110,7 +110,7 @@ test('CSV parsing preserves quotes, commas, newlines, zero, and blank cells', ()
 
 function fixtures() {
   const models = Array.from({ length: 12 }, (_, i) => ({ id: `lab/model-${i}`, canonical_slug: `lab/model-${i}-2026-10-01`, name: `Lab: Model ${i}`, architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] }, pricing: { prompt: '.000001', completion: '.000002' }, supported_parameters: ['response_format'] }));
-  const rows = models.map((m, i) => ({ slug: `model-${i}`, name: m.name.slice(5), gpqa: i / 12, medianOutputTokensPerSecond: 100, medianTimeToFirstTokenSeconds: 1, deprecated: false }));
+  const rows = models.map((m, i) => ({ slug: `model-${i}`, name: m.name.slice(5), scores: { 'gpqa-diamond': i / 12 }, medianOutputTokensPerSecond: 100, medianTimeToFirstTokenSeconds: 1, deprecated: false }));
   const flight = `a:${JSON.stringify({ models: rows })}\n`;
   const analysisHTML = `<script>self.__next_f.push([1,${JSON.stringify(flight)}])</script>`;
   const metadata = 'benchmark,source_file,score_column,scale\n' + Array.from({ length: 10 }, (_, i) => `Bench${i},results.csv,Score,1`).join('\n');
@@ -164,11 +164,15 @@ test('serialized leaderboard records survive component property renames without 
 test('a fresh table retains omitted historical observations only for an unchanged series',()=>{
  const input=fixtures(),previous=compileSnapshot(input),model=previous.models.find(m=>m.id==='lab/model-0');
  const old=model.evidence.find(e=>e.benchmark==='aa:gpqa');old.historical=true;
- const rows=parseAnalysis(input.analysisHTML);rows[0].gpqa=null;
+ const rows=parseAnalysis(input.analysisHTML);delete rows[0].scores['gpqa-diamond'];
  const flight=`a:${JSON.stringify({records:rows})}\n`,analysisHTML=`<script>self.__next_f.push([1,${JSON.stringify(flight)}])</script>`;
  const next=compileSnapshot({...input,analysisHTML,previous});assert.deepEqual(next.models.find(m=>m.id===model.id).evidence.find(e=>e.benchmark==='aa:gpqa'),old);
- previous.benchmarks.find(b=>b.id==='aa:gpqa').definition.description='A different version.';
- const changed=compileSnapshot({...input,analysisHTML,previous});assert.ok(!changed.models.find(m=>m.id===model.id).evidence.some(e=>e.benchmark==='aa:gpqa'));
+ previous.benchmarks.find(b=>b.id==='aa:gpqa').definition.description='Published description.';
+ const carried=compileSnapshot({...input,analysisHTML,previous});
+ assert.equal(carried.benchmarks.find(b=>b.id==='aa:gpqa').definition.description,'Published description.');assert.deepEqual(carried.models.find(m=>m.id===model.id).evidence.find(e=>e.benchmark==='aa:gpqa'),old);
+ // A description the page publishes defines the series; without one, the published description carries over.
+ const described=analysisHTML.replace('</script>',`</script><script>self.__next_f.push([1,${JSON.stringify(`b:${JSON.stringify({gpqaSubLabel:'A different version.'})}\n`)}])</script>`);
+ const changed=compileSnapshot({...input,analysisHTML:described,previous});assert.ok(!changed.models.find(m=>m.id===model.id).evidence.some(e=>e.benchmark==='aa:gpqa'));
 });
 
 test('refresh reads bounded benchmark methodology and catalogue feeds; total outage needs a previous index', async () => {

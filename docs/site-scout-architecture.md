@@ -1,5 +1,23 @@
 # Scout architecture and operations
 
+## Artificial Analysis score format — 26 October 2026 (not yet deployed)
+
+Artificial Analysis now publishes each model's results under `scores`, keyed by evaluation slug (for example `gpqa-diamond` and `tau2-bench`), instead of flat fields. It also no longer publishes the `…SubLabel` descriptions. Scout's coverage guard caught the change: every one of the 17 fields it read was empty across 272 rows. From 04:55 UTC on 26 October, production kept the previous AA evidence with the source marked failed.
+
+`aaBenchmarks` in `scout/sources.mjs` now maps each benchmark to its slug:
+- **Existing series carry over.** The 17 existing series keep their IDs and byte-identical definitions, so their prepared interpretations carry over. When the page gives no description, a series keeps the description it was published with. A description the page does publish still defines the series, so an omitted historical row is then dropped as before.
+- **Ten new 0–1 series:** omniscience non-hallucination rate, LiveCodeBench, AIME 2025, AutomationBench, GDP.pdf, Terminal-Bench-Science, FrontierCode, MLCR-AA, Harvey LAB-AA and EnterpriseOps-Gym.
+- **Elo-style ratings:** GDPval-AA's value is now an Elo-style rating (−410 to 1,866), so `aa:gdpvalNormalized` takes no new rows and keeps only its retained historical observations. The series stays, because removing a prepared benchmark would block publication. New `aa:gdpvalRating` and `aa:aa3d` convert GDPval-AA and AA-3D ratings into the expected win rate against the median-rated model, as for Arena.
+- **Not read:** AA-Briefcase, because dozens of exact zeros look like placeholders rather than ratings.
+- **Not recorded yet:** AA's "under review" flag on SciCode, because recording it would change that definition.
+
+**Measured locally** on the 26 October page, against published generation `fc490025fce766c12512c006fb8fc3ab`, with the catalogue models change:
+- The `analysis` source is `ok`.
+- Every existing series gained models; for example, GPQA Diamond went from 148 to 154 and HLE from 166 to 173.
+- The new series matched 10 to 68 models each: 60 for GDPval-AA and 17 for AA-3D.
+- All 12 new series prepared as `ready` through `refreshBenchmarks`. AA-3D got no capability tags, so it informs no task yet.
+- Benchmark-backed models rose from 233 to 263. 30 of them are catalogue models, and 7 of those have AA results, including Qwen3.8 Max, ERNIE 4.5 300B and Sarvam 105B.
+
 ## Catalogue identities and catalogue models in Scout — deployed, 26 October 2026
 
 **Deployment receipt:** the owner approved the push and deployment. Commit [3364230](https://github.com/laz-aslam/openmerit/commit/3364230) is on `origin/main`. Publisher `openmerit-scout` moved from `27bd6884-8d8d-4b7c-be7a-1d13d05dd397` to `07118166-8674-4003-83ad-d3150652d6bb`, with schedule `7 0,12 * * *`. No manual run was made; the 12:07 UTC refresh is the first to use it.
@@ -40,7 +58,7 @@ Models.dev's own unlinked provider entries go through the same tiers against Mod
 - **Existing models unchanged:** no existing model's evidence changed, compared to ten significant digits.
 - **Shortlists:** live interpretation varies between calls, because its vocabulary includes the model set. Invoice-extraction and ticket-classification shortlists were identical. Pixtral 12B entered the chart-question shortlist, and Qwen3 8B the cheap open-weight summarising one.
 
-**Known gap, unrelated to this change:** Artificial Analysis's leaderboard page no longer embeds per-benchmark scores. All 17 fields Scout reads were empty across 272 rows on 26 October. Production has retained the previous AA evidence since 04:55 UTC under the coverage guard. Until the AA parser reads another page, catalogue models gain no new AA results.
+**Known gap, unrelated to this change:** Artificial Analysis changed its score format, and production retained the previous AA evidence from 04:55 UTC. The parser fix is described in the section above.
 
 ## Catalogue host routes in Scout recommendations — deployed, 26 October 2026
 

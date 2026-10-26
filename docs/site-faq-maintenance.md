@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Artificial Analysis score format — 26 October 2026
+
+Reviewed benchmark-source claims against the parser change for Artificial Analysis's new per-evaluation score format. The homepage and the Scout page name no Artificial Analysis evaluations or counts, so no FAQ copy changes. The Scout guide's source table now lists 27 evaluations and how Elo-style ratings are converted.
+
 ## Catalogue identities and models in Scout — 26 October 2026
 
 Reviewed model-coverage and source claims against the change that adds catalogue models to Scout and widens catalogue identity resolution. The homepage and the Scout page state no model or provider counts, so no FAQ copy changes. The Scout guide's source table now says the catalogue also contributes models no other source lists.

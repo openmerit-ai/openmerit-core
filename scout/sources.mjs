@@ -139,15 +139,27 @@ export function parseArena(rows, categories) {
   return { categories: result, publishedAt: [...dates][0] };
 }
 
+// Artificial Analysis publishes each model's scores under `scores`, keyed by
+// evaluation slug. Benchmark IDs keep their original field names, so existing
+// series and their prepared interpretations carry over. GDPval-AA's value is now
+// an Elo-style rating, outside the 0–1 range, so its original series takes no new rows.
 const aaBenchmarks = {
-  gpqa: 'GPQA Diamond · AA', hle: 'Humanity’s Last Exam · AA',
-  scicode: 'SciCode · AA', ifbench: 'IFBench · AA', lcr: 'AA Long Context Reasoning',
-  terminalbenchHard: 'Terminal-Bench Hard · AA', terminalBench21: 'Terminal-Bench 2.1 · AA',
-  terminalBench40: 'Terminal-Bench 4.0 · AA', tau2: 'τ²-Bench · AA', tauBanking: 'τ-Bench Banking · AA',
-  critpt: 'CritPt · AA', apexAgents: 'APEX-Agents · AA', itbenchSre: 'ITBench SRE · AA',
-  mmmuPro: 'MMMU Pro · AA', omniscienceAccuracy: 'AA Omniscience accuracy',
-  analystAgent: 'Analyst Agent · AA', gdpvalNormalized: 'GDPval · AA',
+  gpqa: ['gpqa-diamond', 'GPQA Diamond · AA'], hle: ['humanitys-last-exam', 'Humanity’s Last Exam · AA'],
+  scicode: ['scicode', 'SciCode · AA'], ifbench: ['ifbench', 'IFBench · AA'], lcr: ['artificial-analysis-long-context-reasoning', 'AA Long Context Reasoning'],
+  terminalbenchHard: ['terminalbench-hard', 'Terminal-Bench Hard · AA'], terminalBench21: ['terminalbench-2-1', 'Terminal-Bench 2.1 · AA'],
+  terminalBench40: ['terminalbench-4-0', 'Terminal-Bench 4.0 · AA'], tau2: ['tau2-bench', 'τ²-Bench · AA'], tauBanking: ['tau3-banking', 'τ-Bench Banking · AA'],
+  critpt: ['critpt', 'CritPt · AA'], apexAgents: ['apex-agents-aa', 'APEX-Agents · AA'], itbenchSre: ['itbench-aa', 'ITBench SRE · AA'],
+  mmmuPro: ['mmmu-pro', 'MMMU Pro · AA'], omniscienceAccuracy: ['omniscience-accuracy', 'AA Omniscience accuracy'],
+  analystAgent: ['aa-analyst-agent', 'Analyst Agent · AA'], gdpvalNormalized: ['gdpval-aa-normalized', 'GDPval · AA'],
+  omniscienceNonHallucination: ['omniscience-non-hallucination', 'AA Omniscience non-hallucination rate'], livecodebench: ['livecodebench', 'LiveCodeBench · AA'],
+  aime2025: ['aime-2025', 'AIME 2025 · AA'], automationbench: ['automationbench-aa', 'AutomationBench · AA'], gdpPdf: ['gdp-pdf', 'GDP.pdf · AA'],
+  terminalBenchScience: ['terminal-bench-science', 'Terminal-Bench-Science · AA'], frontiercode: ['frontiercode', 'FrontierCode · AA'],
+  mlcr: ['mlcr-aa', 'MLCR-AA Medical Long Context Reasoning'], harveyLab: ['harvey-lab-aa', 'Harvey LAB-AA'], enterpriseOpsGym: ['enterprise-ops-gym-aa', 'EnterpriseOps-Gym · AA'],
 };
+// Elo-style AA ratings become the expected win rate against the median-rated
+// model, as for Arena. AA-Briefcase is not read: dozens of exact zeros look like
+// placeholders rather than ratings.
+const aaRatings = { gdpvalRating: ['gdpval-aa-normalized', 'GDPval-AA · win rate vs median model'], aa3d: ['aa-3d', 'AA-3D · win rate vs median model'] };
 
 export const bfclMetrics = [
   ['nonLive', 'Non-Live AST Acc', 'BFCL v4 single-turn'],
@@ -272,11 +284,18 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
   }, { license: 'https://creativecommons.org/licenses/by/4.0/' });
   collect('analysis', 'Artificial Analysis', sourceURLs.analysis, 'Benchmark results and reference speed by Artificial Analysis. Archived configurations remain labelled.', () => {
   const aa = parseAnalysis(analysisHTML), speedByModel = new Map(), descriptions = analysisDescriptions(analysisHTML);
-  for (const [field, name] of Object.entries(aaBenchmarks)) {
-    const benchmark = addBenchmark(`aa:${field}`, name, 'analysis', { title: name, description: descriptions[field] ?? null, metric: field, sourceURL: sourceURLs.analysis });
+  for (const [field, [slug, name]] of Object.entries(aaBenchmarks)) {
+    // The page no longer carries descriptions; a series keeps the one it was published with.
+    const prior = previous?.benchmarks.find(b => b.id === `aa:${field}`)?.definition?.description ?? null;
+    const benchmark = addBenchmark(`aa:${field}`, name, 'analysis', { title: name, description: descriptions[field] ?? prior, metric: field, sourceURL: sourceURLs.analysis });
     for (const row of aa) {
-      add(row.name, benchmark, row[field], { url: `https://artificialanalysis.ai/models/${encodeURIComponent(row.slug)}`, observedAt: null, sourceModel: row.name, metric: field, historical: !!row.deprecated });
+      add(row.name, benchmark, row.scores?.[slug], { url: `https://artificialanalysis.ai/models/${encodeURIComponent(row.slug)}`, observedAt: null, sourceModel: row.name, metric: field, historical: !!row.deprecated });
     }
+  }
+  for (const [field, [slug, name]] of Object.entries(aaRatings)) {
+    const rated = aa.filter(row => Number.isFinite(row.scores?.[slug])), sorted = rated.map(row => row.scores[slug]).sort((a, b) => a - b), median = sorted[sorted.length >> 1];
+    const benchmark = addBenchmark(`aa:${field}`, name, 'analysis', { title: name, description: `Artificial Analysis ${slug} rating, as the expected win rate against the median-rated model.`, metric: 'Win rate vs median model', sourceURL: sourceURLs.analysis });
+    for (const row of rated) add(row.name, benchmark, 1 / (1 + 10 ** ((median - row.scores[slug]) / 400)), { url: `https://artificialanalysis.ai/models/${encodeURIComponent(row.slug)}`, observedAt: null, sourceModel: row.name, metric: 'Win rate vs median model', historical: !!row.deprecated });
   }
   for (const row of aa) {
     const model = resolve(row.name); if (!model || !(row.medianOutputTokensPerSecond > 0)) continue;
