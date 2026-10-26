@@ -1,5 +1,29 @@
 # Scout architecture and operations
 
+## Arena Vision and WebDev boards (not yet deployed)
+
+The Arena leaderboard dataset (CC BY 4.0, updated 24 October 2026) publishes 24 boards. Scout read two of them, text and document. Collection now also reads two more, each as its own source, so a missing board withholds only itself:
+- **`arenaVision`** (`vision_style_control`): `arena:vision` (overall), plus `:ocr`, `:diagram`, `:homework` and `:creative_writing_vision`. Captioning and entity recognition are left out, because only 3 of 34 and 5 of 51 ratings have intervals within 60 points.
+- **`arenaWebdev`** (`webdev`, Code Arena): `arena:webdev` (overall), plus `:webdev-html`, `:webdev-react` and `:image_to_webdev`. The dataset's `webdev` category repeats `overall`.
+- **Not read:** Search Arena rates model-plus-search systems (for example `claude-opus-4-6-search`), and Agent Arena publishes IPS effect estimates rather than ratings. Neither names a plain model score.
+
+`parseArena` now checks and keeps one publication date per category, instead of requiring one date for the whole file. The vision board's unused `creative_writing` category is still dated 9 January 2026. Text observations take their category's date, which equals the file date today.
+
+**Measured locally** on the 26 October files, together with the matching change below: Vision matched 106 of 167 rated names and WebDev 129 of 149. That gave 105 models vision evidence and 103 WebDev evidence, with 51 to 91 models in each split. `refreshBenchmarks` prepared all nine new series as `ready`:
+
+| Series | Tags |
+| --- | --- |
+| Vision | vision |
+| OCR | documents, vision |
+| Diagrams | documents, reasoning, vision |
+| Homework | documents, reasoning, math, knowledge, vision |
+| Creative writing | writing, vision |
+| WebDev | coding, agents |
+| HTML, React | coding |
+| Image to WebDev | coding, vision |
+
+Missed names are mostly older models Scout no longer lists, such as Claude 3, Gemini 1.5, LLaVA and InternVL2.
+
 ## Benchmark-row matching through catalogue aliases (not yet deployed)
 
 Before this change, Scout placed a benchmark row only when its normalized name equalled a Scout model's ID suffix, canonical slug or name, after stripping one effort suffix and one trailing parenthetical, plus nine hand-written aliases. Measured against generation `04c70031f2d10174e21049ef73aedde9` and the 26 October feeds, 911 of 2,113 distinct scored row names (43%) matched.
@@ -7,10 +31,11 @@ Before this change, Scout placed a benchmark row only when its normalized name e
 - **Catalogue aliases.** `loadCatalogue(...).aliases(models)` in `scout/catalogue-routes.ts` maps every name the D1 catalogue knows for a canonical model to the Scout model that owns it. The names come from canonical IDs and names, every listing's provider model ID (without a namespace or `:tag`) and listing name (without a `Lab:` prefix), Hugging Face repositories, Epoch's model records, and linked Hub repositories. Ownership uses the same rule as catalogue routes.
 - **Ambiguity.** A name shared by distinct canonical models is dropped. Copies that differ only by a dated suffix (for example `claude-opus-4-5` and `claude-opus-4-5-20251101`) count as one model. An unlinked Hub repository from a model maker that has linked repositories also claims its name. This keeps a host's short name such as "Qwen 2.5 Coder 32B" from merging the base model's results into the Instruct model.
 - **Run settings.** `resolve()` in `scout/sources.mjs` then retries without `_minimal`, `_16K`-style thinking budgets, `-low`/`-high`-style efforts and every trailing parenthetical, such as "(High, 32K, 20251101)" or "(FC)". Dash suffixes `-max` and `-thinking` are kept, because they name distinct models.
+- **Shared names.** Scout can list one model under two IDs (OpenRouter and native), which makes their shared name ambiguous to Scout. Such a name still resolves through its catalogue alias when the catalogue links every Scout entry claiming it to one model family: the canonical ID without namespace, punctuation or a dated suffix (`families()`). Routes still use exact links only. This recovers, for example, Arena's "Claude Opus 4.5 (20251101)", which Scout lists three times.
 - **Precedence.** Rows matched under Scout's own name are tier 0; stripped or alias matches are tier 1. For one model and benchmark, only the best tier's rows are combined. Arena's "Qwen-Max (0919)" therefore cannot move Qwen-Max's current score, and no observation that existed before changes.
 - **Diagnostics.** Each `ok` benchmark source records `matching: {models, matched}`. The collection result carries `unmatchedRows`, which records do not keep.
 
-**Measured locally** with the same inputs: 1,018 of 2,113 names matched (48%). By source: Epoch 515/891, Analysis 128/269, OpenVLM 19/285, OmniDoc 4/7, IDP 15/26, Vectara 74/106, Arena 232/462 and BFCL 27/67. The change adds 260 observations, changes 0 and removes 0. Benchmark-backed models rose from 263 to 270. All 32 models gaining evidence were reviewed by hand, for example "Mistral Large 3" to `mistral-large-2512` and "Kimi-K2-Instruct-0905" to `kimi-k2-0905`.
+**Measured locally** with the same inputs, for the sources that existed before: 1,030 of 2,113 names matched (49%). By source: Epoch 521/891, Analysis 131/269, OpenVLM 19/285, OmniDoc 4/7, IDP 15/26, Vectara 76/106, Arena 238/462 and BFCL 27/67. Comparing runs with and without catalogue aliases, across all sources including the new Arena boards, matching adds 407 observations, changes 0 and removes 0. Benchmark-backed models rose from 263 to 275, counting the new boards. All 32 models gaining evidence were reviewed by hand, for example "Mistral Large 3" to `mistral-large-2512` and "Kimi-K2-Instruct-0905" to `kimi-k2-0905`.
 
 **Coverage ceiling.** Across the eight feeds, catalogue aliases place rows on 295 of the 844 canonical models. The other canonical models appear in none of these feeds. Of the 1,191 row names with no canonical model, 398 equal a Hugging Face repository name; these are mostly older open models (InternVL, LLaVA, Granite, Falcon, xLAM) that belong in the separate Hugging Face search, not main Scout. Wider coverage of canonical models needs more benchmark sources, not looser matching.
 

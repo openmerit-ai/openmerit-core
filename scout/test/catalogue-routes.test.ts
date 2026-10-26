@@ -53,4 +53,7 @@ test('catalogue routes reach Scout models only through exact identities and only
   // Every host's name for a linked model points at the Scout model that owns it; models Scout does not list have no alias.
   const aliases = (await loadCatalogue(db, admitted)).aliases(models);
   assert.deepEqual([aliases.get('glmx'), aliases.get('glmxalt'), aliases.get('gptx'), aliases.get('ds1')], ['z-ai/glm-x', 'z-ai/glm-x', 'openai/gpt-x', undefined]);
+  // Both Scout entries for GLM X belong to one family; an unlinked model has none.
+  const families = (await loadCatalogue(db, admitted)).families(models);
+  assert.deepEqual([families.get('z-ai/glm-x'), families.get('zai/glm-x-native'), families.get('lab/unknown')], ['glmx', 'glmx', undefined]);
 });

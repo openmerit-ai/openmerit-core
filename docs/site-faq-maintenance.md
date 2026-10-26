@@ -1,8 +1,8 @@
 # Website FAQ maintenance
 
-## Benchmark-row matching through catalogue aliases — 26 October 2026
+## Arena Vision and WebDev boards; benchmark-row matching through catalogue aliases — 26 October 2026
 
-Reviewed benchmark-coverage claims against the change that matches benchmark rows through catalogue aliases and stripped run settings. The homepage and the Scout page state no matched-model counts, so no FAQ copy changes. The Scout guide's catalogue row now describes alias matching and its precedence rule.
+Reviewed benchmark-coverage claims against the change that matches benchmark rows through catalogue aliases and stripped run settings. The homepage and the Scout page state no matched-model counts, so no FAQ copy changes. The Scout guide's catalogue row now describes alias matching and its precedence rule. The same review covered the new Arena Vision and WebDev sources: the homepage and the Scout page name no Arena boards, so no FAQ copy changes, and the Scout guide's source table now has an Arena row listing the four boards read.
 
 ## Artificial Analysis score format — 26 October 2026
 

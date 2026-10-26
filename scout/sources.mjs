@@ -23,6 +23,8 @@ export const sourceURLs = {
   vectara: 'https://raw.githubusercontent.com/vectara/hallucination-leaderboard/main/README.md',
   arena: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/text_style_control/latest-00000-of-00001.parquet',
   arenaDocument: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/document_style_control/latest-00000-of-00001.parquet',
+  arenaVision: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/vision_style_control/latest-00000-of-00001.parquet',
+  arenaWebdev: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/webdev/latest-00000-of-00001.parquet',
   bfclMethodology: 'https://gorilla.cs.berkeley.edu/leaderboard',
   bfclMemory: 'https://gorilla.cs.berkeley.edu/blogs/16_bfcl_v4_memory.html',
 };
@@ -122,21 +124,39 @@ export const arenaCategories = [
   ['longer_query', 'Arena · Longer queries', 'Human preference on prompts of 500 or more tokens, often with supplied material to work from.'],
   ['expert', 'Arena · Expert prompts', 'Human preference on prompts judged to need expert domain knowledge.'],
 ];
+// Vision arena categories (image input, text output) that describe a kind of request.
+// Captioning and entity recognition are omitted: few of their ratings are narrow enough to compare.
+export const arenaVisionCategories = [
+  ['overall', 'Arena · Vision', 'Human preference on prompts that include one or more images, across all vision categories.'],
+  ['ocr', 'Arena · Vision OCR', 'Human preference on image prompts that require reading text in the image, such as screenshots, receipts, forms and signs.'],
+  ['diagram', 'Arena · Vision diagrams', 'Human preference on image prompts about charts, diagrams, plots and other structured figures.'],
+  ['homework', 'Arena · Vision homework', 'Human preference on image prompts with homework or exam problems, such as photographed math, science or language exercises.'],
+  ['creative_writing_vision', 'Arena · Vision creative writing', 'Human preference on prompts asking for creative writing about or inspired by supplied images.'],
+];
+// Code Arena (WebDev) categories: models build working web applications from a prompt.
+export const arenaWebdevCategories = [
+  ['overall', 'Arena · WebDev', 'Human preference between two web applications that models built and ran from the same prompt, judged by using the result.'],
+  ['webdev-html', 'Arena · WebDev HTML', 'Human preference between two single-page HTML, CSS and JavaScript applications built from the same prompt.'],
+  ['webdev-react', 'Arena · WebDev React', 'Human preference between two React applications built from the same prompt.'],
+  ['image_to_webdev', 'Arena · Image to WebDev', 'Human preference between two web applications built from the same prompt that includes an image, such as a screenshot or mockup to reproduce.'],
+];
 // Bradley-Terry ratings become the expected win rate against the median-rated
-// model of the same leaderboard, which keeps scores on a 0-1 scale.
+// model of the same leaderboard category, which keeps scores on a 0-1 scale.
+// Categories of one leaderboard can be published on different dates; each keeps its own.
 export function parseArena(rows, categories) {
   if (!Array.isArray(rows) || rows.length < 20) throw new Error('Invalid Arena leaderboard dataset.');
-  const dates = new Set(rows.map(r => r.leaderboard_publish_date));
-  if (dates.size !== 1 || !/^\d{4}-\d{2}-\d{2}$/.test([...dates][0])) throw new Error('Arena leaderboard format changed.');
-  const result = {};
+  const result = {}, dates = {};
   for (const category of categories) {
     const list = rows.filter(r => r.category === category && typeof r.model_name === 'string' && Number.isFinite(r.rating) && Number.isFinite(r.rating_lower) && Number.isFinite(r.rating_upper));
     if (list.length < 10) throw new Error(`Arena category ${category} is missing.`);
+    const published = new Set(list.map(r => r.leaderboard_publish_date));
+    if (published.size !== 1 || !/^\d{4}-\d{2}-\d{2}$/.test([...published][0])) throw new Error('Arena leaderboard format changed.');
+    dates[category] = [...published][0];
     const sorted = list.map(r => r.rating).sort((a, b) => a - b), median = sorted[sorted.length >> 1];
     // Wide intervals mean few votes; those ratings are not stable enough to compare.
     result[category] = list.filter(r => r.rating_upper - r.rating_lower <= 60).map(r => ({ name: r.model_name, score: 1 / (1 + 10 ** ((median - r.rating) / 400)) }));
   }
-  return { categories: result, publishedAt: [...dates][0] };
+  return { categories: result, dates, publishedAt: Object.values(dates).sort().at(-1) };
 }
 
 // Artificial Analysis publishes each model's scores under `scores`, keyed by
@@ -186,7 +206,7 @@ export function parseBFCL(csv) {
   });
 }
 
-export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, catalogueSupply, previous, failures = {}, checkedAt = new Date().toISOString() }) {
+export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, arenaVisionRows, arenaWebdevRows, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, catalogueSupply, previous, failures = {}, checkedAt = new Date().toISOString() }) {
   const sources = [], benchmarks = [], observations = new Map();
   const descriptions = benchmarkDescriptions ?? previous?.benchmarkDescriptions ?? {};
   const priorSources = new Map(previous?.sources.map(s => [s.id, s]) ?? []);
@@ -216,16 +236,21 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
   // Without the D1 catalogue, the previous generation's ones are kept.
   const offered = catalogueSupply ? catalogueSupply.models(models, checkedAt) : (previous?.catalogue ?? []).filter(m => m.listedBy === catalogueRouteSource).map(m => ({ ...m, evidence: [], speed: null }));
   for (const entry of contracts.entries) if (!sources.some(s => s.id === entry.source)) sources.push({ id: entry.source, name: `${entry.provider} · typed endpoints`, url: entry.url, status: 'ok', checkedAt: contracts.reviewedAt, refreshPolicy: 'manual-contract-review', attribution: 'Provider-documented endpoint contract and quoted rates; versioned metadata, not a live performance probe.' });
-  const lookup = new Map(), aliases = model => [model.id.split('/').slice(1).join('/'), model.canonical?.split('/').slice(1).join('/'), model.name].filter(Boolean).map(norm);
-  for (const model of models) for (const key of aliases(model)) { const previous = lookup.get(key); lookup.set(key, lookup.has(key) && previous !== model ? null : model); }
+  // A name two models share maps to null; claimants keeps who shares it.
+  const lookup = new Map(), claimants = new Map(), aliases = model => [model.id.split('/').slice(1).join('/'), model.canonical?.split('/').slice(1).join('/'), model.name].filter(Boolean).map(norm);
+  const claim = (key, model) => { const previous = lookup.get(key); lookup.set(key, lookup.has(key) && previous !== model ? null : model); claimants.set(key, (claimants.get(key) ?? new Set()).add(model.id)); };
+  for (const model of models) for (const key of aliases(model)) claim(key, model);
   // A catalogue model whose name or slug an existing model already uses may be
   // that model under another catalogue ID (Models.dev has such duplicates), so it stays out.
   const listed = offered.filter(m => !models.some(x => x.id === m.id) && !aliases(m).some(key => lookup.has(key)));
-  for (const model of listed) for (const key of aliases(model)) { const previous = lookup.get(key); lookup.set(key, lookup.has(key) && previous !== model ? null : model); }
+  for (const model of listed) for (const key of aliases(model)) claim(key, model);
   models.push(...listed);
   const explicitAliases = { 'claudesonnet4520250929': 'anthropic/claude-sonnet-4.5', 'claudehaiku4520251001': 'anthropic/claude-haiku-4.5', 'chatgpt4olatest': 'openai/chatgpt-4o-latest', 'claude37sonnet20250219': 'anthropic/claude-3.7-sonnet', 'gemini25propreview0325': 'google/gemini-2.5-pro-preview-03-25', 'gemini3flash': 'google/gemini-3-flash-preview', 'gemini31pro': 'google/gemini-3.1-pro-preview', 'claudehaiku45': 'anthropic/claude-haiku-4.5', 'qwen3vl235b': 'qwen/qwen3-vl-235b-a22b-instruct' };
   // Catalogue names (provider model IDs, listing and repository names) of the models above; Scout's own names win.
-  const catalogueAliases = catalogueSupply?.aliases(models) ?? new Map(), byId = new Map(models.map(m => [m.id, m]));
+  const catalogueAliases = catalogueSupply?.aliases(models) ?? new Map(), linked = catalogueSupply?.families(models) ?? new Map(), byId = new Map(models.map(m => [m.id, m]));
+  // Scout can list one canonical model under two IDs (OpenRouter and native), so their shared
+  // name is ambiguous to Scout. It still resolves when the catalogue links every claimant to one model family.
+  const sameModel = key => { const ids = [...claimants.get(key) ?? []], first = linked.get(ids[0]); return !!first && ids.every(id => linked.get(id) === first); };
   function resolve(name) {
     const base = String(name).replace(/_(?:none|low|medium|high|xhigh|max|unknown|thinking|nothinking)$/, '').replace(/\s*\([^)]*\)\s*$/, '');
     // Then without run settings: reasoning effort, thinking budgets and every trailing parenthetical.
@@ -235,7 +260,7 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     for (const [tier, key] of [norm(base), norm(bare)].entries()) {
       const own = lookup.get(key) ?? byId.get(explicitAliases[key]);
       if (own) return { model: own, tier: tier === 0 ? 0 : 1 };
-      const alias = lookup.has(key) ? undefined : byId.get(catalogueAliases.get(key));
+      const alias = lookup.has(key) && !sameModel(key) ? undefined : byId.get(catalogueAliases.get(key));
       if (alias) return { model: alias, tier: 1 };
     }
     return { model: undefined, tier: 1 };
@@ -370,11 +395,23 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     const text = parseArena(arenaRows, arenaCategories.map(c => c[0])), document = parseArena(arenaDocumentRows, ['overall']);
     for (const [category, name, description] of arenaCategories) {
       const benchmark = addBenchmark(`arena:${category}`, name, 'arena', { title: name, description: `${description} Crowdsourced pairwise votes on real user prompts, style-controlled. Score is the expected win rate against the median-rated model in this category.`, metric: 'Win rate vs median model', suite: 'Arena text', sourceURL: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset' });
-      for (const row of text.categories[category]) add(row.name, benchmark, row.score, { url: 'https://arena.ai/leaderboard/text', observedAt: text.publishedAt, sourceModel: row.name, metric: 'Win rate vs median model' });
+      for (const row of text.categories[category]) add(row.name, benchmark, row.score, { url: 'https://arena.ai/leaderboard/text', observedAt: text.dates[category], sourceModel: row.name, metric: 'Win rate vs median model' });
     }
     const benchmark = addBenchmark('arena:document', 'Arena · Document', 'arena', { title: 'Arena · Document', description: 'Human preference on prompts about uploaded documents such as PDFs: users ask questions, request summaries or extract information, and vote between two anonymous answers. Style-controlled. Score is the expected win rate against the median-rated model.', metric: 'Win rate vs median model', suite: 'Arena document', sourceURL: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset' });
     for (const row of document.categories.overall) add(row.name, benchmark, row.score, { url: 'https://arena.ai/leaderboard/document', observedAt: document.publishedAt, sourceModel: row.name, metric: 'Win rate vs median model' });
     return { publishedAt: text.publishedAt };
+  }, { license: 'https://creativecommons.org/licenses/by/4.0/' });
+  // Vision and Code Arena are separate sources, so a missing board never withholds another.
+  for (const [id, name, rows, categories, suite, page, url, prefix] of [
+    ['arenaVision', 'Arena · Vision', arenaVisionRows, arenaVisionCategories, 'Arena vision', 'https://arena.ai/leaderboard/vision', sourceURLs.arenaVision, 'arena:vision'],
+    ['arenaWebdev', 'Arena · WebDev', arenaWebdevRows, arenaWebdevCategories, 'Arena WebDev', 'https://arena.ai/leaderboard/webdev', sourceURLs.arenaWebdev, 'arena:webdev'],
+  ]) collect(id, name, 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset', `Arena leaderboard dataset, ${suite} board: style-controlled ratings from crowdsourced pairwise human votes by category. Converted to expected win rate against the median-rated model; ratings with confidence intervals wider than 60 points are excluded. Human preference, not verified correctness.`, () => {
+    const board = parseArena(rows, categories.map(c => c[0]));
+    for (const [category, title, description] of categories) {
+      const benchmark = addBenchmark(category === 'overall' ? prefix : `${prefix}:${category}`, title, id, { title, description: `${description} Style-controlled. Score is the expected win rate against the median-rated model in this category.`, metric: 'Win rate vs median model', suite, sourceURL: url });
+      for (const row of board.categories[category]) add(row.name, benchmark, row.score, { url: page, observedAt: board.dates[category], sourceModel: row.name, metric: 'Win rate vs median model' });
+    }
+    return { publishedAt: board.publishedAt };
   }, { license: 'https://creativecommons.org/licenses/by/4.0/' });
   collect('bfcl', 'Berkeley Function Calling Leaderboard', 'https://gorilla.cs.berkeley.edu/leaderboard', 'BFCL v4 native function-calling evaluations. Memory uses the named external backend, not built-in model memory. Per-model measurement dates are not supplied.', () => {
     const rows = parseBFCL(bfclCSV);
@@ -432,7 +469,7 @@ export async function refreshSnapshot(fetcher = fetch, previous, options = {}) {
     failed: [...(results[0].status === 'rejected' ? ['analysis'] : []), ...(results.slice(1).some(r => r.status === 'rejected') ? ['bfcl'] : [])],
   }));
   const descriptions = readEpochDefinitions(read).then(value => ({ value }), () => ({ value: previous?.benchmarkDescriptions, failed: true }));
-  const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['idp', 'idpHTML', 'text'], ['vectara', 'vectaraMarkdown', 'text'], ['arena', 'arenaRows', 'parquet'], ['arenaDocument', 'arenaDocumentRows', 'parquet'], ['bfcl', 'bfclCSV', 'text'], ['modelsdev', 'modelsDev', 'json']];
+  const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['idp', 'idpHTML', 'text'], ['vectara', 'vectaraMarkdown', 'text'], ['arena', 'arenaRows', 'parquet'], ['arenaDocument', 'arenaDocumentRows', 'parquet'], ['arenaVision', 'arenaVisionRows', 'parquet'], ['arenaWebdev', 'arenaWebdevRows', 'parquet'], ['bfcl', 'bfclCSV', 'text'], ['modelsdev', 'modelsDev', 'json']];
   const results = await Promise.allSettled([...specs.map(([id, , type]) => read(sourceURLs[id], type)), ...hubQueries.map(query => read(query.url, 'json', 2_000_000))]);
   const inputs = { previous, failures: {}, catalogueSupply: options.catalogueSupply };
   results.slice(0, specs.length).forEach((result, i) => {

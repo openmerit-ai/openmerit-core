@@ -26,6 +26,9 @@ export interface CatalogueSupply {
   // Exact catalogue aliases (normalized) of models Scout lists: canonical IDs and
   // names, every provider's model ID and Hugging Face repository for that model.
   aliases(models: readonly ScoutModelLike[]): Map<string, string>;
+  // The model family each Scout model links to through an exact identity: its canonical ID
+  // without namespace, punctuation or a dated suffix, so catalogue copies of one model agree.
+  families(models: readonly ScoutModelLike[]): Map<string, string>;
 }
 
 export const catalogueRouteSource = 'catalogue';
@@ -86,26 +89,28 @@ export async function loadCatalogue(db: Database, admitted: Readonly<Record<stri
     for (const e of byCanonical.get(target) ?? []) { const k = e.provider.toLowerCase(), old = out.get(k); if (!have.has(k) && (!old || blended(e) < blended(old) || blended(e) === blended(old) && e.id < old.id)) out.set(k, { ...e, checkedAt }); }
     return [...out.values()].sort((a, b) => a.id.localeCompare(b.id));
   };
+  // Canonical models a Scout model reaches through its ID or its endpoints' exact identities.
+  const found = (m: ScoutModelLike) => {
+    const out = new Set<string>();
+    if (canonical.has(m.id)) out.add(m.id);
+    for (const e of m.endpoints ?? []) { const hit = keys.get(keyOf(e) ?? ''); if (hit) out.add(hit); }
+    return out;
+  };
   const linksOf = (models: readonly ScoutModelLike[]) => {
     const links = new Map<string, string>();
-    for (const m of models) {
-      const found = new Set<string>();
-      if (canonical.has(m.id)) found.add(m.id);
-      for (const e of m.endpoints ?? []) { const hit = keys.get(keyOf(e) ?? ''); if (hit) found.add(hit); }
-      if (found.size === 1) links.set(m.id, [...found][0] ?? '');
-    }
+    for (const m of models) { const [only, ...rest] = found(m); if (only && !rest.length) links.set(m.id, only); }
     return links;
   };
   // Scout can list one canonical model under several IDs (an OpenRouter ID and a
   // native ID). Its routes and aliases go to one of them: measured first, then the most routes.
+  const rank = (m: ScoutModelLike) => [m.evidence?.length ? 1 : 0, m.endpoints?.length ?? 0];
+  const better = (m: ScoutModelLike, old: ScoutModelLike | undefined) => {
+    const [a1 = 0, a2 = 0] = rank(m), [b1 = 0, b2 = 0] = old ? rank(old) : [-1, -1];
+    return !old || a1 > b1 || a1 === b1 && (a2 > b2 || a2 === b2 && m.id < old.id);
+  };
   const ownersOf = (models: readonly ScoutModelLike[]) => {
-    const links = linksOf(models), owner = new Map<string, ScoutModelLike>(), rank = (m: ScoutModelLike) => [m.evidence?.length ? 1 : 0, m.endpoints?.length ?? 0];
-    for (const m of models) {
-      const target = links.get(m.id), old = target ? owner.get(target) : undefined;
-      if (!target) continue;
-      const [a1 = 0, a2 = 0] = rank(m), [b1 = 0, b2 = 0] = old ? rank(old) : [-1, -1];
-      if (!old || a1 > b1 || a1 === b1 && (a2 > b2 || a2 === b2 && m.id < old.id)) owner.set(target, m);
-    }
+    const links = linksOf(models), owner = new Map<string, ScoutModelLike>();
+    for (const m of models) { const target = links.get(m.id); if (target && better(m, owner.get(target))) owner.set(target, m); }
     return owner;
   };
   // Names each canonical model goes by across the catalogue: its ID and name, every
@@ -153,15 +158,22 @@ export async function loadCatalogue(db: Database, admitted: Readonly<Record<stri
       }
       return out.sort((a, b) => a.id.localeCompare(b.id));
     },
+    families(models) {
+      // Several catalogue copies of one model still name one family; routes stay with exact links only.
+      const out = new Map<string, string>();
+      for (const m of models) { const set = new Set([...found(m)].map(family)), [only] = set; if (only && set.size === 1) out.set(m.id, only); }
+      return out;
+    },
     aliases(models) {
       const owners = ownersOf(models), out = new Map<string, string>();
       for (const [key, targets] of names) {
         // A name several distinct canonical models share is no identity. Copies of one
-        // model (dotted vs dashed versions, or a dated snapshot of an alias) count as one.
+        // model (dotted vs dashed versions, or a dated snapshot of an alias) count as one,
+        // and when Scout lists several copies the name goes to the best-ranked one.
         if (new Set([...targets].map(family)).size !== 1) continue;
-        const scout = new Set([...targets].flatMap(t => owners.get(t)?.id ?? []));
-        const [only] = scout;
-        if (scout.size === 1 && only) out.set(key, only);
+        let best: ScoutModelLike | undefined;
+        for (const t of targets) { const m = owners.get(t); if (m && better(m, best)) best = m; }
+        if (best) out.set(key, best.id);
       }
       return out;
     },

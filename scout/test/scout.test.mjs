@@ -135,7 +135,7 @@ test('catalogue models join before benchmark matching unless an existing model u
   const listed = (id, name) => ({ id, name, provider: 'Other', canonical: id, repository: null, modalities: ['text'], outputModalities: ['text'], parameters: [], context: null, facts: [], inputPrice: 1, outputPrice: 2, speed: null, evidence: [],
     endpoints: [{ id: `catalogue:host:chat-completions:${id}`, provider: 'Host', modelId: id, api: 'https://host.example/v1/chat/completions', protocol: 'chat-completions', inputPrice: 1, outputPrice: 2, source: 'catalogue', url: 'https://host.example' }], listedBy: 'catalogue' });
   let seen;
-  const catalogueSupply = { models: models => (seen = models.length, [listed('other/host-x', 'Host X'), listed('other/model-1', 'Model 1')]), aliases: () => new Map() };
+  const catalogueSupply = { models: models => (seen = models.length, [listed('other/host-x', 'Host X'), listed('other/model-1', 'Model 1')]), aliases: () => new Map(), families: () => new Map() };
   const data = compileSnapshot({ ...input, catalogueSupply });
   assert.equal(seen, 12, 'the supply sees every feed model, so it can leave out linked ones');
   assert.equal(data.models.find(m => m.id === 'other/host-x')?.evidence.find(e => e.benchmark === 'epoch:Bench0')?.score, .7);
@@ -150,7 +150,7 @@ test('benchmark rows match catalogue aliases and run settings, but never move a 
   // An older dated snapshot of model 1, a host's name for model 3, a thinking budget, and a name the catalogue cannot place.
   const results = 'Model version,Score\nmodel-1_high,0.5\nmodel-1-0919_minimal,0.9\nhost-name-3 (FC),0.4\nmodel-4_32K,0.3\nunknown-x,0.2\n';
   input.epochZip = zipSync({ 'benchmark_metadata.csv': strToU8('benchmark,source_file,score_column,scale\n' + Array.from({ length: 10 }, (_, i) => `Bench${i},results.csv,Score,1`).join('\n')), 'results.csv': strToU8(results) });
-  const catalogueSupply = { models: () => [], aliases: () => new Map([['model10919', 'lab/model-1'], ['hostname3', 'lab/model-3']]) };
+  const catalogueSupply = { models: () => [], aliases: () => new Map([['model10919', 'lab/model-1'], ['hostname3', 'lab/model-3']]), families: () => new Map() };
   const data = compileSnapshot({ ...input, catalogueSupply });
   const score = id => data.models.find(m => m.id === id)?.evidence.find(e => e.benchmark === 'epoch:Bench0');
   assert.deepEqual([score('lab/model-1').score, score('lab/model-1').configurations], [.5, ['model-1_high']]);
@@ -158,6 +158,15 @@ test('benchmark rows match catalogue aliases and run settings, but never move a 
   assert.equal(score('lab/model-4').score, .3);
   assert.deepEqual(data.sources.find(s => s.id === 'epoch').matching, { models: 5, matched: 4 });
   assert.deepEqual(data.unmatchedRows.epoch, ['unknown-x']);
+  // Scout lists model 5 twice (as a native copy), so the name is ambiguous to Scout; it resolves
+  // only when the catalogue links both entries to one model family.
+  const twice = fixtures();
+  twice.router.data.push({ ...twice.router.data[5], id: 'lab/model-5-native', canonical_slug: 'lab/model-5-native' });
+  twice.epochZip = zipSync({ 'benchmark_metadata.csv': strToU8('benchmark,source_file,score_column,scale\n' + Array.from({ length: 10 }, (_, i) => `Bench${i},results.csv,Score,1`).join('\n')), 'results.csv': strToU8('Model version,Score\nModel 5,0.6\n') });
+  const shared = families => compileSnapshot({ ...twice, catalogueSupply: { models: () => [], aliases: () => new Map([['model5', 'lab/model-5']]), families: () => new Map(families) } })
+    .models.find(m => m.id === 'lab/model-5')?.evidence.find(e => e.benchmark === 'epoch:Bench0')?.score;
+  assert.equal(shared([['lab/model-5', 'model5'], ['lab/model-5-native', 'model5']]), .6);
+  assert.equal(shared([['lab/model-5', 'model5'], ['lab/model-5-native', 'other']]), undefined);
 });
 
 test('reference speed preserves first-answer delay and does not mistake reasoning tokens for an answer', () => {
@@ -193,7 +202,7 @@ test('a fresh table retains omitted historical observations only for an unchange
 test('refresh reads bounded benchmark methodology and catalogue feeds; total outage needs a previous index', async () => {
   const f = fixtures(); const calls = [];
   const fetcher = async url => { calls.push(url); return new Response(url.endsWith('.zip') ? f.epochZip : url.includes('artificialanalysis') ? f.analysisHTML : JSON.stringify(url.includes('OpenVLM') ? f.openvlm : f.router)); };
-  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 29); assert.equal(refreshed.models.length, 12);
+  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 31); assert.equal(refreshed.models.length, 12);
   assert.equal(refreshed.sources.find(s => s.id === 'huggingface').status, 'failed');
   await assert.rejects(refreshSnapshot(async () => new Response('Unavailable', { status: 503 })), /Invalid model catalogue/);
 });
@@ -268,6 +277,10 @@ test('summary and human-preference parsers keep comparable rows and reject forma
   assert.ok(!arena.categories.expert.some(r => r.name === 'Model 0'));
   assert.throws(() => parseArena(rows.map((r, i) => ({ ...r, leaderboard_publish_date: i ? r.leaderboard_publish_date : '2026-09-01' })), ['expert']), /format changed/);
   assert.throws(() => parseArena(rows, ['missing']), /missing/);
+  // Categories of one board can be published on different dates; each keeps its own, and an unused stale one is ignored.
+  const vision = parseArena([...rows.map(r => ({ ...r, category: 'ocr' })), ...rows.map(r => ({ ...r, category: 'overall', leaderboard_publish_date: '2026-10-22' })),
+    ...rows.map(r => ({ ...r, category: 'creative_writing', leaderboard_publish_date: '2026-01-09' }))], ['overall', 'ocr']);
+  assert.deepEqual([vision.dates, vision.publishedAt], [{ overall: '2026-10-22', ocr: '2026-10-20' }, '2026-10-22']);
 });
 test('the IDP Leaderboard parser reads component scores from the rendered table and rejects format changes', async () => {
   const { parseIDP } = await import('../sources.mjs');
