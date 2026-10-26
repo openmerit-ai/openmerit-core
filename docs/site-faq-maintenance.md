@@ -1,5 +1,17 @@
 # Website FAQ maintenance
 
+## Scout privacy settings page — source only, 26 October 2026
+
+Moved Privacy & analytics to `/scout/privacy/`, linked from Scout's footer and the data policy. The notice and sharing controls are unchanged; sign-in returns to the settings page and existing saved preferences continue to apply to Scout. The old settings fragment forwards to the new page. The homepage FAQ requires no change. No deployment is included.
+
+## Scout footer simplification — source only, 26 October 2026
+
+Removed the Scout page's JSON API, Capabilities and Sources sections and header API navigation, along with their UI-only rendering, copy-request and deep-link code. Privacy & analytics, the data policy and Claude Code setup remain available. Recommendation evidence and limitations, catalogue counts, and API/status/MCP contracts are unchanged; removing public UI is not access control or a claim that these integrations are undiscoverable. The homepage FAQ requires no change. No deployment is included.
+
+## Scout privacy copy and placement — source only, 26 October 2026
+
+Moved the task-logging notice from below Scout's task input into the existing Privacy & analytics disclosure on the current Claude Code setup UI. The controls, dynamic sharing state and data-policy links remain available before and after submitting a task. Public Scout privacy copy and the policy describe service-provider categories rather than implementation vendors; collection, account linkage, retention, opt-outs and deletion limitations are unchanged. The policy retains device-approval, setup/installation correlation and MCP telemetry disclosures, and replaces the superseded source-only setup-default note with the released installer behavior. The homepage and connection page need no vendor-copy changes. Recommended-model/provider names, source attribution and sign-in choices remain functional information; browser assets/network requests can still reveal integrations. Internal implementation guides are unchanged. No deployment is included.
+
 ## Vendor-reported benchmark scores — 26 October 2026
 
 Reviewed evidence and provenance claims against the change that adds developer-reported scores from LLM Stats. The homepage and the Scout page make no claim that every score is independently measured, so no FAQ copy changes. The Scout guide's source table now has an LLM Stats row that states the results are vendor-reported, unverified and counted in ranking.

@@ -264,7 +264,7 @@ await writeFile(join(policyDirectory, 'index.html'), `<!doctype html>
   <a class="skip-link" href="#doc-content">Skip to policy</a>
   <header class="docs-header"><div class="docs-header-inner">
     <a class="brand" href="/" aria-label="OpenMerit home">${brand}</a>
-    <nav class="docs-header-links" aria-label="Primary navigation"><a href="/scout/">Back to Scout</a><a href="/scout/#analytics-settings">Privacy settings</a></nav>
+    <nav class="docs-header-links" aria-label="Primary navigation"><a href="/scout/">Back to Scout</a><a href="/scout/privacy/">Privacy settings</a></nav>
   </div></header>
   <main class="docs-main">
     <article class="docs-article" id="doc-content" tabindex="-1">
