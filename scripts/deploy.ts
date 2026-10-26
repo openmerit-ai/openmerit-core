@@ -112,8 +112,9 @@ async function status(): Promise<void> {
     console.log(`\nScout catalogue: status request failed with HTTP ${response.status}.`);
     return;
   }
-  const healthy = catalogue["refreshStatus"] !== "failed" && catalogue["stale"] !== true;
-  console.log(`\nScout catalogue${healthy ? "" : " [WARNING]"}: refresh ${String(catalogue["refreshStatus"])}, stale ${String(catalogue["stale"])}, last attempt ${String(catalogue["lastAttemptAt"])}, snapshot ${String(catalogue["snapshotVersion"])}`);
+  // degraded means a source failed even while refreshStatus is idle and retained data is fresh.
+  const healthy = catalogue["refreshStatus"] !== "failed" && catalogue["stale"] !== true && catalogue["degraded"] !== true;
+  console.log(`\nScout catalogue${healthy ? "" : " [WARNING]"}: refresh ${String(catalogue["refreshStatus"])}, stale ${String(catalogue["stale"])}, degraded ${String(catalogue["degraded"])}, last attempt ${String(catalogue["lastAttemptAt"])}, snapshot ${String(catalogue["snapshotVersion"])}`);
   if (typeof catalogue["refreshError"] === "string") console.log(`  ${catalogue["refreshError"]}`);
 }
 
