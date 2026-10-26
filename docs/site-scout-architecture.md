@@ -1,6 +1,11 @@
 # Scout architecture and operations
 
-## Vendor-reported scores from LLM Stats (not yet deployed)
+## Vendor-reported scores from LLM Stats — deployed, 26 October 2026
+
+**Deployment receipt:** the owner approved the push, the deployment and a manual run. Commit [13a9dd2](https://github.com/laz-aslam/openmerit/commit/13a9dd2) is on `origin/main`. Publisher `openmerit-scout` moved from `b87a4068-82df-4f52-8330-c8071731c8fb` to `5f10f048-1475-4a06-84c0-7d0386e0e37e` at 11:44 UTC, with schedule `7 0,12 * * *`. Manual run `manual-20261026-vendor-1` published generation `fb379087c03be796e9a3f758f11174fc` (checked 11:46 UTC). That generation is also the first to carry the alias matching, Arena Vision and WebDev, Arena industry and Vals AI changes recorded below.
+- **Sources:** every benchmark feed is `ok`. Row names matched: Vals 140/248, vendor 225/381, Arena Vision 106/167, Arena WebDev 129/149.
+- **Counts:** benchmark-backed models rose from 263 to 297, and benchmarks from 404 to 543. Observations rose from 5,871 to 11,527, of which 2,412 are vendor-reported. Comparing generation `04c70031` with `fb379087`, no observation changed or disappeared.
+- **Retries:** `interpret-evidence` hit a D1 CPU-time limit once (11:55 UTC) and succeeded on retry. `validate-and-stage` waited twice for Vectorize indexing.
 
 The owner asked for vendor-reported scores and decided earlier that they may affect ranking. LLM Stats (llm-stats.com) compiles the results developers publish. Its terms (updated 8 October 2026) allow reuse, including commercial reuse, with visible attribution. Its public API at `api.llm-stats.com` sets no content signals.
 
