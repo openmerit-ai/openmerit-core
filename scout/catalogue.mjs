@@ -54,7 +54,7 @@ export function parseProviderCatalogue(data, checkedAt) {
 }
 export function mergeCatalogues(routerModels, independent) {
   const models = new Map(routerModels.map(m => [m.id, m]));
-  const norm = v => v.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const norm = v => v.toLowerCase().replace(/\+/g, 'plus').replace(/[^a-z0-9]/g, '');
   for (const item of independent) {
     // Match only a unique name within the same publisher; never merge fine-tunes
     // or different dated model IDs based on fuzzy similarity.

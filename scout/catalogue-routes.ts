@@ -39,8 +39,9 @@ const chatType = (t: string | null) => t === null || t === 'chat' || t === 'lang
 // Where a canonical identity comes from, by its basis prefix (catalogue-db.ts).
 const identitySources: Record<string, string> = { modelsdev: 'https://models.dev', openrouter: 'https://openrouter.ai/models', vercel: 'https://vercel.com/ai-gateway/models' };
 // Same normalization as Scout's benchmark-row matching (sources.mjs).
-const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
-const family = (id: string) => norm((id.split('/').pop() ?? id).replace(/-(?:\d{8}|\d{4}-\d{2}-\d{2})$/, ''));
+const norm = (v: string) => v.toLowerCase().replace(/\+/g, 'plus').replace(/[^a-z0-9]/g, '');
+// Dated IDs (claude-…-20250219, …-2025-02-19, Cohere's command-a-03-2025) are copies of one model.
+const family = (id: string) => norm((id.split('/').pop() ?? id).replace(/-(?:\d{8}|\d{4}-\d{2}-\d{2}|\d{2}-\d{4})$/, ''));
 const blended = (e: { inputPrice: number; outputPrice: number }) => e.inputPrice * 3 + e.outputPrice;
 const keyOf = (e: { provider?: string | null; modelId?: string; source?: string }) =>
   e.source === 'models' && e.modelId ? `models|${e.modelId}` : e.source === 'modelsdev' && e.provider && e.modelId ? `modelsdev|${e.provider.toLowerCase()}|${e.modelId}` : null;
@@ -96,9 +97,11 @@ export async function loadCatalogue(db: Database, admitted: Readonly<Record<stri
     for (const e of m.endpoints ?? []) { const hit = keys.get(keyOf(e) ?? ''); if (hit) out.add(hit); }
     return out;
   };
+  // A Scout model links to the canonical models it reaches when they are copies
+  // of one model (cohere/command-a and its dated ID command-a-03-2025).
   const linksOf = (models: readonly ScoutModelLike[]) => {
-    const links = new Map<string, string>();
-    for (const m of models) { const [only, ...rest] = found(m); if (only && !rest.length) links.set(m.id, only); }
+    const links = new Map<string, string[]>();
+    for (const m of models) { const targets = [...found(m)]; if (targets.length && new Set(targets.map(family)).size === 1) links.set(m.id, targets); }
     return links;
   };
   // Scout can list one canonical model under several IDs (an OpenRouter ID and a
@@ -110,7 +113,7 @@ export async function loadCatalogue(db: Database, admitted: Readonly<Record<stri
   };
   const ownersOf = (models: readonly ScoutModelLike[]) => {
     const links = linksOf(models), owner = new Map<string, ScoutModelLike>();
-    for (const m of models) { const target = links.get(m.id); if (target && better(m, owner.get(target))) owner.set(target, m); }
+    for (const m of models) for (const target of links.get(m.id) ?? []) if (better(m, owner.get(target))) owner.set(target, m);
     return owner;
   };
   // Names each canonical model goes by across the catalogue: its ID and name, every
@@ -134,8 +137,9 @@ export async function loadCatalogue(db: Database, admitted: Readonly<Record<stri
     routes(models, checkedAt) {
       const out = new Map<string, ScoutEndpoint[]>();
       for (const [target, m] of ownersOf(models)) {
-        const add = best(target, new Set((m.endpoints ?? []).map(e => String(e.provider ?? '').toLowerCase())), checkedAt);
-        if (add.length) out.set(m.id, add);
+        // A model owning several copies takes each host once, from the first copy offering it.
+        const prior = out.get(m.id) ?? [], add = best(target, new Set([...(m.endpoints ?? []), ...prior].map(e => String(e.provider ?? '').toLowerCase())), checkedAt);
+        if (add.length) out.set(m.id, [...prior, ...add]);
       }
       return out;
     },

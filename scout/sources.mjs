@@ -30,7 +30,8 @@ export const sourceURLs = {
   bfclMethodology: 'https://gorilla.cs.berkeley.edu/leaderboard',
   bfclMemory: 'https://gorilla.cs.berkeley.edu/blogs/16_bfcl_v4_memory.html',
 };
-const norm = value => String(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+// "+" is part of a model name (Command A+ is not Command A), so it survives as "plus".
+const norm = value => String(value).toLowerCase().replace(/\+/g, 'plus').replace(/[^a-z0-9]/g, '');
 const number = value => value === '' || value == null ? null : Number.isFinite(Number(value)) ? Number(value) : null;
 const median = values => { const a = [...values].sort((a, b) => a - b); return a.length ? (a[Math.floor((a.length - 1) / 2)] + a[Math.floor(a.length / 2)]) / 2 : null; };
 const safeURL = value => { try { const u = new URL(value); return ['https:', 'http:'].includes(u.protocol) ? u.href : null; } catch { return null; } };

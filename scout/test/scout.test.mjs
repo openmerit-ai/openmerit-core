@@ -167,6 +167,12 @@ test('benchmark rows match catalogue aliases and run settings, but never move a 
     .models.find(m => m.id === 'lab/model-5')?.evidence.find(e => e.benchmark === 'epoch:Bench0')?.score;
   assert.equal(shared([['lab/model-5', 'model5'], ['lab/model-5-native', 'model5']]), .6);
   assert.equal(shared([['lab/model-5', 'model5'], ['lab/model-5-native', 'other']]), undefined);
+  // "+" names a different model (Command A+ is not Command A), so neither name is ambiguous.
+  const plus = fixtures();
+  plus.router.data.push({ ...plus.router.data[6], id: 'lab/model-6-plus', canonical_slug: 'lab/model-6-plus', name: 'Lab: Model 6+' });
+  plus.epochZip = zipSync({ 'benchmark_metadata.csv': strToU8('benchmark,source_file,score_column,scale\n' + Array.from({ length: 10 }, (_, i) => `Bench${i},results.csv,Score,1`).join('\n')), 'results.csv': strToU8('Model version,Score\nModel 6,0.3\nModel 6+,0.7\n') });
+  const scored = compileSnapshot(plus).models, bench0 = id => scored.find(m => m.id === id)?.evidence.find(e => e.benchmark === 'epoch:Bench0')?.score;
+  assert.deepEqual([bench0('lab/model-6'), bench0('lab/model-6-plus')], [.3, .7]);
 });
 
 test('reference speed preserves first-answer delay and does not mistake reasoning tokens for an answer', () => {

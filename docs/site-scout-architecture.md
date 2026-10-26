@@ -1,5 +1,29 @@
 # Scout architecture and operations
 
+## Ranking test set and model-name matching (not yet deployed)
+
+The owner agreed to measure ranking before changing it, and to fix ambiguous model names.
+
+**Test set.** `scout/experiments/evidence-cases.json` now has 34 cases. Eight carry `leaders`: a benchmark pattern whose ten highest-scoring models, read from the records file rather than from Scout's ranking, must include one of the top five. Four new cases state a provider, context or price restriction (`filter`), which every recommendation must meet. `RUNS=n` repeats each case with a new recommender each time, because a shared one answers repeats from its result cache, and reports the mean share of the top five two runs have in common.
+
+**Baseline**, measured against live generation `9242132d`, with three runs per case:
+
+| Measure | Result |
+|---|---|
+| Runs passing | 80 of 102 |
+| Cases passing every run | 23 of 34 |
+| Expected leader in the top five | 13 of 24 runs |
+| Restrictions met | 10 of 12 runs |
+| Mean top-five overlap between identical searches | 0.34 |
+
+Identical searches mostly return different shortlists. Linux administration, telecom support, worksheet photos, security review and corporate finance share none of their top five across runs. Both broken restrictions were interpreter misses: one "Only Anthropic models" search returned no recommendations, and one "Using a Google model" search recommended Pixtral, GPT-4.1 and Claude. Leader misses include clinical questions (no HealthBench or MedQA leader in the top five), airline tools and invoice tables in every run, and Python repository repair in two of three runs.
+
+**Matching.** Two changes:
+- **"+" is significant.** `norm` dropped "+" in `sources.mjs`, `catalogue-routes.ts` and `mergeCatalogues`, so "Command A+" and "Command A" became one ambiguous key and neither matched. It now becomes "plus". As a result, Models.dev's native Cohere endpoints (`command-a-03-2025`, `command-a-plus-05-2026`) merge into the OpenRouter models of the same name instead of appearing as separate catalogue models.
+- **Dated copies.** In `catalogue-routes.ts`, `family` now strips a `-MM-YYYY` suffix as well as `-YYYYMMDD` and `-YYYY-MM-DD`. `linksOf` links a Scout model to every canonical model it reaches when they are copies of one family, instead of none. Each copy's hosts are added once.
+
+Compiled against today's feeds, these changes match 121 more benchmark rows. Examples: Command A+ (20 rows), Command A and its dated names (35), Command R+ (32), Command R (25) and `claude-opus-4-6-thinking` (9). No previously matched row lost its match or moved to another model.
+
 ## Parallel research removed; publisher methodology first — deployed, 26 October 2026
 
 **Deployment receipt:** the owner approved the push and deployment. Commits [bc581d8](https://github.com/laz-aslam/openmerit/commit/bc581d8) and [5c97478](https://github.com/laz-aslam/openmerit/commit/5c97478) are on `origin/main`, rebased onto PR #23 (Scout example pills), which ships with them. Worker version `c6df31aa` is live. Search-time changes apply now. Pipeline changes take effect at the next refresh, so live status reports `stale` and `degraded` until a refresh publishes; until then it is computed from the last published generation `9242132d`.

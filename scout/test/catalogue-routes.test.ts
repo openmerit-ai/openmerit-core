@@ -57,3 +57,23 @@ test('catalogue routes reach Scout models only through exact identities and only
   const families = (await loadCatalogue(db, admitted)).families(models);
   assert.deepEqual([families.get('z-ai/glm-x'), families.get('zai/glm-x-native'), families.get('lab/unknown')], ['glmx', 'glmx', undefined]);
 });
+
+test('a Scout model reaching a canonical model and its dated copy owns both: their hosts and names', async () => {
+  const db = d1(), now = '2026-10-26T00:00:00.000Z';
+  // Cohere lists the dated ID; OpenRouter lists the undated one; Together hosts the dated one.
+  const copies = {
+    openai: api.openai, anthropic: api.anthropic,
+    cohere: { id: 'cohere', name: 'Cohere', models: { 'cmd-03-2025': route('cmd-03-2025', 'cohere/cmd-03-2025', { input: 2.5, output: 10 }) } },
+    openrouter: { id: 'openrouter', name: 'OpenRouter', npm: '@openrouter/ai-sdk-provider', api: 'https://openrouter.ai/api/v1', models: { 'cohere/cmd': route('cohere/cmd', 'cohere/cmd', { input: 2.5, output: 10 }) } },
+    togetherai: { id: 'togetherai', name: 'Together AI', npm: '@ai-sdk/togetherai', models: { 'CohereLabs/cmd-host': route('CohereLabs/cmd-host', 'cohere/cmd-03-2025', { input: 2, output: 8 }) } },
+  };
+  const files: Record<string, unknown> = { [MD]: copies, [MDM]: {}, [OR]: { data: [{ id: 'cohere/cmd', name: 'Cmd', pricing: { prompt: '0.0000025', completion: '0.00001' } }] } };
+  const fetcher = async (url: string) => new Response(JSON.stringify(files[url]));
+  for (const source of ['modelsdev', 'openrouter'] as const) assert.equal((await importCatalogueSource(db, source, { fetcher, now, run: source })).status, 'ok');
+  await rebuildOfferings(db);
+  const models = [{ id: 'cohere/cmd', evidence: [{}], endpoints: [{ provider: 'OpenRouter', modelId: 'cohere/cmd', source: 'models' }, { provider: 'Cohere', modelId: 'cmd-03-2025', source: 'modelsdev' }] }];
+  const catalogue = await loadCatalogue(db, admitted);
+  assert.deepEqual(catalogue.routes(models, now).get('cohere/cmd')?.map(e => [e.provider, e.modelId]), [['Together AI', 'CohereLabs/cmd-host']]);
+  assert.equal(catalogue.aliases(models).get('cmdhost'), 'cohere/cmd');
+  assert.deepEqual(catalogue.models(models, now), []);
+});
