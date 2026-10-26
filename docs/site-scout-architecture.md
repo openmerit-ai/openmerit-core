@@ -1,6 +1,6 @@
 # Scout architecture and operations
 
-## D1 model catalogue, first slice — source only, 25 October 2026
+## D1 model catalogue, first slice — deployed, 26 October 2026
 
 `scout/catalogue-db.ts` (Scout's first TypeScript module, checked by `tsconfig.scout.json`) starts the database-backed catalogue the owner chose, with Models.dev as the backbone. It writes `cat_*` tables in the existing `openmerit-scout-index` D1 database:
 
@@ -13,6 +13,8 @@
 Raw source files are kept in R2 under `catalogue-raw/<source>/<sha256>.json`. LiteLLM routes resolve to a model only through Models.dev: the same route, or the same provider model ID mapped to exactly one canonical model. Providers that Models.dev doesn't list stay namespaced as `litellm:<name>`. A source that stops listing a route withdraws it instead of deleting it. A source whose listings drop by more than half fails its run and keeps its previous rows. Each refresh imports both sources before the existing steps, and a catalogue failure never blocks the refresh. Serving does not read these tables yet.
 
 A local run on 25 October data took under 2 seconds. It produced 659 models from 79 labs, 8,929 Models.dev and 4,201 LiteLLM listings, 12,085 merged offerings and 44,109 price rows, in about 30 MB of SQLite. 7,610 Models.dev routes (85%) and 1,487 LiteLLM routes (35%) resolve to a canonical model. Models.dev assigns canonical IDs to only 622 models, so 1,319 of its routes have none yet. Both sources are MIT-licensed; for LiteLLM, the price file sits outside its separately licensed `enterprise/` directory.
+
+**Deployment receipt, 26 October 2026:** the owner approved the publisher deployment. Commit [0e84ca3](https://github.com/laz-aslam/openmerit/commit/0e84ca3) is on `origin/main`, and `npm run verify` passed. Publisher `openmerit-scout` moved from `8abdd14c-0f01-45a7-9240-7700446c3a6d` to `62b3fe80-ccb4-4282-85b5-f1a4180eaa07`, schedule `7 0,12 * * *`. The `cat_*` tables are created by the next scheduled run; no manual run was started. The preceding scheduled run `hour-498048` (00:07 UTC) passed `collect-public-feeds` but failed `interpret-evidence` with "Worker exceeded memory limit", so the ASCII storage change below has not yet produced a successful production refresh. Rolling back to `8abdd14c` is safe for the catalogue tables, which nothing else reads.
 
 ## Refresh memory: smaller documents and ASCII storage — 25 October 2026
 
