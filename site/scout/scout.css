@@ -78,9 +78,9 @@ code, kbd { font-family: var(--mono); }
 .results-heading .query-time { margin-left: auto; }
 .results-basis { margin-top: 6px; font-size: 11px; color: var(--quiet); }
 .result-table { margin-top: 20px; }
-.search-state { padding-block: 32px; color: var(--muted); }
-.search-status { color: var(--ink); }
-.search-context { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; max-width: 680px; margin-top: 10px; font-size: 12px; }
+.results-section[aria-busy="true"] #results-title { display: flex; align-items: center; gap: 10px; }
+.results-section[aria-busy="true"] #results-title::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%; background: radial-gradient(circle at 30% 25%, var(--ink), var(--muted)); animation: search-orb 1.6s ease-in-out infinite; }
+@keyframes search-orb { 0%, 100% { opacity: .5; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
 .result-feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 24px; padding: 16px 4px 4px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .feedback-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .feedback-controls button, .feedback-controls select { height: 40px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--field-line); border-radius: 5px; background: var(--surface); color: var(--ink); font: inherit; }
