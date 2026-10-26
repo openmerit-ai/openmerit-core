@@ -1,5 +1,19 @@
 # Scout architecture and operations
 
+## Benchmark-row matching through catalogue aliases (not yet deployed)
+
+Before this change, Scout placed a benchmark row only when its normalized name equalled a Scout model's ID suffix, canonical slug or name, after stripping one effort suffix and one trailing parenthetical, plus nine hand-written aliases. Measured against generation `04c70031f2d10174e21049ef73aedde9` and the 26 October feeds, 911 of 2,113 distinct scored row names (43%) matched.
+
+- **Catalogue aliases.** `loadCatalogue(...).aliases(models)` in `scout/catalogue-routes.ts` maps every name the D1 catalogue knows for a canonical model to the Scout model that owns it. The names come from canonical IDs and names, every listing's provider model ID (without a namespace or `:tag`) and listing name (without a `Lab:` prefix), Hugging Face repositories, Epoch's model records, and linked Hub repositories. Ownership uses the same rule as catalogue routes.
+- **Ambiguity.** A name shared by distinct canonical models is dropped. Copies that differ only by a dated suffix (for example `claude-opus-4-5` and `claude-opus-4-5-20251101`) count as one model. An unlinked Hub repository from a model maker that has linked repositories also claims its name. This keeps a host's short name such as "Qwen 2.5 Coder 32B" from merging the base model's results into the Instruct model.
+- **Run settings.** `resolve()` in `scout/sources.mjs` then retries without `_minimal`, `_16K`-style thinking budgets, `-low`/`-high`-style efforts and every trailing parenthetical, such as "(High, 32K, 20251101)" or "(FC)". Dash suffixes `-max` and `-thinking` are kept, because they name distinct models.
+- **Precedence.** Rows matched under Scout's own name are tier 0; stripped or alias matches are tier 1. For one model and benchmark, only the best tier's rows are combined. Arena's "Qwen-Max (0919)" therefore cannot move Qwen-Max's current score, and no observation that existed before changes.
+- **Diagnostics.** Each `ok` benchmark source records `matching: {models, matched}`. The collection result carries `unmatchedRows`, which records do not keep.
+
+**Measured locally** with the same inputs: 1,018 of 2,113 names matched (48%). By source: Epoch 515/891, Analysis 128/269, OpenVLM 19/285, OmniDoc 4/7, IDP 15/26, Vectara 74/106, Arena 232/462 and BFCL 27/67. The change adds 260 observations, changes 0 and removes 0. Benchmark-backed models rose from 263 to 270. All 32 models gaining evidence were reviewed by hand, for example "Mistral Large 3" to `mistral-large-2512` and "Kimi-K2-Instruct-0905" to `kimi-k2-0905`.
+
+**Coverage ceiling.** Across the eight feeds, catalogue aliases place rows on 295 of the 844 canonical models. The other canonical models appear in none of these feeds. Of the 1,191 row names with no canonical model, 398 equal a Hugging Face repository name; these are mostly older open models (InternVL, LLaVA, Granite, Falcon, xLAM) that belong in the separate Hugging Face search, not main Scout. Wider coverage of canonical models needs more benchmark sources, not looser matching.
+
 ## Artificial Analysis score format — deployed, 26 October 2026
 
 **Deployment receipt:** the owner approved the push, the deployment and a manual run. Commit [81510b6](https://github.com/laz-aslam/openmerit/commit/81510b6) is on `origin/main`. Publisher `openmerit-scout` moved from `07118166-8674-4003-83ad-d3150652d6bb` to `f10ebd46-2385-475d-a26c-24eceb5c43dd`, with schedule `7 0,12 * * *`. The manual run `manual-20261026-aa-1` also put the catalogue models change into production for the first time. It published generation `04c70031f2d10174e21049ef73aedde9`, checked at 09:16 UTC.

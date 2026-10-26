@@ -135,7 +135,7 @@ test('catalogue models join before benchmark matching unless an existing model u
   const listed = (id, name) => ({ id, name, provider: 'Other', canonical: id, repository: null, modalities: ['text'], outputModalities: ['text'], parameters: [], context: null, facts: [], inputPrice: 1, outputPrice: 2, speed: null, evidence: [],
     endpoints: [{ id: `catalogue:host:chat-completions:${id}`, provider: 'Host', modelId: id, api: 'https://host.example/v1/chat/completions', protocol: 'chat-completions', inputPrice: 1, outputPrice: 2, source: 'catalogue', url: 'https://host.example' }], listedBy: 'catalogue' });
   let seen;
-  const catalogueSupply = { models: models => (seen = models.length, [listed('other/host-x', 'Host X'), listed('other/model-1', 'Model 1')]) };
+  const catalogueSupply = { models: models => (seen = models.length, [listed('other/host-x', 'Host X'), listed('other/model-1', 'Model 1')]), aliases: () => new Map() };
   const data = compileSnapshot({ ...input, catalogueSupply });
   assert.equal(seen, 12, 'the supply sees every feed model, so it can leave out linked ones');
   assert.equal(data.models.find(m => m.id === 'other/host-x')?.evidence.find(e => e.benchmark === 'epoch:Bench0')?.score, .7);
@@ -143,6 +143,21 @@ test('catalogue models join before benchmark matching unless an existing model u
   assert.ok(!data.catalogue.some(m => m.id === 'other/model-1'), 'a possible duplicate of an existing model is left out');
   const kept = compileSnapshot({ ...input, previous: toSnapshot(toRecords(data)), checkedAt: '2026-10-14T12:00:00Z' });
   assert.equal(kept.models.find(m => m.id === 'other/host-x')?.evidence.find(e => e.benchmark === 'epoch:Bench0')?.score, .7);
+});
+
+test('benchmark rows match catalogue aliases and run settings, but never move a score matched under Scout\'s own name', () => {
+  const input = fixtures();
+  // An older dated snapshot of model 1, a host's name for model 3, a thinking budget, and a name the catalogue cannot place.
+  const results = 'Model version,Score\nmodel-1_high,0.5\nmodel-1-0919_minimal,0.9\nhost-name-3 (FC),0.4\nmodel-4_32K,0.3\nunknown-x,0.2\n';
+  input.epochZip = zipSync({ 'benchmark_metadata.csv': strToU8('benchmark,source_file,score_column,scale\n' + Array.from({ length: 10 }, (_, i) => `Bench${i},results.csv,Score,1`).join('\n')), 'results.csv': strToU8(results) });
+  const catalogueSupply = { models: () => [], aliases: () => new Map([['model10919', 'lab/model-1'], ['hostname3', 'lab/model-3']]) };
+  const data = compileSnapshot({ ...input, catalogueSupply });
+  const score = id => data.models.find(m => m.id === id)?.evidence.find(e => e.benchmark === 'epoch:Bench0');
+  assert.deepEqual([score('lab/model-1').score, score('lab/model-1').configurations], [.5, ['model-1_high']]);
+  assert.equal(score('lab/model-3').score, .4);
+  assert.equal(score('lab/model-4').score, .3);
+  assert.deepEqual(data.sources.find(s => s.id === 'epoch').matching, { models: 5, matched: 4 });
+  assert.deepEqual(data.unmatchedRows.epoch, ['unknown-x']);
 });
 
 test('reference speed preserves first-answer delay and does not mistake reasoning tokens for an answer', () => {

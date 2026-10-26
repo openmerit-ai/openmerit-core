@@ -224,16 +224,35 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
   for (const model of listed) for (const key of aliases(model)) { const previous = lookup.get(key); lookup.set(key, lookup.has(key) && previous !== model ? null : model); }
   models.push(...listed);
   const explicitAliases = { 'claudesonnet4520250929': 'anthropic/claude-sonnet-4.5', 'claudehaiku4520251001': 'anthropic/claude-haiku-4.5', 'chatgpt4olatest': 'openai/chatgpt-4o-latest', 'claude37sonnet20250219': 'anthropic/claude-3.7-sonnet', 'gemini25propreview0325': 'google/gemini-2.5-pro-preview-03-25', 'gemini3flash': 'google/gemini-3-flash-preview', 'gemini31pro': 'google/gemini-3.1-pro-preview', 'claudehaiku45': 'anthropic/claude-haiku-4.5', 'qwen3vl235b': 'qwen/qwen3-vl-235b-a22b-instruct' };
+  // Catalogue names (provider model IDs, listing and repository names) of the models above; Scout's own names win.
+  const catalogueAliases = catalogueSupply?.aliases(models) ?? new Map(), byId = new Map(models.map(m => [m.id, m]));
   function resolve(name) {
     const base = String(name).replace(/_(?:none|low|medium|high|xhigh|max|unknown|thinking|nothinking)$/, '').replace(/\s*\([^)]*\)\s*$/, '');
-    return lookup.get(norm(base)) ?? models.find(m => m.id === explicitAliases[norm(base)]);
+    // Then without run settings: reasoning effort, thinking budgets and every trailing parenthetical.
+    // A dash suffix is stripped only for efforts and budgets; "-max" and "-thinking" name distinct models.
+    const bare = String(name).replace(/(?:\s*\([^)]*\))+\s*$/, '').replace(/_(?:none|minimal|low|medium|high|xhigh|max|unknown|thinking|nothinking|\d+k)$/i, '').replace(/-(?:minimal|low|medium|high|xhigh|\d+k)$/i, '');
+    // Tier 0 is Scout's own name for the model; tier 1 needed stripping or a catalogue alias.
+    for (const [tier, key] of [norm(base), norm(bare)].entries()) {
+      const own = lookup.get(key) ?? byId.get(explicitAliases[key]);
+      if (own) return { model: own, tier: tier === 0 ? 0 : 1 };
+      const alias = lookup.has(key) ? undefined : byId.get(catalogueAliases.get(key));
+      if (alias) return { model: alias, tier: 1 };
+    }
+    return { model: undefined, tier: 1 };
   }
   function addBenchmark(id, name, source, definition, extra = {}) { const b = { id, name, tags: [], source, definition, ...extra }; benchmarks.push(b); return b; }
+  // Distinct model names each source offered with a usable score, and whether each matched.
+  const rowNames = new Map();
   function add(modelName, benchmark, value, details) {
-    const model = resolve(modelName), score = number(value);
-    if (!model || score === null || score < 0 || score > 1) return;
-    const key = `${model.id}|${benchmark.id}`;
-    const record = observations.get(key) ?? { model, benchmark, values: [], variants: new Set(), records: [] };
+    const { model, tier } = resolve(modelName), score = number(value);
+    if (score === null || score < 0 || score > 1) return;
+    const names = rowNames.get(benchmark.source) ?? new Map(); names.set(modelName, names.get(modelName) || !!model); rowNames.set(benchmark.source, names);
+    if (!model) return;
+    // A row under Scout's own name for the model outranks rows matched more loosely (an
+    // older dated snapshot or another run setting), so those never shift its score.
+    const key = `${model.id}|${benchmark.id}`, old = observations.get(key);
+    if (old && old.tier < tier) return;
+    const record = old && old.tier === tier ? old : { model, benchmark, tier, values: [], variants: new Set(), records: [] };
     record.values.push(score); record.variants.add(modelName); record.records.push(details); observations.set(key, record);
   }
   // Each source commits independently. A broken feed cannot freeze fresh prices or other benchmarks.
@@ -252,7 +271,8 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
       const priorBenchmarks=new Map(previous?.benchmarks.map(b=>[b.id,b])??[]);
       const unchanged=new Set(benchmarks.filter(b=>b.source===id&&JSON.stringify(b.definition)===JSON.stringify(priorBenchmarks.get(b.id)?.definition)).map(b=>b.id));
       for(const model of models){const old=previous?.models.find(m=>m.id===model.id);for(const e of old?.evidence??[])if(e.historical&&unchanged.has(e.benchmark)&&!observations.has(`${model.id}|${e.benchmark}`)&&!model.evidence.some(x=>x.benchmark===e.benchmark))model.evidence.push(e);}
-      sources.push({ id, name, url, attribution, status: 'ok', checkedAt, publishedAt: null, ...extra, ...metadata });
+      const names = [...(rowNames.get(id)?.values() ?? [])];
+      sources.push({ id, name, url, attribution, status: 'ok', checkedAt, publishedAt: null, ...extra, ...metadata, matching: { models: names.length, matched: names.filter(Boolean).length } });
     } catch (error) {
       benchmarks.splice(start);
       for (const [key, value] of observations) if (value.benchmark.source === id) observations.delete(key);
@@ -298,7 +318,7 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     for (const row of rated) add(row.name, benchmark, 1 / (1 + 10 ** ((median - row.scores[slug]) / 400)), { url: `https://artificialanalysis.ai/models/${encodeURIComponent(row.slug)}`, observedAt: null, sourceModel: row.name, metric: 'Win rate vs median model', historical: !!row.deprecated });
   }
   for (const row of aa) {
-    const model = resolve(row.name); if (!model || !(row.medianOutputTokensPerSecond > 0)) continue;
+    const { model } = resolve(row.name); if (!model || !(row.medianOutputTokensPerSecond > 0)) continue;
     const entries = speedByModel.get(model.id) ?? []; entries.push(row); speedByModel.set(model.id, entries);
   }
   for (const model of models) {
@@ -385,7 +405,9 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
       sources.push({ id: 'huggingface', name: 'Hugging Face', url: 'https://huggingface.co/models', status: 'ok', checkedAt, publishedAt: null, attribution: 'Public repository metadata and reported evaluation results. Up to 30 most-downloaded repositories in each of fourteen task queries, including two OCR-filtered pipelines; not an exhaustive Hub index.' });
     } catch { sources.push({ ...failed('huggingface', failures.huggingface ?? 'Hub metadata unavailable.'), name: 'Hugging Face', url: 'https://huggingface.co/models', attribution: 'Public repository metadata and reported evaluation results; last complete discovery snapshot retained.' }); }
   }
-  return { version: 1, dataVersion: 7, selectionMetadataVersion:'1',providerMetadata:providerMetadata(modelsDev),checkedAt, sources, benchmarks, benchmarkDescriptions: descriptions, benchmarkMethodologies: benchmarkMethodologies ?? previous?.benchmarkMethodologies ?? {}, models: usable, specialists, availableModels: models.length,
+  // Unmatched names are diagnostics for the collection step; records do not keep them.
+  const unmatchedRows = Object.fromEntries([...rowNames].map(([source, names]) => [source, [...names].filter(([, matched]) => !matched).map(([n]) => n)]));
+  return { version: 1, dataVersion: 7, selectionMetadataVersion:'1',providerMetadata:providerMetadata(modelsDev),checkedAt, sources, unmatchedRows, benchmarks, benchmarkDescriptions: descriptions, benchmarkMethodologies: benchmarkMethodologies ?? previous?.benchmarkMethodologies ?? {}, models: usable, specialists, availableModels: models.length,
     catalogue: models.map(({ evidence: _e, speed: _s, ...model }) => model) };
 }
 

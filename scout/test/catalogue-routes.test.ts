@@ -49,4 +49,8 @@ test('catalogue routes reach Scout models only through exact identities and only
   const listed = (await loadCatalogue(db, admitted)).models(models, now);
   assert.deepEqual(listed.map(m => [m.id, m.name, m.provider, m.inputPrice, m.outputPrice, m.endpoints.map(e => e.id), m.listedBy]), [
     ['deepseek/ds-1', 'deepseek-ai/DS-1', 'DeepSeek', 0.5, 2, ['catalogue:togetherai:chat-completions:deepseek-ai/DS-1'], 'catalogue']]);
+
+  // Every host's name for a linked model points at the Scout model that owns it; models Scout does not list have no alias.
+  const aliases = (await loadCatalogue(db, admitted)).aliases(models);
+  assert.deepEqual([aliases.get('glmx'), aliases.get('glmxalt'), aliases.get('gptx'), aliases.get('ds1')], ['z-ai/glm-x', 'z-ai/glm-x', 'openai/gpt-x', undefined]);
 });

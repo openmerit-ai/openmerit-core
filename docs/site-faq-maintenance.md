@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Benchmark-row matching through catalogue aliases — 26 October 2026
+
+Reviewed benchmark-coverage claims against the change that matches benchmark rows through catalogue aliases and stripped run settings. The homepage and the Scout page state no matched-model counts, so no FAQ copy changes. The Scout guide's catalogue row now describes alias matching and its precedence rule.
+
 ## Artificial Analysis score format — 26 October 2026
 
 Reviewed benchmark-source claims against the parser change for Artificial Analysis's new per-evaluation score format. The homepage and the Scout page name no Artificial Analysis evaluations or counts, so no FAQ copy changes. The Scout guide's source table now lists 27 evaluations and how Elo-style ratings are converted.

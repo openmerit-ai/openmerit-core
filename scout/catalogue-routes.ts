@@ -23,6 +23,9 @@ export interface CatalogueSupply {
   routes(models: readonly ScoutModelLike[], checkedAt: string): Map<string, ScoutEndpoint[]>;
   // Canonical chat models with routes that none of `models` links to.
   models(models: readonly ScoutModelLike[], checkedAt: string): CatalogueModel[];
+  // Exact catalogue aliases (normalized) of models Scout lists: canonical IDs and
+  // names, every provider's model ID and Hugging Face repository for that model.
+  aliases(models: readonly ScoutModelLike[]): Map<string, string>;
 }
 
 export const catalogueRouteSource = 'catalogue';
@@ -32,6 +35,9 @@ const https = (v: string | null | undefined): string | null => { if (!v || v.inc
 const chatType = (t: string | null) => t === null || t === 'chat' || t === 'language';
 // Where a canonical identity comes from, by its basis prefix (catalogue-db.ts).
 const identitySources: Record<string, string> = { modelsdev: 'https://models.dev', openrouter: 'https://openrouter.ai/models', vercel: 'https://vercel.com/ai-gateway/models' };
+// Same normalization as Scout's benchmark-row matching (sources.mjs).
+const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
+const family = (id: string) => norm((id.split('/').pop() ?? id).replace(/-(?:\d{8}|\d{4}-\d{2}-\d{2})$/, ''));
 const blended = (e: { inputPrice: number; outputPrice: number }) => e.inputPrice * 3 + e.outputPrice;
 const keyOf = (e: { provider?: string | null; modelId?: string; source?: string }) =>
   e.source === 'models' && e.modelId ? `models|${e.modelId}` : e.source === 'modelsdev' && e.provider && e.modelId ? `modelsdev|${e.provider.toLowerCase()}|${e.modelId}` : null;
@@ -90,22 +96,39 @@ export async function loadCatalogue(db: Database, admitted: Readonly<Record<stri
     }
     return links;
   };
+  // Scout can list one canonical model under several IDs (an OpenRouter ID and a
+  // native ID). Its routes and aliases go to one of them: measured first, then the most routes.
+  const ownersOf = (models: readonly ScoutModelLike[]) => {
+    const links = linksOf(models), owner = new Map<string, ScoutModelLike>(), rank = (m: ScoutModelLike) => [m.evidence?.length ? 1 : 0, m.endpoints?.length ?? 0];
+    for (const m of models) {
+      const target = links.get(m.id), old = target ? owner.get(target) : undefined;
+      if (!target) continue;
+      const [a1 = 0, a2 = 0] = rank(m), [b1 = 0, b2 = 0] = old ? rank(old) : [-1, -1];
+      if (!old || a1 > b1 || a1 === b1 && (a2 > b2 || a2 === b2 && m.id < old.id)) owner.set(target, m);
+    }
+    return owner;
+  };
+  // Names each canonical model goes by across the catalogue: its ID and name, every
+  // listing's model ID (without a namespace or version tag) and name (without a
+  // "Lab:" prefix), Hugging Face repositories, and names benchmark-tracking sources use.
+  const names = new Map<string, Set<string>>();
+  const named = (key: string | null | undefined, model: string) => { const k = norm(key ?? ''); if (k.length < 3) return; const set = names.get(k) ?? new Set<string>(); set.add(model); names.set(k, set); };
+  for (const [id, m] of canonical) { named(id.split('/').slice(1).join('/'), id); named(m.name, id); }
+  for (const l of (await db.prepare(`SELECT provider_model_id id,name,model_id FROM cat_listings WHERE model_id IS NOT NULL AND withdrawn_at IS NULL
+    UNION ALL SELECT hf_id,NULL,model_id FROM cat_listings WHERE hf_id IS NOT NULL AND model_id IS NOT NULL AND withdrawn_at IS NULL
+    UNION ALL SELECT id,name,model_id FROM cat_source_models WHERE model_id IS NOT NULL AND withdrawn_at IS NULL
+    UNION ALL SELECT id,NULL,model_id FROM cat_hf_models WHERE model_id IS NOT NULL AND withdrawn_at IS NULL`).all<{ id: string; name: string | null; model_id: string }>()).results) {
+    if (!canonical.has(l.model_id)) continue;
+    named(l.id.split('/').pop()?.replace(/:[^:]*$/, ''), l.model_id); named(l.name?.replace(/^[^:]+:\s*/, ''), l.model_id);
+  }
+  // Hosts shorten names ("Qwen 2.5 Coder 32B" for the Instruct model). A model maker's
+  // other repository by that name, such as the base model, makes the name ambiguous.
+  for (const r of (await db.prepare(`SELECT id FROM cat_hf_models WHERE model_id IS NULL AND withdrawn_at IS NULL
+    AND author IN (SELECT author FROM cat_hf_models WHERE model_id IS NOT NULL AND withdrawn_at IS NULL)`).all<{ id: string }>()).results) named(r.id.split('/').pop(), `huggingface:${r.id}`);
   return {
     routes(models, checkedAt) {
-      const links = linksOf(models);
-      // Scout can list one canonical model under several IDs (an OpenRouter ID and a
-      // native ID). Its routes go to one of them: measured first, then the most routes.
-      const owner = new Map<string, ScoutModelLike>(), rank = (m: ScoutModelLike) => [m.evidence?.length ? 1 : 0, m.endpoints?.length ?? 0];
-      for (const m of models) {
-        const target = links.get(m.id), old = target ? owner.get(target) : undefined;
-        if (!target) continue;
-        const [a1 = 0, a2 = 0] = rank(m), [b1 = 0, b2 = 0] = old ? rank(old) : [-1, -1];
-        if (!old || a1 > b1 || a1 === b1 && (a2 > b2 || a2 === b2 && m.id < old.id)) owner.set(target, m);
-      }
       const out = new Map<string, ScoutEndpoint[]>();
-      for (const m of models) {
-        const target = links.get(m.id);
-        if (!target || owner.get(target)?.id !== m.id) continue;
+      for (const [target, m] of ownersOf(models)) {
         const add = best(target, new Set((m.endpoints ?? []).map(e => String(e.provider ?? '').toLowerCase())), checkedAt);
         if (add.length) out.set(m.id, add);
       }
@@ -129,6 +152,18 @@ export async function loadCatalogue(db: Database, admitted: Readonly<Record<stri
           inputPrice: cheapest.inputPrice, outputPrice: cheapest.outputPrice, speed: null, evidence: [], endpoints, listedBy: catalogueRouteSource });
       }
       return out.sort((a, b) => a.id.localeCompare(b.id));
+    },
+    aliases(models) {
+      const owners = ownersOf(models), out = new Map<string, string>();
+      for (const [key, targets] of names) {
+        // A name several distinct canonical models share is no identity. Copies of one
+        // model (dotted vs dashed versions, or a dated snapshot of an alias) count as one.
+        if (new Set([...targets].map(family)).size !== 1) continue;
+        const scout = new Set([...targets].flatMap(t => owners.get(t)?.id ?? []));
+        const [only] = scout;
+        if (scout.size === 1 && only) out.set(key, only);
+      }
+      return out;
     },
   };
 }
