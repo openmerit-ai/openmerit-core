@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { openBrowser } from './browser.mjs';
 import { clientVersion, setupHeaders, setupUUID, sendInstallationEvent, setupCorrelationEnabled, telemetryEnabled } from './telemetry.mjs';
+import { configureUpdates, inspectUpdates, recoverUpdates, removeUpdates, runUpdate, withUpdateLock } from './updates.ts';
 
 // One-command coding-agent setup: device sign-in in the browser, then the MCP
 // server, startup rule and Scout skill. Built to be run by a person or by a coding agent:
@@ -39,6 +40,12 @@ model. You may continue work that does not commit to a model.
 Do not consult Scout for unrelated edits, normal inference calls using an unchanged
 approved model, or this coding agent's own model. Do not reselect approved models
 unless the task introduces or changes a model decision.
+
+When the user says "update openmerit", run
+\`npx -y openmerit@latest update --scope user\` (use \`--scope project\` if this
+rule is in the project's .claude/rules directory). Report the result, including
+any conflict or manual-upgrade requirement. Do not delete edited files, bypass
+permissions or rerun login automatically. A new session loads updated instructions.
 `;
 
 export const skill = `---
@@ -102,16 +109,21 @@ expired or revoked, run \`npx -y openmerit@latest login\` and then
 
 export const help = `OpenMerit · coding-agent setup
 
-  openmerit install [--client claude-code] [--scope user|project] [--setup-id UUID] [--plan] [--json] [--no-open]
+  openmerit install [--client claude-code] [--scope user|project] [--setup-id UUID] [--auto-update on|off] [--plan] [--json] [--no-open]
   openmerit status  [--client claude-code] [--scope user|project] [--check] [--json]
   openmerit remove  [--client claude-code] [--scope user|project] [--plan] [--json]
   openmerit login   [--setup-id UUID] [--json] [--no-open]     Replace this device's key
   openmerit logout  [--json]                 Revoke this device's key
   openmerit project --policy existing-only|existing-first [--endpoint-id <id> ...] [--plan]
   openmerit doctor  [--json]
+  openmerit update  [--scope user|project] [--auto on|off] [--json]
 
 install signs this device in through the browser (one Approve click), adds the
 OpenMerit MCP server, startup rule and Scout skill, then verifies the connection.
+Automatic Scout instruction updates default on; --auto-update off opts out.
+Background SessionStart/Stop hooks check npm at most daily (15-minute failure
+retry), verify package integrity, and preserve edited files and credentials.
+Start a new Claude Code session to reliably load updated instructions.
 It opens the approval page and waits up to 9 minutes for the Approve click
 (30 seconds when no browser could be opened). If it exits with approval
 pending, rerun the same command: it resumes the same request.
@@ -196,12 +208,13 @@ async function claude(args, root, key) {
 async function inspect(root, scope) {
   const paths = claudePaths(root, scope);
   const [record, config, installedSkill, installedRule, legacyRule] = await Promise.all([object(paths.record), object(paths.mcpFile), optional(paths.skill), optional(paths.rule), optional(paths.legacyRule)]);
+  const updates = await inspectUpdates(dirname(paths.record), scope, record);
   const owned = [2, 3].includes(record.version) && record.scope === scope;
   const current = configuredServer(config, root, scope);
   const otherScope = configuredServer(config, root, scope === 'user' ? 'project' : 'user');
   const projectFile = await object(join(root, '.mcp.json'));
   return {
-    paths, record, owned, current, installedSkill, installedRule,
+    paths, record, owned, current, installedSkill, installedRule, updates,
     // A full pending hash covers interruption without accepting edited headers.
     // Keep pendingAuth compatibility for records from the earlier installer.
     serverOwned: !current || owned && (serverHash(current) === record.serverHash || serverHash(current) === record.pendingServerHash || !!record.pendingAuth && hash(current.headers?.Authorization ?? '') === record.pendingAuth),
@@ -214,7 +227,7 @@ async function inspect(root, scope) {
 }
 
 function conflicts(state) {
-  const found = [];
+  const found = [...state.updates.conflicts];
   if (!state.serverOwned) found.push('Claude Code already has an MCP server named "openmerit" that this installer did not create or that was edited. Remove it with "claude mcp remove openmerit", then retry.');
   if (!state.skillOwned) found.push(`${state.paths.skill} exists and was not created by this installer or was edited. Move or delete it, then retry.`);
   if (!state.ruleOwned) found.push(`${state.paths.rule} exists and was not created by this installer or was edited. Move or delete it, then retry.`);
@@ -314,18 +327,22 @@ async function verify(key, telemetry) {
   return connection;
 }
 
-async function install(root, { client, scope, plan, open, log, wait, telemetry }) {
+async function install(root, { client, scope, plan, open, log, wait, telemetry, autoUpdate, json }) {
   const state = await inspect(root, scope);
+  const enabled = autoUpdate === undefined ? state.updates.saved?.enabled ?? true : autoUpdate === 'on';
   const found = conflicts(state);
   const changes = [
     `${state.current ? 'Update' : 'Add'} MCP server "openmerit" in Claude Code (${state.paths.mcpScope} scope, ${state.paths.mcpFile})`,
     `${state.installedSkill === null ? 'Create' : 'Update'} ${state.paths.skill}`,
     `${state.installedRule === null ? 'Create' : 'Update'} ${state.paths.rule} (loaded at session startup)`,
+    `Automatic Scout instruction updates ${enabled ? 'on' : 'off'} (SessionStart/Stop background hooks; disable with openmerit update --auto off)`,
+    `Write the owned updater at ${state.updates.paths.runner}; merge its hooks in ${state.updates.paths.settings}`,
     ...(state.legacyRule === 'remove' ? [`Remove the unchanged earlier instructions at ${state.paths.legacyRule}`] : []),
     ...(await credentials() ? [] : [`Sign this device in through the browser and store its key in ${credentialsPath()} (mode 600)`]),
   ];
   if (plan) return { action: 'install', applied: false, client, scope, changes, conflicts: found };
   if (found.length) throw new Stop(found.join('\n'), exitCodes.conflict, 'Nothing was changed.');
+  if (!json) log(changes.find(change => change.startsWith('Automatic Scout')));
   await claude(['--version'], root);
   if (setupCorrelationEnabled()) telemetry.properties.installation_id ??= randomUUID();
   await telemetry.step('preflight', 'ok');
@@ -337,7 +354,7 @@ async function install(root, { client, scope, plan, open, log, wait, telemetry }
   const next = serverConfig(key, telemetry);
   const ids = { setup_id: telemetry.properties.setup_id, installation_id: telemetry.properties.installation_id };
   // Record intent first so an interrupted install is repaired by rerunning.
-  await save(state.paths.record, { version: 3, scope, client, ...ids, serverHash: serverHash(state.current), skillHash: state.installedSkill === null ? null : hash(state.installedSkill), ruleHash: state.installedRule === null ? null : hash(state.installedRule), pendingServerHash: serverHash(next), pendingSkill: hash(skill), pendingRule: hash(rule) });
+  await save(state.paths.record, { version: 3, scope, client, ...ids, updates: state.record.updates, pendingUpdates: state.record.pendingUpdates, serverHash: serverHash(state.current), skillHash: state.installedSkill === null ? null : hash(state.installedSkill), ruleHash: state.installedRule === null ? null : hash(state.installedRule), pendingServerHash: serverHash(next), pendingSkill: hash(skill), pendingRule: hash(rule) });
   telemetry.properties.applied = true;
   if (serverHash(state.current) !== serverHash(next)) {
     if (state.current) await claude(['mcp', 'remove', '--scope', state.paths.mcpScope, 'openmerit'], root, key);
@@ -349,7 +366,8 @@ async function install(root, { client, scope, plan, open, log, wait, telemetry }
   // Record what Claude actually wrote, so later edits are detected precisely.
   const written = configuredServer(await object(state.paths.mcpFile), root, scope);
   if (!written) throw new Stop('Claude Code did not save the "openmerit" MCP server.', exitCodes.error, 'Run "openmerit doctor".');
-  await save(state.paths.record, { version: 3, scope, client, ...ids, serverHash: serverHash(written), skillHash: hash(skill), ruleHash: hash(rule), installedAt: new Date().toISOString() });
+  const updates = await configureUpdates(dirname(state.paths.record), scope, state.record, clientVersion, enabled);
+  await save(state.paths.record, { version: 3, scope, client, ...ids, serverHash: serverHash(written), skillHash: hash(skill), ruleHash: hash(rule), updates, installedAt: new Date().toISOString() });
   await telemetry.step('configuration', 'ok', diagnostics(await inspect(root, scope)));
   const connection = await verify(key, telemetry);
   if (connection !== 'connected') telemetry.outcome = 'error';
@@ -369,6 +387,8 @@ async function status(root, { client, scope, check, telemetry }) {
   await telemetry.step('status', telemetry.outcome, { ...details, connection });
   return { action: 'status', client, scope, installed: details.installed, signedIn: !!saved,
     server: details.server_status, skill: details.skill_status, rule: details.rule_status,
+    autoUpdates: state.updates.saved?.enabled ?? false, instructionVersion: state.updates.saved?.version ?? null,
+    updateHooks: state.updates.saved?.enabled ? state.updates.active && !state.updates.conflicts.length ? 'ready' : 'incomplete' : 'disabled',
     conflicts: found, connection };
 }
 
@@ -395,13 +415,16 @@ async function remove(root, { client, scope, plan, telemetry }) {
   }
   const changes = [...(state.current && state.serverOwned ? [`Remove MCP server "openmerit" (${state.paths.mcpScope} scope)`] : []),
     ...(state.installedSkill !== null && state.skillOwned ? [`Delete ${state.paths.skill}`] : []),
-    ...(state.installedRule !== null && state.ruleOwned ? [`Delete ${state.paths.rule}`] : []), 'Revoke and delete this device key'];
+    ...(state.installedRule !== null && state.ruleOwned ? [`Delete ${state.paths.rule}`] : []),
+    ...(state.updates.saved ? ['Remove unchanged owned update hooks and updater; retain edited hooks and their runner'] : []), 'Revoke and delete this device key'];
   const kept = [...(state.serverOwned ? [] : ['the edited "openmerit" MCP server']), ...(state.skillOwned ? [] : [state.paths.skill]), ...(state.ruleOwned ? [] : [state.paths.rule]), policyPath];
+  kept.push(...state.updates.conflicts);
   if (plan) return { action: 'remove', applied: false, client, scope, changes, keeps: kept };
   telemetry.properties.applied = true;
   if (state.current && state.serverOwned) await claude(['mcp', 'remove', '--scope', state.paths.mcpScope, 'openmerit'], root);
   if (state.installedSkill !== null && state.skillOwned) await rm(dirname(state.paths.skill), { recursive: true, force: true });
   if (state.installedRule !== null && state.ruleOwned) await rm(state.paths.rule, { force: true });
+  await removeUpdates(dirname(state.paths.record), scope, state.record);
   await rm(state.paths.record, { force: true });
   const revoked = await revokeKey(telemetry);
   await telemetry.step('remove', telemetry.outcome, diagnostics(await inspect(root, scope)));
@@ -432,6 +455,7 @@ async function doctor(root, { scope, telemetry }) {
   if (saved && reach.status === 200) { const connection = await verify(saved.key, telemetry); add('mcp', connection === 'connected', `MCP check: ${connection}`); }
   const state = await inspect(root, scope).catch(() => null);
   if (state) add('install', state.owned && !!state.current && state.installedSkill !== null && state.installedRule !== null && !conflicts(state).length, state.owned ? conflicts(state).join(' ') || (state.current && state.installedSkill !== null && state.installedRule !== null ? `Installed (${scope} scope)` : 'Installation incomplete. Rerun "openmerit install".') : `Not installed in ${scope} scope`);
+  if (state?.updates.saved?.enabled) add('updater', state.updates.active && !state.updates.conflicts.length, state.updates.active && !state.updates.conflicts.length ? 'Automatic instruction hooks installed' : 'Automatic instruction hooks missing or edited. Rerun install after reviewing conflicts.');
   telemetry.outcome = checks.every(check => check.ok) ? 'ok' : 'error';
   await telemetry.step('status', telemetry.outcome, { ...(state ? diagnostics(state) : {}), ...(reach.status === 200 ? {} : { code: 'openmerit_unreachable', connection: 'failed' }) });
   return { action: 'doctor', ok: checks.every(check => check.ok), checks };
@@ -439,7 +463,8 @@ async function doctor(root, { scope, telemetry }) {
 
 function render(result) {
   if (result.action === 'doctor') return result.checks.map(c => `${c.ok ? '✓' : '✗'} ${c.name}: ${c.detail}`).join('\n');
-  if (result.action === 'status') return [`OpenMerit in ${clients[result.client]} (${result.scope} scope): ${result.installed ? 'installed' : 'not installed'}`, `Signed in: ${result.signedIn ? 'yes' : 'no'} · MCP server: ${result.server} · skill: ${result.skill} · rule: ${result.rule} · connection: ${result.connection}`, ...result.conflicts].join('\n');
+  if (result.action === 'status') return [`OpenMerit in ${clients[result.client]} (${result.scope} scope): ${result.installed ? 'installed' : 'not installed'}`, `Signed in: ${result.signedIn ? 'yes' : 'no'} · MCP server: ${result.server} · skill: ${result.skill} · rule: ${result.rule} · connection: ${result.connection}`, `Automatic instruction updates: ${result.autoUpdates ? 'on' : 'off'} · hooks: ${result.updateHooks} · instruction version: ${result.instructionVersion ?? 'bootstrap required'}`, ...result.conflicts].join('\n');
+  if (result.action === 'update') return result.message;
   if (result.action === 'project') return `${result.applied ? 'Saved' : 'Would save'} ${result.path}: ${result.policy.policy}, ${result.policy.endpointIds.length} endpoint ID(s). ${result.note}`;
   if (result.action === 'login') return result.note;
   if (result.action === 'logout') return result.note;
@@ -458,7 +483,7 @@ export async function main(args, dependencies = {}) {
       this.stage = stage;
       if (outcome === 'ok') delete this.properties.code;
       Object.assign(this.properties, properties);
-      await sendInstallationEvent({ ...this.properties, stage, outcome });
+      if (args[0] !== 'update') await sendInstallationEvent({ ...this.properties, stage, outcome });
     },
     async fail(error) {
       this.outcome = ({ 10: 'pending', 11: 'denied', 20: 'conflict' })[error.exit] ?? 'error';
@@ -481,8 +506,8 @@ async function runMain(args, { root = process.cwd(), print = console.log, printE
   const [action, ...rest] = args;
   if (!action || rest.includes('--help') || rest.includes('-h')) { print(help); return exitCodes.ok; }
   const options = { client: undefined, scope: 'user', plan: false, check: false, json: false, open: true, policy: undefined, ids: [], telemetry };
-  const allowed = { install: ['--client', '--scope', '--setup-id', '--plan', '--json', '--no-open'], status: ['--client', '--scope', '--check', '--json'], remove: ['--client', '--scope', '--plan', '--json'],
-    login: ['--setup-id', '--json', '--no-open'], logout: ['--json'], project: ['--policy', '--endpoint-id', '--plan', '--json'], doctor: ['--scope', '--json'] }[action];
+  const allowed = { install: ['--client', '--scope', '--setup-id', '--plan', '--json', '--no-open', '--auto-update'], status: ['--client', '--scope', '--check', '--json'], remove: ['--client', '--scope', '--plan', '--json'],
+    login: ['--setup-id', '--json', '--no-open'], logout: ['--json'], project: ['--policy', '--endpoint-id', '--plan', '--json'], doctor: ['--scope', '--json'], update: ['--scope', '--auto', '--json'] }[action];
   if (!allowed) throw new Error('Unknown command. Run openmerit --help.');
   for (let i = 0; i < rest.length; i++) {
     const option = rest[i];
@@ -493,6 +518,7 @@ async function runMain(args, { root = process.cwd(), print = console.log, printE
     else if (option === '--setup-id') { options.setup_id = value(); if (!setupUUID(options.setup_id)) throw new Error('--setup-id must be a UUID v4.'); }
     else if (option === '--policy') options.policy = value();
     else if (option === '--endpoint-id') options.ids.push(value());
+    else if (option === '--auto-update' || option === '--auto') { const setting = value(); if (!['on', 'off'].includes(setting)) throw new Error(`${option} needs on or off.`); options.autoUpdate = setting; }
     else if (option === '--no-open') options.open = false;
     else options[option.slice(2)] = true;
   }
@@ -528,16 +554,20 @@ async function runMain(args, { root = process.cwd(), print = console.log, printE
     }
     await telemetry.step('started', 'started');
     await telemetry.step('preflight', 'started');
-    const result = action === 'install' ? await install(root, { ...options, log, wait })
+    const base = dirname(claudePaths(root, options.scope).record);
+    const maintenance = work => options.plan ? work() : withUpdateLock(base, async () => { await recoverUpdates(base, options.scope); return work(); });
+    const result = action === 'install' ? await maintenance(() => install(root, { ...options, log, wait }))
       : action === 'status' ? await status(root, options)
-      : action === 'remove' ? await remove(root, options)
+      : action === 'remove' ? await maintenance(() => remove(root, options))
+      : action === 'update' ? { action, ...await runUpdate(base, options.scope, options.autoUpdate === undefined ? {} : { enabled: options.autoUpdate === 'on' }) }
       : action === 'project' ? await project(root, options)
       : action === 'doctor' ? await doctor(root, options)
       : action === 'logout' ? { action, revoked: await revokeKey(telemetry), note: 'Signed out. This device key was revoked and deleted. Agents configured with it stop working until you run install again.' }
       : (await revokeKey(telemetry), await login({ client: 'claude-code', scope: 'user', open: options.open, log, wait, telemetry }), { action, signedIn: true, note: 'Signed in. Run "openmerit install" again to give your coding agents the new key.' });
     if (result.conflicts?.length && telemetry.outcome !== 'error') { telemetry.outcome = 'conflict'; telemetry.properties.code = 'install_conflict'; }
     if (options.plan) await telemetry.step(telemetry.stage, telemetry.outcome, { applied: false });
-    print(options.json ? JSON.stringify({ ok: true, ...result }, null, 2) : render(result));
+    print(options.json ? JSON.stringify({ ok: action !== 'update' || !['conflict', 'retry', 'manual_required'].includes(result.status), ...result }, null, 2) : render(result));
+    if (action === 'update') return result.status === 'conflict' ? exitCodes.conflict : result.status === 'retry' ? exitCodes.unreachable : result.status === 'manual_required' ? exitCodes.error : exitCodes.ok;
     return action === 'doctor' && !result.ok ? exitCodes.error : exitCodes.ok;
   } catch (error) {
     if (!(error instanceof Stop)) throw error;

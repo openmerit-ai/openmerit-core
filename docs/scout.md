@@ -491,6 +491,32 @@ Claude can load the `openmerit-scout` skill when choosing an application inferen
 
 The agent compares model and endpoint, evidence, reference cost/time and unknowns, and helps configure the chosen route. New providers, credentials, spending and deployments need separate approval. A skill is a default, not enforcement. The MCP tool, `scout_models`, is read-only and does not execute models.
 
+### Automatic instruction updates — unreleased
+
+Source adds default-on updates for the installed Scout skill and startup rule. **npm 0.1.9 does not contain the updater.** After a release containing it is published, existing installations need one explicit installer rerun in their original scope to acquire it. A website or Scout deployment cannot bootstrap files on someone else's machine. Compatible hosted Scout changes already reach agents through their next MCP request.
+
+Setup discloses automatic updates and installs asynchronous `SessionStart` and `Stop` command hooks. They check npm's stable `latest` release at most once per 24 hours per installation. Offline or failed checks retain the installed version and retry at the next eligible hook after 15 minutes. `Stop` means Claude finished responding, not that the user's task succeeded. No background service watches connectivity while Claude Code is closed, and checks never ask Claude to keep working. A one-shot `claude -p` process can exit before an asynchronous Stop hook finishes; startup checks and later sessions provide the retry path. Managed policies or disabled hooks can prevent automatic checks; an explicit manual update remains available.
+
+Completed failed checks emit a non-blocking Claude Code notice: the installed version was retained, automatic checks retry after 15 minutes during use, and the user can say **“update openmerit”** to retry manually. Hooks during that backoff stay silent; another eligible failed check emits the notice again. Current-version checks and disabled automatic checks stay silent. Delivery depends on Claude Code processing the completed asynchronous hook output; an exiting one-shot process may not show the notice.
+
+The updater lives beside the install record, independent of the npx cache. User scope adds hooks to Claude's `settings.json`; project scope uses `.claude/settings.local.json`. Existing settings and other hooks are preserved. It downloads only from the public npm registry, verifies the package's SHA-512 integrity against registry metadata, and reads a fixed instruction JSON bundle in memory. It does not install the downloaded package or execute its scripts. npm sees the normal network request, but receives no device key, installation ID, task, project path or transcript. Registry integrity protects against mismatched bytes, not a compromised publisher or registry.
+
+Only bundles declaring the supported instruction/permission contract update automatically. Releases that change provider permissions, authentication, analytics, hook code or MCP configuration need a reviewed installer upgrade; the updater leaves those components alone. The contract is a release-maintainer assertion, not an automated security review of prose. Maintainers must change the contract when those boundaries change. Updates preserve credentials, project policy and user-edited instructions, hooks and updater files. Writes are serialized and journaled so an interrupted instruction update can recover the previous complete pair; intervening user edits stop recovery instead of being overwritten.
+
+Start a **new Claude Code session** after an update to reliably load the new instructions. A running session may retain earlier instructions; reconnecting `/mcp` does not reload the startup rule. The installed rule tells Claude how to handle “update openmerit”; this natural-language trigger is guidance, not an enforced command.
+
+Commands in updater-enabled releases:
+
+```sh
+openmerit update                         # check immediately, even if auto updates are off
+openmerit update --auto off              # persistently disable automatic updates
+openmerit update --auto on               # enable them again
+openmerit update --scope project --json  # update this project's installation
+openmerit install --client claude-code --auto-update off  # opt out during setup
+```
+
+Use the same scope as installation. `OPENMERIT_AUTO_UPDATE=off` suppresses automatic checks in that process without disabling an explicit manual update. Installer reruns preserve a saved opt-out. `status` includes the automatic-update preference, hook readiness and instruction version; `remove` removes unchanged owned hooks/updater files and retains personal settings and edited files. Manual updates report conflicts, retryable failures or a required installer upgrade instead of claiming success. If lock recovery itself was interrupted, inspect the PID in `openmerit-update.lock.recovery` beside the install record and confirm that process has stopped before removing that recovery lock and retrying.
+
 ### Startup model-decision rule — npm 0.1.8
 
 The 0.1.8 installer adds `rules/openmerit-scout.md` alongside the skill. Unlike an on-demand skill, an unscoped [Claude Code rule](https://code.claude.com/docs/en/memory#organize-rules-with-claude/rules/) loads at session startup. The rule requires loading the skill and consulting Scout before any application-model choice, even when the user only asks for a feature. It explicitly includes pretrained/local/browser models, weight downloads, SDK defaults, embeddings, OCR, speech, classification, detection and segmentation. An explicit user model choice must be assessed, not silently replaced. Unchanged approved models and ordinary inference calls do not require another search.

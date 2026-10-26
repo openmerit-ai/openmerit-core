@@ -105,10 +105,23 @@ test('install signs in once, resumes a pending approval, installs, verifies and 
   assert.ok(!done.out.includes(key), 'the key is never printed');
   assert.match(await readFile(join(h.claudeDir, 'skills/openmerit-scout/SKILL.md'), 'utf8'), /^---\nname: openmerit-scout\n/);
   assert.equal(await readFile(join(h.claudeDir, 'rules/openmerit-scout.md'), 'utf8'), rule);
+  const settingsPath = join(h.claudeDir, 'settings.json');
+  const hooks = JSON.parse(await readFile(settingsPath, 'utf8')).hooks;
+  assert.equal(hooks.SessionStart[0].hooks[0].async, true);
+  assert.equal(hooks.Stop[0].hooks[0].async, true);
+  assert.equal(JSON.parse((await h.run('status', '--json')).out).autoUpdates, true);
+  assert.equal((await h.run('update', '--auto', 'off', '--json')).code, 0);
+  assert.equal(JSON.parse((await h.run('status', '--json')).out).autoUpdates, false);
 
   const calls = (await readFile(process.env.FAKE_CLAUDE_LOG, 'utf8')).trim().split('\n').length;
   const again = await h.run('install', '--json');
   assert.equal(again.code, 0); assert.equal(JSON.parse(again.out).connection, 'connected');
+  assert.deepEqual(JSON.parse(await readFile(settingsPath, 'utf8')).hooks, {}, 'rerunning install preserves the automatic-update opt-out');
+  assert.equal((await h.run('update', '--auto', 'on')).code, 0);
+  const partial = JSON.parse(await readFile(join(h.claudeDir, 'openmerit-install.json'), 'utf8'));
+  partial.pendingUpdates = partial.updates; delete partial.updates;
+  await writeFile(join(h.claudeDir, 'openmerit-install.json'), JSON.stringify(partial));
+  assert.equal((await h.run('install', '--json')).code, 0, 'an interrupted updater bootstrap resumes without treating its files as foreign');
   assert.equal((await readFile(process.env.FAKE_CLAUDE_LOG, 'utf8')).trim().split('\n').length, calls, 'an unchanged install does not rewrite Claude config');
   assert.equal(JSON.parse((await h.run('status', '--check', '--json')).out).installed, true);
 
@@ -141,6 +154,8 @@ test('install signs in once, resumes a pending approval, installs, verifies and 
   await writeFile(join(h.claudeDir, 'rules/personal.md'), 'Keep my instructions');
   assert.equal((await h.run('remove')).code, 0);
   await assert.rejects(readFile(rulePath), { code: 'ENOENT' });
+  assert.deepEqual(JSON.parse(await readFile(settingsPath, 'utf8')).hooks, {});
+  await assert.rejects(readFile(join(h.claudeDir, 'openmerit-updater.mts')), { code: 'ENOENT' });
   assert.equal(await readFile(join(h.claudeDir, 'rules/personal.md'), 'utf8'), 'Keep my instructions');
 });
 
@@ -162,6 +177,11 @@ test('install refuses to overwrite user edits or foreign servers, and remove rev
   const userCode = (await h.run('install', '--client', 'claude-code', '--no-open')).out.match(/Code: (\S+)/)[1];
   await h.approve(userCode);
   assert.equal((await h.run('install', '--client', 'claude-code')).code, 0);
+  const settingsPath = join(h.claudeDir, 'settings.json');
+  const settings = JSON.parse(await readFile(settingsPath, 'utf8'));
+  settings.hooks.Stop[0].hooks[0].timeout = 25;
+  await writeFile(settingsPath, JSON.stringify(settings));
+  assert.equal((await h.run('install', '--client', 'claude-code')).code, 20, 'edited maintenance hooks are not overwritten');
   const skillPath = join(h.claudeDir, 'skills/openmerit-scout/SKILL.md');
   await writeFile(skillPath, 'my edits');
   const edited = await h.run('install', '--client', 'claude-code');
@@ -176,6 +196,8 @@ test('install refuses to overwrite user edits or foreign servers, and remove rev
   assert.equal((await h.claudeConfig()).mcpServers.openmerit, undefined);
   assert.equal(await readFile(skillPath, 'utf8'), 'my edits', 'edited skill is kept');
   assert.equal(await readFile(rulePath, 'utf8'), 'my rule edits', 'edited startup rule is kept');
+  assert.deepEqual(JSON.parse(await readFile(settingsPath, 'utf8')).hooks.Stop, settings.hooks.Stop, 'edited hook is kept');
+  assert.ok(await readFile(join(h.claudeDir, 'openmerit-updater.mts')), 'an edited hook keeps its referenced runner');
   assert.equal(await deviceKeyUser(h.env, key), null);
 });
 
@@ -194,6 +216,9 @@ test('a failing claude command never leaks the key, and project scope keeps it o
   assert.match(await readFile(join(h.root, '.claude/skills/openmerit-scout/SKILL.md'), 'utf8'), /openmerit-scout/);
   assert.equal(await readFile(join(h.root, '.claude/rules/openmerit-scout.md'), 'utf8'), rule);
   await assert.rejects(readFile(join(h.claudeDir, 'rules/openmerit-scout.md')), { code: 'ENOENT' });
+  const settings = JSON.parse(await readFile(join(h.root, '.claude/settings.local.json'), 'utf8'));
+  assert.match(settings.hooks.SessionStart[0].hooks[0].command, /--scope project --hook/);
+  await assert.rejects(readFile(join(h.claudeDir, 'settings.json')), { code: 'ENOENT' });
 });
 
 test('install opens only the approval page, once, and resumes without reopening it', { skip: process.platform !== 'linux' }, async t => {

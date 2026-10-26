@@ -1,8 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, rmSync } from "node:fs";
+import { chmodSync, cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildTerminal } from "./build-terminal.mjs";
+import { rule, skill } from "../packages/terminal/src/install.mjs";
+import { updateContract } from "../packages/terminal/src/updates.ts";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 rmSync(join(root, "dist"), { recursive: true, force: true });
@@ -18,6 +20,12 @@ if (result.status === 0) {
   cpSync(join(root, "packages/eval/src"), join(root, "dist/eval/src"), { recursive: true });
   cpSync(join(root, "packages/terminal/src"), join(root, "dist/terminal/src"), { recursive: true });
   cpSync(join(root, "packages/terminal/public"), join(root, "dist/terminal/public"), { recursive: true });
+  // The legacy installer is copied, not compiled. Node cannot strip types in
+  // node_modules, so its new TypeScript boundary must use the emitted module.
+  const installer = join(root, "dist/terminal/src/install.mjs");
+  writeFileSync(installer, readFileSync(installer, "utf8").replace("from './updates.ts'", "from './updates.js'"));
+  const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  writeFileSync(join(root, "dist/terminal/scout-update.json"), `${JSON.stringify({ format: 1, contract: updateContract, version, skill, rule })}\n`);
   chmodSync(join(root, "dist/terminal/src/cli.mjs"), 0o755);
 }
 process.exit(result.status ?? 1);

@@ -8,6 +8,12 @@ Reviewed benchmark-source claims against the parser change for Artificial Analys
 
 Reviewed model-coverage and source claims against the change that adds catalogue models to Scout and widens catalogue identity resolution. The homepage and the Scout page state no model or provider counts, so no FAQ copy changes. The Scout guide's source table now says the catalogue also contributes models no other source lists.
 
+## Claude Code automatic instruction updates — source only, 26 October 2026
+
+Reviewed installation, background work, permissions, data handling and activation claims. Source adds default-on asynchronous startup/response-end checks for compatible Scout instructions, with daily cadence, offline retry backoff, opt-out, manual update, integrity verification and edited-file preservation. Downloaded code is not executed; keys, MCP configuration, privacy settings and project policy are unchanged. A new session reliably loads updates. Older clients need an explicit bootstrap upgrade after npm publication; hosted releases do not push local files. Homepage wording needs no changes. Scout/npm/main-site releases remain separate, and no publication is included in this source change.
+
+Failed background checks now emit a non-blocking notice with the “update openmerit” manual fallback; hooks during the 15-minute retry backoff remain silent. Claude Code must process the completed asynchronous output to display it. This changes failure reporting, not background execution or the one-shot exit limitation; homepage wording still needs no changes.
+
 ## Catalogue host routes in Scout — 26 October 2026
 
 Reviewed provider, source and pricing claims against the change that adds reviewed hosted routes from the D1 model catalogue to Scout's existing models. The homepage and the Scout page make no provider-coverage claims, so no FAQ copy changes. The Scout guide's source table now lists the catalogue as a source of hosted routes.
