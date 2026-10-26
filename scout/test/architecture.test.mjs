@@ -221,16 +221,16 @@ test('the D1 research ledger reuses verified inspections per record and feeds pr
 });
 
 test('catalogue routes are replaced each collection and, if D1 fails, the previous routes stay with a failed source',async()=>{
- const {addCatalogueRoutes}=await import('../pipeline.mjs');
+ const {addCatalogueRoutes}=await import('../pipeline.mjs'),{loadCatalogue}=await import('../catalogue-routes.ts');
  const route={id:'catalogue:host:chat-completions:m',provider:'Host',modelId:'m',source:'catalogue'};
  const previous={catalogue:[{id:'a',endpoints:[{id:'or',source:'models'},route]}],sources:[{id:'catalogue',status:'ok',checkedAt:'2026-10-25T12:00:00Z'}]};
  const next=()=>({checkedAt:'2026-10-26T00:00:00Z',sources:[],catalogue:[{id:'a',endpoints:[{id:'or',source:'models'},route]}]});
  const broken={prepare:()=>{throw new Error('D1 unavailable');}};
- const kept=await addCatalogueRoutes(next(),previous,broken);
+ const kept=addCatalogueRoutes(next(),previous,null,await loadCatalogue(broken,{}).catch(e=>e));
  assert.deepEqual(kept.catalogue[0].endpoints.map(e=>e.id),['or',route.id],'carried-over routes are not duplicated');
  assert.deepEqual([kept.sources[0].status,kept.sources[0].checkedAt],['failed','2026-10-25T12:00:00Z']);
  const empty={prepare:()=>({bind(){return this;},all:async()=>({results:[]})})};
- const fresh=await addCatalogueRoutes(next(),previous,empty);
+ const fresh=addCatalogueRoutes(next(),previous,await loadCatalogue(empty,{}));
  assert.deepEqual(fresh.catalogue[0].endpoints.map(e=>e.id),['or'],'a route the catalogue no longer lists is dropped');assert.equal(fresh.sources[0].status,'ok');
 });
 

@@ -4,8 +4,8 @@
 // home (some major labs, such as Qwen, are not verified). Live Hub inference
 // routes become `huggingface:<backend>` listings with their prices.
 import {
-  type Database, type Listing, type Parsed, type Price, type Row, type Backbone, type StoreStats,
-  ensureCatalogueSchema, storeCatalogue, chunked, pick, extract, updates, digest, isObject, obj, text, int, date, id, money, num,
+  type Database, type Listing, type Parsed, type Price, type Row, type StoreStats,
+  ensureCatalogueSchema, storeCatalogue, loadBackbone, resolveListings, chunked, pick, extract, updates, digest, isObject, obj, text, int, date, id, money, num,
 } from './catalogue-db.ts';
 
 type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
@@ -167,8 +167,7 @@ export async function crawlHubModels(db: Database, options: HubOptions & { pages
   for (const o of due) { const cost = Math.max(1, Math.ceil(o.n / 1000)); if (planned + cost > budget && plan.length) break; plan.push(o.name); planned += cost; }
   const links = new Map((await db.prepare("SELECT hf_id,min(model_id) model_id FROM cat_listings WHERE hf_id IS NOT NULL AND model_id IS NOT NULL AND withdrawn_at IS NULL GROUP BY hf_id HAVING count(DISTINCT model_id)=1")
     .all<{ hf_id: string; model_id: string }>()).results.map(r => [r.hf_id, r.model_id]));
-  const backbone: Backbone = { routes: (await db.prepare("SELECT provider_id,provider_model_id,model_id FROM cat_listings WHERE source='modelsdev' AND withdrawn_at IS NULL AND model_id IS NOT NULL")
-    .all<{ provider_id: string; provider_model_id: string; model_id: string | null }>()).results, models: new Set((await db.prepare('SELECT id FROM cat_models WHERE withdrawn_at IS NULL').all<{ id: string }>()).results.map(r => r.id)) };
+  const backbone = await loadBackbone(db);
   const result: CrawlResult = { organisations: 0, failed: 0, pages: 0, models: 0, routes: 0, rateLimited: false, stats: null };
   const add = (a: StoreStats | null, b: StoreStats): StoreStats => a ? { listings: a.listings + b.listings, added: a.added + b.added, changed: a.changed + b.changed, withdrawn: a.withdrawn + b.withdrawn,
     unresolved: a.unresolved + b.unresolved, prices_opened: a.prices_opened + b.prices_opened, prices_closed: a.prices_closed + b.prices_closed } : b;
@@ -195,7 +194,7 @@ export async function crawlHubModels(db: Database, options: HubOptions & { pages
           // A repository another source already links to a model starts linked; Models.dev routes still take precedence.
           listings: done.flatMap(c => c.listings).map(l => { const linked = links.get(l.provider_model_id); return linked ? { ...l, model_id: linked, model_basis: 'catalogue-hf-id' } : l; }), models: [] };
         await storeHubModels(db, models, authors, now, links);
-        result.stats = add(result.stats, await storeCatalogue(db, 'huggingface', parsed, { now, run, backbone, scope: authors }));
+        result.stats = add(result.stats, await storeCatalogue(db, 'huggingface', { ...parsed, listings: resolveListings(parsed.listings, backbone, { slugs: false }) }, { now, run, scope: authors }));
         result.models += models.length; result.routes += parsed.listings.length;
       }
       const marks = crawled.map(c => 'models' in c ? [c.author, 'ok', null, c.models.length] : [c.author, 'failed', c.error, null]);

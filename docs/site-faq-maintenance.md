@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Catalogue identities and models in Scout — 26 October 2026
+
+Reviewed model-coverage and source claims against the change that adds catalogue models to Scout and widens catalogue identity resolution. The homepage and the Scout page state no model or provider counts, so no FAQ copy changes. The Scout guide's source table now says the catalogue also contributes models no other source lists.
+
 ## Catalogue host routes in Scout — 26 October 2026
 
 Reviewed provider, source and pricing claims against the change that adds reviewed hosted routes from the D1 model catalogue to Scout's existing models. The homepage and the Scout page make no provider-coverage claims, so no FAQ copy changes. The Scout guide's source table now lists the catalogue as a source of hosted routes.

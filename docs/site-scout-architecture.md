@@ -1,5 +1,45 @@
 # Scout architecture and operations
 
+## Catalogue identities and catalogue models in Scout — 26 October 2026 (not yet deployed)
+
+Two changes widen what reaches Scout from the D1 catalogue.
+
+**Identity resolution in `scout/catalogue-db.ts`.** `resolveListings` now tries exact keys in this order, and an ambiguous key resolves nothing:
+1. the same Models.dev route;
+2. a canonical ID, also as a service variant (`:free`, `:batch`, Vercel's `-batch`);
+3. the identical provider model ID mapped to one model elsewhere;
+4. a link the source itself gives;
+5. a Hugging Face repository named for one model, by Models.dev `weights` or by an already-resolved route's `hf_id` (`hf-repo`);
+6. the route's model slug equal to exactly one canonical model's slug (`slug-unique`). For example, `accounts/fireworks/models/qwen3-8b` and `Qwen/Qwen3-8B` both resolve to `alibaba/qwen3-8b`.
+
+Models.dev's own unlinked provider entries go through the same tiers against Models.dev itself. Hub crawls keep slugs off, because a repository named like a lab's model may be anyone's fine-tune. On 26 October data, Models.dev's canonical slugs had no collisions.
+
+**Gateway identities.** An OpenRouter or Vercel `lab/model` ID that no tier resolves becomes a canonical model, with basis `openrouter-id` or `vercel-id`. Service variants share it, and routers and `~` aliases never count. The gateways now import before LiteLLM and genai-prices, so those price lists resolve to the new identities in the same run. Each source withdraws only its own models, by basis prefix. Models.dev takes over an ID once it lists it, and a gateway never overwrites another source's model.
+
+**Catalogue models in Scout.** `collect-public-feeds` reads the catalogue once (`loadCatalogue` in `scout/catalogue-routes.ts`). `compileSnapshot` then adds catalogue models before benchmark rows are matched:
+- **Which models qualify:** canonical chat models (type unknown, `chat` or `language`, text output) with at least one admitted, priced chat route, that no feed model links to.
+- **Possible duplicates stay out:** a catalogue model whose name or ID slug an existing model already uses is left out, because it may be that model under another catalogue ID. Models.dev has such duplicates, for example `deepseek/deepseek-v3.1` and `deepseek/deepseek-chat-v3.1`. So no existing match can become ambiguous.
+- **What a catalogue model carries:** it is labelled `listedBy: "catalogue"`, its price is its cheapest route's, and it has creator and release-date facts from the catalogue.
+- **Without D1:** the previous generation's catalogue models are kept, and the `catalogue` source is marked failed.
+
+**Measured locally**, against the published generation `fc490025fce766c12512c006fb8fc3ab` and a local rebuild of the catalogue from 26 October feeds. Collection ran twice on identical fetched feeds, with and without the catalogue.
+
+| Measure | Before | After |
+| --- | --- | --- |
+| Canonical models | 659 | 844 (58 OpenRouter and 127 Vercel identities) |
+| Unresolved text routes at admitted hosts | 673 of 1,690 | 497 |
+| Offerings linked by `slug-unique` | — | 611 |
+| Offerings linked by `hf-repo` | — | 91 |
+| Scout catalogue entries | 391 | 454 (65 catalogue models) |
+| Benchmark-backed models | 233 | 258 |
+| Hosted routes | 1,147 | 1,324 |
+
+- **Newly measured models:** 25 catalogue models gained evidence, among them DeepSeek R1, Qwen3 235B, Qwen3 8B, Qwen3.8 Max, QwQ 32B, Mistral Small 2506, Pixtral 12B, Llama 3.2 11B Vision and Nemotron 70B.
+- **Existing models unchanged:** no existing model's evidence changed, compared to ten significant digits.
+- **Shortlists:** live interpretation varies between calls, because its vocabulary includes the model set. Invoice-extraction and ticket-classification shortlists were identical. Pixtral 12B entered the chart-question shortlist, and Qwen3 8B the cheap open-weight summarising one.
+
+**Known gap, unrelated to this change:** Artificial Analysis's leaderboard page no longer embeds per-benchmark scores. All 17 fields Scout reads were empty across 272 rows on 26 October. Production has retained the previous AA evidence since 04:55 UTC under the coverage guard. Until the AA parser reads another page, catalogue models gain no new AA results.
+
 ## Catalogue host routes in Scout recommendations — deployed, 26 October 2026
 
 **Deployment receipt:** the owner approved the deployment and a manual run. Commit [b61e181](https://github.com/laz-aslam/openmerit/commit/b61e181) is on `origin/main`. Publisher `openmerit-scout` moved from `ca47b624-b254-4b54-a8e6-e70b86799790` to `27bd6884-8d8d-4b7c-be7a-1d13d05dd397`, with schedule `7 0,12 * * *`. Manual run `manual-20261026-routes-1` published generation `fc490025fce766c12512c006fb8fc3ab` at 08:10 UTC, with the `catalogue` source `ok`. Endpoints rose from 513 to 1,149, as the local measurement below predicted.

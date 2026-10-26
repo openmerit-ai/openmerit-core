@@ -25,12 +25,13 @@ type Json = Record<string, unknown>;
 export type CatalogueSource = 'modelsdev' | 'litellm' | 'openrouter' | 'vercel' | 'genaiprices' | 'epoch';
 
 interface SourceConfig { name: string; url: string; modelsURL?: string; license: string; role: string; maxBytes: number }
-// Import order matters: Models.dev first, as every later source resolves against it.
+// Import order matters: Models.dev first, as every later source resolves against it,
+// then the gateways, whose lab/model IDs add identities the price lists resolve to.
 export const catalogueSources: Record<CatalogueSource, SourceConfig> = {
   modelsdev: { name: 'Models.dev', url: 'https://models.dev/api.json', modelsURL: 'https://models.dev/models.json', license: 'MIT', role: 'Model identity, families and provider routes (backbone)', maxBytes: 20_000_000 },
-  litellm: { name: 'LiteLLM model prices', url: 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json', license: 'MIT', role: 'Provider routes and prices', maxBytes: 12_000_000 },
   openrouter: { name: 'OpenRouter models API', url: 'https://openrouter.ai/api/v1/models', license: 'Public API; OpenRouter terms of service', role: 'Gateway routes, prices and Hugging Face IDs', maxBytes: 8_000_000 },
   vercel: { name: 'Vercel AI Gateway models API', url: 'https://ai-gateway.vercel.sh/v1/models', license: 'Public API; Vercel terms of service', role: 'Second gateway: routes, release dates and prices', maxBytes: 8_000_000 },
+  litellm: { name: 'LiteLLM model prices', url: 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json', license: 'MIT', role: 'Provider routes and prices', maxBytes: 12_000_000 },
   genaiprices: { name: 'genai-prices (Pydantic)', url: 'https://raw.githubusercontent.com/pydantic/genai-prices/main/prices/data.json', license: 'MIT', role: 'Provider prices with tiers and dated changes', maxBytes: 8_000_000 },
   epoch: { name: 'Epoch AI models database', url: 'https://epoch.ai/data/all_ai_models.csv', license: 'CC BY 4.0', role: 'Model creators, countries, release dates, size and openness, including models no gateway lists', maxBytes: 30_000_000 },
 };
@@ -383,24 +384,66 @@ export function resolveSourceModels(rows: SourceModel[], canonical: ReadonlyArra
 }
 
 interface BackboneRoute { provider_id: string; provider_model_id: string; model_id: string | null }
-export interface Backbone { routes: BackboneRoute[]; models: ReadonlySet<string> }
-// Identity comes only from Models.dev: the same route, a provider model ID that
-// is itself a canonical model ID (gateways use lab/model), or the identical
-// provider model ID mapped to exactly one canonical model elsewhere.
-export function resolveListings(listings: Listing[], backbone: Backbone): Listing[] {
-  const routes = new Map<string, string>(), byId = new Map<string, Set<string>>();
-  for (const r of backbone.routes) {
-    if (!r.model_id) continue;
-    routes.set(`${r.provider_id}|${r.provider_model_id}`, r.model_id);
-    const set = byId.get(r.provider_model_id) ?? new Set<string>(); set.add(r.model_id); byId.set(r.provider_model_id, set);
-  }
+// repos: Hugging Face repositories (lowercase) named for canonical models by
+// Models.dev weights or by an already-resolved route's hf_id.
+export interface Backbone { routes: BackboneRoute[]; models: ReadonlySet<string>; repos?: ReadonlyArray<{ repo: string; model_id: string }> }
+export async function loadBackbone(db: Database): Promise<Backbone> {
+  const routes = (await db.prepare("SELECT provider_id,provider_model_id,model_id FROM cat_listings WHERE source='modelsdev' AND withdrawn_at IS NULL AND model_id IS NOT NULL").all<BackboneRoute>()).results;
+  const models = (await db.prepare('SELECT id,weights FROM cat_models WHERE withdrawn_at IS NULL').all<{ id: string; weights: string | null }>()).results;
+  const repos = (await db.prepare('SELECT DISTINCT lower(hf_id) repo,model_id FROM cat_listings WHERE hf_id IS NOT NULL AND model_id IS NOT NULL AND withdrawn_at IS NULL').all<{ repo: string; model_id: string }>()).results;
+  return { routes, models: new Set(models.map(m => m.id)), repos: [...repos, ...weightRepos(models)] };
+}
+const weightRepos = (models: ReadonlyArray<{ id: string; weights: string | null }>) =>
+  models.flatMap(m => [...(m.weights ?? '').matchAll(/https:\/\/huggingface\.co\/([\w.-]+\/[\w.-]+)/g)].map(([, repo]) => ({ repo: (repo ?? '').toLowerCase(), model_id: m.id })));
+// A route's model slug: the last path segment without a :variant suffix, so
+// accounts/fireworks/models/qwen3-8b and Qwen/Qwen3-8B:free both give qwen3-8b.
+export const modelSlug = (id: string): string => (baseID(id).split('/').pop() ?? id).toLowerCase();
+// Service variants of one model: OpenRouter's :free or :batch, Vercel's -batch.
+const baseID = (id: string): string => id.replace(/(:[^/]*|-batch)$/, '');
+const index = (pairs: Iterable<readonly [string, string]>) => {
+  const out = new Map<string, Set<string>>();
+  for (const [k, v] of pairs) { const set = out.get(k) ?? new Set<string>(); set.add(v); out.set(k, set); }
+  return (k: string | null | undefined): string | null => { const set = k ? out.get(k) : undefined; return set?.size === 1 ? [...set][0] ?? null : null; };
+};
+// Identity resolves through exact keys only, in order: the same Models.dev
+// route, a canonical model ID (gateways use lab/model, also as a service
+// variant), the identical provider model ID mapped to one model elsewhere, a
+// Hugging Face repository named for one model, and a model slug equal to one
+// canonical model's slug. Ambiguous keys resolve nothing. The Hub keeps
+// slugs off: a repository named like a lab's model may be anyone's fine-tune.
+export function resolveListings(listings: Listing[], backbone: Backbone, { slugs = true }: { slugs?: boolean } = {}): Listing[] {
+  const routes = new Map<string, string>();
+  for (const r of backbone.routes) if (r.model_id) routes.set(`${r.provider_id}|${r.provider_model_id}`, r.model_id);
+  const same = index(backbone.routes.flatMap(r => r.model_id ? [[r.provider_model_id, r.model_id] as const] : []));
+  const repo = index((backbone.repos ?? []).map(r => [r.repo, r.model_id] as const)), slug = index([...backbone.models].map(m => [modelSlug(m), m] as const));
+  const canonical = (id: string) => [id, baseID(id)].find(x => backbone.models.has(x)) ?? null;
   for (const l of listings) {
-    const exact = routes.get(`${l.provider_id}|${l.provider_model_id}`), same = byId.get(l.provider_model_id);
-    if (exact) Object.assign(l, { model_id: exact, model_basis: 'modelsdev-route' });
-    else if (backbone.models.has(l.provider_model_id)) Object.assign(l, { model_id: l.provider_model_id, model_basis: 'modelsdev-canonical-id' });
-    else if (same?.size === 1) Object.assign(l, { model_id: [...same][0] ?? null, model_basis: 'modelsdev-same-id' });
+    // A link the source itself gives ranks after Models.dev's routes and IDs.
+    const id = l.provider_model_id, exact = routes.get(`${l.provider_id}|${id}`), lower = id.toLowerCase();
+    const found: Array<[string | null | undefined, string | null]> = [[exact, 'modelsdev-route'], [canonical(id), 'modelsdev-canonical-id'], [same(id), 'modelsdev-same-id'], [l.model_id, l.model_basis],
+      [repo(lower.includes('/') ? lower : null) ?? repo(l.hf_id?.toLowerCase()), 'hf-repo'], [slugs ? slug(modelSlug(id)) : null, 'slug-unique']];
+    const [model_id, model_basis] = found.find(([m]) => m) ?? [null, null];
+    Object.assign(l, { model_id: model_id ?? null, model_basis: model_id ? model_basis : null });
   }
   return listings;
+}
+
+// A gateway lab/model ID that no tier resolves becomes a canonical model of its
+// own (basis `<source>-id`), so models Models.dev lacks still have one identity.
+// Service variants share their base ID; routers and aliases do not count.
+export function gatewayIdentities(source: 'openrouter' | 'vercel', listings: Listing[]): Model[] {
+  const models = new Map<string, Model>();
+  for (const l of listings) {
+    const id = baseID(l.provider_model_id), [lab = '', name = ''] = id.split('/');
+    if (l.model_id || !/^[a-z0-9][\w.-]*\/[\w.-]+$/.test(id) || id !== id.toLowerCase() || ['openrouter', 'auto'].includes(lab)) continue;
+    Object.assign(l, { model_id: id, model_basis: `${source}-id` });
+    if (models.has(id) || !name) continue;
+    models.set(id, { id, lab_id: lab, name: l.name?.replace(/^[^:]+:\s*/, '').replace(/\s*\((free|batch)\)$/i, '') ?? name, family: null, description: null, type: l.type, release_date: l.release_date, last_updated: null,
+      knowledge: l.knowledge, open_weights: l.open_weights, license: null, weights: l.hf_id ? JSON.stringify([{ label: 'Hugging Face', url: `https://huggingface.co/${l.hf_id}` }]) : null,
+      input_modalities: l.input_modalities, output_modalities: l.output_modalities, reasoning: l.reasoning, tool_call: l.tool_call, attachment: null, temperature: null, context: l.context, max_output: l.max_output,
+      basis: `${source}-id`, payload: { source, provider_model_id: l.provider_model_id } });
+  }
+  return [...models.values()];
 }
 
 const listingColumns = ['provider_id', 'provider_model_id', 'model_id', 'model_basis', 'name', 'family', 'type', 'status', 'release_date', 'knowledge', 'deprecated_at', 'context', 'max_input', 'max_output',
@@ -434,8 +477,9 @@ export interface StoreStats { listings: number; added: number; changed: number; 
 // the given owners ("owner/..."): a source crawled in parts, such as the Hub,
 // withdraws and closes prices only for the owners it crawled this run.
 const owned = (column: string, n: number) => `(?${n} IS NULL OR substr(${column},1,instr(${column},'/')-1) IN (SELECT value FROM json_each(?${n})))`;
-export async function storeCatalogue(db: Database, source: string, parsed: Parsed, { now, run, backbone, scope = null }: { now: string; run: string; backbone: Backbone | null; scope?: string[] | null }): Promise<StoreStats> {
-  const listings = backbone ? resolveListings(parsed.listings, backbone) : parsed.listings, owners = scope ? JSON.stringify(scope) : null;
+// Listings arrive resolved (resolveListings); storing never changes identity.
+export async function storeCatalogue(db: Database, source: string, parsed: Parsed, { now, run, scope = null }: { now: string; run: string; scope?: string[] | null }): Promise<StoreStats> {
+  const listings = parsed.listings, owners = scope ? JSON.stringify(scope) : null;
   const existing = await db.prepare(`SELECT provider_id,provider_model_id,payload_hash,withdrawn_at FROM cat_listings WHERE source=?1 AND ${owned('provider_model_id', 2)}`).bind(source, owners)
     .all<{ provider_id: string; provider_model_id: string; payload_hash: string; withdrawn_at: string | null }>();
   const prior = new Map(existing.results.map(r => [`${r.provider_id}|${r.provider_model_id}`, r]));
@@ -455,12 +499,14 @@ export async function storeCatalogue(db: Database, source: string, parsed: Parse
   const withdrawn = (await db.prepare(`UPDATE cat_listings SET withdrawn_at=?1 WHERE source=?2 AND last_seen<?1 AND withdrawn_at IS NULL AND ${owned('provider_model_id', 3)}`).bind(now, source, owners).run()).meta.changes;
   await chunked(db, `INSERT INTO cat_providers (source,id,name,api,doc,npm,env,first_seen,last_seen) SELECT ?1,${extract(['id', 'name', 'api', 'doc', 'npm', 'env'])},?2,?2 FROM json_each(?3) WHERE true
     ON CONFLICT(source,id) DO UPDATE SET name=excluded.name,api=excluded.api,doc=excluded.doc,npm=excluded.npm,env=excluded.env,last_seen=excluded.last_seen`, parsed.providers, [source, now]);
-  if (parsed.models.length) {
+  // Each source keeps and withdraws only its own models (basis prefix). Models.dev
+  // takes over an ID a gateway introduced; a gateway never overwrites another's.
+  if (parsed.models.length || ['openrouter', 'vercel'].includes(source)) {
     const models: Row[] = [];
     for (const m of parsed.models) models.push({ ...pick(modelColumns, { ...m, payload: JSON.stringify(m.payload) }), payload_hash: await digest(m.payload) });
-    await chunked(db, `INSERT INTO cat_models (${modelColumns.join(',')},first_seen,last_seen,withdrawn_at) SELECT ${extract(modelColumns)},?1,?1,NULL FROM json_each(?2) WHERE true
-      ON CONFLICT(id) DO UPDATE SET ${updates(modelColumns, ['id'])},last_seen=excluded.last_seen,withdrawn_at=NULL`, models, [now]);
-    await db.prepare('UPDATE cat_models SET withdrawn_at=?1 WHERE last_seen<?1 AND withdrawn_at IS NULL').bind(now).run();
+    await chunked(db, `INSERT INTO cat_models (${modelColumns.join(',')},first_seen,last_seen,withdrawn_at) SELECT ${extract(modelColumns)},?1,?1,NULL FROM json_each(?3) WHERE true
+      ON CONFLICT(id) DO UPDATE SET ${updates(modelColumns, ['id'])},last_seen=excluded.last_seen,withdrawn_at=NULL WHERE ?2='modelsdev' OR cat_models.basis=excluded.basis`, models, [now, source]);
+    await db.prepare("UPDATE cat_models SET withdrawn_at=?1 WHERE last_seen<?1 AND withdrawn_at IS NULL AND substr(basis,1,instr(basis,'-')-1)=?2").bind(now, source).run();
   }
   // Prices are intervals: an unchanged price stays open, a changed or removed one
   // closes now, and a new amount opens now. Staging keeps each statement bounded.
@@ -550,17 +596,22 @@ export async function importCatalogueSource(db: Database, source: CatalogueSourc
       files.length = 0;
       stats = await storeSourceModels(db, source, rows, now);
     } else {
-      let parsed: Parsed, backbone: Backbone | null = null;
-      if (source === 'modelsdev') parsed = parseModelsDev(decode(first), second ? decode(second) : {});
-      else {
+      let parsed: Parsed;
+      if (source === 'modelsdev') {
+        // Models.dev leaves some provider entries unlinked; resolve them against its own models and links.
+        parsed = parseModelsDev(decode(first), second ? decode(second) : {});
+        const linked = parsed.listings.filter(l => l.model_id);
+        resolveListings(parsed.listings.filter(l => !l.model_id), { routes: linked, models: new Set(parsed.models.map(m => m.id)),
+          repos: [...linked.flatMap(l => l.hf_id && l.model_id ? [{ repo: l.hf_id.toLowerCase(), model_id: l.model_id }] : []), ...weightRepos(parsed.models)] });
+      } else {
         const known = new Set((await db.prepare("SELECT id FROM cat_providers WHERE source='modelsdev'").all<{ id: string }>()).results.map(r => r.id));
         const data = decode(first);
         parsed = source === 'litellm' ? parseLiteLLM(data, known) : source === 'openrouter' ? parseOpenRouter(data) : source === 'vercel' ? parseVercel(data) : parseGenaiPrices(data, known, now);
-        backbone = { routes: (await db.prepare("SELECT provider_id,provider_model_id,model_id FROM cat_listings WHERE source='modelsdev' AND withdrawn_at IS NULL AND model_id IS NOT NULL").all<BackboneRoute>()).results,
-          models: new Set((await db.prepare('SELECT id FROM cat_models WHERE withdrawn_at IS NULL').all<{ id: string }>()).results.map(r => r.id)) };
+        resolveListings(parsed.listings, await loadBackbone(db));
+        if (source === 'openrouter' || source === 'vercel') parsed.models = gatewayIdentities(source, parsed.listings);
       }
       files.length = 0;
-      stats = await storeCatalogue(db, source, parsed, { now, run, backbone });
+      stats = await storeCatalogue(db, source, parsed, { now, run });
     }
     await db.batch([
       db.prepare("UPDATE cat_runs SET finished_at=?2,status='ok',artifact=?3,listings=?4,added=?5,changed=?6,withdrawn=?7,unresolved=?8,prices_opened=?9,prices_closed=?10 WHERE id=?1")

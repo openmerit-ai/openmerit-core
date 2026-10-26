@@ -95,14 +95,17 @@ test('gateways, genai-prices and Epoch add routes, Hugging Face IDs, tiers, date
   await db.prepare('CREATE TABLE cat_listings (source TEXT NOT NULL, provider_id TEXT NOT NULL, provider_model_id TEXT NOT NULL, model_id TEXT, model_basis TEXT, name TEXT, family TEXT, type TEXT, status TEXT, release_date TEXT, knowledge TEXT, deprecated_at TEXT, context INTEGER, max_input INTEGER, max_output INTEGER, input_modalities TEXT, output_modalities TEXT, reasoning INTEGER, tool_call INTEGER, structured_output INTEGER, attachment INTEGER, open_weights INTEGER, payload TEXT NOT NULL, payload_hash TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, withdrawn_at TEXT, PRIMARY KEY(source,provider_id,provider_model_id))').run();
   const OR = 'https://openrouter.ai/api/v1/models', VC = 'https://ai-gateway.vercel.sh/v1/models', GP = 'https://raw.githubusercontent.com/pydantic/genai-prices/main/prices/data.json', EP = 'https://epoch.ai/data/all_ai_models.csv';
   const files: Record<string, unknown> = {
-    [MD]: api, [MDM]: models,
+    // Models.dev leaves this Fireworks entry unlinked; its slug names one canonical model.
+    [MD]: { ...api, 'fireworks-ai': { id: 'fireworks-ai', name: 'Fireworks AI', models: { 'accounts/fireworks/models/claude-y': { id: 'accounts/fireworks/models/claude-y', name: 'Claude Y' } } } }, [MDM]: models,
     [OR]: { data: [
       { id: 'openai/gpt-x', name: 'OpenAI: GPT X', hugging_face_id: '', context_length: 400000, architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] }, top_provider: { max_completion_tokens: 128000 },
         pricing: { prompt: '0.000002', completion: '0.00001', web_search: '0.01' }, supported_parameters: ['tools', 'response_format'] },
       { id: 'vendor/open-1', name: 'Open 1', hugging_face_id: 'Vendor/Open-1', context_length: 32000, pricing: { prompt: '0.0000001', completion: '0.0000002' }, supported_parameters: ['max_tokens'] },
+      { id: 'vendor/open-1:free', name: 'Open 1 (free)' },
       { id: 'openrouter/auto', name: 'Auto Router', pricing: { prompt: '-1', completion: '-1' } }] },
     [VC]: { data: [{ id: 'openai/gpt-x', name: 'GPT X', type: 'language', released: 1777593600, context_window: 400000, max_tokens: 128000, tags: ['tool-use', 'reasoning'], modalities: { input: ['text'], output: ['text'] },
-      pricing: { input: '0.0000025', output: '0.00001', input_tiers: [{ cost: '0.0000025', min: 0, max: 272001 }, { cost: '0.000005', min: 272001 }], service_tiers: { priority: { input: '0.000005' } } } }] },
+      pricing: { input: '0.0000025', output: '0.00001', input_tiers: [{ cost: '0.0000025', min: 0, max: 272001 }, { cost: '0.000005', min: 272001 }], service_tiers: { priority: { input: '0.000005' } } } },
+      { id: 'openai/gpt-x-batch', name: 'GPT X', type: 'language' }, { id: 'lab-w/w-1', name: 'W 1', type: 'language' }] },
     [GP]: [
       { id: 'openai', name: 'OpenAI', models: [{ id: 'gpt-x', name: 'GPT X', context_window: 400000, prices: [
         { prices: { input_mtok: { base: 2, tiers: [{ start: 272000, price: 4 }] }, output_mtok: 10, cache_read_mtok: 0.2 } },
@@ -119,9 +122,16 @@ test('gateways, genai-prices and Epoch add routes, Hugging Face IDs, tiers, date
   const routes = Object.fromEntries(db.all("SELECT source||'|'||provider_id||'|'||provider_model_id k,model_id,model_basis,hf_id FROM cat_listings WHERE source<>'modelsdev'").map(r => [r.k, [r.model_id, r.model_basis, r.hf_id]]));
   assert.deepEqual(routes, {
     // Gateway IDs that are canonical lab/model IDs resolve even where Models.dev lists no such route.
-    'openrouter|openrouter|openai/gpt-x': ['openai/gpt-x', 'modelsdev-canonical-id', null], 'openrouter|openrouter|vendor/open-1': [null, null, 'Vendor/Open-1'],
+    'openrouter|openrouter|openai/gpt-x': ['openai/gpt-x', 'modelsdev-canonical-id', null],
+    // A gateway model Models.dev lacks becomes its own identity, shared by its service variants; routers never do.
+    'openrouter|openrouter|vendor/open-1': ['vendor/open-1', 'openrouter-id', 'Vendor/Open-1'], 'openrouter|openrouter|vendor/open-1:free': ['vendor/open-1', 'openrouter-id', null],
     'openrouter|openrouter|openrouter/auto': [null, null, null], 'vercel|vercel|openai/gpt-x': ['openai/gpt-x', 'modelsdev-canonical-id', null],
-    'genaiprices|openai|gpt-x': ['openai/gpt-x', 'modelsdev-route', null], 'genaiprices|huggingface:together|Vendor/Open-1': [null, null, 'Vendor/Open-1'] });
+    'vercel|vercel|openai/gpt-x-batch': ['openai/gpt-x', 'modelsdev-canonical-id', null], 'vercel|vercel|lab-w/w-1': ['lab-w/w-1', 'vercel-id', null],
+    // The Hub route links through the repository the OpenRouter identity names.
+    'genaiprices|openai|gpt-x': ['openai/gpt-x', 'modelsdev-route', null], 'genaiprices|huggingface:together|Vendor/Open-1': ['vendor/open-1', 'hf-repo', 'Vendor/Open-1'] });
+  assert.deepEqual({ ...one(db, "SELECT model_id,model_basis FROM cat_listings WHERE provider_id='fireworks-ai'") }, { model_id: 'anthropic/claude-y', model_basis: 'slug-unique' });
+  assert.deepEqual(db.all("SELECT id,lab_id,name,basis FROM cat_models WHERE basis NOT LIKE 'modelsdev-%' ORDER BY id").map(r => ({ ...r })), [
+    { id: 'lab-w/w-1', lab_id: 'lab-w', name: 'W 1', basis: 'vercel-id' }, { id: 'vendor/open-1', lab_id: 'vendor', name: 'Open 1', basis: 'openrouter-id' }]);
   const prices = (source: string, provider: string) => db.all(`SELECT kind,tier,unit,amount FROM cat_prices WHERE source='${source}' AND provider_id='${provider}' ORDER BY kind,tier`).map(r => [r.kind, r.tier, r.unit, r.amount]);
   // Router "-1" placeholders are not prices.
   assert.deepEqual(prices('openrouter', 'openrouter'), [['input', '', 'usd_per_mtok', 2], ['input', '', 'usd_per_mtok', 0.1], ['output', '', 'usd_per_mtok', 10], ['output', '', 'usd_per_mtok', 0.2], ['web_search', '', 'usd_per_query', 0.01]]);
@@ -129,11 +139,14 @@ test('gateways, genai-prices and Epoch add routes, Hugging Face IDs, tiers, date
   // The September variant is the whole price set: no earlier tier or cache price, no future or off-peak price.
   assert.deepEqual(prices('genaiprices', 'openai'), [['input', '', 'usd_per_mtok', 1.5], ['output', '', 'usd_per_mtok', 10]]);
   assert.deepEqual(prices('genaiprices', 'huggingface:together'), [['input', '', 'usd_per_mtok', 0.2], ['request', '', 'usd_per_request', 0.001]]);
-  assert.deepEqual({ ...one(db, "SELECT release_date,reasoning,tool_call,structured_output FROM cat_listings WHERE source='vercel'") }, { release_date: '2026-05-01', reasoning: 1, tool_call: 1, structured_output: 0 });
+  assert.deepEqual({ ...one(db, "SELECT release_date,reasoning,tool_call,structured_output FROM cat_listings WHERE source='vercel' AND provider_model_id='openai/gpt-x'") }, { release_date: '2026-05-01', reasoning: 1, tool_call: 1, structured_output: 0 });
   assert.deepEqual(db.all('SELECT name,organization,country,release_date,parameters,open_weights,model_id,model_basis FROM cat_source_models ORDER BY name').map(r => ({ ...r })), [
     { name: 'GPT X', organization: 'OpenAI', country: 'United States of America', release_date: '2026-05-01', parameters: null, open_weights: 0, model_id: 'openai/gpt-x', model_basis: 'name-exact-unique' },
     { name: 'Regional Z', organization: 'Lab Z', country: 'South Korea', release_date: '2026-07-31', parameters: 750000000000, open_weights: 1, model_id: null, model_basis: null }]);
   assert.equal(JSON.parse(String(one(db, "SELECT payload FROM cat_source_models WHERE name='GPT X'").payload)).Abstract, 'Says "hi", then\ncontinues');
   await rebuildOfferings(db);
-  assert.deepEqual({ ...one(db, "SELECT model_id,hf_id,sources FROM cat_offerings WHERE provider_id='openrouter' AND provider_model_id='vendor/open-1'") }, { model_id: null, hf_id: 'Vendor/Open-1', sources: '["openrouter"]' });
+  assert.deepEqual({ ...one(db, "SELECT model_id,hf_id,sources FROM cat_offerings WHERE provider_id='openrouter' AND provider_model_id='vendor/open-1'") }, { model_id: 'vendor/open-1', hf_id: 'Vendor/Open-1', sources: '["openrouter"]' });
+  // A later Models.dev import withdraws only Models.dev's own models.
+  ok(await importCatalogueSource(db, 'modelsdev', { fetcher, now: '2026-10-26T12:00:00Z', run: 'modelsdev-2' }));
+  assert.deepEqual(db.all('SELECT id FROM cat_models WHERE withdrawn_at IS NULL ORDER BY id').map(r => r.id), ['anthropic/claude-y', 'lab-w/w-1', 'openai/gpt-x', 'vendor/open-1']);
 });

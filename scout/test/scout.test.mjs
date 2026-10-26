@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { zipSync, strToU8 } from 'fflate';
 import { createIndex, recommend as rankTask, indexStatus } from '../rank.mjs';
+import { toRecords, toSnapshot } from '../records.mjs';
 import offlineTasks from './fixtures/offline-tasks.json' with {type:'json'};
 // Explicit historical task objects test arithmetic and transports, not interpretation.
 const fixtureTask = prompt => {const task=offlineTasks[prompt];if(!task)throw Error('Missing typed test fixture');return structuredClone(task);};
@@ -125,6 +126,23 @@ test('source ingestion preserves zero, rejects out-of-range and missing scores, 
   assert.ok(!data.models.find(m => m.id === 'lab/model-2').evidence.some(e => e.benchmark === 'epoch:Bench0'));
   assert.equal(data.sources.find(s => s.id === 'openvlm').publishedAt, '2025-09-17');
   assert.throws(() => parseAnalysis('<script>throw new Error("not data")</script>'), /format changed/);
+});
+
+test('catalogue models join before benchmark matching unless an existing model uses their name, and persist without D1', () => {
+  const input = fixtures();
+  const results = 'Model version,Score\nmodel-1_high,0.5\nhost-x_high,0.7\n';
+  input.epochZip = zipSync({ 'benchmark_metadata.csv': strToU8('benchmark,source_file,score_column,scale\n' + Array.from({ length: 10 }, (_, i) => `Bench${i},results.csv,Score,1`).join('\n')), 'results.csv': strToU8(results) });
+  const listed = (id, name) => ({ id, name, provider: 'Other', canonical: id, repository: null, modalities: ['text'], outputModalities: ['text'], parameters: [], context: null, facts: [], inputPrice: 1, outputPrice: 2, speed: null, evidence: [],
+    endpoints: [{ id: `catalogue:host:chat-completions:${id}`, provider: 'Host', modelId: id, api: 'https://host.example/v1/chat/completions', protocol: 'chat-completions', inputPrice: 1, outputPrice: 2, source: 'catalogue', url: 'https://host.example' }], listedBy: 'catalogue' });
+  let seen;
+  const catalogueSupply = { models: models => (seen = models.length, [listed('other/host-x', 'Host X'), listed('other/model-1', 'Model 1')]) };
+  const data = compileSnapshot({ ...input, catalogueSupply });
+  assert.equal(seen, 12, 'the supply sees every feed model, so it can leave out linked ones');
+  assert.equal(data.models.find(m => m.id === 'other/host-x')?.evidence.find(e => e.benchmark === 'epoch:Bench0')?.score, .7);
+  assert.equal(data.models.find(m => m.id === 'lab/model-1').evidence.find(e => e.benchmark === 'epoch:Bench0').score, .5, 'an existing model keeps its name');
+  assert.ok(!data.catalogue.some(m => m.id === 'other/model-1'), 'a possible duplicate of an existing model is left out');
+  const kept = compileSnapshot({ ...input, previous: toSnapshot(toRecords(data)), checkedAt: '2026-10-14T12:00:00Z' });
+  assert.equal(kept.models.find(m => m.id === 'other/host-x')?.evidence.find(e => e.benchmark === 'epoch:Bench0')?.score, .7);
 });
 
 test('reference speed preserves first-answer delay and does not mistake reasoning tokens for an answer', () => {

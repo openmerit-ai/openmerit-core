@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { importCatalogueSource, rebuildOfferings } from '../catalogue-db.ts';
-import { catalogueRoutes } from '../catalogue-routes.ts';
+import { catalogueRoutes, loadCatalogue } from '../catalogue-routes.ts';
 import { d1 } from './helpers-d1.ts';
 
 const MD = 'https://models.dev/api.json', MDM = 'https://models.dev/models.json', OR = 'https://openrouter.ai/api/v1/models';
@@ -13,7 +13,10 @@ const api = {
   openrouter: { id: 'openrouter', name: 'OpenRouter', npm: '@openrouter/ai-sdk-provider', api: 'https://openrouter.ai/api/v1', models: { 'z-ai/glm-x': route('z-ai/glm-x', 'zai/glm-x', { input: 1, output: 3 }) } },
   zai: { id: 'zai', name: 'Z.AI', npm: '@ai-sdk/openai-compatible', api: 'https://api.z.ai/api/paas/v4', models: { 'glm-x': route('glm-x', 'zai/glm-x', { input: 1.4, output: 4.4 }) } },
   // Admitted host with an SDK-specific entry: its base URL comes from the reviewed override.
-  togetherai: { id: 'togetherai', name: 'Together AI', npm: '@ai-sdk/togetherai', models: { 'zai-org/GLM-X': route('zai-org/GLM-X', 'zai/glm-x', { input: 1, output: 3 }), 'zai-org/GLM-X-alt': route('zai-org/GLM-X-alt', 'zai/glm-x', { input: 0.9, output: 3 }) } },
+  togetherai: { id: 'togetherai', name: 'Together AI', npm: '@ai-sdk/togetherai', models: { 'zai-org/GLM-X': route('zai-org/GLM-X', 'zai/glm-x', { input: 1, output: 3 }), 'zai-org/GLM-X-alt': route('zai-org/GLM-X-alt', 'zai/glm-x', { input: 0.9, output: 3 }),
+    // Hosted models Scout has no entry for: a chat model becomes a Scout model, an embedding model does not.
+    'deepseek-ai/DS-1': route('deepseek-ai/DS-1', 'deepseek/ds-1', { input: 0.5, output: 2 }), 'BAAI/emb-1': { ...route('BAAI/emb-1', 'baai/emb-1', { input: 0.1, output: 0.1 }), type: 'embedding' } } },
+  deepseek: { id: 'deepseek', name: 'DeepSeek', models: {} },
   fireworks: { id: 'fireworks-ai', name: 'Fireworks AI', npm: '@ai-sdk/openai-compatible', api: 'https://api.fireworks.ai/inference/v1/', models: {
     'glm-x': route('glm-x', 'zai/glm-x', { input: 0, output: 0 }), 'gpt-x': route('gpt-x', 'openai/gpt-x', { input: 1, output: 4 }), 'img-x': route('img-x', 'zai/glm-x', { input: 1, output: 1 }, ['image']) } },
   nanogpt: { id: 'nano-gpt', name: 'NanoGPT', npm: '@ai-sdk/openai-compatible', api: 'https://nano-gpt.com/api/v1', models: { 'glm-x': route('glm-x', 'zai/glm-x', { input: 0.5, output: 1 }) } },
@@ -41,4 +44,9 @@ test('catalogue routes reach Scout models only through exact identities and only
     ['Together AI', 'zai-org/GLM-X-alt', 'https://api.together.xyz/v1/chat/completions', 0.9, 3, 'host'],
     ['Z.AI', 'glm-x', 'https://api.z.ai/api/paas/v4/chat/completions', 1.4, 4.4, 'first-party']]);
   assert.deepEqual(routes.get('openai/gpt-x')?.map(e => [e.id, e.api, e.parameters]), [['catalogue:fireworks-ai:chat-completions:gpt-x', 'https://api.fireworks.ai/inference/v1/chat/completions', ['tools']]]);
+
+  // GLM X and GPT X are linked by Scout models above, so only DS-1 becomes a catalogue model.
+  const listed = (await loadCatalogue(db, admitted)).models(models, now);
+  assert.deepEqual(listed.map(m => [m.id, m.name, m.provider, m.inputPrice, m.outputPrice, m.endpoints.map(e => e.id), m.listedBy]), [
+    ['deepseek/ds-1', 'deepseek-ai/DS-1', 'DeepSeek', 0.5, 2, ['catalogue:togetherai:chat-completions:deepseek-ai/DS-1'], 'catalogue']]);
 });

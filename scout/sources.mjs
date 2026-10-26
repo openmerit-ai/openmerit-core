@@ -7,6 +7,7 @@ import contracts from './endpoint-contracts.json' with { type: 'json' };
 import { hubQueries, parseHubModels, hubID } from './huggingface.mjs';
 import { refreshSpecialists } from './specialists.mjs';
 import { refreshModelMetadata } from './metadata.mjs';
+import { catalogueRouteSource } from './catalogue-routes.ts';
 
 export const sourceURLs = {
   modelsdev: catalogueURL,
@@ -173,7 +174,7 @@ export function parseBFCL(csv) {
   });
 }
 
-export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, previous, failures = {}, checkedAt = new Date().toISOString() }) {
+export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, catalogueSupply, previous, failures = {}, checkedAt = new Date().toISOString() }) {
   const sources = [], benchmarks = [], observations = new Map();
   const descriptions = benchmarkDescriptions ?? previous?.benchmarkDescriptions ?? {};
   const priorSources = new Map(previous?.sources.map(s => [s.id, s]) ?? []);
@@ -199,12 +200,17 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     speed: null, evidence: [],
   })).map(m => ({ ...m, endpoints: [routerEndpoint(m, checkedAt)] })) : (previous?.catalogue ?? previous?.models ?? []).map(m => ({ ...m, endpoints: (m.endpoints ?? [routerEndpoint(m, previous.checkedAt)]).filter(e => e.source === 'models' && textOutputOnly(e.outputModalities)), speed: null, evidence: [] })).filter(m => m.endpoints.length);
   const models = mergeCatalogues(routerModels, independent);
+  // Catalogue models no feed above lists join before benchmark rows are matched.
+  // Without the D1 catalogue, the previous generation's ones are kept.
+  const offered = catalogueSupply ? catalogueSupply.models(models, checkedAt) : (previous?.catalogue ?? []).filter(m => m.listedBy === catalogueRouteSource).map(m => ({ ...m, evidence: [], speed: null }));
   for (const entry of contracts.entries) if (!sources.some(s => s.id === entry.source)) sources.push({ id: entry.source, name: `${entry.provider} · typed endpoints`, url: entry.url, status: 'ok', checkedAt: contracts.reviewedAt, refreshPolicy: 'manual-contract-review', attribution: 'Provider-documented endpoint contract and quoted rates; versioned metadata, not a live performance probe.' });
-  const lookup = new Map();
-  for (const model of models) for (const alias of [model.id.split('/').slice(1).join('/'), model.canonical?.split('/').slice(1).join('/'), model.name]) {
-    if (!alias) continue; const key = norm(alias); const previous = lookup.get(key);
-    lookup.set(key, lookup.has(key) && previous !== model ? null : model);
-  }
+  const lookup = new Map(), aliases = model => [model.id.split('/').slice(1).join('/'), model.canonical?.split('/').slice(1).join('/'), model.name].filter(Boolean).map(norm);
+  for (const model of models) for (const key of aliases(model)) { const previous = lookup.get(key); lookup.set(key, lookup.has(key) && previous !== model ? null : model); }
+  // A catalogue model whose name or slug an existing model already uses may be
+  // that model under another catalogue ID (Models.dev has such duplicates), so it stays out.
+  const listed = offered.filter(m => !models.some(x => x.id === m.id) && !aliases(m).some(key => lookup.has(key)));
+  for (const model of listed) for (const key of aliases(model)) { const previous = lookup.get(key); lookup.set(key, lookup.has(key) && previous !== model ? null : model); }
+  models.push(...listed);
   const explicitAliases = { 'claudesonnet4520250929': 'anthropic/claude-sonnet-4.5', 'claudehaiku4520251001': 'anthropic/claude-haiku-4.5', 'chatgpt4olatest': 'openai/chatgpt-4o-latest', 'claude37sonnet20250219': 'anthropic/claude-3.7-sonnet', 'gemini25propreview0325': 'google/gemini-2.5-pro-preview-03-25', 'gemini3flash': 'google/gemini-3-flash-preview', 'gemini31pro': 'google/gemini-3.1-pro-preview', 'claudehaiku45': 'anthropic/claude-haiku-4.5', 'qwen3vl235b': 'qwen/qwen3-vl-235b-a22b-instruct' };
   function resolve(name) {
     const base = String(name).replace(/_(?:none|low|medium|high|xhigh|max|unknown|thinking|nothinking)$/, '').replace(/\s*\([^)]*\)\s*$/, '');
@@ -387,7 +393,7 @@ export async function refreshSnapshot(fetcher = fetch, previous, options = {}) {
   const descriptions = readEpochDefinitions(read).then(value => ({ value }), () => ({ value: previous?.benchmarkDescriptions, failed: true }));
   const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['idp', 'idpHTML', 'text'], ['vectara', 'vectaraMarkdown', 'text'], ['arena', 'arenaRows', 'parquet'], ['arenaDocument', 'arenaDocumentRows', 'parquet'], ['bfcl', 'bfclCSV', 'text'], ['modelsdev', 'modelsDev', 'json']];
   const results = await Promise.allSettled([...specs.map(([id, , type]) => read(sourceURLs[id], type)), ...hubQueries.map(query => read(query.url, 'json', 2_000_000))]);
-  const inputs = { previous, failures: {} };
+  const inputs = { previous, failures: {}, catalogueSupply: options.catalogueSupply };
   results.slice(0, specs.length).forEach((result, i) => {
     const [id, field] = specs[i];
     if (result.status === 'fulfilled') inputs[field] = result.value;
