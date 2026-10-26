@@ -1,5 +1,33 @@
 # Scout architecture and operations
 
+## Catalogue host routes in Scout recommendations — 26 October 2026 (not yet deployed)
+
+`collect-public-feeds` now calls `addCatalogueRoutes` in `pipeline.mjs`, which uses `scout/catalogue-routes.ts`. It attaches hosted routes from the D1 catalogue to Scout's own models.
+
+**Matching routes to Scout models**
+- **Exact identity only:** a Scout model links to a canonical model through its OpenRouter route, its native Models.dev route, or an identical canonical ID. A model with conflicting links gets nothing.
+- **Duplicate Scout IDs:** when Scout lists one canonical model under two IDs, its routes go to the measured one, otherwise to the one with more routes.
+
+**Which providers count**
+- **Allow-list:** `scout/catalogue-providers.json` lists the reviewed providers, with the owner's decision of 26 October behind it. It has 21 model makers' own APIs and 34 inference hosts, all with a fixed public HTTPS OpenAI-compatible endpoint. Together, DeepInfra, Groq and Cerebras get documented base URLs, because Models.dev lists them under their own SDKs.
+- **Excluded:**
+  - resellers, routers and gateways
+  - coding or token plans
+  - local servers and account-templated endpoints, such as Bedrock, Azure and Vertex
+  - the ten providers Scout adapts natively
+
+**Which routes count**
+- The route must be live, accept text and output only text, and have positive base input and output token prices. Models.dev's price is used first.
+- A provider the model already has isn't added again. When a provider lists the model under several IDs, the cheapest is kept.
+- The routes form a `catalogue` source. If D1 can't be read, the previous generation's routes are kept and the source is marked failed.
+
+Measured on production generation `5242cd967872ed4b947fe5d596de7d66` (checked at 07:10 UTC) against a local rebuild of the catalogue:
+
+- 636 routes were added across 45 providers, to 178 models, 147 of them measured. Endpoints rose from 511 to 1,147.
+- For 55 models, a new route is more than 5% cheaper than any route Scout had before. Shortlists order a model's routes by reference cost, so the cheaper route is shown.
+- With semantic interpretation live, five sample shortlists for coding, extraction, support, ticket classification and translation were unchanged. Those tasks picked closed models or OpenRouter routes that remain cheapest for the reference workload.
+- `endpointIds` scoping now has about 2.2 times as many routes to choose from.
+
 ## D1 model catalogue: Hugging Face organisations — deployed, 26 October 2026
 
 **Deployment receipt:** the owner approved the deployment, the `HF_TOKEN` Worker secret and a manual run. Commit [646423b](https://github.com/laz-aslam/openmerit/commit/646423b) is on `origin/main`. Publisher `openmerit-scout` moved from `f5b68add-7c96-4c0f-8c0b-b6e9e3d6e332` to `ca47b624-b254-4b54-a8e6-e70b86799790`, with schedule `7 0,12 * * *`. Manual run `manual-20261026-hub-1` completed and published at 07:23 UTC:

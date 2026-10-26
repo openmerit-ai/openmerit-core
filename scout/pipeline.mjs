@@ -16,6 +16,8 @@ import {discoverInventory,archiveListings,discoveryBacklog} from './discovery.mj
 import {catalogueInventory} from './catalogue.mjs';
 import {catalogueSources,importCatalogueSource,rebuildOfferings} from './catalogue-db.ts';
 import {refreshHubOrgs,crawlHubModels} from './catalogue-hub.ts';
+import {catalogueRoutes,catalogueRouteSource} from './catalogue-routes.ts';
+import admittedProviders from './catalogue-providers.json' with { type: 'json' };
 import {evidenceLedger,migrateGeneration} from './evidence-db.ts';
 
 export function retainResearch(next,previous) {
@@ -38,6 +40,25 @@ export function retainResearch(next,previous) {
   const prior=previous.registry??registry,discovered=prior.capabilities.filter(c=>!c.core&&!registry.capabilities.some(x=>x.id===c.id));
   next.registry={...prior,capabilities:[...registry.capabilities,...discovered],policy:{...previous.registry?.policy,...registry.policy},questions:registry.questions,operations:registry.operations};next.research=previous.research??[];next.researchState=previous.researchState??{};next.researchPending=previous.researchPending??[];
   for(const b of next.benchmarks){const old=previous.benchmarks.find(x=>x.id===b.id);if(old?.research)b.research=old.research;}
+  return next;
+}
+
+// Adds reviewed hosted routes from the D1 catalogue to Scout's models. If the
+// catalogue cannot be read, the previous generation's routes are kept, labelled.
+export async function addCatalogueRoutes(next,previous,db,admitted=admittedProviders.providers) {
+  for(const m of next.catalogue)m.endpoints=(m.endpoints??[]).filter(e=>e.source!==catalogueRouteSource);
+  const source={id:catalogueRouteSource,name:'OpenMerit catalogue · hosted routes',url:'https://models.dev',publishedAt:null,
+    attribution:"Hosted chat routes and token prices from reviewed inference hosts and model makers' APIs, merged from Models.dev, LiteLLM, OpenRouter, Vercel AI Gateway and genai-prices. Availability on your account is not checked."};
+  try {
+    const routes=await catalogueRoutes(db,next.catalogue,admitted,next.checkedAt);
+    for(const m of next.catalogue)m.endpoints.push(...(routes.get(m.id)??[]));
+    next.sources=[...next.sources.filter(s=>s.id!==catalogueRouteSource),{...source,status:'ok',checkedAt:next.checkedAt}];
+  } catch(error) {
+    const old=new Map((previous.catalogue??[]).map(m=>[m.id,(m.endpoints??[]).filter(e=>e.source===catalogueRouteSource)]));
+    for(const m of next.catalogue)m.endpoints.push(...(old.get(m.id)??[]));
+    const prior=previous.sources?.find(s=>s.id===catalogueRouteSource);
+    next.sources=[...next.sources.filter(s=>s.id!==catalogueRouteSource),{...source,status:'failed',checkedAt:prior?.checkedAt??null,attemptedAt:next.checkedAt,error:String(error?.message??error).slice(0,200)}];
+  }
   return next;
 }
 
@@ -94,6 +115,7 @@ export async function runRefresh(env,step,id) {
         await archiveListings(env.SCOUT_INDEX,extra,next.checkedAt);
         next=await discoverInventory(next,previous,{archiveDb:env.SCOUT_INDEX,pages:next.registry.policy.discoveryPagesPerHour??2});
       }
+      if(env.SCOUT_INDEX)next=await addCatalogueRoutes(next,previous,env.SCOUT_INDEX);
       // Later steps re-read the unchanged published generation instead of a copy here.
       const key=`runs/${id}/collected.json`;await putJSON(bucket,key,{next});return key;
     });

@@ -220,6 +220,20 @@ test('the D1 research ledger reuses verified inspections per record and feeds pr
  assert.ok(jobs.some(j=>j.id===provider.id&&j.subjectHash==='p1'&&j.objective.includes(provider.url)));
 });
 
+test('catalogue routes are replaced each collection and, if D1 fails, the previous routes stay with a failed source',async()=>{
+ const {addCatalogueRoutes}=await import('../pipeline.mjs');
+ const route={id:'catalogue:host:chat-completions:m',provider:'Host',modelId:'m',source:'catalogue'};
+ const previous={catalogue:[{id:'a',endpoints:[{id:'or',source:'models'},route]}],sources:[{id:'catalogue',status:'ok',checkedAt:'2026-10-25T12:00:00Z'}]};
+ const next=()=>({checkedAt:'2026-10-26T00:00:00Z',sources:[],catalogue:[{id:'a',endpoints:[{id:'or',source:'models'},route]}]});
+ const broken={prepare:()=>{throw new Error('D1 unavailable');}};
+ const kept=await addCatalogueRoutes(next(),previous,broken);
+ assert.deepEqual(kept.catalogue[0].endpoints.map(e=>e.id),['or',route.id],'carried-over routes are not duplicated');
+ assert.deepEqual([kept.sources[0].status,kept.sources[0].checkedAt],['failed','2026-10-25T12:00:00Z']);
+ const empty={prepare:()=>({bind(){return this;},all:async()=>({results:[]})})};
+ const fresh=await addCatalogueRoutes(next(),previous,empty);
+ assert.deepEqual(fresh.catalogue[0].endpoints.map(e=>e.id),['or'],'a route the catalogue no longer lists is dropped');assert.equal(fresh.sources[0].status,'ok');
+});
+
 test('rediscovered model primary keys update routes instead of duplicating catalogue entries',async()=>{
  const {integrateResearch}=await import('../enrich.mjs');
  const record={id:'model:opaque',kind:'model',name:'Opaque checkpoint',publisher:'Lab',url:'https://example.com/model',version:'1',description:'A documented model.',contentHash:'model-v1',citations:[{url:'https://example.com/model',excerpts:['A documented model.']}],capabilities:[],observations:[],facts:[],endpoints:[{provider:'Lab',modelId:'opaque-1',protocol:'openai-chat',api:'https://example.com/v1/chat/completions',url:'https://example.com/model',inputs:['text'],outputs:['text'],parameters:[],contextTokens:null,inputPerMillion:null,outputPerMillion:null}]};

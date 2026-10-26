@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Catalogue host routes in Scout — 26 October 2026
+
+Reviewed provider, source and pricing claims against the change that adds reviewed hosted routes from the D1 model catalogue to Scout's existing models. The homepage and the Scout page make no provider-coverage claims, so no FAQ copy changes. The Scout guide's source table now lists the catalogue as a source of hosted routes.
+
 ## Twice-daily catalogue refresh — deployed, 25 October 2026
 
 Reviewed scheduling and freshness claims. The homepage has no Scout refresh-cadence claim, so no FAQ copy changes. The Scout page's source note, the Scout guide, the data policy and the security guide now say twice daily. The owner-approved publisher and serving deployments are recorded in [Scout architecture](site-scout-architecture.md#twice-daily-refresh-deployed-25-october-2026).
