@@ -17,6 +17,7 @@ All first-party JavaScript, including Workers, browser code, tests and deploymen
 |---|---|---|
 | `tsconfig.json` | Node.js | `packages/**/*.ts`, `scripts/**/*.ts` |
 | `tsconfig.build.json` | Node.js emit | Package sources compiled into `dist/` |
+| `tsconfig.scout.json` | Scout Worker and its Node.js tests | `scout/**/*.ts`; D1 and R2 use small structural interfaces until Worker runtime types are committed |
 
 Each Worker gets its own project when its first TypeScript file lands, because generated Worker types declare one global `Cloudflare.Env` per Worker. A browser project arrives with the first browser module.
 

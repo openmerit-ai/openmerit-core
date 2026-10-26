@@ -14,6 +14,7 @@ import {structured} from './structured.mjs';
 import {embed} from './evidence-search.mjs';
 import {discoverInventory,archiveListings,discoveryBacklog} from './discovery.mjs';
 import {catalogueInventory} from './catalogue.mjs';
+import {catalogueSources,importCatalogueSource,rebuildOfferings} from './catalogue-db.ts';
 
 export function retainResearch(next,previous) {
   for(const b of previous.benchmarks.filter(b=>b.source.startsWith('research:')))if(!next.benchmarks.some(x=>x.id===b.id))next.benchmarks.push(b);
@@ -44,6 +45,12 @@ export async function runRefresh(env,step,id) {
   if(!lock.acquired)return {status:'already-running'};
   const options={apiKey:env.OPENAI_API_KEY,cache:{get:key=>getJSON(bucket,key),put:(key,value)=>putJSON(bucket,key,value)}};
   try {
+    // The D1 model catalogue is independent of the serving snapshot. Each source
+    // records its own run; a failure there never blocks the rest of the refresh.
+    if(env.SCOUT_INDEX){
+      for(const source of [...Object.keys(catalogueSources),'offerings'])
+        try{await step.do(`catalogue-${source}`,{retries:{limit:1,delay:'30 seconds'},timeout:'5 minutes'},()=>source==='offerings'?rebuildOfferings(env.SCOUT_INDEX):importCatalogueSource(env.SCOUT_INDEX,source,{bucket,run:`${id}-${source}`}));}catch{}
+    }
     await step.do('check-semantic-service',{retries:{limit:0,delay:'1 second'},timeout:'1 minute'},async()=>{
       const questions=[choice('ready','Is this an availability check?',{yes:'Availability check.',no:'Another request.'})];
       decode(questions,(await requestDecisions('Scout hourly semantic-service availability check.',questions,options)).answers);

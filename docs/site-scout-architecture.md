@@ -1,5 +1,19 @@
 # Scout architecture and operations
 
+## D1 model catalogue, first slice — source only, 25 October 2026
+
+`scout/catalogue-db.ts` (Scout's first TypeScript module, checked by `tsconfig.scout.json`) starts the database-backed catalogue the owner chose, with Models.dev as the backbone. It writes `cat_*` tables in the existing `openmerit-scout-index` D1 database:
+
+- `cat_models`: one row per Models.dev canonical model ID (`lab/model`).
+- `cat_listings`: each source's own listing of a provider route, with its raw payload.
+- `cat_prices`: dated price intervals per kind, tier and unit.
+- `cat_offerings`: listings merged per route, with Models.dev values first.
+- `cat_providers`, `cat_sources` and `cat_runs`: provenance and run history.
+
+Raw source files are kept in R2 under `catalogue-raw/<source>/<sha256>.json`. LiteLLM routes resolve to a model only through Models.dev: the same route, or the same provider model ID mapped to exactly one canonical model. Providers that Models.dev doesn't list stay namespaced as `litellm:<name>`. A source that stops listing a route withdraws it instead of deleting it. A source whose listings drop by more than half fails its run and keeps its previous rows. Each refresh imports both sources before the existing steps, and a catalogue failure never blocks the refresh. Serving does not read these tables yet.
+
+A local run on 25 October data took under 2 seconds. It produced 659 models from 79 labs, 8,929 Models.dev and 4,201 LiteLLM listings, 12,085 merged offerings and 44,109 price rows, in about 30 MB of SQLite. 7,610 Models.dev routes (85%) and 1,487 LiteLLM routes (35%) resolve to a canonical model. Models.dev assigns canonical IDs to only 622 models, so 1,319 of its routes have none yet. Both sources are MIT-licensed; for LiteLLM, the price file sits outside its separately licensed `enterprise/` directory.
+
 ## Refresh memory: smaller documents and ASCII storage — 25 October 2026
 
 The memory failure returned in two steps. 37 of the 50 hourly runs before the twice-daily change failed. `collect-public-feeds` usually failed, and runs that got past it then failed in `interpret-evidence`; a manual run after the first fix below did exactly that. The published records file had grown to 41.4 MB. Research took 19.0 MB of it, across 1,476 records. The 360 benchmarks took 16.5 MB, of which 10.9 MB is per-capability interpretation over the 210 registry capabilities.

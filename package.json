@@ -69,7 +69,7 @@
   "scripts": {
     "check": "npm run check --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scout.json",
     "check:typescript": "node scripts/check-typescript.ts",
     "types:workers": "node scripts/worker-types.ts",
     "check:worker-types": "node scripts/worker-types.ts --check",
@@ -87,7 +87,7 @@
     "deploy:dash-preview": "wrangler deploy --config wrangler.terminal.jsonc",
     "scout": "node scout/dev.mjs",
     "scout:refresh": "node scout/refresh.mjs",
-    "check:scout": "node --test scout/test/*.test.mjs && node --check scout/worker.mjs && node --check site/scout/scout.js",
+    "check:scout": "node --test scout/test/*.test.mjs scout/test/*.test.ts && node --check scout/worker.mjs && node --check site/scout/scout.js",
     "build:scout": "node scripts/build-scout.mjs"
   },
   "dependencies": {
