@@ -1,5 +1,30 @@
 # Scout architecture and operations
 
+## D1 model catalogue: OpenRouter, Vercel, genai-prices and Epoch — 26 October 2026 (not yet deployed)
+
+Four more sources now merge onto the Models.dev backbone in `scout/catalogue-db.ts`, each as its own refresh step after LiteLLM:
+
+| Source | Licence | Adds |
+| --- | --- | --- |
+| OpenRouter models API | Public API, OpenRouter terms | Gateway routes, prices, and `hugging_face_id` links |
+| Vercel AI Gateway models API | Public API, Vercel terms | A second gateway's routes, release dates, context tiers and service tiers |
+| genai-prices (Pydantic) | MIT | Provider prices with context tiers. The dated variant in force today is the whole price set, as in genai-prices itself; time-of-day variants stay in the payload. |
+| Epoch AI `all_ai_models.csv` | CC BY 4.0 | Model-level records: creator, country, release date, parameters, training compute and openness |
+
+Gateway route IDs that are themselves canonical `lab/model` IDs now resolve with basis `modelsdev-canonical-id`. Hugging Face IDs go to a new `hf_id` column on `cat_listings` and `cat_offerings`. These come from OpenRouter, from Models.dev's `huggingface` routes, and from genai-prices' Hugging Face backends. Existing tables gain the column on the next import.
+
+Epoch describes models, not routes, so it fills a new `cat_source_models` table. A row links to a canonical model only when its full name equals exactly one canonical model's name or ID. Unlinked rows are kept. This is where models no gateway lists enter the catalogue, such as Doubao, ERNIE, K-EXAONE and Tencent Hy. Price fields with unclear units, such as OpenRouter's per-image and audio fields and Vercel's web-search rate, stay in the payload.
+
+A local run on 26 October data imported all six sources in about 37 seconds, 31 of them for Models.dev on SQLite:
+
+- OpenRouter: 467 routes, 322 resolved.
+- Vercel: 480 routes, 304 resolved.
+- genai-prices: 1,442 routes, 562 resolved.
+- Epoch: 3,636 models from 1,319 organisations, 224 linked. Of those released since 2025, 355 are from the United States, 235 from China, 28 from France and 23 from South Korea.
+- Merged offerings: 13,225 across 301 providers, up from 12,085, with 436 carrying a Hugging Face ID.
+
+Minimum Node heap per step is about 22 MB for each JSON source and 49 MB for Epoch. The first CSV parser grew fields character by character, which built V8 rope strings and needed 201 MB. It now slices whole fields.
+
 ## Evidence ledger in D1 — deployed, 26 October 2026
 
 **Deployment receipt:** the owner approved the deployment and a manual run. Commit [7d66964](https://github.com/laz-aslam/openmerit/commit/7d66964) is on `origin/main`, and `npm run verify` passed. Publisher `openmerit-scout` moved from `62b3fe80-ccb4-4282-85b5-f1a4180eaa07` to `40cf2409-8653-45b3-9b8a-35416c7b3ea9`, with schedule `7 0,12 * * *`. Manual run `manual-20261026-ledger-1` completed and published at 04:58 UTC, ending the run of memory failures:

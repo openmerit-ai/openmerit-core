@@ -22,12 +22,17 @@ export interface Bucket {
 }
 type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 type Json = Record<string, unknown>;
-export type CatalogueSource = 'modelsdev' | 'litellm';
+export type CatalogueSource = 'modelsdev' | 'litellm' | 'openrouter' | 'vercel' | 'genaiprices' | 'epoch';
 
 interface SourceConfig { name: string; url: string; modelsURL?: string; license: string; role: string; maxBytes: number }
+// Import order matters: Models.dev first, as every later source resolves against it.
 export const catalogueSources: Record<CatalogueSource, SourceConfig> = {
   modelsdev: { name: 'Models.dev', url: 'https://models.dev/api.json', modelsURL: 'https://models.dev/models.json', license: 'MIT', role: 'Model identity, families and provider routes (backbone)', maxBytes: 20_000_000 },
   litellm: { name: 'LiteLLM model prices', url: 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json', license: 'MIT', role: 'Provider routes and prices', maxBytes: 12_000_000 },
+  openrouter: { name: 'OpenRouter models API', url: 'https://openrouter.ai/api/v1/models', license: 'Public API; OpenRouter terms of service', role: 'Gateway routes, prices and Hugging Face IDs', maxBytes: 8_000_000 },
+  vercel: { name: 'Vercel AI Gateway models API', url: 'https://ai-gateway.vercel.sh/v1/models', license: 'Public API; Vercel terms of service', role: 'Second gateway: routes, release dates and prices', maxBytes: 8_000_000 },
+  genaiprices: { name: 'genai-prices (Pydantic)', url: 'https://raw.githubusercontent.com/pydantic/genai-prices/main/prices/data.json', license: 'MIT', role: 'Provider prices with tiers and dated changes', maxBytes: 8_000_000 },
+  epoch: { name: 'Epoch AI models database', url: 'https://epoch.ai/data/all_ai_models.csv', license: 'CC BY 4.0', role: 'Model creators, countries, release dates, size and openness, including models no gateway lists', maxBytes: 30_000_000 },
 };
 
 // One statement per entry: D1 exec splits on newlines, so schema goes through batch.
@@ -37,16 +42,22 @@ export const catalogueSchema = [
   'CREATE TABLE IF NOT EXISTS cat_providers (source TEXT NOT NULL, id TEXT NOT NULL, name TEXT, api TEXT, doc TEXT, npm TEXT, env TEXT, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, PRIMARY KEY(source,id))',
   'CREATE TABLE IF NOT EXISTS cat_models (id TEXT PRIMARY KEY, lab_id TEXT NOT NULL, name TEXT, family TEXT, description TEXT, type TEXT, release_date TEXT, last_updated TEXT, knowledge TEXT, open_weights INTEGER, license TEXT, weights TEXT, input_modalities TEXT, output_modalities TEXT, reasoning INTEGER, tool_call INTEGER, attachment INTEGER, temperature INTEGER, context INTEGER, max_output INTEGER, basis TEXT NOT NULL, payload TEXT NOT NULL, payload_hash TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, withdrawn_at TEXT)',
   'CREATE INDEX IF NOT EXISTS cat_models_lab ON cat_models(lab_id)',
-  'CREATE TABLE IF NOT EXISTS cat_listings (source TEXT NOT NULL, provider_id TEXT NOT NULL, provider_model_id TEXT NOT NULL, model_id TEXT, model_basis TEXT, name TEXT, family TEXT, type TEXT, status TEXT, release_date TEXT, knowledge TEXT, deprecated_at TEXT, context INTEGER, max_input INTEGER, max_output INTEGER, input_modalities TEXT, output_modalities TEXT, reasoning INTEGER, tool_call INTEGER, structured_output INTEGER, attachment INTEGER, open_weights INTEGER, payload TEXT NOT NULL, payload_hash TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, withdrawn_at TEXT, PRIMARY KEY(source,provider_id,provider_model_id))',
+  'CREATE TABLE IF NOT EXISTS cat_listings (source TEXT NOT NULL, provider_id TEXT NOT NULL, provider_model_id TEXT NOT NULL, model_id TEXT, model_basis TEXT, name TEXT, family TEXT, type TEXT, status TEXT, release_date TEXT, knowledge TEXT, deprecated_at TEXT, context INTEGER, max_input INTEGER, max_output INTEGER, input_modalities TEXT, output_modalities TEXT, reasoning INTEGER, tool_call INTEGER, structured_output INTEGER, attachment INTEGER, open_weights INTEGER, hf_id TEXT, payload TEXT NOT NULL, payload_hash TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, withdrawn_at TEXT, PRIMARY KEY(source,provider_id,provider_model_id))',
   'CREATE INDEX IF NOT EXISTS cat_listings_route ON cat_listings(provider_id,provider_model_id)',
   'CREATE INDEX IF NOT EXISTS cat_listings_model ON cat_listings(model_id)',
   'CREATE TABLE IF NOT EXISTS cat_prices (source TEXT NOT NULL, provider_id TEXT NOT NULL, provider_model_id TEXT NOT NULL, kind TEXT NOT NULL, tier TEXT NOT NULL, unit TEXT NOT NULL, amount REAL NOT NULL, valid_from TEXT NOT NULL, valid_to TEXT, PRIMARY KEY(source,provider_id,provider_model_id,kind,tier,unit,valid_from))',
   'CREATE INDEX IF NOT EXISTS cat_prices_route ON cat_prices(provider_id,provider_model_id,valid_to)',
   'CREATE TABLE IF NOT EXISTS cat_price_stage (run TEXT NOT NULL, source TEXT NOT NULL, provider_id TEXT NOT NULL, provider_model_id TEXT NOT NULL, kind TEXT NOT NULL, tier TEXT NOT NULL, unit TEXT NOT NULL, amount REAL NOT NULL)',
   'CREATE INDEX IF NOT EXISTS cat_price_stage_key ON cat_price_stage(run,provider_id,provider_model_id,kind,tier,unit)',
-  'CREATE TABLE IF NOT EXISTS cat_offerings (provider_id TEXT NOT NULL, provider_model_id TEXT NOT NULL, model_id TEXT, model_basis TEXT, sources TEXT NOT NULL, name TEXT, family TEXT, type TEXT, status TEXT, release_date TEXT, deprecated_at TEXT, context INTEGER, max_input INTEGER, max_output INTEGER, input_modalities TEXT, output_modalities TEXT, reasoning INTEGER, tool_call INTEGER, structured_output INTEGER, attachment INTEGER, open_weights INTEGER, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, PRIMARY KEY(provider_id,provider_model_id))',
+  'CREATE TABLE IF NOT EXISTS cat_offerings (provider_id TEXT NOT NULL, provider_model_id TEXT NOT NULL, model_id TEXT, model_basis TEXT, sources TEXT NOT NULL, name TEXT, family TEXT, type TEXT, status TEXT, release_date TEXT, deprecated_at TEXT, context INTEGER, max_input INTEGER, max_output INTEGER, input_modalities TEXT, output_modalities TEXT, reasoning INTEGER, tool_call INTEGER, structured_output INTEGER, attachment INTEGER, open_weights INTEGER, hf_id TEXT, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, PRIMARY KEY(provider_id,provider_model_id))',
   'CREATE INDEX IF NOT EXISTS cat_offerings_model ON cat_offerings(model_id)',
+  // Model-level records from sources that describe models rather than routes (Epoch).
+  // Each keeps its own identity; model_id links it to a canonical model when resolved.
+  'CREATE TABLE IF NOT EXISTS cat_source_models (source TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, organization TEXT, country TEXT, domain TEXT, task TEXT, release_date TEXT, parameters REAL, training_compute REAL, accessibility TEXT, open_weights INTEGER, base_model TEXT, hf_developer TEXT, link TEXT, model_id TEXT, model_basis TEXT, payload TEXT NOT NULL, payload_hash TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, withdrawn_at TEXT, PRIMARY KEY(source,id))',
+  'CREATE INDEX IF NOT EXISTS cat_source_models_model ON cat_source_models(model_id)',
 ];
+// Columns added after a table first shipped; CREATE TABLE IF NOT EXISTS does not add them.
+const addedColumns: Array<[table: string, column: string, type: string]> = [['cat_listings', 'hf_id', 'TEXT'], ['cat_offerings', 'hf_id', 'TEXT']];
 
 const isObject = (v: unknown): v is Json => !!v && typeof v === 'object' && !Array.isArray(v);
 const obj = (v: unknown): Json => isObject(v) ? v : {};
@@ -71,7 +82,7 @@ interface RouteFields {
   context: number | null; max_input: number | null; max_output: number | null; input_modalities: string | null; output_modalities: string | null;
   reasoning: number | null; tool_call: number | null; structured_output: number | null; attachment: number | null; open_weights: number | null;
 }
-export interface Listing extends RouteFields { provider_id: string; provider_model_id: string; model_id: string | null; model_basis: string | null; prices: Price[]; payload: Json }
+export interface Listing extends RouteFields { provider_id: string; provider_model_id: string; model_id: string | null; model_basis: string | null; hf_id: string | null; prices: Price[]; payload: Json }
 export interface Model {
   id: string; lab_id: string; name: string | null; family: string | null; description: string | null; type: string | null; release_date: string | null; last_updated: string | null;
   knowledge: string | null; open_weights: number | null; license: string | null; weights: string | null; input_modalities: string | null; output_modalities: string | null;
@@ -111,7 +122,7 @@ export function parseModelsDev(api: unknown, models: unknown): Parsed {
       const m = obj(value), modelId = id(m.id);
       if (!modelId) continue;
       const canonical = id(m.canonical_model_id);
-      listings.push({ provider_id: providerId, provider_model_id: modelId, model_id: canonical, model_basis: canonical ? 'modelsdev-canonical' : null, ...route(m), prices: modelsDevPrices(obj(m.cost)), payload: m });
+      listings.push({ provider_id: providerId, provider_model_id: modelId, model_id: canonical, model_basis: canonical ? 'modelsdev-canonical' : null, hf_id: providerId === 'huggingface' ? modelId : null, ...route(m), prices: modelsDevPrices(obj(m.cost)), payload: m });
       if (canonical && !referenced.has(canonical)) referenced.set(canonical, m);
     }
   }
@@ -189,7 +200,7 @@ export function parseLiteLLM(data: unknown, knownProviders: ReadonlySet<string> 
     if (!modelId) continue;
     const input = ['text', e.supports_vision && 'image', e.supports_audio_input && 'audio', e.supports_pdf_input && 'pdf'].filter((x): x is string => typeof x === 'string');
     const output = mode ? outputs[mode] : undefined;
-    const row: Listing = { provider_id: provider, provider_model_id: modelId, model_id: null, model_basis: null, name: null, family: null, type: mode, status: null, release_date: null, knowledge: null,
+    const row: Listing = { provider_id: provider, provider_model_id: modelId, model_id: null, model_basis: null, hf_id: null, name: null, family: null, type: mode, status: null, release_date: null, knowledge: null,
       deprecated_at: date(e.deprecation_date), context: int(e.max_input_tokens ?? e.max_tokens), max_input: int(e.max_input_tokens), max_output: int(e.max_output_tokens),
       input_modalities: mode && ['chat', 'completion', 'responses'].includes(mode) ? JSON.stringify(input) : null, output_modalities: output ? JSON.stringify(output) : null,
       reasoning: bool(e.supports_reasoning), tool_call: bool(e.supports_function_calling), structured_output: bool(e.supports_response_schema), attachment: null, open_weights: null,
@@ -201,12 +212,179 @@ export function parseLiteLLM(data: unknown, knownProviders: ReadonlySet<string> 
   return { providers: [...providers.values()], listings: [...listings.values()], models: [] };
 }
 
+const num = (v: unknown): number | null => { const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : NaN; return Number.isFinite(n) ? n : null; };
+// Gateways quote USD per token as strings; negative values mean "variable" (routers).
+const perToken = (v: unknown): number | null => { const n = num(v); return n !== null && n >= 0 ? money(n * 1e6) : null; };
+const flag = (on: boolean, known: boolean): number | null => known ? Number(on) : null;
+const priced = (prices: Price[], kind: string, tier: string, unit: string, amount: number | null) => { if (amount !== null) prices.push({ kind, tier, unit, amount }); };
+const unlisted = { family: null, status: null, max_input: null, attachment: null, model_id: null, model_basis: null } as const;
+
+// OpenRouter lists its own routes. Ambiguous price fields (per-image, audio,
+// time-of-day overrides) stay in the payload rather than being guessed.
+export function parseOpenRouter(data: unknown): Parsed {
+  const rows = isObject(data) && Array.isArray(data.data) ? data.data : [];
+  if (!rows.length) throw new Error('OpenRouter models format changed.');
+  const listings: Listing[] = [];
+  for (const value of rows) {
+    const m = obj(value), modelId = id(m.id);
+    if (!modelId) continue;
+    const arch = obj(m.architecture), top = obj(m.top_provider), pricing = obj(m.pricing), prices: Price[] = [];
+    const params = Array.isArray(m.supported_parameters) ? m.supported_parameters : [], known = params.length > 0;
+    for (const [field, kind] of [['prompt', 'input'], ['completion', 'output'], ['input_cache_read', 'cache_read'], ['input_cache_write', 'cache_write'], ['internal_reasoning', 'reasoning']] as const)
+      priced(prices, kind, '', 'usd_per_mtok', perToken(pricing[field]));
+    priced(prices, 'cache_write', 'cache-ttl>1hr', 'usd_per_mtok', perToken(pricing.input_cache_write_1h));
+    const search = num(pricing.web_search);
+    priced(prices, 'web_search', '', 'usd_per_query', search !== null && search >= 0 ? money(search) : null);
+    listings.push({ ...unlisted, provider_id: 'openrouter', provider_model_id: modelId, hf_id: text(m.hugging_face_id), name: text(m.name), type: null, release_date: null, knowledge: date(m.knowledge_cutoff),
+      deprecated_at: date(m.expiration_date), context: int(m.context_length), max_output: int(top.max_completion_tokens), input_modalities: list(arch.input_modalities), output_modalities: list(arch.output_modalities),
+      reasoning: isObject(m.reasoning) ? 1 : flag(params.includes('reasoning'), known), tool_call: flag(params.includes('tools'), known),
+      structured_output: flag(params.includes('structured_outputs') || params.includes('response_format'), known), open_weights: null, prices, payload: m });
+  }
+  return { providers: [{ id: 'openrouter', name: 'OpenRouter', api: 'https://openrouter.ai/api/v1', doc: 'https://openrouter.ai/models', npm: null, env: null }], listings, models: [] };
+}
+
+// Vercel AI Gateway: context tiers become context>N, service tiers keep their name.
+export function parseVercel(data: unknown): Parsed {
+  const rows = isObject(data) && Array.isArray(data.data) ? data.data : [];
+  if (!rows.length) throw new Error('Vercel AI Gateway models format changed.');
+  const listings: Listing[] = [], kinds = { input: 'input', output: 'output', input_cache_read: 'cache_read', input_cache_write: 'cache_write' } as const;
+  for (const value of rows) {
+    const m = obj(value), modelId = id(m.id);
+    if (!modelId) continue;
+    const pricing = obj(m.pricing), prices: Price[] = [], tags = Array.isArray(m.tags) ? m.tags : [], type = text(m.type), modalities = obj(m.modalities);
+    for (const [field, kind] of Object.entries(kinds)) {
+      priced(prices, kind, '', 'usd_per_mtok', perToken(pricing[field]));
+      for (const t of Array.isArray(pricing[`${field}_tiers`]) ? pricing[`${field}_tiers`] as unknown[] : []) {
+        const tier = obj(t), min = int(tier.min);
+        if (min) priced(prices, kind, `context>${min - 1}`, 'usd_per_mtok', perToken(tier.cost));
+      }
+      for (const [name, service] of Object.entries(obj(pricing.service_tiers))) priced(prices, kind, name, 'usd_per_mtok', perToken(obj(service)[field]));
+    }
+    if (type === 'image') { const each = num(pricing.image); priced(prices, 'output_image', '', 'usd_per_image', each !== null && each >= 0 ? money(each) : null); }
+    const released = num(m.released);
+    listings.push({ ...unlisted, provider_id: 'vercel', provider_model_id: modelId, hf_id: null, name: text(m.name), type, release_date: released ? new Date(released * 1000).toISOString().slice(0, 10) : null,
+      knowledge: date(m.knowledge), deprecated_at: null, context: int(m.context_window), max_output: int(m.max_tokens), input_modalities: list(modalities.input), output_modalities: list(modalities.output),
+      reasoning: flag(tags.includes('reasoning'), tags.length > 0), tool_call: flag(tags.includes('tool-use'), tags.length > 0), structured_output: flag(tags.includes('structured-output'), tags.length > 0),
+      open_weights: tags.includes('open-weights') ? 1 : null, prices, payload: m });
+  }
+  return { providers: [{ id: 'vercel', name: 'Vercel AI Gateway', api: 'https://ai-gateway.vercel.sh/v1', doc: 'https://vercel.com/ai-gateway/models', npm: null, env: null }], listings, models: [] };
+}
+
+// genai-prices provider IDs that differ from Models.dev's. Hugging Face
+// inference routes are priced per backend, so each backend stays separate.
+export const genaiProviders: Record<string, string> = { aws: 'amazon-bedrock', fireworks: 'fireworks-ai', together: 'togetherai', 'x-ai': 'xai' };
+const genaiKinds: Record<string, string> = { input_mtok: 'input', output_mtok: 'output', cache_read_mtok: 'cache_read', cache_write_mtok: 'cache_write', input_audio_mtok: 'input_audio',
+  output_audio_mtok: 'output_audio', cache_audio_read_mtok: 'cache_read_audio' };
+// Prices may be a list of dated variants. As in genai-prices itself, the last
+// variant in force on `day` is the whole price set. Time-of-day variants stay
+// in the payload.
+function genaiPrices(value: unknown, day: string): Price[] {
+  let current: Json = {};
+  if (Array.isArray(value)) for (const v of value) {
+    const entry = obj(v), c = obj(entry.constraint), from = date(c.start_date), to = date(c.end_date);
+    if (c.start_time !== undefined || c.end_time !== undefined || (from && from > day) || (to && to <= day)) continue;
+    current = obj(entry.prices);
+  } else current = obj(value);
+  const prices: Price[] = [];
+  for (const [field, v] of Object.entries(current)) {
+    if (field === 'requests_kcount') { const n = num(v); priced(prices, 'request', '', 'usd_per_request', n !== null && n >= 0 ? money(n / 1000) : null); continue; }
+    const kind = genaiKinds[field];
+    if (!kind) continue;
+    const base = isObject(v) ? v.base : v, amount = num(base);
+    priced(prices, kind, '', 'usd_per_mtok', amount !== null && amount >= 0 ? money(amount) : null);
+    for (const t of isObject(v) && Array.isArray(v.tiers) ? v.tiers : []) {
+      const tier = obj(t), start = int(tier.start), price = num(tier.price);
+      if (start && price !== null && price >= 0) priced(prices, kind, `context>${start}`, 'usd_per_mtok', money(price));
+    }
+  }
+  return prices;
+}
+export function parseGenaiPrices(data: unknown, knownProviders: ReadonlySet<string> = new Set(), now = new Date().toISOString()): Parsed {
+  if (!Array.isArray(data) || !data.some(p => obj(p).id === 'openai')) throw new Error('genai-prices format changed.');
+  const providers: Provider[] = [], listings: Listing[] = [], day = now.slice(0, 10);
+  for (const raw of data) {
+    const p = obj(raw), source = id(p.id);
+    if (!source) continue;
+    const backend = source.startsWith('huggingface_') ? source.slice('huggingface_'.length) : null;
+    const providerId = genaiProviders[source] ?? (backend ? `huggingface:${backend}` : knownProviders.has(source) ? source : `genai-prices:${source}`);
+    providers.push({ id: providerId, name: text(p.name), api: null, doc: Array.isArray(p.pricing_urls) ? text(p.pricing_urls[0]) : null, npm: null, env: null });
+    for (const value of Array.isArray(p.models) ? p.models : []) {
+      const m = obj(value), modelId = id(m.id);
+      if (!modelId) continue;
+      listings.push({ ...unlisted, provider_id: providerId, provider_model_id: modelId, hf_id: backend ? modelId : null, name: text(m.name), type: null, release_date: null, knowledge: null, deprecated_at: null,
+        context: int(m.context_window), max_output: null, input_modalities: null, output_modalities: null, reasoning: null, tool_call: null, structured_output: null, open_weights: null,
+        prices: genaiPrices(m.prices, day), payload: m });
+    }
+  }
+  return { providers, listings, models: [] };
+}
+
+// RFC 4180 CSV: quoted fields may contain commas, quotes ("") and newlines.
+// Fields are sliced whole: growing strings by character builds V8 ropes that
+// need many times the input's size.
+export function parseCSV(input: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [], i = 0;
+  while (i < input.length) {
+    let field: string;
+    if (input[i] === '"') {
+      let end = i + 1;
+      for (;;) { end = input.indexOf('"', end); if (end < 0) { end = input.length; break; } if (input[end + 1] === '"') end += 2; else break; }
+      field = input.slice(i + 1, end).replaceAll('""', '"'); i = end + 1;
+    } else {
+      let end = i;
+      while (end < input.length && input[end] !== ',' && input[end] !== '\n' && input[end] !== '\r') end++;
+      field = input.slice(i, end); i = end;
+    }
+    row.push(field);
+    if (input[i] === ',') { i++; if (i === input.length) row.push(''); continue; }
+    if (input[i] === '\r') i++;
+    if (input[i] === '\n') i++;
+    rows.push(row); row = [];
+  }
+  return rows;
+}
+
+export interface SourceModel {
+  id: string; name: string; organization: string | null; country: string | null; domain: string | null; task: string | null; release_date: string | null; parameters: number | null;
+  training_compute: number | null; accessibility: string | null; open_weights: number | null; base_model: string | null; hf_developer: string | null; link: string | null; payload: Json;
+}
+const commaSet = (v: string | undefined): string | null => { const items = [...new Set((v ?? '').split(',').map(s => s.trim()).filter(Boolean))]; return items.length ? items.join(', ') : null; };
+export function parseEpoch(csv: string): SourceModel[] {
+  const [header = [], ...rows] = parseCSV(csv), at = (name: string) => header.indexOf(name);
+  if (at('Model') < 0 || at('Organization') < 0 || at('Publication date') < 0) throw new Error('Epoch models format changed.');
+  const out = new Map<string, SourceModel>();
+  for (const r of rows) {
+    const cell = (name: string): string | undefined => { const i = at(name); return i < 0 ? undefined : r[i]?.trim() || undefined; };
+    const name = cell('Model');
+    if (!name || out.has(name)) continue;
+    const weights = cell('Open model weights?'), positive = (v: string | undefined) => { const n = num(v); return n !== null && n > 0 ? n : null; };
+    out.set(name, { id: name, name, organization: commaSet(cell('Organization')), country: commaSet(cell('Country (of organization)')), domain: commaSet(cell('Domain')), task: commaSet(cell('Task')),
+      release_date: date(cell('Publication date')), parameters: positive(cell('Parameters')), training_compute: positive(cell('Training compute (FLOP)')), accessibility: cell('Model accessibility') ?? null,
+      open_weights: weights === 'Yes' ? 1 : weights === 'No' ? 0 : null, base_model: cell('Base model') ?? null, hf_developer: cell('Hugging Face developer id') ?? null, link: cell('Link') ?? null,
+      payload: Object.fromEntries(header.map((h, i) => [h, r[i]?.trim() ?? '']).filter(([, v]) => v)) });
+  }
+  return [...out.values()];
+}
+
+// A source model links to a canonical model only when its full name equals
+// exactly one canonical model's name or ID suffix; anything else stays unlinked.
+const loose = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+export function resolveSourceModels(rows: SourceModel[], canonical: ReadonlyArray<{ id: string; name: string | null }>): Array<SourceModel & { model_id: string | null; model_basis: string | null }> {
+  const byName = new Map<string, Set<string>>();
+  const add = (key: string, modelId: string) => { if (!key) return; const set = byName.get(key) ?? new Set<string>(); set.add(modelId); byName.set(key, set); };
+  for (const m of canonical) { if (m.name) add(loose(m.name), m.id); add(loose(m.id.split('/').slice(1).join('/')), m.id); }
+  return rows.map(r => { const hit = byName.get(loose(r.name)); return hit?.size === 1 ? { ...r, model_id: [...hit][0] ?? null, model_basis: 'name-exact-unique' } : { ...r, model_id: null, model_basis: null }; });
+}
+
 interface BackboneRoute { provider_id: string; provider_model_id: string; model_id: string | null }
-// Identity comes only from Models.dev: the same route, or the identical
+export interface Backbone { routes: BackboneRoute[]; models: ReadonlySet<string> }
+// Identity comes only from Models.dev: the same route, a provider model ID that
+// is itself a canonical model ID (gateways use lab/model), or the identical
 // provider model ID mapped to exactly one canonical model elsewhere.
-export function resolveListings(listings: Listing[], backbone: BackboneRoute[]): Listing[] {
+export function resolveListings(listings: Listing[], backbone: Backbone): Listing[] {
   const routes = new Map<string, string>(), byId = new Map<string, Set<string>>();
-  for (const r of backbone) {
+  for (const r of backbone.routes) {
     if (!r.model_id) continue;
     routes.set(`${r.provider_id}|${r.provider_model_id}`, r.model_id);
     const set = byId.get(r.provider_model_id) ?? new Set<string>(); set.add(r.model_id); byId.set(r.provider_model_id, set);
@@ -214,13 +392,14 @@ export function resolveListings(listings: Listing[], backbone: BackboneRoute[]):
   for (const l of listings) {
     const exact = routes.get(`${l.provider_id}|${l.provider_model_id}`), same = byId.get(l.provider_model_id);
     if (exact) Object.assign(l, { model_id: exact, model_basis: 'modelsdev-route' });
+    else if (backbone.models.has(l.provider_model_id)) Object.assign(l, { model_id: l.provider_model_id, model_basis: 'modelsdev-canonical-id' });
     else if (same?.size === 1) Object.assign(l, { model_id: [...same][0] ?? null, model_basis: 'modelsdev-same-id' });
   }
   return listings;
 }
 
 const listingColumns = ['provider_id', 'provider_model_id', 'model_id', 'model_basis', 'name', 'family', 'type', 'status', 'release_date', 'knowledge', 'deprecated_at', 'context', 'max_input', 'max_output',
-  'input_modalities', 'output_modalities', 'reasoning', 'tool_call', 'structured_output', 'attachment', 'open_weights', 'payload', 'payload_hash'];
+  'input_modalities', 'output_modalities', 'reasoning', 'tool_call', 'structured_output', 'attachment', 'open_weights', 'hf_id', 'payload', 'payload_hash'];
 const modelColumns = ['id', 'lab_id', 'name', 'family', 'description', 'type', 'release_date', 'last_updated', 'knowledge', 'open_weights', 'license', 'weights', 'input_modalities', 'output_modalities',
   'reasoning', 'tool_call', 'attachment', 'temperature', 'context', 'max_output', 'basis', 'payload', 'payload_hash'];
 type Row = Record<string, Value>;
@@ -237,10 +416,16 @@ async function chunked(db: Database, sql: string, rows: readonly object[], bindi
   }
 }
 
-export async function ensureCatalogueSchema(db: Database): Promise<void> { await db.batch(catalogueSchema.map(s => db.prepare(s))); }
+export async function ensureCatalogueSchema(db: Database): Promise<void> {
+  await db.batch(catalogueSchema.map(s => db.prepare(s)));
+  for (const [table, column, type] of addedColumns) {
+    const { results } = await db.prepare(`SELECT name FROM pragma_table_info('${table}') WHERE name=?1`).bind(column).all();
+    if (!results.length) await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`).run();
+  }
+}
 
 export interface StoreStats { listings: number; added: number; changed: number; withdrawn: number; unresolved: number; prices_opened: number; prices_closed: number }
-export async function storeCatalogue(db: Database, source: string, parsed: Parsed, { now, run, backbone }: { now: string; run: string; backbone: BackboneRoute[] | null }): Promise<StoreStats> {
+export async function storeCatalogue(db: Database, source: string, parsed: Parsed, { now, run, backbone }: { now: string; run: string; backbone: Backbone | null }): Promise<StoreStats> {
   const listings = backbone ? resolveListings(parsed.listings, backbone) : parsed.listings;
   const existing = await db.prepare('SELECT provider_id,provider_model_id,payload_hash,withdrawn_at FROM cat_listings WHERE source=?').bind(source)
     .all<{ provider_id: string; provider_model_id: string; payload_hash: string; withdrawn_at: string | null }>();
@@ -283,10 +468,31 @@ export async function storeCatalogue(db: Database, source: string, parsed: Parse
   return { listings: listings.length, added, changed, withdrawn, unresolved: listings.filter(l => !l.model_id).length, prices_opened: opened?.meta.changes ?? 0, prices_closed: closed?.meta.changes ?? 0 };
 }
 
+const sourceModelColumns = ['id', 'name', 'organization', 'country', 'domain', 'task', 'release_date', 'parameters', 'training_compute', 'accessibility', 'open_weights', 'base_model', 'hf_developer', 'link',
+  'model_id', 'model_basis', 'payload', 'payload_hash'];
+export async function storeSourceModels(db: Database, source: string, models: SourceModel[], now: string): Promise<StoreStats> {
+  const canonical = (await db.prepare('SELECT id,name FROM cat_models WHERE withdrawn_at IS NULL').all<{ id: string; name: string | null }>()).results;
+  const existing = await db.prepare('SELECT id,payload_hash,withdrawn_at FROM cat_source_models WHERE source=?').bind(source).all<{ id: string; payload_hash: string; withdrawn_at: string | null }>();
+  const prior = new Map(existing.results.map(r => [r.id, r])), active = existing.results.filter(r => !r.withdrawn_at).length;
+  if (active > 50 && models.length < active * .5) throw new Error(`${source} models dropped from ${active} to ${models.length}; previous rows retained.`);
+  const rows: Row[] = []; let added = 0, changed = 0;
+  for (const m of resolveSourceModels(models, canonical)) {
+    const row = pick(sourceModelColumns, { ...m, payload: JSON.stringify(m.payload) });
+    row.payload_hash = await digest([m.model_id, m.payload]);
+    const old = prior.get(m.id);
+    if (!old) added++; else if (old.payload_hash !== row.payload_hash || old.withdrawn_at) changed++;
+    rows.push(row);
+  }
+  await chunked(db, `INSERT INTO cat_source_models (source,${sourceModelColumns.join(',')},first_seen,last_seen,withdrawn_at) SELECT ?1,${extract(sourceModelColumns)},?2,?2,NULL FROM json_each(?3) WHERE true
+    ON CONFLICT(source,id) DO UPDATE SET ${updates(sourceModelColumns, ['id'])},last_seen=excluded.last_seen,withdrawn_at=NULL`, rows, [source, now], 60);
+  const withdrawn = (await db.prepare('UPDATE cat_source_models SET withdrawn_at=?1 WHERE source=?2 AND last_seen<?1 AND withdrawn_at IS NULL').bind(now, source).run()).meta.changes;
+  return { listings: rows.length, added, changed, withdrawn, unresolved: rows.filter(r => !r.model_id).length, prices_opened: 0, prices_closed: 0 };
+}
+
 // Offerings merge every source's listing of one provider route. Each field takes
 // the first known value in source order, with Models.dev first.
 const offeringFields = ['model_id', 'model_basis', 'name', 'family', 'type', 'status', 'release_date', 'deprecated_at', 'context', 'max_input', 'max_output', 'input_modalities', 'output_modalities',
-  'reasoning', 'tool_call', 'structured_output', 'attachment', 'open_weights'];
+  'reasoning', 'tool_call', 'structured_output', 'attachment', 'open_weights', 'hf_id'];
 export async function rebuildOfferings(db: Database): Promise<{ offerings: number }> {
   const live = 'l.provider_id=k.provider_id AND l.provider_model_id=k.provider_model_id AND l.withdrawn_at IS NULL';
   const order = "CASE l.source WHEN 'modelsdev' THEN 0 ELSE 1 END,l.source";
@@ -324,20 +530,29 @@ export async function importCatalogueSource(db: Database, source: CatalogueSourc
     const hashes: string[] = [];
     for (const bytes of files) {
       const hash = await hex(bytes); hashes.push(hash);
-      const key = `catalogue-raw/${source}/${hash}.json`;
-      if (bucket && !await bucket.head(key)) await bucket.put(key, bytes, { httpMetadata: { contentType: 'application/json' } });
+      const csv = config.url.endsWith('.csv'), key = `catalogue-raw/${source}/${hash}.${csv ? 'csv' : 'json'}`;
+      if (bucket && !await bucket.head(key)) await bucket.put(key, bytes, { httpMetadata: { contentType: csv ? 'text/csv' : 'application/json' } });
     }
     const [first, second] = files;
     if (!first) throw new Error('Source returned no data.');
-    let parsed: Parsed, backbone: BackboneRoute[] | null = null;
-    if (source === 'modelsdev') parsed = parseModelsDev(decode(first), second ? decode(second) : {});
-    else {
-      const known = new Set((await db.prepare("SELECT id FROM cat_providers WHERE source='modelsdev'").all<{ id: string }>()).results.map(r => r.id));
-      parsed = parseLiteLLM(decode(first), known);
-      backbone = (await db.prepare("SELECT provider_id,provider_model_id,model_id FROM cat_listings WHERE source='modelsdev' AND withdrawn_at IS NULL AND model_id IS NOT NULL").all<BackboneRoute>()).results;
+    let stats: StoreStats;
+    if (source === 'epoch') {
+      const rows = parseEpoch(new TextDecoder().decode(first));
+      files.length = 0;
+      stats = await storeSourceModels(db, source, rows, now);
+    } else {
+      let parsed: Parsed, backbone: Backbone | null = null;
+      if (source === 'modelsdev') parsed = parseModelsDev(decode(first), second ? decode(second) : {});
+      else {
+        const known = new Set((await db.prepare("SELECT id FROM cat_providers WHERE source='modelsdev'").all<{ id: string }>()).results.map(r => r.id));
+        const data = decode(first);
+        parsed = source === 'litellm' ? parseLiteLLM(data, known) : source === 'openrouter' ? parseOpenRouter(data) : source === 'vercel' ? parseVercel(data) : parseGenaiPrices(data, known, now);
+        backbone = { routes: (await db.prepare("SELECT provider_id,provider_model_id,model_id FROM cat_listings WHERE source='modelsdev' AND withdrawn_at IS NULL AND model_id IS NOT NULL").all<BackboneRoute>()).results,
+          models: new Set((await db.prepare('SELECT id FROM cat_models WHERE withdrawn_at IS NULL').all<{ id: string }>()).results.map(r => r.id)) };
+      }
+      files.length = 0;
+      stats = await storeCatalogue(db, source, parsed, { now, run, backbone });
     }
-    files.length = 0;
-    const stats = await storeCatalogue(db, source, parsed, { now, run, backbone });
     await db.batch([
       db.prepare("UPDATE cat_runs SET finished_at=?2,status='ok',artifact=?3,listings=?4,added=?5,changed=?6,withdrawn=?7,unresolved=?8,prices_opened=?9,prices_closed=?10 WHERE id=?1")
         .bind(run, new Date().toISOString(), hashes.join(','), stats.listings, stats.added, stats.changed, stats.withdrawn, stats.unresolved, stats.prices_opened, stats.prices_closed),
