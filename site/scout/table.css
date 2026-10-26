@@ -20,7 +20,6 @@
 .model-toggle { display: block; width: 100%; min-height: 44px; padding: 0; border: 0; background: none; text-align: left; }
 .model-toggle:active:not(:disabled) { transform: none; }
 .model-identity { display: flex; align-items: center; gap: 15px; min-width: 0; }
-.model-number { flex: 0 0 17px; font: 10px var(--mono); color: var(--quiet); }
 .model-title { display: block; font-size: 13px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
 .model-provider { display: flex; align-items: center; gap: 5px; margin-top: 4px; color: var(--muted); font-size: 11px; font-weight: 400; }
 .provider-icon { display: block; flex: none; width: 13px; height: 13px; object-fit: contain; }
@@ -37,13 +36,12 @@
 .task-order { flex: none; font: 10px var(--mono); color: var(--quiet); }
 .task-excerpt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
 .result-table[data-sequence] .table-scroll { max-height: min(620px, 75svh); scroll-padding-top: 108px; }
-.sequence-table { table-layout: fixed; min-width: calc(var(--steps) * 280px + 48px); }
-.sequence-table .rank-column { width: 48px; left: 0; z-index: 3; }
+.sequence-table { table-layout: fixed; min-width: calc(var(--steps) * 280px); }
 .sequence-table .step-column { padding: 12px 26px 18px; vertical-align: top; }
-.sequence-table .sequence-rank { position: sticky; left: 0; z-index: 1; background: var(--paper); color: var(--quiet); font: 10px var(--mono); vertical-align: top; padding-top: 23px; }
 .sequence-table .sequence-cell { position: relative; padding: 8px 26px; cursor: pointer; vertical-align: top; }
 .sequence-table .sequence-empty { padding: 26px; color: var(--quiet); font-size: 11px; vertical-align: top; }
-.sequence-row > th, .sequence-row > td { border-bottom: 1px solid var(--line); }
+.sequence-table .step-column:first-child, .sequence-table .sequence-cell:first-child, .sequence-table .sequence-empty:first-child { padding-left: 0; }
+.sequence-row > td { border-bottom: 1px solid var(--line); }
 .sequence-cell:has(+ .sequence-cell)::after { content: '→'; position: absolute; top: 25px; right: -5px; color: var(--quiet); font-size: 14px; }
 .sequence-metrics { display: flex; gap: 25px; margin: 8px 0 0; }
 .sequence-metrics dt { color: var(--quiet); font-size: 10px; }
@@ -61,12 +59,10 @@
   .model-table thead .model-column { z-index: 3; background: var(--paper); }
   .model-table thead tr { background: var(--paper); }
   .model-identity { gap: 10px; }
-  .model-number { flex-basis: 12px; }
   .model-title { font-size: 12px; }
   .model-provider { font-size: 10px; }
   .model-evidence { padding: 8px 16px 22px; }
   .model-id-line button { min-height: 36px; }
   .sequence-table .step-column, .sequence-table .sequence-cell, .sequence-table .sequence-empty { padding-inline: 20px; }
-  .sequence-table .rank-column { width: 40px; }
   .task-caption { font-size: 12px; }
 }
