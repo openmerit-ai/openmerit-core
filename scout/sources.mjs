@@ -99,6 +99,40 @@ export function parseIDP(html) {
 
 // Summaries of supplied documents scored by HHEM. A model that declines many
 // documents is scored only on the rest, so low answer rates are excluded.
+// Vals AI benchmarks read for vertical and task coverage: healthcare, legal, finance,
+// public benefits, education, multilingual math, science, code migration and security.
+// Left out: composite indexes, archived versions, small beta boards, speech, and
+// evaluations other feeds already supply (GPQA, MMLU-Pro, MMMU, LiveCodeBench, SWE-bench,
+// Terminal-Bench, AIME, MATH 500, ProofBench).
+export const valsSlugs = ['medqa', 'medcode', 'medscribe', 'legal_bench', 'legal_research', 'hlab', 'corp_fin_v2', 'tax_eval_v2', 'mortgage_tax', 'fabv2', 'fabv2-1', 'emb', 'emb-v1-1', 'claimbench',
+  'public-benefits-bench', 'sage', 'mgsm', 'biomysterybench', 'mysterymechanism', 'code-migration', 'code-migration-v1-1', 'vibe-code', 'programbench', 'ioi', 'swebench-multimodal', 'cyber', 'srebench'];
+const decodeEntities = value => value.replace(/&(?:amp|lt|gt|quot|#x27|#39|nbsp);/g, v => ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#x27;': "'", '&#39;': "'", '&nbsp;': ' ' })[v]);
+// Each benchmark page links its data file under a content hash; only overall accuracy is kept.
+export function parseVals(slug, data, summary = '') {
+  const md = data?.metadata, overall = data?.tasks?.overall;
+  if (typeof md?.benchmark !== 'string' || !overall || typeof overall !== 'object') throw new Error('Vals AI format changed.');
+  const rows = Object.entries(overall).flatMap(([id, r]) => Number.isFinite(r?.accuracy) && r.accuracy >= 0 && r.accuracy <= 100 ? [{ id, score: r.accuracy / 100 }] : []);
+  if (rows.length < 5) throw new Error(`Too few Vals AI results for ${slug}.`);
+  return { slug, name: md.benchmark, family: typeof md.family === 'string' ? md.family : slug, industry: typeof md.industry === 'string' ? md.industry : null,
+    description: [summary, typeof md.description === 'string' ? md.description : ''].filter(Boolean).join(' '), updated: /^\d{4}-\d{2}-\d{2}$/.test(md.updated) ? md.updated : null, publicData: md.dataset_type === 'public', rows };
+}
+// Four at a time, reduced to scores as each arrives, so collection holds one small table per benchmark.
+export async function readVals(read) {
+  const found = [], missing = [];
+  for (let i = 0; i < valsSlugs.length; i += 4) {
+    const batch = valsSlugs.slice(i, i + 4);
+    const results = await Promise.allSettled(batch.map(async slug => {
+      const page = await read(`https://www.vals.ai/benchmarks/${slug}`, 'text', 3_000_000), path = page.match(/\/_astro\/benchmark_view_[\w.-]+?\.json/)?.[0];
+      if (!path) throw new Error('Vals AI data link missing.');
+      // The page summary says what the benchmark tests, for example the code sets or tasks it covers.
+      const summary = decodeEntities(page.match(/<meta name="description" content="([^"]*)"/)?.[1] ?? '');
+      return parseVals(slug, await read(`https://www.vals.ai${path}`, 'json', 8_000_000), summary);
+    }));
+    results.forEach((r, j) => r.status === 'fulfilled' ? found.push(r.value) : missing.push(batch[j]));
+  }
+  if (found.length < valsSlugs.length / 2) throw new Error('Most Vals AI benchmarks were unavailable.');
+  return { benchmarks: found, missing };
+}
 export function parseVectara(markdown) {
   const lines = markdown.split('\n'), start = lines.findIndex(l => /^\|\s*Model\s*\|\s*Hallucination Rate\s*\|\s*Factual Consistency Rate\s*\|\s*Answer Rate\s*\|/.test(l));
   if (start < 0) throw new Error('Vectara leaderboard format changed.');
@@ -123,6 +157,11 @@ export const arenaCategories = [
   ['multi_turn', 'Arena · Multi-turn', 'Human preference on conversations with more than one user turn.'],
   ['longer_query', 'Arena · Longer queries', 'Human preference on prompts of 500 or more tokens, often with supplied material to work from.'],
   ['expert', 'Arena · Expert prompts', 'Human preference on prompts judged to need expert domain knowledge.'],
+  // Industry categories no other source measures (software and mathematics are measured directly elsewhere).
+  ['industry_medicine_and_healthcare', 'Arena · Medicine & healthcare', 'Human preference on prompts Arena classifies as medicine and healthcare work.'],
+  ['industry_legal_and_government', 'Arena · Legal & government', 'Human preference on prompts Arena classifies as legal and government work.'],
+  ['industry_life_and_physical_and_social_science', 'Arena · Life, physical & social sciences', 'Human preference on prompts Arena classifies as life, physical and social science work.'],
+  ['industry_entertainment_and_sports_and_media', 'Arena · Entertainment, sports & media', 'Human preference on prompts Arena classifies as entertainment, sports and media work.'],
 ];
 // Vision arena categories (image input, text output) that describe a kind of request.
 // Captioning and entity recognition are omitted: few of their ratings are narrow enough to compare.
@@ -206,7 +245,7 @@ export function parseBFCL(csv) {
   });
 }
 
-export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, arenaVisionRows, arenaWebdevRows, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, catalogueSupply, previous, failures = {}, checkedAt = new Date().toISOString() }) {
+export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, arenaVisionRows, arenaWebdevRows, vals, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, catalogueSupply, previous, failures = {}, checkedAt = new Date().toISOString() }) {
   const sources = [], benchmarks = [], observations = new Map();
   const descriptions = benchmarkDescriptions ?? previous?.benchmarkDescriptions ?? {};
   const priorSources = new Map(previous?.sources.map(s => [s.id, s]) ?? []);
@@ -413,6 +452,28 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     }
     return { publishedAt: board.publishedAt };
   }, { license: 'https://creativecommons.org/licenses/by/4.0/' });
+  collect('vals', 'Vals AI', 'https://www.vals.ai/benchmarks', 'Benchmark results run and published by Vals AI, many on private test sets. Overall accuracy only. Per-model evaluation dates are not supplied; each series records the date Vals AI last updated it. Matched by Scout.', () => {
+    if (!vals) throw new Error('Vals AI benchmarks unavailable.');
+    for (const v of vals.benchmarks) {
+      const benchmark = addBenchmark(`vals:${v.slug}`, `${v.name} · Vals AI`, 'vals', { title: v.name, description: `${v.description}${v.industry ? ` Vals AI ${v.industry} benchmark.` : ''} ${v.publicData ? 'Public' : 'Private'} test set. Score is overall accuracy.`,
+        metric: 'Accuracy / 100', suite: `Vals AI · ${v.family}`, sourceURL: `https://www.vals.ai/benchmarks/${v.slug}` }, { publishedAt: v.updated });
+      for (const row of v.rows) {
+        // Keys are "provider/model ID"; a host's key adds the model's own namespace. Vals marks
+        // extended thinking with a "-thinking" suffix unless the model ID already has one.
+        const own = row.id.split('/').slice(1).join('/'), last = row.id.split('/').pop();
+        const name = [own, last, last.replace(/-thinking$/, '')].find(n => resolve(n).model) ?? own;
+        add(name, benchmark, row.score, { url: `https://www.vals.ai/benchmarks/${v.slug}`, observedAt: null, sourceModel: row.id, metric: 'Accuracy / 100' });
+      }
+    }
+    // A benchmark whose page failed this run keeps its previous definition and evidence.
+    for (const slug of vals.missing) {
+      const old = previous?.benchmarks.find(b => b.id === `vals:${slug}`);
+      if (!old) continue;
+      benchmarks.push(old);
+      for (const model of models) model.evidence.push(...(previous.models.find(m => m.id === model.id)?.evidence.filter(e => e.benchmark === old.id) ?? []));
+    }
+    return { publishedAt: vals.benchmarks.map(v => v.updated).filter(Boolean).sort().at(-1) ?? null };
+  });
   collect('bfcl', 'Berkeley Function Calling Leaderboard', 'https://gorilla.cs.berkeley.edu/leaderboard', 'BFCL v4 native function-calling evaluations. Memory uses the named external backend, not built-in model memory. Per-model measurement dates are not supplied.', () => {
     const rows = parseBFCL(bfclCSV);
     if (rows.length < 3) throw new Error('Too few native BFCL configurations.');
@@ -468,6 +529,7 @@ export async function refreshSnapshot(fetcher = fetch, previous, options = {}) {
       bfcl: results.slice(1).every(r => r.status === 'fulfilled') ? { urls: [sourceURLs.bfclMethodology, sourceURLs.bfclMemory], sections: results.slice(1).flatMap(r => r.value) } : previous?.benchmarkMethodologies?.bfcl ?? null },
     failed: [...(results[0].status === 'rejected' ? ['analysis'] : []), ...(results.slice(1).some(r => r.status === 'rejected') ? ['bfcl'] : [])],
   }));
+  const valsRead = readVals(read);
   const descriptions = readEpochDefinitions(read).then(value => ({ value }), () => ({ value: previous?.benchmarkDescriptions, failed: true }));
   const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['idp', 'idpHTML', 'text'], ['vectara', 'vectaraMarkdown', 'text'], ['arena', 'arenaRows', 'parquet'], ['arenaDocument', 'arenaDocumentRows', 'parquet'], ['arenaVision', 'arenaVisionRows', 'parquet'], ['arenaWebdev', 'arenaWebdevRows', 'parquet'], ['bfcl', 'bfclCSV', 'text'], ['modelsdev', 'modelsDev', 'json']];
   const results = await Promise.allSettled([...specs.map(([id, , type]) => read(sourceURLs[id], type)), ...hubQueries.map(query => read(query.url, 'json', 2_000_000))]);
@@ -488,6 +550,7 @@ export async function refreshSnapshot(fetcher = fetch, previous, options = {}) {
     inputs.hubRows = rows;
   }
   const described = await descriptions, methods = await methodologies;
+  try { inputs.vals = await valsRead; } catch (error) { inputs.failures.vals = error.message; }
   inputs.benchmarkMethodologies = methods.value;
   inputs.benchmarkDescriptions = described.value;
   const snapshot = compileSnapshot(inputs);

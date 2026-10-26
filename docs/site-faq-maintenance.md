@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Vals AI and Arena industry benchmarks — 26 October 2026
+
+Reviewed benchmark-source and coverage claims against the change that adds 27 Vals AI benchmarks and four Arena industry categories. The homepage and the Scout page name no benchmark publishers or vertical coverage, so no FAQ copy changes. The Scout guide's source table now has a Vals AI row and lists the Arena industry categories.
+
 ## Arena Vision and WebDev boards; benchmark-row matching through catalogue aliases — 26 October 2026
 
 Reviewed benchmark-coverage claims against the change that matches benchmark rows through catalogue aliases and stripped run settings. The homepage and the Scout page state no matched-model counts, so no FAQ copy changes. The Scout guide's catalogue row now describes alias matching and its precedence rule. The same review covered the new Arena Vision and WebDev sources: the homepage and the Scout page name no Arena boards, so no FAQ copy changes, and the Scout guide's source table now has an Arena row listing the four boards read.

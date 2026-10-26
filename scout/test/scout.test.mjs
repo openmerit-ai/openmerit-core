@@ -8,7 +8,7 @@ import offlineTasks from './fixtures/offline-tasks.json' with {type:'json'};
 // Explicit historical task objects test arithmetic and transports, not interpretation.
 const fixtureTask = prompt => {const task=offlineTasks[prompt];if(!task)throw Error('Missing typed test fixture');return structuredClone(task);};
 const recommend=(index,prompt)=>rankTask(index,prompt,Date.now(),fixtureTask(prompt));
-import { parseCSV, parseAnalysis, compileSnapshot, refreshSnapshot, parseOmniDoc, parseVectara, parseArena } from '../sources.mjs';
+import { parseCSV, parseAnalysis, compileSnapshot, refreshSnapshot, parseOmniDoc, parseVectara, parseArena, parseVals, readVals, valsSlugs } from '../sources.mjs';
 import { handleAPI as api } from '../http.mjs';
 
 const handleAPI=(request,index)=>api(request,index,{},recommend);
@@ -202,7 +202,7 @@ test('a fresh table retains omitted historical observations only for an unchange
 test('refresh reads bounded benchmark methodology and catalogue feeds; total outage needs a previous index', async () => {
   const f = fixtures(); const calls = [];
   const fetcher = async url => { calls.push(url); return new Response(url.endsWith('.zip') ? f.epochZip : url.includes('artificialanalysis') ? f.analysisHTML : JSON.stringify(url.includes('OpenVLM') ? f.openvlm : f.router)); };
-  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 31); assert.equal(refreshed.models.length, 12);
+  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 58, 'feeds, plus one page per Vals AI benchmark'); assert.equal(refreshed.models.length, 12);
   assert.equal(refreshed.sources.find(s => s.id === 'huggingface').status, 'failed');
   await assert.rejects(refreshSnapshot(async () => new Response('Unavailable', { status: 503 })), /Invalid model catalogue/);
 });
@@ -282,6 +282,30 @@ test('summary and human-preference parsers keep comparable rows and reject forma
     ...rows.map(r => ({ ...r, category: 'creative_writing', leaderboard_publish_date: '2026-01-09' }))], ['overall', 'ocr']);
   assert.deepEqual([vision.dates, vision.publishedAt], [{ overall: '2026-10-22', ocr: '2026-10-20' }, '2026-10-22']);
 });
+test('Vals AI benchmarks keep overall accuracy, read model keys and keep a failed page\'s previous evidence', async () => {
+  const result = (id, accuracy) => [id, { accuracy, stderr: .5, provider: 'Host' }];
+  const data = { metadata: { benchmark: 'MedCode', family: 'medcode', industry: 'healthcare', description: 'Medical coding.', updated: '2026-10-13', dataset_type: 'private' },
+    tasks: { overall: Object.fromEntries([result('lab/model-0', 40), result('fireworks/lab/model-1', 50), result('lab/model-2-thinking', 60), result('lab/model-3-thinking', 70), result('lab/model-4', 101), result('lab/model-5', 30)]), other: {} } };
+  const page = slug => `<meta name="description" content="${slug} benchmarks AI models on ICD-10-CM &amp; billing."><a href="/_astro/benchmark_view_${slug}.Ab1-2.json">`;
+  const read = async url => url.endsWith('.json') ? data : url.endsWith('/medscribe') ? Promise.reject(new Error('down')) : page(url.split('/').pop());
+  const vals = await readVals(read);
+  assert.deepEqual(vals.missing, ['medscribe']);
+  const medcode = vals.benchmarks.find(v => v.slug === 'medcode');
+  // Out-of-range accuracy is dropped; the page summary joins the short description.
+  assert.deepEqual([medcode.rows.length, medcode.description], [5, 'medcode benchmarks AI models on ICD-10-CM & billing. Medical coding.']);
+  assert.throws(() => parseVals('x', { metadata: {}, tasks: {} }), /format changed/);
+  const input = fixtures();
+  // Model 3's own ID ends in "-thinking"; model 2's suffix is Vals' thinking setting.
+  input.router.data[3] = { ...input.router.data[3], id: 'lab/model-3-thinking', canonical_slug: 'lab/model-3-thinking' };
+  const previous = { benchmarks: [{ id: 'vals:medscribe', name: 'MedScribe · Vals AI', source: 'vals', tags: [], definition: {} }], models: [{ id: 'lab/model-0', evidence: [{ benchmark: 'vals:medscribe', score: .8 }] }], sources: [] };
+  const snap = compileSnapshot({ ...input, vals, previous });
+  const score = (id, b) => snap.models.find(m => m.id === id)?.evidence.find(e => e.benchmark === b)?.score;
+  assert.deepEqual([score('lab/model-0', 'vals:medcode'), score('lab/model-1', 'vals:medcode'), score('lab/model-2', 'vals:medcode'), score('lab/model-3-thinking', 'vals:medcode')], [.4, .5, .6, .7]);
+  assert.equal(score('lab/model-0', 'vals:medscribe'), .8);
+  assert.equal(snap.benchmarks.find(b => b.id === 'vals:medcode').definition.suite, 'Vals AI · medcode');
+  assert.equal(valsSlugs.length, new Set(valsSlugs).size);
+});
+
 test('the IDP Leaderboard parser reads component scores from the rendered table and rejects format changes', async () => {
   const { parseIDP } = await import('../sources.mjs');
   const cell = v => `<td data-slot="table-cell"><span class="tabular-nums">${v}</span></td>`;

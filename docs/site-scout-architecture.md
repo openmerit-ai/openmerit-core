@@ -1,5 +1,51 @@
 # Scout architecture and operations
 
+## Vertical benchmarks: Vals AI and Arena industry categories (not yet deployed)
+
+The owner asked for benchmarks covering a wider range of tasks and specific industries such as healthcare and insurance.
+
+**Vals AI (`vals`).** Vals AI publishes 58 benchmark pages. Each page links a content-hashed JSON file (`/_astro/benchmark_view_<slug>.<hash>.json`) with per-task, per-model accuracy, standard error and run settings. `readVals` fetches the 27 pages in `valsSlugs` four at a time, follows each data link, and keeps only overall accuracy (0–100, divided by 100). Each series is `vals:<slug>`:
+- **Description:** the page's meta description plus Vals' own description, for example "MedCode benchmarks AI models on medical coding for billing … ICD-10-CM".
+- **Suite:** `Vals AI · <family>`. Versions such as Finance Agent v2 and v2.1 share a family and count once in quality estimates; distinct benchmarks stay separate.
+- **Date:** the Vals update date is kept as `publishedAt` on the benchmark, outside the definition, so an update does not re-prepare the series.
+
+Selection and scope:
+- **Read (27):**
+  - Healthcare: MedQA, MedCode, MedScribe.
+  - Legal: LegalBench, Legal Research Bench, HLAB.
+  - Finance: CorpFin v2, TaxEval v2, MortgageTax, Finance Agent v2 and v2.1, EMB and EMB v1.1, ClaimBench.
+  - Other: Public Benefits Bench (SNAP), SAGE (grading student math), MGSM (multilingual math), BioMysteryBench, MysteryMechanism, Code Migration and v1.1 (including COBOL), Vibe Code Bench, ProgramBench, IOI, SWE-bench Multimodal, CyberBench and SRE Bench.
+- **Not read:**
+  - Composite indexes, archived versions, and boards with fewer than about 15 models (robotics, poker, CUA).
+  - VoiceCodeBench (speech).
+  - Evaluations other feeds already supply: GPQA, MMLU-Pro, MMMU, LiveCodeBench, SWE-bench, Terminal-Bench, AIME, MATH 500 and ProofBench.
+  - Mental Health, which has no data file.
+- **Model keys:** keys are `provider/model ID`. Scout tries the ID after the provider, then its last segment (hosts add a namespace), then that segment without Vals' `-thinking` setting suffix. An ID that already ends in `-thinking`, such as `kimi-k2-thinking`, matches first. Agent products such as `claude-opus-4-8-claude-code` or `gpt-5.5-codex` do not match the model.
+- **Failures:** a benchmark whose page or data fails keeps its previous definition and evidence. The source fails, retaining previous evidence, only when fewer than half load.
+- **Licence:** Vals AI publishes no terms or data licence, and its robots.txt allows crawling. Following the owner's position for Artificial Analysis, Scout keeps only overall scores, attributed and linked to each page.
+- **Research overlap:** 18 Vals series were already in the research ledger (for example Finance Agent, CyberBench and ProgramBench). They have no suite, so family linking can join them to the structured series of the same evaluation.
+
+**Arena industry categories.** `arenaCategories` adds medicine and healthcare, legal and government, life/physical/social sciences, and entertainment/sports/media from the text file Scout already reads. Software/IT and mathematics stay out, because other sources measure coding and math directly.
+
+**Insurance.** No machine-readable insurance benchmark with broad, current coverage was found. Snorkel's underwriting leaderboard rates 33 mostly older models in HTML. InsureBench has not opened its leaderboard. Coverage Cat tests 7 models.
+
+**Measured locally** on the 26 October pages: 27 of 27 Vals benchmarks loaded, and 139 of 247 distinct Vals model names matched. Per series, 5 (ClaimBench, which mostly rates specialised decision models) to 99 (Vibe Code Bench) models gained evidence. Benchmark-backed models rose to 279. `refreshBenchmarks` prepared all 27 Vals series and 4 Arena categories as `ready`. Unmatched names are mostly retired models, decision models and agent products. Every matched name that differs from its Scout ID was reviewed by hand.
+
+**Replay.** Real recommendations ran locally with OpenAI interpretation and a stand-in for Vectorize: `text-embedding-3-small` (256 dimensions) over the same evidence documents, top 50 by cosine. The same eight prompts were run against the published generation and against the new one:
+
+| Prompt | Published evidence | New evidence |
+| --- | --- | --- |
+| ICD-10-CM coding of discharge summaries | GPQA, HLE, SciCode | MedCode, GPQA |
+| US case-law research | HLE, SimpleQA, AA Omniscience | Legal Research Bench, LegalBench |
+| DCF model in Excel | SciCode | EMB v1.1 |
+| COBOL to Java | general coding series | Code Migration and v1.1, plus others |
+| SOAP notes from consultations | Vectara | MLCR-AA medical, Vectara |
+| Tax return checks | Arena business, GDPval | adds Finance Agent v2 |
+| Insurance claim coverage | Arena business, GDPval | ClaimBench and long-context series |
+| SNAP eligibility | no recommendation (time limit) | Arena legal and government |
+
+TaxEval and Public Benefits Bench were not selected for their own prompts, and MedScribe was selected only without vectors. ClaimBench for the insurance prompt is a weak proxy: it checks claims against SEC filings. These are retrieval and applicability results, not executions of the recommended models.
+
 ## Arena Vision and WebDev boards (not yet deployed)
 
 The Arena leaderboard dataset (CC BY 4.0, updated 24 October 2026) publishes 24 boards. Scout read two of them, text and document. Collection now also reads two more, each as its own source, so a missing board withholds only itself:
