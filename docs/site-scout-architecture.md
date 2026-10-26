@@ -1,6 +1,8 @@
 # Scout architecture and operations
 
-## Parallel research removed; publisher methodology first (not yet deployed)
+## Parallel research removed; publisher methodology first — deployed, 26 October 2026
+
+**Deployment receipt:** the owner approved the push and deployment. Commits [bc581d8](https://github.com/laz-aslam/openmerit/commit/bc581d8) and [5c97478](https://github.com/laz-aslam/openmerit/commit/5c97478) are on `origin/main`, rebased onto PR #23 (Scout example pills), which ships with them. Worker version `c6df31aa` is live. Search-time changes apply now. Pipeline changes take effect at the next refresh, so live status reports `stale` and `degraded` until a refresh publishes; until then it is computed from the last published generation `9242132d`.
 
 The owner agreed to stop Parallel research after a review of what it contributed to live generation `fb379087`:
 - **Benchmarks:** 234 of the 543 benchmarks came from research, and none had a single model result. Every ranked result comes from a direct feed.
@@ -15,7 +17,9 @@ Changes:
 - **Methodology:** `methodologyFor` skipped the publisher's methodology whenever a research description existed, so 25 Artificial Analysis benchmarks never got their own section. It now always applies. Sections titled with the benchmark's name (by the same evaluation key as cross-source families) come first and skip the Decisions question; other sections are judged as before. On the live page, 22 of the 29 AA benchmarks with results get a title-matched section. The other seven are AA-LCR, τ³-Banking, ITBench, the two Omniscience rows and two win-rate rows. The selection cache key changed, so the next refresh reselects AA sections and re-interprets the affected benchmarks once.
 - **Not changed:** the `PARALLEL_API_KEY` Worker secret, the `scout_discovery` D1 table and stored research ledger rows. Deleting them is a separate cleanup.
 
-## Vertical benchmark retrieval and split quality targets (not yet deployed)
+## Vertical benchmark retrieval and split quality targets — deployed, 26 October 2026
+
+**Deployment receipt:** the owner approved the push and deployment. Commits [bc581d8](https://github.com/laz-aslam/openmerit/commit/bc581d8) and [5c97478](https://github.com/laz-aslam/openmerit/commit/5c97478) are on `origin/main`, rebased onto PR #23 (Scout example pills), which ships with them. Worker version `c6df31aa` is live. Search-time changes apply now. Pipeline changes take effect at the next refresh, so live status reports `stale` and `degraded` until a refresh publishes; until then it is computed from the last published generation `9242132d`.
 
 The owner asked to continue with the gaps left by the change below: vertical benchmarks that were never retrieved, and intermittent interpreter failures.
 
