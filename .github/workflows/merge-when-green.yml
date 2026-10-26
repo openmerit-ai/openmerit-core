@@ -1,0 +1,45 @@
+name: Merge when green
+
+# GitHub auto-merge and branch protection are unavailable for private repositories on
+# GitHub Free, so this merges pull requests labelled merge-when-green once CI passes.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: merge-when-green
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.pull_requests[0].number
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Squash-merge the pull request
+        id: merge
+        run: |
+          read -r state base labelled < <(gh pr view "$PR" --json state,baseRefName,labels \
+            --jq '[.state, .baseRefName, ([.labels[].name] | index("merge-when-green") != null)] | @tsv')
+          if [[ "$state" != OPEN || "$base" != main || "$labelled" != true ]]; then
+            echo "Skipping #$PR: state $state, base $base, labelled $labelled."
+            exit 0
+          fi
+          # --match-head-commit refuses the merge if commits arrived after this CI run.
+          gh pr merge "$PR" --squash --delete-branch --match-head-commit "$HEAD_SHA"
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+      - name: Run CI on main
+        # Pushes made with GITHUB_TOKEN start no workflows, and scripts/deploy.ts needs
+        # verify and package-smoke results on the main commit.
+        if: steps.merge.outputs.merged == 'true'
+        run: gh workflow run ci.yml --ref main
