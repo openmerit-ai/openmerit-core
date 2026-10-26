@@ -1,6 +1,13 @@
 # Scout architecture and operations
 
-## D1 model catalogue: Hugging Face organisations — 26 October 2026 (not yet deployed)
+## D1 model catalogue: Hugging Face organisations — deployed, 26 October 2026
+
+**Deployment receipt:** the owner approved the deployment, the `HF_TOKEN` Worker secret and a manual run. Commit [646423b](https://github.com/laz-aslam/openmerit/commit/646423b) is on `origin/main`. Publisher `openmerit-scout` moved from `f5b68add-7c96-4c0f-8c0b-b6e9e3d6e332` to `ca47b624-b254-4b54-a8e6-e70b86799790`, with schedule `7 0,12 * * *`. Manual run `manual-20261026-hub-1` completed and published at 07:23 UTC:
+
+- `catalogue-hub-orgs` found 1,033 candidates, checked 400 and admitted 187.
+- `catalogue-hub-models` crawled those 187 organisations in 48 seconds: 15,929 models and 1,153 live inference routes.
+- Production D1 now has 14,329 offerings across 311 providers. 633 candidate organisations remain to be checked in later runs.
+- The published generation, checked at 07:10 UTC, has 386 benchmarks, all prepared.
 
 `scout/catalogue-hub.ts` catalogues every model published by admitted Hugging Face organisations. It runs as two refresh steps before offerings are rebuilt, only when the publisher has an `HF_TOKEN` secret.
 
