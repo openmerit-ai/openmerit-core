@@ -1,6 +1,8 @@
 # Scout architecture and operations
 
-## D1 model catalogue: OpenRouter, Vercel, genai-prices and Epoch — 26 October 2026 (not yet deployed)
+## D1 model catalogue: OpenRouter, Vercel, genai-prices and Epoch — deployed, 26 October 2026
+
+**Deployment receipt:** the owner approved the deployment and a manual run. Commit [dc1fd11](https://github.com/laz-aslam/openmerit/commit/dc1fd11) is on `origin/main`. Publisher `openmerit-scout` moved from `40cf2409-8653-45b3-9b8a-35416c7b3ea9` to `f5b68add-7c96-4c0f-8c0b-b6e9e3d6e332`, with schedule `7 0,12 * * *`. Manual run `manual-20261026-sources-1` completed and published at 05:41 UTC. All six catalogue steps succeeded, and production D1 matched the local run: 13,225 offerings across 301 providers, 436 with a Hugging Face ID, and 3,636 Epoch models, 224 of them linked. The published generation, checked at 05:30 UTC, has 381 benchmarks, all prepared.
 
 Four more sources now merge onto the Models.dev backbone in `scout/catalogue-db.ts`, each as its own refresh step after LiteLLM:
 
