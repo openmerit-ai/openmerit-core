@@ -1,8 +1,13 @@
 # Website FAQ maintenance
 
+## Scout input examples — source only, 26 October 2026
+
+Moved the example controls into the task field, with a short Try label, 1/2/3 numbering and rounded pills that hide for any nonempty draft. Presets still fill editable text without submitting. Removed visible input-helper copy and the CSS-imposed white background behind the already-transparent Claude Code logo. The homepage FAQ makes no affected claims and needs no change. No deployment is included.
+
 ## Domain-aware evidence weighting and cross-source benchmark families — 26 October 2026
 
 Reviewed ranking and evidence claims against the change that weights task-domain benchmarks above general proxies and counts copies of one evaluation from several publishers once. The homepage and the Scout page describe ranking only as using measured results, public benchmarks, cost and speed, so no FAQ copy changes. The Scout guide's quality-estimate and evidence-assessment paragraphs now describe the relevance tiers and cross-source families.
+
 ## Scout privacy settings page — source only, 26 October 2026
 
 Moved Privacy & analytics to `/scout/privacy/`, linked from Scout's footer and the data policy. The notice and sharing controls are unchanged; sign-in returns to the settings page and existing saved preferences continue to apply to Scout. The old settings fragment forwards to the new page. The homepage FAQ requires no change. No deployment is included.
