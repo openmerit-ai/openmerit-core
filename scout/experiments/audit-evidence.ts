@@ -8,8 +8,9 @@
 //   filter: restrictions the prompt states (provider pattern, minimum context,
 //     maximum input price per million tokens) that every recommendation must meet.
 // RUNS=n repeats every case and reports how much the top five agree across runs.
+// ANSWER_CACHE=1 measures repeats of an identical search on the hosted service.
 // No recommended model is executed.
-// Usage: [RUNS=3] node scout/experiments/audit-evidence.ts records.json report.json [case-id ...]
+// Usage: [RUNS=3] [ANSWER_CACHE=1] node scout/experiments/audit-evidence.ts records.json report.json [case-id ...]
 import { readFile, writeFile } from 'node:fs/promises';
 
 interface Filter { provider?: string; minContext?: number; maxInputPrice?: number }
@@ -22,15 +23,22 @@ interface Result { error?: string; task?: Task; tasks?: { task?: Task }[]; recom
 interface Index { benchmarks: Map<string, { name: string }> }
 interface Snapshot { models: { id: string; evidence: { benchmark: string; score: number }[] }[]; registry?: unknown }
 type Recommender = (index: Index, prompt: string) => Promise<Result>;
+interface Answers { get(id: string, since: number): Promise<string | null>; put(rows: readonly { id: string; value: string; at: number }[]): Promise<void> }
 interface Modules {
   records: { toSnapshot: (records: unknown) => Snapshot };
   rank: { createIndex: (snapshot: unknown) => Index };
-  recommend: { createRecommender: (options: { apiKey: string; vectorize: unknown }) => Recommender };
+  recommend: { createRecommender: (options: { apiKey: string; vectorize: unknown; answers?: Answers | undefined }) => Recommender };
   registry: { registry: unknown };
   search: { evidenceDocuments: (snapshot: unknown) => Document[]; embed: (texts: string[], options: { apiKey: string; timeoutMs: number }) => Promise<number[][]> };
 }
 
 const [recordsPath, report, ...only] = process.argv.slice(2), apiKey = process.env.OPENAI_API_KEY, runs = Math.max(1, Number(process.env.RUNS ?? 1));
+// ANSWER_CACHE=1 shares recorded provider answers between runs, as the hosted
+// Worker does through D1, and runs each case's repeats one after another.
+const memory = new Map<string, { value: string; at: number }>(), answers: Answers | undefined = process.env.ANSWER_CACHE ? {
+  get: async (id, since) => { const row = memory.get(id); return row && row.at >= since ? row.value : null; },
+  put: async rows => { for (const row of rows) memory.set(row.id, row); },
+} : undefined;
 if (!recordsPath || !report || !apiKey) throw new Error('Usage: [RUNS=n] audit-evidence.ts records.json report.json [case-id ...] with OPENAI_API_KEY set.');
 const load = (name: string) => import(new URL(`../${name}.mjs`, import.meta.url).href);
 const m: Modules = { records: await load('records'), rank: await load('rank'), recommend: await load('recommend'), registry: await load('registry'), search: await load('evidence-search') };
@@ -57,7 +65,7 @@ const meets = (r: Recommendation, f: Filter) => (!f.provider || new RegExp(f.pro
 const audit = async (c: Case) => {
   let result: Result;
   // A new recommender per run: one would answer repeats from its result cache.
-  try { result = await m.recommend.createRecommender({ apiKey, vectorize })(index, c.prompt); } catch (error) { result = { error: error instanceof Error && error.cause ? String(error.cause) : String(error) }; }
+  try { result = await m.recommend.createRecommender({ apiKey, vectorize, answers })(index, c.prompt); } catch (error) { result = { error: error instanceof Error && error.cause ? String(error.cause) : String(error) }; }
   const matches = [result.task, ...(result.tasks ?? []).map(t => t.task)].flatMap(t => t?.evidenceMatch ? [t.evidenceMatch] : []);
   const accepted = [...new Set(matches.flatMap(e => e.ids))], assessments = matches.flatMap(e => e.assessments).filter(a => accepted.includes(a.benchmark));
   const recommendations = result.recommendations ?? [], names = accepted.map(name), top = recommendations[0]?.evidence?.map(e => e.benchmark) ?? [];
@@ -76,7 +84,9 @@ const audit = async (c: Case) => {
 type Run = Awaited<ReturnType<typeof audit>>;
 const results: { id: string; runs: Run[]; stability: number | null }[] = [];
 for (let i = 0; i < cases.length; i += 4) results.push(...await Promise.all(cases.slice(i, i + 4).map(async c => {
-  const all = await Promise.all(Array.from({ length: runs }, () => audit(c)));
+  const all: Run[] = [];
+  if (answers) for (let i = 0; i < runs; i++) all.push(await audit(c));
+  else all.push(...await Promise.all(Array.from({ length: runs }, () => audit(c))));
   // Mean share of the top five two runs have in common.
   const pairs = all.flatMap((a, x) => all.slice(x + 1).map(b => b.shortlist.filter(id => a.shortlist.includes(id)).length / Math.max(1, a.shortlist.length, b.shortlist.length)));
   return { id: c.id, runs: all, stability: pairs.length ? pairs.reduce((s, v) => s + v, 0) / pairs.length : null };

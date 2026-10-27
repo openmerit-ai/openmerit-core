@@ -10,9 +10,10 @@ import {createResultCache} from './result-cache.mjs';
 import {interpreterVersion} from './interpreter.mjs';
 import {matchingTimeoutMs,createTimings} from './timing.mjs';
 import {diagnosticTransport} from './utils.mjs';
+import {d1Answers} from './answer-cache.ts';
 
 // HTTP search computation; bounded admission without visitor accounts or queues.
-export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, timeoutMs = matchingTimeoutMs, db, vectorize, observe = () => {},cacheOptions } = {}) {
+export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, timeoutMs = matchingTimeoutMs, db, vectorize, observe = () => {},cacheOptions,answers = db ? d1Answers(db) : undefined } = {}) {
   let inFlight = 0, windowStart = now(), requests = 0;
   const cached=createResultCache({now,...cacheOptions});
   return async (index, prompt, selection, endpoints, channel = 'api', observeRequest = () => {}) => {
@@ -35,7 +36,7 @@ export function createRecommender({ apiKey, fetcher = fetch, now = Date.now, tim
         let ownsComputation=false;
         try {
           const key=JSON.stringify([index.snapshot.publication.id,interpreterVersion,prompt,modelIds,endpointIds,new Date(started).toISOString().slice(0,10)]);
-          const entry=await cached(key,()=>{ownsComputation=true;return matchTask(index,prompt,modelIds,endpointIds,{apiKey,fetcher,now,timeoutMs,db,vectorize});});
+          const entry=await cached(key,()=>{ownsComputation=true;return matchTask(index,prompt,modelIds,endpointIds,{apiKey,fetcher,now,timeoutMs,db,vectorize,answers});});
           result=entry.value;result.runtime={...(entry.status==='miss'?result.runtime:{}),cache:entry.status,ageMs:entry.ageMs};
           result.elapsedMs=Math.max(0,now()-started);if(entry.status!=='miss')result.interpretationMs=0;
           task=result.task;const slots=result.tasks.flatMap(t=>t.slots);

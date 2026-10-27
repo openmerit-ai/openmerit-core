@@ -109,3 +109,16 @@ test('task-domain evidence outweighs a majority of general proxies that disagree
  assert.equal(leader('domain'),'domain-leader');
  assert.equal(leader('generic'),'general-leader');
 });
+test('a model without the task benchmark cannot outrank or displace models measured on it',()=>{
+ // Q has the best general proxy and is cheapest and fastest, but no direct score.
+ const row=(id,direct,proxy,c,t)=>{const x=candidate(id,proxy,c,t,'proxy');x.evidence[0].definition.relevance='generic';
+  if(direct!==null)x.evidence.push({benchmark:'task',metric:'accuracy',score:direct,definition:{id:'task',tags:['coding'],family:'task',relevance:'direct'}});return x;};
+ const build=()=>[row('a',.64,.8,10,5),row('b',.6,.79,8,4),row('c',.55,.75,2,2),row('q',null,.82,1,1)];
+ const rows=build();selectPareto(rows,task);
+ assert.deepEqual(rows.map(c=>c.model.id),['a','b','q']);
+ assert.deepEqual(rows.map(c=>c.pick),[['quality'],['value','speed'],[]]);
+ assert.equal(rows[2].lacksSpecificEvidence,2);
+ // Without a direct benchmark in the task, the same proxy leader leads and dominates.
+ const proxies=build().map(c=>({...c,evidence:c.evidence.map(e=>({...e,definition:{...e.definition,relevance:'generic'}}))}));
+ selectPareto(proxies,task);assert.equal(proxies[0].model.id,'q');
+});

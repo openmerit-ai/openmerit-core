@@ -1,5 +1,15 @@
 # Scout architecture and operations
 
+## Answer cache and specificity-first frontier (not yet deployed)
+
+**Why results varied.** A diagnostic run of eight cases, four times each, against generation `9242132d` showed that every repeat produced a different decomposition `search` text, which changed the capability weights, the retrieved benchmarks (mean Jaccard 0.25–0.92) and the accepted tiers. Pinning only the decomposition raised mean top-five overlap from 0.34 to 0.70; the evidence assessment and Decisions answers account for the rest. Two of 32 runs failed with "Task evidence applicability is unavailable": the assessment call allowed 1.8 s with no retry, and observed latencies ran 265–1,383 ms.
+
+**Answer cache** (`scout/answer-cache.ts`). `matchTask` wraps the provider transport. Each Responses, Decisions and embeddings request is looked up in D1 table `scout_answers` by SHA-256 of URL and body; a hit is replayed and marked with `x-scout-answer-replay`, so diagnostics record no provider generation. Misses are recorded and written by `commit()` only after the whole search completed without a degraded assessment or unavailable specialist check. Values are AES-GCM encrypted with a key derived from the same request, so stored rows reveal no prompt text without it. Entries older than seven days are deleted on each write and ignored on read. Because request bodies include the catalogue context, the interpreter version and the `referenceTime` (now day precision), a new generation, version or UTC day misses naturally. Store failures fall back to the provider. Response bodies are read directly rather than through `clone()`: a clone of an aborted response stayed pending and held `commit()` open in the concurrent audit.
+
+**Specificity first** (`pareto.mjs`). Each estimated configuration gets `specificity`: 2 for a fitted direct benchmark or calibration observation, 1 for domain, 0 for general proxies. Within the quality band, the configurations at the highest tier present form their own Pareto frontier and carry the strongest, value and fastest labels; lower-tier configurations follow, ordered within themselves, and cannot dominate the leaders. `rank.mjs` warns about any listed model without the leading tier.
+
+The assessment call now allows one retry (`maxRetries:1`) within up to four seconds.
+
 ## Ranking test set and model-name matching (not yet deployed)
 
 The owner agreed to measure ranking before changing it, and to fix ambiguous model names.

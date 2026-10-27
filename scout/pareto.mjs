@@ -139,6 +139,10 @@ export function prepareObjectives(candidates,task) {
     if(estimate&&(c.taskObservation??c.measured))for(const t of Object.keys(weights))covered.add(t);
     c.comparisonCoverage=estimate&&total?Object.entries(weights).reduce((n,[t,w])=>n+(covered.has(t)?w:0),0)/total:0;
     c.frontierComplete=Number.isFinite(c.scopeQuality)&&c.reference.cost!==null&&c.reference.seconds!==null;
+    // The most task-specific evidence in its estimate: 2 direct (or a task
+    // calibration), 1 domain, 0 general proxies only.
+    const fitted=new Set(estimate?.benchmarks??[]);
+    c.specificity=estimate&&(c.taskObservation??c.measured)?2:Math.max(0,...c.evidence.filter(e=>fitted.has(e.benchmark)).map(e=>({direct:2,domain:1})[e.definition?.relevance]??0));
   }
   return {workload,models:fit.models,benchmarks:fit.benchmarks,margin:Math.max(qualityIndifference,qualityIndifferenceShare*(fit.spread??0))};
 }
@@ -160,20 +164,25 @@ export function selectPareto(candidates,task,{limit=5,providerLimit=2}={}) {
     if(gap<=allowance+Number.EPSILON*4)qualified.push(c);
   }
   const qualityGate={status:qualified.length?'proxy-qualified':'unverified',margin:scope.margin,marginShare:qualityIndifferenceShare,tolerance:qualityTolerance,qualifiedConfigurations:qualified.length,unverifiedConfigurations:unverified.length,excludedConfigurations:count-qualified.length-unverified.length};
-  const frontier=supportedFrontier(qualified.length?qualified:unverified);
+  // Within the band, models measured on the task's most specific evidence come
+  // first. One estimated from general proxies alone (a high GPQA score without
+  // the task's own benchmark) neither outranks nor removes them from the
+  // frontier; it can still fill remaining places when it is not dominated.
+  const tier=Math.max(0,...qualified.map(c=>c.specificity)),lead=new Set(tier?qualified.filter(c=>c.specificity===tier):[]);
+  const frontier=lead.size?[...supportedFrontier([...lead]),...supportedFrontier(qualified).filter(c=>!lead.has(c))]:supportedFrontier(qualified.length?qualified:unverified);
   const q=c=>c.scopeQuality??-Infinity,cost=c=>c.reference.cost??Infinity,time=c=>c.reference.seconds??Infinity,preference=c=>c.preference??0;
   const tie=(a,b)=>preference(b)-preference(a)||a.model.id.localeCompare(b.model.id)||a.model.endpoint.id.localeCompare(b.model.endpoint.id);
   const orders={quality:(a,b)=>q(b)-q(a)||cost(a)-cost(b)||time(a)-time(b)||tie(a,b),cost:(a,b)=>cost(a)-cost(b)||time(a)-time(b)||q(b)-q(a)||tie(a,b),latency:(a,b)=>time(a)-time(b)||cost(a)-cost(b)||q(b)-q(a)||tie(a,b)};
   // Without established quality, keep the explicitly unverified discovery list
   // in known-cost order; no pick can claim a quality role.
-  const order=!qualified.length?orders.cost:orders[priority]??orders.quality;
+  const within=!qualified.length?orders.cost:orders[priority]??orders.quality,order=(a,b)=>lead.size&&lead.has(b)-lead.has(a)||within(a,b);
   frontier.sort(order);
   // Labelled tradeoffs among the supported frontier, never outside it.
   const roles=new Map();
   if(qualified.length){
-    const known=(value,list)=>list.filter(c=>Number.isFinite(value(c)));
+    const known=(value,list)=>list.filter(c=>Number.isFinite(value(c))),labelled=lead.size?frontier.filter(c=>lead.has(c)):frontier;
     const pick=(role,list,compare)=>{const c=[...list].sort(compare)[0];if(c)roles.set(c,[...(roles.get(c)??[]),role]);};
-    pick('quality',frontier,orders.quality);pick('value',known(cost,frontier),orders.cost);pick('speed',known(time,frontier),orders.latency);
+    pick('quality',labelled,orders.quality);pick('value',known(cost,labelled),orders.cost);pick('speed',known(time,labelled),orders.latency);
   }
   const selected=[],ids=new Set(),providers=new Map();
   const take=(c,capped)=>{
@@ -186,7 +195,7 @@ export function selectPareto(candidates,task,{limit=5,providerLimit=2}={}) {
   // The provider cap diversifies; it does not leave supported places empty.
   for(const c of frontier)take(c,false);
   selected.sort(order);
-  for(const c of selected)c.pick=[...roles].filter(([x])=>x.model.id===c.model.id).flatMap(([,r])=>r);
+  for(const c of selected){c.pick=[...roles].filter(([x])=>x.model.id===c.model.id).flatMap(([,r])=>r);if(lead.size&&!lead.has(c))c.lacksSpecificEvidence=tier;}
   candidates.splice(0,candidates.length,...selected);
   return {workload:scope.workload,weights:{quality:null,cost:null,latency:null},frontier:{version:4,scope:qualityGate.status==='proxy-qualified'&&frontier.every(c=>c.frontierComplete)?'comparable':'partial',qualityModels:scope.models,qualityBenchmarks:scope.benchmarks,qualityGate,eligibleConfigurations:frontier.length,comparedConfigurations:count,completeConfigurations:frontier.filter(c=>c.frontierComplete).length,selectedModels:selected.length,priority,
     policy:'One latent quality estimate across all connected evaluations, with per-evaluation difficulty, scale and noise. Configurations not credibly worse than the strongest estimate (the larger of two points and 0.15 of the spread of model estimates on the task, plus one combined standard error that grows when a model’s evaluations disagree) enter supported Pareto selection over quality, reference cost and time. Balanced searches keep the strongest, lowest-cost and fastest frontier points, then order by estimated quality, with at most two models per provider unless places would remain empty. Unknown quality is provisional, never a pass. This does not establish a task-specific accuracy threshold.'}};

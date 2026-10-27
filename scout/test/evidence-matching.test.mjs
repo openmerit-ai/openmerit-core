@@ -76,10 +76,33 @@ test('exact result reuse respects inventories, prompt identity and catalogue pub
  first.recommendations.length=0;const second=await f.run(f.index,args.prompt);assert.equal(second.runtime.cache,'hit');assert.ok(second.recommendations.length);assert.equal(f.calls(),count);
  assert.equal(second.evaluatedAt,first.evaluatedAt);assert.equal(second.tasks[0].slots[0].evaluatedAt,first.tasks[0].slots[0].evaluatedAt);
  assert.equal(second.tasks[0].slots[0].runtime.cache,'hit');assert.equal(second.tasks[0].slots[0].interpretationMs,0);assert.equal(second.tasks[0].slots[0].runtime.timings,undefined);
- await f.run(f.index,args.prompt,[]);assert.ok(f.calls()>count);const afterScope=f.calls();
- await f.run(f.index,'Different task.');assert.ok(f.calls()>afterScope);
+ // Another inventory is a new result; its identical provider requests replay recorded answers.
+ const scoped=await f.run(f.index,args.prompt,[]);assert.equal(scoped.runtime.cache,'miss');assert.deepEqual(scoped.recommendations,[]);assert.equal(f.calls(),count);
+ await f.run(f.index,'Different task.');assert.ok(f.calls()>count);
  // A new publication never reuses a result from its predecessor.
  f.index.snapshot.publication.id='missing-generation';await assert.rejects(f.run(f.index,args.prompt),/could not establish/);
+});
+
+test('an identical search on a new isolate replays its recorded answers instead of asking again',async()=>{
+ const f=await fixture();let decompositions=0,failAssessment=false;
+ // A provider that answers differently each time: Lab A first, then Lab B.
+ const fetcher=async(url,o)=>{
+  if(failAssessment&&JSON.parse(o.body).questions?.[0].name.startsWith('method_'))return new Response('{}',{status:500});
+  if(!url.endsWith('/responses'))return f.fetcher(url,o);
+  const lab=decompositions++?'Lab B':'Lab A',value={overflow:false,tasks:[{title:'Code task',sourceText:'Opaque task.',layers,slots:[{...slot([{all:[{field:'creator',op:'eq',values:[lab]}]}]),search:failAssessment?'Write other code.':'Write source code.',unresolved:[]}]}]};
+  return Response.json({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify(value)}]}]});
+ };
+ const run=prompt=>createRecommender({apiKey:'fixture',db:f.db,fetcher,vectorize:{query:async()=>({matches:[{metadata:{benchmark:'fixture'}}]})}})(f.index,prompt);
+ const first=await run('Opaque task.'),calls=f.calls(),again=await run('Opaque task.');
+ assert.deepEqual(first.recommendations.map(m=>m.modelId),['lab/m0']);
+ assert.deepEqual(again.recommendations.map(m=>m.modelId),['lab/m0']);
+ assert.equal(decompositions,1);assert.equal(f.calls(),calls);assert.deepEqual(again.runtime.generations,[]);
+ // Entries are keyed and encrypted by the request: no task text is readable.
+ const rows=()=>f.db.db.prepare('SELECT value FROM scout_answers').all();
+ assert.ok(rows().length);assert.ok(rows().every(r=>!r.value.includes('Opaque')&&!r.value.includes('Lab A')));
+ // A search that fails never pins its answers.
+ const stored=rows().length;failAssessment=true;
+ await assert.rejects(run('Another opaque task.'));assert.equal(rows().length,stored);
 });
 
 test('product analytics counts one search per caller across multi-task, shared computation, cache hits and failures',async t=>{
@@ -209,7 +232,7 @@ test('HTTP accepts valid searches beyond the speed target but still bounds stall
    if(url.endsWith('/responses')){begin();await new Promise(resolve=>{if(!stalled)setTimeout(resolve,6000);});}
    return f.fetcher(url,options);
   };
-  const run=createRecommender({apiKey:'fixture',db:f.db,fetcher}),args={prompt:'A task with a slow provider.'};
+  const run=createRecommender({apiKey:'fixture',db:f.db,fetcher}),args={prompt:`A task with a slow provider (${stalled}).`};
   const request=new Request('https://example.test/scout/api/recommend',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(args)});
   const pending=handleAPI(request,f.index,{},run);
   await started;t.mock.timers.tick(stalled?30000:6000);

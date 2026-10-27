@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Repeatable searches and task-specific evidence first — 26 October 2026
+
+Reviewed ranking, data-handling and privacy claims against the change that replays an identical search's recorded AI answers for seven days and ranks models measured on the task's own benchmark ahead of models with only general evidence. The homepage FAQ makes no claim about result stability, ranking order or server-side prompt storage beyond the data policy, which this change updates with the new answer cache. No FAQ change is needed.
+
 ## Scout compact loading header — source only, 26 October 2026
 
 Removed the repeated prompt excerpt and separate loading heading. Rotating messages now occupy the results-title position with a tiny pulsing orb before the text; reduced motion disables the pulse and text transitions. Timing and result rendering are unchanged. The homepage FAQ makes no affected claims and needs no change. No deployment is included.

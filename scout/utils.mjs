@@ -61,6 +61,8 @@ export async function fetchJSON(fetcher,url,init,timeoutMs) {
   }
   try{return await Promise.race([
     Promise.resolve().then(()=>fetcher(url,{...init,signal})).then(async response=>{
+      // A replayed answer (answer-cache.ts) made no provider call.
+      if(generation&&response.headers.get('x-scout-answer-replay')){generations.splice(generations.indexOf(generation),1);generation=undefined;}
       if(generation){generation.providerStatus=response.status;if(!response.ok)generation.code=response.status===429?'rate_limited':'http_error';}
       const body=await response.json().catch(error=>{if(response.ok)throw error;return null;});
       if(generation){

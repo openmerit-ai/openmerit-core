@@ -7,12 +7,17 @@ import {createIndex,recommend,indexStatus} from './rank.mjs';
 import {matchSpecialists,relevantProfiles} from './specialists.mjs';
 import {createTimings,matchingTimeoutMs} from './timing.mjs';
 import {diagnosticTransport} from './utils.mjs';
+import {answerTransport} from './answer-cache.ts';
 
 export async function matchTask(index,prompt,modelIds,endpointIds,options={}) {
   const {timeoutMs=matchingTimeoutMs,fetcher=fetch}=options,controller=new AbortController(),trace=createTimings();let timer;
   const generations=[];
-  const boundedFetch=diagnosticTransport((url,init)=>fetcher(url,{...init,signal:init?.signal?AbortSignal.any([controller.signal,init.signal]):controller.signal}),generations);
-  try{const result=await Promise.race([runTasks(index,prompt,modelIds,endpointIds,{...options,timeoutMs,fetcher:boundedFetch,trace}),new Promise((_resolve,reject)=>{timer=setTimeout(()=>{const error=new DOMException('Matching deadline exceeded.','TimeoutError');controller.abort(error);reject(error);},timeoutMs);})]);result.runtime.generations=structuredClone(generations);return result;}
+  const answers=answerTransport(options.answers,(url,init)=>fetcher(url,{...init,signal:init?.signal?AbortSignal.any([controller.signal,init.signal]):controller.signal}),options.now);
+  const boundedFetch=diagnosticTransport(answers.fetch,generations);
+  try{const result=await Promise.race([runTasks(index,prompt,modelIds,endpointIds,{...options,timeoutMs,fetcher:boundedFetch,trace}),new Promise((_resolve,reject)=>{timer=setTimeout(()=>{const error=new DOMException('Matching deadline exceeded.','TimeoutError');controller.abort(error);reject(error);},timeoutMs);})]);result.runtime.generations=structuredClone(generations);
+    // Only a complete search pins its answers for identical later searches.
+    if(result.tasks.flatMap(t=>t.slots).every(s=>!s.task?.evidenceMatch?.degraded&&s.task?.specialistMatch?.status!=='unavailable'))await answers.commit();
+    return result;}
   catch(error){error.diagnostics={...trace.snapshot(error),generations:structuredClone(generations)};throw error;}
   finally{clearTimeout(timer);controller.abort();}
 }
@@ -88,7 +93,7 @@ async function runMatch(index,prompt,modelIds,endpointIds,{apiKey,fetcher,db,vec
     const vectors=interpreted.prepared.embedding;if(vectors.error)throw vectors.error;
     const documents=await trace.measure('evidenceRetrieval',()=>retrieveEvidence(task,evidenceIndex,{vectorize,queryVector:vectors.value[0],modelIds:task.selection.allowedModelIds}));
     [task.evidenceMatch,rows]=await Promise.all([
-      trace.measure('evidence',()=>assessEvidence(task,documents,{apiKey,fetcher,capabilityDefinitions:manifest.registry.capabilities,timeoutMs:Math.min(1800,remaining())})),
+      trace.measure('evidence',()=>assessEvidence(task,documents,{apiKey,fetcher,capabilityDefinitions:manifest.registry.capabilities,timeoutMs:Math.min(4000,remaining())})),
       loadRows(documents.map(d=>d.id)),
     ]);
     // Prefetching is independent of assessment. Only verified evidence may rank.
