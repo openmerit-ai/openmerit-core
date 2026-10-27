@@ -8,7 +8,7 @@ Scout is a separate hosted beta product. Npm 0.1.7 includes optional Claude Code
 
 **Coding-agent setup — 24 October 2026:** stable npm 0.1.7 includes [device sign-in setup](#connect-a-coding-agent). Hosted Scout serves `/connect` and `/scout/mcp`; the button opens Claude Desktop with a setup prompt. This supersedes the 23 October web-placeholder reset. Existing older client configuration and authorization grants are not automatically removed or revoked. Scout serving, main-site documentation and npm publication remain separate releases; dated receipts below describe their original versions, not acceptance of every later build.
 
-## Repeatable searches and task-specific evidence first — 26 October 2026 (not yet deployed)
+## Repeatable searches and task-specific evidence first — deployed, 27 October 2026
 
 **Repeatable results.** Scout's interpretation and evidence checks are AI calls whose answers vary between attempts, so an identical search could return a different shortlist: across 34 test cases run three times, repeats shared only 34–39% of their top five. A completed search now records each AI answer it received. For seven days, an identical search (same prompt, model/endpoint scope, catalogue generation, interpreter version and UTC day) replays those answers instead of asking again, so it returns the same shortlist. Failed or degraded searches record nothing. A new catalogue generation, interpreter version or day asks again. See [the data policy](/scout/data-policy/) for how the answers are stored. Relative dates in restrictions now resolve against the UTC day rather than the exact time. Interpreter version is 40.
 

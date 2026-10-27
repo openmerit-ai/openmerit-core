@@ -1,6 +1,8 @@
 # Scout architecture and operations
 
-## Answer cache and specificity-first frontier (not yet deployed)
+## Answer cache and specificity-first frontier — deployed, 27 October 2026
+
+**Deployment receipt:** the owner approved the commit, push and deployment of both Workers. Commit [848a53a](https://github.com/laz-aslam/openmerit/commit/848a53a) is on `origin/main`. Serving Worker `openmerit-scout-alpha` version `6919c5cf` and publisher `openmerit-scout` version `c1871492` are live (the publisher's first two attempts failed with a Cloudflare 500 on the asset-upload session before uploading anything). Search-time changes apply now; live generation is `18b7d5ed`.
 
 **Why results varied.** A diagnostic run of eight cases, four times each, against generation `9242132d` showed that every repeat produced a different decomposition `search` text, which changed the capability weights, the retrieved benchmarks (mean Jaccard 0.25–0.92) and the accepted tiers. Pinning only the decomposition raised mean top-five overlap from 0.34 to 0.70; the evidence assessment and Decisions answers account for the rest. Two of 32 runs failed with "Task evidence applicability is unavailable": the assessment call allowed 1.8 s with no retry, and observed latencies ran 265–1,383 ms.
 
@@ -10,7 +12,9 @@
 
 The assessment call now allows one retry (`maxRetries:1`) within up to four seconds.
 
-## Ranking test set and model-name matching (not yet deployed)
+## Ranking test set and model-name matching — deployed, 26 October 2026
+
+**Deployment receipt:** the owner approved the push and deployment. Commit [39667f6](https://github.com/laz-aslam/openmerit/commit/39667f6) is on `origin/main`, rebased onto PRs #24 and #25. Publisher version `9146e449` went live; the matching changes apply from the next refresh, which published generation `18b7d5ed`.
 
 The owner agreed to measure ranking before changing it, and to fix ambiguous model names.
 
