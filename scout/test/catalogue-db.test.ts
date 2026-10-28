@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { importCatalogueSource, mergeListings, mergeModel, rebuildOfferings, routeVoice, type Bucket, type ImportResult, type SourceListing } from '../catalogue-db.ts';
+import { importCatalogueSource, mergeListings, mergeModel, rebuildModels, rebuildOfferings, routeVoice, type Bucket, type ImportResult, type SourceListing } from '../catalogue-db.ts';
 import { d1 } from './helpers-d1.ts';
 
 const bucket = (): Bucket & { data: Map<string, Uint8Array> } => { const data = new Map<string, Uint8Array>(); return { data, head: async (k: string) => data.has(k) ? {} : null, put: async (k: string, v: Uint8Array) => data.set(k, v) }; };
@@ -30,7 +30,7 @@ test('models.dev seeds canonical models, routes and dated price tiers, and LiteL
   const backbone = ok(await importCatalogueSource(db, 'modelsdev', { fetcher: serve({ [MD]: api, [MDM]: models }), bucket: raw, now: '2026-10-25T00:00:00Z', run: 'r1' }));
   assert.equal(backbone.listings, 4); assert.equal(backbone.unresolved, 1);
   // A canonical ID referenced only by routes still becomes a model, with its lab.
-  assert.deepEqual(db.all('SELECT id,lab_id,basis,license FROM cat_models ORDER BY id').map(r => ({ ...r })), [
+  assert.deepEqual(db.all("SELECT id,lab_id,basis,license FROM cat_models WHERE basis<>'reviewed-model' ORDER BY id").map(r => ({ ...r })), [
     { id: 'anthropic/claude-y', lab_id: 'anthropic', basis: 'modelsdev-route', license: null }, { id: 'openai/gpt-x', lab_id: 'openai', basis: 'modelsdev-model', license: 'proprietary' }]);
   // The legacy context_over_200k block and an identical 200k tier are one tier, not two.
   assert.deepEqual(db.all("SELECT kind,tier,amount FROM cat_prices WHERE provider_model_id='gpt-x' ORDER BY tier,kind").map(r => ({ ...r })), [
@@ -130,7 +130,7 @@ test('gateways, genai-prices and Epoch add routes, Hugging Face IDs, tiers, date
     // The Hub route links through the repository the OpenRouter identity names.
     'genaiprices|openai|gpt-x': ['openai/gpt-x', 'modelsdev-route', null], 'genaiprices|huggingface:together|Vendor/Open-1': ['vendor/open-1', 'hf-repo', 'Vendor/Open-1'] });
   assert.deepEqual({ ...one(db, "SELECT model_id,model_basis FROM cat_listings WHERE provider_id='fireworks-ai'") }, { model_id: 'anthropic/claude-y', model_basis: 'slug-unique' });
-  assert.deepEqual(db.all("SELECT id,lab_id,name,basis FROM cat_models WHERE basis NOT LIKE 'modelsdev-%' ORDER BY id").map(r => ({ ...r })), [
+  assert.deepEqual(db.all("SELECT id,lab_id,name,basis FROM cat_models WHERE basis NOT LIKE 'modelsdev-%' AND basis<>'reviewed-model' ORDER BY id").map(r => ({ ...r })), [
     { id: 'lab-w/w-1', lab_id: 'lab-w', name: 'W 1', basis: 'vercel-id' }, { id: 'vendor/open-1', lab_id: 'vendor', name: 'Open 1', basis: 'openrouter-id' }]);
   const prices = (source: string, provider: string) => db.all(`SELECT kind,tier,unit,amount FROM cat_prices WHERE source='${source}' AND provider_id='${provider}' ORDER BY kind,tier`).map(r => [r.kind, r.tier, r.unit, r.amount]);
   // Router "-1" placeholders are not prices.
@@ -148,10 +148,10 @@ test('gateways, genai-prices and Epoch add routes, Hugging Face IDs, tiers, date
   assert.deepEqual({ ...one(db, "SELECT model_id,hf_id,sources FROM cat_offerings WHERE provider_id='openrouter' AND provider_model_id='vendor/open-1'") }, { model_id: 'vendor/open-1', hf_id: 'Vendor/Open-1', sources: '["openrouter"]' });
   // A later Models.dev import withdraws only Models.dev's own models.
   ok(await importCatalogueSource(db, 'modelsdev', { fetcher, now: '2026-10-26T12:00:00Z', run: 'modelsdev-2' }));
-  assert.deepEqual(db.all('SELECT id FROM cat_models WHERE withdrawn_at IS NULL ORDER BY id').map(r => r.id), ['anthropic/claude-y', 'lab-w/w-1', 'openai/gpt-x', 'vendor/open-1']);
+  assert.deepEqual(db.all("SELECT id FROM cat_models WHERE withdrawn_at IS NULL AND basis<>'reviewed-model' ORDER BY id").map(r => r.id), ['anthropic/claude-y', 'lab-w/w-1', 'openai/gpt-x', 'vendor/open-1']);
   // A gateway's next import keeps the identities it introduced, with their own basis.
   for (const source of ['openrouter', 'vercel'] as const) ok(await importCatalogueSource(db, source, { fetcher, now: '2026-10-27T00:00:00Z', run: `${source}-2` }));
-  assert.deepEqual(db.all('SELECT id,basis FROM cat_models WHERE withdrawn_at IS NULL ORDER BY id').map(r => [r.id, r.basis]),
+  assert.deepEqual(db.all("SELECT id,basis FROM cat_models WHERE withdrawn_at IS NULL AND basis<>'reviewed-model' ORDER BY id").map(r => [r.id, r.basis]),
     [['anthropic/claude-y', 'modelsdev-route'], ['lab-w/w-1', 'vercel-id'], ['openai/gpt-x', 'modelsdev-model'], ['vendor/open-1', 'openrouter-id']]);
   assert.deepEqual(db.all("SELECT model_basis FROM cat_listings WHERE provider_model_id IN ('lab-w/w-1','vendor/open-1') ORDER BY provider_model_id").map(r => r.model_basis), ['vercel-id', 'openrouter-id']);
 });
@@ -191,4 +191,19 @@ test('a canonical model merges its owner record with every source\'s routes unde
   const two = mergeModel('lab/m', record, [...voices, routeVoice('openrouter', [{ input_modalities: '["image","text"]' }])]);
   assert.equal(two.input_modalities, '["text","image"]');
   assert.deepEqual(JSON.parse(two.sources), ['modelsdev', 'openrouter', 'litellm', 'epoch']);
+});
+
+test('reviewed identities link LiteLLM-only decision routes but never moving aliases', async () => {
+  const db = d1(), now = '2026-10-28T00:00:00Z';
+  const fetcher = serve({ [MD]: api, [MDM]: models, [LL]: { ...litellm(), 'nace/drex-v2.0': { litellm_provider: 'nace', mode: 'evaluation', input_cost_per_token: 1e-7 }, 'nace/drex-latest': { litellm_provider: 'nace', mode: 'evaluation', input_cost_per_token: 1e-7 } } });
+  ok(await importCatalogueSource(db, 'modelsdev', { fetcher, now, run: 'm' }));
+  ok(await importCatalogueSource(db, 'litellm', { fetcher, now, run: 'l' }));
+  assert.deepEqual(db.all("SELECT provider_model_id,model_id,model_basis FROM cat_listings WHERE provider_id='litellm:nace' ORDER BY provider_model_id").map(r => [r.provider_model_id, r.model_id, r.model_basis]),
+    [['drex-latest', null, null], ['drex-v2.0', 'nace/drex-v2.0', 'reviewed-route']]);
+  await rebuildOfferings(db); await rebuildModels(db);
+  assert.deepEqual({ ...one(db, "SELECT kind,name FROM cat_model_merged WHERE id='nace/drex-v2.0'") }, { kind: 'decision', name: 'Drex 2.0' });
+  // Models.dev's own record replaces a reviewed identity it later introduces.
+  const taken = { ...api, nace: { id: 'nace', name: 'Nace', models: { 'drex-v2.0': { id: 'drex-v2.0', name: 'Drex v2', canonical_model_id: 'nace/drex-v2.0' } } } };
+  ok(await importCatalogueSource(db, 'modelsdev', { fetcher: serve({ [MD]: taken, [MDM]: models }), now: '2026-10-28T12:00:00Z', run: 'm2' }));
+  assert.equal(one(db, "SELECT basis FROM cat_models WHERE id='nace/drex-v2.0'").basis, 'modelsdev-route');
 });

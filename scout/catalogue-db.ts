@@ -6,6 +6,8 @@
 
 // The subset of D1 and R2 this module uses. Runtime Worker types are not
 // committed yet (docs/site-typescript-migration.md), and tests pass SQLite.
+import { reviewedModels, reviewedRoutes } from './catalogue-identities.ts';
+
 type Value = string | number | null;
 export interface Statement {
   bind(...values: Value[]): Statement;
@@ -422,10 +424,11 @@ export function resolveListings(listings: Listing[], backbone: Backbone, { slugs
   const same = index(backbone.routes.flatMap(r => r.model_id ? [[r.provider_model_id, r.model_id] as const] : []));
   const repo = index((backbone.repos ?? []).map(r => [r.repo, r.model_id] as const)), slug = index([...backbone.models].map(m => [modelSlug(m), m] as const));
   const canonical = (id: string) => [id, baseID(id)].find(x => backbone.models.has(x)) ?? null;
+  const reviewed = new Map(reviewedRoutes.filter(r => backbone.models.has(r.model)).map(r => [`${r.provider}|${r.route}`, r.model]));
   for (const l of listings) {
     // A link the source itself gives ranks after Models.dev's routes and IDs.
     const id = l.provider_model_id, exact = routes.get(`${l.provider_id}|${id}`), lower = id.toLowerCase();
-    const found: Array<[string | null | undefined, string | null]> = [[exact, 'modelsdev-route'], [canonical(id), 'modelsdev-canonical-id'], [same(id), 'modelsdev-same-id'], [l.model_id, l.model_basis],
+    const found: Array<[string | null | undefined, string | null]> = [[exact, 'modelsdev-route'], [reviewed.get(`${l.provider_id}|${id}`), 'reviewed-route'], [canonical(id), 'modelsdev-canonical-id'], [same(id), 'modelsdev-same-id'], [l.model_id, l.model_basis],
       [repo(lower.includes('/') ? lower : null) ?? repo(l.hf_id?.toLowerCase()), 'hf-repo'], [slugs ? slug(modelSlug(id)) : null, 'slug-unique']];
     const [model_id, model_basis] = found.find(([m]) => m) ?? [null, null];
     Object.assign(l, { model_id: model_id ?? null, model_basis: model_id ? model_basis : null });
@@ -560,7 +563,7 @@ export async function storeSourceModels(db: Database, source: string, models: So
 // added only when two other sources claim it, so one stale or optimistic feed
 // cannot add support. Each row records which sources supplied each field and
 // any disagreement.
-export const sourcePreference = ['modelsdev', 'openrouter', 'vercel', 'litellm', 'genaiprices', 'huggingface', 'epoch'];
+export const sourcePreference = ['modelsdev', 'reviewed', 'openrouter', 'vercel', 'litellm', 'genaiprices', 'huggingface', 'epoch'];
 const offeringFields = ['model_id', 'model_basis', 'name', 'family', 'type', 'status', 'release_date', 'deprecated_at', 'context', 'max_input', 'max_output', 'input_modalities', 'output_modalities',
   'reasoning', 'tool_call', 'structured_output', 'attachment', 'open_weights', 'hf_id'] as const;
 const capabilityFlags = new Set(['reasoning', 'tool_call', 'structured_output', 'attachment']), corroboration = 2;
@@ -609,7 +612,7 @@ const kinds: Record<string, string> = {
   image: 'image', image_generation: 'image', image_edit: 'image', 'text-to-image': 'image', 'image-to-image': 'image',
   video: 'video', video_generation: 'video', 'text-to-video': 'video', 'image-to-video': 'video', 'image-text-to-video': 'video',
   speech: 'speech', audio_speech: 'speech', 'text-to-speech': 'speech', 'text-to-audio': 'speech',
-  transcription: 'transcription', audio_transcription: 'transcription', 'automatic-speech-recognition': 'transcription', ocr: 'ocr',
+  decision: 'decision', transcription: 'transcription', audio_transcription: 'transcription', 'automatic-speech-recognition': 'transcription', ocr: 'ocr',
 };
 export const modelKind = (type: Value | undefined): string | null => typeof type === 'string' ? kinds[type] ?? null : null;
 
@@ -691,6 +694,20 @@ export async function rebuildModels(db: Database): Promise<{ models: number; con
   return { models: rows.length, conflicts: rows.filter(r => r.conflicts).length, corroborated };
 }
 
+// Reviewed identities (catalogue-identities.ts) are stored before every import so
+// routes can resolve to them. They never replace another source's record, and
+// one removed from the review is withdrawn.
+export async function storeReviewedModels(db: Database, now: string): Promise<void> {
+  const rows: Row[] = [];
+  for (const m of reviewedModels) {
+    const payload = { reviewed: m };
+    rows.push({ ...pick(modelColumns, { id: m.id, lab_id: m.lab, name: m.name, type: m.kind, basis: 'reviewed-model', payload: JSON.stringify(payload) }), payload_hash: await digest(payload) });
+  }
+  await chunked(db, `INSERT INTO cat_models (${modelColumns.join(',')},first_seen,last_seen,withdrawn_at) SELECT ${extract(modelColumns)},?1,?1,NULL FROM json_each(?2) WHERE true
+    ON CONFLICT(id) DO UPDATE SET ${updates(modelColumns, ['id'])},last_seen=excluded.last_seen,withdrawn_at=NULL WHERE cat_models.basis=excluded.basis`, rows, [now]);
+  await db.prepare("UPDATE cat_models SET withdrawn_at=?1 WHERE basis='reviewed-model' AND withdrawn_at IS NULL AND id NOT IN (SELECT value FROM json_each(?2))").bind(now, JSON.stringify(reviewedModels.map(m => m.id))).run();
+}
+
 async function readSource(fetcher: Fetcher, url: string, maxBytes: number): Promise<Uint8Array<ArrayBuffer>> {
   const response = await fetcher(url, { signal: AbortSignal.timeout(60_000), headers: { 'User-Agent': 'OpenMerit-Scout/0.1 (+https://openmerit.ai/scout)' } });
   if (!response.ok || !response.body) throw new Error(`${new URL(url).hostname} returned ${response.status}.`);
@@ -707,6 +724,7 @@ export async function importCatalogueSource(db: Database, source: CatalogueSourc
   const { fetcher = fetch, bucket, now = new Date().toISOString() } = options, run = options.run ?? `${source}-${now}`;
   const config = catalogueSources[source];
   await ensureCatalogueSchema(db);
+  await storeReviewedModels(db, now);
   await db.batch([
     db.prepare('INSERT INTO cat_sources (id,name,url,license,role) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET name=excluded.name,url=excluded.url,license=excluded.license,role=excluded.role').bind(source, config.name, config.url, config.license, config.role),
     // A retried workflow step reuses its run ID.
