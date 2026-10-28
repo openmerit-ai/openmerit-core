@@ -52,7 +52,7 @@ async function openSignIn(clerk, options) {
   finally { observer?.disconnect(); }
 }
 
-export function initAuth(onAccountChange, onAuthenticatedSubmit) {
+export function initAuth(onAccountChange, onAuthenticatedSubmit, onSessionChange = (_id) => {}) {
   const button = document.querySelector('#sign-in'), account = document.querySelector('#user-account');
   const prompt = document.querySelector('#prompt'), error = document.querySelector('#error');
   const returnUrl = `${location.origin}${location.pathname}`;
@@ -105,6 +105,7 @@ export function initAuth(onAccountChange, onAuthenticatedSubmit) {
         button.hidden = !!id; account.hidden = !id;
         if (id && !mounted) { clerk.mountUserButton(account); mounted = true; }
         if (!id && mounted) { clerk.unmountUserButton(account); mounted = false; }
+        onSessionChange(id);
         if (id) {
           try { sessionStorage.removeItem(draftKey); } catch { /* Optional storage. */ }
           const resume = pendingPrompt && prompt?.value.trim() === pendingPrompt;
