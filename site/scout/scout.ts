@@ -9,7 +9,6 @@ import type { Answer } from '../../scout/agent/tools.ts';
 import type { AgentState, BriefEdits, TurnAnswer, TurnRequest } from '../../scout/agent/turn.ts';
 
 type Clarification = Extract<Answer, { kind: 'clarification' }>;
-type Question = Clarification['questions'][number];
 type Reply = AgentState & { conversationId?: string; error?: string };
 
 const $ = <T extends HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
@@ -39,15 +38,16 @@ function showError(message: string) { errorBox.textContent = message; errorBox.h
 function scrollIntoView(node: Element) { node.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }
 function entry(role: 'user' | 'scout'): HTMLLIElement {
   const item = element('li', `turn turn-${role}`);
-  item.append(element('span', 'turn-role', role === 'user' ? 'You' : 'Scout'));
+  const label = element('span', 'turn-role', role === 'user' ? 'You' : 'Scout');
+  if (role === 'scout') label.prepend(document.querySelector('.parent-brand svg')!.cloneNode(true));
+  item.append(label);
   conversationList.append(item);
   return item;
 }
 
-// The task brief as a form: each component is edited in place, and Scout's
-// questions sit under the component they would change. Only components the
-// user changed are sent.
-function briefForm(brief: Brief, questions: Question[], onSend: (edits: BriefEdits, skip: boolean) => void): HTMLFormElement {
+// The task brief as a form: each component is edited in place.
+// Only components the user changed are sent.
+function briefForm(brief: Brief, onSend: (edits: BriefEdits, skip: boolean) => void): HTMLFormElement {
   const form = element('form', 'brief-form'), list = element('dl', 'brief brief-editable');
   const prefix = `b-${epoch}-${conversationList.children.length}`, fields = new Map<Component, HTMLTextAreaElement>();
   for (const key of Object.keys(componentLabels) as Component[]) {
@@ -57,13 +57,6 @@ function briefForm(brief: Brief, questions: Question[], onSend: (edits: BriefEdi
     const field = element('textarea', 'brief-field'); field.id = label.htmlFor; field.rows = 1; field.maxLength = 1000; field.value = part.text;
     field.placeholder = 'Not known yet. Add it here.';
     const value = element('dd'); value.append(field);
-    const asked = questions.filter(q => q.component === key);
-    asked.forEach((q, i) => {
-      const box = element('div', 'brief-question'), text = element('p', 'brief-question-text', q.question); text.id = `${prefix}-${key}-${i}`;
-      box.append(text);
-      value.append(box);
-    });
-    if (asked.length) { row.classList.add('brief-asked'); field.setAttribute('aria-describedby', asked.map((_, i) => `${prefix}-${key}-${i}`).join(' ')); }
     const sync = () => {
       fit(field);
       const source = field.value.trim() === part.text.trim() ? part.source : 'edited';
@@ -79,16 +72,11 @@ function briefForm(brief: Brief, questions: Question[], onSend: (edits: BriefEdi
   actions.append(send);
   form.append(list, actions);
   const edits = (): BriefEdits => Object.fromEntries([...fields].filter(([key, f]) => f.value.trim() !== brief[key].text.trim()).map(([key, f]) => [key, f.value.trim()]));
-  const submit = (skip: boolean) => {
+  form.addEventListener('submit', event => {
+    event.preventDefault();
     if (working) return;
-    const changed = edits();
-    if (!skip && !Object.keys(changed).length) { showError('Edit the brief, or skip the questions.'); fields.values().next().value?.focus(); return; }
-    onSend(changed, skip);
-  };
-  form.addEventListener('submit', event => { event.preventDefault(); submit(false); });
-  const skip = element('button', 'secondary-button', 'Skip questions'); skip.type = 'button';
-  skip.addEventListener('click', () => submit(true));
-  actions.append(skip, element('span', 'question-hint', 'Skipping lets Scout recommend now with stated assumptions.'));
+    onSend(edits(), true);
+  });
   return form;
 }
 // What the user said, as their side of the conversation.
@@ -102,11 +90,11 @@ const sendEdits = (brief: BriefEdits, skip: boolean) => { void runTurn({ brief, 
 function clarificationView(answer: Clarification, item: HTMLLIElement) {
   // Open while the user edits; collapses to one line once they send it (see runTurn).
   const box = element('details', 'brief-turn'); box.open = true;
-  box.append(element('summary', '', 'Task brief and questions'),
-    element('p', 'turn-text', 'Here is what I understood. Correct anything in place. Answering the questions under a part would change which models I recommend.'),
-    briefForm(answer.brief, answer.questions, sendEdits));
+  box.append(element('summary', '', 'Task brief'),
+    element('p', 'turn-text', 'Here is what I understood. Correct anything in place.'),
+    briefForm(answer.brief, sendEdits));
   item.append(box);
-  requestAnimationFrame(() => item.querySelector<HTMLTextAreaElement>('.brief-asked .brief-field')?.focus({ preventScroll: true }));
+  requestAnimationFrame(() => item.querySelector<HTMLTextAreaElement>('.brief-field')?.focus({ preventScroll: true }));
 }
 
 function metricCell(value: string | null, title: string): HTMLTableCellElement {
@@ -228,8 +216,18 @@ async function request(token: string, method: 'GET' | 'POST', path: string, body
 // Signed-out users are sent to sign in first; onStart runs only once the turn really starts.
 async function runTurn(turn: TurnRequest, said: string, onStart?: () => void) {
   if (working) return;
-  const token = await auth.getToken();
-  if (!token || working) return;
+  const authEpoch = epoch;
+  let token: string | null;
+  showError('');
+  try { token = await auth.getToken(); }
+  catch {
+    if (authEpoch === epoch) {
+      showError('Sign-in could not load. Check your connection and reload this page to try again.');
+      scrollIntoView(errorBox);
+    }
+    return;
+  }
+  if (!token || working || authEpoch !== epoch) return;
   onStart?.();
   const first = conversationId === null, id = conversationId ?? crypto.randomUUID(), turnEpoch = epoch;
   working = true; showError(''); setComposer();
@@ -292,7 +290,14 @@ function setComposer() {
 }
 // Grow a text box to its content. A box that is not displayed yet keeps its natural height until it is.
 function fit(area: HTMLTextAreaElement) { area.style.height = 'auto'; if (area.scrollHeight) area.style.height = `${area.scrollHeight}px`; }
-addEventListener('resize', () => conversationList.querySelectorAll<HTMLTextAreaElement>('.brief-field').forEach(fit));
+// Let the first page gesture settle at the full-screen chat before the footer
+// becomes another snap destination. A fast swipe must not skip the chat.
+function settleChat() {
+  const chat = $('#main');
+  chat.classList.toggle('chat-settled', chat.getBoundingClientRect().top <= 1);
+}
+addEventListener('scrollend', settleChat);
+addEventListener('resize', () => { settleChat(); conversationList.querySelectorAll<HTMLTextAreaElement>('.brief-field').forEach(fit); });
 const fitPrompt = () => fit(prompt);
 
 composer.addEventListener('submit', event => {
@@ -310,5 +315,69 @@ function reset() {
   epoch++; conversationId = null; working = false;
   conversationList.replaceChildren(); showError(''); setComposer(); prompt.focus();
 }
-const auth = initAuth(reset);
+const auth = initAuth(reset, () => composer.requestSubmit());
 fitPrompt();
+
+// Restore the existing secret-free Claude handoff without making analytics a
+// startup dependency. Blocked instrumentation is not a saved installer opt-out.
+let setupAnalytics: typeof import('./analytics.js')['analytics'] | undefined, setupEpoch = 0;
+void import('./analytics.js').then(module => { setupAnalytics = module.analytics; }).catch(() => {});
+addEventListener('scout-analytics-change', () => { setupEpoch++; });
+function setupSettings() {
+  const current = setupAnalytics?.preferences();
+  try {
+    return {
+      enabled: current?.enabled === true,
+      usageRequested: navigator.doNotTrack !== '1' && !('doNotTrack' in window && window.doNotTrack === '1')
+        && !('globalPrivacyControl' in navigator && navigator.globalPrivacyControl === true)
+        && localStorage.getItem('scout-analytics-opt-out') !== '1' && !(current?.available && !current.enabled),
+      linkAccount: current?.linkAccount ?? localStorage.getItem('scout-analytics-account-link') !== '0',
+    };
+  } catch { return { enabled: false, usageRequested: false, linkAccount: false }; }
+}
+$('#add-to-claude').addEventListener('click', async () => {
+  const settings = setupSettings(), epoch = setupEpoch;
+  const setupId = settings.enabled && settings.usageRequested && settings.linkAccount ? crypto.randomUUID() : undefined;
+  const properties = { agent: 'claude-code', ...(setupId ? { setup_id: setupId } : {}) };
+  const environment = !settings.usageRequested ? 'DO_NOT_TRACK=1 ' : settings.linkAccount ? '' : 'OPENMERIT_ANALYTICS_ACCOUNT=off ';
+  const setupPrompt = `Connect OpenMerit Scout to Claude Code.
+
+Run this command with a 10-minute timeout, without asking me anything first:
+${environment}npx -y openmerit@latest install --client claude-code${setupId ? ` --setup-id ${setupId}` : ''}
+
+It opens my browser so I can approve this device, then finishes by itself. If it exits with "approval pending", show me the link and code it printed and run the same command again. Don't edit configuration files yourself or ask me for a key. If it reports a conflict or another error, show me its message and stop. When it succeeds, tell me in one line that Scout is connected and I must start a new Claude Code session to load its startup instructions; reconnecting /mcp alone is not enough.`;
+  const status = $('#claude-setup-status'); status.hidden = false; status.textContent = 'Copying setup prompt and requesting Claude…';
+  void setupAnalytics?.track('scout_agent_setup_started', properties);
+  // Request the app in this click task: clipboard permission must not consume
+  // transient user activation. Either API can fail independently of the other.
+  let copying: Promise<void> | undefined, launched = false;
+  try { copying = navigator.clipboard.writeText(setupPrompt); } catch { /* Report below. */ }
+  try { location.href = `claude://code/new?q=${encodeURIComponent(setupPrompt)}`; launched = true; } catch { /* A request cannot prove the app opened. */ }
+  void setupAnalytics?.track('scout_agent_launch_requested', { ...properties, outcome: launched ? 'ok' : 'error', ...(!launched ? { code: 'launch_error' } : {}) });
+  let copied = false;
+  try { if (copying) { await copying; copied = true; } } catch { /* The deep link still includes the prompt. */ }
+  status.textContent = copied ? 'Setup prompt copied. Paste it into Claude Code if the app doesn’t open.'
+    : launched ? 'Claude launch requested. If it doesn’t open, allow clipboard access and try again.'
+    : 'Couldn’t copy or request Claude. Please try again.';
+  const current = setupSettings();
+  if (epoch === setupEpoch && current.enabled === settings.enabled && current.linkAccount === settings.linkAccount && current.usageRequested === settings.usageRequested)
+    void setupAnalytics?.track('scout_agent_setup_copied', { ...properties, outcome: copied ? 'ok' : 'error', ...(!copied ? { code: 'clipboard_error' } : {}) });
+});
+
+// Public coverage is optional; a failed or slow status request must never gate sign-in or sending.
+async function loadCoverage() {
+  try {
+    const response = await fetch(api.replace(/\/agent$/, '/status'), { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) return;
+    const status = await response.json() as { availableModels: number; specialistRepositories: number; providers: number; benchmarks: number; sources: { id: string }[] };
+    const counts = [status.availableModels, status.specialistRepositories, status.providers, status.benchmarks];
+    if (!counts.every(n => Number.isSafeInteger(n) && n >= 0) || !Array.isArray(status.sources) || !status.sources.every(s => typeof s?.id === 'string')) return;
+    const sources = new Set(status.sources.map(s => s.id)).size;
+    const labels = ['indexed models', 'Hub repos', 'benchmarked labs', 'benchmarks', 'source feeds'];
+    const coverage = $('#index-counts');
+    coverage.textContent = [...counts, sources].map((n, i) => `${n.toLocaleString('en-US')}\u00a0${labels[i]!.replaceAll(' ', '\u00a0')}`).join(' · ');
+    coverage.title = 'Catalogue models and Hugging Face repositories are separate, potentially overlapping counts. Labs count publishers with benchmark results. Benchmarks include descriptions without results; source feeds include retained research records, not distinct organizations.';
+    coverage.hidden = false;
+  } catch { /* Keep the composer usable without catalogue coverage. */ }
+}
+void loadCoverage();

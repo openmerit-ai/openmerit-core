@@ -1,12 +1,21 @@
 /* Conversational Scout: turns, task brief, clarifying questions and the shortlist. */
-.agent-page .scout-intro { padding-bottom: 20px; }
-.conversation { display: flex; flex-direction: column; gap: 22px; margin: 0 0 28px; padding: 0; list-style: none; }
-.conversation:empty { display: none; }
+.agent-page .scout-intro { display: block; flex: none; padding: 24px 0 18px; }
+.index-coverage { display: grid; gap: 9px; margin-top: 18px; }
+.lab-stack { display: flex; width: fit-content; }
+.lab-stack > span { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border: 2px solid var(--paper); border-radius: 50%; background: #fff; }
+.lab-stack > span + span { margin-left: -6px; }
+.lab-stack img { display: block; object-fit: contain; border-radius: 2px; }
+.index-counts { color: var(--quiet); font-size: 11px; line-height: 1.8; text-wrap: pretty; }
+.conversation { display: flex; flex-direction: column; gap: 22px; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; scroll-padding: 16px; margin: 0; padding: 16px 16px 28px; list-style: none; }
+.conversation:empty { display: block; }
+.conversation:focus-visible { outline-offset: -2px; }
+.conversation > .turn { flex: none; }
 .turn { display: grid; gap: 12px; min-width: 0; }
-.turn-role { color: var(--quiet); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .6px; }
+.turn-role { display: flex; align-items: center; gap: 6px; color: var(--quiet); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .6px; }
+.turn-role svg { flex: none; width: 14px; height: 16px; }
 .turn-user { justify-items: end; }
 .turn-user .turn-text { max-width: min(640px, 100%); padding: 10px 14px; border-radius: 8px; background: var(--raised); white-space: pre-wrap; overflow-wrap: anywhere; }
-.turn-scout { padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+.turn-scout { padding-bottom: 22px; }
 .turn-text { font-size: 14px; line-height: 1.6; max-width: 760px; }
 .turn-error { color: var(--error); font-size: 13px; }
 
@@ -27,32 +36,35 @@
 .brief-turn:not(.brief-sent) > summary { display: none; }
 .brief-turn[open] > summary { margin-bottom: 4px; }
 
-.brief { display: grid; gap: 0; margin: 0; border-top: 1px solid var(--line); }
-.brief-row { display: grid; grid-template-columns: 160px 1fr; gap: 16px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.brief { display: grid; gap: 0; margin: 0; }
+.brief-row { display: grid; grid-template-columns: 160px 1fr; gap: 16px; padding: 9px 0; }
 .brief dt { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-top: 4px; font-weight: 500; }
 .brief dd { display: grid; gap: 10px; margin: 0; min-width: 0; }
 .brief-source { padding: 1px 6px; border-radius: 999px; font: 10px var(--mono); color: var(--muted); background: var(--raised); }
 .brief-assumed { color: var(--warning); }
 .brief-missing { color: var(--quiet); background: transparent; border: 1px dashed var(--field-line); }
 .brief-edited { color: var(--paper); background: var(--ink); }
-/* Each component reads as text and edits in place; fields Scout asks about, and empty ones, show as inputs. */
-.brief-field { display: block; width: calc(100% + 16px); margin: 0 -8px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); line-height: 1.5; resize: none; overflow: hidden; }
+/* Every current brief component has the same editable surface. */
+.brief-field { display: block; width: calc(100% + 16px); margin: 0 -8px; padding: 4px 8px; border: 0; border-radius: 6px; background: var(--input); color: var(--ink); line-height: 1.5; resize: none; overflow: hidden; }
 .brief-field::placeholder { color: var(--quiet); opacity: 1; }
-.brief-asked .brief-field, .brief-field:placeholder-shown { background: var(--input); }
 .brief-field:focus { outline: none; background: var(--input-active); }
 .brief-field:disabled { background: transparent; cursor: default; }
-.brief-question-text { color: var(--muted); font-size: 12px; }
 .brief-form { display: grid; gap: 14px; }
-.question-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+.question-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .question-actions:has(:disabled) { display: none; }
-.question-hint { color: var(--muted); font-size: 11px; }
-.primary-button, .secondary-button { min-height: 40px; padding: 8px 16px; border-radius: 6px; font-size: 12px; font-weight: 500; }
-.primary-button { border: 0; background: var(--button); color: var(--button-ink); }
-.secondary-button { border: 1px solid var(--field-line); background: var(--surface); }
+.question-actions button:focus-visible { outline-offset: 2px; }
+.primary-button, .secondary-button { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 6px 12px; border: 0; border-radius: 8px; font-size: 12px; font-weight: 500; line-height: 20px; -webkit-user-select: none; user-select: none; }
+.primary-button { background: var(--button); color: var(--button-ink); }
+.secondary-button { padding-inline: 8px; background: transparent; color: var(--muted); }
 .brief-form :disabled { cursor: default; }
+.claude-setup { margin-top: 20px; }
+.claude-setup-button { gap: 8px; padding-inline: 12px; background: var(--raised); color: var(--ink); }
+.claude-setup-button img { display: block; flex: none; }
+.agent-page .claude-setup-status { margin-top: 8px; color: var(--muted); font-size: 11px; }
 
 .turn .table-scroll { max-height: none; }
 .agent-table { min-width: 600px; }
+.agent-table thead th { box-shadow: none; }
 .agent-table .model-column { width: 40%; }
 .agent-table .numeric-column { width: 15%; }
 .agent-scroll-hint { display: none; }
@@ -60,14 +72,29 @@
 .model-watch { margin-top: 8px; color: var(--warning); font-size: 12px; }
 .evidence-item > .evidence-name { font-family: var(--sans); overflow-wrap: anywhere; }
 
-/* Like a chat app: the conversation fills the page and the message box stays docked at the bottom. */
-html:has(.agent-page) { scroll-padding-bottom: 160px; }
-.agent-page { display: flex; flex-direction: column; max-width: 768px; min-height: calc(100svh - 72px); }
+/* Desktop keeps the intro/footer on the left and gives chat the full right-hand height. */
+html:has(.agent-page) { overscroll-behavior: none; scroll-padding: 0; }
+body:has(.agent-page) { height: 100dvh; min-height: 0; overflow: hidden; }
+.agent-page { display: grid; flex: 1; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; grid-template-areas: "nav chat" "intro chat" "footer chat"; column-gap: 64px; width: auto; min-height: 0; margin: 24px 40px; }
+.agent-page > .scout-header { grid-area: nav; }
+.agent-page > .scout-intro { grid-area: intro; min-height: 0; overflow-y: auto; }
+.agent-page > .scout-footer { grid-area: footer; }
+#main.chat-panel { grid-area: chat; display: flex; flex-direction: column; min-width: 0; min-height: 0; padding-bottom: 0; overflow: hidden; border-radius: 10px; background: var(--surface); }
+.scout-header .scout-brand { padding-left: 0; border-left: 0; }
+.scout-header .scout-wordmark, .scout-footer .parent-brand > span { font-size: 18px; font-weight: 550; letter-spacing: -.7px; }
+.scout-header .scout-wordmark { text-transform: lowercase; }
+.scout-header #new-conversation { flex: none; gap: 5px; margin-inline-end: -8px; padding: 6px 8px; }
+.scout-header #new-conversation svg { flex: none; }
 .agent-page .conversation { flex: 1; }
-.agent-page .error-message { margin: 0 0 8px; }
-.composer { position: sticky; bottom: 0; z-index: 2; margin-top: auto; padding: 10px 0 max(16px, env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--paper) 12px); }
+.agent-page .error-message { flex: none; margin: 0 12px 8px; }
+.composer { flex: none; padding: 10px 12px 12px; }
+.scout-page .scout-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding-top: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+.scout-footer .parent-brand { flex: none; min-height: 24px; color: var(--muted); }
+.scout-footer .parent-brand > span { display: inline; }
+.scout-page .footer-meta { flex-direction: column; flex-wrap: nowrap; align-items: flex-start; gap: 2px; padding-top: 0; text-align: left; }
+.scout-page .footer-meta a { display: flex; align-items: center; gap: 3px; min-height: 24px; }
 /* Three lines to start; grows with the text up to the shared maximum height, then scrolls. */
-.composer textarea { min-height: calc(3lh + 24px); }
+.composer textarea { min-height: calc(3lh + 24px); max-height: min(240px, 25dvh); }
 .composer .prompt-field { position: relative; }
 .composer textarea { padding-right: 64px; }
 .composer .prompt-footer { position: absolute; right: 0; bottom: 0; padding: 8px; }
@@ -76,6 +103,21 @@ html:has(.agent-page) { scroll-padding-bottom: 160px; }
   .secondary-button:not(:disabled):hover, .brief-field:not(:disabled):not(:focus):hover { background: var(--hover); }
   .primary-button:not(:disabled):hover { background: var(--button-hover); }
 }
+@media (any-pointer: coarse) {
+  .primary-button, .secondary-button { min-height: 44px; }
+  .brief-field, .composer textarea { font-size: 16px; }
+}
+@media (max-width: 900px) {
+  html:has(.agent-page) { scroll-snap-type: y mandatory; }
+  body:has(.agent-page) { height: auto; min-height: 100svh; overflow: visible; }
+  .agent-page { flex: none; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto 100dvh auto; grid-template-areas: "nav" "intro" "chat" "footer"; margin: 0 max(20px, env(safe-area-inset-right)) 0 max(20px, env(safe-area-inset-left)); }
+  .agent-page > .scout-header { padding-top: env(safe-area-inset-top); scroll-snap-align: start; }
+  .agent-page > .scout-intro { overflow: visible; }
+  #main.chat-panel { padding-top: env(safe-area-inset-top); scroll-snap-align: start; scroll-snap-stop: always; }
+  .agent-page .conversation { overscroll-behavior-y: auto; }
+  .composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .chat-settled + .scout-footer { scroll-snap-align: end; }
+}
 @media (max-width: 760px) {
   .brief-row { grid-template-columns: 1fr; gap: 4px; }
   .brief dt { justify-content: flex-start; padding-top: 0; }
@@ -83,4 +125,16 @@ html:has(.agent-page) { scroll-padding-bottom: 160px; }
   .agent-table { min-width: 600px; table-layout: fixed; }
   .agent-table .model-column { width: 190px; }
   .agent-table .numeric-column { width: 102px; }
+}
+@media (max-height: 600px) {
+  body:has(.agent-page) .header-inner { height: 48px; }
+  .agent-page .scout-intro { padding: 10px 0; }
+  .agent-page h1 { font-size: 20px; letter-spacing: -.5px; }
+  .agent-page .scout-intro p { font-size: 11px; }
+  .index-coverage { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; }
+  .lab-stack > span { width: 22px; height: 22px; }
+  .lab-stack img { width: 13px; height: 13px; }
+  .index-counts { font-size: 10px; line-height: 1.5; }
+  .composer textarea { min-height: calc(1lh + 24px); max-height: min(80px, 16dvh); }
+  body:has(.agent-page) .scout-footer { padding-top: 6px; padding-bottom: max(6px, env(safe-area-inset-bottom)); }
 }

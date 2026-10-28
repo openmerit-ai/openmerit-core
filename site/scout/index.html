@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
@@ -32,38 +32,63 @@
 </head>
 <body class="scout-page">
   <a class="skip-link" href="#prompt">Skip to message</a>
-  <header class="scout-header">
-    <div class="scout-wrap header-inner">
-      <a class="parent-brand" href="/" aria-label="OpenMerit home"><svg width="22" height="25" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span>openmerit</span></a>
-      <a class="scout-brand" href="/scout/">Scout <span class="beta-label">Beta</span></a>
-      <div class="account-controls"><button id="sign-in" class="sign-in-button" type="button">Sign in</button><div id="user-account" aria-label="Your account" hidden></div></div>
-    </div>
-  </header>
-  <main class="scout-wrap agent-page" id="main">
+  <div class="scout-wrap agent-page">
+    <header class="scout-header">
+      <div class="header-inner">
+        <a class="scout-brand" href="/scout/"><span class="scout-wordmark">Scout</span> <span class="beta-label">Beta</span></a>
+        <div class="account-controls"><button id="sign-in" class="sign-in-button" type="button">Sign in</button><div id="user-account" aria-label="Your account" hidden></div></div>
+        <button id="new-conversation" class="secondary-button" type="button" aria-label="New conversation" title="New conversation" hidden>
+          <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>
+          <span>New</span>
+        </button>
+      </div>
+    </header>
     <section class="scout-intro" aria-labelledby="agent-title">
       <div class="intro-copy">
-        <h1 id="agent-title">Find models for your work.</h1>
+        <h1 id="agent-title">Find the best AI models for your work.</h1>
         <p>Describe your work. Scout may ask a few questions, then shortlists five models on quality, cost and recency.</p>
-      </div>
-      <button id="new-conversation" class="sign-in-button" type="button" hidden>New conversation</button>
-    </section>
-    <ol id="conversation" class="conversation" aria-label="Conversation" aria-live="polite"></ol>
-    <p class="error-message" id="error" role="alert" hidden></p>
-    <form id="composer" class="prompt-box composer">
-      <label for="prompt" id="prompt-label" class="sr-only">Describe your work</label>
-      <div class="prompt-field">
-        <textarea id="prompt" name="prompt" rows="3" maxlength="4000" spellcheck="false" aria-describedby="prompt-hint" placeholder="Summarize customer support tickets and tag each one with a category."></textarea>
-        <span id="prompt-hint" class="sr-only">Shift + Enter for a new line.</span>
-        <div class="prompt-footer">
-          <button class="find-button" type="submit" title="Send"><span class="sr-only">Send</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="index-coverage">
+          <div class="lab-stack" role="img" aria-label="Including OpenAI, Anthropic, Google, Meta, Mistral, DeepSeek and Hugging Face">
+            <span><img src="/scout/providers/openai.png" width="16" height="16" alt=""></span>
+            <span><img src="/scout/providers/anthropic.png" width="16" height="16" alt=""></span>
+            <span><img src="/scout/providers/google.png" width="16" height="16" alt=""></span>
+            <span><img src="/scout/providers/meta.ico" width="16" height="16" alt=""></span>
+            <span><img src="/scout/providers/mistral.png" width="16" height="16" alt=""></span>
+            <span><img src="/scout/providers/deepseek.ico" width="16" height="16" alt=""></span>
+            <span><img src="/scout/providers/huggingface.svg" width="16" height="16" alt=""></span>
+          </div>
+          <div id="index-counts" class="index-counts" hidden></div>
+        </div>
+        <div class="claude-setup">
+          <button id="add-to-claude" class="secondary-button claude-setup-button" type="button" aria-describedby="claude-setup-status"><img src="/scout/agents/claude.png" width="18" height="18" alt="">Add to Claude Code</button>
+          <p id="claude-setup-status" class="claude-setup-status" role="status" hidden></p>
         </div>
       </div>
-    </form>
-    <noscript><p class="error-message">Enable JavaScript to talk to Scout.</p></noscript>
-  </main>
-  <footer class="scout-footer scout-wrap">
-    <div class="footer-meta"><span>Scout by OpenMerit</span><a href="/scout/privacy/">Privacy &amp; analytics</a><a href="/scout/data-policy/">Data policy <span aria-hidden="true">↗</span></a></div>
-  </footer>
+    </section>
+    <main class="chat-panel" id="main" aria-label="Chat with Scout">
+      <ol id="conversation" class="conversation" aria-label="Conversation" aria-live="polite" tabindex="0"></ol>
+      <p class="error-message" id="error" role="alert" hidden></p>
+      <form id="composer" class="prompt-box composer">
+        <label for="prompt" id="prompt-label" class="sr-only">Describe your work</label>
+        <div class="prompt-field">
+          <textarea id="prompt" name="prompt" rows="3" maxlength="4000" spellcheck="false" aria-describedby="prompt-hint" placeholder="Summarize customer support tickets and tag each one with a category."></textarea>
+          <span id="prompt-hint" class="sr-only">Shift + Enter for a new line.</span>
+          <div class="prompt-footer">
+            <button class="find-button" type="submit" title="Send"><span class="sr-only">Send</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          </div>
+        </div>
+      </form>
+      <noscript><p class="error-message">Enable JavaScript to talk to Scout.</p></noscript>
+    </main>
+    <footer class="scout-footer">
+      <div class="footer-meta">
+        <a href="/scout/data-policy/">Data policy <span aria-hidden="true">↗</span></a>
+        <a href="/scout/privacy/">Privacy &amp; analytics</a>
+        <span>Scout by OpenMerit</span>
+      </div>
+      <a class="parent-brand" href="/" aria-label="OpenMerit home"><svg width="22" height="25" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span>openmerit</span></a>
+    </footer>
+  </div>
   <p class="sr-only" id="announcement" role="status" aria-live="polite"></p>
 </body>
 </html>
