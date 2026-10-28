@@ -160,7 +160,6 @@
     "scout/store.mjs",
     "scout/structured.mjs",
     "scout/task-evidence.mjs",
-    "scout/test/agent-handoff.test.mjs",
     "scout/test/ambiguity.test.mjs",
     "scout/test/analytics.test.mjs",
     "scout/test/architecture.test.mjs",
@@ -232,7 +231,6 @@
     "site/scout/auth.js",
     "site/scout/hub-provider-icons.js",
     "site/scout/providers.js",
-    "site/scout/scout.js",
     "site/scout/web-analytics.js",
     "site/script.js"
   ]

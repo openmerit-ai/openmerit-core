@@ -1,19 +1,19 @@
-// Conversational Scout: one conversation with the Scout agent (scout/agent/).
+// Scout's page: one conversation with the Scout agent (scout/agent/).
 // A turn is one POST that can run for minutes; the page polls the same
 // conversation for progress meanwhile, and reads the answer from it if the POST
 // connection drops before the turn ends.
-import { initAuth } from '../auth.js';
-import { providerIdentity } from '../providers.js';
-import type { Brief, Component, RecommendedModel, Recommendation } from '../../../scout/agent/recommendation.ts';
-import type { Answer } from '../../../scout/agent/tools.ts';
-import type { AgentState, BriefEdits, TurnAnswer, TurnRequest } from '../../../scout/agent/turn.ts';
+import { initAuth } from './auth.js';
+import { providerIdentity } from './providers.js';
+import type { Brief, Component, RecommendedModel, Recommendation } from '../../scout/agent/recommendation.ts';
+import type { Answer } from '../../scout/agent/tools.ts';
+import type { AgentState, BriefEdits, TurnAnswer, TurnRequest } from '../../scout/agent/turn.ts';
 
 type Clarification = Extract<Answer, { kind: 'clarification' }>;
 type Question = Clarification['questions'][number];
 type Reply = AgentState & { conversationId?: string; error?: string };
 
 const $ = <T extends HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
-const api = `${new URL('..', import.meta.url).pathname.replace(/\/$/, '')}/api/agent`;
+const api = `${new URL('.', import.meta.url).pathname.replace(/\/$/, '')}/api/agent`;
 const conversationList = $<HTMLOListElement>('#conversation'), composer = $<HTMLFormElement>('#composer'), prompt = $<HTMLTextAreaElement>('#prompt');
 const errorBox = $('#error'), announcement = $('#announcement');
 const componentLabels: Record<Component, string> = { input: 'Input', work: 'Work', output: 'Output', criteria: 'Criteria', constraints: 'Constraints' };
@@ -225,10 +225,12 @@ async function request(token: string, method: 'GET' | 'POST', path: string, body
   return { status: response.status, data: await response.json() as Reply };
 }
 
-async function runTurn(turn: TurnRequest, said: string) {
+// Signed-out users are sent to sign in first; onStart runs only once the turn really starts.
+async function runTurn(turn: TurnRequest, said: string, onStart?: () => void) {
   if (working) return;
   const token = await auth.getToken();
-  if (!token) return;
+  if (!token || working) return;
+  onStart?.();
   const first = conversationId === null, id = conversationId ?? crypto.randomUUID(), turnEpoch = epoch;
   working = true; showError(''); setComposer();
   // Only the latest answer's brief can be edited; earlier ones are history.
@@ -298,8 +300,8 @@ composer.addEventListener('submit', event => {
   const message = prompt.value.trim();
   if (!message) { showError('Describe the work you want a model to do.'); prompt.focus(); return; }
   if (working) return;
-  prompt.value = ''; fitPrompt();
-  void runTurn({ message }, message);
+  // The message stays in the box until the turn starts, so sign-in can keep it as a draft.
+  void runTurn({ message }, message, () => { prompt.value = ''; fitPrompt(); });
 });
 prompt.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); composer.requestSubmit(); } });
 prompt.addEventListener('input', fitPrompt);

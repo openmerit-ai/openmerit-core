@@ -90,7 +90,7 @@
     "deploy:dash-preview": "node scripts/deploy.ts terminal-preview",
     "scout": "node scout/dev.mjs",
     "scout:refresh": "node scout/refresh.mjs",
-    "check:scout": "node --test scout/test/*.test.mjs scout/test/*.test.ts && node --check scout/worker.mjs && node --check site/scout/scout.js",
+    "check:scout": "node --test scout/test/*.test.mjs scout/test/*.test.ts && node --check scout/worker.mjs",
     "build:scout": "node scripts/build-scout.mjs"
   },
   "dependencies": {

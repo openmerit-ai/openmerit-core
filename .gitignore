@@ -5,7 +5,7 @@ site/memo/
 site/scout/data-policy/
 site/scout/vendor/
 site/scout/privacy/privacy.js
-site/scout/agent/agent.js
+site/scout/scout.js
 coverage/
 *.tsbuildinfo
 

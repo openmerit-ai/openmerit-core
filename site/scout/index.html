@@ -6,12 +6,12 @@
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
-  <meta name="description" content="Compare five models for your task using measured results, public benchmarks, cost, and speed.">
+  <meta name="description" content="Describe your work. Scout asks what it needs to know, then shortlists five models on quality, cost and recency.">
   <title>Scout by OpenMerit</title>
   <link rel="canonical" href="https://openmerit.ai/scout/">
   <meta property="og:type" content="website">
   <meta property="og:title" content="Scout by OpenMerit">
-  <meta property="og:description" content="Compare five models for your task using measured results, public benchmarks, cost, and speed.">
+  <meta property="og:description" content="Describe your work. Scout asks what it needs to know, then shortlists five models on quality, cost and recency.">
   <meta property="og:url" content="https://openmerit.ai/scout/">
   <meta property="og:site_name" content="OpenMerit">
   <meta property="og:image" content="https://openmerit.ai/scout/scout-og.png">
@@ -21,16 +21,17 @@
   <meta property="og:image:alt" content="Scout by OpenMerit. One task branches into five model candidates along colored paths on a graphite background.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Scout by OpenMerit">
-  <meta name="twitter:description" content="Compare five models for your task using measured results, public benchmarks, cost, and speed.">
+  <meta name="twitter:description" content="Describe your work. Scout asks what it needs to know, then shortlists five models on quality, cost and recency.">
   <meta name="twitter:image" content="https://openmerit.ai/scout/scout-og.png">
   <meta name="twitter:image:alt" content="Scout by OpenMerit. One task branches into five model candidates along colored paths on a graphite background.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/scout/scout.css">
   <link rel="stylesheet" href="/scout/table.css">
+  <link rel="stylesheet" href="/scout/chat.css">
   <script src="/scout/scout.js" type="module"></script>
 </head>
 <body class="scout-page">
-  <a class="skip-link" href="#prompt">Skip to task</a>
+  <a class="skip-link" href="#prompt">Skip to message</a>
   <header class="scout-header">
     <div class="scout-wrap header-inner">
       <a class="parent-brand" href="/" aria-label="OpenMerit home"><svg width="22" height="25" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span>openmerit</span></a>
@@ -38,69 +39,27 @@
       <div class="account-controls"><button id="sign-in" class="sign-in-button" type="button">Sign in</button><div id="user-account" aria-label="Your account" hidden></div></div>
     </div>
   </header>
-  <main class="scout-wrap" id="main">
-    <section class="scout-intro" aria-labelledby="scout-title">
+  <main class="scout-wrap agent-page" id="main">
+    <section class="scout-intro" aria-labelledby="agent-title">
       <div class="intro-copy">
-        <h1 id="scout-title">Compare models for your tasks.</h1>
-        <p id="index-counts">Loading index…</p>
+        <h1 id="agent-title">Find models for your work.</h1>
+        <p>Describe your work. Scout may ask a few questions, then shortlists five models on quality, cost and recency.</p>
       </div>
-      <div class="agent-install">
-      <button class="add-agent-button" type="button" aria-describedby="agent-install-hint">
-        <span class="agent-logos" aria-hidden="true">
-          <img src="/scout/agents/claude.png" width="28" height="28" alt="">
-        </span>
-        <span>Add to Claude Code</span>
-      </button>
-      <span id="agent-install-hint" class="sr-only">Copies a setup prompt and opens Claude Code with it filled in.</span>
-      <div id="toast" class="toast" aria-hidden="true" hidden></div>
-      </div>
+      <button id="new-conversation" class="sign-in-button" type="button" hidden>New conversation</button>
     </section>
-    <section class="search-section" aria-label="Find models">
-      <form id="scout-form" class="prompt-box">
-        <label for="prompt">Describe your work</label>
-        <div class="prompt-field">
-        <textarea id="prompt" name="prompt" rows="2" maxlength="4000" required spellcheck="false" enterkeyhint="search" aria-describedby="prompt-hint" placeholder="Users upload photos of supplier invoices. Extract the vendor, invoice number, date, currency, tax, and total as JSON. Return null for missing fields. We process thousands a day, so accuracy, cost, and speed matter."></textarea>
+    <ol id="conversation" class="conversation" aria-label="Conversation" aria-live="polite"></ol>
+    <p class="error-message" id="error" role="alert" hidden></p>
+    <form id="composer" class="prompt-box composer">
+      <label for="prompt" id="prompt-label" class="sr-only">Describe your work</label>
+      <div class="prompt-field">
+        <textarea id="prompt" name="prompt" rows="3" maxlength="4000" spellcheck="false" aria-describedby="prompt-hint" placeholder="Summarize customer support tickets and tag each one with a category."></textarea>
         <span id="prompt-hint" class="sr-only">Shift + Enter for a new line.</span>
         <div class="prompt-footer">
-        <div class="prompt-examples" role="group" aria-labelledby="examples-label">
-          <span id="examples-label">Try</span>
-          <button type="button" data-example="invoice-extraction" data-prompt="Extract the vendor, invoice number, date, currency, tax, and total from supplier invoice photos as JSON. Return null for missing fields. We process thousands a day; prefer the lowest-cost model that can extract these fields accurately."><span class="example-count">1</span><span>Extract invoice fields</span></button>
-          <button type="button" data-example="support-workflow" data-prompt="Recommend models for two independent services, each with its own input and output. 1. Ticket routing: classify customer tickets by topic and urgency, returning JSON. 2. Reply writing: draft a short, empathetic response using a customer's ticket and supplied help-center excerpts, returning plain text without inventing policies. Evaluate these services separately and give each its own model shortlist. Prefer low cost once each service's quality needs are met."><span class="example-count">2</span><span>Triage tickets → Draft replies</span></button>
-          <button type="button" data-example="feedback-workflow" data-prompt="Recommend models for three independent tasks, each with its own deliverable. 1. Summarize customer feedback into themes with supporting quotes. 2. Turn those themes into a prioritized list of proposed fixes, explaining the customer impact. 3. Write customer-facing release notes from a supplied list of completed fixes, without claiming planned work is already available. Give each task its own model shortlist."><span class="example-count">3</span><span>Feedback → Fixes → Release notes</span></button>
-        </div>
-        <button class="find-button" type="submit" title="Find models"><span class="sr-only">Find models</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        </div>
-        </div>
-      </form>
-      <p class="error-message" id="error" role="alert" hidden></p>
-    </section>
-
-    <section class="results-section" id="results" aria-labelledby="results-title" aria-busy="false" hidden>
-      <div class="results-heading"><h2 id="results-title">Recommendations</h2><span class="query-time" id="query-time"></span></div>
-      <p class="results-basis" id="results-basis">Up to five model choices · quality, cost and latency trade-offs</p>
-      <div id="task-results"></div>
-    </section>
-
-    <template id="result-template">
-      <div class="result-table">
-      <div class="table-frame">
-        <div class="table-scroll" role="region" aria-label="Model comparison" tabindex="0">
-          <table class="data-table model-table">
-            <caption class="sr-only">Model choices grouped by task. Quality scores are not comparable across tasks. Expand a model for its evidence.</caption>
-            <thead><tr>
-              <th scope="col" class="model-column">Model</th>
-              <th scope="col" class="numeric-column" data-field="quality-heading">Quality <span class="column-unit">relative / 100</span></th>
-              <th scope="col" class="numeric-column">Cost <span class="column-unit">USD / 1,000 tasks</span></th>
-              <th scope="col" class="numeric-column">Time <span class="column-unit" data-field="time-unit">reference seconds</span></th>
-            </tr></thead>
-          </table>
+          <button class="find-button" type="submit" title="Send"><span class="sr-only">Send</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         </div>
       </div>
-      <p class="table-scroll-hint" hidden>Scroll to compare <span aria-hidden="true">↔</span></p>
-      <p class="results-warning">Results could be wrong. Please verify before choosing a model.</p>
-      </div>
-    </template>
-    <noscript><p class="error-message">Enable JavaScript to search.</p></noscript>
+    </form>
+    <noscript><p class="error-message">Enable JavaScript to talk to Scout.</p></noscript>
   </main>
   <footer class="scout-footer scout-wrap">
     <div class="footer-meta"><span>Scout by OpenMerit</span><a href="/scout/privacy/">Privacy &amp; analytics</a><a href="/scout/data-policy/">Data policy <span aria-hidden="true">↗</span></a></div>
