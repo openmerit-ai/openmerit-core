@@ -10,7 +10,7 @@ import { requestDecisions } from './decisions.mjs';
 import { refreshModelMetadata } from './metadata.mjs';
 import {structured} from './structured.mjs';
 import {embed} from './evidence-search.mjs';
-import {catalogueSources,importCatalogueSource,rebuildOfferings} from './catalogue-db.ts';
+import {catalogueSources,importCatalogueSource,rebuildOfferings,rebuildModels} from './catalogue-db.ts';
 import {refreshHubOrgs,crawlHubModels} from './catalogue-hub.ts';
 import {loadCatalogue,catalogueRouteSource} from './catalogue-routes.ts';
 import admittedProviders from './catalogue-providers.json' with { type: 'json' };
@@ -82,7 +82,7 @@ export async function runRefresh(env,step,id) {
         ...Object.fromEntries(Object.keys(catalogueSources).map(source=>[source,()=>importCatalogueSource(env.SCOUT_INDEX,source,{bucket,run:`${id}-${source}`})])),
         // The Hub crawl needs HF_TOKEN; it covers part of the organisations per run.
         ...(env.HF_TOKEN?{'hub-orgs':()=>refreshHubOrgs(env.SCOUT_INDEX,hubOptions),'hub-models':()=>crawlHubModels(env.SCOUT_INDEX,hubOptions)}:{}),
-        offerings:()=>rebuildOfferings(env.SCOUT_INDEX)};
+        offerings:()=>rebuildOfferings(env.SCOUT_INDEX),models:()=>rebuildModels(env.SCOUT_INDEX)};
       for(const [name,run] of Object.entries(steps))
         try{await step.do(`catalogue-${name}`,{retries:{limit:1,delay:'30 seconds'},timeout:'10 minutes'},run);}catch{}
     }

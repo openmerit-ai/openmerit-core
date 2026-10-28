@@ -141,7 +141,7 @@ export async function loadCatalogue(env: CatalogueBindings, embed: Embedder): Pr
   const publication = isObject(manifest?.publication) ? manifest.publication : {};
   const version = str(publication.id);
   if (!manifest || !version) throw new Error('No published Scout catalogue is available.');
-  const rows = (await env.SCOUT_INDEX.prepare(`SELECT s.payload, c.release_date, c.open_weights FROM scout_models s LEFT JOIN cat_models c ON c.id = s.id AND c.withdrawn_at IS NULL WHERE s.version = ?`)
+  const rows = (await env.SCOUT_INDEX.prepare(`SELECT s.payload, coalesce(g.release_date, c.release_date) release_date, coalesce(g.open_weights, c.open_weights) open_weights FROM scout_models s LEFT JOIN cat_models c ON c.id = s.id AND c.withdrawn_at IS NULL LEFT JOIN cat_model_merged g ON g.id = c.id WHERE s.version = ?`)
     .bind(version).all<{ payload: string; release_date: string | null; open_weights: number | null }>()).results;
   const models = rows.flatMap(r => {
     const raw: unknown = JSON.parse(r.payload);

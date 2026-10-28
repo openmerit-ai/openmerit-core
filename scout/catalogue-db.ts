@@ -50,7 +50,11 @@ export const catalogueSchema = [
   'CREATE INDEX IF NOT EXISTS cat_prices_route ON cat_prices(provider_id,provider_model_id,valid_to)',
   'CREATE TABLE IF NOT EXISTS cat_price_stage (run TEXT NOT NULL, source TEXT NOT NULL, provider_id TEXT NOT NULL, provider_model_id TEXT NOT NULL, kind TEXT NOT NULL, tier TEXT NOT NULL, unit TEXT NOT NULL, amount REAL NOT NULL)',
   'CREATE INDEX IF NOT EXISTS cat_price_stage_key ON cat_price_stage(run,provider_id,provider_model_id,kind,tier,unit)',
-  'CREATE TABLE IF NOT EXISTS cat_offerings (provider_id TEXT NOT NULL, provider_model_id TEXT NOT NULL, model_id TEXT, model_basis TEXT, sources TEXT NOT NULL, name TEXT, family TEXT, type TEXT, status TEXT, release_date TEXT, deprecated_at TEXT, context INTEGER, max_input INTEGER, max_output INTEGER, input_modalities TEXT, output_modalities TEXT, reasoning INTEGER, tool_call INTEGER, structured_output INTEGER, attachment INTEGER, open_weights INTEGER, hf_id TEXT, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, PRIMARY KEY(provider_id,provider_model_id))',
+  'CREATE TABLE IF NOT EXISTS cat_offerings (provider_id TEXT NOT NULL, provider_model_id TEXT NOT NULL, model_id TEXT, model_basis TEXT, sources TEXT NOT NULL, name TEXT, family TEXT, type TEXT, status TEXT, release_date TEXT, deprecated_at TEXT, context INTEGER, max_input INTEGER, max_output INTEGER, input_modalities TEXT, output_modalities TEXT, reasoning INTEGER, tool_call INTEGER, structured_output INTEGER, attachment INTEGER, open_weights INTEGER, hf_id TEXT, provenance TEXT, conflicts TEXT, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, PRIMARY KEY(provider_id,provider_model_id))',
+  'CREATE TABLE IF NOT EXISTS cat_offering_stage (value TEXT NOT NULL)',
+  // Canonical models merged across sources (rebuildModels); cat_models keeps each owner's record.
+  'CREATE TABLE IF NOT EXISTS cat_model_merged (id TEXT PRIMARY KEY, name TEXT, family TEXT, type TEXT, release_date TEXT, knowledge TEXT, open_weights INTEGER, input_modalities TEXT, output_modalities TEXT, reasoning INTEGER, tool_call INTEGER, attachment INTEGER, context INTEGER, max_output INTEGER, sources TEXT NOT NULL, provenance TEXT NOT NULL, conflicts TEXT)',
+  'CREATE TABLE IF NOT EXISTS cat_model_stage (value TEXT NOT NULL)',
   'CREATE INDEX IF NOT EXISTS cat_offerings_model ON cat_offerings(model_id)',
   // Model-level records from sources that describe models rather than routes (Epoch).
   // Each keeps its own identity; model_id links it to a canonical model when resolved.
@@ -63,7 +67,7 @@ export const catalogueSchema = [
   'CREATE INDEX IF NOT EXISTS cat_hf_models_model ON cat_hf_models(model_id)',
 ];
 // Columns added after a table first shipped; CREATE TABLE IF NOT EXISTS does not add them.
-const addedColumns: Array<[table: string, column: string, type: string]> = [['cat_listings', 'hf_id', 'TEXT'], ['cat_offerings', 'hf_id', 'TEXT']];
+const addedColumns: Array<[table: string, column: string, type: string]> = [['cat_listings', 'hf_id', 'TEXT'], ['cat_offerings', 'hf_id', 'TEXT'], ['cat_offerings', 'provenance', 'TEXT'], ['cat_offerings', 'conflicts', 'TEXT']];
 
 export const isObject = (v: unknown): v is Json => !!v && typeof v === 'object' && !Array.isArray(v);
 export const obj = (v: unknown): Json => isObject(v) ? v : {};
@@ -544,18 +548,125 @@ export async function storeSourceModels(db: Database, source: string, models: So
   return { listings: rows.length, added, changed, withdrawn, unresolved: rows.filter(r => !r.model_id).length, prices_opened: 0, prices_closed: 0 };
 }
 
-// Offerings merge every source's listing of one provider route. Each field takes
-// the first known value in source order, with Models.dev first.
+// Offerings merge every source's listing of one provider route, field by field;
+// canonical models merge every source's view of one model the same way.
+// Sources are ranked by sourcePreference, Models.dev first. Plain fields take
+// the first known value. Capability claims (input modalities and the flags
+// below) start from the preferred value; a capability it denies or omits is
+// added only when two other sources claim it, so one stale or optimistic feed
+// cannot add support. Each row records which sources supplied each field and
+// any disagreement.
+export const sourcePreference = ['modelsdev', 'openrouter', 'vercel', 'litellm', 'genaiprices', 'huggingface', 'epoch'];
 const offeringFields = ['model_id', 'model_basis', 'name', 'family', 'type', 'status', 'release_date', 'deprecated_at', 'context', 'max_input', 'max_output', 'input_modalities', 'output_modalities',
-  'reasoning', 'tool_call', 'structured_output', 'attachment', 'open_weights', 'hf_id'];
-export async function rebuildOfferings(db: Database): Promise<{ offerings: number }> {
-  const live = 'l.provider_id=k.provider_id AND l.provider_model_id=k.provider_model_id AND l.withdrawn_at IS NULL';
-  const order = "CASE l.source WHEN 'modelsdev' THEN 0 ELSE 1 END,l.source";
-  const fields = offeringFields.map(f => `(SELECT l.${f} FROM cat_listings l WHERE ${live} AND l.${f} IS NOT NULL ORDER BY ${order} LIMIT 1)`).join(',');
-  const [, inserted] = await db.batch([db.prepare('DELETE FROM cat_offerings'), db.prepare(`INSERT INTO cat_offerings (provider_id,provider_model_id,${offeringFields.join(',')},sources,first_seen,last_seen)
-    SELECT k.provider_id,k.provider_model_id,${fields},(SELECT json_group_array(l.source) FROM cat_listings l WHERE ${live}),k.first_seen,k.last_seen
-    FROM (SELECT provider_id,provider_model_id,min(first_seen) first_seen,max(last_seen) last_seen FROM cat_listings WHERE withdrawn_at IS NULL GROUP BY provider_id,provider_model_id) k`)]);
-  return { offerings: inserted?.meta.changes ?? 0 };
+  'reasoning', 'tool_call', 'structured_output', 'attachment', 'open_weights', 'hf_id'] as const;
+const capabilityFlags = new Set(['reasoning', 'tool_call', 'structured_output', 'attachment']), corroboration = 2;
+type OfferingField = typeof offeringFields[number];
+export type SourceListing = { source: string; provider_id: string; provider_model_id: string; first_seen: string; last_seen: string } & Record<OfferingField, Value>;
+export type Offering = Record<OfferingField, Value> & { provider_id: string; provider_model_id: string; sources: string; provenance: string; conflicts: string | null; first_seen: string; last_seen: string };
+type Voice = { source: string } & Partial<Record<string, Value>>;
+
+const rank = (source: string) => (i => i < 0 ? sourcePreference.length : i)(sourcePreference.indexOf(source));
+const modalities = (v: Value | undefined): string[] => { try { const x: unknown = typeof v === 'string' ? JSON.parse(v) : null; return Array.isArray(x) ? x.filter((m): m is string => typeof m === 'string') : []; } catch { return []; } };
+const listField = (field: string) => field === 'input_modalities' || field === 'output_modalities';
+// OpenRouter calls PDF input "file"; that naming difference is not a disagreement.
+const comparable = (field: string, v: Value | undefined) => listField(field) ? JSON.stringify([...new Set(modalities(v).map(m => m === 'file' ? 'pdf' : m))].sort()) : v;
+
+// One value per field from voices already in preference order.
+function mergeVoices(voices: readonly Voice[], fields: readonly string[]) {
+  const values: Record<string, Value> = {}, provenance: Record<string, string[]> = {}, conflicts: Record<string, Record<string, Value>> = {};
+  for (const field of fields) {
+    const known = voices.filter(v => v[field] !== null && v[field] !== undefined), [first] = known;
+    values[field] = first?.[field] ?? null;
+    if (!first) continue;
+    provenance[field] = [first.source];
+    if (field === 'input_modalities') {
+      const base = modalities(first[field]), added: string[] = [], claims = new Map<string, string[]>();
+      for (const v of known) for (const m of new Set(modalities(v[field]))) claims.set(m, [...claims.get(m) ?? [], v.source]);
+      for (const [m, by] of claims) if (!base.includes(m) && by.length >= corroboration) { added.push(m); provenance[field] = [...new Set([...provenance[field] ?? [], ...by])]; }
+      if (added.length) values[field] = JSON.stringify([...base, ...added]);
+    } else if (capabilityFlags.has(field) && first[field] === 0) {
+      const by = known.filter(v => v[field] === 1).map(v => v.source);
+      if (by.length >= corroboration) { values[field] = 1; provenance[field] = by; }
+    }
+    if (new Set(known.map(v => comparable(field, v[field]))).size > 1) conflicts[field] = Object.fromEntries(known.map(v => [v.source, v[field] ?? null]));
+  }
+  return { values, provenance: JSON.stringify(provenance), conflicts: Object.keys(conflicts).length ? JSON.stringify(conflicts) : null };
+}
+
+// Listings of one route, any order.
+export function mergeListings(listings: readonly SourceListing[]): Offering {
+  const ordered = [...listings].sort((a, b) => rank(a.source) - rank(b.source) || a.source.localeCompare(b.source)), [head] = ordered;
+  if (!head) throw new Error('A route needs at least one listing.');
+  const { values, provenance, conflicts } = mergeVoices(ordered, offeringFields.filter(f => f !== 'model_basis'));
+  // The match basis belongs to the listing that supplied the model ID.
+  const basis = ordered.find(l => l.model_id !== null)?.model_basis ?? null;
+  return { ...values as Record<OfferingField, Value>, model_basis: basis, provider_id: head.provider_id, provider_model_id: head.provider_model_id, sources: JSON.stringify(ordered.map(l => l.source)),
+    provenance, conflicts, first_seen: ordered.map(l => l.first_seen).sort()[0] ?? head.first_seen, last_seen: ordered.map(l => l.last_seen).sort().at(-1) ?? head.last_seen };
+}
+
+// A source's routes for one model as one voice: a capability any route has, the
+// largest limits, and the first known value otherwise.
+const modelFields = ['name', 'family', 'type', 'release_date', 'knowledge', 'open_weights', 'input_modalities', 'output_modalities', 'reasoning', 'tool_call', 'attachment', 'context', 'max_output'] as const;
+type ModelField = typeof modelFields[number];
+export type ModelVoice = { source: string } & Partial<Record<ModelField, Value>>;
+export function routeVoice(source: string, routes: readonly Partial<Record<ModelField, Value>>[]): ModelVoice {
+  const voice: ModelVoice = { source };
+  // A route's type is its API mode ("responses", "conversational"), not the model's kind.
+  for (const field of modelFields) {
+    if (field === 'type') continue;
+    const known = routes.map(r => r[field]).filter((v): v is string | number => v !== null && v !== undefined);
+    if (!known.length) continue;
+    voice[field] = listField(field) ? JSON.stringify([...new Set(known.flatMap(v => modalities(v)))])
+      : capabilityFlags.has(field) || field === 'context' || field === 'max_output' ? Math.max(...known.map(Number)) : known[0] ?? null;
+  }
+  return voice;
+}
+// One canonical model: the owner's record first in its source's voice, filled
+// from that source's routes; every other source contributes its routes.
+export function mergeModel(id: string, record: { source: string } & Partial<Record<ModelField, Value>> | null, voices: readonly ModelVoice[]) {
+  const bySource = new Map(voices.map(v => [v.source, v]));
+  if (record) bySource.set(record.source, { ...bySource.get(record.source), ...Object.fromEntries(Object.entries(record).filter(([, v]) => v !== null && v !== undefined)), source: record.source });
+  const ordered = [...bySource.values()].sort((a, b) => rank(a.source) - rank(b.source) || a.source.localeCompare(b.source));
+  const { values, provenance, conflicts } = mergeVoices(ordered, modelFields);
+  const merged: Record<ModelField, Value> & { id: string; sources: string; provenance: string; conflicts: string | null } = { ...values as Record<ModelField, Value>, id, sources: JSON.stringify(ordered.map(v => v.source)), provenance, conflicts };
+  return merged;
+}
+
+// Merged rows are staged, then swapped in with one batch, so a failed rebuild
+// leaves the previous offerings in place.
+export async function rebuildOfferings(db: Database): Promise<{ offerings: number; conflicts: number; corroborated: number }> {
+  await ensureCatalogueSchema(db);
+  const { results } = await db.prepare(`SELECT source,provider_id,provider_model_id,first_seen,last_seen,${offeringFields.join(',')} FROM cat_listings WHERE withdrawn_at IS NULL ORDER BY provider_id,provider_model_id`).all<SourceListing>();
+  const rows: Offering[] = [];let group: SourceListing[] = [];
+  for (const l of results) {
+    if (group.length && (group[0]?.provider_id !== l.provider_id || group[0]?.provider_model_id !== l.provider_model_id)) { rows.push(mergeListings(group)); group = []; }
+    group.push(l);
+  }
+  if (group.length) rows.push(mergeListings(group));
+  const columns = ['provider_id', 'provider_model_id', ...offeringFields, 'sources', 'provenance', 'conflicts', 'first_seen', 'last_seen'];
+  await db.prepare('DELETE FROM cat_offering_stage').run();
+  await chunked(db, 'INSERT INTO cat_offering_stage (value) SELECT value FROM json_each(?1)', rows, []);
+  await db.batch([db.prepare('DELETE FROM cat_offerings'), db.prepare(`INSERT INTO cat_offerings (${columns.join(',')}) SELECT ${extract(columns)} FROM cat_offering_stage`), db.prepare('DELETE FROM cat_offering_stage')]);
+  const corroborated = rows.filter(r => Object.values(JSON.parse(r.provenance) as Record<string, string[]>).some(by => by.length > 1)).length;
+  return { offerings: rows.length, conflicts: rows.filter(r => r.conflicts).length, corroborated };
+}
+
+export async function rebuildModels(db: Database): Promise<{ models: number; conflicts: number; corroborated: number }> {
+  await ensureCatalogueSchema(db);
+  const fields = modelFields.join(',');
+  const records = (await db.prepare(`SELECT id,basis,${fields} FROM cat_models WHERE withdrawn_at IS NULL`).all<{ id: string; basis: string } & Record<ModelField, Value>>()).results;
+  // Routes and Epoch rows linked to a live canonical model, one voice per source.
+  const routes = (await db.prepare(`SELECT source,model_id,${fields} FROM cat_listings WHERE withdrawn_at IS NULL AND model_id IS NOT NULL ORDER BY model_id,source,provider_id,provider_model_id`).all<{ source: string; model_id: string } & Record<ModelField, Value>>()).results;
+  const epoch = (await db.prepare("SELECT 'epoch' source,model_id,release_date,open_weights FROM cat_source_models WHERE withdrawn_at IS NULL AND model_id IS NOT NULL ORDER BY model_id,id").all<{ source: string; model_id: string; release_date: Value; open_weights: Value }>()).results;
+  const linked = new Map<string, Map<string, Partial<Record<ModelField, Value>>[]>>();
+  for (const r of [...routes, ...epoch]) { const sources = linked.get(r.model_id) ?? new Map(); sources.set(r.source, [...sources.get(r.source) ?? [], r]); linked.set(r.model_id, sources); }
+  const rows = records.map(({ id, basis, ...record }) => mergeModel(id, { ...record, source: basis.slice(0, basis.indexOf('-')) }, [...linked.get(id) ?? []].map(([source, list]) => routeVoice(source, list))));
+  const columns = ['id', ...modelFields, 'sources', 'provenance', 'conflicts'];
+  await db.prepare('DELETE FROM cat_model_stage').run();
+  await chunked(db, 'INSERT INTO cat_model_stage (value) SELECT value FROM json_each(?1)', rows, []);
+  await db.batch([db.prepare('DELETE FROM cat_model_merged'), db.prepare(`INSERT INTO cat_model_merged (${columns.join(',')}) SELECT ${extract(columns)} FROM cat_model_stage`), db.prepare('DELETE FROM cat_model_stage')]);
+  const corroborated = rows.filter(r => Object.values(JSON.parse(r.provenance) as Record<string, string[]>).some(by => by.length > 1)).length;
+  return { models: rows.length, conflicts: rows.filter(r => r.conflicts).length, corroborated };
 }
 
 async function readSource(fetcher: Fetcher, url: string, maxBytes: number): Promise<Uint8Array<ArrayBuffer>> {

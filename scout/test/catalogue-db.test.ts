@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { importCatalogueSource, rebuildOfferings, type Bucket, type ImportResult } from '../catalogue-db.ts';
+import { importCatalogueSource, mergeListings, mergeModel, rebuildOfferings, routeVoice, type Bucket, type ImportResult, type SourceListing } from '../catalogue-db.ts';
 import { d1 } from './helpers-d1.ts';
 
 const bucket = (): Bucket & { data: Map<string, Uint8Array> } => { const data = new Map<string, Uint8Array>(); return { data, head: async (k: string) => data.has(k) ? {} : null, put: async (k: string, v: Uint8Array) => data.set(k, v) }; };
@@ -149,4 +149,38 @@ test('gateways, genai-prices and Epoch add routes, Hugging Face IDs, tiers, date
   // A later Models.dev import withdraws only Models.dev's own models.
   ok(await importCatalogueSource(db, 'modelsdev', { fetcher, now: '2026-10-26T12:00:00Z', run: 'modelsdev-2' }));
   assert.deepEqual(db.all('SELECT id FROM cat_models WHERE withdrawn_at IS NULL ORDER BY id').map(r => r.id), ['anthropic/claude-y', 'lab-w/w-1', 'openai/gpt-x', 'vendor/open-1']);
+});
+
+test('merging prefers Models.dev field by field and needs two other sources to add a capability it denies', () => {
+  const blank = { model_id: null, model_basis: null, name: null, family: null, type: null, status: null, release_date: null, deprecated_at: null, context: null, max_input: null, max_output: null,
+    input_modalities: null, output_modalities: null, reasoning: null, tool_call: null, structured_output: null, attachment: null, open_weights: null, hf_id: null };
+  const listing = (source: string, fields: Partial<SourceListing>, provider_id = 'host'): SourceListing => ({ ...blank, source, provider_id, provider_model_id: 'm', first_seen: `2026-10-0${source.length % 9}`, last_seen: '2026-10-27', ...fields });
+  const md = listing('modelsdev', { model_id: 'lab/m', model_basis: 'modelsdev-route', name: 'M', context: 200000, input_modalities: '["text"]', tool_call: 0 });
+  // One other source cannot add image input or tool calling; its gaps-only fields still fill in.
+  const one = mergeListings([listing('litellm', { model_id: 'lab/other', model_basis: 'litellm-id', context: 128000, max_output: 8000, input_modalities: '["text","image"]', tool_call: 1 }), md]);
+  assert.deepEqual([one.model_id, one.model_basis, one.context, one.max_output, one.input_modalities, one.tool_call], ['lab/m', 'modelsdev-route', 200000, 8000, '["text"]', 0]);
+  assert.deepEqual(JSON.parse(String(one.conflicts)).context, { modelsdev: 200000, litellm: 128000 });
+  assert.deepEqual(JSON.parse(one.provenance).max_output, ['litellm']);
+  // Two independent claims add the capability, and both are credited.
+  const two = mergeListings([md, listing('litellm', { input_modalities: '["text","image"]', tool_call: 1 }), listing('vercel', { input_modalities: '["image","text"]', tool_call: 1 })]);
+  assert.deepEqual([two.input_modalities, two.tool_call], ['["text","image"]', 1]);
+  assert.deepEqual(JSON.parse(two.provenance).input_modalities, ['modelsdev', 'vercel', 'litellm']);
+  // Models.dev wins even on a host's own routes, and its support is kept when that feed omits it.
+  const own = mergeListings([listing('openrouter', { name: 'Lab: M', input_modalities: '["text"]' }, 'openrouter'), listing('modelsdev', { name: 'M', input_modalities: '["text","image"]' }, 'openrouter')]);
+  assert.deepEqual([own.name, own.input_modalities, own.sources], ['M', '["text","image"]', '["modelsdev","openrouter"]']);
+});
+
+test('a canonical model merges its owner record with every source\'s routes under the same rules', () => {
+  const record = { source: 'modelsdev', name: 'M', release_date: '2026-05-01', input_modalities: '["text"]', tool_call: null, context: null };
+  // Models.dev's own routes fill its record's gaps; one route with a capability counts for its source.
+  const voices = [routeVoice('modelsdev', [{ context: 128000 }, { context: 200000 }]), routeVoice('litellm', [{ input_modalities: '["text"]', tool_call: 0 }, { input_modalities: '["text","image"]', tool_call: 1 }]),
+    routeVoice('epoch', [{ release_date: '2026-04-20', open_weights: 1 }])];
+  const one = mergeModel('lab/m', record, voices);
+  assert.deepEqual([one.name, one.context, one.release_date, one.open_weights, one.input_modalities, one.tool_call], ['M', 200000, '2026-05-01', 1, '["text"]', 1]);
+  assert.deepEqual(JSON.parse(String(one.conflicts)), { release_date: { modelsdev: '2026-05-01', epoch: '2026-04-20' }, input_modalities: { modelsdev: '["text"]', litellm: '["text","image"]' } });
+  assert.deepEqual(JSON.parse(one.provenance).open_weights, ['epoch']);
+  // A second source claiming image input adds it to the canonical model.
+  const two = mergeModel('lab/m', record, [...voices, routeVoice('openrouter', [{ input_modalities: '["image","text"]' }])]);
+  assert.equal(two.input_modalities, '["text","image"]');
+  assert.deepEqual(JSON.parse(two.sources), ['modelsdev', 'openrouter', 'litellm', 'epoch']);
 });

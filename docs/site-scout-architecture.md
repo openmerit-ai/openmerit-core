@@ -1,5 +1,20 @@
 # Scout architecture and operations
 
+## Field-by-field source merging for routes and models (not yet deployed)
+
+`rebuildOfferings` in `scout/catalogue-db.ts` now merges each route's listings with `mergeListings`, a pure function, instead of one SQL subquery per field:
+
+- **Order:** `sourcePreference` is Models.dev, OpenRouter, Vercel, LiteLLM, genai-prices, Hugging Face; unknown sources come last. Previously sources after Models.dev were alphabetical. A host's own feed does not outrank Models.dev on its routes: tried against live listings, that rule prefixed names ("AionLabs: Aion-2.0"), replaced output limits with implausible values and removed image input from 20 Vercel routes.
+- **Plain fields** take the first known value, as before. `model_basis` now comes from the same listing as `model_id`.
+- **Capability claims** (input modalities, `reasoning`, `tool_call`, `structured_output`, `attachment`) start from the preferred value. A modality or flag it omits or denies is added only when at least two other sources claim it, because a false claim admits an endpoint to work it cannot do, while a missing one only excludes it. Output modalities are not combined: they decide whether a route is a chat route.
+- **Provenance:** new `provenance` (field → sources) and `conflicts` (field → value per source, only where known values differ) columns. OpenRouter's `file` input and Models.dev's `pdf` are not counted as a conflict.
+- **Atomic swap:** merged rows are written to `cat_offering_stage` and swapped into `cat_offerings` in one batch, so a failed rebuild keeps the previous offerings.
+- **Canonical models:** `rebuildModels` (new refresh step `catalogue-models`, after offerings) writes `cat_model_merged` with the same rules and the same `sources`, `provenance` and `conflicts` columns. `cat_models` stays each owner's raw record. Each source is one voice: the owner's record, with gaps filled from that source's own routes. A source's routes count a capability if any of them has it, and its largest context and output limit. Epoch's linked rows add release dates and open weights. Route `type` values are API modes (`responses`, `conversational`), not model kinds, so they never fill a model's type. `catalogue-routes.ts` and the Scout agent's catalogue read merged values with `coalesce` over `cat_models`, so a missing merged row falls back to the raw record. The serving Worker's agent query needs the table, which the publisher creates when it runs: deploy the publisher and run a refresh before the serving Worker.
+
+Replayed on the 16,934 live listings (14,579 routes) against the previous SQL merge: 60 field values change, all from the explicit order (42 `type` values switch between chat labels; 18 context windows now come from LiteLLM before genai-prices, such as DeepSeek chat 64K → 131K). Image input is unchanged on every route. No capability is added by corroboration on today's data, because few routes have three listing sources. 1,353 routes record at least one conflict: names 461, input modalities 400, max output 340, context 298.
+
+Replayed on the 675 live canonical models: 74 knowledge cutoffs, 31 output limits, 11 context windows and 1 open-weights flag are filled in. 17 values change, all corroborated input modalities: 16 OpenAI models gain PDF input (Vercel and LiteLLM agree) and Perplexity Sonar gains image input (OpenRouter and Vercel agree). 517 models record a conflict, including 145 release dates where Epoch differs from Models.dev. Before route types were excluded, 11 models would have taken API-mode types that route building rejects.
+
 ## Answer cache and specificity-first frontier — deployed, 27 October 2026
 
 **Deployment receipt:** the owner approved the commit, push and deployment of both Workers. Commit [848a53a](https://github.com/laz-aslam/openmerit/commit/848a53a) is on `origin/main`. Serving Worker `openmerit-scout-alpha` version `6919c5cf` and publisher `openmerit-scout` version `c1871492` are live (the publisher's first two attempts failed with a Cloudflare 500 on the asset-upload session before uploading anything). Search-time changes apply now; live generation is `18b7d5ed`.
@@ -401,7 +416,7 @@ The first run after migration made no Decisions calls and left all 360 benchmark
 - `cat_models`: one row per Models.dev canonical model ID (`lab/model`).
 - `cat_listings`: each source's own listing of a provider route, with its raw payload.
 - `cat_prices`: dated price intervals per kind, tier and unit.
-- `cat_offerings`: listings merged per route, with Models.dev values first.
+- `cat_offerings`: listings merged per route, field by field, in `sourcePreference` order with Models.dev first. A capability claim needs two other sources to override Models.dev; `provenance` and `conflicts` record the sources behind each field (see the source-merging section).
 - `cat_providers`, `cat_sources` and `cat_runs`: provenance and run history.
 
 Raw source files are kept in R2 under `catalogue-raw/<source>/<sha256>.json`. LiteLLM routes resolve to a model only through Models.dev: the same route, or the same provider model ID mapped to exactly one canonical model. Providers that Models.dev doesn't list stay namespaced as `litellm:<name>`. A source that stops listing a route withdraws it instead of deleting it. A source whose listings drop by more than half fails its run and keeps its previous rows. Each refresh imports both sources before the existing steps, and a catalogue failure never blocks the refresh. Serving does not read these tables yet.

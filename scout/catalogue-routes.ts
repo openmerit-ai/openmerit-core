@@ -54,7 +54,8 @@ export async function loadCatalogue(db: Database, admitted: Readonly<Record<stri
   const keys = new Map((await db.prepare(`SELECT 'models|'||l.provider_model_id k,l.model_id FROM cat_listings l WHERE l.source='openrouter' AND l.provider_id='openrouter' AND l.model_id IS NOT NULL AND l.withdrawn_at IS NULL
     UNION ALL SELECT 'modelsdev|'||lower(coalesce(p.name,p.id))||'|'||l.provider_model_id,l.model_id FROM cat_listings l JOIN cat_providers p ON p.source='modelsdev' AND p.id=l.provider_id
     WHERE l.source='modelsdev' AND l.model_id IS NOT NULL AND l.withdrawn_at IS NULL`).all<{ k: string; model_id: string }>()).results.map(r => [r.k, r.model_id]));
-  const canonical = new Map((await db.prepare('SELECT id,lab_id,name,type,release_date,input_modalities,output_modalities,context,weights,basis FROM cat_models WHERE withdrawn_at IS NULL')
+  const canonical = new Map((await db.prepare(`SELECT m.id,m.lab_id,${['name', 'type', 'release_date', 'input_modalities', 'output_modalities', 'context'].map(f => `coalesce(g.${f},m.${f}) ${f}`).join(',')},m.weights,m.basis
+    FROM cat_models m LEFT JOIN cat_model_merged g ON g.id=m.id WHERE m.withdrawn_at IS NULL`)
     .all<{ id: string; lab_id: string; name: string | null; type: string | null; release_date: string | null; input_modalities: string | null; output_modalities: string | null; context: number | null; weights: string | null; basis: string }>()).results.map(m => [m.id, m]));
   const offerings = ids.length ? (await db.prepare(`SELECT provider_id,provider_model_id,model_id,type,status,context,input_modalities,output_modalities,tool_call,structured_output FROM cat_offerings
     WHERE provider_id IN (SELECT value FROM json_each(?1)) AND model_id IS NOT NULL`).bind(JSON.stringify(ids))
