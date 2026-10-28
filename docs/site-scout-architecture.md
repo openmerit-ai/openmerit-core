@@ -1,6 +1,8 @@
 # Scout architecture and operations
 
-## Field-by-field source merging for routes and models (not yet deployed)
+## Field-by-field source merging for routes and models — deployed, 28 October 2026
+
+**Deployment receipt:** the owner approved pushing and deploying the publisher with a manual run. Commits [9e5132c](https://github.com/laz-aslam/openmerit/commit/9e5132c), [13e4712](https://github.com/laz-aslam/openmerit/commit/13e4712) and [49211f7](https://github.com/laz-aslam/openmerit/commit/49211f7) are on `origin/main`. Publisher `openmerit-scout` version `b0e10083` went live with schedule `7 0,12 * * *`. Manual run `manual-20261028-merge-1` published generation `c6daee1e` after the evidence-projection step waited out Vectorize indexing. D1 afterwards: 855 active canonical models (675 before; the gateway identity fix restored the alternately withdrawn ones), 855 merged model rows (460 chat, 55 image, 45 video, 36 speech, 36 embedding, 26 decision, 21 transcription, 13 rerank, 163 without a recognized kind), 14,573 offerings, and 34 of 47 decision routes linked to a canonical model. The serving Worker was not redeployed; its agent catalogue query reads `cat_model_merged` through a `LEFT JOIN`.
 
 `rebuildOfferings` in `scout/catalogue-db.ts` now merges each route's listings with `mergeListings`, a pure function, instead of one SQL subquery per field:
 
