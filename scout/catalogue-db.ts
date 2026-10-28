@@ -53,7 +53,7 @@ export const catalogueSchema = [
   'CREATE TABLE IF NOT EXISTS cat_offerings (provider_id TEXT NOT NULL, provider_model_id TEXT NOT NULL, model_id TEXT, model_basis TEXT, sources TEXT NOT NULL, name TEXT, family TEXT, type TEXT, status TEXT, release_date TEXT, deprecated_at TEXT, context INTEGER, max_input INTEGER, max_output INTEGER, input_modalities TEXT, output_modalities TEXT, reasoning INTEGER, tool_call INTEGER, structured_output INTEGER, attachment INTEGER, open_weights INTEGER, hf_id TEXT, provenance TEXT, conflicts TEXT, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, PRIMARY KEY(provider_id,provider_model_id))',
   'CREATE TABLE IF NOT EXISTS cat_offering_stage (value TEXT NOT NULL)',
   // Canonical models merged across sources (rebuildModels); cat_models keeps each owner's record.
-  'CREATE TABLE IF NOT EXISTS cat_model_merged (id TEXT PRIMARY KEY, name TEXT, family TEXT, type TEXT, release_date TEXT, knowledge TEXT, open_weights INTEGER, input_modalities TEXT, output_modalities TEXT, reasoning INTEGER, tool_call INTEGER, attachment INTEGER, context INTEGER, max_output INTEGER, sources TEXT NOT NULL, provenance TEXT NOT NULL, conflicts TEXT)',
+  'CREATE TABLE IF NOT EXISTS cat_model_merged (id TEXT PRIMARY KEY, kind TEXT, name TEXT, family TEXT, type TEXT, release_date TEXT, knowledge TEXT, open_weights INTEGER, input_modalities TEXT, output_modalities TEXT, reasoning INTEGER, tool_call INTEGER, attachment INTEGER, context INTEGER, max_output INTEGER, sources TEXT NOT NULL, provenance TEXT NOT NULL, conflicts TEXT)',
   'CREATE TABLE IF NOT EXISTS cat_model_stage (value TEXT NOT NULL)',
   'CREATE INDEX IF NOT EXISTS cat_offerings_model ON cat_offerings(model_id)',
   // Model-level records from sources that describe models rather than routes (Epoch).
@@ -67,7 +67,7 @@ export const catalogueSchema = [
   'CREATE INDEX IF NOT EXISTS cat_hf_models_model ON cat_hf_models(model_id)',
 ];
 // Columns added after a table first shipped; CREATE TABLE IF NOT EXISTS does not add them.
-const addedColumns: Array<[table: string, column: string, type: string]> = [['cat_listings', 'hf_id', 'TEXT'], ['cat_offerings', 'hf_id', 'TEXT'], ['cat_offerings', 'provenance', 'TEXT'], ['cat_offerings', 'conflicts', 'TEXT']];
+const addedColumns: Array<[table: string, column: string, type: string]> = [['cat_listings', 'hf_id', 'TEXT'], ['cat_offerings', 'hf_id', 'TEXT'], ['cat_offerings', 'provenance', 'TEXT'], ['cat_offerings', 'conflicts', 'TEXT'], ['cat_offerings', 'kind', 'TEXT']];
 
 export const isObject = (v: unknown): v is Json => !!v && typeof v === 'object' && !Array.isArray(v);
 export const obj = (v: unknown): Json => isObject(v) ? v : {};
@@ -390,12 +390,13 @@ export function resolveSourceModels(rows: SourceModel[], canonical: ReadonlyArra
 interface BackboneRoute { provider_id: string; provider_model_id: string; model_id: string | null }
 // repos: Hugging Face repositories (lowercase) named for canonical models by
 // Models.dev weights or by an already-resolved route's hf_id.
-export interface Backbone { routes: BackboneRoute[]; models: ReadonlySet<string>; repos?: ReadonlyArray<{ repo: string; model_id: string }> }
+// owned: canonical IDs a gateway introduced, by basis (`openrouter-id`, `vercel-id`).
+export interface Backbone { routes: BackboneRoute[]; models: ReadonlySet<string>; repos?: ReadonlyArray<{ repo: string; model_id: string }>; owned?: ReadonlyMap<string, string> }
 export async function loadBackbone(db: Database): Promise<Backbone> {
   const routes = (await db.prepare("SELECT provider_id,provider_model_id,model_id FROM cat_listings WHERE source='modelsdev' AND withdrawn_at IS NULL AND model_id IS NOT NULL").all<BackboneRoute>()).results;
-  const models = (await db.prepare('SELECT id,weights FROM cat_models WHERE withdrawn_at IS NULL').all<{ id: string; weights: string | null }>()).results;
+  const models = (await db.prepare('SELECT id,weights,basis FROM cat_models WHERE withdrawn_at IS NULL').all<{ id: string; weights: string | null; basis: string }>()).results;
   const repos = (await db.prepare('SELECT DISTINCT lower(hf_id) repo,model_id FROM cat_listings WHERE hf_id IS NOT NULL AND model_id IS NOT NULL AND withdrawn_at IS NULL').all<{ repo: string; model_id: string }>()).results;
-  return { routes, models: new Set(models.map(m => m.id)), repos: [...repos, ...weightRepos(models)] };
+  return { routes, models: new Set(models.map(m => m.id)), repos: [...repos, ...weightRepos(models)], owned: new Map(models.map(m => [m.id, m.basis])) };
 }
 const weightRepos = (models: ReadonlyArray<{ id: string; weights: string | null }>) =>
   models.flatMap(m => [...(m.weights ?? '').matchAll(/https:\/\/huggingface\.co\/([\w.-]+\/[\w.-]+)/g)].map(([, repo]) => ({ repo: (repo ?? '').toLowerCase(), model_id: m.id })));
@@ -434,12 +435,15 @@ export function resolveListings(listings: Listing[], backbone: Backbone, { slugs
 
 // A gateway lab/model ID that no tier resolves becomes a canonical model of its
 // own (basis `<source>-id`), so models Models.dev lacks still have one identity.
-// Service variants share their base ID; routers and aliases do not count.
-export function gatewayIdentities(source: 'openrouter' | 'vercel', listings: Listing[]): Model[] {
+// Service variants share their base ID; routers and aliases do not count. A
+// listing that resolved to the identity this gateway introduced on an earlier
+// run keeps it: otherwise the model is not stored again and is withdrawn.
+export function gatewayIdentities(source: 'openrouter' | 'vercel', listings: Listing[], owned: ReadonlyMap<string, string> = new Map()): Model[] {
   const models = new Map<string, Model>();
   for (const l of listings) {
     const id = baseID(l.provider_model_id), [lab = '', name = ''] = id.split('/');
-    if (l.model_id || !/^[a-z0-9][\w.-]*\/[\w.-]+$/.test(id) || id !== id.toLowerCase() || ['openrouter', 'auto'].includes(lab)) continue;
+    const own = l.model_id === id && owned.get(id) === `${source}-id`;
+    if (l.model_id && !own || !/^[a-z0-9][\w.-]*\/[\w.-]+$/.test(id) || id !== id.toLowerCase() || ['openrouter', 'auto'].includes(lab)) continue;
     Object.assign(l, { model_id: id, model_basis: `${source}-id` });
     if (models.has(id) || !name) continue;
     models.set(id, { id, lab_id: lab, name: l.name?.replace(/^[^:]+:\s*/, '').replace(/\s*\((free|batch)\)$/i, '') ?? name, family: null, description: null, type: l.type, release_date: l.release_date, last_updated: null,
@@ -562,7 +566,7 @@ const offeringFields = ['model_id', 'model_basis', 'name', 'family', 'type', 'st
 const capabilityFlags = new Set(['reasoning', 'tool_call', 'structured_output', 'attachment']), corroboration = 2;
 type OfferingField = typeof offeringFields[number];
 export type SourceListing = { source: string; provider_id: string; provider_model_id: string; first_seen: string; last_seen: string } & Record<OfferingField, Value>;
-export type Offering = Record<OfferingField, Value> & { provider_id: string; provider_model_id: string; sources: string; provenance: string; conflicts: string | null; first_seen: string; last_seen: string };
+export type Offering = Record<OfferingField, Value> & { kind: string | null; provider_id: string; provider_model_id: string; sources: string; provenance: string; conflicts: string | null; first_seen: string; last_seen: string };
 type Voice = { source: string } & Partial<Record<string, Value>>;
 
 const rank = (source: string) => (i => i < 0 ? sourcePreference.length : i)(sourcePreference.indexOf(source));
@@ -593,6 +597,22 @@ function mergeVoices(voices: readonly Voice[], fields: readonly string[]) {
   return { values, provenance: JSON.stringify(provenance), conflicts: Object.keys(conflicts).length ? JSON.stringify(conflicts) : null };
 }
 
+// What a model does, from the type labels sources use for a route or model.
+// API modes (responses, conversational) are chat; Vercel calls decision models
+// "evaluation". Unknown labels stay unknown.
+const kinds: Record<string, string> = {
+  chat: 'chat', language: 'chat', conversational: 'chat', responses: 'chat', completion: 'chat', realtime: 'chat',
+  embedding: 'embedding', 'feature-extraction': 'embedding', 'sentence-similarity': 'embedding',
+  rerank: 'rerank', reranking: 'rerank', 'text-ranking': 'rerank',
+  evaluation: 'decision', decisions: 'decision',
+  moderation: 'moderation', guardrail: 'moderation',
+  image: 'image', image_generation: 'image', image_edit: 'image', 'text-to-image': 'image', 'image-to-image': 'image',
+  video: 'video', video_generation: 'video', 'text-to-video': 'video', 'image-to-video': 'video', 'image-text-to-video': 'video',
+  speech: 'speech', audio_speech: 'speech', 'text-to-speech': 'speech', 'text-to-audio': 'speech',
+  transcription: 'transcription', audio_transcription: 'transcription', 'automatic-speech-recognition': 'transcription', ocr: 'ocr',
+};
+export const modelKind = (type: Value | undefined): string | null => typeof type === 'string' ? kinds[type] ?? null : null;
+
 // Listings of one route, any order.
 export function mergeListings(listings: readonly SourceListing[]): Offering {
   const ordered = [...listings].sort((a, b) => rank(a.source) - rank(b.source) || a.source.localeCompare(b.source)), [head] = ordered;
@@ -600,13 +620,14 @@ export function mergeListings(listings: readonly SourceListing[]): Offering {
   const { values, provenance, conflicts } = mergeVoices(ordered, offeringFields.filter(f => f !== 'model_basis'));
   // The match basis belongs to the listing that supplied the model ID.
   const basis = ordered.find(l => l.model_id !== null)?.model_basis ?? null;
-  return { ...values as Record<OfferingField, Value>, model_basis: basis, provider_id: head.provider_id, provider_model_id: head.provider_model_id, sources: JSON.stringify(ordered.map(l => l.source)),
+  const kind = ordered.map(l => modelKind(l.type)).find(k => k !== null) ?? null;
+  return { ...values as Record<OfferingField, Value>, kind, model_basis: basis, provider_id: head.provider_id, provider_model_id: head.provider_model_id, sources: JSON.stringify(ordered.map(l => l.source)),
     provenance, conflicts, first_seen: ordered.map(l => l.first_seen).sort()[0] ?? head.first_seen, last_seen: ordered.map(l => l.last_seen).sort().at(-1) ?? head.last_seen };
 }
 
 // A source's routes for one model as one voice: a capability any route has, the
 // largest limits, and the first known value otherwise.
-const modelFields = ['name', 'family', 'type', 'release_date', 'knowledge', 'open_weights', 'input_modalities', 'output_modalities', 'reasoning', 'tool_call', 'attachment', 'context', 'max_output'] as const;
+const modelFields = ['kind', 'name', 'family', 'type', 'release_date', 'knowledge', 'open_weights', 'input_modalities', 'output_modalities', 'reasoning', 'tool_call', 'attachment', 'context', 'max_output'] as const;
 type ModelField = typeof modelFields[number];
 export type ModelVoice = { source: string } & Partial<Record<ModelField, Value>>;
 export function routeVoice(source: string, routes: readonly Partial<Record<ModelField, Value>>[]): ModelVoice {
@@ -614,6 +635,7 @@ export function routeVoice(source: string, routes: readonly Partial<Record<Model
   // A route's type is its API mode ("responses", "conversational"), not the model's kind.
   for (const field of modelFields) {
     if (field === 'type') continue;
+    if (field === 'kind') { const kind = routes.map(r => modelKind(r.type)).find(k => k !== null); if (kind) voice.kind = kind; continue; }
     const known = routes.map(r => r[field]).filter((v): v is string | number => v !== null && v !== undefined);
     if (!known.length) continue;
     voice[field] = listField(field) ? JSON.stringify([...new Set(known.flatMap(v => modalities(v)))])
@@ -643,7 +665,7 @@ export async function rebuildOfferings(db: Database): Promise<{ offerings: numbe
     group.push(l);
   }
   if (group.length) rows.push(mergeListings(group));
-  const columns = ['provider_id', 'provider_model_id', ...offeringFields, 'sources', 'provenance', 'conflicts', 'first_seen', 'last_seen'];
+  const columns = ['provider_id', 'provider_model_id', ...offeringFields, 'kind', 'sources', 'provenance', 'conflicts', 'first_seen', 'last_seen'];
   await db.prepare('DELETE FROM cat_offering_stage').run();
   await chunked(db, 'INSERT INTO cat_offering_stage (value) SELECT value FROM json_each(?1)', rows, []);
   await db.batch([db.prepare('DELETE FROM cat_offerings'), db.prepare(`INSERT INTO cat_offerings (${columns.join(',')}) SELECT ${extract(columns)} FROM cat_offering_stage`), db.prepare('DELETE FROM cat_offering_stage')]);
@@ -653,14 +675,14 @@ export async function rebuildOfferings(db: Database): Promise<{ offerings: numbe
 
 export async function rebuildModels(db: Database): Promise<{ models: number; conflicts: number; corroborated: number }> {
   await ensureCatalogueSchema(db);
-  const fields = modelFields.join(',');
+  const fields = modelFields.filter(f => f !== 'kind').join(',');
   const records = (await db.prepare(`SELECT id,basis,${fields} FROM cat_models WHERE withdrawn_at IS NULL`).all<{ id: string; basis: string } & Record<ModelField, Value>>()).results;
   // Routes and Epoch rows linked to a live canonical model, one voice per source.
   const routes = (await db.prepare(`SELECT source,model_id,${fields} FROM cat_listings WHERE withdrawn_at IS NULL AND model_id IS NOT NULL ORDER BY model_id,source,provider_id,provider_model_id`).all<{ source: string; model_id: string } & Record<ModelField, Value>>()).results;
   const epoch = (await db.prepare("SELECT 'epoch' source,model_id,release_date,open_weights FROM cat_source_models WHERE withdrawn_at IS NULL AND model_id IS NOT NULL ORDER BY model_id,id").all<{ source: string; model_id: string; release_date: Value; open_weights: Value }>()).results;
   const linked = new Map<string, Map<string, Partial<Record<ModelField, Value>>[]>>();
   for (const r of [...routes, ...epoch]) { const sources = linked.get(r.model_id) ?? new Map(); sources.set(r.source, [...sources.get(r.source) ?? [], r]); linked.set(r.model_id, sources); }
-  const rows = records.map(({ id, basis, ...record }) => mergeModel(id, { ...record, source: basis.slice(0, basis.indexOf('-')) }, [...linked.get(id) ?? []].map(([source, list]) => routeVoice(source, list))));
+  const rows = records.map(({ id, basis, ...record }) => mergeModel(id, { ...record, kind: modelKind(record.type), source: basis.slice(0, basis.indexOf('-')) }, [...linked.get(id) ?? []].map(([source, list]) => routeVoice(source, list))));
   const columns = ['id', ...modelFields, 'sources', 'provenance', 'conflicts'];
   await db.prepare('DELETE FROM cat_model_stage').run();
   await chunked(db, 'INSERT INTO cat_model_stage (value) SELECT value FROM json_each(?1)', rows, []);
@@ -718,8 +740,9 @@ export async function importCatalogueSource(db: Database, source: CatalogueSourc
         const known = new Set((await db.prepare("SELECT id FROM cat_providers WHERE source='modelsdev'").all<{ id: string }>()).results.map(r => r.id));
         const data = decode(first);
         parsed = source === 'litellm' ? parseLiteLLM(data, known) : source === 'openrouter' ? parseOpenRouter(data) : source === 'vercel' ? parseVercel(data) : parseGenaiPrices(data, known, now);
-        resolveListings(parsed.listings, await loadBackbone(db));
-        if (source === 'openrouter' || source === 'vercel') parsed.models = gatewayIdentities(source, parsed.listings);
+        const backbone = await loadBackbone(db);
+        resolveListings(parsed.listings, backbone);
+        if (source === 'openrouter' || source === 'vercel') parsed.models = gatewayIdentities(source, parsed.listings, backbone.owned);
       }
       files.length = 0;
       stats = await storeCatalogue(db, source, parsed, { now, run });

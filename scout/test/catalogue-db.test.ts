@@ -149,6 +149,11 @@ test('gateways, genai-prices and Epoch add routes, Hugging Face IDs, tiers, date
   // A later Models.dev import withdraws only Models.dev's own models.
   ok(await importCatalogueSource(db, 'modelsdev', { fetcher, now: '2026-10-26T12:00:00Z', run: 'modelsdev-2' }));
   assert.deepEqual(db.all('SELECT id FROM cat_models WHERE withdrawn_at IS NULL ORDER BY id').map(r => r.id), ['anthropic/claude-y', 'lab-w/w-1', 'openai/gpt-x', 'vendor/open-1']);
+  // A gateway's next import keeps the identities it introduced, with their own basis.
+  for (const source of ['openrouter', 'vercel'] as const) ok(await importCatalogueSource(db, source, { fetcher, now: '2026-10-27T00:00:00Z', run: `${source}-2` }));
+  assert.deepEqual(db.all('SELECT id,basis FROM cat_models WHERE withdrawn_at IS NULL ORDER BY id').map(r => [r.id, r.basis]),
+    [['anthropic/claude-y', 'modelsdev-route'], ['lab-w/w-1', 'vercel-id'], ['openai/gpt-x', 'modelsdev-model'], ['vendor/open-1', 'openrouter-id']]);
+  assert.deepEqual(db.all("SELECT model_basis FROM cat_listings WHERE provider_model_id IN ('lab-w/w-1','vendor/open-1') ORDER BY provider_model_id").map(r => r.model_basis), ['vercel-id', 'openrouter-id']);
 });
 
 test('merging prefers Models.dev field by field and needs two other sources to add a capability it denies', () => {
@@ -161,6 +166,9 @@ test('merging prefers Models.dev field by field and needs two other sources to a
   assert.deepEqual([one.model_id, one.model_basis, one.context, one.max_output, one.input_modalities, one.tool_call], ['lab/m', 'modelsdev-route', 200000, 8000, '["text"]', 0]);
   assert.deepEqual(JSON.parse(String(one.conflicts)).context, { modelsdev: 200000, litellm: 128000 });
   assert.deepEqual(JSON.parse(one.provenance).max_output, ['litellm']);
+  // Kind normalizes each source's type label: an API mode is chat, Vercel's "evaluation" is a decision model.
+  assert.equal(one.kind, null);
+  assert.deepEqual(['responses', 'evaluation', 'feature-extraction', 'unheard-of'].map(type => mergeListings([listing('litellm', { type })]).kind), ['chat', 'decision', 'embedding', null]);
   // Two independent claims add the capability, and both are credited.
   const two = mergeListings([md, listing('litellm', { input_modalities: '["text","image"]', tool_call: 1 }), listing('vercel', { input_modalities: '["image","text"]', tool_call: 1 })]);
   assert.deepEqual([two.input_modalities, two.tool_call], ['["text","image"]', 1]);
