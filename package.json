@@ -61,7 +61,8 @@
     "access": "public"
   },
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "scout/agent"
   ],
   "engines": {
     "node": ">=22.19.0"
@@ -69,7 +70,7 @@
   "scripts": {
     "check": "npm run check --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scout.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scout.json && tsc -p scout/agent/tsconfig.json",
     "check:typescript": "node scripts/check-typescript.ts",
     "types:workers": "node scripts/worker-types.ts",
     "check:worker-types": "node scripts/worker-types.ts --check",

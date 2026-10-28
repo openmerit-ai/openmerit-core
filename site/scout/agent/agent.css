@@ -1,0 +1,86 @@
+/* Conversational Scout: turns, task brief, clarifying questions and the shortlist. */
+.agent-page .scout-intro { padding-bottom: 20px; }
+.conversation { display: flex; flex-direction: column; gap: 22px; margin: 0 0 28px; padding: 0; list-style: none; }
+.conversation:empty { display: none; }
+.turn { display: grid; gap: 12px; min-width: 0; }
+.turn-role { color: var(--quiet); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .6px; }
+.turn-user { justify-items: end; }
+.turn-user .turn-text { max-width: min(640px, 100%); padding: 10px 14px; border-radius: 8px; background: var(--raised); white-space: pre-wrap; overflow-wrap: anywhere; }
+.turn-scout { padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+.turn-text { font-size: 14px; line-height: 1.6; max-width: 760px; }
+.turn-error { color: var(--error); font-size: 13px; }
+
+.progress { display: grid; gap: 6px; }
+.progress:not(.progress-done) > summary { display: none; }
+.progress > summary, .brief-turn > summary { width: fit-content; color: var(--muted); font-size: 12px; cursor: pointer; }
+.progress > summary::after, .brief-turn > summary::after { content: '›'; display: inline-block; margin-left: 6px; transition: transform 160ms ease; }
+.progress[open] > summary::after, .brief-turn[open] > summary::after { transform: rotate(90deg); }
+.progress-current { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
+.progress-status { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.progress-status::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%; background: radial-gradient(circle at 30% 25%, var(--ink), var(--muted)); animation: search-orb 1.6s ease-in-out infinite; }
+.progress-steps { margin: 0; padding: 0 0 0 18px; color: var(--muted); font-size: 12px; list-style: none; }
+.progress-done .progress-steps { margin-top: 6px; }
+.progress-steps:empty { display: none; }
+.progress-steps li { position: relative; padding: 2px 0; }
+.progress-steps li::before { content: '✓'; position: absolute; left: -18px; color: var(--quiet); font-size: 11px; }
+.brief-turn { display: grid; gap: 12px; }
+.brief-turn:not(.brief-sent) > summary { display: none; }
+.brief-turn[open] > summary { margin-bottom: 4px; }
+
+.brief { display: grid; gap: 0; margin: 0; border-top: 1px solid var(--line); }
+.brief-row { display: grid; grid-template-columns: 160px 1fr; gap: 16px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.brief dt { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-top: 4px; font-weight: 500; }
+.brief dd { display: grid; gap: 10px; margin: 0; min-width: 0; }
+.brief-source { padding: 1px 6px; border-radius: 999px; font: 10px var(--mono); color: var(--muted); background: var(--raised); }
+.brief-assumed { color: var(--warning); }
+.brief-missing { color: var(--quiet); background: transparent; border: 1px dashed var(--field-line); }
+.brief-edited { color: var(--paper); background: var(--ink); }
+/* Each component reads as text and edits in place; fields Scout asks about, and empty ones, show as inputs. */
+.brief-field { display: block; width: calc(100% + 16px); margin: 0 -8px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); line-height: 1.5; resize: none; overflow: hidden; }
+.brief-field::placeholder { color: var(--quiet); opacity: 1; }
+.brief-asked .brief-field, .brief-field:placeholder-shown { background: var(--input); }
+.brief-field:focus { outline: none; background: var(--input-active); }
+.brief-field:disabled { background: transparent; cursor: default; }
+.brief-question-text { color: var(--muted); font-size: 12px; }
+.brief-form { display: grid; gap: 14px; }
+.question-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+.question-actions:has(:disabled) { display: none; }
+.question-hint { color: var(--muted); font-size: 11px; }
+.primary-button, .secondary-button { min-height: 40px; padding: 8px 16px; border-radius: 6px; font-size: 12px; font-weight: 500; }
+.primary-button { border: 0; background: var(--button); color: var(--button-ink); }
+.secondary-button { border: 1px solid var(--field-line); background: var(--surface); }
+.brief-form :disabled { cursor: default; }
+
+.turn .table-scroll { max-height: none; }
+.agent-table { min-width: 600px; }
+.agent-table .model-column { width: 40%; }
+.agent-table .numeric-column { width: 15%; }
+.agent-scroll-hint { display: none; }
+.model-rationale { margin-top: 6px; font-size: 13px; color: var(--ink); }
+.model-watch { margin-top: 8px; color: var(--warning); font-size: 12px; }
+.evidence-item > .evidence-name { font-family: var(--sans); overflow-wrap: anywhere; }
+
+/* Like a chat app: the conversation fills the page and the message box stays docked at the bottom. */
+html:has(.agent-page) { scroll-padding-bottom: 160px; }
+.agent-page { display: flex; flex-direction: column; max-width: 768px; min-height: calc(100svh - 72px); }
+.agent-page .conversation { flex: 1; }
+.agent-page .error-message { margin: 0 0 8px; }
+.composer { position: sticky; bottom: 0; z-index: 2; margin-top: auto; padding: 10px 0 max(16px, env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--paper) 12px); }
+/* Three lines to start; grows with the text up to the shared maximum height, then scrolls. */
+.composer textarea { min-height: calc(3lh + 24px); }
+.composer .prompt-field { position: relative; }
+.composer textarea { padding-right: 64px; }
+.composer .prompt-footer { position: absolute; right: 0; bottom: 0; padding: 8px; }
+.composer textarea:disabled { opacity: .6; cursor: wait; }
+@media (hover: hover) and (pointer: fine) {
+  .secondary-button:not(:disabled):hover, .brief-field:not(:disabled):not(:focus):hover { background: var(--hover); }
+  .primary-button:not(:disabled):hover { background: var(--button-hover); }
+}
+@media (max-width: 760px) {
+  .brief-row { grid-template-columns: 1fr; gap: 4px; }
+  .brief dt { justify-content: flex-start; padding-top: 0; }
+  .agent-scroll-hint { display: flex; margin-top: 0; }
+  .agent-table { min-width: 600px; table-layout: fixed; }
+  .agent-table .model-column { width: 190px; }
+  .agent-table .numeric-column { width: 102px; }
+}

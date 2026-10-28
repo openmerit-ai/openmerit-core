@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="Describe your work. Scout asks what it needs to know, then shortlists five models on quality, cost, latency and recency.">
+  <title>Ask Scout · OpenMerit</title>
+  <link rel="canonical" href="https://openmerit.ai/scout/agent/">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/scout/scout.css">
+  <link rel="stylesheet" href="/scout/table.css">
+  <link rel="stylesheet" href="/scout/agent/agent.css">
+  <script src="/scout/agent/agent.js" type="module"></script>
+</head>
+<body class="scout-page">
+  <a class="skip-link" href="#prompt">Skip to message</a>
+  <header class="scout-header">
+    <div class="scout-wrap header-inner">
+      <a class="parent-brand" href="/" aria-label="OpenMerit home"><svg width="22" height="25" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span>openmerit</span></a>
+      <a class="scout-brand" href="/scout/">Scout <span class="beta-label">Beta</span></a>
+      <div class="account-controls"><button id="sign-in" class="sign-in-button" type="button">Sign in</button><div id="user-account" aria-label="Your account" hidden></div></div>
+    </div>
+  </header>
+  <main class="scout-wrap agent-page" id="main">
+    <section class="scout-intro" aria-labelledby="agent-title">
+      <div class="intro-copy">
+        <h1 id="agent-title">Ask Scout</h1>
+        <p>Describe your work. Scout may ask a few questions, then shortlists five models on quality, cost, latency and recency.</p>
+      </div>
+      <button id="new-conversation" class="sign-in-button" type="button" hidden>New conversation</button>
+    </section>
+    <ol id="conversation" class="conversation" aria-label="Conversation" aria-live="polite"></ol>
+    <p class="error-message" id="error" role="alert" hidden></p>
+    <form id="composer" class="prompt-box composer">
+      <label for="prompt" id="prompt-label" class="sr-only">Describe your work</label>
+      <div class="prompt-field">
+        <textarea id="prompt" name="prompt" rows="3" maxlength="4000" spellcheck="false" aria-describedby="prompt-hint" placeholder="Summarize customer support tickets and tag each one with a category."></textarea>
+        <span id="prompt-hint" class="sr-only">Shift + Enter for a new line.</span>
+        <div class="prompt-footer">
+          <button class="find-button" type="submit" title="Send"><span class="sr-only">Send</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        </div>
+      </div>
+    </form>
+    <noscript><p class="error-message">Enable JavaScript to talk to Scout.</p></noscript>
+  </main>
+  <footer class="scout-footer scout-wrap">
+    <div class="footer-meta"><span>Scout by OpenMerit</span><a href="/scout/privacy/">Privacy &amp; analytics</a><a href="/scout/data-policy/">Data policy <span aria-hidden="true">↗</span></a></div>
+  </footer>
+  <p class="sr-only" id="announcement" role="status" aria-live="polite"></p>
+</body>
+</html>

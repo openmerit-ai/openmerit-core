@@ -10,6 +10,7 @@ import { scoutAccess, sessionUser } from './auth.mjs';
 import { createProductAnalytics } from './product-analytics.mjs';
 import { handleClerkWebhook } from './account-analytics.mjs';
 import { publicSiteResponse } from './public-site.mjs';
+import { agentPath, handleAgent } from './agent/routes.ts';
 
 // Publication coordination only. User searches do not pass through this object.
 export class ScoutPublication extends DurableObject {
@@ -80,9 +81,11 @@ export default {
       return ['GET','HEAD'].includes(request.method)?env.ASSETS.fetch(request):json({error:'Not found.'},404);
     }
     const analytics=createProductAnalytics(request,env,ctx);
-    const access=await scoutAccess(request,env,analytics.identify);
+    let userId;
+    const access=await scoutAccess(request,env,id=>{userId=id;analytics.identify(id);});
     if(access){await analytics.complete(access);return analytics.response(access);}
     if(path==='/scout/api/analytics')return analytics.handleEvent();
+    if(agentPath.test(path)){const response=await handleAgent(request,env.SCOUT_AGENT,userId);await analytics.complete(response);return analytics.response(response);}
     if(path==='/scout/api/analytics/preference')return analytics.handlePreference();
     let response;
     try {

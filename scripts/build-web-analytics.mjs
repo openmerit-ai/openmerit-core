@@ -10,7 +10,7 @@ await build({
   platform: 'browser', target: 'es2022', minify: true, legalComments: 'inline',
   footer: { js: `/*! Third-party notices: web-vitals\n${license.replaceAll('*/', '* /')}\n*/` },
 });
-await build({
-  absWorkingDir: resolve(import.meta.dirname, '..'), entryPoints: ['site/scout/privacy/privacy.ts'],
-  outfile: 'site/scout/privacy/privacy.js', format: 'esm', platform: 'browser', target: 'es2022',
+for (const page of ['privacy', 'agent']) await build({
+  absWorkingDir: resolve(import.meta.dirname, '..'), entryPoints: [`site/scout/${page}/${page}.ts`],
+  outfile: `site/scout/${page}/${page}.js`, format: 'esm', platform: 'browser', target: 'es2022',
 });

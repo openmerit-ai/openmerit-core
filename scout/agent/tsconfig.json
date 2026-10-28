@@ -1,0 +1,11 @@
+{
+  // Scout agent Durable Object: Workers runtime types, separate from the Node.js
+  // Scout project because it imports cloudflare:workers and the Agents SDK.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types"],
+    "allowJs": true
+  },
+  "include": ["*.ts"]
+}

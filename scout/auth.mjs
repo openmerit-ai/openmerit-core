@@ -3,6 +3,7 @@ import { parsePublishableKey } from '@clerk/shared/keys';
 import { json } from './http.mjs';
 import { productAnalyticsEnabled, accountSyncEnabled, betaEvaluationEnabled } from './product-analytics.mjs';
 import { deviceKeyUser } from './connect.mjs';
+import { agentPath } from './agent/routes.ts';
 
 // Verifies a current Clerk browser session bearer token. Returns the user ID,
 // null when the token is absent or invalid, and throws when Clerk is unconfigured.
@@ -32,7 +33,7 @@ export async function scoutAccess(request, env, onAuthenticated = () => {}) {
   const source = request.headers.get('origin');
   if (source && source !== origin) return json({ error: 'Origin not allowed.' }, 403);
   if (path === '/scout/api/status') return null;
-  if (!['/scout/api/auth', '/scout/api/analytics', '/scout/api/analytics/preference', '/scout/api/recommend', '/scout/mcp'].includes(path)) return json({ error: 'Not found.' }, 404);
+  if (!['/scout/api/auth', '/scout/api/analytics', '/scout/api/analytics/preference', '/scout/api/recommend', '/scout/mcp'].includes(path) && !agentPath.test(path)) return json({ error: 'Not found.' }, 404);
   if (path === '/scout/api/auth' && request.method !== 'GET') return json({ error: 'Use GET.' }, 405, { Allow: 'GET' });
 
   try {
