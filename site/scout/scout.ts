@@ -3,6 +3,7 @@
 // conversation for progress meanwhile, and reads the answer from it if the POST
 // connection drops before the turn ends.
 import { initAuth } from './auth.js';
+import { initOnboarding } from './onboarding.js';
 import { providerIdentity } from './providers.js';
 import type { Brief, Component, RecommendedModel, Recommendation } from '../../scout/agent/recommendation.ts';
 import type { Answer } from '../../scout/agent/tools.ts';
@@ -310,12 +311,19 @@ composer.addEventListener('submit', event => {
 });
 prompt.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); composer.requestSubmit(); } });
 prompt.addEventListener('input', fitPrompt);
+for (const button of Array.from($('#chat-examples').querySelectorAll<HTMLButtonElement>('[data-example-task]'))) {
+  button.addEventListener('click', () => {
+    prompt.value = button.textContent!.trim();
+    fitPrompt(); composer.requestSubmit();
+  });
+}
 $('#new-conversation').addEventListener('click', () => reset());
 function reset() {
   epoch++; conversationId = null; working = false;
   conversationList.replaceChildren(); showError(''); setComposer(); prompt.focus();
 }
-const auth = initAuth(reset, () => composer.requestSubmit());
+const onboarding = initOnboarding(() => auth.signIn());
+const auth = initAuth(reset, () => composer.requestSubmit(), (id: string | null) => onboarding.session(id));
 fitPrompt();
 
 // Restore the existing secret-free Claude handoff without making analytics a
@@ -378,6 +386,16 @@ async function loadCoverage() {
     coverage.textContent = [...counts, sources].map((n, i) => `${n.toLocaleString('en-US')}\u00a0${labels[i]!.replaceAll(' ', '\u00a0')}`).join(' · ');
     coverage.title = 'Catalogue models and Hugging Face repositories are separate, potentially overlapping counts. Labs count publishers with benchmark results. Benchmarks include descriptions without results; source feeds include retained research records, not distinct organizations.';
     coverage.hidden = false;
+    // The tour and page share this validated response; neither invents fallback counts.
+    for (const [selector, count] of [
+      ['#welcome-model-count', status.availableModels], ['#welcome-lab-count', status.providers],
+      ['#welcome-benchmark-count', status.benchmarks], ['#welcome-source-count', sources],
+    ] as const) $(selector).textContent = count.toLocaleString('en-US');
+    $('#welcome-coverage').title = coverage.title;
+    $('#welcome-coverage').hidden = false;
+    $('#welcome-coverage-summary').hidden = true;
+    $('#welcome-hub-count').textContent = `Also exploring ${status.specialistRepositories.toLocaleString('en-US')} Hugging Face repositories.`;
+    $('#welcome-hub-count').hidden = false;
   } catch { /* Keep the composer usable without catalogue coverage. */ }
 }
 void loadCoverage();

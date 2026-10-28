@@ -20,6 +20,8 @@ async function fixture(blocked = 'analytics.js', failure = '', options: {
     bundle: true, write: false, format: 'iife',
     define: { 'import.meta.url': JSON.stringify('https://example.test/scout/scout.js') },
     plugins: [{ name: 'blocked-analytics', setup(builder) {
+      // Check source even when a previous website build left generated JS beside it.
+      builder.onResolve({ filter: /\/onboarding\.js$/ }, () => ({ path: new URL('../../site/scout/onboarding.ts', import.meta.url).pathname }));
       builder.onLoad({ filter: new RegExp(`/${blocked.replaceAll('.', '\\.')}$`) }, () => ({
         contents: options.analytics
           ? `export const analytics = { configure() {}, account() {}, track: async () => false, preferences: () => ({ available: true, ...${JSON.stringify(options.analytics)} }) };`
@@ -37,14 +39,23 @@ async function fixture(blocked = 'analytics.js', failure = '', options: {
     const target = new EventTarget();
     return Object.assign(target, {
       value: '', textContent: '', placeholder: '', hidden: true, disabled: false,
-      style: {}, scrollHeight: 40, focus() {}, scrollIntoView() {},
-      setAttribute() {}, removeAttribute() {}, querySelectorAll: () => [], querySelector: $,
-      append() {}, prepend() {}, cloneNode: node, replaceChildren() {}, remove() {}, classList: { add() {}, remove() {} },
+      style: {}, dataset: {} as Record<string, string>, inert: true, scrollHeight: 40, focus() {}, scrollIntoView() {},
+      setAttribute() {}, removeAttribute() {},
+      querySelectorAll: (selector: string): EventTarget[] => selector === '[data-welcome-step]'
+        ? Array.from({ length: 5 }, (_, index) => $(`[data-welcome-step="${index}"]`))
+        : selector === '[data-example-task]' ? Array.from({ length: 3 }, (_, index) => $(`[data-example-task="${index}"]`)) : [],
+      querySelector: $,
+      append() {}, prepend() {}, cloneNode: node, replaceChildren() {}, remove() {}, classList: { add() {}, remove() {}, toggle() {} },
       requestSubmit() { target.dispatchEvent(new Event('submit', { cancelable: true })); },
     });
   }
   function $(selector: string) {
-    if (!nodes.has(selector)) nodes.set(selector, node());
+    if (!nodes.has(selector)) {
+      const value = node(); value.hidden = selector !== '#onboarding' && selector !== '#scout-app';
+      const step = selector.match(/^\[data-welcome-step="(\d+)"\]$/);
+      if (step) value.dataset.welcomeStep = step[1]!;
+      nodes.set(selector, value);
+    }
     return nodes.get(selector)!;
   }
   const available = () => { if (options.storageDisabled) throw new Error('Storage disabled'); };
@@ -60,7 +71,7 @@ async function fixture(blocked = 'analytics.js', failure = '', options: {
     closeSignIn() { state.modal = state.ready = false; for (const check of observers) check(); },
   };
   const document = Object.assign(new EventTarget(), {
-    body: {}, visibilityState: 'visible', createElement: node,
+    body: node(), visibilityState: 'visible', createElement: node,
     querySelector: (selector: string) => selector === '.scout-auth-ready' ? state.ready ? {} : null : selector === '.scout-auth-modal' ? state.modal ? {} : null : $(selector),
   });
   const location = { origin: 'https://example.test', pathname: '/scout/', href: 'https://example.test/scout/' };
@@ -98,6 +109,7 @@ async function fixture(blocked = 'analytics.js', failure = '', options: {
       clerk.session = { status, getToken: async () => 'current-session-token' }; clerk.user = { id: 'user-one' };
       observe(clerk); await drain();
     },
+    async signedOut() { clerk.session = null; clerk.user = null; observe(clerk); await drain(); },
     async submit(enter = false) {
       $('#prompt').value = draft;
       if (enter) $('#prompt').dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { key: 'Enter', shiftKey: false, isComposing: false }));
@@ -107,6 +119,101 @@ async function fixture(blocked = 'analytics.js', failure = '', options: {
     async expire(ms: number) { for (const [id, timer] of timers) if (timer.ms === ms) { timers.delete(id); timer.callback(); } await drain(); },
   };
 }
+
+test('selecting an example starts one conversation turn, after sign-in if needed', async () => {
+  for (const signedIn of [true, false]) {
+    const f = await fixture('analytics.js', '', { signedIn });
+    const button = f.$('[data-example-task="1"]');
+    button.textContent = 'Extract invoice dates, line items and totals into JSON.';
+    button.dispatchEvent(new Event('click')); await drain();
+    assert.equal(f.state.opened, signedIn ? 0 : 1);
+    if (!signedIn) {
+      assert.equal(f.turns.length, 0);
+      assert.equal(f.$('#prompt').value, 'Extract invoice dates, line items and totals into JSON.');
+      await f.signedIn();
+    }
+    assert.equal(f.turns.length, 1);
+    assert.equal(f.turns[0]!.message, 'Extract invoice dates, line items and totals into JSON.');
+    assert.equal(f.$('#prompt').value, '');
+  }
+});
+
+test('five modal steps lead to auth while the visible page stays inert until an active session, without submitting an example', async () => {
+  const f = await fixture();
+  assert.equal(f.$('#onboarding').hidden, false);
+  assert.equal(f.$('#scout-app').hidden, false);
+  assert.equal(f.$('#scout-app').inert, true);
+  const figures = ['#welcome-note', '#welcome-intro', '#welcome-stack', '#welcome-product', '#welcome-claude'];
+  for (const [index, figure] of figures.entries()) {
+    for (const other of figures) assert.equal(f.$(other).hidden, other !== figure, `${other} visibility on slide ${index + 1}`);
+    assert.equal(f.$('#scout-app').inert, true);
+    assert.equal(f.state.opened, 0, `slide ${index + 1} does not open auth before its CTA`);
+    f.$('#welcome-next').dispatchEvent(new Event('click')); await drain();
+  }
+  assert.equal(f.state.opened, 1);
+  assert.equal(f.$('#scout-app').inert, true);
+  f.clerk.closeSignIn(); await drain();
+  assert.equal(f.$('#onboarding').hidden, false);
+  assert.equal(f.$('#welcome-error').hidden, true);
+  await f.signedIn('pending');
+  assert.equal(f.$('#scout-app').inert, true);
+  await f.signedIn();
+  assert.equal(f.$('#onboarding').hidden, true);
+  assert.equal(f.$('#scout-app').hidden, false);
+  assert.equal(f.$('#scout-app').inert, false);
+  assert.equal(f.turns.length, 0);
+  await f.signedOut();
+  assert.equal(f.$('#scout-app').hidden, false);
+  assert.equal(f.$('#scout-app').inert, true);
+  assert.equal(f.$('#onboarding').hidden, false);
+});
+
+test('progress controls unlock with Continue and keep visited slides available after going back', async () => {
+  const f = await fixture();
+  const buttons = Array.from({ length: 5 }, (_, index) => f.$(`[data-welcome-step="${index}"]`));
+  assert.deepEqual(buttons.map(button => button.disabled), [false, true, true, true, true]);
+  f.$('#welcome-next').dispatchEvent(new Event('click'));
+  assert.deepEqual(buttons.map(button => button.disabled), [false, false, true, true, true]);
+  f.$('#welcome-next').dispatchEvent(new Event('click'));
+  assert.deepEqual(buttons.map(button => button.disabled), [false, false, false, true, true]);
+  buttons[0]!.dispatchEvent(new Event('click'));
+  assert.equal(f.$('#welcome-note').hidden, false);
+  assert.deepEqual(buttons.map(button => button.disabled), [false, false, false, true, true]);
+  buttons[2]!.dispatchEvent(new Event('click'));
+  assert.equal(f.$('#welcome-stack').hidden, false);
+  f.$('#welcome-next').dispatchEvent(new Event('click'));
+  assert.deepEqual(buttons.map(button => button.disabled), [false, false, false, false, true]);
+  assert.equal(f.state.opened, 0);
+  assert.equal(f.turns.length, 0);
+});
+
+test('returning sessions bypass onboarding; signed-out reloads start at the first slide despite an old marker or blocked storage', async () => {
+  const returning = await fixture('analytics.js', '', { signedIn: true });
+  assert.equal(returning.$('#onboarding').hidden, true);
+  assert.equal(returning.$('#scout-app').hidden, false);
+  assert.equal(returning.turns.length, 0);
+  for (const storageDisabled of [false, true]) {
+    const saved = new Map([['scout-onboarding-v1', '1']]);
+    const f = await fixture('analytics.js', 'config', { saved, storageDisabled });
+    assert.equal(f.$('#welcome-note').hidden, false);
+    assert.equal(f.$('#welcome-claude').hidden, true);
+    assert.equal(f.$('[data-welcome-step="4"]').disabled, true);
+    for (let i = 0; i < 4; i++) f.$('#welcome-next').dispatchEvent(new Event('click'));
+    f.$('#welcome-next').dispatchEvent(new Event('click')); await drain();
+    assert.equal(f.$('#welcome-error').hidden, false);
+    assert.match(f.$('#welcome-error').textContent, /Sign-in could not load/);
+    assert.equal(f.$('#welcome-next').disabled, false);
+    assert.equal(f.$('#scout-app').hidden, false);
+    assert.equal(f.$('#scout-app').inert, true);
+    f.state.authStatus = 200;
+    f.$('#welcome-next').dispatchEvent(new Event('click')); await drain();
+    assert.equal(f.state.opened, 1);
+    await f.signedIn();
+    assert.equal(f.$('#scout-app').hidden, false);
+    assert.equal(f.$('#scout-app').inert, false);
+    assert.equal(f.turns.length, 0);
+  }
+});
 
 test('Claude handoff remains usable with analytics blocked and opens before clipboard permission settles', async () => {
   let copied = '', finishCopy = () => {};
@@ -177,9 +284,18 @@ test('public coverage distinguishes catalogue models, Hub repositories, benchmar
   const f = await fixture('analytics.js', '', { coverage });
   assert.equal(f.$('#index-counts').hidden, false);
   assert.equal(f.$('#index-counts').textContent.replaceAll('\u00a0', ' '), '1,234 indexed models · 87 Hub repos · 19 benchmarked labs · 462 benchmarks · 2 source feeds');
+  assert.equal(f.$('#welcome-coverage').hidden, false);
+  assert.equal(f.$('#welcome-coverage-summary').hidden, true);
+  assert.equal(f.$('#welcome-model-count').textContent, '1,234');
+  assert.equal(f.$('#welcome-lab-count').textContent, '19');
+  assert.equal(f.$('#welcome-benchmark-count').textContent, '462');
+  assert.equal(f.$('#welcome-source-count').textContent, '2');
+  assert.equal(f.$('#welcome-hub-count').textContent, 'Also exploring 87 Hugging Face repositories.');
+  assert.equal(f.state.requests.filter(url => url.endsWith('/api/status')).length, 1);
   for (const options of [{ coverageFailure: true }, { coverage: { ...coverage, availableModels: -1 } }, { coverage: { ...coverage, providers: null } }, { coverage: { ...coverage, sources: [{}] } }]) {
     const unavailable = await fixture('analytics.js', '', options);
     assert.equal(unavailable.$('#index-counts').hidden, true);
+    assert.equal(unavailable.$('#welcome-coverage').hidden, true);
     await unavailable.submit();
     assert.equal(unavailable.state.opened, 1, 'coverage failure must not block sign-in');
     assert.equal(unavailable.$('#error').hidden, true);
