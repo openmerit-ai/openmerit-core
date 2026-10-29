@@ -16,6 +16,8 @@ export const hubPolicy = {
   // Requests per run stay far below the Hub's 1,000 per 5 minutes and the Worker subrequest limit.
   overviewsPerRun: 400, pagesPerRun: 250, recheckDays: 7, recrawlDays: 7, concurrency: 6,
   providerPagesPerRun: 4, providerPageBytes: 4_000_000, providerRowBytes: 250_000, providerApplyBatches: 4, providerBatchModels: 50, providerApplyBytes: 1_000_000,
+  // Unchanged repositories are re-applied at least this often, so identity links and parser changes still reach them.
+  providerReapplyDays: 7,
   // Discovery proposes organisations from the most-downloaded models; only verified ones are admitted.
   discovery: ['text-generation', 'image-text-to-text', 'text-to-image'],
 };
@@ -288,6 +290,8 @@ async function providerPage(response: Response, maxBytes: number): Promise<{ row
   return { rows, bytes };
 }
 
+// Popularity counts change every day; they are not a repository change.
+const providerHash = (row: unknown): Promise<string> => { const { downloads: _d, likes: _l, ...stable } = obj(row); return digest(stable); };
 type ProviderPhase = 'collect' | 'apply' | 'done';
 interface ProviderCrawl { started_at: string; run: string; next_url: string | null; phase: ProviderPhase; cursor: string; pages: number; models: number; routes: number; stats: string }
 const emptyStats = (): StoreStats => ({ listings: 0, added: 0, changed: 0, withdrawn: 0, unresolved: 0, prices_opened: 0, prices_closed: 0 });
@@ -329,9 +333,12 @@ export async function refreshHubProviders(db: Database, options: HubOptions & { 
   await ensureCatalogueSchema(db);
   await db.batch([
     db.prepare("CREATE TABLE IF NOT EXISTS cat_hf_provider_crawl (id INTEGER PRIMARY KEY CHECK(id=1),started_at TEXT NOT NULL,run TEXT NOT NULL,next_url TEXT,phase TEXT NOT NULL,cursor TEXT NOT NULL DEFAULT '',pages INTEGER NOT NULL DEFAULT 0,models INTEGER NOT NULL DEFAULT 0,routes INTEGER NOT NULL DEFAULT 0,stats TEXT NOT NULL)"),
-    db.prepare('CREATE TABLE IF NOT EXISTS cat_hf_provider_stage (id TEXT PRIMARY KEY,payload TEXT)'),
+    db.prepare('CREATE TABLE IF NOT EXISTS cat_hf_provider_stage (id TEXT PRIMARY KEY,payload TEXT,hash TEXT)'),
     db.prepare('CREATE TABLE IF NOT EXISTS cat_hf_provider_pages (url TEXT PRIMARY KEY)'),
+    // The metadata hash each repository was last applied with; it survives crawls.
+    db.prepare('CREATE TABLE IF NOT EXISTS cat_hf_provider_seen (id TEXT PRIMARY KEY,hash TEXT NOT NULL,applied_at TEXT NOT NULL)'),
   ]);
+  if (!(await db.prepare("SELECT name FROM pragma_table_info('cat_hf_provider_stage') WHERE name='hash'").all()).results.length) await db.prepare('ALTER TABLE cat_hf_provider_stage ADD COLUMN hash TEXT').run();
   let crawl = await providerCrawl(db);
   if (!crawl) {
     const run = options.run ?? `huggingface-providers-${now}`;
@@ -355,8 +362,10 @@ export async function refreshHubProviders(db: Database, options: HubOptions & { 
       if (next === url || next && (await db.prepare('SELECT url FROM cat_hf_provider_pages WHERE url=?1').bind(next).all()).results.length) throw new Error('Hugging Face provider pagination cycle.');
       // A page and its continuation commit together. Retrying an interrupted
       // request cannot skip a repository or leave a cursor ahead of its data.
+      const hashes = await Promise.all(page.rows.map(providerHash));
       await db.batch([
-        ...page.rows.map(row => db.prepare('INSERT INTO cat_hf_provider_stage (id,payload) VALUES (?1,?2) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').bind(String(obj(row).id), JSON.stringify(row))),
+        ...page.rows.map((row, i) => db.prepare('INSERT INTO cat_hf_provider_stage (id,payload,hash) VALUES (?1,?2,?3) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,hash=excluded.hash')
+          .bind(String(obj(row).id), JSON.stringify(row), hashes[i] ?? null)),
         db.prepare('INSERT INTO cat_hf_provider_pages (url) VALUES (?1)').bind(url),
         db.prepare('UPDATE cat_hf_provider_crawl SET next_url=?1,phase=?2,pages=pages+1 WHERE id=1').bind(next, next ? 'collect' : 'apply'),
       ]);
@@ -376,10 +385,15 @@ export async function refreshHubProviders(db: Database, options: HubOptions & { 
         throw new Error(`${source} listings dropped from ${active} to ${staged}; previous rows retained.`);
       }
     }
+    // Only new or changed repositories are applied. One whose metadata hash
+    // matches what was applied recently keeps its rows; final withdrawal still
+    // uses the whole staged feed.
+    const recent = daysAgo(crawl.started_at, hubPolicy.providerReapplyDays);
     for (let i = 0; crawl.phase === 'apply' && i < batches; i++) {
-      const rows = (await db.prepare(`WITH candidates AS (SELECT id,payload FROM cat_hf_provider_stage WHERE id>?1 ORDER BY id LIMIT ?2)
-        SELECT id,payload FROM (SELECT id,payload,sum(length(CAST(payload AS BLOB))) OVER (ORDER BY id) bytes FROM candidates) WHERE bytes<=?3 ORDER BY id`)
-        .bind(crawl.cursor, batchModels, hubPolicy.providerApplyBytes).all<{ id: string; payload: string }>()).results;
+      const rows = (await db.prepare(`WITH candidates AS (SELECT id,payload,hash FROM cat_hf_provider_stage s WHERE id>?1 AND payload IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM cat_hf_provider_seen v WHERE v.id=s.id AND v.hash=s.hash AND v.applied_at>=?4) ORDER BY id LIMIT ?2)
+        SELECT id,payload,hash FROM (SELECT id,payload,hash,sum(length(CAST(payload AS BLOB))) OVER (ORDER BY id) bytes FROM candidates) WHERE bytes<=?3 ORDER BY id`)
+        .bind(crawl.cursor, batchModels, hubPolicy.providerApplyBytes, recent).all<{ id: string; payload: string; hash: string | null }>()).results;
       if (!rows.length) { crawl.phase = 'done'; await db.prepare("UPDATE cat_hf_provider_crawl SET phase='done' WHERE id=1").run(); break; }
       const repos = rows.map(r => r.id), parsedPage = parseHubPage(rows.map(r => JSON.parse(r.payload) as unknown));
       const listings = resolveListings(parsedPage.listings, await providerBackbone(db, repos), { slugs: false });
@@ -397,6 +411,8 @@ export async function refreshHubProviders(db: Database, options: HubOptions & { 
         // Release large raw payloads as each batch is applied, retaining only
         // repository membership for final cleanup. A crashed batch is replayable.
         db.prepare('UPDATE cat_hf_provider_stage SET payload=NULL WHERE id IN (SELECT value FROM json_each(?1))').bind(JSON.stringify(repos)),
+        db.prepare(`INSERT INTO cat_hf_provider_seen (id,hash,applied_at) SELECT json_extract(value,'$[0]'),json_extract(value,'$[1]'),?2 FROM json_each(?1) WHERE json_extract(value,'$[1]') IS NOT NULL
+          ON CONFLICT(id) DO UPDATE SET hash=excluded.hash,applied_at=excluded.applied_at`).bind(JSON.stringify(rows.map(r => [r.id, r.hash])), crawl.started_at),
         db.prepare('UPDATE cat_hf_provider_crawl SET cursor=?1,models=models+?2,routes=routes+?3,stats=?4 WHERE id=1').bind(cursor, parsedPage.models.length, listings.length, JSON.stringify(total)),
       ]);
       crawl.cursor = cursor; crawl.models += parsedPage.models.length; crawl.routes += listings.length; crawl.stats = JSON.stringify(total);
@@ -412,6 +428,8 @@ export async function refreshHubProviders(db: Database, options: HubOptions & { 
           '$.prices_closed',json_extract(stats,'$.prices_closed')+(SELECT count(*) FROM cat_prices WHERE ${unpriced})) WHERE id=1`),
         db.prepare(`UPDATE cat_listings SET withdrawn_at=?1 WHERE ${missing}`).bind(crawl.started_at),
         db.prepare(`UPDATE cat_prices SET valid_to=?1 WHERE ${unpriced}`).bind(crawl.started_at),
+        // A withdrawn repository is applied again in full if it returns.
+        db.prepare('DELETE FROM cat_hf_provider_seen WHERE id NOT IN (SELECT id FROM cat_hf_provider_stage)'),
       ]);
       const finished = await providerCrawl(db);
       if (!finished) throw new Error('Missing completed provider crawl.');

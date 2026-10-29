@@ -179,7 +179,8 @@ test('page and apply budgets resume durable cursors; interrupted collection and 
   await refreshHubProviders(db, { now: '2026-10-01T00:00:00.000Z', run: 'seed', fetcher: hub({ [hubProvidersURL]: { body: [served('person/a'), served('person/b')] } }) });
   const active = () => db.all("SELECT provider_model_id FROM cat_listings WHERE source='huggingface-providers' AND withdrawn_at IS NULL ORDER BY provider_model_id").map(r => r.provider_model_id);
   const prices = () => db.all("SELECT provider_model_id FROM cat_prices WHERE source='huggingface-providers' AND valid_to IS NULL ORDER BY provider_model_id,kind").map(r => r.provider_model_id);
-  const pages: Record<string, Page> = { [hubProvidersURL]: { body: [served('person/a')], next }, [next]: { status: 429 } };
+  // person/a changed since the seed, so this crawl applies it again.
+  const pages: Record<string, Page> = { [hubProvidersURL]: { body: [served('person/a', 'conversational', { lastModified: '2026-10-01T12:00:00Z' })], next }, [next]: { status: 429 } };
   const fetcher = hub(pages, seen), started = '2026-10-02T00:00:00.000Z';
   const collect = await refreshHubProviders(db, { fetcher, now: started, run: 'resumable', pages: 1, applyBatches: 1, batchModels: 1 });
   assert.deepEqual([collect.complete, collect.phase, collect.collectedPages, collect.stagedModels, collect.models, collect.error], [false, 'collect', 1, 1, 0, null]);
@@ -236,7 +237,7 @@ test('a globally collapsed completed feed is rejected before any bounded apply a
   assert.equal(db.all("SELECT last_run FROM cat_sources WHERE id='huggingface-providers'")[0]?.last_run, 'healthy');
   assert.equal(db.all('SELECT count(*) n FROM cat_hf_provider_crawl')[0]?.n, 0, 'a rejected complete generation must not trap future refreshes');
   const recovered = await refreshHubProviders(db, { now: '2026-10-03T00:00:00.000Z', run: 'recovered', fetcher: hub({ [hubProvidersURL]: { body: seed } }) });
-  assert.equal(recovered.complete, true); assert.equal(recovered.appliedModels, 60);
+  assert.deepEqual([recovered.complete, recovered.stagedModels, recovered.appliedModels], [true, 60, 0], 'the recovered feed matches what was applied, so nothing is rewritten');
 });
 
 test('a globally healthy feed can shrink a greater-than-50-route exact repository batch below half', async () => {
@@ -249,9 +250,29 @@ test('a globally healthy feed can shrink a greater-than-50-route exact repositor
   const second = await refreshHubProviders(db, { now: '2026-10-02T00:00:00.000Z', run: 'healthy-decline', batchModels: 1,
     fetcher: hub({ [hubProvidersURL]: { body: [many('person/a', 10), many('person/z', 60)] } }) });
   assert.equal(second.error, null, 'the global feed retains 70/120 routes, although the first exact batch retains only 10/60');
-  assert.equal(second.complete, true); assert.equal(second.appliedRoutes, 70);
+  assert.equal(second.complete, true); assert.equal(second.appliedRoutes, 10, 'unchanged person/z is not applied again');
   assert.equal(second.stats?.withdrawn, 50); assert.equal(second.stats?.prices_closed, 100);
   assert.deepEqual(db.all("SELECT provider_model_id,count(*) n FROM cat_listings WHERE source='huggingface-providers' AND withdrawn_at IS NULL GROUP BY provider_model_id ORDER BY provider_model_id").map(r => Object.values(r)), [['person/a', 10], ['person/z', 60]]);
+});
+
+test('a later crawl applies only new, changed, returning or long-unapplied repositories', async () => {
+  const db = d1(), crawl = (now: string, body: unknown[]) => refreshHubProviders(db, { now, run: now, fetcher: hub({ [hubProvidersURL]: { body } }) });
+  const row = (repo: string) => db.all(`SELECT * FROM cat_listings WHERE provider_model_id='${repo}'`);
+  const changed = { lastModified: '2026-10-01T12:00:00Z' };
+  await crawl('2026-10-01T00:00:00.000Z', [served('person/a'), served('person/b'), served('person/c')]);
+  const a = row('person/a');
+  const second = await crawl('2026-10-02T00:00:00.000Z', [served('person/a', 'conversational', { downloads: 999, likes: 50 }), served('person/b', 'conversational', changed), served('person/d')]);
+  assert.deepEqual([second.complete, second.stagedModels, second.appliedModels], [true, 3, 2], 'only changed b and new d are applied');
+  assert.deepEqual(row('person/a'), a, 'a popularity-only change rewrites nothing');
+  assert.equal(row('person/b')[0]?.last_seen, '2026-10-02T00:00:00.000Z');
+  assert.equal(row('person/c')[0]?.withdrawn_at, '2026-10-02T00:00:00.000Z');
+  assert.equal(row('person/d')[0]?.withdrawn_at, null);
+  const third = await crawl('2026-10-03T00:00:00.000Z', [served('person/a'), served('person/b', 'conversational', changed), served('person/c'), served('person/d')]);
+  assert.equal(third.appliedModels, 1, 'only c, which returned unchanged, is applied');
+  assert.equal(row('person/c')[0]?.withdrawn_at, null, 'a returning repository is restored even though its metadata is unchanged');
+  const weekly = await crawl('2026-10-09T00:00:00.000Z', [served('person/a'), served('person/b', 'conversational', changed), served('person/c'), served('person/d')]);
+  assert.equal(weekly.appliedModels, 1, `only a was last applied more than ${hubPolicy.providerReapplyDays} days ago; b exactly that long ago is still skipped`);
+  assert.equal(row('person/a')[0]?.last_seen, '2026-10-09T00:00:00.000Z');
 });
 
 test('failed final cleanup cannot advance source freshness, and retry preserves final withdrawal counters', async () => {
