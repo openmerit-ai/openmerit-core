@@ -1,5 +1,5 @@
 // Final per-model results from media and decision-model leaderboards (image, editing,
-// video, speech, transcription, music, decisions), kept verbatim with provenance. Like
+// video, speech, transcription, music, 3D, embeddings, decisions), kept verbatim with provenance. Like
 // MTEB, these stay out of chat evidence; decision boards only break equal-cost ties in
 // task-fit shortlists (catalogue-routes.ts decisionScores). A result
 // links to a canonical model only when its name matches exactly one catalogue
@@ -97,6 +97,60 @@ function jevBench(data: unknown): Board {
       ci_lower: null, ci_upper: null, samples: null, released: null, payload: { ...s, revision: root.revision } })) };
 }
 
+// A table's initial value in a Gradio Space's /config JSON, found by the element id of the
+// table or of an enclosing component, or by its tab's exact label. Nothing on the page runs.
+export function gradioTable(config: unknown, at: string): { headers: string[]; rows: unknown[][] } {
+  const root = obj(config), components = Array.isArray(root.components) ? root.components.filter(isObject) : [];
+  const byId = new Map(components.map(c => [c.id, c]));
+  const props = (n: unknown) => obj(byId.get(obj(n).id)?.props);
+  const find = (n: unknown, inside: boolean): Record<string, unknown> | undefined => {
+    const p = props(n), here = inside || p.elem_id === at || (byId.get(obj(n).id)?.type === 'tabitem' && p.label === at);
+    if (here && byId.get(obj(n).id)?.type === 'dataframe') return obj(p.value);
+    for (const child of Array.isArray(obj(n).children) ? obj(n).children as unknown[] : []) { const t = find(child, here); if (t) return t; }
+    return undefined;
+  };
+  const table = find(root.layout, false);
+  if (!table || !Array.isArray(table.headers) || !Array.isArray(table.data) || !table.data.every(Array.isArray)) throw new Error(`Table ${at} not found.`);
+  return { headers: table.headers.map(String), rows: table.data as unknown[][] };
+}
+const plain = (v: unknown) => String(v ?? '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/<[^>]*>/g, '')
+  .replace(/&(amp|lt|gt|quot|#39);/g, (_, e: string) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e] ?? '').replace(/\s+/g, ' ').trim();
+const percent = (v: unknown) => { const n = typeof v === 'string' && /^\s*-?\d+(\.\d+)?%?\s*$/.test(v) ? parseFloat(v) : v; return finite(n) ? n : null; };
+type BoardInfo = Omit<Board, 'results' | 'published_at' | 'metric' | 'direction'>;
+// One board from one Gradio table: the model and score columns must exist, scoreless rows are
+// dropped, and each row is kept as a header-to-cell payload.
+function gradioBoard(config: unknown, at: string, board: BoardInfo & Pick<Board, 'metric' | 'direction'>, columns: { model: string; score: string; variant?: string; samples?: string }): Board {
+  const { headers, rows } = gradioTable(config, at), col = (h: string) => { const i = headers.indexOf(h); if (i < 0) throw new Error(`${board.title}: no ${h} column; format changed.`); return i; };
+  const model = col(columns.model), score = col(columns.score), variant = columns.variant ? col(columns.variant) : -1, samples = columns.samples ? col(columns.samples) : -1;
+  const results = rows.filter(r => plain(r[model]) && percent(r[score]) !== null).map(r => {
+    const name = plain(r[model]);
+    return { model: name, variant: variant < 0 ? '' : plain(r[variant]), creator: name.includes('/') ? name.split('/')[0] ?? null : null, score: percent(r[score]) ?? 0,
+      ci_lower: null, ci_upper: null, samples: samples < 0 ? null : count(r[samples]), released: null, payload: Object.fromEntries(headers.map((h, i) => [h, r[i] ?? null])) };
+  });
+  if (results.length < 5) throw new Error(`${board.title}: format changed.`);
+  return { ...board, published_at: null, results };
+}
+// Arena-style JSON lists (TTS Arena, 3D Arena): an Elo per model from blind pairwise votes.
+function eloList(rows: unknown, board: BoardInfo, fields: { score: string; samples: string }): Board {
+  const list = Array.isArray(rows) ? rows.filter(isObject) : [];
+  const results = list.filter(r => typeof r.name === 'string' && finite(r[fields.score])).map(r => ({ model: plain(r.name), variant: '', creator: null, score: Number(r[fields.score]),
+    ci_lower: null, ci_upper: null, samples: count(r[fields.samples]), released: null, payload: r }));
+  if (results.length < 5) throw new Error(`${board.title}: format changed.`);
+  return { ...board, metric: 'Elo', direction: 'higher', published_at: null, results };
+}
+
+const HF = 'https://huggingface.co/spaces', noLicense = 'No licence stated; final results only, attributed';
+const asr = `${HF}/hf-audio/open_asr_leaderboard`, vbench = `${HF}/Vchitect/VBench_Leaderboard`, arena3d = `${HF}/3d-arena/3d-arena`;
+// Open ASR: average WER (%) over each table's default datasets, as the Space shows it on load.
+// Multilingual rows without every default language have no average and are not kept.
+const asrBoard = (config: unknown, at: string, id: string, title: string, model = 'Model') =>
+  gradioBoard(config, at, { id: `open-asr:${id}`, title: `Open ASR Leaderboard · ${title}`, kind: 'transcription', metric: 'Average WER (%)', direction: 'lower', url: asr }, { model, score: 'Average WER ⬇️' });
+// VBench: the Total Score of each table. Rows are not filtered by who evaluated them (the
+// 1.0 table is published with VBench-evaluated rows only); "Evaluated by" is the variant,
+// so a model scored by both VBench and its own team keeps both rows.
+const vbenchBoard = (config: unknown, tab: string, id: string, title: string, model: string) =>
+  gradioBoard(config, tab, { id: `vbench:${id}`, title: `VBench · ${title}`, kind: 'video', metric: 'Total score (%)', direction: 'higher', url: vbench }, { model, score: 'Total Score', variant: 'Evaluated by' });
+
 const decisionRole = 'Final decision-model leaderboard results; break equal-cost ties in task-fit shortlists';
 const AA = 'https://artificialanalysis.ai', aaLicense = 'Artificial Analysis public leaderboard pages; final results only, attributed', arenaLicense = 'CC BY 4.0';
 const arenaData = (board: string) => `https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/${board}/latest-00000-of-00001.parquet`;
@@ -127,6 +181,22 @@ export const boardSources: BoardSource[] = [
   arena('video_edit', 'video-edit', 'video', 'https://arena.ai/leaderboard/video-edit', [['overall', 'Arena · Video editing']]),
   { id: 'analysis-board:decision-index', name: 'Artificial Analysis · Decision Index', url: `${AA}/evaluations/artificial-analysis-decision-index`, license: aaLicense, type: 'html', maxBytes: 8_000_000, role: decisionRole, parse: data => [analysisDecisions(String(data))] },
   { id: 'jevbench', name: 'JevBench (Benchmark Heaven)', url: 'https://benchmarkheaven.com/api/jevbench/latest', license: 'No licence stated; final results only, attributed', type: 'json', maxBytes: 4_000_000, role: decisionRole, parse: data => [jevBench(data)] },
+  // The private-data tab is left out: its two averages are already columns of the English table.
+  { id: 'open-asr', name: 'Open ASR Leaderboard (Hugging Face Audio)', url: 'https://hf-audio-open-asr-leaderboard.hf.space/config', license: noLicense, type: 'json', maxBytes: 4_000_000,
+    parse: data => [asrBoard(data, 'leaderboard-table', 'english', 'English', 'model'), asrBoard(data, 'multilingual-table', 'multilingual', 'Multilingual'), asrBoard(data, 'longform-table', 'long-form', 'Long-form')] },
+  // Suspended entries (for example for vote manipulation) are unranked and not kept.
+  { id: 'tts-arena', name: 'TTS Arena V2', url: 'https://tts-agi-tts-arena-v2.hf.space/api/leaderboard', license: noLicense, type: 'json', maxBytes: 1_000_000,
+    parse: data => [eloList((Array.isArray(obj(data).rows) ? obj(data).rows as unknown[] : []).filter(r => obj(r).suspended !== true), { id: 'tts-arena:v2', title: 'TTS Arena V2', kind: 'speech', url: `${HF}/TTS-AGI/TTS-Arena-V2` }, { score: 'elo', samples: 'totalVotes' })] },
+  ...(['render', 'topology'] as const).map((vote): BoardSource => ({ id: `3d-arena:${vote}`, name: `3D Arena (${vote})`, url: `https://3d-arena-3d-arena.hf.space/api/leaderboard?vote_type=${vote}`, license: 'MIT (Space licence); final results only, attributed',
+    type: 'json', maxBytes: 1_000_000, parse: data => [eloList(data, { id: `3d-arena:${vote}`, title: `3D Arena · ${vote === 'render' ? 'Render' : 'Topology'}`, kind: '3d', url: arena3d }, { score: 'score', samples: 'votes' })] })),
+  // VBench-Long and the trustworthiness table are not read.
+  { id: 'vbench', name: 'VBench Leaderboard', url: 'https://vchitect-vbench-leaderboard.hf.space/config', license: 'MIT (Space licence); final results only, attributed', type: 'json', maxBytes: 4_000_000,
+    parse: data => [vbenchBoard(data, '📊 VBench 1.0', 't2v', 'Text to video (VBench 1.0)', 'Model Name (clickable)'), vbenchBoard(data, '⭐ VBench 2.0', 'v2', 'Text to video (VBench-2.0)', 'Model (alphabetical order)'),
+      vbenchBoard(data, 'VBench-I2V', 'i2v', 'Image to video', 'Model Name (clickable)')] },
+  // Self-submitted results. Ranked by "Overall" (every V3 dataset), not "Overall-V3", which covers only the datasets new in V3.
+  { id: 'mmeb', name: 'MMEB Leaderboard (TIGER-Lab)', url: 'https://tiger-lab-mmeb-leaderboard.hf.space/config', license: 'Apache-2.0 (Space licence); self-submitted final results, attributed', type: 'json', maxBytes: 4_000_000,
+    parse: data => [['tab-overall', 'v3', 'MMEB-V3', 'Overall'], ['tab-overall-v2', 'v2', 'MMEB-V2', 'Overall-V2']].map(([at = '', id = '', title = '', score = '']) =>
+      gradioBoard(data, at, { id: `mmeb:${id}`, title: `MMEB · ${title} overall`, kind: 'embedding', metric: `${score} score`, direction: 'higher', url: `${HF}/TIGER-Lab/MMEB-Leaderboard` }, { model: 'Models', score })) },
 ];
 
 // Exact names only: lower-case alphanumerics, without a trailing run setting such as "(max)".
