@@ -1,5 +1,18 @@
 # Scout architecture and operations
 
+## Scale Labs SEAL boards as benchmark evidence (not yet deployed)
+
+`readSeal` in `sources.mjs` fetches one page per board from `labs.scale.com/leaderboard/<id>`, four at a time, and reads the full ranking from the page's flight data with `flightRecords` (no script runs). The overview page lists only each board's top six. Each board becomes a `seal:<id>` series of published percentages divided by 100, with Scale's per-row date as the observation date and the page's meta description as its description. A board whose page fails keeps its previous series and evidence, as for Vals AI; most boards failing fails the source.
+
+- **Read (11):** Professional Reasoning Legal and Finance, MCP Atlas, MultiChallenge, Remote Labor Index, SWE Atlas Refactoring, Test Writing and Codebase QnA, HiL-Bench, DrugDiscoveryBench and Humanity's Sixth Sense.
+- **Not read:** 23 deprecated boards; DistressBench and Fortress (safety; Fortress is lower-is-better); AudioMultiChallenge (speech); HLE Diamond, which Artificial Analysis now supplies; and SWE-Bench Pro V2, whose Full and Hard views share one URL and whose 16 rows score 87–99 without a stated metric.
+- **Rows dropped:** any with a contamination message or marked deprecated.
+- **Names:** agent boards write "Model (harness) effort"; the trailing effort becomes a parenthetical so the existing resolver strips run settings. Harness rows of one model join that model's evidence with the harness in its configuration list. Known mismatch: \"gpt-5.6 (sol)\" resolves to `openai/gpt-5.6` because the resolver drops trailing parentheticals.
+- `evaluationKey` strips the \" · SEAL\" suffix, so SEAL's MultiChallenge and MCP Atlas share a family with other publishers' copies of those evaluations.
+- **Terms:** Scale's site states no data licence. This follows the owner's stance for Artificial Analysis (final results, attributed); it has not been confirmed for Scale specifically.
+
+**Local replay, 29 October** (live pages, published catalogue as the previous snapshot, collection only): 161 of 232 distinct names match. Models per board: Legal 31, Finance 26, MCP Atlas 24, MultiChallenge 15, RLI 7, SWE Atlas 11, 13 and 12, HiL-Bench 27, DrugDiscoveryBench 18, Humanity's Sixth Sense 25. The refresh adds 11 page fetches.
+
 ## More Artificial Analysis evaluations (not yet deployed)
 
 The models leaderboard page Scout already reads carries scores for six evaluations that `aaBenchmarks` did not map. They are now read as their own series, with no new download:

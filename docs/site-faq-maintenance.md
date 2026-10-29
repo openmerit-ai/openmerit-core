@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Scale Labs SEAL boards as evidence — source only, 29 October 2026
+
+Reviewed ranking and coverage claims against the change that reads 11 Scale Labs SEAL boards as benchmark evidence. The homepage FAQ names no individual benchmark sources or counts, so no FAQ copy changes. The Scout guide's source table describes the new source.
+
 ## More Artificial Analysis evaluations as evidence — source only, 29 October 2026
 
 Reviewed ranking and coverage claims against the change that reads HealthBench, HealthBench Professional, Humanity’s Last Exam Diamond, CritPt v2 Hard, FrontierCode 2.0 and Code2Video-AA from the Artificial Analysis page Scout already collects. The homepage FAQ names no individual benchmarks or evaluation counts, so no FAQ copy changes. The Scout guide's source table gives the new count.

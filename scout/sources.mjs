@@ -6,6 +6,7 @@ import { catalogueURL, parseProviderCatalogue, mergeCatalogues, routerEndpoint, 
 import contracts from './endpoint-contracts.json' with { type: 'json' };
 import { hubQueries, parseHubModels, hubID } from './huggingface.mjs';
 import { refreshSpecialists } from './specialists.mjs';
+import { flightRecords } from './catalogue-boards.ts';
 import { refreshModelMetadata } from './metadata.mjs';
 import { catalogueRouteSource } from './catalogue-routes.ts';
 
@@ -136,6 +137,33 @@ export async function readVals(read) {
   }
   if (found.length < valsSlugs.length / 2) throw new Error('Most Vals AI benchmarks were unavailable.');
   return { benchmarks: found, missing };
+}
+// Scale Labs (SEAL) boards, run by Scale on mostly private sets. Each board page embeds its
+// full ranking in flight data; scripts are never run. Read: current professional, agentic and
+// multi-turn boards. Left out: deprecated boards, safety boards (different meaning of a high
+// score), audio, HLE Diamond (Artificial Analysis supplies it) and SWE-Bench Pro V2, whose
+// page shares one URL between its Full and Hard views.
+export const sealBoards = ['prbench-legal', 'prbench-finance', 'mcp_atlas', 'multichallenge', 'rli', 'sweatlas-refactoring', 'sweatlas-tw', 'sweatlas-qna', 'hil', 'drugdiscoverybench', 'hss'];
+export function parseSeal(slug, html) {
+  const title = decodeEntities(html.match(/<meta property="og:title" content="([^"]*)"/)?.[1] ?? '').trim();
+  const description = decodeEntities(html.match(/<meta name="description" content="([^"]*)"/)?.[1] ?? '').trim();
+  const entries = flightRecords(html, r => typeof r.model === 'string' && typeof r.score === 'number' && 'rank' in r);
+  // A row flagged as possibly contaminated or deprecated has no standing on the board. Agent
+  // boards name "Model (harness) effort"; the effort becomes a parenthetical run setting.
+  const rows = entries.filter(r => !r.deprecated && !r.contaminationMessage && Number.isFinite(r.score) && r.score >= 0 && r.score <= 100)
+    .map(r => ({ model: String(r.model).replace(/\s+/g, ' ').trim().replace(/(\))\s+(minimal|low|medium|high|xhigh|max)$/i, '$1 ($2)'), score: r.score / 100, observedAt: /^\d{4}-\d{2}-\d{2}/.test(String(r.createdAt)) ? String(r.createdAt).slice(0, 10) : null }));
+  if (!title || rows.length < 10) throw new Error(`Scale SEAL ${slug} format changed.`);
+  return { slug, name: title, description, updated: rows.map(r => r.observedAt).filter(Boolean).sort().at(-1) ?? null, rows };
+}
+export async function readSeal(read) {
+  const found = [], missing = [];
+  for (let i = 0; i < sealBoards.length; i += 4) {
+    const batch = sealBoards.slice(i, i + 4);
+    const results = await Promise.allSettled(batch.map(async slug => parseSeal(slug, await read(`https://labs.scale.com/leaderboard/${slug}`, 'text', 3_000_000))));
+    results.forEach((r, j) => r.status === 'fulfilled' ? found.push(r.value) : missing.push(batch[j]));
+  }
+  if (found.length < sealBoards.length / 2) throw new Error('Most Scale SEAL boards were unavailable.');
+  return { boards: found, missing };
 }
 // Developer-reported scores compiled by LLM Stats. Only scores it marks self-reported
 // are kept, on 0–1 or 0–100 scales; Elo-style and unbounded scales are not comparable.
@@ -279,7 +307,7 @@ export function parseBFCL(csv) {
   });
 }
 
-export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, arenaVisionRows, arenaWebdevRows, arenaFactualityRows, vals, vendorScores, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, catalogueSupply, previous, failures = {}, checkedAt = new Date().toISOString() }) {
+export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, arenaVisionRows, arenaWebdevRows, arenaFactualityRows, vals, seal, vendorScores, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, catalogueSupply, previous, failures = {}, checkedAt = new Date().toISOString() }) {
   const sources = [], benchmarks = [], observations = new Map();
   const descriptions = benchmarkDescriptions ?? previous?.benchmarkDescriptions ?? {};
   const priorSources = new Map(previous?.sources.map(s => [s.id, s]) ?? []);
@@ -511,6 +539,21 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     }
     return { publishedAt: vals.benchmarks.map(v => v.updated).filter(Boolean).sort().at(-1) ?? null };
   });
+  collect('seal', 'Scale Labs (SEAL)', 'https://labs.scale.com/leaderboard', 'Leaderboards run and published by Scale Labs (SEAL), mostly on private test sets. Final scores only; rows Scale marks as possibly contaminated or deprecated are left out. Each result keeps the date Scale added it. Matched by Scout.', () => {
+    if (!seal) throw new Error('Scale SEAL boards unavailable.');
+    for (const b of seal.boards) {
+      const url = `https://labs.scale.com/leaderboard/${b.slug}`;
+      const benchmark = addBenchmark(`seal:${b.slug}`, `${b.name} · SEAL`, 'seal', { title: b.name, description: `${b.description} Run by Scale Labs. Score is the published percentage.`.trim(), metric: 'Score / 100', suite: 'Scale Labs SEAL', sourceURL: url }, { publishedAt: b.updated });
+      for (const row of b.rows) add(row.model, benchmark, row.score, { url, observedAt: row.observedAt, sourceModel: row.model, metric: 'Score / 100' });
+    }
+    for (const slug of seal.missing) {
+      const old = previous?.benchmarks.find(b => b.id === `seal:${slug}`);
+      if (!old) continue;
+      benchmarks.push(old);
+      for (const model of models) model.evidence.push(...(previous.models.find(m => m.id === model.id)?.evidence.filter(e => e.benchmark === old.id) ?? []));
+    }
+    return { publishedAt: seal.boards.map(b => b.updated).filter(Boolean).sort().at(-1) ?? null };
+  });
   // Vendor-reported results are their own series, never merged into third-party measurements of the same benchmark.
   collect('vendor', 'Vendor-reported · LLM Stats', 'https://llm-stats.com/benchmarks', 'Benchmark scores model developers report in their announcements, papers and model cards, compiled by LLM Stats (llm-stats.com). Self-reported by each vendor and not independently verified; settings such as tools, attempts and reasoning effort follow the vendor and can differ between models.', () => {
     for (const v of parseVendorScores(vendorScores)) {
@@ -579,7 +622,7 @@ export async function refreshSnapshot(fetcher = fetch, previous, options = {}) {
       bfcl: results.slice(1).every(r => r.status === 'fulfilled') ? { urls: [sourceURLs.bfclMethodology, sourceURLs.bfclMemory], sections: results.slice(1).flatMap(r => r.value) } : previous?.benchmarkMethodologies?.bfcl ?? null },
     failed: [...(results[0].status === 'rejected' ? ['analysis'] : []), ...(results.slice(1).some(r => r.status === 'rejected') ? ['bfcl'] : [])],
   }));
-  const valsRead = readVals(read);
+  const valsRead = readVals(read), sealRead = readSeal(read);
   const descriptions = readEpochDefinitions(read).then(value => ({ value }), () => ({ value: previous?.benchmarkDescriptions, failed: true }));
   const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['idp', 'idpHTML', 'text'], ['vectara', 'vectaraMarkdown', 'text'], ['arena', 'arenaRows', 'parquet'], ['arenaDocument', 'arenaDocumentRows', 'parquet'], ['arenaVision', 'arenaVisionRows', 'parquet'], ['arenaWebdev', 'arenaWebdevRows', 'parquet'], ['arenaFactuality', 'arenaFactualityRows', 'parquet'], ['vendor', 'vendorScores', 'json'], ['bfcl', 'bfclCSV', 'text'], ['modelsdev', 'modelsDev', 'json']];
   const results = await Promise.allSettled([...specs.map(([id, , type]) => read(sourceURLs[id], type)), ...hubQueries.map(query => read(query.url, 'json', 2_000_000))]);
@@ -601,6 +644,7 @@ export async function refreshSnapshot(fetcher = fetch, previous, options = {}) {
   }
   const described = await descriptions, methods = await methodologies;
   try { inputs.vals = await valsRead; } catch (error) { inputs.failures.vals = error.message; }
+  try { inputs.seal = await sealRead; } catch (error) { inputs.failures.seal = error.message; }
   inputs.benchmarkMethodologies = methods.value;
   inputs.benchmarkDescriptions = described.value;
   const snapshot = compileSnapshot(inputs);

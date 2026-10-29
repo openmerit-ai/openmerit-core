@@ -8,7 +8,7 @@ import offlineTasks from './fixtures/offline-tasks.json' with {type:'json'};
 // Explicit historical task objects test arithmetic and transports, not interpretation.
 const fixtureTask = prompt => {const task=offlineTasks[prompt];if(!task)throw Error('Missing typed test fixture');return structuredClone(task);};
 const recommend=(index,prompt)=>rankTask(index,prompt,Date.now(),fixtureTask(prompt));
-import { parseCSV, parseAnalysis, compileSnapshot, refreshSnapshot, parseOmniDoc, parseVectara, parseArena, parseVals, readVals, valsSlugs, parseVendorScores } from '../sources.mjs';
+import { parseCSV, parseAnalysis, compileSnapshot, refreshSnapshot, parseOmniDoc, parseVectara, parseArena, parseVals, readVals, valsSlugs, parseSeal, readSeal, sealBoards, parseVendorScores } from '../sources.mjs';
 import { handleAPI as api } from '../http.mjs';
 
 const handleAPI=(request,index)=>api(request,index,{},recommend);
@@ -208,7 +208,7 @@ test('a fresh table retains omitted historical observations only for an unchange
 test('refresh reads bounded benchmark methodology and catalogue feeds; total outage needs a previous index', async () => {
   const f = fixtures(); const calls = [];
   const fetcher = async url => { calls.push(url); return new Response(url.endsWith('.zip') ? f.epochZip : url.includes('artificialanalysis') ? f.analysisHTML : JSON.stringify(url.includes('OpenVLM') ? f.openvlm : f.router)); };
-  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 60, 'feeds, plus one page per Vals AI benchmark'); assert.equal(refreshed.models.length, 12);
+  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 71, 'feeds, plus one page per Vals AI benchmark and per Scale SEAL board'); assert.equal(refreshed.models.length, 12);
   assert.equal(refreshed.sources.find(s => s.id === 'huggingface').status, 'failed');
   await assert.rejects(refreshSnapshot(async () => new Response('Unavailable', { status: 503 })), /Invalid model catalogue/);
 });
@@ -334,6 +334,25 @@ test('vendor-reported scores keep only self-reported results on comparable scale
   assert.equal(snap.benchmarks.find(b => b.id === 'vendor:gpqa').definition.reportedBy, 'vendor');
   assert.deepEqual(snap.unmatchedRows.vendor, ['model-2-base']);
   assert.throws(() => parseVendorScores({ benchmarks: [], models: [] }), /Too few/);
+});
+test('Scale SEAL boards drop contaminated and deprecated rows, read harness efforts as run settings and keep a failed board\'s evidence', async () => {
+  const entry = (model, score, extra = {}) => ({ model, version: '', rank: 1, score, confidenceInterval_upper: 1, contaminationMessage: '', company: 'lab', createdAt: '2026-10-20T00:00:00.000Z', deprecated: false, ...extra });
+  const line = rows => `1b:${JSON.stringify(['$', 'div', null, { children: ['$', '$L1d', null, { entries: rows }] }])}\n`;
+  const page = rows => `<meta property="og:title" content="Legal &amp; Tax"/><meta name="description" content="Legal reasoning."/><script>self.__next_f.push([1,${JSON.stringify(line(rows))}])</script>`;
+  const rows = [entry('model-0 (Codex) max', 40), entry('model-1', 50, { createdAt: '2026-10-27T01:00:00.000Z' }), entry('model-2', 99, { contaminationMessage: 'Evaluated after public release.' }),
+    entry('model-3', 98, { deprecated: true }), ...Array.from({ length: 9 }, (_, i) => entry(`other-${i}`, 10 + i))];
+  const read = async url => url.endsWith('/rli') ? Promise.reject(new Error('down')) : page(rows);
+  const seal = await readSeal(read);
+  assert.deepEqual(seal.missing, ['rli']);
+  const board = seal.boards[0];
+  assert.deepEqual([board.name, board.updated, board.rows.length, board.rows[0]], ['Legal & Tax', '2026-10-27', 11, { model: 'model-0 (Codex) (max)', score: .4, observedAt: '2026-10-20' }]);
+  assert.ok(!board.rows.some(r => ['model-2', 'model-3'].includes(r.model)));
+  assert.throws(() => parseSeal('x', '<html></html>'), /format changed/);
+  const previous = { benchmarks: [{ id: 'seal:rli', name: 'RLI · SEAL', source: 'seal', tags: [], definition: {} }], models: [{ id: 'lab/model-0', evidence: [{ benchmark: 'seal:rli', score: .2 }] }], sources: [] };
+  const snap = compileSnapshot({ ...fixtures(), seal, previous });
+  const score = (id, b) => snap.models.find(m => m.id === id)?.evidence.find(e => e.benchmark === b)?.score;
+  assert.deepEqual([score('lab/model-0', 'seal:prbench-legal'), score('lab/model-1', 'seal:prbench-legal'), score('lab/model-2', 'seal:prbench-legal'), score('lab/model-0', 'seal:rli')], [.4, .5, undefined, .2]);
+  assert.equal(sealBoards.length, new Set(sealBoards).size);
 });
 
 test('the IDP Leaderboard parser reads component scores from the rendered table and rejects format changes', async () => {

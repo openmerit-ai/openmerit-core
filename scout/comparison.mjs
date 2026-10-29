@@ -9,7 +9,7 @@ export const benchmarkFamily = b => b.family ?? b.id ?? b.name;
 const evaluationAliases = { hle: 'humanityslastexam', gpqadiamond: 'gpqa', tau2: 'tau2bench', t2bench: 'tau2bench', mmmuval: 'mmmu' };
 export function evaluationKey(name) {
   const key = String(name).normalize('NFKC').toLowerCase().replace(/[’‘]/g, "'").replace(/τ/g, 'tau')
-    .replace(/\s*·\s*(vendor-reported|aa|vals ai)$/, '').replace(/\s*\((artificial analysis[^)]*|vals ai run)\)$/, '').replace(/\s*—\s*(artificial analysis|vals ai) evaluation$/, '').replace(/-aa$/, '')
+    .replace(/\s*·\s*(vendor-reported|aa|vals ai|seal)$/, '').replace(/\s*\((artificial analysis[^)]*|vals ai run)\)$/, '').replace(/\s*—\s*(artificial analysis|vals ai) evaluation$/, '').replace(/-aa$/, '')
     .replace(/[^\p{L}\p{N}]+/gu, '');
   return evaluationAliases[key] ?? key;
 }
