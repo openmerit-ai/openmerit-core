@@ -267,10 +267,11 @@ export function parseOpenRouter(data: unknown): Parsed {
       ['audio', 'input_audio'], ['audio_output', 'output_audio'], ['input_audio_cache', 'cache_read_audio']] as const)
       priced(prices, kind, '', 'usd_per_mtok', rate(pricing[field]));
     priced(prices, 'cache_write', 'cache-ttl>1hr', 'usd_per_mtok', perToken(pricing.input_cache_write_1h));
-    const search = num(pricing.web_search), image = num(pricing.image), imageOutput = num(pricing.image_output), imageToken = num(pricing.image_token);
+    const search = num(pricing.web_search), imageToken = num(pricing.image_token);
     priced(prices, 'web_search', '', 'usd_per_query', search !== null && search >= 0 ? money(search) : null);
-    priced(prices, 'input_image', '', 'usd_per_image', image !== null && image > 0 ? money(image) : null);
-    priced(prices, 'output_image', '', 'usd_per_image', imageOutput !== null && imageOutput > 0 ? money(imageOutput) : null);
+    // image and image_output are per image token (Gemini image output: 0.00003 = $30/M), not per image.
+    priced(prices, 'input_image', '', 'usd_per_mtok', num(pricing.image) ? rate(pricing.image) : null);
+    priced(prices, 'output_image', '', 'usd_per_mtok', num(pricing.image_output) ? rate(pricing.image_output) : null);
     // OpenRouter does not say whether an image token is input or output, so preserve its
     // official unit without inventing a direction. The raw payload retains every override.
     priced(prices, 'image_token', '', 'usd_per_mtok', imageToken !== null && imageToken > 0 ? money(imageToken * 1e6) : null);

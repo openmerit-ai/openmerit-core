@@ -227,14 +227,14 @@ test('reviewed identities link LiteLLM-only decision routes but never moving ali
 test('OpenRouter non-text models get their kind as type, and per-token "0" on generated media is no price', () => {
   const row = (id: string, output: string[], pricing: Record<string, string>) => ({ id, name: id, architecture: { input_modalities: ['text'], output_modalities: output }, pricing });
   const { listings } = parseOpenRouter({ data: [row('lab/chat', ['text'], { prompt: '0.000001', completion: '0.000002' }), row('lab/clip', ['video'], { prompt: '0', completion: '0' }),
-    row('lab/pic', ['image'], { prompt: '0', completion: '0', image_output: '0.04', image_token: '0.000004' }), row('lab/judge', ['decisions'], { prompt: '0.00000002', completion: '0' }),
+    row('lab/pic', ['image'], { prompt: '0', completion: '0', image_output: '0.00003', image_token: '0.000004' }), row('lab/judge', ['decisions'], { prompt: '0.00000002', completion: '0' }),
     row('lab/vec', ['embeddings'], { prompt: '0.0000001', completion: '0' }), row('lab/voice', ['speech'], { prompt: '0.000004', completion: '0' }), row('lab/rank:free', ['rerank'], { prompt: '0', completion: '0' })] });
   const got = Object.fromEntries(listings.map(l => [l.provider_model_id, [l.type, l.output_modalities, l.prices.map(p => `${p.kind} ${p.amount} ${p.unit}`)]]));
   assert.deepEqual(got, {
     'lab/chat': [null, '["text"]', ['input 1 usd_per_mtok', 'output 2 usd_per_mtok']],
     'lab/clip': ['video', '["video"]', []],
     // Per-image and per-image-token prices keep the distinct units OpenRouter documents.
-    'lab/pic': ['image', '["image"]', ['output_image 0.04 usd_per_image', 'image_token 4 usd_per_mtok']],
+    'lab/pic': ['image', '["image"]', ['output_image 30 usd_per_mtok', 'image_token 4 usd_per_mtok']],
     // Decisions bill input only, so their zero output rate is real; so is a free reranker's.
     'lab/judge': ['decisions', '["text"]', ['input 0.02 usd_per_mtok', 'output 0 usd_per_mtok']],
     'lab/vec': ['embedding', '["embedding"]', ['input 0.1 usd_per_mtok', 'output 0 usd_per_mtok']],
