@@ -2,6 +2,7 @@
 // built-ins: it must survive the npx cache disappearing, without installing or
 // executing code from the release it downloads.
 import { createHash, randomUUID } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -300,7 +301,7 @@ export async function runUpdate(base: string, scope: string, options: { hook?: b
 
 // Hooks deliberately never ask Claude to continue, read transcripts or emit
 // blocking decisions. Offline and concurrent-hook failures exit successfully.
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2), base = args[args.indexOf('--base') + 1], scope = args[args.indexOf('--scope') + 1];
   if (base && ['user', 'project'].includes(scope ?? '')) {
     process.stdin.resume();
