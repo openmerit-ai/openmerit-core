@@ -6,7 +6,7 @@ import './build-web-analytics.mjs';
 // The data policy is generated under scout/; the docs site stays unpublished.
 const root = resolve(import.meta.dirname, '..'), output = resolve(root, 'dist/scout-site');
 await rm(output, { recursive: true, force: true });
-for (const path of ['index.html', 'styles.css', 'script.js', 'illustrations.js', 'assets', 'scout', 'connect', 'favicon.svg']) {
+for (const path of ['index.html', 'styles.css', 'illustrations.js', 'assets', 'scout', 'connect', 'favicon.svg']) {
   const destination = resolve(output, path); await mkdir(dirname(destination), { recursive: true });
   await cp(resolve(root, 'site', path), destination, { recursive: true });
 }

@@ -6,12 +6,12 @@
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
-  <meta name="description" content="Describe your work. Scout asks what it needs to know, then shortlists five models on quality, cost and recency.">
+  <meta name="description" content="Scout is OpenMerit's model search agent. Describe your task and get model recommendations.">
   <title>Scout by OpenMerit</title>
   <link rel="canonical" href="https://openmerit.ai/scout/">
   <meta property="og:type" content="website">
   <meta property="og:title" content="Scout by OpenMerit">
-  <meta property="og:description" content="Describe your work. Scout asks what it needs to know, then shortlists five models on quality, cost and recency.">
+  <meta property="og:description" content="Scout is OpenMerit's model search agent. Describe your task and get model recommendations.">
   <meta property="og:url" content="https://openmerit.ai/scout/">
   <meta property="og:site_name" content="OpenMerit">
   <meta property="og:image" content="https://openmerit.ai/scout/scout-og.png">
@@ -21,7 +21,7 @@
   <meta property="og:image:alt" content="Scout by OpenMerit. One task branches into five model candidates along colored paths on a graphite background.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Scout by OpenMerit">
-  <meta name="twitter:description" content="Describe your work. Scout asks what it needs to know, then shortlists five models on quality, cost and recency.">
+  <meta name="twitter:description" content="Scout is OpenMerit's model search agent. Describe your task and get model recommendations.">
   <meta name="twitter:image" content="https://openmerit.ai/scout/scout-og.png">
   <meta name="twitter:image:alt" content="Scout by OpenMerit. One task branches into five model candidates along colored paths on a graphite background.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -32,13 +32,13 @@
   <script src="/scout/scout.js" type="module"></script>
 </head>
 <body class="scout-page onboarding-active">
-  <div id="onboarding" class="onboarding" data-step="0">
+  <div id="onboarding" class="onboarding" data-step="0" hidden>
     <section class="welcome-dialog" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-description">
     <div class="welcome-content">
       <div class="welcome-copy">
         <p id="welcome-eyebrow" class="welcome-eyebrow" hidden></p>
         <h2 id="welcome-title" class="sr-only" tabindex="-1"><span>Scout beta</span></h2>
-        <p id="welcome-description" class="welcome-description">Hello, we’re building Scout, the model discovery part of OpenMerit. This is an early beta.</p>
+        <p id="welcome-description" class="welcome-description">Hello, we’re building Scout, OpenMerit’s model search agent. This is an early beta.</p>
       </div>
       <div class="welcome-stage">
         <figure id="welcome-note" class="welcome-figure">
@@ -135,11 +135,11 @@
         <p id="welcome-error" class="welcome-error" role="alert" hidden></p>
       </div>
     </div>
-    <noscript><p class="welcome-error">Enable JavaScript to continue and sign in to Scout.</p></noscript>
     </section>
   </div>
+  <noscript><p class="welcome-error">Enable JavaScript to continue and sign in to Scout.</p></noscript>
   <a class="skip-link" href="#prompt" hidden>Skip to message</a>
-  <div id="scout-app" class="scout-wrap agent-page" inert>
+  <div id="scout-app" class="scout-wrap agent-page" inert aria-busy="true">
     <header class="scout-header">
       <div class="header-inner">
         <a class="scout-brand" href="/scout/"><span class="scout-wordmark">Scout</span> <span class="beta-label">Beta</span></a>
@@ -152,8 +152,8 @@
     </header>
     <section class="scout-intro" aria-labelledby="agent-title">
       <div class="intro-copy">
-        <h1 id="agent-title">Find the best AI models for your work.</h1>
-        <p>Describe your work. Scout may ask a few questions, then shortlists five models on quality, cost and recency.</p>
+        <h1 id="agent-title">Find the right AI models for your task.</h1>
+        <p>Describe your task. Get model recommendations.</p>
         <div class="index-coverage">
           <div class="lab-stack" role="img" aria-label="Including OpenAI, Anthropic, Google, Meta, Mistral, DeepSeek and Hugging Face">
             <span><img src="/scout/providers/openai.png" width="16" height="16" alt=""></span>

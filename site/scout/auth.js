@@ -118,6 +118,7 @@ export function initAuth(onAccountChange, onAuthenticatedSubmit, onSessionChange
     })().catch(error => {
       loading = null; analyticsAccount = [null, null]; analytics?.account(...analyticsAccount);
       analytics?.exception(error, 'auth_unavailable');
+      onSessionChange(null);
       throw new Error('Sign-in could not load. Check your connection and try again.');
     });
     return loading;

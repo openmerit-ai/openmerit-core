@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Less time speed-dating models. More time building for customers. Meet Scout, OpenMerit's model-discovery beta for Claude Code.">
+  <meta name="description" content="Meet Scout, OpenMerit's model search agent. Find the right AI models for your task, on the web or inside your coding agent.">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#171915" media="(prefers-color-scheme: dark)">
   <meta property="og:type" content="website">
   <meta property="og:title" content="OpenMerit — Your team has better things to build.">
-  <meta property="og:description" content="Less time speed-dating models. More time building for customers. Meet Scout, OpenMerit's model-discovery beta for Claude Code.">
+  <meta property="og:description" content="Meet Scout, OpenMerit's model search agent. Find the right AI models for your task, on the web or inside your coding agent.">
   <meta property="og:url" content="https://openmerit.ai/">
   <meta property="og:site_name" content="OpenMerit">
   <meta property="og:image" content="https://openmerit.ai/assets/openmerit-og-v1.png">
@@ -24,8 +24,7 @@
   <link rel="canonical" href="https://openmerit.ai/">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preload" href="/assets/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/styles.css?v=20261025-reading">
-  <script src="/script.js?v=20261025-reading" defer></script>
+  <link rel="stylesheet" href="/styles.css?v=20261029-scout-button">
 </head>
 <body class="landing-page">
   <a class="skip-link" href="#main">Skip to content</a>
@@ -39,31 +38,12 @@
   <main id="main" class="letter-main">
     <section aria-labelledby="hero-title">
       <h1 id="hero-title" class="sr-only">OpenMerit</h1>
-      <button class="letter-reading-toggle" id="reading-toggle" type="button" aria-controls="letter-full" aria-expanded="true" hidden>TL;DR</button>
-      <div id="letter-story">
-      <div id="letter-full">
       <div class="letter-copy">
-        <p>The frontier is moving faster than ever, and there are more great models to choose from than at any point in history. We love that. It also means the best model for your task last month might not be the best one today, and no public leaderboard is going to tell you which one it is. OpenMerit exists to make sure you get the most out of all that progress. We pick the best model for every task in your app, judged on your own evals, and keep updating that pick all day, every day if needed. Your harness changes, the catalogue keeps growing, and nobody (human or agent) should spend their life benchmarking models against every agent and task. Your product team should be building for customers, not speed-dating models.</p>
-        <p>Now, we know what you’re thinking: “Cool, so it’s a router.” It’s not a router. “Auto” routers guess per query, sit in your live path, and optimize for metrics that aren’t yours. Even if one could see your evals, it couldn’t run them mid-request, because your real quality bar lives in product evals written by you (or your agent) for your app, not in a millisecond guess. And let’s be honest, writing and running those evals is the bane of your existence. We get it. That’s why we plug into the eval setup you already have and do the heavy lifting for you. We don’t touch your calls, and we don’t sell you tokens (we checked, it’s a very crowded business).</p>
-      </div>
-      <div class="letter-invitation">
-        <p>Meet <a href="/scout/">Scout</a>, the part of OpenMerit that makes finding models easier for you. It’s in beta, which means it occasionally asks for directions. Help us shape it.</p>
-      </div>
-      </div>
-      <div id="letter-short" hidden>
-        <div class="letter-copy">
-          <p>New models drop every week. OpenMerit finds the best one for each task in your app, using your own evals, and keeps that pick up to date. It’s not a router. we never touch your calls or sell you tokens.</p>
-        </div>
-        <div class="letter-invitation">
-          <p><a href="/scout/">Scout</a>. Our model finder, is in beta. give it a go.</p>
-        </div>
+        <p>There’s more to picking a model than an eval, a skill or an “auto” setting. It needs to do the job, fit your budget and meet your needs for speed, security and where your data lives. You also need a fallback, and a sense of when it’s time to switch. OpenMerit is a model selection layer in your infrastructure, not a router. We stay out of your live request path, and we don’t sell you tokens (we checked, it’s a very crowded business). Read our memo, <a href="/memo/">Optimum Inference For All</a>.</p>
+        <p>We’re launching <a href="/scout/">Scout</a> by OpenMerit in beta, our model search agent. It’ll help you find the right models for your task, weighing quality and cost across text, code and vision. Its growing index covers 400+ open-weight and closed models, results from 30+ labs, 500+ benchmark series and 200+ source feeds.</p>
       </div>
       <div class="letter-actions">
-        <a class="letter-cta" id="add-to-claude" href="/scout/" aria-describedby="setup-hint"><img src="/scout/agents/claude.png" width="23" height="23" alt="">Add OpenMerit to Claude Code</a>
-        <p class="letter-hint" id="setup-hint">Copies a setup prompt and opens Claude Code. You approve the connection.</p>
-        <p class="letter-status" id="setup-status" role="status" aria-live="polite"></p>
-        <noscript><p class="letter-hint">Enable JavaScript for the direct handoff, or use the setup button on <a href="/scout/">Scout</a>.</p></noscript>
-      </div>
+        <a class="letter-cta" href="/scout/">Try Scout</a>
       </div>
     </section>
   </main>
