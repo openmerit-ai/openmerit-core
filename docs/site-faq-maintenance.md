@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Scout agent covers every model kind — source only, 29 October 2026
+
+Reviewed model-coverage, pricing and data-handling claims against the change that publishes every merged model kind, leaderboard and MTEB results to the Scout agent, adds free-text catalogue search with unit-aware costs, and runs the agent on OpenAI. The homepage FAQ names no model kinds, price units or agent model, so no FAQ copy changes. The Scout page copy on `main` no longer promises five models, so shortlists of fewer, now likelier with a kind constraint, need no copy change. The Scout guide describes the change as not yet deployed, including that agent search queries are embedded with OpenAI.
+
 ## Text leaderboards, media boards and Eden AI — source only, 29 October 2026
 
 Reviewed ranking, coverage and pricing claims against the change that reads LiveBench, τ-bench by Sierra, OpenCompass, HELM Arabic, BRIDGE Medical and SuperCLUE as benchmark evidence, stores Open ASR, TTS Arena, 3D Arena, VBench and MMEB results, and imports Eden AI's expert-model prices. The homepage FAQ names no individual benchmark or catalogue sources, counts or price units, and claims no Chinese, Arabic or clinical coverage, so no FAQ copy changes. The Scout guide's source table describes the new sources.
