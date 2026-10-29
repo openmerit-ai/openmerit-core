@@ -1,12 +1,16 @@
 # Scout by OpenMerit
 
-Describe what you need a model to do. Scout returns up to five model-and-endpoint candidates per task. Comparable measurements support performance ranking; narrow decision and vision tasks use an explicitly labelled task-fit shortlist when quality is unmeasured. The `/scout/` page and JSON API use the same index and ranking.
+Scout is OpenMerit's model search agent. Describe your task and get model recommendations. Scout returns up to five model-and-endpoint candidates per task. Comparable measurements support performance ranking; narrow decision and vision tasks use an explicitly labelled task-fit shortlist when quality is unmeasured. The `/scout/` page and JSON API use the same index and ranking.
 
 Scout is a separate hosted beta product. Npm 0.1.7 includes optional Claude Code setup for it; the hosted service does not change the Pi coordinator or Inference Terminal. Recommendations are evidence-based candidates for your own evaluation, not a guarantee of task accuracy or an independently validated state-of-the-art ranking.
 
 **Website rebuild — published 24 October 2026:** the rebuild preserves the existing landing page at `/` and Scout at `/scout/`, and takes all hosted `/docs/` pages offline, including this guide. `/connect/`, the JSON API/MCP and the standalone `/scout/data-policy/` remain available. The guide remains maintained in Markdown; this does not remove the local CLI or its documentation from the package. See the [cutover notes](site-domain-migration.md) for publication and verification details.
 
 **Coding-agent setup — 24 October 2026:** stable npm 0.1.7 includes [device sign-in setup](#connect-a-coding-agent). Hosted Scout serves `/connect` and `/scout/mcp`; the button opens Claude Desktop with a setup prompt. This supersedes the 23 October web-placeholder reset. Existing older client configuration and authorization grants are not automatically removed or revoked. Scout serving, main-site documentation and npm publication remain separate releases; dated receipts below describe their original versions, not acceptance of every later build.
+
+**Session restoration — unreleased source:** onboarding stays hidden while sign-in is checked, so returning signed-in visitors do not see the introduction flash on reload or reopening. Chat remains locked until an active session is confirmed. Signed-out visitors and failed checks reveal the introduction with sign-in still available; signing out restores it. No saved tour-completion flag grants access. This is not yet deployed and changes no homepage FAQ claim.
+
+**Product wording — unreleased source:** the homepage, Scout page, onboarding and search/social descriptions call Scout “OpenMerit's model search agent,” with “model search” as the shorthand and “Find the right AI models for your task” as its promise. “Model recommendations” describes its output; the web and coding agents are access channels, not separate product categories. This copy is not yet deployed. Dated receipts below retain the wording and behavior of their original releases.
 
 ## Five-step introduction modal — deployed, 28 October 2026
 

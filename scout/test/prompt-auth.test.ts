@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { build } from 'esbuild';
 
 const drain = async () => { for (let i = 0; i < 10; i++) await new Promise<void>(resolve => setImmediate(resolve)); };
 const draft = 'Extract invoice dates and totals as JSON';
+const page = await readFile(new URL('../../site/scout/index.html', import.meta.url), 'utf8');
 type Session = { status: string; getToken: () => Promise<string> };
 type Account = { user: { id: string } | null; session: Session | null };
 
@@ -12,6 +14,7 @@ type Account = { user: { id: string } | null; session: Session | null };
 // are replaced. Failed optional imports must not stop event registration.
 async function fixture(blocked = 'analytics.js', failure = '', options: {
   saved?: Map<string, string>; signedIn?: boolean; storageDisabled?: boolean; coverage?: unknown; coverageFailure?: boolean;
+  pauseAuth?: 'config' | 'clerk';
   navigator?: { doNotTrack?: string; globalPrivacyControl?: boolean; clipboard?: Pick<Clipboard, 'writeText'> };
   launchFailure?: boolean; analytics?: { enabled: boolean; linkAccount: boolean };
 } = {}) {
@@ -32,6 +35,8 @@ async function fixture(blocked = 'analytics.js', failure = '', options: {
   const nodes = new Map<string, ReturnType<typeof node>>(), saved = options.saved ?? new Map<string, string>();
   const timers = new Map<number, { callback: () => void; ms: number }>();
   const observers = new Set<() => void>();
+  let releaseAuth = () => {};
+  const authReady = options.pauseAuth ? new Promise<void>(resolve => { releaseAuth = resolve; }) : Promise.resolve();
   const state = { authStatus: failure === 'config' ? 503 : 200, loadFailure: failure === 'clerk', hangUI: failure.startsWith('modal'), opened: 0, modal: false, ready: false, requests: [] as string[] };
   const turns: { message: string; authorization: string | null }[] = [];
   let nextTimer = 0;
@@ -51,7 +56,10 @@ async function fixture(blocked = 'analytics.js', failure = '', options: {
   }
   function $(selector: string) {
     if (!nodes.has(selector)) {
-      const value = node(); value.hidden = selector !== '#onboarding' && selector !== '#scout-app';
+      const value = node();
+      value.hidden = selector === '#onboarding'
+        ? /\bhidden\b/.test(page.match(/<div\b[^>]*\bid="onboarding"[^>]*>/)![0])
+        : selector !== '#scout-app';
       const step = selector.match(/^\[data-welcome-step="(\d+)"\]$/);
       if (step) value.dataset.welcomeStep = step[1]!;
       nodes.set(selector, value);
@@ -64,7 +72,7 @@ async function fixture(blocked = 'analytics.js', failure = '', options: {
   const clerk = {
     session: options.signedIn ? { status: 'active', getToken: async () => 'current-session-token' } : null as Session | null,
     user: options.signedIn ? { id: 'user-one' } : null as { id: string } | null,
-    load: async () => { if (state.loadFailure) throw new Error('private provider failure'); },
+    load: async () => { if (options.pauseAuth === 'clerk') await authReady; if (state.loadFailure) throw new Error('private provider failure'); },
     addListener: (fn: (value: Account) => void) => { observe = fn; fn(clerk); },
     mountUserButton() {}, unmountUserButton() {},
     openSignIn() { state.opened++; state.modal = true; state.ready = !state.hangUI; },
@@ -99,12 +107,14 @@ async function fixture(blocked = 'analytics.js', failure = '', options: {
         turns.push({ message: (JSON.parse(String(request.body)) as { message: string }).message, authorization: new Headers(request.headers).get('Authorization') });
         return Response.json({ busy: false, progress: [], answer: { kind: 'message', text: 'Models found.' } });
       }
+      if (url.endsWith('/api/auth') && options.pauseAuth === 'config') await authReady;
       return Response.json({ analytics: { enabled: false } }, { status: url.endsWith('/api/auth') ? state.authStatus : 200 });
     },
   });
   runInNewContext(output.outputFiles[0]!.text, { ...env, window: env, addEventListener: env.addEventListener.bind(env) });
   await drain();
   return { $, state, saved, clerk, turns, document, location,
+    async resolveAuth() { releaseAuth(); await drain(); },
     async signedIn(status = 'active') {
       clerk.session = { status, getToken: async () => 'current-session-token' }; clerk.user = { id: 'user-one' };
       observe(clerk); await drain();
@@ -212,6 +222,26 @@ test('returning sessions bypass onboarding; signed-out reloads start at the firs
     assert.equal(f.$('#scout-app').hidden, false);
     assert.equal(f.$('#scout-app').inert, false);
     assert.equal(f.turns.length, 0);
+  }
+});
+
+test('onboarding stays hidden during session restoration and only opens for signed-out or failed checks', async () => {
+  for (const pauseAuth of ['config', 'clerk'] as const) {
+    for (const signedIn of [true, false]) {
+      const f = await fixture('analytics.js', '', { pauseAuth, signedIn });
+      assert.equal(f.$('#onboarding').hidden, true, `no introduction while ${pauseAuth} is pending`);
+      assert.equal(f.$('#scout-app').inert, true);
+      await f.resolveAuth();
+      assert.equal(f.$('#onboarding').hidden, signedIn);
+      assert.equal(f.$('#scout-app').inert, !signedIn);
+      assert.equal(f.state.opened, 0);
+      assert.equal(f.turns.length, 0);
+    }
+    const failed = await fixture('analytics.js', pauseAuth, { pauseAuth });
+    assert.equal(failed.$('#onboarding').hidden, true);
+    await failed.resolveAuth();
+    assert.equal(failed.$('#onboarding').hidden, false, 'sign-in remains reachable after a failed check');
+    assert.equal(failed.$('#scout-app').inert, true);
   }
 });
 

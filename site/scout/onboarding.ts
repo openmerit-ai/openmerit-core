@@ -1,11 +1,11 @@
 // The introduction is presentation, not authorization: agent endpoints still
 // verify tokens. Only Clerk's active-session listener enables the real composer.
 const STEPS = [
-  { figure: '#welcome-note', eyebrow: '', title: ['Scout beta'], description: 'Hello, we’re building Scout, the model discovery part of OpenMerit. This is an early beta.', action: 'Continue' },
-  { figure: '#welcome-intro', eyebrow: 'Introducing Scout, by OpenMerit', title: ['Find the best models', 'for your task.'], description: 'Explore models across leading labs and the Hugging Face Hub, with benchmark evidence and source-linked research to guide your choice.', action: 'Continue' },
-  { figure: '#welcome-stack', eyebrow: 'Recommendation, not on runtime', title: ['Your Endpoints.', 'Your Preferences.'], description: 'We’re not a router. We don’t sell tokens or sit in your inference runtime. Keep your providers, endpoints and routers. Scout tailors recommendations to the configuration you share.', action: 'Continue' },
-  { figure: '#welcome-product', eyebrow: 'Get clarity, before you build', title: ['The right model starts', 'with your work.'], description: 'Tell Scout what you’re making. Get a shortlist of five AI models, with the evidence and pricing to make the call.', action: 'Continue' },
-  { figure: '#welcome-claude', eyebrow: 'Model decisions, inside coding agent', title: ['The same Scout.', 'Inside Claude Code.'], description: 'Connect Scout to Claude Code to bring model recommendations into your project. Available via MCP, API and CLI.', action: 'Get started' },
+  { figure: '#welcome-note', eyebrow: '', title: ['Scout beta'], description: 'Hello, we’re building Scout, OpenMerit’s model search agent. This is an early beta.', action: 'Continue' },
+  { figure: '#welcome-intro', eyebrow: 'OpenMerit’s model search agent', title: ['Find the right AI models', 'for your task.'], description: 'Explore models across leading labs and the Hugging Face Hub, with evidence to guide your choice.', action: 'Continue' },
+  { figure: '#welcome-stack', eyebrow: 'Find models. Keep your stack.', title: ['Your Endpoints.', 'Your Preferences.'], description: 'We’re not a router. We don’t sell tokens or sit in your inference runtime. Keep your providers, endpoints and routers. Scout tailors recommendations to the configuration you share.', action: 'Continue' },
+  { figure: '#welcome-product', eyebrow: 'Describe your task', title: ['The right model starts', 'with your task.'], description: 'Tell Scout what you’re making. Get model recommendations, with evidence and pricing to help you choose.', action: 'Continue' },
+  { figure: '#welcome-claude', eyebrow: 'Scout in Claude Code', title: ['Model search.', 'Inside Claude Code.'], description: 'Connect Scout to Claude Code to bring model recommendations into your project. Available via MCP, API and CLI.', action: 'Get started' },
 ] as const;
 
 /* ANIMATION STORYBOARD
@@ -83,18 +83,18 @@ export function initOnboarding(signIn: () => Promise<void>) {
     }
   });
   showStep(step);
-  title.focus({ preventScroll: true });
   return {
     session(id: string | null) {
-      const entering = !!id && !signedIn, leaving = !id && signedIn;
+      const entering = !!id && !signedIn, showing = !id && welcome.hidden;
       signedIn = !!id;
       welcome.hidden = signedIn;
       app.inert = !signedIn;
+      app.removeAttribute('aria-busy');
       find('.skip-link').hidden = !signedIn;
       document.body.classList.toggle('onboarding-active', !signedIn);
       if (entering) find('#prompt').focus({ preventScroll: true });
       if (!id) showStep(step);
-      if (leaving) title.focus({ preventScroll: true });
+      if (showing) title.focus({ preventScroll: true });
     },
   };
 }

@@ -254,23 +254,23 @@ code { font-family: var(--mono); }
 .letter-header nav { display: flex; gap: 28px; font-size: 13px; }
 .letter-header nav a { padding-block: 10px; }
 .letter-main { width: min(820px, calc(100% - 96px)); margin: 40px auto 72px; }
-.letter-reading-toggle { display: block; min-height: 36px; margin-bottom: 16px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; text-decoration: underline; text-underline-offset: 4px; }
 .letter-copy { font-family: Georgia, 'Times New Roman', serif; font-size: 20px; line-height: 1.6; letter-spacing: -.015em; }
-.letter-copy p + p { margin-top: 28px; }
-.letter-invitation { margin-top: 32px; }
-.letter-invitation > p:first-child { max-width: 700px; color: var(--prose); font-size: 15px; line-height: 1.8; }
-.letter-invitation > p:first-child a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--link-line); text-underline-offset: 3px; }
-.letter-cta { display: inline-flex; align-items: center; justify-content: center; gap: 12px; margin-top: 25px; padding: 14px 20px; min-height: 52px; border: 1px solid var(--ink); border-radius: 6px; background: var(--ink); color: var(--paper); font-size: 14px; font-weight: 500; line-height: 1.5; transition: background 160ms ease, transform 160ms ease; }
+.letter-copy p + p { margin-top: 24px; }
+.letter-copy p + p::before { content: ''; display: block; width: 48px; border-top: 1px solid var(--line); margin-bottom: 24px; }
+.letter-copy a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--link-line); text-underline-offset: 3px; }
+.letter-cta { display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin-top: 25px; padding: 6px 12px; min-height: 32px; border: 0; border-radius: 8px; background: var(--soft); color: var(--ink); font-size: 12px; font-weight: 500; line-height: 20px; -webkit-user-select: none; user-select: none; transition: background 160ms ease, transform 160ms var(--ease-out); }
 .letter-cta img { flex-shrink: 0; }
-.letter-cta:active { transform: translateY(1px); }
+.letter-cta:active:not(:focus-visible) { transform: scale(.97); }
 .letter-hint, .letter-status, .letter-scope { font-size: 11px; line-height: 1.7; color: var(--muted); }
 .letter-hint { margin-top: 12px; }
 .letter-status:not(:empty) { margin-top: 12px; color: var(--ink); }
 .letter-scope { max-width: 570px; margin-top: 28px; }
 @media (hover: hover) and (pointer: fine) {
   .letter-header nav a:hover { text-decoration: underline; text-underline-offset: 5px; }
-  .letter-reading-toggle:hover { color: var(--ink); }
-  .letter-cta:hover { background: var(--button-hover); }
+  .letter-cta:hover { background: var(--line); }
+}
+@media (any-pointer: coarse) {
+  .letter-cta { min-height: 44px; }
 }
 @media (max-width: 600px) {
   .letter-header { width: calc(100% - 40px); min-height: 80px; gap: 16px; }
@@ -279,15 +279,11 @@ code { font-family: var(--mono); }
   .letter-header nav { gap: 20px; font-size: 12px; }
   .letter-main { width: calc(100% - 40px); margin-block: 40px 56px; }
   .letter-copy { font-size: 19px; line-height: 1.65; }
-  .letter-copy p + p { margin-top: 24px; }
-  .letter-invitation { margin-top: 28px; }
-  .letter-invitation > p:first-child { font-size: 14px; }
-  .letter-cta { font-size: 12px; padding-inline: 13px; gap: 9px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { transition: none !important; }
-  .button:active:not(:focus-visible), .text-link:hover span { transform: none; }
+  .button:active:not(:focus-visible), .letter-cta:active:not(:focus-visible), .text-link:hover span { transform: none; }
   .art-motion-layer, .motion-toggle { display: none; }
   .has-motion-frame > img { opacity: 1; }
 }
