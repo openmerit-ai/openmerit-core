@@ -13,12 +13,12 @@ function updateAnalyticsControls() {
   content.checked = settings.content; content.disabled = !settings.enabled || !settings.contentAvailable;
   unlinked.checked = !settings.linkAccount; unlinked.disabled = !settings.enabled;
   notice.textContent = settings.content
-    ? 'Beta: we log shared task text and recommendations to improve Scout. Shared task text has a 30-day retention window. Don’t include confidential data.'
-    : 'Task text sharing is off. Our AI processing provider still processes your task to generate recommendations.';
-  status.textContent = !settings.available ? 'Analytics is unavailable or disabled by your browser privacy settings.'
-    : !settings.contentAvailable ? 'Prompt sharing is not enabled on this deployment.'
-    : settings.contentDefault ? 'Beta prompt sharing defaults on unless you previously opted out. Shared task text has a 30-day retention window; recommendation metrics may remain longer.'
-    : 'Prompt sharing is optional and off by default on this deployment. Shared task text has a 30-day retention window; recommendation metrics may remain longer.';
+    ? 'Shared task text has a 30-day retention window. Other analytics may remain longer.'
+    : 'Prompt sharing is off. Tasks are still processed to provide the service.';
+  status.textContent = !settings.available ? 'Analytics is unavailable or blocked by browser privacy settings.'
+    : !settings.contentAvailable ? 'Prompt sharing is unavailable.'
+    : settings.contentDefault ? 'Prompt sharing defaults on. Saved opt-outs are respected.'
+    : 'Prompt sharing defaults off.';
 }
 
 for (const input of [usage, content, unlinked]) input.addEventListener('change', () => analytics.setPreferences(usage.checked, content.checked, !unlinked.checked));
