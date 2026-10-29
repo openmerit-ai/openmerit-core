@@ -23,18 +23,17 @@
   <main class="scout-wrap privacy-page" id="main" tabindex="-1">
     <section class="scout-intro"><h1>Privacy &amp; analytics</h1></section>
     <div class="support-section">
-      <p><strong>Help improve Scout during beta.</strong> We use enabled prompt, recommendation and usage logging to evaluate matching and fix problems, not to train a foundation model. You can turn off sharing below; existing opt-outs are preserved.</p>
-      <p id="beta-data-notice">Task text sharing is off. Our AI processing provider still processes your task to generate recommendations.</p>
-      <p>We use service providers for hosting, AI task processing, sign-in and analytics. Account analytics can include your name, verified email and sign-in provider information. No session recording.</p>
+      <p>Optional sharing helps us improve Scout. No foundation model training or session recording.</p>
+      <p id="beta-data-notice">Prompt sharing is off. Tasks are still processed to provide the service.</p>
       <fieldset class="privacy-choices">
         <legend>Sharing preferences</legend>
         <p><label><input id="analytics-usage" type="checkbox" disabled> Share usage and account analytics</label></p>
         <p><label><input id="analytics-content" type="checkbox" disabled> Share my task prompts and breakdowns for product improvement</label></p>
         <p><label><input id="analytics-unlinked" type="checkbox" disabled> Don't link this browser's activity to my account</label></p>
       </fieldset>
-      <p>Unlinked activity uses separate request IDs, not your account identity. This does not erase earlier links or stop separate account-profile and sign-in analytics. Prompt text can still identify you.</p>
+      <p>Account analytics may include your name, email and sign-in provider. Unlinking does not erase past links or stop account-profile analytics. Task text may still identify you.</p>
       <p id="analytics-status" role="status">Loading analytics settings…</p>
-      <p>Don't submit confidential or sensitive information. Redaction cannot detect every secret or personal detail. Turning sharing off stops future collection, not required task processing or previously stored records. <a href="/scout/data-policy/">Read the beta data policy ↗</a></p>
+      <p>Don't submit sensitive information. Opting out stops future optional collection, not required processing, and does not delete past data. <a href="/scout/data-policy/">Data policy ↗</a></p>
       <p class="error-message" id="error" role="alert" hidden></p>
       <noscript><p>Enable JavaScript to change analytics settings. The data policy remains available without JavaScript.</p></noscript>
     </div>

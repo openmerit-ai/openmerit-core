@@ -7,7 +7,7 @@ export const groups = [
     { source: 'getting-started.md', slug: 'getting-started', title: 'Installation & setup', description: 'Open the standalone terminal or configure the separate Pi comparison workflow.' },
     { source: 'inference-terminal.md', slug: 'inference-terminal', title: 'Inference Terminal', description: 'Inspect application declarations, recorded requests, services, and linked compute.' },
     { source: 'scout.md', slug: 'scout', documentationLabel: 'Hosted beta', githubSource: false, title: 'Scout · Beta', description: 'Get a prompt-only model shortlist from published benchmark evidence, pricing, and reference speed.' },
-    { source: 'scout-data-policy.md', slug: 'scout-data-policy', documentationLabel: 'Beta', githubSource: false, title: 'Scout data policy', description: 'Beta analytics, prompt sharing and browser account linkage, service providers, retention and deletion limits.' },
+    { source: 'scout-data-policy.md', slug: 'scout-data-policy', documentationLabel: 'Beta', githubSource: false, title: 'Scout data policy', description: 'Data use, sharing choices and deletion.' },
     { source: 'first-trial.md', slug: 'first-trial', title: 'Your first trial', description: 'Collect evidence, compare candidates, and validate a supervised model change.' },
   ] },
   { title: 'Demos & recorded examples', pages: [
