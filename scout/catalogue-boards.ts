@@ -167,7 +167,7 @@ export async function importBoards(db: Database, source: BoardSource, options: O
       const keys = new Set<string>();
       for (const r of board.results) { const k = JSON.stringify([r.model, r.variant]); if (keys.has(k)) throw new Error(`${board.id}: duplicate result for ${r.model}.`); keys.add(k); }
       const links = linkResults(board.results, board.kind, candidates), version = await digest([board.id, board.published_at, board.results.map(r => [r.model, r.variant, r.score, r.ci_lower, r.ci_upper, r.samples])]);
-      prepared.push({ board, version, links, rows: board.results.map(r => ({ ...r, model_id: links.get(r) ?? null, payload: JSON.stringify(r.payload) })) });
+      prepared.push({ board, version, links, rows: board.results.map(r => ({ ...r, model_id: links.get(r) ?? null, payload: JSON.stringify(r.payload, (_k, v: unknown) => typeof v === 'bigint' ? Number(v) : v) })) });
     }
     if (bucket && !await bucket.head(artifact)) await bucket.put(artifact, bytes, { httpMetadata: { contentType: { parquet: 'application/vnd.apache.parquet', json: 'application/json', html: 'text/html' }[source.type] } });
     for (const p of prepared) await chunked(db, `INSERT OR REPLACE INTO cat_board_results (board,version,model,variant,creator,score,ci_lower,ci_upper,samples,released,model_id,payload)

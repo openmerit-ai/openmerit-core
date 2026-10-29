@@ -1,6 +1,17 @@
 # Scout architecture and operations
 
-## Decision-model leaderboards and shortlist tie-break (not yet deployed)
+## Catalogue expansion and decision tie-break deployment — 29 October 2026
+
+**Receipt:** the owner approved committing, pushing and deploying the publisher with a manual run, then the serving Worker. Commit [4d84e4f](https://github.com/laz-aslam/openmerit/commit/4d84e4faccc4091a8bf092b2eb5882acfac2c5ac) is on `origin/main` with CI green. Publisher `openmerit-scout` version `5994bfbf` went live with schedule `7 0,12 * * *`. Manual run `manual-20261029-decisions-1` published generation `8959ded6` without degradation. Serving `openmerit-scout-alpha` version `f683788a` replaced `17ab0166` (rollback command in the receipt); `/`, `/scout/`, `/connect/` and `/scout/api/status` return 200.
+
+**Results in D1 after the run:** decision boards 312 results, 26 linked (Decision Index 32/10, JevBench 280/16); AA image, video, speech, transcription and music boards 520 results, 125 linked. The published snapshot carries `decisionScores` for 16 decision models, for example Drex Max 0.96, d1-ultra 0.86, Sage 1.4 0.75, Jev 1.13 0.67 and Decider v1.2 0.67.
+
+**Failures in this run (fix not yet deployed):**
+- `huggingface-providers` failed at once: Workers reject `fetch` with `redirect: 'error'`. The fix uses `redirect: 'manual'` and refuses any 3xx, so the token still never follows a redirect. The previous Hub provider data is retained.
+- All five Arena media sources failed with "Do not know how to serialize a BigInt": parquet integer columns in the stored source row. The fix converts BigInt values to numbers when storing the row. No Arena media board is stored yet.
+- `mteb:RTEB(jpn, beta)` returned no final results; the source publishes none for that benchmark yet.
+
+## Decision-model leaderboards and shortlist tie-break — deployed, 29 October 2026
 
 Two decision-model boards join the leaderboard results store (`scout/catalogue-boards.ts`) as kind `decision`, linked by the same exact-name rule to decision models in `cat_model_merged`. Unlike the media boards, they feed one ranking step: the equal-cost tie-break in task-fit shortlists, described below.
 
@@ -14,7 +25,7 @@ Two decision-model boards join the leaderboard results store (`scout/catalogue-b
 
 **Live replay, 28 October** (deployed decision models and Vercel rates, current boards): at $0.02 per million input tokens Decider v1.2 (0.89) now precedes d1 (no results); at $0.042 the order becomes d1-ultra (0.86), Jev 1.13 (0.83), Jev 1.14 (0.79), Microsoft-Decision-1 (0.50), then `jev` (no results), instead of alphabetical. Other price points have a single route or no results.
 
-## Media leaderboard results store (not yet deployed)
+## Media leaderboard results store — deployed 29 October 2026; fix not yet deployed
 
 `scout/catalogue-boards.ts` keeps final per-model results from media leaderboards in D1, in the same spirit as the MTEB store: published numbers verbatim, with provenance, and no use in chat ranking. Scout cannot yet recommend image, video, speech, transcription or music models, so these results wait for those recommendation paths.
 
@@ -27,7 +38,7 @@ Two decision-model boards join the leaderboard results store (`scout/catalogue-b
 
 **Local replay, 28 October:** 24 boards, 1,388 results. Against the deployed catalogue's 157 image, video, speech and transcription models, 461 results link, for example GPT Image 2.5 Sunburst, MiniMax H3, Eleven v4, Voxtral Transcribe 3 and GPT Live Transcribe. Music links none: no catalogue source lists Suno or its peers yet. Link counts should rise once OpenRouter's media models, DeepInfra and TrueFoundry are deployed.
 
-## TrueFoundry model registry (not yet deployed)
+## TrueFoundry model registry — deployed, 29 October 2026
 
 New catalogue source `truefoundry` reads the [TrueFoundry models](https://github.com/truefoundry/models) repository (MIT) as one zip, `codeload.github.com/truefoundry/models/zip/refs/heads/main` (about 2.8 MB, under a second; the tar.gz endpoint streams for 50 seconds). The repository publishes its unified JSON only to a private S3 bucket, so `parseTrueFoundry` reads the per-route YAML files with the `yaml` package and stores the raw zip in R2 like other sources.
 
@@ -40,7 +51,7 @@ New catalogue source `truefoundry` reads the [TrueFoundry models](https://github
 
 The remaining Portkey files are not added in this revision: their token prices for Bedrock, Azure, Vertex and Together overlap TrueFoundry and LiteLLM, and the files with unique coverage (Scenario, Meshy, Tripo3D) use units the earlier review found undocumented or credit-based.
 
-## Arena text factuality and Models.dev decision models (not yet deployed)
+## Arena text factuality and Models.dev decision models — deployed, 29 October 2026
 
 **Arena factuality.** `sources.mjs` reads the `text_factuality` parquet from the Arena leaderboard dataset (CC BY 4.0) as source `arenaFactuality`: the overall board and the medicine and healthcare, legal and government, and business and finance categories, as `arena:factuality` series. Arena blends human preference with search-agent verification of each response's web-verifiable claims in a composite Bradley-Terry model at 25% factuality weight ([method](https://arena.ai/blog/factuality-in-arena)). Ratings convert to the expected win rate against the median-rated model, as for the other boards. The other 25 factuality categories repeat text categories Scout already reads and are skipped. Replay of the 22 October board: 187, 119, 125 and 162 rated models per category, none excluded by the confidence-interval rule in the overall board.
 
@@ -48,7 +59,7 @@ Not read, deliberately: the Search and Search factuality boards rate a model tog
 
 **Models.dev `?type=all`.** Both Models.dev requests now pass `type=all`. Without it, Models.dev omits decision models: 63 routes in `api.json` across 10 providers (Cloudflare AI Gateway and Workers AI, GreenPT, Melious, NanoGPT, NEAR AI, OpenCode, OpenRouter, Vercel, Vivgrid) and 10 models in `models.json`. Every other type was already returned; counts checked against both responses on 28 October.
 
-## All-task hosted Hub discovery (not yet deployed)
+## All-task hosted Hub discovery — deployed 29 October 2026; fix not yet deployed
 
 `refreshHubProviders` independently crawls `/api/models?inference_provider=all`, with no task, author or verified-organisation restriction. Personal accounts can contribute provider-served repositories without gaining admission to the separate organisation-wide crawler. The `huggingface-providers` source owns its routes and price intervals independently of `huggingface`; failures or withdrawals in either do not withdraw the other's coverage. Exact/reviewed identity links are allowed, but model-slug guessing and creation of canonical identities are not.
 
@@ -68,7 +79,7 @@ Arena responses carry stable model/creator IDs, full variant names, Elo and null
 
 **Access is not reuse permission.** The [Data Platform Terms v1.1, 19 August 2026](https://artificialanalysiscdn.com/legal/ProDataPlatformTerms.pdf) cover the free API. Sections 2.4–2.5 restrict customer-facing structured data, combined third-party datasets and model/provider-selection products without written consent; an executed agreement can grant specific additional rights. The [Website Terms, 15 September 2026](https://artificialanalysis.ai/terms-of-use) also restrict automated scraping and competitive use, so public HTML is not a substitute authorization. This review does not add or enable media collection. Obtain permission covering Scout's selection use, combined evidence, public scores/API output, caching and attribution before integration. Existing language-leaderboard handling is unchanged; this is not a legal determination about that prior integration.
 
-## MTEB final leaderboard results (not yet deployed)
+## MTEB final leaderboard results — deployed, 29 October 2026
 
 `scout/catalogue-mteb.ts` reads the MTEB leaderboard backend's `/v1/benchmarks?include_hidden=true` directory and each suite's `/scores` summary. Off-menu and older suite versions remain separate. The publisher imports one suite per Workflow step, with a 2 MB directory limit and an 8 MB per-summary limit. It never downloads benchmark corpora, embeddings, predictions or the expanded results dataset.
 
@@ -78,7 +89,7 @@ MTEB's results dataset declares CC0-1.0; task dataset licences remain separate. 
 
 **Local replay, 28 October:** 78 suites discovered, 77 imported, 12,936 result rows and 739 distinct source model names. `RTEB(jpn, beta)` advertised models but returned no rows, so its run failed rather than publishing an empty board. Successful raw summaries totalled 35,809,889 bytes; the largest was 2,086,301 bytes. These are local SQLite imports of the live API, not production D1 counts. Partial-coverage rows keep null means; result rows are not all complete aggregate evaluations.
 
-## Portkey supplemental media pricing (not yet deployed)
+## Portkey supplemental media pricing — deployed, 29 October 2026
 
 Three independent, bounded catalogue feeds read Portkey's public Deepgram, ElevenLabs and Stability AI pricing files. The unit review used [Portkey models](https://github.com/Portkey-AI/models) revision `5365ea6c92e807d53c8a602eb7bdddb0b8b0479a`, its MIT notice, the [ElevenLabs pricing PR](https://github.com/Portkey-AI/models/pull/898), [Deepgram's character billing table](https://deepgram.com/pricing) and Stability's `rates.image` calculation. The scheduled feeds follow Portkey's current published configs and archive each response; quoted rates are not a live provider/account quote.
 
@@ -88,7 +99,7 @@ Three independent, bounded catalogue feeds read Portkey's public Deepgram, Eleve
 
 **Local replay, 28 October:** 5 Deepgram Aura voice listings, 5 ElevenLabs model listings and 11 Stability image listings/prices imported. These are 21 supplemental source rows, not 21 newly discovered canonical models; several duplicate existing routes.
 
-## OpenRouter all-modalities and DeepInfra catalogue ingestion (not yet deployed)
+## OpenRouter all-modalities and DeepInfra catalogue ingestion — deployed, 29 October 2026
 
 The D1 model catalogue now requests OpenRouter with `output_modalities=all` rather than accepting its default text-only subset. Its output categories normalize to chat, decision, embedding, rerank, image, video, speech and transcription routes. Embeddings expose `embedding` output and rerankers expose `ranking`; they are not described as generic text generators. OpenRouter's official pricing units remain distinct: input/output/audio/image-token rates are per token, `image` and `image_output` are per image, and request/search rates are per operation. A generated-media token placeholder of zero is not promoted to a known price. Conditional pricing overrides remain in the archived raw payload.
 
@@ -98,7 +109,7 @@ DeepInfra prices are cent-denominated and normalize to their native unit: millio
 
 The public Novita OpenAI models endpoint was checked but is not added in this revision. Its observed IDs mostly overlap existing catalogue routes, and it does not add source-specific prices or modality metadata that can be normalized without another source. Deferring it avoids a redundant voice in capability corroboration rather than treating duplicate listings as independent evidence.
 
-## Vercel AI Gateway decision routes as typed contracts (not yet deployed)
+## Vercel AI Gateway decision routes as typed contracts — deployed, 29 October 2026
 
 Decision models reached Scout only through two hand-reviewed entries in `scout/endpoint-contracts.json` (OpenAI `gpt-6-luna` Decisions and TypeSafe `jev-1.14.0`). The catalogue already lists 14 Vercel decision routes with prices, but `catalogue-routes.ts` admits only chat routes, so none could be recommended.
 

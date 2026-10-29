@@ -162,7 +162,7 @@ test('provider collection failures retain active coverage and reject unsafe pagi
     const result = await refreshHubProviders(db, { now: '2026-10-02T00:00:00.000Z', run: 'failed', token: 'test-secret', fetcher: async (url, init) => {
       assert.equal(new URL(url).origin, 'https://huggingface.co', 'never forward credentials off-origin');
       assert.equal(new Headers(init.headers).get('authorization'), 'Bearer test-secret');
-      assert.equal(init.redirect, 'error', 'redirects cannot forward credentials');
+      assert.equal(init.redirect, 'manual', 'redirects cannot forward credentials');
       return fetcher(url);
     } });
     assert.equal(result.complete, false); assert.equal(result.stats, null); assert.ok(result.error);

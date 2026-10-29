@@ -30,7 +30,9 @@ function hub(fetcher: Fetcher, token: string | undefined) {
     if (target.origin !== 'https://huggingface.co' || target.username || target.password) throw new Error('Untrusted Hugging Face URL.');
     const headers: Record<string, string> = { 'User-Agent': 'OpenMerit-Scout/0.1 (+https://openmerit.ai/scout)' };
     if (token) headers.Authorization = `Bearer ${token}`;
-    const response = await fetcher(url, { headers, redirect: 'error', signal: AbortSignal.timeout(30_000) });
+    // Workers support only follow and manual; a redirect must not forward the token.
+    const response = await fetcher(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(30_000) });
+    if (response.status >= 300 && response.status < 400) { await response.body?.cancel(); throw new Error('Hugging Face redirected; not followed.'); }
     if (response.status === 429) { await response.body?.cancel(); throw new RateLimited(); }
     return response;
   };

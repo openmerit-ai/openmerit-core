@@ -76,3 +76,11 @@ test('decision boards keep JevBench capability for ranked systems only and link 
   assert.deepEqual(db.all("SELECT model,score,model_id FROM cat_board_results WHERE board='analysis:decision-index' AND model IN ('Decide 1','Chat 9') ORDER BY score DESC").map(r => Object.values(r)),
     [['Decide 1', 65.2, 'lab/decide-1'], ['Chat 9', 60, null]]);
 });
+
+test('parquet integers in a result row are stored as numbers', async () => {
+  const db = d1(), row = (i: number) => ({ model: `m${i}`, variant: '', creator: null, score: 100 - i, ci_lower: null, ci_upper: null, samples: null, released: null, payload: { rank: BigInt(i + 1) } });
+  const source = { id: 'test-board', name: 'Test', url: 'https://example.test/board.json', license: 'test', type: 'json' as const, maxBytes: 1000,
+    parse: () => [{ id: 'test:board', title: 'Test', kind: 'image', metric: 'Elo', direction: 'higher' as const, url: 'https://example.test', published_at: null, results: [0, 1, 2, 3, 4].map(row) }] };
+  assert.equal((await importBoards(db, source, { fetcher: async () => new Response('{}') })).status, 'ok');
+  assert.equal(db.all("SELECT payload FROM cat_board_results WHERE model='m0'")[0]?.payload, '{"rank":1}');
+});
