@@ -1,12 +1,18 @@
 # Scout architecture and operations
 
+## Publisher subrequest limit (not yet deployed)
+
+**Second manual run, 29 October:** after `d9b07b0` (publisher `1b543351`), run `manual-20261029-fixes-1` reached the Hugging Face provider crawl for the first time. It collected all 130 pages (64,575 staged repositories) and applied 33,600 of them before step `catalogue-hub-providers-65` failed with "Too many API requests by single Worker invocation". Cloudflare counts subrequests per Worker invocation, and one Workflow invocation runs many steps, so every later step failed at once on the same budget: the offerings and model rebuilds, every MTEB import, all media and decision boards, the public-feed collection and `record-failure`. The run errored without publishing; snapshot `8959ded6` stays live, and `health.json` still reads "running" until the next run, because the 55-minute lease expired normally but the failure record was never written. The crawl's durable cursor keeps the 33,600 applied repositories, so the next run resumes from there.
+
+**Fix:** `wrangler.scout.jsonc` sets `limits.subrequests` to 200,000 (the paid default is 10,000; up to 10 million is allowed and subrequests are not billed). The crawl makes about 150 D1 calls per apply step over roughly 100 steps, and the other steps need a few thousand more. Whether the Arena BigInt fix works in production is not yet observed, because the Arena steps never ran.
+
 ## Catalogue expansion and decision tie-break deployment — 29 October 2026
 
 **Receipt:** the owner approved committing, pushing and deploying the publisher with a manual run, then the serving Worker. Commit [4d84e4f](https://github.com/laz-aslam/openmerit/commit/4d84e4faccc4091a8bf092b2eb5882acfac2c5ac) is on `origin/main` with CI green. Publisher `openmerit-scout` version `5994bfbf` went live with schedule `7 0,12 * * *`. Manual run `manual-20261029-decisions-1` published generation `8959ded6` without degradation. Serving `openmerit-scout-alpha` version `f683788a` replaced `17ab0166` (rollback command in the receipt); `/`, `/scout/`, `/connect/` and `/scout/api/status` return 200.
 
 **Results in D1 after the run:** decision boards 312 results, 26 linked (Decision Index 32/10, JevBench 280/16); AA image, video, speech, transcription and music boards 520 results, 125 linked. The published snapshot carries `decisionScores` for 16 decision models, for example Drex Max 0.96, d1-ultra 0.86, Sage 1.4 0.75, Jev 1.13 0.67 and Decider v1.2 0.67.
 
-**Failures in this run (fix not yet deployed):**
+**Failures in this run (fixed by [d9b07b0](https://github.com/laz-aslam/openmerit/commit/d9b07b0c36cfd2a913c2338e4c9253ce0bfba201), deployed as publisher `1b543351`):**
 - `huggingface-providers` failed at once: Workers reject `fetch` with `redirect: 'error'`. The fix uses `redirect: 'manual'` and refuses any 3xx, so the token still never follows a redirect. The previous Hub provider data is retained.
 - All five Arena media sources failed with "Do not know how to serialize a BigInt": parquet integer columns in the stored source row. The fix converts BigInt values to numbers when storing the row. No Arena media board is stored yet.
 - `mteb:RTEB(jpn, beta)` returned no final results; the source publishes none for that benchmark yet.
