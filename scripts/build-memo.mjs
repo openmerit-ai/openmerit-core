@@ -67,7 +67,7 @@ export async function buildMemo(root) {
 <body class="memo-page">
   <a class="skip-link" href="#memo-content">Skip to content</a>
   <header class="memo-header wrap">
-    <a class="brand" href="/" aria-label="OpenMerit home"><svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M4 24V8l12 10L28 8v16M4 8l12 16L28 8" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg><span>openmerit</span></a>
+    <a class="brand" href="/" aria-label="OpenMerit home"><svg class="brand-mark" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span>openmerit</span></a>
     <nav class="memo-nav" aria-label="Primary navigation"><a href="/">Home</a><a href="/docs/">Documentation</a></nav>
   </header>
   <figure class="memo-cover" aria-hidden="true"><img src="/assets/memo-inference-abstract-v1.webp" width="2172" height="724" alt="" fetchpriority="high" decoding="async"></figure>

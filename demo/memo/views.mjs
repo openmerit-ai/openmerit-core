@@ -15,7 +15,7 @@ ${sharingMetadata}
 ${script ? '<script src="/memo-access.js" defer></script>' : ''}
 </head><body class="memo-page memo-access-page">
 <a class="skip-link" href="#access-content">Skip to content</a>
-<header class="memo-header wrap"><a class="brand" href="/" aria-label="OpenMerit home"><svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M4 24V8l12 10L28 8v16M4 8l12 16L28 8" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg><span>openmerit</span></a><nav class="memo-nav" aria-label="Primary navigation"><a href="/">Home</a></nav></header>
+<header class="memo-header wrap"><a class="brand" href="/" aria-label="OpenMerit home"><svg class="brand-mark" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span>openmerit</span></a><nav class="memo-nav" aria-label="Primary navigation"><a href="/">Home</a></nav></header>
 <main id="access-content" class="memo-access-main" tabindex="-1">${main}</main>
 </body></html>`;
 }
