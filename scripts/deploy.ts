@@ -27,7 +27,6 @@ const workers: Readonly<Record<string, Worker>> = {
   },
   site: {
     config: "wrangler.jsonc",
-    blocked: "the production memo application is newer than this source; deploying it would replace production with older code (docs/site-domain-migration.md).",
   },
 };
 
@@ -66,12 +65,29 @@ async function deploy(key: string, flags: readonly string[]): Promise<void> {
   requireGreenCI(commit);
 
   const subject = run("git", ["log", "-1", "--format=%s", commit]).trim();
-  const before = dryRun ? undefined : activeDeployment(name);
   console.log(`Deploying ${name} from ${worker.config} at ${commit.slice(0, 12)} (${subject}).`);
-  if (before) console.log(`Current versions: ${describe(before)}`);
   if (!dryRun && !flags.includes("--yes")) await confirm(`Deploy ${name} to production?`);
+  const before = dryRun && key !== "site" ? undefined : activeDeployment(name);
+  if (before) console.log(`Current versions: ${describe(before)}`);
+
+  // keep_assets inherits the last upload, which need not be the live version.
+  // Check after confirmation so a human pause cannot stale these checks.
+  if (key === "site") {
+    const latest = json<{ id: string; number: number }[]>(wrangler(["versions", "list", "--name", name, "--json"]))
+      .sort((a, b) => b.number - a.number)[0];
+    const active = before?.versions[0];
+    // Version 146 retained 145's assets: the executed upload and receipt prove
+    // keep_assets:true with no assets.jwt and 145 both latest and fully active.
+    // Evidence and limitations: docs/site-memo.md. No other upload is exempt.
+    const verifiedRetention = active?.version_id === "9b0ea195-8c33-40b0-a5ee-a21f3e31a46d"
+      && latest?.id === "f6c5d9ae-107a-49e9-883a-5046e57d810c";
+    if (before?.versions.length !== 1 || active?.percentage !== 100 || !latest || (active.version_id !== latest.id && !verifiedRetention)) {
+      fail("The site has an undeployed upload or split deployment. Reconcile its asset bundle before a keep_assets release; do not deploy an intermediate version just to pass this check.");
+    }
+  }
 
   const args = ["deploy", "--config", worker.config, "--strict", "--tag", commit.slice(0, 12), "--message", `${commit.slice(0, 12)} ${subject}`.slice(0, 100)];
+  if (key === "site") args.push("--containers-rollout", "none");
   if (dryRun) args.push("--dry-run");
   const result = spawnSync("wrangler", args, { cwd: root, stdio: "inherit" });
   if (result.error) throw result.error;

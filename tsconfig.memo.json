@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "allowJs": true,
+    "types": ["node"]
+  },
+  "include": ["demo/**/*.ts", "site/memo-access.ts"]
+}

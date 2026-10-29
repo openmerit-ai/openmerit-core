@@ -1,5 +1,9 @@
 # Primary domain migration
 
+## Memo source reconciliation — local only, 29 October 2026
+
+The protected memo, deployed interactive gateway/admission source and binding configuration have been restored for local verification; see [memo maintenance](site-memo.md#protected-memo-reconciliation--local-only-29-october-2026). Local route comparisons against the exact active Worker pass. The code-only configuration retains uploaded assets instead of replacing them with the older local site tree, and pins the existing container image. The executed upload record and receipt establish that version 146 retained active version 145's assets. `scripts/deploy.ts` replaces the blanket source-mismatch block with checks allowing that exact chain or a latest upload that is itself 100% active; unknown uploads and split deployments are refused. Production remains on `9b0ea195-8c33-40b0-a5ee-a21f3e31a46d`; no deployment, remote migration, real email or secret change is authorized by this local work. Production acceptance remains unexercised. The historical mismatch below records the earlier migration, not a release of this restoration.
+
 ## Protected memo restoration — published 25 October 2026
 
 The owner requested `/memo` back after the rebuild cutover. The router now

@@ -3,7 +3,7 @@ import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -94,8 +94,10 @@ test('offline checks back off for 15 minutes and manual retry bypasses the sched
 test('installed hooks notify on failure with a manual fallback, without blocking or repeating during backoff', async t => {
   const h = await fixture(t), preload = join(h.root, 'offline.mts');
   await writeFile(preload, 'globalThis.fetch = async () => { throw new Error("offline fixture"); };\n');
+  const linkedBase = join(h.root, 'linked-config');
+  await symlink(h.base, linkedBase, process.platform === 'win32' ? 'junction' : 'dir');
   const invoke = async () => {
-    const check = exec(process.execPath, ['--import', pathToFileURL(preload).href, h.paths.runner, '--base', h.base, '--scope', 'user', '--hook']);
+    const check = exec(process.execPath, ['--import', pathToFileURL(preload).href, join(linkedBase, 'openmerit-updater.mts'), '--base', h.base, '--scope', 'user', '--hook']);
     check.child.stdin?.end();
     return check;
   };

@@ -47,7 +47,9 @@ export const pages = groups.flatMap(group => group.pages.map(page => ({
 
 // The founding memo is a standalone article, outside the product guides and search.
 export const memo = {
-  source: 'memo.md',
+  // Preserve the published article; memo.md remains the earlier editorial draft.
+  source: 'memo-published.md',
   url: '/memo/',
-  description: 'How can we accelerate the distribution of intelligence? A memo by Lazim on optimum inference and the direction of OpenMerit.',
+  protected: true,
+  description: 'Optimum Inference for All. A memo by Lazim Aslam and Akhil Aryan on keeping model choices under review as the work and the models change.',
 };
