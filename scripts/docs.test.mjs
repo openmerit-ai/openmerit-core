@@ -58,12 +58,26 @@ test('every generated page declares device-driven appearance before styles load'
 });
 
 test('downloadable Markdown matches the maintained source and excludes internal site notes', async () => {
-  for (const page of publishedPages) {
+  for (const page of publishedPages.filter(page => !page.protected)) {
     assert.ok(!page.source.startsWith('site-'), `Internal site notes published: ${page.source}`);
     const original = await readFile(join(root, 'docs', page.source), 'utf8');
     const downloadable = await readFile(join(site, page.url, 'source.md'), 'utf8');
     assert.equal(downloadable, original, page.url);
   }
+});
+
+test('the memo build publishes only the gate and keeps the article and Markdown private', async () => {
+  const gate = await readFile(join(site, 'memo/index.html'), 'utf8');
+  assert.match(gate, /data-memo-login/);
+  assert.ok(!gate.includes('A choice made once'));
+  await assert.rejects(stat(join(site, 'memo/source.md')), { code: 'ENOENT' });
+  const { memoHtml, memoMarkdown } = await import('../demo/memo/generated/content.ts');
+  assert.equal(memoMarkdown, await readFile(join(root, 'docs', memo.source), 'utf8'));
+  assert.ok(memoHtml.includes('A choice made once'));
+  assert.equal((memoHtml.match(/class="memo-vector"/g) || []).length, 10);
+  const search = await readFile(join(site, manifest.searchIndex), 'utf8');
+  assert.ok(!search.includes('A choice made once'));
+  assert.ok(!manifest.pages.some(page => page.url.startsWith('/memo/')));
 });
 
 test('search finds operational topics and produces valid section destinations', async () => {
