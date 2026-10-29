@@ -1,6 +1,21 @@
 # Scout architecture and operations
 
-## Scale Labs SEAL boards as benchmark evidence (not yet deployed)
+## SEAL family fix (not yet deployed)
+
+The SEAL boards were deployed with `suite: 'Scale Labs SEAL'`, and the refresh turns a suite into one family, so all 11 boards formed one family (`suite:b04530f3…`) in snapshot `0fb74a8b`. Ranking counts a family as one correlated piece of evidence, so a model's legal, MCP, drug-discovery and visual-reasoning results counted once; SEAL was under-weighted, never over-counted. Because `prepareBenchmarks` keeps a benchmark's earlier family, removing the suite would not regroup them. Each board now sets its family explicitly as `seal:<slug before the first dash>`: PRBench Legal and Finance share `seal:prbench`, the three SWE Atlas boards share `seal:sweatlas`, and the other six stand alone, 8 families in all.
+
+## SEAL, Artificial Analysis and subrequest-limit deployment — 29 October 2026
+
+**Receipt:** the owner approved committing, pushing and deploying the publisher with a manual run. Commits [6041d90](https://github.com/laz-aslam/openmerit/commit/6041d90) (subrequest limit), [296e4c1](https://github.com/laz-aslam/openmerit/commit/296e4c1) (six AA evaluations) and [c94f77f](https://github.com/laz-aslam/openmerit/commit/c94f77f000c11f85e98c9804d7de9e0e6c07db0e) (SEAL) are on `origin/main` with CI green. Publisher `openmerit-scout` version `9ef8b236` went live with schedule `7 0,12 * * *`. Manual run `manual-20261029-seal-1` completed with no failed steps and published snapshot `0fb74a8b` (not stale, not degraded); the serving Worker was not redeployed and `/`, `/scout/` and `/connect/` return 200.
+
+**Results:**
+- The Hugging Face provider crawl resumed at 33,600 repositories and completed: 150,679 hosted routes. The subrequest limit held through the crawl, both catalogue rebuilds, every MTEB import, all boards and publish.
+- All five Arena media sources imported (656, 106, 48, 48 and 10 results), confirming the BigInt fix. Only `mteb:RTEB(jpn, beta)` failed, because it publishes no final results yet.
+- Benchmarks 560 → 577, benchmarks with results 273 → 290, measurements 11,723 → 12,015.
+- New AA series: HLE Diamond 55 models, CritPt v2 Hard 35, FrontierCode 2.0 31, Code2Video 22, HealthBench and HealthBench Professional 11 each. HLE Diamond and FrontierCode 2.0 were linked to their earlier versions' families.
+- SEAL matched 174 of 232 names (161 in the local replay), with 8–33 models per board, all interpreted.
+
+## Scale Labs SEAL boards as benchmark evidence — deployed, 29 October 2026
 
 `readSeal` in `sources.mjs` fetches one page per board from `labs.scale.com/leaderboard/<id>`, four at a time, and reads the full ranking from the page's flight data with `flightRecords` (no script runs). The overview page lists only each board's top six. Each board becomes a `seal:<id>` series of published percentages divided by 100, with Scale's per-row date as the observation date and the page's meta description as its description. A board whose page fails keeps its previous series and evidence, as for Vals AI; most boards failing fails the source.
 
@@ -13,7 +28,7 @@
 
 **Local replay, 29 October** (live pages, published catalogue as the previous snapshot, collection only): 161 of 232 distinct names match. Models per board: Legal 31, Finance 26, MCP Atlas 24, MultiChallenge 15, RLI 7, SWE Atlas 11, 13 and 12, HiL-Bench 27, DrugDiscoveryBench 18, Humanity's Sixth Sense 25. The refresh adds 11 page fetches.
 
-## More Artificial Analysis evaluations (not yet deployed)
+## More Artificial Analysis evaluations — deployed, 29 October 2026
 
 The models leaderboard page Scout already reads carries scores for six evaluations that `aaBenchmarks` did not map. They are now read as their own series, with no new download:
 
@@ -24,7 +39,7 @@ Newer versions stay separate from the earlier series (`aa:hle`, `aa:critpt`, `aa
 
 **Local replay, 29 October**, matching AA configuration names already resolved in the published catalogue: HLE Diamond 98 rows for 55 models, CritPt v2 Hard 77 for 35, FrontierCode 2.0 70 for 31, Code2Video 22 for 22, HealthBench and HealthBench Professional 11 each for 11 models. A live refresh may resolve more names.
 
-## Publisher subrequest limit (not yet deployed)
+## Publisher subrequest limit — deployed, 29 October 2026
 
 **Second manual run, 29 October:** after `d9b07b0` (publisher `1b543351`), run `manual-20261029-fixes-1` reached the Hugging Face provider crawl for the first time. It collected all 130 pages (64,575 staged repositories) and applied 33,600 of them before step `catalogue-hub-providers-65` failed with "Too many API requests by single Worker invocation". Cloudflare counts subrequests per Worker invocation, and one Workflow invocation runs many steps, so every later step failed at once on the same budget: the offerings and model rebuilds, every MTEB import, all media and decision boards, the public-feed collection and `record-failure`. The run errored without publishing; snapshot `8959ded6` stays live, and `health.json` still reads "running" until the next run, because the 55-minute lease expired normally but the failure record was never written. The crawl's durable cursor keeps the 33,600 applied repositories, so the next run resumes from there.
 

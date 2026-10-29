@@ -353,6 +353,10 @@ test('Scale SEAL boards drop contaminated and deprecated rows, read harness effo
   const score = (id, b) => snap.models.find(m => m.id === id)?.evidence.find(e => e.benchmark === b)?.score;
   assert.deepEqual([score('lab/model-0', 'seal:prbench-legal'), score('lab/model-1', 'seal:prbench-legal'), score('lab/model-2', 'seal:prbench-legal'), score('lab/model-0', 'seal:rli')], [.4, .5, undefined, .2]);
   assert.equal(sealBoards.length, new Set(sealBoards).size);
+  // Unrelated boards are separate families; legal and finance PRBench are one.
+  const family = id => snap.benchmarks.find(b => b.id === id)?.family;
+  assert.equal(family('seal:prbench-legal'), 'seal:prbench');
+  assert.deepEqual(new Set(sealBoards.map(b => `seal:${b.split('-')[0]}`)).size, 8);
 });
 
 test('the IDP Leaderboard parser reads component scores from the rendered table and rejects format changes', async () => {

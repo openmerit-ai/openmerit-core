@@ -543,7 +543,10 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     if (!seal) throw new Error('Scale SEAL boards unavailable.');
     for (const b of seal.boards) {
       const url = `https://labs.scale.com/leaderboard/${b.slug}`;
-      const benchmark = addBenchmark(`seal:${b.slug}`, `${b.name} · SEAL`, 'seal', { title: b.name, description: `${b.description} Run by Scale Labs. Score is the published percentage.`.trim(), metric: 'Score / 100', suite: 'Scale Labs SEAL', sourceURL: url }, { publishedAt: b.updated });
+      const benchmark = addBenchmark(`seal:${b.slug}`, `${b.name} · SEAL`, 'seal', { title: b.name, description: `${b.description} Run by Scale Labs. Score is the published percentage.`.trim(), metric: 'Score / 100', sourceURL: url },
+        // Boards are unrelated evaluations; only versions of one (PRBench Legal and Finance, the SWE Atlas tasks) share a family.
+        // Explicit, because an earlier generation grouped every board as one suite and the refresh keeps a prior family.
+        { publishedAt: b.updated, family: `seal:${b.slug.split('-')[0]}` });
       for (const row of b.rows) add(row.model, benchmark, row.score, { url, observedAt: row.observedAt, sourceModel: row.model, metric: 'Score / 100' });
     }
     for (const slug of seal.missing) {
