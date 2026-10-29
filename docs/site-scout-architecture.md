@@ -1,6 +1,54 @@
 # Scout architecture and operations
 
-## SEAL family fix (not yet deployed)
+## Hugging Face provider crawl applies only changes (not yet deployed)
+
+Until now every refresh that followed a completed crawl crawled again and re-applied all of it. Run `manual-20261029-sealfamily-1` spent 09:04–10:20 UTC on the crawl: collecting 130 pages took about 4 minutes, and re-applying 64,575 repositories took about 72, about 1,000 repositories per one-minute step, nearly all of them unchanged.
+
+Collection is unchanged: it still reads the whole feed, because withdrawal needs the complete list of served repositories. Each staged repository now carries a hash of its metadata, leaving out download and like counts. `cat_hf_provider_seen` keeps the hash each repository was last applied with. The apply phase skips a repository whose hash matches and that was applied within `providerReapplyDays` (7). It applies new and changed repositories as before, and withdraws repositories missing from the feed as before. A withdrawn repository's hash is forgotten, so it is applied in full if it returns. The 7-day re-apply carries identity links, parser changes and popularity counts to unchanged repositories. Until then their `last_seen`, downloads and likes are those of the last apply.
+
+The first run after deployment has no stored hashes and applies everything once. After that a refresh should spend minutes on the crawl, with a full re-apply about weekly. Not yet measured on the live feed.
+
+## Six more text leaderboards as benchmark evidence (not yet deployed)
+
+`sources.mjs` reads LiveBench 2.0 (7 categories, `livebench:*`), τ-bench as run by Sierra (4 domains, `tau:*`), OpenCompass (5 abilities, `opencompass:*`), HELM Arabic (mean score, `helm:arabic`), BRIDGE Medical (zero-shot average, `bridge:zero-shot`) and SuperCLUE (6 categories, `superclue:*`): 25 series. Each sets its family explicitly, never a shared suite; only `τ-Bench Banking · Sierra` shares a family with another publisher's copy (Artificial Analysis), through `evaluationKey`. Each source fails on its own and keeps its previous evidence.
+
+- **LiveBench:** the release id comes from the literal release list in the site bundle, read as text and never run. The weighted overall score is not read.
+- **τ-bench:** only Sierra's own standard text runs on harness 1.x; developer submissions (LLM Stats already supplies developer-reported scores), custom agent systems and 0.1.3 runs are dropped. Banking keeps the `alltools` retrieval setup. Score is pass^1. Runs at two reasoning settings of one model are run settings and combine by median, as for Vals and SEAL.
+- **HELM Arabic:** the newest release is found from the public bucket listing (v2.2.0, 25 June 2026). A model missing any scenario is dropped. Display names are used only when the schema has no model ID; this fixed "Mistral Large (2411)" matching the 2024 `mistralai/mistral-large`.
+- **BRIDGE Medical:** a trailing `-Thinking`/`-Non-Thinking` counts as a run setting only when the exact name is not itself a model. The Space's MIT licence may cover only its code.
+- **SuperCLUE:** the monthly xlsx is read with `fflate` and regular expressions, no new dependency. The last six months are tried and the newest kept; an older month is used only when the newer one is a 404, so a timeout fails the source. The total is not read.
+- **Not added:** MedHELM v4.0.0 (January 2026, 13 models, a win rate within that pool) and EuroEval (GitHub CSVs unchanged since April 2026; the fresher copy is CSV inside hashed site modules, and its rank score is relative).
+
+**Local replay, 29 October**, against snapshot `0fb74a8b`: LiveBench 25 of 31 names, τ-bench 21 of 27, OpenCompass 18 of 22, HELM Arabic 20 of 41 (the rest are Arabic-specialist models not in the catalogue), BRIDGE 42 of 112 names onto 35 models, SuperCLUE 14 of 18; 101 distinct models, one of them new to evidence (`baichuan/baichuan-m2-32b`). A refresh makes 11 more first fetches plus about 30 τ-bench submissions and the LiveBench and HELM follow-up files. SuperCLUE often timed out from the orb; behaviour from Cloudflare is not yet observed.
+
+## More boards in the leaderboard results store (not yet deployed)
+
+`catalogue-boards.ts` reads five more public leaderboards, 11 boards, adding the kinds `3d` and `embedding`. Results are stored verbatim with provenance and not used in ranking.
+
+- **Open ASR Leaderboard** (`open-asr:english`, `open-asr:multilingual`, `open-asr:long-form`): average word error rate (%), lower is better, from the Space's Gradio `/config` JSON. Multilingual rows without every default language have no average and are not stored. No licence stated.
+- **TTS Arena V2** (`tts-arena:v2`): Elo from blind votes, with uncertainty, win rate and votes in the payload. Suspended entries are not stored. No licence stated.
+- **3D Arena** (`3d-arena:render`, `3d-arena:topology`): Elo and votes. MIT (Space licence).
+- **VBench** (`vbench:t2v`, `vbench:v2`, `vbench:i2v`): Total Score (%). Rows VBench evaluated and rows a model's own team evaluated are both kept; "Evaluated by" is the result's variant, so they never merge. MIT (Space licence).
+- **MMEB** (`mmeb:v3`, `mmeb:v2`): self-submitted multimodal embedding results ranked by Overall and Overall-V2. Apache-2.0 (Space licence).
+- Gradio boards are read only from the initial table values in `/config` (`gradioTable`); no page script or Gradio event runs. A missing table or score column fails that source and keeps its previous boards.
+- **Not added:** ViDoRe, whose current tables are empty in `/config` and load only through Gradio events.
+
+**Local replay, 29 October:** 552 results, 21 linked (Open ASR 18, TTS Arena 3). 3D Arena, VBench and MMEB link none: the catalogue has no 3D models, and the video and embedding boards rank research or older names such as "Veo 3" that do not match API IDs like `google/veo-3.0-generate-001`.
+
+## Eden AI expert models in the catalogue (not yet deployed)
+
+New catalogue source `edenai` reads `https://api.edenai.run/v3/info` (public, about 105 KB) rather than the legacy v2 `provider_subfeatures` (2.4 MB), whose LLM rows carry one token price without saying input or output and a copied LiteLLM block. It imports OCR, translation, speech, moderation and detection models as routes of the existing `edenai` provider: one route per Eden model string and one price per unit (price ÷ quoted quantity). Minutes become seconds; a file is an image for image models and a document (`usd_per_file`, a new unit) for parsers; token, free, execution-time, zero and non-USD quotes store no price. Eden ranks last in the merge preference. Only speech and plain-OCR models link to existing canonical IDs; Eden's gpt-4o-based OCR and translation pipelines are not gpt-4o routes. The import fails below 80 models or 60 priced ones.
+
+**Local replay, 29 October:** 137 routes, 123 priced, 13 linked; 19 vendors no other source lists (Affinda, API4AI, Base64, DeepL, Eagledoc, Extracta, Gladia, Gradium, IONOS, Klippa, Mindee, ModernMT, Resemble, Sapling, SentiSight, Sightengine, Tabscanner, Veryfi, Winston AI). Spot-checked prices match the source exactly. Eden quotes $300 per million characters for every ElevenLabs model, against $40–80 in LiteLLM and TrueFoundry; it stays Eden's quote on Eden's route.
+
+**Evaluated, not added:**
+- **OpenRouter per-host endpoints:** 689 calls fit the subrequest budget, but a scoped import disables the collapse guard and uptime would change every payload. Worth a separate source with a rotating subset and its own guard.
+- **Azure Retail Prices:** meter names are free-text abbreviations without model IDs (`V3.2 SP Outp DZ`).
+- **AWS Price List:** of 214 base us-east-1 token meters, 78 mapped to Bedrock routes and 58 of those agreed with known prices; Bedrock already has 1,143 routes from four sources.
+
+## SEAL family fix — deployed, 29 October 2026
+
+**Receipt:** commit [2340f6e](https://github.com/laz-aslam/openmerit/commit/2340f6e430dd11c74328c0b1fbb65ba0bc7bfc56) is on `origin/main` with CI green. Publisher `openmerit-scout` version `3c60ea37` went live, and manual run `manual-20261029-sealfamily-1` completed with no failed steps and published snapshot `a0ce2a00` (not stale, not degraded). The serving Worker was not redeployed.
 
 The SEAL boards were deployed with `suite: 'Scale Labs SEAL'`, and the refresh turns a suite into one family, so all 11 boards formed one family (`suite:b04530f3…`) in snapshot `0fb74a8b`. Ranking counts a family as one correlated piece of evidence, so a model's legal, MCP, drug-discovery and visual-reasoning results counted once; SEAL was under-weighted, never over-counted. Because `prepareBenchmarks` keeps a benchmark's earlier family, removing the suite would not regroup them. Each board now sets its family explicitly as `seal:<slug before the first dash>`: PRBench Legal and Finance share `seal:prbench`, the three SWE Atlas boards share `seal:sweatlas`, and the other six stand alone, 8 families in all.
 
@@ -22,8 +70,8 @@ The SEAL boards were deployed with `suite: 'Scale Labs SEAL'`, and the refresh t
 - **Read (11):** Professional Reasoning Legal and Finance, MCP Atlas, MultiChallenge, Remote Labor Index, SWE Atlas Refactoring, Test Writing and Codebase QnA, HiL-Bench, DrugDiscoveryBench and Humanity's Sixth Sense.
 - **Not read:** 23 deprecated boards; DistressBench and Fortress (safety; Fortress is lower-is-better); AudioMultiChallenge (speech); HLE Diamond, which Artificial Analysis now supplies; and SWE-Bench Pro V2, whose Full and Hard views share one URL and whose 16 rows score 87–99 without a stated metric.
 - **Rows dropped:** any with a contamination message or marked deprecated.
-- **Names:** agent boards write "Model (harness) effort"; the trailing effort becomes a parenthetical so the existing resolver strips run settings. Harness rows of one model join that model's evidence with the harness in its configuration list. Known mismatch: \"gpt-5.6 (sol)\" resolves to `openai/gpt-5.6` because the resolver drops trailing parentheticals.
-- `evaluationKey` strips the \" · SEAL\" suffix, so SEAL's MultiChallenge and MCP Atlas share a family with other publishers' copies of those evaluations.
+- **Names:** agent boards write "Model (harness) effort"; the trailing effort becomes a parenthetical so the existing resolver strips run settings. Harness rows of one model join that model's evidence with the harness in its configuration list. Known mismatch: "gpt-5.6 (sol)" resolves to `openai/gpt-5.6` because the resolver drops trailing parentheticals.
+- `evaluationKey` strips the " · SEAL" suffix, so SEAL's MultiChallenge and MCP Atlas share a family with other publishers' copies of those evaluations.
 - **Terms:** Scale's site states no data licence. This follows the owner's stance for Artificial Analysis (final results, attributed); it has not been confirmed for Scale specifically.
 
 **Local replay, 29 October** (live pages, published catalogue as the previous snapshot, collection only): 161 of 232 distinct names match. Models per board: Legal 31, Finance 26, MCP Atlas 24, MultiChallenge 15, RLI 7, SWE Atlas 11, 13 and 12, HiL-Bench 27, DrugDiscoveryBench 18, Humanity's Sixth Sense 25. The refresh adds 11 page fetches.

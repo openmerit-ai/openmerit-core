@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Text leaderboards, media boards and Eden AI — source only, 29 October 2026
+
+Reviewed ranking, coverage and pricing claims against the change that reads LiveBench, τ-bench by Sierra, OpenCompass, HELM Arabic, BRIDGE Medical and SuperCLUE as benchmark evidence, stores Open ASR, TTS Arena, 3D Arena, VBench and MMEB results, and imports Eden AI's expert-model prices. The homepage FAQ names no individual benchmark or catalogue sources, counts or price units, and claims no Chinese, Arabic or clinical coverage, so no FAQ copy changes. The Scout guide's source table describes the new sources.
+
 ## Scale Labs SEAL boards as evidence — source only, 29 October 2026
 
 Reviewed ranking and coverage claims against the change that reads 11 Scale Labs SEAL boards as benchmark evidence. The homepage FAQ names no individual benchmark sources or counts, so no FAQ copy changes. The Scout guide's source table describes the new source.
