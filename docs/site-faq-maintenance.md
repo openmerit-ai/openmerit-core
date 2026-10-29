@@ -1,5 +1,33 @@
 # Website FAQ maintenance
 
+## Decision-model leaderboards and shortlist tie-break — source only, 28 October 2026
+
+Reviewed ranking and coverage claims against the change that stores the Artificial Analysis Decision Index and JevBench results for decision models and uses them to break equal-cost ties in task-fit shortlists. The homepage FAQ names no benchmark sources, decision models or shortlist ordering, so no FAQ copy changes. The Scout guide describes the tie-break in its task-fit paragraph and the Vercel decision routes row.
+
+## Media leaderboard results store — source only, 28 October 2026
+
+Reviewed ranking and coverage claims against the change that stores final results from Artificial Analysis and Arena image, video, speech, transcription and music leaderboards in the catalogue database. Scout does not use them in recommendations yet, and the homepage FAQ names no benchmark sources or media coverage, so no FAQ or guide copy changes.
+
+## TrueFoundry model registry in the catalogue — source only, 28 October 2026
+
+Reviewed coverage and pricing claims against the change that imports TrueFoundry's MIT-licensed model registry into the D1 catalogue. The homepage FAQ names no catalogue sources, provider counts or price units, so no FAQ copy changes. The Scout guide's catalogue row lists the source and what it leaves out.
+
+## Arena text factuality boards — source only, 28 October 2026
+
+Reviewed benchmark-coverage claims against the change that reads Arena's text factuality board (overall plus medicine and healthcare, legal and government, business and finance). The homepage FAQ names no benchmark sources or counts, so no FAQ copy changes. The Scout guide's Arena row describes the board, its claim-verification weight and that Search and Agent Arena remain unread.
+
+## MTEB final results, hosted Hub discovery and reviewed Portkey media prices — source only, 28 October 2026
+
+Reviewed benchmark, cost, data and coverage claims against the final-score importer, task-independent hosted Hub crawl and three supplemental pricing feeds. MTEB collection excludes benchmark datasets, predictions and per-example outputs, preserves experiment and suite versions, and does not yet contribute to recommendation ranking. Media quotes retain character, input-audio-second or per-image units; unknown denominators and placeholder zeros are not free generation. Hub provider discovery includes personal accounts without widening organisation admission or executable contracts; durable collection preserves prior coverage on failures, and incremental application is not a whole-source atomic swap. Ingestion counts are not new canonical-model counts or proof of executable access. The homepage FAQ describes the unchanged terminal/Pi workflow and needs no copy changes. The Scout guide marks these additions unreleased and separates collection from recommendation support. No deployment or production refresh is included.
+
+## Complete OpenRouter modalities and DeepInfra catalogue source — source only, 28 October 2026
+
+Reviewed provider coverage, pricing and freshness claims against the source change that requests every OpenRouter output modality and imports DeepInfra's own public inventory. Prices retain their documented token, image, character, frame or second unit; conditional structures remain source provenance where no lossless normalized row exists. Novita is deliberately deferred because its public list adds no normalized price or modality coverage over the existing sources. The homepage FAQ names no catalogue providers or route counts, so no FAQ copy changes. The Scout guide records the new coverage and limitations. No deployment or production refresh is included.
+
+## Vercel AI Gateway decision routes in task-fit shortlists — 28 October 2026
+
+Reviewed coverage and pricing claims against the change that adds every decision model Vercel AI Gateway routes, with its current input rate from the catalogue, as a typed choice, score and boolean endpoint in classification and judging shortlists. The homepage FAQ names no typed endpoints, decision providers or candidate counts, so no FAQ copy changes. The Scout guide's source table describes the new routes, their single reviewed contract and the promotional-rate caveat.
+
 ## Repeatable searches and task-specific evidence first — 26 October 2026
 
 Reviewed ranking, data-handling and privacy claims against the change that replays an identical search's recorded AI answers for seven days and ranks models measured on the task's own benchmark ahead of models with only general evidence. The homepage FAQ makes no claim about result stability, ranking order or server-side prompt storage beyond the data policy, which this change updates with the new answer cache. No FAQ change is needed.

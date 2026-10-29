@@ -11,8 +11,10 @@ import { refreshModelMetadata } from './metadata.mjs';
 import {structured} from './structured.mjs';
 import {embed} from './evidence-search.mjs';
 import {catalogueSources,importCatalogueSource,rebuildOfferings,rebuildModels} from './catalogue-db.ts';
-import {refreshHubOrgs,crawlHubModels} from './catalogue-hub.ts';
-import {loadCatalogue,catalogueRouteSource} from './catalogue-routes.ts';
+import {refreshHubOrgs,crawlHubModels,refreshHubProviders} from './catalogue-hub.ts';
+import {discoverMTEB,importMTEB} from './catalogue-mteb.ts';
+import {boardSources,importBoards} from './catalogue-boards.ts';
+import {loadCatalogue,catalogueRouteSource,decisionGateway} from './catalogue-routes.ts';
 import admittedProviders from './catalogue-providers.json' with { type: 'json' };
 import {evidenceLedger,migrateGeneration} from './evidence-db.ts';
 
@@ -47,15 +49,22 @@ export function addCatalogueRoutes(next,previous,supply,error=null) {
   for(const m of next.catalogue)m.endpoints=(m.endpoints??[]).filter(e=>e.source!==catalogueRouteSource);
   const source={id:catalogueRouteSource,name:'OpenMerit catalogue · hosted routes',url:'https://models.dev',publishedAt:null,
     attribution:"Hosted chat routes, token prices and model identities from reviewed inference hosts and model makers' APIs, merged from Models.dev, OpenRouter, Vercel AI Gateway, LiteLLM and genai-prices. Availability on your account is not checked."};
+  const decisions={id:decisionGateway.source,name:'Vercel AI Gateway · decision routes',url:decisionGateway.url,publishedAt:null,refreshPolicy:'catalogue-refresh',
+    attribution:'Decision models Vercel AI Gateway routes, with their input rates, from the OpenMerit catalogue. One documented typed-question contract covers them all; not a quality measurement.'};
+  const others=next.sources.filter(s=>s.id!==catalogueRouteSource&&s.id!==decisions.id);
   if(supply) {
     const routes=supply.routes(next.catalogue,next.checkedAt);
     for(const m of next.catalogue)m.endpoints.push(...(routes.get(m.id)??[]));
-    next.sources=[...next.sources.filter(s=>s.id!==catalogueRouteSource),{...source,status:'ok',checkedAt:next.checkedAt}];
+    next.contracts=supply.decisionRoutes().map(c=>({...c,checkedAt:next.checkedAt}));
+    next.decisionScores=supply.decisionScores();
+    next.sources=[...others,{...source,status:'ok',checkedAt:next.checkedAt},{...decisions,status:'ok',checkedAt:next.checkedAt}];
   } else {
     const old=new Map((previous.catalogue??[]).map(m=>[m.id,(m.endpoints??[]).filter(e=>e.source===catalogueRouteSource)]));
     for(const m of next.catalogue)m.endpoints.push(...(old.get(m.id)??[]));
-    const prior=previous.sources?.find(s=>s.id===catalogueRouteSource);
-    next.sources=[...next.sources.filter(s=>s.id!==catalogueRouteSource),{...source,status:'failed',checkedAt:prior?.checkedAt??null,attemptedAt:next.checkedAt,error:String(error?.message??error??'Catalogue unavailable.').slice(0,200)}];
+    next.contracts=previous.contracts??[];
+    next.decisionScores=previous.decisionScores??{};
+    const failed=s=>({status:'failed',checkedAt:previous.sources?.find(p=>p.id===s.id)?.checkedAt??null,attemptedAt:next.checkedAt,error:String(error?.message??error??'Catalogue unavailable.').slice(0,200)});
+    next.sources=[...others,{...source,...failed(source)},{...decisions,...failed(decisions)}];
   }
   return next;
 }
@@ -81,10 +90,29 @@ export async function runRefresh(env,step,id) {
       const hubOptions={token:env.HF_TOKEN,run:`${id}-huggingface`},steps={
         ...Object.fromEntries(Object.keys(catalogueSources).map(source=>[source,()=>importCatalogueSource(env.SCOUT_INDEX,source,{bucket,run:`${id}-${source}`})])),
         // The Hub crawl needs HF_TOKEN; it covers part of the organisations per run.
-        ...(env.HF_TOKEN?{'hub-orgs':()=>refreshHubOrgs(env.SCOUT_INDEX,hubOptions),'hub-models':()=>crawlHubModels(env.SCOUT_INDEX,hubOptions)}:{}),
-        offerings:()=>rebuildOfferings(env.SCOUT_INDEX),models:()=>rebuildModels(env.SCOUT_INDEX)};
+        ...(env.HF_TOKEN?{'hub-orgs':()=>refreshHubOrgs(env.SCOUT_INDEX,hubOptions),'hub-models':()=>crawlHubModels(env.SCOUT_INDEX,hubOptions)}:{})};
       for(const [name,run] of Object.entries(steps))
         try{await step.do(`catalogue-${name}`,{retries:{limit:1,delay:'30 seconds'},timeout:'10 minutes'},run);}catch{}
+      // Separate bounded steps release each page/batch before the next. Durable
+      // cursors also resume across refreshes when this workflow's budget ends.
+      if(env.HF_TOKEN)for(let chunk=0;chunk<128;chunk++){
+        try{
+          const progress=await step.do(`catalogue-hub-providers-${chunk}`,{retries:{limit:1,delay:'30 seconds'},timeout:'10 minutes'},
+            ()=>refreshHubProviders(env.SCOUT_INDEX,{token:env.HF_TOKEN,run:`${id}-huggingface-providers`,applyBatches:20}));
+          if(progress.complete||progress.error||progress.rateLimited)break;
+        }catch{break;}
+      }
+      for(const [name,rebuild] of [['offerings',rebuildOfferings],['models',rebuildModels]])
+        try{await step.do(`catalogue-${name}`,{retries:{limit:1,delay:'30 seconds'},timeout:'10 minutes'},()=>rebuild(env.SCOUT_INDEX));}catch{}
+      // One compact final-results response per step; never hold every MTEB
+      // leaderboard in memory or download its benchmark datasets/results dump.
+      let mteb=[];
+      try{mteb=await step.do('catalogue-mteb-directory',{retries:{limit:1,delay:'30 seconds'},timeout:'2 minutes'},()=>discoverMTEB());}catch{}
+      for(const benchmark of mteb)
+        try{await step.do(`catalogue-mteb-${benchmark.name}`,{retries:{limit:1,delay:'30 seconds'},timeout:'2 minutes'},()=>importMTEB(env.SCOUT_INDEX,benchmark,{bucket,run:`${id}-mteb-${benchmark.name}`}));}catch{}
+      // Media leaderboards, one page or parquet per step, after models are rebuilt so links use this run's catalogue.
+      for(const source of boardSources)
+        try{await step.do(`catalogue-${source.id.replace(':','-')}`,{retries:{limit:1,delay:'30 seconds'},timeout:'2 minutes'},()=>importBoards(env.SCOUT_INDEX,source,{bucket,run:`${id}-${source.id}`}));}catch{}
     }
     await step.do('check-semantic-service',{retries:{limit:0,delay:'1 second'},timeout:'1 minute'},async()=>{
       const questions=[choice('ready','Is this an availability check?',{yes:'Availability check.',no:'Another request.'})];

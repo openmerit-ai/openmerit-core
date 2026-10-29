@@ -29,7 +29,20 @@ export interface CatalogueSupply {
   // The model family each Scout model links to through an exact identity: its canonical ID
   // without namespace, punctuation or a dated suffix, so catalogue copies of one model agree.
   families(models: readonly ScoutModelLike[]): Map<string, string>;
+  // Vercel AI Gateway decision routes as typed endpoint contracts, in endpoint-contracts.json's shape.
+  decisionRoutes(): DecisionContract[];
+  // Linked decision-leaderboard results per canonical model (catalogue-boards.ts).
+  decisionScores(): Record<string, DecisionScore>;
 }
+// A model's standing on each decision board: the share of that board's other results it
+// beats (ties count half), in the board's own direction. Quality is the mean over boards.
+export interface DecisionScore { quality: number; results: Array<{ board: string; title: string; url: string; metric: string; model: string; score: number; percentile: number; publishedAt: string | null }> }
+export interface DecisionContract {
+  id: string; model: string; name: string; provider: string; modelId: string; api: string; protocol: string; operations: string[]; labelMode: 'supplied';
+  modalities: string[]; parameters: string[]; context: number | null; inputPrice: number; outputPrice: number; url: string; source: string; status: string; pricingBasis: string; limits: string;
+}
+// Vercel's gateway answers choice, score and boolean questions for every decision model it routes.
+export const decisionGateway = { source: 'vercel-decisions', provider: 'Vercel AI Gateway', api: 'https://ai-gateway.vercel.sh/v1/evaluate', protocol: 'vercel-evaluate', url: 'https://vercel.com/docs/ai-gateway/modalities/decision' };
 
 export const catalogueRouteSource = 'catalogue';
 const strings = (v: string | null): string[] => { try { const parsed: unknown = JSON.parse(v ?? 'null'); return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []; } catch { return []; } };
@@ -134,7 +147,45 @@ export async function loadCatalogue(db: Database, admitted: Readonly<Record<stri
   // other repository by that name, such as the base model, makes the name ambiguous.
   for (const r of (await db.prepare(`SELECT id FROM cat_hf_models WHERE model_id IS NULL AND withdrawn_at IS NULL
     AND author IN (SELECT author FROM cat_hf_models WHERE model_id IS NOT NULL AND withdrawn_at IS NULL)`).all<{ id: string }>()).results) named(r.id.split('/').pop(), `huggingface:${r.id}`);
+  // Decision routes need a current input rate; Vercel bills decisions on input tokens only.
+  const decisionRows = (await db.prepare(`SELECT o.provider_model_id,o.model_id,o.name,o.status,o.context,o.input_modalities,p.amount input FROM cat_offerings o
+    JOIN cat_prices p ON p.provider_id=o.provider_id AND p.provider_model_id=o.provider_model_id AND p.valid_to IS NULL AND p.tier='' AND p.unit='usd_per_mtok' AND p.kind='input'
+    WHERE o.provider_id='vercel' AND o.kind='decision' AND o.model_id IS NOT NULL AND (o.status IS NULL OR o.status<>'deprecated') ORDER BY o.provider_model_id,CASE p.source WHEN 'vercel' THEN 0 ELSE 1 END`)
+    .all<{ provider_model_id: string; model_id: string; name: string | null; status: string | null; context: number | null; input_modalities: string | null; input: number }>()).results;
+  // The board tables exist only once a refresh has imported a leaderboard.
+  const boardRows = (await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='cat_board_results'").all()).results.length ? (await db.prepare(`SELECT b.id board,b.title,b.url,b.metric,b.direction,b.published_at,r.model,r.score,r.model_id
+    FROM cat_board_results r JOIN cat_boards b ON b.id=r.board AND b.version=r.version WHERE b.kind='decision'`)
+    .all<{ board: string; title: string; url: string; metric: string; direction: string; published_at: string | null; model: string; score: number; model_id: string | null }>()).results : [];
   return {
+    decisionScores() {
+      const boards = new Map<string, typeof boardRows>(), best = new Map<string, Map<string, DecisionScore['results'][number]>>();
+      for (const r of boardRows) boards.set(r.board, [...(boards.get(r.board) ?? []), r]);
+      for (const rows of boards.values()) for (const r of rows) {
+        if (!r.model_id || rows.length < 2) continue;
+        const sign = r.direction === 'lower' ? -1 : 1, beaten = rows.reduce((n, o) => n + (o === r ? 0 : sign * (r.score - o.score) > 0 ? 1 : r.score === o.score ? .5 : 0), 0);
+        const result = { board: r.board, title: r.title, url: r.url, metric: r.metric, model: r.model, score: r.score, percentile: beaten / (rows.length - 1), publishedAt: r.published_at };
+        const mine = best.get(r.model_id) ?? new Map<string, DecisionScore['results'][number]>();
+        if ((mine.get(r.board)?.percentile ?? -1) < result.percentile) mine.set(r.board, result);
+        best.set(r.model_id, mine);
+      }
+      return Object.fromEntries([...best].map(([id, m]) => { const results = [...m.values()]; return [id, { quality: results.reduce((n, x) => n + x.percentile, 0) / results.length, results }]; }));
+    },
+    decisionRoutes() {
+      // Vercel can list one model under a paid and a free-tier ID with the same name; the first ID stands for both.
+      const out = new Map<string, DecisionContract>(), seen = new Set<string>();
+      for (const r of decisionRows) {
+        const model = canonical.get(r.model_id), inputs = strings(r.input_modalities), name = model?.name ?? r.name ?? r.provider_model_id;
+        const same = `${r.provider_model_id.split('/')[0]}|${norm(name)}`;
+        if (out.has(r.provider_model_id) || !(r.input >= 0) || !inputs.includes('text') || seen.has(same)) continue;
+        seen.add(same);
+        out.set(r.provider_model_id, { id: `${decisionGateway.source}:${decisionGateway.protocol}:${r.provider_model_id}`, model: r.model_id, name,
+          provider: decisionGateway.provider, modelId: r.provider_model_id, api: decisionGateway.api, protocol: decisionGateway.protocol, operations: ['classify', 'judge'], labelMode: 'supplied',
+          modalities: inputs, parameters: ['structured_outputs'], context: r.context ?? model?.context ?? null, inputPrice: r.input, outputPrice: 0, url: decisionGateway.url, source: decisionGateway.source,
+          status: r.status ?? 'listed', pricingBasis: 'Vercel AI Gateway decision rate: input tokens only. Promotional and free-tier rates can end; image tokenization affects the actual bill.',
+          limits: 'Supplied choices, ordered rubric scores and boolean probabilities. No arbitrary field extraction, free-form answers, tool execution, boxes or masks.' });
+      }
+      return [...out.values()];
+    },
     routes(models, checkedAt) {
       const out = new Map<string, ScoutEndpoint[]>();
       for (const [target, m] of ownersOf(models)) {

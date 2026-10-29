@@ -208,7 +208,7 @@ test('a fresh table retains omitted historical observations only for an unchange
 test('refresh reads bounded benchmark methodology and catalogue feeds; total outage needs a previous index', async () => {
   const f = fixtures(); const calls = [];
   const fetcher = async url => { calls.push(url); return new Response(url.endsWith('.zip') ? f.epochZip : url.includes('artificialanalysis') ? f.analysisHTML : JSON.stringify(url.includes('OpenVLM') ? f.openvlm : f.router)); };
-  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 59, 'feeds, plus one page per Vals AI benchmark'); assert.equal(refreshed.models.length, 12);
+  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 60, 'feeds, plus one page per Vals AI benchmark'); assert.equal(refreshed.models.length, 12);
   assert.equal(refreshed.sources.find(s => s.id === 'huggingface').status, 'failed');
   await assert.rejects(refreshSnapshot(async () => new Response('Unavailable', { status: 503 })), /Invalid model catalogue/);
 });

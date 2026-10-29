@@ -35,7 +35,7 @@ export function prepareEligibility(snapshot) {
   for(const model of snapshot.catalogue??snapshot.models)for(const endpoint of model.endpoints??[])
     profiles.push({modelId:model.id,endpointId:endpoint.id,source:endpoint.source,facts:modelFacts(model,endpoint)});
   const byId=new Map((snapshot.catalogue??snapshot.models).map(m=>[m.id,m]));
-  for(const model of contractModels())profiles.push({modelId:model.id,endpointId:model.endpoint.id,source:model.endpoint.source,facts:{...modelFacts({...model,facts:byId.get(model.id)?.facts},model.endpoint),creator:model.provider}});
+  for(const model of contractModels(snapshot))profiles.push({modelId:model.id,endpointId:model.endpoint.id,source:model.endpoint.source,facts:{...modelFacts({...model,facts:byId.get(model.id)?.facts},model.endpoint),creator:model.provider}});
   for(const model of snapshot.specialists??[])profiles.push({modelId:`huggingface/${model.id}`,repository:model.id,endpointId:`huggingface:local:${model.id}:${model.revision}`,source:'huggingface',
     facts:{creator:value(model,'creator'),host:'Self-hosted',family:value(model,'family'),identity:{id:model.id,name:model.id},contextTokens:value(model,'contextTokens'),releasedAt:value(model,'releasedAt'),listedAt:null,deployment:'self-hosted',other:{pipeline:model.pipeline,repositoryPublisher:model.id.split('/')[0],updatedAt:model.updatedAt,attributes:model.facts??[]}}});
   const vocabulary=Object.fromEntries(Object.keys(factDefinitions).map(field=>[field,[...new Set(profiles.flatMap(p=>Array.isArray(p.facts[field])?p.facts[field]:[p.facts[field]]).filter(v=>v!==null&&typeof v!=='object'))].sort((a,b)=>String(a).localeCompare(String(b)))]));

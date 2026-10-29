@@ -18,7 +18,7 @@ export function toRecords(snapshot) {
     for (const [i,e] of (evidence.get(m.id)?.evidence ?? []).entries()) observations.push({ ...e, id: `${m.id}|${e.benchmark}|${i}`, modelId: m.id });
   }
   return { version: catalogueVersion,discoveryState:snapshot.discoveryState??{},discoverySummary:snapshot.discoverySummary??null,selectionMetadataVersion:snapshot.selectionMetadataVersion??null,checkedAt: snapshot.checkedAt, registry: snapshot.registry ?? seed, models, endpoints, benchmarks: snapshot.benchmarks, observations, sources: snapshot.sources,
-    specialists: snapshot.specialists ?? [], specialistProfiles: snapshot.specialistProfiles ?? [], benchmarkMethodologies: snapshot.benchmarkMethodologies, benchmarkDescriptions: snapshot.benchmarkDescriptions,
+    specialists: snapshot.specialists ?? [], specialistProfiles: snapshot.specialistProfiles ?? [], contracts: snapshot.contracts ?? [], decisionScores: snapshot.decisionScores ?? {}, benchmarkMethodologies: snapshot.benchmarkMethodologies, benchmarkDescriptions: snapshot.benchmarkDescriptions,
     research: (snapshot.research ?? []).map(dropInspectionRecord), researchState: snapshot.researchState ?? {}, researchPending:snapshot.researchPending??[], refreshSummary:snapshot.refreshSummary??null, publication: snapshot.publication ?? null };
 }
 
@@ -32,6 +32,9 @@ export function validateRecords(records) {
     if(!models.has(e.canonicalModelId) || !e.modelId || !e.protocol || !publicURL(e.url ?? records.sources.find(s=>s.id===e.source)?.url)) throw new Error('Invalid endpoint identity or provenance.');
     for(const key of ['inputPrice','outputPrice']) if(e[key] !== null && e[key] !== undefined && (finite(e[key]) === null || e[key] < 0)) throw new Error('Invalid price.');
   }
+  unique(records.contracts ?? []);
+  for(const c of records.contracts ?? []) if(!c.model || !c.modelId || !c.operations?.length || !publicURL(c.api) || !publicURL(c.url) || finite(c.inputPrice) === null || c.inputPrice < 0 || finite(c.outputPrice) === null || c.outputPrice < 0) throw new Error('Invalid decision contract.');
+  for(const d of Object.values(records.decisionScores ?? {})) if(finite(d?.quality) === null || d.quality < 0 || d.quality > 1 || !d.results?.length || d.results.some(r=>finite(r.percentile) === null || !publicURL(r.url))) throw new Error('Invalid decision score.');
   for(const b of records.benchmarks) if(!Array.isArray(b.tags) || b.tags.some(t=>!capabilities.has(t))) throw new Error('Unknown capability reference.');
   for(const o of records.observations) if(!models.has(o.modelId) || !benchmarks.has(o.benchmark) || finite(o.score) === null || o.score < 0 || o.score > 1 || !publicURL(o.url)) throw new Error('Invalid observation or provenance.');
   return records;
@@ -43,7 +46,7 @@ export function toSnapshot(records) {
   for(const o of records.observations) { const rows=evidence.get(o.modelId)??[];const {modelId,id,...e}=o;rows.push(e);evidence.set(o.modelId,rows); }
   const catalogue=records.models.map(m=>({...m,endpoints:endpoints.get(m.id)??[],evidence:evidence.get(m.id)??[]}));
   return { version:1,dataVersion:20,discoveryState:records.discoveryState??{},discoverySummary:records.discoverySummary??null,selectionMetadataVersion:records.selectionMetadataVersion??null,checkedAt:records.checkedAt,availableModels:catalogue.filter(m=>m.endpoints.length).length,catalogue,models:catalogue.filter(m=>m.evidence.length),benchmarks:records.benchmarks,sources:records.sources,
-    registry:records.registry,specialists:records.specialists,specialistProfiles:records.specialistProfiles,benchmarkMethodologies:records.benchmarkMethodologies,benchmarkDescriptions:records.benchmarkDescriptions,research:(records.research??[]).map(dropInspectionRecord),researchState:records.researchState,researchPending:records.researchPending??[],refreshSummary:records.refreshSummary,publication:records.publication };
+    registry:records.registry,specialists:records.specialists,specialistProfiles:records.specialistProfiles,contracts:records.contracts??[],decisionScores:records.decisionScores??{},benchmarkMethodologies:records.benchmarkMethodologies,benchmarkDescriptions:records.benchmarkDescriptions,research:(records.research??[]).map(dropInspectionRecord),researchState:records.researchState,researchPending:records.researchPending??[],refreshSummary:records.refreshSummary,publication:records.publication };
 }
 
 // Hash each record independently before the small catalogue root. This retains

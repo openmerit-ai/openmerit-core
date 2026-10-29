@@ -6,6 +6,8 @@
 
 // The subset of D1 and R2 this module uses. Runtime Worker types are not
 // committed yet (docs/site-typescript-migration.md), and tests pass SQLite.
+import { unzipSync, strFromU8 } from 'fflate';
+import { parse as parseYAML } from 'yaml';
 import { reviewedModels, reviewedRoutes } from './catalogue-identities.ts';
 
 type Value = string | number | null;
@@ -24,18 +26,23 @@ export interface Bucket {
 }
 type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 type Json = Record<string, unknown>;
-export type CatalogueSource = 'modelsdev' | 'litellm' | 'openrouter' | 'vercel' | 'genaiprices' | 'epoch';
+export type CatalogueSource = 'modelsdev' | 'litellm' | 'openrouter' | 'vercel' | 'deepinfra' | 'genaiprices' | 'epoch' | 'portkey-deepgram' | 'portkey-elevenlabs' | 'portkey-stability-ai' | 'truefoundry';
 
 interface SourceConfig { name: string; url: string; modelsURL?: string; license: string; role: string; maxBytes: number }
 // Import order matters: Models.dev first, as every later source resolves against it,
 // then the gateways, whose lab/model IDs add identities the price lists resolve to.
 export const catalogueSources: Record<CatalogueSource, SourceConfig> = {
-  modelsdev: { name: 'Models.dev', url: 'https://models.dev/api.json', modelsURL: 'https://models.dev/models.json', license: 'MIT', role: 'Model identity, families and provider routes (backbone)', maxBytes: 20_000_000 },
-  openrouter: { name: 'OpenRouter models API', url: 'https://openrouter.ai/api/v1/models', license: 'Public API; OpenRouter terms of service', role: 'Gateway routes, prices and Hugging Face IDs', maxBytes: 8_000_000 },
+  modelsdev: { name: 'Models.dev', url: 'https://models.dev/api.json?type=all', modelsURL: 'https://models.dev/models.json?type=all', license: 'MIT', role: 'Model identity, families and provider routes (backbone)', maxBytes: 20_000_000 },
+  openrouter: { name: 'OpenRouter models API', url: 'https://openrouter.ai/api/v1/models?output_modalities=all', license: 'Public API; OpenRouter terms of service', role: 'Gateway routes, prices and Hugging Face IDs', maxBytes: 8_000_000 },
   vercel: { name: 'Vercel AI Gateway models API', url: 'https://ai-gateway.vercel.sh/v1/models', license: 'Public API; Vercel terms of service', role: 'Second gateway: routes, release dates and prices', maxBytes: 8_000_000 },
   litellm: { name: 'LiteLLM model prices', url: 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json', license: 'MIT', role: 'Provider routes and prices', maxBytes: 12_000_000 },
+  deepinfra: { name: 'DeepInfra models API', url: 'https://api.deepinfra.com/models/list', license: 'Public API; DeepInfra terms of service', role: "A host's own list: chat, media, audio, embedding, rerank and decision models with prices", maxBytes: 4_000_000 },
   genaiprices: { name: 'genai-prices (Pydantic)', url: 'https://raw.githubusercontent.com/pydantic/genai-prices/main/prices/data.json', license: 'MIT', role: 'Provider prices with tiers and dated changes', maxBytes: 8_000_000 },
   epoch: { name: 'Epoch AI models database', url: 'https://epoch.ai/data/all_ai_models.csv', license: 'CC BY 4.0', role: 'Model creators, countries, release dates, size and openness, including models no gateway lists', maxBytes: 30_000_000 },
+  truefoundry: { name: 'TrueFoundry models registry', url: 'https://codeload.github.com/truefoundry/models/zip/refs/heads/main', license: 'MIT · Copyright (c) TrueFoundry · https://github.com/truefoundry/models/blob/main/LICENSE', role: 'Per-provider model configs: modes, modalities, limits and prices per region, including media, speech, rerank and decision models', maxBytes: 10_000_000 },
+  'portkey-deepgram': { name: 'Portkey · Deepgram prices', url: 'https://configs.portkey.ai/pricing/deepgram.json', license: 'MIT · Copyright (c) 2025 Portkey.ai · https://github.com/Portkey-AI/models/blob/main/LICENSE', role: 'Reviewed Aura voice prices per character; not token prices', maxBytes: 1_000_000 },
+  'portkey-elevenlabs': { name: 'Portkey · ElevenLabs prices', url: 'https://configs.portkey.ai/pricing/elevenlabs.json', license: 'MIT · Copyright (c) 2025 Portkey.ai · https://github.com/Portkey-AI/models/blob/main/LICENSE', role: 'Reviewed speech model prices per character or input-audio second', maxBytes: 1_000_000 },
+  'portkey-stability-ai': { name: 'Portkey · Stability AI prices', url: 'https://configs.portkey.ai/pricing/stability-ai.json', license: 'MIT · Copyright (c) 2025 Portkey.ai · https://github.com/Portkey-AI/models/blob/main/LICENSE', role: 'Image prices with quality/size tiers', maxBytes: 1_000_000 },
 };
 
 // One statement per entry: D1 exec splits on newlines, so schema goes through batch.
@@ -231,8 +238,17 @@ const flag = (on: boolean, known: boolean): number | null => known ? Number(on) 
 const priced = (prices: Price[], kind: string, tier: string, unit: string, amount: number | null) => { if (amount !== null) prices.push({ kind, tier, unit, amount }); };
 const unlisted = { family: null, status: null, max_input: null, attachment: null, model_id: null, model_basis: null } as const;
 
-// OpenRouter lists its own routes. Ambiguous price fields (per-image, audio,
-// time-of-day overrides) stay in the payload rather than being guessed.
+// OpenRouter names a non-chat model's output by its kind. Like Models.dev and Vercel, such a
+// route outputs text or audio, and the kind becomes its type. Chat routes keep no type.
+const openRouterOutputs: Record<string, { type: string; output: string }> = {
+  decisions: { type: 'decisions', output: 'text' }, embeddings: { type: 'embedding', output: 'embedding' }, rerank: { type: 'rerank', output: 'ranking' },
+  transcription: { type: 'transcription', output: 'text' }, speech: { type: 'speech', output: 'audio' }, video: { type: 'video', output: 'video' },
+};
+// Generated media is billed per unit elsewhere; OpenRouter quotes "0" per token for it, which is no price.
+const mediaTypes = new Set(['image', 'video', 'speech']);
+
+// OpenRouter lists its own routes. Ambiguous price fields (time-of-day overrides)
+// stay in the payload rather than being guessed.
 export function parseOpenRouter(data: unknown): Parsed {
   const rows = isObject(data) && Array.isArray(data.data) ? data.data : [];
   if (!rows.length) throw new Error('OpenRouter models format changed.');
@@ -242,17 +258,200 @@ export function parseOpenRouter(data: unknown): Parsed {
     if (!modelId) continue;
     const arch = obj(m.architecture), top = obj(m.top_provider), pricing = obj(m.pricing), prices: Price[] = [];
     const params = Array.isArray(m.supported_parameters) ? m.supported_parameters : [], known = params.length > 0;
-    for (const [field, kind] of [['prompt', 'input'], ['completion', 'output'], ['input_cache_read', 'cache_read'], ['input_cache_write', 'cache_write'], ['internal_reasoning', 'reasoning']] as const)
-      priced(prices, kind, '', 'usd_per_mtok', perToken(pricing[field]));
+    const raw = Array.isArray(arch.output_modalities) ? arch.output_modalities.filter((x): x is string => typeof x === 'string') : [];
+    const special = raw.length === 1 ? openRouterOutputs[raw[0] ?? ''] : undefined;
+    const type = special?.type ?? (raw.length === 1 && raw[0] === 'image' ? 'image' : null), outputs = special ? list([special.output]) : list(raw);
+    const rate = (v: unknown) => { const n = perToken(v); return n === 0 && type && mediaTypes.has(type) ? null : n; };
+    for (const [field, kind] of [['prompt', 'input'], ['completion', 'output'], ['input_cache_read', 'cache_read'], ['input_cache_write', 'cache_write'], ['internal_reasoning', 'reasoning'],
+      ['audio', 'input_audio'], ['audio_output', 'output_audio'], ['input_audio_cache', 'cache_read_audio']] as const)
+      priced(prices, kind, '', 'usd_per_mtok', rate(pricing[field]));
     priced(prices, 'cache_write', 'cache-ttl>1hr', 'usd_per_mtok', perToken(pricing.input_cache_write_1h));
-    const search = num(pricing.web_search);
+    const search = num(pricing.web_search), image = num(pricing.image), imageOutput = num(pricing.image_output), imageToken = num(pricing.image_token);
     priced(prices, 'web_search', '', 'usd_per_query', search !== null && search >= 0 ? money(search) : null);
-    listings.push({ ...unlisted, provider_id: 'openrouter', provider_model_id: modelId, hf_id: text(m.hugging_face_id), name: text(m.name), type: null, release_date: null, knowledge: date(m.knowledge_cutoff),
-      deprecated_at: date(m.expiration_date), context: int(m.context_length), max_output: int(top.max_completion_tokens), input_modalities: list(arch.input_modalities), output_modalities: list(arch.output_modalities),
+    priced(prices, 'input_image', '', 'usd_per_image', image !== null && image > 0 ? money(image) : null);
+    priced(prices, 'output_image', '', 'usd_per_image', imageOutput !== null && imageOutput > 0 ? money(imageOutput) : null);
+    // OpenRouter does not say whether an image token is input or output, so preserve its
+    // official unit without inventing a direction. The raw payload retains every override.
+    priced(prices, 'image_token', '', 'usd_per_mtok', imageToken !== null && imageToken > 0 ? money(imageToken * 1e6) : null);
+    listings.push({ ...unlisted, provider_id: 'openrouter', provider_model_id: modelId, hf_id: text(m.hugging_face_id), name: text(m.name), type, release_date: null, knowledge: date(m.knowledge_cutoff),
+      deprecated_at: date(m.expiration_date), context: int(m.context_length), max_output: int(top.max_completion_tokens), input_modalities: list(arch.input_modalities), output_modalities: outputs,
       reasoning: isObject(m.reasoning) ? 1 : flag(params.includes('reasoning'), known), tool_call: flag(params.includes('tools'), known),
       structured_output: flag(params.includes('structured_outputs') || params.includes('response_format'), known), open_weights: null, prices, payload: m });
   }
   return { providers: [{ id: 'openrouter', name: 'OpenRouter', api: 'https://openrouter.ai/api/v1', doc: 'https://openrouter.ai/models', npm: null, env: null }], listings, models: [] };
+}
+
+// DeepInfra's own model list: every model it serves, including media, audio, embedding,
+// rerank and decision models. Prices are in US cents; the listed rate already includes a discount.
+// The list has no modality fields, so they follow from the model type and DeepInfra's tags.
+const deepInfraTypes: Record<string, { type: string; input: string[]; output: string[] }> = {
+  'text-generation': { type: 'chat', input: ['text'], output: ['text'] }, embeddings: { type: 'embedding', input: ['text'], output: ['embedding'] },
+  reranker: { type: 'rerank', input: ['text'], output: ['ranking'] }, decision: { type: 'decision', input: ['text'], output: ['text'] },
+  'text-to-image': { type: 'text-to-image', input: ['text'], output: ['image'] }, 'text-to-video': { type: 'text-to-video', input: ['text'], output: ['video'] },
+  'text-to-speech': { type: 'text-to-speech', input: ['text'], output: ['audio'] }, 'text-to-music': { type: 'text-to-music', input: ['text'], output: ['audio'] },
+  'automatic-speech-recognition': { type: 'automatic-speech-recognition', input: ['audio'], output: ['text'] },
+  'zero-shot-image-classification': { type: 'decision', input: ['image'], output: ['text'] },
+};
+export function parseDeepInfra(data: unknown, now: string): Parsed {
+  const rows = Array.isArray(data) ? data : [];
+  if (!rows.length) throw new Error('DeepInfra models format changed.');
+  const listings: Listing[] = [], usd = (cents: unknown, scale: number) => { const n = num(cents); return n !== null && n >= 0 ? money(n / 100 * scale) : null; };
+  for (const value of rows) {
+    const m = obj(value), modelId = id(m.model_name), shape = deepInfraTypes[text(m.type) ?? ''];
+    if (!modelId || !shape || m.private === true || m.private === 1) continue;
+    const pricing = obj(m.pricing), prices: Price[] = [], tags = Array.isArray(m.tags) ? m.tags.filter((t): t is string => typeof t === 'string') : [];
+    const extra = (tag: string, modality: string) => tags.includes(tag) && !shape.input.includes(modality) ? [modality] : [];
+    const input = [...shape.input, ...(shape.input.includes('text') ? [...extra('multimodal', 'image'), ...extra('input-audio', 'audio'), ...extra('input-video', 'video')] : [])];
+    switch (text(pricing.type)) {
+      case 'tokens': {
+        const baseInput = usd(pricing.cents_per_input_token, 1e6), baseOutput = usd(pricing.cents_per_output_token, 1e6);
+        priced(prices, 'input', '', 'usd_per_mtok', baseInput); priced(prices, 'output', '', 'usd_per_mtok', baseOutput);
+        for (const [field, kind, tier] of [['rate_per_input_token_cached', 'cache_read', ''], ['rate_per_input_token_cache_write', 'cache_write', ''],
+          ['rate_per_service_tier_priority', 'input', 'priority'], ['rate_per_service_tier_flex', 'input', 'flex']] as const) {
+          const multiplier = num(pricing[field]);
+          priced(prices, kind, tier, 'usd_per_mtok', baseInput !== null && multiplier !== null && multiplier >= 0 ? money(baseInput * multiplier) : null);
+        }
+        for (const [ttl, value] of Object.entries(obj(pricing.rate_per_explicit_cache_write_token))) {
+          const multiplier = num(value);
+          priced(prices, 'cache_write', ttl, 'usd_per_mtok', baseInput !== null && multiplier !== null && multiplier >= 0 ? money(baseInput * multiplier) : null);
+        }
+        break;
+      }
+      case 'input_tokens':
+        priced(prices, 'input', '', 'usd_per_mtok', usd(pricing.cents_per_input_token, 1e6));
+        priced(prices, 'input_image', '', 'usd_per_mtok', usd(pricing.cents_per_image_token, 1e6));
+        break;
+      case 'input_character_length': priced(prices, 'input', '', 'usd_per_mchar', usd(pricing.cents_per_input_chars, 1e6)); break;
+      case 'input_length': priced(prices, 'input_audio', '', 'usd_per_second', usd(pricing.cents_per_input_sec, 1)); break;
+      case 'output_length': priced(prices, shape.output[0] === 'video' ? 'output_video' : 'output_audio', '', 'usd_per_second', usd(pricing.cents_per_output_sec, 1)); break;
+      case 'image_units': priced(prices, 'output_image', '', 'usd_per_image_unit', usd(pricing.cents_per_image_unit, 1)); break;
+      case 'frame_units': priced(prices, 'output_video', '', 'usd_per_frame_unit', usd(pricing.cents_per_frame_unit, 1)); break;
+      // Billed by compute time, not by the input or output.
+      case 'time': priced(prices, 'compute', '', 'usd_per_second', usd(pricing.cents_per_sec, 1)); break;
+    }
+    const deprecated = num(m.deprecated), retired = deprecated !== null && deprecated > 0 ? new Date(deprecated * 1000).toISOString() : null, chat = shape.type === 'chat';
+    listings.push({ ...unlisted, provider_id: 'deepinfra', provider_model_id: modelId, hf_id: m.is_partner === true ? null : modelId, name: null, type: shape.type,
+      status: retired && retired <= now ? 'deprecated' : null, release_date: null, knowledge: null, deprecated_at: retired?.slice(0, 10) ?? null,
+      context: chat || shape.type === 'embedding' || shape.type === 'rerank' || shape.type === 'decision' ? int(m.max_tokens) : null, max_output: null,
+      input_modalities: list(input), output_modalities: list(shape.output),
+      reasoning: chat ? flag(tags.includes('reasoning'), tags.length > 0) : null, tool_call: chat ? flag(tags.includes('tools'), tags.length > 0) : null,
+      structured_output: chat ? flag(tags.includes('structured-output') || tags.includes('json'), tags.length > 0) : null, open_weights: null, prices, payload: m });
+  }
+  return { providers: [{ id: 'deepinfra', name: 'Deep Infra', api: 'https://api.deepinfra.com/v1/openai', doc: 'https://deepinfra.com/models', npm: null, env: null }], listings, models: [] };
+}
+
+// TrueFoundry's registry: one YAML file per provider route. Directories map to the
+// catalogue's provider IDs; OpenRouter and DeepInfra are read from their own feeds,
+// and TrueFoundry's managed hosting is not a public provider. Microsoft Foundry and
+// Azure AI Foundry list the same Azure deployments; the first listed wins.
+const trueFoundryProviders: Record<string, string | null> = {
+  ai21: 'ai21', anthropic: 'anthropic', 'aws-bedrock': 'amazon-bedrock', 'aws-bedrock-mantle': 'truefoundry:aws-bedrock-mantle', 'microsoft-foundry': 'azure', 'azure-ai-foundry': 'azure',
+  'azure-open-ai': 'azure', cerebras: 'cerebras', cohere: 'cohere', databricks: 'databricks', deepgram: 'litellm:deepgram', elevenlabs: 'litellm:elevenlabs', 'fireworks-ai': 'fireworks-ai',
+  'google-gemini': 'google', 'google-vertex': 'google-vertex', groq: 'groq', 'mistral-ai': 'mistral', openai: 'openai', 'perplexity-ai': 'perplexity', sambanova: 'sambanova',
+  'together-ai': 'togetherai', typesafe: 'litellm:typesafe', wafer: 'truefoundry:wafer', xai: 'xai', openrouter: null, deepinfra: null, 'truefoundry-managed': null,
+};
+// Price fields with one documented unit. Batch, priority, flex and ultrafast rates are
+// tiers. Context tiers (tiered_pricing) are left out: "cumulative" does not say
+// whether the whole request or only the excess pays the higher rate. Per-hour cache
+// storage is left out: it means storage on Google and a 1-hour write on Anthropic.
+const trueFoundryRates: Record<string, readonly [string, string, number]> = {
+  input_cost_per_token: ['input', 'usd_per_mtok', 1e6], output_cost_per_token: ['output', 'usd_per_mtok', 1e6],
+  cache_read_input_token_cost: ['cache_read', 'usd_per_mtok', 1e6], cache_creation_input_token_cost: ['cache_write', 'usd_per_mtok', 1e6],
+  input_cost_per_audio_token: ['input_audio', 'usd_per_mtok', 1e6], output_cost_per_audio_token: ['output_audio', 'usd_per_mtok', 1e6],
+  cache_read_input_audio_token_cost: ['cache_read_audio', 'usd_per_mtok', 1e6], cache_creation_input_audio_token_cost: ['cache_write_audio', 'usd_per_mtok', 1e6],
+  input_cost_per_image_token: ['input_image', 'usd_per_mtok', 1e6], output_cost_per_image_token: ['output_image', 'usd_per_mtok', 1e6],
+  cache_read_input_image_token_cost: ['cache_read_image', 'usd_per_mtok', 1e6], input_cost_per_video_token: ['input_video', 'usd_per_mtok', 1e6], output_cost_per_video_token: ['output_video', 'usd_per_mtok', 1e6],
+  input_cost_per_image: ['input_image', 'usd_per_image', 1], output_cost_per_image: ['output_image', 'usd_per_image', 1], input_cost_per_character: ['input', 'usd_per_mchar', 1e6],
+  input_cost_per_request: ['request', 'usd_per_request', 1], input_cost_per_query: ['query', 'usd_per_query', 1], input_cost_per_page: ['ocr', 'usd_per_page', 1],
+};
+const trueFoundryModes: Record<string, string> = {
+  chat: 'chat', completion: 'completion', responses: 'responses', realtime: 'realtime', embedding: 'embedding', rerank: 'rerank', decision: 'decision', moderation: 'moderation', ocr: 'ocr',
+  image: 'image', video: 'video', text_to_speech: 'text_to_speech', audio_transcription: 'audio_transcription', audio_translation: 'audio_translation',
+};
+// The region a provider-wide price applies to, else the most common US default.
+const baseRegions = ['*', 'global', 'us-east-1', 'eastus2', 'eastus', 'us-central1', 'us'];
+function trueFoundryPrices(cost: Json, mode: string, tier: string): Price[] {
+  const prices: Price[] = [], add = (kind: string, unit: string, amount: number | null, extra = '') => priced(prices, kind, [tier, extra].filter(Boolean).join(','), unit, amount);
+  const rate = (v: unknown, scale: number) => { const n = num(v); return n !== null && n >= 0 ? money(n * scale) : null; };
+  for (const [field, value] of Object.entries(cost)) {
+    const known = trueFoundryRates[field.replace(/_batches$/, '')], batch = field.endsWith('_batches');
+    if (known) { add(known[0], known[1], rate(value, known[2]), batch ? 'batch' : ''); continue; }
+    const seconds = /^(input|output)_cost_per_second(?:_(\d+p|4k)(_noaudio)?)?$/.exec(field), images = /^output_cost_per_image_(\dk)$/.exec(field);
+    // Seconds are of the generated video or audio, or of the transcribed input audio.
+    if (seconds?.[1] === 'output' && (mode === 'video' || mode === 'text_to_speech')) add(mode === 'video' ? 'output_video' : 'output_audio', 'usd_per_second', rate(value, 1), [seconds[2] && `resolution=${seconds[2]}`, seconds[3] && 'audio=none'].filter(Boolean).join(','));
+    else if (seconds?.[1] === 'input' && !seconds[2] && (mode === 'audio_transcription' || mode === 'audio_translation')) add('input_audio', 'usd_per_second', rate(value, 1));
+    else if (images) add('output_image', 'usd_per_image', rate(value, 1), `size=${images[1]}`);
+    else if (field === 'input_cost_per_annotated_page') add('ocr', 'usd_per_page', rate(value, 1), 'annotated');
+    else if (isObject(value) && /^(priority|flex|ultrafast)_pricing$/.test(field)) prices.push(...trueFoundryPrices(value, mode, [tier, field.slice(0, -8)].filter(Boolean).join(',')));
+  }
+  return prices;
+}
+export function parseTrueFoundry(zip: Uint8Array): Parsed {
+  const files = unzipSync(zip, { filter: f => /^[^/]+\/providers\/[^/]+\/[^/]+\.yaml$/.test(f.name) && !f.name.endsWith('/default.yaml') });
+  const listings = new Map<string, Listing>();
+  for (const name of Object.keys(files).sort((a, b) => {
+    // Directory order of trueFoundryProviders decides which duplicate route wins.
+    const order = Object.keys(trueFoundryProviders), d = (f: string) => order.indexOf(f.split('/')[2] ?? '');
+    return d(a) - d(b) || a.localeCompare(b);
+  })) {
+    const dir = name.split('/')[2] ?? '', provider = trueFoundryProviders[dir], bytes = files[name];
+    if (!provider || !bytes) continue;
+    let doc: unknown;
+    try { doc = parseYAML(strFromU8(bytes)); } catch { continue; }
+    const m = obj(doc), modelId = id(m.model), mode = trueFoundryModes[text(m.mode) ?? ''];
+    if (!modelId || !mode || m.status === 'retired' || listings.has(`${provider}|${modelId}`)) continue;
+    // One base region's prices, and each other region's base input/output where they differ.
+    const costs = (Array.isArray(m.costs) ? m.costs : []).map(obj), regions = costs.map(c => text(c.region) ?? '');
+    const baseIndex = Math.max(0, baseRegions.map(r => regions.indexOf(r)).find(i => i >= 0) ?? 0), base = costs[baseIndex];
+    const prices = base ? trueFoundryPrices(base, mode, '') : [];
+    for (const [i, cost] of costs.entries()) {
+      if (i === baseIndex) continue;
+      for (const p of trueFoundryPrices(cost, mode, `region=${regions[i]}`)) if (p.tier === `region=${regions[i]}` && (p.kind === 'input' || p.kind === 'output') && !prices.some(b => b.tier === '' && b.kind === p.kind && b.unit === p.unit && b.amount === p.amount)) prices.push(p);
+    }
+    const limits = obj(m.limits), modalities = obj(m.modalities), features = Array.isArray(m.features) ? m.features : [], chat = ['chat', 'completion', 'responses', 'realtime'].includes(mode);
+    const deprecated = m.status === 'deprecated' || m.isDeprecated === true;
+    listings.set(`${provider}|${modelId}`, { ...unlisted, provider_id: provider, provider_model_id: modelId, hf_id: null, name: null, type: mode, status: deprecated ? 'deprecated' : m.status === 'preview' ? 'preview' : null,
+      release_date: null, knowledge: null, deprecated_at: date(m.retirementDate) ?? date(m.deprecationDate), context: int(limits.max_input_tokens ?? limits.max_tokens), max_input: int(limits.max_input_tokens), max_output: int(limits.max_output_tokens),
+      input_modalities: list(modalities.input), output_modalities: list(modalities.output),
+      reasoning: chat && isObject(m.thinking) ? 1 : null, tool_call: chat ? flag(features.includes('function_calling') || features.includes('tool_choice'), features.length > 0) : null,
+      structured_output: chat ? flag(features.includes('structured_output'), features.length > 0) : null, open_weights: null, prices, payload: { ...m, directory: dir } });
+  }
+  if (listings.size < 1000) throw new Error('TrueFoundry registry format changed.');
+  const providers = [...new Set([...listings.values()].map(l => l.provider_id))].map(p => ({ id: p, name: p.startsWith('truefoundry:') ? p.slice(12) : p, api: null, doc: 'https://github.com/truefoundry/models/tree/main/providers', npm: null, env: null }));
+  return { providers, listings: [...listings.values()], models: [] };
+}
+
+// Portkey's request/response "token" fields sometimes count characters or
+// seconds. Only reviewed model families and image trees have known units.
+// Unit evidence: Portkey models PR #898 (ElevenLabs), Deepgram's character
+// billing table, and Stability's rates.image calculation. No default/fallback
+// configs, generic service aliases or zero media placeholders become prices.
+export function parsePortkey(data: unknown, vendor: string, knownProviders: ReadonlySet<string> = new Set()): Parsed {
+  if (!isObject(data) || !Object.values(data).some(v => isObject(obj(v).pricing_config))) throw new Error('Portkey pricing format changed.');
+  const name = vendor === 'stability-ai' ? 'stability' : vendor, provider = knownProviders.has(name) ? name : `litellm:${name}`, listings: Listing[] = [];
+  for (const [model, value] of Object.entries(data)) {
+    if (model === 'default' || model === 'text-to-speech' || model === 'speech-to-text') continue;
+    const config = obj(obj(value).pricing_config), rates = obj(config.pay_as_you_go), prices: Price[] = [];
+    if (config.currency !== undefined && config.currency !== 'USD' || config.calculate !== undefined) continue;
+    const cents = (value: unknown, scale: number) => { const n = num(value); return n !== null && n > 0 ? money(n / 100 * scale) : null; };
+    let type: string, input: string[], output: string[];
+    if (vendor === 'deepgram' && /^aura-(?:2-)?[a-z]+-[a-z]{2}$/.test(model) || vendor === 'elevenlabs' && /^eleven_(?:multilingual_v2|v3|flash_v2_5|turbo_v2_5)$/.test(model)) {
+      type = 'speech'; input = ['text']; output = ['audio'];
+      priced(prices, 'input', '', 'usd_per_mchar', cents(obj(rates.request_token).price, 1e6));
+    } else if (vendor === 'elevenlabs' && model === 'scribe_v1') {
+      type = 'transcription'; input = ['audio']; output = ['text'];
+      // The response_token field bills seconds of INPUT audio, not text output.
+      priced(prices, 'input_audio', '', 'usd_per_second', cents(obj(rates.response_token).price, 1));
+    } else if (vendor === 'stability-ai' && isObject(rates.image)) {
+      type = 'image'; input = ['text']; output = ['image'];
+      for (const [quality, sizes] of Object.entries(rates.image)) for (const [size, rate] of Object.entries(obj(sizes)))
+        priced(prices, 'output_image', [quality !== 'default' ? `quality=${quality}` : '', size !== 'default' ? `size=${size}` : ''].filter(Boolean).join(','), 'usd_per_image', cents(obj(rate).price, 1));
+    } else continue;
+    if (!prices.length) continue;
+    listings.push({ ...unlisted, ...route({}), hf_id: null, provider_id: provider, provider_model_id: model, name: model, type, input_modalities: list(input), output_modalities: list(output), prices, payload: obj(value) });
+  }
+  if (!listings.length) throw new Error('No reviewed Portkey prices found; previous rows retained.');
+  return { providers: [{ id: provider, name: vendor, api: null, doc: `https://github.com/Portkey-AI/models/blob/main/pricing/${vendor}.json`, npm: null, env: null }], listings, models: [] };
 }
 
 // Vercel AI Gateway: context tiers become context>N, service tiers keep their name.
@@ -486,17 +685,19 @@ export async function ensureCatalogueSchema(db: Database): Promise<void> {
 export interface StoreStats { listings: number; added: number; changed: number; withdrawn: number; unresolved: number; prices_opened: number; prices_closed: number }
 // A scoped store covers only routes whose provider model ID starts with one of
 // the given owners ("owner/..."): a source crawled in parts, such as the Hub,
-// withdraws and closes prices only for the owners it crawled this run.
-const owned = (column: string, n: number) => `(?${n} IS NULL OR substr(${column},1,instr(${column},'/')-1) IN (SELECT value FROM json_each(?${n})))`;
+// withdraws and closes prices only for the owners it crawled this run. A staged
+// provider-wide crawl applies exact repository batches instead of whole owners.
+const scoped = (column: string, n: number, kind: 'owners' | 'models') => `(?${n} IS NULL OR ${kind === 'models' ? column : `substr(${column},1,instr(${column},'/')-1)`} IN (SELECT value FROM json_each(?${n})))`;
 // Listings arrive resolved (resolveListings); storing never changes identity.
-export async function storeCatalogue(db: Database, source: string, parsed: Parsed, { now, run, scope = null }: { now: string; run: string; scope?: string[] | null }): Promise<StoreStats> {
+export async function storeCatalogue(db: Database, source: string, parsed: Parsed, { now, run, scope = null, scopeKind = 'owners' }: { now: string; run: string; scope?: string[] | null; scopeKind?: 'owners' | 'models' }): Promise<StoreStats> {
   const listings = parsed.listings, owners = scope ? JSON.stringify(scope) : null;
-  const existing = await db.prepare(`SELECT provider_id,provider_model_id,payload_hash,withdrawn_at FROM cat_listings WHERE source=?1 AND ${owned('provider_model_id', 2)}`).bind(source, owners)
+  const existing = await db.prepare(`SELECT provider_id,provider_model_id,payload_hash,withdrawn_at FROM cat_listings WHERE source=?1 AND ${scoped('provider_model_id', 2, scopeKind)}`).bind(source, owners)
     .all<{ provider_id: string; provider_model_id: string; payload_hash: string; withdrawn_at: string | null }>();
   const prior = new Map(existing.results.map(r => [`${r.provider_id}|${r.provider_model_id}`, r]));
   const active = [...prior.values()].filter(r => !r.withdrawn_at).length;
   // A broken or truncated feed must not withdraw most of the catalogue.
-  if (active > 50 && listings.length < active * .5) throw new Error(`${source} listings dropped from ${active} to ${listings.length}; previous rows retained.`);
+  // Exact-model application batches belong to a crawl validated source-wide.
+  if (scopeKind !== 'models' && active > 50 && listings.length < active * .5) throw new Error(`${source} listings dropped from ${active} to ${listings.length}; previous rows retained.`);
   const rows: Row[] = []; let added = 0, changed = 0;
   for (const l of listings) {
     const row = pick(listingColumns, { ...l, payload: JSON.stringify(l.payload) });
@@ -507,7 +708,7 @@ export async function storeCatalogue(db: Database, source: string, parsed: Parse
   }
   await chunked(db, `INSERT INTO cat_listings (source,${listingColumns.join(',')},first_seen,last_seen,withdrawn_at) SELECT ?1,${extract(listingColumns)},?2,?2,NULL FROM json_each(?3) WHERE true
     ON CONFLICT(source,provider_id,provider_model_id) DO UPDATE SET ${updates(listingColumns, ['provider_id', 'provider_model_id'])},last_seen=excluded.last_seen,withdrawn_at=NULL`, rows, [source, now]);
-  const withdrawn = (await db.prepare(`UPDATE cat_listings SET withdrawn_at=?1 WHERE source=?2 AND last_seen<?1 AND withdrawn_at IS NULL AND ${owned('provider_model_id', 3)}`).bind(now, source, owners).run()).meta.changes;
+  const withdrawn = (await db.prepare(`UPDATE cat_listings SET withdrawn_at=?1 WHERE source=?2 AND last_seen<?1 AND withdrawn_at IS NULL AND ${scoped('provider_model_id', 3, scopeKind)}`).bind(now, source, owners).run()).meta.changes;
   await chunked(db, `INSERT INTO cat_providers (source,id,name,api,doc,npm,env,first_seen,last_seen) SELECT ?1,${extract(['id', 'name', 'api', 'doc', 'npm', 'env'])},?2,?2 FROM json_each(?3) WHERE true
     ON CONFLICT(source,id) DO UPDATE SET name=excluded.name,api=excluded.api,doc=excluded.doc,npm=excluded.npm,env=excluded.env,last_seen=excluded.last_seen`, parsed.providers, [source, now]);
   // Each source keeps and withdraws only its own models (basis prefix). Models.dev
@@ -526,7 +727,7 @@ export async function storeCatalogue(db: Database, source: string, parsed: Parse
   await chunked(db, `INSERT INTO cat_price_stage SELECT ?1,?2,${extract(['provider_id', 'provider_model_id', 'kind', 'tier', 'unit', 'amount'])} FROM json_each(?3)`, prices, [run, source], 400);
   const same = 's.run=?3 AND s.provider_id=p.provider_id AND s.provider_model_id=p.provider_model_id AND s.kind=p.kind AND s.tier=p.tier AND s.unit=p.unit AND s.amount=p.amount';
   const [closed, opened] = await db.batch([
-    db.prepare(`UPDATE cat_prices AS p SET valid_to=?1 WHERE p.source=?2 AND p.valid_to IS NULL AND ${owned('p.provider_model_id', 4)} AND NOT EXISTS (SELECT 1 FROM cat_price_stage s WHERE ${same})`).bind(now, source, run, owners),
+    db.prepare(`UPDATE cat_prices AS p SET valid_to=?1 WHERE p.source=?2 AND p.valid_to IS NULL AND ${scoped('p.provider_model_id', 4, scopeKind)} AND NOT EXISTS (SELECT 1 FROM cat_price_stage s WHERE ${same})`).bind(now, source, run, owners),
     db.prepare(`INSERT INTO cat_prices SELECT s.source,s.provider_id,s.provider_model_id,s.kind,s.tier,s.unit,s.amount,?1,NULL FROM cat_price_stage s WHERE s.run=?3 AND s.source=?2
       AND NOT EXISTS (SELECT 1 FROM cat_prices p WHERE p.source=?2 AND p.valid_to IS NULL AND ${same})`).bind(now, source, run),
     db.prepare('DELETE FROM cat_price_stage WHERE run=?').bind(run),
@@ -563,7 +764,7 @@ export async function storeSourceModels(db: Database, source: string, models: So
 // added only when two other sources claim it, so one stale or optimistic feed
 // cannot add support. Each row records which sources supplied each field and
 // any disagreement.
-export const sourcePreference = ['modelsdev', 'reviewed', 'openrouter', 'vercel', 'litellm', 'genaiprices', 'huggingface', 'epoch'];
+export const sourcePreference = ['modelsdev', 'reviewed', 'openrouter', 'vercel', 'deepinfra', 'litellm', 'genaiprices', 'portkey-deepgram', 'portkey-elevenlabs', 'portkey-stability-ai', 'truefoundry', 'huggingface', 'epoch'];
 const offeringFields = ['model_id', 'model_basis', 'name', 'family', 'type', 'status', 'release_date', 'deprecated_at', 'context', 'max_input', 'max_output', 'input_modalities', 'output_modalities',
   'reasoning', 'tool_call', 'structured_output', 'attachment', 'open_weights', 'hf_id'] as const;
 const capabilityFlags = new Set(['reasoning', 'tool_call', 'structured_output', 'attachment']), corroboration = 2;
@@ -612,6 +813,7 @@ const kinds: Record<string, string> = {
   image: 'image', image_generation: 'image', image_edit: 'image', 'text-to-image': 'image', 'image-to-image': 'image',
   video: 'video', video_generation: 'video', 'text-to-video': 'video', 'image-to-video': 'video', 'image-text-to-video': 'video',
   speech: 'speech', audio_speech: 'speech', 'text-to-speech': 'speech', 'text-to-audio': 'speech',
+  'text-to-music': 'music', text_to_speech: 'speech', audio_translation: 'transcription',
   decision: 'decision', transcription: 'transcription', audio_transcription: 'transcription', 'automatic-speech-recognition': 'transcription', ocr: 'ocr',
 };
 export const modelKind = (type: Value | undefined): string | null => typeof type === 'string' ? kinds[type] ?? null : null;
@@ -661,19 +863,30 @@ export function mergeModel(id: string, record: { source: string } & Partial<Reco
 // leaves the previous offerings in place.
 export async function rebuildOfferings(db: Database): Promise<{ offerings: number; conflicts: number; corroborated: number }> {
   await ensureCatalogueSchema(db);
-  const { results } = await db.prepare(`SELECT source,provider_id,provider_model_id,first_seen,last_seen,${offeringFields.join(',')} FROM cat_listings WHERE withdrawn_at IS NULL ORDER BY provider_id,provider_model_id`).all<SourceListing>();
-  const rows: Offering[] = [];let group: SourceListing[] = [];
-  for (const l of results) {
-    if (group.length && (group[0]?.provider_id !== l.provider_id || group[0]?.provider_model_id !== l.provider_model_id)) { rows.push(mergeListings(group)); group = []; }
-    group.push(l);
-  }
-  if (group.length) rows.push(mergeListings(group));
   const columns = ['provider_id', 'provider_model_id', ...offeringFields, 'kind', 'sources', 'provenance', 'conflicts', 'first_seen', 'last_seen'];
   await db.prepare('DELETE FROM cat_offering_stage').run();
-  await chunked(db, 'INSERT INTO cat_offering_stage (value) SELECT value FROM json_each(?1)', rows, []);
+  const stats = { offerings: 0, conflicts: 0, corroborated: 0 };
+  let cursor = ['', '', ''], group: SourceListing[] = [];
+  for (;;) {
+    const { results } = await db.prepare(`SELECT source,provider_id,provider_model_id,first_seen,last_seen,${offeringFields.join(',')} FROM cat_listings
+      WHERE withdrawn_at IS NULL AND (provider_id,provider_model_id,source)>(?1,?2,?3) ORDER BY provider_id,provider_model_id,source LIMIT 1000`).bind(...cursor).all<SourceListing>();
+    const rows: Offering[] = [];
+    for (const l of results) {
+      if (group.length && (group[0]?.provider_id !== l.provider_id || group[0]?.provider_model_id !== l.provider_model_id)) { rows.push(mergeListings(group)); group = []; }
+      group.push(l);
+    }
+    // Carry the unfinished route across pages: its other sources may follow.
+    if (results.length < 1000 && group.length) { rows.push(mergeListings(group)); group = []; }
+    await chunked(db, 'INSERT INTO cat_offering_stage (value) SELECT value FROM json_each(?1)', rows, []);
+    stats.offerings += rows.length;
+    stats.conflicts += rows.filter(r => r.conflicts).length;
+    stats.corroborated += rows.filter(r => Object.values(JSON.parse(r.provenance) as Record<string, string[]>).some(by => by.length > 1)).length;
+    const last = results.at(-1);
+    if (results.length < 1000 || !last) break;
+    cursor = [last.provider_id, last.provider_model_id, last.source];
+  }
   await db.batch([db.prepare('DELETE FROM cat_offerings'), db.prepare(`INSERT INTO cat_offerings (${columns.join(',')}) SELECT ${extract(columns)} FROM cat_offering_stage`), db.prepare('DELETE FROM cat_offering_stage')]);
-  const corroborated = rows.filter(r => Object.values(JSON.parse(r.provenance) as Record<string, string[]>).some(by => by.length > 1)).length;
-  return { offerings: rows.length, conflicts: rows.filter(r => r.conflicts).length, corroborated };
+  return stats;
 }
 
 export async function rebuildModels(db: Database): Promise<{ models: number; conflicts: number; corroborated: number }> {
@@ -708,7 +921,7 @@ export async function storeReviewedModels(db: Database, now: string): Promise<vo
   await db.prepare("UPDATE cat_models SET withdrawn_at=?1 WHERE basis='reviewed-model' AND withdrawn_at IS NULL AND id NOT IN (SELECT value FROM json_each(?2))").bind(now, JSON.stringify(reviewedModels.map(m => m.id))).run();
 }
 
-async function readSource(fetcher: Fetcher, url: string, maxBytes: number): Promise<Uint8Array<ArrayBuffer>> {
+export async function readSource(fetcher: Fetcher, url: string, maxBytes: number): Promise<Uint8Array<ArrayBuffer>> {
   const response = await fetcher(url, { signal: AbortSignal.timeout(60_000), headers: { 'User-Agent': 'OpenMerit-Scout/0.1 (+https://openmerit.ai/scout)' } });
   if (!response.ok || !response.body) throw new Error(`${new URL(url).hostname} returned ${response.status}.`);
   const reader = response.body.getReader(), chunks: Uint8Array[] = []; let size = 0;
@@ -736,8 +949,8 @@ export async function importCatalogueSource(db: Database, source: CatalogueSourc
     const hashes: string[] = [];
     for (const bytes of files) {
       const hash = await hex(bytes); hashes.push(hash);
-      const csv = config.url.endsWith('.csv'), key = `catalogue-raw/${source}/${hash}.${csv ? 'csv' : 'json'}`;
-      if (bucket && !await bucket.head(key)) await bucket.put(key, bytes, { httpMetadata: { contentType: csv ? 'text/csv' : 'application/json' } });
+      const ext = config.url.endsWith('.csv') ? 'csv' : source === 'truefoundry' ? 'zip' : 'json', key = `catalogue-raw/${source}/${hash}.${ext}`;
+      if (bucket && !await bucket.head(key)) await bucket.put(key, bytes, { httpMetadata: { contentType: ext === 'csv' ? 'text/csv' : ext === 'zip' ? 'application/zip' : 'application/json' } });
     }
     const [first, second] = files;
     if (!first) throw new Error('Source returned no data.');
@@ -756,10 +969,10 @@ export async function importCatalogueSource(db: Database, source: CatalogueSourc
           repos: [...linked.flatMap(l => l.hf_id && l.model_id ? [{ repo: l.hf_id.toLowerCase(), model_id: l.model_id }] : []), ...weightRepos(parsed.models)] });
       } else {
         const known = new Set((await db.prepare("SELECT id FROM cat_providers WHERE source='modelsdev'").all<{ id: string }>()).results.map(r => r.id));
-        const data = decode(first);
-        parsed = source === 'litellm' ? parseLiteLLM(data, known) : source === 'openrouter' ? parseOpenRouter(data) : source === 'vercel' ? parseVercel(data) : parseGenaiPrices(data, known, now);
+        const data = source === 'truefoundry' ? null : decode(first);
+        parsed = source === 'truefoundry' ? parseTrueFoundry(first) : source === 'litellm' ? parseLiteLLM(data, known) : source === 'openrouter' ? parseOpenRouter(data) : source === 'vercel' ? parseVercel(data) : source === 'deepinfra' ? parseDeepInfra(data, now) : source.startsWith('portkey-') ? parsePortkey(data, source.slice('portkey-'.length), known) : parseGenaiPrices(data, known, now);
         const backbone = await loadBackbone(db);
-        resolveListings(parsed.listings, backbone);
+        resolveListings(parsed.listings, backbone, { slugs: !source.startsWith('portkey-') });
         if (source === 'openrouter' || source === 'vercel') parsed.models = gatewayIdentities(source, parsed.listings, backbone.owned);
       }
       files.length = 0;

@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { importCatalogueSource, mergeListings, mergeModel, rebuildModels, rebuildOfferings, routeVoice, type Bucket, type ImportResult, type SourceListing } from '../catalogue-db.ts';
+import { importCatalogueSource, parseDeepInfra, parseOpenRouter, mergeListings, mergeModel, rebuildModels, rebuildOfferings, routeVoice, type Bucket, type ImportResult, type SourceListing } from '../catalogue-db.ts';
 import { d1 } from './helpers-d1.ts';
 
 const bucket = (): Bucket & { data: Map<string, Uint8Array> } => { const data = new Map<string, Uint8Array>(); return { data, head: async (k: string) => data.has(k) ? {} : null, put: async (k: string, v: Uint8Array) => data.set(k, v) }; };
 const serve = (files: Record<string, unknown>) => async (url: string) => { const f = files[url]; return f === undefined ? new Response('missing', { status: 500 }) : new Response(typeof f === 'string' ? f : JSON.stringify(f)); };
-const MD = 'https://models.dev/api.json', MDM = 'https://models.dev/models.json', LL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
+const MD = 'https://models.dev/api.json?type=all', MDM = 'https://models.dev/models.json?type=all', LL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
 const api = {
   openai: { id: 'openai', name: 'OpenAI', api: 'https://api.openai.com/v1', models: { 'gpt-x': { id: 'gpt-x', name: 'GPT X', family: 'gpt', canonical_model_id: 'openai/gpt-x', release_date: '2026-05-01', modalities: { input: ['text', 'image'], output: ['text'] }, limit: { context: 400000, output: 128000 }, tool_call: true,
     cost: { input: 2, output: 10, context_over_200k: { input: 4, output: 15 }, tiers: [{ input: 4, output: 15, tier: { type: 'context', size: 200000 } }, { input: 5, tier: { type: 'context', size: 272000 } }] } } } },
@@ -52,6 +52,22 @@ test('models.dev seeds canonical models, routes and dated price tiers, and LiteL
   assert.deepEqual(merged, { name: 'GPT X', model_id: 'openai/gpt-x', deprecated_at: '2027-01-31', sources: '["modelsdev","litellm"]' });
 });
 
+test('offering rebuild keeps a route together when its source listings cross a page boundary', async () => {
+  const db = d1(), entries = Object.fromEntries(Array.from({ length: 999 }, (_, i) => { const id = `m-${String(i).padStart(4, '0')}`; return [id, { id, name: `M ${i}` }]; }));
+  const fetcher = serve({
+    [MD]: { openai: { models: {} }, anthropic: { models: {} }, host: { id: 'host', models: { ...entries, 'zz-shared': { id: 'zz-shared', name: 'Shared', limit: { context: 9000 } } } } }, [MDM]: {},
+    [LL]: { 'gpt-4o': { mode: 'search' }, 'zz-shared': { litellm_provider: 'host', mode: 'chat', max_input_tokens: 8000, max_output_tokens: 700 } },
+  });
+  ok(await importCatalogueSource(db, 'modelsdev', { fetcher }));
+  ok(await importCatalogueSource(db, 'litellm', { fetcher }));
+  const stats = await rebuildOfferings(db);
+  assert.equal(stats.offerings, 1000);
+  assert.deepEqual({ ...one(db, "SELECT name,context,max_output,sources FROM cat_offerings WHERE provider_id='host' AND provider_model_id='zz-shared'") },
+    { name: 'Shared', context: 9000, max_output: 700, sources: '["modelsdev","litellm"]' });
+  assert.equal(one(db, "SELECT count(*) n FROM cat_offerings WHERE provider_model_id='m-0000' OR provider_model_id='m-0998'").n, 2);
+  assert.deepEqual(await rebuildOfferings(db), stats, 'a repeated rebuild neither skips nor duplicates rows');
+});
+
 test('re-imports keep unchanged prices open, date changes, withdraw missing routes and restore them', async () => {
   const db = d1(), files: Record<string, unknown> = { [MD]: api, [MDM]: models, [LL]: litellm() }, fetcher = async (url: string) => serve(files)(url);
   await importCatalogueSource(db, 'modelsdev', { fetcher, now: '2026-10-25T00:00:00Z', run: 'm1' });
@@ -93,7 +109,7 @@ test('gateways, genai-prices and Epoch add routes, Hugging Face IDs, tiers, date
   const db = d1();
   // A database created before hf_id existed gains the column on the next import.
   await db.prepare('CREATE TABLE cat_listings (source TEXT NOT NULL, provider_id TEXT NOT NULL, provider_model_id TEXT NOT NULL, model_id TEXT, model_basis TEXT, name TEXT, family TEXT, type TEXT, status TEXT, release_date TEXT, knowledge TEXT, deprecated_at TEXT, context INTEGER, max_input INTEGER, max_output INTEGER, input_modalities TEXT, output_modalities TEXT, reasoning INTEGER, tool_call INTEGER, structured_output INTEGER, attachment INTEGER, open_weights INTEGER, payload TEXT NOT NULL, payload_hash TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, withdrawn_at TEXT, PRIMARY KEY(source,provider_id,provider_model_id))').run();
-  const OR = 'https://openrouter.ai/api/v1/models', VC = 'https://ai-gateway.vercel.sh/v1/models', GP = 'https://raw.githubusercontent.com/pydantic/genai-prices/main/prices/data.json', EP = 'https://epoch.ai/data/all_ai_models.csv';
+  const OR = 'https://openrouter.ai/api/v1/models?output_modalities=all', VC = 'https://ai-gateway.vercel.sh/v1/models', GP = 'https://raw.githubusercontent.com/pydantic/genai-prices/main/prices/data.json', EP = 'https://epoch.ai/data/all_ai_models.csv';
   const files: Record<string, unknown> = {
     // Models.dev leaves this Fireworks entry unlinked; its slug names one canonical model.
     [MD]: { ...api, 'fireworks-ai': { id: 'fireworks-ai', name: 'Fireworks AI', models: { 'accounts/fireworks/models/claude-y': { id: 'accounts/fireworks/models/claude-y', name: 'Claude Y' } } } }, [MDM]: models,
@@ -206,4 +222,122 @@ test('reviewed identities link LiteLLM-only decision routes but never moving ali
   const taken = { ...api, nace: { id: 'nace', name: 'Nace', models: { 'drex-v2.0': { id: 'drex-v2.0', name: 'Drex v2', canonical_model_id: 'nace/drex-v2.0' } } } };
   ok(await importCatalogueSource(db, 'modelsdev', { fetcher: serve({ [MD]: taken, [MDM]: models }), now: '2026-10-28T12:00:00Z', run: 'm2' }));
   assert.equal(one(db, "SELECT basis FROM cat_models WHERE id='nace/drex-v2.0'").basis, 'modelsdev-route');
+});
+
+test('OpenRouter non-text models get their kind as type, and per-token "0" on generated media is no price', () => {
+  const row = (id: string, output: string[], pricing: Record<string, string>) => ({ id, name: id, architecture: { input_modalities: ['text'], output_modalities: output }, pricing });
+  const { listings } = parseOpenRouter({ data: [row('lab/chat', ['text'], { prompt: '0.000001', completion: '0.000002' }), row('lab/clip', ['video'], { prompt: '0', completion: '0' }),
+    row('lab/pic', ['image'], { prompt: '0', completion: '0', image_output: '0.04', image_token: '0.000004' }), row('lab/judge', ['decisions'], { prompt: '0.00000002', completion: '0' }),
+    row('lab/vec', ['embeddings'], { prompt: '0.0000001', completion: '0' }), row('lab/voice', ['speech'], { prompt: '0.000004', completion: '0' }), row('lab/rank:free', ['rerank'], { prompt: '0', completion: '0' })] });
+  const got = Object.fromEntries(listings.map(l => [l.provider_model_id, [l.type, l.output_modalities, l.prices.map(p => `${p.kind} ${p.amount} ${p.unit}`)]]));
+  assert.deepEqual(got, {
+    'lab/chat': [null, '["text"]', ['input 1 usd_per_mtok', 'output 2 usd_per_mtok']],
+    'lab/clip': ['video', '["video"]', []],
+    // Per-image and per-image-token prices keep the distinct units OpenRouter documents.
+    'lab/pic': ['image', '["image"]', ['output_image 0.04 usd_per_image', 'image_token 4 usd_per_mtok']],
+    // Decisions bill input only, so their zero output rate is real; so is a free reranker's.
+    'lab/judge': ['decisions', '["text"]', ['input 0.02 usd_per_mtok', 'output 0 usd_per_mtok']],
+    'lab/vec': ['embedding', '["embedding"]', ['input 0.1 usd_per_mtok', 'output 0 usd_per_mtok']],
+    'lab/voice': ['speech', '["audio"]', ['input 4 usd_per_mtok']],
+    'lab/rank:free': ['rerank', '["ranking"]', ['input 0 usd_per_mtok', 'output 0 usd_per_mtok']] });
+});
+
+test('DeepInfra prices convert from cents per unit, modalities follow type and tags, and past deprecations retire the route', () => {
+  const now = '2026-10-28T00:00:00.000Z', p = (type: string, fields: Record<string, number>) => ({ type, ...fields });
+  const { listings } = parseDeepInfra([
+    { model_name: 'lab/chat-1', type: 'text-generation', max_tokens: 131072, tags: ['multimodal', 'tools'], pricing: {
+      ...p('tokens', { cents_per_input_token: 0.00003, cents_per_output_token: 0.00012, rate_per_input_token_cached: 0.2, rate_per_service_tier_priority: 1.5 }),
+      rate_per_explicit_cache_write_token: { '5m': 1.25, '1h': 2 } } },
+    { model_name: 'lab/old-1', type: 'text-generation', deprecated: 1790000000, tags: [], pricing: p('tokens', { cents_per_input_token: 0.00001, cents_per_output_token: 0.00002 }) },
+    { model_name: 'lab/clip-1', type: 'text-to-video', pricing: p('output_length', { cents_per_output_sec: 7.5 }) },
+    { model_name: 'lab/voice-1', type: 'text-to-speech', pricing: p('input_character_length', { cents_per_input_chars: 0.0015 }) },
+    { model_name: 'lab/ear-1', type: 'automatic-speech-recognition', pricing: p('input_length', { cents_per_input_sec: 0.01 }) },
+    { model_name: 'lab/pic-1', type: 'text-to-image', is_partner: true, pricing: p('image_units', { cents_per_image_unit: 3 }) },
+    { model_name: 'lab/clip-labels-1', type: 'zero-shot-image-classification', pricing: p('input_tokens', { cents_per_input_token: 0.000001, cents_per_image_token: 0.0000035 }) },
+    { model_name: 'lab/embed-1', type: 'embeddings', pricing: p('input_tokens', { cents_per_input_token: 0.000001 }) },
+    { model_name: 'lab/rank-1', type: 'reranker', pricing: p('input_tokens', { cents_per_input_token: 0.000002 }) },
+    { model_name: 'lab/unknown-1', type: 'image-to-3d', pricing: p('tokens', {}) }], now);
+  const got = Object.fromEntries(listings.map(l => [l.provider_model_id, [l.type, l.status, l.input_modalities, l.output_modalities, l.context, l.hf_id !== null, l.prices.map(x => `${x.kind} ${x.amount} ${x.unit}`)]]));
+  assert.deepEqual(got, {
+    'lab/chat-1': ['chat', null, '["text","image"]', '["text"]', 131072, true, ['input 0.3 usd_per_mtok', 'output 1.2 usd_per_mtok', 'cache_read 0.06 usd_per_mtok', 'input 0.45 usd_per_mtok', 'cache_write 0.375 usd_per_mtok', 'cache_write 0.6 usd_per_mtok']],
+    'lab/old-1': ['chat', 'deprecated', '["text"]', '["text"]', null, true, ['input 0.1 usd_per_mtok', 'output 0.2 usd_per_mtok']],
+    'lab/clip-1': ['text-to-video', null, '["text"]', '["video"]', null, true, ['output_video 0.075 usd_per_second']],
+    'lab/voice-1': ['text-to-speech', null, '["text"]', '["audio"]', null, true, ['input 15 usd_per_mchar']],
+    'lab/ear-1': ['automatic-speech-recognition', null, '["audio"]', '["text"]', null, true, ['input_audio 0.0001 usd_per_second']],
+    // A partner's (closed) model name is no Hugging Face repository.
+    'lab/pic-1': ['text-to-image', null, '["text"]', '["image"]', null, false, ['output_image 0.03 usd_per_image_unit']],
+    'lab/clip-labels-1': ['decision', null, '["image"]', '["text"]', null, true, ['input 0.01 usd_per_mtok', 'input_image 0.035 usd_per_mtok']],
+    'lab/embed-1': ['embedding', null, '["text"]', '["embedding"]', null, true, ['input 0.01 usd_per_mtok']],
+    'lab/rank-1': ['rerank', null, '["text"]', '["ranking"]', null, true, ['input 0.02 usd_per_mtok']] });
+});
+
+test('Portkey reviewed media quotes retain character, input-audio and image units, never placeholder token prices', async () => {
+  const db = d1(), raw = bucket(), config = (rates: Record<string, unknown>) => ({ pricing_config: { pay_as_you_go: rates } });
+  const files = {
+    'https://configs.portkey.ai/pricing/deepgram.json': {
+      default: config({ request_token: { price: 0 } }), 'nova-3': config({ request_audio_token: { price: .43 } }),
+      'aura-2-thalia-en': config({ request_token: { price: .003 }, response_token: { price: 0 } }),
+      'aura-luna-en': config({ request_token: { price: .0015 } }),
+    },
+    'https://configs.portkey.ai/pricing/elevenlabs.json': {
+      eleven_multilingual_v2: config({ request_token: { price: .01 }, response_token: { price: 0 } }),
+      eleven_flash_v2_5: config({ request_token: { price: .005 } }), scribe_v1: config({ request_token: { price: 0 }, response_token: { price: .00611111 } }),
+      'text-to-speech': config({ request_token: { price: .01 } }), unknown: config({ request_token: { price: 9 } }),
+    },
+    'https://configs.portkey.ai/pricing/stability-ai.json': {
+      default: config({ image: { default: { default: { price: 0 } } } }),
+      ultra: config({ image: { default: { default: { price: 8 } }, hd: { '1024x1024': { price: 12 }, '1536x1024': { price: 16 } } } }),
+      core: config({ image: { default: { default: { price: 0 } } } }),
+    },
+  };
+  for (const source of ['portkey-deepgram', 'portkey-elevenlabs', 'portkey-stability-ai'] as const)
+    assert.equal((await importCatalogueSource(db, source, { fetcher: serve(files), bucket: raw })).status, 'ok');
+  assert.deepEqual(db.all('SELECT provider_model_id,kind,tier,unit,amount FROM cat_prices ORDER BY provider_model_id,tier').map(r => Object.values(r)), [
+    ['aura-2-thalia-en', 'input', '', 'usd_per_mchar', 30], ['aura-luna-en', 'input', '', 'usd_per_mchar', 15],
+    ['eleven_flash_v2_5', 'input', '', 'usd_per_mchar', 50], ['eleven_multilingual_v2', 'input', '', 'usd_per_mchar', 100],
+    ['scribe_v1', 'input_audio', '', 'usd_per_second', .0000611111],
+    ['ultra', 'output_image', '', 'usd_per_image', .08], ['ultra', 'output_image', 'quality=hd,size=1024x1024', 'usd_per_image', .12], ['ultra', 'output_image', 'quality=hd,size=1536x1024', 'usd_per_image', .16],
+  ]);
+  assert.equal(raw.data.size, 3);
+  assert.equal((await rebuildOfferings(db)).offerings, 6);
+  assert.deepEqual(db.all("SELECT provider_id,kind,input_modalities,output_modalities FROM cat_offerings WHERE provider_model_id='scribe_v1'").map(r => Object.values(r)), [['litellm:elevenlabs', 'transcription', '["audio"]', '["text"]']]);
+  assert.equal(db.all('SELECT count(*) n FROM cat_models WHERE basis<>\'reviewed-model\'')[0]?.n, 0, 'price aliases do not manufacture canonical model identities');
+});
+
+test('TrueFoundry configs import from the repository zip with base-region prices, service tiers and per-second media units', async () => {
+  const { zipSync, strToU8 } = await import('fflate');
+  const yaml = (lines: string[]) => strToU8(lines.join('\n'));
+  const zip = zipSync({
+    // Region us-east-1 is the base; eu-west-2's different rate is kept as a region tier, sa-east-1's identical one is not.
+    'models-main/providers/aws-bedrock/lab.chat-1.yaml': yaml(['model: lab.chat-1', 'mode: chat', 'status: active', 'features:', '    - function_calling', 'limits:', '    max_input_tokens: 128000', '    max_output_tokens: 8000',
+      'costs:', '    - input_cost_per_token: 2e-6', '      output_cost_per_token: 8e-6', '      region: eu-west-2', '    - input_cost_per_token: 1e-6', '      output_cost_per_token: 4e-6',
+      '      input_cost_per_token_batches: 5e-7', '      priority_pricing:', '          input_cost_per_token: 1.5e-6', '      tiered_pricing:', '          input:', '              - cost_per_token: 9e-6', '                from: 200000',
+      '      region: us-east-1', '    - input_cost_per_token: 1e-6', '      output_cost_per_token: 4e-6', '      region: sa-east-1']),
+    'models-main/providers/aws-bedrock/lab.clip-1.yaml': yaml(['model: lab.clip-1', 'mode: video', 'costs:', '    - output_cost_per_second_720p: 1.5', '      output_cost_per_second_720p_noaudio: 1', '      region: "*"']),
+    'models-main/providers/azure-open-ai/lab-voice.yaml': yaml(['model: lab-voice', 'mode: text_to_speech', 'status: deprecated', 'costs:', '    - input_cost_per_character: 0.00003', '      region: "*"']),
+    // Retired routes, unsupported modes, OpenRouter's directory and default configs are skipped.
+    'models-main/providers/azure-open-ai/lab-old.yaml': yaml(['model: lab-old', 'mode: chat', 'status: retired', 'costs:', '    - input_cost_per_token: 1e-6', '      region: "*"']),
+    'models-main/providers/azure-open-ai/lab-odd.yaml': yaml(['model: lab-odd', 'mode: unsupported', 'costs:', '    - input_cost_per_token: 1e-6', '      region: "*"']),
+    'models-main/providers/openrouter/lab-x.yaml': yaml(['model: lab-x', 'mode: chat']),
+    'models-main/providers/typesafe/default.yaml': yaml(['model: default', 'mode: decision']),
+    // Microsoft Foundry and Azure AI Foundry list the same deployment; Microsoft Foundry's wins.
+    'models-main/providers/azure-ai-foundry/Lab-1.yaml': yaml(['model: Lab-1', 'mode: chat', 'costs:', '    - input_cost_per_token: 9e-6', '      region: "*"']),
+    'models-main/providers/microsoft-foundry/Lab-1.yaml': yaml(['model: Lab-1', 'mode: chat', 'costs:', '    - input_cost_per_token: 3e-6', '      region: "*"']),
+    // The parser rejects a registry that collapsed below 1,000 routes.
+    ...Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`models-main/providers/groq/filler-${i}.yaml`, yaml([`model: filler-${i}`, 'mode: embedding'])])),
+  });
+  const db = d1(), raw = bucket();
+  const result = await importCatalogueSource(db, 'truefoundry', { fetcher: serve({}), bucket: raw, now: '2026-10-28T00:00:00Z' }).catch(e => e);
+  assert.equal((result as ImportResult).status, 'failed', 'an unreachable registry fails without rows');
+  const fetcher = async () => new Response(Uint8Array.from(zip));
+  ok(await importCatalogueSource(db, 'truefoundry', { fetcher, bucket: raw, now: '2026-10-28T00:00:00Z' }));
+  assert.ok([...raw.data.keys()].every(k => k.endsWith('.zip')));
+  const routes = db.all("SELECT provider_id,provider_model_id,type,status,context,tool_call FROM cat_listings WHERE provider_model_id NOT LIKE 'filler-%' ORDER BY provider_id,provider_model_id").map(r => Object.values(r));
+  assert.deepEqual(routes, [['amazon-bedrock', 'lab.chat-1', 'chat', null, 128000, 1], ['amazon-bedrock', 'lab.clip-1', 'video', null, null, null], ['azure', 'Lab-1', 'chat', null, null, null], ['azure', 'lab-voice', 'text_to_speech', 'deprecated', null, null]]);
+  assert.deepEqual(db.all("SELECT provider_model_id,kind,tier,unit,amount FROM cat_prices WHERE provider_model_id NOT LIKE 'filler-%' ORDER BY provider_model_id,kind,tier").map(r => Object.values(r)), [
+    ['Lab-1', 'input', '', 'usd_per_mtok', 3],
+    ['lab-voice', 'input', '', 'usd_per_mchar', 30],
+    ['lab.chat-1', 'input', '', 'usd_per_mtok', 1], ['lab.chat-1', 'input', 'batch', 'usd_per_mtok', .5], ['lab.chat-1', 'input', 'priority', 'usd_per_mtok', 1.5], ['lab.chat-1', 'input', 'region=eu-west-2', 'usd_per_mtok', 2],
+    ['lab.chat-1', 'output', '', 'usd_per_mtok', 4], ['lab.chat-1', 'output', 'region=eu-west-2', 'usd_per_mtok', 8],
+    ['lab.clip-1', 'output_video', 'resolution=720p', 'usd_per_second', 1.5], ['lab.clip-1', 'output_video', 'resolution=720p,audio=none', 'usd_per_second', 1]]);
 });

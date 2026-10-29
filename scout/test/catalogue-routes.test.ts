@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { importCatalogueSource, rebuildOfferings } from '../catalogue-db.ts';
+import { importCatalogueSource, rebuildOfferings, rebuildModels } from '../catalogue-db.ts';
+import { boardSources, importBoards } from '../catalogue-boards.ts';
 import { catalogueRoutes, loadCatalogue } from '../catalogue-routes.ts';
 import { d1 } from './helpers-d1.ts';
 
-const MD = 'https://models.dev/api.json', MDM = 'https://models.dev/models.json', OR = 'https://openrouter.ai/api/v1/models';
+const MD = 'https://models.dev/api.json?type=all', MDM = 'https://models.dev/models.json?type=all', OR = 'https://openrouter.ai/api/v1/models?output_modalities=all';
 const route = (id: string, canonical: string, cost: Record<string, number>, output = ['text']) => ({ id, name: id, canonical_model_id: canonical, modalities: { input: ['text'], output }, limit: { context: 128000, output: 8000 }, tool_call: true, cost });
 const api = {
   openai: { id: 'openai', name: 'OpenAI', models: { 'gpt-x': route('gpt-x', 'openai/gpt-x', { input: 2, output: 8 }) } },
@@ -76,4 +77,43 @@ test('a Scout model reaching a canonical model and its dated copy owns both: the
   assert.deepEqual(catalogue.routes(models, now).get('cohere/cmd')?.map(e => [e.provider, e.modelId]), [['Together AI', 'CohereLabs/cmd-host']]);
   assert.equal(catalogue.aliases(models).get('cmdhost'), 'cohere/cmd');
   assert.deepEqual(catalogue.models(models, now), []);
+});
+
+test('Vercel decision routes become typed contracts with their live input rate, and Scout shortlists them for supplied-label classification', async () => {
+  const db = d1(), now = '2026-10-28T00:00:00.000Z', VC = 'https://ai-gateway.vercel.sh/v1/models';
+  const decision = (id: string, pricing: Record<string, string> | undefined, input = ['text'], name = id) => ({ id, name, type: 'evaluation', context_window: 32000, modalities: { input, output: ['text'] }, ...(pricing ? { pricing } : {}) });
+  const files: Record<string, unknown> = { [MD]: { openai: api.openai, anthropic: api.anthropic }, [MDM]: {}, [VC]: { data: [
+    decision('lab/decide-1', { input: '0.00000002', output: '0' }, ['text', 'image']), decision('lab/decide-free', { input: '0', output: '0' }),
+    decision('lab/decide-2', { input: '0.00000002', output: '0' }),
+    // A free-tier ID of decide-1 (same lab and name) adds no second shortlist entry.
+    decision('lab/decide-1-free', { input: '0', output: '0' }, ['text', 'image'], 'lab/decide-1'),
+    // No published rate: unknown cost is never shown as free.
+    decision('lab/decide-unpriced', undefined),
+    { id: 'lab/chat-1', name: 'Chat 1', type: 'language', modalities: { input: ['text'], output: ['text'] }, pricing: { input: '0.000001', output: '0.000002' } }] } };
+  const fetcher = async (url: string) => new Response(JSON.stringify(files[url]));
+  for (const source of ['modelsdev', 'vercel'] as const) assert.equal((await importCatalogueSource(db, source, { fetcher, now, run: source })).status, 'ok');
+  await rebuildOfferings(db);
+  // JevBench ranks decide-2 above decide-1; the free model has no results.
+  await rebuildModels(db);
+  const system = (key: string, name: string, score: number) => ({ key, name, listing: 'ranked', capability: { score }, draw: { measured_on: '2026-10-26' } });
+  const jev = JSON.stringify({ revision: 'v1', systems: [system('d1', 'Decide 1 (Lab)', 60), system('d2', 'Decide 2 (Lab)', 80), ...Array.from({ length: 48 }, (_, i) => system(`o${i}`, `Other ${i}`, 70))] });
+  assert.equal((await importBoards(db, boardSources.filter(b => b.id === 'jevbench')[0] ?? assert.fail('jevbench'), { fetcher: async () => new Response(jev), now })).status, 'ok');
+  const supply = await loadCatalogue(db, admitted), contracts = supply.decisionRoutes(), scores = supply.decisionScores();
+  assert.deepEqual(Object.keys(scores).sort(), ['lab/decide-1', 'lab/decide-2']);
+  assert.equal(scores['lab/decide-2']?.quality, 1);
+  assert.deepEqual(contracts.map(c => [c.id, c.model, c.api, c.protocol, c.inputPrice, c.outputPrice, c.modalities, c.operations]), [
+    ['vercel-decisions:vercel-evaluate:lab/decide-1', 'lab/decide-1', 'https://ai-gateway.vercel.sh/v1/evaluate', 'vercel-evaluate', 0.02, 0, ['text', 'image'], ['classify', 'judge']],
+    ['vercel-decisions:vercel-evaluate:lab/decide-2', 'lab/decide-2', 'https://ai-gateway.vercel.sh/v1/evaluate', 'vercel-evaluate', 0.02, 0, ['text'], ['classify', 'judge']],
+    ['vercel-decisions:vercel-evaluate:lab/decide-free', 'lab/decide-free', 'https://ai-gateway.vercel.sh/v1/evaluate', 'vercel-evaluate', 0, 0, ['text'], ['classify', 'judge']]]);
+
+  const { taskEndpointResult } = await import('../endpoints.mjs');
+  const index = { snapshot: { checkedAt: now, catalogue: [], specialists: [], contracts: contracts.map(c => ({ ...c, checkedAt: now })), decisionScores: scores }, models: [] };
+  const shortlist = (task: Record<string, unknown>) => taskEndpointResult(index, 'route tickets', { outputCardinality: 'single', weights: {}, ...task }, null, {}).recommendations.map((r: { endpoint: { id: string } }) => r.endpoint.id);
+  const supplied = shortlist({ kind: 'classify', labelSpace: 'supplied' }).filter((id: string) => id.startsWith('vercel-decisions:'));
+  // Cost first: the free route leads. At the same rate, the better JevBench standing breaks the tie.
+  assert.deepEqual(supplied, ['lab/decide-free', 'lab/decide-2', 'lab/decide-1'].map(m => `vercel-decisions:vercel-evaluate:${m}`));
+  // Only the image-capable route survives a photo task; open label spaces are not a typed-choice contract.
+  const photos = shortlist({ kind: 'classify', labelSpace: 'supplied', needsVision: true });
+  assert.ok(photos.includes('vercel-decisions:vercel-evaluate:lab/decide-1') && !photos.includes('vercel-decisions:vercel-evaluate:lab/decide-free'));
+  assert.ok(!shortlist({ kind: 'classify', labelSpace: 'open' }).some((id: string) => id.startsWith('vercel-decisions:')));
 });

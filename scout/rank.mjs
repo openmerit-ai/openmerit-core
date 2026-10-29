@@ -43,7 +43,7 @@ function computeIndexStatus(index, now = Date.now()) {
   })).size;
   return { checkedAt: snapshot.checkedAt, stale: staleSources(snapshot, now), degraded: snapshot.sources.some(s => s.status === 'failed'),
     benchmarks: snapshot.benchmarks.length, benchmarksWithResults: new Set(models.flatMap(m => m.evidence.map(e => e.benchmark))).size, benchmarkInterpretation: index.benchmarkInterpretation,
-    models: models.length, providers, endpoints: (snapshot.catalogue ?? models).reduce((n, m) => n + (m.endpoints?.length ?? 1), 0) + contractModels().length, independentModels: (snapshot.catalogue ?? []).filter(m => m.endpoints?.some(e => e.source !== 'models')).length, availableModels: snapshot.availableModels, measurements: models.reduce((sum, m) => sum + m.evidence.length, 0),
+    models: models.length, providers, endpoints: (snapshot.catalogue ?? models).reduce((n, m) => n + (m.endpoints?.length ?? 1), 0) + contractModels(snapshot).length, independentModels: (snapshot.catalogue ?? []).filter(m => m.endpoints?.some(e => e.source !== 'models')).length, availableModels: snapshot.availableModels, measurements: models.reduce((sum, m) => sum + m.evidence.length, 0),
     sources: describeSources(index), calibration: calibrationStatus(now), specialistRepositories: snapshot.specialists?.length ?? 0, wordCloud: Object.entries(capabilities).map(([id, c]) => ({ id, label: c.label, keywords: c.terms, benchmarks: snapshot.benchmarks.filter(b => b.tags.includes(id)).length, models: models.filter(m => m.evidence.some(e => index.benchmarks.get(e.benchmark)?.tags.includes(id))).length })), refreshIntervalSeconds: 3600 };
 }
 

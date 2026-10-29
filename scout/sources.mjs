@@ -25,6 +25,7 @@ export const sourceURLs = {
   arenaDocument: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/document_style_control/latest-00000-of-00001.parquet',
   arenaVision: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/vision_style_control/latest-00000-of-00001.parquet',
   arenaWebdev: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/webdev/latest-00000-of-00001.parquet',
+  arenaFactuality: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/text_factuality/latest-00000-of-00001.parquet',
   // LLM Stats' public API: its 100 most-reported benchmarks with every model's score.
   vendor: 'https://api.llm-stats.com/leaderboard/benchmarks/matrix?top_n=100',
   bfclMethodology: 'https://gorilla.cs.berkeley.edu/leaderboard',
@@ -200,6 +201,15 @@ export const arenaWebdevCategories = [
   ['webdev-react', 'Arena · WebDev React', 'Human preference between two React applications built from the same prompt.'],
   ['image_to_webdev', 'Arena · Image to WebDev', 'Human preference between two web applications built from the same prompt that includes an image, such as a screenshot or mockup to reproduce.'],
 ];
+// Text factuality blends human preference with automated web checks of each verifiable claim
+// (Arena's composite Bradley-Terry model, factuality weight 25%). It repeats every text category; only the overall board and the verticals
+// where a false claim costs most are read, since the rest duplicate the text categories.
+export const arenaFactualityCategories = [
+  ['overall', 'Arena · Factuality', 'Text answers ranked by human preference blended with web-verified correctness of their factual claims.'],
+  ['industry_medicine_and_healthcare', 'Arena · Factuality: medicine & healthcare', 'Medicine and healthcare prompts, ranked by human preference blended with web-verified correctness of factual claims.'],
+  ['industry_legal_and_government', 'Arena · Factuality: legal & government', 'Legal and government prompts, ranked by human preference blended with web-verified correctness of factual claims.'],
+  ['industry_business_and_management_and_financial_operations', 'Arena · Factuality: business & finance', 'Business, management and financial operations prompts, ranked by human preference blended with web-verified correctness of factual claims.'],
+];
 // Bradley-Terry ratings become the expected win rate against the median-rated
 // model of the same leaderboard category, which keeps scores on a 0-1 scale.
 // Categories of one leaderboard can be published on different dates; each keeps its own.
@@ -266,7 +276,7 @@ export function parseBFCL(csv) {
   });
 }
 
-export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, arenaVisionRows, arenaWebdevRows, vals, vendorScores, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, catalogueSupply, previous, failures = {}, checkedAt = new Date().toISOString() }) {
+export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, arenaVisionRows, arenaWebdevRows, arenaFactualityRows, vals, vendorScores, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, catalogueSupply, previous, failures = {}, checkedAt = new Date().toISOString() }) {
   const sources = [], benchmarks = [], observations = new Map();
   const descriptions = benchmarkDescriptions ?? previous?.benchmarkDescriptions ?? {};
   const priorSources = new Map(previous?.sources.map(s => [s.id, s]) ?? []);
@@ -463,14 +473,15 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     for (const row of document.categories.overall) add(row.name, benchmark, row.score, { url: 'https://arena.ai/leaderboard/document', observedAt: document.publishedAt, sourceModel: row.name, metric: 'Win rate vs median model' });
     return { publishedAt: text.publishedAt };
   }, { license: 'https://creativecommons.org/licenses/by/4.0/' });
-  // Vision and Code Arena are separate sources, so a missing board never withholds another.
-  for (const [id, name, rows, categories, suite, page, url, prefix] of [
+  // Vision, Code Arena and text factuality are separate sources, so a missing board never withholds another.
+  for (const [id, name, rows, categories, suite, page, url, prefix, factuality = false] of [
     ['arenaVision', 'Arena · Vision', arenaVisionRows, arenaVisionCategories, 'Arena vision', 'https://arena.ai/leaderboard/vision', sourceURLs.arenaVision, 'arena:vision'],
     ['arenaWebdev', 'Arena · WebDev', arenaWebdevRows, arenaWebdevCategories, 'Arena WebDev', 'https://arena.ai/leaderboard/webdev', sourceURLs.arenaWebdev, 'arena:webdev'],
-  ]) collect(id, name, 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset', `Arena leaderboard dataset, ${suite} board: style-controlled ratings from crowdsourced pairwise human votes by category. Converted to expected win rate against the median-rated model; ratings with confidence intervals wider than 60 points are excluded. Human preference, not verified correctness.`, () => {
+    ['arenaFactuality', 'Arena · Factuality', arenaFactualityRows, arenaFactualityCategories, 'Arena text factuality', 'https://arena.ai/leaderboard/text/overall-factuality', sourceURLs.arenaFactuality, 'arena:factuality', true],
+  ]) collect(id, name, 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset', `Arena leaderboard dataset, ${suite} board: ${factuality ? "ratings from crowdsourced pairwise human votes combined with automated web verification of each response's factual claims (25% weight)" : 'style-controlled ratings from crowdsourced pairwise human votes'} by category. Converted to expected win rate against the median-rated model; ratings with confidence intervals wider than 60 points are excluded. ${factuality ? 'Claim checks cover web-verifiable facts only, not reasoning or task completion.' : 'Human preference, not verified correctness.'}`, () => {
     const board = parseArena(rows, categories.map(c => c[0]));
     for (const [category, title, description] of categories) {
-      const benchmark = addBenchmark(category === 'overall' ? prefix : `${prefix}:${category}`, title, id, { title, description: `${description} Style-controlled. Score is the expected win rate against the median-rated model in this category.`, metric: 'Win rate vs median model', suite, sourceURL: url });
+      const benchmark = addBenchmark(category === 'overall' ? prefix : `${prefix}:${category}`, title, id, { title, description: `${description}${factuality ? '' : ' Style-controlled.'} Score is the expected win rate against the median-rated model in this category.`, metric: 'Win rate vs median model', suite, sourceURL: url });
       for (const row of board.categories[category]) add(row.name, benchmark, row.score, { url: page, observedAt: board.dates[category], sourceModel: row.name, metric: 'Win rate vs median model' });
     }
     return { publishedAt: board.publishedAt };
@@ -567,7 +578,7 @@ export async function refreshSnapshot(fetcher = fetch, previous, options = {}) {
   }));
   const valsRead = readVals(read);
   const descriptions = readEpochDefinitions(read).then(value => ({ value }), () => ({ value: previous?.benchmarkDescriptions, failed: true }));
-  const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['idp', 'idpHTML', 'text'], ['vectara', 'vectaraMarkdown', 'text'], ['arena', 'arenaRows', 'parquet'], ['arenaDocument', 'arenaDocumentRows', 'parquet'], ['arenaVision', 'arenaVisionRows', 'parquet'], ['arenaWebdev', 'arenaWebdevRows', 'parquet'], ['vendor', 'vendorScores', 'json'], ['bfcl', 'bfclCSV', 'text'], ['modelsdev', 'modelsDev', 'json']];
+  const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['idp', 'idpHTML', 'text'], ['vectara', 'vectaraMarkdown', 'text'], ['arena', 'arenaRows', 'parquet'], ['arenaDocument', 'arenaDocumentRows', 'parquet'], ['arenaVision', 'arenaVisionRows', 'parquet'], ['arenaWebdev', 'arenaWebdevRows', 'parquet'], ['arenaFactuality', 'arenaFactualityRows', 'parquet'], ['vendor', 'vendorScores', 'json'], ['bfcl', 'bfclCSV', 'text'], ['modelsdev', 'modelsDev', 'json']];
   const results = await Promise.allSettled([...specs.map(([id, , type]) => read(sourceURLs[id], type)), ...hubQueries.map(query => read(query.url, 'json', 2_000_000))]);
   const inputs = { previous, failures: {}, catalogueSupply: options.catalogueSupply };
   results.slice(0, specs.length).forEach((result, i) => {
