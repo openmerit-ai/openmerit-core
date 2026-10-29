@@ -26,7 +26,7 @@ export interface Bucket {
 }
 type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 type Json = Record<string, unknown>;
-export type CatalogueSource = 'modelsdev' | 'litellm' | 'openrouter' | 'vercel' | 'deepinfra' | 'genaiprices' | 'epoch' | 'portkey-deepgram' | 'portkey-elevenlabs' | 'portkey-stability-ai' | 'truefoundry';
+export type CatalogueSource = 'modelsdev' | 'litellm' | 'openrouter' | 'vercel' | 'deepinfra' | 'genaiprices' | 'epoch' | 'portkey-deepgram' | 'portkey-elevenlabs' | 'portkey-stability-ai' | 'truefoundry' | 'edenai';
 
 interface SourceConfig { name: string; url: string; modelsURL?: string; license: string; role: string; maxBytes: number }
 // Import order matters: Models.dev first, as every later source resolves against it,
@@ -43,6 +43,7 @@ export const catalogueSources: Record<CatalogueSource, SourceConfig> = {
   'portkey-deepgram': { name: 'Portkey · Deepgram prices', url: 'https://configs.portkey.ai/pricing/deepgram.json', license: 'MIT · Copyright (c) 2025 Portkey.ai · https://github.com/Portkey-AI/models/blob/main/LICENSE', role: 'Reviewed Aura voice prices per character; not token prices', maxBytes: 1_000_000 },
   'portkey-elevenlabs': { name: 'Portkey · ElevenLabs prices', url: 'https://configs.portkey.ai/pricing/elevenlabs.json', license: 'MIT · Copyright (c) 2025 Portkey.ai · https://github.com/Portkey-AI/models/blob/main/LICENSE', role: 'Reviewed speech model prices per character or input-audio second', maxBytes: 1_000_000 },
   'portkey-stability-ai': { name: 'Portkey · Stability AI prices', url: 'https://configs.portkey.ai/pricing/stability-ai.json', license: 'MIT · Copyright (c) 2025 Portkey.ai · https://github.com/Portkey-AI/models/blob/main/LICENSE', role: 'Image prices with quality/size tiers', maxBytes: 1_000_000 },
+  edenai: { name: 'Eden AI expert models', url: 'https://api.edenai.run/v3/info', license: 'Public API; licence not stated; Eden AI terms of service · https://www.edenai.co/terms', role: "A gateway's OCR, document parsing, translation, speech, moderation and AI-content detection routes with per-character, page, file, image, request and second prices, excluding its platform fee", maxBytes: 2_000_000 },
 };
 
 // One statement per entry: D1 exec splits on newlines, so schema goes through batch.
@@ -421,6 +422,59 @@ export function parseTrueFoundry(zip: Uint8Array): Parsed {
   return { providers, listings: [...listings.values()], models: [] };
 }
 
+// Eden AI's expert models: a gateway's own routes, one per model string it bills
+// ("ocr/financial_parser/mindee", "audio/tts/openai/tts-1"). Only OCR,
+// translation, speech, moderation and AI-content detection are read; its LLMs come
+// from the providers' own feeds. Each model has one USD price per quantity of a
+// unit. A "token" price does not say whether it is input or output, so it is no
+// price; free and execution-time quotes, and zero placeholders, are none either.
+// Prices exclude Eden AI's platform fee, charged when credits are bought.
+const edenSubfeatures: Record<string, { type: string; input: string[] | null; output: string[] | null }> = {
+  'translation/automatic_translation': { type: 'translation', input: ['text'], output: ['text'] }, 'translation/document_translation': { type: 'translation', input: null, output: null },
+  'audio/tts': { type: 'speech', input: ['text'], output: ['audio'] }, 'audio/speech_to_text_async': { type: 'transcription', input: ['audio'], output: ['text'] },
+  'text/moderation': { type: 'moderation', input: ['text'], output: ['text'] }, 'image/explicit_content': { type: 'moderation', input: ['image'], output: ['text'] },
+  'text/ai_detection': { type: 'detection', input: ['text'], output: ['text'] }, 'image/ai_detection': { type: 'detection', input: ['image'], output: ['text'] },
+  'image/deepfake_detection': { type: 'detection', input: ['image'], output: ['text'] }, 'video/deepfake_detection_async': { type: 'detection', input: ['video'], output: ['text'] },
+};
+function edenPrice(pricing: Json, feature: string, type: string): Price | null {
+  const price = num(pricing.price), quantity = num(pricing.price_unit_quantity), unit = text(pricing.price_unit_type);
+  if (pricing.currency !== 'USD' || price === null || price <= 0 || quantity === null || quantity <= 0) return null;
+  // The quote is for `quantity` units; amounts are per one unit (per million characters).
+  const each = price / quantity, media = type === 'speech' ? 'output_audio' : feature === 'video' ? 'input_video' : 'input_audio';
+  const make = (kind: string, unit: string, amount: number | null): Price | null => amount === null ? null : { kind, tier: '', unit, amount };
+  switch (unit) {
+    case 'character': return make('input', 'usd_per_mchar', money(each * 1e6));
+    case 'second': return make(media, 'usd_per_second', money(each));
+    case 'minute': return make(media, 'usd_per_second', money(each / 60));
+    case 'page': return make(feature === 'ocr' ? 'ocr' : 'input', 'usd_per_page', money(each));
+    // A file is an image for image models and a whole document for document parsers.
+    case 'file': return feature === 'image' ? make('input_image', 'usd_per_image', money(each)) : make(feature === 'ocr' ? 'ocr' : 'input', 'usd_per_file', money(each));
+    case 'image': return make('input_image', 'usd_per_image', money(each));
+    case 'request': return make('request', 'usd_per_request', money(each));
+    default: return null;
+  }
+}
+export function parseEdenAI(data: unknown): Parsed {
+  const features = isObject(data) && Array.isArray(data.features) ? data.features.map(obj) : [], listings: Listing[] = [];
+  for (const f of features) for (const s of Array.isArray(f.subfeatures) ? f.subfeatures.map(obj) : []) {
+    const feature = text(f.name) ?? '', path = `${feature}/${text(s.name) ?? ''}`, shape = feature === 'ocr' ? { type: 'ocr', input: null, output: ['text'] } : edenSubfeatures[path];
+    if (!shape) continue;
+    for (const value of Array.isArray(s.models) ? s.models : []) {
+      const m = obj(value), modelId = id(m.model), [, , vendor, ...rest] = modelId?.split('/') ?? [], model = rest.join('/');
+      if (!modelId || !modelId.startsWith(`${path}/`) || !vendor) continue;
+      const price = edenPrice(obj(m.pricing), feature, shape.type);
+      // A speech or OCR model may be a lab's canonical model; the importer keeps only IDs
+      // that exist. Parsers, translators and moderators that name an LLM are tasks built on it, not its routes.
+      const link = model && (feature === 'audio' || path === 'ocr/ocr' || path === 'ocr/ocr_async') ? `${vendor}/${model}` : null;
+      listings.push({ ...unlisted, ...route({}), provider_id: 'edenai', provider_model_id: modelId, hf_id: null, model_id: link, model_basis: link ? 'edenai-model' : null,
+        name: `${model ? `${vendor}/${model}` : vendor} · ${text(s.fullname) ?? path}`, type: shape.type, input_modalities: list(shape.input), output_modalities: list(shape.output), prices: price ? [price] : [], payload: m });
+    }
+  }
+  // About 140 such models in October 2026; a collapsed or reshaped list stores nothing.
+  if (listings.length < 80 || listings.filter(l => l.prices.length).length < 60) throw new Error('Eden AI model list format changed.');
+  return { providers: [{ id: 'edenai', name: 'Eden AI', api: 'https://api.edenai.run/v3', doc: 'https://www.edenai.co/docs/v3/expert-models/listing-models', npm: null, env: null }], listings, models: [] };
+}
+
 // Portkey's request/response "token" fields sometimes count characters or
 // seconds. Only reviewed model families and image trees have known units.
 // Unit evidence: Portkey models PR #898 (ElevenLabs), Deepgram's character
@@ -764,7 +818,7 @@ export async function storeSourceModels(db: Database, source: string, models: So
 // added only when two other sources claim it, so one stale or optimistic feed
 // cannot add support. Each row records which sources supplied each field and
 // any disagreement.
-export const sourcePreference = ['modelsdev', 'reviewed', 'openrouter', 'vercel', 'deepinfra', 'litellm', 'genaiprices', 'portkey-deepgram', 'portkey-elevenlabs', 'portkey-stability-ai', 'truefoundry', 'huggingface', 'epoch'];
+export const sourcePreference = ['modelsdev', 'reviewed', 'openrouter', 'vercel', 'deepinfra', 'litellm', 'genaiprices', 'portkey-deepgram', 'portkey-elevenlabs', 'portkey-stability-ai', 'truefoundry', 'edenai', 'huggingface', 'epoch'];
 const offeringFields = ['model_id', 'model_basis', 'name', 'family', 'type', 'status', 'release_date', 'deprecated_at', 'context', 'max_input', 'max_output', 'input_modalities', 'output_modalities',
   'reasoning', 'tool_call', 'structured_output', 'attachment', 'open_weights', 'hf_id'] as const;
 const capabilityFlags = new Set(['reasoning', 'tool_call', 'structured_output', 'attachment']), corroboration = 2;
@@ -970,9 +1024,11 @@ export async function importCatalogueSource(db: Database, source: CatalogueSourc
       } else {
         const known = new Set((await db.prepare("SELECT id FROM cat_providers WHERE source='modelsdev'").all<{ id: string }>()).results.map(r => r.id));
         const data = source === 'truefoundry' ? null : decode(first);
-        parsed = source === 'truefoundry' ? parseTrueFoundry(first) : source === 'litellm' ? parseLiteLLM(data, known) : source === 'openrouter' ? parseOpenRouter(data) : source === 'vercel' ? parseVercel(data) : source === 'deepinfra' ? parseDeepInfra(data, now) : source.startsWith('portkey-') ? parsePortkey(data, source.slice('portkey-'.length), known) : parseGenaiPrices(data, known, now);
+        parsed = source === 'truefoundry' ? parseTrueFoundry(first) : source === 'litellm' ? parseLiteLLM(data, known) : source === 'openrouter' ? parseOpenRouter(data) : source === 'vercel' ? parseVercel(data) : source === 'deepinfra' ? parseDeepInfra(data, now) : source.startsWith('portkey-') ? parsePortkey(data, source.slice('portkey-'.length), known) : source === 'edenai' ? parseEdenAI(data) : parseGenaiPrices(data, known, now);
         const backbone = await loadBackbone(db);
-        resolveListings(parsed.listings, backbone, { slugs: !source.startsWith('portkey-') });
+        // Eden AI's vendor/model links only an existing canonical model; its paths have no meaningful slug.
+        if (source === 'edenai') for (const l of parsed.listings) if (l.model_id && !backbone.models.has(l.model_id)) Object.assign(l, { model_id: null, model_basis: null });
+        resolveListings(parsed.listings, backbone, { slugs: !source.startsWith('portkey-') && source !== 'edenai' });
         if (source === 'openrouter' || source === 'vercel') parsed.models = gatewayIdentities(source, parsed.listings, backbone.owned);
       }
       files.length = 0;

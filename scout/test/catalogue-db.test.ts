@@ -341,3 +341,47 @@ test('TrueFoundry configs import from the repository zip with base-region prices
     ['lab.chat-1', 'output', '', 'usd_per_mtok', 4], ['lab.chat-1', 'output', 'region=eu-west-2', 'usd_per_mtok', 8],
     ['lab.clip-1', 'output_video', 'resolution=720p', 'usd_per_second', 1.5], ['lab.clip-1', 'output_video', 'resolution=720p,audio=none', 'usd_per_second', 1]]);
 });
+
+test('Eden AI expert models price per one unit of the quoted quantity, keep undirected token quotes unpriced and link only speech and OCR models that exist', async () => {
+  const EDEN = 'https://api.edenai.run/v3/info', usd = (price: number, price_unit_quantity: number, price_unit_type: string, currency = 'USD') => ({ price, price_unit_quantity, price_unit_type, currency });
+  const sub = (name: string, models: Array<[string, ReturnType<typeof usd>]>) => ({ name, fullname: name, models: models.map(([model, pricing]) => ({ model, pricing, regions: [] })) });
+  const info = (fillers: number) => ({ features: [
+    { name: 'ocr', subfeatures: [sub('financial_parser', [['ocr/financial_parser/mindee', usd(0.1, 1, 'page')], ['ocr/financial_parser/veryfi', usd(0.08, 1, 'file')], ['ocr/financial_parser/openai/gpt-4o', usd(0.04, 1, 'page')]]),
+      sub('ocr', [['ocr/ocr/mistral/mistral-ocr-9', usd(2, 1000, 'page')], ...Array.from({ length: fillers }, (_, i): [string, ReturnType<typeof usd>] => [`ocr/ocr/filler-${i}`, usd(1, 1000, 'page')])])] },
+    { name: 'translation', subfeatures: [sub('automatic_translation', [['translation/automatic_translation/deepl', usd(20, 1000000, 'character')], ['translation/automatic_translation/openai/gpt-4o', usd(20, 1000000, 'token')], ['translation/automatic_translation/eurolab', usd(9, 1000000, 'character', 'EUR')]]),
+      sub('document_translation', [['translation/document_translation/deepl', usd(2, 20, 'page')]])] },
+    { name: 'audio', subfeatures: [sub('tts', [['audio/tts/openai/tts-1', usd(15, 1000000, 'character')], ['audio/tts/openai/gpt-4o-mini-tts', usd(0.015, 1, 'minute')], ['audio/tts/ovhcloud/nvr-tts-en-us', usd(0, 1, 'free')]]),
+      sub('speech_to_text_async', [['audio/speech_to_text_async/gladia', usd(0.0102, 60, 'second')]])] },
+    { name: 'image', subfeatures: [sub('explicit_content', [['image/explicit_content/google', usd(1.5, 1000, 'file')]]), sub('generation', [['image/generation/lab/pic-1', usd(0.04, 1, 'image')]])] },
+    { name: 'text', subfeatures: [sub('moderation', [['text/moderation/microsoft', usd(1, 1000, 'request')], ['text/moderation/ovhcloud/guard-1', usd(0, 1, 'request')]])] },
+  ] });
+  const md = { openai: { id: 'openai', models: { 'tts-1': { id: 'tts-1', canonical_model_id: 'openai/tts-1', type: 'speech' }, 'gpt-4o': { id: 'gpt-4o', canonical_model_id: 'openai/gpt-4o' } } }, anthropic: { id: 'anthropic', models: {} } };
+  const files: Record<string, unknown> = { [MD]: md, [MDM]: {}, [EDEN]: info(10) }, fetcher = async (url: string) => serve(files)(url), db = d1();
+  ok(await importCatalogueSource(db, 'modelsdev', { fetcher, now: '2026-10-29T00:00:00Z', run: 'm' }));
+  const collapsed = await importCatalogueSource(db, 'edenai', { fetcher, now: '2026-10-29T00:00:00Z', run: 'e0' });
+  assert.equal(collapsed.status, 'failed', 'a list with too few expert models stores nothing');
+  assert.equal(one(db, "SELECT count(*) n FROM cat_listings WHERE source='edenai'").n, 0);
+  files[EDEN] = info(70);
+  const stored = ok(await importCatalogueSource(db, 'edenai', { fetcher, now: '2026-10-29T00:00:00Z', run: 'e1' }));
+  assert.equal(stored.listings, 85, 'image generation is out of scope; unpriced routes are kept');
+  assert.deepEqual(db.all("SELECT provider_model_id,kind,tier,unit,amount FROM cat_prices WHERE source='edenai' AND provider_model_id NOT LIKE 'ocr/ocr/filler-%' ORDER BY provider_model_id").map(r => Object.values(r)), [
+    // Minutes become seconds of the generated audio; the 60-second quote is per one second of input audio.
+    ['audio/speech_to_text_async/gladia', 'input_audio', '', 'usd_per_second', .00017],
+    ['audio/tts/openai/gpt-4o-mini-tts', 'output_audio', '', 'usd_per_second', .00025],
+    ['audio/tts/openai/tts-1', 'input', '', 'usd_per_mchar', 15],
+    // An image model's file is an image; a document parser's file is a document.
+    ['image/explicit_content/google', 'input_image', '', 'usd_per_image', .0015],
+    ['ocr/financial_parser/mindee', 'ocr', '', 'usd_per_page', .1], ['ocr/financial_parser/openai/gpt-4o', 'ocr', '', 'usd_per_page', .04], ['ocr/financial_parser/veryfi', 'ocr', '', 'usd_per_file', .08],
+    ['ocr/ocr/mistral/mistral-ocr-9', 'ocr', '', 'usd_per_page', .002],
+    ['text/moderation/microsoft', 'request', '', 'usd_per_request', .001],
+    ['translation/automatic_translation/deepl', 'input', '', 'usd_per_mchar', 20],
+    // $2 per 20 pages (a 20-page minimum) is $0.10 per page.
+    ['translation/document_translation/deepl', 'input', '', 'usd_per_page', .1]]);
+  // Only a speech or OCR model with an existing canonical ID links; a parser built on an LLM does not.
+  assert.deepEqual(db.all("SELECT provider_model_id,model_id,model_basis FROM cat_listings WHERE source='edenai' AND (model_id IS NOT NULL OR provider_model_id LIKE '%gpt-4o%') ORDER BY provider_model_id").map(r => Object.values(r)), [
+    ['audio/tts/openai/gpt-4o-mini-tts', null, null], ['audio/tts/openai/tts-1', 'openai/tts-1', 'edenai-model'],
+    ['ocr/financial_parser/openai/gpt-4o', null, null], ['translation/automatic_translation/openai/gpt-4o', null, null]]);
+  await rebuildOfferings(db);
+  assert.deepEqual(db.all("SELECT provider_model_id,kind,input_modalities,output_modalities FROM cat_offerings WHERE provider_id='edenai' AND provider_model_id IN ('audio/speech_to_text_async/gladia','ocr/financial_parser/mindee','text/moderation/microsoft')").map(r => Object.values(r)), [
+    ['audio/speech_to_text_async/gladia', 'transcription', '["audio"]', '["text"]'], ['ocr/financial_parser/mindee', 'ocr', null, '["text"]'], ['text/moderation/microsoft', 'moderation', '["text"]', '["text"]']]);
+});
