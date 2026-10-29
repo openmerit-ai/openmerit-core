@@ -101,7 +101,7 @@ const defaultSocialImage = {
   url: 'https://openmerit.ai/assets/openmerit-og-v1.png', type: 'image/png', width: 1200, height: 630,
   alt: 'Good models prove themselves in the work. Three miniature makers compare tools at a wooden workbench.',
 };
-const brand = '<svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M4 24V8l12 10L28 8v16M4 8l12 16L28 8" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg><span>openmerit</span>';
+const brand = '<svg class="brand-mark" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span>openmerit</span>';
 function navigation(doc, label) {
   return `<nav aria-label="${label}">${groups.map(group => `<div class="docs-nav-group"><p>${escape(group.title)}</p><ul>${group.pages.map(item => {
     const page = bySource.get(item.source);
