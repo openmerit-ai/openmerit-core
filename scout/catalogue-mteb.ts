@@ -2,6 +2,7 @@
 // embeddings, predictions or the expanded per-example results export.
 // These stay outside chat evidence: a retrieval score is not chat quality.
 import { type Database, type Bucket, type Row, chunked, digest, ensureCatalogueSchema, isObject, obj, readSource } from './catalogue-db.ts';
+import { linkCandidates, linkResults } from './catalogue-boards.ts';
 
 export const mtebAPI = 'https://mteb-leaderboard-backend.hf.space/v1';
 type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
@@ -10,9 +11,11 @@ export interface MTEBBenchmark extends Record<string, unknown> { name: string }
 
 // Readers join results to the benchmark's active version. A partial write is
 // invisible until the last transaction, and historical responses remain in R2.
+// model_id links a result to one catalogue model by the board rules (linkResults, kind
+// 'embedding'): mostly an exact model ID or Hugging Face repository.
 const schema = [
   'CREATE TABLE IF NOT EXISTS cat_mteb_benchmarks (name TEXT PRIMARY KEY, metadata TEXT NOT NULL, summary TEXT NOT NULL, version TEXT NOT NULL, artifact TEXT NOT NULL, checked_at TEXT NOT NULL)',
-  'CREATE TABLE IF NOT EXISTS cat_mteb_results (benchmark TEXT NOT NULL, version TEXT NOT NULL, model TEXT NOT NULL, variant TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(benchmark,version,model,variant))',
+  'CREATE TABLE IF NOT EXISTS cat_mteb_results (benchmark TEXT NOT NULL, version TEXT NOT NULL, model TEXT NOT NULL, variant TEXT NOT NULL, payload TEXT NOT NULL, model_id TEXT, PRIMARY KEY(benchmark,version,model,variant))',
   'CREATE INDEX IF NOT EXISTS cat_mteb_results_model ON cat_mteb_results(model)',
 ];
 
@@ -48,12 +51,14 @@ export function parseMTEB(data: unknown, name: string): { summary: Record<string
   return { summary, rows };
 }
 
-export type MTEBImport = { status: 'ok'; rows: number; models: number } | { status: 'failed'; error: string };
+export type MTEBImport = { status: 'ok'; rows: number; models: number; linked: number } | { status: 'failed'; error: string };
 export async function importMTEB(db: Database, benchmark: MTEBBenchmark, options: Options = {}): Promise<MTEBImport> {
   const { fetcher = fetch, bucket, now = new Date().toISOString() } = options;
   const name = benchmark.name, source = `mteb:${name}`, run = options.run ?? `${source}-${now}`, url = `${mtebAPI}/benchmarks/${encodeURIComponent(name)}/scores`;
   await ensureCatalogueSchema(db);
   await db.batch(schema.map(sql => db.prepare(sql)));
+  if (!(await db.prepare("SELECT name FROM pragma_table_info('cat_mteb_results') WHERE name='model_id'").all()).results.length) await db.prepare('ALTER TABLE cat_mteb_results ADD COLUMN model_id TEXT').run();
+  await db.prepare('CREATE INDEX IF NOT EXISTS cat_mteb_results_model_id ON cat_mteb_results(model_id)').run();
   await db.batch([
     db.prepare('INSERT INTO cat_sources (id,name,url,license,role) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET name=excluded.name,url=excluded.url,license=excluded.license,role=excluded.role')
       .bind(source, `MTEB · ${name}`, url, 'CC0-1.0 (MTEB results); task dataset licences are separate', 'Published embedding/retrieval leaderboard results; not chat quality or independent verification'),
@@ -73,9 +78,11 @@ export async function importMTEB(db: Database, benchmark: MTEBBenchmark, options
       identities.add(key); models.add(model);
       rows.push({ model, variant, payload: JSON.stringify(r) });
     }
+    const links = linkResults([...models].map(model => ({ model })), 'embedding', await linkCandidates(db), source), ids = new Map([...links].map(([r, id]) => [r.model, id]));
+    for (const r of rows) r.model_id = ids.get(String(r.model)) ?? null;
     if (bucket && !await bucket.head(artifact)) await bucket.put(artifact, bytes, { httpMetadata: { contentType: 'application/json' } });
-    await chunked(db, `INSERT OR REPLACE INTO cat_mteb_results (benchmark,version,model,variant,payload)
-      SELECT ?1,?2,json_extract(value,'$.model'),json_extract(value,'$.variant'),json_extract(value,'$.payload') FROM json_each(?3)`, rows, [name, version], 20);
+    await chunked(db, `INSERT OR REPLACE INTO cat_mteb_results (benchmark,version,model,variant,payload,model_id)
+      SELECT ?1,?2,json_extract(value,'$.model'),json_extract(value,'$.variant'),json_extract(value,'$.payload'),json_extract(value,'$.model_id') FROM json_each(?3)`, rows, [name, version], 20);
     await db.batch([
       db.prepare('INSERT INTO cat_mteb_benchmarks (name,metadata,summary,version,artifact,checked_at) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(name) DO UPDATE SET metadata=excluded.metadata,summary=excluded.summary,version=excluded.version,artifact=excluded.artifact,checked_at=excluded.checked_at')
         .bind(name, JSON.stringify(benchmark), JSON.stringify(parsed.summary), version, artifact, now),
@@ -83,7 +90,7 @@ export async function importMTEB(db: Database, benchmark: MTEBBenchmark, options
       db.prepare("UPDATE cat_runs SET finished_at=?2,status='ok',artifact=?3,artifact_bytes=?4,listings=?5 WHERE id=?1").bind(run, new Date().toISOString(), hash, bytes.length, rows.length),
       db.prepare('UPDATE cat_sources SET last_success_at=?2,last_run=?3 WHERE id=?1').bind(source, now, run),
     ]);
-    return { status: 'ok', rows: rows.length, models: models.size };
+    return { status: 'ok', rows: rows.length, models: models.size, linked: ids.size };
   } catch (error) {
     const message = String(error instanceof Error ? error.message : error).slice(0, 300);
     await db.prepare("UPDATE cat_runs SET finished_at=?2,status='failed',error=?3 WHERE id=?1").bind(run, new Date().toISOString(), message).run();

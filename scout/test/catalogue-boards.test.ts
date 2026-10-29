@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { boardSources, importBoards } from '../catalogue-boards.ts';
+import { boardSources, importBoards, linkResults } from '../catalogue-boards.ts';
 import { ensureCatalogueSchema } from '../catalogue-db.ts';
 import { d1 } from './helpers-d1.ts';
 
@@ -36,6 +36,26 @@ test('media board results are stored verbatim, linked only to one catalogue mode
   assert.equal((await importBoards(db, source('analysis-board:text-to-image'), { fetcher, now: '2026-10-30T00:00:00Z' })).status, 'failed');
   assert.equal(db.all('SELECT count(*) n FROM cat_board_results')[0]?.n, 5);
   assert.deepEqual(db.all("SELECT status FROM cat_runs ORDER BY started_at").map(r => r.status), ['failed', 'ok', 'ok', 'failed']);
+});
+
+test('results link by reviewed alias, exact ID or repository, owner and exact name, never by substring, sibling or an ambiguous name', () => {
+  const candidates = [
+    { id: 'google/veo-3.0-generate-001', kind: 'video', names: ['Veo 3.0', 'veo-3.0-generate-001'] },
+    { id: 'google/veo-3.1', kind: 'video', names: ['Veo 3.1', 'veo-3.1'] }, { id: 'google/veo-3.1-generate-preview', kind: 'video', names: ['Veo 3.1', 'veo-3.1-generate-preview'] },
+    { id: 'kwaivgi/kling-v3.0-pro', kind: 'video', names: ['Kling: Video v3.0 Pro', 'kling-v3.0-pro'] },
+    { id: 'nvidia/parakeet-tdt-0.6b-v3', kind: 'transcription', names: ['Parakeet TDT 0.6B v3'], repos: ['nvidia/parakeet-tdt-0.6b-v3'] },
+    { id: 'openai/whisper-large-v3', kind: 'transcription', names: ['Whisper Large v3'], repos: ['openai/whisper-large-v3'] },
+    { id: 'google/gemma-4-e4b-it', kind: 'chat', names: ['Gemma 4 E4B'] },
+    { id: 'elevenlabs/eleven-multilingual-v2', kind: 'speech', names: ['Eleven Multilingual v2'] },
+  ];
+  const link = (kind: string, names: string[], board = '') => { const rows = names.map(model => ({ model })), links = linkResults(rows, kind, candidates, board); return rows.map(r => links.get(r) ?? null); };
+  // "Veo 3" is Veo 3.0, never 3.1 or 3.1 Fast; "Veo 3.1" names two models; "kling-v3-pro" is Kling v3.0 Pro.
+  assert.deepEqual(link('video', ['Veo 3', 'veo-3', 'Veo 3.1', 'Veo 3.1 Fast', 'Veo', 'kling-v3-pro', 'Kling 3 Pro Turbo']), ['google/veo-3.0-generate-001', 'google/veo-3.0-generate-001', null, null, null, 'kwaivgi/kling-v3.0-pro', null]);
+  // A repository or ID links whatever its kind; a sibling version or another owner's fine-tune does not.
+  assert.deepEqual(link('transcription', ['nvidia/parakeet-tdt-0.6b-v3', 'nvidia/parakeet-tdt-0.6b-v2', 'someone/whisper-large-v3', 'openai/whisper-large-v3-turbo', 'Google/Gemma-4-E4B-it', 'Whisper Large v3, OpenAI']),
+    ['nvidia/parakeet-tdt-0.6b-v3', null, null, null, 'google/gemma-4-e4b-it', 'openai/whisper-large-v3']);
+  // A reviewed alias applies only to its kind and boards.
+  assert.deepEqual([link('speech', ['Multilingual v2'], 'analysis:tts-provider-voice'), link('speech', ['Multilingual v2'], 'tts-arena:v2'), link('image', ['Multilingual v2'], 'analysis:tts-provider-voice')], [['elevenlabs/eleven-multilingual-v2'], [null], [null]]);
 });
 
 test('speech-to-text rows are host endpoints ranked by error rate, lower is better', async () => {

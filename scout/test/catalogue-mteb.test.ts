@@ -28,7 +28,7 @@ test('MTEB imports only final summaries and preserves suite versions, variants, 
   };
   const discovered = await discoverMTEB({ fetcher });
   assert.deepEqual(discovered, suites, 'off-menu historical suites are retained');
-  for (const b of discovered) assert.deepEqual(await importMTEB(db, b, { fetcher, bucket, now: '2026-10-28T00:00:00Z' }), { status: 'ok', rows: 2, models: 1 });
+  for (const b of discovered) assert.deepEqual(await importMTEB(db, b, { fetcher, bucket, now: '2026-10-28T00:00:00Z' }), { status: 'ok', rows: 2, models: 1, linked: 0 });
   assert.equal(active(db).length, 4, 'versions and experiment configurations are not averaged together');
   assert.deepEqual(active(db).filter(r => r.benchmark === board().name).map(r => JSON.parse(String(r.payload))).sort((a, b) => Number(!!a.experiments) - Number(!!b.experiments)), summary().rows);
   assert.equal(raw.size, 2); assert.equal(seen.length, 3);
@@ -68,6 +68,15 @@ test('MTEB partial database writes are invisible and a retry publishes one compl
   const next = summary(Array.from({ length: 25 }, (_, i) => row(`Lab/New-${i}`)));
   assert.equal((await importMTEB(failed, board(), { fetcher: async () => Response.json(next), run: 'next' })).status, 'failed');
   assert.deepEqual(active(db), before);
-  assert.deepEqual(await importMTEB(db, board(), { fetcher: async () => Response.json(next), run: 'next' }), { status: 'ok', rows: 25, models: 25 });
+  assert.deepEqual(await importMTEB(db, board(), { fetcher: async () => Response.json(next), run: 'next' }), { status: 'ok', rows: 25, models: 25, linked: 0 });
   assert.equal(active(db).length, 25); assert.equal(db.all('SELECT count(*) n FROM cat_mteb_results')[0]?.n, 25);
+});
+
+test('MTEB results link to a catalogue model by exact ID or repository, and other owners stay unlinked', async () => {
+  const db = d1();
+  await importMTEB(db, board(), { fetcher: async () => new Response('down', { status: 503 }) });
+  await db.prepare("INSERT INTO cat_model_merged (id,kind,name,sources,provenance) VALUES ('lab/model','embedding','Model','[]','{}')").run();
+  const rows = [row('Lab/Model'), row('Lab/Model', { embed_dim: 512 }), row('Other/Model'), row('Lab/Model-2')];
+  assert.deepEqual(await importMTEB(db, board(), { fetcher: async () => Response.json(summary(rows)) }), { status: 'ok', rows: 4, models: 3, linked: 1 });
+  assert.deepEqual(db.all('SELECT model,model_id FROM cat_mteb_results ORDER BY model,variant').map(r => Object.values(r)), [['Lab/Model', 'lab/model'], ['Lab/Model', 'lab/model'], ['Lab/Model-2', null], ['Other/Model', null]]);
 });

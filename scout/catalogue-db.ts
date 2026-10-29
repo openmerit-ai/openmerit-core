@@ -651,8 +651,13 @@ export interface Backbone { routes: BackboneRoute[]; models: ReadonlySet<string>
 export async function loadBackbone(db: Database): Promise<Backbone> {
   const routes = (await db.prepare("SELECT provider_id,provider_model_id,model_id FROM cat_listings WHERE source='modelsdev' AND withdrawn_at IS NULL AND model_id IS NOT NULL").all<BackboneRoute>()).results;
   const models = (await db.prepare('SELECT id,weights,basis FROM cat_models WHERE withdrawn_at IS NULL').all<{ id: string; weights: string | null; basis: string }>()).results;
-  const repos = (await db.prepare('SELECT DISTINCT lower(hf_id) repo,model_id FROM cat_listings WHERE hf_id IS NOT NULL AND model_id IS NOT NULL AND withdrawn_at IS NULL').all<{ repo: string; model_id: string }>()).results;
-  return { routes, models: new Set(models.map(m => m.id)), repos: [...repos, ...weightRepos(models)], owned: new Map(models.map(m => [m.id, m.basis])) };
+  return { routes, models: new Set(models.map(m => m.id)), repos: [...await listingRepos(db), ...weightRepos(models)], owned: new Map(models.map(m => [m.id, m.basis])) };
+}
+const listingRepos = async (db: Database) => (await db.prepare('SELECT DISTINCT lower(hf_id) repo,model_id FROM cat_listings WHERE hf_id IS NOT NULL AND model_id IS NOT NULL AND withdrawn_at IS NULL').all<{ repo: string; model_id: string }>()).results;
+// Hugging Face repositories (lowercase) named for each canonical model, as loadBackbone reads them.
+export async function modelRepos(db: Database): Promise<Array<{ repo: string; model_id: string }>> {
+  const models = (await db.prepare('SELECT id,weights FROM cat_models WHERE withdrawn_at IS NULL AND weights IS NOT NULL').all<{ id: string; weights: string | null }>()).results;
+  return [...await listingRepos(db), ...weightRepos(models)];
 }
 const weightRepos = (models: ReadonlyArray<{ id: string; weights: string | null }>) =>
   models.flatMap(m => [...(m.weights ?? '').matchAll(/https:\/\/huggingface\.co\/([\w.-]+\/[\w.-]+)/g)].map(([, repo]) => ({ repo: (repo ?? '').toLowerCase(), model_id: m.id })));

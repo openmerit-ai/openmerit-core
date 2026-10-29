@@ -2,10 +2,10 @@
 // video, speech, transcription, music, 3D, embeddings, decisions), kept verbatim with provenance. Like
 // MTEB, these stay out of chat evidence; decision boards only break equal-cost ties in
 // task-fit shortlists (catalogue-routes.ts decisionScores). A result
-// links to a canonical model only when its name matches exactly one catalogue
-// model of the board's kind.
+// links to a canonical model only when it names exactly one catalogue model (linkResults).
 import { parquetReadObjects } from 'hyparquet';
-import { type Database, type Bucket, chunked, digest, ensureCatalogueSchema, isObject, obj, readSource, text, date } from './catalogue-db.ts';
+import { type Database, type Bucket, chunked, digest, ensureCatalogueSchema, isObject, modelRepos, obj, readSource, text, date } from './catalogue-db.ts';
+import { reviewedAliases } from './catalogue-identities.ts';
 
 type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 interface Options { fetcher?: Fetcher; bucket?: Bucket; now?: string; run?: string }
@@ -199,13 +199,41 @@ export const boardSources: BoardSource[] = [
       gradioBoard(data, at, { id: `mmeb:${id}`, title: `MMEB · ${title} overall`, kind: 'embedding', metric: `${score} score`, direction: 'higher', url: `${HF}/TIGER-Lab/MMEB-Leaderboard` }, { model: 'Models', score })) },
 ];
 
-// Exact names only: lower-case alphanumerics, without a trailing run setting such as "(max)".
-export const boardName = (v: string) => v.toLowerCase().replace(/\s*\([^)]*\)\s*$/, '').replace(/\+/g, 'plus').replace(/[^a-z0-9]/g, '');
-export function linkResults(results: readonly BoardResult[], kind: string, candidates: ReadonlyArray<{ id: string; kind: string | null; names: readonly string[] }>): Map<BoardResult, string> {
-  const byName = new Map<string, Set<string>>();
-  for (const c of candidates) if (c.kind === kind) for (const n of c.names) { const k = boardName(n); if (k.length >= 3) byName.set(k, (byName.get(k) ?? new Set()).add(c.id)); }
-  const out = new Map<BoardResult, string>();
-  for (const r of results) { const hits = byName.get(boardName(r.model)); if (hits?.size === 1) out.set(r, [...hits][0] ?? ''); }
+// Exact names only: lower-case alphanumerics, without a trailing maker (", OpenAI") or run
+// setting such as "(max)", and with versions written one way: "Veo 3.0", "Veo v3" and "Veo 3" agree.
+export const boardName = (v: string) => v.toLowerCase().replace(/_/g, ' ').replace(/,\s*[a-z]+\s*$/, '').replace(/\s*\([^)]*\)\s*$/, '').replace(/\bv(?=\d)/g, '').replace(/(\d)\.0(?![\d.])/g, '$1').replace(/\+/g, 'plus').replace(/[^a-z0-9]/g, '');
+export interface LinkCandidate { id: string; kind: string | null; names: readonly string[]; repos?: readonly string[] }
+// Catalogue models with every name, ID slug and route name, and their Hugging Face repositories.
+export async function linkCandidates(db: Database): Promise<LinkCandidate[]> {
+  const repos = new Map<string, string[]>();
+  for (const r of await modelRepos(db)) repos.set(r.model_id, [...repos.get(r.model_id) ?? [], r.repo]);
+  return (await db.prepare(`SELECT g.id,g.kind,json_group_array(n.name) names FROM cat_model_merged g JOIN (SELECT id,name FROM cat_model_merged WHERE name IS NOT NULL
+    UNION SELECT id,substr(id,instr(id,'/')+1) FROM cat_model_merged UNION SELECT model_id,name FROM cat_offerings WHERE model_id IS NOT NULL AND name IS NOT NULL) n ON n.id=g.id GROUP BY g.id`)
+    .all<{ id: string; kind: string | null; names: string }>()).results.map(c => ({ id: c.id, kind: c.kind, names: JSON.parse(c.names) as string[], repos: repos.get(c.id) ?? [] }));
+}
+// A result links to one catalogue model by the first of these that names anything, and only
+// if it names exactly one model: a reviewed alias for the board's kind (and board); a result named
+// "owner/name" equal to a model ID or Hugging Face repository (any kind, so a chat model's
+// repository on a speech board links); that name under the same owner (model lab or
+// repository owner); the exact normalised name of one model of the board's kind.
+// No substring or fuzzy matching: "Veo 3" never links to "Veo 3.1".
+export function linkResults<T extends { model: string }>(results: readonly T[], kind: string, candidates: readonly LinkCandidate[], board = ''): Map<T, string> {
+  const ids = new Set(candidates.map(c => c.id)), add = (m: Map<string, Set<string>>, k: string, id: string) => { if (k.length >= 3) m.set(k, (m.get(k) ?? new Set()).add(id)); };
+  const alias = new Map<string, Set<string>>(), exact = new Map<string, Set<string>>(), owned = new Map<string, Set<string>>(), byName = new Map<string, Set<string>>();
+  for (const a of reviewedAliases) if (a.kind === kind && board.startsWith(a.board ?? '') && ids.has(a.model)) add(alias, boardName(a.name), a.model);
+  for (const c of candidates) {
+    for (const k of [c.id, ...c.repos ?? []]) add(exact, k.toLowerCase(), c.id);
+    if (c.kind !== kind) continue;
+    const owners = new Set([c.id, ...c.repos ?? []].map(k => boardName(k.split('/')[0] ?? '')));
+    for (const n of c.names) { add(byName, boardName(n), c.id); for (const o of owners) add(owned, `${o}/${boardName(n)}`, c.id); }
+  }
+  const out = new Map<T, string>();
+  for (const r of results) {
+    const plain = r.model.trim().replace(/\s*\([^)]*\)\s*$/, ''), [owner, name] = /^([\w.-]+)\/([\w.-]+)$/.exec(plain)?.slice(1) ?? [];
+    const tiers = [alias.get(boardName(r.model)), owner && name ? exact.get(plain.toLowerCase()) : undefined, owner && name ? owned.get(`${boardName(owner)}/${boardName(name)}`) : undefined, byName.get(boardName(r.model))];
+    const hits = tiers.find(t => t?.size);
+    if (hits?.size === 1) out.set(r, [...hits][0] ?? '');
+  }
   return out;
 }
 
@@ -227,16 +255,14 @@ export async function importBoards(db: Database, source: BoardSource, options: O
     const boards = source.parse(data);
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2, '0')).join('');
     const artifact = `catalogue-raw/boards/${hash}.${source.type}`;
-    const candidates = (await db.prepare(`SELECT g.id,g.kind,json_group_array(n.name) names FROM cat_model_merged g JOIN (SELECT id,name FROM cat_model_merged WHERE name IS NOT NULL
-      UNION SELECT id,substr(id,instr(id,'/')+1) FROM cat_model_merged UNION SELECT model_id,name FROM cat_offerings WHERE model_id IS NOT NULL AND name IS NOT NULL) n ON n.id=g.id GROUP BY g.id`)
-      .all<{ id: string; kind: string | null; names: string }>()).results.map(c => ({ id: c.id, kind: c.kind, names: JSON.parse(c.names) as string[] }));
+    const candidates = await linkCandidates(db);
     const prepared = [];
     for (const board of boards) {
       const previous = (await db.prepare('SELECT results FROM cat_boards WHERE id=?1').bind(board.id).all<{ results: number }>()).results[0]?.results ?? 0;
       if (previous > 10 && board.results.length < previous * .5) throw new Error(`${board.id} dropped from ${previous} to ${board.results.length} results; previous results retained.`);
       const keys = new Set<string>();
       for (const r of board.results) { const k = JSON.stringify([r.model, r.variant]); if (keys.has(k)) throw new Error(`${board.id}: duplicate result for ${r.model}.`); keys.add(k); }
-      const links = linkResults(board.results, board.kind, candidates), version = await digest([board.id, board.published_at, board.results.map(r => [r.model, r.variant, r.score, r.ci_lower, r.ci_upper, r.samples])]);
+      const links = linkResults(board.results, board.kind, candidates, board.id), version = await digest([board.id, board.published_at, board.results.map(r => [r.model, r.variant, r.score, r.ci_lower, r.ci_upper, r.samples])]);
       prepared.push({ board, version, links, rows: board.results.map(r => ({ ...r, model_id: links.get(r) ?? null, payload: JSON.stringify(r.payload, (_k, v: unknown) => typeof v === 'bigint' ? Number(v) : v) })) });
     }
     if (bucket && !await bucket.head(artifact)) await bucket.put(artifact, bytes, { httpMetadata: { contentType: { parquet: 'application/vnd.apache.parquet', json: 'application/json', html: 'text/html' }[source.type] } });
