@@ -103,6 +103,17 @@ function metricCell(value: string | null, title: string): HTMLTableCellElement {
   cell.append(element('span', value ? '' : 'metric-unavailable', value ?? 'unknown'));
   return cell;
 }
+// Token prices fill the per-1M-token columns; a model billed in another unit shows
+// that unit's price, input-side rates under Input and output-side rates under Output.
+const shortUnits: Record<string, string> = { 'USD per image': '/image', 'USD per second': '/s', 'USD per 1M characters': '/1M chars', 'USD per page': '/page', 'USD per request': '/request' };
+function priceCell(model: RecommendedModel, side: 'input' | 'output'): HTMLTableCellElement {
+  const cost = model.cost;
+  if (!cost) return metricCell(null, 'No eligible priced route.');
+  const token = side === 'input' ? cost.inputPerMillion : cost.outputPerMillion;
+  if (token !== null) return metricCell(money(token), `${side === 'input' ? 'Input' : 'Output'} price via ${cost.route}.`);
+  const rate = cost.rates.find(r => r.unit in shortUnits && r.kind.startsWith('output') === (side === 'output'));
+  return metricCell(rate ? `${money(rate.amount)}${shortUnits[rate.unit] ?? ''}` : null, rate ? `${rate.unit} (${rate.kind}) via ${cost.route}.` : `No ${side} price on ${cost.route}.`);
+}
 function modelRows(model: RecommendedModel, prefix: string): HTMLTableRowElement[] {
   const row = element('tr', 'model-row'), name = element('th', 'model-cell'); name.scope = 'row';
   const provider = providerIdentity(model), toggle = element('button', 'model-toggle'); toggle.type = 'button';
@@ -117,9 +128,8 @@ function modelRows(model: RecommendedModel, prefix: string): HTMLTableRowElement
   identity.append(text); toggle.append(identity); name.append(toggle);
   row.append(name,
     metricCell(String(model.quality.score), 'Scout’s estimate for this task from the cited benchmark standings, out of 100. Not measured accuracy.'),
-    // Per-token list prices on the model's cheapest eligible route.
-    metricCell(model.cost ? money(model.cost.inputPerMillion) : null, model.cost ? `Input price via ${model.cost.route}.` : 'No eligible priced route.'),
-    metricCell(model.cost ? money(model.cost.outputPerMillion) : null, model.cost ? `Output price via ${model.cost.route}.` : 'No eligible priced route.'),
+    // List prices on the route used for the cost estimate.
+    priceCell(model, 'input'), priceCell(model, 'output'),
     metricCell(model.recency ? releaseDate(model.recency.released) : null, model.recency ? `Released ${age(model.recency.ageDays)}.` : 'Release date not recorded.'));
   const detail = element('tr', 'model-detail'), cell = element('td', 'model-detail-cell'); cell.colSpan = 5; detail.id = `${prefix}-${model.rank}`; detail.hidden = true;
   const body = element('div', 'model-evidence');
@@ -140,7 +150,7 @@ function modelRows(model: RecommendedModel, prefix: string): HTMLTableRowElement
     }
     body.append(grid);
   } else body.append(element('p', 'price-detail', 'No benchmark results cited; the quality estimate is Scout’s judgement.'));
-  if (model.cost) body.append(element('p', 'price-detail', `Prices are for ${model.cost.route}, the cheapest eligible route.`));
+  if (model.cost) body.append(element('p', 'price-detail', `Prices are for ${model.cost.route}, the cheapest eligible route: about ${money(model.cost.usdPer1kTasks)} per 1,000 tasks for the estimated workload${model.cost.unpriced.length ? `, not counting ${model.cost.unpriced.join(', ')}, which this route does not price` : ''}.`));
   if (model.latency) body.append(element('p', 'price-detail', `${model.latency.firstTokenSeconds.toFixed(1)}s to first token, ${model.latency.tokensPerSecond} tokens per second${model.latency.source ? ` (${model.latency.source})` : ''}. Endpoint performance may differ.`));
   cell.append(body); detail.append(cell);
   toggle.addEventListener('click', () => { detail.hidden = !detail.hidden; toggle.setAttribute('aria-expanded', String(!detail.hidden)); row.dataset.expanded = String(!detail.hidden); });
@@ -149,12 +159,12 @@ function modelRows(model: RecommendedModel, prefix: string): HTMLTableRowElement
 }
 function recommendationView(answer: Recommendation, item: HTMLLIElement) {
   const table = element('table', 'data-table model-table agent-table'), head = element('thead'), header = element('tr');
-  for (const [label, unit] of [['Model', ''], ['Quality', 'estimate / 100'], ['Input', '$ / 1M tokens'], ['Output', '$ / 1M tokens'], ['Released', 'recency']] as const) {
+  for (const [label, unit] of [['Model', ''], ['Quality', 'estimate / 100'], ['Input', '$ / 1M tokens unless marked'], ['Output', '$ / 1M tokens unless marked'], ['Released', 'recency']] as const) {
     const th = element('th', label === 'Model' ? 'model-column' : 'numeric-column', label); th.scope = 'col';
     if (unit) th.append(element('span', 'column-unit', unit));
     header.append(th);
   }
-  head.append(header); table.append(element('caption', 'sr-only', 'Five recommended models, best overall first. Expand a model for its rationale and evidence.'), head);
+  head.append(header); table.append(element('caption', 'sr-only', 'Recommended models, best overall first. Expand a model for its rationale and evidence.'), head);
   const body = element('tbody'), prefix = `m-${epoch}-${conversationList.children.length}`;
   for (const model of answer.models) body.append(...modelRows(model, prefix));
   table.append(body);

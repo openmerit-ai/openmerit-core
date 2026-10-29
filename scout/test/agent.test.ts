@@ -23,7 +23,9 @@ const models: ModelRecord[] = [
 const catalogue: Catalogue = {
   version: 'test', models,
   benchmarks: [{ id: 'b1', name: 'Bench One', tags: [], source: 't', description: '', releaseDate: null, models: 3 }, { id: 'b2', name: 'Bench Two', tags: [], source: 't', description: '', releaseDate: null, models: 1 }],
+  boards: [],
   semanticBenchmarks: async () => ['b1'],
+  search: { bm25: async () => [], embedding: async () => [] },
 };
 const brief = { input: { text: 'Invoices', source: 'stated' as const }, work: { text: 'Extract', source: 'stated' as const }, output: { text: 'JSON', source: 'stated' as const }, criteria: { text: '', source: 'missing' as const }, constraints: { text: '', source: 'missing' as const } };
 const pick = (modelId: string, quality: number, evidence: string[] = []) => ({ modelId, role: 'r', quality, evidence, rationale: 'why' });
@@ -37,7 +39,8 @@ test('a shortlist is priced on the cheapest route that meets the constraints, wi
   const [alpha] = result.models;
   assert.ok(alpha);
   // Vision route: (2000 × $3 + 500 × $10) / 1M tokens × 1,000 tasks = $11.
-  assert.deepEqual(alpha.cost, { usdPer1kTasks: 11, inputPerMillion: 3, outputPerMillion: 10, route: 'Vision' });
+  assert.deepEqual(alpha.cost, { usdPer1kTasks: 11, route: 'Vision', inputPerMillion: 3, outputPerMillion: 10, unpriced: [],
+    rates: [{ unit: 'USD per 1M tokens', kind: 'input', amount: 3 }, { unit: 'USD per 1M tokens', kind: 'output', amount: 10 }] });
   // First answer token after 2 s, then 500 tokens at 100 tokens per second.
   assert.deepEqual(alpha.latency, { seconds: 7, firstTokenSeconds: 2, tokensPerSecond: 100, source: null });
   assert.deepEqual(alpha.recency, { released: '2026-09-01', ageDays: 56 });

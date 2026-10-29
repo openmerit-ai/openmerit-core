@@ -5,8 +5,9 @@ import { createIndex, indexStatus } from './rank.mjs';
 import { relevantProfiles } from './specialists.mjs';
 import { prepareEligibility } from './eligibility.mjs';
 import {fieldDefinitions} from './constraints.mjs';
-import {stageProjection} from './projection.mjs';
-import {stageEvidence,verifyEvidenceReady} from './evidence-search.mjs';
+import {stageProjection,projectionRows} from './projection.mjs';
+import {stageEvidence,verifyEvidenceReady,embed} from './evidence-search.mjs';
+import {stageAgentCatalogue} from './agent-projection.ts';
 
 export function shardFor(id) {
   let hash=2166136261;for(const c of id)hash=Math.imul(hash^c.charCodeAt(0),16777619);
@@ -128,6 +129,11 @@ export async function stageCatalogue(bucket,records,previous,options={}) {
     const specialistPacks=await stageSpecialistPacks(bucket,snapshot);
     const {models,catalogue,specialists,benchmarkMethodologies,benchmarkDescriptions,research,researchPending,researchState,searchIndex,...core}=snapshot;
     const manifest={...core,servingEngine:'evidence',projection,metadataDefinitions:fieldDefinitions(directory),selectionVocabulary:directory.vocabulary,evidenceIndex,specialistProfiles:undefined,benchmarks:core.benchmarks.map(({research,methodologySelection,definition,...b})=>b),publicStatus:status,shards,profileKeys,specialistPacks,recordsKey,publication};
+    // The agent's catalogue of every model kind and its search index, in D1 and Vectorize
+    // for this version (agent-projection.ts). A failure leaves the agent on chat records only.
+    try{manifest.agentCatalogue=await stageAgentCatalogue(options.db,publication.id,manifest,projectionRows(snapshot,directory).models,{vectorize:options.vectorize,cache:{get:key=>getJSON(bucket,key),put:(key,value)=>putJSON(bucket,key,value)},
+      keep:previous?.publication?.id?[previous.publication.id]:[],...(options.apiKey?{embed:texts=>embed(texts,{apiKey:options.apiKey,fetcher:options.fetcher,timeoutMs:30000})}:{})});}
+    catch(error){manifest.agentCatalogue={error:String(error?.message??error).slice(0,300)};console.error('scout agent catalogue not staged',manifest.agentCatalogue.error);}
     const key=`manifests/${publication.id}.json`;await putJSON(bucket,key,manifest);return {key,publication,previousVersion:previous?.publication?.id??null};
   }
   // Request-sized materialized pools avoid hundreds of remote point reads.

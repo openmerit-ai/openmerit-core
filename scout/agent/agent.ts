@@ -2,7 +2,6 @@
 // keeps its transcript in this object's SQLite; PiHarness wakes the object to
 // finish interrupted work. Each turn ends with clarifying questions or a shortlist.
 import { DurableObject } from 'cloudflare:workers';
-import { createModels } from '@earendil-works/pi-ai/models';
 import { createRegistry, Harness } from '@earendil-works/pi-durable';
 import { PiHarness } from 'agents/harness/pi';
 import { Lifecycle } from 'agents/lifecycle';
@@ -10,17 +9,17 @@ import { createAI } from 'agents/models/pi-ai';
 import { webSearchTool } from 'agents/websearch/pi';
 import { embed } from '../evidence-search.mjs';
 import { loadCatalogue, type Catalogue, type CatalogueBindings } from './catalogue.ts';
+import { agentModels, defaultAgentModel, openAIModelId } from './model.ts';
 import { preamble, sessionSection } from './prompt.ts';
 import { scoutTools, withProgress, type ToolHost } from './tools.ts';
 import { turnText, type AgentState, type TurnAnswer, type TurnRequest } from './turn.ts';
 
 export interface AgentEnv extends CatalogueBindings {
   AI: Ai;
-  // Workers AI (@cf/…) or AI Gateway catalogue (<provider>/<id>) model for the agent itself.
+  // openai/<id> (OpenAI with OPENAI_API_KEY), or a Workers AI (@cf/…) or AI Gateway catalogue model.
   SCOUT_AGENT_MODEL?: string;
   SCOUT_AGENT_WEB_SEARCH?: string;
 }
-export const defaultAgentModel = '@cf/zai-org/glm-5.3';
 const maxClarificationRounds = 2;
 
 // Published catalogues change twice a day; one load serves every conversation in this isolate for a while.
@@ -38,6 +37,7 @@ function catalogueFor(env: AgentEnv): Promise<Catalogue> {
 
 export class ScoutAgent extends DurableObject<AgentEnv> {
   readonly ai = createAI({ binding: this.env.AI });
+  readonly agentModels = agentModels(this.env.OPENAI_API_KEY);
   readonly registry = createRegistry();
   progressLog: string[] = [];
 
@@ -64,12 +64,16 @@ export class ScoutAgent extends DurableObject<AgentEnv> {
         sections: [
           { key: 'preamble', render: () => preamble, tag: false },
           { key: 'today', render: () => new Date().toISOString().slice(0, 10) },
-          { key: 'catalogue', render: async () => { const c = await this.host.catalogue(); return `${c.models.length} models and ${c.benchmarks.length} benchmarks with results (catalogue ${c.version}).`; } },
+          { key: 'catalogue', render: async () => {
+            const c = await this.host.catalogue(), kinds = new Map<string, number>();
+            for (const m of c.models) kinds.set(m.kind ?? 'unknown', (kinds.get(m.kind ?? 'unknown') ?? 0) + 1);
+            return `${c.models.length} models (${[...kinds].map(([k, n]) => `${n} ${k}`).join(', ')}), ${c.benchmarks.length} chat benchmarks and ${c.boards.length} leaderboards with results (catalogue ${c.version}).`;
+          } },
           { key: 'session', render: async () => sessionSection({ skipped: !!(await this.ctx.storage.get<boolean>('skipped')), rounds: (await this.ctx.storage.get<number>('rounds')) ?? 0, maxRounds: maxClarificationRounds }) },
         ],
         tools,
       });
-      const models = createModels();
+      const { models } = this.agentModels;
       models.setProvider(this.ai.provider);
       return Harness.open(storage, {
         models, registry: this.registry, onWake,
@@ -77,8 +81,13 @@ export class ScoutAgent extends DurableObject<AgentEnv> {
         onReport: report => console.warn('scout-agent report', (report as { type?: string }).type),
       }, context);
     },
-    defaults: { model: this.ai((this.env.SCOUT_AGENT_MODEL || defaultAgentModel) as Parameters<typeof this.ai>[0]), thinkingLevel: 'low' },
+    defaults: { model: this.model(this.env.SCOUT_AGENT_MODEL || defaultAgentModel), thinkingLevel: 'low' },
   });
+
+  model(spec: string) {
+    const openai = openAIModelId(spec);
+    return openai ? this.agentModels.openai(openai) : this.ai(spec as Parameters<typeof this.ai>[0]);
+  }
 
   readonly lifecycle = Lifecycle.install(this).use(this.harness);
 
