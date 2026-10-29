@@ -66,6 +66,19 @@ test('offering rebuild keeps a route together when its source listings cross a p
     { name: 'Shared', context: 9000, max_output: 700, sources: '["modelsdev","litellm"]' });
   assert.equal(one(db, "SELECT count(*) n FROM cat_offerings WHERE provider_model_id='m-0000' OR provider_model_id='m-0998'").n, 2);
   assert.deepEqual(await rebuildOfferings(db), stats, 'a repeated rebuild neither skips nor duplicates rows');
+  // A timed-out step keeps running beside its retry: a whole rebuild runs between the
+  // first one's staging and its swap. Neither may clear the other's rows.
+  let staging = false, overlapped = false;
+  const overlapping = { prepare: (sql: string) => { if (sql.startsWith('INSERT INTO cat_offering_stage')) staging = true; return db.prepare(sql); },
+    batch: async (statements: Parameters<typeof db.batch>[0]) => {
+      const out = await db.batch(statements);
+      if (staging && !overlapped) { overlapped = true; assert.deepEqual(await rebuildOfferings(db), stats); }
+      return out;
+    } };
+  assert.deepEqual(await rebuildOfferings(overlapping), stats);
+  assert.ok(overlapped);
+  assert.equal(one(db, 'SELECT count(*) n FROM cat_offerings').n, 1000, 'the outer rebuild swaps in its complete stage');
+  assert.equal(one(db, 'SELECT count(*) n FROM cat_offering_stage').n, 0);
 });
 
 test('re-imports keep unchanged prices open, date changes, withdraw missing routes and restore them', async () => {

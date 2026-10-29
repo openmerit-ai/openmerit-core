@@ -77,7 +77,7 @@ export const catalogueSchema = [
   'CREATE INDEX IF NOT EXISTS cat_hf_models_model ON cat_hf_models(model_id)',
 ];
 // Columns added after a table first shipped; CREATE TABLE IF NOT EXISTS does not add them.
-const addedColumns: Array<[table: string, column: string, type: string]> = [['cat_listings', 'hf_id', 'TEXT'], ['cat_offerings', 'hf_id', 'TEXT'], ['cat_offerings', 'provenance', 'TEXT'], ['cat_offerings', 'conflicts', 'TEXT'], ['cat_offerings', 'kind', 'TEXT']];
+const addedColumns: Array<[table: string, column: string, type: string]> = [['cat_offering_stage', 'run', 'TEXT'], ['cat_model_stage', 'run', 'TEXT'], ['cat_listings', 'hf_id', 'TEXT'], ['cat_offerings', 'hf_id', 'TEXT'], ['cat_offerings', 'provenance', 'TEXT'], ['cat_offerings', 'conflicts', 'TEXT'], ['cat_offerings', 'kind', 'TEXT']];
 
 export const isObject = (v: unknown): v is Json => !!v && typeof v === 'object' && !Array.isArray(v);
 export const obj = (v: unknown): Json => isObject(v) ? v : {};
@@ -919,12 +919,28 @@ export function mergeModel(id: string, record: { source: string } & Partial<Reco
   return merged;
 }
 
+// Each rebuild stages rows under its own token and swaps in only those. A timed-out
+// workflow step keeps running beside its retry; with one shared stage, each cleared the
+// other's rows and swapped in a fraction of the catalogue (29 October 2026). Tokens start
+// with the time, so abandoned rows older than an hour are cleared by the next rebuild.
+async function stageToken(db: Database, table: string): Promise<string> {
+  const now = new Date();
+  await db.prepare(`DELETE FROM ${table} WHERE run IS NULL OR run<?1`).bind(new Date(now.getTime() - 3_600_000).toISOString()).run();
+  return `${now.toISOString()}-${crypto.randomUUID()}`;
+}
+async function swapStage(db: Database, stage: string, target: string, columns: string[], run: string, expected: number): Promise<void> {
+  const staged = (await db.prepare(`SELECT count(*) n FROM ${stage} WHERE run=?1`).bind(run).all<{ n: number }>()).results[0]?.n ?? 0;
+  if (staged !== expected) throw new Error(`${target} rebuild staged ${staged} of ${expected} rows; previous rows retained.`);
+  await db.batch([db.prepare(`DELETE FROM ${target}`), db.prepare(`INSERT INTO ${target} (${columns.join(',')}) SELECT ${extract(columns)} FROM ${stage} WHERE run=?1`).bind(run),
+    db.prepare(`DELETE FROM ${stage} WHERE run=?1`).bind(run)]);
+}
+
 // Merged rows are staged, then swapped in with one batch, so a failed rebuild
 // leaves the previous offerings in place.
 export async function rebuildOfferings(db: Database): Promise<{ offerings: number; conflicts: number; corroborated: number }> {
   await ensureCatalogueSchema(db);
   const columns = ['provider_id', 'provider_model_id', ...offeringFields, 'kind', 'sources', 'provenance', 'conflicts', 'first_seen', 'last_seen'];
-  await db.prepare('DELETE FROM cat_offering_stage').run();
+  const run = await stageToken(db, 'cat_offering_stage');
   const stats = { offerings: 0, conflicts: 0, corroborated: 0 };
   let cursor = ['', '', ''], group: SourceListing[] = [];
   for (;;) {
@@ -937,7 +953,7 @@ export async function rebuildOfferings(db: Database): Promise<{ offerings: numbe
     }
     // Carry the unfinished route across pages: its other sources may follow.
     if (results.length < 1000 && group.length) { rows.push(mergeListings(group)); group = []; }
-    await chunked(db, 'INSERT INTO cat_offering_stage (value) SELECT value FROM json_each(?1)', rows, []);
+    await chunked(db, 'INSERT INTO cat_offering_stage (value,run) SELECT value,?1 FROM json_each(?2)', rows, [run]);
     stats.offerings += rows.length;
     stats.conflicts += rows.filter(r => r.conflicts).length;
     stats.corroborated += rows.filter(r => Object.values(JSON.parse(r.provenance) as Record<string, string[]>).some(by => by.length > 1)).length;
@@ -945,7 +961,7 @@ export async function rebuildOfferings(db: Database): Promise<{ offerings: numbe
     if (results.length < 1000 || !last) break;
     cursor = [last.provider_id, last.provider_model_id, last.source];
   }
-  await db.batch([db.prepare('DELETE FROM cat_offerings'), db.prepare(`INSERT INTO cat_offerings (${columns.join(',')}) SELECT ${extract(columns)} FROM cat_offering_stage`), db.prepare('DELETE FROM cat_offering_stage')]);
+  await swapStage(db, 'cat_offering_stage', 'cat_offerings', columns, run, stats.offerings);
   return stats;
 }
 
@@ -960,9 +976,9 @@ export async function rebuildModels(db: Database): Promise<{ models: number; con
   for (const r of [...routes, ...epoch]) { const sources = linked.get(r.model_id) ?? new Map(); sources.set(r.source, [...sources.get(r.source) ?? [], r]); linked.set(r.model_id, sources); }
   const rows = records.map(({ id, basis, ...record }) => mergeModel(id, { ...record, kind: modelKind(record.type), source: basis.slice(0, basis.indexOf('-')) }, [...linked.get(id) ?? []].map(([source, list]) => routeVoice(source, list))));
   const columns = ['id', ...modelFields, 'sources', 'provenance', 'conflicts'];
-  await db.prepare('DELETE FROM cat_model_stage').run();
-  await chunked(db, 'INSERT INTO cat_model_stage (value) SELECT value FROM json_each(?1)', rows, []);
-  await db.batch([db.prepare('DELETE FROM cat_model_merged'), db.prepare(`INSERT INTO cat_model_merged (${columns.join(',')}) SELECT ${extract(columns)} FROM cat_model_stage`), db.prepare('DELETE FROM cat_model_stage')]);
+  const run = await stageToken(db, 'cat_model_stage');
+  await chunked(db, 'INSERT INTO cat_model_stage (value,run) SELECT value,?1 FROM json_each(?2)', rows, [run]);
+  await swapStage(db, 'cat_model_stage', 'cat_model_merged', columns, run, rows.length);
   const corroborated = rows.filter(r => Object.values(JSON.parse(r.provenance) as Record<string, string[]>).some(by => by.length > 1)).length;
   return { models: rows.length, conflicts: rows.filter(r => r.conflicts).length, corroborated };
 }

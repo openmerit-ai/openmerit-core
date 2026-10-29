@@ -102,8 +102,9 @@ export async function runRefresh(env,step,id) {
           if(progress.complete||progress.error||progress.rateLimited)break;
         }catch{break;}
       }
+      // A timed-out step keeps running beside its retry; the long timeout keeps a slow D1 from starting one.
       for(const [name,rebuild] of [['offerings',rebuildOfferings],['models',rebuildModels]])
-        try{await step.do(`catalogue-${name}`,{retries:{limit:1,delay:'30 seconds'},timeout:'10 minutes'},()=>rebuild(env.SCOUT_INDEX));}catch{}
+        try{await step.do(`catalogue-${name}`,{retries:{limit:1,delay:'30 seconds'},timeout:'30 minutes'},()=>rebuild(env.SCOUT_INDEX));}catch{}
       // One compact final-results response per step; never hold every MTEB
       // leaderboard in memory or download its benchmark datasets/results dump.
       let mteb=[];
