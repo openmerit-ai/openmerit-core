@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## More Artificial Analysis evaluations as evidence — source only, 29 October 2026
+
+Reviewed ranking and coverage claims against the change that reads HealthBench, HealthBench Professional, Humanity’s Last Exam Diamond, CritPt v2 Hard, FrontierCode 2.0 and Code2Video-AA from the Artificial Analysis page Scout already collects. The homepage FAQ names no individual benchmarks or evaluation counts, so no FAQ copy changes. The Scout guide's source table gives the new count.
+
 ## Decision-model leaderboards and shortlist tie-break — source only, 28 October 2026
 
 Reviewed ranking and coverage claims against the change that stores the Artificial Analysis Decision Index and JevBench results for decision models and uses them to break equal-cost ties in task-fit shortlists. The homepage FAQ names no benchmark sources, decision models or shortlist ordering, so no FAQ copy changes. The Scout guide describes the tie-break in its task-fit paragraph and the Vercel decision routes row.

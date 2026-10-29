@@ -1,5 +1,16 @@
 # Scout architecture and operations
 
+## More Artificial Analysis evaluations (not yet deployed)
+
+The models leaderboard page Scout already reads carries scores for six evaluations that `aaBenchmarks` did not map. They are now read as their own series, with no new download:
+
+- Accuracies (0–1): Humanity’s Last Exam Diamond (115 configurations), CritPt v2 Hard (84), FrontierCode 2.0 (77), HealthBench (11) and HealthBench Professional (11).
+- Code2Video-AA (23) is an Elo-style rating, so it joins GDPval-AA and AA-3D in `aaRatings` and becomes the expected win rate against the median-rated model.
+
+Newer versions stay separate from the earlier series (`aa:hle`, `aa:critpt`, `aa:frontiercode`), so their scores are never merged; the refresh's family step can link them as correlated evidence, and the names share words to make that candidate search find them. The page carries no descriptions, as for the other recent AA series; the refresh's benchmark research supplies them, as it did for FrontierCode, Harvey LAB-AA and MLCR. Global-MMLU-Lite appears only on its own evaluation page, with 27 models, and is not read.
+
+**Local replay, 29 October**, matching AA configuration names already resolved in the published catalogue: HLE Diamond 98 rows for 55 models, CritPt v2 Hard 77 for 35, FrontierCode 2.0 70 for 31, Code2Video 22 for 22, HealthBench and HealthBench Professional 11 each for 11 models. A live refresh may resolve more names.
+
 ## Publisher subrequest limit (not yet deployed)
 
 **Second manual run, 29 October:** after `d9b07b0` (publisher `1b543351`), run `manual-20261029-fixes-1` reached the Hugging Face provider crawl for the first time. It collected all 130 pages (64,575 staged repositories) and applied 33,600 of them before step `catalogue-hub-providers-65` failed with "Too many API requests by single Worker invocation". Cloudflare counts subrequests per Worker invocation, and one Workflow invocation runs many steps, so every later step failed at once on the same budget: the offerings and model rebuilds, every MTEB import, all media and decision boards, the public-feed collection and `record-failure`. The run errored without publishing; snapshot `8959ded6` stays live, and `health.json` still reads "running" until the next run, because the 55-minute lease expired normally but the failure record was never written. The crawl's durable cursor keeps the 33,600 applied repositories, so the next run resumes from there.

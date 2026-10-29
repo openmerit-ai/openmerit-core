@@ -245,11 +245,14 @@ const aaBenchmarks = {
   aime2025: ['aime-2025', 'AIME 2025 · AA'], automationbench: ['automationbench-aa', 'AutomationBench · AA'], gdpPdf: ['gdp-pdf', 'GDP.pdf · AA'],
   terminalBenchScience: ['terminal-bench-science', 'Terminal-Bench-Science · AA'], frontiercode: ['frontiercode', 'FrontierCode · AA'],
   mlcr: ['mlcr-aa', 'MLCR-AA Medical Long Context Reasoning'], harveyLab: ['harvey-lab-aa', 'Harvey LAB-AA'], enterpriseOpsGym: ['enterprise-ops-gym-aa', 'EnterpriseOps-Gym · AA'],
+  // Newer versions are separate series; the refresh links each to its earlier version's family.
+  hleDiamond: ['hle-diamond', 'Humanity’s Last Exam Diamond · AA'], critptV2Hard: ['critpt-v2-hard', 'CritPt v2 Hard · AA'], frontiercode20: ['frontiercode-2-0', 'FrontierCode 2.0 · AA'],
+  healthbench: ['healthbench', 'HealthBench · AA'], healthbenchProfessional: ['healthbench-professional', 'HealthBench Professional · AA'],
 };
 // Elo-style AA ratings become the expected win rate against the median-rated
 // model, as for Arena. AA-Briefcase is not read: dozens of exact zeros look like
 // placeholders rather than ratings.
-const aaRatings = { gdpvalRating: ['gdpval-aa-normalized', 'GDPval-AA · win rate vs median model'], aa3d: ['aa-3d', 'AA-3D · win rate vs median model'] };
+const aaRatings = { gdpvalRating: ['gdpval-aa-normalized', 'GDPval-AA · win rate vs median model'], aa3d: ['aa-3d', 'AA-3D · win rate vs median model'], code2video: ['code2video-aa', 'Code2Video-AA · win rate vs median model'] };
 
 export const bfclMetrics = [
   ['nonLive', 'Non-Live AST Acc', 'BFCL v4 single-turn'],
