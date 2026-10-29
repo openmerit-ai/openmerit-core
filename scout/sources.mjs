@@ -29,6 +29,8 @@ export const sourceURLs = {
   arenaFactuality: 'https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/text_factuality/latest-00000-of-00001.parquet',
   // LLM Stats' public API: its 100 most-reported benchmarks with every model's score.
   vendor: 'https://api.llm-stats.com/leaderboard/benchmarks/matrix?top_n=100',
+  opencompass: 'https://cdn.opencompass.org.cn/assets/lm/data-lm-ability_official.json',
+  bridge: 'https://huggingface.co/spaces/YLab-Open/BRIDGE-Medical-Leaderboard/resolve/main/leaderboards/Zero-Shot_leaderboard.json',
   bfclMethodology: 'https://gorilla.cs.berkeley.edu/leaderboard',
   bfclMemory: 'https://gorilla.cs.berkeley.edu/blogs/16_bfcl_v4_memory.html',
 };
@@ -164,6 +166,136 @@ export async function readSeal(read) {
   }
   if (found.length < sealBoards.length / 2) throw new Error('Most Scale SEAL boards were unavailable.');
   return { boards: found, missing };
+}
+const isoDate = value => { const m = String(value ?? '').match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/); return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : null; };
+// LiveBench 2.0 grades the work models hand back. Each category is one column of its
+// published table; the overall score is a weighted average of them and is not kept.
+export function parseLiveBench(release, csv, categories, breakdown) {
+  const rows = parseCSV(csv), columns = Object.entries(categories ?? {}).filter(([name]) => !name.startsWith('_'))
+    .map(([name, cols]) => ({ name, column: Array.isArray(cols) && cols.length === 1 ? cols[0] : null, parts: (breakdown?.[name]?.parts ?? []).filter(p => typeof p?.name === 'string').map(p => typeof p.gloss === 'string' ? `${p.name} (${p.gloss.replace(/\.$/, '')})` : p.name) }));
+  if (!/^\d{8}$/.test(release) || columns.length < 3 || rows.length < 10 || !('model' in rows[0]) || columns.some(c => typeof c.column !== 'string' || !(c.column in rows[0]))) throw new Error('LiveBench format changed.');
+  return { release, publishedAt: `${release.slice(0, 4)}-${release.slice(4, 6)}-${release.slice(6)}`, categories: columns, rows: rows.map(r => ({ model: r.model, scores: Object.fromEntries(columns.map(c => [c.column, number(r[c.column])])) })) };
+}
+export async function readLiveBench(read) {
+  const home = await read('https://livebench.ai/', 'text', 200_000), script = home.match(/src="\.?\/?(static\/js\/main\.\w+\.js)"/)?.[1];
+  if (!script) throw new Error('LiveBench script link missing.');
+  // The bundle lists release IDs as a literal array; it is searched as text and never run.
+  const bundle = await read(`https://livebench.ai/${script}`, 'text', 3_000_000);
+  const release = [...bundle.matchAll(/\[((?:"20\d{6}",?)+)\]/g)].flatMap(m => m[1].match(/\d{8}/g)).sort().at(-1);
+  if (!release) throw new Error('LiveBench release missing.');
+  const base = `https://livebench.ai/data/${release}`;
+  const [csv, categories, breakdown] = await Promise.all([read(`${base}/table.csv`, 'text', 1_000_000), read(`${base}/categories.json`, 'json', 100_000), read(`${base}/breakdown.json`, 'json', 1_000_000).catch(() => null)]);
+  return parseLiveBench(release, csv, categories, breakdown);
+}
+// τ-bench (Sierra). Only Sierra's own standard text runs on τ²-bench 1.x are kept: developer
+// submissions are self-reported (LLM Stats supplies those as vendor series), custom entries are
+// agent systems rather than models, and older harness versions score differently. Banking
+// results depend on the retrieval setup, so only the shared AllTools configuration is kept.
+export const tauDomains = [
+  ['airline', 'τ²-Bench Airline', 'Customer-service agent conversations with a simulated user in an airline domain: the agent follows a booking-change and refund policy through tool calls.'],
+  ['retail', 'τ²-Bench Retail', 'Customer-service agent conversations with a simulated user in a retail domain: orders, returns and exchanges under a written policy, through tool calls.'],
+  ['telecom', 'τ²-Bench Telecom', 'Technical-support conversations where both the agent and a simulated user act on a shared telecom environment with tools.'],
+  ['banking_knowledge', 'τ-Bench Banking', 'Banking customer-service conversations where the agent must retrieve from about 700 policy documents while acting through tools (AllTools retrieval configuration).'],
+];
+export function parseTau(submissions) {
+  const runs = submissions.filter(s => s?.submitting_organization === 'Sierra' && s.submission_type === 'standard' && (s.modality ?? 'text') === 'text' && typeof s.model_name === 'string' && /^v?1\./.test(s.methodology?.tau2_bench_version ?? ''));
+  const domains = tauDomains.map(([id, name, description]) => ({ id, name, description, rows: runs.flatMap(s => {
+    const r = s.results?.[id];
+    return Number.isFinite(r?.pass_1) && r.pass_1 >= 0 && r.pass_1 <= 100 && (id !== 'banking_knowledge' || r.retrieval_config === 'alltools')
+      ? [{ model: s.reasoning_effort ? `${s.model_name} (${s.reasoning_effort})` : s.model_name, score: r.pass_1 / 100, observedAt: isoDate(s.methodology?.evaluation_date) }] : [];
+  }) })).filter(d => d.rows.length >= 5);
+  if (!domains.length) throw new Error('τ-bench format changed.');
+  return { domains, publishedAt: runs.map(s => isoDate(s.submission_date)).filter(Boolean).sort().at(-1) ?? null };
+}
+export async function readTau(read) {
+  const base = 'https://sierra-tau-bench-public.s3.us-west-2.amazonaws.com/submissions', manifest = await read(`${base}/manifest.json`, 'json', 200_000);
+  if (!Array.isArray(manifest?.submissions)) throw new Error('τ-bench manifest format changed.');
+  // Submission IDs name the submitter; each submission's own fields are checked again when parsed.
+  const ids = manifest.submissions.filter(id => typeof id === 'string' && /^[\w.-]+_sierra_\d{4}-\d{2}-\d{2}$/.test(id));
+  const found = [];
+  for (let i = 0; i < ids.length; i += 4) for (const r of await Promise.allSettled(ids.slice(i, i + 4).map(id => read(`${base}/${id}/submission.json`, 'json', 200_000)))) if (r.status === 'fulfilled') found.push(r.value);
+  if (found.length < ids.length / 2) throw new Error('Most τ-bench submissions were unavailable.');
+  return parseTau(found);
+}
+// OpenCompass text-only ability boards. The overall average is a composite; the safety
+// board is left out because a high score there means refusal and calibration, not task skill.
+export const openCompassAbilities = [['Knowledge', 'knowledge'], ['Abstraction', 'abstraction'], ['Reasoning', 'reasoning'], ['Interaction', 'interaction'], ['Agent', 'agent']];
+export function parseOpenCompass(data) {
+  const base = data?.modelBase;
+  if (!base || typeof base !== 'object') throw new Error('OpenCompass format changed.');
+  const words = key => key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\bAnd\b/g, 'and');
+  const abilities = openCompassAbilities.map(([name, id]) => {
+    const table = data[`${name}Table`];
+    if (!Array.isArray(table)) throw new Error('OpenCompass format changed.');
+    const parts = Object.keys(table[0] ?? {}).filter(k => !['key', 'Average', 'thinkingTokenCost', 'responseTokenCost', 'rank_change'].includes(k)).map(words);
+    return { id, name, parts, rows: table.flatMap(r => base[r?.key] && typeof base[r.key].model === 'string' && Number.isFinite(r.Average) && r.Average >= 0 && r.Average <= 100
+      ? [{ model: base[r.key].model, key: r.key, score: r.Average / 100, observedAt: isoDate(base[r.key].date) }] : []) };
+  });
+  if (abilities.some(a => a.rows.length < 10)) throw new Error('Too few OpenCompass results.');
+  return { abilities, publishedAt: abilities.flatMap(a => a.rows.map(r => r.observedAt)).filter(Boolean).sort().at(-1) ?? null };
+}
+// HELM Arabic (Stanford CRFM): the mean of its Arabic scenario scores, all on a 0–1 scale. The newest
+// release is found from the public bucket listing. MedHELM is not read: its newest release has older
+// models only and its headline is a win rate within that small pool.
+const helmBase = 'https://storage.googleapis.com/crfm-helm-public/arabic/benchmark_output/releases';
+export function parseHELM(release, summary, schema, table) {
+  const header = table?.header?.map(h => h?.value), rows = table?.rows;
+  if (header?.[0] !== 'Model' || header[1] !== 'Mean score' || header.length < 5 || !Array.isArray(rows) || !Array.isArray(schema?.models)) throw new Error('HELM Arabic format changed.');
+  const ids = new Map(schema.models.filter(m => typeof m?.display_name === 'string' && typeof m.name === 'string').map(m => [m.display_name, m.name]));
+  // A model without every scenario has a mean over fewer tests, so it is left out.
+  const kept = rows.flatMap(r => { const values = r.slice(1).map(c => c?.value);
+    return typeof r[0]?.value === 'string' && values.length === header.length - 1 && values.every(v => Number.isFinite(v) && v >= 0 && v <= 1) ? [{ name: r[0].value, id: ids.get(r[0].value) ?? null, score: values[0] }] : []; });
+  if (kept.length < 10) throw new Error('Too few HELM Arabic results.');
+  return { release, publishedAt: isoDate(summary?.date), scenarios: header.slice(2).map(h => String(h).replace(/ - \w+$/, '')), rows: kept };
+}
+export async function readHELM(read) {
+  const listing = await read('https://storage.googleapis.com/storage/v1/b/crfm-helm-public/o?prefix=arabic/benchmark_output/releases/&delimiter=/', 'json', 100_000);
+  const version = v => v.slice(1).split('.').map(Number);
+  const release = (listing?.prefixes ?? []).map(p => String(p).match(/\/(v\d+\.\d+\.\d+)\/$/)?.[1]).filter(Boolean)
+    .sort((a, b) => version(a).reduce((d, n, i) => d || n - version(b)[i], 0)).at(-1);
+  if (!release) throw new Error('HELM Arabic release missing.');
+  const [summary, schema, table] = await Promise.all([read(`${helmBase}/${release}/summary.json`, 'json', 100_000), read(`${helmBase}/${release}/schema.json`, 'json', 1_000_000), read(`${helmBase}/${release}/groups/json/arabic_scenarios_accuracy.json`, 'json', 4_000_000)]);
+  return parseHELM(release, summary, schema, table);
+}
+// BRIDGE Medical (YLab), zero-shot board: column-oriented JSON, each column mapping a row index
+// to its value. Only the average over its clinical-text tasks is kept.
+export function parseBRIDGE(data) {
+  const models = data?.Model, average = data?.['Average Performance'];
+  if (!models || typeof models !== 'object' || !average || typeof average !== 'object') throw new Error('BRIDGE format changed.');
+  const rows = Object.entries(models).flatMap(([i, html]) => { const name = decodeEntities(String(html).replace(/<[^>]*>/g, '')).trim(), score = number(average[i]);
+    return name && score !== null && score >= 0 && score <= 100 ? [{ name, score: score / 100 }] : []; });
+  if (rows.length < 20) throw new Error('Too few BRIDGE results.');
+  return rows;
+}
+// SuperCLUE (Chinese general board) publishes about every two months as a spreadsheet named
+// by month. The six months before the refresh are tried and the newest is read. Only its
+// first sheet's inline cells are read; the total is a composite and is not kept.
+export const superclueCategories = [['数学推理', 'math', 'Mathematical reasoning'], ['幻觉控制', 'hallucination', 'Hallucination control'], ['科学推理', 'science', 'Scientific reasoning'],
+  ['精确指令遵循', 'instructions', 'Precise instruction following'], ['智能体编程', 'agentic-coding', 'Agentic coding'], ['智能体任务规划', 'agentic-planning', 'Agentic task planning']];
+export const superclueURL = (year, month) => `https://www.superclueai.com/data/generalboard/${year}${encodeURIComponent('年')}${month}${encodeURIComponent('月')}.xlsx`;
+export function parseSuperCLUE(xlsx) {
+  let size = 0;
+  const files = unzipSync(xlsx, { filter: f => { if ((size += f.originalSize) > 4_000_000) throw new Error('Expanded source exceeded size limit.'); return ['xl/worksheets/sheet1.xml', 'docProps/core.xml'].includes(f.name); } });
+  const xml = files['xl/worksheets/sheet1.xml'] ? strFromU8(files['xl/worksheets/sheet1.xml']) : '';
+  const text = v => decodeEntities(v.replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&#x([\da-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))).trim();
+  const rows = [...xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)].map(m => Object.fromEntries([...m[1].matchAll(/<c r="([A-Z]+)\d+"[^>]*?(?:\/>|>([\s\S]*?)<\/c>)/g)]
+    .map(c => [c[1], text((c[2] ?? '').match(/<[tv](?:\s[^>]*)?>([\s\S]*?)<\/[tv]>/)?.[1] ?? '')])));
+  const header = rows.shift() ?? {}, column = label => Object.keys(header).find(k => header[k] === label);
+  const model = column('模型名称'), columns = superclueCategories.map(([label]) => column(label));
+  if (!model || columns.some(c => !c)) throw new Error('SuperCLUE format changed.');
+  const kept = rows.filter(r => r[model]).map(r => ({ model: r[model], scores: Object.fromEntries(superclueCategories.map(([, id], i) => [id, number(r[columns[i]])])) }));
+  if (kept.length < 10) throw new Error('Too few SuperCLUE results.');
+  const created = files['docProps/core.xml'] ? strFromU8(files['docProps/core.xml']).match(/<dcterms:created[^>]*>(\d{4}-\d{2}-\d{2})/)?.[1] ?? null : null;
+  return { rows: kept, publishedAt: created };
+}
+export async function readSuperCLUE(read, now) {
+  const months = Array.from({ length: 6 }, (_, i) => { const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1)); return [d.getUTCFullYear(), d.getUTCMonth() + 1]; });
+  const results = await Promise.allSettled(months.map(([y, m]) => read(superclueURL(y, m), 'zip', 2_000_000)));
+  // Only a month that is not published (404) falls through to an earlier one; any other failure could hide the newest board.
+  const i = results.findIndex(r => r.status === 'fulfilled' || !/ 404:/.test(r.reason?.message));
+  if (i < 0) throw new Error('No SuperCLUE board in the last six months.');
+  if (results[i].status === 'rejected') throw results[i].reason;
+  return { ...parseSuperCLUE(results[i].value), month: `${months[i][0]}-${String(months[i][1]).padStart(2, '0')}`, url: superclueURL(...months[i]) };
 }
 // Developer-reported scores compiled by LLM Stats. Only scores it marks self-reported
 // are kept, on 0–1 or 0–100 scales; Elo-style and unbounded scales are not comparable.
@@ -307,7 +439,7 @@ export function parseBFCL(csv) {
   });
 }
 
-export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, arenaVisionRows, arenaWebdevRows, arenaFactualityRows, vals, seal, vendorScores, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, catalogueSupply, previous, failures = {}, checkedAt = new Date().toISOString() }) {
+export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, arenaVisionRows, arenaWebdevRows, arenaFactualityRows, vals, seal, livebench, tau, opencompass, helm, bridge, superclue, vendorScores, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, catalogueSupply, previous, failures = {}, checkedAt = new Date().toISOString() }) {
   const sources = [], benchmarks = [], observations = new Map();
   const descriptions = benchmarkDescriptions ?? previous?.benchmarkDescriptions ?? {};
   const priorSources = new Map(previous?.sources.map(s => [s.id, s]) ?? []);
@@ -557,6 +689,69 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     }
     return { publishedAt: seal.boards.map(b => b.updated).filter(Boolean).sort().at(-1) ?? null };
   });
+  // The boards below are unrelated evaluations, so each series has its own family. Names lead with
+  // the publisher where the evaluation is its own; only Sierra's τ-bench copies share a name with other publishers'.
+  collect('livebench', 'LiveBench', 'https://livebench.ai/', 'LiveBench 2.0 category scores, graded by LiveBench on long-horizon work models hand back. The overall score is a weighted average of the categories and is not imported. Per-model evaluation dates are not supplied; each series records its release date. Matched by Scout.', () => {
+    if (!livebench) throw new Error('LiveBench unavailable.');
+    for (const c of livebench.categories) {
+      const name = `LiveBench 2.0 · ${c.name}`, url = 'https://livebench.ai/';
+      const benchmark = addBenchmark(`livebench:${c.column}`, name, 'livebench', { title: name, description: `LiveBench 2.0 ${c.name} category, release ${livebench.release}.${c.parts.length ? ` Parts: ${c.parts.join('; ')}.` : ''} Score is the category score LiveBench publishes.`, metric: 'Score / 100', sourceURL: `https://livebench.ai/data/${livebench.release}/table.csv` },
+        { publishedAt: livebench.publishedAt, family: `livebench:${c.column}` });
+      for (const row of livebench.rows) add(row.model, benchmark, row.scores[c.column] === null ? null : row.scores[c.column] / 100, { url, observedAt: null, sourceModel: row.model, metric: 'Score / 100' });
+    }
+    return { publishedAt: livebench.publishedAt };
+  });
+  collect('tau', 'τ-bench (Sierra)', 'https://taubench.com/', 'τ-bench leaderboard submissions run by Sierra on τ²-bench 1.x, text modality. Developer-submitted, custom-agent and older-harness entries are left out. Score is pass^1. Each result keeps its evaluation date.', () => {
+    if (!tau) throw new Error('τ-bench unavailable.');
+    for (const d of tau.domains) {
+      const benchmark = addBenchmark(`tau:${d.id}`, `${d.name} · Sierra`, 'tau', { title: d.name, description: `${d.description} Run by Sierra with a simulated user. Score is pass^1, the share of tasks solved in one trial, averaged over trials.`, metric: 'pass^1 / 100', sourceURL: 'https://sierra-tau-bench-public.s3.us-west-2.amazonaws.com/submissions/manifest.json' },
+        { publishedAt: tau.publishedAt, family: `tau:${d.id}` });
+      for (const row of d.rows) add(row.model, benchmark, row.score, { url: 'https://taubench.com/', observedAt: row.observedAt, sourceModel: row.model, metric: 'pass^1 / 100' });
+    }
+    return { publishedAt: tau.publishedAt };
+  });
+  collect('opencompass', 'OpenCompass', 'https://rank.opencompass.org.cn/leaderboard-llm', 'OpenCompass text-only ability leaderboard, run by Shanghai AI Laboratory. Ability averages only; the overall average and the safety board are not imported. Each result keeps the date OpenCompass records. Matched by Scout.', () => {
+    const board = parseOpenCompass(opencompass);
+    for (const a of board.abilities) {
+      const name = `OpenCompass · ${a.name}`;
+      const benchmark = addBenchmark(`opencompass:${a.id}`, name, 'opencompass', { title: name, description: `OpenCompass ${a.name.toLowerCase()} ability, text-only benchmarks.${a.parts.length ? ` Covers: ${a.parts.join(', ')}.` : ''} Score is the published ability average.`, metric: 'Average / 100', sourceURL: sourceURLs.opencompass },
+        { family: `opencompass:${a.id}` });
+      for (const row of a.rows) add([row.model, row.key].find(n => resolve(n).model) ?? row.model, benchmark, row.score, { url: 'https://rank.opencompass.org.cn/leaderboard-llm', observedAt: row.observedAt, sourceModel: row.model, metric: 'Average / 100' });
+    }
+    return { publishedAt: board.publishedAt };
+  });
+  collect('helm', 'HELM Arabic (Stanford CRFM)', 'https://crfm.stanford.edu/helm/arabic/latest/', 'HELM Arabic leaderboard run by Stanford CRFM. Mean score across its Arabic scenarios; models missing a scenario are left out. Per-model evaluation dates are not supplied; the series records the release date. Matched by Scout.', () => {
+    if (!helm) throw new Error('HELM Arabic unavailable.');
+    const url = `https://crfm.stanford.edu/helm/arabic/${helm.release}/`;
+    const benchmark = addBenchmark('helm:arabic', 'HELM Arabic · mean score', 'helm', { title: 'HELM Arabic · mean score', description: `Arabic-language evaluation by Stanford CRFM, release ${helm.release}: the mean of ${helm.scenarios.join(', ')}. Mostly multiple-choice knowledge and exam questions, plus retrieval-augmented answers (ALRAGE). Score is the mean on a 0–1 scale.`, metric: 'Mean score', sourceURL: `${helmBase}/${helm.release}/groups/json/arabic_scenarios_accuracy.json` },
+      { publishedAt: helm.publishedAt, family: 'helm:arabic' });
+    for (const row of helm.rows) {
+      // Model IDs carry dates and a thinking setting ("gemini-2.5-flash-thinking-disabled"). Display names put versions in
+      // parentheses Scout strips ("Mistral Large (2411)" is not the original Mistral Large), so they are used only without an ID.
+      const own = row.id?.split('/').slice(1).join('/');
+      const name = (own ? [own, own.replace(/-thinking-disabled$/, ' (thinking disabled)'), own.replace(/-(?:\d{4}-\d{2}-\d{2}|\d{8})$/, '')] : [row.name]).find(n => resolve(n).model) ?? own ?? row.name;
+      add(name, benchmark, row.score, { url, observedAt: null, sourceModel: row.id ?? row.name, metric: 'Mean score' });
+    }
+    return { publishedAt: helm.publishedAt };
+  });
+  collect('bridge', 'BRIDGE Medical (YLab)', 'https://huggingface.co/spaces/YLab-Open/BRIDGE-Medical-Leaderboard', 'BRIDGE Medical leaderboard, zero-shot board: clinical-text tasks in many languages run by YLab. Average performance only. Per-model evaluation dates are not supplied. Matched by Scout.', () => {
+    const rows = parseBRIDGE(bridge);
+    const benchmark = addBenchmark('bridge:zero-shot', 'BRIDGE Medical · zero-shot', 'bridge', { title: 'BRIDGE Medical · zero-shot', description: 'Clinical-text benchmark from real electronic health records and medical text in several languages: classification, extraction, normalization, question answering, summarization and coding tasks, zero-shot. Score is the average across tasks.', metric: 'Average / 100', sourceURL: sourceURLs.bridge },
+      { family: 'bridge:zero-shot' });
+    // A trailing thinking mode names a run setting of a hybrid model unless the exact name is itself a model.
+    for (const row of rows) add([row.name, row.name.replace(/-(Non-Thinking|Thinking)$/i, ' ($1)')].find(n => resolve(n).model) ?? row.name, benchmark, row.score,
+      { url: 'https://huggingface.co/spaces/YLab-Open/BRIDGE-Medical-Leaderboard', observedAt: null, sourceModel: row.name, metric: 'Average / 100' });
+  }, { license: 'https://opensource.org/licenses/MIT' });
+  collect('superclue', 'SuperCLUE', 'https://www.superclueai.com/', 'SuperCLUE general board: Chinese-language evaluations run by CLUE, published about every two months. Category scores only; the total is not imported. Per-model evaluation dates are not supplied; the series records the board date. Matched by Scout.', () => {
+    if (!superclue) throw new Error('SuperCLUE unavailable.');
+    for (const [label, id, title] of superclueCategories) {
+      const name = `SuperCLUE · ${title}`;
+      const benchmark = addBenchmark(`superclue:${id}`, name, 'superclue', { title: name, description: `SuperCLUE general board category ${label} (${title.toLowerCase()}), Chinese-language prompts, board ${superclue.month}. Score is the published category score.`, metric: 'Score / 100', sourceURL: superclue.url },
+        { publishedAt: superclue.publishedAt, family: `superclue:${id}` });
+      for (const row of superclue.rows) add(row.model, benchmark, row.scores[id] === null ? null : row.scores[id] / 100, { url: 'https://www.superclueai.com/generalpage', observedAt: null, sourceModel: row.model, metric: 'Score / 100' });
+    }
+    return { publishedAt: superclue.publishedAt };
+  });
   // Vendor-reported results are their own series, never merged into third-party measurements of the same benchmark.
   collect('vendor', 'Vendor-reported · LLM Stats', 'https://llm-stats.com/benchmarks', 'Benchmark scores model developers report in their announcements, papers and model cards, compiled by LLM Stats (llm-stats.com). Self-reported by each vendor and not independently verified; settings such as tools, attempts and reasoning effort follow the vendor and can differ between models.', () => {
     for (const v of parseVendorScores(vendorScores)) {
@@ -626,6 +821,9 @@ export async function refreshSnapshot(fetcher = fetch, previous, options = {}) {
     failed: [...(results[0].status === 'rejected' ? ['analysis'] : []), ...(results.slice(1).some(r => r.status === 'rejected') ? ['bfcl'] : [])],
   }));
   const valsRead = readVals(read), sealRead = readSeal(read);
+  // Each board is read on its own; a failure marks only that source failed, and it keeps its previous evidence.
+  const boardReads = Object.entries({ livebench: readLiveBench(read), tau: readTau(read), opencompass: read(sourceURLs.opencompass, 'json', 1_000_000), helm: readHELM(read),
+    bridge: read(sourceURLs.bridge, 'json', 2_000_000), superclue: readSuperCLUE(read, new Date()) }).map(([id, pending]) => pending.then(value => ({ id, value }), error => ({ id, error })));
   const descriptions = readEpochDefinitions(read).then(value => ({ value }), () => ({ value: previous?.benchmarkDescriptions, failed: true }));
   const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['idp', 'idpHTML', 'text'], ['vectara', 'vectaraMarkdown', 'text'], ['arena', 'arenaRows', 'parquet'], ['arenaDocument', 'arenaDocumentRows', 'parquet'], ['arenaVision', 'arenaVisionRows', 'parquet'], ['arenaWebdev', 'arenaWebdevRows', 'parquet'], ['arenaFactuality', 'arenaFactualityRows', 'parquet'], ['vendor', 'vendorScores', 'json'], ['bfcl', 'bfclCSV', 'text'], ['modelsdev', 'modelsDev', 'json']];
   const results = await Promise.allSettled([...specs.map(([id, , type]) => read(sourceURLs[id], type)), ...hubQueries.map(query => read(query.url, 'json', 2_000_000))]);
@@ -648,6 +846,7 @@ export async function refreshSnapshot(fetcher = fetch, previous, options = {}) {
   const described = await descriptions, methods = await methodologies;
   try { inputs.vals = await valsRead; } catch (error) { inputs.failures.vals = error.message; }
   try { inputs.seal = await sealRead; } catch (error) { inputs.failures.seal = error.message; }
+  for (const { id, value, error } of await Promise.all(boardReads)) if (error) inputs.failures[id] = error.message; else inputs[id] = value;
   inputs.benchmarkMethodologies = methods.value;
   inputs.benchmarkDescriptions = described.value;
   const snapshot = compileSnapshot(inputs);

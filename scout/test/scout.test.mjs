@@ -8,7 +8,9 @@ import offlineTasks from './fixtures/offline-tasks.json' with {type:'json'};
 // Explicit historical task objects test arithmetic and transports, not interpretation.
 const fixtureTask = prompt => {const task=offlineTasks[prompt];if(!task)throw Error('Missing typed test fixture');return structuredClone(task);};
 const recommend=(index,prompt)=>rankTask(index,prompt,Date.now(),fixtureTask(prompt));
-import { parseCSV, parseAnalysis, compileSnapshot, refreshSnapshot, parseOmniDoc, parseVectara, parseArena, parseVals, readVals, valsSlugs, parseSeal, readSeal, sealBoards, parseVendorScores } from '../sources.mjs';
+import { parseCSV, parseAnalysis, compileSnapshot, refreshSnapshot, parseOmniDoc, parseVectara, parseArena, parseVals, readVals, valsSlugs, parseSeal, readSeal, sealBoards, parseVendorScores,
+  readLiveBench, readTau, parseOpenCompass, readHELM, parseBRIDGE, readSuperCLUE, superclueURL, superclueCategories } from '../sources.mjs';
+import { evaluationKey } from '../comparison.mjs';
 import { handleAPI as api } from '../http.mjs';
 
 const handleAPI=(request,index)=>api(request,index,{},recommend);
@@ -208,7 +210,7 @@ test('a fresh table retains omitted historical observations only for an unchange
 test('refresh reads bounded benchmark methodology and catalogue feeds; total outage needs a previous index', async () => {
   const f = fixtures(); const calls = [];
   const fetcher = async url => { calls.push(url); return new Response(url.endsWith('.zip') ? f.epochZip : url.includes('artificialanalysis') ? f.analysisHTML : JSON.stringify(url.includes('OpenVLM') ? f.openvlm : f.router)); };
-  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 71, 'feeds, plus one page per Vals AI benchmark and per Scale SEAL board'); assert.equal(refreshed.models.length, 12);
+  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 82, 'feeds, plus one page per Vals AI benchmark and per Scale SEAL board, the first file of LiveBench, τ-bench, OpenCompass, HELM and BRIDGE (each stops when it is not their data) and six SuperCLUE months'); assert.equal(refreshed.models.length, 12);
   assert.equal(refreshed.sources.find(s => s.id === 'huggingface').status, 'failed');
   await assert.rejects(refreshSnapshot(async () => new Response('Unavailable', { status: 503 })), /Invalid model catalogue/);
 });
@@ -357,6 +359,66 @@ test('Scale SEAL boards drop contaminated and deprecated rows, read harness effo
   const family = id => snap.benchmarks.find(b => b.id === id)?.family;
   assert.equal(family('seal:prbench-legal'), 'seal:prbench');
   assert.deepEqual(new Set(sealBoards.map(b => `seal:${b.split('-')[0]}`)).size, 8);
+});
+
+test('LiveBench, τ-bench, OpenCompass, HELM Arabic, BRIDGE and SuperCLUE keep the right score, scale and rows, each as its own family', async () => {
+  const names = Array.from({ length: 12 }, (_, i) => `model-${i}`);
+  // LiveBench: the newest release in the bundle's literal list; each category column, never the overall.
+  const lbPages = { 'https://livebench.ai/': '<script defer src="./static/js/main.ab12.js"></script>', 'https://livebench.ai/static/js/main.ab12.js': 'Yt=["20261025","20261014"],en=["2024-06-24"]',
+    'https://livebench.ai/data/20261025/table.csv': `model,overall,coding,reasoning,design\n${names.map((n, i) => `${n},99,${i === 1 ? '' : 10 * i},50,40`).join('\n')}\n`,
+    'https://livebench.ai/data/20261025/categories.json': { Coding: ['coding'], Reasoning: ['reasoning'], Design: ['design'], _overall_weights: { Coding: 1.5 } } };
+  const livebench = await readLiveBench(async url => url.endsWith('breakdown.json') ? Promise.reject(new Error('down')) : lbPages[url] ?? Promise.reject(new Error(`unexpected ${url}`)));
+  assert.deepEqual([livebench.release, livebench.publishedAt, livebench.categories.map(c => c.column)], ['20261025', '2026-10-25', ['coding', 'reasoning', 'design']]);
+  // τ-bench: Sierra's standard text runs on harness 1.x, pass^1; banking only with AllTools retrieval.
+  const sub = (i, extra = {}) => ({ model_name: `Model ${i}`, submitting_organization: 'Sierra', submission_type: 'standard', modality: 'text', reasoning_effort: 'high', submission_date: '2026-08-04',
+    methodology: { tau2_bench_version: '1.0.1', evaluation_date: '2026-08-03' }, results: { airline: { pass_1: 10 * i, pass_4: 1 }, banking_knowledge: { pass_1: 5 * i, retrieval_config: i === 2 ? 'terminal' : 'alltools' } }, ...extra });
+  const subs = { 'm0_sierra_2026-08-04': sub(0), 'm1_sierra_2026-08-04': sub(1), 'm2_sierra_2026-08-04': sub(2), 'm3_sierra_2026-08-04': sub(3), 'm4_sierra_2026-08-04': sub(4), 'm5_sierra_2026-08-04': sub(5),
+    'm6_sierra_2026-08-04': sub(6, { submission_type: 'custom' }), 'm7_sierra_2026-08-04': sub(7, { methodology: { tau2_bench_version: '0.1.3' } }), 'm8_sierra_2026-08-04': sub(8, { submitting_organization: 'Lab' }) };
+  const tauBase = 'https://sierra-tau-bench-public.s3.us-west-2.amazonaws.com/submissions';
+  const tauRead = async url => url === `${tauBase}/manifest.json` ? { submissions: [...Object.keys(subs), 'm9_lab_2026-08-04'] } : subs[url.slice(tauBase.length + 1, -'/submission.json'.length)] ?? Promise.reject(new Error(`unexpected ${url}`));
+  const tau = await readTau(tauRead);
+  assert.deepEqual(tau.domains.map(d => [d.id, d.rows.length]), [['airline', 6], ['banking_knowledge', 5]]);
+  assert.deepEqual(tau.domains[0].rows[1], { model: 'Model 1 (high)', score: .1, observedAt: '2026-08-03' });
+  // OpenCompass: each ability table's own average (not the overall table); safety is not read.
+  const ability = (n, offset) => names.map((key, i) => ({ key, Average: offset + i, Part: 1 })).reverse();
+  const opencompass = { modelBase: Object.fromEntries(names.map((key, i) => [key, { model: `Model ${i} (max)`, date: '2026/10/23' }])), OverallTable: ability(0, 90),
+    KnowledgeTable: ability(0, 10), AbstractionTable: ability(0, 20), ReasoningTable: ability(0, 30), InteractionTable: ability(0, 40), AgentTable: ability(0, 50), SafetyTable: ability(0, 60) };
+  assert.ok(!parseOpenCompass(opencompass).abilities.some(a => a.id === 'safety'));
+  // HELM Arabic: the newest release by version number (v10 after v9), the mean column, and only models with every scenario.
+  const helmBase = 'https://storage.googleapis.com/crfm-helm-public/arabic/benchmark_output/releases';
+  const cell = value => ({ value });
+  const helmRows = names.map((n, i) => [cell(`Model ${i} (2026-01-02)`), cell(i / 20), cell(.9), cell(i === 4 ? undefined : .9), cell(.9)]);
+  const helmFiles = { [`${helmBase}/v10.0.0/summary.json`]: { date: '2026-06-25' }, [`${helmBase}/v10.0.0/schema.json`]: { models: names.map((n, i) => ({ name: i === 7 ? 'lab/large-2411' : `lab/${n}-2026-01-02`, display_name: `Model ${i} (2026-01-02)` })) },
+    [`${helmBase}/v10.0.0/groups/json/arabic_scenarios_accuracy.json`]: { header: ['Model', 'Mean score', 'A - EM', 'B - EM', 'C - Score'].map(value => ({ value })), rows: helmRows } };
+  const helm = await readHELM(async url => url.includes('storage/v1/b/') ? { prefixes: ['arabic/benchmark_output/releases/v9.0.0/', 'arabic/benchmark_output/releases/v10.0.0/'] } : helmFiles[url] ?? Promise.reject(new Error(`unexpected ${url}`)));
+  assert.deepEqual([helm.release, helm.rows.length, helm.scenarios], ['v10.0.0', 11, ['A', 'B', 'C']]);
+  // BRIDGE: HTML stripped from names, 0–100 averages, a thinking mode read as a run setting.
+  const bridge = { Model: Object.fromEntries(names.map((n, i) => [i, i === 3 ? `<a href="x">${n}-Thinking</a>` : n]).concat(names.map((n, i) => [12 + i, `other-${i}`]))), 'Average Performance': Object.fromEntries(Array.from({ length: 24 }, (_, i) => [i, String(i === 5 ? 140 : i)])) };
+  assert.equal(parseBRIDGE(bridge).length, 23);
+  // SuperCLUE: the newest month that is not a 404, read by header label, not column position.
+  const sheet = rows => `<worksheet><sheetData>${rows.map((r, i) => `<row r="${i + 1}">${r.map((v, j) => `<c r="${String.fromCharCode(65 + j)}${i + 1}" ${typeof v === 'number' ? `t="n"><v>${v}</v>` : `t="inlineStr"><is><t>${v.replace(/[^\x00-\x7f]/g, c => `&#${c.codePointAt(0)};`)}</t></is>`}</c>`).join('')}</row>`).join('')}</sheetData></worksheet>`;
+  const labels = superclueCategories.map(c => c[0]).reverse();
+  const xlsx = zipSync({ 'xl/worksheets/sheet1.xml': strToU8(sheet([['排名', '模型名称', '总分', ...labels], ...names.map((n, i) => [String(i), `${n}(max)`, 99, 10 * i, ...labels.slice(1).map(() => 50)])])), 'docProps/core.xml': strToU8('<dcterms:created xsi:type="dcterms:W3CDTF">2026-09-10T09:55:33Z</dcterms:created>') });
+  const now = new Date('2026-10-29T00:00:00Z'), notFound = Promise.reject(new Error('Source returned 404: www.superclueai.com')); notFound.catch(() => {});
+  const superclue = await readSuperCLUE(async url => url === superclueURL(2026, 9) ? xlsx : url === superclueURL(2026, 7) ? Promise.reject(new Error('stale')) : notFound, now);
+  assert.deepEqual([superclue.month, superclue.publishedAt, superclue.rows[2].scores[superclueCategories.at(-1)[1]]], ['2026-09', '2026-09-10', 20]);
+  // A timeout on the newest month must not fall back to an older board.
+  await assert.rejects(readSuperCLUE(async url => url === superclueURL(2026, 10) ? Promise.reject(new Error('timeout')) : xlsx, now), /timeout/);
+  const snap = compileSnapshot({ ...fixtures(), livebench, tau, opencompass, helm, bridge, superclue });
+  const score = (id, b) => snap.models.find(m => m.id === `lab/${id}`)?.evidence.find(e => e.benchmark === b)?.score;
+  assert.deepEqual([score('model-2', 'livebench:coding'), score('model-1', 'livebench:coding'), score('model-0', 'livebench:coding')], [.2, undefined, 0]);
+  assert.deepEqual([score('model-3', 'tau:airline'), score('model-2', 'tau:banking_knowledge'), score('model-8', 'tau:airline'), score('model-6', 'tau:airline')], [.3, undefined, undefined, undefined]);
+  assert.deepEqual([score('model-3', 'opencompass:knowledge'), score('model-3', 'opencompass:agent')], [.13, .53]);
+  // Model 7's display name strips to "Model 7", but its ID names another model.
+  assert.deepEqual([score('model-6', 'helm:arabic'), score('model-4', 'helm:arabic'), score('model-7', 'helm:arabic')], [.3, undefined, undefined]);
+  assert.deepEqual([score('model-3', 'bridge:zero-shot'), score('model-5', 'bridge:zero-shot')], [.03, undefined]);
+  assert.equal(score('model-2', 'superclue:agentic-planning'), .2);
+  const ids = ['livebench:coding', 'livebench:reasoning', 'tau:airline', 'tau:banking_knowledge', 'opencompass:knowledge', 'opencompass:agent', 'helm:arabic', 'bridge:zero-shot', 'superclue:math', 'superclue:agentic-planning'];
+  const families = ids.map(id => snap.benchmarks.find(b => b.id === id)?.family);
+  assert.deepEqual([families.includes(undefined), new Set(families).size, snap.benchmarks.filter(b => ids.includes(b.id) && b.definition.suite).length], [false, ids.length, 0]);
+  // Sierra's banking run is the same evaluation Artificial Analysis publishes; its other names stay distinct.
+  assert.equal(evaluationKey(snap.benchmarks.find(b => b.id === 'tau:banking_knowledge').name), evaluationKey('τ-Bench Banking · AA'));
+  assert.notEqual(evaluationKey('OpenCompass · Reasoning'), evaluationKey('LiveBench 2.0 · Reasoning'));
 });
 
 test('the IDP Leaderboard parser reads component scores from the rendered table and rejects format changes', async () => {
