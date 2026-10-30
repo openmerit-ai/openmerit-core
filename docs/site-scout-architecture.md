@@ -1,18 +1,22 @@
 # Scout architecture and operations
 
-## Vendor benchmarks that leave the LLM Stats feed are kept (not yet deployed)
+## Agent catalogue publication — 30 October 2026
+
+**Receipt:** the owner approved each step. Commits through [a6a24fe](https://github.com/laz-aslam/openmerit/commit/a6a24fee8b60e3f120483c75e6df708a51ce719a) are on `origin/main` with CI green. Serving Worker `openmerit-scout-alpha` version `913abaa9` (agent tools, `openai/gpt-6-sol`) and publisher `openmerit-scout` version `28fa6bc5` are live. The 00:07 UTC refresh `hour-498144` errored on the previous publisher (the vendor guard). Manual run `manual-20261030-agentcatalogue-3` completed with no failed steps in about 25 minutes (Hugging Face crawl about 6 minutes) and published snapshot `c3722e9f` (450 models, 603 benchmarks, 12,562 observations). Its agent catalogue is ready: 1,128 models, 113 boards, 1,557 search documents and Vectorize namespace `agent-c3722e9f…`. Live D1 after the run: 165,387 offerings, 688 of 2,192 board results and 1,426 MTEB rows linked. `validate-and-stage` retried twice while Vectorize finished indexing, then passed. `/`, `/scout/`, `/connect/` and `/scout/api/status` return 200. A signed-in agent turn on production has not been run.
+
+## Vendor benchmarks that leave the LLM Stats feed are kept — deployed, 30 October 2026
 
 Manual run `manual-20261029-agentcatalogue-2` (publisher `4f973492`, with the rebuild fix below) applied the Hugging Face crawl as a delta in 6 m 50 s: 1,622 routes re-applied, 6 added and 8 withdrawn, against about 76 minutes for the last full crawl. It rebuilt all 165,349 offerings in about 3.5 minutes. It then failed at `validate-and-stage`: "Publication would discard previously validated benchmark records." The two records were `vendor:truthfulqa` and `vendor:blink`, which LLM Stats' `top_n=100` matrix no longer lists. Nothing was published; snapshot `54f6839a` stayed active.
 
 LLM Stats vendor benchmarks now follow the Vals AI rule: one that leaves the feed keeps its last published definition and evidence. Such a benchmark is never refreshed again and is not marked as retired.
 
-## Catalogue rebuild race on step timeout (fix not yet deployed)
+## Catalogue rebuild race on step timeout — fix deployed, 29 October 2026
 
 **Incident, 29 October 2026.** Manual run `manual-20261029-agentcatalogue-1` (publisher `5434178f`) ran the catalogue sources and the Hugging Face crawl without failures. The first full apply wrote hashes for all 64,572 staged repositories. Then `catalogue-offerings` took longer than its 10-minute step timeout; it took about 3 minutes in earlier runs. Workflows started the retry while the timed-out attempt kept running, and both used the one shared `cat_offering_stage`: the retry cleared the first attempt's rows, the first attempt swapped in the 8,683 rows then staged and cleared the stage, and the retry also timed out. Live `cat_offerings` was left with 8,683 of 165,330 routes. The run was terminated during the MTEB steps, before publish, so the published snapshot (`54f6839a`, from the 12:07 refresh) and production search were unaffected, and the agent stayed on chat-only data.
 
 **Fix.** `rebuildOfferings` and `rebuildModels` stage rows under a per-attempt token (`run`, starting with the time) and swap in only their own rows, after checking that the staged count equals the rows they built. Rows older than an hour are cleared by the next rebuild. Both steps' timeout is now 30 minutes. A test runs a whole rebuild between another rebuild's staging and its swap.
 
-## Scout agent: every model kind, catalogue search, OpenAI model and result linking (not yet deployed)
+## Scout agent: every model kind, catalogue search, OpenAI model and result linking — deployed, 29–30 October 2026
 
 **Agent catalogue.** At publication `stageCatalogue` calls `stageAgentCatalogue` (`scout/agent-projection.ts`) after the serving manifest is built. It reads the merged catalogue once (`cat_model_merged`, current base-tier `cat_prices` for non-deprecated `cat_offerings`, `cat_boards`/`cat_board_results`, `cat_mteb_*`). It writes `scout_agent_models`, `scout_agent_boards` and the FTS5 table `scout_agent_search` for the publication ID, then marks `scout_agent_versions.ready`. Scout's chat records stay in `scout_models`. The agent reads both for the active version and never the live `cat_*` tables, so search and shortlist validation agree. Leaderboard ranks are fixed at publication: among all results on a board version, in the board's direction. MTEB uses its published rank. Documents (1,517 on 29 October data) are embedded with `text-embedding-3-small`/256 through the existing R2 embedding cache, so only changed texts reach OpenAI. They are upserted into Vectorize namespace `agent-<version>` of `openmerit-scout-evidence`. The newest five versions besides the one being staged and the published one are kept; older rows and their vectors are deleted. A staging failure is recorded as `agentCatalogue.error` in the manifest and leaves the agent on chat records only. An embedding failure leaves `vectors` null and the agent on BM25. No binding or migration changes. A local replay on 29 October data staged 1,124 models, 103 boards and 1,517 documents in 9–12 s; remote D1 and Vectorize timings are not yet observed. `wrangler d1 export` cannot export the FTS5 virtual table.
 
@@ -24,7 +28,7 @@ LLM Stats vendor benchmarks now follow the Vals AI rule: one that leaves the fee
 
 **OpenRouter image prices.** `image` and `image_output` are per image token (Gemini image output: 0.00003, $30 per million), not per image; they are now stored as `usd_per_mtok`. Earlier rows stored them as `usd_per_image`, about a million times too low as per-image prices; the next OpenRouter import closes those intervals.
 
-## Hugging Face provider crawl applies only changes (not yet deployed)
+## Hugging Face provider crawl applies only changes — deployed, 29 October 2026
 
 Until now every refresh that followed a completed crawl crawled again and re-applied all of it. Run `manual-20261029-sealfamily-1` spent 09:04–10:20 UTC on the crawl: collecting 130 pages took about 4 minutes, and re-applying 64,575 repositories took about 72, about 1,000 repositories per one-minute step, nearly all of them unchanged.
 
