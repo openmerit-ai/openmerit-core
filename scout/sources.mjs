@@ -764,6 +764,14 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
         add(name, benchmark, row.score, { url: `https://llm-stats.com/models/${encodeURIComponent(row.id)}`, observedAt: null, sourceModel: row.id, metric: benchmark.definition.metric });
       }
     }
+    // The feed lists only LLM Stats' top 100 benchmarks; one that drops out keeps its last
+    // published definition and evidence, as a missing Vals AI page does (29 October 2026:
+    // TruthfulQA and BLINK dropped out and the publish guard rejected the refresh).
+    const listed = new Set(benchmarks.filter(b => b.source === 'vendor').map(b => b.id));
+    for (const old of previous?.benchmarks.filter(b => b.source === 'vendor' && !listed.has(b.id)) ?? []) {
+      benchmarks.push(old);
+      for (const model of models) model.evidence.push(...(previous.models.find(m => m.id === model.id)?.evidence.filter(e => e.benchmark === old.id) ?? []));
+    }
   }, { license: 'https://llm-stats.com/terms' });
   collect('bfcl', 'Berkeley Function Calling Leaderboard', 'https://gorilla.cs.berkeley.edu/leaderboard', 'BFCL v4 native function-calling evaluations. Memory uses the named external backend, not built-in model memory. Per-model measurement dates are not supplied.', () => {
     const rows = parseBFCL(bfclCSV);

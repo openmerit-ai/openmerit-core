@@ -335,6 +335,12 @@ test('vendor-reported scores keep only self-reported results on comparable scale
   assert.equal(ev('lab/model-2', 'vendor:gpqa').url, 'https://llm-stats.com/models/model-2');
   assert.equal(snap.benchmarks.find(b => b.id === 'vendor:gpqa').definition.reportedBy, 'vendor');
   assert.deepEqual(snap.unmatchedRows.vendor, ['model-2-base']);
+  // A benchmark that drops out of the feed keeps its last published definition and scores; one still listed is refreshed.
+  const dropped = { ...data, benchmarks: data.benchmarks.filter(b => b.benchmark_id !== 'gpqa'), models: models.map(m => ({ ...m, benchmark_scores: { ...m.benchmark_scores, pct: score(5) } })) };
+  const next = compileSnapshot({ ...fixtures(), vendorScores: dropped, previous: snap });
+  assert.deepEqual(next.benchmarks.find(b => b.id === 'vendor:gpqa')?.definition, snap.benchmarks.find(b => b.id === 'vendor:gpqa').definition);
+  assert.equal(next.models.find(m => m.id === 'lab/model-2')?.evidence.find(e => e.benchmark === 'vendor:gpqa')?.score, .2);
+  assert.equal(next.models.find(m => m.id === 'lab/model-2')?.evidence.filter(e => e.benchmark === 'vendor:pct').map(e => e.score).join(), '0.05');
   assert.throws(() => parseVendorScores({ benchmarks: [], models: [] }), /Too few/);
 });
 test('Scale SEAL boards drop contaminated and deprecated rows, read harness efforts as run settings and keep a failed board\'s evidence', async () => {

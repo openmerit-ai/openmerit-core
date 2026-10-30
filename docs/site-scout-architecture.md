@@ -1,5 +1,11 @@
 # Scout architecture and operations
 
+## Vendor benchmarks that leave the LLM Stats feed are kept (not yet deployed)
+
+Manual run `manual-20261029-agentcatalogue-2` (publisher `4f973492`, with the rebuild fix below) applied the Hugging Face crawl as a delta in 6 m 50 s: 1,622 routes re-applied, 6 added and 8 withdrawn, against about 76 minutes for the last full crawl. It rebuilt all 165,349 offerings in about 3.5 minutes. It then failed at `validate-and-stage`: "Publication would discard previously validated benchmark records." The two records were `vendor:truthfulqa` and `vendor:blink`, which LLM Stats' `top_n=100` matrix no longer lists. Nothing was published; snapshot `54f6839a` stayed active.
+
+LLM Stats vendor benchmarks now follow the Vals AI rule: one that leaves the feed keeps its last published definition and evidence. Such a benchmark is never refreshed again and is not marked as retired.
+
 ## Catalogue rebuild race on step timeout (fix not yet deployed)
 
 **Incident, 29 October 2026.** Manual run `manual-20261029-agentcatalogue-1` (publisher `5434178f`) ran the catalogue sources and the Hugging Face crawl without failures. The first full apply wrote hashes for all 64,572 staged repositories. Then `catalogue-offerings` took longer than its 10-minute step timeout; it took about 3 minutes in earlier runs. Workflows started the retry while the timed-out attempt kept running, and both used the one shared `cat_offering_stage`: the retry cleared the first attempt's rows, the first attempt swapped in the 8,683 rows then staged and cleared the stage, and the retry also timed out. Live `cat_offerings` was left with 8,683 of 165,330 routes. The run was terminated during the MTEB steps, before publish, so the published snapshot (`54f6839a`, from the 12:07 refresh) and production search were unaffected, and the agent stayed on chat-only data.
