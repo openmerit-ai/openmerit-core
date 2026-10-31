@@ -9,6 +9,7 @@ site/scout/scout.js
 site/scout/onboarding.js
 site/memo-access.js
 demo/memo/generated/
+site/assets/video-player.js
 coverage/
 *.tsbuildinfo
 

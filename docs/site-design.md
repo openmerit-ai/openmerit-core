@@ -10,6 +10,61 @@ The nested-arches mark already used on Scout is the default OpenMerit logo. The 
 
 The homepage uses two conversational paragraphs on every screen size: OpenMerit as a model selection layer in the customer's infrastructure, followed by the beta launch of Scout by OpenMerit, its model search agent. The approved opening explains model choice in plain language: doing the job, fitting a budget, speed, security, where data lives, a fallback and knowing when to switch, beyond an eval, a skill or an “auto” setting. It uses no em dashes, replaces the speed-dating metaphor and retains the token-sales joke (“we checked, it’s a very crowded business”). The first still states that OpenMerit is not a router, does not sit in the live request path and does not sell tokens, ending with an underlined “Optimum Inference For All” memo-title link to `/memo/`; the second describes task-based model search weighing quality and cost for text, code and vision, without implementation detail. Rounded coverage figures (400+ catalogue models, results from 30+ labs, 500+ benchmark series and 200+ source feeds) were checked against the live status endpoint on 29 October 2026: 449 models, 39 labs, 577 series and 212 distinct feed IDs. These static figures need rechecking when the copy changes; they are not live counters. Only 290 series had matched results, and feed IDs include retained research records, so the copy does not claim every model or series is benchmarked, independent verification or support for all modalities. The memo's existing access controls are unchanged. It has no full/TL;DR toggle and retains the existing typography, header and **Try Scout** CTA. The CTA navigates directly to `/scout/`, with or without JavaScript; the homepage has no client script, installer prompt, clipboard action or native Claude launch. Claude Code setup remains available on Scout. This is not yet deployed; dated reading-mode and handoff descriptions below describe their original releases. The current homepage has no FAQ requiring an update.
 
+## Founder video — homepage source only, 31 October 2026
+
+A second section below the existing introduction presents the owner's 53-second
+film, with an editorial heading and a wide, uncropped 4:3 player. The supplied
+2880 × 2160 recording is encoded as H.264 at CRF 20 with the original AAC audio
+and fast-start metadata. The web copy is 108,324,818 bytes; the original is kept
+outside Git. Subtitles are burned into the supplied video, not a selectable
+caption track. This is a founder introduction, not a product demonstration.
+
+The refined controls follow Amp's compact arrangement: play and mute together
+on the left, sans-serif elapsed/duration text, speed and fullscreen on the
+right, and a rounded 6px timeline with a bordered playhead. The speed disclosure
+uses a checked radio list rather than a native select; Escape and outside
+pointer presses dismiss it, and selection returns focus to the trigger.
+Mouse movement over the timeline previews a timestamp without seeking.
+The section has no eyebrow or monospace typography.
+Its heading is “OpenMerit in 53 seconds.” with “Lazim 1 · xhigh” beneath it in
+small sans-serif text. The current two-paragraph hero, header and Try Scout
+link are unchanged. Only the video loads a new homepage client script.
+
+The owner approved creating the dedicated `openmerit-media` R2 bucket and its
+public custom domain `media.openmerit.ai`. The versioned
+`/openmerit-introduction-v1.mp4` and `/openmerit-introduction-v1.jpg` objects are
+uploaded with the appropriate MIME types and one-year immutable caching.
+Public HTTPS access, cache hits and HTTP 206 byte-range responses were checked.
+This bucket contains only public media; Scout's catalogue remains separate.
+Replace media with new versioned keys rather than overwriting immutable URLs.
+No Worker binding or new Worker is needed for media delivery.
+
+The homepage uses a poster and `preload="none"`: the MP4 is not requested until
+playback or seeking. Custom controls provide play/pause/replay, scrubbing,
+mute, playback speed and fullscreen; they remain visible below the picture.
+With the player focused, Space/K, Left/Right, M and F control playback,
+five-second seeking, mute and fullscreen. Native controls remain available if
+JavaScript fails or is disabled. iPhone fullscreen uses Safari's native video
+API when element fullscreen is unavailable; physical iPhone playback has not
+been verified. Load failures offer a direct video link. No autoplay, external
+player, video analytics or tracking is added.
+
+`site/video-player.ts` is compiled by the existing browser build into the
+ignored `site/assets/video-player.js`; both docs and Scout builds generate it.
+The player follows the device's light/dark appearance and keeps 44px toolbar
+targets on mobile. The homepage currently has no FAQ, and this change makes no
+new claims about released model-evaluation behavior. Local checks do not
+publish the homepage; deploy `scout-serving` through the normal workflow.
+
+Chromium checks exercised play/pause, seek, mute, speed, keyboard shortcuts,
+fullscreen, completion and replay at desktop and 390px widths. Poster layouts
+were inspected at 1440px light/dark, 390px and 320px with no horizontal overflow.
+No MP4 request occurred before interaction; native no-JavaScript controls,
+failed-download fallback and pausing during a delayed load were also checked.
+The final encode fully decoded without errors. `npm run verify` passed using
+Node 22.19.0 and `TMPDIR=/private/tmp`; the default macOS symlinked temporary
+path exposes an existing updater-entry test failure unrelated to this player.
+
 ## Scout setup analytics default — source only, 25 October 2026
 
 The homepage's copied/deep-linked command now starts with `npx`, without
