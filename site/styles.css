@@ -265,9 +265,57 @@ code { font-family: var(--mono); }
 .letter-hint { margin-top: 12px; }
 .letter-status:not(:empty) { margin-top: 12px; color: var(--ink); }
 .letter-scope { max-width: 570px; margin-top: 28px; }
+.intro-film { width: min(1040px, calc(100vw - 96px)); margin: 88px 0 0 50%; transform: translateX(-50%); padding-top: 48px; border-top: 1px solid var(--line); }
+.intro-film-heading { margin-bottom: 30px; text-align: center; }
+.intro-film h2 { font-family: Georgia, 'Times New Roman', serif; font-size: clamp(25px, 3vw, 36px); font-weight: 400; line-height: 1.3; letter-spacing: -.035em; text-wrap: balance; }
+.intro-film-model { margin-top: 12px; color: var(--muted); font-family: var(--sans); font-size: 13px; }
+.film-player { --progress: 0%; width: 100%; }
+.film-stage { position: relative; overflow: hidden; border-radius: 8px; background: #111; }
+.film-stage video { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: contain; }
+.film-cover { position: absolute; inset: 0; display: grid; place-items: center; width: 100%; border: 0; padding: 0; background: #0000000a; color: white; }
+.film-cover > span { display: grid; place-items: center; width: 72px; height: 72px; border: 1px solid #ffffff38; border-radius: 50%; background: #0009; backdrop-filter: blur(8px); transition: background 160ms ease, transform 160ms ease; }
+.film-cover svg { width: 30px; height: 30px; margin-left: -2px; }
+.film-controls { padding-top: 10px; font-family: var(--sans); }
+.film-timeline { position: relative; }
+.film-progress { --progress: 0%; display: block; width: 100%; height: 24px; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; accent-color: var(--ink); appearance: none; }
+.film-progress::-webkit-slider-runnable-track { height: 6px; border-radius: 6px; background: linear-gradient(to right, var(--ink) var(--progress), var(--line) var(--progress)); }
+.film-progress::-moz-range-track { height: 6px; border-radius: 6px; background: var(--line); }
+.film-progress::-moz-range-progress { height: 6px; border-radius: 6px; background: var(--ink); }
+.film-progress::-webkit-slider-thumb { width: 15px; height: 15px; margin-top: -4.5px; border: 2px solid var(--paper); border-radius: 50%; background: var(--ink); box-shadow: 0 1px 3px #0003; appearance: none; }
+.film-progress::-moz-range-thumb { width: 11px; height: 11px; border: 2px solid var(--paper); border-radius: 50%; background: var(--ink); box-shadow: 0 1px 3px #0003; }
+.film-seek-preview { position: absolute; bottom: calc(100% + 4px); left: clamp(28px, var(--preview-position), calc(100% - 28px)); transform: translateX(-50%); padding: 4px 8px; border-radius: 5px; background: var(--ink); color: var(--paper); font-size: 12px; font-variant-numeric: tabular-nums; pointer-events: none; }
+.film-toolbar { display: flex; align-items: center; gap: 4px; min-height: 36px; }
+.film-toolbar button, .film-speed summary { display: grid; place-items: center; min-width: 32px; height: 32px; border: 0; border-radius: 5px; padding: 7px; background: transparent; color: var(--ink); opacity: .85; transition: background 120ms ease, opacity 120ms ease; }
+.film-toolbar svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.film-time { padding-inline: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.film-time-divider { opacity: .5; }
+.film-toolbar-space { flex: 1; }
+.film-speed { position: relative; }
+.film-speed summary { min-width: 44px; list-style: none; font-size: 12px; font-weight: 500; cursor: pointer; }
+.film-speed summary::-webkit-details-marker { display: none; }
+.film-speed[open] summary { background: var(--line); opacity: 1; }
+.film-speed-options { position: absolute; z-index: 2; bottom: calc(100% + 10px); right: 0; width: 132px; padding: 5px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); box-shadow: 0 4px 18px #0002; }
+.film-speed-options label { position: relative; display: flex; align-items: center; justify-content: space-between; min-height: 36px; padding: 6px 10px; border-radius: 5px; font-size: 13px; cursor: pointer; }
+.film-speed-options input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.film-speed-check { visibility: hidden; }
+.film-speed-options label:has(:checked) { background: var(--soft); }
+.film-speed-options :checked ~ .film-speed-check { visibility: visible; }
+.film-speed-options label:has(:focus-visible) { outline: 2px solid var(--green); outline-offset: -2px; }
+.film-pause-icon, .film-muted-icon, .is-playing .film-play-icon, .is-muted .film-sound-icon { display: none; }
+.is-playing .film-pause-icon, .is-muted .film-muted-icon { display: initial; }
+.film-status { min-height: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.film-status:not(:empty) { margin-top: 8px; }
+.film-status a { text-decoration: underline; text-underline-offset: 3px; }
+.film-cover:focus-visible { outline: 3px solid white; outline-offset: -5px; }
+.film-player:fullscreen { display: flex; flex-direction: column; justify-content: center; padding: 16px 24px; background: #111; color: var(--ink); color-scheme: dark; --paper: #111; --ink: #f8f7f4; --muted: #bbb; --line: #444; --surface: #20211f; --soft: #30332c; --green: #a6bd8a; }
+.film-player:fullscreen .film-stage { min-height: 0; border-radius: 0; }
+.film-player:fullscreen video { max-height: calc(100dvh - 130px); }
+.film-player:fullscreen .film-controls { flex: 0 0 auto; }
 @media (hover: hover) and (pointer: fine) {
   .letter-header nav a:hover { text-decoration: underline; text-underline-offset: 5px; }
   .letter-cta:hover { background: var(--line); }
+  .film-cover:hover > span { background: #000c; transform: scale(1.06); }
+  .film-toolbar button:hover, .film-speed summary:hover, .film-speed-options label:hover { background: var(--line); opacity: 1; }
 }
 @media (any-pointer: coarse) {
   .letter-cta { min-height: 44px; }
@@ -279,6 +327,14 @@ code { font-family: var(--mono); }
   .letter-header nav { gap: 20px; font-size: 12px; }
   .letter-main { width: calc(100% - 40px); margin-block: 40px 56px; }
   .letter-copy { font-size: 19px; line-height: 1.65; }
+  .intro-film { width: 100%; margin-top: 52px; padding-top: 30px; }
+  .intro-film-heading { margin-bottom: 22px; }
+  .film-stage { border-radius: 6px; }
+  .film-cover > span { width: 60px; height: 60px; }
+  .film-toolbar { gap: 2px; }
+  .film-toolbar button, .film-speed summary { min-width: 44px; height: 44px; }
+  .film-speed-options label { min-height: 44px; }
+  .film-controls { padding-top: 8px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
