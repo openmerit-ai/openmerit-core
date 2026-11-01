@@ -9,7 +9,7 @@ import offlineTasks from './fixtures/offline-tasks.json' with {type:'json'};
 const fixtureTask = prompt => {const task=offlineTasks[prompt];if(!task)throw Error('Missing typed test fixture');return structuredClone(task);};
 const recommend=(index,prompt)=>rankTask(index,prompt,Date.now(),fixtureTask(prompt));
 import { parseCSV, parseAnalysis, compileSnapshot, refreshSnapshot, parseOmniDoc, parseVectara, parseArena, parseVals, readVals, valsSlugs, parseSeal, readSeal, sealBoards, parseVendorScores,
-  readLiveBench, readTau, parseOpenCompass, readHELM, parseBRIDGE, readSuperCLUE, superclueURL, superclueCategories } from '../sources.mjs';
+  readLiveBench, readTau, parseOpenCompass, readHELM, parseBRIDGE, readSuperCLUE, superclueURL, superclueCategories, parseFireworks } from '../sources.mjs';
 import { evaluationKey } from '../comparison.mjs';
 import { handleAPI as api } from '../http.mjs';
 
@@ -210,7 +210,7 @@ test('a fresh table retains omitted historical observations only for an unchange
 test('refresh reads bounded benchmark methodology and catalogue feeds; total outage needs a previous index', async () => {
   const f = fixtures(); const calls = [];
   const fetcher = async url => { calls.push(url); return new Response(url.endsWith('.zip') ? f.epochZip : url.includes('artificialanalysis') ? f.analysisHTML : JSON.stringify(url.includes('OpenVLM') ? f.openvlm : f.router)); };
-  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 82, 'feeds, plus one page per Vals AI benchmark and per Scale SEAL board, the first file of LiveBench, τ-bench, OpenCompass, HELM and BRIDGE (each stops when it is not their data) and six SuperCLUE months'); assert.equal(refreshed.models.length, 12);
+  const refreshed = await refreshSnapshot(fetcher); assert.equal(calls.length, 83, 'feeds, plus one page per Vals AI benchmark and per Scale SEAL board, the first file of LiveBench, τ-bench, OpenCompass, HELM and BRIDGE (each stops when it is not their data), six SuperCLUE months and the Fireworks index'); assert.equal(refreshed.models.length, 12);
   assert.equal(refreshed.sources.find(s => s.id === 'huggingface').status, 'failed');
   await assert.rejects(refreshSnapshot(async () => new Response('Unavailable', { status: 503 })), /Invalid model catalogue/);
 });
@@ -425,6 +425,32 @@ test('LiveBench, τ-bench, OpenCompass, HELM Arabic, BRIDGE and SuperCLUE keep t
   // Sierra's banking run is the same evaluation Artificial Analysis publishes; its other names stay distinct.
   assert.equal(evaluationKey(snap.benchmarks.find(b => b.id === 'tau:banking_knowledge').name), evaluationKey('τ-Bench Banking · AA'));
   assert.notEqual(evaluationKey('OpenCompass · Reasoning'), evaluationKey('LiveBench 2.0 · Reasoning'));
+});
+
+test('the Fireworks index keeps 0–100 headline scores of plain ranked model runs, each benchmark its own family', () => {
+  const names = Array.from({ length: 12 }, (_, i) => `model-${i}`), result = (model, value, extra = {}) => ({ rank: 1, ranked: true, model, provider: 'Lab', metrics: { score: { value }, cost_per_task: { value: 99 } }, ...extra });
+  const board = (id, label, rows, unit = 'percent') => ({ id: `domain/${id}`, name: id.toUpperCase(), url: `https://fireworks.ai/specialized-intelligence-index/benchmarks/domain/${id}`, domain: 'Legal', contributor: 'Firm', description: 'Contract review.',
+    headline_metric: { label, unit, direction: 'desc' }, reproducibility: { level: 'provider' }, last_updated: '2026-10-28', results: rows });
+  const plain = names.flatMap((n, i) => n === 'model-5' ? [] : [result(n, 5 * i)]);
+  const data = { status: 'published', url: 'https://fireworks.ai/specialized-intelligence-index', last_updated: '2026-10-30', benchmarks: [
+    // A run inside another product (†), a rejected-tasks run (*) and an unranked row are not plain model runs; "· high" is a run setting.
+    board('contracts', 'Score (pass@1)', [...plain, result('model-1†', 99), result('model-2*', 98), result('model-4', 97, { ranked: false }), result('model-3 · high', 95), result('model-5 · high', 80)]),
+    // Elo, dollars and a relative score above 100 are not shares of tasks.
+    board('elo', 'Score (Elo)', names.map((n, i) => result(n, 1200 + i))), board('cash', 'Score (current cash, USD)', names.map((n, i) => result(n, i))),
+    board('relative', 'Score (quality)', names.map((n, i) => result(n, 95 + i))), board('diagnosis', 'Score (Diagnosis Elo)', names.map((n, i) => result(n, i)), 'Elo points'),
+    ...Array.from({ length: 19 }, (_, i) => board(`b${i}`, 'Score', plain)),
+  ] };
+  const index = parseFireworks(data);
+  assert.deepEqual([index.publishedAt, index.boards.length, index.boards.some(b => ['elo', 'cash', 'relative', 'diagnosis'].includes(b.id))], ['2026-10-30', 20, false]);
+  assert.throws(() => parseFireworks({ ...data, benchmarks: data.benchmarks.slice(0, 10) }), /format changed/);
+  const snap = compileSnapshot({ ...fixtures(), fireworks: data });
+  const score = id => snap.models.find(m => m.id === `lab/${id}`)?.evidence.find(e => e.benchmark === 'fireworks:contracts')?.score;
+  // "· high" is a run setting of the same model, as "(high)" is elsewhere: model 3's two runs share a median.
+  assert.deepEqual(['model-1', 'model-2', 'model-3', 'model-4', 'model-5'].map(id => Math.round(score(id) * 100) / 100), [.05, .1, .55, .2, .8]);
+  assert.deepEqual(snap.models.find(m => m.id === 'lab/model-3').evidence.find(e => e.benchmark === 'fireworks:contracts').configurations, ['model-3', 'model-3 (high)']);
+  const contracts = snap.benchmarks.find(b => b.id === 'fireworks:contracts');
+  assert.deepEqual([contracts.family, contracts.publishedAt, contracts.definition.metric], ['fireworks:contracts', '2026-10-28', 'pass@1 / 100']);
+  assert.equal(evaluationKey(contracts.name), evaluationKey('CONTRACTS · vendor-reported'));
 });
 
 test('the IDP Leaderboard parser reads component scores from the rendered table and rejects format changes', async () => {

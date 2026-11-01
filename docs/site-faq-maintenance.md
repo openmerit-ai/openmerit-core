@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Fireworks Specialized Intelligence Index — source only, 1 November 2026
+
+Reviewed ranking and coverage claims against the change that reads the Fireworks Specialized Intelligence Index's 0–100 headline scores as benchmark evidence. The homepage FAQ names no individual benchmark sources and claims no legal, finance or healthcare coverage, so no FAQ copy changes. The Scout guide's source table has a Fireworks row that states which boards and rows are left out and that Fireworks is itself an inference provider.
+
 ## Scout agent covers every model kind — source only, 29 October 2026
 
 Reviewed model-coverage, pricing and data-handling claims against the change that publishes every merged model kind, leaderboard and MTEB results to the Scout agent, adds free-text catalogue search with unit-aware costs, and runs the agent on OpenAI. The homepage FAQ names no model kinds, price units or agent model, so no FAQ copy changes. The Scout page copy on `main` no longer promises five models, so shortlists of fewer, now likelier with a kind constraint, need no copy change. The Scout guide describes the change as not yet deployed, including that agent search queries are embedded with OpenAI.

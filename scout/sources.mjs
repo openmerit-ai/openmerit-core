@@ -31,6 +31,8 @@ export const sourceURLs = {
   vendor: 'https://api.llm-stats.com/leaderboard/benchmarks/matrix?top_n=100',
   opencompass: 'https://cdn.opencompass.org.cn/assets/lm/data-lm-ability_official.json',
   bridge: 'https://huggingface.co/spaces/YLab-Open/BRIDGE-Medical-Leaderboard/resolve/main/leaderboards/Zero-Shot_leaderboard.json',
+  // Fireworks publishes the whole index as JSON for machine readers (its llms.txt points here).
+  fireworks: 'https://fireworks.ai/specialized-intelligence-index/api/index.json',
   bfclMethodology: 'https://gorilla.cs.berkeley.edu/leaderboard',
   bfclMemory: 'https://gorilla.cs.berkeley.edu/blogs/16_bfcl_v4_memory.html',
 };
@@ -297,6 +299,25 @@ export async function readSuperCLUE(read, now) {
   if (results[i].status === 'rejected') throw results[i].reason;
   return { ...parseSuperCLUE(results[i].value), month: `${months[i][0]}-${String(months[i][1]).padStart(2, '0')}`, url: superclueURL(...months[i]) };
 }
+// Fireworks Specialized Intelligence Index: domain benchmarks contributed by practitioner companies
+// (legal, finance, healthcare, software and more), each with its own headline metric. Only headlines
+// on a 0–100 scale are kept: Elo, US-dollar and relative scores (Legora BAR's quality against the
+// average exceeds 100) are not shares of tasks. Unranked rows and names with a footnote mark
+// († run inside another product, * rejected tasks) are not plain model runs. "Model · high" names
+// a reasoning effort and becomes a run setting Scout strips. Cost and duration are not read.
+export function parseFireworks(data) {
+  if (data?.status !== 'published' || !Array.isArray(data.benchmarks)) throw new Error('Fireworks index format changed.');
+  const boards = data.benchmarks.flatMap(b => {
+    const metric = b?.headline_metric, rows = Array.isArray(b?.results) ? b.results : [], values = rows.map(r => r?.metrics?.score?.value).filter(Number.isFinite);
+    if (typeof b?.id !== 'string' || typeof b.name !== 'string' || !['percent', 'points (0–100)'].includes(metric?.unit) || /elo|usd|vs average/i.test(metric.label ?? '') || values.some(v => v < 0 || v > 100)) return [];
+    const kept = rows.flatMap(r => { const v = r?.metrics?.score?.value;
+      return r?.ranked === true && typeof r.model === 'string' && !/[†‡*]/.test(r.model) && Number.isFinite(v) ? [{ model: r.model.trim().replace(/\s+·\s+(\w+)$/, ' ($1)'), score: v / 100 }] : []; });
+    return kept.length >= 5 ? [{ id: b.id.split('/').at(-1), name: b.name, url: typeof b.url === 'string' ? b.url : data.url, domain: b.domain, contributor: b.contributor ?? null, metric: String(metric.label).replace(/^Score \((.*)\)$/, '$1'),
+      description: [b.description, b.methodology_summary].find(s => typeof s === 'string' && s) ?? '', reproducibility: b.reproducibility?.level ?? null, publishedAt: isoDate(b.last_updated), rows: kept }] : [];
+  });
+  if (boards.length < 20 || new Set(boards.map(b => b.id)).size !== boards.length) throw new Error('Fireworks index format changed.');
+  return { boards, publishedAt: isoDate(data.last_updated) };
+}
 // Developer-reported scores compiled by LLM Stats. Only scores it marks self-reported
 // are kept, on 0–1 or 0–100 scales; Elo-style and unbounded scales are not comparable.
 export function parseVendorScores(data) {
@@ -439,7 +460,7 @@ export function parseBFCL(csv) {
   });
 }
 
-export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, arenaVisionRows, arenaWebdevRows, arenaFactualityRows, vals, seal, livebench, tau, opencompass, helm, bridge, superclue, vendorScores, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, catalogueSupply, previous, failures = {}, checkedAt = new Date().toISOString() }) {
+export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnidocHTML, idpHTML, vectaraMarkdown, arenaRows, arenaDocumentRows, arenaVisionRows, arenaWebdevRows, arenaFactualityRows, vals, seal, livebench, tau, opencompass, helm, bridge, superclue, fireworks, vendorScores, bfclCSV, hubRows, modelsDev, benchmarkDescriptions, benchmarkMethodologies, catalogueSupply, previous, failures = {}, checkedAt = new Date().toISOString() }) {
   const sources = [], benchmarks = [], observations = new Map();
   const descriptions = benchmarkDescriptions ?? previous?.benchmarkDescriptions ?? {};
   const priorSources = new Map(previous?.sources.map(s => [s.id, s]) ?? []);
@@ -752,6 +773,17 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     }
     return { publishedAt: superclue.publishedAt };
   });
+  collect('fireworks', 'Fireworks Specialized Intelligence Index', 'https://fireworks.ai/specialized-intelligence-index/', 'Domain benchmarks contributed by practitioner companies and published by Fireworks AI, each with its own headline metric; only headline scores on a 0–100 scale are imported, without cost or duration. Most are run by the contributor, who keeps the task set or harness; some are run by Fireworks or on public harnesses. Per-model evaluation dates are not supplied; each series records the benchmark\'s last update. Matched by Scout.', () => {
+    const index = parseFireworks(fireworks);
+    const runBy = { provider: 'run by the contributor, who keeps the task set or harness', fireworks: 'run by Fireworks on a task set the contributor keeps private', public: 'on a public task set and harness' };
+    for (const b of index.boards) {
+      const name = `${b.name} · Fireworks`;
+      const benchmark = addBenchmark(`fireworks:${b.id}`, name, 'fireworks', { title: b.name, description: `${b.description} ${b.domain} benchmark${b.contributor ? ` contributed by ${b.contributor}` : ''}, ${runBy[b.reproducibility] ?? 'published by Fireworks'}. Score is the headline ${b.metric}.`, metric: `${b.metric} / 100`, sourceURL: sourceURLs.fireworks },
+        { publishedAt: b.publishedAt, family: `fireworks:${b.id}` });
+      for (const row of b.rows) add(row.model, benchmark, row.score, { url: b.url, observedAt: null, sourceModel: row.model, metric: `${b.metric} / 100` });
+    }
+    return { publishedAt: index.publishedAt };
+  });
   // Vendor-reported results are their own series, never merged into third-party measurements of the same benchmark.
   collect('vendor', 'Vendor-reported · LLM Stats', 'https://llm-stats.com/benchmarks', 'Benchmark scores model developers report in their announcements, papers and model cards, compiled by LLM Stats (llm-stats.com). Self-reported by each vendor and not independently verified; settings such as tools, attempts and reasoning effort follow the vendor and can differ between models.', () => {
     for (const v of parseVendorScores(vendorScores)) {
@@ -831,7 +863,7 @@ export async function refreshSnapshot(fetcher = fetch, previous, options = {}) {
   const valsRead = readVals(read), sealRead = readSeal(read);
   // Each board is read on its own; a failure marks only that source failed, and it keeps its previous evidence.
   const boardReads = Object.entries({ livebench: readLiveBench(read), tau: readTau(read), opencompass: read(sourceURLs.opencompass, 'json', 1_000_000), helm: readHELM(read),
-    bridge: read(sourceURLs.bridge, 'json', 2_000_000), superclue: readSuperCLUE(read, new Date()) }).map(([id, pending]) => pending.then(value => ({ id, value }), error => ({ id, error })));
+    bridge: read(sourceURLs.bridge, 'json', 2_000_000), superclue: readSuperCLUE(read, new Date()), fireworks: read(sourceURLs.fireworks, 'json', 6_000_000) }).map(([id, pending]) => pending.then(value => ({ id, value }), error => ({ id, error })));
   const descriptions = readEpochDefinitions(read).then(value => ({ value }), () => ({ value: previous?.benchmarkDescriptions, failed: true }));
   const specs = [['epoch', 'epochZip', 'zip'], ['analysis', 'analysisHTML', 'text'], ['openvlm', 'openvlm', 'json'], ['models', 'router', 'json'], ['omnidoc', 'omnidocHTML', 'text'], ['idp', 'idpHTML', 'text'], ['vectara', 'vectaraMarkdown', 'text'], ['arena', 'arenaRows', 'parquet'], ['arenaDocument', 'arenaDocumentRows', 'parquet'], ['arenaVision', 'arenaVisionRows', 'parquet'], ['arenaWebdev', 'arenaWebdevRows', 'parquet'], ['arenaFactuality', 'arenaFactualityRows', 'parquet'], ['vendor', 'vendorScores', 'json'], ['bfcl', 'bfclCSV', 'text'], ['modelsdev', 'modelsDev', 'json']];
   const results = await Promise.allSettled([...specs.map(([id, , type]) => read(sourceURLs[id], type)), ...hubQueries.map(query => read(query.url, 'json', 2_000_000))]);
