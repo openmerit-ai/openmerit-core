@@ -10,6 +10,8 @@ Scout is a separate hosted beta product. Npm 0.1.7 includes optional Claude Code
 
 **Session restoration — unreleased source:** onboarding stays hidden while sign-in is checked, so returning signed-in visitors do not see the introduction flash on reload or reopening. Chat remains locked until an active session is confirmed. Signed-out visitors and failed checks reveal the introduction with sign-in still available; signing out restores it. No saved tour-completion flag grants access. This is not yet deployed and changes no homepage FAQ claim.
 
+**Session tokens during agent turns — unreleased source:** each progress poll asks the sign-in client for a current session token instead of reusing the token captured at the start of the turn. This lets an active session renew its short-lived token while Scout works, including when polling retrieves an answer after the initial connection fails. It does not extend an expired or revoked session, resubmit the task or bypass server authentication. A browser-platform regression fixture covers token renewal and answer recovery; the fix is not yet deployed. No homepage FAQ claim changes.
+
 **Product wording — unreleased source:** the homepage, Scout page, onboarding and search/social descriptions call Scout “OpenMerit's model search agent,” with “model search” as the shorthand and “Find the right AI models for your task” as its promise. “Model recommendations” describes its output; the web and coding agents are access channels, not separate product categories. This copy is not yet deployed. Dated receipts below retain the wording and behavior of their original releases.
 
 ## Five-step introduction modal — deployed, 28 October 2026

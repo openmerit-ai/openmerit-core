@@ -266,6 +266,10 @@ async function runTurn(turn: TurnRequest, said: string, onStart?: () => void) {
     await Promise.race([post, new Promise(resolve => setTimeout(resolve, pollMs))]);
     if (finished || failure || turnEpoch !== epoch) break;
     try {
+      // A turn can outlive its short-lived bearer token without ending the session.
+      token = await auth.getToken();
+      if (turnEpoch !== epoch) break;
+      if (!token) { failure = 'Your session has expired. Sign in and try again.'; break; }
       const { status, data } = await request(token, 'GET', `/${id}`);
       if (status === 200) {
         sawTurn = true; progress.update(data.progress);

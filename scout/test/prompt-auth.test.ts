@@ -14,6 +14,7 @@ type Account = { user: { id: string } | null; session: Session | null };
 // are replaced. Failed optional imports must not stop event registration.
 async function fixture(blocked = 'analytics.js', failure = '', options: {
   saved?: Map<string, string>; signedIn?: boolean; storageDisabled?: boolean; coverage?: unknown; coverageFailure?: boolean;
+  expiredPollToken?: boolean;
   pauseAuth?: 'config' | 'clerk';
   navigator?: { doNotTrack?: string; globalPrivacyControl?: boolean; clipboard?: Pick<Clipboard, 'writeText'> };
   launchFailure?: boolean; analytics?: { enabled: boolean; linkAccount: boolean };
@@ -39,6 +40,8 @@ async function fixture(blocked = 'analytics.js', failure = '', options: {
   const authReady = options.pauseAuth ? new Promise<void>(resolve => { releaseAuth = resolve; }) : Promise.resolve();
   const state = { authStatus: failure === 'config' ? 503 : 200, loadFailure: failure === 'clerk', hangUI: failure.startsWith('modal'), opened: 0, modal: false, ready: false, requests: [] as string[] };
   const turns: { message: string; authorization: string | null }[] = [];
+  const rendered: ReturnType<typeof node>[] = [];
+  let tokenReads = 0;
   let nextTimer = 0;
   function node() {
     const target = new EventTarget();
@@ -70,7 +73,7 @@ async function fixture(blocked = 'analytics.js', failure = '', options: {
   const storage = { getItem: (key: string) => { available(); return saved.get(key) ?? null; }, setItem: (key: string, value: string) => { available(); saved.set(key, value); }, removeItem: (key: string) => { available(); saved.delete(key); } };
   let observe = (_account: Account) => {};
   const clerk = {
-    session: options.signedIn ? { status: 'active', getToken: async () => 'current-session-token' } : null as Session | null,
+    session: options.signedIn ? { status: 'active', getToken: async () => options.expiredPollToken && tokenReads++ > 0 ? 'renewed-session-token' : 'current-session-token' } : null as Session | null,
     user: options.signedIn ? { id: 'user-one' } : null as { id: string } | null,
     load: async () => { if (options.pauseAuth === 'clerk') await authReady; if (state.loadFailure) throw new Error('private provider failure'); },
     addListener: (fn: (value: Account) => void) => { observe = fn; fn(clerk); },
@@ -79,7 +82,7 @@ async function fixture(blocked = 'analytics.js', failure = '', options: {
     closeSignIn() { state.modal = state.ready = false; for (const check of observers) check(); },
   };
   const document = Object.assign(new EventTarget(), {
-    body: node(), visibilityState: 'visible', createElement: node,
+    body: node(), visibilityState: 'visible', createElement: () => { const value = node(); rendered.push(value); return value; },
     querySelector: (selector: string) => selector === '.scout-auth-ready' ? state.ready ? {} : null : selector === '.scout-auth-modal' ? state.modal ? {} : null : $(selector),
   });
   const location = { origin: 'https://example.test', pathname: '/scout/', href: 'https://example.test/scout/' };
@@ -105,6 +108,11 @@ async function fixture(blocked = 'analytics.js', failure = '', options: {
       }
       if (url.endsWith('/api/agent') && request.method === 'POST') {
         turns.push({ message: (JSON.parse(String(request.body)) as { message: string }).message, authorization: new Headers(request.headers).get('Authorization') });
+        if (options.expiredPollToken) return Response.json({ error: 'Read the durable result by polling.' }, { status: 503 });
+        return Response.json({ busy: false, progress: [], answer: { kind: 'message', text: 'Models found.' } });
+      }
+      if (options.expiredPollToken && url.includes('/api/agent/') && request.method === 'GET') {
+        if (new Headers(request.headers).get('Authorization') !== 'Bearer renewed-session-token') return Response.json({ error: 'Sign in to use Scout.', code: 'sign_in_required' }, { status: 401 });
         return Response.json({ busy: false, progress: [], answer: { kind: 'message', text: 'Models found.' } });
       }
       if (url.endsWith('/api/auth') && options.pauseAuth === 'config') await authReady;
@@ -113,7 +121,7 @@ async function fixture(blocked = 'analytics.js', failure = '', options: {
   });
   runInNewContext(output.outputFiles[0]!.text, { ...env, window: env, addEventListener: env.addEventListener.bind(env) });
   await drain();
-  return { $, state, saved, clerk, turns, document, location,
+  return { $, state, saved, clerk, turns, document, location, rendered,
     async resolveAuth() { releaseAuth(); await drain(); },
     async signedIn(status = 'active') {
       clerk.session = { status, getToken: async () => 'current-session-token' }; clerk.user = { id: 'user-one' };
@@ -129,6 +137,17 @@ async function fixture(blocked = 'analytics.js', failure = '', options: {
     async expire(ms: number) { for (const [id, timer] of timers) if (timer.ms === ms) { timers.delete(id); timer.callback(); } await drain(); },
   };
 }
+
+test('an active session renews its token when polling a turn after the original token expires', async () => {
+  const f = await fixture('analytics.js', '', { signedIn: true, expiredPollToken: true });
+  await f.submit();
+  assert.equal(f.$('#user-account').hidden, false);
+  assert.equal(f.state.opened, 0);
+  assert.equal(f.turns.length, 1, 'recover the durable answer without resubmitting the turn');
+  assert.ok(f.rendered.some(node => node.textContent === 'Models found.'));
+  assert.ok(!f.rendered.some(node => node.textContent === 'Sign in to use Scout.'));
+  assert.equal(f.$('#prompt').disabled, false);
+});
 
 test('selecting an example starts one conversation turn, after sign-in if needed', async () => {
   for (const signedIn of [true, false]) {
