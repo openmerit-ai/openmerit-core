@@ -359,7 +359,7 @@ Scout separates semantic interpretation from exact metadata checks and numerical
 | --- | --- |
 | Hourly discovery | Structured feeds and incremental Parallel research; resumable Hub discovery archives public listings without inventing usable endpoints or scores. |
 | Hourly evidence | Source-backed identities, deployment facts, benchmark methodology and specialist profiles; cached summaries fall back to the original source when support is uncertain. |
-| Hourly publication | Private R2 records, an indexed D1 fact/observation projection and versioned Vectorize benchmark embeddings. The active pointer changes only after the complete generation is ready. |
+| Hourly publication | Private R2 records, an indexed D1 fact/observation projection and Vectorize benchmark embeddings, stored once per content and listed per version. The active pointer changes only after the complete generation is ready. |
 | Task interpretation | Structured Outputs extracts metadata restrictions, alternatives, preferences and the downstream work. Decisions interprets that work for capabilities, operations and output serialization. No prompt keywords or provider/family exception lists are used. |
 | Eligibility | Generic typed equality, membership and range comparisons against documented facts, intersected with explicit inventories. Missing or incorrectly typed facts cannot establish a restriction. |
 | Evidence retrieval | A query embedding retrieves benchmark methodology, supplemented by hourly capability memberships. Semantic similarity supplies evidence candidates, never a model's score. |

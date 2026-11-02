@@ -2,8 +2,8 @@
 // refresh copies every merged model of every kind (with its catalogue routes and
 // unit prices), linked leaderboard and MTEB results, and a free-text index into
 // tables keyed by the version, so the agent never reads the live cat_* tables,
-// which change while a refresh runs. Embeddings of the same documents go to a
-// per-version Vectorize namespace; unchanged texts reuse cached embeddings.
+// which change while a refresh runs. Embeddings of the same documents go to one
+// shared Vectorize namespace addressed by content, so only new or changed texts are upserted.
 import { catalogueDocuments, headlineRate, manifestBenchmarks, modelRecord, priceRate, units, type BoardRecord, type ModelRecord, type Rate } from './agent/catalogue.ts';
 import { embeddingText, searchSchema, searchTable, type CatalogueDocument } from './agent/search.ts';
 import { embeddingDimensions, embeddingModel } from './evidence-search.mjs';
@@ -33,8 +33,12 @@ export const agentSchema = [
   'CREATE TABLE IF NOT EXISTS scout_agent_models (version TEXT NOT NULL, id TEXT NOT NULL, kind TEXT, payload TEXT NOT NULL, PRIMARY KEY(version,id))',
   'CREATE TABLE IF NOT EXISTS scout_agent_boards (version TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(version,id))',
   searchSchema,
+  // The vectors each version's search uses, in the shared namespace (stageVectors).
+  'CREATE TABLE IF NOT EXISTS scout_agent_vectors (version TEXT NOT NULL, id TEXT NOT NULL, type TEXT NOT NULL, doc TEXT NOT NULL, PRIMARY KEY(version,id))',
+  'CREATE INDEX IF NOT EXISTS scout_agent_vectors_id ON scout_agent_vectors(id)',
 ];
-const tables = ['scout_agent_models', 'scout_agent_boards', searchTable];
+const tables = ['scout_agent_models', 'scout_agent_boards', searchTable, 'scout_agent_vectors'];
+export const agentNamespace = 'agent';
 // Published versions kept besides the one being staged and any in `keep`.
 const retained = 5;
 // Catalogue routes listed per model: the cheapest in each unit, then the cheapest by token price.
@@ -178,24 +182,33 @@ async function pool<T, R>(rows: readonly T[], count: number, fn: (row: T) => Pro
   return out;
 }
 
-// Embeds each document once per content: vectors are cached in R2 by a hash of
-// model, dimensions and text (the evidence index's scheme), then upserted into
-// the version's own namespace. Returns the namespace and how many texts were new.
-export async function stageVectors(vectorize: VectorIndex, version: string, documents: readonly CatalogueDocument[], options: Required<Pick<StageOptions, 'embed'>> & Pick<StageOptions, 'cache'>) {
-  const namespace = `agent-${version}`;
+// Embeds and upserts each document once per content. A vector's ID hashes the document's
+// type, ID and embedded text (which names its kind), so a vector some version already
+// references is reused as is; only the rest are embedded (cached in R2 by a hash of model,
+// dimensions and text, the evidence index's scheme) and upserted. Returns how many texts
+// were embedded and how many vectors upserted.
+export async function stageVectors(vectorize: VectorIndex, db: Database, version: string, documents: readonly CatalogueDocument[], options: Required<Pick<StageOptions, 'embed'>> & Pick<StageOptions, 'cache'>) {
+  const namespace = agentNamespace;
   const texts = documents.map(embeddingText), hashes = await Promise.all(texts.map(t => digest([embeddingModel, embeddingDimensions, t]) as Promise<string>));
+  const ids = await Promise.all(documents.map((d, i) => digest([namespace, d.type, d.id, hashes[i]]) as Promise<string>));
+  const present = new Set<string>();
+  for (const batch of chunks(ids, 500)) for (const r of (await db.prepare('SELECT DISTINCT id FROM scout_agent_vectors WHERE id IN (SELECT value FROM json_each(?1))').bind(JSON.stringify(batch)).all<{ id: string }>()).results) present.add(r.id);
+  const todo = ids.flatMap((id, i) => present.has(id) ? [] : [i]);
   const key = (hash: string) => `semantic/embeddings/${hash}.json`;
-  const values: Array<number[] | null> = await pool(hashes, 12, async h => { const v = await options.cache?.get(key(h)); return Array.isArray(v) && v.length === embeddingDimensions ? v as number[] : null; });
-  const missing = values.flatMap((v, i) => v ? [] : [i]);
+  const values = new Map<number, number[]>();
+  await pool(todo, 12, async i => { const v = await options.cache?.get(key(hashes[i] ?? '')); if (Array.isArray(v) && v.length === embeddingDimensions) values.set(i, v as number[]); });
+  const missing = todo.filter(i => !values.has(i));
   for (const batch of chunks(missing, 64)) {
     const vectors = await options.embed(batch.map(i => texts[i] ?? ''));
-    await pool(batch, 12, async i => { const at = batch.indexOf(i), v = vectors[at]; if (!v) throw new Error('Incomplete embeddings.'); values[i] = v; await options.cache?.put(key(hashes[i] ?? ''), v); });
+    await pool(batch, 12, async i => { const v = vectors[batch.indexOf(i)]; if (!v) throw new Error('Incomplete embeddings.'); values.set(i, v); await options.cache?.put(key(hashes[i] ?? ''), v); });
   }
-  const rows = await Promise.all(documents.map(async (d, i) => ({ id: await digest([namespace, d.type, d.id]) as string, namespace, values: values[i] ?? [],
-    metadata: { type: d.type, id: d.id, ...(d.kind ? { kind: d.kind } : {}) } })));
+  const rows = todo.map(i => { const d = documents[i] as CatalogueDocument; return { id: ids[i] ?? '', namespace, values: values.get(i) ?? [], metadata: { type: d.type, id: d.id, ...(d.kind ? { kind: d.kind } : {}) } }; });
   let mutationId: string | undefined;
   for (const batch of chunks(rows, 500)) mutationId = (await vectorize.upsert(batch)).mutationId ?? mutationId;
-  return { namespace, embedded: missing.length, mutationId };
+  // References are written after the upsert, so a version never claims a vector that was not sent.
+  const refs = documents.map((d, i) => ({ id: ids[i], type: d.type, doc: d.id }));
+  await db.batch(chunks(refs, 200).map(batch => db.prepare("INSERT OR IGNORE INTO scout_agent_vectors (version,id,type,doc) SELECT ?1,json_extract(value,'$.id'),json_extract(value,'$.type'),json_extract(value,'$.doc') FROM json_each(?2)").bind(version, JSON.stringify(batch))));
+  return { namespace, embedded: missing.length, upserted: rows.length, mutationId };
 }
 
 // Stages the agent catalogue for `version`. Idempotent: a ready version is
@@ -221,21 +234,26 @@ export async function stageAgentCatalogue(db: Database, version: string, manifes
   // Vectors are optional: without them search_catalogue says so and uses keywords only.
   let vectors: string | null = null, embedded: number | undefined, vectorError: string | undefined;
   if (options.vectorize && options.embed) {
-    try { const staged = await stageVectors(options.vectorize, version, documents, { embed: options.embed, ...(options.cache ? { cache: options.cache } : {}) }); vectors = staged.namespace; embedded = staged.embedded; }
+    try { const staged = await stageVectors(options.vectorize, db, version, documents, { embed: options.embed, ...(options.cache ? { cache: options.cache } : {}) }); vectors = staged.namespace; embedded = staged.embedded; }
     catch (error) { vectorError = String((error as Error).message).slice(0, 200); }
   }
   // Older generations go; their rows are derived and rebuilt by any later publication.
   const keep = [version, ...options.keep ?? []];
   const old = (await db.prepare(`SELECT id FROM scout_agent_versions WHERE id NOT IN (SELECT value FROM json_each(?1)) ORDER BY staged_at DESC LIMIT -1 OFFSET ${retained}`).bind(JSON.stringify(keep)).all<{ id: string }>()).results.map(r => r.id);
-  // Their vectors go too, by the IDs stageVectors gave them; a failure only leaves unused vectors behind.
+  // Their vectors go too: shared vectors no remaining version references, and the whole
+  // namespace of a version staged before the shared one (agent-<version>, by the IDs it was given).
+  // If deletion fails the versions stay, so the next publication tries again.
+  let pruned = old;
   if (old.length && options.vectorize?.deleteByIds) try {
-    const docs = (await db.prepare(`SELECT s.version,s.type,s.id FROM ${searchTable} s JOIN scout_agent_versions v ON v.id=s.version AND v.vectors IS NOT NULL WHERE s.version IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(old))
+    const list = JSON.stringify(old);
+    const shared = (await db.prepare('SELECT DISTINCT id FROM scout_agent_vectors WHERE version IN (SELECT value FROM json_each(?1)) AND id NOT IN (SELECT id FROM scout_agent_vectors WHERE version NOT IN (SELECT value FROM json_each(?1)))').bind(list).all<{ id: string }>()).results.map(r => r.id);
+    const docs = (await db.prepare(`SELECT s.version,s.type,s.id FROM ${searchTable} s JOIN scout_agent_versions v ON v.id=s.version AND v.vectors LIKE 'agent-%' WHERE s.version IN (SELECT value FROM json_each(?1))`).bind(list)
       .all<{ version: string; type: string; id: string }>()).results;
-    const ids = await Promise.all(docs.map(d => digest([`agent-${d.version}`, d.type, d.id]) as Promise<string>));
+    const ids = [...shared, ...await Promise.all(docs.map(d => digest([`agent-${d.version}`, d.type, d.id]) as Promise<string>))];
     for (const batch of chunks(ids, 500)) await options.vectorize.deleteByIds(batch);
-  } catch { /* unused vectors stay in their namespace */ }
-  if (old.length) await db.batch([...tables.map(t => db.prepare(`DELETE FROM ${t} WHERE version IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(old))),
-    db.prepare('DELETE FROM scout_agent_versions WHERE id IN (SELECT value FROM json_each(?1))').bind(JSON.stringify(old))]);
+  } catch { pruned = []; }
+  if (pruned.length) await db.batch([...tables.map(t => db.prepare(`DELETE FROM ${t} WHERE version IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(pruned))),
+    db.prepare('DELETE FROM scout_agent_versions WHERE id IN (SELECT value FROM json_each(?1))').bind(JSON.stringify(pruned))]);
   await db.prepare('UPDATE scout_agent_versions SET ready=1,vectors=?2 WHERE id=?1').bind(version, vectors).run();
   return { version, models: payloads.length, boards: boards.length, documents: documents.length, vectors, ...(embedded !== undefined ? { embedded } : {}), ...(vectorError ? { vectorError } : {}) };
 }

@@ -6,7 +6,7 @@ import { relevantProfiles } from './specialists.mjs';
 import { prepareEligibility } from './eligibility.mjs';
 import {fieldDefinitions} from './constraints.mjs';
 import {stageProjection,projectionRows} from './projection.mjs';
-import {stageEvidence,verifyEvidenceReady,embed} from './evidence-search.mjs';
+import {stageEvidence,verifyEvidenceReady,embed,recordLegacyEvidence,pruneEvidence} from './evidence-search.mjs';
 import {stageAgentCatalogue} from './agent-projection.ts';
 
 export function shardFor(id) {
@@ -121,8 +121,14 @@ export async function stageCatalogue(bucket,records,previous,options={}) {
     const directory=prepareEligibility(snapshot),projection=await stageProjection(options.db,publication.id,snapshot,directory);
     const evidenceKey=`serving-evidence/${publication.id}.json`;
     let evidenceIndex=await getJSON(bucket,evidenceKey);
+    // Once, before the first shared-namespace stage: record earlier versions' own copies for pruning.
+    if(bucket.list)try{await recordLegacyEvidence(options.db,async function*(){let cursor;do{const page=await bucket.list({prefix:'serving-evidence/',cursor});
+      for(const o of page.objects)yield {index:await getJSON(bucket,o.key),uploaded:new Date(o.uploaded).toISOString()};cursor=page.truncated?page.cursor:undefined;}while(cursor);});}
+    catch(error){console.error('scout legacy evidence vectors not recorded',String(error?.message??error).slice(0,300));}
     if(!evidenceIndex){evidenceIndex=await stageEvidence(options.vectorize,snapshot,publication.id,{...options,cache:{get:key=>getJSON(bucket,key),put:(key,v)=>putJSON(bucket,key,v)}});await putJSON(bucket,evidenceKey,evidenceIndex);}
     await verifyEvidenceReady(options.vectorize,evidenceIndex);
+    // Unused vectors are only a cost, so a failed prune never blocks publication.
+    try{await pruneEvidence(options.db,options.vectorize,[publication.id,...(previous?.publication?.id?[previous.publication.id]:[])]);}catch(error){console.error('scout evidence vectors not pruned',String(error?.message??error).slice(0,300));}
     const profileKeys={};for(const operation of new Set(snapshot.specialistProfiles.map(p=>p.operation))) {
       const rows=snapshot.specialistProfiles.filter(p=>p.operation===operation),key=`chunks/${await digest(rows)}.json`;if(!await bucket.head(key))await putJSON(bucket,key,rows);profileKeys[operation]=key;
     }

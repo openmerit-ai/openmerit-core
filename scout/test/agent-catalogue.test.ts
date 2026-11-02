@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { catalogueSchema } from '../catalogue-db.ts';
-import { agentRows, stageAgentCatalogue, type Sources } from '../agent-projection.ts';
+import { agentRows, agentSchema, stageAgentCatalogue, type Sources } from '../agent-projection.ts';
 import { benchmarkLeaderboard, loadCatalogue, modelDetails, modelRecord, searchCatalogue, searchModels, type Catalogue, type CatalogueBindings, type ModelRecord } from '../agent/catalogue.ts';
 import { finalize, routeCost, type Submission } from '../agent/recommendation.ts';
 import { reciprocalRankFusion, type SearchHit } from '../agent/search.ts';
 import { d1 } from './helpers-d1.ts';
+import { digest } from '../utils.mjs';
 
 // ---- In-memory catalogue for the query and validation rules ----
 
@@ -199,34 +200,42 @@ test('the agent reads the published version, not live catalogue tables that chan
   assert.deepEqual(await stageAgentCatalogue(db, 'v1', manifest, payloads), { version: 'v1', models: 3, boards: 1, documents: 5, vectors: null });
 });
 
-test('embeddings are reused by content hash and old versions are pruned, keeping the published one', async () => {
-  const db = liveCatalogue(), payloads: Array<Record<string, unknown>> = [], cache = new Map<string, unknown>(), upserts: Array<{ namespace: string; metadata: Record<string, string> }> = [];
-  let embedded = 0; const deleted: string[] = [];
+test('vectors are upserted once per content in a shared namespace and pruned once no retained version uses them', async () => {
+  const db = liveCatalogue(), payloads: Array<Record<string, unknown>> = [], cache = new Map<string, unknown>();
+  let upserts: Array<{ id: string; namespace: string; metadata: Record<string, string> }> = [];
+  let embedded = 0; const deleted: string[] = [], staged: Record<string, typeof upserts> = {};
   const options = (now: string) => ({ now, keep: ['v1'], cache: { get: async (k: string) => cache.get(k), put: async (k: string, v: unknown) => { cache.set(k, v); } },
     embed: async (texts: string[]) => { embedded += texts.length; return texts.map(() => Array.from({ length: 256 }, () => 0.1)); },
     vectorize: { upsert: async (rows: typeof upserts) => { upserts.push(...rows); return { mutationId: 'm' }; }, deleteByIds: async (ids: string[]) => { deleted.push(...ids); } } });
-  const first = await stageAgentCatalogue(db, 'v1', { benchmarks: [] }, payloads, options('2026-10-01T00:00:00Z'));
-  assert.deepEqual([first.vectors, first.embedded, embedded], ['agent-v1', 4, 4]);
-  assert.deepEqual(upserts.map(u => [u.namespace, u.metadata.type, u.metadata.id]).sort(), [['agent-v1', 'board', 'asr:en'], ['agent-v1', 'model', 'acme/canvas'], ['agent-v1', 'model', 'acme/scribe'], ['agent-v1', 'model', 'lab/chat']]);
-  // A later version with one changed document embeds only that document.
+  const stage = async (v: string, day: number) => { upserts = []; const r = await stageAgentCatalogue(db, v, { benchmarks: [] }, payloads, options(`2026-10-0${day}T00:00:00Z`)); staged[v] = upserts; return r; };
+  // A version staged before the shared namespace, with its own namespace and vector IDs.
+  for (const sql of agentSchema) db.all(sql);
+  db.all("INSERT INTO scout_agent_versions (id,ready,models,boards,documents,vectors,staged_at) VALUES ('v0',1,1,0,1,'agent-v0','2026-09-01T00:00:00Z')");
+  db.all("INSERT INTO scout_agent_search (version,type,id,kind,name,aliases,description) VALUES ('v0','model','acme/old','image','Old','','')");
+  const first = await stage('v1', 1);
+  assert.deepEqual([first.vectors, first.embedded, embedded], ['agent', 4, 4]);
+  assert.deepEqual(staged.v1?.map(u => [u.namespace, u.metadata.type, u.metadata.id]).sort(), [['agent', 'board', 'asr:en'], ['agent', 'model', 'acme/canvas'], ['agent', 'model', 'acme/scribe'], ['agent', 'model', 'lab/chat']]);
+  // Each later version upserts only the document whose text changed: v2 and v3 rename Canvas.
   db.all("UPDATE cat_model_merged SET name='Acme Canvas 2' WHERE id='acme/canvas'");
-  for (let i = 2; i <= 8; i++) await stageAgentCatalogue(db, `v${i}`, { benchmarks: [] }, payloads, options(`2026-10-0${i}T00:00:00Z`));
-  assert.equal(embedded, 5);
+  await stage('v2', 2);
+  db.all("UPDATE cat_model_merged SET name='Acme Canvas 3' WHERE id='acme/canvas'");
+  for (let i = 3; i <= 8; i++) await stage(`v${i}`, i);
+  assert.deepEqual([embedded, staged.v2?.length, staged.v3?.length, staged.v4?.length, staged.v8?.length], [6, 1, 1, 0, 0]);
   // Five recent versions survive besides the one staged, plus v1, which is published.
   assert.deepEqual(db.all('SELECT id FROM scout_agent_versions ORDER BY id').map(r => r.id), ['v1', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8']);
   assert.equal(db.all("SELECT count(*) n FROM scout_agent_search WHERE version='v2'")[0]?.n, 0);
-  // The pruned version's four vectors are deleted with it.
-  assert.equal(new Set(deleted).size, 4);
-  // The published namespace is what the agent queries; hits outside the published documents are ignored.
-  const queried: string[] = [];
-  const catalogue = await loadCatalogue(bindings(db, { query: async (_v, o) => { queried.push(o.namespace ?? ''); return { matches: [{ score: 0.9, metadata: { type: 'model', id: 'acme/scribe' } }, { score: 0.8, metadata: { type: 'model', id: 'acme/elsewhere' } }] }; } }),
-    async texts => texts.map(() => [0.1]));
+  // Deleted: v0's own vector and v2's Canvas 2, which no retained version uses. Shared vectors v2 used stay.
+  assert.deepEqual(deleted.sort(), [String(await digest(['agent-v0', 'model', 'acme/old'])), staged.v2?.[0]?.id ?? ''].sort());
+  // The published version's vectors are what the agent counts; Canvas 2's vector (another version's) is dropped.
+  const queried: string[] = [], scribe = staged.v1?.find(u => u.metadata.id === 'acme/scribe')?.id ?? '';
+  const query = async (_v: number[], o: { namespace?: string }) => { queried.push(o.namespace ?? ''); return { matches: [{ id: scribe, score: 0.9, metadata: { type: 'model', id: 'acme/scribe' } }, { id: staged.v2?.[0]?.id ?? '', score: 0.85, metadata: { type: 'model', id: 'acme/canvas' } }, { id: 'x', score: 0.8, metadata: { type: 'model', id: 'acme/elsewhere' } }] }; };
+  const catalogue = await loadCatalogue(bindings(db, { query }), async texts => texts.map(() => [0.1]));
   assert.equal(await catalogue.search.embedding('speech to text', { limit: 5 }).catch((e: Error) => e.message), 'OPENAI_API_KEY is not configured');
-  const keyed = await loadCatalogue({ ...bindings(db, { query: async (_v, o) => { queried.push(o.namespace ?? ''); return { matches: [{ score: 0.9, metadata: { type: 'model', id: 'acme/scribe' } }, { score: 0.8, metadata: { type: 'model', id: 'acme/elsewhere' } }] }; } }), OPENAI_API_KEY: 'k' },
-    async texts => texts.map(() => [0.1]));
+  const keyed = await loadCatalogue({ ...bindings(db, { query }), OPENAI_API_KEY: 'k' }, async texts => texts.map(() => [0.1]));
+  assert.deepEqual((await keyed.search.embedding('speech to text', { limit: 5 })).map(h => h.id), ['acme/scribe']);
   const hybrid = await searchCatalogue(keyed, { query: 'speech to text' });
   assert.equal(hybrid.mode, 'hybrid');
-  assert.deepEqual(queried, ['agent-v1']);
-  // Scribe leads both lists; "text" also matches the other models' modalities. The unpublished vector hit is dropped.
+  assert.deepEqual(queried, ['agent', 'agent']);
+  // Scribe leads both lists; "text" also matches the other models' modalities.
   assert.deepEqual(hybrid.results.map(r => [r.id, r.matched]), [['acme/scribe', ['description', 'meaning']], ['asr:en', ['description']], ['lab/chat', ['description']], ['acme/canvas', ['description']]]);
 });

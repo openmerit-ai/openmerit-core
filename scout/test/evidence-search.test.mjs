@@ -1,4 +1,4 @@
-import test from'node:test';import assert from'node:assert/strict';import{evidenceDocuments,relevantEvidence,stageEvidence,verifyEvidenceReady}from'../evidence-search.mjs';
+import test from'node:test';import assert from'node:assert/strict';import{evidenceDocuments,relevantEvidence,stageEvidence,verifyEvidenceReady,recordLegacyEvidence,pruneEvidence,retrieveEvidence}from'../evidence-search.mjs';import{d1}from'./helpers-d1.ts';
 test('hourly retrieval documents retain verified research and selected methodology rather than generic feed labels',()=>{
  const [d]=evidenceDocuments({benchmarks:[{id:'b',name:'Opaque series',tags:['vision'],interpretation:{status:'ready'},definition:{description:'Receives images.'},research:{description:'Recognize instances in photographs.',methodology:'Copy the visible category.',limitations:'No location evaluation.'},methodologySelection:{sections:[{title:'Scope',text:'Single photograph inputs.'}]}}]});
  assert.match(d.text,/Recognize instances/);assert.match(d.text,/Copy the visible category/);assert.match(d.text,/Single photograph inputs/);assert.match(d.text,/No location evaluation/);
@@ -9,13 +9,30 @@ test('one batch assesses each exact methodology independently without domain wor
  assert.deepEqual(result.ids,['one']);assert.equal(requests.length,1);assert.equal(requests[0].questions.length,2);
  assert.ok(requests[0].questions[0].instructions.includes(docs[0].text));assert.ok(!requests[0].questions[0].instructions.includes(docs[1].text));assert.ok(requests[0].questions[1].instructions.includes(docs[1].text));assert.doesNotMatch(JSON.stringify(requests),/PRIVATE downstream domain/);
 });
-test('vector generations use distinct IDs and are not ready before mutation processing',async()=>{
- const snapshot={benchmarks:[{id:'b',name:'b',tags:['vision'],definition:{description:'Photo interpretation.'},interpretation:{status:'ready'}}]};
- const cache=new Map();let embeddingCalls=0;const options={apiKey:'fixture',cache:{get:async k=>cache.get(k),put:async(k,v)=>cache.set(k,v)},fetcher:async(url,o)=>{assert.ok(url.endsWith('/embeddings'),'Hourly retrieval must not summarize verified methodology again');embeddingCalls++;const q=JSON.parse(o.body);return Response.json({data:q.input.map((_,index)=>({index,embedding:Array(256).fill(.01)}))});}};
- let vectors=[];const service={upsert:async rows=>{vectors.push(...rows);return{mutationId:'new'};},describe:async()=>({processedUpToMutation:'old'}),getByIds:async()=>vectors};
- const first=await stageEvidence(service,snapshot,'first',options),second=await stageEvidence(service,snapshot,'second',options);
- assert.equal(embeddingCalls,1);assert.notEqual(first.documents[0].vectorId,second.documents[0].vectorId);assert.match(first.documents[0].text,/Photo interpretation/);
- await assert.rejects(verifyEvidenceReady(service,second),/finished indexing/);service.describe=async()=>({processedUpToMutation:'new'});await verifyEvidenceReady(service,second);
+test('evidence vectors are upserted once per content and pruned only when no retained or published version uses them',async()=>{
+ const snapshot=text=>({benchmarks:[{id:'b',name:'b',tags:['vision'],definition:{description:text},interpretation:{status:'ready'}}]});
+ const cache=new Map(),db=d1();let embeddingCalls=0;const options=now=>({db,now,apiKey:'fixture',cache:{get:async k=>cache.get(k),put:async(k,v)=>cache.set(k,v)},fetcher:async(url,o)=>{assert.ok(url.endsWith('/embeddings'),'Hourly retrieval must not summarize verified methodology again');embeddingCalls++;const q=JSON.parse(o.body);return Response.json({data:q.input.map((_,index)=>({index,embedding:Array(256).fill(.01)}))});}});
+ let vectors=[];const deleted=[];const service={upsert:async rows=>{vectors.push(...rows);return{mutationId:'new'};},describe:async()=>({processedUpToMutation:'old'}),getByIds:async ids=>vectors.filter(v=>ids.includes(v.id)),deleteByIds:async ids=>{deleted.push(...ids);}};
+ // A version published before the shared namespace is recorded once, from its stored index.
+ assert.equal(await recordLegacyEvidence(db,async function*(){yield {index:{version:'legacy',documents:[{vectorId:'L1'}]},uploaded:'2026-09-01T00:00:00Z'};}),1);
+ const a=await stageEvidence(service,snapshot('Photo interpretation.'),'a',options('2026-10-01T00:00:00Z'));
+ assert.match(a.documents[0].text,/Photo interpretation/);assert.equal(a.namespace,'evidence');
+ await assert.rejects(verifyEvidenceReady(service,a),/finished indexing/);
+ // The same text in the next version reuses the vector: no embedding, no upsert, nothing to wait for.
+ const b=await stageEvidence(service,snapshot('Photo interpretation.'),'b',options('2026-10-02T00:00:00Z'));
+ assert.deepEqual([embeddingCalls,vectors.length,b.upserted,b.mutationId,b.documents[0].vectorId],[1,1,0,undefined,a.documents[0].vectorId]);
+ assert.equal(await verifyEvidenceReady(service,b),true);
+ assert.equal(await recordLegacyEvidence(db,async function*(){throw Error('must not list again');}),0);
+ for(const [i,v] of ['c','d','e','f','g','h'].entries())await stageEvidence(service,snapshot('Changed description.'),v,options(`2026-10-0${i+3}T00:00:00Z`));
+ assert.deepEqual([embeddingCalls,vectors.length],[2,2]);
+ // With h staged and a published, b and the legacy version fall out of the newest five. Only the
+ // legacy vector goes: b's vector is a's, which is still published.
+ assert.deepEqual(await pruneEvidence(db,service,['h','a']),{versions:2,deleted:1});assert.deepEqual(deleted,['L1']);
+ assert.deepEqual(await pruneEvidence(db,service,['h']),{versions:1,deleted:1});assert.deepEqual(deleted,['L1',a.documents[0].vectorId]);
+ // Retrieval counts only this version's vector of a benchmark, not an older copy in the shared namespace.
+ const h={...await stageEvidence(service,snapshot('Changed description.'),'h',options('2026-10-08T00:00:00Z'))};
+ const found=async id=>(await retrieveEvidence({weights:{}},h,{vectorize:{query:async(_v,o)=>{assert.equal(o.namespace,'evidence');return {matches:[{id,metadata:{benchmark:'b'}}]};}},queryVector:[]})).map(d=>d.id);
+ assert.deepEqual([await found(a.documents[0].vectorId),await found(h.documents[0].vectorId)],[[],['b']]);
 });
 test('an unavailable applicability check withholds even prepared proxies and marks uncertainty',async()=>{
  const docs=[{id:'supported',text:'Known operation.',tags:['coding']},{id:'unverified',text:'Unrelated operation.',tags:['vision']}];

@@ -230,7 +230,7 @@ interface Statement { bind(...values: unknown[]): Statement; all<T>(): Promise<{
 export interface CatalogueBindings {
   SCOUT_CATALOGUE: { get(key: string): Promise<{ json<T>(): Promise<T> } | null> };
   SCOUT_INDEX: { prepare(sql: string): Statement };
-  SCOUT_EVIDENCE: { query(vector: number[], options: { namespace?: string; topK: number; returnMetadata: 'all' }): Promise<{ matches: Array<{ score?: number; metadata?: Record<string, unknown> }> }> };
+  SCOUT_EVIDENCE: { query(vector: number[], options: { namespace?: string; topK: number; returnMetadata: 'all' }): Promise<{ matches: Array<{ id: string; score?: number; metadata?: Record<string, unknown> }> }> };
   OPENAI_API_KEY?: string;
 }
 export type Embedder = (texts: string[], apiKey: string) => Promise<number[][]>;
@@ -242,12 +242,14 @@ async function agentProjection(env: CatalogueBindings, version: string) {
   try { row = (await env.SCOUT_INDEX.prepare('SELECT vectors FROM scout_agent_versions WHERE id = ? AND ready = 1').bind(version).all<{ vectors: string | null }>()).results[0]; }
   catch { return null; }
   if (!row) return null;
-  const [models, boards] = await Promise.all([
+  const [models, boards, vectors] = await Promise.all([
     env.SCOUT_INDEX.prepare('SELECT payload FROM scout_agent_models WHERE version = ?').bind(version).all<{ payload: string }>(),
     env.SCOUT_INDEX.prepare('SELECT payload FROM scout_agent_boards WHERE version = ?').bind(version).all<{ payload: string }>(),
+    // The version's vectors in the shared namespace; versions with their own namespace have none listed.
+    env.SCOUT_INDEX.prepare('SELECT id FROM scout_agent_vectors WHERE version = ?').bind(version).all<{ id: string }>().catch(() => ({ results: [] })),
   ]);
   const parse = (rows: Array<{ payload: string }>) => rows.map(r => JSON.parse(r.payload) as unknown).filter(isObject);
-  return { namespace: row.vectors, models: parse(models.results), boards: parse(boards.results).map(boardRecord).filter((b): b is BoardRecord => b !== null) };
+  return { namespace: row.vectors, vectorIds: new Set(vectors.results.map(r => r.id)), models: parse(models.results), boards: parse(boards.results).map(boardRecord).filter((b): b is BoardRecord => b !== null) };
 }
 
 // The published generation: active pointer → manifest in R2; chat records,
@@ -282,7 +284,9 @@ export async function loadCatalogue(env: CatalogueBindings, embed: Embedder): Pr
   }
   const benchmarks = manifestBenchmarks(manifest, models), boards = projection?.boards ?? [];
   const evidenceIndex = isObject(manifest.evidenceIndex) ? manifest.evidenceIndex : {};
-  const known = new Set(benchmarks.map(b => b.id)), namespace = str(evidenceIndex.version) ?? version;
+  const known = new Set(benchmarks.map(b => b.id)), namespace = str(evidenceIndex.namespace) ?? str(evidenceIndex.version) ?? version;
+  // A shared namespace also holds other versions' vectors; only this version's count.
+  const evidenceVectors = new Set((Array.isArray(evidenceIndex.documents) ? evidenceIndex.documents : []).flatMap(d => isObject(d) && typeof d.vectorId === 'string' ? [d.vectorId] : []));
   const memory = projection ? null : memorySearch(catalogueDocuments(models, benchmarks, boards));
   const documents = new Map<string, string | null>([...models.map(m => [`model:${m.id}`, m.kind] as const), ...benchmarks.map(b => [`benchmark:${b.id}`, 'chat'] as const), ...boards.map(b => [`board:${b.id}`, b.kind] as const)]);
   return {
@@ -293,7 +297,7 @@ export async function loadCatalogue(env: CatalogueBindings, embed: Embedder): Pr
       const [vector] = await embed([query], env.OPENAI_API_KEY);
       if (!vector) return lexical;
       const result = await env.SCOUT_EVIDENCE.query(vector, { namespace, topK: Math.min(50, limit * 2), returnMetadata: 'all' });
-      const semantic = result.matches.map(m => str(m.metadata?.benchmark)).filter((id): id is string => !!id && known.has(id));
+      const semantic = result.matches.flatMap(m => !evidenceVectors.size || evidenceVectors.has(m.id) ? [str(m.metadata?.benchmark)] : []).filter((id): id is string => !!id && known.has(id));
       // Exact names first (a user who names a benchmark means it), then nearest methodologies.
       return [...new Set([...lexical.slice(0, 3), ...semantic, ...lexical])].slice(0, limit);
     },
@@ -306,6 +310,7 @@ export async function loadCatalogue(env: CatalogueBindings, embed: Embedder): Pr
         if (!vector) throw new Error('the embedding service returned no vector');
         const result = await env.SCOUT_EVIDENCE.query(vector, { namespace: projection.namespace, topK: 50, returnMetadata: 'all' });
         return result.matches.flatMap((m): SearchHit[] => {
+          if (projection.vectorIds.size && !projection.vectorIds.has(m.id)) return [];
           const type = m.metadata?.type, id = str(m.metadata?.id);
           if (!id || !(documentTypes as readonly unknown[]).includes(type) || !documents.has(`${String(type)}:${id}`)) return [];
           const hitKind = documents.get(`${String(type)}:${id}`) ?? null;

@@ -23,29 +23,68 @@ export function evidenceDocuments(snapshot) {
     // interpretation. A generic feed label alone can discard the actual scope.
     text:JSON.stringify({name:b.name,research:b.research?{description:b.research.description,methodology:b.research.methodology,limitations:b.research.limitations}:null,methodology:b.methodologySelection?.sections??null,definition:b.definition??null,metric:b.metric??null,limitations:b.limitations??null}).slice(0,12000)}));
 }
+// Evidence vectors live in one shared namespace, addressed by benchmark and embedded
+// text, so a publication upserts only the documents no earlier version indexed. Each
+// version records the vectors it uses in D1; a vector goes once no retained version uses it.
+export const evidenceNamespace='evidence';
+const evidenceSchema=['CREATE TABLE IF NOT EXISTS scout_evidence_vectors (version TEXT NOT NULL, id TEXT NOT NULL, staged_at TEXT NOT NULL, PRIMARY KEY(version,id))','CREATE INDEX IF NOT EXISTS scout_evidence_vectors_id ON scout_evidence_vectors(id)'];
+// Versions whose vectors survive besides those in `keep` (the staged and published ones).
+const retainedEvidence=5;
+const referenced=async(db,ids)=>{const out=new Set();for(const batch of chunks(ids,500))for(const r of (await db.prepare('SELECT DISTINCT id FROM scout_evidence_vectors WHERE id IN (SELECT value FROM json_each(?1))').bind(JSON.stringify(batch)).all()).results)out.add(r.id);return out;};
 export async function stageEvidence(vectorize,snapshot,version,options) {
   // These descriptions and methodology selections were already verified during
   // hourly enrichment. Preserve them directly instead of summarizing them again.
   // Citation excerpts remain in the source records, outside semantic search text.
-  const docs=evidenceDocuments(snapshot).filter(d=>!d.modelIds||d.modelIds.length);
-  const rows=await concurrent(docs,6,async d=>{
-    const hash=await digest([embeddingModel,embeddingDimensions,d.text]),key=`semantic/embeddings/${hash}.json`;
-    let values=await options.cache?.get(key);if(!values){[values]=await embed([d.text],{...options,timeoutMs:30000});await options.cache?.put(key,values);}
-    return {id:await digest([version,d.id,hash]),namespace:version,values,metadata:{benchmark:d.id}};
+  const docs=evidenceDocuments(snapshot).filter(d=>!d.modelIds||d.modelIds.length),db=options.db;
+  const hashes=await Promise.all(docs.map(d=>digest([embeddingModel,embeddingDimensions,d.text]))),ids=await Promise.all(docs.map((d,i)=>digest([evidenceNamespace,d.id,hashes[i]])));
+  if(db)await db.batch(evidenceSchema.map(sql=>db.prepare(sql)));
+  const present=db?await referenced(db,ids):new Set(),missing=docs.flatMap((_d,i)=>present.has(ids[i])?[]:[i]);
+  const rows=await concurrent(missing,6,async i=>{
+    const key=`semantic/embeddings/${hashes[i]}.json`;
+    let values=await options.cache?.get(key);if(!values){[values]=await embed([docs[i].text],{...options,timeoutMs:30000});await options.cache?.put(key,values);}
+    return {id:ids[i],namespace:evidenceNamespace,values,metadata:{benchmark:docs[i].id}};
   });
   let mutation;const submittedAt=new Date().toISOString();
   for(const batch of chunks(rows,500))mutation=(await vectorize.upsert(batch)).mutationId;
-  return {version,model:embeddingModel,dimensions:embeddingDimensions,documents:docs.map((d,i)=>({...d,vectorId:rows[i].id})),mutationId:mutation,submittedAt};
+  if(db)await db.batch(chunks(ids,500).map(batch=>db.prepare('INSERT OR IGNORE INTO scout_evidence_vectors (version,id,staged_at) SELECT ?1,value,?2 FROM json_each(?3)').bind(version,options.now??submittedAt,JSON.stringify(batch))));
+  return {version,namespace:evidenceNamespace,model:embeddingModel,dimensions:embeddingDimensions,documents:docs.map((d,i)=>({...d,vectorId:ids[i]})),mutationId:mutation,submittedAt,upserted:rows.length};
+}
+// Versions published before the shared namespace kept a full copy in a namespace named
+// after the version. `indexes` yields their evidence indexes once, so pruning removes them too.
+export async function recordLegacyEvidence(db,indexes) {
+  await db.batch(evidenceSchema.map(sql=>db.prepare(sql)));
+  if((await db.prepare('SELECT 1 FROM scout_evidence_vectors LIMIT 1').all()).results.length)return 0;
+  // Every index is read before anything is written, so a failed read records nothing and the next publication starts over.
+  const versions=[];
+  for await(const {index,uploaded} of indexes())if(!index?.namespace&&typeof index?.version==='string'&&Array.isArray(index.documents))
+    versions.push({version:index.version,uploaded,ids:index.documents.map(d=>d?.vectorId).filter(id=>typeof id==='string')});
+  const writes=versions.flatMap(v=>chunks(v.ids,500).map(batch=>db.prepare('INSERT OR IGNORE INTO scout_evidence_vectors (version,id,staged_at) SELECT ?1,value,?2 FROM json_each(?3)').bind(v.version,v.uploaded,JSON.stringify(batch))));
+  for(const batch of chunks(writes,50))await db.batch(batch);
+  return versions.reduce((n,v)=>n+v.ids.length,0);
+}
+// Deletes the vectors only versions older than the newest retained ones use. A failed
+// deletion keeps the references, so the next publication tries again.
+export async function pruneEvidence(db,vectorize,keep) {
+  const versions=(await db.prepare('SELECT version FROM scout_evidence_vectors GROUP BY version ORDER BY max(staged_at) DESC').all()).results.map(r=>r.version);
+  const old=JSON.stringify(versions.filter(v=>!keep.includes(v)).slice(retainedEvidence));
+  if(old==='[]')return {versions:0,deleted:0};
+  const ids=(await db.prepare('SELECT DISTINCT id FROM scout_evidence_vectors WHERE version IN (SELECT value FROM json_each(?1)) AND id NOT IN (SELECT id FROM scout_evidence_vectors WHERE version NOT IN (SELECT value FROM json_each(?1)))').bind(old).all()).results.map(r=>r.id);
+  for(const batch of chunks(ids,500))await vectorize.deleteByIds(batch);
+  await db.prepare('DELETE FROM scout_evidence_vectors WHERE version IN (SELECT value FROM json_each(?1))').bind(old).run();
+  return {versions:JSON.parse(old).length,deleted:ids.length};
 }
 export async function verifyEvidenceReady(vectorize,index) {
+  // Nothing new was upserted when every document was already indexed.
   if(index.mutationId){const info=await vectorize.describe();if(info.processedUpToMutation!==index.mutationId&&!(index.submittedAt&&Date.parse(info.processedUpToDatetime)>=Date.parse(index.submittedAt)))throw Error('Vector projection has not finished indexing.');}
-  await concurrent(chunks(index.documents,20),4,async batch=>{const rows=await vectorize.getByIds(batch.map(d=>d.vectorId));if(batch.some(d=>!rows.some(r=>r.id===d.vectorId&&r.namespace===index.version&&(!d.id||r.metadata?.benchmark===d.id))))throw Error('Vector generation is unavailable.');});
+  const namespace=index.namespace??index.version;
+  await concurrent(chunks(index.documents,20),4,async batch=>{const rows=await vectorize.getByIds(batch.map(d=>d.vectorId));if(batch.some(d=>!rows.some(r=>r.id===d.vectorId&&r.namespace===namespace&&(!d.id||r.metadata?.benchmark===d.id))))throw Error('Vector generation is unavailable.');});
   return true;
 }
 export async function retrieveEvidence(task,index,{vectorize,queryVector,modelIds}={}) {
   const eligible=modelIds?new Set(modelIds):null,documents=index.documents.filter(d=>!eligible||!d.modelIds||d.modelIds.some(id=>eligible.has(id))),byId=new Map(documents.map(d=>[d.id,d]));
   let candidates=[];
-  if(vectorize){const result=await vectorize.query(queryVector,{namespace:index.version,topK:50,returnMetadata:'all'});candidates=[...new Map(result.matches.flatMap(m=>{const d=byId.get(m.metadata?.benchmark);return d?[[d.id,d]]:[];})).values()];}
+  // A shared namespace also holds other versions' vectors of a benchmark; only this version's count.
+  if(vectorize){const result=await vectorize.query(queryVector,{namespace:index.namespace??index.version,topK:50,returnMetadata:'all'});candidates=[...new Map(result.matches.flatMap(m=>{const d=byId.get(m.metadata?.benchmark);return d&&(!d.vectorId||d.vectorId===m.id)?[[d.id,d]]:[];})).values()];}
   // Prepared memberships are a fallback when the vector query has no matches.
   // They do not turn broad capability overlap into task-relevance evidence.
   const supported=documents.filter(d=>d.tags.some(t=>task.weights[t]));

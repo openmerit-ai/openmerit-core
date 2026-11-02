@@ -8,8 +8,11 @@
   "preview_urls": false,
   // One Workflow invocation can run many refresh steps and they share this budget
   // (default 10,000). The Hugging Face provider crawl alone makes about 150 D1 calls
-  // per step over roughly 100 steps; subrequests are not billed.
-  "limits": { "subrequests": 200000 },
+  // per step over roughly 100 steps; subrequests are not billed. CPU time is shared the same
+  // way: since 29 October most refreshes reached the default 30 s and were restarted mid-run
+  // (Workers analytics: exceededResources at 30–32 s), once failing a validate-and-stage attempt.
+  // Only CPU actually used is billed.
+  "limits": { "subrequests": 200000, "cpu_ms": 300000 },
   "assets": {
     "directory": "./dist/scout-site",
     "binding": "ASSETS",
