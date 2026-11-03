@@ -385,8 +385,8 @@ function setupSettings() {
   } catch { return { enabled: false, usageRequested: false, linkAccount: false }; }
 }
 for (const host of [
-  { id: 'claude', client: 'claude-code', name: 'Claude Code' },
-  { id: 'pi', client: 'pi', name: 'Pi' },
+  { id: 'claude', client: 'claude-code' },
+  { id: 'pi', client: 'pi' },
 ] as const) $(`#add-to-${host.id}`).addEventListener('click', async () => {
   const settings = setupSettings(), epoch = setupEpoch;
   const setupId = settings.enabled && settings.usageRequested && settings.linkAccount ? crypto.randomUUID() : undefined;
@@ -394,14 +394,12 @@ for (const host of [
   const environment = !settings.usageRequested ? 'DO_NOT_TRACK=1 ' : settings.linkAccount ? '' : 'OPENMERIT_ANALYTICS_ACCOUNT=off ';
   const command = `${environment}npx -y openmerit@latest install --client ${host.client}${setupId ? ` --setup-id ${setupId}` : ''}`;
   const completion = host.id === 'claude'
-    ? 'tell me in one line that Scout is connected and I must start a new Claude Code session to load its startup instructions; reconnecting /mcp alone is not enough.'
-    : 'show me the installer’s completion message and any next steps it prints.';
-  const setupPrompt = `Connect OpenMerit Scout to ${host.name}.
-
-Run this command with a 10-minute timeout, without asking me anything first:
+    ? 'tell me to start a new Claude Code session; reconnecting /mcp isn’t enough.'
+    : 'show the installer’s next steps.';
+  const setupPrompt = `Run with a 10-minute timeout:
 ${command}
 
-It opens my browser so I can approve this device, then finishes by itself. If it exits with "approval pending", show me the link and code it printed and run the same command again. Don't edit configuration files yourself or ask me for a key. If it reports a conflict or another error, show me its message and stop. When it succeeds, ${completion}`;
+I’ll approve in the browser. If approval is pending, show the link/code and rerun. Stop and show errors; don’t edit configs or ask for keys. On success, ${completion}`;
   const status = $(`#${host.id}-setup-status`); status.hidden = false;
   status.textContent = host.id === 'claude' ? 'Copying setup prompt and requesting Claude…' : 'Copying setup prompt for Pi…';
   void setupAnalytics?.track('scout_agent_setup_started', properties);
