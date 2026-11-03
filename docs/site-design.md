@@ -10,6 +10,16 @@ The nested-arches mark already used on Scout is the default OpenMerit logo. The 
 
 The homepage uses two conversational paragraphs on every screen size: OpenMerit as a model selection layer in the customer's infrastructure, followed by the beta launch of Scout by OpenMerit, its model search agent. The approved opening explains model choice in plain language: doing the job, fitting a budget, speed, security, where data lives, a fallback and knowing when to switch, beyond an eval, a skill or an “auto” setting. It uses no em dashes, replaces the speed-dating metaphor and retains the token-sales joke (“we checked, it’s a very crowded business”). The first still states that OpenMerit is not a router, does not sit in the live request path and does not sell tokens, ending with an underlined “Optimum Inference For All” memo-title link to `/memo/`; the second describes task-based model search weighing quality and cost for text, code and vision, without implementation detail. Rounded coverage figures (400+ catalogue models, results from 30+ labs, 500+ benchmark series and 200+ source feeds) were checked against the live status endpoint on 29 October 2026: 449 models, 39 labs, 577 series and 212 distinct feed IDs. These static figures need rechecking when the copy changes; they are not live counters. Only 290 series had matched results, and feed IDs include retained research records, so the copy does not claim every model or series is benchmarked, independent verification or support for all modalities. The memo's existing access controls are unchanged. It has no full/TL;DR toggle and retains the existing typography, header and **Try Scout** CTA. The CTA navigates directly to `/scout/`, with or without JavaScript; the homepage has no client script, installer prompt, clipboard action or native Claude launch. Claude Code setup remains available on Scout. This is not yet deployed; dated reading-mode and handoff descriptions below describe their original releases. The current homepage has no FAQ requiring an update.
 
+## Thread dividers — homepage source only, 3 November 2026
+
+The homepage's two rules, the short one between the letter paragraphs and the
+full-width one above the film, are drawn as slightly wiggly SVG threads by
+`site/thread-rule.ts` (built into the ignored `site/assets/thread-rule.js`).
+A hovering mouse pulls the nearby part of the thread up to 7px toward it. A
+damped spring makes it lag, bounce once softly and settle when released. Touch
+input is ignored, reduced-motion users get the still wiggle, and the straight
+CSS rule remains without JavaScript.
+
 ## Founder video — homepage source only, 31 October 2026
 
 A second section below the existing introduction presents the owner's 53-second
