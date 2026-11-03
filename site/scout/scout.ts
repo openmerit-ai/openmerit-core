@@ -264,10 +264,10 @@ async function checkVersion() {
     const { version } = await response.json() as { version: string | null };
     if (!version) return;
     if (loadedVersion === null) loadedVersion = version;
-    else if (version !== loadedVersion) updateNotice.hidden = false;
+    else if (version !== loadedVersion) { updateNotice.hidden = false; announcement.textContent = 'A new version of Scout is available. Refresh to update.'; }
   } catch { /* Offline or unavailable: try again at the next check. */ }
 }
-$('#update-refresh').addEventListener('click', () => location.reload());
+updateNotice.addEventListener('click', () => location.reload());
 void checkVersion();
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void checkVersion(); });
 
