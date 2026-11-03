@@ -340,7 +340,7 @@ const onboarding = initOnboarding(() => auth.signIn());
 const auth = initAuth(reset, () => composer.requestSubmit(), (id: string | null) => onboarding.session(id));
 fitPrompt();
 
-// Restore the existing secret-free Claude handoff without making analytics a
+// Share secret-free agent setup without making analytics a
 // startup dependency. Blocked instrumentation is not a saved installer opt-out.
 let setupAnalytics: typeof import('./analytics.js')['analytics'] | undefined, setupEpoch = 0;
 void import('./analytics.js').then(module => { setupAnalytics = module.analytics; }).catch(() => {});
@@ -357,28 +357,40 @@ function setupSettings() {
     };
   } catch { return { enabled: false, usageRequested: false, linkAccount: false }; }
 }
-$('#add-to-claude').addEventListener('click', async () => {
+for (const host of [
+  { id: 'claude', client: 'claude-code', name: 'Claude Code' },
+  { id: 'pi', client: 'pi', name: 'Pi' },
+] as const) $(`#add-to-${host.id}`).addEventListener('click', async () => {
   const settings = setupSettings(), epoch = setupEpoch;
   const setupId = settings.enabled && settings.usageRequested && settings.linkAccount ? crypto.randomUUID() : undefined;
-  const properties = { agent: 'claude-code', ...(setupId ? { setup_id: setupId } : {}) };
+  const properties = { agent: host.client, ...(setupId ? { setup_id: setupId } : {}) };
   const environment = !settings.usageRequested ? 'DO_NOT_TRACK=1 ' : settings.linkAccount ? '' : 'OPENMERIT_ANALYTICS_ACCOUNT=off ';
-  const setupPrompt = `Connect OpenMerit Scout to Claude Code.
+  const command = `${environment}npx -y openmerit@latest install --client ${host.client}${setupId ? ` --setup-id ${setupId}` : ''}`;
+  const completion = host.id === 'claude'
+    ? 'tell me in one line that Scout is connected and I must start a new Claude Code session to load its startup instructions; reconnecting /mcp alone is not enough.'
+    : 'show me the installer’s completion message and any next steps it prints.';
+  const setupPrompt = `Connect OpenMerit Scout to ${host.name}.
 
 Run this command with a 10-minute timeout, without asking me anything first:
-${environment}npx -y openmerit@latest install --client claude-code${setupId ? ` --setup-id ${setupId}` : ''}
+${command}
 
-It opens my browser so I can approve this device, then finishes by itself. If it exits with "approval pending", show me the link and code it printed and run the same command again. Don't edit configuration files yourself or ask me for a key. If it reports a conflict or another error, show me its message and stop. When it succeeds, tell me in one line that Scout is connected and I must start a new Claude Code session to load its startup instructions; reconnecting /mcp alone is not enough.`;
-  const status = $('#claude-setup-status'); status.hidden = false; status.textContent = 'Copying setup prompt and requesting Claude…';
+It opens my browser so I can approve this device, then finishes by itself. If it exits with "approval pending", show me the link and code it printed and run the same command again. Don't edit configuration files yourself or ask me for a key. If it reports a conflict or another error, show me its message and stop. When it succeeds, ${completion}`;
+  const status = $(`#${host.id}-setup-status`); status.hidden = false;
+  status.textContent = host.id === 'claude' ? 'Copying setup prompt and requesting Claude…' : 'Copying setup prompt for Pi…';
   void setupAnalytics?.track('scout_agent_setup_started', properties);
   // Request the app in this click task: clipboard permission must not consume
   // transient user activation. Either API can fail independently of the other.
   let copying: Promise<void> | undefined, launched = false;
   try { copying = navigator.clipboard.writeText(setupPrompt); } catch { /* Report below. */ }
-  try { location.href = `claude://code/new?q=${encodeURIComponent(setupPrompt)}`; launched = true; } catch { /* A request cannot prove the app opened. */ }
-  void setupAnalytics?.track('scout_agent_launch_requested', { ...properties, outcome: launched ? 'ok' : 'error', ...(!launched ? { code: 'launch_error' } : {}) });
+  if (host.id === 'claude') {
+    try { location.href = `claude://code/new?q=${encodeURIComponent(setupPrompt)}`; launched = true; } catch { /* A request cannot prove the app opened. */ }
+    void setupAnalytics?.track('scout_agent_launch_requested', { ...properties, outcome: launched ? 'ok' : 'error', ...(!launched ? { code: 'launch_error' } : {}) });
+  }
   let copied = false;
   try { if (copying) { await copying; copied = true; } } catch { /* The deep link still includes the prompt. */ }
-  status.textContent = copied ? 'Setup prompt copied. Paste it into Claude Code if the app doesn’t open.'
+  status.textContent = host.id === 'pi'
+    ? copied ? 'Setup prompt copied. Paste it into Pi to begin setup.' : `Couldn’t copy the setup prompt. Paste this command into Pi to begin setup:\n${command}`
+    : copied ? 'Setup prompt copied. Paste it into Claude Code if the app doesn’t open.'
     : launched ? 'Claude launch requested. If it doesn’t open, allow clipboard access and try again.'
     : 'Couldn’t copy or request Claude. Please try again.';
   const current = setupSettings();

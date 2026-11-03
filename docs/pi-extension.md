@@ -2,53 +2,57 @@
 
 ## Supported version
 
-The adapter targets Pi 0.87 and declares `>=0.87.0 <0.88.0`. Development uses 0.87.0 without modifying a globally installed Pi.
+OpenMerit **0.1.12** adds a Scout adapter for Pi **1.5.0**. It replaces, rather than upgrades in place, the Pi 0.87 evaluation adapter. The `@latest` commands below require OpenMerit 0.1.12 or newer. Package publication and website deployment remain independent releases.
 
-## Loading
+## Installation
 
-Install the published package with `pi install npm:openmerit`. For development
-from a checkout, load the source extension with:
+With Node.js 22.19 or newer, npm, and Pi 1.5.0 installed:
 
 ```sh
-./node_modules/.bin/pi --no-extensions -e ./packages/pi/src/index.ts
+npx -y openmerit@latest install --client pi --scope user
 ```
 
-The isolation flag avoids duplicate `openmerit_complete_intent` and `openmerit_report_signal` registrations when npm `openmerit` is also installed in Pi's user settings.
+Approve the matching browser device code and start a new Pi session. Scope defaults to `user`; use `--scope project` from the project's root for project-local setup. Each client and scope gets an independent key and approval; project keys are also separated by project. The npm package alone does not configure Pi.
 
-Use `/openmerit doctor` to confirm that the adapter and intent executor are available.
+The website's **Add to Pi** action is copy-only and sits below the Claude action, with the Pi logo before the label. It copies the installer command; it does not open a Pi deep link or prove installation. The button requires the corresponding Scout website deployment.
 
-Use `/openmerit logs` to locate the project-local audit stream, exporter failures, evidence manifests, and state while testing an end-to-end run.
+## Installed files and credentials
 
-On `session_start`, an interactive unconfigured project receives a bounded source preflight. The adapter also repeats that bounded detection after a settled Pi turn. This lets Pi build an application from an empty directory and then receive an automatic `establish_evals` intent without requiring `/openmerit setup`. Durable active-intent state prevents duplicate setup nudges. Non-interactive runs do not attempt a confirmation flow.
+| File | User scope | Project scope |
+| --- | --- | --- |
+| Native extension bundle | `~/.pi/agent/extensions/openmerit-scout.ts` | `.pi/extensions/openmerit-scout.ts` |
+| Credential-path reference | `~/.pi/agent/extensions/openmerit-scout.json` | `.pi/extensions/openmerit-scout.json` |
+| Shared Scout skill | `~/.pi/agent/skills/openmerit-scout/SKILL.md` | `.pi/skills/openmerit-scout/SKILL.md` |
+| Installer ownership record | `~/.pi/agent/openmerit-install.json` | `.pi/openmerit-install.json` |
 
-If Pi exits while an intent is active, the adapter restores its completion tool and resends that same persisted intent on the next interactive session so the harness can continue it.
+`PI_CODING_AGENT_DIR` overrides the user agent directory. The connection JSON contains a `credentialsPath`, not the key. The default private key paths are `~/.config/openmerit/pi/user/credentials.json` for user scope and `~/.config/openmerit/pi/<project-id>/credentials.json` for project scope. The project ID derives from the resolved project root; run targeted commands from that root. `OPENMERIT_CONFIG_DIR` or `XDG_CONFIG_HOME` can override the private configuration base. Do not copy credentials into the project or model instructions.
 
-For configured projects with a confirmed application target, session start reports the available model catalogue and a scheduled tick. Application instrumentation reports idempotent completed-task and metric-window signals. OpenMerit evaluates the confirmed policy before issuing work. On macOS, Pi can install a per-project user LaunchAgent after you confirm persistent execution and authorize infrastructure changes in the policy. It uses the selected authenticated Pi model, checks for due work locally every five minutes, and starts a headless Pi only when the due core check finds downstream harness work. If installation or background authentication fails, the adapter reports a scheduling gap. Other platforms still need an external scheduler.
+The extension reads credentials at session startup and registers the `openmerit` HTTP MCP server with direct tool exposure. Authorization is an HTTP header, not prompt content. Missing or invalid configuration produces a sanitized setup diagnostic, not an automatic login. The adapter performs no per-turn HTTP connection checks or credential reads.
 
-The macOS background runner is not yet product-validated for candidate work. A local runner test verifies that an insufficient baseline is checked and recorded without starting Pi. A model-driven runner is capped at 15 minutes and records a nonzero exit and active intent ID on failure. Do not infer that unattended candidate discovery or swapping has passed end-to-end validation.
+## Native ownership and shared guidance
 
-The adapter does not convert Pi's own provider usage into application metrics. Application-task signals must carry the application model, target ID, and durable evidence; application telemetry may include provider-reported USD cost, token counts, and wall-clock latency. If automatic setup is active when interactive input arrives, the input is queued and released after setup completes instead of racing the setup turn.
+Pi supplies the MCP connection, tool discovery and execution, permissions, and session management. The thin adapter adds the same Scout rule and skill used by the shared installer as structured system-prompt sections. It leaves the host's model, tool allow/exclude lists, and other prompt sections intact. This is guidance to consult Scout before application-model choices, not enforcement of tool invocation or permission to download, spend, deploy, or change models. Scout's [data-handling policy](scout.md#refresh-and-data-handling) applies to submitted tasks.
 
-Pi also exposes `openmerit_report_signal` for verified `product_task_completed`, `metric_window_available`, and `verification_window_completed` events. Evals or observability work performed by Pi can submit measured application-target metric records through this typed ingress using stable signal IDs. For baseline checks, send cumulative metric windows with sample counts and evidence references. The background wakeup only checks whether a time-based action is due; it does not collect application results by itself. `/openmerit assess` checks those stored windows locally and starts candidate discovery only when all required metrics are ready.
+## Updates and targeted lifecycle commands
 
-## Intent delivery
+```sh
+npx -y openmerit@latest status --client pi --scope user --check
+npx -y openmerit@latest doctor --client pi --scope user
+npx -y openmerit@latest login --client pi --scope user
+npx -y openmerit@latest logout --client pi --scope user
+npx -y openmerit@latest remove --client pi --scope user
+```
 
-The extension persists each intent as a custom Pi session entry, sends private extension-authored context with `display: false`, and triggers a follow-up Pi turn. The intent describes the outcome, constraints, evidence, task profile, and authorization boundary without prescribing Pi's method.
+Replace `user` with `project` for a project installation. Removal and logout target that client's scope/key, not a Claude Code installation or another project. Edited or unowned files are not silently overwritten or deleted. Resolve duplicate user/project adapters or existing `openmerit` MCP entries before installing.
 
-Pi must finish by calling `openmerit_complete_intent` exactly once. Success without evidence is rejected. Setup, assessment, and frontier intents receive additional structured-output checks. During setup, Pi first presents its inferred metrics and sampling plan to the user. The accepted task profile records how many representative cases and repetitions each metric needs and how results are aggregated; sample counts are kept separate from optional performance thresholds.
+Updates are **explicit reinstall only**: rerun `install --client pi` with the same scope and start a new session. There are no Pi auto-update hooks; Claude Code update-hook settings do not apply to Pi.
 
-If Pi exits while an intent is active, the next session reports the recovered intent. Use `/openmerit cancel` to record an explicit cancellation before retrying; OpenMerit does not silently reinterpret interrupted work as success.
+## SDK embedding
 
-The extension replaces the completion tool definition whenever an intent becomes active. Its `outputs` property therefore exposes the canonical schema for that exact intent instead of untyped JSON. Pi validates the arguments before execution and requests provider-side JSON Schema constrained sampling when supported. OpenMerit validates the canonical schema and semantic rules again when accepting the result. OpenMerit records the exact incumbent during setup, freezes accepted candidates after discovery, and carries accepted assessments and the experiment manifest into frontier calculation so these transitions do not rely on conversational memory.
+`openmerit/pi` exports `createScoutPiExtension({ credentialsPath })` and a default extension created by that factory. SDK hosts must explicitly load Pi's own **`createMcpExtension()`** alongside the Scout extension; the Scout factory does not create an MCP runtime. The Pi CLI already supplies native MCP. The explicit credential path takes precedence over the installed adjacent connection JSON, with the shared Pi user credential path as the fallback when that JSON is absent. The host supplies its own model, tools, session and permission configuration.
 
-## Model changes
+## Migration from Pi 0.87
 
-The extension never treats Pi's model as the application target. After policy authorization, it sends a bounded, target-bound `apply_model_swap` intent. Pi performs the application-route change and returns configuration proof; the target ID must match the confirmed application LLM target, and Pi's own model must remain unchanged.
+Remove or disable the old `npm:openmerit` Pi package registration before loading this adapter, and explicitly remove any previously authorized background job through its existing management path. New setup does not promise to uninstall a legacy LaunchAgent. Preserve `.openmerit/` evaluation state and evidence if needed; do not delete them as a setup repair.
 
-## Jev System One
-
-Jev is not integrated into OpenMerit. If configured in Pi, the intent asks Pi to use harness-configured fast decision resources aggressively for bounded ranking, triage, and judgment. Credentials remain outside OpenMerit.
-
-## Non-interactive modes
-
-A harness must not attempt interactive confirmation in a mode without dialog-capable UI. It should return a waiting-for-user or failed result with an actionable reason.
+The replacement has no `/openmerit` commands, `openmerit_complete_intent` or `openmerit_report_signal` tools, source preflight, evaluation lifecycle, intent recovery, scheduling, automatic swaps, or LaunchAgent. The [core coordinator](architecture.md) remains available for custom harnesses. The [standalone evaluation CLI](agent-evaluations.md) is unchanged. Older lifecycle guides are retained as historical adapter/core references, not instructions for this Scout adapter.

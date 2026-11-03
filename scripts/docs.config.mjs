@@ -3,8 +3,8 @@ export const documentationLabel = 'Main branch';
 // Only these product documents are published. Design notes stay in the repository.
 export const groups = [
   { title: 'Get started', pages: [
-    { source: 'index.md', slug: '', title: 'Overview', description: 'Inspect application inference and set up supervised model comparisons.' },
-    { source: 'getting-started.md', slug: 'getting-started', title: 'Installation & setup', description: 'Open the standalone terminal or configure the separate Pi comparison workflow.' },
+    { source: 'index.md', slug: '', title: 'Overview', description: 'Inspect application inference, consult Scout, and compare models with evidence.' },
+    { source: 'getting-started.md', slug: 'getting-started', title: 'Installation & setup', description: 'Open the terminal or connect Scout to Claude Code and Pi.' },
     { source: 'inference-terminal.md', slug: 'inference-terminal', title: 'Inference Terminal', description: 'Inspect application declarations, recorded requests, services, and linked compute.' },
     { source: 'scout.md', slug: 'scout', documentationLabel: 'Hosted beta', githubSource: false, title: 'Scout · Beta', description: 'OpenMerit’s model search agent. Describe your task and get model recommendations.' },
     { source: 'scout-data-policy.md', slug: 'scout-data-policy', documentationLabel: 'Beta', githubSource: false, title: 'Scout data policy', description: 'Data use, sharing choices and deletion.' },
@@ -27,9 +27,10 @@ export const groups = [
     { source: 'budgets.md', slug: 'budgets', title: 'Budgets & permissions', description: 'Understand evaluation costs, spending constraints, and automation permissions.' },
   ] },
   { title: 'Reference', pages: [
-    { source: 'commands.md', slug: 'commands', title: 'Commands', description: 'The OpenMerit command reference for Pi.' },
+    { source: 'commands.md', slug: 'commands', title: 'Commands', description: 'Scout setup commands and historical coordinator command reference.' },
+    { source: 'pi-extension.md', slug: 'pi-extension', title: 'Scout for Pi', description: 'Native Scout setup and SDK embedding on current stable Pi.' },
     { source: 'operations.md', slug: 'operations', title: 'Project files & logs', description: 'Find project state, audit events, evidence manifests, and recovery information.' },
-    { source: 'troubleshooting.md', slug: 'troubleshooting', title: 'Troubleshooting', description: 'Diagnose setup, evidence, scheduling, and lifecycle problems.' },
+    { source: 'troubleshooting.md', slug: 'troubleshooting', title: 'Troubleshooting', description: 'Diagnose Scout setup, credentials, discovery and host restrictions.' },
     { source: 'security.md', slug: 'security', title: 'Security & data', description: 'Understand credentials, authorization, local data, and evidence trust.' },
     { source: 'roadmap.md', slug: 'roadmap', title: 'Current limitations', description: 'Read the current readiness limits and next validation milestones.' },
   ] },

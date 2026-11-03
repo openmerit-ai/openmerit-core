@@ -1,5 +1,7 @@
 # Budgets and permissions
 
+**Core reference / historical Pi workflow:** these coordinator policies are available to custom evaluation harnesses. Pi-specific setup and automation references describe the removed Pi 0.87 adapter, not the unreleased Pi 1.5.0 Scout connection. The new adapter grants only Scout MCP access and shared guidance; it does not run evaluations or authorize swaps. See [Pi setup](pi-extension.md). The standalone CLI has its own [budget controls](agent-evaluations.md#budget-selection), unchanged by this replacement.
+
 Setup asks you to confirm the limits and permissions for evaluation work. OpenMerit stores the policy and passes its constraints to the harness.
 
 ## Evaluation costs

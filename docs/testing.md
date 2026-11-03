@@ -1,5 +1,7 @@
 # Testing and validation
 
+**Pi source replacement — unreleased and unpublished:** the new Pi 1.5.0 adapter uses native Scout MCP and shared guidance only. The dated Pi 0.87 lifecycle/scheduler results below remain historical receipts, not proof of the replacement or supported current commands. Package, browser-approval, native Pi and SDK acceptance must be reported for the new build separately; a successful documentation build alone establishes none of them. Core coordinator and standalone evaluation tests remain separate.
+
 ## Stable 0.1.7 acceptance — 24 October 2026
 
 Published `openmerit@0.1.7` to npm's `latest` channel after full repository verification: 757 passing tests, one existing skip, syntax/type checks, builds and documentation checks. The `preview` tag remains `0.1.7-preview.5`. A fresh registry installation on macOS ARM64 with Node.js 22.23.1 matched the tested 104-file tarball byte-for-byte. Packed core/protocol/Pi exports and the installed terminal runtime smoke checks passed, including passive collection, source removal, runtime outage/recovery and shutdown.

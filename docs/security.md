@@ -1,5 +1,7 @@
 # Security
 
+**Pi replacement — unreleased, unpublished source:** Pi 1.5.0 uses native MCP plus shared Scout rule/skill sections, not the former evaluation adapter. It never initiates login, changes the host model/tools/session, or provisions background jobs. Browser-approved credentials are independent per client/scope/project, stored privately outside the repository, and passed as MCP HTTP headers, never instructions. Pi's installed connection JSON contains only the private credential path. See [Pi paths and targeted removal](pi-extension.md). The standalone evaluation CLI and core coordinator remain separate.
+
 The [preview agent-evaluation runner](agent-evaluations.md) is a separate execution path: it runs trusted local agents/graders, passes only basic OS variables and explicitly named environment variables, and preserves agent-owned authentication. It sends task descriptions and optional model IDs to Scout. Local metric reports and budget reservations persist; temporary task outputs are removed. Fresh directories are not security sandboxes. Its budget admission controls do not enforce provider billing limits.
 
 The [budget selector](agent-evaluations.md#budget-selection) in `0.1.7-preview.2` requires an explicit $10, custom or no-fixed-cap choice after model scope. No fixed cap removes monetary admission limits, including Claude's per-attempt dollar flag, while retaining tasks, repetition bounds, timeouts, native permissions and accounting. Saved choices apply across reruns; a foreground watcher can incur further charges on each change until stopped. Provider limits remain independent.
@@ -11,6 +13,8 @@ OpenMerit accepts no model-provider or Jev credential. Credentials belong to the
 Never place secrets in profiles, policies, intent constraints, summaries, evidence URIs, audit events, fixtures, traces, or committed environment files.
 
 ## Mutation authorization
+
+This section describes core/custom evaluation harness policy. Pi-specific lifecycle and background-runner behavior below is **historical Pi 0.87 functionality**, removed from the new Scout adapter. Installing the replacement does not establish that an old background job was removed; manage that job separately.
 
 Most intents carry `modelMutationAllowed: false`. Only application-target apply-swap and rollback intents can authorize a mutation, limited to the relevant proposal, prior configuration, and confirmed target ID. Pi's model is explicitly excluded. Automatic swaps require explicit policy opt-in and meeting the configured verified-swap threshold, which can be zero. Otherwise a proposal requires approval. Post-swap evaluation depends on the harness performing the checks and reporting their results. OpenMerit is not a sandbox around the harness's tools.
 
@@ -24,7 +28,7 @@ The background runner imposes a 15-minute wall-clock limit and records a nonzero
 
 `.openmerit/` may reveal task names, candidate identifiers, evidence locations, budgets, or model choices. Treat it as sensitive project metadata even though it must not contain credentials.
 
-Pi also records OpenMerit requests and results in its session history. Project context and evaluation data may be sent to the model providers, tools, and evidence systems configured in the harness. Local OpenMerit storage does not imply that all processing stays on your machine.
+The historical evaluation adapter also recorded OpenMerit requests and results in Pi history. With native Scout, Pi manages its own session/tool records and provider context; the adapter adds no separate evaluation-history store. Task descriptions sent to hosted Scout follow its data policy. Local OpenMerit storage does not imply that all processing stays on your machine.
 
 ## Evidence integrity
 
@@ -54,6 +58,8 @@ Hosted Scout uses Clerk Google/GitHub sign-in. The page and status are public; J
 The [coding-agent setup](scout.md#connect-a-coding-agent) in npm 0.1.7 uses hosted device sign-in instead of OAuth or tokens in prompts. The copied prompt contains no secret. A signed-in person approves an eight-character code on `/connect`; codes expire after ten minutes and are single-use. Approval mints one key per device and client, scoped to `scout:recommend` and accepted only on `/scout/mcp`. The server stores only SHA-256 hashes. Keys expire after 90 days without use and can be revoked on `/connect` or with `openmerit remove`/`logout`. Locally the key is in `~/.config/openmerit/credentials.json` (mode 600) and in Claude Code's plain-text MCP configuration; the CLI never prints it. As with any device-code flow, only approve a code you started.
 
 **Automatic instruction updates — version 0.1.10:** updater-enabled setup defaults on with an opt-out, installing asynchronous Claude Code startup/response-end hooks. Checks use npm's public stable registry without credentials, task content or installation IDs. SHA-512 verification checks package bytes against registry metadata; it does not defend against a compromised publisher/registry. The updater reads only a bounded instruction bundle, never executes downloaded code or package scripts, and leaves MCP configuration, keys, privacy settings and project policy unchanged. A supported release contract permits instruction updates; maintainers must change it when permissions or data handling change. This is a publisher assertion, not semantic validation of instructions. Edited files are retained, concurrent writes serialize, and journaled recovery stops on intervening edits. New sessions reliably load new instructions. See [automatic updates](scout.md#automatic-instruction-updates-version-0110) for cadence, offline retries, manual commands and the one-time bootstrap required for older installations. Availability follows npm publication independently of hosted releases.
+
+These update hooks are Claude Code only. The new Pi adapter installs none; updates require explicit targeted reinstall. Its `login`, `logout`, `status`, `remove` and `doctor` shell commands target the selected client/scope without revoking another installation's independent key.
 
 ### OpenMerit coding-agent reset — 23 October 2026
 

@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Native Scout for Pi — npm 0.1.12 release preparation, 3 November 2026
+
+Reviewed setup, approvals, data handling, background work and readiness against replacement of the Pi 0.87 evaluation extension with the thin Pi 1.5.0 native MCP adapter. Current checkout landing copy describes model selection, not Pi lifecycle commands; it has no FAQ block promising Pi evaluations, scheduling or swaps, so no landing edit is required here. Older FAQ audit entries that describe the Pi lifecycle remain historical, not claims about this adapter. Public setup, troubleshooting, architecture, navigation and limitations now distinguish native Scout from the unchanged standalone evaluation CLI and custom core coordinator. Lifecycle walkthroughs are explicitly historical/core references. Each new client/scope has an independent private key; Pi installs no auto-update hook or LaunchAgent. The logo-first, copy-only Add to Pi action has no deep link and proves neither setup nor invocation. Local packed-install and native-agent acceptance passed; registry publication, website deployment and production account approval require separate release receipts.
+
 ## Fireworks Specialized Intelligence Index — source only, 1 November 2026
 
 Reviewed ranking and coverage claims against the change that reads the Fireworks Specialized Intelligence Index's 0–100 headline scores as benchmark evidence. The homepage FAQ names no individual benchmark sources and claims no legal, finance or healthcare coverage, so no FAQ copy changes. The Scout guide's source table has a Fireworks row that states which boards and rows are left out and that Fireworks is itself an inference provider.

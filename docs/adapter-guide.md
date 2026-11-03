@@ -1,5 +1,7 @@
 # Building a harness adapter
 
+**Evaluation coordinator boundary:** this guide remains applicable to custom harnesses. Pi-specific examples refer to the historical Pi 0.87 evaluation adapter. The unreleased Pi 1.5.0 `openmerit/pi` export is instead a thin Scout adapter and does not implement `HarnessAdapter`; see [native MCP and SDK embedding](pi-extension.md#sdk-embedding).
+
 OpenMerit adapters are transport bridges. They do not reproduce OpenMerit's lifecycle, validation, persistence, or Pareto rules, and OpenMerit does not reproduce the harness's intelligence.
 
 ## Required components

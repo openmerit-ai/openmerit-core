@@ -283,26 +283,27 @@ test('Claude handoff remains usable with analytics blocked and opens before clip
   assert.equal(f.$('#prompt').value, 'Private task that must never enter setup');
 });
 
-test('Claude handoff preserves privacy refusals and unlinked setup without browser correlation', async () => {
-  for (const options of [
+test('both agent setups preserve privacy refusals and unlinked setup without browser correlation', async () => {
+  for (const host of ['claude', 'pi']) for (const options of [
     { saved: new Map([['scout-analytics-opt-out', '1']]) },
     { navigator: { doNotTrack: '1' } }, { navigator: { globalPrivacyControl: true } }, { storageDisabled: true },
     { saved: new Map([['scout-analytics-account-link', '0']]) },
   ]) {
     let copied = '';
     const f = await fixture('analytics.js', '', { ...options, navigator: { ...options.navigator, clipboard: { writeText: async text => { copied = text; } } } });
-    f.$('#add-to-claude').dispatchEvent(new Event('click')); await drain();
+    f.$(`#add-to-${host}`).dispatchEvent(new Event('click')); await drain();
     assert.match(copied, options.saved?.has('scout-analytics-account-link') ? /OPENMERIT_ANALYTICS_ACCOUNT=off npx/ : /DO_NOT_TRACK=1 npx/);
     assert.doesNotMatch(copied, /--setup-id/);
-    assert.equal(new URL(f.location.href).searchParams.get('q'), copied);
+    if (host === 'claude') assert.equal(new URL(f.location.href).searchParams.get('q'), copied);
+    else assert.equal(f.location.href, 'https://example.test/scout/');
   }
 });
 
-test('Claude handoff creates fresh setup correlation only for enabled, account-linked collection', async () => {
-  for (const linkAccount of [true, false]) {
+test('both agent setups create fresh setup correlation only for enabled, account-linked collection', async () => {
+  for (const host of ['claude', 'pi']) for (const linkAccount of [true, false]) {
     const prompts: string[] = [];
     const f = await fixture('analytics.js', '', { analytics: { enabled: true, linkAccount }, navigator: { clipboard: { writeText: async text => { prompts.push(text); } } } });
-    for (let i = 0; i < 2; i++) { f.$('#add-to-claude').dispatchEvent(new Event('click')); await drain(); }
+    for (let i = 0; i < 2; i++) { f.$(`#add-to-${host}`).dispatchEvent(new Event('click')); await drain(); }
     if (linkAccount) {
       for (const prompt of prompts) assert.match(prompt, /--setup-id [0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/);
       assert.notEqual(prompts[0], prompts[1]);
@@ -325,6 +326,57 @@ test('Claude handoff attempts clipboard and app launch independently and reports
     assert.doesNotMatch(status, /Private|connected|installed/);
     if (copy === 'allowed') assert.match(copied, /install --client claude-code/);
     if (!launchFailure) assert.equal(new URL(f.location.href).protocol, 'claude:');
+  }
+});
+
+test('Pi action follows Claude with its official logo and an accessible setup status', () => {
+  assert.ok(page.indexOf('id="add-to-pi"') > page.indexOf('id="add-to-claude"'));
+  const button = page.match(/<button\b[^>]*id="add-to-pi"[^>]*>(.*?)<\/button>/s)!;
+  assert.match(button[0], /aria-describedby="pi-setup-status"/);
+  assert.match(button[1]!, /^<img src="\/assets\/pi-logo\.svg"[^>]*alt="">Add to Pi$/);
+  assert.equal(button[1]!.replace(/<[^>]+>/g, '').replace(/\s+/g, ' '), 'Add to Pi');
+  assert.match(page, /id="pi-setup-status"[^>]*role="status"/);
+});
+
+test('Pi copies a secret-free setup prompt without launching an app or claiming installation', async () => {
+  let copied = '', finishCopy = () => {};
+  const f = await fixture('analytics.js', '', { signedIn: true, navigator: { clipboard: { writeText: text => {
+    copied = text; return new Promise<void>(resolve => { finishCopy = resolve; });
+  } } } });
+  f.$('#prompt').value = 'Private task that must never enter setup';
+  f.$('#add-to-pi').dispatchEvent(new Event('click'));
+  assert.equal(f.$('#pi-setup-status').hidden, false);
+  assert.equal(f.$('#pi-setup-status').textContent, 'Copying setup prompt for Pi…');
+  assert.equal(f.location.href, 'https://example.test/scout/');
+  assert.match(copied, /^Connect OpenMerit Scout to Pi\./);
+  assert.match(copied, /npx -y openmerit@latest install --client pi\n/);
+  assert.match(copied, /approval pending/);
+  assert.doesNotMatch(copied, /Private task|current-session-token|user-one|--setup-id|DO_NOT_TRACK|OPENMERIT_TELEMETRY|claude:|pi:\/\//);
+  finishCopy(); await drain();
+  assert.equal(f.$('#pi-setup-status').textContent, 'Setup prompt copied. Paste it into Pi to begin setup.');
+  assert.doesNotMatch(f.$('#pi-setup-status').textContent, /connected|installed|launch/i);
+  assert.equal(f.$('#prompt').value, 'Private task that must never enter setup');
+  assert.equal(f.state.opened, 0); assert.equal(f.turns.length, 0);
+  assert.equal(f.$('#claude-setup-status').hidden, true);
+});
+
+test('Pi clipboard failures show the privacy-preserving command to paste, without navigation', async () => {
+  for (const copy of ['missing', 'throws', 'denied']) for (const unlinked of [false, true]) {
+    const navigator = copy === 'missing' ? {} : { clipboard: { writeText: () => {
+      if (copy === 'throws') throw new Error('Private clipboard failure');
+      return Promise.reject(new Error('Private clipboard denial'));
+    } } };
+    const saved = new Map([[unlinked ? 'scout-analytics-account-link' : 'scout-analytics-opt-out', unlinked ? '0' : '1']]);
+    const f = await fixture('analytics.js', '', { navigator, saved });
+    f.$('#add-to-pi').dispatchEvent(new Event('click')); await drain();
+    const status = f.$('#pi-setup-status');
+    assert.equal(status.hidden, false);
+    assert.match(status.textContent, /^Couldn’t copy the setup prompt\. Paste this command into Pi to begin setup:\n/);
+    assert.match(status.textContent, unlinked ? /OPENMERIT_ANALYTICS_ACCOUNT=off npx/ : /DO_NOT_TRACK=1 npx/);
+    assert.match(status.textContent, /npx -y openmerit@latest install --client pi$/);
+    assert.doesNotMatch(status.textContent, /Private|connected|installed|copied|--setup-id/);
+    assert.equal(f.location.href, 'https://example.test/scout/');
+    assert.equal(f.state.opened, 0); assert.equal(f.turns.length, 0);
   }
 });
 

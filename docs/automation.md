@@ -1,5 +1,7 @@
 # Harness-neutral automation
 
+**Core reference / historical Pi workflow:** the unreleased Pi 1.5.0 Scout adapter replaces the Pi 0.87 lifecycle adapter. It has no signals, `/openmerit` commands, scheduler, headless wakeups, or LaunchAgent. Pi-specific provisioning instructions below are historical, not available in the replacement. The coordinator's policy and signal APIs remain available to custom harnesses. See [current Pi setup and migration](pi-extension.md); the standalone [evaluation watcher](agent-evaluations.md) is unchanged.
+
 The user defines cadence, thresholds, budget, scheduling mode, and automation permission. OpenMerit stores that policy, evaluates durable signals, and decides whether a bounded intent is due. A harness adapter arranges native wakeups and reports events. The coding harness performs the resulting intelligent work.
 
 ```text

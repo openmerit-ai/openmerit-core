@@ -1,55 +1,50 @@
 # Troubleshooting
 
-Start with the current status and the local audit trail. These show what OpenMerit requested, what the harness reported, and which evidence references were recorded.
+The Pi Scout adapter requires OpenMerit **0.1.12** or newer and targets Pi **1.5.0**. Check the resolved package version when using `@latest`. The removed Pi 0.87 `/openmerit` workflow is not a diagnostic path for the replacement.
 
-```text
-/openmerit status
-/openmerit doctor
-/openmerit logs
-```
+## Scout is missing in Pi
 
-## The command is missing
-
-Check that OpenMerit is installed and enabled in Pi:
+Run targeted checks in your shell:
 
 ```sh
-pi list
+npx -y openmerit@latest status --client pi --scope user --check
+npx -y openmerit@latest doctor --client pi --scope user
 ```
 
-The published extension targets Pi 0.87 and Node.js 22.19 or newer. Follow [getting started](getting-started.md) to install it, then start Pi in your product repository.
+Use `--scope project` from the original project root for project setup. Check Pi and Node.js versions against [setup](getting-started.md), complete browser device approval, then start a **new session**. Installing the npm package or reconnecting an old session does not load new extension instructions. For SDK embedding, load Pi's `createMcpExtension()` explicitly alongside `createScoutPiExtension`; the Scout factory alone is not an MCP runtime.
 
-## Setup did not begin
+## The connection configuration is invalid
 
-Automatic setup requires an unconfigured project, an interactive Pi UI, and a bounded source-detection match for an application LLM call. Non-interactive runs do not start the confirmation flow, and a project without a detected target remains idle until `/openmerit setup` is requested. Existing project state or active work may also prevent a fresh setup request.
+The installed extension reads `openmerit-scout.json` beside its bundle; that file points to a private credential file outside the repository. Do not put the key in the extension or prompt. Check the scope and configuration-directory overrides against [installed paths](pi-extension.md#installed-files-and-credentials). Reinstall explicitly to repair missing owned files:
 
-Inspect status first. If no intent is active, use `/openmerit setup` to request setup explicitly; this is also the supported correction path when source detection or a prior setup recorded the wrong incumbent. A new setup preserves audit history but replaces the active task profile, candidate/assessment handoffs, frontier, and baseline state after the new result is accepted. Do not delete `.openmerit/` as a routine reset: it contains your policy, lifecycle state, evidence references, and audit history.
+```sh
+npx -y openmerit@latest install --client pi --scope user
+```
 
-## Evidence is missing or incomplete
+Expired or revoked credentials require targeted `login` followed by reinstall. The adapter reports a sanitized setup diagnostic; it never starts sign-in on its own. Approve only a browser code you initiated.
 
-A task profile is not the same as working telemetry. Ask Pi which required metrics are uncovered, where their measurements should come from, and which evaluation artifacts have been run. Normal coding checkpoints do not replace those measurements.
+## Installation reports a conflict
 
-The [metrics guide](metrics-and-evidence.md) explains missing and insufficient evidence. More samples or instrumentation may be needed before a candidate can be compared.
+The installer does not overwrite edited or unowned files. Inspect and preserve your changes before resolving the conflict. Also check for overlapping Pi user/project installations or an existing `openmerit` MCP entry. Remove the unwanted owned installation using its own scope; do not revoke a different client's key as a repair. Disable the old `npm:openmerit` Pi registration when migrating from 0.87.
 
-## A result was rejected
+## The adapter did not update automatically
 
-Read the validation error and audit event. Successful work needs evidence references and the output structure required by that intent. Frontier results must match the task and product revisions, identify their assessments, and satisfy the comparison rules.
+That is expected. Pi has no OpenMerit auto-update hooks. Explicitly rerun `install --client pi` with the original scope, then start a new session. Claude Code's update settings do not configure Pi.
 
-Have the harness correct the measurement or output problem. Do not mark an intent successful merely to advance the workflow.
+## `/openmerit` or evaluation tools are missing
 
-## Work appears stuck after a restart
+They were removed, not renamed. The Pi adapter now supplies only native Scout MCP and shared guidance. It does not set up evaluations, recover intents, schedule work, swap models, or install a LaunchAgent. Existing legacy background jobs must be removed separately; installing the new adapter is not evidence that they stopped. Preserve old evaluation state and audit files if needed. For new evaluations use [the standalone CLI](agent-evaluations.md); custom harnesses may still use [the core coordinator](adapter-guide.md).
 
-Pending or active intent state is durable. Inspect `state.json` and `events.jsonl` using the paths from `/openmerit logs`, and ask the harness to reconcile that work with the current session before requesting another intent. The current adapter may need supervised recovery; automatic completion after a restart is not guaranteed.
+## Scout was not consulted or its evidence is insufficient
 
-## Checks are not running while Pi is closed
+The rule and skill are model guidance, not a guaranteed tool gate. Confirm they loaded in a new session and that the host permits the MCP tools. When project model policy is missing, ask the user; when Scout is unavailable or lacks suitable evidence, pause the model choice rather than invent a result. Host model/tool/session restrictions remain authoritative. Scout candidates are not measurements of your application's quality.
 
-On macOS, check that the confirmed policy requests persistent execution and allows infrastructure changes, that the Mac user is logged in, and that Pi authentication works without shell-only credentials. `/openmerit doctor` reports scheduler diagnostics; `.openmerit/scheduler-status.json` records completed wakeups and failures. An active pause unloads the managed LaunchAgent. Other platforms need an external scheduler. A successful schedule does not establish that model-driven work completed. See [automatic checks](automation.md).
+## Evaluation or terminal problems
 
-## Work continues after pausing
-
-Pause is durable and gates automatic work, but an already-active intent can continue and explicit commands remain available. Inspect the active intent and audit timestamps to distinguish prior work from a new automatic dispatch. `/openmerit cancel` records abandonment; it does not terminate a provider request or harness process. The standalone terminal is independent of Pi pause; stop its CLI with Ctrl+C to stop collection. If a new automatic intent starts while the persisted pause is active, record a sanitized reproduction and your installed version.
+The standalone products are separate from Pi setup. Use [agent-evaluation diagnostics](agent-evaluations.md) for tasks, graders, budgets and execution blocks, or [terminal diagnostics](inference-terminal.md) for missing inventory and request evidence. A populated dashboard is not proof of successful evaluations. Never mark missing or rejected evidence successful merely to advance a workflow.
 
 ## Report a reproducible problem
 
-Include the OpenMerit, Pi, and Node.js versions, the triggering command or signal, the lifecycle stage, and a sanitized error. Remove credentials, private traces, and proprietary evaluation data before sharing anything in a public issue.
+Include OpenMerit, Pi and Node.js versions, the client/scope, the triggering command, and a sanitized error. Remove credentials, private paths, prompts and proprietary data before sharing. Do not attach credential or connection files containing private configuration.
 
 [Open an issue on GitHub](https://github.com/laz-aslam/openmerit/issues)

@@ -1,24 +1,25 @@
-# Pi adapter
+# Scout for Pi
 
-The first OpenMerit harness adapter, delivered as a Pi extension.
+This source adapter targets Pi **1.5.0**. It replaces the obsolete Pi 0.87
+evaluation adapter; it does not expose the old `/openmerit` commands, completion
+tools, scheduler, or background wakeups. Core and evaluation products are separate.
 
-It translates OpenMerit intents into intelligent Pi work and returns structured results with evidence references. Its implementation targets the approved Pi version and follows Pi's extension lifecycle and security rules.
+The default export is `createScoutPiExtension()`. SDK hosts may pass an explicit
+credential file with `createScoutPiExtension({ credentialsPath })` and must load
+Pi's own `createMcpExtension()` alongside it. Pi's CLI already supplies native MCP.
 
-## Initial command surface
+At session startup, the default extension reads `openmerit-scout.json` beside its
+installed bundle. That small file contains only `{ "credentialsPath": "…" }`.
+Without it, the adapter uses the shared Pi user credential path. An explicit
+factory option takes precedence. Missing or invalid credentials produce a
+sanitized setup diagnostic; the adapter never initiates login.
 
-- `/openmerit` and `/openmerit status` — show evidence readiness and current activity.
-- `/openmerit setup` — explicitly rerun or recover setup; interactive startup only begins automatically after bounded source detection finds an application LLM call.
-- `/openmerit assess` — in the unreleased source checkout, check stored baseline metric windows locally; published `0.1.5` delegates assessment to Pi.
-- `/openmerit frontier` — request and verify a harness-calculated frontier.
-- `/openmerit approve` — authorize the currently proposed supervised swap.
-- `/openmerit pause` and `/openmerit resume` — control proactive nudges.
-- `/openmerit logs` — show canonical audit, exporter-error, evidence, and state paths.
-- `/openmerit doctor` — show sanitized adapter diagnostics.
+The adapter registers `openmerit` through Pi's native HTTP MCP integration with
+direct tool exposure, and adds the shared Scout rule and skill as structured
+prompt sections. Pi owns connections, discovery, tool calls, permissions, and
+session management. Host tool restrictions and existing prompt sections remain
+intact. Credentials are HTTP headers only, never model instructions. There are
+no adapter HTTP checks or credential reads on individual turns.
 
-The adapter persists typed intents in Pi's session, supplies them as private extension-authored context, and triggers Pi to perform the work. Pi completes each intent through `openmerit_complete_intent`, returning structured outputs and durable evidence references.
-
-Pi owns the work behind every intent, including use of harness-configured Jev System One access. This adapter deliberately contains no Jev API client and accepts no Jev credential.
-
-The adapter does not select or directly set a model. It issues a bounded mutation intent only after the policy gate authorizes one; Pi performs and proves the change.
-
-Pi reports active-session ticks and catalogue observations. Application instrumentation submits completed-task, metric-window, and verification-window records through `openmerit_report_signal`; Pi's own model telemetry is never application evidence. Pi declares that it cannot provision persistent background wakeups, allowing OpenMerit to report the need for an external scheduler without overstating automation readiness.
+Run `npm run test --workspace @openmerit/pi` for bounded native SDK/loopback MCP
+contract tests. These tests make no application-model or inference calls.

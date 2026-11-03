@@ -50,6 +50,8 @@ code, kbd { font-family: var(--mono); }
 .scout-intro { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px 28px; padding: 38px 0 24px; }
 .intro-copy { flex: 1 1 440px; min-width: 0; }
 .scout-intro p { margin-top: 5px; color: var(--muted); font-size: 13px; }
+.claude-setup { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+.claude-setup-status { max-width: 440px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .prompt-box { padding: 0; background: transparent; border: 0; }
 .prompt-box label { display: block; margin-bottom: 9px; font-size: 12px; font-weight: 500; }
 .prompt-field { background: var(--input); border-radius: 6px; }

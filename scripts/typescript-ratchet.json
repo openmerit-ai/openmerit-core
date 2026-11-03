@@ -8,7 +8,6 @@
     "demo/domain-router.mjs",
     "demo/memo/views.mjs",
     "demo/recording.mjs",
-    "demo/runtime/adapter.mjs",
     "demo/runtime/application.mjs",
     "demo/runtime/backfill.mjs",
     "demo/runtime/comparison.mjs",
