@@ -1,6 +1,10 @@
 # Scout architecture and operations
 
-## Incremental Vectorize writes (not yet deployed), 2 November 2026
+## Incremental Vectorize writes — deployed 2 November 2026; prune fix not yet deployed
+
+**Receipt.** The owner approved committing, pushing and deploying serving, then the publisher, with a manual run. Commit [45738f6](https://github.com/laz-aslam/openmerit/commit/45738f63bec314a0b75ba5de6c67c6df3fbbf75d) is on `origin/main`; CI passed after a rerun of the `connect-browser` UUID flake. Serving `openmerit-scout-alpha` is version `23df843c` (receipt `.deploys/scout-serving/2026-11-02T18-41-32.644Z.json`, rollback to `e8413821`); publisher `openmerit-scout` is `adcca729` (rollback to `a30bbfc3`). Manual run `manual-20261102-vectors-1` completed with no failed steps and published `81135aa3`: evidence in namespace `evidence` (371 vectors, all new this once), agent catalogue in `agent` (1,617 vectors listed, 45 texts embedded). `validate-and-stage` waited four attempts for the first shared upsert. `/`, `/scout/`, `/connect/` and `/scout/api/status` return 200.
+
+**Pruning failed, fix not yet deployed.** No vector was deleted: the index went from 29,388 to 31,376, exactly the new vectors, and D1 still lists 91 evidence versions and 8 agent versions. Both prunes sent 500 IDs per `deleteByIds` call, and Vectorize accepts at most 20 per call (as `verifyEvidenceReady` already batches `getByIds`); each prune threw, was caught, and kept its references. The agent prune had the same batch size before this change, so it has likely never deleted a vector. Both now delete in batches of 20, six at a time; the first publication after deployment should delete about 13,300 evidence vectors of 84 old versions, and the agent namespaces of versions that age out.
 
 **Finding.** Each publication wrote a full copy of its vectors into a namespace of its own: 371 evidence vectors in `<version>` (never deleted) and 1,612 agent-catalogue vectors in `agent-<version>` (the newest five kept). Embeddings were already cached in R2 by content hash, so OpenAI was called only for changed texts, but on 1 November the index held 25,424 vectors, mostly identical copies, and every publication had to wait for about 2,000 upserts to be indexed before `validate-and-stage` could pass.
 

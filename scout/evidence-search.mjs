@@ -69,7 +69,8 @@ export async function pruneEvidence(db,vectorize,keep) {
   const old=JSON.stringify(versions.filter(v=>!keep.includes(v)).slice(retainedEvidence));
   if(old==='[]')return {versions:0,deleted:0};
   const ids=(await db.prepare('SELECT DISTINCT id FROM scout_evidence_vectors WHERE version IN (SELECT value FROM json_each(?1)) AND id NOT IN (SELECT id FROM scout_evidence_vectors WHERE version NOT IN (SELECT value FROM json_each(?1)))').bind(old).all()).results.map(r=>r.id);
-  for(const batch of chunks(ids,500))await vectorize.deleteByIds(batch);
+  // Vectorize takes at most 20 IDs per getByIds or deleteByIds call.
+  await concurrent(chunks(ids,20),6,batch=>vectorize.deleteByIds(batch));
   await db.prepare('DELETE FROM scout_evidence_vectors WHERE version IN (SELECT value FROM json_each(?1))').bind(old).run();
   return {versions:JSON.parse(old).length,deleted:ids.length};
 }

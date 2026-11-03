@@ -206,7 +206,7 @@ test('vectors are upserted once per content in a shared namespace and pruned onc
   let embedded = 0; const deleted: string[] = [], staged: Record<string, typeof upserts> = {};
   const options = (now: string) => ({ now, keep: ['v1'], cache: { get: async (k: string) => cache.get(k), put: async (k: string, v: unknown) => { cache.set(k, v); } },
     embed: async (texts: string[]) => { embedded += texts.length; return texts.map(() => Array.from({ length: 256 }, () => 0.1)); },
-    vectorize: { upsert: async (rows: typeof upserts) => { upserts.push(...rows); return { mutationId: 'm' }; }, deleteByIds: async (ids: string[]) => { deleted.push(...ids); } } });
+    vectorize: { upsert: async (rows: typeof upserts) => { upserts.push(...rows); return { mutationId: 'm' }; }, deleteByIds: async (ids: string[]) => { assert.ok(ids.length <= 20, 'Vectorize takes at most 20 IDs per call'); deleted.push(...ids); } } });
   const stage = async (v: string, day: number) => { upserts = []; const r = await stageAgentCatalogue(db, v, { benchmarks: [] }, payloads, options(`2026-10-0${day}T00:00:00Z`)); staged[v] = upserts; return r; };
   // A version staged before the shared namespace, with its own namespace and vector IDs.
   for (const sql of agentSchema) db.all(sql);

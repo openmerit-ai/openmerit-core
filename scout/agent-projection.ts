@@ -250,7 +250,9 @@ export async function stageAgentCatalogue(db: Database, version: string, manifes
     const docs = (await db.prepare(`SELECT s.version,s.type,s.id FROM ${searchTable} s JOIN scout_agent_versions v ON v.id=s.version AND v.vectors LIKE 'agent-%' WHERE s.version IN (SELECT value FROM json_each(?1))`).bind(list)
       .all<{ version: string; type: string; id: string }>()).results;
     const ids = [...shared, ...await Promise.all(docs.map(d => digest([`agent-${d.version}`, d.type, d.id]) as Promise<string>))];
-    for (const batch of chunks(ids, 500)) await options.vectorize.deleteByIds(batch);
+    // Vectorize takes at most 20 IDs per deleteByIds call (2 November 2026: batches of 500 failed every prune).
+    const remove = options.vectorize.deleteByIds.bind(options.vectorize);
+    await pool(chunks(ids, 20), 6, batch => remove(batch));
   } catch { pruned = []; }
   if (pruned.length) await db.batch([...tables.map(t => db.prepare(`DELETE FROM ${t} WHERE version IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(pruned))),
     db.prepare('DELETE FROM scout_agent_versions WHERE id IN (SELECT value FROM json_each(?1))').bind(JSON.stringify(pruned))]);

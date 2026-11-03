@@ -12,9 +12,10 @@ test('one batch assesses each exact methodology independently without domain wor
 test('evidence vectors are upserted once per content and pruned only when no retained or published version uses them',async()=>{
  const snapshot=text=>({benchmarks:[{id:'b',name:'b',tags:['vision'],definition:{description:text},interpretation:{status:'ready'}}]});
  const cache=new Map(),db=d1();let embeddingCalls=0;const options=now=>({db,now,apiKey:'fixture',cache:{get:async k=>cache.get(k),put:async(k,v)=>cache.set(k,v)},fetcher:async(url,o)=>{assert.ok(url.endsWith('/embeddings'),'Hourly retrieval must not summarize verified methodology again');embeddingCalls++;const q=JSON.parse(o.body);return Response.json({data:q.input.map((_,index)=>({index,embedding:Array(256).fill(.01)}))});}});
- let vectors=[];const deleted=[];const service={upsert:async rows=>{vectors.push(...rows);return{mutationId:'new'};},describe:async()=>({processedUpToMutation:'old'}),getByIds:async ids=>vectors.filter(v=>ids.includes(v.id)),deleteByIds:async ids=>{deleted.push(...ids);}};
+ let vectors=[];const deleted=[];const service={upsert:async rows=>{vectors.push(...rows);return{mutationId:'new'};},describe:async()=>({processedUpToMutation:'old'}),getByIds:async ids=>vectors.filter(v=>ids.includes(v.id)),deleteByIds:async ids=>{assert.ok(ids.length<=20,'Vectorize takes at most 20 IDs per call');deleted.push(...ids);}};
  // A version published before the shared namespace is recorded once, from its stored index.
- assert.equal(await recordLegacyEvidence(db,async function*(){yield {index:{version:'legacy',documents:[{vectorId:'L1'}]},uploaded:'2026-09-01T00:00:00Z'};}),1);
+ const legacy=Array.from({length:45},(_,i)=>`L${i}`);
+ assert.equal(await recordLegacyEvidence(db,async function*(){yield {index:{version:'legacy',documents:legacy.map(vectorId=>({vectorId}))},uploaded:'2026-09-01T00:00:00Z'};}),45);
  const a=await stageEvidence(service,snapshot('Photo interpretation.'),'a',options('2026-10-01T00:00:00Z'));
  assert.match(a.documents[0].text,/Photo interpretation/);assert.equal(a.namespace,'evidence');
  await assert.rejects(verifyEvidenceReady(service,a),/finished indexing/);
@@ -26,9 +27,9 @@ test('evidence vectors are upserted once per content and pruned only when no ret
  for(const [i,v] of ['c','d','e','f','g','h'].entries())await stageEvidence(service,snapshot('Changed description.'),v,options(`2026-10-0${i+3}T00:00:00Z`));
  assert.deepEqual([embeddingCalls,vectors.length],[2,2]);
  // With h staged and a published, b and the legacy version fall out of the newest five. Only the
- // legacy vector goes: b's vector is a's, which is still published.
- assert.deepEqual(await pruneEvidence(db,service,['h','a']),{versions:2,deleted:1});assert.deepEqual(deleted,['L1']);
- assert.deepEqual(await pruneEvidence(db,service,['h']),{versions:1,deleted:1});assert.deepEqual(deleted,['L1',a.documents[0].vectorId]);
+ // legacy vectors go: b's vector is a's, which is still published.
+ assert.deepEqual(await pruneEvidence(db,service,['h','a']),{versions:2,deleted:45});assert.deepEqual(deleted.sort(),[...legacy].sort());
+ assert.deepEqual(await pruneEvidence(db,service,['h']),{versions:1,deleted:1});assert.equal(deleted.at(-1),a.documents[0].vectorId);
  // Retrieval counts only this version's vector of a benchmark, not an older copy in the shared namespace.
  const h={...await stageEvidence(service,snapshot('Changed description.'),'h',options('2026-10-08T00:00:00Z'))};
  const found=async id=>(await retrieveEvidence({weights:{}},h,{vectorize:{query:async(_v,o)=>{assert.equal(o.namespace,'evidence');return {matches:[{id,metadata:{benchmark:'b'}}]};}},queryVector:[]})).map(d=>d.id);
