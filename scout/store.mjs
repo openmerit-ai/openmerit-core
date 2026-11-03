@@ -128,13 +128,13 @@ export async function stageCatalogue(bucket,records,previous,options={}) {
     if(!evidenceIndex){evidenceIndex=await stageEvidence(options.vectorize,snapshot,publication.id,{...options,cache:{get:key=>getJSON(bucket,key),put:(key,v)=>putJSON(bucket,key,v)}});await putJSON(bucket,evidenceKey,evidenceIndex);}
     await verifyEvidenceReady(options.vectorize,evidenceIndex);
     // Unused vectors are only a cost, so a failed prune never blocks publication.
-    try{await pruneEvidence(options.db,options.vectorize,[publication.id,...(previous?.publication?.id?[previous.publication.id]:[])]);}catch(error){console.error('scout evidence vectors not pruned',String(error?.message??error).slice(0,300));}
+    let evidencePrune;try{evidencePrune=await pruneEvidence(options.db,options.vectorize,[publication.id,...(previous?.publication?.id?[previous.publication.id]:[])]);}catch(error){evidencePrune={error:String(error?.message??error).slice(0,300)};}
     const profileKeys={};for(const operation of new Set(snapshot.specialistProfiles.map(p=>p.operation))) {
       const rows=snapshot.specialistProfiles.filter(p=>p.operation===operation),key=`chunks/${await digest(rows)}.json`;if(!await bucket.head(key))await putJSON(bucket,key,rows);profileKeys[operation]=key;
     }
     const specialistPacks=await stageSpecialistPacks(bucket,snapshot);
     const {models,catalogue,specialists,benchmarkMethodologies,benchmarkDescriptions,research,researchPending,researchState,searchIndex,...core}=snapshot;
-    const manifest={...core,servingEngine:'evidence',projection,metadataDefinitions:fieldDefinitions(directory),selectionVocabulary:directory.vocabulary,evidenceIndex,specialistProfiles:undefined,benchmarks:core.benchmarks.map(({research,methodologySelection,definition,...b})=>b),publicStatus:status,shards,profileKeys,specialistPacks,recordsKey,publication};
+    const manifest={...core,servingEngine:'evidence',projection,metadataDefinitions:fieldDefinitions(directory),selectionVocabulary:directory.vocabulary,evidenceIndex,specialistProfiles:undefined,benchmarks:core.benchmarks.map(({research,methodologySelection,definition,...b})=>b),publicStatus:status,shards,profileKeys,specialistPacks,recordsKey,publication,evidencePrune};
     // The agent's catalogue of every model kind and its search index, in D1 and Vectorize
     // for this version (agent-projection.ts). A failure leaves the agent on chat records only.
     try{manifest.agentCatalogue=await stageAgentCatalogue(options.db,publication.id,manifest,projectionRows(snapshot,directory).models,{vectorize:options.vectorize,cache:{get:key=>getJSON(bucket,key),put:(key,value)=>putJSON(bucket,key,value)},

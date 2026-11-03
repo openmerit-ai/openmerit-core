@@ -62,17 +62,24 @@ export async function recordLegacyEvidence(db,indexes) {
   for(const batch of chunks(writes,50))await db.batch(batch);
   return versions.reduce((n,v)=>n+v.ids.length,0);
 }
-// Deletes the vectors only versions older than the newest retained ones use. A failed
-// deletion keeps the references, so the next publication tries again.
-export async function pruneEvidence(db,vectorize,keep) {
+// At most this many vectors are deleted per publication; a capped or interrupted prune
+// resumes on the next one. Vectorize takes at most 20 IDs per getByIds or deleteByIds call.
+export const pruneBudget=2000;
+// Deletes the vectors of versions older than the newest retained ones, oldest version first
+// and one version at a time: a vector goes once no other listed version uses it, and the
+// version's references go only after all its vectors are deleted, so a failure keeps the
+// work done and the next publication resumes. The summary is recorded in the manifest.
+export async function pruneEvidence(db,vectorize,keep,budget=pruneBudget) {
   const versions=(await db.prepare('SELECT version FROM scout_evidence_vectors GROUP BY version ORDER BY max(staged_at) DESC').all()).results.map(r=>r.version);
-  const old=JSON.stringify(versions.filter(v=>!keep.includes(v)).slice(retainedEvidence));
-  if(old==='[]')return {versions:0,deleted:0};
-  const ids=(await db.prepare('SELECT DISTINCT id FROM scout_evidence_vectors WHERE version IN (SELECT value FROM json_each(?1)) AND id NOT IN (SELECT id FROM scout_evidence_vectors WHERE version NOT IN (SELECT value FROM json_each(?1)))').bind(old).all()).results.map(r=>r.id);
-  // Vectorize takes at most 20 IDs per getByIds or deleteByIds call.
-  await concurrent(chunks(ids,20),6,batch=>vectorize.deleteByIds(batch));
-  await db.prepare('DELETE FROM scout_evidence_vectors WHERE version IN (SELECT value FROM json_each(?1))').bind(old).run();
-  return {versions:JSON.parse(old).length,deleted:ids.length};
+  const old=versions.filter(v=>!keep.includes(v)).slice(retainedEvidence).reverse(),summary={versions:0,deleted:0,remaining:old.length};
+  for(const version of old){
+    const ids=(await db.prepare('SELECT id FROM scout_evidence_vectors s WHERE version=?1 AND NOT EXISTS (SELECT 1 FROM scout_evidence_vectors o WHERE o.id=s.id AND o.version<>?1)').bind(version).all()).results.map(r=>r.id);
+    if(summary.versions&&summary.deleted+ids.length>budget)break;
+    try{for(const batch of chunks(ids,20)){await vectorize.deleteByIds(batch);summary.deleted+=batch.length;}}
+    catch(error){summary.error=String(error?.message??error).slice(0,300);break;}
+    await db.prepare('DELETE FROM scout_evidence_vectors WHERE version=?1').bind(version).run();summary.versions++;summary.remaining--;
+  }
+  return summary;
 }
 export async function verifyEvidenceReady(vectorize,index) {
   // Nothing new was upserted when every document was already indexed.

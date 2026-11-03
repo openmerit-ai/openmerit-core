@@ -203,10 +203,10 @@ test('the agent reads the published version, not live catalogue tables that chan
 test('vectors are upserted once per content in a shared namespace and pruned once no retained version uses them', async () => {
   const db = liveCatalogue(), payloads: Array<Record<string, unknown>> = [], cache = new Map<string, unknown>();
   let upserts: Array<{ id: string; namespace: string; metadata: Record<string, string> }> = [];
-  let embedded = 0; const deleted: string[] = [], staged: Record<string, typeof upserts> = {};
+  let embedded = 0, failDeletes = false; const deleted: string[] = [], staged: Record<string, typeof upserts> = {};
   const options = (now: string) => ({ now, keep: ['v1'], cache: { get: async (k: string) => cache.get(k), put: async (k: string, v: unknown) => { cache.set(k, v); } },
     embed: async (texts: string[]) => { embedded += texts.length; return texts.map(() => Array.from({ length: 256 }, () => 0.1)); },
-    vectorize: { upsert: async (rows: typeof upserts) => { upserts.push(...rows); return { mutationId: 'm' }; }, deleteByIds: async (ids: string[]) => { assert.ok(ids.length <= 20, 'Vectorize takes at most 20 IDs per call'); deleted.push(...ids); } } });
+    vectorize: { upsert: async (rows: typeof upserts) => { upserts.push(...rows); return { mutationId: 'm' }; }, deleteByIds: async (ids: string[]) => { if (failDeletes) throw new Error('Vectorize busy'); assert.ok(ids.length <= 20, 'Vectorize takes at most 20 IDs per call'); deleted.push(...ids); } } });
   const stage = async (v: string, day: number) => { upserts = []; const r = await stageAgentCatalogue(db, v, { benchmarks: [] }, payloads, options(`2026-10-0${day}T00:00:00Z`)); staged[v] = upserts; return r; };
   // A version staged before the shared namespace, with its own namespace and vector IDs.
   for (const sql of agentSchema) db.all(sql);
@@ -226,6 +226,16 @@ test('vectors are upserted once per content in a shared namespace and pruned onc
   assert.equal(db.all("SELECT count(*) n FROM scout_agent_search WHERE version='v2'")[0]?.n, 0);
   // Deleted: v0's own vector and v2's Canvas 2, which no retained version uses. Shared vectors v2 used stay.
   assert.deepEqual(deleted.sort(), [String(await digest(['agent-v0', 'model', 'acme/old'])), staged.v2?.[0]?.id ?? ''].sort());
+  // A failed delete is reported and keeps the version (v3) for the next publication, which resumes it.
+  db.all("INSERT INTO scout_agent_vectors (version,id,type,doc) VALUES ('v3','only-v3','model','acme/gone')");
+  failDeletes = true;
+  assert.deepEqual((await stage('v9', 9)).pruned, { versions: 0, deleted: 0, remaining: 1, error: 'Vectorize busy' });
+  assert.equal(db.all("SELECT count(*) n FROM scout_agent_versions WHERE id='v3'")[0]?.n, 1);
+  failDeletes = false;
+  db.all("UPDATE scout_agent_versions SET staged_at='2026-10-10T00:00:00Z' WHERE id='v9'");
+  assert.deepEqual((await stageAgentCatalogue(db, 'v10', { benchmarks: [] }, payloads, options('2026-10-11T00:00:00Z'))).pruned, { versions: 2, deleted: 1, remaining: 0 });
+  assert.equal(deleted.at(-1), 'only-v3');
+  assert.deepEqual(db.all('SELECT id FROM scout_agent_versions ORDER BY id').map(r => r.id), ['v1', 'v10', 'v5', 'v6', 'v7', 'v8', 'v9']);
   // The published version's vectors are what the agent counts; Canvas 2's vector (another version's) is dropped.
   const queried: string[] = [], scribe = staged.v1?.find(u => u.metadata.id === 'acme/scribe')?.id ?? '';
   const query = async (_v: number[], o: { namespace?: string }) => { queried.push(o.namespace ?? ''); return { matches: [{ id: scribe, score: 0.9, metadata: { type: 'model', id: 'acme/scribe' } }, { id: staged.v2?.[0]?.id ?? '', score: 0.85, metadata: { type: 'model', id: 'acme/canvas' } }, { id: 'x', score: 0.8, metadata: { type: 'model', id: 'acme/elsewhere' } }] }; };

@@ -24,9 +24,12 @@ export interface StageOptions {
   cache?: { get(key: string): Promise<unknown>; put(key: string, value: unknown): Promise<unknown> };
   // Versions that must survive pruning, such as the one currently published.
   keep?: string[];
+  // Most vectors deleted per publication (default 2,000); the rest wait for the next one.
+  pruneBudget?: number;
   now?: string;
 }
-export interface AgentCatalogueSummary { version: string; models: number; boards: number; documents: number; vectors: string | null; embedded?: number; vectorError?: string }
+export interface PruneSummary { versions: number; deleted: number; remaining: number; error?: string }
+export interface AgentCatalogueSummary { version: string; models: number; boards: number; documents: number; vectors: string | null; embedded?: number; vectorError?: string; pruned?: PruneSummary }
 
 export const agentSchema = [
   'CREATE TABLE IF NOT EXISTS scout_agent_versions (id TEXT PRIMARY KEY, ready INTEGER NOT NULL DEFAULT 0, models INTEGER NOT NULL, boards INTEGER NOT NULL, documents INTEGER NOT NULL, vectors TEXT, staged_at TEXT NOT NULL)',
@@ -240,22 +243,27 @@ export async function stageAgentCatalogue(db: Database, version: string, manifes
   // Older generations go; their rows are derived and rebuilt by any later publication.
   const keep = [version, ...options.keep ?? []];
   const old = (await db.prepare(`SELECT id FROM scout_agent_versions WHERE id NOT IN (SELECT value FROM json_each(?1)) ORDER BY staged_at DESC LIMIT -1 OFFSET ${retained}`).bind(JSON.stringify(keep)).all<{ id: string }>()).results.map(r => r.id);
-  // Their vectors go too: shared vectors no remaining version references, and the whole
-  // namespace of a version staged before the shared one (agent-<version>, by the IDs it was given).
-  // If deletion fails the versions stay, so the next publication tries again.
-  let pruned = old;
-  if (old.length && options.vectorize?.deleteByIds) try {
-    const list = JSON.stringify(old);
-    const shared = (await db.prepare('SELECT DISTINCT id FROM scout_agent_vectors WHERE version IN (SELECT value FROM json_each(?1)) AND id NOT IN (SELECT id FROM scout_agent_vectors WHERE version NOT IN (SELECT value FROM json_each(?1)))').bind(list).all<{ id: string }>()).results.map(r => r.id);
-    const docs = (await db.prepare(`SELECT s.version,s.type,s.id FROM ${searchTable} s JOIN scout_agent_versions v ON v.id=s.version AND v.vectors LIKE 'agent-%' WHERE s.version IN (SELECT value FROM json_each(?1))`).bind(list)
-      .all<{ version: string; type: string; id: string }>()).results;
-    const ids = [...shared, ...await Promise.all(docs.map(d => digest([`agent-${d.version}`, d.type, d.id]) as Promise<string>))];
-    // Vectorize takes at most 20 IDs per deleteByIds call (2 November 2026: batches of 500 failed every prune).
-    const remove = options.vectorize.deleteByIds.bind(options.vectorize);
-    await pool(chunks(ids, 20), 6, batch => remove(batch));
-  } catch { pruned = []; }
-  if (pruned.length) await db.batch([...tables.map(t => db.prepare(`DELETE FROM ${t} WHERE version IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(pruned))),
-    db.prepare('DELETE FROM scout_agent_versions WHERE id IN (SELECT value FROM json_each(?1))').bind(JSON.stringify(pruned))]);
+  // Their vectors go too, oldest version first and one version at a time: shared vectors no
+  // other version lists, and the whole namespace of a version staged before the shared one
+  // (agent-<version>, by the IDs it was given). A version's rows go only after its vectors, so
+  // a failure or the per-publication budget leaves the rest for the next publication.
+  const drop = (versions: string[]) => db.batch([...tables.map(t => db.prepare(`DELETE FROM ${t} WHERE version IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(versions))),
+    db.prepare('DELETE FROM scout_agent_versions WHERE id IN (SELECT value FROM json_each(?1))').bind(JSON.stringify(versions))]);
+  let pruned: PruneSummary | undefined;
+  if (old.length && options.vectorize?.deleteByIds) {
+    const remove = options.vectorize.deleteByIds.bind(options.vectorize), budget = options.pruneBudget ?? 2000;
+    pruned = { versions: 0, deleted: 0, remaining: old.length };
+    for (const v of [...old].reverse()) {
+      const shared = (await db.prepare('SELECT id FROM scout_agent_vectors s WHERE version=?1 AND NOT EXISTS (SELECT 1 FROM scout_agent_vectors o WHERE o.id=s.id AND o.version<>?1)').bind(v).all<{ id: string }>()).results.map(r => r.id);
+      const docs = (await db.prepare(`SELECT s.type,s.id FROM ${searchTable} s JOIN scout_agent_versions g ON g.id=s.version AND g.vectors LIKE 'agent-%' WHERE s.version=?1`).bind(v).all<{ type: string; id: string }>()).results;
+      const ids = [...shared, ...await Promise.all(docs.map(d => digest([`agent-${v}`, d.type, d.id]) as Promise<string>))];
+      if (pruned.versions && pruned.deleted + ids.length > budget) break;
+      // Vectorize takes at most 20 IDs per deleteByIds call.
+      try { for (const batch of chunks(ids, 20)) { await remove(batch); pruned.deleted += batch.length; } }
+      catch (error) { pruned.error = String((error as Error)?.message ?? error).slice(0, 300); break; }
+      await drop([v]); pruned.versions++; pruned.remaining--;
+    }
+  } else if (old.length) await drop(old);
   await db.prepare('UPDATE scout_agent_versions SET ready=1,vectors=?2 WHERE id=?1').bind(version, vectors).run();
-  return { version, models: payloads.length, boards: boards.length, documents: documents.length, vectors, ...(embedded !== undefined ? { embedded } : {}), ...(vectorError ? { vectorError } : {}) };
+  return { version, models: payloads.length, boards: boards.length, documents: documents.length, vectors, ...(embedded !== undefined ? { embedded } : {}), ...(vectorError ? { vectorError } : {}), ...(pruned ? { pruned } : {}) };
 }

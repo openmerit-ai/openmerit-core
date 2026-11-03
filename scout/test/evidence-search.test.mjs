@@ -28,8 +28,12 @@ test('evidence vectors are upserted once per content and pruned only when no ret
  assert.deepEqual([embeddingCalls,vectors.length],[2,2]);
  // With h staged and a published, b and the legacy version fall out of the newest five. Only the
  // legacy vectors go: b's vector is a's, which is still published.
- assert.deepEqual(await pruneEvidence(db,service,['h','a']),{versions:2,deleted:45});assert.deepEqual(deleted.sort(),[...legacy].sort());
- assert.deepEqual(await pruneEvidence(db,service,['h']),{versions:1,deleted:1});assert.equal(deleted.at(-1),a.documents[0].vectorId);
+ // A failed delete records its error and keeps the version listed; a budget caps each prune; the next prune resumes.
+ const remove=service.deleteByIds;let calls=0;service.deleteByIds=async ids=>{if(++calls===2)throw Error('Vectorize busy');return remove(ids);};
+ assert.deepEqual(await pruneEvidence(db,service,['h','a']),{versions:0,deleted:20,remaining:2,error:'Vectorize busy'});service.deleteByIds=remove;
+ assert.deepEqual(await pruneEvidence(db,service,['h','a'],10),{versions:1,deleted:45,remaining:1});
+ assert.deepEqual(await pruneEvidence(db,service,['h','a']),{versions:1,deleted:0,remaining:0});assert.deepEqual([...new Set(deleted)].sort(),[...legacy].sort());
+ assert.deepEqual(await pruneEvidence(db,service,['h']),{versions:1,deleted:1,remaining:0});assert.equal(deleted.at(-1),a.documents[0].vectorId);
  // Retrieval counts only this version's vector of a benchmark, not an older copy in the shared namespace.
  const h={...await stageEvidence(service,snapshot('Changed description.'),'h',options('2026-10-08T00:00:00Z'))};
  const found=async id=>(await retrieveEvidence({weights:{}},h,{vectorize:{query:async(_v,o)=>{assert.equal(o.namespace,'evidence');return {matches:[{id,metadata:{benchmark:'b'}}]};}},queryVector:[]})).map(d=>d.id);
