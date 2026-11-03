@@ -14,7 +14,7 @@ for (const page of ['privacy/privacy', 'onboarding', 'scout']) await build({
   absWorkingDir: resolve(import.meta.dirname, '..'), entryPoints: [`site/scout/${page}.ts`],
   outfile: `site/scout/${page}.js`, format: 'esm', platform: 'browser', target: 'es2022',
 });
-for (const script of ['video-player', 'thread-rule']) await build({
+for (const script of ['video-player', 'thread-rule', 'speed-egg']) await build({
   absWorkingDir: resolve(import.meta.dirname, '..'), entryPoints: [`site/${script}.ts`],
   outfile: `site/assets/${script}.js`, format: 'esm', platform: 'browser', target: 'es2022',
 });

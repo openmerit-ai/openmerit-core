@@ -6,7 +6,7 @@
     "allowJs": true,
     "types": ["node"]
   },
-  "include": ["scout/**/*.ts", "site/scout/privacy/**/*.ts", "site/scout/scout.ts", "site/video-player.ts", "site/thread-rule.ts"],
+  "include": ["scout/**/*.ts", "site/scout/privacy/**/*.ts", "site/scout/scout.ts", "site/video-player.ts", "site/thread-rule.ts", "site/speed-egg.ts"],
   // The agent Durable Object needs Workers runtime types: scout/agent/tsconfig.json.
   "exclude": ["scout/agent/agent.ts"]
 }
