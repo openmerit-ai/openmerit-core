@@ -77,6 +77,12 @@ test('promoted Scout serves the canonical page and redirects former alpha paths'
   for(const path of ['/scout/alpha-other','/scout/alphabets','/scout/v1/','/scout/v2/'])assert.equal((await alpha.fetch(new Request(`https://example.test${path}`),env,{})).status,404);
 });
 
+test('the deployed version is public and never cached, without auth or catalogue access',async()=>{
+  const response=await alpha.fetch(new Request('https://example.test/scout/api/version'),Object.assign(Object.create(env),{CF_VERSION_METADATA:{id:'v2'}}),{});
+  assert.deepEqual(await response.json(),{version:'v2'});assert.equal(response.headers.get('cache-control'),'no-store');
+  assert.equal((await alpha.fetch(new Request('https://example.test/scout/api/version',{method:'POST'}),env,{})).status,405);
+});
+
 test('promoted Scout preserves canonical API bodies',async t=>{
   t.mock.method(worker,'fetch',async request=>Response.json({path:new URL(request.url).pathname,query:new URL(request.url).search,method:request.method,origin:request.headers.get('origin'),body:await request.json()}));
   for(const path of ['api/recommend']){

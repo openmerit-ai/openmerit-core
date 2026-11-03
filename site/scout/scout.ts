@@ -252,8 +252,28 @@ async function request(token: string, method: 'GET' | 'POST', path: string, body
 }
 
 // Signed-out users are sent to sign in first; onStart runs only once the turn really starts.
+// A deploy replaces the server while this page keeps its old code, which may not read newer answers.
+// The version the page loaded under is compared with the live one when the tab is shown again and before
+// each turn, the moments an old tab is used after a deploy; a change asks for a refresh.
+const updateNotice = $('#update-notice');
+let loadedVersion: string | null = null;
+async function checkVersion() {
+  if (!updateNotice.hidden) return;
+  try {
+    const response = await fetch(`${api.replace(/\/agent$/, '')}/version`, { cache: 'no-store' });
+    const { version } = await response.json() as { version: string | null };
+    if (!version) return;
+    if (loadedVersion === null) loadedVersion = version;
+    else if (version !== loadedVersion) updateNotice.hidden = false;
+  } catch { /* Offline or unavailable: try again at the next check. */ }
+}
+$('#update-refresh').addEventListener('click', () => location.reload());
+void checkVersion();
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void checkVersion(); });
+
 async function runTurn(turn: TurnRequest, said: string, onStart?: () => void) {
   if (working) return;
+  void checkVersion();
   const authEpoch = epoch;
   let token: string | null;
   showError('');
