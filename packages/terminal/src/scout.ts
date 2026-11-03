@@ -29,7 +29,7 @@ refused under the existing-only policy. Uses the device key that
 type Json = Record<string, unknown>;
 export interface ScoutRequest { prompt?: string; conversationId?: string; brief?: Partial<Record<typeof components[number], string>>; skip?: boolean; endpointIds?: string[] }
 export interface ScoutModel {
-  rank: number; id: string; name: string; provider: string; role: string; rationale: string; watchOut: string | null;
+  rank: number; id: string; name: string; provider: string; rationale: string; watchOut: string | null;
   quality: { score: number; evidence: Array<{ name: string; rank: number; of: number }> };
   cost: { usdPer1kTasks: number; inputPerMillion: number; outputPerMillion: number; route: string; endpointId: string; providerModelId: string } | null;
 }
@@ -116,7 +116,7 @@ export function renderScout(result: ScoutResult): string {
       if (tasks.length > 1) lines.push(`${i + 1}. ${task.title}`, `   ${task.work}`);
       for (const m of task.models) {
         const price = m.cost ? `${money(m.cost.inputPerMillion)} in / ${money(m.cost.outputPerMillion)} out per 1M via ${m.cost.route} (${m.cost.endpointId})` : 'no priced route';
-        lines.push(`   ${m.rank}. ${m.name} · ${m.role} · quality ${m.quality.score}/100 · ${price}`, `      ${m.rationale}`);
+        lines.push(`   ${m.rank}. ${m.name} · quality ${m.quality.score}/100 · ${price}`, `      ${m.rationale}`);
       }
       lines.push(`   ${task.summary}`, '');
     });

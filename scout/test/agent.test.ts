@@ -29,9 +29,9 @@ const catalogue: Catalogue = {
   search: { bm25: async () => [], embedding: async () => [] },
 };
 const brief = { input: { text: 'Invoices', source: 'stated' as const }, work: { text: 'Extract', source: 'stated' as const }, output: { text: 'JSON', source: 'stated' as const }, criteria: { text: '', source: 'missing' as const }, constraints: { text: '', source: 'missing' as const } };
-const pick = (modelId: string, quality: number, evidence: string[] = []) => ({ modelId, role: 'r', quality, evidence, rationale: 'why' });
-const submission = (recommendations: Submission['recommendations'], filters?: Submission['filters']): Submission =>
-  ({ task: 1, workload: { inputTokens: 2000, outputTokens: 500 }, summary: 's', recommendations, ...(filters ? { filters } : {}) });
+const pick = (modelId: string, quality: number, evidence: string[] = []) => ({ modelId, quality, evidence, rationale: 'why' });
+const submission = (candidates: Submission['candidates'], filters?: Submission['filters']): Submission =>
+  ({ task: 1, workload: { inputTokens: 2000, outputTokens: 500 }, summary: 's', qualityBar: 50, candidates, ...(filters ? { filters } : {}) });
 const now = Date.parse('2026-10-27T00:00:00Z');
 
 test('a shortlist is priced on the cheapest route that meets the constraints, with timing and age from catalogue data', () => {
@@ -58,7 +58,7 @@ test('rejected shortlists explain every problem so the agent can correct them', 
     return true;
   });
   // Six models are eligible without constraints, so two are not a shortlist of five.
-  assert.throws(() => finalize(catalogue, submission([pick('lab/alpha', 90), pick('lab/beta', 80)]), now), /Recommend five models: 6 models meet the constraints/);
+  assert.throws(() => finalize(catalogue, submission([pick('lab/alpha', 90), pick('lab/beta', 80)]), now), /Five candidates must reach the quality bar of 50; 2 do, and 6 models meet the constraints/);
 });
 
 test('axis leaders come from known values only', () => {
@@ -69,6 +69,19 @@ test('axis leaders come from known values only', () => {
   // Alpha: 2 + 500/100 = 7 s beats beta's 1 + 500/50 = 11 s; models without timing never lead.
   assert.deepEqual(best['lab/alpha'], ['latency']);
   assert.deepEqual(best['lab/gamma'], []);
+});
+
+test('by default the five cheapest candidates that reach the quality bar are shown, cheapest first', () => {
+  // Per 1k tasks: beta $1.50, the Gateway routes (gamma, delta, epsilon, zeta) $3, alpha $4.
+  const all = ['lab/epsilon', 'lab/alpha', 'lab/delta', 'lab/beta', 'lab/gamma', 'lab/zeta'];
+  const shown = (quality: (id: string) => number, priority?: Submission['priority']) =>
+    finalize(catalogue, { ...submission(all.map(id => pick(id, quality(id)))), qualityBar: 70, ...(priority ? { priority } : {}) }, now).models.map(m => [m.rank, m.id]);
+  // Six reach the bar: the costliest (alpha) is left out even though it scores highest; equal costs keep the agent's order.
+  assert.deepEqual(shown(id => id === 'lab/alpha' ? 95 : 80), [[1, 'lab/beta'], [2, 'lab/epsilon'], [3, 'lab/delta'], [4, 'lab/gamma'], [5, 'lab/zeta']]);
+  // Beta is cheapest but below the bar, so it is never shown and alpha fills the fifth place.
+  assert.deepEqual(shown(id => id === 'lab/beta' ? 60 : 80), [[1, 'lab/epsilon'], [2, 'lab/delta'], [3, 'lab/gamma'], [4, 'lab/zeta'], [5, 'lab/alpha']]);
+  // An explicit quality priority shows the five highest estimates instead.
+  assert.deepEqual(shown(id => ({ 'lab/alpha': 95, 'lab/zeta': 90, 'lab/beta': 75 })[id] ?? 80, 'quality').map(([, id]) => id), ['lab/alpha', 'lab/zeta', 'lab/epsilon', 'lab/delta', 'lab/gamma']);
 });
 
 test('model search applies constraints, treats PDF as a document input and ranks by benchmark among measured models', () => {

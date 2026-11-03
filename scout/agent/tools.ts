@@ -132,7 +132,7 @@ export function scoutTools(host: ToolHost): ToolRegistration[] {
   };
   const submitTool: ToolRegistration<typeof SubmissionSchema> = {
     name: 'submit_recommendation', replay: 'safe',
-    description: 'Submit the shortlist for one planned task: five models of any kind, best overall first (fewer only when fewer meet the hard constraints). It is checked against the catalogue and the hard constraints; cost, latency and recency are computed from catalogue prices for the per-task workload you estimate in billing units (tokens, images, seconds of audio or video, characters, pages, requests). If it is rejected, fix the listed problems and submit again. The turn ends once every task has an accepted shortlist.',
+    description: 'Submit the shortlist for one planned task: a priority, a quality bar and up to ten assessed candidates of any kind. Scout keeps the candidates at or above the bar, ranks them by the priority (by default cost, cheapest first) and shows the top five (fewer only when fewer meet the hard constraints). It is checked against the catalogue and the hard constraints; cost, latency and recency are computed from catalogue prices for the per-task workload you estimate in billing units (tokens, images, seconds of audio or video, characters, pages, requests). If it is rejected, fix the listed problems and submit again. The turn ends once every task has an accepted shortlist.',
     parameters: SubmissionSchema,
     async execute(args) {
       const plan = await host.plan();

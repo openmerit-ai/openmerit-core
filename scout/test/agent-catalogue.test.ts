@@ -34,9 +34,9 @@ const boards = [
 const stubSearch = (bm25: SearchHit[], embedding: SearchHit[] | Error): Catalogue['search'] => ({
   bm25: async () => bm25, embedding: async () => { if (embedding instanceof Error) throw embedding; return embedding; } });
 const catalogue: Catalogue = { version: 'v-test', models, benchmarks: [], boards, semanticBenchmarks: async () => [], search: stubSearch([], []) };
-const pick = (modelId: string, evidence: string[] = []) => ({ modelId, role: 'r', quality: 70, evidence, rationale: 'why' });
-const submit = (recommendations: Submission['recommendations'], workload: Submission['workload'], filters?: Submission['filters']): Submission =>
-  ({ task: 1, workload, summary: 's', recommendations, ...(filters ? { filters } : {}) });
+const pick = (modelId: string, evidence: string[] = []) => ({ modelId, quality: 70, evidence, rationale: 'why' });
+const submit = (candidates: Submission['candidates'], workload: Submission['workload'], filters?: Submission['filters']): Submission =>
+  ({ task: 1, workload, summary: 's', qualityBar: 50, candidates, ...(filters ? { filters } : {}) });
 
 test('price sorting compares one unit at a time, so a per-image price never outranks a per-token price', () => {
   // Default unit is tokens: the image models are not billed per token (painter) or sort by their token route (painter-pro, blended 7.725).
@@ -57,7 +57,7 @@ test('the kind filter restricts search, leaderboards and the number of models a 
   const ok = finalize(catalogue, submit([pick('lab/ears-hd', ['asr:multilingual']), pick('lab/ears')], { audioSeconds: 600 }, { kind: 'transcription' }), Date.parse('2026-10-29'));
   assert.equal(ok.models.length, 2);
   // ...but not without it, and a chat model breaks the constraint.
-  assert.throws(() => finalize(catalogue, submit([pick('lab/ears-hd'), pick('lab/ears')], { audioSeconds: 600 }), 0), /Recommend five models: 9 models meet the constraints \(set filters.kind/);
+  assert.throws(() => finalize(catalogue, submit([pick('lab/ears-hd'), pick('lab/ears')], { audioSeconds: 600 }), 0), /Five candidates must reach the quality bar of 50; 2 do, and 9 models meet the constraints \(set filters.kind/);
   assert.throws(() => finalize(catalogue, submit([pick('lab/ears'), pick('lab/chat-a')], { audioSeconds: 600 }, { kind: 'transcription' }), 0), /lab\/chat-a breaks the hard constraints: it is a chat model, not transcription/);
 });
 
@@ -66,7 +66,7 @@ test('a citation must be the model\'s own benchmark or leaderboard result', () =
   assert.throws(() => finalize(catalogue, submit([pick('lab/painter', ['asr:multilingual']), pick('lab/painter-pro', ['arena:t2i'])], { images: 4 }, { kind: 'image' }), 0),
     (error: Error) => /lab\/painter has no results on asr:multilingual/.test(error.message) && !/painter-pro has no results/.test(error.message));
   const accepted = finalize(catalogue, submit([pick('lab/painter-pro', ['arena:t2i']), pick('lab/painter', ['arena:t2i'])], { images: 4 }, { kind: 'image' }), 0);
-  assert.deepEqual(accepted.models[0]?.quality.evidence, [{ benchmark: 'arena:t2i', name: 'Arena · Text to image', score: 1300, rank: 1, of: 40 }]);
+  assert.deepEqual(accepted.models.find(m => m.id === 'lab/painter-pro')?.quality.evidence, [{ benchmark: 'arena:t2i', name: 'Arena · Text to image', score: 1300, rank: 1, of: 40 }]);
 });
 
 test('cost is computed from catalogue rates in the workload\'s units on the route that prices most of it', () => {
@@ -76,9 +76,10 @@ test('cost is computed from catalogue rates in the workload\'s units on the rout
   // Only fully priced costs can lead on cost.
   assert.deepEqual(result.models.map(m => m.best.includes('cost')), [false, false]);
   // Painter-pro: the per-image route prices the whole workload ($0.32 per task); its token route prices none of it.
+  // Per-image costs rank cheapest first, whatever order they were submitted in.
   const images = finalize(catalogue, submit([pick('lab/painter-pro'), pick('lab/painter')], { images: 4 }, { kind: 'image' }), 0);
-  assert.deepEqual(images.models.map(m => [m.cost?.route, m.cost?.usdPer1kTasks]), [['Fal', 320], ['Fal', 40]]);
-  assert.deepEqual(images.models.map(m => m.best.includes('cost')), [false, true]);
+  assert.deepEqual(images.models.map(m => [m.id, m.cost?.route, m.cost?.usdPer1kTasks]), [['lab/painter', 'Fal', 40], ['lab/painter-pro', 'Fal', 320]]);
+  assert.deepEqual(images.models.map(m => m.best.includes('cost')), [true, false]);
   // With a prompt in the workload, each route prices one quantity; the image price wins over the far cheaper prompt price.
   const prompted = finalize(catalogue, submit([pick('lab/painter-pro'), pick('lab/painter')], { images: 4, inputTokens: 150 }, { kind: 'image' }), 0);
   assert.deepEqual(prompted.models[0]?.cost && [prompted.models[0].cost.route, prompted.models[0].cost.usdPer1kTasks, prompted.models[0].cost.unpriced], ['Fal', 320, ['inputTokens']]);
