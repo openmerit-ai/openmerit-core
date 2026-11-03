@@ -9,15 +9,15 @@ export const components = ['input', 'work', 'output', 'criteria', 'constraints']
 export type Component = typeof components[number];
 
 const Part = (description: string) => Type.Object({
-  text: Type.String({ description: `${description} Empty when unknown.` }),
+  text: Type.String({ description: `${description} Only what is known, in a few plain words; never write "unspecified" or list unknowns. Empty when nothing is known.` }),
   source: StringEnum(['stated', 'assumed', 'missing'], { description: 'stated: the user said it; assumed: your inference, to confirm; missing: unknown.' }),
 });
 export const BriefSchema = Type.Object({
   input: Part('What the model receives: data type, modality, size and format.'),
   work: Part('The steps or tasks the model performs, in order.'),
   output: Part('What the model must produce: format, schema, length, modality.'),
-  criteria: Part('How success is judged: quality bar, evaluations, metrics, and which of quality, cost, latency and recency matter most.'),
-  constraints: Part('Guardrails and hard limits: budget, latency ceilings, hosting, providers, data residency, open weights, licensing, safety.'),
+  criteria: Part('How success is judged: quality bar, evaluations, metrics, and which of quality, cost, latency and recency matter most. Only what the user explicitly said; otherwise empty and missing, never assumed.'),
+  constraints: Part('Guardrails and hard limits: budget, latency ceilings, hosting, providers, data residency, open weights, licensing, safety. Only what the user explicitly said; otherwise empty and missing, never assumed.'),
 }, { description: 'The task brief: the five components of the request.' });
 export type Brief = Static<typeof BriefSchema>;
 
