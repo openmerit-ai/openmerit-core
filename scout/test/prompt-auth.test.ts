@@ -276,6 +276,7 @@ test('Claude handoff remains usable with analytics blocked and opens before clip
   assert.deepEqual([...url.searchParams.keys()], ['q']); assert.equal(url.searchParams.get('q'), copied);
   assert.match(copied, /npx -y openmerit@latest install --client claude-code/);
   assert.match(copied, /start a new Claude Code session/);
+  assert.match(copied, /reconnecting \/mcp isn’t enough/);
   assert.doesNotMatch(copied, /Private task|--setup-id|DO_NOT_TRACK|OPENMERIT_TELEMETRY/);
   assert.equal(f.state.opened, 0); assert.equal(f.turns.length, 0);
   finishCopy(); await drain();
@@ -348,9 +349,12 @@ test('Pi copies a secret-free setup prompt without launching an app or claiming 
   assert.equal(f.$('#pi-setup-status').hidden, false);
   assert.equal(f.$('#pi-setup-status').textContent, 'Copying setup prompt for Pi…');
   assert.equal(f.location.href, 'https://example.test/scout/');
-  assert.match(copied, /^Connect OpenMerit Scout to Pi\./);
+  assert.match(copied, /^Run with a 10-minute timeout:\n/);
   assert.match(copied, /npx -y openmerit@latest install --client pi\n/);
-  assert.match(copied, /approval pending/);
+  assert.match(copied, /I’ll approve in the browser/);
+  assert.match(copied, /If approval is pending, show the link\/code and rerun/);
+  assert.match(copied, /Stop and show errors; don’t edit configs or ask for keys/);
+  assert.match(copied, /On success, show the installer’s next steps\.$/);
   assert.doesNotMatch(copied, /Private task|current-session-token|user-one|--setup-id|DO_NOT_TRACK|OPENMERIT_TELEMETRY|claude:|pi:\/\//);
   finishCopy(); await drain();
   assert.equal(f.$('#pi-setup-status').textContent, 'Setup prompt copied. Paste it into Pi to begin setup.');
