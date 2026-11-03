@@ -13,7 +13,7 @@ The separately deployed [delivery-resolution experiment](https://openmerit.ai/de
 
 ## Run your own supervised trial
 
-Use [Pi setup](getting-started.md#set-up-model-comparisons-with-pi) and [your first trial](first-trial.md) for real application measurements. The repository's separate `npm run demo` sandbox makes live provider calls; its requirements and spend boundaries are in [testing](testing.md#experimental-sandbox).
+Use [the standalone evaluation CLI](agent-evaluations.md) or a [custom coordinator harness](adapter-guide.md) for real application measurements. [Your first trial](first-trial.md) retains the historical Pi 0.87 lifecycle walkthrough; the unreleased [Pi 1.5.0 Scout adapter](pi-extension.md) does not provide it. The repository's separate `npm run demo` sandbox makes live provider calls; its requirements and spend boundaries are in [testing](testing.md#experimental-sandbox).
 
 ## Recorded player
 

@@ -1,6 +1,8 @@
 # Commands
 
-The standalone `openmerit dash` command runs in your shell. The `/openmerit` slash commands run inside Pi with the extension loaded.
+**Pi replacement — unreleased, unpublished source:** Pi 1.5.0 uses only native Scout MCP and shared guidance. Run `npx -y openmerit@latest install --client pi [--scope user|project]` after publication and approve in the browser. Shell `login`, `logout`, `status`, `remove`, and `doctor` accept the same target flags. Updates require explicit reinstall; no Pi update hooks or scheduler are installed. See [Pi setup](pi-extension.md).
+
+The standalone `openmerit dash` and `openmerit eval` commands are unchanged. All `/openmerit` slash commands below are **historical Pi 0.87 references**, not commands in the new Scout adapter. Core lifecycle APIs remain available for custom harnesses.
 
 Stable npm `openmerit@0.1.7` provides `openmerit eval init`, `doctor`, `plan`, `run`, `watch` and `report`. See [agent evaluations](agent-evaluations.md) for scope selection, repeated task checks and budgets. These are shell commands, separate from Pi commands. The same release includes [Scout setup commands](scout.md#commands), beginning with `npx -y openmerit@latest install --client claude-code`.
 

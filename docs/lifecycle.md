@@ -1,5 +1,7 @@
 # Improvement lifecycle
 
+**Core reference / historical Pi workflow:** this lifecycle remains available through the coordinator for custom harnesses. Pi-specific actions below describe the removed Pi 0.87 adapter, not the unreleased Pi 1.5.0 native Scout adapter. The replacement has no lifecycle commands, evaluation setup, swaps, or scheduling. See [Pi setup](pi-extension.md) or the separate, unchanged [evaluation CLI](agent-evaluations.md).
+
 ## Stages
 
 1. **Unconfigured** — no confirmed profile exists.

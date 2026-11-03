@@ -4,7 +4,10 @@ COPY package.json package-lock.json ./
 COPY packages/core/package.json packages/core/package.json
 COPY packages/pi/package.json packages/pi/package.json
 COPY packages/protocol/package.json packages/protocol/package.json
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+COPY demo/package.json demo/package-lock.json ./demo/
+RUN npm ci --omit=dev --ignore-scripts \
+    && npm ci --omit=dev --ignore-scripts --prefix demo \
+    && npm cache clean --force
 COPY dist ./dist
 COPY demo/runtime ./demo/runtime
 RUN mkdir -p /workspace && chown node:node /workspace

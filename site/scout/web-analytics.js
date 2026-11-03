@@ -1,7 +1,7 @@
 // Shared browser/server contract. No DOM access at module evaluation time.
 export const webEvents = ['web_pageview', 'web_pageleave', 'web_vitals', 'web_interaction'];
 export const ctaIds = ['open_scout', 'open_docs', 'open_terminal', 'open_github', 'search_submit', 'analytics_settings'];
-const guides = new Set(['', 'getting-started', 'inference-terminal', 'scout', 'scout-data-policy', 'first-trial', 'demo', 'interactive-demo', 'demo-support', 'demo-spam', 'demo-backfill', 'demo-placement', 'demo-fieldkit', 'agent-evaluations', 'metrics-and-evidence', 'lifecycle', 'automation', 'budgets', 'commands', 'operations', 'troubleshooting', 'security', 'roadmap', 'architecture', 'adapter-guide', 'pareto-spec', 'testing']);
+const guides = new Set(['', 'getting-started', 'inference-terminal', 'scout', 'scout-data-policy', 'first-trial', 'demo', 'interactive-demo', 'demo-support', 'demo-spam', 'demo-backfill', 'demo-placement', 'demo-fieldkit', 'agent-evaluations', 'metrics-and-evidence', 'lifecycle', 'automation', 'budgets', 'commands', 'pi-extension', 'operations', 'troubleshooting', 'security', 'roadmap', 'architecture', 'adapter-guide', 'pareto-spec', 'testing']);
 export const uuidV4 = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 export function publicPage(path) {
   if (path === '/docs/demo/') return null;

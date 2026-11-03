@@ -1,6 +1,6 @@
 # Pi UX behavioral reference
 
-This document records user-visible behaviors from the earlier OpenMerit implementation. It is not an implementation specification; the current implementation carries forward only the behaviors listed below, rather than its source code, storage schema, or internal contracts.
+This document is a **historical evaluation-adapter reference**, not the current Pi interface specification. The unreleased Pi 1.5.0 native Scout replacement does not carry forward the `/openmerit` commands, lifecycle, pause controls, or scheduling described here. See [the current Pi guide](pi-extension.md). The list below preserves earlier UX ideas for custom evaluation harnesses only.
 
 ## Behaviors worth preserving
 

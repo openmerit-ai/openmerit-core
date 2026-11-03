@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.12 — 2026-11-03
+
+- Replace the obsolete Pi 0.87 evaluation adapter with native Scout support for Pi 1.5.0. Share browser device approval, private client/scope/project credentials, installer lifecycle and Scout instructions with Claude Code; keep Pi's native MCP, tools, model, permissions and session ownership intact.
+- Add targeted Pi setup, status, diagnostics, login, logout and removal, preserving edited files and independent credentials. Install a self-contained automatically discovered extension; updates require an explicit installer rerun and a new session. No legacy evaluation commands, scheduler, LaunchAgent or auto-update hooks remain in the Pi adapter.
+- Add the logo-first Add to Pi action below Claude Code, with copy-only setup and a clipboard-denied fallback. Scout serving and npm publication remain separate releases.
+- Keep the standalone evaluation CLI and core coordinator; move the prepared demo transport out of the removed Pi adapter and declare its Pi runtime dependency explicitly.
+
+## 0.1.11 — 2026-11-01
+
+- Refresh packaged Scout guides and include the Saga articles maintained in Markdown.
+- Recognize the Claude Code instruction updater when invoked through a symbolic link, so linked hook entry points run their update checks.
+- Preserve the existing CLI, Claude Code instruction-update contract, Pi integration and public exports. Scout, Saga and homepage source changes require separate website deployments; this npm release does not publish them.
+
 ## 0.1.10 — 2026-10-26
 
 - Add default-on Claude Code background checks for compatible Scout skill/startup-rule updates, with daily checks, 15-minute failure backoff, non-blocking failure notices with the “update openmerit” fallback, manual `openmerit update`, persistent opt-out and a natural-language update instruction.

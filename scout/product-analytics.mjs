@@ -16,7 +16,7 @@ const mode = choice(['sample', 'live']), page = choice(['home', 'docs']);
 const exception = { error_type: errorType, frames: safeFrames };
 const failure = { failure_stage: choice([...timingStages, 'matching']), failure_code: value => failureCodes.has(value) ? value : undefined, provider_status: integer(100, 599) };
 const version = value => typeof value === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[a-z0-9.]{1,30})?$/.test(value) ? value : undefined;
-const agent = choice(['claude-code', 'openmerit-cli', 'unknown']);
+const agent = choice(['claude-code', 'pi', 'openmerit-cli', 'unknown']);
 const setup = { agent, scope: choice(['user', 'project']), outcome: choice(['started', 'ok', 'error', 'pending', 'denied', 'conflict', 'not_installed']) };
 const component = choice(['matches', 'missing', 'modified_or_unowned']);
 const mcp = { mcp_method: choice(['initialize', 'ping', 'tools/list', 'tools/call', 'notifications/initialized', 'notifications/cancelled', 'other']),
@@ -250,7 +250,7 @@ export function createProductAnalytics(request, env, ctx = {}) {
       mcpProperties = {
         mcp_method: mcp.mcp_method(method) ?? 'other',
         ...(method === 'tools/call' ? { mcp_tool: tool === 'scout_models' ? tool : 'other' } : {}),
-        ...(method === 'initialize' ? { harness: ['claude-code', 'claude-ai', 'Claude Code'].includes(name) ? 'claude-code' : name === 'openmerit-cli' ? name : 'unknown', harness_version: version(harnessVersion) } : {}),
+        ...(method === 'initialize' ? { harness: ['claude-code', 'claude-ai', 'Claude Code'].includes(name) ? 'claude-code' : ['pi', 'openmerit-cli'].includes(name) ? name : 'unknown', harness_version: version(harnessVersion) } : {}),
       };
       if (method === 'tools/call') capture('scout_tool_invocation_started', mcpProperties);
     },

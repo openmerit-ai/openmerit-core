@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS openmerit_device_keys (id TEXT PRIMARY KEY, key_hash 
 CREATE INDEX IF NOT EXISTS openmerit_device_keys_user ON openmerit_device_keys(user_id, created_at);`;
 
 export const scoutPermission = 'scout:recommend';
-export const clients = { 'claude-code': 'Claude Code' };
+export const clients = { 'claude-code': 'Claude Code', pi: 'Pi' };
 const loginTTL = 600_000, pollInterval = 5, idleLifetime = 90 * 86400_000, touchEvery = 300_000;
 const alphabet = 'BCDFGHJKLMNPQRSTVWXZ23456789';
 const ready = new WeakSet();

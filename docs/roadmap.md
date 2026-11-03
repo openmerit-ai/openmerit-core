@@ -2,7 +2,7 @@
 
 ## Current status
 
-The Inference Terminal provides a read-only view of existing application evidence. The Pi integration coordinates supervised model-comparison trials. Neither a populated dashboard nor passing implementation tests establishes that an application has better models, trustworthy evaluations, or reliable unattended automation.
+The Inference Terminal provides a read-only view of existing application evidence. The Pi **1.5.0** adapter in OpenMerit **0.1.12** provides only native Scout MCP and shared guidance, not evaluation coordination. The standalone evaluation CLI and reusable core coordinator remain separate. Neither a populated dashboard nor passing implementation tests establishes that an application has better models, trustworthy evaluations, or reliable unattended automation.
 
 ## Known limitations
 
@@ -10,10 +10,11 @@ The Inference Terminal provides a read-only view of existing application evidenc
 - History and inventory can be incomplete because of source availability and read/parser limits. “All time” means retained supported evidence, not a complete lifetime archive. Cloud account usage is not fetched.
 - Machine and runtime readings describe shared resources; they are not per-request resource measurements. Static endpoints do not prove deployment, availability, or physical location.
 - Hosted samples and the before/after dashboard demo are fictional. Their cost projections and public benchmark screens do not establish application quality or latency.
-- Pi 0.87 is the only implemented coding-harness adapter. Jev must be configured and invoked by the harness; OpenMerit provides no Jev client.
-- Setup asks the harness to establish task-specific evaluations and observability. Generic coding checkpoints cannot replace product telemetry, and structured-result validation cannot prove external evidence is truthful.
-- Background wakeups require a logged-in macOS user, working headless Pi authentication, and explicit persistent-execution/infrastructure permission. Other platforms require an external scheduler. Deterministic baseline checks have automated coverage; unattended candidate discovery and model changes still need representative product validation.
-- Pause persists and gates automatic work, but does not cancel active intents, stop explicit commands, or stop the standalone terminal.
+- The Pi 0.87 evaluation adapter is removed in source. Pi 1.5.0 setup needs explicit browser approval, a new session and an explicit installer rerun for updates. It has no lifecycle commands, scheduler, LaunchAgent or auto-update hooks. The host owns tools, model, permissions and sessions; SDK hosts must load Pi's native MCP extension explicitly.
+- Scout rule/skill availability does not guarantee invocation or measured application quality. Missing project policy requires asking; unavailable or insufficient Scout evidence requires pausing the model choice.
+- Custom core evaluation harnesses must establish task-specific evaluations and observability. Generic coding checkpoints cannot replace product telemetry, and structured-result validation cannot prove external evidence is truthful.
+- Background provisioning and unattended validation belong to custom evaluation integrations, not the new Pi adapter. Existing legacy Pi jobs require separate cleanup during migration.
+- Core pause policy does not cancel active intents or stop explicit commands or the standalone terminal. It is not a command exposed by the new Pi adapter.
 - Challenger accounting depends on reported costs. It cannot independently meter provider billing or stop an in-flight request. Use provider spending controls as well as the confirmed evaluation policy.
 - The source interface and hosted dashboard follow the device's light/dark preference. That UI change is not included in npm 0.1.6.
 

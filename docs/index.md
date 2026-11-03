@@ -1,6 +1,6 @@
 # OpenMerit documentation
 
-These guides describe the implementation on **main**. Stable npm `openmerit@0.1.7` includes the Inference Terminal, agent-evaluation CLI and Scout device setup for Claude Code. The website, hosted samples, Scout service and npm package are deployed independently; dated receipts describe the versions actually tested.
+These guides distinguish current source work from published behavior. OpenMerit **0.1.12** adds native Scout support for Pi **1.5.0**, replacing the old Pi 0.87 evaluation extension. The Inference Terminal and standalone agent-evaluation CLI are separate products and are unchanged by that replacement. The website, hosted samples, Scout service and npm package are deployed independently; dated receipts describe the versions actually tested.
 
 ## See your inference environment
 
@@ -20,11 +20,15 @@ Start with [installation and setup](getting-started.md) or the [Inference Termin
 
 For a shortlist before building an integration, the separate [Scout beta](scout.md) accepts a task description and returns up to five evidence-backed model candidates. It is available at [openmerit.ai/scout/](https://openmerit.ai/scout/), with a prompt-only JSON API and MCP tool for coding agents.
 
-## Evaluate model changes with Pi
+## Connect Scout to Pi
 
-The separate Pi 0.87 integration asks a coding harness to establish evaluations, gather application measurements, and test candidates. OpenMerit coordinates the approved lifecycle, records evidence references, validates structured results and frontier conformance, and requests authorized changes. The harness executes the work; the terminal does not perform this workflow.
+The thin Pi 1.5.0 adapter uses native MCP and shared Scout guidance. Pi owns tools, models, permissions and sessions; the adapter has no `/openmerit` lifecycle commands, evaluation scheduling, LaunchAgent or automatic updates.
 
-Follow [Pi setup](getting-started.md#set-up-model-comparisons-with-pi), then [your first supervised trial](first-trial.md).
+Follow [setup](getting-started.md#connect-scout-to-a-coding-agent) and [the Pi guide](pi-extension.md), including browser approval, per-client/scope credentials, explicit reinstall updates and SDK requirements. Registry setup requires OpenMerit 0.1.12 or newer.
+
+## Evaluate application changes
+
+Use [the standalone evaluation CLI](agent-evaluations.md) for Claude Code, Codex and OpenCode. Custom harnesses may use the core coordinator. The following guides retain core concepts and historical Pi 0.87 workflows; they do not describe the new Scout adapter:
 
 - [Metrics and evidence](metrics-and-evidence.md): measurements, sample requirements, and readiness.
 - [Comparisons and swaps](lifecycle.md): baseline, challenger trials, approval, verification, and rollback.
@@ -33,8 +37,8 @@ Follow [Pi setup](getting-started.md#set-up-model-comparisons-with-pi), then [yo
 
 ## Operate and troubleshoot
 
-[Commands](commands.md) and [project files and logs](operations.md) explain status, pause, diagnostics, and recovery. [Troubleshooting](troubleshooting.md), [security and data](security.md), and [current limitations](roadmap.md) describe the boundaries to check before relying on automation.
+[Troubleshooting](troubleshooting.md), [security and data](security.md), and [current limitations](roadmap.md) explain current Pi setup and its boundaries. [Commands](commands.md) and [project files and logs](operations.md) also retain explicitly historical Pi lifecycle references alongside standalone/core information; their old pause and recovery commands are not part of the new adapter.
 
 ## Build an integration
 
-Pi is the implemented coding-harness adapter. Other harnesses can implement the protocol and coordinator boundary described in [architecture](architecture.md) and [the adapter guide](adapter-guide.md). The [Pareto specification](pareto-spec.md) defines comparison rules; [testing and validation](testing.md) distinguishes automated coverage from product evidence.
+Pi now supplies a native Scout connection, not an evaluation `HarnessAdapter`. Custom evaluation harnesses can implement the protocol and coordinator boundary described in [architecture](architecture.md) and [the adapter guide](adapter-guide.md). The [Pareto specification](pareto-spec.md) defines comparison rules; [testing and validation](testing.md) distinguishes automated coverage from product evidence.

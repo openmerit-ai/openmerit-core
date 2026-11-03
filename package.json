@@ -1,6 +1,6 @@
 {
   "name": "openmerit",
-  "version": "0.1.10",
+  "version": "0.1.12",
   "description": "Evidence-driven model decisions for coding harnesses.",
   "type": "module",
   "bin": {
@@ -95,7 +95,6 @@
     "build:scout": "node scripts/build-scout.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.87.0",
     "@iarna/toml": "2.2.5",
     "@lezer/javascript": "1.5.6",
     "@lezer/python": "1.1.19",
@@ -104,7 +103,7 @@
     "yaml": "2.9.1"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.87.0 <0.88.0"
+    "@earendil-works/pi-coding-agent": "1.5.0"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {
@@ -112,6 +111,7 @@
     }
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.5.0",
     "@clerk/backend": "3.26.1",
     "@clerk/shared": "4.41.0",
     "@resvg/resvg-js": "2.6.2",

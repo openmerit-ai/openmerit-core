@@ -1,6 +1,6 @@
 # Getting started
 
-Stable npm 0.1.7 includes a separate [agent-evaluation CLI-change loop](agent-evaluations.md) for Claude Code, Codex and OpenCode, plus [Scout device setup for Claude Code](scout.md#connect-a-coding-agent). Neither is part of the Pi setup below.
+OpenMerit provides a passive Inference Terminal, Scout model-selection guidance, and a separate [agent-evaluation CLI](agent-evaluations.md). Pi Scout setup requires OpenMerit **0.1.12** or newer and Pi **1.5.0**. Package publication and website deployment are independent releases.
 
 ## Open your inference environment
 
@@ -12,65 +12,40 @@ cd /path/to/your/application
 openmerit dash
 ```
 
-The Inference Terminal is included in stable `openmerit@0.1.7`. It opens a local, read-only view of the selected application's services, models, recorded requests, and linked compute. It does not require Pi or a provider API key, make inference calls, or change model assignments. Supported code/configuration declarations identify inventory; request history requires existing supported logs or exports. See [the terminal guide](inference-terminal.md) for collection, privacy, configuration, and diagnostics.
+The Inference Terminal opens a local, read-only view of the selected application's services, models, recorded requests, and linked compute. It does not require Pi or a provider API key, make inference calls, or change model assignments. Supported code/configuration declarations identify inventory; request history requires existing supported logs or exports. See [the terminal guide](inference-terminal.md) for collection, privacy, configuration, and diagnostics.
 
 To inspect fictional data without installation, open the [hosted dashboard](https://dash.openmerit.ai/) or its [before/after comparison](https://dash.openmerit.ai/demo). Neither connects to your machine.
 
-## Set up model comparisons with Pi
+## Connect Scout to a coding agent
 
-The Pi integration is a separate workflow for evaluations and authorized model changes. It requires Pi 0.87 with a model provider configured, and a product repository where Pi can create and verify evaluation and observability artifacts. Provider credentials belong to Pi or its environment; OpenMerit does not accept them.
-
-Install the extension in Pi:
+Claude Code setup is described in [the Scout guide](scout.md#connect-a-coding-agent). For the new Pi integration, use Pi **1.5.0**, Node.js 22.19 or newer, and npm. Run the intended command in your shell:
 
 ```sh
-pi install npm:openmerit
-pi list
+npx -y openmerit@latest install --client pi --scope user
 ```
 
-Run `/openmerit doctor` inside Pi to confirm that the extension is available.
-
-## Install from source
+Approve the matching device code in the browser, then start a **new Pi session**. Only approve a request you initiated. User scope is the default and applies across projects. For one project, run this from that project's root instead:
 
 ```sh
-git clone https://github.com/laz-aslam/openmerit.git
-cd openmerit
-npm ci
+npx -y openmerit@latest install --client pi --scope project
 ```
 
-Start Pi with the extension:
+Each client/scope installation has its own private Scout key; project keys are stored outside the repository. Do not install overlapping Pi user/project adapters or a duplicate `openmerit` MCP entry. The installer reports conflicts rather than overwriting edited or unowned files.
+
+The adapter connects Scout through Pi's native MCP and supplies the shared Scout rule and skill. Pi owns tool discovery, tool execution, model choice, permissions, and sessions. Scout recommends application-model candidates; it does not execute those candidates or change Pi's own model. There are no `/openmerit` lifecycle commands, automatic evaluation setup, scheduler, or LaunchAgent in this adapter.
+
+## Check, update, or remove Pi setup
 
 ```sh
-./node_modules/.bin/pi --no-extensions -e ./packages/pi/src/index.ts
+npx -y openmerit@latest status --client pi --scope user --check
+npx -y openmerit@latest doctor --client pi --scope user
+npx -y openmerit@latest remove --client pi --scope user
 ```
 
-`--no-extensions` prevents a globally installed npm copy from conflicting with the source extension. Run `/openmerit doctor` inside Pi to confirm that the adapter and intent executor are available.
+Use `--scope project` from the original project root for a project installation. `login` and `logout` accept the same `--client` and `--scope` flags. These commands target that installation, not another client's connection. Updating Pi setup requires explicitly rerunning `install` and starting a new session; no Pi auto-update hooks are installed. Installing or updating the npm package alone does not reconfigure Pi.
 
-## Establish a product profile
+See [the Pi extension guide](pi-extension.md) for installed paths, migration from Pi 0.87, and SDK embedding. Use [troubleshooting](troubleshooting.md) for setup failures.
 
-Open the product repository in interactive Pi with the extension loaded. If the project has no OpenMerit state, the Pi adapter performs a bounded source preflight. It also scans after a settled Pi build turn, so an application created from an initially empty directory can enter setup without a slash command. A repository without such a target remains idle; use `/openmerit setup` only to recover or configure a custom integration explicitly.
+## Evaluate application changes
 
-OpenMerit sends Pi a private, typed `establish_evals` intent. Pi must identify the application LLM call or shared route under evaluation and its exact incumbent application model. It inspects the application's outputs, tools, and failure modes to infer task-relevant metrics instead of asking you to invent them. Before running setup, Pi shows the proposed metrics, why each matters, the representative case and repetition counts, aggregation, any actual performance threshold, and estimated evaluation cost. You confirm or edit that plan together with the stable target ID, call sites, route key, budget, check cadence, scheduling mode, and automation permissions. Pi's own model is never an application target.
-
-For an active-session demo, Pi defaults the baseline and post-swap verification cadence to one completed evaluation task unless you change it. OpenMerit rejects empty baseline or post-swap cadences.
-
-Pi is also asked to research preliminary model leads during setup. Each reported lead has a current price estimate and reputation summary with sources and check times. OpenMerit stores these leads with the project profile. The field is optional for compatibility with existing protocol-0.1 harnesses, and an empty list means no credible leads were found. It does not change the application model or count as a measurement.
-
-OpenMerit rejects successful setup without a confirmed task profile, at least one valid objective with an explicit sampling plan, a supervised-graduation policy, non-empty baseline and post-swap cadences, a budget, and evidence.
-
-The setup instruction asks Pi to run the application path with working provider authentication, execute each required collector and grader, inspect the resulting metric values, and retain verification artifacts. A metric that cannot be produced must be marked missing. This smoke run verifies the pipeline; it is not counted as a production baseline sample. OpenMerit still checks the reported coverage and evidence references, not the authenticity of a grader run itself.
-
-## Collect the baseline
-
-After setup, instrument the confirmed application target and use the product normally. Report application-task completions and cumulative metric windows through Pi's typed signal tool, including the application model where applicable, sample counts, and durable evidence. Pi's own model, tokens, cost, and latency are orchestration telemetry and do not satisfy product metrics. OpenMerit core checks the stored baseline windows at the approved cadence without calling Pi; missing evidence stays insufficient.
-
-## Find the frontier
-
-When the baseline meets every required metric threshold, OpenMerit issues the next approved nudges: discover candidates, run controlled challenger trials, and calculate the Pareto frontier. Pi performs that work. OpenMerit checks the returned result against the [Pareto specification](pareto-spec.md).
-
-Candidate discovery uses current price, capability, availability, reputation, and benchmark signals to shortlist models worth testing. These are starting clues, not evidence that a model performs well on your application. OpenMerit collects preliminary leads at setup, then refreshes them, probes availability, and freezes the incumbent plus challengers. Pi must use the same cases, application revision, prompt, tools, grader, and run count, with a recorded shuffle seed. It preserves one experiment manifest and reports measured quality, cost, latency, tokens, and other required metrics. OpenMerit durably carries the accepted candidate set and assessments into later intents rather than relying on Pi conversation history. A model proposal must come from the verified frontier of those measured candidate results, not from price or reputation alone.
-
-## Approve an early swap
-
-With automatic swaps disabled, a model proposal that passes frontier validation waits for `/openmerit approve`. That authorizes Pi to apply only the proposed change. OpenMerit then requires post-swap evaluation; the approved policy determines rollback behavior. Automatic swaps may bypass per-proposal approval when enabled and the configured verified-swap threshold is reached, including when that threshold is zero.
-
-Continue with [your first supervised trial](first-trial.md) for a practical walkthrough.
+The standalone `openmerit eval` CLI is unchanged by the new Pi adapter. It evaluates Claude Code, Codex and OpenCode through explicit task, scope, budget and grader configuration; see [agent evaluations](agent-evaluations.md). The core evaluation coordinator remains available to custom harness integrations, but the removed Pi 0.87 lifecycle adapter is not the way to invoke it.

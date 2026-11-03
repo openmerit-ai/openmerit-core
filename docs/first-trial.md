@@ -1,5 +1,7 @@
 # Your first supervised trial
 
+**Historical Pi 0.87 walkthrough / core evaluation reference:** the unreleased Pi 1.5.0 replacement is a native Scout adapter, not an evaluation lifecycle adapter. It has none of the `/openmerit` commands or setup flow below. Retain this walkthrough for custom harness/coordinator work; for current setup use [Scout for Pi](pi-extension.md), and for standalone comparisons use [agent evaluations](agent-evaluations.md). This page is not a receipt of a successful trial.
+
 Use one representative product task to learn whether OpenMerit and your harness can collect useful evidence. This guide describes a trial to perform; it does not claim that a trial has already succeeded for your product.
 
 ## Choose a bounded task

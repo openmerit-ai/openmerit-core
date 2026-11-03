@@ -38,7 +38,7 @@ export const setupUUID = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-
 export function setupHeaders(ids = {}, client = 'cli') {
   return {
     'X-Scout-Client': client,
-    'X-Scout-Agent': 'claude-code',
+    'X-Scout-Agent': ids.agent === 'pi' ? 'pi' : 'claude-code',
     ...(clientVersion ? { 'X-Scout-Client-Version': clientVersion } : {}),
     'X-Scout-Analytics-Content': 'off',
     ...(client === 'cli' ? { 'X-Scout-Analytics': telemetryEnabled(true) ? 'on' : 'off' } : !telemetryEnabled(true) ? { 'X-Scout-Analytics': 'off' } : {}),
@@ -54,7 +54,7 @@ export function installationProperties(input) {
     stage: ['started', 'preflight', 'login', 'browser_open', 'configuration', 'verification', 'status', 'remove', 'completed'],
     outcome: ['started', 'ok', 'error', 'pending', 'denied', 'conflict', 'not_installed'],
     command: ['install', 'status', 'remove', 'login', 'logout', 'project', 'doctor', 'unknown'],
-    agent: ['claude-code'], scope: ['user', 'project'],
+    agent: ['claude-code', 'pi'], scope: ['user', 'project'],
     rule_status: ['matches', 'missing', 'modified_or_unowned'],
     skill_status: ['matches', 'missing', 'modified_or_unowned'],
     server_status: ['matches', 'missing', 'modified_or_unowned'],

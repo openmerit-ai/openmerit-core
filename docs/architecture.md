@@ -1,5 +1,7 @@
 # Architecture
 
+**Source status:** the Pi 1.5.0 native Scout replacement is unreleased and unpublished. The protocol/core evaluation coordinator described here remains available for custom harnesses; it is not invoked by the new Pi adapter. The standalone evaluation CLI and Inference Terminal are unchanged.
+
 ## Design principle
 
 OpenMerit is an orchestrator, not an intelligence layer. The product application LLM call is the system under test; the coding harness is the evaluator and execution environment.
@@ -12,7 +14,7 @@ OpenMerit deterministic orchestration
         |
         | typed intent: outcome, constraints, evidence
         v
-Coding harness such as Pi
+Custom evaluation harness
         |
         | intelligent work, tools, evals, calculation
         v
@@ -38,13 +40,13 @@ Contains deterministic behavior: choosing the next lifecycle intent according to
 
 `OpenMeritCoordinator` is the reusable adapter boundary. It constructs canonical intents, negotiates capabilities, records lifecycle progress and observations, validates results, and advances durable state. `OpenMeritStore` makes persistence replaceable; `ProjectStore` is the bundled filesystem backend.
 
-The coordinator also accepts idempotent application-target automation signals and evaluates the user-confirmed `AutomationCheckPolicy`. `buildAutomationPlan` tells an adapter which signals and wakeups are required and reports unsupported persistent scheduling honestly. Provisioning belongs to the adapter: Pi can install an authorized macOS user LaunchAgent; the coordinator itself does not create operating-system schedulers or paid cloud workers.
+The coordinator also accepts idempotent application-target automation signals and evaluates the user-confirmed `AutomationCheckPolicy`. `buildAutomationPlan` tells an adapter which signals and wakeups are required and reports unsupported persistent scheduling honestly. Provisioning belongs to a custom adapter; the coordinator itself does not create operating-system schedulers or paid cloud workers. The removed Pi 0.87 adapter's LaunchAgent is historical functionality, not part of the new Scout connection.
 
 ### `openmerit/pi`
 
-Exposes the command surface, supplies private typed intent context, triggers Pi, accepts one structured completion for the active intent, records evidence, advances the lifecycle, and detects model-catalog changes.
+Exports `createScoutPiExtension` and a default native Scout extension for Pi 1.5.0. It registers the authenticated Scout HTTP MCP server through Pi and adds shared rule/skill prompt sections. Pi owns discovery, tools, permissions, model and sessions; SDK hosts must load Pi's `createMcpExtension()` explicitly alongside it.
 
-The Pi package implements `HarnessAdapter`. It does not define canonical intents, per-intent result contracts, stage transitions, or validation rules.
+The package no longer implements `HarnessAdapter`, exposes lifecycle commands, or schedules evaluation work. It shares credential and instruction code with the installer instead of duplicating an MCP client or evaluation coordinator. See [Pi installation and migration](pi-extension.md).
 
 ### Inference Terminal
 
@@ -52,7 +54,7 @@ The Pi package implements `HarnessAdapter`. It does not define canonical intents
 
 ## Intelligence resources
 
-Models, web research, tools, evaluators, and fast decision systems such as Jev System One are harness resources. They are configured and invoked by Pi. This keeps OpenMerit provider-neutral and lets future adapters choose their own implementation.
+Models, web research, tools, evaluators, and fast decision systems such as Jev System One are harness resources. They are configured and invoked by the host harness. This keeps the coordinator provider-neutral and lets custom adapters choose their own implementation.
 
 ## Trust boundary
 

@@ -2,7 +2,7 @@
 
 Scout is OpenMerit's model search agent. Describe your task and get model recommendations. Scout returns up to five model-and-endpoint candidates per task. Comparable measurements support performance ranking; narrow decision and vision tasks use an explicitly labelled task-fit shortlist when quality is unmeasured. The `/scout/` page and JSON API use the same index and ranking.
 
-Scout is a separate hosted beta product. Npm 0.1.7 includes optional Claude Code setup for it; the hosted service does not change the Pi coordinator or Inference Terminal. Recommendations are evidence-based candidates for your own evaluation, not a guarantee of task accuracy or an independently validated state-of-the-art ranking.
+Scout is a separate hosted beta product. Npm 0.1.7 introduced optional Claude Code setup for it. OpenMerit 0.1.12 adds native Scout access for Pi 1.5.0, replacing the old Pi evaluation adapter without changing the core coordinator, standalone evaluation CLI or Inference Terminal. Recommendations are evidence-based candidates for your own evaluation, not a guarantee of task accuracy or an independently validated state-of-the-art ranking.
 
 **Website rebuild — published 24 October 2026:** the rebuild preserves the existing landing page at `/` and Scout at `/scout/`, and takes all hosted `/docs/` pages offline, including this guide. `/connect/`, the JSON API/MCP and the standalone `/scout/data-policy/` remain available. The guide remains maintained in Markdown; this does not remove the local CLI or its documentation from the package. See the [cutover notes](site-domain-migration.md) for publication and verification details.
 
@@ -520,7 +520,11 @@ The comparison table keeps recommendations in Scout rank order. Benchmark mode s
 
 ## Connect a coding agent
 
-**Device sign-in setup — npm 0.1.8:** use the stable `latest` tag for the commands below. Version 0.1.8 adds the startup model-decision rule to the device setup introduced in 0.1.7. Hosted Scout serves `/connect` and `/scout/mcp` independently of npm. Claude Code is the only supported client; other agents are not yet supported. The older `0.1.7-preview.5` package does not contain these commands.
+**Pi native Scout adapter — npm 0.1.12:** Pi **1.5.0** joins Claude Code through the shared browser-approved installer. Run `npx -y openmerit@latest install --client pi [--scope user|project]`. The **Add to Pi** action below Claude copies setup text only; there is no Pi deep link. Approve the matching browser code, then start a new Pi session. Pi owns native MCP, tools, model, permissions and sessions; the adapter adds only the authenticated connection and shared Scout rule/skill. No `/openmerit` lifecycle commands, scheduler, LaunchAgent or automatic-update hooks are carried forward. Explicitly reinstall to update. See [Pi paths, migration and SDK embedding](pi-extension.md).
+
+Each new client/scope installation has independent credentials and approval; project keys are also separated by project and stored outside the repository. Shell `login`, `logout`, `status`, `remove` and `doctor` accept `--client pi|claude-code --scope user|project` to target that installation. Pi connection JSON references a private credential path rather than containing the key. The legacy Claude user credential path remains supported. Package publication and website deployment are independent; the versioned Claude setup below describes earlier releases.
+
+**Device sign-in setup — npm 0.1.8:** use the stable `latest` tag for the Claude commands below. Version 0.1.8 adds the startup model-decision rule to the device setup introduced in 0.1.7. Hosted Scout serves `/connect` and `/scout/mcp` independently of npm. Claude Code was the supported client in that release; Pi support requires 0.1.12 or newer. The older `0.1.7-preview.5` package does not contain these commands.
 
 Setup takes four steps, and you act in each one only once:
 
@@ -582,6 +586,8 @@ Claude can load the `openmerit-scout` skill when choosing an application inferen
 The agent compares model and endpoint, evidence, reference cost/time and unknowns, and helps configure the chosen route. New providers, credentials, spending and deployments need separate approval. A skill is a default, not enforcement. The MCP tool, `scout_models`, is read-only and does not execute models.
 
 ### Automatic instruction updates — version 0.1.10
+
+**Claude Code only.** These hooks and `update` commands do not apply to Pi. Pi updates require an explicit installer rerun and a new session.
 
 Version 0.1.10 adds default-on updates for the installed Scout skill and startup rule. **npm 0.1.9 does not contain the updater.** After 0.1.10 is published, existing installations need one explicit installer rerun in their original scope to acquire it. A website or Scout deployment cannot bootstrap files on someone else's machine. Compatible hosted Scout changes already reach agents through their next MCP request.
 

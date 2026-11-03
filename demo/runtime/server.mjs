@@ -79,7 +79,7 @@ async function start() {
   });
   const pi = fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'));
   const piCli = join(dirname(pi), 'cli.js');
-  const extension = join(here, 'adapter.mjs');
+  const extension = join(here, 'adapter.ts');
   child = spawn(process.execPath, [piCli, '--mode', 'rpc', '--provider', 'openrouter', '--model', harnessModel,
     '--thinking', 'off', '--no-session', '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes',
     '-e', extension, '-e', join(here, 'extension.mjs'),

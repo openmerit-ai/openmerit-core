@@ -1,5 +1,7 @@
 # Project state and operations
 
+**Scope — unreleased Pi replacement:** the evaluation lifecycle files and `/openmerit` commands below describe the core coordinator and historical Pi 0.87 adapter. The Pi 1.5.0 Scout adapter does not create or advance that lifecycle, manage scheduling, or expose those commands. See [current Pi paths and targeted shell commands](pi-extension.md). Terminal files remain current; standalone evaluation files are documented in [agent evaluations](agent-evaluations.md). Preserve older state and separately remove any legacy background job when migrating.
+
 ## State location
 
 Operational data lives under `.openmerit/` in the target product repository. It should be ignored by version control because it can contain local lifecycle state and evidence locations.
