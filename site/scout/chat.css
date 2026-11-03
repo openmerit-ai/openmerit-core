@@ -23,6 +23,8 @@
 .turn-scout { padding-bottom: 22px; }
 .turn-text { font-size: 14px; line-height: 1.6; max-width: 760px; }
 .turn-error { color: var(--error); font-size: 13px; }
+.task-title { margin: 10px 0 -6px; font-size: 14px; font-weight: 600; }
+.task-work { color: var(--muted); font-size: 13px; line-height: 1.5; max-width: 760px; }
 
 .progress { display: grid; gap: 6px; }
 .progress:not(.progress-done) > summary { display: none; }

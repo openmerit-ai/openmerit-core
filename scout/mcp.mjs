@@ -1,17 +1,38 @@
-import { recommend } from './rank.mjs';
 import { json, readJSON } from './http.mjs';
-import { validateSelection } from './selection.mjs';
+import { components } from './agent/recommendation.ts';
+import { converse, parseTurn } from './agent/routes.ts';
 
 const versions = ['2025-03-26', '2025-06-18', '2025-11-25'];
 const tool = {
   name: 'scout_models', title: 'Find models for your tasks',
-  description: 'Get up to five ranked models per task with explicit endpoint identities. The evidence engine decomposes up to three independent tasks and resolves ambiguity internally without follow-up questions. Each task has five layers and exactly one shortlist, retained at tasks[].slots[0] for compatibility. Multi-task responses have an empty top-level recommendations array. Combinations are not jointly evaluated. Typed decision and vision tasks use a task-fit shortlist when comparable quality measurements are absent; inspect each task\'s ranking.mode and unknown metrics. Comparable calibration can supply task-quality observations; inspect each metric basis and reference assumptions. Public benchmarks are task proxies. The evidence engine selects numerical tradeoffs only within comparable scopes; missing objectives remain provisional. Compatible classification/detection/segmentation deployments can enter the task-fit five. Other Hugging Face components remain in specialists; reported results are not independently verified. The task description is sent to OpenAI for structured decomposition, Decisions interpretation and transient query embeddings. When configured, PostHog receives account-linked usage, task categories, ordered model/endpoint choices, bounded source evidence and sanitized errors. Send X-Scout-Analytics: off to opt out. Prompt and task-breakdown text are excluded unless both the deployment permits content capture and the client sends X-Scout-Analytics-Content: on. Content redaction is best effort; never submit secrets or confidential records. New searches are not copied into Cloudflare Analytics Engine. PostHog retention is configured separately. Scout does not execute the recommended models. Inspect ranking.mode, tested pool, sample size, freshness, requirements, warnings and evidence. This is a shortlist, not a guarantee of task accuracy.',
-  inputSchema: { type: 'object', properties: { prompt: { type: 'string', minLength: 1, maxLength: 4000, description: 'Describe what the selected model needs to do, including input and output formats.' }, endpointIds: { type: 'array', maxItems: 100, uniqueItems: true, items: { type: 'string', maxLength: 160 }, description: 'Optional exact endpoint IDs. Filters before ranking; no provider credential fallback. Omit modelIds when selecting non-router endpoints.' }, modelIds: { type: 'array', maxItems: 100, uniqueItems: true, items: { type: 'string', maxLength: 160 }, description: 'Optional project-accessible legacy OpenRouter catalogue model IDs. Filtered before ranking. Empty means no models.' } }, required: ['prompt'], additionalProperties: false },
+  description: 'Talk to Scout, the same agent as the openmerit.ai/scout page. Send a task description as prompt. Scout writes a task brief (input, work, output, criteria, constraints) and either asks clarifying questions or splits the work into tasks, one per model it needs, with no limit on the number of tasks, and returns up to five ranked models for each task. When the result status is needs_answers, show the brief and questions to the user, then call again with the same conversationId and brief set to the components rewritten with their answers, or skip: true to let Scout assume. When it is recommended, read tasks[].models; each model\'s cost names the cheapest eligible endpointId and the providerModelId to call. Send a follow-up prompt with the conversationId to refine. Pass endpointIds on the first call to limit every task to the project\'s inventory; they stay fixed for the conversation, and an empty list allows none. A turn usually takes one to three minutes; if a call is interrupted, call again with only the conversationId to read the outcome. The task text reaches Workers AI, Workers AI web search and OpenAI (benchmark search embeddings); the conversation is stored for your account. Never send secrets, source files or real customer records. Scout does not execute the recommended models. Quality is Scout\'s estimate from public benchmarks, not measured accuracy for your application.',
+  inputSchema: { type: 'object', properties: {
+    prompt: { type: 'string', minLength: 1, maxLength: 4000, description: 'The work the models need to do, including input and output formats; or a follow-up message in an existing conversation.' },
+    conversationId: { type: 'string', maxLength: 36, description: 'The conversationId from an earlier result, to continue that conversation.' },
+    brief: { type: 'object', additionalProperties: false, properties: Object.fromEntries(components.map(c => [c, { type: 'string', maxLength: 1000 }])), description: 'Brief components rewritten with the user\'s answers to Scout\'s questions. An empty string removes one.' },
+    skip: { type: 'boolean', description: 'Skip the remaining clarifying questions; Scout recommends with stated assumptions.' },
+    endpointIds: { type: 'array', maxItems: 100, uniqueItems: true, items: { type: 'string', maxLength: 160 }, description: 'Catalogue endpoint IDs the project can use, on the first call only. Every shortlist is limited to them; an empty list allows none. Omit to search the whole catalogue.' },
+  }, additionalProperties: false },
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
 };
 
+const next = {
+  clarification: 'Show the brief and questions to the user. Call scout_models again with this conversationId and brief set to the components rewritten with their answers, or skip: true. Do not answer for the user from guesses.',
+  recommendation: 'Present each task\'s shortlist with its trade-offs and let the user choose. To refine, call scout_models with this conversationId and a prompt.',
+};
+// The coding agent's view of a turn: the answer, without the progress log the page animates.
+function result(body) {
+  const { conversationId, busy, answer } = body;
+  if (busy || !answer) return { conversationId, status: 'working', next: 'Scout is still working. Call scout_models again with only this conversationId to read the outcome.' };
+  if (answer.kind === 'clarification') return { conversationId, status: 'needs_answers', brief: answer.brief, questions: answer.questions, next: next.clarification };
+  if (answer.kind === 'recommendation') return { conversationId, status: 'recommended', brief: answer.brief, assumptions: answer.assumptions, catalogueVersion: answer.catalogueVersion, tasks: answer.tasks, next: next.recommendation };
+  if (answer.kind === 'message') return { conversationId, status: 'message', text: answer.text };
+  return { conversationId, status: 'error', error: answer.message };
+}
+
 // Stateless Streamable HTTP. No sessions, SDK runtime or open SSE streams.
-export async function handleMCP(request, index, state = {}, recommendTask = (index, prompt, modelIds, endpointIds) => recommend(index, prompt, Date.now(), null, undefined, modelIds ?? null, endpointIds ?? null), observe = () => {}) {
+// Every tool call is one turn of a Scout agent conversation (agent/), keyed by the device key's user.
+export async function handleMCP(request, conversations, userId, observe = () => {}) {
   const origin = request.headers.get('origin');
   if (origin && origin !== new URL(request.url).origin) return json({ error: 'Origin not allowed.' }, 403);
   if (request.method !== 'POST') return json({ error: 'Use POST. This server does not open SSE streams.' }, 405, { Allow: 'POST' });
@@ -30,22 +51,25 @@ export async function handleMCP(request, index, state = {}, recommendTask = (ind
     return fail(-32600, 'Unrecognized notification.', 400);
   }
   const reply = result => json({ jsonrpc: '2.0', id, result });
-  if (method === 'initialize') return reply({ protocolVersion: versions.includes(params?.protocolVersion) ? params.protocolVersion : versions.at(-1), capabilities: { tools: {} }, serverInfo: { name: 'OpenMerit', version: '0.1.0' }, instructions: 'OpenMerit currently provides Scout only. Consult scout_models for new or changed application inference selections. Pass existing authorized endpointIds to constrain recommendations; never silently fall back to unauthorized endpoints or providers. Recommendations are not executions: Scout does not run inference or grant endpoint access. Respect evidence limitations and freshness warnings.' });
+  if (method === 'initialize') return reply({ protocolVersion: versions.includes(params?.protocolVersion) ? params.protocolVersion : versions.at(-1), capabilities: { tools: {} }, serverInfo: { name: 'OpenMerit', version: '0.1.0' }, instructions: 'OpenMerit currently provides Scout only. Consult scout_models for new or changed application inference selections. Scout may ask clarifying questions first: relay them to the user and continue the same conversation. Pass existing authorized endpointIds to constrain recommendations; never silently fall back to unauthorized endpoints or providers. Recommendations are not executions: Scout does not run inference or grant endpoint access.' });
   if (method === 'ping') return reply({});
   if (method === 'tools/list') return reply({ tools: [tool] });
   if (method !== 'tools/call') return fail(-32601, 'Method not found.');
   if (params?.name !== tool.name) return fail(-32602, 'Unknown tool.');
   const args = params.arguments;
-  if (!args || Array.isArray(args) || typeof args !== 'object' || Object.keys(args).some(k => !['prompt', 'modelIds', 'endpointIds'].includes(k))) return fail(-32602, 'Provide prompt and optionally modelIds or endpointIds.');
-  try {
-    validateSelection(args.modelIds); validateSelection(args.endpointIds, 'endpointIds');
-    const result = { ...await recommendTask(index, args.prompt, args.modelIds, args.endpointIds), ...state };
-    // Keep agent context small; the JSON API exposes the complete evidence list.
-    for(const section of [result,...(result.tasks??[]).flatMap(t=>t.slots)]) {
-      section.recommendations = section.recommendations.map(m => ({ ...m, evidenceCount: m.evidence.length, evidence: m.evidence.slice(0, 4) }));
-      if (section.specialists) section.specialists.candidates = section.specialists.candidates.map(m => ({ ...m, evaluationCount: m.evaluations.length, evaluations: m.evaluations.slice(0, 4) }));
-      delete section.wordCloud;
-    }
-    return reply({ content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result, isError: false });
-  } catch (error) { return reply({ content: [{ type: 'text', text: error.message }], isError: true }); }
+  if (!args || Array.isArray(args) || typeof args !== 'object' || Object.keys(args).some(k => !Object.hasOwn(tool.inputSchema.properties, k))) return fail(-32602, 'Provide prompt, or conversationId with brief, skip or prompt.');
+  const failed = text => reply({ content: [{ type: 'text', text }], isError: true });
+  if (!conversations) return failed('The Scout agent is not available on this server.');
+  const { prompt, ...rest } = args;
+  const parsed = parseTurn({ ...rest, ...(prompt === undefined ? {} : { message: prompt }) });
+  if (typeof parsed === 'string') return failed(parsed.replace(/^message\b/, 'prompt'));
+  let outcome;
+  // conversationId alone reads the latest outcome, for a client whose call was interrupted.
+  if (parsed.conversationId && Object.keys(args).length === 1) {
+    const state = await conversations.getByName(`${userId}:${parsed.conversationId}`).state();
+    outcome = state.turns ? { status: 200, body: { conversationId: parsed.conversationId, ...state } } : { status: 404, body: { error: 'Conversation not found.' } };
+  } else outcome = await converse(conversations, userId, parsed, 'agent');
+  if (outcome.status !== 200) return failed([outcome.body.error, outcome.body.conversationId && `conversationId: ${outcome.body.conversationId}`].filter(Boolean).join(' '));
+  const value = result(outcome.body);
+  return reply({ content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value, isError: value.status === 'error' });
 }

@@ -60,6 +60,8 @@ export interface Catalogue {
 export interface Filters {
   kind?: string; inputs?: string[]; outputs?: string[]; parameters?: string[]; providers?: string[]; excludeProviders?: string[];
   minContext?: number; maxInputPrice?: number; maxOutputPrice?: number; openWeights?: boolean; releasedAfter?: string;
+  // The project's endpoint inventory, set by the conversation, never by the model. Empty allows none.
+  endpointIds?: string[];
 }
 
 type Json = Record<string, unknown>;
@@ -367,7 +369,7 @@ const nameMatch = (value: string, wanted: string[]) => wanted.some(w => value.to
 export function eligibleEndpoints(model: ModelRecord, f: Filters = {}): Endpoint[] {
   const routes = model.endpoints.length ? model.endpoints
     : [{ id: `${model.id}:unlisted`, provider: model.provider, modelId: model.id, inputPrice: null, outputPrice: null, rates: [], context: null, inputs: [], outputs: [], parameters: [], deployment: 'unlisted', url: null }];
-  return routes.filter(e =>
+  return routes.filter(e => (!f.endpointIds || f.endpointIds.includes(e.id)) &&
     includesAll(e.inputs.length ? e.inputs : model.inputs, (f.inputs ?? []).map(modality)) && includesAll(e.outputs.length ? e.outputs : model.outputs, f.outputs)
     && (f.parameters ?? []).every(p => (e.parameters.length ? e.parameters : model.parameters).includes(p))
     && (!f.providers?.length || nameMatch(e.provider, f.providers) || nameMatch(model.provider, f.providers))
@@ -382,7 +384,7 @@ export function violation(model: ModelRecord, f: Filters = {}): string | null {
   if (f.kind && model.kind !== f.kind) return model.kind ? `it is a ${model.kind} model, not ${f.kind}` : 'its kind is unknown';
   if (f.openWeights !== undefined && model.openWeights !== f.openWeights) return model.openWeights === null ? 'its weight availability is unknown' : f.openWeights ? 'its weights are not open' : 'it is an open-weights model';
   if (f.releasedAfter && !(model.releaseDate && model.releaseDate > f.releasedAfter)) return model.releaseDate ? `it was released on ${model.releaseDate}` : 'its release date is unknown';
-  return eligibleEndpoints(model, f).length ? null : 'no listed route meets the input, output, parameter, provider, context or price constraints';
+  return eligibleEndpoints(model, f).length ? null : f.endpointIds && !model.endpoints.some(e => f.endpointIds?.includes(e.id)) ? 'none of its routes is in the project\'s endpoint inventory' : 'no listed route meets the input, output, parameter, provider, context or price constraints';
 }
 
 // Each model's position on one benchmark or leaderboard. Benchmark ranks are among

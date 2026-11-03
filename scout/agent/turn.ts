@@ -8,7 +8,13 @@ export interface TurnRequest {
   // Components of the task brief the user rewrote in place; an empty string removes one.
   brief?: BriefEdits;
   skip?: boolean;
+  // Catalogue endpoint IDs the project can use. Fixed by the first turn; omitted means the whole catalogue.
+  endpointIds?: string[];
 }
+// Where a conversation comes from. The web page splits work into at most three
+// tasks so its answer stays readable; coding agents get as many as the work needs.
+export type Channel = 'web' | 'agent';
+export const taskLimits: Record<Channel, number | null> = { web: 3, agent: null };
 export type TurnAnswer = Answer | { kind: 'message'; text: string } | { kind: 'error'; message: string };
 export interface AgentState { busy: boolean; turns: number; skipped: boolean; progress: string[]; answer: TurnAnswer | null }
 
