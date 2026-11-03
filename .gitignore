@@ -10,6 +10,7 @@ site/scout/onboarding.js
 site/memo-access.js
 demo/memo/generated/
 site/assets/video-player.js
+site/assets/thread-rule.js
 coverage/
 *.tsbuildinfo
 
