@@ -1,5 +1,5 @@
 // The agent's two answers to a turn: clarifying questions about the task brief,
-// or a shortlist. The model chooses and justifies; this module checks the choice
+// or a shortlist for each task the work splits into. The model chooses and justifies; this module checks the choice
 // against the catalogue and computes every number shown for cost, latency and
 // recency, so a figure on screen always comes from source data.
 import { StringEnum, Type, type Static } from '@earendil-works/pi-ai';
@@ -62,20 +62,34 @@ export type Workload = Static<typeof WorkloadSchema>;
 type Quantity = Exclude<keyof Workload, 'imageOutputTokens'>;
 const quantities: Quantity[] = ['inputTokens', 'outputTokens', 'images', 'audioSeconds', 'videoSeconds', 'characters', 'pages', 'requests'];
 
-export const SubmissionSchema = Type.Object({
+// The work split into tasks, each served by a separately chosen model. Written
+// once the brief is settled; every task then gets its own validated shortlist.
+export const PlanSchema = Type.Object({
   brief: BriefSchema,
+  assumptions: Type.Array(Type.String(), { description: 'Assumptions you made in place of missing information.' }),
+  tasks: Type.Array(Type.Object({
+    title: Type.String({ description: 'Short name for the task, such as "Transcribe calls" or "Classify tickets".' }),
+    work: Type.String({ description: 'What the model does in this task, in one or two sentences.' }),
+    input: Type.String({ description: 'What this task\'s model receives.' }),
+    output: Type.String({ description: 'What this task\'s model produces.' }),
+  }), { minItems: 1, description: 'One entry per model the work needs, in the order they run.' }),
+});
+export type Plan = Static<typeof PlanSchema>;
+export type TaskPlan = Plan['tasks'][number];
+
+export const SubmissionSchema = Type.Object({
+  task: Type.Integer({ minimum: 1, description: 'Task number from plan_tasks, starting at 1.' }),
   filters: Type.Optional(FiltersSchema),
   workload: WorkloadSchema,
-  summary: Type.String({ description: 'Two or three sentences: the recommendation and the main trade-off.' }),
-  assumptions: Type.Array(Type.String(), { description: 'Assumptions you made in place of missing information.' }),
+  summary: Type.String({ description: 'Two or three sentences: the recommendation for this task and the main trade-off.' }),
   recommendations: Type.Array(Type.Object({
     modelId: Type.String({ description: 'Model ID from the catalogue tools.' }),
     role: Type.String({ description: 'Short label, such as "Best quality", "Best value", "Fastest", "Newest" or "Balanced".' }),
     quality: Type.Integer({ minimum: 0, maximum: 100, description: 'Your quality estimate for THIS task, from the cited benchmark standings.' }),
     evidence: Type.Array(Type.String(), { description: 'Benchmark or leaderboard IDs from this model\'s get_model_details results that support the quality estimate.' }),
-    rationale: Type.String({ description: 'One or two sentences on why this model fits the brief.' }),
+    rationale: Type.String({ description: 'One or two sentences on why this model fits the task.' }),
     watchOut: Type.Optional(Type.String({ description: 'The main risk or limitation.' })),
-  }), { minItems: 1, maxItems: 5 }),
+  }), { maxItems: 5, description: 'Five models, best overall first; fewer only when fewer meet the hard constraints, and empty when none do.' }),
 });
 export type Submission = Static<typeof SubmissionSchema>;
 
@@ -84,15 +98,17 @@ export interface RecommendedModel {
   rank: number; id: string; name: string; provider: string; role: string; rationale: string; watchOut: string | null;
   quality: { score: number; evidence: Array<{ benchmark: string; name: string; score: number | null; rank: number; of: number }> };
   // Cost of 1,000 tasks on the eligible route that prices the most workload quantities, then the cheapest.
+  // endpointId and providerModelId identify that route and the model ID its API expects.
   // Token prices are kept for the shortlist table; rates lists every price used; unpriced lists quantities the route does not bill.
-  cost: { usdPer1kTasks: number; route: string; inputPerMillion: number | null; outputPerMillion: number | null; rates: Array<{ unit: string; kind: string; amount: number }>; unpriced: Quantity[] } | null;
+  cost: { usdPer1kTasks: number; route: string; endpointId: string; providerModelId: string; inputPerMillion: number | null; outputPerMillion: number | null; rates: Array<{ unit: string; kind: string; amount: number }>; unpriced: Quantity[] } | null;
   latency: { seconds: number; firstTokenSeconds: number; tokensPerSecond: number; source: string | null } | null;
   recency: { released: string; ageDays: number } | null;
   best: Axis[];
 }
+export interface TaskShortlist { summary: string; workload: Workload; models: RecommendedModel[] }
+export type TaskRecommendation = TaskPlan & TaskShortlist;
 export interface Recommendation {
-  kind: 'recommendation'; brief: Brief; summary: string; assumptions: string[]; catalogueVersion: string;
-  workload: Workload; models: RecommendedModel[];
+  kind: 'recommendation'; brief: Brief; assumptions: string[]; catalogueVersion: string; tasks: TaskRecommendation[];
 }
 
 const round = (v: number, digits: number) => Number(v.toFixed(digits));
@@ -147,10 +163,11 @@ export function routeCost(route: Endpoint, kind: string | null, w: Workload) {
   return { usd, used, unpriced };
 }
 
-// Validates a submitted shortlist. Errors are written for the agent, which can
-// correct the submission and try again; nothing invalid reaches the user.
-export function finalize(catalogue: Catalogue, s: Submission, now: number): Recommendation {
-  const filters: Filters = s.filters ?? {}, byId = new Map(catalogue.models.map(m => [m.id, m]));
+// Validates one task's submitted shortlist. Errors are written for the agent, which can
+// correct the submission and try again; nothing invalid reaches the user. Scope
+// holds constraints the conversation imposes, such as the endpoint inventory.
+export function finalize(catalogue: Catalogue, s: Submission, now: number, scope: Filters = {}): TaskShortlist {
+  const filters: Filters = { ...s.filters, ...scope }, byId = new Map(catalogue.models.map(m => [m.id, m]));
   const problems: string[] = [], seen = new Set<string>();
   if (!quantities.some(q => (s.workload[q] ?? 0) > 0)) problems.push('The workload is empty: estimate at least one per-task quantity, such as inputTokens and outputTokens, images or audioSeconds.');
   for (const r of s.recommendations) {
@@ -192,7 +209,7 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number): Reco
     return {
       rank: i + 1, id: m.id, name: m.name, provider: m.provider, role: r.role, rationale: r.rationale, watchOut: r.watchOut ?? null,
       quality: { score: r.quality, evidence: r.evidence.map(id => ({ benchmark: id, name: names.get(id) ?? id, ...standing(id, m.id) })) },
-      cost: best ? { usdPer1kTasks: round(best.usd * 1000, 4), route: best.route.provider, inputPerMillion: best.route.inputPrice, outputPerMillion: best.route.outputPrice,
+      cost: best ? { usdPer1kTasks: round(best.usd * 1000, 4), route: best.route.provider, endpointId: best.route.id, providerModelId: best.route.modelId, inputPerMillion: best.route.inputPrice, outputPerMillion: best.route.outputPrice,
         rates: best.used.map(x => ({ unit: unitLabels[x.unit], kind: x.kind, amount: x.amount })), unpriced: best.unpriced } : null,
       latency: tps && ttft != null && outputTokens ? { seconds: round(ttft + outputTokens / tps, 1), firstTokenSeconds: round(ttft, 1), tokensPerSecond: Math.round(tps), source: m.speed?.source ?? null } : null,
       recency: released ? { released, ageDays: Math.max(0, Math.floor((now - Date.parse(released)) / 86_400_000)) } : null,
@@ -200,5 +217,5 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number): Reco
     };
   });
   leaders(models);
-  return { kind: 'recommendation', brief: s.brief, summary: s.summary, assumptions: s.assumptions, catalogueVersion: catalogue.version, workload: s.workload, models };
+  return { summary: s.summary, workload: s.workload, models };
 }

@@ -1,17 +1,25 @@
-// The Scout agent's tools. Catalogue reads are replay-safe; the two answer
-// tools end the run, so a turn ends with questions or a validated shortlist.
+// The Scout agent's tools. Catalogue reads are replay-safe. A turn ends with
+// questions, or once every planned task has a validated shortlist.
 import { StringEnum, Type } from '@earendil-works/pi-ai';
 import type { ToolExecutionResult, ToolRegistration } from '@earendil-works/pi-durable';
-import { benchmarkLeaderboard, kinds, modelDetails, searchBenchmarks, searchCatalogue, searchModels, units, type Catalogue } from './catalogue.ts';
+import { benchmarkLeaderboard, kinds, modelDetails, searchBenchmarks, searchCatalogue, searchModels, units, type Catalogue, type Filters } from './catalogue.ts';
 import { documentTypes } from './search.ts';
-import { ClarificationSchema, FiltersSchema, SubmissionSchema, finalize, type Clarification, type Recommendation } from './recommendation.ts';
+import { ClarificationSchema, FiltersSchema, PlanSchema, SubmissionSchema, finalize, type Clarification, type Plan, type Recommendation, type TaskShortlist } from './recommendation.ts';
 
 export type Answer = ({ kind: 'clarification' } & Clarification) | Recommendation;
+// The current split of the work, with the shortlists accepted so far in this turn.
+export type PlanState = Plan & { results: Array<TaskShortlist | null> };
 export interface ToolHost {
   catalogue(): Promise<Catalogue>;
   now(): number;
+  // Constraints the conversation imposes on every search and shortlist, such as the endpoint inventory.
+  scope(): Promise<Filters>;
+  // The most tasks this conversation may split the work into, or null for no limit.
+  maxTasks(): Promise<number | null>;
   // Why clarifying questions are not allowed now, or null when they are.
   clarificationBlocked(): Promise<string | null>;
+  plan(): Promise<PlanState | null>;
+  savePlan(plan: PlanState): Promise<void>;
   answer(answer: Answer): Promise<void>;
   progress(step: string): void;
 }
@@ -76,7 +84,7 @@ export function scoutTools(host: ToolHost): ToolRegistration[] {
     async execute({ benchmark, filters, limit }) {
       const catalogue = await host.catalogue();
       host.progress(`Reading the ${catalogue.benchmarks.find(b => b.id === benchmark)?.name ?? benchmark} leaderboard`);
-      try { return text(benchmarkLeaderboard(catalogue, benchmark, filters, limit)); } catch (error) { return failure((error as Error).message); }
+      try { return text(benchmarkLeaderboard(catalogue, benchmark, { ...filters, ...await host.scope() }, limit)); } catch (error) { return failure((error as Error).message); }
     },
   };
   const searchModelsTool: ToolRegistration<typeof SearchModels> = {
@@ -85,7 +93,7 @@ export function scoutTools(host: ToolHost): ToolRegistration[] {
     parameters: SearchModels,
     async execute(args) {
       host.progress(args.query ? `Searching models for ${quote(args.query)}` : `Searching models by ${args.sortBy ?? (args.benchmark ? 'benchmark' : 'constraints')}`);
-      try { return text(searchModels(await host.catalogue(), args)); } catch (error) { return failure((error as Error).message); }
+      try { return text(searchModels(await host.catalogue(), { ...args, filters: { ...args.filters, ...await host.scope() } })); } catch (error) { return failure((error as Error).message); }
     },
   };
   const detailsTool: ToolRegistration<typeof Details> = {
@@ -94,7 +102,7 @@ export function scoutTools(host: ToolHost): ToolRegistration[] {
     parameters: Details,
     async execute({ modelIds, filters }) {
       host.progress(`Comparing ${modelIds.length} ${modelIds.length === 1 ? 'model' : 'models'}`);
-      return text(modelDetails(await host.catalogue(), modelIds, filters));
+      return text(modelDetails(await host.catalogue(), modelIds, { ...filters, ...await host.scope() }));
     },
   };
   const askTool: ToolRegistration<typeof ClarificationSchema> = {
@@ -108,19 +116,43 @@ export function scoutTools(host: ToolHost): ToolRegistration[] {
       return { ...text('Questions shown to the user. Stop here.'), control: { terminate: true } };
     },
   };
+  const planTool: ToolRegistration<typeof PlanSchema> = {
+    name: 'plan_tasks', replay: 'safe',
+    description: 'Record how the work splits into tasks, one per model it needs, with the settled brief and your assumptions. Call it before researching; call it again to change the split, which discards the shortlists accepted so far.',
+    parameters: PlanSchema,
+    async execute(args) {
+      const limit = await host.maxTasks();
+      if (limit !== null && args.tasks.length > limit) return failure(`This conversation allows at most ${limit} tasks. Group steps that one model can perform together until the plan has at most ${limit}, and mention the grouping in your assumptions.`);
+      const titles = args.tasks.map(t => t.title.trim().toLowerCase());
+      if (new Set(titles).size !== titles.length) return failure('Give every task a different title.');
+      await host.savePlan({ ...args, results: args.tasks.map(() => null) });
+      host.progress(args.tasks.length === 1 ? 'Planning one task' : `Splitting the work into ${args.tasks.length} tasks`);
+      return text(`Plan recorded. Research each task, then call submit_recommendation once per task:\n${args.tasks.map((t, i) => `${i + 1}. ${t.title}`).join('\n')}`);
+    },
+  };
   const submitTool: ToolRegistration<typeof SubmissionSchema> = {
     name: 'submit_recommendation', replay: 'safe',
-    description: 'End this turn with your shortlist of five models of any kind, best overall first (fewer only when fewer meet the hard constraints). The shortlist is checked against the catalogue and the hard constraints; cost, latency and recency are computed from catalogue prices for the per-task workload you estimate in billing units (tokens, images, seconds of audio or video, characters, pages, requests). If it is rejected, fix the listed problems and submit again.',
+    description: 'Submit the shortlist for one planned task: five models of any kind, best overall first (fewer only when fewer meet the hard constraints). It is checked against the catalogue and the hard constraints; cost, latency and recency are computed from catalogue prices for the per-task workload you estimate in billing units (tokens, images, seconds of audio or video, characters, pages, requests). If it is rejected, fix the listed problems and submit again. The turn ends once every task has an accepted shortlist.',
     parameters: SubmissionSchema,
     async execute(args) {
-      host.progress('Checking the shortlist');
-      let result: Recommendation;
-      try { result = finalize(await host.catalogue(), args, host.now()); } catch (error) { return failure((error as Error).message); }
-      await host.answer(result);
+      const plan = await host.plan();
+      if (!plan) return failure('Call plan_tasks first to split the work into tasks.');
+      const task = plan.tasks[args.task - 1];
+      if (!task) return failure(`The plan has ${plan.tasks.length} ${plan.tasks.length === 1 ? 'task' : 'tasks'}; use a task number from 1 to ${plan.tasks.length}.`);
+      host.progress(plan.tasks.length === 1 ? 'Checking the shortlist' : `Checking the shortlist for ${quote(task.title)}`);
+      let result: TaskShortlist;
+      try { result = finalize(await host.catalogue(), args, host.now(), await host.scope()); } catch (error) { return failure((error as Error).message); }
+      plan.results[args.task - 1] = result;
+      await host.savePlan(plan);
+      const remaining = plan.tasks.flatMap((t, i) => plan.results[i] ? [] : [`${i + 1}. ${t.title}`]);
+      if (remaining.length) return text(`Task ${args.task} accepted. Still to submit:\n${remaining.join('\n')}`);
+      const catalogue = await host.catalogue();
+      await host.answer({ kind: 'recommendation', brief: plan.brief, assumptions: plan.assumptions, catalogueVersion: catalogue.version,
+        tasks: plan.tasks.map((t, i) => ({ ...t, ...(plan.results[i] as TaskShortlist) })) });
       return { ...text('Recommendation shown to the user. Stop here.'), control: { terminate: true } };
     },
   };
-  return [searchCatalogueTool, searchBenchmarksTool, leaderboardTool, searchModelsTool, detailsTool, askTool, submitTool] as ToolRegistration[];
+  return [searchCatalogueTool, searchBenchmarksTool, leaderboardTool, searchModelsTool, detailsTool, askTool, planTool, submitTool] as ToolRegistration[];
 }
 
 // Reports progress for a tool provided by another package, such as web search.

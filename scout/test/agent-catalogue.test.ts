@@ -34,10 +34,9 @@ const boards = [
 const stubSearch = (bm25: SearchHit[], embedding: SearchHit[] | Error): Catalogue['search'] => ({
   bm25: async () => bm25, embedding: async () => { if (embedding instanceof Error) throw embedding; return embedding; } });
 const catalogue: Catalogue = { version: 'v-test', models, benchmarks: [], boards, semanticBenchmarks: async () => [], search: stubSearch([], []) };
-const brief = { input: { text: 'Calls', source: 'stated' as const }, work: { text: 'Transcribe', source: 'stated' as const }, output: { text: 'Text', source: 'stated' as const }, criteria: { text: '', source: 'missing' as const }, constraints: { text: '', source: 'missing' as const } };
 const pick = (modelId: string, evidence: string[] = []) => ({ modelId, role: 'r', quality: 70, evidence, rationale: 'why' });
 const submit = (recommendations: Submission['recommendations'], workload: Submission['workload'], filters?: Submission['filters']): Submission =>
-  ({ brief, workload, summary: 's', assumptions: [], recommendations, ...(filters ? { filters } : {}) });
+  ({ task: 1, workload, summary: 's', recommendations, ...(filters ? { filters } : {}) });
 
 test('price sorting compares one unit at a time, so a per-image price never outranks a per-token price', () => {
   // Default unit is tokens: the image models are not billed per token (painter) or sort by their token route (painter-pro, blended 7.725).
@@ -73,7 +72,7 @@ test('a citation must be the model\'s own benchmark or leaderboard result', () =
 test('cost is computed from catalogue rates in the workload\'s units on the route that prices most of it', () => {
   const result = finalize(catalogue, submit([pick('lab/ears'), pick('lab/ears-hd')], { audioSeconds: 600, outputTokens: 2000 }, { kind: 'transcription' }), 0);
   // 600 s × $0.0001 = $0.06 per task, $60 per 1,000; output tokens are not billed on this route and are reported.
-  assert.deepEqual(result.models[0]?.cost, { usdPer1kTasks: 60, route: 'Speechy', inputPerMillion: null, outputPerMillion: null, rates: [{ unit: 'USD per second', kind: 'input', amount: 0.0001 }], unpriced: ['outputTokens'] });
+  assert.deepEqual(result.models[0]?.cost, { usdPer1kTasks: 60, route: 'Speechy', endpointId: 'Speechy:r', providerModelId: 'r', inputPerMillion: null, outputPerMillion: null, rates: [{ unit: 'USD per second', kind: 'input', amount: 0.0001 }], unpriced: ['outputTokens'] });
   // Only fully priced costs can lead on cost.
   assert.deepEqual(result.models.map(m => m.best.includes('cost')), [false, false]);
   // Painter-pro: the per-image route prices the whole workload ($0.32 per task); its token route prices none of it.

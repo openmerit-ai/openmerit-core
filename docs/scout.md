@@ -34,6 +34,20 @@ Pointer navigation uses a short, non-looping opacity/position transition. Keyboa
 
 Design references: [Linear's welcome screen](https://mobbin.com/screens/62773d0f-3574-4191-ac91-eb8a51697a95), [Linear's onboarding flow](https://mobbin.com/flows/cbaf58a9-fd84-4afe-b214-e65b24484013), [Notion's focused setup screen](https://mobbin.com/screens/99396b7b-c21d-4cea-8956-4942c2b9aae6), [Neon's integration walkthrough](https://mobbin.com/screens/8b8b58fe-86fd-4a2a-a5ad-51b84614d7b2), and [Torph's text-continuity examples](https://torph.lochie.me/). The implementation keeps Scout's own graphite palette and system typography; it does not embed Mobbin or generated mockup assets or add an animation dependency. The Claude Code image comes from the owner's 24 October recorded session: two unaltered content crops of `claude-automatic-expanded-full.png`, `(1330, 1029)–(2810, 1103)` and `(1330, 1552)–(2810, 1770)`, stacked with a 42-pixel neutral gap and encoded as WebP. OS chrome, account information and unrelated session content are excluded.
 
+## Tasks per model, and one agent for every client — unreleased
+
+Once the brief is settled, Scout splits the work into tasks, one per model it needs (for example transcribing calls, then tagging the transcripts), and recommends up to five models for each task with its own summary. Steps one model call performs well stay one task. The page allows at most three tasks, so its answer stays readable; Scout groups steps to fit. A single-task answer shows one table without a task heading; several tasks show one numbered table each.
+
+Coding agents now use the same Scout agent as the page, instead of the older single-call search. Claude Code and Pi reach it through the `scout_models` MCP tool, which runs one conversation turn per call and returns `status`:
+
+- `needs_answers`: Scout's `brief` and `questions`. The agent shows them to the user, then calls again with the `conversationId` and `brief` set to the rewritten components, or `skip: true`.
+- `recommended`: `tasks[]`, each with `title`, `work`, `input`, `output`, `summary`, `workload` and up to five ranked `models`. Coding-agent conversations have no task limit. Each model's `cost` names the cheapest eligible route's `endpointId` and `providerModelId`.
+- `working`: the call ended before the turn did. Calling again with only the `conversationId` reads the outcome.
+
+The tool takes `prompt`, `conversationId`, `brief`, `skip` and, on the first call, `endpointIds`. The inventory limits every search and shortlist in that conversation, whatever filters the agent's model chooses; an empty list allows none, and later turns cannot change it. `POST /scout/api/agent` accepts the same `endpointIds`. `modelIds` is no longer accepted, and the response no longer has `tasks[].slots`. A turn usually takes one to three minutes, much longer than a search. Conversations are keyed by the device key's account. The local `npm run scout` preview has no agent and reports MCP calls as unavailable.
+
+npm adds `openmerit scout` for agents without MCP and for people at a terminal. It calls the same tool with this device's key and applies the project's saved endpoint inventory. The installed instructions tell the agent to relay Scout's questions rather than answer them itself.
+
 ## Every model kind in the agent — source only, not deployed
 
 This describes source changes that are not yet published or deployed. Until both the publisher and the serving Worker are deployed and a refresh has published a new catalogue version, the agent behaves as described in the next section.
@@ -575,7 +589,11 @@ openmerit login   # replace an expired or revoked key, then rerun install
 openmerit logout  # revoke and delete this device's key
 openmerit project --policy existing-only|existing-first [--endpoint-id <id> ...] [--plan]
 openmerit doctor  # Node.js, claude, reachability, key, MCP check and install state
+openmerit scout "<task>" [--all-endpoints] [--json]   # ask Scout from the terminal
+openmerit scout --conversation <id> [--brief <component>=<text> ...] [--skip] ["<follow-up>"]
 ```
+
+`openmerit scout` limits a new conversation to the endpoint IDs in `.openmerit/scout.json`. `--all-endpoints` searches the whole catalogue; it is refused under existing-only and needed when no policy is saved.
 
 Removal deletes the MCP server, the unchanged skill and startup rule, and the install record, and revokes the key. It keeps edited files and `.openmerit/scout.json`.
 

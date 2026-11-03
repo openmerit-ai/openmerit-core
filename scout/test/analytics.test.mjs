@@ -487,12 +487,9 @@ test('MCP invocations preserve installation correlation and classify logical fai
     sent.length = 0;
     const request = new Request('https://example.test/scout/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Scout-Client': 'agent', 'X-Scout-Agent': 'claude-code', 'X-Scout-Client-Version': '0.1.8', 'X-Scout-Setup-Id': setup_id, 'X-Scout-Installation-Id': installation_id }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
     const analytics = createProductAnalytics(request, env, { waitUntil: p => pending.push(p) });
-    const response = await handleMCP(request, index, {}, async (_, prompt) => {
-      if (prompt === secret) throw new Error(secret);
-      const result = recommend(index, prompt, Date.parse(snapshot.checkedAt), { kind: 'classify', weights: { reasoning: 3 }, workload: { input: 'short', output: 'short' } });
-      analytics.observeSearch({ prompt, result, outcome: 'ok', durationMs: 20 });
-      return result;
-    }, analytics.observeMCP);
+    // A Scout agent conversation that fails on the secret prompt and otherwise answers.
+    const conversation = { state: async () => ({ busy: false, turns: 1, skipped: false, progress: [], answer: null }), turn: async ({ message }) => message === secret ? { busy: false, turns: 1, skipped: false, progress: [], answer: { kind: 'error', message: 'Scout could not finish this turn.' } } : { busy: false, turns: 1, skipped: false, progress: [], answer: { kind: 'message', text: 'ok' } } };
+    const response = await handleMCP(request, { getByName: () => conversation }, 'user_1', analytics.observeMCP);
     assert.equal(response.status, 200);
     await analytics.complete(response);
     while (pending.length) await Promise.all(pending.splice(0));
@@ -507,11 +504,7 @@ test('MCP invocations preserve installation correlation and classify logical fai
       assert.equal(sent.filter(e => e.event === 'scout_tool_invocation_started').length, 1);
       const invocation = sent.find(e => e.event === 'scout_tool_invocation_completed').properties;
       assert.equal(invocation.outcome, failed ? 'error' : 'ok');
-      if (!failed) {
-        assert.equal(invocation.task_count, 1); assert.equal(invocation.candidate_count, 5);
-        assert.equal(sent.filter(e => e.event === 'scout_search_details').length, 1);
-        assert.equal(new Set(sent.map(e => e.properties.trace_id)).size, 1);
-      }
+      if (!failed) assert.equal(new Set(sent.map(e => e.properties.trace_id)).size, 1);
     }
     assert.doesNotMatch(JSON.stringify(sent), /PRIVATE_CANARY|example.invalid|unknown_private_method/);
   }

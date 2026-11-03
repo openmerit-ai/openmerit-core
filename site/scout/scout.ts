@@ -5,7 +5,7 @@
 import { initAuth } from './auth.js';
 import { initOnboarding } from './onboarding.js';
 import { providerIdentity } from './providers.js';
-import type { Brief, Component, RecommendedModel, Recommendation } from '../../scout/agent/recommendation.ts';
+import type { Brief, Component, RecommendedModel, Recommendation, TaskRecommendation } from '../../scout/agent/recommendation.ts';
 import type { Answer } from '../../scout/agent/tools.ts';
 import type { AgentState, BriefEdits, TurnAnswer, TurnRequest } from '../../scout/agent/turn.ts';
 
@@ -157,22 +157,33 @@ function modelRows(model: RecommendedModel, prefix: string): HTMLTableRowElement
   row.addEventListener('click', event => { if (!(event.target as Element).closest('button, a')) toggle.click(); });
   return [row, detail];
 }
+// One comparison table per task; a single-task answer has no task heading.
 function recommendationView(answer: Recommendation, item: HTMLLIElement) {
+  const several = answer.tasks.length > 1;
+  if (several) item.append(element('p', 'turn-text', `I split this into ${answer.tasks.length} tasks, one model each.`));
+  answer.tasks.forEach((task, i) => {
+    if (several) item.append(element('h3', 'task-title', `${i + 1}. ${task.title}`), element('p', 'task-work', task.work));
+    taskView(task, item, `${i}`);
+  });
+  item.append(element('p', 'results-warning', 'Results could be wrong. Please verify before choosing a model.'));
+}
+function taskView(task: TaskRecommendation, item: HTMLLIElement, key: string) {
+  if (!task.models.length) { item.append(element('p', 'turn-text', task.summary)); return; }
   const table = element('table', 'data-table model-table agent-table'), head = element('thead'), header = element('tr');
   for (const [label, unit] of [['Model', ''], ['Quality', 'estimate / 100'], ['Input', '$ / 1M tokens unless marked'], ['Output', '$ / 1M tokens unless marked'], ['Released', 'recency']] as const) {
     const th = element('th', label === 'Model' ? 'model-column' : 'numeric-column', label); th.scope = 'col';
     if (unit) th.append(element('span', 'column-unit', unit));
     header.append(th);
   }
-  head.append(header); table.append(element('caption', 'sr-only', 'Recommended models, best overall first. Expand a model for its rationale and evidence.'), head);
-  const body = element('tbody'), prefix = `m-${epoch}-${conversationList.children.length}`;
-  for (const model of answer.models) body.append(...modelRows(model, prefix));
+  head.append(header); table.append(element('caption', 'sr-only', `Recommended models for ${task.title}, best overall first. Expand a model for its rationale and evidence.`), head);
+  const body = element('tbody'), prefix = `m-${epoch}-${conversationList.children.length}-${key}`;
+  for (const model of task.models) body.append(...modelRows(model, prefix));
   table.append(body);
   const scroll = element('div', 'table-scroll'); scroll.tabIndex = 0; scroll.setAttribute('role', 'region'); scroll.setAttribute('aria-label', 'Model comparison');
   scroll.append(table);
   const frame = element('div', 'table-frame'); frame.append(scroll);
   const hint = element('p', 'table-scroll-hint agent-scroll-hint'); hint.append('Scroll to compare ', element('span', '', '↔'));
-  item.append(frame, hint, element('p', 'turn-text', answer.summary), element('p', 'results-warning', 'Results could be wrong. Please verify before choosing a model.'));
+  item.append(frame, hint, element('p', 'turn-text', task.summary));
 }
 function answerView(answer: TurnAnswer | null, item: HTMLLIElement) {
   item.classList.remove('turn-working'); item.removeAttribute('aria-busy');
@@ -290,7 +301,7 @@ async function runTurn(turn: TurnRequest, said: string, onStart?: () => void) {
     // A first turn that never started leaves nothing to continue.
     if (first && !sawTurn) conversationId = null;
   }
-  announcement.textContent = reply?.answer?.kind === 'clarification' ? 'Scout has questions about your task.' : reply?.answer?.kind === 'recommendation' ? 'Scout recommended five models.' : 'Scout replied.';
+  announcement.textContent = reply?.answer?.kind === 'clarification' ? 'Scout has questions about your task.' : reply?.answer?.kind === 'recommendation' ? (reply.answer.tasks.length > 1 ? `Scout recommended models for ${reply.answer.tasks.length} tasks.` : 'Scout recommended models.') : 'Scout replied.';
   setComposer();
   scrollIntoView(scout.querySelector('.turn-text') ?? scout);
 }

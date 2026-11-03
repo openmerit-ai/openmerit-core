@@ -1,6 +1,8 @@
 // One Scout conversation per Durable Object. Pi Durable runs the agent loop and
 // keeps its transcript in this object's SQLite; PiHarness wakes the object to
-// finish interrupted work. Each turn ends with clarifying questions or a shortlist.
+// finish interrupted work. Each turn ends with clarifying questions or a shortlist
+// for every task the work splits into. The web page and coding agents (MCP and
+// the openmerit CLI) all hold their conversations here.
 import { DurableObject } from 'cloudflare:workers';
 import { createRegistry, Harness } from '@earendil-works/pi-durable';
 import { PiHarness } from 'agents/harness/pi';
@@ -11,8 +13,8 @@ import { embed } from '../evidence-search.mjs';
 import { loadCatalogue, type Catalogue, type CatalogueBindings } from './catalogue.ts';
 import { agentModels, defaultAgentModel, openAIModelId } from './model.ts';
 import { preamble, sessionSection } from './prompt.ts';
-import { scoutTools, withProgress, type ToolHost } from './tools.ts';
-import { turnText, type AgentState, type TurnAnswer, type TurnRequest } from './turn.ts';
+import { scoutTools, withProgress, type PlanState, type ToolHost } from './tools.ts';
+import { taskLimits, turnText, type AgentState, type Channel, type TurnAnswer, type TurnRequest } from './turn.ts';
 
 export interface AgentEnv extends CatalogueBindings {
   AI: Ai;
@@ -44,6 +46,10 @@ export class ScoutAgent extends DurableObject<AgentEnv> {
   readonly host: ToolHost = {
     catalogue: () => catalogueFor(this.env),
     now: () => Date.now(),
+    scope: async () => { const endpointIds = await this.ctx.storage.get<string[] | null>('endpointIds'); return endpointIds ? { endpointIds } : {}; },
+    maxTasks: async () => taskLimits[(await this.ctx.storage.get<Channel>('channel')) ?? 'web'],
+    plan: async () => (await this.ctx.storage.get<PlanState>('plan')) ?? null,
+    savePlan: async plan => { await this.ctx.storage.put('plan', plan); },
     clarificationBlocked: async () => {
       if (await this.ctx.storage.get<boolean>('skipped')) return 'The user skipped clarifying questions.';
       return ((await this.ctx.storage.get<number>('rounds')) ?? 0) >= maxClarificationRounds ? 'The clarifying questions for this conversation have been used.' : null;
@@ -69,7 +75,10 @@ export class ScoutAgent extends DurableObject<AgentEnv> {
             for (const m of c.models) kinds.set(m.kind ?? 'unknown', (kinds.get(m.kind ?? 'unknown') ?? 0) + 1);
             return `${c.models.length} models (${[...kinds].map(([k, n]) => `${n} ${k}`).join(', ')}), ${c.benchmarks.length} chat benchmarks and ${c.boards.length} leaderboards with results (catalogue ${c.version}).`;
           } },
-          { key: 'session', render: async () => sessionSection({ skipped: !!(await this.ctx.storage.get<boolean>('skipped')), rounds: (await this.ctx.storage.get<number>('rounds')) ?? 0, maxRounds: maxClarificationRounds }) },
+          { key: 'session', render: async () => sessionSection({
+            skipped: !!(await this.ctx.storage.get<boolean>('skipped')), rounds: (await this.ctx.storage.get<number>('rounds')) ?? 0, maxRounds: maxClarificationRounds,
+            maxTasks: await this.host.maxTasks(), endpointIds: (await this.ctx.storage.get<string[] | null>('endpointIds')) ?? null, plan: await this.host.plan(),
+          }) },
         ],
         tools,
       });
@@ -99,13 +108,23 @@ export class ScoutAgent extends DurableObject<AgentEnv> {
   }
 
   // Runs one user turn to its end. A client that disconnects can read the outcome from state().
-  async turn(request: TurnRequest): Promise<AgentState> {
+  // The first turn fixes the conversation's channel (and so its task limit) and endpoint inventory.
+  async turn(request: TurnRequest, channel: Channel = 'web'): Promise<AgentState> {
     const input = turnText(request);
     if (!input) throw new Error('Describe the work you want a model to do.');
     if (await this.harness.session().busy()) throw new Error('busy');
+    const turns = (await this.ctx.storage.get<number>('turns')) ?? 0;
+    if (!turns) await this.ctx.storage.put({ channel, endpointIds: request.endpointIds ?? null });
+    else if (request.endpointIds !== undefined) {
+      const fixed = (await this.ctx.storage.get<string[] | null>('endpointIds')) ?? null;
+      if (!fixed || fixed.length !== request.endpointIds.length || request.endpointIds.some(id => !fixed.includes(id))) throw new Error('endpoints');
+    }
     if (request.skip) await this.ctx.storage.put('skipped', true);
     this.progressLog = [];
-    await this.ctx.storage.put({ answer: null, progress: [], turns: ((await this.ctx.storage.get<number>('turns')) ?? 0) + 1 });
+    // A turn ends once every task has a shortlist accepted in this turn; the split itself carries over.
+    const plan = await this.host.plan();
+    if (plan) await this.host.savePlan({ ...plan, results: plan.tasks.map(() => null) });
+    await this.ctx.storage.put({ answer: null, progress: [], turns: turns + 1 });
     const result = await this.harness.prompt(input, { operationId: crypto.randomUUID() });
     if (!(await this.ctx.storage.get<TurnAnswer>('answer'))) {
       // The model ended the run without an answer tool: keep what it said rather than nothing.

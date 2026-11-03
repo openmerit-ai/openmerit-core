@@ -31,6 +31,7 @@ export const help = `OpenMerit · coding-agent setup
   openmerit project --policy existing-only|existing-first [--endpoint-id <id> ...] [--plan]
   openmerit doctor  [--client claude-code|pi] [--scope user|project] [--json]
   openmerit update  [--client claude-code|pi] [--scope user|project] [--auto on|off] [--json]
+  openmerit scout   --help                   Ask Scout from the terminal
 
 install signs this device in through the browser (one Approve click), adds the
 OpenMerit MCP server, startup rule and Scout skill, then verifies the connection.

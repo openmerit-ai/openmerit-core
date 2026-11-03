@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { benchmarkLeaderboard, modelRecord, searchModels, type Catalogue, type ModelRecord } from '../agent/catalogue.ts';
 import { finalize, type Submission } from '../agent/recommendation.ts';
 import { handleAgent, parseTurn, type AgentNamespace } from '../agent/routes.ts';
-import { scoutTools, type Answer } from '../agent/tools.ts';
-import { turnText, type AgentState } from '../agent/turn.ts';
+import { scoutTools, type Answer, type PlanState, type ToolHost } from '../agent/tools.ts';
+import { turnText, type AgentState, type Channel, type TurnRequest } from '../agent/turn.ts';
+import { handleMCP } from '../mcp.mjs';
 
 const route = (provider: string, inputPrice: number, outputPrice: number, extra: Record<string, unknown> = {}) =>
   ({ id: `${provider}:m`, provider, modelId: 'm', inputPrice, outputPrice, modalities: ['text'], outputModalities: ['text'], parameters: ['tools'], ...extra });
@@ -30,7 +31,7 @@ const catalogue: Catalogue = {
 const brief = { input: { text: 'Invoices', source: 'stated' as const }, work: { text: 'Extract', source: 'stated' as const }, output: { text: 'JSON', source: 'stated' as const }, criteria: { text: '', source: 'missing' as const }, constraints: { text: '', source: 'missing' as const } };
 const pick = (modelId: string, quality: number, evidence: string[] = []) => ({ modelId, role: 'r', quality, evidence, rationale: 'why' });
 const submission = (recommendations: Submission['recommendations'], filters?: Submission['filters']): Submission =>
-  ({ brief, workload: { inputTokens: 2000, outputTokens: 500 }, summary: 's', assumptions: [], recommendations, ...(filters ? { filters } : {}) });
+  ({ task: 1, workload: { inputTokens: 2000, outputTokens: 500 }, summary: 's', recommendations, ...(filters ? { filters } : {}) });
 const now = Date.parse('2026-10-27T00:00:00Z');
 
 test('a shortlist is priced on the cheapest route that meets the constraints, with timing and age from catalogue data', () => {
@@ -39,7 +40,7 @@ test('a shortlist is priced on the cheapest route that meets the constraints, wi
   const [alpha] = result.models;
   assert.ok(alpha);
   // Vision route: (2000 × $3 + 500 × $10) / 1M tokens × 1,000 tasks = $11.
-  assert.deepEqual(alpha.cost, { usdPer1kTasks: 11, route: 'Vision', inputPerMillion: 3, outputPerMillion: 10, unpriced: [],
+  assert.deepEqual(alpha.cost, { usdPer1kTasks: 11, route: 'Vision', endpointId: 'Vision:m', providerModelId: 'm', inputPerMillion: 3, outputPerMillion: 10, unpriced: [],
     rates: [{ unit: 'USD per 1M tokens', kind: 'input', amount: 3 }, { unit: 'USD per 1M tokens', kind: 'output', amount: 10 }] });
   // First answer token after 2 s, then 500 tokens at 100 tokens per second.
   assert.deepEqual(alpha.latency, { seconds: 7, firstTokenSeconds: 2, tokensPerSecond: 100, source: null });
@@ -76,26 +77,94 @@ test('model search applies constraints, treats PDF as a document input and ranks
   assert.deepEqual(benchmarkLeaderboard(catalogue, 'b1').results.map(r => r.model), ['lab/delta', 'lab/alpha', 'lab/beta']);
 });
 
-test('clarifying questions are refused once the user skips them', async () => {
+// An in-memory conversation for the tools: what the Durable Object stores.
+function toolHost(options: { maxTasks?: number | null; endpointIds?: string[]; blocked?: () => string | null } = {}) {
   const answers: Answer[] = [];
+  let plan: PlanState | null = null;
+  const host: ToolHost = {
+    catalogue: async () => catalogue, now: () => now,
+    scope: async () => options.endpointIds ? { endpointIds: options.endpointIds } : {},
+    maxTasks: async () => options.maxTasks === undefined ? 3 : options.maxTasks,
+    clarificationBlocked: async () => options.blocked?.() ?? null,
+    plan: async () => plan && structuredClone(plan), savePlan: async p => { plan = structuredClone(p); },
+    answer: async a => { answers.push(a); }, progress: () => {},
+  };
+  const tools = scoutTools(host);
+  const call = async (name: string, args: unknown) => {
+    const tool = tools.find(t => t.name === name);
+    assert.ok(tool);
+    return tool.execute(args as never, {} as never, {} as never);
+  };
+  return { answers, call };
+}
+const task = (title: string) => ({ title, work: `${title} work`, input: 'text', output: 'text' });
+const five = ['lab/alpha', 'lab/beta', 'lab/gamma', 'lab/delta', 'lab/epsilon'].map(id => pick(id, 70));
+
+test('the web page splits work into at most three tasks; coding agents have no limit', async () => {
+  const tasks = ['Transcribe', 'Extract', 'Classify', 'Draft'].map(task);
+  const web = toolHost({ maxTasks: 3 });
+  const refused = await web.call('plan_tasks', { brief, assumptions: [], tasks });
+  assert.equal(refused.isError, true);
+  assert.match(JSON.stringify(refused.output), /at most 3 tasks/);
+  assert.equal((await web.call('submit_recommendation', submission(five))).isError, true, 'a refused plan records nothing to submit against');
+  const agent = toolHost({ maxTasks: null });
+  assert.equal((await agent.call('plan_tasks', { brief, assumptions: [], tasks })).isError, undefined);
+  assert.equal((await agent.call('plan_tasks', { brief, assumptions: [], tasks: [task('Extract'), task('extract')] })).isError, true, 'task titles must differ');
+});
+
+test('a turn ends only once every planned task has an accepted shortlist, answered in plan order', async () => {
+  const { answers, call } = toolHost();
+  await call('plan_tasks', { brief, assumptions: ['English only'], tasks: [task('Extract'), task('Summarize')] });
+  // Task 2 first: accepted, but the turn continues and nothing reaches the user.
+  const second = await call('submit_recommendation', { ...submission(five), task: 2, summary: 'second' });
+  assert.equal(second.control, undefined);
+  assert.match(JSON.stringify(second.output), /Still to submit:\\n1. Extract/);
+  assert.equal((await call('submit_recommendation', { ...submission(five), task: 3 })).isError, true);
+  // A rejected shortlist for task 1 leaves the turn open too.
+  assert.equal((await call('submit_recommendation', submission([pick('lab/missing', 50)]))).isError, true);
+  assert.equal(answers.length, 0);
+  const first = await call('submit_recommendation', { ...submission(five), summary: 'first' });
+  assert.deepEqual(first.control, { terminate: true });
+  const [answer] = answers;
+  assert.ok(answer?.kind === 'recommendation');
+  assert.deepEqual(answer.tasks.map(t => [t.title, t.summary, t.models.length]), [['Extract', 'first', 5], ['Summarize', 'second', 5]]);
+  assert.deepEqual(answer.assumptions, ['English only']);
+});
+
+test('the endpoint inventory limits every search and shortlist, whatever filters the model sends', async () => {
+  // Only beta's route is in the inventory.
+  const { answers, call } = toolHost({ endpointIds: ['Gateway:m'] });
+  const found = await call('search_models', { filters: { providers: ['lab'] } });
+  assert.deepEqual(JSON.parse((found.output?.[0] as { text: string }).text).models.map((m: { id: string }) => m.id), ['lab/beta', 'lab/gamma', 'lab/delta', 'lab/epsilon', 'lab/zeta']);
+  await call('plan_tasks', { brief, assumptions: [], tasks: [task('Extract')] });
+  const rejected = await call('submit_recommendation', submission([pick('lab/alpha', 90)]));
+  assert.match(JSON.stringify(rejected.output), /lab\/alpha breaks the hard constraints: none of its routes is in the project's endpoint inventory/);
+  // An empty inventory allows nothing, so an empty shortlist is the valid answer.
+  const empty = toolHost({ endpointIds: [] });
+  await empty.call('plan_tasks', { brief, assumptions: [], tasks: [task('Extract')] });
+  assert.match(JSON.stringify((await empty.call('submit_recommendation', submission([pick('lab/beta', 80)]))).output), /not accepted/);
+  assert.deepEqual((await empty.call('submit_recommendation', submission([]))).control, { terminate: true });
+  assert.equal(answers.length, 0);
+});
+
+test('clarifying questions are refused once the user skips them', async () => {
   let blocked: string | null = 'The user skipped clarifying questions.';
-  const tools = scoutTools({ catalogue: async () => catalogue, now: () => now, clarificationBlocked: async () => blocked, answer: async a => { answers.push(a); }, progress: () => {} });
-  const ask = tools.find(t => t.name === 'ask_clarifying_questions');
-  assert.ok(ask);
+  const { answers, call } = toolHost({ blocked: () => blocked });
   const args = { brief, questions: [{ component: 'criteria', question: 'What matters most?' }] };
-  const refused = await ask.execute(args, {} as never, {} as never);
+  const refused = await call('ask_clarifying_questions', args);
   assert.equal(refused.isError, true);
   assert.equal(refused.control, undefined);
   assert.equal(answers.length, 0);
   blocked = null;
-  const asked = await ask.execute(args, {} as never, {} as never);
+  const asked = await call('ask_clarifying_questions', args);
   assert.deepEqual(asked.control, { terminate: true });
   assert.equal(answers[0]?.kind, 'clarification');
 });
 
 test('turns are validated before reaching a conversation', () => {
   assert.equal(parseTurn({ skip: true }), 'Describe the work you want a model to do.');
-  assert.equal(parseTurn({ message: 'x', extra: 1 }), 'Send conversationId, message, brief or skip.');
+  assert.equal(parseTurn({ message: 'x', extra: 1 }), 'Send conversationId, message, brief, skip or endpointIds.');
+  assert.match(String(parseTurn({ message: 'x', endpointIds: ['a', 'a'] })), /unique list/);
   assert.equal(parseTurn({ conversationId: 'not-a-uuid', skip: true }), 'Invalid conversationId.');
   assert.match(String(parseTurn({ message: 'x', brief: { budget: '$5' } })), /brief maps/);
   assert.match(String(parseTurn({ message: 'x', brief: { input: 7 } })), /brief maps/);
@@ -119,4 +188,25 @@ test('a client can name a new conversation, but continue only one that exists an
   assert.equal((await post('alice', { conversationId: id, skip: true })).status, 200);
   assert.equal((await post('bob', { conversationId: id, skip: true })).status, 404);
   assert.equal((await handleAgent(new Request(`https://openmerit.ai/scout/api/agent/${id}`), namespace, 'bob')).status, 404);
+});
+
+test('coding agents reach the same conversations through MCP, relaying questions and continuing them', async () => {
+  const turns: Array<{ name: string; request: TurnRequest; channel: Channel | undefined }> = [];
+  const clarification: AgentState = { busy: false, turns: 1, skipped: false, progress: ['Reading'], answer: { kind: 'clarification', brief, questions: [{ component: 'criteria', question: 'What matters most?' }] } };
+  const namespace: AgentNamespace = { getByName: name => ({ state: async () => clarification, turn: async (request, channel) => { turns.push({ name, request, channel }); return clarification; } }) };
+  const call = async (args: unknown) => {
+    const response = await handleMCP(new Request('https://openmerit.ai/scout/mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scout_models', arguments: args } }) }), namespace, 'alice');
+    return (await response.json() as { result: { isError: boolean; structuredContent?: Record<string, unknown>; content: Array<{ text: string }> } }).result;
+  };
+  const first = await call({ prompt: 'Summarize tickets', endpointIds: ['Gateway:m'] });
+  assert.equal(first.structuredContent?.status, 'needs_answers');
+  assert.deepEqual(first.structuredContent?.questions, [{ component: 'criteria', question: 'What matters most?' }]);
+  const id = first.structuredContent?.conversationId as string;
+  assert.deepEqual(turns[0], { name: `alice:${id}`, request: { skip: false, message: 'Summarize tickets', endpointIds: ['Gateway:m'] }, channel: 'agent' });
+  await call({ conversationId: id, brief: { criteria: 'Accuracy first' } });
+  assert.deepEqual(turns[1], { name: `alice:${id}`, request: { skip: false, brief: { criteria: 'Accuracy first' } }, channel: 'agent' });
+  // The conversation ID alone reads the outcome without starting a turn.
+  assert.equal((await call({ conversationId: id })).structuredContent?.status, 'needs_answers');
+  assert.equal(turns.length, 2);
+  assert.match((await call({ prompt: 'x'.repeat(4001) })).content[0]?.text ?? '', /^prompt must be text/);
 });

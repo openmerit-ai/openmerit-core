@@ -86,6 +86,8 @@ export default {
     if(access){await analytics.complete(access);return analytics.response(access);}
     if(path==='/scout/api/analytics')return analytics.handleEvent();
     if(agentPath.test(path)){const response=await handleAgent(request,env.SCOUT_AGENT,userId);await analytics.complete(response);return analytics.response(response);}
+    // Coding agents talk to the same Scout agent as the page, through MCP.
+    if(path==='/scout/mcp'){const response=await handleMCP(request,env.SCOUT_AGENT,userId,analytics.observeMCP);await analytics.complete(response);return analytics.response(response);}
     if(path==='/scout/api/analytics/preference')return analytics.handlePreference();
     let response;
     try {
@@ -96,8 +98,7 @@ export default {
         const health=await getJSON(env.SCOUT_CATALOGUE,'health.json').catch(()=>null);
         return json({...status,scheduler:'cloudflare-twice-daily',refreshStatus:status.degraded?'degraded':'idle',...health,snapshotVersion:index.snapshot.publication.id,refreshSummary:index.snapshot.refreshSummary});
       }
-      const mcp=path==='/scout/mcp';
-      response=await (mcp?handleMCP:handleAPI)(request,index,{},(...args)=>recommend(...args,mcp?'mcp':'api',analytics.observeSearch),analytics.observeMCP);
+      response=await handleAPI(request,index,{},(...args)=>recommend(...args,'api',analytics.observeSearch),analytics.observeMCP);
     } catch (error) {analytics.exception(error);response=json({error:'Scout could not load its prepared catalogue. Please try again shortly.'},503);}
     await analytics.complete(response);return analytics.response(response);
   },

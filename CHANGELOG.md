@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add `openmerit scout`, a conversation with Scout from the terminal: clarifying questions answered with `--brief` or `--skip`, then up to five models per task. It uses this device's Claude Code or Pi key and limits new conversations to the endpoint IDs in `.openmerit/scout.json`.
+- The installed Scout instructions for Claude Code and Pi tell the agent to relay Scout's questions to the user and to read `tasks[].models`. This needs the matching hosted Scout release, whose `scout_models` MCP tool now runs the Scout agent.
+
 ## 0.1.12 — 2026-11-03
 
 - Replace the obsolete Pi 0.87 evaluation adapter with native Scout support for Pi 1.5.0. Share browser device approval, private client/scope/project credentials, installer lifecycle and Scout instructions with Claude Code; keep Pi's native MCP, tools, model, permissions and session ownership intact.
