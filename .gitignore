@@ -11,6 +11,7 @@ site/memo-access.js
 demo/memo/generated/
 site/assets/video-player.js
 site/assets/thread-rule.js
+site/assets/speed-egg.js
 coverage/
 *.tsbuildinfo
 
