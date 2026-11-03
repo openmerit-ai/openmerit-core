@@ -14,6 +14,8 @@ count as model choices, not implementation details. Identify this decision befor
 writing model-specific code, installing a model package or downloading weights.
 
 Follow the skill's project access policy. If it is missing, ask and save it first.
+Scout may answer with clarifying questions: relay them to the user and continue
+the same Scout conversation with their answers before choosing.
 If Scout is unavailable, fails or has no suitable evidence/candidate, disclose the
 gap and pause the model decision; do not fall back to a remembered or SDK-default
 model. You may continue work that does not commit to a model.
@@ -61,17 +63,28 @@ is not permission to search all models.
 
 ## Searching
 
-Call \`scout_models\` with a non-confidential task description and
-\`endpointIds\` set to the saved inventory, including \`[]\` when empty.
-Existing-only never broadens. For existing-first, if no existing candidate fits,
-explain the gap and ask before a separate search without \`endpointIds\`. Send
+Call \`scout_models\` with a non-confidential task description as \`prompt\` and
+\`endpointIds\` set to the saved inventory, including \`[]\` when empty. Send
 only task requirements, never source files, secrets or real customer records.
+If the MCP tool is unavailable, run
+\`npx -y openmerit@latest scout "<task>" --json\`; it applies the saved inventory.
 
-Compare model AND endpoint, evidence, reference cost/time, unknowns and
-warnings. For multiple tasks read \`tasks[].slots[0].recommendations\`; the
-top-level list is empty. Prefer the cheapest usable option the quality evidence
-supports, without claiming benchmarks prove application accuracy. Use the
-returned provider model ID and the project's actual SDK and protocol.
+Scout is a conversation with the agent behind openmerit.ai/scout. When
+\`status\` is \`needs_answers\`, fill in what the user or project already states,
+show the user Scout's brief and remaining questions, and wait for their answers.
+Then call again with the returned \`conversationId\` and \`brief\` set to the
+rewritten components, or \`skip: true\` if the user wants Scout to assume. Never
+answer Scout's questions with guesses. Send later refinements to the same
+\`conversationId\`. A call with only a \`conversationId\` reads an interrupted turn.
+
+When \`status\` is \`recommended\`, Scout has split the work into \`tasks\`, one
+per model, each with up to five ranked \`models\`; cover every task. Each
+model's \`cost\` names the \`endpointId\` and \`providerModelId\` to call.
+Existing-only never broadens. For existing-first, if no existing candidate fits a
+task, explain the gap and ask before a new conversation without \`endpointIds\`.
+Compare quality evidence, reference cost/time and watch-outs. Prefer the cheapest
+usable option the evidence supports, without claiming benchmarks prove
+application accuracy. Use the project's actual SDK and protocol.
 
 ## Boundaries
 

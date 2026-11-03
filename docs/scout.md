@@ -589,7 +589,11 @@ openmerit login   # replace an expired or revoked key, then rerun install
 openmerit logout  # revoke and delete this device's key
 openmerit project --policy existing-only|existing-first [--endpoint-id <id> ...] [--plan]
 openmerit doctor  # Node.js, claude, reachability, key, MCP check and install state
+openmerit scout "<task>" [--all-endpoints] [--json]   # ask Scout from the terminal
+openmerit scout --conversation <id> [--brief <component>=<text> ...] [--skip] ["<follow-up>"]
 ```
+
+`openmerit scout` limits a new conversation to the endpoint IDs in `.openmerit/scout.json`. `--all-endpoints` searches the whole catalogue; it is refused under existing-only and needed when no policy is saved.
 
 Removal deletes the MCP server, the unchanged skill and startup rule, and the install record, and revokes the key. It keeps edited files and `.openmerit/scout.json`.
 

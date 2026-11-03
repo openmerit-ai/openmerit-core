@@ -21,10 +21,12 @@ if (result.status === 0) {
   cpSync(join(root, "packages/eval/src"), join(root, "dist/eval/src"), { recursive: true });
   cpSync(join(root, "packages/terminal/src"), join(root, "dist/terminal/src"), { recursive: true });
   cpSync(join(root, "packages/terminal/public"), join(root, "dist/terminal/public"), { recursive: true });
-  // The legacy installer is copied, not compiled. Node cannot strip types in
-  // node_modules, so its new TypeScript boundary must use the emitted module.
-  const installer = join(root, "dist/terminal/src/install.mjs");
-  writeFileSync(installer, readFileSync(installer, "utf8").replace(/from '(\.\/[^']+)\.ts'/g, "from '$1.js'"));
+  // The legacy CLI and installer are copied, not compiled. Node cannot strip types
+  // in node_modules, so their TypeScript imports must use the emitted modules.
+  for (const file of ["cli.mjs", "install.mjs"]) {
+    const path = join(root, "dist/terminal/src", file);
+    writeFileSync(path, readFileSync(path, "utf8").replace(/(from |import\()'(\.\/[^']+)\.ts'/g, "$1'$2.js'"));
+  }
   await build({ entryPoints: [join(root, 'packages/pi/src/index.ts')], outfile: join(root, 'dist/pi/scout-extension.mjs'), bundle: true, platform: 'node', format: 'esm', target: 'node22' });
   const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   writeFileSync(join(root, "dist/terminal/scout-update.json"), `${JSON.stringify({ format: 1, contract: updateContract, version, skill, rule })}\n`);

@@ -10,6 +10,7 @@ import { commandTelemetry } from './telemetry.mjs';
 const help = `OpenMerit · Inference Terminal
 
   openmerit dash [path] [options]
+  openmerit scout --help             Ask Scout which models fit your tasks
   openmerit install --help           Connect OpenMerit to your coding agent
   openmerit update --help            Update installed Scout instructions
   openmerit eval --help              Evaluate CLI changes across coding agents
@@ -31,6 +32,7 @@ Coding-harness usage is outside this terminal's scope.
 async function main() {
   const args = process.argv.slice(2);
   if (['install', 'status', 'remove', 'login', 'logout', 'project', 'doctor', 'update'].includes(args[0])) { const { main } = await import('./install.mjs'); process.exitCode = await main(args); return; }
+  if (args[0] === 'scout') { const { main } = await import('./scout.ts'); process.exitCode = await main(args.slice(1)); return; }
   if (args[0] === 'eval') { const { main } = await import('../../eval/src/cli.mjs'); await main(args.slice(1)); return; }
   if (!args.length || args.includes('--help') || args.includes('-h')) { console.log(help); return; }
   if (args.shift() !== 'dash') throw new Error('Unknown command. Run openmerit --help.');
