@@ -46,7 +46,7 @@ Coding agents now use the same Scout agent as the page, instead of the older sin
 
 The tool takes `prompt`, `conversationId`, `brief`, `skip` and, on the first call, `endpointIds`. The inventory limits every search and shortlist in that conversation, whatever filters the agent's model chooses; an empty list allows none, and later turns cannot change it. `POST /scout/api/agent` accepts the same `endpointIds`. `modelIds` is no longer accepted, and the response no longer has `tasks[].slots`. A turn usually takes one to three minutes, much longer than a search. Conversations are keyed by the device key's account. The local `npm run scout` preview has no agent and reports MCP calls as unavailable.
 
-npm adds `openmerit scout` for agents without MCP and for people at a terminal. It calls the same tool with this device's key and applies the project's saved endpoint inventory. The installed instructions tell the agent to relay Scout's questions rather than answer them itself.
+npm adds `openmerit scout` for agents without MCP and for people at a terminal. It calls the same tool with this device's key and applies the project's saved endpoint inventory. Without `--json` it prints each task's models in ranked order with their quality estimate and list prices. As on the page, the default cheapest-first order is unlabelled; when the user asks for the best quality, the fastest or the newest model, a line names that order, and fastest and newest lists also show each model's time per task or release date (unknown when missing). The installed instructions tell the agent to relay Scout's questions rather than answer them itself.
 
 ## Every model kind in the agent — source only, not deployed
 
