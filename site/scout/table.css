@@ -21,6 +21,7 @@
 .model-identity { display: flex; align-items: center; gap: 15px; min-width: 0; }
 .model-title { display: block; font-size: 13px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
 .model-provider { display: flex; align-items: center; gap: 5px; margin-top: 4px; color: var(--muted); font-size: 11px; font-weight: 400; }
+.ranking-basis { margin: 0 0 6px; color: var(--muted); font-size: 12px; }
 .provider-icon { display: block; flex: none; width: 13px; height: 13px; object-fit: contain; }
 .metric-cell { font: 12px var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .metric-unavailable { color: var(--quiet); }

@@ -5,7 +5,7 @@
 import { initAuth } from './auth.js';
 import { initOnboarding } from './onboarding.js';
 import { providerIdentity } from './providers.js';
-import type { Brief, Component, RecommendedModel, Recommendation, TaskRecommendation } from '../../scout/agent/recommendation.ts';
+import type { Axis, Brief, Component, RecommendedModel, Recommendation, TaskRecommendation } from '../../scout/agent/recommendation.ts';
 import type { Answer } from '../../scout/agent/tools.ts';
 import type { AgentState, BriefEdits, TurnAnswer, TurnRequest } from '../../scout/agent/turn.ts';
 
@@ -114,7 +114,19 @@ function priceCell(model: RecommendedModel, side: 'input' | 'output'): HTMLTable
   const rate = cost.rates.find(r => r.unit in shortUnits && r.kind.startsWith('output') === (side === 'output'));
   return metricCell(rate ? `${money(rate.amount)}${shortUnits[rate.unit] ?? ''}` : null, rate ? `${rate.unit} (${rate.kind}) via ${cost.route}.` : `No ${side} price on ${cost.route}.`);
 }
-function modelRows(model: RecommendedModel, prefix: string): HTMLTableRowElement[] {
+// Cheapest first is the default and goes unstated on screen; a priority the user asked for is named above the table.
+const rankings: Record<Axis, string> = {
+  cost: 'Cheapest first.',
+  quality: 'Highest quality estimate first.',
+  latency: 'Fastest first.',
+  recency: 'Newest first.',
+};
+// A latency ranking adds the time per task it sorts by; cost, quality and recency already have columns.
+type RankColumn = { label: string; unit: string; cell: (model: RecommendedModel) => HTMLTableCellElement };
+const rankColumns: Partial<Record<Axis, RankColumn>> = {
+  latency: { label: 'Time', unit: 'seconds / task', cell: m => metricCell(m.latency ? `${m.latency.seconds.toFixed(1)}s` : null, m.latency ? 'Reference first-token delay plus generation time for the estimated output.' : 'No speed measurement.') },
+};
+function modelRows(model: RecommendedModel, prefix: string, rankColumn?: RankColumn): HTMLTableRowElement[] {
   const row = element('tr', 'model-row'), name = element('th', 'model-cell'); name.scope = 'row';
   const provider = providerIdentity(model), toggle = element('button', 'model-toggle'); toggle.type = 'button';
   toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', `${prefix}-${model.rank}`);
@@ -126,12 +138,14 @@ function modelRows(model: RecommendedModel, prefix: string): HTMLTableRowElement
   }
   text.append(element('span', 'model-title', model.name), byline);
   identity.append(text); toggle.append(identity); name.append(toggle);
-  row.append(name,
+  row.append(name);
+  if (rankColumn) row.append(rankColumn.cell(model));
+  row.append(
     metricCell(String(model.quality.score), 'Scout’s estimate for this task from the cited benchmark standings, out of 100. Not measured accuracy.'),
     // List prices on the route used for the cost estimate.
     priceCell(model, 'input'), priceCell(model, 'output'),
     metricCell(model.recency ? releaseDate(model.recency.released) : null, model.recency ? `Released ${age(model.recency.ageDays)}.` : 'Release date not recorded.'));
-  const detail = element('tr', 'model-detail'), cell = element('td', 'model-detail-cell'); cell.colSpan = 5; detail.id = `${prefix}-${model.rank}`; detail.hidden = true;
+  const detail = element('tr', 'model-detail'), cell = element('td', 'model-detail-cell'); cell.colSpan = row.cells.length; detail.id = `${prefix}-${model.rank}`; detail.hidden = true;
   const body = element('div', 'model-evidence');
   body.append(element('p', 'model-rationale', model.rationale));
   if (model.watchOut) body.append(element('p', 'model-watch', `Watch out: ${model.watchOut}`));
@@ -165,24 +179,26 @@ function recommendationView(answer: Recommendation, item: HTMLLIElement) {
     if (several) item.append(element('h3', 'task-title', `${i + 1}. ${task.title}`), element('p', 'task-work', task.work));
     taskView(task, item, `${i}`);
   });
-  item.append(element('p', 'results-warning', 'Results could be wrong. Please verify before choosing a model.'));
 }
 function taskView(task: TaskRecommendation, item: HTMLLIElement, key: string) {
   if (!task.models.length) { item.append(element('p', 'turn-text', task.summary)); return; }
+  const rankColumn = rankColumns[task.priority];
   const table = element('table', 'data-table model-table agent-table'), head = element('thead'), header = element('tr');
-  for (const [label, unit] of [['Model', ''], ['Quality', 'estimate / 100'], ['Input', '$ / 1M tokens unless marked'], ['Output', '$ / 1M tokens unless marked'], ['Released', 'recency']] as const) {
+  const columns: Array<readonly [string, string]> = [['Model', ''], ...(rankColumn ? [[rankColumn.label, rankColumn.unit] as const] : []), ['Quality', 'estimate / 100'], ['Input', '$ / 1M tokens unless marked'], ['Output', '$ / 1M tokens unless marked'], ['Released', 'recency']];
+  for (const [label, unit] of columns) {
     const th = element('th', label === 'Model' ? 'model-column' : 'numeric-column', label); th.scope = 'col';
     if (unit) th.append(element('span', 'column-unit', unit));
     header.append(th);
   }
-  head.append(header); table.append(element('caption', 'sr-only', `Recommended models for ${task.title}, best overall first. Expand a model for its rationale and evidence.`), head);
+  head.append(header); table.append(element('caption', 'sr-only', `Recommended models for ${task.title}. ${rankings[task.priority]} Expand a model for its rationale and evidence.`), head);
   const body = element('tbody'), prefix = `m-${epoch}-${conversationList.children.length}-${key}`;
-  for (const model of task.models) body.append(...modelRows(model, prefix));
+  for (const model of task.models) body.append(...modelRows(model, prefix, rankColumn));
   table.append(body);
   const scroll = element('div', 'table-scroll'); scroll.tabIndex = 0; scroll.setAttribute('role', 'region'); scroll.setAttribute('aria-label', 'Model comparison');
   scroll.append(table);
   const frame = element('div', 'table-frame'); frame.append(scroll);
   const hint = element('p', 'table-scroll-hint agent-scroll-hint'); hint.append('Scroll to compare ', element('span', '', '↔'));
+  if (task.priority !== 'cost') item.append(element('p', 'ranking-basis', rankings[task.priority]));
   item.append(frame, hint, element('p', 'turn-text', task.summary));
 }
 function answerView(answer: TurnAnswer | null, item: HTMLLIElement) {

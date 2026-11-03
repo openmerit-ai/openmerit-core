@@ -77,25 +77,30 @@ export const PlanSchema = Type.Object({
 export type Plan = Static<typeof PlanSchema>;
 export type TaskPlan = Plan['tasks'][number];
 
+// The axes a shortlist is compared and ranked on. Cost is the default priority:
+// models that hold the task's quality bar, cheapest first.
+export const axes = ['cost', 'quality', 'latency', 'recency'] as const;
+export type Axis = typeof axes[number];
+
 export const SubmissionSchema = Type.Object({
   task: Type.Integer({ minimum: 1, description: 'Task number from plan_tasks, starting at 1.' }),
+  priority: Type.Optional(StringEnum(axes, { description: 'How to rank the shortlist. cost (the default): models that hold the task\'s quality bar, cheapest first. Use quality only when the user explicitly asks for the best quality, latency only when they ask for the fastest, recency only when they ask for the newest.' })),
   filters: Type.Optional(FiltersSchema),
   workload: WorkloadSchema,
-  summary: Type.String({ description: 'Two or three sentences: the recommendation for this task and the main trade-off.' }),
-  recommendations: Type.Array(Type.Object({
+  summary: Type.String({ description: 'One short sentence on what to choose for this task, such as the cheapest model and what it gives up. Do not describe how candidates were assessed, filtered or ranked; the page states that. When there are no candidates, say why.' }),
+  qualityBar: Type.Integer({ minimum: 0, maximum: 100, description: 'The lowest quality estimate at which a model still does THIS task to the brief\'s standard. Candidates below it are never shown.' }),
+  candidates: Type.Array(Type.Object({
     modelId: Type.String({ description: 'Model ID from the catalogue tools.' }),
-    role: Type.String({ description: 'Short label, such as "Best quality", "Best value", "Fastest", "Newest" or "Balanced".' }),
     quality: Type.Integer({ minimum: 0, maximum: 100, description: 'Your quality estimate for THIS task, from the cited benchmark standings.' }),
     evidence: Type.Array(Type.String(), { description: 'Benchmark or leaderboard IDs from this model\'s get_model_details results that support the quality estimate.' }),
     rationale: Type.String({ description: 'One or two sentences on why this model fits the task.' }),
     watchOut: Type.Optional(Type.String({ description: 'The main risk or limitation.' })),
-  }), { maxItems: 5, description: 'Five models, best overall first; fewer only when fewer meet the hard constraints, and empty when none do.' }),
+  }), { maxItems: 10, description: 'Up to ten models you assessed for this task, in any order. Scout keeps those at or above the quality bar, ranks them by the priority and shows the top five, so include every model that could lead on it. Fewer only when fewer meet the hard constraints, and empty when none do.' }),
 });
 export type Submission = Static<typeof SubmissionSchema>;
 
-export type Axis = 'quality' | 'cost' | 'latency' | 'recency';
 export interface RecommendedModel {
-  rank: number; id: string; name: string; provider: string; role: string; rationale: string; watchOut: string | null;
+  rank: number; id: string; name: string; provider: string; rationale: string; watchOut: string | null;
   quality: { score: number; evidence: Array<{ benchmark: string; name: string; score: number | null; rank: number; of: number }> };
   // Cost of 1,000 tasks on the eligible route that prices the most workload quantities, then the cheapest.
   // endpointId and providerModelId identify that route and the model ID its API expects.
@@ -105,7 +110,7 @@ export interface RecommendedModel {
   recency: { released: string; ageDays: number } | null;
   best: Axis[];
 }
-export interface TaskShortlist { summary: string; workload: Workload; models: RecommendedModel[] }
+export interface TaskShortlist { summary: string; workload: Workload; priority: Axis; qualityBar: number; models: RecommendedModel[] }
 export type TaskRecommendation = TaskPlan & TaskShortlist;
 export interface Recommendation {
   kind: 'recommendation'; brief: Brief; assumptions: string[]; catalogueVersion: string; tasks: TaskRecommendation[];
@@ -170,7 +175,7 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
   const filters: Filters = { ...s.filters, ...scope }, byId = new Map(catalogue.models.map(m => [m.id, m]));
   const problems: string[] = [], seen = new Set<string>();
   if (!quantities.some(q => (s.workload[q] ?? 0) > 0)) problems.push('The workload is empty: estimate at least one per-task quantity, such as inputTokens and outputTokens, images or audioSeconds.');
-  for (const r of s.recommendations) {
+  for (const r of s.candidates) {
     const m = byId.get(r.modelId);
     if (!m) { problems.push(`${r.modelId} is not in the catalogue; use an exact ID from search_models or search_catalogue.`); continue; }
     if (seen.has(m.id)) problems.push(`${m.id} is listed twice.`);
@@ -183,7 +188,8 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
     if (missing.length) problems.push(`${m.id} has no results on ${missing.join(', ')}; cite only benchmark or leaderboard IDs from its get_model_details results.`);
   }
   const eligible = catalogue.models.filter(m => violation(m, filters) === null).length;
-  if (!problems.length && s.recommendations.length < Math.min(5, eligible)) problems.push(`Recommend five models: ${eligible} models meet the constraints${filters.kind ? '' : ' (set filters.kind when the task needs one kind of model)'}. Cover the quality, cost, latency and recency trade-offs.`);
+  const qualifying = s.candidates.filter(r => r.quality >= s.qualityBar);
+  if (!problems.length && qualifying.length < Math.min(5, eligible)) problems.push(`Five candidates must reach the quality bar of ${s.qualityBar}; ${qualifying.length} do, and ${eligible} models meet the constraints${filters.kind ? '' : ' (set filters.kind when the task needs one kind of model)'}. Assess more models that can do this task.`);
   if (problems.length) throw new Error(`Shortlist not accepted:\n- ${problems.join('\n- ')}`);
 
   const names = new Map([...catalogue.benchmarks.map(b => [b.id, b.name] as const), ...catalogue.boards.map(b => [b.id, b.title] as const)]);
@@ -192,7 +198,7 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
     return { score: row?.score ?? null, rank: row?.rank ?? 0, of: row?.of ?? 0 };
   };
   const { outputTokens } = s.workload;
-  const models = s.recommendations.map((r, i): RecommendedModel => {
+  const assessed = qualifying.map((r, i): RecommendedModel => {
     const m = byId.get(r.modelId);
     if (!m) throw new Error('Unreachable: validated above.');
     // The route pricing the most of the kind's own quantities (images for an image model), then the most of the
@@ -207,7 +213,7 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
     const tps = m.speed?.tokensPerSecond, ttft = m.speed?.timeToFirstToken;
     const released = m.releaseDate;
     return {
-      rank: i + 1, id: m.id, name: m.name, provider: m.provider, role: r.role, rationale: r.rationale, watchOut: r.watchOut ?? null,
+      rank: i + 1, id: m.id, name: m.name, provider: m.provider, rationale: r.rationale, watchOut: r.watchOut ?? null,
       quality: { score: r.quality, evidence: r.evidence.map(id => ({ benchmark: id, name: names.get(id) ?? id, ...standing(id, m.id) })) },
       cost: best ? { usdPer1kTasks: round(best.usd * 1000, 4), route: best.route.provider, endpointId: best.route.id, providerModelId: best.route.modelId, inputPerMillion: best.route.inputPrice, outputPerMillion: best.route.outputPrice,
         rates: best.used.map(x => ({ unit: unitLabels[x.unit], kind: x.kind, amount: x.amount })), unpriced: best.unpriced } : null,
@@ -216,6 +222,16 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
       best: [],
     };
   });
+  // Rank by the priority, lower first; unknown values go last, and ties keep the agent's order.
+  // Only the top five are shown, so a costlier model cannot displace a cheaper one that reaches the bar.
+  // A cost that leaves part of the workload unpriced understates the bill, so it ranks as unknown.
+  const priority = s.priority ?? 'cost';
+  const keys: Record<Axis, (m: RecommendedModel) => number | null> = {
+    quality: m => -m.quality.score, cost: m => m.cost && !m.cost.unpriced.length ? m.cost.usdPer1kTasks : null, latency: m => m.latency?.seconds ?? null, recency: m => m.recency?.ageDays ?? null,
+  };
+  const key = (m: RecommendedModel) => keys[priority](m) ?? Infinity;
+  const models = assessed.sort((a, b) => key(a) === key(b) ? 0 : key(a) - key(b)).slice(0, 5);
+  models.forEach((m, i) => { m.rank = i + 1; });
   leaders(models);
-  return { summary: s.summary, workload: s.workload, models };
+  return { summary: s.summary, workload: s.workload, priority, qualityBar: s.qualityBar, models };
 }
