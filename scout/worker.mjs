@@ -77,6 +77,8 @@ export default {
     }
     // This endpoint authenticates Clerk's signature, never a browser session.
     if(path==='/scout/api/webhooks/clerk')return handleClerkWebhook(request,env);
+    // Open pages compare this with the version they loaded under, so a deploy can ask them to refresh.
+    if(path==='/scout/api/version')return request.method==='GET'?json({version:env.CF_VERSION_METADATA?.id??null}):json({error:'Use GET.'},405);
     if(!path.startsWith('/scout/api/')&&path!=='/scout/mcp') {
       return ['GET','HEAD'].includes(request.method)?env.ASSETS.fetch(request):json({error:'Not found.'},404);
     }
