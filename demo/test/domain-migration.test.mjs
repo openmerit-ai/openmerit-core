@@ -12,7 +12,7 @@ test('upgraded connections retain the original Cloudflare WebSocket response', a
 test('the landing page, Scout, sign-in and their assets use the current serving Worker',async()=>{
   const {default:router}=await import('../domain-router.mjs');
   const env={...enabled,SCOUT:{fetch:request=>new Response(new URL(request.url).pathname)}};
-  for(const path of ['/','/styles.css','/script.js','/illustrations.js','/assets/motion/hero-frame-0-transparent-v3.webp','/scout','/scout/','/scout/api/status','/scout/api/recommend','/scout/mcp','/scout/providers/openai.svg','/scout/data-policy/','/connect','/connect/','/connect/api/device','/favicon.svg','/assets/inter-latin.woff2','/assets/openmerit-og-v1.png'])assert.equal(await(await router.fetch(new Request('https://openmerit.ai'+path),env)).text(),path);
+  for(const path of ['/','/styles.css','/scout','/scout/','/scout/api/status','/scout/api/recommend','/scout/mcp','/scout/providers/openai.svg','/scout/data-policy/','/connect','/connect/','/connect/api/device','/favicon.svg','/assets/inter-latin.woff2','/assets/openmerit-og-v1.png'])assert.equal(await(await router.fetch(new Request('https://openmerit.ai'+path),env)).text(),path);
 });
 test('legacy pages preserve path and query while redirecting to the matching primary host', async () => {
   for (const [kind, from, to] of [

@@ -1,4 +1,4 @@
-// TypeScript migration ratchet. See docs/typescript-migration.md.
+// TypeScript migration ratchet. See docs/site-typescript-migration.md.
 //
 // - No new first-party JavaScript: every .js/.mjs/.cjs/.jsx file must already
 //   be listed in typescript-ratchet.json, and converted files must leave it.

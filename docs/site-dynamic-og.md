@@ -8,7 +8,7 @@ The shared-image configuration is live as Cloudflare version `90bd0c29-5d32-4386
 
 ## Optional template and build
 
-`scripts/social-image.mjs` renders a reusable SVG template to PNG with the pinned `@resvg/resvg-js` development dependency. It combines the text-free workshop asset at `site/assets/openmerit-og-workshop-v1.png` with a heading in the existing `site/assets/inter-latin.woff2` font. The font's SIL Open Font License is retained. There are no network requests, system-font dependencies, or image-generation API calls during builds. The source artwork and exact edit prompt are recorded in [the workshop background notes](site-og-workshop.md).
+`scripts/social-image.mjs` renders a reusable SVG template to PNG with the pinned `@resvg/resvg-js` development dependency. It combines the text-free workshop asset at `site/assets/openmerit-og-workshop-v1.png` with a heading in the existing `site/assets/inter-latin.woff2` font. The font's SIL Open Font License is retained. There are no network requests, system-font dependencies, or image-generation API calls during builds.
 
 For an entry with `socialImage: true`, `scripts/build-docs.mjs` passes the maintained page metadata into the renderer, which draws the page title over the workshop. The page description remains in the Open Graph and Twitter description tags. `npm run build:docs` and `npm run check:docs` generate enabled cards, and the existing Cloudflare deployment runs the latter before publishing.
 

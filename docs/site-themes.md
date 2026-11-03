@@ -1,12 +1,12 @@
 # Device-driven appearance
 
-Published to the website and hosted dashboard on 14 October 2026. The npm package is unchanged; npm 0.1.6 retains its previous appearance. See the [publication record](site-publication-2026-10-14.md).
+Published to the website and hosted dashboard on 14 October 2026. The npm package is unchanged; npm 0.1.6 retains its previous appearance.
 
 The website and Inference Terminal follow `prefers-color-scheme` automatically. There is no theme control, cookie, local-storage preference, or URL override. CSS resolves the initial appearance before application JavaScript runs and updates when the device preference changes. Light is the browser default when no dark preference is supplied. Theme-aware `color-scheme` and media-qualified `theme-color` metadata cover native controls and browser chrome.
 
 ## Presentation sources
 
-- `site/styles.css` owns the warm website palette shared by the homepage, generated docs, memo, and engineering article. Reading surfaces, code, search, tables, navigation, forms, and SVG diagram tokens use it. Print output remains light. The homepage illustrations use [transparent frames and posters](site-illustration-transparency.md), retaining their natural colors directly against either theme without paper panels or blend filters. Animation and reduced-motion behavior are preserved.
+- `site/styles.css` owns the warm website palette shared by the homepage, generated docs, memo, and engineering article. Reading surfaces, code, search, tables, navigation, forms, and SVG diagram tokens use it. Print output remains light.
 - `site/docs.css`, `site/memo.css`, and `site/memo-access.css` style their components using those tokens. The article's local stylesheet entry points import the shared foundations. Its article-specific code and table colors are also theme-aware.
 - `site/demo/demo.css` covers this checkout's recorded demo. `site/demo/interactive.css` covers the newer deployed interactive demo, including its subdued inspector, syntax colors, status states, and scenario switches.
 - `packages/terminal/public/styles.css` owns the dashboard palette. `client/routes.mjs` uses semantic route colors for both SVG diagrams and HTML legends. `client/theme.js` subscribes React canvas charts to device changes and reads resolved CSS colors; the optional React Flow view uses its system color mode. Inspectors, custom selects, comparison preferences, search, and loading/error states use the same palette.

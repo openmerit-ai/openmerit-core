@@ -1,6 +1,6 @@
 // Generates or checks the binding types for every Worker configuration.
 // Runtime types are not committed yet; they arrive with each Worker's
-// TypeScript project (see docs/typescript-migration.md).
+// TypeScript project (see docs/site-typescript-migration.md).
 import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";

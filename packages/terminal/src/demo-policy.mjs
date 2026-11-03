@@ -1,6 +1,5 @@
 // A reviewed model/service-offer catalog for the hosted fictional comparison only.
 // Scores are publisher-reported point estimates, not insurance-workload evaluations.
-export const EVIDENCE_DATE = '2026-10-10';
 export const PREFERENCES = [
   { value: 'default', label: 'Default · within your stack', note: 'Search all configured services; choose the lowest modeled cost among qualified replacements.' },
   { value: 'zdr', label: 'Bias ZDR models', note: 'Prefer confirmed ZDR endpoints. Eligibility alone does not establish account approval or enabled settings.' },
