@@ -32,11 +32,14 @@ export interface ScoutModel {
   rank: number; id: string; name: string; provider: string; rationale: string; watchOut: string | null;
   quality: { score: number; evidence: Array<{ name: string; rank: number; of: number }> };
   cost: { usdPer1kTasks: number; inputPerMillion: number; outputPerMillion: number; route: string; endpointId: string; providerModelId: string } | null;
+  latency?: { seconds: number } | null; recency?: { released: string } | null;
 }
+// How a task's models are ordered. Cost (cheapest first among models that reach the quality bar) is the default.
+type Priority = 'cost' | 'quality' | 'latency' | 'recency';
 export interface ScoutResult {
   conversationId: string; status: 'needs_answers' | 'recommended' | 'working' | 'message' | 'error'; next?: string;
   brief?: Record<string, { text: string; source: string }>; questions?: Array<{ component: string; question: string }>;
-  assumptions?: string[]; tasks?: Array<{ title: string; work: string; summary: string; models: ScoutModel[] }>;
+  assumptions?: string[]; tasks?: Array<{ title: string; work: string; summary: string; priority?: Priority; models: ScoutModel[] }>;
   text?: string; error?: string;
 }
 
@@ -102,6 +105,7 @@ export async function scoutTurn(root: string, request: Omit<ScoutRequest, 'endpo
 }
 
 const money = (usd: number) => `$${usd < 0.1 ? usd.toFixed(3) : usd.toFixed(2)}`;
+const rankings: Record<Exclude<Priority, 'cost'>, string> = { quality: 'Highest quality estimate first.', latency: 'Fastest first.', recency: 'Newest first.' };
 export function renderScout(result: ScoutResult): string {
   const lines: string[] = [];
   if (result.status === 'needs_answers') {
@@ -114,9 +118,14 @@ export function renderScout(result: ScoutResult): string {
     const tasks = result.tasks ?? [];
     tasks.forEach((task, i) => {
       if (tasks.length > 1) lines.push(`${i + 1}. ${task.title}`, `   ${task.work}`);
+      // As on the page, the default cheapest-first order is unlabelled; another priority is named with the value it sorts by.
+      const priority = task.priority ?? 'cost';
+      if (priority !== 'cost') lines.push(`   ${rankings[priority]}`);
       for (const m of task.models) {
         const price = m.cost ? `${money(m.cost.inputPerMillion)} in / ${money(m.cost.outputPerMillion)} out per 1M via ${m.cost.route} (${m.cost.endpointId})` : 'no priced route';
-        lines.push(`   ${m.rank}. ${m.name} · quality ${m.quality.score}/100 · ${price}`, `      ${m.rationale}`);
+        const metric = priority === 'latency' ? ` · ${m.latency ? `${m.latency.seconds.toFixed(1)}s per task` : 'time unknown'}`
+          : priority === 'recency' ? ` · ${m.recency ? `released ${m.recency.released}` : 'release date unknown'}` : '';
+        lines.push(`   ${m.rank}. ${m.name}${metric} · quality ${m.quality.score}/100 · ${price}`, `      ${m.rationale}`);
       }
       lines.push(`   ${task.summary}`, '');
     });
