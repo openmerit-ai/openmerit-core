@@ -2,6 +2,12 @@
 
 Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
 
+## Demo retirement — unreleased source, 3 November 2026
+
+The `openmerit-site` Worker now serves only the memo. `demo/site.ts` handles memo routes and falls back to the retained asset bundle for memo styles; the domain router already sent nothing else to this Worker. The recorded and interactive demos, their container, admission ledger and provider gateway are removed from the source, and `wrangler.jsonc` drops the container and both Durable Object bindings.
+
+The configuration adds the `remove-demo-v1` migration, which deletes the `DemoContainer` and `DemoGate` classes and their stored admission records on the next release. That release needs the owner's approval like any other deploy. Afterwards, check whether the `openmerit-site-democontainer` container application still exists in Cloudflare and delete it separately if so.
+
 ## Protected memo reconciliation — local only, 29 October 2026
 
 The protected article's maintained source is [the recovered published memo](memo-published.md), restored byte-for-byte from `codex/main-before-terminal-2026-10-12`. The earlier `docs/memo.md` draft is unchanged and is not built. This avoids replacing the running article with the older draft during a logo release. The historical static-page records below describe earlier releases, not the current access boundary.

@@ -10,15 +10,6 @@ export const groups = [
     { source: 'scout-data-policy.md', slug: 'scout-data-policy', documentationLabel: 'Beta', githubSource: false, title: 'Scout data policy', description: 'Data use, sharing choices and deletion.' },
     { source: 'first-trial.md', slug: 'first-trial', title: 'Your first trial', description: 'Collect evidence, compare candidates, and validate a supervised model change.' },
   ] },
-  { title: 'Demos & recorded examples', pages: [
-    { source: 'demo.md', slug: 'demo', title: 'Demos & samples', description: 'Explore fictional dashboards and distinguish them from recorded experiments.' },
-    { source: 'interactive-demo.md', slug: 'interactive-demo', title: 'Interactive experiment', description: 'Understand the separately deployed delivery-resolution experiment, its checks, approvals, and limits.' },
-    { source: 'demo-support.md', slug: 'demo-support', title: 'Support tickets', description: 'Compare three models on email-to-ticket extraction with exact-match grading.' },
-    { source: 'demo-spam.md', slug: 'demo-spam', title: 'Spam filter · Jev', description: 'Compare a chat model with a typed-decision specialist on promotional spam.' },
-    { source: 'demo-backfill.md', slug: 'demo-backfill', title: 'Backfill recovery', description: 'Follow a three-task agent through incident inspection, checkpoint lookup, and recovery planning.' },
-    { source: 'demo-placement.md', slug: 'demo-placement', title: 'GPU placement', description: 'See how a three-task model route chooses a GPU pool under six constraints.' },
-    { source: 'demo-fieldkit.md', slug: 'demo-fieldkit', title: 'Field kit · Six tasks', description: 'Explore a prepared six-model workflow spanning translation, vision, extraction, code, reasoning, and writing.' },
-  ] },
   { title: 'Using OpenMerit', pages: [
     { source: 'agent-evaluations.md', slug: 'agent-evaluations', title: 'Agent evaluations', documentationLabel: 'npm preview', description: 'Compare CLI revisions across Claude Code, Codex and OpenCode with Scout and repeated local checks.' },
     { source: 'metrics-and-evidence.md', slug: 'metrics-and-evidence', title: 'Metrics & evidence', description: 'Understand measurements, sample requirements, and evidence readiness.' },

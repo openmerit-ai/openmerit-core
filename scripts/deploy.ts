@@ -87,7 +87,6 @@ async function deploy(key: string, flags: readonly string[]): Promise<void> {
   }
 
   const args = ["deploy", "--config", worker.config, "--strict", "--tag", commit.slice(0, 12), "--message", `${commit.slice(0, 12)} ${subject}`.slice(0, 100)];
-  if (key === "site") args.push("--containers-rollout", "none");
   if (dryRun) args.push("--dry-run");
   const result = spawnSync("wrangler", args, { cwd: root, stdio: "inherit" });
   if (result.error) throw result.error;

@@ -9,8 +9,6 @@ services:
     portals:
       - url: /docs/
         title: Documentation
-      - url: /demo/
-        title: Demo player
   scout:
     # Scout dev server; recommendations that need OPENAI_API_KEY stay unavailable without it.
     command: SCOUT_PORT="$PORT" exec npm run scout

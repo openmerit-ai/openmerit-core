@@ -14,7 +14,7 @@ openmerit dash
 
 The terminal shows application services, model declarations, recorded requests, and linked compute. It reads supported local evidence, needs no Pi installation or provider API key, and makes no inference calls or model changes. Configuration can identify declared services; actual activity requires existing supported logs or exports.
 
-Start with [installation and setup](getting-started.md) or the [Inference Terminal guide](inference-terminal.md). Explore the [hosted sample](https://dash.openmerit.ai/) and [before/after dashboard demo](https://dash.openmerit.ai/demo) without connecting your machine. The [demo guide](demo.md) explains their fictional data and comparison limits.
+Start with [installation and setup](getting-started.md) or the [Inference Terminal guide](inference-terminal.md).
 
 ## Discover model candidates
 
