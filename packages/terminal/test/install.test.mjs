@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { createServer } from 'node:http';
 import { Readable } from 'node:stream';
 import { mkdtemp, mkdir, writeFile, readFile, chmod, rm, realpath } from 'node:fs/promises';
@@ -10,6 +11,7 @@ import { LocalD1 } from '../../../scout/test/helpers-projection.mjs';
 import { handleConnect, deviceKeyUser } from '../../../scout/connect.mjs';
 import { handleMCP } from '../../../scout/mcp.mjs';
 import { main, rule } from '../src/install.mjs';
+import { browserCommand, openBrowser } from '../src/browser.mjs';
 import { clientVersion, setupUUID } from '../src/telemetry.mjs';
 
 // A fake `claude` that stores MCP servers like Claude Code does (user or local
@@ -464,4 +466,31 @@ test('resumed approval rebuilds its URL and requests after a telemetry refusal',
   assert.equal(new URL(pending.url).searchParams.get('analytics'), 'off');
   assert.equal(h.requests.at(-1).headers['x-scout-setup-id'], undefined);
   assert.equal(h.requests.at(-1).headers['x-scout-analytics'], 'off');
+});
+
+test('browser launch uses platform defaults, opens only allowed URLs and never invokes a shell', async () => {
+  const url = 'https://openmerit.ai/connect?code=ABCD';
+  const allowed = value => value === url;
+  assert.deepEqual(browserCommand(url, 'darwin', {}, allowed), ['open', [url]]);
+  assert.deepEqual(browserCommand(url, 'win32', {}, allowed), ['rundll32.exe', ['url.dll,FileProtocolHandler', url]]);
+  assert.deepEqual(browserCommand(url, 'linux', { WAYLAND_DISPLAY: 'wayland-0' }, allowed), ['xdg-open', [url]]);
+  assert.throws(() => browserCommand('https://example.org', 'darwin', {}, allowed));
+  let launches = 0;
+  assert.equal(await openBrowser(url, { allowed, platform: 'darwin', env: {}, spawnProcess: (command, args, options) => {
+    launches++;
+    assert.equal(command, 'open'); assert.deepEqual(args, [url]); assert.equal(options.shell, false);
+    const child = new EventEmitter(); child.unref = () => {};
+    queueMicrotask(() => child.emit('exit', 0));
+    return child;
+  } }), true);
+  assert.equal(launches, 1);
+  const noSpawn = () => assert.fail('Headless sessions must not launch a browser');
+  for (const [platform, env] of [['linux', {}], ['darwin', { SSH_CONNECTION: 'test' }], ['linux', { DISPLAY: ':0', SSH_TTY: '/dev/pts/0' }]]) {
+    assert.equal(await openBrowser(url, { allowed, platform, env, spawnProcess: noSpawn }), false);
+  }
+  for (const failure of ['error', 'exit']) assert.equal(await openBrowser(url, { allowed, platform: 'darwin', env: {}, spawnProcess: () => {
+    const child = new EventEmitter(); child.unref = () => {};
+    queueMicrotask(() => child.emit(failure, failure === 'exit' ? 1 : new Error('opener missing')));
+    return child;
+  } }), false);
 });

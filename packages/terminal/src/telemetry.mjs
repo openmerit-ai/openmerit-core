@@ -5,7 +5,7 @@ export let clientVersion;
 for (const path of ['../../../package.json', '../../../../package.json']) {
   try { const pkg = JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')); if (pkg.name === 'openmerit') { clientVersion = pkg.version; break; } } catch {}
 }
-const frameFiles = Object.freeze(['cli.mjs', 'server.mjs', 'collect.mjs', 'repository-index.mjs', 'install.mjs', 'app.js']);
+const frameFiles = Object.freeze(['cli.mjs', 'install.mjs']);
 const applicationURLs = frameFiles.map(file => new URL(`../../terminal/src/${file}`, import.meta.url).href);
 export function safeFrames(error) {
   try {
@@ -95,56 +95,9 @@ export async function sendInstallationEvent(input) {
   } catch { /* Never affect setup, even if the transport ignores abort. */ }
   finally { clearTimeout(timer); }
 }
-export const errorType = error => ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'URIError', 'EvalError', 'AggregateError', 'AbortError'].includes(error?.name) ? error.name : 'Error';
-export function terminalProperties(event, input) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
-  const out = {};
-  const select = (key, values) => { if (!values.includes(input[key])) return false; out[key] = input[key]; return true; };
-  if (event === 'terminal_error') {
-    if (!select('code', ['collection_error', 'snapshot_error', 'render_error', 'uncaught_error']) || !select('error_type', ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'URIError', 'EvalError', 'AggregateError', 'AbortError'])) return null;
-    if (Array.isArray(input.frames)) out.frames = input.frames.slice(0, 8).filter(f => f && frameFiles.includes(f.filename) && Number.isInteger(f.lineno) && f.lineno > 0 && f.lineno <= 1000000 && Number.isInteger(f.colno) && f.colno > 0 && f.colno <= 1000000).map(f => ({ filename: f.filename, lineno: f.lineno, colno: f.colno }));
-    return out;
-  }
-  if (!select('mode', ['sample', 'live'])) return null;
-  if (event === 'terminal_visited') return out;
-  if (event === 'terminal_page_viewed') return select('page', ['overview', 'models', 'services', 'activity', 'compute', 'sources', 'connections']) ? out : null;
-  if (event === 'terminal_interaction') return select('action', ['inspect', 'filter', 'search', 'map_expand', 'mode', 'command']) && select('kind', ['model', 'agent', 'task', 'service', 'source', 'host', 'deployment', 'pool', 'record', 'path', 'other']) ? out : null;
-  if (event !== 'terminal_snapshot') return null;
-  for (const key of ['model_count', 'record_count', 'source_count', 'host_count', 'deployment_count', 'agent_count']) {
-    if (!Number.isInteger(input[key]) || input[key] < 0 || input[key] > 1000000000) return null;
-    out[key] = input[key];
-  }
-  return out;
-}
-// Shared, process-wide budget; no queue and at most four in-flight requests.
-let windowStart = 0, count = 0, active = 0;
-export function sendTerminalEvent(event, input) {
-  if (!telemetryEnabled()) return;
-  const properties = terminalProperties(event, input);
-  if (!properties) return;
-  if (Date.now() - windowStart >= 60000) { windowStart = Date.now(); count = 0; }
-  if (count >= 60 || active >= 4) return;
-  count++; active++;
-  void sendAnalytics(event, properties).finally(() => active--);
-}
-async function sendAnalytics(event, properties) {
-  const controller = new AbortController();
-  const body = JSON.stringify({ event, event_id: randomUUID(), anonymousId, properties: { ...properties, ...environment() } });
-  let timer;
-  try {
-    await Promise.race([
-      Promise.resolve().then(() => fetch('https://openmerit.ai/scout/api/analytics', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Scout-Client': 'cli', 'X-Scout-Analytics': 'on', ...(process.env.OPENMERIT_ANALYTICS_ACCOUNT === 'off' ? { 'X-Scout-Analytics-Account': 'off' } : {}) },
-        body, signal: controller.signal, redirect: 'error',
-      })).then(response => response.body?.cancel()),
-      new Promise(resolve => { timer = setTimeout(() => { controller.abort(); resolve(); }, 750); timer.unref(); }),
-    ]);
-  } catch { /* Never affect product behavior. */ }
-  finally { clearTimeout(timer); }
-}
-
-// Consent is independent of terminal discovery. Command identity is ephemeral;
-// the installer separately manages the owned installation's correlation IDs.
+const errorType = error => ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'URIError', 'EvalError', 'AggregateError', 'AbortError'].includes(error?.name) ? error.name : 'Error';
+// Command identity is ephemeral; the installer separately manages the owned
+// installation's correlation IDs.
 export function commandTelemetry(args) {
   const setup = ['install', 'status', 'remove', 'login', 'logout', 'project', 'doctor'];
   const enabled = () => telemetryEnabled(setup.includes(args[0]));
@@ -152,7 +105,7 @@ export function commandTelemetry(args) {
   const started = performance.now();
   const command_id = randomUUID();
   const command = !args.length || args.includes('--help') || args.includes('-h')
-    ? 'help' : args[0] === 'dash' ? 'dash' : setup.includes(args[0]) ? args[0] : 'unknown';
+    ? 'help' : setup.includes(args[0]) ? args[0] : 'unknown';
   async function send(event, properties) {
     if (!enabled()) return;
     const controller = new AbortController();

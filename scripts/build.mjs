@@ -2,7 +2,6 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildTerminal } from "./build-terminal.mjs";
 import { build } from "esbuild";
 import { rule, skill } from "../packages/terminal/src/install.mjs";
 import { updateContract } from "../packages/terminal/src/updates.ts";
@@ -17,9 +16,7 @@ const result = spawnSync(process.execPath, [compiler, "-p", join(root, "tsconfig
 });
 if (result.error) throw result.error;
 if (result.status === 0) {
-  await buildTerminal();
   cpSync(join(root, "packages/terminal/src"), join(root, "dist/terminal/src"), { recursive: true });
-  cpSync(join(root, "packages/terminal/public"), join(root, "dist/terminal/public"), { recursive: true });
   // The legacy CLI and installer are copied, not compiled. Node cannot strip types
   // in node_modules, so their TypeScript imports must use the emitted modules.
   for (const file of ["cli.mjs", "install.mjs"]) {

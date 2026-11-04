@@ -1,20 +1,6 @@
 # Getting started
 
-OpenMerit provides a passive Inference Terminal and Scout model-selection guidance. Pi Scout setup requires OpenMerit **0.1.12** or newer and Pi **1.5.0**. Package publication and website deployment are independent releases.
-
-## Open your inference environment
-
-With Node.js 22.19 or newer and npm installed, run:
-
-```sh
-npm install -g openmerit
-cd /path/to/your/application
-openmerit dash
-```
-
-The Inference Terminal opens a local, read-only view of the selected application's services, models, recorded requests, and linked compute. It does not require Pi or a provider API key, make inference calls, or change model assignments. Supported code/configuration declarations identify inventory; request history requires existing supported logs or exports. See [the terminal guide](inference-terminal.md) for collection, privacy, configuration, and diagnostics.
-
-To inspect fictional data, run `openmerit dash --demo` or choose the sample from the environment selector. Sample data never enters the real snapshot or project files.
+OpenMerit provides Scout model-selection guidance. The Inference Terminal (`openmerit dash`) is [retired in unreleased source](inference-terminal.md). Pi Scout setup requires OpenMerit **0.1.12** or newer and Pi **1.5.0**. Package publication and website deployment are independent releases.
 
 ## Connect Scout to a coding agent
 

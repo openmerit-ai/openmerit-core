@@ -1,6 +1,6 @@
 # Amp orbs
 
-`.agents/setup` installs Node.js 22.19.0 (the CI version) into `~/.local/bin` and runs `npm ci`; the orb's default Node.js fails the terminal worker tests. Run `amp orb services ensure` to start the Inference Terminal (`dash`, exposed through `.amp/loopback-proxy.mjs` because the terminal accepts only loopback hosts). The docs website shell and legacy local Scout search server are retired.
+`.agents/setup` installs Node.js 22.19.0 (the CI version) into `~/.local/bin` and runs `npm ci`. The project declares no orb services: the Inference Terminal, docs website shell and legacy local Scout search server are retired.
 
 `openmerit.ai` is the primary domain; `openmerit.site` hosts only legacy redirects. Use `.ai` in new links and copy; `docs/site-domain-migration.md` describes the routing.
 

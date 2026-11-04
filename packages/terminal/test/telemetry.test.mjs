@@ -1,11 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { createServer } from 'node:net';
 import { readFileSync } from 'node:fs';
-import { startTerminal } from '../src/server.mjs';
-import { commandTelemetry, errorProperties, safeFrames, terminalProperties, installationProperties, setupUUID } from '../src/telemetry.mjs';
-import { createAnalytics, browserErrorProperties } from '../client/analytics.mjs';
+import { errorProperties, safeFrames, installationProperties, setupUUID } from '../src/telemetry.mjs';
 
 const cli = new URL('../src/cli.mjs', import.meta.url);
 const clientEnvironment = {client_version:JSON.parse(readFileSync(new URL('../../../package.json',import.meta.url),'utf8')).version,platform:process.platform,runtime_major:Number(process.versions.node.split('.')[0])};
@@ -14,73 +11,10 @@ test('diagnostics keep only application basenames and coordinates', () => {
   const error = new TypeError('PRIVATE text /home/user/secret');
   error.stack = `TypeError: PRIVATE\n    at secretFunction (${app}:12:3)\n    at privateFunction (file:///home/user/cli.mjs:22:4)\n    at PRIVATE (file:///home/user/task.js:4:8)`;
   assert.deepEqual(safeFrames(error), [{filename:'cli.mjs',lineno:12,colno:3}]);
-  assert.deepEqual(terminalProperties('terminal_error', {code:'render_error',error_type:'TypeError',frames:[{filename:'app.js',lineno:5,colno:9,function:'PRIVATE',message:'PRIVATE'}, {filename:'/home/user/cli.mjs',lineno:3,colno:2}]}), {code:'render_error',error_type:'TypeError',frames:[{filename:'app.js',lineno:5,colno:9}]});
   assert.deepEqual(errorProperties({get name(){throw Error('PRIVATE');}}), {error_type:'Error',frames:[]});
-  const location = globalThis.location;
-  try {
-    globalThis.location = { href: 'http://localhost:4310/' };
-    const browserError = { name:'TypeError', stack:'TypeError: PRIVATE\n    at PRIVATE (http://localhost:4310/app.js:17:2)\n    at PRIVATE (https://private.example/app.js:22:5)' };
-    assert.deepEqual(browserErrorProperties(browserError), {error_type:'TypeError',frames:[{filename:'app.js',lineno:17,colno:2}]});
-    assert.deepEqual(browserErrorProperties({get stack(){throw Error('PRIVATE');}}), {error_type:'Error',frames:[]});
-  } finally { if (location === undefined) delete globalThis.location; else globalThis.location = location; }
 });
 
-test('browser consent controls prevent even local submission; enabled browser uses only relay', async () => {
-  const calls = [];
-  for (const control of [{enabled:false}, {navigator:{doNotTrack:'1'}}, {navigator:{globalPrivacyControl:true}}, {optOut:'1'}, {blocked:true}, {}]) {
-    const send = createAnalytics({enabled:()=>control.enabled!==false,mode:()=> 'live',navigator:control.navigator??{},storage:{getItem:()=>{if(control.blocked)throw new Error('blocked');return control.optOut;}},fetcher:async (...args)=>{calls.push(args);}});
-    send('terminal_visited');
-    await new Promise(resolve=>setImmediate(resolve));
-  }
-  assert.equal(calls.length,1);
-  assert.equal(calls[0][0],'/api/analytics');
-  assert.deepEqual(JSON.parse(calls[0][1].body),{event:'terminal_visited',properties:{mode:'live'}});
-});
-
-test('local relay projects allowlists, shares CLI identity, enforces guards and bounds on hung transport', async () => {
-  const originalFetch = globalThis.fetch, saved = process.env.OPENMERIT_TELEMETRY, dnt = process.env.DO_NOT_TRACK;
-  const calls=[];
-  globalThis.fetch=async (url,options)=>{calls.push({url,...options});return new Response(null);};
-  process.env.OPENMERIT_TELEMETRY=''; process.env.DO_NOT_TRACK='';
-  const terminal=await startTerminal({port:0,demo:true});
-  const post=(body,headers={})=>originalFetch(`${terminal.url}/api/analytics`,{method:'POST',headers:{'Content-Type':'application/json',...headers},body:typeof body==='string'?body:JSON.stringify(body)});
-  try {
-    const event={event:'terminal_interaction',anonymousId:'CANARY',properties:{mode:'live',action:'inspect',kind:'model',key:'CANARY',prompt:'CANARY',error:'CANARY'}};
-    assert.equal((await originalFetch(`${terminal.url}/api/info`).then(r=>r.json())).telemetry,false);
-    assert.equal((await post(event)).status,204); assert.equal(calls.length,0);
-    process.env.OPENMERIT_TELEMETRY='1';
-    assert.equal((await originalFetch(`${terminal.url}/api/info`).then(r=>r.json())).telemetry,true);
-    await commandTelemetry(['dash'])('ok');
-    assert.equal((await post(event)).status,204);
-    await new Promise(resolve=>setImmediate(resolve));
-    const body=JSON.parse(calls.at(-1).body);
-    assert.equal(body.anonymousId,JSON.parse(calls[0].body).anonymousId);
-    assert.deepEqual(body.properties,{mode:'live',action:'inspect',kind:'model',...clientEnvironment});
-    assert.doesNotMatch(JSON.stringify(body),/CANARY/);
-    const consented = calls.length;
-    for (const privacy of [{ DNT: '1' }, { 'Sec-GPC': '1' }, { 'X-Scout-Analytics': 'off' }]) {
-      assert.equal((await post(event, privacy)).status, 204);
-      assert.equal(calls.length, consented, 'request privacy overrides process opt-in');
-    }
-    assert.equal((await post(event,{Origin:'https://evil.example'})).status,403);
-    assert.equal((await post(event,{'Sec-Fetch-Site':'cross-site'})).status,403);
-    assert.equal((await post('x'.repeat(2049))).status,413);
-    for(const value of [{...event,event:'private_event'},{...event,properties:{mode:'CANARY',action:'inspect',kind:'model'}},{event:'terminal_snapshot',properties:{mode:'live',model_count:Infinity}},{event:'terminal_error',properties:{code:'collection_error',error_type:'CANARY'}}]) assert.equal((await post(value)).status,400);
-    globalThis.fetch=async (url,options)=>{calls.push({url,...options});return new Promise(()=>{});};
-    const before=calls.length, started=performance.now();
-    await Promise.all(Array.from({length:12},()=>post(event)));
-    assert.ok(calls.length-before<=4);
-    assert.ok(performance.now()-started<700);
-    assert.equal((await originalFetch(`${terminal.url}/api/snapshot`)).status,200);
-    await new Promise(resolve=>setTimeout(resolve,800));
-    await post(event); assert.ok(calls.length>before);
-  } finally {
-    await terminal.close();globalThis.fetch=originalFetch;
-    if(saved===undefined)delete process.env.OPENMERIT_TELEMETRY;else process.env.OPENMERIT_TELEMETRY=saved;
-    if(dnt===undefined)delete process.env.DO_NOT_TRACK;else process.env.DO_NOT_TRACK=dnt;
-  }
-});
-async function run(args, env = {}, mode = 'ok', stopAfterStartup = false) {
+async function run(args, env = {}, mode = 'ok') {
   // Installed before the CLI loads: no test can contact the analytics service.
   const preload = `globalThis.fetch = async (url, options) => {
     process.stderr.write('TELEMETRY:' + JSON.stringify({url, ...options, signal: undefined}) + '\\n');
@@ -95,10 +29,7 @@ async function run(args, env = {}, mode = 'ok', stopAfterStartup = false) {
   let stdout = '', stderr = '';
   const deadline = setTimeout(() => child.kill('SIGKILL'), 5000);
   child.stdout.on('data', data => { stdout += data; });
-  child.stderr.on('data', data => {
-    stderr += data;
-    if (stopAfterStartup && stderr.includes('cli_command_completed')) child.kill('SIGTERM');
-  });
+  child.stderr.on('data', data => { stderr += data; });
   const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
   clearTimeout(deadline);
   const events = stderr.split('\n').filter(line => line.startsWith('TELEMETRY:')).map(line => JSON.parse(line.slice(10)));
@@ -107,9 +38,9 @@ async function run(args, env = {}, mode = 'ok', stopAfterStartup = false) {
 
 test('CLI telemetry is default-off, exact opt-in only, and DO_NOT_TRACK overrides consent', async () => {
   for (const env of [{}, { OPENMERIT_TELEMETRY: '0' }, { OPENMERIT_TELEMETRY: 'true' }, { OPENMERIT_TELEMETRY: '1', DO_NOT_TRACK: '1' }]) {
-    const result = await run(['dash', '--demo', '--json'], env);
+    const result = await run(['--help'], env);
     assert.equal(result.code, 0);
-    assert.equal(JSON.parse(result.stdout).mode, 'sample');
+    assert.match(result.stdout, /openmerit scout/);
     assert.deepEqual(result.events, []);
     assert.equal(result.stderr, '');
   }
@@ -134,8 +65,7 @@ test('opted-in CLI sends only allowlisted payloads with ephemeral UUID identity'
   let previousId;
   for (const [args, command, outcome] of [
     [[], 'help', 'ok'], [['eval', '--help'], 'help', 'ok'],
-    [['dash', '--demo', '--json'], 'dash', 'ok'],
-    [['dash', '--demo', '--diagnostics'], 'dash', 'ok'],
+    [['dash'], 'unknown', 'error'],
     [['private-prompt-model@example.org'], 'unknown', 'error'],
     ...['init', 'doctor', 'plan', 'run', 'watch', 'report'].map(action => [['eval', action, '--private-secret'], 'unknown', 'error']),
   ]) {
@@ -175,13 +105,13 @@ test('installation telemetry projects only exact lifecycle enums, UUID v4 identi
   for (const invalid of [null, [], {}, { ...allowed, stage: 'PRIVATE' }, { ...allowed, outcome: 'success' }, { ...allowed, scope: 'PRIVATE' }, { ...allowed, connection: 'PRIVATE' }, { ...allowed, rule_status: 'PRIVATE' }, { ...allowed, code: 'PRIVATE' }]) assert.equal(installationProperties(invalid), null);
 });
 
-test('network errors and hung transport are silent, bounded, and preserve JSON and exit status', async () => {
+test('network errors and hung transport are silent, bounded, and preserve output and exit status', async () => {
   for (const mode of ['fail', 'hang', 'http-error']) {
     const started = performance.now();
-    const result = await run(['dash', '--demo', '--diagnostics'], { OPENMERIT_TELEMETRY: '1' }, mode);
+    const result = await run(['--help'], { OPENMERIT_TELEMETRY: '1' }, mode);
     assert.ok(performance.now() - started < 3000);
     assert.equal(result.code, 0);
-    assert.doesNotThrow(() => JSON.parse(result.stdout));
+    assert.match(result.stdout, /openmerit scout/);
     assert.equal(result.stderr, '');
     assert.equal(result.events.length, 2);
     const failure = await run(['unknown'], { OPENMERIT_TELEMETRY: '1' }, mode);
@@ -189,17 +119,4 @@ test('network errors and hung transport are silent, bounded, and preserve JSON a
     assert.match(failure.stderr, /Unknown command/);
     assert.doesNotMatch(failure.stderr, /network failure/);
   }
-});
-
-test('long-running dash completes telemetry at startup, before the server stops', async () => {
-  const reservation = createServer();
-  await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve));
-  const port = reservation.address().port;
-  await new Promise(resolve => reservation.close(resolve));
-  const result = await run(['dash', '--demo', '--no-open', '--port', String(port)], { OPENMERIT_TELEMETRY: '1' }, 'ok', true);
-  assert.equal(result.code, 0);
-  assert.match(result.stdout, /Press Ctrl\+C to close/);
-  assert.equal(result.stderr, '');
-  assert.equal(result.events.length, 2);
-  assert.equal(JSON.parse(result.events[1].body).properties.outcome, 'ok');
 });

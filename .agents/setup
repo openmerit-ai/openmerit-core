@@ -13,8 +13,7 @@ step() {
   echo "<== $label ($((SECONDS - start))s)"
 }
 
-# Keep in sync with node-version in .github/workflows/ci.yml. The orb's default
-# Node.js is newer and fails the terminal worker tests.
+# Keep in sync with node-version in .github/workflows/ci.yml.
 NODE_VERSION=22.19.0
 node_dist="node-v${NODE_VERSION}-linux-x64"
 node_home="$HOME/.local/share/node/$node_dist"

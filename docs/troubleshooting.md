@@ -39,9 +39,9 @@ They were removed, not renamed. The Pi adapter now supplies only native Scout MC
 
 The rule and skill are model guidance, not a guaranteed tool gate. Confirm they loaded in a new session and that the host permits the MCP tools. When project model policy is missing, ask the user; when Scout is unavailable or lacks suitable evidence, pause the model choice rather than invent a result. Host model/tool/session restrictions remain authoritative. Scout candidates are not measurements of your application's quality.
 
-## Evaluation or terminal problems
+## `openmerit dash` or `openmerit eval` is an unknown command
 
-The standalone products are separate from Pi setup. Use [agent-evaluation diagnostics](agent-evaluations.md) for tasks, graders, budgets and execution blocks, or [terminal diagnostics](inference-terminal.md) for missing inventory and request evidence. A populated dashboard is not proof of successful evaluations. Never mark missing or rejected evidence successful merely to advance a workflow.
+Both are retired in unreleased source; see the [Inference Terminal](inference-terminal.md) and [evaluation CLI](agent-evaluations.md) retirement notes. Existing local files are not deleted. Never mark missing or rejected evidence successful merely to advance a workflow.
 
 ## Report a reproducible problem
 

@@ -60,25 +60,11 @@ npm run verify
 npm pack --dry-run
 ```
 
-`verify` runs workspace tests, syntax checks, strict TypeScript checks and the TypeScript migration ratchet, the package build, memo tests, policy/memo build and Markdown-guide checks, Scout tests/build, and whitespace validation. It does not publish a package or deploy the website. `npm run check:worker-types` separately checks generated Worker types; CI also performs packed-install and Pi/terminal smoke checks.
-
-## Inference Terminal coverage
-
-```sh
-npm test --workspace=@openmerit/terminal
-```
-
-Tests cover metadata projection and redaction, source containment, recursive syntax indexing, phased worker progress, incremental reuse, coverage limits, endpoint classification, authorized loopback probes, supported request-log formats, UTF-8 boundaries, rotation/truncation, source reconciliation, historical ranges, unknown versus zero measurements, and the read-only API.
-
-Inventory and UI coverage includes model/service identity, explicit deployment and host links, shared capacity, stale/missing hardware, path classification, map completeness, search and filtering, and preservation of unknown costs. Runtime fixtures establish which endpoints collectors call; they do not prove compatibility with every external runtime version.
-
-The local fictional sample (`--demo` or the sample selector) has 40 agents, 140 tasks, 21 models and 9,600 requests over 24 hours. Sample tests exercise interface scale and arithmetic, not measured throughput, application quality, or hardware performance.
-
-Browser review covers the six views, inspectors, search, activity ranges, map and chart interaction, keyboard navigation, reduced motion, and desktop/narrow layouts. Browser checks are distinct from the committed unit suite.
+`verify` runs workspace tests, syntax checks, strict TypeScript checks and the TypeScript migration ratchet, the package build, memo tests, policy/memo build and Markdown-guide checks, Scout tests/build, and whitespace validation. It does not publish a package or deploy the website. `npm run check:worker-types` separately checks generated Worker types; CI also performs packed-install, CLI help and Pi load smoke checks.
 
 ## Pi load and package smoke tests
 
-CI packs the package, installs it in a temporary directory, imports `openmerit/pi`, smoke-tests the installed terminal command, and loads the installed extension in Pi with `--list-models`. These checks establish packaging and loading, not successful provider authentication or Scout recommendations.
+CI packs the package, installs it in a temporary directory, imports `openmerit/pi`, checks the installed `openmerit --help`, and loads the installed extension in Pi with `--list-models`. These checks establish packaging and loading, not successful provider authentication or Scout recommendations.
 
 ## What evidence establishes
 

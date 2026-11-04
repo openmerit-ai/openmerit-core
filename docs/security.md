@@ -10,11 +10,11 @@ The Scout agent, MCP, publisher and account analytics/deletion capabilities rema
 
 OpenMerit accepts no model-provider or Jev credential. Credentials belong to the coding harness, its environment, or an external secret store.
 
-Never place secrets in evaluation configuration, task fixtures, Scout project policy, terminal configuration, activity exports, traces, or committed environment files.
+Never place secrets in evaluation configuration, task fixtures, Scout project policy, traces, or committed environment files.
 
 ## Local state
 
-`.openmerit/` may hold evaluation configuration, task fixtures, reports and budget usage, Scout project policy, and terminal configuration or activity exports. It may reveal task names, model choices, budgets or endpoint identifiers. Treat it as sensitive project metadata even though it must not contain credentials.
+`.openmerit/` may hold evaluation configuration, task fixtures, reports and budget usage, and Scout project policy, plus files left by the retired Inference Terminal (`terminal.json`, `inference.jsonl`), which upgrades do not delete. It may reveal task names, model choices, budgets or endpoint identifiers. Treat it as sensitive project metadata even though it must not contain credentials.
 
 With native Scout, Pi manages its own session/tool records and provider context; the adapter adds no separate evaluation-history store. Task descriptions sent to hosted Scout follow its data policy. Local OpenMerit storage does not imply that all processing stays on your machine.
 
@@ -23,19 +23,6 @@ With native Scout, Pi manages its own session/tool records and provider context;
 OpenMerit does not establish the truth of imported or external evidence. Use authenticated observability, immutable artifacts, and digests where stronger provenance is required.
 
 Do not include credentials, private traces, or proprietary evaluation data in public issues.
-
-## Inference Terminal
-
-The terminal reads supported project metadata, request logs, explicit exports, and authorized loopback runtime inventory/metrics endpoints. It calls no inference endpoint and exposes no mutation API. A local syntax index reads supported Python, JavaScript/TypeScript, JSON, YAML, TOML, and project-local dotenv declarations. It does not execute or import project code, source shell files, or resolve arbitrary expressions. Known credential-variable presence can identify configuration; credential values are discarded and never used for provider calls. Endpoint addresses are sanitized before retention. Static URLs found by the syntax index never authorize network probes.
-
-Loopback runtime probes require supported project endpoint declarations or explicit terminal configuration. No standard ports, remote provider accounts, credential stores, running processes, or general home directories are scanned. Whole-machine readings are context, not per-request measurements; the compute view requires explicit links or supplied host evidence.
-
-Coding-harness histories are outside the terminal's application scope and are not scanned or imported. Application request logs and explicit exports retain only allowlisted metadata, without prompts or responses. Sources must belong to the selected application; the terminal cannot infer the purpose of an unlabeled API response. Records explicitly marked `scope: "development"` are rejected.
-
-The local web service binds to `127.0.0.1` and rejects unexpected Host, Origin, and cross-site browser requests. It only serves bundled assets and specific read-only JSON routes. It is not authenticated against other local processes or machine users. Model names, endpoint identifiers, and relative source paths can still be sensitive. Names and identifiers in imported metadata must be kept free of secrets.
-
-Repository metadata and usage caches live in process memory and disappear when the terminal exits. The terminal creates no persistent index or files in the application. Per-file/parser protections, request-log read limits, runtime inventory limits, and explicit coverage gaps still apply. See [terminal data handling and limits](inference-terminal.md) for supported sources, precedence, retention bounds, diagnostics, and sample-data separation.
-
 
 ## Hosted Scout authentication
 
@@ -79,7 +66,7 @@ Historical records are accessible only through authenticated Cloudflare account 
 
 ### Optional product analytics
 
-Scout has a visible privacy disclosure and controls. Public homepage/docs navigation events remain source-only; npm 0.1.7 includes opt-in local terminal/map events and aggregate counts. The terminal relay cannot mutate project or inference state, retains loopback Host/Origin guards, and forwards only bounded allowlisted telemetry. Terminal and CLI use a process-only random ID; website events use a separate tab ID. Neither is implicitly linked to Clerk. Application names, raw inputs/outputs, local identifiers and source files remain local. Sanitized error classes/categories (and Scout application file/line frames) exclude raw messages, credentials, source context, arbitrary URLs and filesystem paths. No replay is enabled. All expanded account-linked events pass the same preference/deletion gate as profile synchronization; ordinary event delivery remains best effort. New search details link to identified accounts when profile sync is active, unlike the legacy Cloudflare archive. No external retention setting is changed.
+Scout has a visible privacy disclosure and controls. Public homepage/docs navigation events remain source-only; npm 0.1.7 includes opt-in local terminal/map events and aggregate counts, which unreleased source removes with the [Inference Terminal](inference-terminal.md). The terminal relay cannot mutate project or inference state, retains loopback Host/Origin guards, and forwards only bounded allowlisted telemetry. Terminal and CLI use a process-only random ID; website events use a separate tab ID. Neither is implicitly linked to Clerk. Application names, raw inputs/outputs, local identifiers and source files remain local. Sanitized error classes/categories (and Scout application file/line frames) exclude raw messages, credentials, source context, arbitrary URLs and filesystem paths. No replay is enabled. All expanded account-linked events pass the same preference/deletion gate as profile synchronization; ordinary event delivery remains best effort. New search details link to identified accounts when profile sync is active, unlike the legacy Cloudflare archive. No external retention setting is changed.
 
 The [PostHog integration](scout.md#product-analytics) uses the EU ingestion endpoint; unconfigured deployments remain off. Verified Clerk user IDs become namespaced SHA-256 pseudonyms for cross-client account retention. Profile sync can associate those identities with names and verified email addresses, so they are identifiable personal data. No identity is added to the historical Cloudflare prompt archive. The browser retains an anonymous ID and hashed account/session transition markers in tab storage, rotating the anonymous ID on account changes. There is no autocapture, replay or visitor-IP forwarding. PostHog has its own retention/access policies, not Cloudflare's three-month policy.
 

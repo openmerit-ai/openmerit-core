@@ -1,9 +1,7 @@
 import { spawn } from 'node:child_process';
 
-// By default, only open the loopback address returned by our own server.
-// Callers can pass a stricter or different check. Never use a shell.
-const terminalURL = url => { const target = new URL(url); return target.protocol === 'http:' && target.hostname === '127.0.0.1' && /^http:\/\/127\.0\.0\.1:[0-9]+$/.test(url) && !target.username && !target.password && target.pathname === '/' && !target.search && !target.hash; };
-export function browserCommand(url, platform = process.platform, env = process.env, allowed = terminalURL) {
+// Callers decide which URLs may open. Never use a shell.
+export function browserCommand(url, platform = process.platform, env = process.env, allowed) {
   if (!allowed(url)) throw new Error('Refusing to open an unexpected URL.');
   if (env.SSH_CONNECTION || env.SSH_TTY) return null;
   if (platform === 'darwin') return ['open', [url]];
