@@ -1,6 +1,6 @@
 # Commands
 
-**Pi replacement — unreleased, unpublished source:** Pi 1.5.0 uses only native Scout MCP and shared guidance. Run `npx -y openmerit@latest install --client pi [--scope user|project]` after publication and approve in the browser. Shell `login`, `logout`, `status`, `remove`, and `doctor` accept the same target flags. Updates require explicit reinstall; no Pi update hooks or scheduler are installed. See [Pi setup](pi-extension.md).
+**Pi adapter — npm 0.1.12 and later:** Pi 1.5.0 uses only native Scout MCP and shared guidance. Run `npx -y openmerit@latest install --client pi [--scope user|project]` and approve in the browser. Shell `login`, `logout`, `status`, `remove`, and `doctor` accept the same target flags. Updates require explicit reinstall; no Pi update hooks or scheduler are installed. See [Pi setup](pi-extension.md).
 
 The standalone `openmerit dash` and `openmerit eval` commands are unchanged. The Pi 0.87 `/openmerit` slash commands were removed with that adapter and have no replacement.
 
