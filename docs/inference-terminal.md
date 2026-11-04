@@ -1,8 +1,8 @@
 # Inference Terminal retirement
 
-**Unreleased source change, November 2026.** The local Inference Terminal is retired in full: `openmerit dash` and its `--port`, `--interval`, `--no-discovery`, `--no-open`, `--json`, `--diagnostics` and `--demo` options, the fictional sample workspace, repository indexing, request-log and activity-export import, runtime and hardware discovery, and the browser interface. This source change does not itself publish a package or change an already installed older package; those keep the command until they are upgraded.
+**npm 0.3.0, 4 November 2026.** The local Inference Terminal is retired in full: `openmerit dash` and its `--port`, `--interval`, `--no-discovery`, `--no-open`, `--json`, `--diagnostics` and `--demo` options, the fictional sample workspace, repository indexing, request-log and activity-export import, runtime and hardware discovery, and the browser interface. Older installed packages keep the command until they are upgraded.
 
-After an approved npm release, `openmerit dash` reports an unknown command. There is no replacement view of application inventory or request history. Use your application's own logs or observability tools for recorded activity, and [Scout](scout.md) for application-model guidance.
+From 0.3.0, `openmerit dash` reports an unknown command. There is no replacement view of application inventory or request history. Use your application's own logs or observability tools for recorded activity, and [Scout](scout.md) for application-model guidance.
 
 ## Existing local files
 

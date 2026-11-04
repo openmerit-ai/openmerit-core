@@ -41,7 +41,7 @@ The rule and skill are model guidance, not a guaranteed tool gate. Confirm they 
 
 ## `openmerit dash` or `openmerit eval` is an unknown command
 
-Both are retired in unreleased source; see the [Inference Terminal](inference-terminal.md) and [evaluation CLI](agent-evaluations.md) retirement notes. Existing local files are not deleted. Never mark missing or rejected evidence successful merely to advance a workflow.
+Both are retired in npm 0.3.0; see the [Inference Terminal](inference-terminal.md) and [evaluation CLI](agent-evaluations.md) retirement notes. Existing local files are not deleted. Never mark missing or rejected evidence successful merely to advance a workflow.
 
 ## Report a reproducible problem
 
