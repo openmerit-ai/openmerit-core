@@ -1,24 +1,8 @@
 # OpenMerit
 
-OpenMerit provides a local Inference Terminal for understanding an application's models, services, recorded activity, and compute, plus Scout guidance for application-model choices.
+OpenMerit provides Scout guidance for application-model choices: in the browser, from the `openmerit scout` command, and through MCP for Claude Code and Pi.
 
-The terminal reads existing evidence; Scout recommends candidates to evaluate. Neither is a request router or proof of application-quality improvements.
-
-## Open the terminal
-
-Requires Node.js 22.19 or newer and npm:
-
-```sh
-npm install -g openmerit
-cd /path/to/your/application
-openmerit dash
-```
-
-No Pi installation or provider API key is needed. The terminal opens a browser connected to a read-only loopback service. Supported source/configuration declarations establish inventory; existing application logs or exports supply request history. Prompts, responses, and credentials are not retained by terminal collection. Unsupported or missing evidence remains unknown.
-
-The terminal follows the device's light/dark preference without a theme control. CLI and terminal product analytics are off unless explicitly enabled; see [the analytics contract](docs/inference-terminal.md#optional-cli-product-analytics).
-
-Run `openmerit dash --demo` to explore a fictional sample workspace. See [the terminal guide](docs/inference-terminal.md) for configuration, discovery, diagnostics, history limits, and agent access.
+Scout recommends candidates to evaluate. It is not a request router or proof of application-quality improvements.
 
 ## Connect Scout to Claude Code
 
@@ -42,13 +26,17 @@ Package publication and website deployment are separate releases. Pi setup requi
 
 This source removes the standalone `openmerit eval` commands, including planning, together with the old Scout JSON recommendation API. Existing local evaluation files are not deleted. Scout's conversational agent, MCP, coding-agent setup and catalogue publication remain available. This is not an npm release or production deployment; see [retirement details](docs/agent-evaluations.md).
 
+## Inference Terminal retirement — unreleased
+
+This source also removes the local Inference Terminal: `openmerit dash`, its `--demo` sample, collectors, repository index and browser interface. Existing `.openmerit/terminal.json`, `.openmerit/inference.jsonl` and application logs are not deleted. Already installed packages keep the command until they are upgraded. See [retirement details](docs/inference-terminal.md).
+
 ## Documentation
 
 The [documentation overview](docs/index.md) links the maintained Markdown guides. The unpublished `/docs/` website shell is retired; the live Scout data policy and protected memo have separate builds.
 
 - [Getting started](docs/getting-started.md) and [troubleshooting](docs/troubleshooting.md)
 - [Scout](docs/scout.md) and [Pi adapter](docs/pi-extension.md)
-- [Inference Terminal](docs/inference-terminal.md) and [agent evaluations](docs/agent-evaluations.md)
+- Retired: [Inference Terminal](docs/inference-terminal.md) and [agent evaluations](docs/agent-evaluations.md)
 - [Security and data handling](docs/security.md)
 - [Testing](docs/testing.md) and [current limitations](docs/roadmap.md)
 
@@ -57,9 +45,8 @@ The [documentation overview](docs/index.md) links the maintained Markdown guides
 ```sh
 npm ci
 npm run verify
-npm run dash -- /path/to/application
 ```
 
-`packages/terminal` contains the CLI, collectors and browser interface; `packages/pi` supplies only the native Scout adapter. The package exports `openmerit/pi` and the `openmerit` command. See the [Pi package README](packages/pi/README.md) for bounded adapter tests. Provider credentials belong to the harness or its environment and must never be committed.
+`packages/terminal` contains the `openmerit` CLI: Scout setup, updates and the `scout` command; `packages/pi` supplies only the native Scout adapter. The package exports `openmerit/pi` and the `openmerit` command. See the [Pi package README](packages/pi/README.md) for bounded adapter tests. Provider credentials belong to the harness or its environment and must never be committed.
 
 Edit documentation in `docs/`, then run `npm run check:docs`. `npm run build:site` builds only the Scout data policy and protected memo, not a docs website. A local build does not publish changes; follow [deployment maintenance](docs/site-deployment.md) before any approved release.

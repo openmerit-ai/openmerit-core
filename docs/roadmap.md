@@ -2,7 +2,7 @@
 
 ## Current status
 
-The Inference Terminal provides a read-only view of existing application evidence. The Pi **1.5.0** adapter in OpenMerit **0.1.12** provides only native Scout MCP and shared guidance, not evaluation coordination. Unreleased source retires the standalone evaluation CLI and legacy recommendation API together. Neither a populated dashboard nor passing implementation tests establishes that an application has better models, trustworthy evaluations, or reliable unattended automation.
+The Pi **1.5.0** adapter in OpenMerit **0.1.12** provides only native Scout MCP and shared guidance, not evaluation coordination. Unreleased source retires the Inference Terminal, the standalone evaluation CLI and the legacy recommendation API. Passing implementation tests do not establish that an application has better models, trustworthy evaluations, or reliable unattended automation.
 
 ## Known limitations
 

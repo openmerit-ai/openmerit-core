@@ -1,24 +1,10 @@
 # OpenMerit documentation
 
-These maintained Markdown guides distinguish current source work from published behavior. OpenMerit **0.1.12** added native Scout support for Pi **1.5.0**, replacing the old Pi 0.87 evaluation extension. Unreleased source retires the standalone evaluation CLI, legacy recommendation API and unpublished docs website shell. The policy, protected memo, Scout service and npm package are deployed independently; dated receipts describe the versions actually tested.
-
-## See your inference environment
-
-With Node.js 22.19 or newer:
-
-```sh
-npm install -g openmerit
-cd /path/to/your/application
-openmerit dash
-```
-
-The terminal shows application services, model declarations, recorded requests, and linked compute. It reads supported local evidence, needs no Pi installation or provider API key, and makes no inference calls or model changes. Configuration can identify declared services; actual activity requires existing supported logs or exports.
-
-Start with [installation and setup](getting-started.md) or the [Inference Terminal guide](inference-terminal.md).
+These maintained Markdown guides distinguish current source work from published behavior. OpenMerit **0.1.12** added native Scout support for Pi **1.5.0**, replacing the old Pi 0.87 evaluation extension. Unreleased source retires the Inference Terminal (`openmerit dash`), standalone evaluation CLI, legacy recommendation API and unpublished docs website shell. The policy, protected memo, Scout service and npm package are deployed independently; dated receipts describe the versions actually tested.
 
 ## Discover model candidates
 
-The separate [Scout beta](scout.md) provides conversational application-model guidance at [openmerit.ai/scout/](https://openmerit.ai/scout/) and through MCP for coding agents. The legacy prompt-only JSON recommendation endpoint is retired in source.
+Start with [installation and setup](getting-started.md). The [Scout beta](scout.md) provides conversational application-model guidance at [openmerit.ai/scout/](https://openmerit.ai/scout/) and through MCP for coding agents. The legacy prompt-only JSON recommendation endpoint is retired in source.
 
 ## Connect Scout to Pi
 
@@ -32,4 +18,4 @@ Use your own representative task checks to evaluate model candidates. The [stand
 
 ## Operate and troubleshoot
 
-[Commands](commands.md) lists the terminal and Scout setup commands. [Troubleshooting](troubleshooting.md), [security and data](security.md), and [current limitations](roadmap.md) explain setup failures and product boundaries. [Testing and validation](testing.md) distinguishes automated coverage from product evidence.
+[Commands](commands.md) lists the Scout and setup commands. The [Inference Terminal is retired in source](inference-terminal.md); existing local files are not deleted. [Troubleshooting](troubleshooting.md), [security and data](security.md), and [current limitations](roadmap.md) explain setup failures and product boundaries. [Testing and validation](testing.md) distinguishes automated coverage from product evidence.

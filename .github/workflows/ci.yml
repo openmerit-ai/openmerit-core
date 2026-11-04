@@ -55,7 +55,7 @@ jobs:
           assert.equal(typeof extension, "function");
           EOF
           node "$package_root/smoke.mjs"
-          node scripts/terminal-package-smoke.mjs "$package_root/node_modules/.bin/openmerit"
+          "$package_root/node_modules/.bin/openmerit" --help | grep -q "openmerit scout"
           ./node_modules/.bin/pi --no-session \
             -e "$package_root/node_modules/openmerit/dist/pi/src/index.js" \
             --list-models > /dev/null

@@ -199,9 +199,8 @@ All current website changes were deployed as Worker `6b9dfbd1-d9a0-4f13-9120-4e7
 
 ## Automatic appearance — published 14 October 2026
 
-The website and Inference Terminal follow the device's light or dark preference without a switch, saved preference or URL override. Print remains light.
+The website follows the device's light or dark preference without a switch, saved preference or URL override. Print remains light.
 
 - `site/styles.css` owns the shared website palette; `site/policy.css`, `site/memo.css` and `site/memo-access.css` style the retained reading/access surfaces with those tokens.
-- `packages/terminal/public/styles.css` owns the terminal palette. Route diagrams use semantic colors from `client/routes.mjs`; canvas charts follow device changes through `client/theme.js` and resolved CSS colors.
 
-Appearance checks do not establish authentication or inference behavior. Website, Scout, terminal and npm release boundaries remain separate; local captures and passing builds do not imply publication.
+Appearance checks do not establish authentication or inference behavior. Website, Scout and npm release boundaries remain separate; local captures and passing builds do not imply publication.

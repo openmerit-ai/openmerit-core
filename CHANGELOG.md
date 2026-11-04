@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking:** retire the local Inference Terminal. `openmerit dash` and all of its options, including `--demo`, `--json` and `--diagnostics`, are removed, along with repository indexing, request-log and activity-export import, runtime and hardware discovery, the browser interface and its opt-in terminal analytics events. Existing `.openmerit/terminal.json`, `.openmerit/inference.jsonl` and application logs are not deleted. Scout setup, `openmerit scout` and `openmerit update` are unchanged.
+- Drop the terminal-only runtime dependencies (`@iarna/toml`, `@lezer/python`) and browser bundle dependencies.
+
 ## 0.2.0 — 2026-11-04
 
 - Add `openmerit scout`, a conversation with Scout from the terminal: clarifying questions answered with `--brief` or `--skip`, then up to five models per task, cheapest first among models that reach Scout's quality bar. When you ask for the fastest or newest model, the output names that order and shows each model's time per task or release date. It uses this device's Claude Code or Pi key and limits new conversations to the endpoint IDs in `.openmerit/scout.json`.

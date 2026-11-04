@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Inference Terminal retirement — unreleased source, 4 November 2026
+
+Reviewed the homepage against removal of the local Inference Terminal (`openmerit dash`, its `--demo` sample and terminal analytics events). `site/index.html` has no FAQ block and does not mention the terminal, `openmerit dash` or local inventory collection; its copy describes Scout and the memo. No homepage edit is required. Older entries below that describe "terminal/Pi" FAQ claims are historical.
+
 ## Stale product removal — unreleased source, 3 November 2026
 
 Reviewed the homepage against removal of the evaluation coordinator, protocol package, `openmerit`, `openmerit/core` and `openmerit/protocol` exports, the `npm run demo` sandbox, the hosted terminal sample at `dash.openmerit.ai` and its `/demo` comparison, the `?map=flow` map experiment, and the retired container demos. `site/index.html` has no FAQ block; its navigation links only Scout and the memo, and its copy describes Scout. It mentions none of the removed items, so no homepage edit is required. The source map below no longer points at removed packages.
@@ -223,7 +227,7 @@ Reviewed setup, identity and data claims against explicit setup/choice/copy even
 
 The new **Add to your coding agent** button opens existing API/MCP setup, including the current short-lived bearer-token and no-automatic-OAuth limitations. Stacked brand marks are navigation decoration, not a claim of tested integration with each client. No ranking, authentication, installation, collection or homepage FAQ behavior changes. The page serves its marks locally; no visitor request goes to a brand's favicon service.
 
-Brand assets were downloaded unchanged from the product sites on 22 October: Claude from `https://assets.claude.com/95a868946ac8a31e5ff832e2899f294aa368b836.png?w=96&h=96` (the Claude Code page's favicon; returned 32×32), Cursor from `https://cursor.com/marketing-static/icon-192x192-light.png`, Amp from `https://ampcode.com/app-icon-192.png?v=4`, OpenCode from `https://opencode.ai/favicon-96x96-v3.png`, and T3 Code from `https://t3.codes/apple-touch-icon.png`. Codex reuses the existing OpenAI mark from `https://developers.openai.com/favicon.png`, attributed in `packages/terminal/brand-assets.json`. These marks remain their respective owners' trademarks.
+Brand assets were downloaded unchanged from the product sites on 22 October: Claude from `https://assets.claude.com/95a868946ac8a31e5ff832e2899f294aa368b836.png?w=96&h=96` (the Claude Code page's favicon; returned 32×32), Cursor from `https://cursor.com/marketing-static/icon-192x192-light.png`, Amp from `https://ampcode.com/app-icon-192.png?v=4`, OpenCode from `https://opencode.ai/favicon-96x96-v3.png`, and T3 Code from `https://t3.codes/apple-touch-icon.png`. Codex reuses the OpenAI mark from `https://developers.openai.com/favicon.png` (SHA-256 `8d5575ee667ff715cd3e3074d5296edc68d5aadd89720d203e13131b68b22a04`). These marks remain their respective owners' trademarks.
 
 ## Scout common quality estimate — source only, unreleased, 22 October 2026
 
