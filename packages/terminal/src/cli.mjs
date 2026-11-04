@@ -13,7 +13,6 @@ const help = `OpenMerit · Inference Terminal
   openmerit scout --help             Ask Scout which models fit your tasks
   openmerit install --help           Connect OpenMerit to your coding agent
   openmerit update --help            Update installed Scout instructions
-  openmerit eval --help              Evaluate CLI changes across coding agents
 
   --port <number>      Require a specific local port (default: 4310 or a free port)
   --interval <seconds> Collection interval, 10–30 (default: 15)
@@ -33,7 +32,6 @@ async function main() {
   const args = process.argv.slice(2);
   if (['install', 'status', 'remove', 'login', 'logout', 'project', 'doctor', 'update'].includes(args[0])) { const { main } = await import('./install.mjs'); process.exitCode = await main(args); return; }
   if (args[0] === 'scout') { const { main } = await import('./scout.ts'); process.exitCode = await main(args.slice(1)); return; }
-  if (args[0] === 'eval') { const { main } = await import('../../eval/src/cli.mjs'); await main(args.slice(1)); return; }
   if (!args.length || args.includes('--help') || args.includes('-h')) { console.log(help); return; }
   if (args.shift() !== 'dash') throw new Error('Unknown command. Run openmerit --help.');
   let root = process.cwd(), port = 4310, interval = 15, demo = false, json = false, pathSeen = false, discovery = true, noOpen = false, explicitPort = false, diagnostics = false;
@@ -45,7 +43,6 @@ async function main() {
       if (arg === '--port') { port = Number(value); explicitPort = true; } else interval = Number(value);
     } else if (arg === '--no-open') noOpen = true;
     else if (arg === '--no-discovery') discovery = false;
-    else if (arg === '--access' || arg === '--revoke-access') throw new Error('Coding-harness history is no longer collected. Saved history permissions are ignored; these access options have been removed.');
     else if (arg === '--demo') demo = true;
     else if (arg === '--json') json = true;
     else if (arg === '--diagnostics') diagnostics = true;

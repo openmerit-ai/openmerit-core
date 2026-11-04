@@ -5,9 +5,7 @@ import {registry} from '../registry.mjs';
 import {prepareBenchmarks,refreshBenchmarks} from '../benchmarks.mjs';
 import {toRecords,toSnapshot,validateRecords,validatePublication} from '../records.mjs';
 import {stageCatalogue,createSnapshotReader,putJSON} from '../store.mjs';
-import {createIndex,recommend} from '../rank.mjs';
-import {retrieve,narrowIndex,prepareSearch} from '../search-index.mjs';
-import {publicURL} from '../utils.mjs';
+import {createIndex} from '../rank.mjs';
 
 const bench=(id,description='Visual test')=>({id,name:id,source:'fixture',tags:[],definition:{description,sourceURL:'https://example.com/method'}});
 const mock=(capture=()=>{})=>async(_url,options)=>{const body=JSON.parse(options.body);capture(body);return Response.json({answers:body.questions.map(q=>({name:q.name,type:'choice',choice:q.name==='vision'?'supported':'absent',confidence:.99}))});};
@@ -54,18 +52,10 @@ test('publication refuses to lose previously validated evidence and leaves activ
   const records=toRecords(snapshot),bad=structuredClone(records);bad.benchmarks=bad.benchmarks.filter(b=>b.id!==records.benchmarks[0].id);bad.observations=bad.observations.filter(e=>e.benchmark!==records.benchmarks[0].id);
   await assert.rejects(validatePublication(bad,records),/discard/);
 });
-test('candidate retrieval remains bounded and explicit inventories never widen',()=>{
-  const index=createIndex(snapshot),task={weights:{coding:3},workload:{priority:'balanced'}};
-  assert.ok(retrieve(index,task).length<=registry.policy.candidateLimit+index.search.calibrationModels.length);
-  assert.deepEqual(retrieve(index,task,[]),[]);assert.deepEqual(retrieve(index,task,['not-a-model']),['not-a-model']);
-  assert.equal(narrowIndex(index,task,[],null).models.length,0);
-});
-test('snapshot reader fetches selected chunks, retains one version, and supports empty scoped results',async()=>{
+test('snapshot reader serves status from one published manifest without fetching the catalogue',async()=>{
   const bucket=new Bucket(),records=toRecords(snapshot),staged=await stageCatalogue(bucket,records);
   await putJSON(bucket,'active.json',staged);const reader=createSnapshotReader(bucket),view=await reader.view();
-  const task={weights:{coding:3},needsVision:false,needsTools:false,needsStructured:false,kind:'code',workload:{priority:'balanced'},interpreter:'openai-decisions',requirements:{},uncertainty:[]};
-  const index=await view.loadTask(task,[],null);assert.equal(index.models.length,0);assert.equal(recommend(index,'Write a function',Date.now(),task).recommendations.length,0);
-  assert.equal(index.snapshot.publication.id,staged.publication.id);assert.equal(index.cachedStatus.models,snapshot.models.length);
+  assert.equal(view.snapshot.publication.id,staged.publication.id);assert.equal(view.cachedStatus.models,snapshot.models.length);
   assert.ok(!bucket.reads.some(k=>k.startsWith('catalogues/')));
 });
 test('manifest polling reuses immutable data until the publication pointer changes',async()=>{
@@ -107,40 +97,6 @@ test('research observations and routes survive an independent known-feed refresh
   assert.equal(createIndex({...snapshot,registry,sources:next.sources}).cachedStatus.stale,false);
   // A released policy change reaches the next publication instead of being masked by the previous one.
   assert.equal(next.registry.policy.maxSourceAgeHours,registry.policy.maxSourceAgeHours);assert.equal(next.registry.policy.retiredSetting,1);
-});
-
-test('published-reader candidate pool equals local retrieval and is independent of route inventory',async()=>{
-  const bucket=new Bucket(),records=toRecords({...snapshot,registry}),staged=await stageCatalogue(bucket,records);await putJSON(bucket,'active.json',staged);
-  const task={weights:{reasoning:3,knowledge:1},needsVision:false,kind:'other',workload:{priority:'balanced'}};
-  const lazy=await(await createSnapshotReader(bucket).view()).loadTask(task,null,null),local=narrowIndex(createIndex({...snapshot,registry}),task,null,null);
-  assert.deepEqual(lazy.models.map(m=>m.id).sort(),local.models.map(m=>m.id).sort());
-  assert.ok(lazy.models.length<=registry.policy.candidateLimit+lazy.search.calibrationModels.length);
-});
-
-test('cold search reads a bounded number of prepared pools instead of model point reads',async()=>{
- const bucket=new Bucket(),staged=await stageCatalogue(bucket,toRecords({...snapshot,registry}));await putJSON(bucket,'active.json',staged);bucket.reads=[];
- const task={weights:{vision:3,knowledge:1},needsVision:true,kind:'classify',labelSpace:'open',workload:{priority:'balanced'}};
- await(await createSnapshotReader(bucket).view()).loadTask(task,null,null);
- assert.ok(bucket.reads.length<=9,`Remote reads: ${bucket.reads.length}`);
-});
-
-test('overlapping capability pools preserve candidates and full evidence with fewer cold reads',async()=>{
- const bucket=new Bucket(),staged=await stageCatalogue(bucket,toRecords({...snapshot,registry}));await putJSON(bucket,'active.json',staged);
- const manifest=JSON.parse(bucket.data.get(staged.key));
- const members=Object.values(manifest.searchIndex.byCapability).filter(b=>b.quality.length).sort((a,b)=>b.quality.length-a.quality.length)[0];
- const ids=[...new Set(['quality','coverage','cost','latency'].flatMap(k=>members[k]))],rows=toSnapshot(toRecords(snapshot)).catalogue.filter(m=>ids.includes(m.id));
- for(let i=0;i<6;i++){
-   const cap=`overlap_${i}`,key=`pool-${i}`;manifest.searchIndex.byCapability[cap]={...members,quality:[...members.quality].reverse()};
-   manifest.poolKeys[`cap:${cap}`]=key;await putJSON(bucket,key,i%2?[...rows].reverse():rows);
- }
- await putJSON(bucket,staged.key,manifest);bucket.reads=[];
- const task={weights:Object.fromEntries(Array.from({length:6},(_,i)=>[`overlap_${i}`,3])),needsVision:false,kind:'other',workload:{priority:'balanced'}};
- const index=await(await createSnapshotReader(bucket).view()).loadTask(task,null,null);
- assert.equal(bucket.reads.filter(k=>k.startsWith('pool-')).length,1);
- const expected=new Set(retrieve({search:manifest.searchIndex},task));
- assert.deepEqual(index.models.map(m=>m.id).sort(),snapshot.models.filter(m=>expected.has(m.id)).map(m=>m.id).sort());
- const raw=rows=>rows.map(({cohortSize,...e})=>e);
- for(const m of index.models)assert.deepEqual(raw(m.evidence),raw(snapshot.models.find(x=>x.id===m.id).evidence));
 });
 
 test('catalogue routes are replaced each collection and, if D1 fails, the previous routes stay with a failed source',async()=>{

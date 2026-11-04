@@ -95,13 +95,11 @@ test('unsupported local responses do not create services and disabled discovery 
   assert.equal(calls.length, 0); assert.equal(disabled.discovery.enabled, false);
 });
 
-test('retired history flags explain application scope and sample JSON never runs collectors', async t => {
+test('sample JSON never runs collectors', async t => {
   const f = await fixture(t), cli = resolve('src/cli.mjs');
   const run = args => spawnSync(process.execPath, [cli, 'dash', f.root, ...args], { encoding: 'utf8', timeout: 10000, maxBuffer: 16 * 1024 * 1024 });
-  let result = run(['--access']); assert.equal(result.status, 1); assert.match(result.stderr, /Coding-harness history is no longer collected/);
-  result = run(['--revoke-access', '--json']); assert.equal(result.status, 1); assert.match(result.stderr, /Saved history permissions are ignored/);
   await writeFile(join(f.root, '.openmerit/terminal.json'), '{malformed');
-  result = run(['--demo', '--json']); assert.equal(result.status, 0); assert.equal(JSON.parse(result.stdout).mode, 'sample');
+  const result = run(['--demo', '--json']); assert.equal(result.status, 0); assert.equal(JSON.parse(result.stdout).mode, 'sample');
   assert.doesNotMatch(result.stdout, /Allow Pi|PRIVATE_CONVERSATION/);
 });
 

@@ -1,5 +1,7 @@
 # Testing and validation
 
+**Unreleased cleanup:** source retires the standalone evaluation CLI, legacy JSON recommendation pipeline and unpublished docs website shell. Dated evaluation/API acceptance records below describe historical releases, not current supported commands. Current verification retains agent, MCP, publisher, status, policy and protected-memo coverage; it does not publish or deploy anything.
+
 **Pi adapter — npm 0.1.12 and later:** the Pi 1.5.0 adapter uses native Scout MCP and shared guidance only. Dated acceptance records below describe the packages tested at the time; some mention package exports that have since been removed. Standalone evaluation tests remain separate.
 
 ## Stable 0.1.7 acceptance — 24 October 2026
@@ -58,7 +60,7 @@ npm run verify
 npm pack --dry-run
 ```
 
-`verify` runs workspace tests, syntax checks, strict TypeScript checks and the TypeScript migration ratchet, the package build, demo tests, generated-documentation checks, and whitespace validation. It does not publish a package or deploy the website.
+`verify` runs workspace tests, syntax checks, strict TypeScript checks and the TypeScript migration ratchet, the package build, memo tests, policy/memo build and Markdown-guide checks, Scout tests/build, and whitespace validation. It does not publish a package or deploy the website. `npm run check:worker-types` separately checks generated Worker types; CI also performs packed-install and Pi/terminal smoke checks.
 
 ## Inference Terminal coverage
 

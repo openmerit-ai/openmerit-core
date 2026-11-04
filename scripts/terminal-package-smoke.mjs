@@ -6,7 +6,7 @@ import { once } from 'node:events';
 import { createServer, request as httpRequest } from 'node:http';
 import { mkdtemp, mkdir, writeFile, appendFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir, hostname } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const args = process.argv.slice(2);

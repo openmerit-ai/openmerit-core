@@ -1,133 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { searchRecord } from '../analytics.mjs';
-import { createRecommender } from '../recommend.mjs';
-import { createIndex, recommend } from '../rank.mjs';
-import { capabilities } from '../capabilities.mjs';
-import { decisionQuestions } from '../decisions.mjs';
-import { handleAPI } from '../http.mjs';
 import { createProductAnalytics, sendProductBatch } from '../product-analytics.mjs';
 import { handleMCP } from '../mcp.mjs';
 
-const snapshot = JSON.parse(await readFile(new URL('../snapshot.json', import.meta.url), 'utf8'));
-const index = createIndex(snapshot);
-const answers = (choices = {}) => decisionQuestions.map(q => ({ name: q.name, type: 'choice', confidence: .9, choice: choices[q.name] ?? ({ tools: 'no', memory: 'none', json: 'no', output_format: 'unspecified', output_specificity: 'established', output: 'supported', input_length: 'medium', output_length: 'short', priority: 'balanced', task_kind: 'classify', result_type: 'labels', label_space: 'supplied' }[q.name] ?? q.choices[0].value) }));
-const post = body => new Request('https://example.test/scout/api/recommend', { method: 'POST', headers: { 'content-type': 'application/json', cookie: 'visitor=private', 'user-agent': 'private-device', 'cf-connecting-ip': '192.0.2.99' }, body: JSON.stringify(body) });
 const secret = 'private.person@example.invalid PRIVATE_CANARY_493';
-// Serialize like an analytics transport would, so stored records are detached from live results.
-const record = event => JSON.parse(JSON.stringify(searchRecord(event)));
-const capture = events => event => events.push(event);
-
-test('only explicit prompt and allowlisted public evidence cross the analytics boundary', () => {
-  const poison = { prompt: secret, keywords: [secret], reason: secret, name: secret, provider: secret, error: secret, headers: { authorization: secret }, selection: { modelIds: [secret] } };
-  const result = { ...poison, task: { ...poison, kind: secret, capabilities: [{ id: 'vision', label: secret }, { id: secret }], needsVision: true, outputContract: secret, interpreterVersion: secret, workload: { priority: secret, input: secret, output: secret } }, ranking: { mode: secret, version: secret, workload: poison }, checkedAt: secret,
-    recommendations: [{ ...poison, modelId: secret, endpoint: { id: secret }, reference: { costUsd: null, completionSeconds: null, basis: secret } }] };
-  const safe = record({ result, scope: secret, index: { snapshot: { checkedAt: secret, dataVersion: secret } } });
-  assert.doesNotMatch(JSON.stringify(safe), /PRIVATE_CANARY|example.invalid|authorization|keywords|visitor/); assert.equal(safe.task.kind, 'unknown'); assert.deepEqual(safe.task.capabilities, ['vision']);
-  assert.equal(safe.top5[0].model, null); assert.equal(safe.top5[0].endpoint, null); assert.equal(safe.context.scope, 'unknown');
-});
-
-test('a record keeps the five in order, with true zeros distinct from unknowns', () => {
-  const result = { ranking: { mode: 'measured', version: '5' }, task: { kind: 'extract', outputContract: 'text' }, recommendations: Array.from({ length: 6 }, (_, i) => ({ modelId: `lab/model-${i}`, endpoint: { id: `lab:chat:model-${i}` }, quality: i === 0 ? 0 : 90, reference: { costUsd: i === 0 ? 0 : null, completionSeconds: i === 0 ? 0 : null } })) };
-  const { top5 } = record({ result });
-  assert.deepEqual(top5.map(m => m.model), Array.from({ length: 5 }, (_, i) => `lab/model-${i}`));
-  assert.deepEqual(top5.map(m => m.rank), [1, 2, 3, 4, 5]); assert.equal(top5[0].quality, 0); assert.equal(top5[0].costUsd, 0); assert.equal(top5[1].costUsd, null);
-  assert.equal(top5[0].costBasis, 'calibration'); assert.equal(top5[1].costBasis, 'unknown');
-  result.ranking.mode = 'task-fit'; assert.equal(record({ result }).top5[0].quality, null);
-});
-
-test('real HTTP recommendations retain exact prompts and ordered five without visitor metadata', async () => {
-  const points = []; const observe = capture(points);
-  const run = createRecommender({ apiKey: 'provider-secret', observe, fetcher: async () => Response.json({ answers: answers({ vision: 'required' }) }) });
-  const prompt = `  Classify photos into cat or dog labels.\n${secret}  `;
-  const result = await (await handleAPI(post({ prompt }), index, {}, run)).json();
-  assert.equal(points.length, 1);
-  for (const point of points) {
-    const saved = record(point); assert.equal(saved.prompt, prompt);
-    assert.doesNotMatch(JSON.stringify(saved), /192.0.2.99|private-device|provider-secret|visitor/);
-    assert.doesNotMatch(JSON.stringify({ ...saved, prompt: '' }), /PRIVATE_CANARY|example.invalid/);
-    assert.deepEqual(saved.top5.map(m => [m.model, m.endpoint]), result.recommendations.map(m => [m.modelId, m.endpoint.id]));
-    assert.equal(point.outcome, 'ok'); assert.equal(saved.top5[0].qualityBasis, 'unmeasured');
-  }
-  assert.deepEqual(points.map(p => p.channel), ['api']);
-  await handleAPI(new Request('https://example.test/scout/api/status'), index, {}, run);
-  await handleAPI(post({ prompt: 'bad', extra: secret }), index, {}, run);
-  await handleAPI(post({ prompt: '' }), index, {}, run);
-  assert.equal(points.length, 1, 'status and rejected requests are not searches');
-});
-
-test('empty inventories, clarification and unsupported tasks have distinct empty-list outcomes', async () => {
-  const points = [], observe = capture(points);
-  for (const [choices, ids, expected] of [[{}, [], 'empty'], [{ task_kind: 'visual_unspecified', result_type: 'unspecified' }, undefined, 'clarification'], [{ output: 'unsupported' }, undefined, 'unsupported']]) {
-    const run = createRecommender({ apiKey: 'test', observe, fetcher: async () => Response.json({ answers: answers(choices) }) });
-    await run(index, 'Describe the task', ids);
-    const p = points.at(-1); assert.equal(p.outcome, expected); assert.deepEqual(record(p).top5, []);
-  }
-  assert.equal(record(points[0]).context.scope, 'models');
-});
-
-test('upstream failures and admission limits are counted once without error content', async () => {
-  const points = []; let release; const gate = new Promise(resolve => { release = resolve; });
-  const run = createRecommender({ apiKey: 'test', observe: capture(points), fetcher: async () => { await gate; throw new Error(secret); } });
-  const pending = Array.from({ length: 32 }, () => run(index, secret).catch(e => e.status));
-  await assert.rejects(run(index, secret), e => e.status === 429); release();
-  assert.deepEqual(await Promise.all(pending), Array(32).fill(503)); assert.equal(points.length, 33);
-  assert.equal(points.filter(p => p.outcome === 'rate_limited').length, 1); assert.equal(points.filter(p => p.outcome === 'interpretation_error').length, 32);
-  assert.ok(points.every(p => record(p).prompt === secret));
-  assert.doesNotMatch(JSON.stringify(points.map(p => ({ ...record(p), prompt: '' }))), /PRIVATE_CANARY|example.invalid/); assert.ok(points.every(p => record(p).top5.length === 0));
-});
-
-test('an analytics outage cannot change success or mask an interpretation failure', async () => {
-  const observe = () => { throw new Error(secret); };
-  const good = createRecommender({ apiKey: 'test', observe, fetcher: async () => Response.json({ answers: answers() }) });
-  assert.ok((await good(index, 'Classify messages')).recommendations.length);
-  const bad = createRecommender({ apiKey: 'test', observe, fetcher: async () => { throw new Error('upstream unavailable'); } });
-  await assert.rejects(bad(index, 'Classify messages'), e => e.status === 503);
-});
-
-test('evidence snapshots retain benchmark, calibration, endpoint, pricing and speed sources for each rank', () => {
-  const prompt = 'Write a function to parse escaped CSV fields.';
-  const result = recommend(index, prompt, Date.parse(snapshot.checkedAt), {kind:'code',weights:{coding:3},workload:{input:'short',output:'medium'}});
-  const saved = record({ result, prompt });
-  assert.equal(saved.top5.length, 5);
-  saved.top5.forEach((m, i) => {
-    const original = result.recommendations[i];
-    assert.deepEqual(m.evidence.benchmarks, JSON.parse(JSON.stringify(original.evidence)));
-    assert.equal(m.evidence.endpoint.url, original.endpoint.url);
-    assert.equal(m.evidence.pricing.inputPerMillion, original.pricing.inputPerMillion);
-    assert.equal(m.evidence.pricing.url, original.pricing.url);
-    assert.equal(m.evidence.speed?.url, original.speed?.url);
-  });
-  // Source records refresh later; this stored search must remain unchanged.
-  const originalScore = saved.top5[0].evidence.benchmarks[0].score;
-  result.recommendations[0].evidence[0].score = -999;
-  assert.equal(saved.top5[0].evidence.benchmarks[0].score, originalScore);
-});
-
-test('measured evidence includes the calibration protocol and excludes arbitrary extra fields', () => {
-  const result = { ranking: { mode: 'measured', profile: { id: 'fixture', protocolSha256: 'abc123', casesPerModel: 8, extra: secret } }, recommendations: [{ modelId: 'lab/model', endpoint: { id: 'lab:chat:model', protocol: 'chat', url: 'https://provider.test/model', api: secret, headers: { authorization: secret } }, measured: { cases: 8, quality: .9, meanCostUsd: .01, medianSeconds: 1, availability: { successes: 8, attempts: 8, rate: 1 }, extra: secret }, evidence: [{ benchmark: 'Test', score: 90, url: 'https://benchmark.test', observedAt: '2026-10-15', extra: secret }] }] };
-  const saved = record({ prompt: 'A task', result });
-  const e = saved.top5[0].evidence;
-  assert.equal(e.calibration.cases, 8); assert.equal(e.calibration.protocol.protocolSha256, 'abc123');
-  assert.equal(e.calibration.availability.successes, 8); assert.equal(e.benchmarks[0].score, 90);
-  assert.doesNotMatch(JSON.stringify(saved), /PRIVATE_CANARY|authorization/);
-});
-
-test('specialist evidence retains pinned model-card and contract sources without claimed task accuracy', async () => {
-  const points = [];
-  const run = createRecommender({ apiKey: 'test', observe: capture(points), fetcher: async () => Response.json({ answers: answers({ vision: 'required' }) }) });
-  const result = await run(index, 'Classify images into cat or dog labels');
-  const saved = record(points[0]);
-  saved.top5.forEach((m, i) => {
-    const original = result.recommendations[i];
-    assert.equal(m.quality, null); assert.equal(m.evidence.calibration, null);
-    assert.deepEqual(m.evidence.taskFit, original.taskFit);
-    assert.equal(m.evidence.endpoint.configuration, original.endpoint.configuration);
-    assert.equal(m.evidence.endpoint.cardURL, original.endpoint.cardURL);
-    assert.deepEqual(m.evidence.reportedEvaluations, original.endpoint.reportedEvaluations ?? []);
-  });
-});
 
 test('browser analytics links an OAuth return, rotates on account switches, and respects opt-outs without leaking stale events', async t => {
   const storage = () => { const data = new Map(); return { getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value), removeItem: key => data.delete(key) }; };
@@ -191,65 +67,6 @@ test('browser analytics links an OAuth return, rotates on account switches, and 
     reloaded.track('scout_visited'); await settle();
     assert.deepEqual(controls.at(-1), { enabled: false }, 'privacy controls contain no event, profile or anonymous ID');
     assert.equal(sent.length, enabledEvents);
-  }
-});
-
-test('PostHog content obeys rollout and privacy gates, stays in expiring AI fields, and preserves every rank', async t => {
-  const sent = [], pending = [], flush = async () => { while (pending.length) await Promise.all(pending.splice(0)); };
-  t.mock.method(globalThis, 'fetch', async (_, options) => { sent.push(...JSON.parse(options.body).batch); return new Response(null, { status: 200 }); });
-  const base = { POSTHOG_PROJECT_TOKEN: 'phc_fixture', POSTHOG_HOST: 'https://eu.i.posthog.com', POSTHOG_ENVIRONMENT: 'test',
-    POSTHOG_CAPTURE_CONTENT: 'true', CLERK_SECRET_KEY: 'fixture', CLERK_WEBHOOK_SIGNING_SECRET: 'fixture', POSTHOG_PERSONAL_API_KEY: 'fixture', POSTHOG_PROJECT_ID: '123',
-    SCOUT_ACCOUNTS: { idFromName: x => x, get: () => ({ capture: async batch => sent.push(...batch), preference: async () => {} }) } };
-  const prompt = 'Classify invoices for person@example.invalid with API_KEY=private-canary at https://private.invalid/?secret=yes';
-  const result = { tasks: [{ sourceText: prompt, layers: { input: { origin: 'explicit', text: prompt } }, slots: [{
-    task: { kind: 'classify' }, ranking: { mode: 'benchmarks' }, recommendations: Array.from({ length: 5 }, (_, i) => ({
-      modelId: `lab/model-${i}`, quality: i === 0 ? 0 : 95, reference: { costUsd: i === 0 ? 0 : null, completionSeconds: i + 1 },
-      endpoint: { id: `route:${i}`, semanticMatch: { reason: 'PRIVATE_DERIVED_TEXT' }, url: 'https://public.test/model?private-key=bad#private' },
-      evidence: Array.from({ length: 50 }, () => ({ benchmark: 'A'.repeat(2000), score: 80, url: 'https://public.test/eval?secret=bad' })),
-    })) }] }] };
-  for (const [headers, changes, expectedContent, expectedCount] of [
-    [{}, {}, false, 3], [{ 'X-Scout-Analytics-Content': 'on' }, {}, true, 3],
-    [{ 'X-Scout-Client': 'web' }, {}, false, 3],
-    [{ 'X-Scout-Client': 'web' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, true, 3],
-    [{ 'X-Scout-Client': 'web', 'X-Scout-Analytics-Content': 'off' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 3],
-    [{ 'X-Scout-Client': 'web', 'X-Scout-Analytics-Content': 'invalid' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 3],
-    [{ 'X-Scout-Client': 'cli' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 3],
-    [{ 'X-Scout-Client': 'agent' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 3],
-    [{}, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 3],
-    [{ 'X-Scout-Client': 'web' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true', POSTHOG_CAPTURE_CONTENT: 'false' }, false, 3],
-    [{ 'X-Scout-Client': 'web' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true', POSTHOG_PERSONAL_API_KEY: '' }, false, 3],
-    [{ 'X-Scout-Client': 'web', DNT: '1' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 0],
-    [{ 'X-Scout-Client': 'web', 'Sec-GPC': '1' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 0],
-    [{ 'X-Scout-Client': 'web', 'X-Scout-Analytics': 'off' }, { SCOUT_BETA_EVALUATION_LOGGING: 'true' }, false, 0],
-    [{ 'X-Scout-Analytics-Content': 'on' }, { POSTHOG_CAPTURE_CONTENT: 'false' }, false, 3],
-    [{ 'X-Scout-Analytics-Content': 'on' }, { POSTHOG_PERSONAL_API_KEY: '' }, false, 3],
-    [{ 'X-Scout-Analytics-Content': 'on', 'X-Scout-Analytics': 'off' }, {}, false, 0],
-    [{ 'X-Scout-Analytics-Content': 'on', DNT: '1' }, {}, false, 0],
-    [{ 'X-Scout-Analytics-Content': 'on', 'Sec-GPC': '1' }, {}, false, 0],
-  ]) {
-    sent.length = 0;
-    const analytics = createProductAnalytics(new Request('https://example.test/scout/api/recommend', { headers }), { ...base, ...changes }, { waitUntil: p => pending.push(p) });
-    analytics.identify('user_fixture');
-    const credentials = JSON.stringify({ token: 'CANARY_JSON_TOKEN', password: 'CANARY_ESCAPED"QUOTE', 'api-key': 'CANARY_JSON_KEY' });
-    analytics.observeSearch({ prompt: `${prompt} ${credentials}`, result, outcome: 'ok', durationMs: 23 }); await flush();
-    assert.equal(sent.length, expectedCount);
-    if (!expectedCount) continue;
-    const trace = sent.find(e => e.event === '$ai_trace').properties, details = sent.find(e => e.event === 'scout_search_details').properties;
-    assert.equal(trace.content_captured, expectedContent);
-    assert.equal(trace.$ai_input_state !== undefined, expectedContent);
-    assert.equal(details.layers, undefined);
-    if (expectedContent) { assert.match(trace.$ai_input_state.prompt, /Classify invoices/); assert.match(trace.$ai_input_state.tasks[0].layers.input.text, /\[EMAIL\]/); }
-    // Model PostHog's documented split: no user prose may survive in ordinary
-    // event properties after the expiring AI input/output fields are removed.
-    const retained = sent.map(e => ({ ...e, properties: Object.fromEntries(Object.entries(e.properties).filter(([key]) => !e.event.startsWith('$ai_') || !['$ai_input_state', '$ai_output_state'].includes(key))) }));
-    assert.doesNotMatch(JSON.stringify(retained), /Classify invoices/);
-    assert.doesNotMatch(JSON.stringify(sent), /CANARY_JSON|CANARY_ESCAPED|QUOTE/);
-    assert.doesNotMatch(JSON.stringify(sent), /person@example|private-canary|private.invalid|private-key|PRIVATE_DERIVED|secret=bad/);
-    assert.equal(details.evidence_truncated, true);
-    assert.deepEqual(details.top5.map(m => m.model), ['lab/model-0', 'lab/model-1', 'lab/model-2', 'lab/model-3', 'lab/model-4']);
-    assert.equal(details.top5[0].costUsd, 0); assert.equal(details.top5[1].costUsd, null); assert.equal(details.top5[0].quality, 0);
-    assert.ok(Buffer.byteLength(JSON.stringify(details)) < 250000);
-    assert.equal(analytics.response(new Response('ok')).headers.get('x-scout-trace-id'), trace.trace_id);
   }
 });
 
@@ -377,37 +194,6 @@ test('native web, feedback and CLI errors preserve correlation without bypassing
   await ingest('scout_recommendation_feedback', { rating: 'useful', trace_id }, { DNT: '1' });
   await ingest('scout_recommendation_feedback', { rating: 'useful', trace_id }, {}, { ...env, SCOUT_ACCOUNTS: { idFromName: v => v, get: () => ({ capture: async () => {} }) } });
   assert.equal(sent.length, before, 'opt-out and the account gate suppress every derived event');
-});
-
-test('actual computation attempts, failed stages and HTTP failures have native diagnostics', async t => {
-  const sent = [], pending = [], env = { POSTHOG_PROJECT_TOKEN: 'phc_fixture', POSTHOG_HOST: 'https://eu.i.posthog.com', POSTHOG_ENVIRONMENT: 'test' };
-  t.mock.method(globalThis, 'fetch', async (_, options) => { sent.push(...JSON.parse(options.body).batch); return new Response(null, { status: 200 }); });
-  const trace = crypto.randomUUID(), retry = crypto.randomUUID(), startedAt = '2026-10-22T01:02:03.000Z';
-  const analytics = createProductAnalytics(new Request('https://example.test/scout/api/recommend', { headers: { 'X-Scout-Trace-Id': trace, 'X-Scout-Retry-Of': retry, 'X-Scout-Client': 'web' } }), env, { waitUntil: p => pending.push(p) });
-  const span = (stage, rest = {}) => ({ id: crypto.randomUUID(), stage, durationMs: 43, startedAt, failed: false, ...rest });
-  const attempt = rest => ({ id: crypto.randomUUID(), operation: 'responses', durationMs: 19, startedAt, ...rest });
-  const diagnostics = { failure: { stage: 'decisions', code: 'rate_limited', providerStatus: 429 }, pendingStages: ['decisions'],
-    spans: [span('decisions', { failed: true }), span('decisions', { pending: true }), span('decisions')],
-    generations: [attempt({ code: 'rate_limited', providerStatus: 429 }), attempt({ model: 'gpt-6-luna', inputTokens: 83, outputTokens: 7, cachedInputTokens: 0 }), attempt({ operation: 'embeddings', inputTokens: 11, model: 'text-embedding-3-small' })] };
-  analytics.observeSearch({ prompt: secret, outcome: 'interpretation_error', durationMs: 72, error: new TypeError(secret), diagnostics });
-  analytics.complete(Response.json({ error: secret }, { status: 503 }));
-  while (pending.length) await Promise.all(pending.splice(0));
-  const search = sent.find(e => e.event === 'scout_search_completed').properties;
-  assert.equal(search.trace_id, trace); assert.equal(search.retry_of, retry); assert.equal(search.failure_stage, 'decisions'); assert.equal(search.failure_code, 'rate_limited'); assert.equal(search.provider_status, 429);
-  assert.deepEqual(sent.filter(e => e.event === '$ai_span').map(e => e.properties.stage_state), ['failed', 'incomplete', 'completed']);
-  const generations = sent.filter(e => e.event === '$ai_generation');
-  assert.equal(generations.length, 2); assert.equal(generations[0].properties.$ai_input_tokens, undefined);
-  assert.equal(generations[1].properties.$ai_input_tokens, 83); assert.equal(generations[1].properties.$ai_output_tokens, 7); assert.equal(generations[1].properties.$ai_cache_read_input_tokens, 0);
-  assert.equal(generations[1].properties.$ai_total_cost_usd, undefined); assert.equal(generations[1].properties.$ai_parent_id, trace); assert.equal(generations[1].timestamp, startedAt);
-  assert.equal(sent.find(e => e.event === '$ai_embedding').properties.$ai_input_tokens, 11);
-  assert.equal(sent.find(e => e.event === 'scout_request_completed').properties.outcome, 'error');
-  assert.equal(sent.find(e => e.event === 'scout_request_completed').properties.http_status, 503);
-  assert.equal(sent.filter(e => e.event === '$exception').length, 1);
-  assert.doesNotMatch(JSON.stringify(sent), /PRIVATE_CANARY|example.invalid/);
-  for (const cache of ['hit', 'shared']) analytics.observeSearch({ result: { tasks: [] }, outcome: 'empty', durationMs: 3, diagnostics: { ...diagnostics, failure: undefined, cache } });
-  while (pending.length) await Promise.all(pending.splice(0));
-  assert.equal(sent.filter(e => e.event === '$ai_generation').length, 2, 'cached/shared requests cannot double-count provider usage');
-  assert.equal(sent.filter(e => e.event === 'scout_search_completed').length, 3, 'each request still counts as one search');
 });
 
 test('MCP invocations preserve installation correlation and classify logical failures, not just HTTP status', async t => {

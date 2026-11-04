@@ -1,24 +1,14 @@
 import { labels, registry as defaultRegistry } from './registry.mjs';
-import { attachSearch } from './search-index.mjs';
-import { orderCandidates, benchmarkFamily, linkFamilies, requiredEvidenceTags, evidenceFallbacks } from './comparison.mjs';
-import { measuredCandidates,attachTaskObservations } from './task-evidence.mjs';
-import { providerURL } from './provider-links.mjs';
-import { describeSources, calibrationStatus } from './source-details.mjs';
-import { recommendationID, contractModels, expandEndpoints, endpointSupports, bestEndpointPerModel, specializedKinds, taskEndpointResult } from './endpoints.mjs';
-import { discoverSpecialists } from './huggingface.mjs';
-import { selectPareto } from './pareto.mjs';
+import { linkFamilies } from './comparison.mjs';
+import { describeSources } from './source-details.mjs';
+import { contractModels } from './endpoints.mjs';
 
-const round = (value, places = 2) => Number.isFinite(value) ? Math.round(value * 10 ** places) / 10 ** places : null;
-// Workers can freeze the clock during synchronous execution. Zero is not a timing measurement.
-const elapsed = start => { const duration = performance.now() - start; return duration > 0 ? Math.max(.01, round(duration)) : null; };
 const staleSources = (snapshot, now) => snapshot.sources.some(s => {
   if (s.refreshPolicy === 'manual-contract-review' || s.refreshPolicy === 'retained') return false;
   const hours = s.maxAgeHours ?? snapshot.registry?.policy.maxSourceAgeHours ?? defaultRegistry.policy.maxSourceAgeHours;
   return !Number.isFinite(Date.parse(s.checkedAt)) || now - Date.parse(s.checkedAt) > hours * 3600_000;
 });
-export function selectSnapshot(seed, saved) {
-  return (seed.dataVersion ?? 1) > (saved.dataVersion ?? 1) || Date.parse(seed.checkedAt) > Date.parse(saved.checkedAt) || seed.sources.some(source => !saved.sources.some(s => s.id === source.id)) ? seed : saved;
-}
+
 export function createIndex(snapshot) {
   if (snapshot.version !== 1 || (!snapshot.models?.length && !snapshot.publicStatus)) throw new Error('Unsupported Scout index.');
   const benchmarks = new Map(linkFamilies(snapshot.benchmarks).map(b => [b.id, b]));
@@ -31,7 +21,7 @@ export function createIndex(snapshot) {
     unavailable: interpreted.filter(b => b.interpretation.status === 'unavailable').length };
   const index = { snapshot, benchmarks, models, benchmarkInterpretation };
   index.cachedStatus = snapshot.publicStatus ?? computeIndexStatus(index);
-  return snapshot.servingEngine==='evidence'?index:attachSearch(index);
+  return index;
 }
 
 function computeIndexStatus(index, now = Date.now()) {
@@ -44,135 +34,12 @@ function computeIndexStatus(index, now = Date.now()) {
   return { checkedAt: snapshot.checkedAt, stale: staleSources(snapshot, now), degraded: snapshot.sources.some(s => s.status === 'failed'),
     benchmarks: snapshot.benchmarks.length, benchmarksWithResults: new Set(models.flatMap(m => m.evidence.map(e => e.benchmark))).size, benchmarkInterpretation: index.benchmarkInterpretation,
     models: models.length, providers, endpoints: (snapshot.catalogue ?? models).reduce((n, m) => n + (m.endpoints?.length ?? 1), 0) + contractModels(snapshot).length, independentModels: (snapshot.catalogue ?? []).filter(m => m.endpoints?.some(e => e.source !== 'models')).length, availableModels: snapshot.availableModels, measurements: models.reduce((sum, m) => sum + m.evidence.length, 0),
-    sources: describeSources(index), calibration: calibrationStatus(now), specialistRepositories: snapshot.specialists?.length ?? 0, wordCloud: Object.entries(capabilities).map(([id, c]) => ({ id, label: c.label, keywords: c.terms, benchmarks: snapshot.benchmarks.filter(b => b.tags.includes(id)).length, models: models.filter(m => m.evidence.some(e => index.benchmarks.get(e.benchmark)?.tags.includes(id))).length })), refreshIntervalSeconds: 3600 };
+    sources: describeSources(index), specialistRepositories: snapshot.specialists?.length ?? 0, wordCloud: Object.entries(capabilities).map(([id, c]) => ({ id, label: c.label, keywords: c.terms, benchmarks: snapshot.benchmarks.filter(b => b.tags.includes(id)).length, models: models.filter(m => m.evidence.some(e => index.benchmarks.get(e.benchmark)?.tags.includes(id))).length })), refreshIntervalSeconds: 3600 };
 }
 
 export function indexStatus(index, now = Date.now()) {
   const status = index.cachedStatus ?? computeIndexStatus(index, now);
-  return { ...status, calibration: calibrationStatus(now), stale: staleSources(index.snapshot, now), degraded: index.snapshot.sources.some(s=>s.status==='failed') };
-}
-
-// HTTP provides a server-interpreted task. Client-supplied task objects
-// are never accepted. Every search uses the same semantic task contract.
-export function recommend(index, prompt, now = Date.now(), interpretedTask = null, taskEvidence = undefined, modelIds = null, endpointIds = null) {
-  if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('Describe a task in 1–4,000 characters.');
-  if (!interpretedTask) throw new Error('Scout requires semantic task interpretation.');
-  const capabilities = labels(index.snapshot.registry ?? defaultRegistry);
-  const start = performance.now(), task = interpretedTask, status = indexStatus(index, now);
-  const warnings = [];
-  if (status.stale) warnings.push('Some source data is overdue for its refresh policy.');
-  if (status.degraded) warnings.push(`Source refresh incomplete: ${status.sources.filter(s => s.status === 'failed').map(s => s.name).join(', ')}. Last available evidence is retained with its original timestamps.`);
-  if (task.fallback) warnings.push('No specific capability matched. These are general-purpose candidates.');
-  if (task.specialistMatch?.status === 'unavailable') warnings.push('Specialist compatibility could not be checked. Hugging Face candidates are omitted for this search.');
-  if (task.unsupported) return { prompt: prompt.trim(), task, ...status, selection: { modelIds, endpointIds }, recommendations: [], warnings: ['Scout covers text responses and visual understanding. It does not rank image, video, audio generation, or transcription models.'], elapsedMs: elapsed(start) };
-  if (task.clarification) return { prompt: prompt.trim(), task, ...status, selection: { modelIds, endpointIds }, recommendations: [], specialists: { candidates: [] }, warnings: [task.clarification.question], ranking: { version: '6', mode: 'clarification', profile: null }, elapsedMs: elapsed(start) };
-  // Open or uncertain identification needs name-generating endpoints and relevant
-  // evidence, not the automatic task-fit advantage given to fixed-choice APIs.
-  const openIdentification = task.kind === 'classify' && task.labelSpace !== 'supplied';
-  const typedTask = specializedKinds.has(task.kind) && !openIdentification && !task.needsTools && !task.needsMemory;
-  if (typedTask && (task.servingEngine !== 'evidence' || ['detect','segment'].includes(task.kind))) return taskEndpointResult(index, prompt, task, modelIds, status, endpointIds);
-  if (openIdentification) warnings.push('No supplied answer-label set was established. Ranked generative endpoints using relevant public evidence; fixed-choice APIs and label-dependent classifiers are excluded. These benchmarks do not establish accuracy on the specific identities in your task.');
-  const totalWeight = Object.values(task.weights).reduce((a, b) => a + b, 0);
-  // An accepted benchmark counts for the ability the task-specific check confirmed,
-  // not every ability its hourly interpretation lists.
-  const assessed = new Map((task.evidenceMatch?.assessments ?? []).filter(a => a.capability && task.evidenceMatch.ids.includes(a.benchmark)).map(a => [a.benchmark, a]));
-  const forTask = definition => definition && assessed.has(definition.id) ? { ...definition, tags: [assessed.get(definition.id).capability], relevance: assessed.get(definition.id).relevance ?? 'generic' } : definition;
-  // Without tool calls, agentic evaluations mostly score the tool loop. Use
-  // them only when nothing else was accepted; coding evaluations run in such
-  // harnesses by design and keep them.
-  const agentic = new Set(task.servingEngine === 'evidence' && !task.needsTools && !task.weights.agents && !task.weights.tools && !task.weights.coding ? (task.evidenceMatch?.ids ?? []).filter(id => index.benchmarks.get(id)?.tags.some(t => t === 'agents' || t === 'tools')) : []);
-  if (agentic.size && agentic.size === task.evidenceMatch.ids.length) agentic.clear();
-  if (agentic.size) warnings.push(`Agentic tool-use evaluations (${[...agentic].map(id => index.benchmarks.get(id).name).join(', ')}) are not used: this task does not call tools.`);
-  let candidates = [];
-  for (const model of expandEndpoints(index.models, index.snapshot.checkedAt, modelIds !== null)) {
-    if (endpointIds !== null && !endpointIds.includes(model.endpoint.id)) continue;
-    if (modelIds !== null && !modelIds.includes(model.id)) continue;
-    if (!endpointSupports(model, task)) continue;
-    const evidence = model.evidence.map(e => ({ ...e, definition: forTask(index.benchmarks.get(e.benchmark)) })).filter(e => e.definition && !e.definition.superseded && !agentic.has(e.benchmark) && (task.evidenceMatch?task.evidenceMatch.ids.includes(e.benchmark):e.definition.tags.some(t => task.weights[t])));
-    const coverage = Object.entries(task.weights).reduce((sum, [tag, weight]) => sum + (evidence.some(e => e.definition.tags.includes(tag)) ? weight : 0), 0) / totalWeight;
-    const blendedPrice = Number.isFinite(model.inputPrice) && Number.isFinite(model.outputPrice) ? (model.inputPrice * 3 + model.outputPrice) / 4 : null; // Compatibility field, no longer scored.
-    evidence.sort((a, b) => {
-      if(task.evidenceMatch){const assessment=id=>task.evidenceMatch.assessments.find(e=>e.benchmark===id)?.applicability;const direct=id=>assessment(id)==='direct'?2:assessment(id)==='proxy'?1:0;const tier=e=>({direct:2,domain:1})[e.definition.relevance]??0;const delta=direct(b.benchmark)-direct(a.benchmark)||tier(b)-tier(a);if(delta)return delta;}
-      const weight = e => e.definition.tags.reduce((sum, t) => sum + (task.weights[t] ?? 0), 0);
-      return weight(b) - weight(a) || b.cohortSize - a.cohortSize || a.benchmark.localeCompare(b.benchmark);
-    });
-    // Compact responses must show why each hard evidence requirement was satisfied.
-    const requiredTags = requiredEvidenceTags(task);
-    const requiredEvidence = [...new Set(requiredTags.map(tag => evidence.find(e => e.definition.tags.includes(tag))).filter(Boolean))];
-    evidence.splice(0, evidence.length, ...requiredEvidence, ...evidence.filter(e => !requiredEvidence.includes(e)));
-    candidates.push({ model, coverage, blendedPrice, evidence,preference:task.preferenceScores?.[model.endpoint.id]??0 });
-  }
-  // Direct task observations can establish a capability absent from public feeds.
-  // The benchmark fallback still requires explicit document/tool/memory evidence.
-  const calibration=task.servingEngine==='evidence'?attachTaskObservations(candidates,task,now,taskEvidence):null;
-  if(calibration?.expired)warnings.push(`Calibration results for ${calibration.expired.label} expired on ${calibration.expired.expiresAt.slice(0,10)} and are excluded until re-measured. This shortlist uses public benchmarks only.`);
-  const has = (c, tag) => c.evidence.some(e => e.definition.tags.includes(tag));
-  const benchmarkCandidates = candidates.filter(c => c.evidence.length && requiredEvidenceTags(task).every(tag => has(c, tag) || evidenceFallbacks[tag] && has(c, evidenceFallbacks[tag])));
-  for (const c of benchmarkCandidates) c.missingEvidence = requiredEvidenceTags(task).filter(tag => !has(c, tag));
-  const benchmarkEligible = task.servingEngine==='evidence'?new Set(benchmarkCandidates.map(c=>c.model.id)).size:benchmarkCandidates.length;
-  const measured = task.servingEngine==='evidence'?null:measuredCandidates(candidates, task, now, taskEvidence);
-  candidates = measured ? measured.candidates : task.servingEngine==='evidence'?benchmarkCandidates:bestEndpointPerModel(benchmarkCandidates, task);
-  // Contract compatibility cannot outrank measured evidence merely because an
-  // endpoint has a native label/decision API. Preserve an explicitly unmeasured
-  // shortlist only when no comparable benchmark candidates can be established.
-  if (!candidates.length && typedTask) return taskEndpointResult(index, prompt, task, modelIds, status, endpointIds);
-  const eligibleModels=new Set(candidates.map(c=>c.model.id)).size;
-  // Document-evidenced models are ranked among themselves first, so general
-  // image scores cannot push them out of the quality band. Image-only fallbacks
-  // only fill remaining places, ranked separately and without tradeoff labels.
-  const direct = candidates.filter(c => !c.missingEvidence?.length), fallbacks = candidates.filter(c => c.missingEvidence?.length);
-  let comparison;
-  if (task.servingEngine==='evidence' && direct.length && fallbacks.length) {
-    comparison = selectPareto(direct, task);
-    const remaining = 5 - new Set(direct.map(c => c.model.id)).size;
-    if (remaining > 0) { selectPareto(fallbacks, task, { limit: remaining }); for (const c of fallbacks) c.pick = []; } else fallbacks.length = 0;
-    candidates = [...direct, ...fallbacks];
-  } else comparison = task.servingEngine==='evidence'?selectPareto(candidates,task):orderCandidates(candidates, task);
-  if(comparison.frontier)warnings.push(comparison.frontier.qualityGate.status==='proxy-qualified'
-    ? `Candidates are not credibly worse than the strongest model on one common benchmark-quality estimate, then ${({quality:'ordered by estimated quality',cost:'ordered by lowest known reference cost',latency:'ordered by fastest known reference time'})[comparison.frontier.priority]??'labelled as strongest, best value and fastest where supported, then ordered by estimated quality'}. This is a relative evidence policy, not proof of sufficient quality or a requested accuracy target on your task.`
-    : 'No comparable quality cohort can qualify these candidates. This is an unverified discovery shortlist ordered by known estimated cost, not a claim that the models meet your required quality.');
-  if(comparison.frontier)for(const c of candidates)if(c.model.speed?.scope==='model'&&c.reference.seconds!==null){warnings.push('Some reference times use model-level Artificial Analysis measurements rather than the selected endpoint; actual endpoint latency may differ.');break;}
-  // One accepted benchmark cannot separate tasks that need the same ability.
-  if(comparison.frontier?.qualityBenchmarks===1){const name=candidates[0]?.evidence[0]?.definition.name;warnings.push(`Quality rests on a single benchmark${name?` (${name})`:''}. It cannot distinguish tasks that need the same ability, so similar tasks receive the same shortlist.`);}
-  if(comparison.frontier?.scope==='partial')warnings.push('The frontier is provisional: some configurations have missing objectives or incomparable evaluation coverage. No global three-objective frontier is established.');
-  const selected = [], selectedIDs = new Set();
-  for (const c of candidates) { if (selectedIDs.has(c.model.id)) continue; selectedIDs.add(c.model.id); selected.push(c); if (selected.length === 5) break; }
-  const fallback = selected.filter(c => c.missingEvidence?.includes('documents'));
-  if (fallback.length) warnings.push(`${fallback.map(c => c.model.name).join(', ')} ${fallback.length === 1 ? 'has' : 'have'} no document-reading benchmark yet and ${fallback.length === 1 ? 'qualifies' : 'qualify'} on general image-understanding results${selected.length > fallback.length ? ' and ' + (fallback.length === 1 ? 'is' : 'are') + ' listed after models with document results' : ''}. Evaluate ${fallback.length === 1 ? 'it' : 'them'} on your own documents.`);
-  const unmeasured = selected.filter(c => c.lacksSpecificEvidence);
-  if (unmeasured.length) warnings.push(`${unmeasured.map(c => c.model.name).join(', ')} ${unmeasured.length === 1 ? 'has' : 'have'} no score on ${unmeasured[0].lacksSpecificEvidence === 2 ? 'a benchmark of this task' : "a benchmark from this task's domain"}, so ${unmeasured.length === 1 ? 'it is' : 'they are'} listed after models that have one.`);
-  if (selected.length < 5) warnings.push(comparison.frontier?`${selected.length} distinct models remain after eligibility and supported frontier selection. Scout does not fill gaps with dominated or unsupported picks.`:`Only ${selected.length} eligible models have relevant evidence. Scout does not fill gaps with unsupported picks.`);
-  if (selected.some(c => c.reference.cost === null)) warnings.push('Measured cost is unavailable for some candidates; unknown charges earn no cost advantage.');
-  if (selected.some(c => c.reference.seconds === null)) warnings.push('Reference latency is unavailable for some models; missing measurements earn no speed advantage.');
-  if (selected.some(c => c.comparisonCoverage < .8)) warnings.push('Some candidates lack shared benchmarks for all task capabilities. Pairwise comparisons use only overlapping evidence; inspect comparison coverage.');
-  if (measured) warnings.push(`Ranked among ${candidates.length} eligible models tested on ${measured.profile.label}, using a separate calibration set. These are representative tasks, not your prompt or a search of every available model. ${measured.profile.qualityBasis} Cost and speed reflect the tested OpenRouter routes and may change.`);
-  else warnings.push('Cost and completion time use a disclosed reference workload, not a measured execution of your prompt. Image processing, hidden reasoning, caching and endpoint differences can change actual charges and latency.');
-  if (selected.some(c => c.evidence.some(e => e.definition.source === 'openvlm'))) warnings.push(`Some visual evidence comes from OpenVLM’s ${index.snapshot.sources.find(s => s.id === 'openvlm')?.publishedAt ?? 'undated'} snapshot. Newer models may lack comparable document results.`);
-  if (task.needsStructured && !measured) warnings.push('JSON support is checked against the model catalogue. Instruction-following benchmarks are a proxy, not a test of your exact schema.');
-  if (task.weights.tools) warnings.push('Tool-calling support and relevant evaluations are checked. Reliability still depends on your function definitions, arguments and execution loop.');
-  if (task.weights.memory && !measured) warnings.push('Memory evidence is BFCL v4 with external key-value, vector and summarization stores. It is not built-in memory or a test of your storage system; newer models without comparable results are excluded when persistent memory is required.');
-  if (task.requirements?.memory === 'session') warnings.push('The prompt requires conversation state within a session. This is distinct from persistent-memory benchmarks.');
-  if (task.uncertainty?.length) warnings.push(`Some task requirements are uncertain: ${task.uncertainty.join(', ')}. Inspect the interpretation and evaluate the shortlist on your examples.`);
-  const recommendations = selected.map((c, i) => {
-    const { model } = c;
-    const tags = [...new Set(c.evidence.flatMap(e => e.definition.tags).filter(t => task.weights[t]))];
-    const families = new Set(c.evidence.map(e => benchmarkFamily(e.definition)));
-    const confidence = c.measured ? 'small calibration sample' : c.coverage >= .8 && families.size >= 4 ? 'broader evidence' : 'limited evidence';
-    return { rank: i + 1, id: recommendationID(model), modelId: model.id, name: model.name, provider: model.provider, endpoint: model.endpoint, score: round(c.score * 100), quality: c.quality===null?null:round(c.quality * 100),
-      evidenceCoverage: round(c.coverage * 100), confidence, reason: c.measured ? `${c.measured.cases} calibration cases: ${round(c.measured.quality * 100)}% mean task-check accuracy, ${c.measured.validSchema}/${c.measured.cases} usable outputs. ${c.measured.availability ? `Request success across calibration tasks: ${c.measured.availability.successes}/${c.measured.availability.attempts}; repeated failures cap the quality signal. ` : ''}Compared with ${c.comparedModels} tested models. Independent test results are not used in this ranking.` : `${tags.map(t => (capabilities[t]?.label ?? t).toLowerCase()).join(', ')}: ${c.evidence.length} results across ${families.size} benchmark families. Compared on shared benchmarks with ${c.comparedModels} eligible models. ${c.reference.seconds !== null ? 'Reference first-answer delay and generation time included.' : 'Reference latency unavailable.'}`,
-      pricing: { inputPerMillion: round(model.inputPrice, 4), outputPerMillion: round(model.outputPrice, 4), blendedPerMillion: round(c.blendedPrice, 4), currency: 'USD', basis: model.endpoint?.pricingBasis ?? 'Advertised token rates; excludes caching, reasoning and modality-specific charges.', url: model.endpoint?.url ?? providerURL(model.id) },
-      measured: c.measured ? { ...c.measured, profile: measured.profile.id, measuredAt: measured.profile.measuredAt, url: measured.profile.url } : null,
-      comparison: { comparedModels: c.comparedModels, capabilityCoverage: round(c.comparisonCoverage * 100), ...(comparison.frontier && Number.isFinite(c.scopeQuality) ? { qualityEstimate: round(c.scopeQuality * 100), qualityStandardError: round(c.qualitySE * 100) } : {}) },
-      ...(c.pick?.length ? { pick: c.pick } : {}), ...(c.missingEvidence?.length ? { missingEvidence: c.missingEvidence } : {}),
-      reference: { inputTokens: measured ? null : comparison.workload.inputTokens, outputTokens: measured ? null : comparison.workload.outputTokens, costUsd: c.reference.cost === null ? null : round(c.reference.cost, 6), completionSeconds: c.reference.seconds === null ? null : round(c.reference.seconds),
-        basis: measured ? 'Mean reported charge and median full task time on the calibration cases, including errors. Unknown charges are excluded from the cost mean and disclosed by costKnownCalls. Not a quote for your prompt.' : 'Illustrative workload; advertised token rates and published first-answer delay + output tokens / throughput. Not an exact task quote or measured endpoint latency.' },
-      speed: model.speed, context: model.context, metadata: {facts:model.facts??[]},modalities: model.modalities, parameters: model.parameters,
-      evidence: c.evidence.map(e => ({ benchmark: e.definition.name, source: e.definition.source, score: round(e.score * 100), metric: e.metric, url: e.url, observedAt: e.observedAt,
-        capabilities: e.definition.tags, family: benchmarkFamily(e.definition), interpretation: e.definition.interpretation ? { version: e.definition.interpretation.version, preparedAt: e.definition.interpretation.preparedAt } : null,
-        configurations: e.configurations, historical: !!e.historical, urls: e.urls, observedDates: e.observedDates, cohortSize: e.cohortSize })),
-    };
-  });
-  return { prompt: prompt.trim(), task, ...status, selection: { modelIds, endpointIds }, eligibleModels, recommendations, specialists: modelIds === null && endpointIds === null ? discoverSpecialists(index.snapshot, task, prompt, selected) : { candidates: [], reason: 'Specialist discovery is outside the selected endpoint inventory.' }, warnings,
-    ranking: { version: comparison.frontier?'10':'6', mode: measured ? 'measured' : 'benchmarks', profile: measured?.profile ?? null, benchmarkEligibleModels: benchmarkEligible, workload: comparison.workload, weights: comparison.weights, eligibleModels,...(comparison.frontier?{frontier:comparison.frontier}:{}) },
-    methodology: comparison.frontier?'Structured task interpretation → exact documented restrictions → semantic evidence retrieval and applicability → one latent quality estimate across connected evaluations → keep configurations within the larger of two points and a task-relative margin, plus one standard error (including disagreement between evaluations) of the strongest → supported Pareto selection over quality, reference cost and time → strongest, best-value and fastest picks for balanced searches (or the explicit priority order), at most two models per provider when alternatives exist. Missing objectives and disconnected evidence remain provisional. Up to five distinct models; no verified task-accuracy threshold.':measured ? `Typed task match → calibration-only task-check accuracy, reported cost and full request time → strongest pairwise preferences without cycles → ordered top five among tested eligible models. Weights: ${comparison.weights.quality * 100}% quality, ${comparison.weights.cost * 100}% cost, ${comparison.weights.latency * 100}% latency. Small-sample evidence, not predicted accuracy on your task.` : `${task.interpreter === 'openai-decisions' ? 'OpenAI Decisions task interpretation' : 'Capability vocabulary'} → compare candidates on the same benchmarks, grouped by family → task-shaped reference cost and completion time → strongest pairwise preferences without cycles → ordered top five. Weights: ${Math.round(comparison.weights.quality * 100)}% quality, ${Math.round(comparison.weights.cost * 100)}% cost, ${Math.round(comparison.weights.latency * 100)}% latency. Scores are ranking signals, not predicted accuracy.`, elapsedMs: elapsed(start) };
+  // Old published manifests can still contain the retired calibration field.
+  const { calibration, ...current } = status;
+  return { ...current, stale: staleSources(index.snapshot, now), degraded: index.snapshot.sources.some(s => s.status === 'failed') };
 }

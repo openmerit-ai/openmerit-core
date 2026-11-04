@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWebAnalytics, publicPage, validateWebProperties, uuidV4 } from '../../site/scout/web-analytics.js';
-import { pages } from '../../scripts/docs.config.mjs';
 
 function storage() {
   const values = new Map();
@@ -20,7 +19,7 @@ function fixture(shared = {}) {
   return { env, sent, collector, tick: ms => { time += ms; } };
 }
 test('public page contract matches every published guide and excludes private/arbitrary routes', () => {
-  for (const page of pages.filter(page => page.url !== '/docs/demo/')) assert.equal(publicPage(page.url)?.page, 'docs', page.url);
+  assert.equal(publicPage('/scout/')?.page, 'scout');
   for (const path of ['/memo/', '/docs/demo/', '/docs/demo/private/', '/scout/auth/callback/', '/auth/callback', '/docs/private/', '/docs/scout/?token=secret', '/#secret', '/scout/prompt']) assert.equal(publicPage(path), null, path);
 });
 test('emits bounded context and explicit interactions, never arbitrary content or URLs', () => {
@@ -190,32 +189,6 @@ test('authenticated acquisition uses one linked ID, unlink headers and epoch gat
   analytics.setPreferences(false, false, false);
   assert.equal(await analytics.track('scout_search_started'), false);
 });
-test('website entry emits shared-module sanitized error frames and explicit unlink header', async t => {
-  const f = fixture(); f.collector.stop();
-  f.env.localStorage.setItem('scout-analytics-account-link', '0');
-  const sent = [];
-  const globals = { navigator: f.env.navigator, document: f.env.document, window: f.env, location: f.env.location,
-    localStorage: f.env.localStorage, sessionStorage: f.env.sessionStorage,
-    addEventListener: f.env.addEventListener.bind(f.env), removeEventListener: f.env.removeEventListener.bind(f.env),
-    fetch: async (url, options) => {
-      if (!options.method) return { ok: true, json: async () => ({ analytics: { enabled: true } }) };
-      sent.push({ ...JSON.parse(options.body), headers: options.headers }); return { ok: true };
-    } };
-  for (const [name, value] of Object.entries(globals)) {
-    const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
-    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
-    t.after(() => descriptor ? Object.defineProperty(globalThis, name, descriptor) : delete globalThis[name]);
-  }
-  await import(`../../site/product-analytics.js?errors=${crypto.randomUUID()}`);
-  await new Promise(resolve => setTimeout(resolve, 30));
-  f.env.dispatchEvent(Object.assign(new Event('error'), { error: { name: 'TypeError', message: 'PRIVATE',
-    stack: 'TypeError PRIVATE\n at secret (https://private.example/analytics.js:12:4)\n at secret (https://private.example/unknown.js:22:9)' } }));
-  const error = sent.find(row => row.event === 'website_error');
-  assert.deepEqual(error.properties.frames, [{ filename: 'analytics.js', lineno: 12, colno: 4 }]);
-  assert.equal(error.headers['X-Scout-Analytics-Account'], 'off');
-  assert.doesNotMatch(JSON.stringify(error), /PRIVATE|private.example|unknown.js|secret/);
-});
-
 test('connect observation has no Scout visit/pageview and retries only transient failures with one event identity', async t => {
   const f = fixture(); f.collector.stop(); f.env.location.pathname = '/connect/';
   const sent = []; let respond = async () => ({ ok: true, status: 200 });

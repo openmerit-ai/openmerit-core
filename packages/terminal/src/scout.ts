@@ -6,10 +6,10 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { credentialsPath, readCredentials, type DeviceCredentials } from './scout-credentials.ts';
 
-export const policyFile = '.openmerit/scout.json';
+const policyFile = '.openmerit/scout.json';
 export const components = ['input', 'work', 'output', 'criteria', 'constraints'] as const;
 
-export const help = `OpenMerit · Scout
+const help = `OpenMerit · Scout
 
   openmerit scout "<the work models need to do>" [--all-endpoints] [--json]
   openmerit scout --conversation <id> [--brief <component>=<text> ...] [--skip] ["<follow-up>"] [--json]
@@ -27,7 +27,7 @@ refused under the existing-only policy. Uses the device key that
 `;
 
 type Json = Record<string, unknown>;
-export interface ScoutRequest { prompt?: string; conversationId?: string; brief?: Partial<Record<typeof components[number], string>>; skip?: boolean; endpointIds?: string[] }
+interface ScoutRequest { prompt?: string; conversationId?: string; brief?: Partial<Record<typeof components[number], string>>; skip?: boolean; endpointIds?: string[] }
 export interface ScoutModel {
   rank: number; id: string; name: string; provider: string; rationale: string; watchOut: string | null;
   quality: { score: number; evidence: Array<{ name: string; rank: number; of: number }> };
@@ -36,7 +36,7 @@ export interface ScoutModel {
 }
 // How a task's models are ordered. Cost (cheapest first among models that reach the quality bar) is the default.
 type Priority = 'cost' | 'quality' | 'latency' | 'recency';
-export interface ScoutResult {
+interface ScoutResult {
   conversationId: string; status: 'needs_answers' | 'recommended' | 'working' | 'message' | 'error'; next?: string;
   brief?: Record<string, { text: string; source: string }>; questions?: Array<{ component: string; question: string }>;
   assumptions?: string[]; tasks?: Array<{ title: string; work: string; summary: string; priority?: Priority; models: ScoutModel[] }>;
@@ -59,7 +59,7 @@ function deviceKey(root: string): DeviceCredentials | null {
 }
 
 // One turn through the scout_models MCP tool. Errors are written for the person or agent running it.
-export async function askScout(root: string, request: ScoutRequest, signal?: AbortSignal): Promise<ScoutResult> {
+async function askScout(root: string, request: ScoutRequest, signal?: AbortSignal): Promise<ScoutResult> {
   const credentials = deviceKey(root);
   if (!credentials) throw new Error('This device is not signed in to OpenMerit. Run: npx -y openmerit@latest install');
   const server = credentials.server;

@@ -1,5 +1,4 @@
 // Public metadata discovery only. Never download weights or execute repository code.
-import { specialistMatch, relevantProfiles } from './specialists.mjs';
 const pipelines = ['document-question-answering', 'token-classification', 'text-classification', 'sentence-similarity', 'text2text-generation', 'text-generation', 'image-to-text', 'image-text-to-text', 'image-classification', 'zero-shot-image-classification', 'object-detection', 'image-segmentation', 'zero-shot-object-detection', 'mask-generation'];
 const fields = ['cardData', 'config', 'pipeline_tag', 'tags', 'sha', 'gated', 'private', 'disabled', 'lastModified', 'library_name', 'safetensors', 'inferenceProviderMapping', 'evalResults'];
 export const hubQueries = pipelines.map(pipeline => {
@@ -51,36 +50,4 @@ export function parseHubModels(rows, checkedAt) {
       evaluations: evaluations(m), updatedAt: text(m.lastModified), checkedAt });
   }
   return [...unique.values()];
-}
-export function discoverSpecialists(snapshot, task, _prompt, selected = []) {
-  const catalogue = snapshot.specialists ?? [], selectedRepos = new Set(selected.map(c => c.model?.repository).filter(Boolean));
-  const relevant = new Set(relevantProfiles(snapshot.specialistProfiles ?? [], task).map(p => p.id));
-  const descriptions = {
-    documents: 'Document reading component; field assembly and output validation may be required.',
-    entities: 'Entity extraction component; field mapping and output validation may be required.',
-    text_labels: 'Text classification component; evaluate the declared label contract on your examples.',
-    image_labels: 'Image classification component; evaluate the declared label contract on your examples.',
-    retrieval: 'Embedding component for retrieval; requires an index and retrieval evaluation.',
-    code: 'Code generation candidate; instruction format and executable correctness need testing.',
-    boxes: 'Object localization component; evaluate category coverage and localization accuracy.',
-    masks: 'Segmentation component; check required points, boxes or other inputs.',
-  };
-  const choices = catalogue.flatMap(m => {
-    const match = specialistMatch(m, task);
-    if (!match || !relevant.has(m.semantic.profileId) || selectedRepos.has(m.id) || task.selection?.required.length&&!task.selection.allowedRepositories?.includes(m.id)) return [];
-    return [{ ...m, fit: descriptions[m.semantic.spec.operation], matchedTerms: [], semanticMatch: match, quality: null, costUsd: null, latencySeconds: null }];
-  });
-  // Compatibility is eligibility, not a quality score. Preserve deterministic
-  // metadata completeness and component diversity without prompt-word overlap.
-  const completeness = m => [m.license, m.library, m.parameters, m.evaluations.length, m.languages.length].filter(Boolean).length;
-  choices.sort((a, b) => completeness(b) - completeness(a) || a.id.localeCompare(b.id));
-  const candidates = [], names = new Set(), seenPipelines = new Set();
-  for (const diverse of [true, false]) for (const m of choices) {
-    const name = m.id.split('/')[1].toLowerCase();
-    if (candidates.length === 3 || names.has(name) || (diverse && seenPipelines.has(m.pipeline))) continue;
-    candidates.push(m); names.add(name); seenPipelines.add(m.pipeline);
-  }
-  return { mode: 'discovery', indexedRepositories: catalogue.length, matchedRepositories: choices.length, candidates,
-    basis: 'Decisions compatibility with hourly-prepared metadata profiles, followed by component diversity and metadata completeness; not a performance ranking. Bounded sample of 30 most-downloaded repositories per pipeline. Downloads select coverage only.',
-    limitations: 'Metadata and semantic interpretation can be incomplete or wrong. No common task evaluation, endpoint cost, latency or hardware fit has been measured. No weights are downloaded or executed.' };
 }

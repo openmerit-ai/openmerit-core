@@ -2,11 +2,11 @@
 
 **Pi adapter — npm 0.1.12 and later:** Pi 1.5.0 uses only native Scout MCP and shared guidance. Run `npx -y openmerit@latest install --client pi [--scope user|project]` and approve in the browser. Shell `login`, `logout`, `status`, `remove`, and `doctor` accept the same target flags. Updates require explicit reinstall; no Pi update hooks or scheduler are installed. See [Pi setup](pi-extension.md).
 
-The standalone `openmerit dash` and `openmerit eval` commands are unchanged. The Pi 0.87 `/openmerit` slash commands were removed with that adapter and have no replacement.
+`openmerit dash` remains available. The Pi 0.87 `/openmerit` slash commands were removed with that adapter and have no replacement.
 
-Stable npm `openmerit@0.1.7` provides `openmerit eval init`, `doctor`, `plan`, `run`, `watch` and `report`. See [agent evaluations](agent-evaluations.md) for scope selection, repeated task checks and budgets. These are shell commands, separate from Pi commands. The same release includes [Scout setup commands](scout.md#commands), beginning with `npx -y openmerit@latest install --client claude-code`.
+**Unreleased retirement:** this source no longer provides any `openmerit eval` commands, including `plan`. It also retires `/scout/api/recommend`; use Scout's conversational agent or MCP. Existing local evaluation files are untouched. Published packages and hosted Workers change only through separate approved releases. See [retirement details](agent-evaluations.md).
 
-Since `0.1.7-preview.2`, `openmerit eval plan [--scope existing|all] [--budget <USD|unlimited>]` asks for a budget after scope. Choose $10, a custom amount, or no fixed cap; saved choices and cumulative usage persist. See [budget selection](agent-evaluations.md#budget-selection).
+The [Scout setup commands](scout.md#commands) remain available, beginning with `npx -y openmerit@latest install --client claude-code`.
 
 ## Inference Terminal
 

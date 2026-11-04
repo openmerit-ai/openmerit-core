@@ -1,8 +1,7 @@
 import { DurableObject, WorkflowEntrypoint } from 'cloudflare:workers';
-import { handleAPI, json, isRetiredAgentPath } from './http.mjs';
+import { json, isRetiredAgentPath } from './http.mjs';
 import { handleMCP } from './mcp.mjs';
 import { handleConnect } from './connect.mjs';
-import { createRecommender } from './recommend.mjs';
 import { createSnapshotReader, getJSON, putJSON } from './store.mjs';
 import { runRefresh } from './pipeline.mjs';
 import { indexStatus } from './rank.mjs';
@@ -56,10 +55,10 @@ export class ScoutRefresh extends WorkflowEntrypoint {
   }
 }
 
-let reader,recommend;
+let reader;
 function services(env) {
-  if(!reader){reader=createSnapshotReader(env.SCOUT_CATALOGUE);recommend=createRecommender({apiKey:env.OPENAI_API_KEY,db:env.SCOUT_INDEX,vectorize:env.SCOUT_EVIDENCE});}
-  return {reader,recommend};
+  reader??=createSnapshotReader(env.SCOUT_CATALOGUE);
+  return reader;
 }
 export default {
   async fetch(request,env,ctx) {
@@ -93,14 +92,14 @@ export default {
     if(path==='/scout/api/analytics/preference')return analytics.handlePreference();
     let response;
     try {
-      const {reader,recommend}=services(env),index=await reader.view();
+      const index=await services(env).view();
       if(path==='/scout/api/status') {
         if(request.method!=='GET')return json({error:'Use GET.'},405);
         const status=indexStatus(index);
         const health=await getJSON(env.SCOUT_CATALOGUE,'health.json').catch(()=>null);
         return json({...status,scheduler:'cloudflare-twice-daily',refreshStatus:status.degraded?'degraded':'idle',...health,snapshotVersion:index.snapshot.publication.id,refreshSummary:index.snapshot.refreshSummary});
       }
-      response=await handleAPI(request,index,{},(...args)=>recommend(...args,'api',analytics.observeSearch),analytics.observeMCP);
+      response=json({error:'Not found.'},404);
     } catch (error) {analytics.exception(error);response=json({error:'Scout could not load its prepared catalogue. Please try again shortly.'},503);}
     await analytics.complete(response);return analytics.response(response);
   },

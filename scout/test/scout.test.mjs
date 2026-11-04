@@ -2,62 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { zipSync, strToU8 } from 'fflate';
-import { createIndex, recommend as rankTask, indexStatus } from '../rank.mjs';
+import { createIndex, indexStatus } from '../rank.mjs';
 import { toRecords, toSnapshot } from '../records.mjs';
-import offlineTasks from './fixtures/offline-tasks.json' with {type:'json'};
-// Explicit historical task objects test arithmetic and transports, not interpretation.
-const fixtureTask = prompt => {const task=offlineTasks[prompt];if(!task)throw Error('Missing typed test fixture');return structuredClone(task);};
-const recommend=(index,prompt)=>rankTask(index,prompt,Date.now(),fixtureTask(prompt));
 import { parseCSV, parseAnalysis, compileSnapshot, refreshSnapshot, parseOmniDoc, parseVectara, parseArena, parseVals, readVals, valsSlugs, parseSeal, readSeal, sealBoards, parseVendorScores,
   readLiveBench, readTau, parseOpenCompass, readHELM, parseBRIDGE, readSuperCLUE, superclueURL, superclueCategories, parseFireworks } from '../sources.mjs';
 import { evaluationKey } from '../comparison.mjs';
-import { handleAPI as api } from '../http.mjs';
 
-const handleAPI=(request,index)=>api(request,index,{},recommend);
 const snapshot = JSON.parse(await readFile(new URL('../snapshot.json', import.meta.url), 'utf8'));
 const index = createIndex(snapshot);
-const post = body => new Request('http://localhost/scout/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
-test('invoice recommendations require real document evidence, image input, JSON support and five distinct IDs', () => {
-  const result = recommend(index, 'Upload an invoice and extract 6 fields as JSON');
-  assert.equal(result.recommendations.length, 5);
-  assert.equal(new Set(result.recommendations.map(m => m.id)).size, 5);
-  for (const model of result.recommendations) {
-    assert.ok(model.modalities.includes('image'));
-    assert.ok(model.parameters.some(p => ['structured_outputs', 'response_format'].includes(p)));
-    // Document evidence, or labelled general image evidence when no document result exists.
-    assert.ok(model.evidence.some(e => e.capabilities.includes('documents')) || model.missingEvidence?.includes('documents') && model.evidence.some(e => e.capabilities.includes('vision')), model.id);
-    if (model.missingEvidence) assert.ok(result.warnings.some(w => w.includes(model.name) && w.includes('no document-reading benchmark')));
-    assert.ok(model.evidence.every(e => /^https?:/.test(e.url) && e.configurations.length));
-  }
-  if (result.recommendations.some(m => m.evidence.some(e => e.source === 'openvlm'))) assert.ok(result.warnings.some(w => w.includes('Newer models')));
-});
-
-test('task changes produce different rankings; writing tests does not select creative-writing evidence', () => {
-  const code = recommend(index, 'Fix a bug in a TypeScript repository and write unit tests');
-  const invoice = recommend(index, 'Extract invoice fields as JSON');
-  assert.notDeepEqual(code.recommendations.map(m => m.id), invoice.recommendations.map(m => m.id));
-  assert.ok(code.recommendations.every(m => m.evidence.some(e => /code|swe|terminal|aider|weirdml|cursor|gso/i.test(e.benchmark))));
-});
-
-
-
-test('scores are finite, quality is bounded, missing speed stays null, and increased price cannot improve rank score', () => {
-  for (const prompt of ['Debug Python code', 'Research a question', 'Write a story', 'Extract invoice fields as JSON']) {
-    const result = recommend(index, prompt);
-    for (const m of result.recommendations) { assert.ok(Number.isFinite(m.score)); assert.ok(m.quality >= 0 && m.quality <= 100); if (!m.speed) assert.equal(m.speed, null); }
-  }
-  const baseline = recommend(index, 'Research a scientific question').recommendations[0];
-  const modified = structuredClone(snapshot), model = modified.models.find(m => m.id === baseline.modelId);
-  model.inputPrice *= 100; model.outputPrice *= 100;
-  model.endpoints?.forEach(e => { e.inputPrice *= 100; e.outputPrice *= 100; });
-  const result = recommend(createIndex(modified), 'Research a scientific question').recommendations.find(m => m.id === baseline.modelId);
-  assert.ok(!result || result.score < baseline.score);
-});
-
-test('limited evidence never fills five slots and stale status comes from source check time', () => {
-  const tiny = createIndex({ ...snapshot, models: snapshot.models.slice(0, 1) });
-  assert.ok(recommend(tiny, 'Read an invoice').recommendations.length < 5);
+test('stale status comes from source check time', () => {
   // Feeds refresh every twelve hours: a fresh run is never stale, a missed one is.
   assert.equal(indexStatus(index, Date.parse(snapshot.checkedAt) + 12 * 3600_000).stale, false);
   assert.ok(indexStatus(index, Date.parse(snapshot.checkedAt) + 14 * 3600_000).stale);
@@ -73,34 +27,10 @@ test('index coverage counts providers once across aliases and label variations',
     { ...model, id: 'mistralai/small', provider: 'mistralai' },
   ];
   const sample = createIndex({ ...snapshot, models });
-  const status = await (await handleAPI(new Request('http://localhost/scout/api/status'), sample)).json();
+  const status = indexStatus(sample);
   assert.equal(status.models, 4);
   assert.equal(status.providers, 2);
   assert.equal(indexStatus(createIndex({ ...snapshot, models: models.slice(0, 2) })).providers, 1);
-});
-
-test('API validates method, content type, shape, empty and oversized input; prompts are not cached', async () => {
-  const valid = await handleAPI(post({ prompt: 'Debug Python code' }), index);
-  assert.equal(valid.status, 200); assert.equal(valid.headers.get('cache-control'), 'no-store');
-  assert.ok(valid.headers.get('server-timing').startsWith('scout;dur='));
-  const result = await valid.json();
-  assert.equal(result.recommendations.length, 5);
-  assert.deepEqual(result.recommendations.map(m => m.id), recommend(index, 'Debug Python code').recommendations.map(m => m.id));
-  for (const body of [{ prompt: '' }, { prompt: ' ' }, { prompt: 5 }, { prompt: 'x'.repeat(4001) }, { prompt: 'hello', limit: 5 }, null, []]) assert.equal((await handleAPI(post(body), index)).status, 400);
-  assert.equal((await handleAPI(new Request('http://localhost/scout/api/recommend'), index)).status, 405);
-  assert.equal((await handleAPI(new Request('http://localhost/scout/api/recommend', { method: 'POST', body: '{}' }), index)).status, 415);
-  assert.equal((await handleAPI(post({ prompt: 'x'.repeat(20000) }), index)).status, 413);
-  const malformed = new Request('http://localhost/scout/api/recommend', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' });
-  assert.equal((await handleAPI(malformed, index)).status, 400);
-  assert.equal((await handleAPI(new Request('http://localhost/scout/api/missing'), index)).status, 404);
-});
-
-test('recommendations make no network calls and leave the shared snapshot unchanged', async t => {
-  const before = JSON.stringify(snapshot);
-  t.mock.method(globalThis, 'fetch', () => { throw new Error('Unexpected network call during ranking'); });
-  const response = await handleAPI(post({ prompt: 'Read an invoice as JSON' }), index);
-  assert.equal(response.status, 200); assert.equal((await response.json()).recommendations.length, 5);
-  assert.equal(JSON.stringify(snapshot), before);
 });
 
 test('CSV parsing preserves quotes, commas, newlines, zero, and blank cells', () => {
@@ -265,12 +195,6 @@ test('partial refresh preserves only failed sources with original timestamps whi
 
 
 
-test('a frozen runtime clock never reports a fabricated zero-millisecond computation', async t => {
-  t.mock.method(performance, 'now', () => 0);
-  const response = await handleAPI(post({ prompt: 'Debug Python code' }), index);
-  assert.equal((await response.json()).elapsedMs, null);
-  assert.equal(response.headers.get('server-timing'), null);
-});
 test('summary and human-preference parsers keep comparable rows and reject format changes', () => {
   const table = Array.from({ length: 22 }, (_, i) => `|lab/model-${i}-2026-03-17|${(2 + i / 10).toFixed(1)} %|${(98 - i / 10).toFixed(1)} %|${i === 3 ? '74.3' : '99.5'} %|120.0|`);
   const vectara = parseVectara(['Last updated on October 16, 2026', '', '|Model|Hallucination Rate|Factual Consistency Rate|Answer Rate|Average Summary Length (Words)|', '|----|----:|----:|----:|----:|', ...table, '', 'Notes'].join('\n'));

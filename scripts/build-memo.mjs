@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import MarkdownIt from 'markdown-it';
 import { build } from 'esbuild';
-import { memo } from './docs.config.mjs';
+import { memo } from './memo.config.ts';
 import { renderMemoSvg } from './memo-svg.ts';
 import { loginPage } from '../demo/memo/views.mjs';
 

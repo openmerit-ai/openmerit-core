@@ -1,21 +1,4 @@
 services:
-  site:
-    # Same static preview as docs/site-documentation.md, rebuilt from docs/ on each start.
-    command: npm run build:docs && exec python3 -m http.server "$PORT" --bind 127.0.0.1 --directory site
-    health: /docs/
-    portal:
-      url: /
-      title: Website
-    portals:
-      - url: /docs/
-        title: Documentation
-  scout:
-    # Scout dev server; recommendations that need OPENAI_API_KEY stay unavailable without it.
-    command: SCOUT_PORT="$PORT" exec npm run scout
-    health: /scout/
-    portal:
-      url: /scout/
-      title: Scout
   dash:
     # Inference Terminal for this checkout; its sample selector switches to fictional data.
     command: npm run dash -- --no-open --port "$PORT"

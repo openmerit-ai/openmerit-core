@@ -2,8 +2,6 @@
 .memo-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 28px; min-height: 82px; padding-block: max(12px, env(safe-area-inset-top)) 12px; }
 .memo-nav { display: flex; flex-wrap: wrap; gap: 26px; font-size: 13px; }
 .memo-nav a, .memo-footer a { display: inline-flex; align-items: center; min-height: 44px; }
-.memo-cover { width: 100%; height: clamp(220px, 30vw, 480px); overflow: hidden; background: var(--soft); }
-.memo-cover img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
 .memo-main, .memo-footer { width: min(680px, calc(100% - 48px)); margin-inline: auto; }
 .memo-main { padding-top: clamp(48px, 5vw, 72px); }
 .memo-eyebrow { margin-bottom: 24px; color: var(--muted); font-size: 12px; }
@@ -23,86 +21,6 @@
 .memo-prose ol { margin: 0; padding-left: 24px; font-size: 13px; line-height: 1.8; }
 .memo-prose li { padding-left: 7px; margin-bottom: 14px; }
 .memo-prose li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
-/* Figure copy lives in the memo Markdown; these layouts only arrange it. */
-.memo-diagram { width: min(800px, calc(100vw - 48px)); position: relative; left: 50%; transform: translateX(-50%); margin-block: 36px 40px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); font-size: 13px; line-height: 1.55; }
-.diagram-heading { padding: 28px 28px 24px; }
-.memo-diagram p { margin: 0; }
-.memo-diagram .diagram-kicker { margin-bottom: 8px; color: var(--soft-muted); font-size: 12px; font-weight: 500; line-height: 1.5; letter-spacing: 0; }
-.memo-diagram h3 { max-width: 620px; font-size: 21px; font-weight: 500; line-height: 1.35; letter-spacing: -.025em; text-wrap: pretty; }
-.diagram-body { padding: 0 28px 24px; }
-.diagram-card { min-width: 0; padding: 18px; border: 1px solid var(--code-line); border-radius: 5px; background: var(--paper); }
-.memo-diagram strong { display: block; font-size: 14px; font-weight: 500; color: var(--ink); line-height: 1.45; }
-.diagram-card p, .diagram-layer p, .diagram-harness > p { margin-top: 8px; color: var(--soft-muted); font-size: 13px; line-height: 1.6; text-wrap: pretty; }
-.diagram-number { display: block; margin-bottom: 12px; color: var(--soft-muted); font-size: 12px; font-weight: 500; line-height: 1.5; font-variant-numeric: tabular-nums; }
-.memo-diagram figcaption { padding: 17px 28px 20px; border-top: 1px solid var(--line); color: var(--soft-muted); font-size: 12px; line-height: 1.65; text-wrap: pretty; }
-.memo-diagram .diagram-stages { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; padding: 0; list-style: none; font-size: inherit; line-height: inherit; }
-.memo-diagram .diagram-stages li { padding: 0; margin: 0; position: relative; }
-.diagram-stages .diagram-card { padding: 0; border: 0; border-radius: 0; background: transparent; }
-.diagram-stages .diagram-number { margin-bottom: 0; }
-.diagram-connector { position: relative; display: block; width: 100%; height: 12px; color: var(--green); }
-.diagram-connector::before { content: ''; position: absolute; inset: 50% 0 auto; border-top: 1px solid currentColor; }
-.diagram-connector:not(.diagram-connector--plain)::after { content: ''; position: absolute; top: 50%; right: 1px; width: 6px; height: 6px; border-top: 1px solid currentColor; border-right: 1px solid currentColor; transform: translateY(-50%) rotate(45deg); }
-.diagram-connector.diagram-connector--left::after { left: 1px; right: auto; transform: translateY(-50%) rotate(-135deg); }
-.diagram-stages .diagram-connector { margin-block: 8px 14px; }
-.diagram-cycle-return { margin-top: 17px; color: var(--green); }
-.diagram-cycle-return svg { display: block; width: 100%; height: 32px; fill: none; stroke: var(--green); }
-.diagram-cycle-return path { vector-effect: non-scaling-stroke; }
-.diagram-cycle-return p { margin-top: 8px; text-align: center; font-size: 12px; }
-.diagram-cycle-return p > span { display: none; }
-.diagram-outcome-label { margin-block: 24px 12px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 12px; font-weight: 500; color: var(--muted); }
-.diagram-outcomes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.diagram-adopted { background: var(--reference-tint); border-color: var(--field-line); }
-.diagram-pending { border-style: dashed; background: transparent; }
-.diagram-outcomes strong::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 8px; border: 1px solid var(--green); border-radius: 50%; }
-.diagram-adopted strong::before { background: var(--green); }
-.diagram-arrow { display: flex; justify-content: center; align-items: center; color: var(--green); font-size: 23px; line-height: 1; }
-.diagram-loop-grid { display: grid; grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr); gap: 16px 0; }
-.diagram-loop-grid .diagram-card { padding: 17px 19px; }
-.diagram-loop-grid .diagram-number { margin-bottom: 8px; }
-.diagram-step-1 { grid-column: 1; grid-row: 1; }
-.diagram-loop-grid > .diagram-arrow--right { grid-column: 2; grid-row: 1; }
-.diagram-step-2 { grid-column: 3; grid-row: 1; }
-.diagram-step-3 { grid-column: 3; grid-row: 3; }
-.diagram-loop-grid > .diagram-arrow--left { grid-column: 2; grid-row: 3; }
-.diagram-step-4 { grid-column: 1; grid-row: 3; }
-.diagram-memory { grid-column: 1 / -1; grid-row: 2; display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; gap: 12px; }
-.diagram-memory::before, .diagram-memory::after { color: var(--green); font-size: 24px; text-align: center; }
-.diagram-memory::before { content: '↑'; }
-.diagram-memory::after { content: '↓'; }
-.diagram-memory .diagram-card { background: var(--reference-tint); border-color: var(--field-line); text-align: center; padding: 17px 24px; }
-.diagram-memory p { max-width: 420px; margin-inline: auto; }
-.memo-diagram .diagram-repeat { margin-top: 19px; color: var(--green); font-size: 12px; text-align: center; }
-.diagram-repeat span { margin-right: 4px; font-size: 17px; vertical-align: -1px; }
-.memo-diagram--architecture { width: min(960px, calc(100vw - 48px)); }
-.diagram-architecture { display: grid; grid-template-columns: minmax(0, 1fr) 88px minmax(0, 1.6fr) 88px minmax(0, 1fr); align-items: center; gap: 14px; }
-.diagram-harness { min-width: 0; padding: 22px; border: 1px solid var(--field-line); border-radius: 5px; }
-.diagram-harness > strong { font-weight: 600; }
-.diagram-component { margin-top: 20px; padding: 18px; }
-.diagram-architecture > .diagram-card { padding: 18px; }
-.diagram-exchange { display: grid; gap: 24px; }
-.diagram-transfer { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.diagram-transfer p { color: var(--soft-muted); font-size: 12px; text-align: center; line-height: 1.5; }
-.diagram-layers { border-top: 1px solid var(--line); }
-.diagram-layer { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: start; gap: 16px; padding: 21px 0; border-bottom: 1px solid var(--line); }
-.diagram-level { color: var(--soft-muted); font-size: 13px; line-height: 1.5; font-variant-numeric: tabular-nums; }
-.diagram-phase { padding-top: 1px; font-size: 12px; line-height: 1.5; color: var(--soft-muted); white-space: nowrap; }
-.diagram-layer:nth-child(-n + 2) .diagram-level { color: var(--ink); font-size: 14px; font-weight: 600; }
-.diagram-layer:nth-child(-n + 2) strong { font-size: 14px; font-weight: 600; }
-.diagram-layer:nth-child(-n + 2) .diagram-phase { color: var(--ink); font-weight: 500; }
-.memo-diagram .diagram-population { max-width: 580px; margin-bottom: 24px; color: var(--soft-muted); font-size: 12px; }
-.diagram-chart-axis { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 16px; color: var(--soft-muted); font-size: 12px; line-height: 1.5; font-variant-numeric: tabular-nums; }
-.diagram-chart { margin: 0; display: grid; gap: 23px; }
-.diagram-chart-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
-.diagram-chart-row dt { font-weight: 500; }
-.diagram-chart-row dd { display: contents; margin: 0; }
-.diagram-chart-value { color: var(--ink); font-size: 15px; line-height: 1.5; font-variant-numeric: tabular-nums; }
-.diagram-chart-track { grid-column: 1 / -1; display: block; height: 12px; background: var(--chart-muted); border-radius: 2px; overflow: hidden; }
-.diagram-chart-track > span { display: block; height: 100%; background: var(--green); border-radius: inherit; }
-.diagram-chart-row:last-child .diagram-chart-track > span { background: var(--green); }
-.memo-diagram .diagram-source { margin-top: 24px; color: var(--soft-muted); font-size: 12px; line-height: 1.6; }
-.diagram-source a { text-decoration-thickness: 1px; }
-.memo-prose #sources-and-data-notes ~ h3 { margin-top: 25px; margin-bottom: 8px; font-size: 14px; font-weight: 500; letter-spacing: 0; line-height: 1.5; scroll-margin-top: 32px; }
-.memo-prose #sources-and-data-notes ~ p { font-size: 13px; line-height: 1.8; }
 .memo-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 24px; margin-top: 64px; padding-block: 20px max(36px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .memo-footer nav { display: flex; flex-wrap: wrap; gap: 24px; }
 .memo-footer span { margin-left: 8px; }
@@ -173,40 +91,6 @@
   .memo-prose h1 + p + p { font-size: 21px; }
   .memo-prose h2 { margin-top: 44px; font-size: 21px; }
   .memo-footer { margin-top: 48px; }
-  .memo-diagram { width: 100%; margin-block: 28px 32px; }
-  .diagram-heading { padding: 22px 18px 20px; }
-  .memo-diagram h3 { font-size: 20px; }
-  .diagram-body { padding: 0 18px 20px; }
-  .memo-diagram figcaption { padding: 15px 18px 18px; }
-  .memo-diagram .diagram-stages { grid-template-columns: 1fr; gap: 19px; }
-  .diagram-stages .diagram-card { display: grid; grid-template-columns: 25px minmax(0, 1fr); column-gap: 10px; }
-  .diagram-stages .diagram-number { grid-row: 1 / 3; padding: 3px 0 0; margin: 0; border-bottom: 0; }
-  .diagram-stages .diagram-connector { display: none; }
-  .diagram-stages .diagram-card p { grid-column: 2; }
-  .diagram-stages li:not(:last-child)::after { content: ''; position: absolute; width: 1px; height: calc(100% - 6px); top: 25px; left: 7px; background: var(--field-line); }
-  .diagram-cycle-return { padding: 12px 14px; border: 1px solid var(--field-line); border-radius: 5px; }
-  .diagram-cycle-return svg { display: none; }
-  .diagram-cycle-return p { margin-top: 0; text-align: left; }
-  .diagram-cycle-return p > span { display: inline; margin-right: 4px; font-size: 16px; }
-  .diagram-outcomes { grid-template-columns: 1fr; gap: 10px; }
-  .diagram-card, .diagram-loop-grid .diagram-card { padding: 15px; }
-  .diagram-loop-grid { display: flex; flex-direction: column; gap: 10px; }
-  .diagram-loop-grid > .diagram-arrow { display: none; }
-  .diagram-step-1 { order: 1; }
-  .diagram-step-2 { order: 2; }
-  .diagram-step-3 { order: 3; }
-  .diagram-step-4 { order: 4; }
-  .diagram-memory { order: 5; display: block; margin-top: 8px; }
-  .diagram-memory::before, .diagram-memory::after { display: none; }
-  .diagram-memory .diagram-card { text-align: left; padding: 15px; }
-  .diagram-layer { grid-template-columns: 24px minmax(0, 1fr); gap: 6px 12px; padding: 18px 0; }
-  .diagram-phase { grid-column: 2; }
-}
-@media (max-width: 980px) {
-  .diagram-architecture { grid-template-columns: minmax(0, 1fr); gap: 20px; }
-  .diagram-harness { padding: 18px; }
-  .diagram-exchange { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; padding-inline: 18px; }
-  .diagram-transfer .diagram-connector { width: 28px; height: 28px; transform: rotate(90deg); }
 }
 /* Keep the reading column clear of a phone's landscape cutout. */
 @supports (padding: max(0px)) {
@@ -214,16 +98,13 @@
 }
 @media print {
   .memo-page { background: white; color: black; }
-  .memo-header, .memo-cover, .memo-footer, .skip-link { display: none; }
+  .memo-header, .memo-footer, .skip-link { display: none; }
   .memo-main { width: 100%; padding: 0; }
   .memo-prose h2 { break-after: avoid; }
   .memo-prose p { orphans: 3; widows: 3; }
-  .memo-diagram { width: 100%; left: auto; transform: none; break-inside: avoid; background: white; }
   .memo-vector { break-inside: avoid; background: white; box-shadow: none; }
   .memo-vector svg { min-width: 0; }
   .memo-vector-hint { display: none; }
   .memo-table-scroll, .memo-vector-scroll { overflow: visible; }
   .memo-table-scroll table { min-width: 0; }
 }
-
-.memo-cover img { filter: var(--art-filter); }

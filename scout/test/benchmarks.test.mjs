@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { prepareBenchmarks, refreshBenchmarks, benchmarkVersion } from '../benchmarks.mjs';
 import { parseEpochDefinitions, readEpochDefinitions, benchmarkIdentity, methodologySections } from '../benchmark-metadata.mjs';
-import { createIndex, recommend } from '../rank.mjs';
 import { benchmarkFamily, linkFamilies } from '../comparison.mjs';
 
 const bench = (id, description = 'Test scope') => ({ id, name: id, source: 'fixture', definition: { title: id, description }, tags: ['reasoning'] });
@@ -101,15 +100,6 @@ test('refresh marks interpretation failure while preserving collected prices, re
   const next = await refreshBenchmarks(snapshot, null, settings(async () => { throw new Error(); }));
   assert.deepEqual(next.models, snapshot.models); assert.equal(next.sources[0].status, 'failed'); assert.match(next.sources[0].error, /semantic/);
   assert.deepEqual(next.benchmarks[0].tags, []);
-});
-
-test('ranking consumes prepared tags and families synchronously, excluding unknown-only evidence', async () => {
-  const benchmarks = await prepareBenchmarks([bench('a'), bench('b')], [], settings(async(u,o)=>{const b=JSON.parse(o.body),id=JSON.parse(b.input.split('\n').at(-1)).benchmark.id;return mock(q=>id==='a'&&q.name==='coding'?'supported':'unknown')(u,o);}));
-  const model = (id, benchmark) => ({ id, name: id, provider: 'fixture', inputPrice: 1, outputPrice: 1, modalities: ['text'], outputModalities: ['text'], evidence: [{ benchmark, score: .8, configurations: ['test'] }] });
-  const index = createIndex({ version: 1, checkedAt: new Date().toISOString(), models: [model('lab/known', 'a'), model('lab/unknown', 'b')], benchmarks, sources: [] });
-  const task = { kind: 'code', weights: { coding: 3 }, capabilities: [{ id: 'coding', label: 'Code' }], workload: { input: 'short', output: 'medium', priority: 'balanced' } };
-  const result = recommend(index, 'Implement a function', Date.now(), task, { version: 1, profiles: [] });
-  assert.deepEqual(result.recommendations.map(m => m.modelId), ['lab/known']); assert.equal(typeof result.then, 'undefined');
 });
 
 const catalogue = () => 'var entries={' + Array.from({ length: 10 }, (_, i) => `b${i}:{id: \`Bench_${i}\`,title:"Title ${i}",short_description:'Reads \\'quoted\\' text',methodology:\`Line 1\nLine 2\`,domains:["Reasoning"]}`).join(',') + '};globalThis.untrustedMetadataExecuted=true;';

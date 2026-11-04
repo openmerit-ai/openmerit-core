@@ -1,6 +1,6 @@
 # Amp orbs
 
-`.agents/setup` installs Node.js 22.19.0 (the CI version) into `~/.local/bin` and runs `npm ci`; the orb's default Node.js fails the terminal worker tests. Run `amp orb services ensure` to start the website preview (`site`), Scout (`scout`; searches need `OPENAI_API_KEY`), and the Inference Terminal (`dash`, exposed through `.amp/loopback-proxy.mjs` because the terminal accepts only loopback hosts).
+`.agents/setup` installs Node.js 22.19.0 (the CI version) into `~/.local/bin` and runs `npm ci`; the orb's default Node.js fails the terminal worker tests. Run `amp orb services ensure` to start the Inference Terminal (`dash`, exposed through `.amp/loopback-proxy.mjs` because the terminal accepts only loopback hosts). The docs website shell and legacy local Scout search server are retired.
 
 `openmerit.ai` is the primary domain; `openmerit.site` hosts only legacy redirects. Use `.ai` in new links and copy; `docs/site-domain-migration.md` describes the routing.
 
@@ -18,14 +18,14 @@ Write new first-party code, tests and tooling in TypeScript; do not add `.js`, `
 
 # Documentation maintenance
 
-The Markdown files in `docs/` are the source of truth for public documentation. The website at `/docs/` is generated from those files by `scripts/build-docs.mjs`. Do not edit generated files in `site/docs/` or maintain a second copy of an article in website code.
+The Markdown files in `docs/` are the source of truth for product documentation. The unpublished `/docs/` website shell is retired. `scripts/build-site.ts` builds only `docs/scout-data-policy.md` into the live policy page and the protected memo via `scripts/build-memo.mjs`. Do not edit generated policy, memo or private content files, or maintain a second copy of an article in website code.
 
 Do not make public claims about the project's licensing or source availability until the user explicitly authorizes that positioning. Preserve the legal license file and package metadata.
 
 When changing user-visible product behavior, update the relevant Markdown guides in the same change. This includes commands, setup, supported versions, protocol contracts, metrics, approvals, budgets, scheduling, pause, data handling, and known limitations. Check affected homepage FAQ claims against the same behavior using `docs/site-faq-maintenance.md`. Distinguish released behavior from unreleased changes; do not describe a planned capability or an unverified outcome as established behavior.
 
-`scripts/docs.config.mjs` controls which guides are public, their navigation labels, routes, and descriptions. Add new public guides there. Internal `site-*` design and maintenance notes remain outside the public documentation navigation.
+Link new guides from `docs/index.md`. Internal `site-*` maintenance notes remain excluded from the npm guides. `scripts/memo.config.ts` owns protected memo metadata; its article and Markdown must never enter public assets.
 
-Run `npm run check:docs` after documentation or documentation-generator changes. It rebuilds the site and validates local links, section destinations, source copies, and search results. Product changes also require the applicable checks in `npm run verify`.
+Run `npm run check:docs` after documentation or policy/memo build changes. It validates Markdown links, section destinations, live-page links, policy source fidelity and memo privacy. Product changes also require the applicable checks in `npm run verify`.
 
-The existing Cloudflare deployment runs the documentation build and checks before publishing. Source edits appear on the live site after deployment; a successful local build or GitHub CI run alone does not publish them. Follow `docs/site-documentation.md` and `docs/site-design.md` for the existing workflow.
+Cloudflare deployment runs these builds and checks before publishing. Only policy/memo source edits are rendered as website pages. A successful local build or GitHub CI run alone does not publish them. Follow `docs/site-deployment.md` and `docs/site-design.md` for the existing workflow.

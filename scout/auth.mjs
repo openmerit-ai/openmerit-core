@@ -26,14 +26,13 @@ export async function sessionUser(request, env) {
   return auth?.isAuthenticated && auth.userId && auth.sessionId ? auth.userId : null;
 }
 
-// Shared by the Worker and local server. Public assets/status need no identity;
-// every recommendation request must pass this boundary before retrieval.
+// Public assets/status need no identity; agent requests require authentication.
 export async function scoutAccess(request, env, onAuthenticated = () => {}) {
   const { pathname: path, origin } = new URL(request.url);
   const source = request.headers.get('origin');
   if (source && source !== origin) return json({ error: 'Origin not allowed.' }, 403);
   if (path === '/scout/api/status') return null;
-  if (!['/scout/api/auth', '/scout/api/analytics', '/scout/api/analytics/preference', '/scout/api/recommend', '/scout/mcp'].includes(path) && !agentPath.test(path)) return json({ error: 'Not found.' }, 404);
+  if (!['/scout/api/auth', '/scout/api/analytics', '/scout/api/analytics/preference', '/scout/mcp'].includes(path) && !agentPath.test(path)) return json({ error: 'Not found.' }, 404);
   if (path === '/scout/api/auth' && request.method !== 'GET') return json({ error: 'Use GET.' }, 405, { Allow: 'GET' });
 
   try {

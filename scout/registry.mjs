@@ -1,5 +1,4 @@
 import seed from './registry.json' with { type: 'json' };
-import { digest } from './utils.mjs';
 export const registry = seed;
 export function validateRegistry(value) {
   const ids = new Set();
@@ -17,5 +16,4 @@ export function validateRegistry(value) {
   }
   return value;
 }
-export const registryHash = value => digest(value.capabilities.map(({ id, task, benchmark, parent }) => ({ id, task, benchmark, parent })));
 export const labels = value => Object.fromEntries(value.capabilities.map(c => [c.id, { label: c.label, terms: [] }]));

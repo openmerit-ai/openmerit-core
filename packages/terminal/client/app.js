@@ -7,7 +7,7 @@ import { selectControl, selectIsOpen, closeSelect } from './select.js';
 import { hostState } from '../src/hardware.mjs';
 import { serviceIdentity, modelIdentity, identityIcon, identitySvg } from './brands.mjs';
 import { serviceInventory, SERVICE_TYPES } from './services.mjs';
-import { reportedPath, deploymentFor, poolsFor, capacityState, capacityReadings, poolUsage } from './environment.mjs';
+import { reportedPath, deploymentFor, capacityState, capacityReadings, poolUsage } from './environment.mjs';
 
 import { buildEnvironmentMap } from './map.mjs';
 import { createAnalytics, browserErrorProperties } from './analytics.mjs';

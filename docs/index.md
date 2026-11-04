@@ -1,6 +1,6 @@
 # OpenMerit documentation
 
-These guides distinguish current source work from published behavior. OpenMerit **0.1.12** adds native Scout support for Pi **1.5.0**, replacing the old Pi 0.87 evaluation extension. The Inference Terminal and standalone agent-evaluation CLI are separate products and are unchanged by that replacement. The website, Scout service and npm package are deployed independently; dated receipts describe the versions actually tested.
+These maintained Markdown guides distinguish current source work from published behavior. OpenMerit **0.1.12** added native Scout support for Pi **1.5.0**, replacing the old Pi 0.87 evaluation extension. Unreleased source retires the standalone evaluation CLI, legacy recommendation API and unpublished docs website shell. The policy, protected memo, Scout service and npm package are deployed independently; dated receipts describe the versions actually tested.
 
 ## See your inference environment
 
@@ -18,7 +18,7 @@ Start with [installation and setup](getting-started.md) or the [Inference Termin
 
 ## Discover model candidates
 
-For a shortlist before building an integration, the separate [Scout beta](scout.md) accepts a task description and returns up to five evidence-backed model candidates. It is available at [openmerit.ai/scout/](https://openmerit.ai/scout/), with a prompt-only JSON API and MCP tool for coding agents.
+The separate [Scout beta](scout.md) provides conversational application-model guidance at [openmerit.ai/scout/](https://openmerit.ai/scout/) and through MCP for coding agents. The legacy prompt-only JSON recommendation endpoint is retired in source.
 
 ## Connect Scout to Pi
 
@@ -28,8 +28,8 @@ Follow [setup](getting-started.md#connect-scout-to-a-coding-agent) and [the Pi g
 
 ## Evaluate application changes
 
-Use [the standalone evaluation CLI](agent-evaluations.md) to compare CLI revisions across Claude Code, Codex and OpenCode with explicit tasks, model scope, budgets and graders.
+Use your own representative task checks to evaluate model candidates. The [standalone evaluation CLI is retired in source](agent-evaluations.md); existing local artifacts are not deleted.
 
 ## Operate and troubleshoot
 
-[Commands](commands.md) lists the terminal, Scout setup and evaluation commands. [Troubleshooting](troubleshooting.md), [security and data](security.md), and [current limitations](roadmap.md) explain setup failures and product boundaries. [Testing and validation](testing.md) distinguishes automated coverage from product evidence.
+[Commands](commands.md) lists the terminal and Scout setup commands. [Troubleshooting](troubleshooting.md), [security and data](security.md), and [current limitations](roadmap.md) explain setup failures and product boundaries. [Testing and validation](testing.md) distinguishes automated coverage from product evidence.

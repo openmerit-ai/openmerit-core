@@ -2,9 +2,9 @@
 
 **Pi adapter — npm 0.1.12 and later:** Pi 1.5.0 uses native MCP plus shared Scout rule/skill sections, not the former evaluation adapter. It never initiates login, changes the host model/tools/session, or provisions background jobs. Browser-approved credentials are independent per client/scope/project, stored privately outside the repository, and passed as MCP HTTP headers, never instructions. Pi's installed connection JSON contains only the private credential path. See [Pi paths and targeted removal](pi-extension.md). The standalone evaluation CLI remains separate.
 
-The [preview agent-evaluation runner](agent-evaluations.md) is a separate execution path: it runs trusted local agents/graders, passes only basic OS variables and explicitly named environment variables, and preserves agent-owned authentication. It sends task descriptions and optional model IDs to Scout. Local metric reports and budget reservations persist; temporary task outputs are removed. Fresh directories are not security sandboxes. Its budget admission controls do not enforce provider billing limits.
+**Unreleased retirement:** the standalone [agent-evaluation runner](agent-evaluations.md), including planning, and `/scout/api/recommend` are removed in source. Existing local reports, budgets, configuration and host-agent instructions are not deleted; review them separately. No provider billing control or remote data deletion is implied.
 
-The [budget selector](agent-evaluations.md#budget-selection) in `0.1.7-preview.2` requires an explicit $10, custom or no-fixed-cap choice after model scope. No fixed cap removes monetary admission limits, including Claude's per-attempt dollar flag, while retaining tasks, repetition bounds, timeouts, native permissions and accounting. Saved choices apply across reruns; a foreground watcher can incur further charges on each change until stopped. Provider limits remain independent.
+The Scout agent, MCP, publisher and account analytics/deletion capabilities remain. Historical analytics and stored catalogue/research data are not erased by endpoint retirement. Necessary provider processing for the agent and publisher continues under the [Scout data policy](scout-data-policy.md).
 
 ## Credential ownership
 

@@ -1,5 +1,3 @@
-import taskEvidence from './task-evidence.json' with { type: 'json' };
-import { calibrationMaxAgeMs } from './task-evidence.mjs';
 const descriptions = {
   models: { role: 'Availability & advertised pricing', measures: 'Catalogue inputs, context, API features and token rates.', limits: 'Router availability is not task quality. Advertised support is not measured schema or tool reliability. Rates are route quotes, not direct-provider quotes.' },
   modelsdev: { role: 'Independent provider catalogue', measures: 'Native model IDs, modalities, API features, context and provider rates across ten direct-provider adapters.', limits: 'Community-maintained metadata. Listed support and price are not a live availability or performance test. Router feeds are not required to discover these models.' },
@@ -35,10 +33,4 @@ export function describeSources(index) {
       ...(['models', 'modelsdev'].includes(source.id) ? { cataloguedModels: (index.snapshot.catalogue ?? []).filter(m => m.endpoints?.some(e => e.source === source.id) || source.id === 'models' && !m.endpoints).length } : {}),
       ...(source.id === 'huggingface' ? { repositories: index.snapshot.specialists?.length ?? 0, repositoriesWithReportedResults: (index.snapshot.specialists ?? []).filter(m => m.evaluations.length).length } : {}) } };
   });
-}
-export function calibrationStatus(now = Date.now()) {
-  return { name: 'Scout task measurements', url: 'https://openmerit.ai/scout/task-evidence.json', role: 'Direct task calibration',
-    profiles: taskEvidence.profiles.map(p => ({ id: p.id, label: p.label, casesPerModel: p.casesPerModel, testedModels: p.models.length, measuredAt: p.measuredAt,
-      expiresAt: new Date(Date.parse(p.measuredAt) + calibrationMaxAgeMs).toISOString(), active: now >= Date.parse(p.measuredAt) && now - Date.parse(p.measuredAt) <= calibrationMaxAgeMs, scope: p.scope })),
-    limits: 'Separate small calibration sets, not executions of your prompt. Profile scope and tested pool constrain applicability. Independent holdout outcomes are excluded from runtime evidence.' };
 }

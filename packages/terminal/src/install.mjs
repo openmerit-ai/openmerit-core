@@ -15,13 +15,13 @@ export { rule, skill } from './scout-instructions.ts';
 // One-command coding-agent setup: device sign-in in the browser, then the MCP
 // server, startup rule and Scout skill. Built to be run by a person or by a coding agent:
 // no interactive prompts, bounded waits, resumable logins and explicit exit codes.
-export const exitCodes = { ok: 0, error: 1, pending: 10, denied: 11, conflict: 20, unreachable: 30 };
+const exitCodes = { ok: 0, error: 1, pending: 10, denied: 11, conflict: 20, unreachable: 30 };
 const exec = promisify(execFile);
 const hash = value => createHash('sha256').update(value).digest('hex');
 const policyPath = '.openmerit/scout.json';
 const clients = { 'claude-code': 'Claude Code', pi: 'Pi' };
 
-export const help = `OpenMerit · coding-agent setup
+const help = `OpenMerit · coding-agent setup
 
   openmerit install [--client claude-code|pi] [--scope user|project] [--setup-id UUID] [--auto-update on|off] [--plan] [--json] [--no-open]
   openmerit status  [--client claude-code|pi] [--scope user|project] [--check] [--json]

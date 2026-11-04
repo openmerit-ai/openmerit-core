@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import snapshot from '../snapshot.json' with {type:'json'};
 import {registry} from '../registry.mjs';
-import {createIndex,indexStatus,recommend} from '../rank.mjs';
-import {requestDecisions,classifyPrompt,questionsFor} from '../decisions.mjs';
+import {createIndex,indexStatus} from '../rank.mjs';
+import {requestDecisions,resolveAmbiguous} from '../decisions.mjs';
 import {choice} from '../utils.mjs';
 const q=[choice('ok','Fixture',{yes:'Yes',no:'No'})],body={answers:[{name:'ok',type:'choice',choice:'yes',confidence:.9}]};
 const settings={apiKey:'fixture',timeoutMs:200,retryBaseMs:0};
@@ -33,20 +33,13 @@ test('Retry-After is honored and an attempt timeout leaves room for recovery',as
   }});
   assert.deepEqual(result,body);assert.equal(calls,2);
 });
-test('repeated failures stop after two attempts and malformed success stays invalid',async()=>{
+test('repeated failures stop after two attempts',async()=>{
   let calls=0;await assert.rejects(requestDecisions('Fixture',q,{...settings,fetcher:async()=>{calls++;return Response.json({}, {status:503});}}),/HTTP 503/);assert.equal(calls,2);
-  await assert.rejects(classifyPrompt('Fixture',{...settings,fetcher:async()=>Response.json({answers:[]})}),/Incomplete/);
 });
 test('slow optional verification returns conservative answers before its own deadline',async()=>{
-  const questions=questionsFor(),answers=questions.map(q=>({name:q.name,type:'choice',choice:q.choices[0].value,confidence:.99}));
-  answers.find(a=>a.name==='json').confidence=.1;
-  let calls=0;const start=performance.now();
-  const result=await classifyPrompt('Fixture',{...settings,verificationTimeoutMs:20,fetcher:async(_u,{signal,body})=>{
-    const qs=JSON.parse(body).questions;calls++;
-    if(!qs[0].name.startsWith('verify_'))return Response.json({answers:answers.filter(a=>qs.some(q=>q.name===a.name))});
-    return stall(signal);
-  }});
-  assert.equal(calls,2);assert.equal(result.task.needsStructured,false);assert.ok(result.task.uncertainty.includes('json'));assert.ok(performance.now()-start<500);
+  const answers=[{name:'ok',type:'choice',choice:'yes',confidence:.1}],start=performance.now();
+  const result=await resolveAmbiguous('Fixture',q,answers,{...settings,timeoutMs:20,maxRetries:0,fetcher:async(_u,{signal})=>stall(signal)});
+  assert.deepEqual(result,answers);assert.ok(performance.now()-start<500);
 });
 test('freshness follows source policy, including unknown dates and genuine feed failures',()=>{
   const now=Date.now(),hours=ago=>new Date(now-ago*3600_000).toISOString();
