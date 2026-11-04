@@ -1,6 +1,6 @@
 # Agent-evaluation CLI retirement
 
-**Unreleased source change, November 2026.** The standalone `openmerit eval` CLI is retired in full, including `init`, `doctor`, `plan`, `run`, `watch` and `report`. The old Scout JSON recommendation API is retired with it. This source change does not itself publish a package, deploy a Worker or change an already installed older package.
+**npm 0.3.0, 4 November 2026.** The standalone `openmerit eval` CLI is retired in full, including `init`, `doctor`, `plan`, `run`, `watch` and `report`. Older installed packages keep it until they are upgraded. The old Scout JSON recommendation API is retired in unreleased source and goes offline only with a separate Scout deployment.
 
 After an approved Scout release, `/scout/api/recommend` and its legacy alpha/versioned paths return 404, regardless of authentication. There is no replacement frozen-plan protocol. Use the [Scout conversational agent or MCP](scout.md) for provisional model guidance and your own representative task checks for evaluation. The Inference Terminal is [retired as well](inference-terminal.md); the Pi adapter remains a native Scout MCP integration, not an evaluation runner.
 

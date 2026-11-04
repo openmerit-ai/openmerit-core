@@ -1,6 +1,6 @@
 # Getting started
 
-OpenMerit provides Scout model-selection guidance. The Inference Terminal (`openmerit dash`) is [retired in unreleased source](inference-terminal.md). Pi Scout setup requires OpenMerit **0.1.12** or newer and Pi **1.5.0**. Package publication and website deployment are independent releases.
+OpenMerit provides Scout model-selection guidance. The Inference Terminal (`openmerit dash`) is [retired in npm 0.3.0](inference-terminal.md). Pi Scout setup requires OpenMerit **0.1.12** or newer and Pi **1.5.0**. Package publication and website deployment are independent releases.
 
 ## Connect Scout to a coding agent
 
@@ -34,4 +34,4 @@ See [the Pi extension guide](pi-extension.md) for installed paths, migration fro
 
 ## Evaluate application changes
 
-The standalone evaluation CLI and legacy JSON recommendation API are retired in unreleased source. Scout guidance is not measured application quality; use your own task checks and provider budget controls. See [retirement details](agent-evaluations.md).
+The standalone evaluation CLI is retired in npm 0.3.0, and the legacy JSON recommendation API in unreleased Scout source. Scout guidance is not measured application quality; use your own task checks and provider budget controls. See [retirement details](agent-evaluations.md).

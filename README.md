@@ -22,13 +22,13 @@ There are no `/openmerit` lifecycle commands, evaluation setup, scheduler, Launc
 
 Package publication and website deployment are separate releases. Pi setup requires OpenMerit 0.1.12 or newer; check the resolved package version when using `@latest`.
 
-## Evaluation CLI retirement — unreleased
+## Evaluation CLI retirement — npm 0.3.0
 
-This source removes the standalone `openmerit eval` commands, including planning, together with the old Scout JSON recommendation API. Existing local evaluation files are not deleted. Scout's conversational agent, MCP, coding-agent setup and catalogue publication remain available. This is not an npm release or production deployment; see [retirement details](docs/agent-evaluations.md).
+OpenMerit 0.3.0 removes the standalone `openmerit eval` commands, including planning. Existing local evaluation files are not deleted. The old Scout JSON recommendation API is retired in source and goes offline with a separate Scout deployment. Scout's conversational agent, MCP, coding-agent setup and catalogue publication remain available; see [retirement details](docs/agent-evaluations.md).
 
-## Inference Terminal retirement — unreleased
+## Inference Terminal retirement — npm 0.3.0
 
-This source also removes the local Inference Terminal: `openmerit dash`, its `--demo` sample, collectors, repository index and browser interface. Existing `.openmerit/terminal.json`, `.openmerit/inference.jsonl` and application logs are not deleted. Already installed packages keep the command until they are upgraded. See [retirement details](docs/inference-terminal.md).
+OpenMerit 0.3.0 also removes the local Inference Terminal: `openmerit dash`, its `--demo` sample, collectors, repository index and browser interface. Existing `.openmerit/terminal.json`, `.openmerit/inference.jsonl` and application logs are not deleted. Older installed packages keep the command until they are upgraded. See [retirement details](docs/inference-terminal.md).
 
 ## Documentation
 

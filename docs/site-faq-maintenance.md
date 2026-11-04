@@ -1,6 +1,6 @@
 # Website FAQ maintenance
 
-## Inference Terminal retirement — unreleased source, 4 November 2026
+## Inference Terminal retirement — npm 0.3.0, 4 November 2026
 
 Reviewed the homepage against removal of the local Inference Terminal (`openmerit dash`, its `--demo` sample and terminal analytics events). `site/index.html` has no FAQ block and does not mention the terminal, `openmerit dash` or local inventory collection; its copy describes Scout and the memo. No homepage edit is required. Older entries below that describe "terminal/Pi" FAQ claims are historical.
 

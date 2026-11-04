@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-11-04
 
+- **Breaking:** retire the standalone `openmerit eval` CLI, including `init`, `doctor`, `plan`, `run`, `watch` and `report`. Existing local evaluation files are not deleted. The hosted `/scout/api/recommend` retirement ships separately with the Scout serving Worker.
 - **Breaking:** retire the local Inference Terminal. `openmerit dash` and all of its options, including `--demo`, `--json` and `--diagnostics`, are removed, along with repository indexing, request-log and activity-export import, runtime and hardware discovery, the browser interface and its opt-in terminal analytics events. Existing `.openmerit/terminal.json`, `.openmerit/inference.jsonl` and application logs are not deleted. Scout setup, `openmerit scout` and `openmerit update` are unchanged.
 - Drop the terminal-only runtime dependencies (`@iarna/toml`, `@lezer/python`) and browser bundle dependencies.
 
