@@ -1,6 +1,6 @@
 # Testing and validation
 
-**Pi source replacement — unreleased and unpublished:** the new Pi 1.5.0 adapter uses native Scout MCP and shared guidance only. Dated acceptance records below describe the packages tested at the time; some mention package exports that have since been removed. Package, browser-approval, native Pi and SDK acceptance must be reported for the new build separately; a successful documentation build alone establishes none of them. Standalone evaluation tests remain separate.
+**Pi adapter — npm 0.1.12 and later:** the Pi 1.5.0 adapter uses native Scout MCP and shared guidance only. Dated acceptance records below describe the packages tested at the time; some mention package exports that have since been removed. Standalone evaluation tests remain separate.
 
 ## Stable 0.1.7 acceptance — 24 October 2026
 

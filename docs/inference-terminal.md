@@ -71,7 +71,7 @@ openmerit dash --no-open
 | `--demo` | Use only a fictional local sample; no local collectors run |
 | `--help` | Show usage |
 
-Ctrl+C stops collection. The terminal has no persistent daemon and is independent of core evaluation pause/scheduling policy. The unreleased Pi 1.5.0 Scout adapter exposes no pause or scheduling commands.
+Ctrl+C stops collection. The terminal has no persistent daemon. The Pi 1.5.0 Scout adapter exposes no pause or scheduling commands.
 
 ## Repository indexing
 

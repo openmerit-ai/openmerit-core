@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-11-04
 
 - Add `openmerit scout`, a conversation with Scout from the terminal: clarifying questions answered with `--brief` or `--skip`, then up to five models per task, cheapest first among models that reach Scout's quality bar. When you ask for the fastest or newest model, the output names that order and shows each model's time per task or release date. It uses this device's Claude Code or Pi key and limits new conversations to the endpoint IDs in `.openmerit/scout.json`.
 - The installed Scout instructions for Claude Code and Pi tell the agent to relay Scout's questions to the user and to read `tasks[].models`. This needs the matching hosted Scout release, whose `scout_models` MCP tool now runs the Scout agent.
