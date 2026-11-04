@@ -32,14 +32,13 @@
     }
   },
   "vars": {
-    "DOMAIN_REDIRECTS_ENABLED": "false",
     "MEMO_AUTH_ORIGIN": "https://openmerit.ai",
     "MEMO_ADMIN_EMAILS": "code@lazim.one",
     "MEMO_EMAIL_PROVIDER": "cloudflare",
     "MEMO_EMAIL_FROM": "OpenMerit <memo@openmerit.ai>",
     "MEMO_DAILY_EMAIL_LIMIT": "100"
   },
-  "send_email": [{ "name": "MEMO_EMAIL", "allowed_sender_addresses": ["memo@openmerit.ai", "memo@openmerit.site"] }],
+  "send_email": [{ "name": "MEMO_EMAIL", "allowed_sender_addresses": ["memo@openmerit.ai"] }],
   "d1_databases": [{
     "binding": "MEMO_DB",
     "database_name": "openmerit-memo",
