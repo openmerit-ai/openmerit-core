@@ -4,7 +4,7 @@ import {createResultCache} from '../result-cache.mjs';
 import {stageSpecialistPacks,createSnapshotReader,putJSON,shardFor} from '../store.mjs';
 import {compactVocabulary} from '../interpreter.mjs';
 import {createTimings} from '../timing.mjs';
-import {searchDataPoint,decodeSearchRecord} from '../analytics.mjs';
+import {searchRecord} from '../analytics.mjs';
 
 const result=()=>({task:{},recommendations:[{modelId:'fixture'}]});
 test('identical concurrent searches share work without sharing mutable results',async()=>{
@@ -49,7 +49,6 @@ test('compact metadata keeps complete canonical names and arbitrary future strin
 test('timing failures retain bounded stage, status and provider code without error text',async()=>{
  let time=0;const trace=createTimings(()=>time),error=Object.assign(Error('PRIVATE_SECRET'),{code:'credit_balance_exhausted',providerStatus:429});
  await assert.rejects(trace.measure('constraints',async()=>{time=12;throw error;}));
- const diagnostics=trace.snapshot(error),point=searchDataPoint({diagnostics,outcome:'interpretation_error',durationMs:12});
- const decoded=decodeSearchRecord({schemaVersion:point.blobs[0],payload:point.blobs[11],payloadEncoding:point.blobs[12]});
+ const diagnostics=trace.snapshot(error),decoded=JSON.parse(JSON.stringify(searchRecord({diagnostics})));
  assert.deepEqual(decoded.context.runtime.failure,{stage:'constraints',type:'error',code:'credit_balance_exhausted',providerStatus:429});assert.equal(decoded.context.runtime.timings.constraints,12);assert.doesNotMatch(JSON.stringify(decoded),/PRIVATE_SECRET/);
 });
