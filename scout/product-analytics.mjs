@@ -1,7 +1,5 @@
 import { json, readJSON } from './http.mjs';
-import { searchEvents, failureCodes } from './search-analytics.mjs';
 import { errorType, exceptionFrames, safeFrames } from '../site/scout/analytics-privacy.js';
-import { timingStages } from './timing.mjs';
 import { webEvents, validateWebProperties } from '../site/scout/web-analytics.js';
 
 const hosts = new Set(['https://us.i.posthog.com', 'https://eu.i.posthog.com']);
@@ -11,10 +9,9 @@ const integer = (min, max) => value => Number.isInteger(value) && value >= min &
 const duration = integer(0, 86_400_000);
 const counts = { task_count: integer(0, 3), candidate_count: integer(0, 15) };
 const position = { rank: integer(1, 5), task_index: integer(1, 3) };
-const command = choice(['help', 'dash', 'install', 'status', 'remove', 'login', 'logout', 'project', 'doctor', 'eval_init', 'eval_doctor', 'eval_plan', 'eval_run', 'eval_watch', 'eval_report', 'unknown']);
+const command = choice(['help', 'dash', 'install', 'status', 'remove', 'login', 'logout', 'project', 'doctor', 'unknown']);
 const mode = choice(['sample', 'live']), page = choice(['home', 'docs']);
 const exception = { error_type: errorType, frames: safeFrames };
-const failure = { failure_stage: choice([...timingStages, 'matching']), failure_code: value => failureCodes.has(value) ? value : undefined, provider_status: integer(100, 599) };
 const version = value => typeof value === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[a-z0-9.]{1,30})?$/.test(value) ? value : undefined;
 const agent = choice(['claude-code', 'pi', 'openmerit-cli', 'unknown']);
 const setup = { agent, scope: choice(['user', 'project']), outcome: choice(['started', 'ok', 'error', 'pending', 'denied', 'conflict', 'not_installed']) };
@@ -56,15 +53,11 @@ const clientEvents = {
 };
 const schemas = {
   ...clientEvents,
-  scout_search_completed: {
-    ...counts, ...failure, duration_ms: duration, cache: choice(['miss', 'hit', 'shared', 'unknown']),
-    outcome: choice(['ok', 'empty', 'unsupported', 'clarification', 'rate_limited', 'interpretation_error', 'selection_error', 'internal_error']),
-  },
-  scout_request_completed: { route: choice(['recommend', 'mcp']), http_status: integer(100, 599), duration_ms: duration, outcome: choice(['ok', 'error']), ...mcp },
+  scout_request_completed: { route: choice(['mcp']), http_status: integer(100, 599), duration_ms: duration, outcome: choice(['ok', 'error']), ...mcp },
   scout_tool_invocation_started: mcp,
   scout_tool_invocation_completed: { ...mcp, outcome: choice(['ok', 'error']), duration_ms: duration, ...counts },
   scout_connect_step: { ...setup, stage: choice(['device', 'token', 'login', 'keys', 'revoke', 'request']), status: choice(['pending', 'slow_down', 'approved', 'denied', 'collected', 'expired', 'invalid', 'revoked']), http_status: integer(100, 599), duration_ms: duration },
-  scout_server_error: { code: choice(['catalogue_error', 'interpretation_error', 'selection_error', 'internal_error', 'auth_error', 'request_error', 'mcp_protocol_error', 'mcp_tool_error', 'connect_error']), ...exception, ...failure },
+  scout_server_error: { code: choice(['catalogue_error', 'internal_error', 'auth_error', 'request_error', 'mcp_protocol_error', 'mcp_tool_error', 'connect_error']), ...exception },
 };
 const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) ? value.toLowerCase() : null;
 const milliseconds = value => Math.max(0, Math.min(86_400_000, Math.round(value)));
@@ -147,10 +140,7 @@ export function createProductAnalytics(request, env, ctx = {}) {
   // reuse browser correlation in unlinking mode, even before response headers.
   const traceId = linkAccount && uuid(request.headers.get('x-scout-trace-id')) || crypto.randomUUID();
   const retryOf = linkAccount && uuid(request.headers.get('x-scout-retry-of'));
-  const contentChoice = request.headers.get('x-scout-analytics-content');
-  const contentAllowed = env.POSTHOG_CAPTURE_CONTENT === 'true' && accountSyncEnabled(env) &&
-    (contentChoice === 'on' || contentChoice === null && client === 'web' && betaEvaluationEnabled(env));
-  let userId, serverErrorReported = false, mcpProperties = {}, searchCounts = {};
+  let userId, serverErrorReported = false, mcpProperties = {};
   const correlation = linkAccount ? {
     setup_id: uuid(request.headers.get('x-scout-setup-id')),
     installation_id: uuid(request.headers.get('x-scout-installation-id')),
@@ -195,7 +185,7 @@ export function createProductAnalytics(request, env, ctx = {}) {
         ...(clientVersion ? { client_version: clientVersion } : {}),
         ...(reportedAgent ? { agent: reportedAgent } : {}),
         analytics_version: 5, account_linked: !!identity,
-        ...(safe.trace_id || ['/scout/api/recommend', '/scout/mcp'].includes(path) ? { $ai_trace_id: safe.trace_id ?? traceId } : {}),
+        ...(safe.trace_id || path === '/scout/mcp' ? { $ai_trace_id: safe.trace_id ?? traceId } : {}),
         ...(env.CF_VERSION_METADATA?.id ? { release: env.CF_VERSION_METADATA.id } : {}),
       };
       const native = web ? {
@@ -270,22 +260,6 @@ export function createProductAnalytics(request, env, ctx = {}) {
         return noContent();
       } catch { return json({ error: 'Analytics preferences temporarily unavailable.' }, 503); }
     },
-    observeSearch(event) {
-      if (!enabled) return;
-      const { result, outcome, durationMs, error } = event;
-      const diagnostic = event.diagnostics?.failure ?? result?.runtime?.failure;
-      const failureProperties = { failure_stage: diagnostic?.stage, failure_code: diagnostic?.code, provider_status: diagnostic?.providerStatus };
-      const tasks = result?.tasks ?? (result ? [{ slots: [result] }] : []);
-      searchCounts = { task_count: tasks.length, candidate_count: tasks.reduce((n, task) => n + task.slots.reduce((n, slot) => n + slot.recommendations.length, 0), 0) };
-      capture('scout_search_completed', {
-        outcome, ...failureProperties, duration_ms: milliseconds(durationMs), ...searchCounts,
-        cache: result?.runtime?.cache ?? 'unknown',
-      }, { entries: searchEvents(event, contentAllowed) });
-      if (error && ['interpretation_error', 'selection_error', 'internal_error'].includes(outcome)) {
-        serverErrorReported = true;
-        capture('scout_server_error', { code: outcome, ...failureProperties, error_type: errorType(error.cause?.name ?? error.name), frames: exceptionFrames(error.cause?.stack ?? error.stack) });
-      }
-    },
     exception(error, code = 'catalogue_error') {
       serverErrorReported = true;
       capture('scout_server_error', { code, error_type: errorType(error?.name), frames: exceptionFrames(error?.stack) });
@@ -299,10 +273,9 @@ export function createProductAnalytics(request, env, ctx = {}) {
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     },
     async complete(response) {
-      if (!['/scout/api/recommend', '/scout/mcp'].includes(path)) return;
-      const isMCP = path === '/scout/mcp';
+      if (path !== '/scout/mcp') return;
       let logicalError = false;
-      if (enabled && isMCP && response.headers.get('content-type')?.includes('application/json')) {
+      if (enabled && response.headers.get('content-type')?.includes('application/json')) {
         try {
           const body = await response.clone().json();
           logicalError = !!body.error || body.result?.isError === true;
@@ -314,9 +287,9 @@ export function createProductAnalytics(request, env, ctx = {}) {
       const duration_ms = milliseconds(performance.now() - started);
       const outcome = response.ok && !logicalError ? 'ok' : 'error';
       capture('scout_request_completed', {
-        route: isMCP ? 'mcp' : 'recommend', http_status: response.status, duration_ms, outcome, ...mcpProperties,
+        route: 'mcp', http_status: response.status, duration_ms, outcome, ...mcpProperties,
       });
-      if (isMCP && mcpProperties.mcp_method === 'tools/call') capture('scout_tool_invocation_completed', { ...mcpProperties, ...searchCounts, duration_ms, outcome });
+      if (mcpProperties.mcp_method === 'tools/call') capture('scout_tool_invocation_completed', { ...mcpProperties, duration_ms, outcome });
       if (!serverErrorReported && (logicalError || response.status >= 400)) capture('scout_server_error', {
         code: logicalError ? mcpProperties.tool_error ? 'mcp_tool_error' : 'mcp_protocol_error' : response.status === 401 || response.status === 403 ? 'auth_error' : 'request_error',
       });

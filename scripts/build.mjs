@@ -18,7 +18,6 @@ const result = spawnSync(process.execPath, [compiler, "-p", join(root, "tsconfig
 if (result.error) throw result.error;
 if (result.status === 0) {
   await buildTerminal();
-  cpSync(join(root, "packages/eval/src"), join(root, "dist/eval/src"), { recursive: true });
   cpSync(join(root, "packages/terminal/src"), join(root, "dist/terminal/src"), { recursive: true });
   cpSync(join(root, "packages/terminal/public"), join(root, "dist/terminal/public"), { recursive: true });
   // The legacy CLI and installer are copied, not compiled. Node cannot strip types

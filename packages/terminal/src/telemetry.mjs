@@ -5,12 +5,8 @@ export let clientVersion;
 for (const path of ['../../../package.json', '../../../../package.json']) {
   try { const pkg = JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')); if (pkg.name === 'openmerit') { clientVersion = pkg.version; break; } } catch {}
 }
-const frameFiles = Object.freeze(['cli.mjs', 'server.mjs', 'collect.mjs', 'repository-index.mjs', 'install.mjs', 'scout.mjs', 'config.mjs', 'runner.mjs', 'adapters.mjs', 'process.mjs', 'report.mjs', 'app.js']);
-const applicationURLs = frameFiles.flatMap(file => ['terminal/src/', 'eval/src/'].map(dir => new URL(`../../${dir}${file}`, import.meta.url).href));
-const diagnostics = new WeakMap();
-export function scoutDiagnostic(error, trace, code) {
-  if (error && typeof error === 'object' && ['scout_network_error', 'scout_http_error', 'scout_response_error', 'scout_timeout'].includes(code)) diagnostics.set(error, { operation: 'scout_recommend', code, ...(typeof trace === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(trace) ? { trace_id: trace } : {}) });
-}
+const frameFiles = Object.freeze(['cli.mjs', 'server.mjs', 'collect.mjs', 'repository-index.mjs', 'install.mjs', 'app.js']);
+const applicationURLs = frameFiles.map(file => new URL(`../../terminal/src/${file}`, import.meta.url).href);
 export function safeFrames(error) {
   try {
     const stack = error?.stack;
@@ -24,7 +20,7 @@ export function safeFrames(error) {
   } catch { return []; }
 }
 export function errorProperties(error) {
-  try { return { error_type: errorType(error), frames: safeFrames(error), ...(diagnostics.get(error) ?? {}) }; }
+  try { return { error_type: errorType(error), frames: safeFrames(error) }; }
   catch { return { error_type: 'Error', frames: [] }; }
 }
 const environment = () => ({ ...(clientVersion ? { client_version: clientVersion } : {}), platform: ['darwin', 'linux', 'win32'].includes(process.platform) ? process.platform : 'unknown', runtime_major: Number(process.versions.node.split('.')[0]) });
@@ -155,9 +151,8 @@ export function commandTelemetry(args) {
   if (!enabled()) return async () => {};
   const started = performance.now();
   const command_id = randomUUID();
-  const actions = ['init', 'doctor', 'plan', 'run', 'watch', 'report'];
-  const command = !args.length || args.includes('--help') || args.includes('-h') || args[0] === 'eval' && args.length === 1
-    ? 'help' : args[0] === 'dash' ? 'dash' : setup.includes(args[0]) ? args[0] : args[0] === 'eval' && actions.includes(args[1]) ? `eval_${args[1]}` : 'unknown';
+  const command = !args.length || args.includes('--help') || args.includes('-h')
+    ? 'help' : args[0] === 'dash' ? 'dash' : setup.includes(args[0]) ? args[0] : 'unknown';
   async function send(event, properties) {
     if (!enabled()) return;
     const controller = new AbortController();

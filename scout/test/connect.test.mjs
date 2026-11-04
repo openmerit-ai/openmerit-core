@@ -76,7 +76,7 @@ test('device keys authorize MCP only, and revocation and idle expiry take effect
   const env = Object.assign(ctx.env, { CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from('scout-auth.clerk.accounts.dev$').toString('base64')}`, CLERK_SECRET_KEY: 'sk_test_fixture' });
   assert.equal(await mcp(env, key), null);
   // The JSON API stays session-only.
-  const api = await scoutAccess(new Request(`${origin}/scout/api/recommend`, { method: 'POST', headers: { authorization: `Bearer ${key}` } }), env);
+  const api = await scoutAccess(new Request(`${origin}/scout/api/agent`, { method: 'POST', headers: { authorization: `Bearer ${key}` } }), env);
   assert.equal(api.status, 401);
   assert.equal((await (await mcp(env, 'om_' + 'a'.repeat(43))).json()).code, 'device_key_required');
 

@@ -43,7 +43,7 @@ test('retired agent and resource discovery routes are 404 before auth, analytics
   const retiredEnv=new Proxy({SCOUT_OAUTH_ENABLED:'true',SCOUT_OAUTH_CLIENT_IDS:'obsolete-client'},{get(){assert.fail('Retired routes must not read bindings or fetch assets');}});
   const ctx={waitUntil(){assert.fail('Retired routes must not schedule analytics');}};
   for(const router of [worker,alpha])for(const prefix of ['/scout','/scout/alpha','/scout/alpha/alpha','/scout/v1','/scout/v2','/scout/alpha/v1']){
-    for(const suffix of ['/mcp','/mcp/','/mcp/tools','/.well-known/oauth-protected-resource','/.well-known/oauth-protected-resource/scout/mcp']){
+    for(const suffix of ['/api/recommend','/api/recommend/','/api/recommend/anything','/mcp','/mcp/','/mcp/tools','/.well-known/oauth-protected-resource','/.well-known/oauth-protected-resource/scout/mcp']){
       if(prefix==='/scout'&&suffix==='/mcp')continue; // Canonical MCP is served; see device-key tests.
       for(const method of ['GET','HEAD','POST','OPTIONS','DELETE']){
         const response=await router.fetch(new Request(`https://example.test${prefix}${suffix}?agent=claude-code`,{method,headers:{origin:'https://foreign.test',authorization:'Bearer obsolete'}}),retiredEnv,ctx);
@@ -66,7 +66,7 @@ test('promoted Scout serves the canonical page and redirects former alpha paths'
   assert.equal(redirect.status,308);assert.equal(redirect.headers.get('location'),'https://example.test/scout/?q=a%20b');
   const page=await alpha.fetch(new Request('https://example.test/scout/'),env,{});
   assert.equal(await page.text(),'Scout');assert.equal(page.headers.get('x-robots-tag'),null);
-  for(const suffix of ['', '/', '/scout.js', '/api/status', '/api/recommend'])for(const method of ['GET','HEAD','POST']){
+  for(const suffix of ['', '/', '/scout.js', '/api/status', '/api/agent'])for(const method of ['GET','HEAD','POST']){
     const response=await alpha.fetch(new Request(`https://example.test/scout/alpha${suffix}?q=a%20b`,{method}),env,{});
     assert.equal(response.status,308);assert.equal(response.headers.get('location'),`https://example.test/scout${suffix||'/'}?q=a%20b`);
     assert.equal(response.headers.get('cache-control'),'no-store');assert.equal(await response.text(),'');
@@ -85,7 +85,7 @@ test('the deployed version is public and never cached, without auth or catalogue
 
 test('promoted Scout preserves canonical API bodies',async t=>{
   t.mock.method(worker,'fetch',async request=>Response.json({path:new URL(request.url).pathname,query:new URL(request.url).search,method:request.method,origin:request.headers.get('origin'),body:await request.json()}));
-  for(const path of ['api/recommend']){
+  for(const path of ['api/agent']){
     const response=await alpha.fetch(new Request(`https://example.test/scout/${path}?test=1`,{method:'POST',headers:{origin:'https://example.test','content-type':'application/json'},body:'{"prompt":"Keep my task"}'}),{},{});
     assert.deepEqual(await response.json(),{path:`/scout/${path}`,query:'?test=1',method:'POST',origin:'https://example.test',body:{prompt:'Keep my task'}});
   }
@@ -111,7 +111,7 @@ test('public auth configuration exposes only the publishable key and fails close
   assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
   assert.deepEqual(await response.json(),{publishableKey:authEnv.CLERK_PUBLISHABLE_KEY,frontendApi:'scout-auth.clerk.accounts.dev',analytics:{enabled:false,accountSync:false,content:false,contentDefault:false}});
   for(const config of [{},{CLERK_PUBLISHABLE_KEY:authEnv.CLERK_PUBLISHABLE_KEY},{...authEnv,CLERK_PUBLISHABLE_KEY:'invalid'}]){
-    for(const path of ['api/auth','api/recommend']){
+    for(const path of ['api/auth','api/agent']){
       const result=await alpha.fetch(new Request(`https://example.test/scout/${path}`),config,{});
       assert.equal(result.status,503);assert.doesNotMatch(await result.text(),/sk_test|BEGIN PUBLIC KEY|invalid/);
     }
@@ -122,7 +122,7 @@ test('HTTP rejects missing, forged, expired, foreign and pending sessions before
   const otherKey=generateKeyPairSync('rsa',{modulusLength:2048}).privateKey;
   const invalid=[null,'malformed',sessionToken({},otherKey),sessionToken({exp:Math.floor(Date.now()/1000)-60}),sessionToken({nbf:Math.floor(Date.now()/1000)+120}),sessionToken({iss:'https://other.clerk.accounts.dev'}),sessionToken({azp:'https://untrusted.example'}),sessionToken({sts:'pending'}),sessionToken({sid:''}),sessionToken({sub:''})];
   const blockedEnv=Object.assign(Object.create(env),authEnv);
-  for(const path of ['api/recommend']){
+  for(const path of ['api/agent']){
     for(const token of invalid){
       const response=await alpha.fetch(authenticatedRequest(path,token),blockedEnv,{});
       assert.equal(response.status,401,`${path}: ${token?.slice(0,20)??'anonymous'}`);
@@ -139,15 +139,15 @@ test('HTTP rejects missing, forged, expired, foreign and pending sessions before
 test('verified sessions reach HTTP handlers, while account and IP limits remain independent',async()=>{
   const manifest={publication:{id:'auth-fixture'},sources:[],publicStatus:{models:0},servingEngine:'evidence'};
   const bucket={async get(key){const data=key==='active.json'?{key:'manifest.json',publication:manifest.publication}:key==='manifest.json'?manifest:null;return data?{json:async()=>data}:null;}};
-  const configured={...authEnv,SCOUT_CATALOGUE:bucket};
+  const configured={...authEnv,SCOUT_CATALOGUE:bucket,SCOUT_AGENT:{getByName:()=>assert.fail('Invalid body must not start an agent turn')}};
   const token=sessionToken();
-  const api=await alpha.fetch(authenticatedRequest('api/recommend',token),configured,{});
-  assert.equal(api.status,400,await api.clone().text());assert.equal((await api.json()).error,'Provide prompt and optionally modelIds or endpointIds.');
+  const api=await alpha.fetch(authenticatedRequest('api/agent',token),configured,{});
+  assert.equal(api.status,400,await api.clone().text());assert.equal((await api.json()).error,'Send conversationId, message, brief, skip or endpointIds.');
   const status=await alpha.fetch(new Request('https://example.test/scout/api/status'),configured,{});
   assert.equal(status.status,200);assert.equal((await status.json()).snapshotVersion,'auth-fixture');
 
   const counts=new Map();configured.SCOUT_RATE={async limit({key}){const count=(counts.get(key)??0)+1;counts.set(key,count);return {success:count<=2};}};
-  const call=(sub,ip)=>alpha.fetch(authenticatedRequest('api/recommend',sessionToken({sub}),{'cf-connecting-ip':ip}),configured,{});
+  const call=(sub,ip)=>alpha.fetch(authenticatedRequest('api/agent',sessionToken({sub}),{'cf-connecting-ip':ip}),configured,{});
   assert.equal((await call('user_alice','192.0.2.1')).status,400);
   assert.equal((await call('user_alice','192.0.2.2')).status,400);
   const accountLimit=await call('user_alice','192.0.2.3');assert.equal(accountLimit.status,429);assert.equal(accountLimit.headers.get('retry-after'),'60');
@@ -219,16 +219,15 @@ test('product opt-out and missing configuration suppress all transmissions; reje
   for(const headers of [{dnt:'1'},{'sec-gpc':'1'},{'x-scout-analytics':'off'}]){
     const config={...authEnv,...productEnv};
     assert.equal((await alpha.fetch(eventRequest('scout_visited',{},undefined,headers),config,ctx)).status,204);
-    assert.equal((await alpha.fetch(authenticatedRequest('api/recommend',null,headers),config,ctx)).status,401);
+    assert.equal((await alpha.fetch(authenticatedRequest('api/agent',null,headers),config,ctx)).status,401);
   }
   for(const config of [{...authEnv},{...authEnv,...productEnv,POSTHOG_PROJECT_TOKEN:''},{...authEnv,...productEnv,POSTHOG_HOST:'https://unexpected.test'},{...authEnv,...productEnv,POSTHOG_ENVIRONMENT:''}]){
     assert.equal((await alpha.fetch(eventRequest('scout_visited'),config,ctx)).status,204);
-    assert.equal((await alpha.fetch(authenticatedRequest('api/recommend'),config,ctx)).status,401);
+    assert.equal((await alpha.fetch(authenticatedRequest('api/agent'),config,ctx)).status,401);
   }
   await ctx.flush();assert.equal(sent.length,0);
-  assert.equal((await alpha.fetch(authenticatedRequest('api/recommend',null,{'x-scout-client':'cli'}),{...authEnv,...productEnv},ctx)).status,401);
-  await ctx.flush();const event=sent[0].batch[0];assert.equal(event.event,'scout_request_completed');
-  assert.equal(event.properties.http_status,401);assert.equal(event.properties.outcome,'error');assert.equal(event.properties.client,'cli');assert.equal(event.properties.transport,'http');
+  assert.equal((await alpha.fetch(authenticatedRequest('api/agent',null,{'x-scout-client':'cli'}),{...authEnv,...productEnv},ctx)).status,401);
+  await ctx.flush();assert.equal(sent.length,0,'rejected agent requests do not emit retired recommendation-completion events');
 });
 
 test('analytics has a separate IP quota and unavailable delivery cannot fail or block requests',async t=>{

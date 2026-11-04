@@ -1,8 +1,12 @@
 # Scout by OpenMerit
 
-Scout is OpenMerit's model search agent. Describe your task and get model recommendations. Scout returns up to five model-and-endpoint candidates per task. Comparable measurements support performance ranking; narrow decision and vision tasks use an explicitly labelled task-fit shortlist when quality is unmeasured. The `/scout/` page and JSON API use the same index and ranking.
+Scout is OpenMerit's model search agent. Describe your task and get provisional model guidance through the conversational page or MCP. Public catalogue evidence is not proof of application quality.
 
-Scout is a separate hosted beta product. Npm 0.1.7 introduced optional Claude Code setup for it. OpenMerit 0.1.12 adds native Scout access for Pi 1.5.0, replacing the old Pi evaluation adapter without changing the standalone evaluation CLI or Inference Terminal. Recommendations are evidence-based candidates for your own evaluation, not a guarantee of task accuracy or an independently validated state-of-the-art ranking.
+**Unreleased retirement, November 2026:** this source removes `/scout/api/recommend`, its alpha/versioned aliases and the complete standalone `openmerit eval` CLI, including `plan`. Retired paths return 404 before authentication, redirects or asset fallback. The agent, canonical `/scout/mcp`, coding-agent setup, catalogue publisher, status and account/privacy capabilities remain. No remote data or existing local evaluation files are deleted. Package publication and Worker deployment require separate approval; neither is implied by this source change.
+
+Dated receipts and the old search/ranking/JSON protocol descriptions below are historical, not supported interfaces in this source. There is no replacement frozen-plan API. See [evaluation retirement](agent-evaluations.md) and [commands](commands.md) for migration boundaries.
+
+Scout is a separate hosted beta product. Npm 0.1.7 introduced optional Claude Code setup for it. OpenMerit 0.1.12 added native Scout access for Pi 1.5.0, replacing the old Pi evaluation adapter. Recommendations are evidence-based candidates for your own evaluation, not a guarantee of task accuracy or an independently validated state-of-the-art ranking.
 
 **Website rebuild — published 24 October 2026:** the rebuild preserves the existing landing page at `/` and Scout at `/scout/`, and takes all hosted `/docs/` pages offline, including this guide. `/connect/`, the JSON API/MCP and the standalone `/scout/data-policy/` remain available. The guide remains maintained in Markdown; this does not remove the local CLI or its documentation from the package. See the [cutover notes](site-domain-migration.md) for publication and verification details.
 

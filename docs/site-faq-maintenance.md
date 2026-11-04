@@ -341,7 +341,7 @@ The experimental `npm run demo` sandbox (since removed) was a repository-local l
 
 The 16 October 2026 Scout reliability changes affect the hosted research/matching service and its source-backed guide: publication recovery, per-source freshness and bounded Decisions retries. Homepage approval, budgets, background-agent scheduling, and published npm behavior are unchanged. No homepage FAQ claim is strengthened by these service tests.
 
-The current homepage has no FAQ block. The earlier source map pointed at the removed coordinator, protocol and Pi 0.87 adapter. If an FAQ returns, check each claim against the remaining sources: `packages/terminal` and `docs/inference-terminal.md`; `packages/eval` and `docs/agent-evaluations.md`; `packages/pi` and `docs/pi-extension.md`; `scout/`, `docs/scout.md` and `docs/scout-data-policy.md`; `docs/security.md`, `docs/testing.md` and `docs/roadmap.md`; and `LICENSE` with the published npm metadata for availability and cost.
+The current homepage has no FAQ block. The earlier source map pointed at the removed coordinator, protocol, Pi 0.87 adapter and standalone eval package. If an FAQ returns, check each claim against the remaining sources: `packages/terminal` and `docs/inference-terminal.md`; `packages/pi` and `docs/pi-extension.md`; `scout/`, `docs/scout.md` and `docs/scout-data-policy.md`; `docs/security.md`, `docs/testing.md` and `docs/roadmap.md`; and `LICENSE` with the published npm metadata for availability and cost. `docs/agent-evaluations.md` records retirement rather than a supported runner.
 
 ## Review during releases and website updates
 
@@ -554,7 +554,11 @@ The `.ai` migration changes hostnames and mail configuration, not product behavi
 
 ## Automatic light and dark appearance — unreleased source, 14 October 2026
 
-Reviewed homepage FAQ claims against the appearance-only change. Device-driven colors affect website reading surfaces, demos, and the Inference Terminal, including charts and overlays. They add no saved theme preference, inference calls, collection, routing, permissions, or billing behavior. No FAQ wording change is required. The terminal guide separates the unreleased source appearance from published preview.5. Website/npm publication is not implied by local builds; the main-app source divergence and integration boundary are recorded in [theme maintenance](site-themes.md).
+Reviewed homepage FAQ claims against the appearance-only change. Device-driven colors affect website reading surfaces, demos, and the Inference Terminal, including charts and overlays. They add no saved theme preference, inference calls, collection, routing, permissions, or billing behavior. No FAQ wording change is required. The terminal guide separates the unreleased source appearance from published preview.5. Website/npm publication is not implied by local builds; see [palette ownership](site-design.md#automatic-appearance--published-14-october-2026) and [deployment boundaries](site-deployment.md).
+
+## Second cleanup — unreleased, November 2026
+
+The current homepage still has no FAQ block. The terminal and Scout agent/MCP remain; the standalone eval CLI, legacy recommendation API and unpublished docs shell are retired in source. README, commands and product guides carry the retirement boundary. No new homepage claim or production acceptance is implied.
 
 ## Scout — unreleased branch preview, 14 October 2026
 

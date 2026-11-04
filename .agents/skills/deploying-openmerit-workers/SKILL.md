@@ -1,6 +1,6 @@
 ---
 name: deploying-openmerit-workers
-description: "Deploys, checks and rolls back OpenMerit's Cloudflare Workers (domain router, Scout serving, Scout publisher, memo site, terminal preview). Use before any wrangler deploy, rollback, secret change, route change or deployment status question in this repository."
+description: "Deploys, checks and rolls back OpenMerit's Cloudflare Workers (domain router, Scout serving, Scout publisher, memo site). Use before any wrangler deploy, rollback, secret change, route change or deployment status question in this repository."
 ---
 
 # Deploying OpenMerit Workers

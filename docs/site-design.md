@@ -158,7 +158,7 @@ runtime errors. Both default layouts were captured and inspected. Native Claude
 launch, completed installation and authenticated Scout/memo flows were not
 exercised by this homepage deployment check.
 
-The website lives in `site/` and uses the existing Cloudflare asset configuration in `wrangler.jsonc`. The homepage is plain HTML, CSS, and JavaScript. The [documentation section](site-documentation.md) is generated from curated Markdown at build time; no browser framework is required. The guided demo adds a Worker API and temporary Cloudflare Containers; Docker must be running for deployment.
+The website lives in `site/`. The homepage is plain HTML, CSS and TypeScript-built browser scripts. The unpublished documentation shell is retired in source; `npm run build:site` builds only the live Scout policy and protected memo, keeping product guides as Markdown. The former guided demo and its container were removed by the first cleanup. Follow [deployment maintenance](site-deployment.md) rather than the historical publication instructions below.
 
 The playback-only revision is published as Worker `31c181c9-c083-4eb4-85a4-f47516eba877`, build `demo-20260928-fieldkit-v1`. It removes live sandbox controls, disables public session creation, adds a dedicated Demo documentation group, and adds the six-task Field kit recording. Each of the five examples has a persistent two-sentence description below its tabs. Both Field kit paths already use six distinct models; five assignments change while the feasibility model is retained. The recorded comparison shows 22% lower observed cost and 13% lower mean latency, with 4/4 evaluation and 4/4 separate verification goals passing. The deployment history below describes earlier published behavior.
 
@@ -199,4 +199,9 @@ All current website changes were deployed as Worker `6b9dfbd1-d9a0-4f13-9120-4e7
 
 ## Automatic appearance — published 14 October 2026
 
-The source styles now follow the device's light or dark preference without a website switch. Shared semantic colors cover the landing page, docs, memo, access forms, engineering article, and both demo presentations. The hero keeps its workshop fixed and registers only the moving maker to remove camera drift between generated poses. See [theme sources, verification, and publication constraints](site-themes.md).
+The website and Inference Terminal follow the device's light or dark preference without a switch, saved preference or URL override. Print remains light.
+
+- `site/styles.css` owns the shared website palette; `site/policy.css`, `site/memo.css` and `site/memo-access.css` style the retained reading/access surfaces with those tokens.
+- `packages/terminal/public/styles.css` owns the terminal palette. Route diagrams use semantic colors from `client/routes.mjs`; canvas charts follow device changes through `client/theme.js` and resolved CSS colors.
+
+Appearance checks do not establish authentication or inference behavior. Website, Scout, terminal and npm release boundaries remain separate; local captures and passing builds do not imply publication.

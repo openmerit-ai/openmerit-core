@@ -1,6 +1,6 @@
 # Getting started
 
-OpenMerit provides a passive Inference Terminal, Scout model-selection guidance, and a separate [agent-evaluation CLI](agent-evaluations.md). Pi Scout setup requires OpenMerit **0.1.12** or newer and Pi **1.5.0**. Package publication and website deployment are independent releases.
+OpenMerit provides a passive Inference Terminal and Scout model-selection guidance. Pi Scout setup requires OpenMerit **0.1.12** or newer and Pi **1.5.0**. Package publication and website deployment are independent releases.
 
 ## Open your inference environment
 
@@ -48,4 +48,4 @@ See [the Pi extension guide](pi-extension.md) for installed paths, migration fro
 
 ## Evaluate application changes
 
-The standalone `openmerit eval` CLI is unchanged by the new Pi adapter. It evaluates Claude Code, Codex and OpenCode through explicit task, scope, budget and grader configuration; see [agent evaluations](agent-evaluations.md).
+The standalone evaluation CLI and legacy JSON recommendation API are retired in unreleased source. Scout guidance is not measured application quality; use your own task checks and provider budget controls. See [retirement details](agent-evaluations.md).

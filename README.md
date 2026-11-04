@@ -2,7 +2,7 @@
 
 OpenMerit provides a local Inference Terminal for understanding an application's models, services, recorded activity, and compute, plus Scout guidance for application-model choices.
 
-The terminal reads existing evidence; Scout recommends candidates to evaluate. Neither is a request router or proof of application-quality improvements. A separate standalone evaluation CLI supports explicit evaluation workflows.
+The terminal reads existing evidence; Scout recommends candidates to evaluate. Neither is a request router or proof of application-quality improvements.
 
 ## Open the terminal
 
@@ -38,13 +38,13 @@ There are no `/openmerit` lifecycle commands, evaluation setup, scheduler, Launc
 
 Package publication and website deployment are separate releases. Pi setup requires OpenMerit 0.1.12 or newer; check the resolved package version when using `@latest`.
 
-## Evaluate application changes
+## Evaluation CLI retirement — unreleased
 
-The standalone `openmerit eval` CLI is unchanged by the Pi replacement. Evaluate Claude Code, Codex and OpenCode with explicit tasks, model scope, budget and graders. Freeze Scout's shortlist and compare fresh repeated attempts after source changes. Budget and sandbox blocks stay separate from task scores; unknown costs stay unknown. See [agent evaluations](docs/agent-evaluations.md) for setup, graders, budgets and availability.
+This source removes the standalone `openmerit eval` commands, including planning, together with the old Scout JSON recommendation API. Existing local evaluation files are not deleted. Scout's conversational agent, MCP, coding-agent setup and catalogue publication remain available. This is not an npm release or production deployment; see [retirement details](docs/agent-evaluations.md).
 
 ## Documentation
 
-The [documentation overview](docs/index.md) links the current guides. The website at [openmerit.ai/docs](https://openmerit.ai/docs/) is deployed separately from the package and this checkout.
+The [documentation overview](docs/index.md) links the maintained Markdown guides. The unpublished `/docs/` website shell is retired; the live Scout data policy and protected memo have separate builds.
 
 - [Getting started](docs/getting-started.md) and [troubleshooting](docs/troubleshooting.md)
 - [Scout](docs/scout.md) and [Pi adapter](docs/pi-extension.md)
@@ -60,6 +60,6 @@ npm run verify
 npm run dash -- /path/to/application
 ```
 
-`packages/terminal` contains the CLI, collectors and browser interface. `packages/eval` contains the standalone `openmerit eval` runner, and `packages/pi` supplies only the native Scout adapter. The package exports `openmerit/pi` and the `openmerit` command. See the [Pi package README](packages/pi/README.md) for bounded adapter tests. Provider credentials belong to the harness or its environment and must never be committed.
+`packages/terminal` contains the CLI, collectors and browser interface; `packages/pi` supplies only the native Scout adapter. The package exports `openmerit/pi` and the `openmerit` command. See the [Pi package README](packages/pi/README.md) for bounded adapter tests. Provider credentials belong to the harness or its environment and must never be committed.
 
-Edit documentation in `docs/`, then run `npm run check:docs`. The website is generated from those Markdown files. See [documentation maintenance](docs/site-documentation.md) and the [production-source reconciliation note](docs/site-domain-migration.md) before deployment; a local build does not publish changes.
+Edit documentation in `docs/`, then run `npm run check:docs`. `npm run build:site` builds only the Scout data policy and protected memo, not a docs website. A local build does not publish changes; follow [deployment maintenance](docs/site-deployment.md) before any approved release.

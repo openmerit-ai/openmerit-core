@@ -9,7 +9,7 @@ import { createAnalytics, browserErrorProperties } from '../client/analytics.mjs
 
 const cli = new URL('../src/cli.mjs', import.meta.url);
 const clientEnvironment = {client_version:JSON.parse(readFileSync(new URL('../../../package.json',import.meta.url),'utf8')).version,platform:process.platform,runtime_major:Number(process.versions.node.split('.')[0])};
-test('diagnostics keep only application basenames and coordinates, including Scout response traces', async () => {
+test('diagnostics keep only application basenames and coordinates', () => {
   const app = new URL('../src/cli.mjs', import.meta.url).href;
   const error = new TypeError('PRIVATE text /home/user/secret');
   error.stack = `TypeError: PRIVATE\n    at secretFunction (${app}:12:3)\n    at privateFunction (file:///home/user/cli.mjs:22:4)\n    at PRIVATE (file:///home/user/task.js:4:8)`;
@@ -23,24 +23,6 @@ test('diagnostics keep only application basenames and coordinates, including Sco
     assert.deepEqual(browserErrorProperties(browserError), {error_type:'TypeError',frames:[{filename:'app.js',lineno:17,colno:2}]});
     assert.deepEqual(browserErrorProperties({get stack(){throw Error('PRIVATE');}}), {error_type:'Error',frames:[]});
   } finally { if (location === undefined) delete globalThis.location; else globalThis.location = location; }
-  const { makePlan } = await import('../../eval/src/scout.mjs');
-  const config = {scope:'all',connections:[],tasks:[{id:'PRIVATE',description:'PRIVATE'}]};
-  const trace = 'b8d2d9fa-6d37-4d50-a90b-d83ea69b22bf';
-  for (const [response, code] of [[new Response('PRIVATE',{status:503,headers:{'X-Scout-Trace-Id':trace}}),'scout_http_error'], [Response.json({PRIVATE:true},{headers:{'X-Scout-Trace-Id':trace}}),'scout_response_error']]) {
-    await assert.rejects(makePlan(config, async()=>response), error => {
-      const diagnostic = errorProperties(error);
-      assert.equal(diagnostic.code,code);
-      assert.equal(diagnostic.operation,'scout_recommend');
-      assert.equal(diagnostic.trace_id,trace);
-      assert.ok(diagnostic.frames.some(f=>f.filename==='scout.mjs'));
-      assert.doesNotMatch(JSON.stringify(diagnostic), /PRIVATE|file:|\/home\//);
-      return true;
-    });
-  }
-  for (const [error, code] of [[new Error('PRIVATE'),'scout_network_error'],[new DOMException('PRIVATE','TimeoutError'),'scout_timeout']]) {
-    await assert.rejects(makePlan(config,async()=>{throw error;}), caught => errorProperties(caught).code===code);
-  }
-  await assert.rejects(makePlan(config,async()=>new Response(null,{status:503,headers:{'X-Scout-Trace-Id':'PRIVATE'}})), error => !('trace_id' in errorProperties(error)));
 });
 
 test('browser consent controls prevent even local submission; enabled browser uses only relay', async () => {
@@ -155,7 +137,7 @@ test('opted-in CLI sends only allowlisted payloads with ephemeral UUID identity'
     [['dash', '--demo', '--json'], 'dash', 'ok'],
     [['dash', '--demo', '--diagnostics'], 'dash', 'ok'],
     [['private-prompt-model@example.org'], 'unknown', 'error'],
-    ...['init', 'doctor', 'plan', 'run', 'watch', 'report'].map(action => [['eval', action, '--private-secret'], `eval_${action}`, 'error']),
+    ...['init', 'doctor', 'plan', 'run', 'watch', 'report'].map(action => [['eval', action, '--private-secret'], 'unknown', 'error']),
   ]) {
     const result = await run(args, { OPENMERIT_TELEMETRY: '1', PRIVATE_SECRET: 'never-send' });
     assert.equal(result.code, outcome === 'ok' ? 0 : 1);
@@ -220,24 +202,4 @@ test('long-running dash completes telemetry at startup, before the server stops'
   assert.equal(result.stderr, '');
   assert.equal(result.events.length, 2);
   assert.equal(JSON.parse(result.events[1].body).properties.outcome, 'ok');
-});
-
-test('Scout requests identify the CLI and propagate explicit analytics consent', async () => {
-  const { makePlan } = await import('../../eval/src/scout.mjs');
-  const saved = { telemetry: process.env.OPENMERIT_TELEMETRY, dnt: process.env.DO_NOT_TRACK };
-  try {
-    for (const [telemetry, dnt, expected] of [['', '', 'off'], ['true', '', 'off'], ['1', '', 'on'], ['1', '1', 'off']]) {
-      process.env.OPENMERIT_TELEMETRY = telemetry; process.env.DO_NOT_TRACK = dnt;
-      await makePlan({ scope: 'all', connections: [], tasks: [{ id: 'task', description: 'private task' }] }, async (url, options) => {
-        assert.equal(options.headers['X-Scout-Client'], 'cli');
-        assert.equal(options.headers['X-Scout-Analytics-Content'], 'off');
-        assert.equal(options.headers['X-Scout-Analytics'], expected);
-        return { ok: true, json: async () => ({ recommendations: [] }) };
-      });
-    }
-  } finally {
-    for (const [key, value] of [['OPENMERIT_TELEMETRY', saved.telemetry], ['DO_NOT_TRACK', saved.dnt]]) {
-      if (value === undefined) delete process.env[key]; else process.env[key] = value;
-    }
-  }
 });
