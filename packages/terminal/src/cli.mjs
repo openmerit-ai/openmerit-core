@@ -45,7 +45,6 @@ async function main() {
       if (arg === '--port') { port = Number(value); explicitPort = true; } else interval = Number(value);
     } else if (arg === '--no-open') noOpen = true;
     else if (arg === '--no-discovery') discovery = false;
-    else if (arg === '--access' || arg === '--revoke-access') throw new Error('Coding-harness history is no longer collected. Saved history permissions are ignored; these access options have been removed.');
     else if (arg === '--demo') demo = true;
     else if (arg === '--json') json = true;
     else if (arg === '--diagnostics') diagnostics = true;

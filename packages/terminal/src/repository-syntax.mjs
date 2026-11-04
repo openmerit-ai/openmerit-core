@@ -5,8 +5,8 @@ import { parseDocument, isMap, isSeq, isScalar, isAlias, LineCounter } from 'yam
 import TOML from '@iarna/toml';
 
 const identifier = /^[A-Za-z_$][\w$]*$/;
-export const endpointField = key => /^(?:base_?url|api_?base|endpoint(?:_?url)?|(?:[A-Z][A-Z0-9_]*_)?(?:BASE_URL|API_BASE|ENDPOINT(?:_URL)?)(?:_\d+)?|OPENMERIT_LOCAL_URL|OLLAMA_HOST)$/i.test(key);
-export const modelField = key => /^(?:(?:[\w]+_)?models?(?:_ids?|_names?)?|modelName|modelId|model_name_or_path|pretrained_model_name_or_path)$/i.test(key) && !/^(?:model_creator|model_provider|model_type|model_path|model_dir|model_cache|model_kwargs)$/i.test(key);
+const endpointField = key => /^(?:base_?url|api_?base|endpoint(?:_?url)?|(?:[A-Z][A-Z0-9_]*_)?(?:BASE_URL|API_BASE|ENDPOINT(?:_URL)?)(?:_\d+)?|OPENMERIT_LOCAL_URL|OLLAMA_HOST)$/i.test(key);
+const modelField = key => /^(?:(?:[\w]+_)?models?(?:_ids?|_names?)?|modelName|modelId|model_name_or_path|pretrained_model_name_or_path)$/i.test(key) && !/^(?:model_creator|model_provider|model_type|model_path|model_dir|model_cache|model_kwargs)$/i.test(key);
 const taskField = key => /^(?:task(?:_id|_name)?|taskName|taskId)$/i.test(key);
 const candidateField = key => /(?:candidate|benchmark|leaderboard|strong_model|weak_model|models$)/i.test(key);
 const sensitive = key => /(?:key|token|secret|password|credential|prompt|message|content|response|header|payload|input|output)/i.test(key);

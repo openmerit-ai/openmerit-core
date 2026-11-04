@@ -16,7 +16,7 @@ export function createAnalytics({ enabled, mode, navigator = globalThis.navigato
     } catch { /* Storage and transport failures never affect the UI. */ }
   };
 }
-export const browserErrorType = error => ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'URIError', 'EvalError', 'AggregateError', 'AbortError'].includes(error?.name) ? error.name : 'Error';
+const browserErrorType = error => ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'URIError', 'EvalError', 'AggregateError', 'AbortError'].includes(error?.name) ? error.name : 'Error';
 export function browserErrorProperties(error) {
   try {
     const stack = error?.stack;

@@ -5,7 +5,7 @@ export let clientVersion;
 for (const path of ['../../../package.json', '../../../../package.json']) {
   try { const pkg = JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')); if (pkg.name === 'openmerit') { clientVersion = pkg.version; break; } } catch {}
 }
-export const frameFiles = Object.freeze(['cli.mjs', 'server.mjs', 'collect.mjs', 'repository-index.mjs', 'install.mjs', 'scout.mjs', 'config.mjs', 'runner.mjs', 'adapters.mjs', 'process.mjs', 'report.mjs', 'app.js']);
+const frameFiles = Object.freeze(['cli.mjs', 'server.mjs', 'collect.mjs', 'repository-index.mjs', 'install.mjs', 'scout.mjs', 'config.mjs', 'runner.mjs', 'adapters.mjs', 'process.mjs', 'report.mjs', 'app.js']);
 const applicationURLs = frameFiles.flatMap(file => ['terminal/src/', 'eval/src/'].map(dir => new URL(`../../${dir}${file}`, import.meta.url).href));
 const diagnostics = new WeakMap();
 export function scoutDiagnostic(error, trace, code) {

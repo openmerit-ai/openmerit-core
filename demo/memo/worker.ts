@@ -14,7 +14,7 @@ function reply(body: BodyInit | null, status = 200, headers: Record<string, stri
 }
 const jsonError = (message: string, status: number) => reply(JSON.stringify({ message }), status, { 'Content-Type': 'application/json' });
 const isUnder = (path: string, root: string) => path === root || path.startsWith(root + '/');
-export const isMemoRequest = (path: string) => isUnder(path, '/memo');
+const isMemoRequest = (path: string) => isUnder(path, '/memo');
 const adminEmails = (env: MemoEnv) => new Set((env.MEMO_ADMIN_EMAILS ?? '').split(',').map(email => email.trim().toLowerCase()).filter(Boolean));
 
 async function parseBody(request: Request): Promise<unknown> {
@@ -108,9 +108,3 @@ export async function handleMemoRequest(request: Request, env: MemoEnv, { sendCo
     return authPath ? jsonError('Email access is temporarily unavailable. Please try again later.', 503) : reply(messagePage('Temporarily unavailable', 'We couldn’t open the memo. Please try again shortly.'), 503);
   }
 }
-
-export default {
-  async fetch(request: Request, env: MemoEnv): Promise<Response> {
-    return await handleMemoRequest(request, env) ?? env.ASSETS.fetch(request);
-  },
-};

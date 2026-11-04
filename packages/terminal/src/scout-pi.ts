@@ -22,7 +22,7 @@ export function piPaths(root: string, scope: ScoutScope) {
   const base = scope === 'user' ? agentDir : join(root, '.pi');
   return { skill: join(base, 'skills/openmerit-scout/SKILL.md'), rule: join(base, 'extensions/openmerit-scout.ts'),
     connection: join(base, 'extensions/openmerit-scout.json'), record: join(base, 'openmerit-install.json'),
-    legacyRule: join(base, 'rules/openmerit.md'), mcpFile: join(base, 'mcp.json'), mcpScope: scope, agentDir };
+    mcpFile: join(base, 'mcp.json'), mcpScope: scope, agentDir };
 }
 export async function inspectPi(root: string, scope: ScoutScope) {
   const paths = piPaths(root, scope);

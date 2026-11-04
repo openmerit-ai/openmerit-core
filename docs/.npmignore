@@ -1,5 +1,4 @@
 # Internal deployment and website maintenance notes are not package guides.
 site-*.md
 # The email-protected memo is not part of the public package documentation.
-memo.md
 memo-published.md

@@ -16,6 +16,7 @@
   "files": [
     "dist/pi/",
     "dist/terminal/",
+    "!dist/terminal/src/*.ts",
     "dist/eval/",
     "docs/",
     "CHANGELOG.md",
@@ -91,11 +92,10 @@
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "1.5.0",
     "@clerk/backend": "3.26.1",
     "@clerk/shared": "4.41.0",
+    "@earendil-works/pi-coding-agent": "1.5.0",
     "@resvg/resvg-js": "2.6.2",
-    "@types/markdown-it": "14.1.2",
     "@types/node": "^22.18.6",
     "esbuild": "0.28.2",
     "fflate": "0.8.2",

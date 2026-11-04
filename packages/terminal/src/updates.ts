@@ -228,7 +228,7 @@ async function recover(base: string, scope: string) {
 }
 export async function recoverUpdates(base: string, scope: string) { await recover(base, scope); }
 
-export interface UpdateResult { status: string; message: string; version?: string }
+interface UpdateResult { status: string; message: string; version?: string }
 export async function runUpdate(base: string, scope: string, options: { hook?: boolean; enabled?: boolean; fetcher?: typeof fetch; now?: number } = {}): Promise<UpdateResult> {
   return withUpdateLock(base, async () => {
     await recover(base, scope);

@@ -214,19 +214,6 @@ export function catalogueDocuments(models: readonly ModelRecord[], benchmarks: r
   ];
 }
 
-// Local catalogue from a refresh snapshot (scout/snapshot.json): tests and offline use.
-export function catalogueFromSnapshot(snapshot: Json, semantic?: Catalogue['semanticBenchmarks']): Catalogue {
-  const measured = new Map((Array.isArray(snapshot.models) ? snapshot.models : []).filter(isObject).map(m => [m.id, m]));
-  const identities = Array.isArray(snapshot.catalogue) ? snapshot.catalogue.filter(isObject) : [...measured.values()];
-  const models = identities.map(m => { const x = measured.get(m.id); return modelRecord({ ...m, speed: m.speed ?? x?.speed, evidence: x?.evidence ?? [] }); }).filter((m): m is ModelRecord => m !== null);
-  const descriptions = new Map(Object.entries(isObject(snapshot.benchmarkDescriptions) ? snapshot.benchmarkDescriptions : {}).flatMap(([k, v]) => isObject(v) && str(v.description) ? [[k, (str(v.description) ?? '').replace(/\s+/g, ' ').slice(0, 400)] as [string, string]] : []));
-  const benchmarks = benchmarkRecords(Array.isArray(snapshot.benchmarks) ? snapshot.benchmarks : [], models, descriptions);
-  const bm25 = memorySearch(catalogueDocuments(models, benchmarks, []));
-  return { version: `snapshot-${str(snapshot.checkedAt) ?? 'local'}`, models, benchmarks, boards: [],
-    semanticBenchmarks: semantic ?? (async (query, limit) => lexicalBenchmarks(benchmarks, query, limit)),
-    search: { bm25: async (query, options) => bm25(query, options), embedding: async () => { throw new Error('Embedding search needs a published catalogue.'); } } };
-}
-
 // The subset of Worker bindings the hosted catalogue reads.
 interface Statement { bind(...values: unknown[]): Statement; all<T>(): Promise<{ results: T[] }> }
 export interface CatalogueBindings {
