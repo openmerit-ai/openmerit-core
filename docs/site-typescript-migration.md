@@ -39,9 +39,9 @@ One boundary, such as a directory or a Worker, per pull request, with no behavio
 ## Order
 
 1. **Baseline (done):** strict shared configuration, ratchet, pinned Wrangler, generated binding types.
-2. **Tooling and routers:** `scripts/`, `.amp/loopback-proxy.mjs`, `demo/domain-router.mjs`, the hosted terminal Worker, and the deployment wrapper.
+2. **Tooling and routers:** `scripts/`, `.amp/loopback-proxy.mjs`, `demo/domain-router.mjs`, and the deployment wrapper.
 3. **Scout:** becomes a workspace package, split into domain, storage, HTTP and analytics modules.
-4. **Package:** terminal CLI, `eval`, and splitting `packages/core/src/index.ts`.
-5. **Browser and demo:** `site/`, the terminal client and the demo container, with an esbuild step. The JavaScript baseline reaches zero.
+4. **Package:** terminal CLI and `eval`.
+5. **Browser and demo:** `site/` and the terminal client, with an esbuild step. The JavaScript baseline reaches zero.
 
 The test safety net (API/MCP contract tests and browser smoke tests) lands before the Scout stage.

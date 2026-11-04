@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Stale product removal — unreleased source, 3 November 2026
+
+Reviewed the homepage against removal of the evaluation coordinator, protocol package, `openmerit`, `openmerit/core` and `openmerit/protocol` exports, the `npm run demo` sandbox, the hosted terminal sample at `dash.openmerit.ai` and its `/demo` comparison, the `?map=flow` map experiment, and the retired container demos. `site/index.html` has no FAQ block; its navigation links only Scout and the memo, and its copy describes Scout. It mentions none of the removed items, so no homepage edit is required. The source map below no longer points at removed packages.
+
 ## Native Scout for Pi — npm 0.1.12 release preparation, 3 November 2026
 
 Reviewed setup, approvals, data handling, background work and readiness against replacement of the Pi 0.87 evaluation extension with the thin Pi 1.5.0 native MCP adapter. Current checkout landing copy describes model selection, not Pi lifecycle commands; it has no FAQ block promising Pi evaluations, scheduling or swaps, so no landing edit is required here. Older FAQ audit entries that describe the Pi lifecycle remain historical, not claims about this adapter. Public setup, troubleshooting, architecture, navigation and limitations now distinguish native Scout from the unchanged standalone evaluation CLI and custom core coordinator. Lifecycle walkthroughs are explicitly historical/core references. Each new client/scope has an independent private key; Pi installs no auto-update hook or LaunchAgent. The logo-first, copy-only Add to Pi action has no deep link and proves neither setup nor invocation. Local packed-install and native-agent acceptance passed; registry publication, website deployment and production account approval require separate release receipts.
@@ -331,33 +335,19 @@ Last factual review: 2026-09-23, against npm `openmerit@0.1.5`, the Pi 0.87 adap
 
 Source review on 2026-09-27: unreleased post-build target detection, harness-inferred user-confirmed metric sampling plans, incumbent and comparison handoffs, setup-time model leads, deterministic core baseline-window checks, macOS Pi LaunchAgent provisioning, and durable pause are under development. The homepage intentionally continues to describe published npm `openmerit@0.1.5`; update it only when a release containing those changes is published and verified.
 
-The experimental `npm run demo` sandbox is a repository-local live-provider demonstration, not a released package workflow. Its end-to-end result and tiny pilot sample do not change the homepage's shipping-behavior or reliability claims.
+The experimental `npm run demo` sandbox (since removed) was a repository-local live-provider demonstration, not a released package workflow. Its end-to-end result and tiny pilot sample do not change the homepage's shipping-behavior or reliability claims.
 
 ## Sources to review when behavior changes
 
 The 16 October 2026 Scout reliability changes affect the hosted research/matching service and its source-backed guide: publication recovery, per-source freshness and bounded Decisions retries. Homepage approval, budgets, background-agent scheduling, and published npm behavior are unchanged. No homepage FAQ claim is strengthened by these service tests.
 
-| FAQ anchor | Claims to verify | Primary sources |
-| --- | --- | --- |
-| `faq-agent` | Harness responsibility; limits of result validation | `packages/pi/src/index.ts` (`privateIntentMessage`), `packages/core/src/index.ts` (`interpretIntentResult`), `docs/architecture.md` |
-| `faq-harnesses` | Implemented adapters; supported Pi versions | `packages/`, root `package.json` peer dependencies, `docs/adapter-guide.md` |
-| `faq-evaluations` | Interactive setup; task-specific instrumentation | Pi `session_start`, core `establish_evals` outcome and observability validation, `docs/getting-started.md` |
-| `faq-comparisons` | User objectives; candidate tradeoffs; no promised savings | Core `verifyFrontierSnapshot`, `docs/pareto-spec.md` |
-| `faq-evidence` | Required samples; unresolved candidates; evidence trust | Core feasibility and frontier verification, `docs/metrics-and-evidence.md`, `docs/security.md` |
-| `faq-approval` | Opt-in automation; zero-capable graduation threshold; post-swap evaluation | Core `nextImprovementAction`, `packages/protocol/src/schemas.ts` (`SupervisedGraduationPolicySchema`), Pi `approve` command |
-| `faq-regressions` | Post-swap regression handling; conditional rollback | Core `interpretIntentResult` and `nextImprovementAction`, `docs/lifecycle.md` |
-| `faq-background` | CLI lifetime; authorized macOS LaunchAgent; other-platform gaps; product-validation limits | Pi `PI_HARNESS_DESCRIPTOR`, core `buildAutomationPlan`, `docs/automation.md` |
-| `faq-pause` | Which automatic dispatches stop; restart behavior; active work | Pi `reportAutomationSignal`, `createInitialUiState`, completion handler and `pause` command; `docs/operations.md` |
-| `faq-data` | Project files; Pi session entries; harness/provider data flows | `packages/core/src/store.ts`, Pi `appendEntry` and `privateIntentMessage`, `docs/security.md` |
-| `faq-cost` | License; npm availability; provider and infrastructure costs | `LICENSE`, published npm metadata, harness execution path |
-| `faq-budget` | Reported challenger ledger, admission/result checks, separate costs, no independent provider-billing cutoff | Core `createOpenMeritIntent`, budget consumers across `packages/` |
-| `faq-readiness` | Implemented, tested, and product-validated behavior | `docs/testing.md`, `docs/roadmap.md`, actual product-trial evidence |
+The current homepage has no FAQ block. The earlier source map pointed at the removed coordinator, protocol and Pi 0.87 adapter. If an FAQ returns, check each claim against the remaining sources: `packages/terminal` and `docs/inference-terminal.md`; `packages/eval` and `docs/agent-evaluations.md`; `packages/pi` and `docs/pi-extension.md`; `scout/`, `docs/scout.md` and `docs/scout-data-policy.md`; `docs/security.md`, `docs/testing.md` and `docs/roadmap.md`; and `LICENSE` with the published npm metadata for availability and cost.
 
 ## Review during releases and website updates
 
 1. Check the current published npm version and compare its behavior with the answers above. Keep unreleased behavior clearly labeled; update version-specific caveats only when the relevant release is available.
-2. Review affected answers whenever adapters, setup, evidence checks, approval, rollback, scheduling, pause, storage, budget handling, or readiness change. Read implementation and meaningful test evidence before strengthening a claim.
-3. Keep the linked operational documentation consistent. In particular, a pause fix needs coverage for task signals, measurement signals, session-start signals, lifecycle follow-ups, and restart behavior before the FAQ can promise a complete pause.
+2. Review affected answers whenever setup, data handling, evidence sources, budget handling, or readiness change. Read implementation and meaningful test evidence before strengthening a claim.
+3. Keep the linked operational documentation consistent.
 4. Check the expanded disclosures at desktop and narrow mobile widths, including keyboard operation, links, and JavaScript-disabled reading. Verify the served FAQ after publishing.
 5. Record the reviewed version, date, and any remaining limits here.
 
@@ -379,6 +369,8 @@ Deployments, reported path hops, shared pools, additional hosts, sites, and rack
 Top navigation, shared dropdowns, model/service images, path colors, chart interactions, and denser source rows change presentation only. Images and animation libraries are bundled locally. This remains an unreleased command; published package behavior and homepage FAQ claims are unchanged. No homepage wording changes are needed before release.
 
 ## Hosted terminal sample — 7 October 2026
+
+Removed from source on 3 November 2026; this record is historical.
 
 The separate `dash.openmerit.site` preview serves generated fictional data and terminal assets only. It has no collector, filesystem access, provider credentials, inference endpoint, upload path, or connection to a visitor's local environment. Public access is by link; noindex is a search-engine request, not authentication. The root site's FAQ and published npm claims remain unchanged. The deployment uses its own Worker and exact custom domain, and does not redeploy the main site or its demo/memo services.
 
@@ -418,6 +410,8 @@ The map no longer selects representative workloads or models. It groups all reta
 
 
 ## Optional graph component experiment — unreleased source, 9 October 2026
+
+Removed from source on 3 November 2026; this record is historical.
 
 The `map=flow` URL flag enables a separately bundled React Flow + ELK renderer over the same retained metadata. The existing map remains the default, with immediate return through Original map. Search and member highlighting change presentation only; grouping, request totals, source collection, permissions, and sample/live separation are unchanged. This is an opt-in experiment, not a claim of production scale or released package behavior. Homepage FAQ wording remains unchanged.
 
@@ -517,7 +511,7 @@ Published and verified `0.1.6-preview.5`, superseding the unreleased/preparation
 
 ## Hosted sample synchronization — 10 October 2026
 
-Deployed the fictional sample at `dash.openmerit.site` with the preview.5 browser assets and current sample generator. The public data disclosure and sample-only API boundary remain intact; repository scanning, local runtime collection, and phased indexing do not run on visitors' environments. Historical range controls describe the available sample records, not a complete project-lifetime archive. The main-site FAQ and deployment remain unchanged. Live assets, sample counts, read-only API behavior, and desktop/mobile browser checks passed; see [the sample deployment record](site-terminal-preview.md).
+Deployed the fictional sample at `dash.openmerit.site` with the preview.5 browser assets and current sample generator. The public data disclosure and sample-only API boundary remain intact; repository scanning, local runtime collection, and phased indexing do not run on visitors' environments. Historical range controls describe the available sample records, not a complete project-lifetime archive. The main-site FAQ and deployment remain unchanged. Live assets, sample counts, read-only API behavior, and desktop/mobile browser checks passed. The hosted sample was removed on 3 November 2026.
 
 ## Hosted enterprise comparison — 10 October 2026
 

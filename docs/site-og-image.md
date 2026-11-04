@@ -41,7 +41,7 @@ Constraints: exact text and only that text. Strong, simple hierarchy. No badges,
 
 Scout has a dedicated card at `site/scout/scout-og.png` (1200 × 630 pixels, PNG). Its page metadata uses `https://openmerit.ai/scout/scout-og.png` for Open Graph and Twitter, with image dimensions, MIME type, alt text and a large-image card. The canonical page is `https://openmerit.ai/scout/`. The homepage and documentation retain the default image above.
 
-The card follows the [Inference Terminal social image](site-terminal-preview.md#sharing-image): graphite background, the OpenMerit mark, large Inter typography, a muted “by OpenMerit” line, thin colored paths and a quiet footer URL. One task branches to five abstract model candidates. The artwork represents a shortlist and contains no model identities, scores or performance claims. Product behavior and homepage FAQ claims are unchanged.
+The card follows the former hosted Inference Terminal social image: graphite background, the OpenMerit mark, large Inter typography, a muted “by OpenMerit” line, thin colored paths and a quiet footer URL. One task branches to five abstract model candidates. The artwork represents a shortlist and contains no model identities, scores or performance claims. Product behavior and homepage FAQ claims are unchanged.
 
 The editable source is `scout/social-image.svg`. Render the checked-in PNG with:
 

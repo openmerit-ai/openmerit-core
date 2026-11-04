@@ -1,6 +1,6 @@
 # Security
 
-**Pi replacement — unreleased, unpublished source:** Pi 1.5.0 uses native MCP plus shared Scout rule/skill sections, not the former evaluation adapter. It never initiates login, changes the host model/tools/session, or provisions background jobs. Browser-approved credentials are independent per client/scope/project, stored privately outside the repository, and passed as MCP HTTP headers, never instructions. Pi's installed connection JSON contains only the private credential path. See [Pi paths and targeted removal](pi-extension.md). The standalone evaluation CLI and core coordinator remain separate.
+**Pi replacement — unreleased, unpublished source:** Pi 1.5.0 uses native MCP plus shared Scout rule/skill sections, not the former evaluation adapter. It never initiates login, changes the host model/tools/session, or provisions background jobs. Browser-approved credentials are independent per client/scope/project, stored privately outside the repository, and passed as MCP HTTP headers, never instructions. Pi's installed connection JSON contains only the private credential path. See [Pi paths and targeted removal](pi-extension.md). The standalone evaluation CLI remains separate.
 
 The [preview agent-evaluation runner](agent-evaluations.md) is a separate execution path: it runs trusted local agents/graders, passes only basic OS variables and explicitly named environment variables, and preserves agent-owned authentication. It sends task descriptions and optional model IDs to Scout. Local metric reports and budget reservations persist; temporary task outputs are removed. Fresh directories are not security sandboxes. Its budget admission controls do not enforce provider billing limits.
 
@@ -10,29 +10,17 @@ The [budget selector](agent-evaluations.md#budget-selection) in `0.1.7-preview.2
 
 OpenMerit accepts no model-provider or Jev credential. Credentials belong to the coding harness, its environment, or an external secret store.
 
-Never place secrets in profiles, policies, intent constraints, summaries, evidence URIs, audit events, fixtures, traces, or committed environment files.
-
-## Mutation authorization
-
-This section describes core/custom evaluation harness policy. Pi-specific lifecycle and background-runner behavior below is **historical Pi 0.87 functionality**, removed from the new Scout adapter. Installing the replacement does not establish that an old background job was removed; manage that job separately.
-
-Most intents carry `modelMutationAllowed: false`. Only application-target apply-swap and rollback intents can authorize a mutation, limited to the relevant proposal, prior configuration, and confirmed target ID. Pi's model is explicitly excluded. Automatic swaps require explicit policy opt-in and meeting the configured verified-swap threshold, which can be zero. Otherwise a proposal requires approval. Post-swap evaluation depends on the harness performing the checks and reporting their results. OpenMerit is not a sandbox around the harness's tools.
-
-Persistent wakeup provisioning is a separate authorization boundary. An adapter that needs to install a system scheduler, create a paid cloud agent, or change infrastructure must declare `wakeupProvisioning: "infrastructure_change"`; OpenMerit will not request that provisioning unless the confirmed check policy sets `infrastructureChangesAllowed: true`.
-
-The macOS Pi adapter installs a user LaunchAgent only under that authorization and persistent execution mode. The plist stores the project path, selected Pi model identifier, and executable paths, but no API key. It verifies that Pi authentication works without shell-only credentials before installing. The agent launches Pi headlessly only for due elapsed-time checks, so the configured model provider may receive project context and incur charges under the confirmed policy. Pause unloads the agent; already-running work is not cancelled.
-
-The background runner imposes a 15-minute wall-clock limit and records a nonzero status if Pi fails to complete a due intent. This is a safety bound, not a provider-spend cap. Unattended candidate discovery and model changes still need representative product validation.
+Never place secrets in evaluation configuration, task fixtures, Scout project policy, terminal configuration, activity exports, traces, or committed environment files.
 
 ## Local state
 
-`.openmerit/` may reveal task names, candidate identifiers, evidence locations, budgets, or model choices. Treat it as sensitive project metadata even though it must not contain credentials.
+`.openmerit/` may hold evaluation configuration, task fixtures, reports and budget usage, Scout project policy, and terminal configuration or activity exports. It may reveal task names, model choices, budgets or endpoint identifiers. Treat it as sensitive project metadata even though it must not contain credentials.
 
-The historical evaluation adapter also recorded OpenMerit requests and results in Pi history. With native Scout, Pi manages its own session/tool records and provider context; the adapter adds no separate evaluation-history store. Task descriptions sent to hosted Scout follow its data policy. Local OpenMerit storage does not imply that all processing stays on your machine.
+With native Scout, Pi manages its own session/tool records and provider context; the adapter adds no separate evaluation-history store. Task descriptions sent to hosted Scout follow its data policy. Local OpenMerit storage does not imply that all processing stays on your machine.
 
 ## Evidence integrity
 
-OpenMerit validates structure and deterministic Pareto conformance, not the truth of arbitrary external evidence. Use authenticated observability, immutable artifacts, and digests where stronger provenance is required.
+OpenMerit does not establish the truth of imported or external evidence. Use authenticated observability, immutable artifacts, and digests where stronger provenance is required.
 
 Do not include credentials, private traces, or proprietary evaluation data in public issues.
 

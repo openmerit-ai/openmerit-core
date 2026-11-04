@@ -83,7 +83,7 @@ test('the memo build publishes only the gate and keeps the article and Markdown 
 test('search finds operational topics and produces valid section destinations', async () => {
   const bundle = JSON.parse(await readFile(join(site, manifest.searchIndex), 'utf8'));
   const index = MiniSearch.loadJSON(JSON.stringify(bundle.index), bundle.options);
-  for (const [query, expectedPage] of [['budget', '/docs/budgets/'], ['pause', '/docs/commands/'], ['rollback', '/docs/lifecycle/'], ['data policy', '/docs/scout-data-policy/']]) {
+  for (const [query, expectedPage] of [['budget', '/docs/agent-evaluations/'], ['discovery', '/docs/inference-terminal/'], ['device code', '/docs/pi-extension/'], ['data policy', '/docs/scout-data-policy/']]) {
     const results = index.search(query);
     assert.ok(results.some(result => result.url.startsWith(expectedPage)), query);
     for (const result of results) {
@@ -109,7 +109,7 @@ test('search loads the page’s index without an extra manifest request', async 
   });
   assert.deepEqual(fetched, [manifest.searchIndex]);
   assert.deepEqual(imported, [manifest.searchLibrary]);
-  assert.ok(index.search('budget').some(result => result.url === '/docs/budgets/#budget-fields'));
+  assert.ok(index.search('budget').some(result => result.url === '/docs/agent-evaluations/#budget-selection'));
 });
 
 test('search recovers when deployment removes an open page’s index or library', async () => {
@@ -134,7 +134,7 @@ test('search recovers when deployment removes an open page’s index or library'
     assert.deepEqual(fetched.find(([url]) => url === '/docs/manifest.json'), ['/docs/manifest.json', { cache: 'no-store' }]);
     assert.equal(fetched.at(-1)[0], manifest.searchIndex);
     assert.ok(imported.at(-1).startsWith(`${manifest.searchLibrary}?recovery=`));
-    assert.ok(index.search('pause').some(result => result.url === '/docs/commands/#pause-and-resume'));
+    assert.ok(index.search('collection intervals').some(result => result.url === '/docs/commands/#inference-terminal'));
   }
 });
 

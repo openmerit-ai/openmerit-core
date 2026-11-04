@@ -8,7 +8,7 @@ The website and Inference Terminal follow `prefers-color-scheme` automatically. 
 
 - `site/styles.css` owns the warm website palette shared by the homepage, generated docs, memo, and engineering article. Reading surfaces, code, search, tables, navigation, forms, and SVG diagram tokens use it. Print output remains light.
 - `site/docs.css`, `site/memo.css`, and `site/memo-access.css` style their components using those tokens. The article's local stylesheet entry points import the shared foundations. Its article-specific code and table colors are also theme-aware.
-- `packages/terminal/public/styles.css` owns the dashboard palette. `client/routes.mjs` uses semantic route colors for both SVG diagrams and HTML legends. `client/theme.js` subscribes React canvas charts to device changes and reads resolved CSS colors; the optional React Flow view uses its system color mode. Inspectors, custom selects, comparison preferences, search, and loading/error states use the same palette.
+- `packages/terminal/public/styles.css` owns the dashboard palette. `client/routes.mjs` uses semantic route colors for both SVG diagrams and HTML legends. `client/theme.js` subscribes React canvas charts to device changes and reads resolved CSS colors. Inspectors, custom selects, search, and loading/error states use the same palette.
 
 The terminal dark palette retains neutral surfaces. Light surfaces use restrained warm neutrals, with darker route and status colors to retain contrast. Text and controls do not use inversion filters.
 

@@ -33,7 +33,7 @@ That is expected. Pi has no OpenMerit auto-update hooks. Explicitly rerun `insta
 
 ## `/openmerit` or evaluation tools are missing
 
-They were removed, not renamed. The Pi adapter now supplies only native Scout MCP and shared guidance. It does not set up evaluations, recover intents, schedule work, swap models, or install a LaunchAgent. Existing legacy background jobs must be removed separately; installing the new adapter is not evidence that they stopped. Preserve old evaluation state and audit files if needed. For new evaluations use [the standalone CLI](agent-evaluations.md); custom harnesses may still use [the core coordinator](adapter-guide.md).
+They were removed, not renamed. The Pi adapter now supplies only native Scout MCP and shared guidance. It does not set up evaluations, recover intents, schedule work, swap models, or install a LaunchAgent. Existing legacy background jobs must be removed separately; installing the new adapter is not evidence that they stopped. Preserve old evaluation state and audit files if needed. For new evaluations use [the standalone CLI](agent-evaluations.md).
 
 ## Scout was not consulted or its evidence is insufficient
 

@@ -10,7 +10,7 @@ The configuration adds the `remove-demo-v1` migration, which deletes the `DemoCo
 
 ## Protected memo reconciliation — local only, 29 October 2026
 
-The protected article's maintained source is [the recovered published memo](memo-published.md), restored byte-for-byte from `codex/main-before-terminal-2026-10-12`. The earlier `docs/memo.md` draft is unchanged and is not built. This avoids replacing the running article with the older draft during a logo release. The historical static-page records below describe earlier releases, not the current access boundary.
+The protected article's maintained source is [the recovered published memo](memo-published.md), restored byte-for-byte from `codex/main-before-terminal-2026-10-12`. The earlier `docs/memo.md` draft was never built and was deleted on 3 November 2026. This avoids replacing the running article with the older draft during a logo release. The historical static-page records below describe earlier releases, not the current access boundary.
 
 `demo/memo/auth.ts` and `worker.ts` restore the preserved email-code contract: six-digit codes, ten-minute expiry, five wrong attempts, single-use verification, hashed codes, database-backed send/attempt limits, seven-day HttpOnly sessions without sliding renewal, and sign-out revocation. Any verified email can read the article and Markdown. Only exact addresses in `MEMO_ADMIN_EMAILS` can access reader records and CSV export. Article GET requests count as visits; HEAD, prefetch, Markdown, sign-in and admin requests do not. Missing configuration or database failures keep the article closed. These records include email, first/latest visit and visit count; sessions also retain IP address and user agent. There is no automatic reader-record deletion.
 
