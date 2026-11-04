@@ -2,9 +2,15 @@
 
 Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
 
+## Demo retirement — unreleased source, 3 November 2026
+
+The `openmerit-site` Worker now serves only the memo. `demo/site.ts` handles memo routes and falls back to the retained asset bundle for memo styles; the domain router already sent nothing else to this Worker. The recorded and interactive demos, their container, admission ledger and provider gateway are removed from the source, and `wrangler.jsonc` drops the container and both Durable Object bindings.
+
+The configuration adds the `remove-demo-v1` migration, which deletes the `DemoContainer` and `DemoGate` classes and their stored admission records on the next release. That release needs the owner's approval like any other deploy. Afterwards, check whether the `openmerit-site-democontainer` container application still exists in Cloudflare and delete it separately if so.
+
 ## Protected memo reconciliation — local only, 29 October 2026
 
-The protected article's maintained source is [the recovered published memo](memo-published.md), restored byte-for-byte from `codex/main-before-terminal-2026-10-12`. The earlier `docs/memo.md` draft is unchanged and is not built. This avoids replacing the running article with the older draft during a logo release. The historical static-page records below describe earlier releases, not the current access boundary.
+The protected article's maintained source is [the recovered published memo](memo-published.md), restored byte-for-byte from `codex/main-before-terminal-2026-10-12`. The earlier `docs/memo.md` draft was never built and was deleted on 3 November 2026. This avoids replacing the running article with the older draft during a logo release. The historical static-page records below describe earlier releases, not the current access boundary.
 
 `demo/memo/auth.ts` and `worker.ts` restore the preserved email-code contract: six-digit codes, ten-minute expiry, five wrong attempts, single-use verification, hashed codes, database-backed send/attempt limits, seven-day HttpOnly sessions without sliding renewal, and sign-out revocation. Any verified email can read the article and Markdown. Only exact addresses in `MEMO_ADMIN_EMAILS` can access reader records and CSV export. Article GET requests count as visits; HEAD, prefetch, Markdown, sign-in and admin requests do not. Missing configuration or database failures keep the article closed. These records include email, first/latest visit and visit count; sessions also retain IP address and user agent. There is no automatic reader-record deletion.
 
@@ -35,23 +41,6 @@ For an interactive local preview, install dependencies with `npm ci --ignore-scr
 ## Local verification
 
 On 2026-09-28, all 11 documentation checks passed. The maintained memo is byte-for-byte identical to the supplied attachment. Browser checks confirmed `/memo` resolves to the article, one H1, nine section headings, ten reading links, and no horizontal overflow at widths from 320px to 1440px. Desktop and phone-sized screenshots were reviewed. The homepage's mobile Menu → Memo link, keyboard skip link, back-to-top link, and Markdown link worked; the complete article and navigation also worked with JavaScript disabled. No browser runtime errors were observed. These were local browser checks; physical phone hardware was not tested. Production asset verification is recorded below.
-
-## Header artwork
-
-The built-in image-generation tool created the header artwork; `site/assets/memo-inference-abstract-v1.webp` is the project asset (2172 × 724 pixels, 296,756 bytes). The visual depicts currents spreading through translucent forms as an abstract interpretation of intelligence, model selection, and shared capacity. WebP encoding is a delivery optimization; no text is added to the image. The original PNG is retained at `/Users/lazim/.codex/generated_images/01a0e79c-c82d-7cb0-8acc-ac542cb5172b/exec-b788a092-99b5-4af7-b441-ee74c0d1d021.png`.
-
-The header addition passed all 11 documentation checks. Browser checks at 320, 390, 768, 1024, 1440, and 1920 CSS pixels confirmed the image loads at its native resolution, spans the viewport width, and creates no horizontal overflow. Desktop and phone-sized screenshots were visually reviewed; no text is present in the artwork and no browser runtime errors were observed. The addition is now published, as recorded below.
-
-### Generation prompt
-
-> Use case: stylized-concept
-> Asset type: full-width editorial header image for OpenMerit's founding memo, 'Optimum Inference For All'.
-> Primary request: an elegant, completely abstract visual of intelligence becoming more widely distributed through thoughtful allocation of finite resources. No text anywhere.
-> Scene and subject: a continuous field of hundreds of very fine graphite and soft sage filaments flowing through a few translucent, mineral-like curved planes of different sizes. Dense ordered currents gradually separate, braid, and spread into an airy, balanced network across the frame. The whole composition feels like one quiet sculptural study of flow, selection, and shared capacity, with subtle irregularity rather than a literal technical diagram.
-> Style and materials: sophisticated contemporary editorial art; tactile matte ivory paper, delicate graphite linework, frosted glass, soft mineral forms, restrained film grain. Crisp fine detail with soft natural shadows and substantial open breathing room.
-> Color palette: warm off-white matching #f8f7f4, muted sage and olive, charcoal, tiny warm ochre accents. Restrained and luminous, with enough contrast to read at banner size.
-> Composition: panoramic landscape, approximately 3:1 aspect ratio, ideally 2400 by 800 pixels. Artwork spans the full width. Important forms and flowing structure stay within the middle vertical band so it crops gracefully on phones. Balanced asymmetry with depth, no central logo-shaped object. Full-bleed artwork, no borders and no text overlay area needed.
-> Avoid: ALL letters, words, numbers, captions, labels, logos, signatures, watermarks; no UI, charts, arrows, literal computers, brains, robots, people, sci-fi neon, stock corporate blue, or generic glowing neural network.
 
 ## Production publication
 

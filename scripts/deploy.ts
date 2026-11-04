@@ -20,7 +20,6 @@ interface Worker {
 const workers: Readonly<Record<string, Worker>> = {
   "domain-router": { config: "wrangler.domains.jsonc" },
   "scout-serving": { config: "wrangler.scout-alpha.jsonc" },
-  "terminal-preview": { config: "wrangler.terminal.jsonc" },
   "scout-publisher": {
     config: "wrangler.scout.jsonc",
     blocked: "main contains unreleased catalogue collection changes; a publisher release needs isolated collection validation first (docs/site-scout-architecture.md#deployment).",
@@ -87,7 +86,6 @@ async function deploy(key: string, flags: readonly string[]): Promise<void> {
   }
 
   const args = ["deploy", "--config", worker.config, "--strict", "--tag", commit.slice(0, 12), "--message", `${commit.slice(0, 12)} ${subject}`.slice(0, 100)];
-  if (key === "site") args.push("--containers-rollout", "none");
   if (dryRun) args.push("--dry-run");
   const result = spawnSync("wrangler", args, { cwd: root, stdio: "inherit" });
   if (result.error) throw result.error;

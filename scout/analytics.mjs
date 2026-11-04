@@ -1,8 +1,6 @@
 import { capabilities } from './capabilities.mjs';
-import { gzipSync, gunzipSync, strToU8, strFromU8 } from 'fflate';
 import {timingStages} from './timing.mjs';
 
-export const analyticsDataset = 'scout_searches';
 const kinds = ['extract', 'classify', 'dispatch', 'code', 'act', 'remember', 'sql', 'calculate', 'retrieve', 'judge', 'detect', 'segment', 'visual_unspecified', 'other'];
 const modes = ['measured', 'benchmarks', 'task-fit', 'clarification'];
 const pick = (value, allowed, fallback = 'unknown') => allowed.includes(value) ? value : fallback;
@@ -31,23 +29,6 @@ const evidenceFor = (m, profile) => ({
     measurements: (m.speed.measurements ?? []).map(e => fields(e, ['configuration', 'tokensPerSecond', 'timeToFirstAnswer'])) } : null,
   comparison: fields(m.comparison, ['comparedModels', 'capabilityCoverage']),
 });
-
-// Pure decoder for private, on-demand Cloudflare queries. No report or web route.
-export function decodeSearchRecord(row) {
-  if (row.schemaVersion === '3') {
-    // SQL queries use hex(blob12) so binary payloads survive JSON transport.
-    const bytes = row.payloadHex !== undefined ? Uint8Array.from(row.payloadHex.match(/../g) ?? [], h => parseInt(h, 16)) : null;
-    const payload = bytes && row.payloadEncoding !== 'gzip-binary' ? strFromU8(bytes) : row.payload;
-    const json = row.payloadEncoding === 'gzip-binary' ? strFromU8(gunzipSync(bytes ?? new Uint8Array(row.payload)))
-      : row.payloadEncoding === 'gzip-base64' ? strFromU8(gunzipSync(Uint8Array.from(atob(payload), c => c.charCodeAt(0)))) : payload;
-    return JSON.parse(json);
-  }
-  return {
-    prompt: row.schemaVersion === '2' ? row.promptEncoding === 'gzip-base64'
-      ? strFromU8(gunzipSync(Uint8Array.from(atob(row.prompt), c => c.charCodeAt(0)))) : row.prompt : null,
-    task: JSON.parse(row.task || '{}'), top5: JSON.parse(row.top5 || '[]'), context: JSON.parse(row.context || '{}'),
-  };
-}
 
 // The validated prompt is the only user-supplied text. Public source evidence is
 // attached separately. Never serialize requests, errors, inventories or whole results.
@@ -90,47 +71,4 @@ export function searchRecord({ prompt, result, task = result?.task, scope = 'all
       providerStatus:Number.isInteger(diagnostics.failure.providerStatus)&&diagnostics.failure.providerStatus>=100&&diagnostics.failure.providerStatus<=599?diagnostics.failure.providerStatus:null}}:{}),
   };
   return { prompt: typeof prompt === 'string' && prompt.length <= 4000 ? prompt : '', task: safeTask, top5, context };
-}
-
-// Legacy encoding remains available for reading/testing historical archives.
-// Serving Workers now send request-local diagnostics only to PostHog.
-export function searchDataPoint(event = {}) {
-  let { result, outcome = 'internal_error', channel = 'api', durationMs } = event;
-  const record = searchRecord(event), { task: safeTask, top5, context } = record;
-  const mode = pick(result?.ranking?.mode, modes);
-  channel = pick(channel, ['api', 'mcp']);
-  outcome = pick(outcome, ['ok', 'empty', 'clarification', 'unsupported', 'rate_limited', 'interpretation_error', 'internal_error']);
-  // Keep legacy columns reserved. One payload holds the prompt, all five, and
-  // their source evidence; compression avoids duplicating long source strings.
-  const blobs = ['3', channel, outcome, safeTask.kind, mode, context.rankingVersion ?? '', '', '', '', '', ''];
-  let payload = JSON.stringify(record), encoding = 'json';
-  const prefixBytes = blobs.reduce((n, b) => n + strToU8(b).length, 0);
-  if (prefixBytes + strToU8(payload).length + encoding.length > 16_384) {
-    const compressed = gzipSync(strToU8(payload));
-    payload = compressed.buffer.slice(compressed.byteOffset, compressed.byteOffset + compressed.byteLength); encoding = 'gzip-binary';
-  }
-  // Never silently truncate a prompt or an evidence list and call it complete.
-  if (prefixBytes + (typeof payload === 'string' ? strToU8(payload).length : payload.byteLength) + encoding.length > 16_384) throw new Error('Search evidence exceeds the Analytics Engine event limit.');
-  blobs.push(payload, encoding);
-  return {
-    // One sampling unit contains the entire prompt + ordered shortlist + evidence.
-    indexes: [`${channel}:${safeTask.kind}`],
-    blobs,
-    doubles: [number(durationMs) !== null ? durationMs : -1, top5.length, number(result?.interpretationMs) !== null ? result.interpretationMs : -1, result ? result.stale === true ? 1 : 0 : -1, result ? result.degraded === true ? 1 : 0 : -1],
-  };
-}
-
-export function createSearchObserver(binding) {
-  return event => {
-    if (!binding) return;
-    try {
-      if(event.result?.tasks)for(const [i,task] of event.result.tasks.entries())for(const [j,slot] of task.slots.entries()) {
-        binding.writeDataPoint(searchDataPoint({...event,result:slot,task:slot.task,diagnostics:slot.runtime,
-          outcome:slot.task.unsupported?'unsupported':slot.task.clarification?'clarification':slot.recommendations.length?'ok':'empty',
-          position:{task:i+1,slot:j+1,tasks:event.result.tasks.length,slots:task.slots.length}}));
-      }
-      else binding.writeDataPoint(searchDataPoint(event));
-    }
-    catch { /* Analytics must never fail a recommendation. No payload logging. */ }
-  };
 }

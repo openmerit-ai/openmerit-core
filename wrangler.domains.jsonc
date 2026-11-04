@@ -12,9 +12,6 @@
     { "binding": "SCOUT", "service": "openmerit-scout-alpha" },
     { "binding": "SITE", "service": "openmerit-site" }
   ],
-  "vars": {
-    "DOMAIN_REDIRECTS_ENABLED": "true"
-  },
   "routes": [
     {
       "pattern": "openmerit.ai",
@@ -25,20 +22,12 @@
       "custom_domain": true
     },
     {
-      "pattern": "dash.openmerit.ai",
-      "custom_domain": true
-    },
-    {
       "pattern": "openmerit.site/*",
       "zone_id": "f4eb6a0586e7778ec5e6fa37bb8fa9e7"
     },
     {
       "pattern": "www.openmerit.site/*",
       "zone_id": "f4eb6a0586e7778ec5e6fa37bb8fa9e7"
-    },
-    {
-      "pattern": "dash.openmerit.site",
-      "custom_domain": true
     }
   ]
 }

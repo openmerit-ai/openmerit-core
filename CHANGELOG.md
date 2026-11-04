@@ -4,6 +4,9 @@
 
 - Add `openmerit scout`, a conversation with Scout from the terminal: clarifying questions answered with `--brief` or `--skip`, then up to five models per task, cheapest first among models that reach Scout's quality bar. When you ask for the fastest or newest model, the output names that order and shows each model's time per task or release date. It uses this device's Claude Code or Pi key and limits new conversations to the endpoint IDs in `.openmerit/scout.json`.
 - The installed Scout instructions for Claude Code and Pi tell the agent to relay Scout's questions to the user and to read `tasks[].models`. This needs the matching hosted Scout release, whose `scout_models` MCP tool now runs the Scout agent.
+- **Breaking:** remove the `openmerit`, `openmerit/core` and `openmerit/protocol` package exports, along with the evaluation coordinator, harness protocol, Pareto conformance rules and the repository's `npm run demo` sandbox. The package keeps `openmerit/pi` and the `openmerit` command: `openmerit dash`, `openmerit scout`, Scout setup commands and `openmerit eval`.
+- Remove the hosted Inference Terminal sample at `dash.openmerit.ai`, its `/demo` before/after comparison and the opt-in `?map=flow` map experiment. The local terminal, including its fictional sample (`--demo`), is unchanged.
+- Remove the retired demo guides and the guides that documented only the coordinator: architecture, adapter development, Pareto specification, first trial, metrics and evidence, comparisons and swaps, automatic checks, budgets and permissions, and project files and logs.
 
 ## 0.1.12 — 2026-11-03
 

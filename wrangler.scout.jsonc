@@ -49,12 +49,6 @@
       "class_name": "ScoutRefresh"
     }
   ],
-  "analytics_engine_datasets": [
-    {
-      "binding": "SCOUT_ANALYTICS",
-      "dataset": "scout_searches"
-    }
-  ],
   "ratelimits": [
     {
       "name": "SCOUT_RATE",

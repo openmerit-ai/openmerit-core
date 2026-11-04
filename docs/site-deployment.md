@@ -24,11 +24,12 @@ It runs the pinned Wrangler with `--strict`, which stops if someone changed the 
 |---|---|---|---|
 | `domain-router` | `openmerit-domains` | `wrangler.domains.jsonc` | Every public host; redirects; `/memo` to `openmerit-site` |
 | `scout-serving` | `openmerit-scout-alpha` | `wrangler.scout-alpha.jsonc` | Landing page, `/scout/`, `/connect/` |
-| `terminal-preview` | `openmerit-terminal-preview` | `wrangler.terminal.jsonc` | Nothing public: the router no longer binds it |
 | `scout-publisher` | `openmerit-scout` | `wrangler.scout.jsonc` | Hourly catalogue refresh. **Blocked** until its unreleased collection changes are validated |
 | `site` | `openmerit-site` | `wrangler.jsonc` | Protected memo. Locally reconciled; code-only release with asset-retention checks and no container rollout |
 
 Deploy `scout-serving` before `domain-router` when a change spans both, as the rebuild cutover did.
+
+The hosted terminal sample's `openmerit-terminal-preview` Worker and its configuration were removed from the repository. The router had already stopped binding it. Any Worker still deployed in Cloudflare is not managed from this checkout; deleting it is a separate action that needs the owner's approval.
 
 ## Rolling back
 
@@ -49,6 +50,6 @@ What a Worker rollback does **not** undo:
 Per Worker:
 
 - **`scout-serving`:** a rollback also changes the landing page. Check `/`, `/scout/`, `/connect/` and `/scout/api/status`.
-- **`domain-router`:** check apex, `www`, legacy `.site` and `dash` hosts, plus `/memo`. The route cases are in `demo/test/domain-migration.test.mjs`.
+- **`domain-router`:** check apex, `www` and legacy `.site` hosts, plus `/memo`. The route cases are in `demo/test/domain-migration.test.mjs`.
 - **`scout-publisher`:** it is not deployed from main. Roll back only to a version listed in its deployment history, and confirm the next hourly run in `deploy:status`.
-- **`site`:** keep version `9b0ea195-8c33-40b0-a5ee-a21f3e31a46d` while the [code-only restoration](site-memo.md#protected-memo-reconciliation--local-only-29-october-2026) is awaiting an approved release. Its configuration retains uploaded assets and pins the live container image; the wrapper also forces `--containers-rollout none`. Because `keep_assets` inherits the latest upload, the wrapper requires a sole 100% active version matching the latest upload, except for the exact verified 145-active/146-latest retention chain documented in memo maintenance. It rejects every other undeployed latest version and split deployment. Do not activate an intermediate version merely to clear this guard. Do not run concurrent uploads during a site release: the remote check and upload are not atomic. After an approved release, check an existing memo session, real email-code login, protected Markdown, reader/admin permissions, logout and all referenced assets. No production test writes or real email sends are authorized by local verification alone.
+- **`site`:** keep version `9b0ea195-8c33-40b0-a5ee-a21f3e31a46d` while the [code-only restoration](site-memo.md#protected-memo-reconciliation--local-only-29-october-2026) is awaiting an approved release. Its configuration retains uploaded assets. The next release also applies the `remove-demo-v1` migration, which deletes the retired demo's container and Durable Object classes; see [demo retirement](site-memo.md#demo-retirement--unreleased-source-3-november-2026). Because `keep_assets` inherits the latest upload, the wrapper requires a sole 100% active version matching the latest upload, except for the exact verified 145-active/146-latest retention chain documented in memo maintenance. It rejects every other undeployed latest version and split deployment. Do not activate an intermediate version merely to clear this guard. Do not run concurrent uploads during a site release: the remote check and upload are not atomic. After an approved release, check an existing memo session, real email-code login, protected Markdown, reader/admin permissions, logout and all referenced assets. No production test writes or real email sends are authorized by local verification alone.

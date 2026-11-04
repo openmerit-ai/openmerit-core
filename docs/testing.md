@@ -1,6 +1,6 @@
 # Testing and validation
 
-**Pi source replacement — unreleased and unpublished:** the new Pi 1.5.0 adapter uses native Scout MCP and shared guidance only. The dated Pi 0.87 lifecycle/scheduler results below remain historical receipts, not proof of the replacement or supported current commands. Package, browser-approval, native Pi and SDK acceptance must be reported for the new build separately; a successful documentation build alone establishes none of them. Core coordinator and standalone evaluation tests remain separate.
+**Pi source replacement — unreleased and unpublished:** the new Pi 1.5.0 adapter uses native Scout MCP and shared guidance only. Dated acceptance records below describe the packages tested at the time; some mention package exports that have since been removed. Package, browser-approval, native Pi and SDK acceptance must be reported for the new build separately; a successful documentation build alone establishes none of them. Standalone evaluation tests remain separate.
 
 ## Stable 0.1.7 acceptance — 24 October 2026
 
@@ -34,7 +34,7 @@ The final production deployment passed **203/203 VM assertions and 8/8 filter/am
 
 The published `0.1.7-preview.4` package passed the full repository verification, including 329 Scout tests and documentation checks. Its packaged runtime is byte-for-byte unchanged from preview.3; version metadata and public guides carry this release. Registry integrity matches the reviewed tarball, the `preview` tag resolves to this version, and stable `latest` remains `0.1.6`. Scout deploys independently and its UI files are unchanged. Broader evidence coverage, task calibration and complete quality/cost/latency validation remain follow-up work.
 
-The hosted beta's public post-deployment suite passed 9/11 cases. Explicit SVG generation returned no shortlist; a Qwen-family code-authoring request admitted tool-calling evidence. Restriction checks passed for creator, family, context and dates, including known matches and impossible-context no-match. The actual bird prompt also displayed five recommendations in a browser. Earlier candidate deadline and interpretation failures are retained in the [Scout validation record](scout.md#task-relevance-corrections-hosted-beta-17-october-2026). These checks do not establish universal semantic reliability or improved task accuracy.
+The hosted beta's public post-deployment suite passed 9/11 cases. Explicit SVG generation returned no shortlist; a Qwen-family code-authoring request admitted tool-calling evidence. Restriction checks passed for creator, family, context and dates, including known matches and impossible-context no-match. The actual bird prompt also displayed five recommendations in a browser. Earlier candidate deadline and interpretation failures were recorded separately at the time. These checks do not establish universal semantic reliability or improved task accuracy.
 
 Fresh registry installation in the existing Ubuntu ARM64 Lima VM verified all 101 packaged file hashes, registry integrity and public core/protocol/Pi exports. Seven workloads were sent through both HTTP and the official MCP SDK. Six of those fourteen requests failed their functional expectations: books/posters and invoice HTTP requests returned unavailable responses, while SQL generation and safety classification with rewriting returned empty shortlists through both interfaces. The matching MCP books/posters and invoice requests succeeded; bird identification, label-only classification and unsupported audio behaved as expected. The first harness stopped when it assumed SQL had returned an endpoint. A separate continuation tested exact endpoint scope using the successful bird result, request/protocol errors and installed CLI planning, preserving all original failures. Together the runs recorded 187 passing checks and nine failed assertions, including duplicate agreement failures caused by unavailable responses and an installed-CLI candidate check. Both CLI email and SQL plans were empty. Planning created no execution or spend state, and the existing global VM installation was retained. This is not a clean acceptance pass. The seven first HTTP workload requests had a median wall time of 4.924 seconds and a maximum of 6.229 seconds, including unavailable responses; repeated cached requests were faster.
 
@@ -60,14 +60,6 @@ npm pack --dry-run
 
 `verify` runs workspace tests, syntax checks, strict TypeScript checks and the TypeScript migration ratchet, the package build, demo tests, generated-documentation checks, and whitespace validation. It does not publish a package or deploy the website.
 
-## Coordinator and Pi coverage
-
-Automated tests cover protocol contracts, task-specific sampling, application-target binding, setup and post-build target detection, incumbent identity, deterministic baseline sufficiency, durable candidate/assessment handoffs, frontier conformance, approval, swap and rollback requests, persistence, evidence requirements, budget accounting, and audit redaction.
-
-Automation coverage includes task and elapsed cadence, signal idempotency, durable pending work, catalogue changes, regression thresholds, delayed post-swap checks, scheduler capability gaps, and persistent pause. Pi's own usage and coding checkpoints are not counted as application measurements.
-
-The disposable-project test in `packages/pi/test/live-wakeup.test.ts` verifies that a due, insufficient baseline is recorded without starting Pi. Scheduler tests validate managed LaunchAgent configuration and authorization boundaries. They do not establish reliable unattended candidate discovery, comparison, or swapping; those require a representative headless product trial.
-
 ## Inference Terminal coverage
 
 ```sh
@@ -76,35 +68,15 @@ npm test --workspace=@openmerit/terminal
 
 Tests cover metadata projection and redaction, source containment, recursive syntax indexing, phased worker progress, incremental reuse, coverage limits, endpoint classification, authorized loopback probes, supported request-log formats, UTF-8 boundaries, rotation/truncation, source reconciliation, historical ranges, unknown versus zero measurements, and the read-only API.
 
-Inventory and UI coverage includes model/service identity, explicit deployment and host links, shared capacity, stale/missing hardware, path classification, map completeness, search and filtering, preference-dependent demo decisions, and preservation of unknown costs. Runtime fixtures establish which endpoints collectors call; they do not prove compatibility with every external runtime version.
+Inventory and UI coverage includes model/service identity, explicit deployment and host links, shared capacity, stale/missing hardware, path classification, map completeness, search and filtering, and preservation of unknown costs. Runtime fixtures establish which endpoints collectors call; they do not prove compatibility with every external runtime version.
 
-The three fictional scenarios are separate:
+The local fictional sample (`--demo` or the sample selector) has 40 agents, 140 tasks, 21 models and 9,600 requests over 24 hours. Sample tests exercise interface scale and arithmetic, not measured throughput, application quality, or hardware performance.
 
-| Scenario | Agents | Tasks | Models / offers | Requests |
-| --- | ---: | ---: | --- | ---: |
-| Local sample (`--demo` or sample selector) | 40 | 140 | 21 models | 9,600 over 24 hours |
-| Hosted enterprise sample | 200 | 699 | 21 models | 9.6 million over 30 days |
-| Hosted before/after comparison | 280 | 980 | 26 reviewed offers across six services; assignments depend on preference | 9.6 million over 30 days |
-
-The comparison tests preserve workload and token volume across all six preferences, enforce service/output compatibility, disclose benchmark/efficiency overrides, and verify modeled costs. Sample tests exercise interface scale and arithmetic, not measured throughput, application quality, or hardware performance.
-
-Browser review covers the six views, inspectors, search, activity ranges, map and chart interaction, keyboard navigation, reduced motion, and desktop/narrow layouts. The source light/dark change has local browser verification; it is not yet published to npm or the hosted site. Browser checks are distinct from the committed unit suite.
+Browser review covers the six views, inspectors, search, activity ranges, map and chart interaction, keyboard navigation, reduced motion, and desktop/narrow layouts. Browser checks are distinct from the committed unit suite.
 
 ## Pi load and package smoke tests
 
-```sh
-./node_modules/.bin/pi --no-session --no-extensions -e ./packages/pi/src/index.ts --list-models
-```
-
-This checks extension loading and catalogue enumeration, not successful provider authentication or a completed product intent. CI also packs the package, installs it in a temporary directory, imports the core/protocol entry points, and loads the installed extension.
-
-## Experimental sandbox
-
-`npm run demo` builds a disposable sentiment-classification application through Pi and runs live provider calls. It requires Pi 0.87 with OpenRouter authentication and an application OpenRouter credential. It is separate from the fictional dashboard comparison and from the recorded website player.
-
-The runner collects a baseline, interleaves incumbent/challenger calls on the prepared cases, records cost/token/latency evidence, submits results to the coordinator, and exercises a change and fresh checks in the temporary app. Missing usage, invalid output, or exhausted allowance stops the run. The default application-spend threshold is $1, checked after responses; Pi's own coding-model spend is excluded. This is not an in-flight provider cutoff.
-
-The default models are `openai/gpt-4.1-mini` and `openai/gpt-4o-mini`. The runner supports `OPENMERIT_DEMO_BASELINE_MODEL`, comma-separated `OPENMERIT_DEMO_CANDIDATE_MODELS`, `OPENMERIT_DEMO_PI_MODEL`, `OPENMERIT_DEMO_REPETITIONS` (2–5), `OPENMERIT_DEMO_MAX_SPEND_USD` (up to $5), and `OPENMERIT_DEMO_SEED`. The printed temporary directory retains the app, plan, lifecycle state, per-call artifacts, comparison manifest, and summary. Small prepared examples do not establish representative product reliability.
+CI packs the package, installs it in a temporary directory, imports `openmerit/pi`, smoke-tests the installed terminal command, and loads the installed extension in Pi with `--list-models`. These checks establish packaging and loading, not successful provider authentication or Scout recommendations.
 
 ## What evidence establishes
 
@@ -113,7 +85,7 @@ The default models are `openai/gpt-4.1-mini` and `openai/gpt-4o-mini`. The runne
 - **Product trial verified:** a representative application completes the workflow with inspected evidence.
 - **Production verified:** repeated representative runs support the claimed operating conditions and reliability.
 
-Implementation checks, historical demo recordings, and public model benchmarks cannot substitute for target-product validation. See [current limitations](roadmap.md) before relying on unattended changes.
+Implementation checks and public model benchmarks cannot substitute for target-product validation. See [current limitations](roadmap.md).
 
 
 ## Agent-evaluation preview validation — 15 October 2026

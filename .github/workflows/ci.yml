@@ -51,12 +51,7 @@ jobs:
           npm install --prefix "$package_root" "./$package_file"
           cat > "$package_root/smoke.mjs" <<'EOF'
           import assert from "node:assert/strict";
-          import { OpenMeritCoordinator } from "openmerit/core";
-          import { PROTOCOL_VERSION, completionToolSchemaFor } from "openmerit/protocol";
           import extension from "openmerit/pi";
-          assert.equal(PROTOCOL_VERSION, "0.1");
-          assert.equal(typeof OpenMeritCoordinator, "function");
-          assert.equal(typeof completionToolSchemaFor("establish_evals"), "object");
           assert.equal(typeof extension, "function");
           EOF
           node "$package_root/smoke.mjs"

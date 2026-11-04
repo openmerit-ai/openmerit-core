@@ -1,6 +1,6 @@
 // Generates or checks the binding types for every Worker configuration.
 // Runtime types are not committed yet; they arrive with each Worker's
-// TypeScript project (see docs/typescript-migration.md).
+// TypeScript project (see docs/site-typescript-migration.md).
 import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -14,7 +14,6 @@ const workers = [
   { config: "wrangler.domains.jsonc", envInterface: "DomainRouterEnv", output: "domain-router.d.ts" },
   { config: "wrangler.scout-alpha.jsonc", envInterface: "ScoutServingEnv", output: "scout-serving.d.ts" },
   { config: "wrangler.scout.jsonc", envInterface: "ScoutPublisherEnv", output: "scout-publisher.d.ts" },
-  { config: "wrangler.terminal.jsonc", envInterface: "TerminalPreviewEnv", output: "terminal-preview.d.ts" },
 ] as const;
 
 const wrangler = join(root, "node_modules", "wrangler", "bin", "wrangler.js");

@@ -4,8 +4,6 @@ const sharedAssets = new Set([
   '/',
   '/favicon.svg',
   '/styles.css',
-  '/script.js',
-  '/illustrations.js',
 ]);
 
 export function publicSiteResponse(request) {

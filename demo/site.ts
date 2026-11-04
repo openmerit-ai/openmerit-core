@@ -1,12 +1,10 @@
-// Preserve the existing demo exports/bindings; restore memo auth ahead of assets.
-import demo from './worker.mjs';
+// The site Worker serves only the memo; its retained asset bundle supplies memo styles.
+// The domain router redirects legacy hosts before requests reach this Worker.
 import { handleMemoRequest } from './memo/worker.ts';
 import type { MemoEnv } from './memo/auth.ts';
-import { withPrimaryDomain } from './domain-migration.mjs';
-export { DemoContainer, DemoGate } from './worker.mjs';
 
-export default withPrimaryDomain({
+export default {
   async fetch(request: Request, env: MemoEnv): Promise<Response> {
-    return await handleMemoRequest(request, env) ?? demo.fetch(request, env);
+    return await handleMemoRequest(request, env) ?? env.ASSETS.fetch(request);
   },
-});
+};

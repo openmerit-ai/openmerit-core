@@ -14,7 +14,7 @@ openmerit dash
 
 The Inference Terminal opens a local, read-only view of the selected application's services, models, recorded requests, and linked compute. It does not require Pi or a provider API key, make inference calls, or change model assignments. Supported code/configuration declarations identify inventory; request history requires existing supported logs or exports. See [the terminal guide](inference-terminal.md) for collection, privacy, configuration, and diagnostics.
 
-To inspect fictional data without installation, open the [hosted dashboard](https://dash.openmerit.ai/) or its [before/after comparison](https://dash.openmerit.ai/demo). Neither connects to your machine.
+To inspect fictional data, run `openmerit dash --demo` or choose the sample from the environment selector. Sample data never enters the real snapshot or project files.
 
 ## Connect Scout to a coding agent
 
@@ -48,4 +48,4 @@ See [the Pi extension guide](pi-extension.md) for installed paths, migration fro
 
 ## Evaluate application changes
 
-The standalone `openmerit eval` CLI is unchanged by the new Pi adapter. It evaluates Claude Code, Codex and OpenCode through explicit task, scope, budget and grader configuration; see [agent evaluations](agent-evaluations.md). The core evaluation coordinator remains available to custom harness integrations, but the removed Pi 0.87 lifecycle adapter is not the way to invoke it.
+The standalone `openmerit eval` CLI is unchanged by the new Pi adapter. It evaluates Claude Code, Codex and OpenCode through explicit task, scope, budget and grader configuration; see [agent evaluations](agent-evaluations.md).

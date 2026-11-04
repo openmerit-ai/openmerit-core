@@ -1,14 +1,8 @@
 {
-  "name": "openmerit-hosted-demo",
+  "name": "openmerit-site",
   "private": true,
   "type": "module",
-  "scripts": {
-    "test": "node --test test/*.test.mjs",
-    "local": "node runtime/server.mjs"
-  },
   "dependencies": {
-    "@cloudflare/containers": "0.3.7",
-    "@earendil-works/pi-coding-agent": "1.5.0",
     "better-auth": "1.7.14"
   }
 }

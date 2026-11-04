@@ -11,21 +11,12 @@ export async function buildTerminal() {
     outfile: fileURLToPath(new URL('../packages/terminal/public/app.js', import.meta.url)),
     bundle: true,
     format: 'esm',
-    external: ['/flow.js'],
     target: ['safari17', 'chrome120', 'firefox121'],
     minify: true,
     legalComments: 'inline',
     footer: { js: `/*! Third-party notices\n\n${notices.join('\n\n').replaceAll('*/', '* /')}\n*/` },
     define: { 'process.env.NODE_ENV': '"production"' },
     logLevel: 'warning',
-  });
-  const flowNotices = await Promise.all(['@xyflow/react/LICENSE', '@xyflow/system/LICENSE', 'classcat/LICENSE.md', 'zustand/LICENSE', 'use-sync-external-store/LICENSE', 'd3-drag/LICENSE', 'd3-dispatch/LICENSE', 'd3-selection/LICENSE', 'd3-interpolate/LICENSE', 'd3-color/LICENSE', 'd3-zoom/LICENSE', 'd3-transition/LICENSE', 'd3-ease/LICENSE', 'd3-timer/LICENSE', 'elkjs/LICENSE.md'].map(async file => `${file}\n${await readFile(new URL(`../node_modules/${file}`, import.meta.url), 'utf8')}`));
-  await build({
-    entryPoints: [fileURLToPath(new URL('../packages/terminal/client/flow-map.jsx', import.meta.url))],
-    outfile: fileURLToPath(new URL('../packages/terminal/public/flow.js', import.meta.url)),
-    bundle: true, format: 'esm', target: ['safari17', 'chrome120', 'firefox121'], minify: true,
-    legalComments: 'inline', footer: { js: `/*! Third-party notices\n\n${[...notices, ...flowNotices].join('\n\n').replaceAll('*/', '* /')}\n*/` },
-    define: { 'process.env.NODE_ENV': '"production"' }, logLevel: 'warning',
   });
 }
 

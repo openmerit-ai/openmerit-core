@@ -25,7 +25,7 @@ Browser checks exercised typed prompts, Enter submission, examples, evidence exp
 
 ## Publication boundaries and rollback
 
-Do not deploy the older root `wrangler.jsonc` as a shortcut. The main application source still diverges from production; see [the earlier publication record](site-publication-2026-10-14.md). This launch downloaded the active main-site modules and changed only public assets. Existing interactive-demo scripts/styles, memo access script and shared styles were checked against live assets before activation.
+Do not deploy the older root `wrangler.jsonc` as a shortcut. This launch downloaded the active main-site modules and changed only public assets. Existing interactive-demo scripts/styles, memo access script and shared styles were checked against live assets before activation.
 
 The prior main-site version was `62ac686b-2895-4263-8e55-053119d2eb27`; the prior domain-router version was `7e5cbee3-1c26-4cb8-afd6-07b6a092ee31`. They remain rollback references. Reverting the domain router removes the Scout public route; the separate Worker can remain deployed during investigation.
 
@@ -62,7 +62,7 @@ At verification the healthy six-source snapshot was `2026-10-14T17:05:42.081Z`: 
 Validation:
 
 - `npm run verify`: all 340 tests passed. New tests cover observed false positives, invalid/refused answers, provider timeout/failure, request admission, memory/tool filters, BFCL parsing and recovery, and shared API/MCP behavior.
-- Thirty real Decisions diagnostic calls passed all 83 selected checks; median interpretation was 447 ms, sample p95 897 ms. These development cases do not establish general classification accuracy or downstream task success; see [the experiment record](site-scout-decisions-experiment.md).
+- Thirty real Decisions diagnostic calls passed all 83 selected checks; median interpretation was 447 ms, sample p95 897 ms. These development cases do not establish general classification accuracy or downstream task success.
 - Eight live API cases passed, including invoice wording variants, fictional agents, supplied comparisons, executed functions, persistent memory, session memory and unsupported image generation. The invoice pair returned identical model IDs. Seven of eight measured requests took 310–540 ms end to end; the first took 1,427 ms. This small sample is not a latency guarantee.
 - Live MCP initialization, discovery and tool calls passed. Compact results included actual memory and tool evidence. Browser submission, copying results, expanded BFCL evidence, local provider images and the pre-submit disclosure were checked. Desktop and 390 CSS-pixel layouts had no page overflow or browser errors; physical mobile hardware was not tested.
 - All 32 changed public assets matched the deployed domain byte-for-byte. Main Worker modules were re-downloaded after publication and matched the captured originals.
