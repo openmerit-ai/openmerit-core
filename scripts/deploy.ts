@@ -20,7 +20,6 @@ interface Worker {
 const workers: Readonly<Record<string, Worker>> = {
   "domain-router": { config: "wrangler.domains.jsonc" },
   "scout-serving": { config: "wrangler.scout-alpha.jsonc" },
-  "terminal-preview": { config: "wrangler.terminal.jsonc" },
   "scout-publisher": {
     config: "wrangler.scout.jsonc",
     blocked: "main contains unreleased catalogue collection changes; a publisher release needs isolated collection validation first (docs/site-scout-architecture.md#deployment).",

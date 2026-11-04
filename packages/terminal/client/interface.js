@@ -43,7 +43,6 @@ export function reconcile(markup, snapshot, error) {
         updateText(from, to.textContent);
         return false;
       }
-      if (from.hasAttribute('data-flow-map') && to.hasAttribute('data-flow-map')) return false;
       if (from.dataset.chart && from.dataset.chart === to.dataset.chart && from.dataset.hostId === to.dataset.hostId) return false;
       return !from.isEqualNode(to);
     },
