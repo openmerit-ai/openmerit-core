@@ -55,6 +55,7 @@
   "scripts": {
     "check": "npm run check --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "pretypecheck": "npm run build:site",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scout.json && tsc -p scout/agent/tsconfig.json",
     "check:typescript": "node scripts/check-typescript.ts",
     "types:workers": "node scripts/worker-types.ts",
