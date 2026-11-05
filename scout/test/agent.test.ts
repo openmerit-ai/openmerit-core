@@ -200,6 +200,10 @@ test('an environment miss does not drop a model whose own results match, and mea
   assert.deepEqual(ranked.models.map(m => m.id), ['lab/alpha', 'lab/beta', 'lab/gamma']);
   assert.deepEqual(ranked.models[0]?.cost?.measured, { usdPer1kTasks: 1.25, usdPer1kAgentRuns: 5, result: 'measured:c2' });
   assert.equal(ranked.models[0]?.cost?.usdPer1kTasks, 4);
+  // Under the quality priority, equal measured quality is broken by measured cost, not the agent's (benchmark) order; a higher estimate still leads.
+  const byQuality = (alpha: number) => finalize(toolCatalogue, { ...shortlist(alpha, ['measured:q2']), priority: 'quality' }, now, {}, context(costs)).models.map(m => m.id);
+  assert.deepEqual(byQuality(70), ['lab/alpha', 'lab/beta', 'lab/gamma']);
+  assert.deepEqual(byQuality(60), ['lab/beta', 'lab/alpha', 'lab/gamma']);
 });
 
 test('measured results are validated, labelled for the model and passed to the conversation', () => {

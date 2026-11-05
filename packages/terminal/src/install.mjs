@@ -314,7 +314,7 @@ async function install(root, { client, scope, plan, open, log, wait, telemetry, 
   if (connection === 'key_rejected') throw new Stop('OpenMerit rejected this device key (expired or revoked).', exitCodes.denied, 'Run "openmerit login", then rerun install.');
   return { action: 'install', applied: true, client, scope, changes, connection,
     next: connection === 'connected'
-      ? `Scout is ready in new ${clients[client]} sessions. Start a new session to load the extension, instructions and skill.`
+      ? `Scout is ready in new ${clients[client]} sessions. Start a new session to load ${client === 'pi' ? 'the extension, instructions and skill' : 'the MCP server, startup rule and skill'}.`
       : `Installed, but the connection check failed. Run "openmerit doctor --client ${client} --scope ${scope}".` };
 }
 

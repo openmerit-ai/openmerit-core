@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `openmerit scout --results` refuses a file with more than 50 results before sending it, instead of failing with HTTP 413; split larger reports into files of up to 50.
+- Claude Code's install success message names the MCP server, startup rule and skill instead of Pi's extension.
+
 ## 0.3.3 — 2026-11-05
 
 - Fix `openmerit install --client claude-code` exiting with `ENOENT … dist/terminal/src/updates.ts` (0.3.1 and 0.3.2). Setting up automatic Scout instruction updates copied the updater from its TypeScript source, which the package does not ship; it now copies the module that is running. The MCP server, skill and rule were already written, but automatic updates stayed off and the installer reported failure.
