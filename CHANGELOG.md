@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `openmerit scout --help` and the installed Scout instructions describe the new optional `kind` field for reported results (`quality`, `usd` or `seconds`), so measured cost replaces Scout's estimate, and tell the agent to report each agent's own checks at the agent level because end-to-end results also measure the agents it did not swap. Terminal output shows measured cost per 1,000 agent runs or tasks. The field needs the matching Scout serving release; `--results` in 0.3.2 already forwards it.
+
 ## 0.3.2 — 2026-11-05
 
 - Fix Claude Code project-scope installation for a project inside a larger git repository, such as a monorepo package. Claude Code keeps its private MCP entry under the repository root, so the installer reported "Claude Code did not save the openmerit MCP server", `status` reported it missing and a rerun clashed with it. The installer now reads the entry where Claude Code keeps it and says that the MCP server applies to the whole repository; the skill and rule stay in the project.

@@ -21,9 +21,10 @@ work, output, criteria, constraints) in the same conversation, or --skip to let
 Scout assume. It then splits the work into tasks and recommends up to five
 models for each, with an evaluation: how to measure the candidates with your
 own evals. Report what you measured with --results: a JSON list of aggregate
-results ({level, task?, scope, model, metric, value, higherIsBetter, samples,
-source}), never inputs or outputs. Scout ranks them above public benchmarks, for
-your recommendations only. A turn usually takes one to three minutes.
+results ({level, kind?, task?, scope, model, metric, value, higherIsBetter,
+samples, source}), never inputs or outputs. kind is quality (the default), usd
+or seconds; measured usd replaces Scout's cost estimate. Scout ranks them above
+public benchmarks, for your recommendations only. A turn usually takes one to three minutes.
 
 A new conversation is limited to the endpoint IDs in ${policyFile}
 (set with openmerit project). --all-endpoints searches the whole catalogue and is
@@ -36,7 +37,7 @@ interface ScoutRequest { prompt?: string; conversationId?: string; brief?: Parti
 export interface ScoutModel {
   rank: number; id: string; name: string; provider: string; rationale: string; watchOut: string | null;
   quality: { score: number; measured?: boolean; evidence: Array<{ name: string; rank: number; of: number }> };
-  cost: { usdPer1kTasks: number; usdPer1kAgentRuns?: number; inputPerMillion: number; outputPerMillion: number; route: string; endpointId: string; providerModelId: string } | null;
+  cost: { usdPer1kTasks: number; usdPer1kAgentRuns?: number; measured?: { usdPer1kTasks: number; usdPer1kAgentRuns?: number }; inputPerMillion: number; outputPerMillion: number; route: string; endpointId: string; providerModelId: string } | null;
   latency?: { seconds: number } | null; recency?: { released: string } | null;
 }
 interface Evaluation { checks: Array<{ level: string; metric: string; how: string }>; samples: number; stopEarly: string }
@@ -128,7 +129,8 @@ export function renderScout(result: ScoutResult): string {
       const priority = task.priority ?? 'cost';
       if (priority !== 'cost') lines.push(`   ${rankings[priority]}`);
       for (const m of task.models) {
-        const price = m.cost ? `${money(m.cost.inputPerMillion)} in / ${money(m.cost.outputPerMillion)} out per 1M via ${m.cost.route} (${m.cost.endpointId})` : 'no priced route';
+        const measuredCost = m.cost?.measured ? `measured ${money(m.cost.measured.usdPer1kAgentRuns ?? m.cost.measured.usdPer1kTasks)} per 1k ${m.cost.measured.usdPer1kAgentRuns === undefined ? 'tasks' : 'agent runs'}, ` : '';
+        const price = m.cost ? `${measuredCost}${money(m.cost.inputPerMillion)} in / ${money(m.cost.outputPerMillion)} out per 1M via ${m.cost.route} (${m.cost.endpointId})` : 'no priced route';
         const metric = priority === 'latency' ? ` · ${m.latency ? `${m.latency.seconds.toFixed(1)}s per task` : 'time unknown'}`
           : priority === 'recency' ? ` · ${m.recency ? `released ${m.recency.released}` : 'release date unknown'}` : '';
         lines.push(`   ${m.rank}. ${m.name}${metric} · quality ${m.quality.score}/100${m.quality.measured ? ' (measured)' : ''} · ${price}`, `      ${m.rationale}`);
