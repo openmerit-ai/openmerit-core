@@ -50,7 +50,9 @@ Exit codes: 0 done, 10 approval pending, 11 denied or expired, 20 conflict,
 30 OpenMerit unreachable, 1 other error.
 `;
 
-class Stop extends Error { constructor(message, code, next) { super(message); this.exit = code; this.next = next; } }
+class Stop extends Error { constructor(message, code, next, details) { super(message); this.exit = code; this.next = next; this.details = details; } }
+// An approval deadline people in any timezone, and agents relaying it, read the same way.
+const deadlineText = at => `${new Date(at).toISOString().slice(11, 16)} UTC, in ${Math.max(0, Math.round((at - Date.now()) / 60_000))} min`;
 
 const server = () => (process.env.OPENMERIT_URL ?? 'https://openmerit.ai').replace(/\/+$/, '');
 const credentialsPath = telemetry => deviceCredentialsPath(telemetry.properties.agent, telemetry.properties.scope, telemetry.root);
@@ -195,7 +197,7 @@ async function login({ client, scope, open, log, wait, telemetry }) {
   if (process.env.OPENMERIT_ANALYTICS_ACCOUNT === 'off' || !telemetryEnabled(true)) approvalURL.searchParams.set('analytics_account', 'off');
   pending = { ...pending, url: approvalURL.href, setup_id: telemetry.properties.setup_id, installation_id: telemetry.properties.installation_id };
   await save(pendingPath(telemetry), pending);
-  log(`Approve this device in your browser (opening it now):\n\n  ${pending.url}\n\n  Code: ${pending.userCode} (expires ${new Date(pending.expiresAt).toLocaleTimeString()})\n`);
+  log(`Approve this device in your browser (opening it now):\n\n  ${pending.url}\n\n  Code: ${pending.userCode} (expires ${deadlineText(pending.expiresAt)})\n`);
   await telemetry.step('browser_open', 'started');
   if (open && !pending.opened && !pending.openFailed) {
     // Only the approval page on the configured OpenMerit server may be opened.
@@ -232,7 +234,9 @@ async function login({ client, scope, open, log, wait, telemetry }) {
       if (data.error === 'access_denied') throw new Stop('The sign-in request was denied. Nothing was installed.', exitCodes.denied, 'Rerun the command to start a new request.');
       throw new Stop('The sign-in code expired or was already used. Nothing was installed.', exitCodes.denied, 'Rerun the command to get a new code.');
     }
-    if (Date.now() + interval > deadline) throw new Stop(`Waiting for approval of code ${pending.userCode}.`, exitCodes.pending, `Open ${pending.url}, click Approve, then rerun the same command. It resumes this request.`);
+    if (Date.now() + interval > deadline) throw new Stop(`Waiting for approval of code ${pending.userCode}: ${pending.url} (expires ${deadlineText(pending.expiresAt)}).`, exitCodes.pending,
+      `Show the person approving this link and its expiry in your reply. Once they click Approve, rerun the same command: it resumes this request.`,
+      { approvalUrl: pending.url, userCode: pending.userCode, expiresAt: new Date(pending.expiresAt).toISOString() });
     await new Promise(resolve => setTimeout(resolve, interval));
   }
 }
@@ -515,7 +519,7 @@ async function runMain(args, { root = process.cwd(), print = console.log, printE
   } catch (error) {
     if (!(error instanceof Stop)) throw error;
     await telemetry.fail(error);
-    if (options.json) print(JSON.stringify({ ok: false, action, code: Object.keys(exitCodes).find(k => exitCodes[k] === error.exit), message: error.message, next: error.next }, null, 2));
+    if (options.json) print(JSON.stringify({ ok: false, action, code: Object.keys(exitCodes).find(k => exitCodes[k] === error.exit), message: error.message, next: error.next, ...error.details }, null, 2));
     else printError([error.message, error.next].filter(Boolean).join('\n'));
     return error.exit;
   }

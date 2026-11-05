@@ -234,7 +234,14 @@ test('a failing claude command never leaks the key, and project scope keeps it o
 
 test('a project in a subdirectory of a git repository installs at project scope', async t => {
   const h = await harness(t, { subdirectory: 'packages/app' });
-  const userCode = (await h.run('install', '--client', 'claude-code', '--scope', 'project', '--no-open')).out.match(/Code: (\S+)/)[1];
+  const first = await h.run('install', '--client', 'claude-code', '--scope', 'project', '--no-open');
+  // The expiry reads the same in any timezone; agents get the link as data to relay.
+  assert.match(first.out, /expires \d\d:\d\d UTC, in (29|30) min/);
+  const userCode = first.out.match(/Code: (\S+)/)[1];
+  const pending = JSON.parse((await h.run('install', '--client', 'claude-code', '--scope', 'project', '--no-open', '--json')).stdout);
+  assert.equal(pending.code, 'pending'); assert.equal(pending.userCode, userCode);
+  assert.match(pending.approvalUrl, new RegExp(`/connect\\?code=${userCode}`)); assert.ok(Date.parse(pending.expiresAt) > Date.now());
+  assert.match(pending.next, /Show the person approving this link/);
   await h.approve(userCode);
   const installed = await h.run('install', '--client', 'claude-code', '--scope', 'project');
   assert.equal(installed.code, 0, installed.out);
