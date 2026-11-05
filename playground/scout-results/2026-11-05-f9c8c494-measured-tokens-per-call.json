@@ -1,0 +1,72 @@
+{
+ "enrollment": {
+  "input": {
+   "n": 7,
+   "mean": 1298,
+   "median": 1200,
+   "max": 2055
+  },
+  "output": {
+   "n": 7,
+   "mean": 162,
+   "median": 136,
+   "max": 373
+  }
+ },
+ "intake": {
+  "input": {
+   "n": 42,
+   "mean": 1510,
+   "median": 1575,
+   "max": 2471
+  },
+  "output": {
+   "n": 42,
+   "mean": 230,
+   "median": 256,
+   "max": 735
+  }
+ },
+ "coding": {
+  "input": {
+   "n": 56,
+   "mean": 2091,
+   "median": 2085,
+   "max": 3792
+  },
+  "output": {
+   "n": 56,
+   "mean": 243,
+   "median": 251,
+   "max": 931
+  }
+ },
+ "adjudication": {
+  "input": {
+   "n": 55,
+   "mean": 3634,
+   "median": 4031,
+   "max": 6110
+  },
+  "output": {
+   "n": 55,
+   "mean": 196,
+   "median": 166,
+   "max": 576
+  }
+ },
+ "fraud": {
+  "input": {
+   "n": 56,
+   "mean": 2765,
+   "median": 2922,
+   "max": 5366
+  },
+  "output": {
+   "n": 56,
+   "mean": 300,
+   "median": 261,
+   "max": 883
+  }
+ }
+}

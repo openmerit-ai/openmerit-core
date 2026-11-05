@@ -2,6 +2,45 @@
 
 Dated observations from using OpenMerit as Sahra Health, newest release first. Each entry says what we ran, what happened and what a customer would expect.
 
+## Scout f9c8c494 (5 Nov 2026, openmerit 0.3.4)
+
+The Scout serving release adds a per-call workload estimate and calibrates it from measured cost (`cost.calibration`). When cost is measured, only the cheapest measured model earns `best: ["cost"]`. The npm package is unchanged at 0.3.4.
+
+No models were run. New conversation `f217f536-68bd-4ee9-b8a4-a084f49a4967`, with the same brief as 0.3.4 (`scout-tasks/agent-models-0.3.1.txt`, priority quality) and the same 69 agent-level results (`scout-results/2026-11-05-f9c8c494-*.json`).
+
+### Scout asked two questions first
+
+- **Questions:** for the first time with this brief, Scout returned `needs_answers`. It asked whether we could share per-model results from our Langfuse experiments, and whether providers other than Workers AI and OpenRouter are allowed with a flagged residency gap.
+- **Answers:** we took both from `POLICY.md` and the task, not guesses. Shortlist from benchmarks first, and we report results afterwards. Other providers are allowed only as a flagged gap, each with owner approval.
+- **Results reported** one call per agent, with the task titles renamed to match the new response ("Claims intake agent call" and so on).
+
+### Uncalibrated per-call guesses are now 1.5–3 times too high, not 7–17 times
+
+Before any results, Scout's per-call workload estimates against the Sonnet 5.5 baseline traces (`run-2026-11-05T13-42-09-533Z`, deployed Worker), as mean input and output tokens per model call from Langfuse:
+
+| Agent | Scout input | Measured input | Ratio | Scout output | Measured output | Ratio |
+|---|---|---|---|---|---|---|
+| Enrollment | 3,500 | 1,298 | 2.7× | 300 | 162 | 1.9× |
+| Intake | 4,500 | 1,510 | 3.0× | 450 | 230 | 2.0× |
+| Coding | 5,000 | 2,091 | 2.4× | 500 | 243 | 2.1× |
+| Adjudication | 5,500 | 3,634 | 1.5× | 450 | 196 | 2.3× |
+| Fraud | 6,000 | 2,765 | 2.2× | 500 | 300 | 1.7× |
+
+- **Comparison with 0.3.1:** there Scout assumed 16k–26k input tokens per call.
+- **Calls per run:** they match our brief: 3 for intake, 4 for the others.
+- **Prompt caching:** the measured input includes prompt-cache reads and writes (Anthropic via OpenRouter), which are billed below the list price. So the cost gap is wider than the token gap, about 4 times for Sonnet: for example intake estimated USD 40.5 per 1k runs, against 10.37 measured.
+
+### Calibrated estimates are close; one factor per task can't capture each model
+
+- **Factor and sources:** after results, every claim-agent candidate has `cost.calibration` with a `factor` and the five `measured:` results it came from. The factors are intake 0.256, coding 0.257, adjudication 0.340 and fraud 0.299. Enrollment has none, because we have no measured enrollment cost.
+- **Accuracy:** calibrated estimates are within 0.67–1.6 times of measured cost, where 0.3.4 showed estimates 12–15 times too high next to `cost.measured`. The factor appears to be fitted to the middle of the group: Sonnet and Opus 5.5 come out almost exact.
+- **The remaining error is per model.** GPT-6.1 Sol is overestimated 1.4–1.6 times, and Opus 5 underestimated to 0.67–0.78 times, because the models use different numbers of tokens for the same work. Models with the same list price get identical estimates: GPT-6.1 Sol, Gemini 4 Argon and Sonnet 5.5 all show USD 10.37 for intake. For an unmeasured candidate, a calibrated estimate can therefore still be off by about 1.5 times either way.
+
+### Cheapest label and ranking
+
+- **One cheapest per task:** after results, `best: ["cost"]` goes to exactly one model per claim agent, the measured cheapest, GPT-6.1 Sol. Before results it still went to two models per task whose estimates tied (Gemini 4 Argon and Sonnet 5.5 at the same list price). Enrollment, with no measured cost, gives it to unmeasured Gemini 3.8 Flash by estimate.
+- **Ranking unchanged from 0.3.4:** each claim agent's five measured models share one quality score (85, 86, 90 and 88), `quality.measured: true`, ordered by measured cost with GPT-6.1 Sol first. Regret of the first pick at 300 claims a day stays 0.
+
 ## openmerit 0.3.4 (5 Nov 2026)
 
 What changed, per the package's CHANGELOG and the release note:
