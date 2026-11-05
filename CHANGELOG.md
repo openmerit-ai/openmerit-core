@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.5 — 2026-11-05
 
-- Add optional headless Langfuse setup through the CLI, HTTP API and `scout_connection` MCP tool. A separately approved `scout:connections` key manages the authenticated user's connection and evaluation data; recommendation keys retain their existing permission. Viewer credentials enter through protected CLI input or trusted client configuration, never model-visible tool arguments. The web connection UI remains available, with revised spacing, mobile controls and the official Langfuse logo. Requires a matching Scout deployment and npm release.
+- Add optional headless Langfuse setup through the CLI, HTTP API and `scout_connection` MCP tool. A separately approved `scout:connections` key manages the authenticated user's connection and evaluation data; recommendation keys retain their existing permission. Viewer credentials enter through protected CLI input or trusted client configuration, never model-visible tool arguments. The web connection UI remains available, with revised spacing, mobile controls and the official Langfuse logo. Hosted features require a matching Scout deployment; saving Langfuse credentials also requires its dedicated encryption secret. Publishing this package does not deploy or enable the hosted connector.
 
 ## 0.3.4 — 2026-11-05
 

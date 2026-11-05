@@ -25,10 +25,12 @@ Setup analytics defaults on. Set `OPENMERIT_TELEMETRY=0` or `DO_NOT_TRACK=1` to 
 
 Turning sharing off stops future optional collection. It does not stop required processing or delete stored data.
 
-## Evaluation connections (unreleased)
+## Evaluation connections
 
-The source Langfuse connector and per-user result store are not yet released.
-Once deployed, reported and imported aggregates are held per authenticated user
+These features require a matching Scout serving deployment; saving Langfuse
+credentials also requires a dedicated server encryption secret. The npm package
+does not deploy or enable the hosted connector. On enabled deployments, reported
+and imported aggregates are held per authenticated user
 in Cloudflare Durable Objects and inform only that user's recommendations across
 conversations. No cross-customer sharing is enabled. Each aggregate records level,
 kind (quality, USD or seconds), task/scope, catalogue model/endpoint ID, metric,

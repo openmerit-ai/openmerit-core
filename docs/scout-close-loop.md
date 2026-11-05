@@ -4,9 +4,11 @@ Scout recommends candidates; your own evals decide whether they work. Never put
 inputs, outputs, patient records, source code or secrets in recommendation prompts
 or tool arguments. Connector credentials use the protected paths described below.
 
-**Release status:** the Langfuse connection, per-user results and `--sync` below
-are unreleased source changes. They need a Scout serving deployment and a new npm
-patch. npm 0.3.4 supports reporting aggregates per conversation, not this connector.
+**Version requirements:** the Langfuse setup commands below require npm 0.3.5 or
+newer and a matching Scout serving deployment. Saving Langfuse credentials also
+requires connection encryption to be enabled on the server. Publishing the npm
+package alone does not deploy or enable the hosted connector. npm 0.3.4 supports
+reporting aggregates per conversation, not this connector.
 
 ## Install and consult
 

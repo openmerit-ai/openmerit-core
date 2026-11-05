@@ -4,7 +4,7 @@ import { credentialsPath, readCredentials } from './scout-credentials.ts';
 import { openBrowser } from './browser.mjs';
 import { main as install } from './install.mjs';
 
-const help = `OpenMerit · Langfuse connections (unreleased)
+const help = `OpenMerit · Langfuse connections
 
   openmerit connect langfuse                       Open the optional web UI
   openmerit connect langfuse --authorize [--no-open] [--json]
