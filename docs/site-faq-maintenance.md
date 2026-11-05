@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Measured cost, environment attribution and Claude Code updater fix — deployed 5 November 2026, npm 0.3.3
+
+Reviewed the homepage against reported results gaining a `kind` (quality, usd, seconds), measured cost replacing Scout's estimate, environment-level results no longer dropping a model whose own agent checks match, and the Claude Code install fix for automatic updates. `site/index.html` has no FAQ block and does not mention ranking inputs, cost estimates or installer updates. No homepage copy changes.
+
 ## Measured-first ranking, 30-minute device codes and monorepo install — deployed 5 November 2026, npm 0.3.2
 
 Reviewed the homepage against measured results ranking ahead of unmeasured models, 30-minute device codes, the UTC expiry and approval link in the installer's pending output, and the Claude Code install fix for projects inside a larger git repository. `site/index.html` has no FAQ block and does not mention code lifetimes, installer output or ranking order. No homepage copy changes.

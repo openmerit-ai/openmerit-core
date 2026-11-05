@@ -1,6 +1,6 @@
 {
   "name": "openmerit",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Evidence-driven model decisions for coding harnesses.",
   "type": "module",
   "bin": {
