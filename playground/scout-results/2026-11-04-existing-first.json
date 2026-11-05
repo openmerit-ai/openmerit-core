@@ -1,0 +1,104 @@
+{
+  "conversationId": "e691e428-c5be-4f46-9e5b-40546ea5be8b",
+  "status": "recommended",
+  "brief": {
+    "input": {
+      "text": "Fictional Dubai outpatient applications, health declarations, structured eClaimLink-style claims, itemized bills, codes, member history and provider statistics",
+      "source": "stated"
+    },
+    "work": {
+      "text": "Enrollment, claims extraction, coding review, coverage adjudication and fraud/waste/abuse review in multi-step JSON-schema tool loops",
+      "source": "stated"
+    },
+    "output": {
+      "text": "Tool-recorded decisions and findings; ICD-10-CM prefixes, matched bill lines and mismatches, line-level pay/deny and denial codes, 0–1 risk signals and pay/review/hold recommendation",
+      "source": "stated"
+    },
+    "criteria": {
+      "text": "Quality and reliable tool calling matter more than cost; Cloudflare Workers AI preferred",
+      "source": "stated"
+    },
+    "constraints": {
+      "text": "Each endpoint must process health data inside UAE; unknown location treated as outside UAE; Pi Durable agents on Cloudflare Workers; low volume",
+      "source": "stated"
+    }
+  },
+  "assumptions": [
+    "Each of the five agents uses one separately selected model.",
+    "No model is eligible because the project inventory has no catalogue endpoints; endpoint residency cannot be verified."
+  ],
+  "catalogueVersion": "548870f9b79218b4f46702c4a5b651a1",
+  "tasks": [
+    {
+      "title": "Enrollment",
+      "work": "Extract declared chronic-condition ICD-10-CM category prefixes and record eligibility using tools.",
+      "input": "Application and free-text health declaration",
+      "output": "Condition prefixes and tool-recorded eligibility decision",
+      "summary": "No eligible model: the project inventory has no catalogue endpoints, so UAE processing and tool support cannot be verified.",
+      "workload": {
+        "inputTokens": 3000,
+        "outputTokens": 500
+      },
+      "priority": "cost",
+      "qualityBar": 80,
+      "models": []
+    },
+    {
+      "title": "Claims intake and extraction",
+      "work": "Match itemized bill lines to claim activities, total and flag mismatches, then record using a tool.",
+      "input": "Structured eClaimLink-style claim and free-text itemized bill",
+      "output": "Matched lines, totals and mismatches recorded via tool",
+      "summary": "No eligible model: the project inventory has no catalogue endpoints, so UAE processing and tool support cannot be verified.",
+      "workload": {
+        "inputTokens": 5000,
+        "outputTokens": 800
+      },
+      "priority": "cost",
+      "qualityBar": 80,
+      "models": []
+    },
+    {
+      "title": "Medical coding review",
+      "work": "Check ICD-10-CM and CPT codes using lookup tools; identify diagnosis/procedure mismatch, unbundling and E/M upcoding.",
+      "input": "Claim diagnoses and procedures, lookup tool results",
+      "output": "Tool-recorded coding findings",
+      "summary": "No eligible model: the project inventory has no catalogue endpoints, so UAE processing and tool support cannot be verified.",
+      "workload": {
+        "inputTokens": 6000,
+        "outputTokens": 900
+      },
+      "priority": "cost",
+      "qualityBar": 85,
+      "models": []
+    },
+    {
+      "title": "Coverage and adjudication",
+      "work": "Apply plan rules from tools and determine pay or deny by line; use a tool to compute amounts.",
+      "input": "Claim lines and plan-rule tool results",
+      "output": "Line decisions and denial codes, tool-computed amounts",
+      "summary": "No eligible model: the project inventory has no catalogue endpoints, so UAE processing and tool support cannot be verified.",
+      "workload": {
+        "inputTokens": 5000,
+        "outputTokens": 800
+      },
+      "priority": "cost",
+      "qualityBar": 90,
+      "models": []
+    },
+    {
+      "title": "Fraud, waste and abuse review",
+      "work": "Compare claim, member history and provider statistics; score signals and recommend disposition.",
+      "input": "Claim, member history and provider statistics",
+      "output": "0–1 signal scores and pay/review/hold recommendation",
+      "summary": "No eligible model: the project inventory has no catalogue endpoints, so UAE processing and tool support cannot be verified.",
+      "workload": {
+        "inputTokens": 7000,
+        "outputTokens": 900
+      },
+      "priority": "cost",
+      "qualityBar": 85,
+      "models": []
+    }
+  ],
+  "next": "Present each task's shortlist with its trade-offs and let the user choose. To refine, call scout_models with this conversationId and a prompt."
+}

@@ -34,6 +34,23 @@ jobs:
       - run: npm ci
       - run: npm run check:worker-types
 
+  # The Sahra Health customer playground: its own lockfile, the published openmerit package, no
+  # model calls. Kept out of `npm run verify` and the npm package.
+  playground:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: playground
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: playground/package-lock.json
+      - run: npm ci
+      - run: npm run check
+
   package-smoke:
     runs-on: ubuntu-latest
     steps:
