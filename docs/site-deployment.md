@@ -24,7 +24,7 @@ It runs the pinned Wrangler with `--strict`, which stops if someone changed the 
 |---|---|---|---|
 | `domain-router` | `openmerit-domains` | `wrangler.domains.jsonc` | Every public host; redirects; `/memo` to `openmerit-site` |
 | `scout-serving` | `openmerit-scout-alpha` | `wrangler.scout-alpha.jsonc` | Landing page, `/scout/`, `/connect/` |
-| `scout-publisher` | `openmerit-scout` | `wrangler.scout.jsonc` | Hourly catalogue refresh. **Blocked** until its unreleased collection changes are validated |
+| `scout-publisher` | `openmerit-scout` | `wrangler.scout.jsonc` | Catalogue refresh, twice a day (00:07 and 12:07 UTC). Validate collection in isolation before each release |
 | `site` | `openmerit-site` | `wrangler.jsonc` | Protected memo. Locally reconciled; code-only release with asset-retention checks and no container rollout |
 
 Deploy `scout-serving` before `domain-router` when a change spans both, as the rebuild cutover did.
