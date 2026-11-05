@@ -1,9 +1,68 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { main, renderScout, scoutTurn, type ScoutModel } from '../src/scout.ts';
+import { connection } from '../src/connections.ts';
+import { credentialsPath } from '../src/scout-credentials.ts';
+
+test('headless CLI resumes explicit management approval, protects keys, and manages connections without changing agent credentials', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'openmerit-connector-'));
+  const names = ['OPENMERIT_CONFIG_DIR', 'OPENMERIT_URL', 'OPENMERIT_LOGIN_WAIT', 'OPENMERIT_CONNECTION_KEY', 'LANGFUSE_PUBLIC_KEY', 'LANGFUSE_SECRET_KEY', 'DO_NOT_TRACK'];
+  const before = new Map(names.map(name => [name, process.env[name]]));
+  t.after(async () => { for (const [name, value] of before) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } await rm(home, { recursive: true, force: true }); });
+  Object.assign(process.env, { OPENMERIT_CONFIG_DIR: home, OPENMERIT_URL: 'https://scout.example', OPENMERIT_LOGIN_WAIT: '0', DO_NOT_TRACK: '1', LANGFUSE_PUBLIC_KEY: 'pk-lf-fictional-key', LANGFUSE_SECRET_KEY: 'sk-lf-fictional-secret' });
+  delete process.env.OPENMERIT_CONNECTION_KEY;
+  const management = `om_${'m'.repeat(43)}`, recommendation = `om_${'r'.repeat(43)}`;
+  const agentPath = credentialsPath('claude-code', 'user', home);
+  const agentFile = JSON.stringify({ version: 1, server: 'https://scout.example', key: recommendation });
+  await writeFile(agentPath, agentFile);
+  const printed: string[] = [], errors: string[] = [];
+  const run = (args: string[]) => connection(args, { root: home, print: text => printed.push(text), printError: text => errors.push(text) });
+  let approved = false, connected = false, results = 0;
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, options?: RequestInit) => {
+    const path = new URL(String(input)).pathname;
+    const body = options?.body ? JSON.parse(String(options.body)) as Record<string, unknown> : {};
+    if (path === '/connect/api/device') {
+      assert.equal(body.client, 'connector');
+      return Response.json({ device_code: 'fictional-device', user_code: 'ABCD-EFGH', verification_uri_complete: 'https://scout.example/connect?code=ABCD-EFGH', expires_in: 1800, interval: 5 });
+    }
+    if (path === '/connect/api/token') return approved ? Response.json({ access_token: management, key_id: 'dk_fixture' }) : Response.json({ error: 'authorization_pending' }, { status: 400 });
+    if (new Headers(options?.headers).get('Authorization') !== `Bearer ${management}`) return Response.json({ error: 'rejected' }, { status: 401 });
+    if (options?.method === 'DELETE') { connected = false; results = 0; }
+    if (path.endsWith('/sync')) results = connected ? 7 : 0;
+    else if (options?.method === 'POST') {
+      assert.equal(body.publicKey, 'pk-lf-fictional-key'); assert.equal(body.secretKey, 'sk-lf-fictional-secret'); connected = true;
+    }
+    return Response.json({ connected, results });
+  });
+  await assert.rejects(run(['connect', 'langfuse', '--status']), /Authorize connection management first/);
+  assert.equal(await run(['connect', 'langfuse', '--authorize', '--no-open', '--json']), 10);
+  assert.equal(JSON.parse(printed.join('\n')).code, 'pending', '--json stdout is machine-readable even while approval is pending');
+  assert.match(printed.join('\n'), /ABCD-EFGH/);
+  approved = true;
+  assert.equal(await run(['connect', 'langfuse', '--authorize', '--no-open', '--json']), 0);
+  assert.equal((await stat(credentialsPath('connector', 'user', home))).mode & 0o777, 0o600);
+  const config = { region: 'us', from: '2026-11-01', tagPrefix: 'experiment:', mappings: [], models: {} };
+  await writeFile(join(home, 'mappings.json'), JSON.stringify(config));
+  assert.equal(await run(['connect', 'langfuse', '--config', 'mappings.json']), 0);
+  assert.equal(JSON.parse(printed.at(-1) ?? '').connected, true);
+  await run(['connect', 'langfuse', '--sync']);
+  assert.equal(JSON.parse(printed.at(-1) ?? '').results, 7);
+  await assert.rejects(run(['disconnect', 'langfuse', '--delete-all']), /requires --yes/);
+  await run(['disconnect', 'langfuse', '--yes']);
+  assert.equal(JSON.parse(printed.at(-1) ?? '').connected, false);
+  t.mock.getter(process, 'stdin', () => Readable.from([JSON.stringify({ ...config, publicKey: process.env.LANGFUSE_PUBLIC_KEY, secretKey: process.env.LANGFUSE_SECRET_KEY })]));
+  await run(['connect', 'langfuse', '--stdin']);
+  assert.equal(JSON.parse(printed.at(-1) ?? '').connected, true);
+  await run(['disconnect', 'langfuse', '--delete-all', '--yes']);
+  assert.equal(JSON.parse(printed.at(-1) ?? '').connected, false);
+  assert.equal(await readFile(agentPath, 'utf8'), agentFile);
+  assert.doesNotMatch([...printed, ...errors].join('\n'), /om_|pk-lf|sk-lf|fictional-device/);
+  await assert.rejects(run(['connect', 'langfuse', '--secret-key=DO_NOT_ECHO']), error => error instanceof Error && !error.message.includes('DO_NOT_ECHO'));
+});
 
 test('openmerit scout talks to the Scout agent over MCP under the project policy', async t => {
   const home = await mkdtemp(join(tmpdir(), 'openmerit-scout-')), root = await mkdtemp(join(tmpdir(), 'openmerit-project-'));

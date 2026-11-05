@@ -1,7 +1,7 @@
 // OpenMerit device approval. A coding agent's `openmerit install` shows a code;
 // the signed-in person confirms it here. The page never sees the device key.
 import { analytics } from '../scout/analytics.js';
-import { showLangfuse } from './langfuse.js';
+import { showLangfuse, showConnectionPermissions } from './langfuse.js';
 
 const $ = selector => document.querySelector(selector);
 const status = $('#connect-status');
@@ -75,7 +75,7 @@ async function showDevices(client) {
     $('#device-list').replaceChildren(...keys.map(key => {
       const item = document.createElement('li'), label = document.createElement('div'), meta = document.createElement('span'), revoke = document.createElement('button');
       label.textContent = `${key.clientName} on ${key.deviceName}`;
-      meta.textContent = ` · last used ${new Date(key.lastUsedAt).toLocaleDateString()}`; label.append(meta);
+      meta.textContent = `Last used ${new Date(key.lastUsedAt).toLocaleDateString()}`; label.append(meta);
       revoke.type = 'button'; revoke.textContent = 'Revoke';
       revoke.addEventListener('click', async () => {
         revoke.disabled = true;
@@ -123,6 +123,7 @@ async function showRequest(client) {
   $('#request-client').textContent = login.clientName;
   $('#request-device').textContent = login.deviceName;
   $('#request-scope').textContent = login.scope === 'user' ? 'All your projects (user scope)' : 'One project (project scope)';
+  showConnectionPermissions(login.permissions ?? []);
   $('#request-code').textContent = code;
   $('#request').hidden = false;
   for (const [button, decision] of [[$('#approve'), 'approve'], [$('#deny'), 'deny']]) button.onclick = async () => {

@@ -19,7 +19,7 @@ const exitCodes = { ok: 0, error: 1, pending: 10, denied: 11, conflict: 20, unre
 const exec = promisify(execFile);
 const hash = value => createHash('sha256').update(value).digest('hex');
 const policyPath = '.openmerit/scout.json';
-const clients = { 'claude-code': 'Claude Code', pi: 'Pi' };
+const clients = { 'claude-code': 'Claude Code', pi: 'Pi', connector: 'OpenMerit connection manager' };
 
 const help = `OpenMerit · coding-agent setup
 
@@ -45,6 +45,8 @@ It opens the approval page and waits up to 9 minutes for the Approve click
 pending, rerun the same command: it resumes the same request.
 --client defaults to the coding agent running the command. --scope defaults to user.
 --plan shows the changes without making them. Keys are never printed.
+login/logout also accept --client connector for a separate connection-management
+key. This grants no model recommendations and changes no coding-agent install.
 
 Exit codes: 0 done, 10 approval pending, 11 denied or expired, 20 conflict,
 30 OpenMerit unreachable, 1 other error.
@@ -471,6 +473,7 @@ async function runMain(args, { root = process.cwd(), print = console.log, printE
     options.client ??= detectClient() ?? (['install', 'status', 'remove'].includes(action) ? undefined : 'claude-code');
     if (!options.client) throw new Error('Choose the coding agent with --client claude-code or --client pi.');
     if (!clients[options.client]) throw new Error(`Unsupported client "${options.client}". Supported: ${Object.keys(clients).join(', ')}.`);
+    if (options.client === 'connector' && !['login', 'logout'].includes(action)) throw new Error('The connector client supports login/logout only. Use openmerit connect langfuse --help.');
   }
   root = resolve(root);
   telemetry.root = root;
@@ -510,7 +513,7 @@ async function runMain(args, { root = process.cwd(), print = console.log, printE
       : action === 'project' ? await project(root, options)
       : action === 'doctor' ? await doctor(root, options)
       : action === 'logout' ? { action, revoked: await revokeKey(telemetry), note: 'Signed out. This device key was revoked and deleted. Agents configured with it stop working until you run install again.' }
-      : (await revokeKey(telemetry), await login({ client: options.client, scope: options.scope, open: options.open, log, wait, telemetry }), { action, signedIn: true, note: `Signed in. Run "openmerit install --client ${options.client} --scope ${options.scope}" to refresh this installation.` });
+      : (await revokeKey(telemetry), await login({ client: options.client, scope: options.scope, open: options.open, log, wait, telemetry }), { action, signedIn: true, note: options.client === 'connector' ? 'Connection management authorized. Recommendation keys and coding-agent installations are unchanged.' : `Signed in. Run "openmerit install --client ${options.client} --scope ${options.scope}" to refresh this installation.` });
     if (result.conflicts?.length && telemetry.outcome !== 'error') { telemetry.outcome = 'conflict'; telemetry.properties.code = 'install_conflict'; }
     if (options.plan) await telemetry.step(telemetry.stage, telemetry.outcome, { applied: false });
     print(options.json ? JSON.stringify({ ok: action !== 'update' || !['conflict', 'retry', 'manual_required'].includes(result.status), ...result }, null, 2) : render(result));

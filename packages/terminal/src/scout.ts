@@ -5,7 +5,6 @@
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { credentialsPath, readCredentials, type DeviceCredentials } from './scout-credentials.ts';
-import { openBrowser } from './browser.mjs';
 
 const policyFile = '.openmerit/scout.json';
 export const components = ['input', 'work', 'output', 'criteria', 'constraints'] as const;
@@ -30,8 +29,9 @@ samples, source}), never inputs or outputs. kind is quality (the default), usd
 or seconds; measured usd replaces Scout's cost estimate. Scout ranks them above
 public benchmarks, for your recommendations only. A turn usually takes one to three minutes.
 
-Connect a separate Langfuse Viewer key in the signed-in browser, then --sync
-langfuse refreshes mapped, tagged experiment aggregates before recommending.
+Connect a separate Langfuse Viewer key through CLI or the optional web UI (see
+openmerit connect langfuse --help), then --sync langfuse refreshes mapped, tagged
+experiment aggregates before recommending.
 Results are stored per user across conversations for 90 days. Disconnect deletes
 the key and imports; use Delete all evaluation data to remove reported results too.
 Past conversations remain. Never put record IDs or emails in source or scope.
@@ -200,12 +200,4 @@ export async function main(args: string[], { root = process.cwd(), print = conso
   const result = await scoutTurn(root, request);
   print(json ? JSON.stringify(result, null, 2) : renderScout(result));
   return result.status === 'error' ? 1 : 0;
-}
-
-export async function connection(args: string[], print = console.log): Promise<number> {
-  if (!['connect', 'disconnect'].includes(args[0] ?? '') || args[1] !== 'langfuse' || args.length !== 2) throw new Error('Use openmerit connect langfuse or openmerit disconnect langfuse.');
-  const url = 'https://openmerit.ai/connect/?integration=langfuse';
-  print(args[0] === 'connect' ? `Add a separate Langfuse Viewer key in your signed-in browser: ${url}` : `Confirm “Disconnect & delete imports” in your signed-in browser: ${url}`);
-  await openBrowser(url, { allowed: (value: string) => value === url }).catch(() => false);
-  return 0;
 }

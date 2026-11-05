@@ -82,13 +82,13 @@ export default {
       return ['GET','HEAD'].includes(request.method)?env.ASSETS.fetch(request):json({error:'Not found.'},404);
     }
     const analytics=createProductAnalytics(request,env,ctx);
-    let userId;
-    const access=await scoutAccess(request,env,id=>{userId=id;analytics.identify(id);});
+    let userId,permissions;
+    const access=await scoutAccess(request,env,(id,grants)=>{userId=id;permissions=grants;analytics.identify(id);});
     if(access){await analytics.complete(access);return analytics.response(access);}
     if(path==='/scout/api/analytics')return analytics.handleEvent();
     if(agentPath.test(path)){const response=await handleAgent(request,env.SCOUT_AGENT,userId,env.SCOUT_EVALUATIONS);await analytics.complete(response);return analytics.response(response);}
     // Coding agents talk to the same Scout agent as the page, through MCP.
-    if(path==='/scout/mcp'){const response=await handleMCP(request,env.SCOUT_AGENT,userId,analytics.observeMCP,env.SCOUT_EVALUATIONS);await analytics.complete(response);return analytics.response(response);}
+    if(path==='/scout/mcp'){const response=await handleMCP(request,env.SCOUT_AGENT,userId,analytics.observeMCP,env.SCOUT_EVALUATIONS,permissions);await analytics.complete(response);return analytics.response(response);}
     if(path==='/scout/api/analytics/preference')return analytics.handlePreference();
     let response;
     try {

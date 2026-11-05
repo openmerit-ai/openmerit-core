@@ -9,7 +9,9 @@ CREATE TABLE IF NOT EXISTS openmerit_device_keys (id TEXT PRIMARY KEY, key_hash 
 CREATE INDEX IF NOT EXISTS openmerit_device_keys_user ON openmerit_device_keys(user_id, created_at);`;
 
 export const scoutPermission = 'scout:recommend';
-export const clients = { 'claude-code': 'Claude Code', pi: 'Pi' };
+export const connectorPermission = 'scout:connections';
+export const clients = { 'claude-code': 'Claude Code', pi: 'Pi', connector: 'OpenMerit connection manager' };
+const permissionsFor = client => [client === 'connector' ? connectorPermission : scoutPermission];
 // Device codes last 30 minutes: approval often waits for a different person than the one running the installer.
 const loginTTL = 1_800_000, pollInterval = 5, idleLifetime = 90 * 86400_000, touchEvery = 300_000;
 const alphabet = 'BCDFGHJKLMNPQRSTVWXZ23456789';
@@ -100,30 +102,36 @@ async function connect(request, env, { session, now = Date.now(), analytics } = 
       const claimed = await db.prepare("UPDATE openmerit_device_logins SET status='collected',key_id=? WHERE device_hash=? AND status='approved' RETURNING user_id,client,device_name").bind(keyId, hash).first();
       if (!claimed) return oauthError('invalid_grant');
       const key = `om_${random(32)}`;
+      const permissions = permissionsFor(claimed.client);
       await db.prepare('INSERT INTO openmerit_device_keys(id,key_hash,user_id,client,device_name,permissions,created_at,last_used_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)')
-        .bind(keyId, await sha256(key), claimed.user_id, claimed.client, claimed.device_name, JSON.stringify([scoutPermission]), now, now, now + idleLifetime).run();
-      return json({ access_token: key, token_type: 'Bearer', key_id: keyId, scope: scoutPermission, expires_in: idleLifetime / 1000 });
+        .bind(keyId, await sha256(key), claimed.user_id, claimed.client, claimed.device_name, JSON.stringify(permissions), now, now, now + idleLifetime).run();
+      return json({ access_token: key, token_type: 'Bearer', key_id: keyId, scope: permissions.join(' '), expires_in: idleLifetime / 1000 });
     }
     if (path === 'keys/self' && method === 'DELETE') {
-      const owner = bearer && await deviceKeyUser(env, bearer, scoutPermission, now);
+      const owner = bearer && (await deviceKeyUser(env, bearer, scoutPermission, now) ?? await deviceKeyUser(env, bearer, connectorPermission, now));
       if (!owner) return json({ error: 'Unknown or inactive device key.' }, 401);
       analytics?.identify(owner.userId);
       await (await database(env)).prepare('UPDATE openmerit_device_keys SET revoked_at=? WHERE id=?').bind(now, owner.keyId).run();
       return json({ revoked: owner.keyId });
     }
 
-    // Everything below acts for a signed-in person in the browser.
-    const userId = await session(request);
+    // A dedicated connection-manager key cannot approve devices or list/revoke
+    // other keys. Recommendation keys never acquire management permission.
+    const evaluation = ['langfuse', 'langfuse/sync', 'evaluations'].includes(path);
+    const device = bearer?.startsWith('om_');
+    const userId = device
+      ? evaluation ? (await deviceKeyUser(env, bearer, connectorPermission, now))?.userId : null
+      : await session(request);
     if (!userId) return json({ error: 'Sign in to continue.', code: 'sign_in_required' }, 401, { 'WWW-Authenticate': 'Bearer realm="OpenMerit"' });
     analytics?.identify(userId);
     if (!await limit(`connect:user:${userId}`)) return json({ error: 'Too many requests. Please try again shortly.' }, 429, { 'Retry-After': '60' });
-    if (['langfuse', 'langfuse/sync', 'evaluations'].includes(path)) return handleEvaluations(request, env.SCOUT_EVALUATIONS, userId);
+    if (evaluation) return handleEvaluations(request, env.SCOUT_EVALUATIONS, userId);
     const db = await database(env);
     if (path === 'login' && method === 'GET') {
       const login = await db.prepare('SELECT client,scope,device_name,expires_at,status,user_id FROM openmerit_device_logins WHERE user_code=?').bind(normalizeCode(url.searchParams.get('code'))).first();
       if (!login || login.user_id && login.user_id !== userId) return json({ error: 'This code is not recognized. Check it against your coding agent.' }, 404);
       const status = login.status === 'pending' && login.expires_at <= now ? 'expired' : login.status;
-      return json({ client: login.client, clientName: clients[login.client], scope: login.scope, deviceName: login.device_name, status, permissions: [scoutPermission], expiresAt: new Date(login.expires_at).toISOString() });
+      return json({ client: login.client, clientName: clients[login.client], scope: login.scope, deviceName: login.device_name, status, permissions: permissionsFor(login.client), expiresAt: new Date(login.expires_at).toISOString() });
     }
     if (path === 'login' && method === 'POST') {
       const { code, decision } = await body();

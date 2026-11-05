@@ -15,14 +15,14 @@ export interface DeviceCredentials {
 
 // Retain the existing Claude user key in place. Other installations own their
 // own key and approval, so removing one cannot revoke another's connection.
-export function credentialsPath(client: ScoutClient, scope: ScoutScope, root: string): string {
+export function credentialsPath(client: ScoutClient | 'connector', scope: ScoutScope, root: string): string {
   const base = resolve(process.env.OPENMERIT_CONFIG_DIR ?? join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'openmerit'));
   if (client === 'claude-code' && scope === 'user') return join(base, 'credentials.json');
   const installation = scope === 'project' ? createHash('sha256').update(resolve(root)).digest('hex').slice(0, 24) : 'user';
   return join(base, client, installation, 'credentials.json');
 }
 
-export function pendingPath(client: ScoutClient, scope: ScoutScope, root: string): string {
+export function pendingPath(client: ScoutClient | 'connector', scope: ScoutScope, root: string): string {
   return join(dirname(credentialsPath(client, scope, root)), 'login.json');
 }
 
