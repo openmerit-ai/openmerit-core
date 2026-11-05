@@ -202,6 +202,8 @@ test('an environment miss does not drop a model whose own results match, and mea
   // Measured over estimated per call: alpha $1.25 / $4 = 0.3125, beta $5 / $1.50 = 3.3333; the median of the two scales every estimate,
   // so unmeasured gamma's $3 becomes 3 × 1.822917 = $5.4688 per 1k calls and alpha's own estimate $7.2917.
   assert.deepEqual(ranked.models.map(m => m.cost?.usdPer1kTasks), [7.2917, 2.7344, 5.4688]);
+  // Only the cheapest measured cost is labelled cheapest, not gamma's lower (calibrated) estimate.
+  assert.deepEqual(ranked.models.map(m => m.best.includes('cost')), [true, false, false]);
   assert.deepEqual(ranked.models[2]?.cost?.calibration, { factor: 1.8229, results: ['measured:c1', 'measured:c2'] });
   // Under the quality priority, equal measured quality is broken by measured cost, not the agent's (benchmark) order; a higher estimate still leads.
   const byQuality = (alpha: number) => finalize(toolCatalogue, { ...shortlist(alpha, ['measured:q2']), priority: 'quality' }, now, {}, context(costs)).models.map(m => m.id);
