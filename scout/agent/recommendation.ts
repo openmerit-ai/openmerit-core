@@ -290,14 +290,17 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
     };
   });
   // Rank by the priority, lower first; unknown values go last, and ties keep the agent's order.
-  // Only the top five are shown, so a costlier model cannot displace a cheaper one that reaches the bar.
+  // Only the top five are shown, so a costlier unmeasured model cannot displace a cheaper one that reaches the bar.
   // A cost that leaves part of the workload unpriced understates the bill, so it ranks as unknown.
   const priority = s.priority ?? 'cost';
   const keys: Record<Axis, (m: RecommendedModel) => number | null> = {
     quality: m => -m.quality.score, cost: m => m.cost && !m.cost.unpriced.length ? m.cost.usdPer1kTasks : null, recency: m => m.recency?.ageDays ?? null,
   };
+  // Models the user measured come first: their own result on this work outranks a public benchmark,
+  // so an unmeasured model cannot lead on a benchmark-based estimate. Within each group the priority ranks.
   const key = (m: RecommendedModel) => keys[priority](m) ?? Infinity;
-  const models = assessed.sort((a, b) => key(a) === key(b) ? 0 : key(a) - key(b)).slice(0, 5);
+  const order = (a: RecommendedModel, b: RecommendedModel) => Number(b.quality.measured) - Number(a.quality.measured) || (key(a) === key(b) ? 0 : key(a) - key(b));
+  const models = assessed.sort(order).slice(0, 5);
   models.forEach((m, i) => { m.rank = i + 1; });
   leaders(models);
   return { summary: s.summary, workload: s.workload, priority, qualityBar: s.qualityBar, models, evaluation: s.evaluation };
