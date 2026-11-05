@@ -3,7 +3,7 @@
 // against the catalogue and computes every number shown for cost, latency and
 // recency, so a figure on screen always comes from source data.
 import { StringEnum, Type, type Static } from '@earendil-works/pi-ai';
-import { eligibleEndpoints, kinds, standings, unitLabels, violation, type Catalogue, type Endpoint, type Filters, type Rate } from './catalogue.ts';
+import { eligibleEndpoints, kinds, standings, unitLabels, violation, type Catalogue, type Endpoint, type Filters, type ModelRecord, type Rate } from './catalogue.ts';
 
 export const components = ['input', 'work', 'output', 'criteria', 'constraints'] as const;
 export type Component = typeof components[number];
@@ -64,6 +64,8 @@ const quantities: Quantity[] = ['inputTokens', 'outputTokens', 'images', 'audioS
 
 // The work split into tasks, each served by a separately chosen model. Written
 // once the brief is settled; every task then gets its own validated shortlist.
+// A task is one model call. An agent runs several calls, possibly on different
+// models; the agents together are the environment the brief describes.
 export const PlanSchema = Type.Object({
   brief: BriefSchema,
   assumptions: Type.Array(Type.String(), { description: 'Assumptions you made in place of missing information.' }),
@@ -72,6 +74,8 @@ export const PlanSchema = Type.Object({
     work: Type.String({ description: 'What the model does in this task, in one or two sentences.' }),
     input: Type.String({ description: 'What this task\'s model receives.' }),
     output: Type.String({ description: 'What this task\'s model produces.' }),
+    agent: Type.Optional(Type.String({ description: 'The agent this call belongs to, when the work is an agent that makes several model calls (with tools, guardrails or retries), such as "Adjudication agent". Omit for a standalone call.' })),
+    callsPerRun: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000, description: 'How many times one run of that agent makes this call, including tool-call rounds and retries. Omit for a single call.' })),
   }), { minItems: 1, description: 'One entry per model the work needs, in the order they run.' }),
 });
 export type Plan = Static<typeof PlanSchema>;
@@ -82,6 +86,39 @@ export type TaskPlan = Plan['tasks'][number];
 export const axes = ['cost', 'quality', 'latency', 'recency'] as const;
 export type Axis = typeof axes[number];
 
+// The levels an application's results are measured at: one model call, one agent run, or the whole environment.
+export const levels = ['task', 'agent', 'environment'] as const;
+export type Level = typeof levels[number];
+
+// An aggregate result the customer measured with their own evals and reported on a conversation.
+// Only aggregates reach Scout, never the inputs or outputs they were measured on.
+// They are stored with the conversation and inform only that user's recommendations.
+export interface Measurement {
+  id: string; // m1, m2, … in the order Scout received them
+  level: Level;
+  task: string | null; // the plan task title it measures, when it measures one task
+  scope: string; // what was measured, in the user's words, such as "adjudication agent"
+  model: string; // catalogue model ID or endpoint ID
+  metric: string;
+  value: number;
+  higherIsBetter: boolean;
+  samples: number;
+  source: string; // where it was measured, such as "Langfuse experiment claims-2026-11"
+}
+export type MeasurementInput = Omit<Measurement, 'id'>;
+
+// How to measure the shortlist with the customer's own evals before choosing.
+export const EvaluationSchema = Type.Object({
+  checks: Type.Array(Type.Object({
+    level: StringEnum(levels, { description: 'task: one model call; agent: one run of the agent; environment: the end-to-end outcome across agents and controls.' }),
+    metric: Type.String({ description: 'What to measure, such as "tool arguments valid" or "line decisions correct".' }),
+    how: Type.String({ description: 'How to measure it with the user\'s existing evals or labels, in one sentence.' }),
+  }), { minItems: 1, maxItems: 6 }),
+  samples: Type.Integer({ minimum: 1, maximum: 100000, description: 'Labelled examples per candidate that would separate the shortlist for this repeated work.' }),
+  stopEarly: Type.String({ description: 'When to stop measuring a candidate that is clearly losing, in one sentence.' }),
+}, { description: 'How the user should measure this task\'s shortlist with their own evals before choosing: add the candidates as runs of evals they already have rather than building new ones.' });
+export type Evaluation = Static<typeof EvaluationSchema>;
+
 export const SubmissionSchema = Type.Object({
   task: Type.Integer({ minimum: 1, description: 'Task number from plan_tasks, starting at 1.' }),
   priority: Type.Optional(StringEnum(axes, { description: 'How to rank the shortlist. cost (the default): models that hold the task\'s quality bar, cheapest first. Use quality only when the user explicitly asks for the best quality, latency only when they ask for the fastest, recency only when they ask for the newest.' })),
@@ -91,26 +128,29 @@ export const SubmissionSchema = Type.Object({
   qualityBar: Type.Integer({ minimum: 0, maximum: 100, description: 'The lowest quality estimate at which a model still does THIS task to the brief\'s standard. Candidates below it are never shown.' }),
   candidates: Type.Array(Type.Object({
     modelId: Type.String({ description: 'Model ID from the catalogue tools.' }),
-    quality: Type.Integer({ minimum: 0, maximum: 100, description: 'Your quality estimate for THIS task, from the cited benchmark standings.' }),
-    evidence: Type.Array(Type.String(), { description: 'Benchmark or leaderboard IDs from this model\'s get_model_details results that support the quality estimate.' }),
+    quality: Type.Integer({ minimum: 0, maximum: 100, description: 'Your quality estimate for THIS task, from the user\'s measured results when there are any, else the cited benchmark standings.' }),
+    evidence: Type.Array(Type.String(), { description: 'Benchmark or leaderboard IDs from this model\'s get_model_details results, and measured:<id> for the user\'s measured results on this model, that support the quality estimate.' }),
     rationale: Type.String({ description: 'One or two sentences on why this model fits the task.' }),
     watchOut: Type.Optional(Type.String({ description: 'The main risk or limitation.' })),
   }), { maxItems: 10, description: 'Up to ten models you assessed for this task, in any order. Scout keeps those at or above the quality bar, ranks them by the priority and shows the top five, so include every model that could lead on it. Fewer only when fewer meet the hard constraints, and empty when none do.' }),
+  evaluation: EvaluationSchema,
 });
 export type Submission = Static<typeof SubmissionSchema>;
 
 export interface RecommendedModel {
   rank: number; id: string; name: string; provider: string; rationale: string; watchOut: string | null;
-  quality: { score: number; evidence: Array<{ benchmark: string; name: string; score: number | null; rank: number; of: number }> };
+  // measured: the estimate rests on the user's own measured results, not only public benchmarks.
+  quality: { score: number; measured: boolean; evidence: Array<{ benchmark: string; name: string; score: number | null; rank: number; of: number }> };
   // Cost of 1,000 tasks on the eligible route that prices the most workload quantities, then the cheapest.
   // endpointId and providerModelId identify that route and the model ID its API expects.
   // Token prices are kept for the shortlist table; rates lists every price used; unpriced lists quantities the route does not bill.
-  cost: { usdPer1kTasks: number; route: string; endpointId: string; providerModelId: string; inputPerMillion: number | null; outputPerMillion: number | null; rates: Array<{ unit: string; kind: string; amount: number }>; unpriced: Quantity[] } | null;
+  // usdPer1kAgentRuns: the same route's cost of 1,000 runs of the task's agent, when one run makes the call several times.
+  cost: { usdPer1kTasks: number; usdPer1kAgentRuns?: number; route: string; endpointId: string; providerModelId: string; inputPerMillion: number | null; outputPerMillion: number | null; rates: Array<{ unit: string; kind: string; amount: number }>; unpriced: Quantity[] } | null;
   latency: { seconds: number; firstTokenSeconds: number; tokensPerSecond: number; source: string | null } | null;
   recency: { released: string; ageDays: number } | null;
   best: Axis[];
 }
-export interface TaskShortlist { summary: string; workload: Workload; priority: Axis; qualityBar: number; models: RecommendedModel[] }
+export interface TaskShortlist { summary: string; workload: Workload; priority: Axis; qualityBar: number; models: RecommendedModel[]; evaluation: Evaluation }
 export type TaskRecommendation = TaskPlan & TaskShortlist;
 export interface Recommendation {
   kind: 'recommendation'; brief: Brief; assumptions: string[]; catalogueVersion: string; tasks: TaskRecommendation[];
@@ -168,12 +208,19 @@ export function routeCost(route: Endpoint, kind: string | null, w: Workload) {
   return { usd, used, unpriced };
 }
 
+// The user's measured results on one catalogue model: reported by its model ID or one of its endpoint IDs.
+export const measuredOn = (m: ModelRecord, results: readonly Measurement[]) => results.filter(r => r.model === m.id || m.endpoints.some(e => e.id === r.model));
+const sameTitle = (a: string | null | undefined, b: string | null | undefined) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+
 // Validates one task's submitted shortlist. Errors are written for the agent, which can
 // correct the submission and try again; nothing invalid reaches the user. Scope
-// holds constraints the conversation imposes, such as the endpoint inventory.
-export function finalize(catalogue: Catalogue, s: Submission, now: number, scope: Filters = {}): TaskShortlist {
+// holds constraints the conversation imposes, such as the endpoint inventory. The
+// context is the planned task and the user's measured results: a candidate the user
+// measured on this task must rest on that result, because it outranks any benchmark.
+export function finalize(catalogue: Catalogue, s: Submission, now: number, scope: Filters = {}, context: { task?: TaskPlan; measurements?: readonly Measurement[] } = {}): TaskShortlist {
   const filters: Filters = { ...s.filters, ...scope }, byId = new Map(catalogue.models.map(m => [m.id, m]));
   const problems: string[] = [], seen = new Set<string>();
+  const results = context.measurements ?? [], measurement = new Map(results.map(r => [`measured:${r.id}`, r]));
   if (!quantities.some(q => (s.workload[q] ?? 0) > 0)) problems.push('The workload is empty: estimate at least one per-task quantity, such as inputTokens and outputTokens, images or audioSeconds.');
   for (const r of s.candidates) {
     const m = byId.get(r.modelId);
@@ -182,10 +229,13 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
     seen.add(m.id);
     const why = violation(m, filters);
     if (why) problems.push(`${m.id} breaks the hard constraints: ${why}.`);
-    // A citation must be this model's own benchmark or leaderboard result.
-    const measured = new Set([...m.evidence.map(e => e.benchmark), ...m.boards.map(b => b.board)]);
+    // A citation must be this model's own benchmark or leaderboard result, or the user's measured result on it.
+    const own = measuredOn(m, results);
+    const measured = new Set([...m.evidence.map(e => e.benchmark), ...m.boards.map(b => b.board), ...own.map(x => `measured:${x.id}`)]);
     const missing = r.evidence.filter(id => !measured.has(id));
-    if (missing.length) problems.push(`${m.id} has no results on ${missing.join(', ')}; cite only benchmark or leaderboard IDs from its get_model_details results.`);
+    if (missing.length) problems.push(`${m.id} has no results on ${missing.join(', ')}; cite only benchmark or leaderboard IDs from its get_model_details results, or measured:<id> for the user's results on this model.`);
+    const uncited = own.filter(x => sameTitle(x.task, context.task?.title) && !r.evidence.includes(`measured:${x.id}`));
+    if (uncited.length) problems.push(`The user measured ${m.id} on this task (${uncited.map(x => `measured:${x.id}`).join(', ')}); cite those results and base its quality estimate on them.`);
   }
   const eligible = catalogue.models.filter(m => violation(m, filters) === null).length;
   const qualifying = s.candidates.filter(r => r.quality >= s.qualityBar);
@@ -194,9 +244,20 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
 
   const names = new Map([...catalogue.benchmarks.map(b => [b.id, b.name] as const), ...catalogue.boards.map(b => [b.id, b.title] as const)]);
   const standing = (id: string, model: string) => {
+    const x = measurement.get(id);
+    // A measured result ranks among the user's results on the same metric, level and task.
+    if (x) {
+      const peers = results.filter(y => y.metric === x.metric && y.level === x.level && (y.task ?? '').toLowerCase() === (x.task ?? '').toLowerCase());
+      return { score: x.value, rank: 1 + peers.filter(y => x.higherIsBetter ? y.value > x.value : y.value < x.value).length, of: peers.length };
+    }
     const row = standings(catalogue, id).find(x => x.model.id === model);
     return { score: row?.score ?? null, rank: row?.rank ?? 0, of: row?.of ?? 0 };
   };
+  const label = (id: string) => {
+    const x = measurement.get(id);
+    return x ? `Your eval: ${x.metric} (${x.level} level, ${x.samples} ${x.samples === 1 ? 'sample' : 'samples'}, ${x.source})` : names.get(id) ?? id;
+  };
+  const calls = context.task?.callsPerRun ?? 1;
   const { outputTokens } = s.workload;
   const assessed = qualifying.map((r, i): RecommendedModel => {
     const m = byId.get(r.modelId);
@@ -214,8 +275,8 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
     const released = m.releaseDate;
     return {
       rank: i + 1, id: m.id, name: m.name, provider: m.provider, rationale: r.rationale, watchOut: r.watchOut ?? null,
-      quality: { score: r.quality, evidence: r.evidence.map(id => ({ benchmark: id, name: names.get(id) ?? id, ...standing(id, m.id) })) },
-      cost: best ? { usdPer1kTasks: round(best.usd * 1000, 4), route: best.route.provider, endpointId: best.route.id, providerModelId: best.route.modelId, inputPerMillion: best.route.inputPrice, outputPerMillion: best.route.outputPrice,
+      quality: { score: r.quality, measured: r.evidence.some(id => measurement.has(id)), evidence: r.evidence.map(id => ({ benchmark: id, name: label(id), ...standing(id, m.id) })) },
+      cost: best ? { usdPer1kTasks: round(best.usd * 1000, 4), ...(calls > 1 ? { usdPer1kAgentRuns: round(best.usd * 1000 * calls, 4) } : {}), route: best.route.provider, endpointId: best.route.id, providerModelId: best.route.modelId, inputPerMillion: best.route.inputPrice, outputPerMillion: best.route.outputPrice,
         rates: best.used.map(x => ({ unit: unitLabels[x.unit], kind: x.kind, amount: x.amount })), unpriced: best.unpriced } : null,
       latency: tps && ttft != null && outputTokens ? { seconds: round(ttft + outputTokens / tps, 1), firstTokenSeconds: round(ttft, 1), tokensPerSecond: Math.round(tps), source: m.speed?.source ?? null } : null,
       recency: released ? { released, ageDays: Math.max(0, Math.floor((now - Date.parse(released)) / 86_400_000)) } : null,
@@ -233,5 +294,5 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
   const models = assessed.sort((a, b) => key(a) === key(b) ? 0 : key(a) - key(b)).slice(0, 5);
   models.forEach((m, i) => { m.rank = i + 1; });
   leaders(models);
-  return { summary: s.summary, workload: s.workload, priority, qualityBar: s.qualityBar, models };
+  return { summary: s.summary, workload: s.workload, priority, qualityBar: s.qualityBar, models, evaluation: s.evaluation };
 }

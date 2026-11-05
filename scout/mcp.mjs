@@ -5,12 +5,23 @@ import { converse, parseTurn } from './agent/routes.ts';
 const versions = ['2025-03-26', '2025-06-18', '2025-11-25'];
 const tool = {
   name: 'scout_models', title: 'Find models for your tasks',
-  description: 'Talk to Scout, the same agent as the openmerit.ai/scout page. Send a task description as prompt. Scout writes a task brief (input, work, output, criteria, constraints) and either asks clarifying questions or splits the work into tasks, one per model it needs, with no limit on the number of tasks, and returns up to five ranked models for each task. When the result status is needs_answers, show the brief and questions to the user, then call again with the same conversationId and brief set to the components rewritten with their answers, or skip: true to let Scout assume. When it is recommended, read tasks[].models; each model\'s cost names the cheapest eligible endpointId and the providerModelId to call. Send a follow-up prompt with the conversationId to refine. Pass endpointIds on the first call to limit every task to the project\'s inventory; they stay fixed for the conversation, and an empty list allows none. A turn usually takes one to three minutes; if a call is interrupted, call again with only the conversationId to read the outcome. The task text reaches Workers AI, Workers AI web search and OpenAI (benchmark search embeddings); the conversation is stored for your account. Never send secrets, source files or real customer records. Scout does not execute the recommended models. Quality is Scout\'s estimate from public benchmarks, not measured accuracy for your application.',
+  description: 'Talk to Scout, the same agent as the openmerit.ai/scout page. Send a task description as prompt. Scout writes a task brief (input, work, output, criteria, constraints) and either asks clarifying questions or splits the work into tasks, one per model it needs, with no limit on the number of tasks, and returns up to five ranked models for each task. When the result status is needs_answers, show the brief and questions to the user, then call again with the same conversationId and brief set to the components rewritten with their answers, or skip: true to let Scout assume. When it is recommended, read tasks[].models; each model\'s cost names the cheapest eligible endpointId and the providerModelId to call. Each task also has an evaluation: the checks, sample size and early-stop rule for measuring its candidates with the project\'s own evals. Run the candidates as extra runs of evals the project already has (or a minimal one the user agrees to), then call again with the conversationId and results set to the aggregate scores, and Scout recommends again with those measurements ranked above public benchmarks. Send a follow-up prompt with the conversationId to refine. Pass endpointIds on the first call to limit every task to the project\'s inventory; they stay fixed for the conversation, and an empty list allows none. A turn usually takes one to three minutes; if a call is interrupted, call again with only the conversationId to read the outcome. The task text reaches Workers AI, Workers AI web search and OpenAI (benchmark search embeddings); the conversation is stored for your account. Never send secrets, source files or real customer records. Scout does not execute the recommended models. Quality is Scout\'s estimate from public benchmarks unless a model\'s quality.measured is true, when it rests on results you reported. Results are stored with this conversation for your account and inform only your recommendations; send aggregates only, never inputs, outputs or customer records.',
   inputSchema: { type: 'object', properties: {
     prompt: { type: 'string', minLength: 1, maxLength: 4000, description: 'The work the models need to do, including input and output formats; or a follow-up message in an existing conversation.' },
     conversationId: { type: 'string', maxLength: 36, description: 'The conversationId from an earlier result, to continue that conversation.' },
     brief: { type: 'object', additionalProperties: false, properties: Object.fromEntries(components.map(c => [c, { type: 'string', maxLength: 1000 }])), description: 'Brief components rewritten with the user\'s answers to Scout\'s questions. An empty string removes one.' },
     skip: { type: 'boolean', description: 'Skip the remaining clarifying questions; Scout recommends with stated assumptions.' },
+    results: { type: 'array', minItems: 1, maxItems: 50, description: 'Aggregate results you measured with your own evals, such as the candidate runs of a task\'s evaluation. Aggregates only: never inputs, outputs or records.', items: { type: 'object', additionalProperties: false, required: ['level', 'scope', 'model', 'metric', 'value', 'higherIsBetter', 'samples', 'source'], properties: {
+      level: { type: 'string', enum: ['task', 'agent', 'environment'], description: 'task: one model call; agent: one agent run; environment: the end-to-end outcome.' },
+      task: { type: 'string', maxLength: 200, description: 'The title of the Scout task this measures, when it measures one task.' },
+      scope: { type: 'string', maxLength: 200, description: 'What was measured, such as "adjudication agent" or "claims pipeline".' },
+      model: { type: 'string', maxLength: 200, description: 'The catalogue model ID or endpoint ID that was measured.' },
+      metric: { type: 'string', maxLength: 200 },
+      value: { type: 'number' },
+      higherIsBetter: { type: 'boolean' },
+      samples: { type: 'integer', minimum: 1 },
+      source: { type: 'string', maxLength: 200, description: 'Where it was measured, such as the eval platform and experiment name.' },
+    } } },
     endpointIds: { type: 'array', maxItems: 100, uniqueItems: true, items: { type: 'string', maxLength: 160 }, description: 'Catalogue endpoint IDs the project can use, on the first call only. Every shortlist is limited to them; an empty list allows none. Omit to search the whole catalogue.' },
   }, additionalProperties: false },
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -18,7 +29,7 @@ const tool = {
 
 const next = {
   clarification: 'Show the brief and questions to the user. Call scout_models again with this conversationId and brief set to the components rewritten with their answers, or skip: true. Do not answer for the user from guesses.',
-  recommendation: 'Present each task\'s shortlist with its trade-offs and let the user choose. To refine, call scout_models with this conversationId and a prompt.',
+  recommendation: 'Present each task\'s shortlist with its trade-offs and its evaluation, and let the user choose. Offer to measure the candidates with the project\'s existing evals as the evaluation describes, then report the aggregate results with this conversationId and results. To refine, call scout_models with this conversationId and a prompt.',
 };
 // The coding agent's view of a turn: the answer, without the progress log the page animates.
 function result(body) {
@@ -57,7 +68,7 @@ export async function handleMCP(request, conversations, userId, observe = () => 
   if (method !== 'tools/call') return fail(-32601, 'Method not found.');
   if (params?.name !== tool.name) return fail(-32602, 'Unknown tool.');
   const args = params.arguments;
-  if (!args || Array.isArray(args) || typeof args !== 'object' || Object.keys(args).some(k => !Object.hasOwn(tool.inputSchema.properties, k))) return fail(-32602, 'Provide prompt, or conversationId with brief, skip or prompt.');
+  if (!args || Array.isArray(args) || typeof args !== 'object' || Object.keys(args).some(k => !Object.hasOwn(tool.inputSchema.properties, k))) return fail(-32602, 'Provide prompt, or conversationId with brief, skip, results or prompt.');
   const failed = text => reply({ content: [{ type: 'text', text }], isError: true });
   if (!conversations) return failed('The Scout agent is not available on this server.');
   const { prompt, ...rest } = args;

@@ -4,7 +4,7 @@ import { StringEnum, Type } from '@earendil-works/pi-ai';
 import type { ToolExecutionResult, ToolRegistration } from '@earendil-works/pi-durable';
 import { benchmarkLeaderboard, kinds, modelDetails, searchBenchmarks, searchCatalogue, searchModels, units, type Catalogue, type Filters } from './catalogue.ts';
 import { documentTypes } from './search.ts';
-import { ClarificationSchema, FiltersSchema, PlanSchema, SubmissionSchema, finalize, type Clarification, type Plan, type Recommendation, type TaskShortlist } from './recommendation.ts';
+import { ClarificationSchema, FiltersSchema, PlanSchema, SubmissionSchema, finalize, type Clarification, type Measurement, type Plan, type Recommendation, type TaskShortlist } from './recommendation.ts';
 
 export type Answer = ({ kind: 'clarification' } & Clarification) | Recommendation;
 // The current split of the work, with the shortlists accepted so far in this turn.
@@ -19,6 +19,8 @@ export interface ToolHost {
   // Why clarifying questions are not allowed now, or null when they are.
   clarificationBlocked(): Promise<string | null>;
   plan(): Promise<PlanState | null>;
+  // Aggregate results the user measured with their own evals and reported on this conversation.
+  measurements(): Promise<Measurement[]>;
   savePlan(plan: PlanState): Promise<void>;
   answer(answer: Answer): Promise<void>;
   progress(step: string): void;
@@ -141,7 +143,7 @@ export function scoutTools(host: ToolHost): ToolRegistration[] {
       if (!task) return failure(`The plan has ${plan.tasks.length} ${plan.tasks.length === 1 ? 'task' : 'tasks'}; use a task number from 1 to ${plan.tasks.length}.`);
       host.progress(plan.tasks.length === 1 ? 'Checking the shortlist' : `Checking the shortlist for ${quote(task.title)}`);
       let result: TaskShortlist;
-      try { result = finalize(await host.catalogue(), args, host.now(), await host.scope()); } catch (error) { return failure((error as Error).message); }
+      try { result = finalize(await host.catalogue(), args, host.now(), await host.scope(), { task, measurements: await host.measurements() }); } catch (error) { return failure((error as Error).message); }
       plan.results[args.task - 1] = result;
       await host.savePlan(plan);
       const remaining = plan.tasks.flatMap((t, i) => plan.results[i] ? [] : [`${i + 1}. ${t.title}`]);

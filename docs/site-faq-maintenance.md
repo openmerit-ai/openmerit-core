@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Evaluation plans and measured results — unreleased source, 5 November 2026
+
+Reviewed the homepage against the change that adds an evaluation plan to each Scout task, lets coding agents and the CLI report aggregate results measured with the customer's own evals, and ranks those results above public benchmarks for that account only. `site/index.html` has no FAQ block; its copy says OpenMerit is a model selection layer that stays out of the live request path, which still holds because Scout runs no evaluations and calls no models. No homepage copy changes. The Scout guide and data policy describe the stored results.
+
 ## Inference Terminal retirement — npm 0.3.0, 4 November 2026
 
 Reviewed the homepage against removal of the local Inference Terminal (`openmerit dash`, its `--demo` sample and terminal analytics events). `site/index.html` has no FAQ block and does not mention the terminal, `openmerit dash` or local inventory collection; its copy describes Scout and the memo. No homepage edit is required. Older entries below that describe "terminal/Pi" FAQ claims are historical.

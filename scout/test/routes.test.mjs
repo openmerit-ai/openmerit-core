@@ -142,7 +142,7 @@ test('verified sessions reach HTTP handlers, while account and IP limits remain 
   const configured={...authEnv,SCOUT_CATALOGUE:bucket,SCOUT_AGENT:{getByName:()=>assert.fail('Invalid body must not start an agent turn')}};
   const token=sessionToken();
   const api=await alpha.fetch(authenticatedRequest('api/agent',token),configured,{});
-  assert.equal(api.status,400,await api.clone().text());assert.equal((await api.json()).error,'Send conversationId, message, brief, skip or endpointIds.');
+  assert.equal(api.status,400,await api.clone().text());assert.equal((await api.json()).error,'Send conversationId, message, brief, skip, endpointIds or results.');
   const status=await alpha.fetch(new Request('https://example.test/scout/api/status'),configured,{});
   assert.equal(status.status,200);assert.equal((await status.json()).snapshotVersion,'auth-fixture');
 
