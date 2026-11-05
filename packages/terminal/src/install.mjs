@@ -105,7 +105,13 @@ function claudePaths(root, scope) {
     mcpScope: scope === 'user' ? 'user' : 'local',
   };
 }
-const configuredServer = (config, root, scope) => scope === 'user' ? config.mcpServers?.openmerit : config.projects?.[root]?.mcpServers?.openmerit;
+// Claude Code keys its private local scope by the project's git repository root, so a
+// project in a subdirectory of a repository shares the entry of the whole repository.
+async function claudeProject(root) {
+  try { return (await exec('git', ['rev-parse', '--show-toplevel'], { cwd: root, timeout: 10_000, windowsHide: true })).stdout.trim() || root; }
+  catch { return root; }
+}
+const configuredServer = (config, project, scope) => scope === 'user' ? config.mcpServers?.openmerit : config.projects?.[project]?.mcpServers?.openmerit;
 const serverConfig = (key, telemetry) => ({ type: 'http', url: `${server()}/scout/mcp`, headers: { Authorization: `Bearer ${key}`, ...setupHeaders(telemetry.properties, 'agent') } });
 const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(k => [k, canonical(value[k])])) : value;
 const serverHash = value => value ? hash(JSON.stringify(canonical(value))) : null;
@@ -123,12 +129,12 @@ async function claude(args, root, key) {
 // Inspect the current Claude Code installation without changing anything.
 async function inspect(root, scope, client = 'claude-code') {
   if (client === 'pi') return { ...await inspectPi(root, scope), client };
-  const paths = claudePaths(root, scope);
+  const paths = { ...claudePaths(root, scope), project: await claudeProject(root) };
   const [record, config, installedSkill, installedRule, legacyRule] = await Promise.all([object(paths.record), object(paths.mcpFile), optional(paths.skill), optional(paths.rule), optional(paths.legacyRule)]);
   const updates = await inspectUpdates(dirname(paths.record), scope, record);
   const owned = [2, 3].includes(record.version) && record.scope === scope;
-  const current = configuredServer(config, root, scope);
-  const otherScope = configuredServer(config, root, scope === 'user' ? 'project' : 'user');
+  const current = configuredServer(config, paths.project, scope);
+  const otherScope = configuredServer(config, paths.project, scope === 'user' ? 'project' : 'user');
   const projectFile = await object(join(root, '.mcp.json'));
   return {
     paths, record, owned, current, installedSkill, installedRule, updates, client,
@@ -251,7 +257,7 @@ async function install(root, { client, scope, plan, open, log, wait, telemetry, 
   const found = conflicts(state);
   if (client === 'pi' && autoUpdate === 'on') throw new Stop('Pi updates are explicit: rerun install --client pi. Automatic hooks are Claude Code only.', exitCodes.error);
   const changes = [
-    `${state.current ? 'Update' : 'Add'} ${client === 'pi' ? 'native Pi MCP extension' : 'MCP server "openmerit" in Claude Code'} (${scope} scope)`,
+    `${state.current ? 'Update' : 'Add'} ${client === 'pi' ? 'native Pi MCP extension' : 'MCP server "openmerit" in Claude Code'} (${scope} scope)${client !== 'pi' && scope === 'project' && state.paths.project !== root ? `; Claude Code applies it to the whole git repository at ${state.paths.project}` : ''}`,
     `${state.installedSkill === null ? 'Create' : 'Update'} ${state.paths.skill}`,
     `${state.installedRule === null ? 'Create' : 'Update'} ${state.paths.rule} (loaded at session startup)`,
     ...(client === 'pi' ? [] : [
@@ -293,7 +299,7 @@ async function install(root, { client, scope, plan, open, log, wait, telemetry, 
     await save(state.paths.rule, rule);
     if (state.legacyRule === 'remove') await rm(state.paths.legacyRule, { force: true });
     // Record what Claude actually wrote, so later edits are detected precisely.
-    const written = configuredServer(await object(state.paths.mcpFile), root, scope);
+    const written = configuredServer(await object(state.paths.mcpFile), state.paths.project, scope);
     if (!written) throw new Stop('Claude Code did not save the "openmerit" MCP server.', exitCodes.error, 'Run "openmerit doctor".');
     const updates = await configureUpdates(dirname(state.paths.record), scope, state.record, clientVersion, enabled);
     await save(state.paths.record, { version: 3, scope, client, ...ids, serverHash: serverHash(written), skillHash: hash(skill), ruleHash: hash(rule), updates, installedAt: new Date().toISOString() });

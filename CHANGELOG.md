@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fix Claude Code project-scope installation for a project inside a larger git repository, such as a monorepo package. Claude Code keeps its private MCP entry under the repository root, so the installer reported "Claude Code did not save the openmerit MCP server", `status` reported it missing and a rerun clashed with it. The installer now reads the entry where Claude Code keeps it and says that the MCP server applies to the whole repository; the skill and rule stay in the project.
+
 ## 0.3.1 — 2026-11-05
 
 - `openmerit scout --conversation <id> --results <file.json>` reports aggregate results you measured with your own evals. Scout then ranks them above public benchmarks for your recommendations only. Terminal output shows each task's evaluation plan, its agent and calls per run, and marks quality that rests on measured results.
