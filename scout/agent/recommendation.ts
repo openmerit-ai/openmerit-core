@@ -82,8 +82,9 @@ export type Plan = Static<typeof PlanSchema>;
 export type TaskPlan = Plan['tasks'][number];
 
 // The axes a shortlist is compared and ranked on. Cost is the default priority:
-// models that hold the task's quality bar, cheapest first.
-export const axes = ['cost', 'quality', 'latency', 'recency'] as const;
+// models that hold the task's quality bar, cheapest first. Latency is shown but never ranks:
+// few sources measure it, and it depends on the endpoint and reasoning setting.
+export const axes = ['cost', 'quality', 'recency'] as const;
 export type Axis = typeof axes[number];
 
 // The levels an application's results are measured at: one model call, one agent run, or the whole environment.
@@ -121,7 +122,7 @@ export type Evaluation = Static<typeof EvaluationSchema>;
 
 export const SubmissionSchema = Type.Object({
   task: Type.Integer({ minimum: 1, description: 'Task number from plan_tasks, starting at 1.' }),
-  priority: Type.Optional(StringEnum(axes, { description: 'How to rank the shortlist. cost (the default): models that hold the task\'s quality bar, cheapest first. Use quality only when the user explicitly asks for the best quality, latency only when they ask for the fastest, recency only when they ask for the newest.' })),
+  priority: Type.Optional(StringEnum(axes, { description: 'How to rank the shortlist. cost (the default): models that hold the task\'s quality bar, cheapest first. Use quality only when the user explicitly asks for the best quality, recency only when they ask for the newest.' })),
   filters: Type.Optional(FiltersSchema),
   workload: WorkloadSchema,
   summary: Type.String({ description: 'One short sentence on what to choose for this task, such as the cheapest model and what it gives up. Do not describe how candidates were assessed, filtered or ranked; the page states that. When there are no candidates, say why.' }),
@@ -168,7 +169,6 @@ function leaders(models: RecommendedModel[]): void {
   lead('quality', m => m.quality.score, true);
   // Only a cost covering the whole workload can lead.
   lead('cost', m => m.cost && !m.cost.unpriced.length ? m.cost.usdPer1kTasks : null, false);
-  lead('latency', m => m.latency?.seconds ?? null, false);
   lead('recency', m => m.recency ? -m.recency.ageDays : null, true);
 }
 
@@ -221,6 +221,7 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
   const filters: Filters = { ...s.filters, ...scope }, byId = new Map(catalogue.models.map(m => [m.id, m]));
   const problems: string[] = [], seen = new Set<string>();
   const results = context.measurements ?? [], measurement = new Map(results.map(r => [`measured:${r.id}`, r]));
+  const agentic = new Set(catalogue.benchmarks.filter(b => b.tags.includes('tools') || b.tags.includes('agents')).map(b => b.id));
   if (!quantities.some(q => (s.workload[q] ?? 0) > 0)) problems.push('The workload is empty: estimate at least one per-task quantity, such as inputTokens and outputTokens, images or audioSeconds.');
   for (const r of s.candidates) {
     const m = byId.get(r.modelId);
@@ -236,10 +237,15 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
     if (missing.length) problems.push(`${m.id} has no results on ${missing.join(', ')}; cite only benchmark or leaderboard IDs from its get_model_details results, or measured:<id> for the user's results on this model.`);
     const uncited = own.filter(x => sameTitle(x.task, context.task?.title) && !r.evidence.includes(`measured:${x.id}`));
     if (uncited.length) problems.push(`The user measured ${m.id} on this task (${uncited.map(x => `measured:${x.id}`).join(', ')}); cite those results and base its quality estimate on them.`);
+    // An agent's call fails on a malformed tool call as surely as on a wrong answer, so domain benchmarks alone cannot put it over the bar.
+    if (context.task?.agent && r.quality >= s.qualityBar && !r.evidence.some(id => measurement.has(id) || agentic.has(id)))
+      problems.push(`${m.id} reaches the quality bar for an agent's call without evidence of tool calling: cite a tools or agents benchmark from its get_model_details results, or the user's measured result, or estimate it below the bar.`);
   }
   const eligible = catalogue.models.filter(m => violation(m, filters) === null).length;
   const qualifying = s.candidates.filter(r => r.quality >= s.qualityBar);
-  if (!problems.length && qualifying.length < Math.min(5, eligible)) problems.push(`Five candidates must reach the quality bar of ${s.qualityBar}; ${qualifying.length} do, and ${eligible} models meet the constraints${filters.kind ? '' : ' (set filters.kind when the task needs one kind of model)'}. Assess more models that can do this task.`);
+  // Five assessed candidates keep cheaper models from being left out; fewer may reach the bar, so the bar never has to drop to fill the list.
+  if (!problems.length && s.candidates.length < Math.min(5, eligible)) problems.push(`Assess at least five candidates; ${s.candidates.length} submitted, and ${eligible} models meet the constraints${filters.kind ? '' : ' (set filters.kind when the task needs one kind of model)'}. Assess more models that can do this task.`);
+  if (!problems.length && eligible && !qualifying.length) problems.push(`No candidate reaches the quality bar of ${s.qualityBar}. Assess stronger models that can do this task.`);
   if (problems.length) throw new Error(`Shortlist not accepted:\n- ${problems.join('\n- ')}`);
 
   const names = new Map([...catalogue.benchmarks.map(b => [b.id, b.name] as const), ...catalogue.boards.map(b => [b.id, b.title] as const)]);
@@ -288,7 +294,7 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
   // A cost that leaves part of the workload unpriced understates the bill, so it ranks as unknown.
   const priority = s.priority ?? 'cost';
   const keys: Record<Axis, (m: RecommendedModel) => number | null> = {
-    quality: m => -m.quality.score, cost: m => m.cost && !m.cost.unpriced.length ? m.cost.usdPer1kTasks : null, latency: m => m.latency?.seconds ?? null, recency: m => m.recency?.ageDays ?? null,
+    quality: m => -m.quality.score, cost: m => m.cost && !m.cost.unpriced.length ? m.cost.usdPer1kTasks : null, recency: m => m.recency?.ageDays ?? null,
   };
   const key = (m: RecommendedModel) => keys[priority](m) ?? Infinity;
   const models = assessed.sort((a, b) => key(a) === key(b) ? 0 : key(a) - key(b)).slice(0, 5);
