@@ -121,3 +121,27 @@ test('semantic-service admission failure stops the refresh before any paid work'
  await assert.rejects(runRefresh(env,step,'fixture'),/Credits unavailable/);
  assert.deepEqual(calls,['claim-refresh','check-semantic-service','record-failure']);assert.match(failure,/serving the last committed catalogue/);assert.equal(env.SCOUT_CATALOGUE.data.size,0);
 });
+
+test('every refresh run reports its outcome and each failed feed or catalogue import to PostHog, without failing the run itself',async()=>{
+ const {runRefresh}=await import('../pipeline.mjs');const sent=[],calls=[];
+ const coordinator={begin:async()=>({acquired:true}),fail:async()=>{}};
+ const bucket=new Bucket();await bucket.put('runs/fixture/sources.json',JSON.stringify([{id:'epoch',status:'ok',checkedAt:'2026-11-05T00:00:00Z'},{id:'superclue',status:'failed',error:'SuperCLUE format changed.',checkedAt:'2026-11-04T00:00:00Z'}]));
+ // A catalogue import that failed and one that never finished are both reported; the D1 query selects only this run's rows.
+ const db={prepare:sql=>({bind(prefix){assert.match(sql,/status!='ok'/);assert.equal(prefix,'fixture-%');return this;},all:async()=>({results:[{source:'vercel',status:'failed',error:'HTTP 502'},{source:'litellm',status:'running',error:null}]})})};
+ const env={SCOUT_CATALOGUE:bucket,SCOUT_INDEX:db,SCOUT_CONTROL:{getByName:()=>coordinator},OPENAI_API_KEY:'[REDACTED:api-key]',POSTHOG_PROJECT_TOKEN:'phc_test',POSTHOG_HOST:'https://us.i.posthog.com',POSTHOG_ENVIRONMENT:'test'};
+ const step={do:async(name,...args)=>{calls.push(name);if(name==='check-semantic-service')throw Error('Credits unavailable');if(name.startsWith('catalogue-'))return name==='catalogue-mteb-directory'?[]:null;return args.at(-1)();}};
+ const realFetch=globalThis.fetch;
+ globalThis.fetch=async(url,init)=>{sent.push({url,body:JSON.parse(init.body)});return new Response('{}');};
+ try{
+  await assert.rejects(runRefresh(env,step,'fixture'),/Credits unavailable/);
+  assert.deepEqual(calls.filter(c=>!c.startsWith('catalogue-')),['claim-refresh','check-semantic-service','record-failure','report-failed']);
+  assert.equal(sent.length,1);assert.equal(sent[0].url,'https://us.i.posthog.com/batch/');
+  const [event]=sent[0].body.batch;
+  assert.equal(event.event,'scout_refresh_completed');
+  assert.deepEqual({...event.properties,failed_sources:undefined},{$process_person_profile:false,product:'scout',environment:'test',run_id:'fixture',status:'failed',version:null,error:'Credits unavailable',failed_count:3,failed_source_ids:'litellm,superclue,vercel',failed_sources:undefined});
+  assert.deepEqual(event.properties.failed_sources,[{id:'litellm',kind:'catalogue',error:'Import did not finish.',lastSuccessAt:null},{id:'superclue',kind:'feed',error:'SuperCLUE format changed.',lastSuccessAt:'2026-11-04T00:00:00Z'},{id:'vercel',kind:'catalogue',error:'HTTP 502',lastSuccessAt:null}]);
+  // PostHog unavailable: the run still fails for its own reason, not the report's.
+  globalThis.fetch=async()=>new Response('',{status:400});sent.length=0;
+  await assert.rejects(runRefresh(env,step,'fixture'),/Credits unavailable/);
+ }finally{globalThis.fetch=realFetch;}
+});
