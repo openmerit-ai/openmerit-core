@@ -1,0 +1,1572 @@
+{
+  "conversationId": "979b4d55-a441-43e9-932c-3c0de794bbfa",
+  "status": "recommended",
+  "brief": {
+    "input": {
+      "text": "Fictional applications, health declarations, structured eClaimLink-style claims, itemized bills, codes, plan rules, member history and provider statistics",
+      "source": "stated"
+    },
+    "work": {
+      "text": "Five Pi Durable agents use JSON-schema tools in multi-step loops: enrollment, claim extraction, coding review, adjudication and fraud review",
+      "source": "stated"
+    },
+    "output": {
+      "text": "Eligibility and ICD prefixes; reconciled lines and mismatches; coding findings; line pay/deny codes; fraud signals 0–1 and disposition",
+      "source": "stated"
+    },
+    "criteria": {
+      "text": "Quality and reliable tool calling more important than cost; rank competitive Cloudflare Workers AI endpoints first",
+      "source": "stated"
+    },
+    "constraints": {
+      "text": "UAE-only processing normally; fictional test records may use outside-UAE endpoint if recorded as residency gap, never silently; Pi Durable on Cloudflare Workers",
+      "source": "stated"
+    }
+  },
+  "assumptions": [
+    "Text inputs are already digitized; no OCR needed.",
+    "Unknown endpoint geography is explicitly recorded as a residency gap under the fictional-test-data exception.",
+    "One chat model per agent; deterministic totals, payment arithmetic and authoritative code/plan lookups remain in tools."
+  ],
+  "catalogueVersion": "548870f9b79218b4f46702c4a5b651a1",
+  "tasks": [
+    {
+      "title": "Enrollment",
+      "input": "Application and health declaration",
+      "work": "Extract ICD-10-CM category prefixes, reason about eligibility and record with tools.",
+      "output": "Condition prefixes and recorded eligibility",
+      "summary": "Use a medically evaluated tool-capable model; no Workers AI endpoint has comparable measured evidence, and all endpoint locations require a recorded unknown-location residency gap.",
+      "workload": {
+        "inputTokens": 3000,
+        "outputTokens": 600
+      },
+      "priority": "cost",
+      "qualityBar": 78,
+      "models": [
+        {
+          "rank": 1,
+          "id": "anthropic/claude-haiku-5.5",
+          "name": "Claude Haiku 5.5",
+          "provider": "Anthropic",
+          "rationale": "Medical coding and clinical extraction evidence; tool-capable.",
+          "watchOut": null,
+          "quality": {
+            "score": 82,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.51542,
+                "rank": 14,
+                "of": 79
+              },
+              {
+                "benchmark": "vals:medscribe",
+                "name": "MedScribe · Vals AI",
+                "score": 0.89542,
+                "rank": 6,
+                "of": 81
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 0.6,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-haiku-5.5",
+            "providerModelId": "anthropic/claude-haiku-5.5",
+            "inputPerMillion": 0.09999999999999999,
+            "outputPerMillion": 0.5,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.09999999999999999
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 0.5
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 33.4,
+            "firstTokenSeconds": 30,
+            "tokensPerSecond": 177,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-07",
+            "ageDays": 28
+          },
+          "best": [
+            "cost"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "google/gemini-3.7-flash",
+          "name": "Gemini 3.7 Flash",
+          "provider": "Google",
+          "rationale": "Strong medical-code and analytical results.",
+          "watchOut": null,
+          "quality": {
+            "score": 84,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.5339,
+                "rank": 9,
+                "of": 79
+              },
+              {
+                "benchmark": "aa:analystAgent",
+                "name": "Analyst Agent · AA",
+                "score": 0.6,
+                "rank": 1,
+                "of": 42
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 4.5,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-3.7-flash",
+            "providerModelId": "google/gemini-3.7-flash",
+            "inputPerMillion": 0.75,
+            "outputPerMillion": 3.75,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.75
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 3.75
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-08-13",
+            "ageDays": 83
+          },
+          "best": []
+        },
+        {
+          "rank": 3,
+          "id": "google/gemini-3.5-flash",
+          "name": "Gemini 3.5 Flash",
+          "provider": "Google",
+          "rationale": "Medical coding and agent-tool evidence.",
+          "watchOut": null,
+          "quality": {
+            "score": 82,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.55825,
+                "rank": 6,
+                "of": 79
+              },
+              {
+                "benchmark": "aa:tau2",
+                "name": "τ²-Bench · AA",
+                "score": 0.953216374269006,
+                "rank": 10,
+                "of": 116
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 9.9,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-3.5-flash",
+            "providerModelId": "google/gemini-3.5-flash",
+            "inputPerMillion": 1.5,
+            "outputPerMillion": 9,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 1.5
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 9
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-05-19",
+            "ageDays": 169
+          },
+          "best": []
+        },
+        {
+          "rank": 4,
+          "id": "anthropic/claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "provider": "Anthropic",
+          "rationale": "Strong clinical and instruction evidence.",
+          "watchOut": null,
+          "quality": {
+            "score": 90,
+            "evidence": [
+              {
+                "benchmark": "vals:medscribe",
+                "name": "MedScribe · Vals AI",
+                "score": 0.91101,
+                "rank": 3,
+                "of": 81
+              },
+              {
+                "benchmark": "aa:healthbench",
+                "name": "HealthBench · AA",
+                "score": 0.620657287652967,
+                "rank": 1,
+                "of": 11
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 12,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5.5",
+            "providerModelId": "anthropic/claude-sonnet-5.5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 18.4,
+            "firstTokenSeconds": 12.6,
+            "tokensPerSecond": 103,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-28",
+            "ageDays": 37
+          },
+          "best": [
+            "latency"
+          ]
+        },
+        {
+          "rank": 5,
+          "id": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "provider": "Google",
+          "rationale": "Strong medical coding and multi-step tools.",
+          "watchOut": null,
+          "quality": {
+            "score": 94,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.58801,
+                "rank": 3,
+                "of": 79
+              },
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.746,
+                "rank": 2,
+                "of": 14
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 12,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-4-argon",
+            "providerModelId": "google/gemini-4-argon",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 48.8,
+            "firstTokenSeconds": 41.5,
+            "tokensPerSecond": 82,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-13",
+            "ageDays": 22
+          },
+          "best": [
+            "quality",
+            "recency"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Claims intake/extraction",
+      "input": "Structured claim and free-text itemized bill",
+      "work": "Match lines, flag discrepancies and call tools for totals and recording.",
+      "output": "Reconciled lines and recorded mismatches",
+      "summary": "Use tool-mediated arithmetic and record mismatches; hosted endpoint processing location unknown, recorded as residency gap.",
+      "workload": {
+        "inputTokens": 5000,
+        "outputTokens": 1300
+      },
+      "priority": "cost",
+      "qualityBar": 78,
+      "models": [
+        {
+          "rank": 1,
+          "id": "anthropic/claude-haiku-5.5",
+          "name": "Claude Haiku 5.5",
+          "provider": "Anthropic",
+          "rationale": "ClaimBench and quantitative agent evidence.",
+          "watchOut": null,
+          "quality": {
+            "score": 83,
+            "evidence": [
+              {
+                "benchmark": "vals:claimbench",
+                "name": "ClaimBench · Vals AI",
+                "score": 1,
+                "rank": 1,
+                "of": 5
+              },
+              {
+                "benchmark": "aa:analystAgent",
+                "name": "Analyst Agent · AA",
+                "score": 0.5375,
+                "rank": 6,
+                "of": 42
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 1.15,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-haiku-5.5",
+            "providerModelId": "anthropic/claude-haiku-5.5",
+            "inputPerMillion": 0.09999999999999999,
+            "outputPerMillion": 0.5,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.09999999999999999
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 0.5
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 37.4,
+            "firstTokenSeconds": 30,
+            "tokensPerSecond": 177,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-07",
+            "ageDays": 28
+          },
+          "best": [
+            "cost"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "google/gemini-3.7-flash",
+          "name": "Gemini 3.7 Flash",
+          "provider": "Google",
+          "rationale": "Top analytical agent and medical coding results.",
+          "watchOut": null,
+          "quality": {
+            "score": 88,
+            "evidence": [
+              {
+                "benchmark": "aa:analystAgent",
+                "name": "Analyst Agent · AA",
+                "score": 0.6,
+                "rank": 1,
+                "of": 42
+              },
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.5339,
+                "rank": 9,
+                "of": 79
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 8.625,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-3.7-flash",
+            "providerModelId": "google/gemini-3.7-flash",
+            "inputPerMillion": 0.75,
+            "outputPerMillion": 3.75,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.75
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 3.75
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-08-13",
+            "ageDays": 83
+          },
+          "best": []
+        },
+        {
+          "rank": 3,
+          "id": "anthropic/claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "provider": "Anthropic",
+          "rationale": "Strong analytical and clinical extraction evidence.",
+          "watchOut": null,
+          "quality": {
+            "score": 91,
+            "evidence": [
+              {
+                "benchmark": "aa:analystAgent",
+                "name": "Analyst Agent · AA",
+                "score": 0.575,
+                "rank": 3,
+                "of": 42
+              },
+              {
+                "benchmark": "vals:medscribe",
+                "name": "MedScribe · Vals AI",
+                "score": 0.91101,
+                "rank": 3,
+                "of": 81
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 23,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5.5",
+            "providerModelId": "anthropic/claude-sonnet-5.5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 25.2,
+            "firstTokenSeconds": 12.6,
+            "tokensPerSecond": 103,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-28",
+            "ageDays": 37
+          },
+          "best": [
+            "latency"
+          ]
+        },
+        {
+          "rank": 4,
+          "id": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "provider": "Google",
+          "rationale": "High multi-step enterprise and analysis performance.",
+          "watchOut": null,
+          "quality": {
+            "score": 94,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.746,
+                "rank": 2,
+                "of": 14
+              },
+              {
+                "benchmark": "livebench:data_analysis",
+                "name": "LiveBench 2.0 · Data Analysis",
+                "score": 0.852,
+                "rank": 1,
+                "of": 27
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 23,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-4-argon",
+            "providerModelId": "google/gemini-4-argon",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 57.3,
+            "firstTokenSeconds": 41.5,
+            "tokensPerSecond": 82,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-13",
+            "ageDays": 22
+          },
+          "best": [
+            "quality",
+            "recency"
+          ]
+        },
+        {
+          "rank": 5,
+          "id": "anthropic/claude-opus-5",
+          "name": "Claude Opus 5",
+          "provider": "Anthropic",
+          "rationale": "Revenue-cycle and medical coding results.",
+          "watchOut": null,
+          "quality": {
+            "score": 94,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.926789,
+                "rank": 1,
+                "of": 20
+              },
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.6357,
+                "rank": 1,
+                "of": 79
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 57.5,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5",
+            "providerModelId": "anthropic/claude-opus-5",
+            "inputPerMillion": 5,
+            "outputPerMillion": 25,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 5
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 25
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-24",
+            "ageDays": 103
+          },
+          "best": [
+            "quality"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Medical coding review",
+      "input": "Diagnosis and CPT claim details and lookup tools",
+      "work": "Check diagnosis/procedure mismatch, unbundling and E/M upcoding.",
+      "output": "Recorded coding findings",
+      "summary": "Prefer measured medical-coding candidates with authoritative lookup tools; all hosted processing locations unknown, log residency gap.",
+      "workload": {
+        "inputTokens": 6000,
+        "outputTokens": 1400
+      },
+      "priority": "cost",
+      "qualityBar": 80,
+      "models": [
+        {
+          "rank": 1,
+          "id": "anthropic/claude-haiku-5.5",
+          "name": "Claude Haiku 5.5",
+          "provider": "Anthropic",
+          "rationale": "Measured medical coding and healthcare reasoning.",
+          "watchOut": null,
+          "quality": {
+            "score": 81,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.51542,
+                "rank": 14,
+                "of": 79
+              },
+              {
+                "benchmark": "aa:healthbench",
+                "name": "HealthBench · AA",
+                "score": 0.5848216837943483,
+                "rank": 3,
+                "of": 11
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 1.3,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-haiku-5.5",
+            "providerModelId": "anthropic/claude-haiku-5.5",
+            "inputPerMillion": 0.09999999999999999,
+            "outputPerMillion": 0.5,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.09999999999999999
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 0.5
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 37.9,
+            "firstTokenSeconds": 30,
+            "tokensPerSecond": 177,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-07",
+            "ageDays": 28
+          },
+          "best": [
+            "cost"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "google/gemini-3.7-flash",
+          "name": "Gemini 3.7 Flash",
+          "provider": "Google",
+          "rationale": "Strong coding and analytical agent performance.",
+          "watchOut": null,
+          "quality": {
+            "score": 85,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.5339,
+                "rank": 9,
+                "of": 79
+              },
+              {
+                "benchmark": "aa:analystAgent",
+                "name": "Analyst Agent · AA",
+                "score": 0.6,
+                "rank": 1,
+                "of": 42
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 9.75,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-3.7-flash",
+            "providerModelId": "google/gemini-3.7-flash",
+            "inputPerMillion": 0.75,
+            "outputPerMillion": 3.75,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.75
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 3.75
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-08-13",
+            "ageDays": 83
+          },
+          "best": []
+        },
+        {
+          "rank": 3,
+          "id": "google/gemini-3.5-flash",
+          "name": "Gemini 3.5 Flash",
+          "provider": "Google",
+          "rationale": "Good coding and agent workflow evidence.",
+          "watchOut": null,
+          "quality": {
+            "score": 86,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.55825,
+                "rank": 6,
+                "of": 79
+              },
+              {
+                "benchmark": "aa:tau2",
+                "name": "τ²-Bench · AA",
+                "score": 0.953216374269006,
+                "rank": 10,
+                "of": 116
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 21.6,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-3.5-flash",
+            "providerModelId": "google/gemini-3.5-flash",
+            "inputPerMillion": 1.5,
+            "outputPerMillion": 9,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 1.5
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 9
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-05-19",
+            "ageDays": 169
+          },
+          "best": []
+        },
+        {
+          "rank": 4,
+          "id": "anthropic/claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "provider": "Anthropic",
+          "rationale": "Strong clinical judgment with tool support.",
+          "watchOut": null,
+          "quality": {
+            "score": 89,
+            "evidence": [
+              {
+                "benchmark": "aa:healthbench",
+                "name": "HealthBench · AA",
+                "score": 0.620657287652967,
+                "rank": 1,
+                "of": 11
+              },
+              {
+                "benchmark": "vals:medscribe",
+                "name": "MedScribe · Vals AI",
+                "score": 0.91101,
+                "rank": 3,
+                "of": 81
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 26,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5.5",
+            "providerModelId": "anthropic/claude-sonnet-5.5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 26.1,
+            "firstTokenSeconds": 12.6,
+            "tokensPerSecond": 103,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-28",
+            "ageDays": 37
+          },
+          "best": [
+            "latency"
+          ]
+        },
+        {
+          "rank": 5,
+          "id": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "provider": "Google",
+          "rationale": "High coding and enterprise workflow performance.",
+          "watchOut": null,
+          "quality": {
+            "score": 94,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.58801,
+                "rank": 3,
+                "of": 79
+              },
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.746,
+                "rank": 2,
+                "of": 14
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 26,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-4-argon",
+            "providerModelId": "google/gemini-4-argon",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 58.5,
+            "firstTokenSeconds": 41.5,
+            "tokensPerSecond": 82,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-13",
+            "ageDays": 22
+          },
+          "best": [
+            "quality",
+            "recency"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Coverage and adjudication",
+      "input": "Claim lines and plan rule lookup tools",
+      "work": "Apply rules and call calculation/recording tools.",
+      "output": "Pay/deny and denial codes by line",
+      "summary": "Keep payment calculations deterministic and have model select rule-grounded dispositions; hosted processing location unknown, log gap.",
+      "workload": {
+        "inputTokens": 6000,
+        "outputTokens": 1400
+      },
+      "priority": "cost",
+      "qualityBar": 80,
+      "models": [
+        {
+          "rank": 1,
+          "id": "anthropic/claude-haiku-5.5",
+          "name": "Claude Haiku 5.5",
+          "provider": "Anthropic",
+          "rationale": "Claim and analytical agent evidence.",
+          "watchOut": null,
+          "quality": {
+            "score": 81,
+            "evidence": [
+              {
+                "benchmark": "vals:claimbench",
+                "name": "ClaimBench · Vals AI",
+                "score": 1,
+                "rank": 1,
+                "of": 5
+              },
+              {
+                "benchmark": "aa:analystAgent",
+                "name": "Analyst Agent · AA",
+                "score": 0.5375,
+                "rank": 6,
+                "of": 42
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 1.3,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-haiku-5.5",
+            "providerModelId": "anthropic/claude-haiku-5.5",
+            "inputPerMillion": 0.09999999999999999,
+            "outputPerMillion": 0.5,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.09999999999999999
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 0.5
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 37.9,
+            "firstTokenSeconds": 30,
+            "tokensPerSecond": 177,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-07",
+            "ageDays": 28
+          },
+          "best": [
+            "cost"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "google/gemini-3.7-flash",
+          "name": "Gemini 3.7 Flash",
+          "provider": "Google",
+          "rationale": "Analytical agent plus clinical coding results.",
+          "watchOut": null,
+          "quality": {
+            "score": 86,
+            "evidence": [
+              {
+                "benchmark": "aa:analystAgent",
+                "name": "Analyst Agent · AA",
+                "score": 0.6,
+                "rank": 1,
+                "of": 42
+              },
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.5339,
+                "rank": 9,
+                "of": 79
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 9.75,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-3.7-flash",
+            "providerModelId": "google/gemini-3.7-flash",
+            "inputPerMillion": 0.75,
+            "outputPerMillion": 3.75,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.75
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 3.75
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-08-13",
+            "ageDays": 83
+          },
+          "best": []
+        },
+        {
+          "rank": 3,
+          "id": "anthropic/claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "provider": "Anthropic",
+          "rationale": "Policy following and analytical agent capability.",
+          "watchOut": null,
+          "quality": {
+            "score": 90,
+            "evidence": [
+              {
+                "benchmark": "aa:analystAgent",
+                "name": "Analyst Agent · AA",
+                "score": 0.575,
+                "rank": 3,
+                "of": 42
+              },
+              {
+                "benchmark": "arena:instruction_following",
+                "name": "Arena · Instruction following",
+                "score": 0.6901244924596415,
+                "rank": 13,
+                "of": 168
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 26,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5.5",
+            "providerModelId": "anthropic/claude-sonnet-5.5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 26.1,
+            "firstTokenSeconds": 12.6,
+            "tokensPerSecond": 103,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-28",
+            "ageDays": 37
+          },
+          "best": [
+            "latency"
+          ]
+        },
+        {
+          "rank": 4,
+          "id": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "provider": "Google",
+          "rationale": "Strong repeatable enterprise tool and policy-following evidence.",
+          "watchOut": null,
+          "quality": {
+            "score": 95,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.746,
+                "rank": 2,
+                "of": 14
+              },
+              {
+                "benchmark": "arena:instruction_following",
+                "name": "Arena · Instruction following",
+                "score": 0.7350018251866062,
+                "rank": 1,
+                "of": 168
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 26,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-4-argon",
+            "providerModelId": "google/gemini-4-argon",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 58.5,
+            "firstTokenSeconds": 41.5,
+            "tokensPerSecond": 82,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-13",
+            "ageDays": 22
+          },
+          "best": [
+            "quality",
+            "recency"
+          ]
+        },
+        {
+          "rank": 5,
+          "id": "anthropic/claude-opus-5",
+          "name": "Claude Opus 5",
+          "provider": "Anthropic",
+          "rationale": "Revenue-cycle and benefits decisions evidence.",
+          "watchOut": null,
+          "quality": {
+            "score": 94,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.926789,
+                "rank": 1,
+                "of": 20
+              },
+              {
+                "benchmark": "vals:public-benefits-bench",
+                "name": "Public Benefits Bench v1.1 · Vals AI",
+                "score": 0.76928,
+                "rank": 1,
+                "of": 45
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 65,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5",
+            "providerModelId": "anthropic/claude-opus-5",
+            "inputPerMillion": 5,
+            "outputPerMillion": 25,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 5
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 25
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-24",
+            "ageDays": 103
+          },
+          "best": []
+        }
+      ]
+    },
+    {
+      "title": "Fraud, waste and abuse",
+      "input": "Claim, member history and provider statistics",
+      "work": "Assess signals using tools and recommend disposition.",
+      "output": "0–1 signal scores and pay/review/hold",
+      "summary": "Treat fraud signals as triage, not proved fraud; all hosted processing locations unknown, log residency gap.",
+      "workload": {
+        "inputTokens": 7000,
+        "outputTokens": 1500
+      },
+      "priority": "cost",
+      "qualityBar": 80,
+      "models": [
+        {
+          "rank": 1,
+          "id": "anthropic/claude-haiku-5.5",
+          "name": "Claude Haiku 5.5",
+          "provider": "Anthropic",
+          "rationale": "Analyst agent and claims-related evidence.",
+          "watchOut": null,
+          "quality": {
+            "score": 81,
+            "evidence": [
+              {
+                "benchmark": "aa:analystAgent",
+                "name": "Analyst Agent · AA",
+                "score": 0.5375,
+                "rank": 6,
+                "of": 42
+              },
+              {
+                "benchmark": "vals:claimbench",
+                "name": "ClaimBench · Vals AI",
+                "score": 1,
+                "rank": 1,
+                "of": 5
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 1.45,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-haiku-5.5",
+            "providerModelId": "anthropic/claude-haiku-5.5",
+            "inputPerMillion": 0.09999999999999999,
+            "outputPerMillion": 0.5,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.09999999999999999
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 0.5
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 38.5,
+            "firstTokenSeconds": 30,
+            "tokensPerSecond": 177,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-07",
+            "ageDays": 28
+          },
+          "best": [
+            "cost"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "google/gemini-3.7-flash",
+          "name": "Gemini 3.7 Flash",
+          "provider": "Google",
+          "rationale": "High analytical performance and medical-context proxy.",
+          "watchOut": null,
+          "quality": {
+            "score": 88,
+            "evidence": [
+              {
+                "benchmark": "aa:analystAgent",
+                "name": "Analyst Agent · AA",
+                "score": 0.6,
+                "rank": 1,
+                "of": 42
+              },
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.5339,
+                "rank": 9,
+                "of": 79
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 10.875,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-3.7-flash",
+            "providerModelId": "google/gemini-3.7-flash",
+            "inputPerMillion": 0.75,
+            "outputPerMillion": 3.75,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.75
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 3.75
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-08-13",
+            "ageDays": 83
+          },
+          "best": []
+        },
+        {
+          "rank": 3,
+          "id": "anthropic/claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "provider": "Anthropic",
+          "rationale": "Good agent analysis and financial workflow proxy.",
+          "watchOut": null,
+          "quality": {
+            "score": 92,
+            "evidence": [
+              {
+                "benchmark": "aa:analystAgent",
+                "name": "Analyst Agent · AA",
+                "score": 0.575,
+                "rank": 3,
+                "of": 42
+              },
+              {
+                "benchmark": "fireworks:dayjob-accounting",
+                "name": "DAYJOB: Accounting · Fireworks",
+                "score": 0.35200000000000004,
+                "rank": 1,
+                "of": 14
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 29,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5.5",
+            "providerModelId": "anthropic/claude-sonnet-5.5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 27.1,
+            "firstTokenSeconds": 12.6,
+            "tokensPerSecond": 103,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-28",
+            "ageDays": 37
+          },
+          "best": [
+            "latency"
+          ]
+        },
+        {
+          "rank": 4,
+          "id": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "provider": "Google",
+          "rationale": "Strong agentic data analysis and tool workflow.",
+          "watchOut": null,
+          "quality": {
+            "score": 95,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.746,
+                "rank": 2,
+                "of": 14
+              },
+              {
+                "benchmark": "livebench:data_analysis",
+                "name": "LiveBench 2.0 · Data Analysis",
+                "score": 0.852,
+                "rank": 1,
+                "of": 27
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 29,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-4-argon",
+            "providerModelId": "google/gemini-4-argon",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 59.8,
+            "firstTokenSeconds": 41.5,
+            "tokensPerSecond": 82,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-13",
+            "ageDays": 22
+          },
+          "best": [
+            "quality",
+            "recency"
+          ]
+        },
+        {
+          "rank": 5,
+          "id": "anthropic/claude-opus-5",
+          "name": "Claude Opus 5",
+          "provider": "Anthropic",
+          "rationale": "Revenue cycle and financial analysis proxies.",
+          "watchOut": null,
+          "quality": {
+            "score": 94,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.926789,
+                "rank": 1,
+                "of": 20
+              },
+              {
+                "benchmark": "vals:corp_fin_v2",
+                "name": "CorpFin v2 · Vals AI",
+                "score": 0.73194,
+                "rank": 1,
+                "of": 83
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 72.5,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5",
+            "providerModelId": "anthropic/claude-opus-5",
+            "inputPerMillion": 5,
+            "outputPerMillion": 25,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 5
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 25
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-24",
+            "ageDays": 103
+          },
+          "best": []
+        }
+      ]
+    }
+  ],
+  "next": "Present each task's shortlist with its trade-offs and let the user choose. To refine, call scout_models with this conversationId and a prompt."
+}

@@ -1,0 +1,33 @@
+{
+  "name": "sahra-health-playground",
+  "private": true,
+  "type": "module",
+  "description": "Fictional AI-native Dubai health insurer used as an OpenMerit customer.",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "types": "wrangler types --env-file .dev.vars.example",
+    "typecheck": "wrangler types --env-file .dev.vars.example > /dev/null && tsc -p tsconfig.json",
+    "test": "node --test test/*.test.ts",
+    "check": "npm run typecheck && npm test",
+    "scenarios": "node scripts/run-scenarios.ts",
+    "approve": "node scripts/approve.ts"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/pi-durable": "1.5.0",
+    "@earendil-works/pi-schema": "1.5.0",
+    "agents": "0.33.0",
+    "openmerit": "0.3.0"
+  },
+  "devDependencies": {
+    "@anthropic-ai/claude-code": "2.1.318",
+    "@earendil-works/pi-coding-agent": "1.5.0",
+    "@types/node": "22.19.1",
+    "typescript": "5.9.3",
+    "wrangler": "4.157.0"
+  }
+}

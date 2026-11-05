@@ -1,0 +1,37 @@
+{
+  // Sahra Health's claims Worker. Deploys and secret changes need the owner's approval each time.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "playground-claims",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "upload_source_maps": true,
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "ai": { "binding": "AI" },
+  "vars": {
+    "LANGFUSE_BASE_URL": "https://us.cloud.langfuse.com",
+    "LANGFUSE_ENVIRONMENT": "playground"
+  },
+  // Secrets: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, OPENROUTER_API_KEY, PLAYGROUND_TOKEN (.dev.vars locally).
+  "durable_objects": {
+    "bindings": [
+      { "name": "LEDGER", "class_name": "Ledger" },
+      { "name": "ENROLLMENT_AGENT", "class_name": "EnrollmentAgent" },
+      { "name": "INTAKE_AGENT", "class_name": "IntakeAgent" },
+      { "name": "CODING_AGENT", "class_name": "CodingAgent" },
+      { "name": "ADJUDICATION_AGENT", "class_name": "AdjudicationAgent" },
+      { "name": "FRAUD_AGENT", "class_name": "FraudAgent" }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Ledger", "EnrollmentAgent", "IntakeAgent", "CodingAgent", "AdjudicationAgent", "FraudAgent"]
+    }
+  ],
+  "workflows": [
+    { "name": "playground-claim-flow", "binding": "CLAIM_FLOW", "class_name": "ClaimFlow" },
+    { "name": "playground-enrollment-flow", "binding": "ENROLLMENT_FLOW", "class_name": "EnrollmentFlow" }
+  ]
+}
