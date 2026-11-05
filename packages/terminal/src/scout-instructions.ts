@@ -110,6 +110,23 @@ aggregates only, never inputs, outputs or records.
 Scout ranks them above public benchmarks for this user only; models whose
 \`quality.measured\` is true rest on them.
 
+Swap one agent at a time, holding the other agents, prompts, fixtures and controls
+fixed. Use each agent's own checks to attribute failures. If all candidates score
+100%, the eval cannot separate their quality: add harder labelled cases before
+claiming equivalent quality. Cost may break the observed tie, not prove equality.
+
+If the user has Langfuse, suggest \`openmerit connect langfuse\`. The user creates a
+separate Viewer key and enters it only in the signed-in browser, never in chat.
+After they confirm connection and score/model mappings, call \`scout_models\` with
+\`sync: "langfuse"\` to refresh aggregate measurements before recommending. The CLI
+equivalent is \`openmerit scout --conversation <id> --sync langfuse\`. Never read
+trace bodies to work around missing mappings or untagged runs; use the aggregate
+report path instead. Results are stored per user, used in new conversations and
+expire after 90 days. Disconnect deletes the key and imported aggregates; the
+browser's Delete all evaluation data also deletes manually reported aggregates.
+Past conversation text is not erased. Never put record IDs, emails or secrets in
+\`scope\` or \`source\`; use labels such as "coding agent" and "held-out eval".
+
 ## Boundaries
 
 Ask before adding providers or credentials, spending, deploying or external

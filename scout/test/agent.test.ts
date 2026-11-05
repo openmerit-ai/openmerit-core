@@ -274,7 +274,7 @@ test('clarifying questions are refused once the user skips them', async () => {
 
 test('turns are validated before reaching a conversation', () => {
   assert.equal(parseTurn({ skip: true }), 'Describe the work you want a model to do.');
-  assert.equal(parseTurn({ message: 'x', extra: 1 }), 'Send conversationId, message, brief, skip, endpointIds or results.');
+  assert.equal(parseTurn({ message: 'x', extra: 1 }), 'Send conversationId, message, brief, skip, endpointIds, results or sync.');
   assert.match(String(parseTurn({ message: 'x', endpointIds: ['a', 'a'] })), /unique list/);
   assert.equal(parseTurn({ conversationId: 'not-a-uuid', skip: true }), 'Invalid conversationId.');
   assert.match(String(parseTurn({ message: 'x', brief: { budget: '$5' } })), /brief maps/);
@@ -323,6 +323,8 @@ test('coding agents reach the same conversations through MCP, relaying questions
   const result = { level: 'agent', task: 'Summarize', scope: 'summary agent', model: 'lab/beta', metric: 'summaries accepted', value: 0.9, higherIsBetter: true, samples: 30, source: 'own eval' };
   await call({ conversationId: id, results: [result] });
   assert.deepEqual(turns[2]?.request, { skip: false, results: [{ ...result, kind: 'quality' }] });
+  const warned = await call({ conversationId: id, results: [{ ...result, scope: 'FICT-CLM-123' }] });
+  assert.match(String(warned.structuredContent?.warnings), /record ID or email/);
   assert.match((await call({ conversationId: id, results: [{ ...result, output: 'raw text' }] })).content[0]?.text ?? '', /^results is a list/);
   assert.match((await call({ prompt: 'x'.repeat(4001) })).content[0]?.text ?? '', /^prompt must be text/);
 });

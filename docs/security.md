@@ -12,6 +12,27 @@ OpenMerit accepts no model-provider or Jev credential. Credentials belong to the
 
 Never place secrets in evaluation configuration, task fixtures, Scout project policy, traces, or committed environment files.
 
+### Langfuse connector (unreleased)
+
+The [connection guide](scout-close-loop.md#connect-langfuse) describes the source
+implementation, not npm 0.3.4 or a deployed acceptance result. Only a separate
+Viewer key pair is accepted. A successful read plus a deliberately invalid
+dataset-create permission probe (HTTP 403 required) fails closed for Full keys;
+no valid write payload is sent. Positive Viewer-key acceptance still needs a real
+Viewer key. Fixed US/EU/HIPAA hosts, manual redirects, timeouts and bounded reads
+prevent credential forwarding and unbounded response bodies. The connector reads
+only experiment headers/metadata and aggregate Metrics v2 values, never trace,
+observation, experiment-item or raw-score bodies. Extra metadata fields are
+discarded; experiment source labels are hashes, not names or record IDs.
+
+Credentials and mappings are AES-GCM encrypted in one Cloudflare Durable Object
+per authenticated user, bound to that object's ID with a dedicated Worker secret.
+Keys never enter browser storage, URLs or analytics. Keep that encryption secret
+stable: replacing it invalidates stored connections and requires reconnecting.
+Disconnect deletes the key and imported aggregates; deleting all evaluation data
+also deletes reported aggregates. Neither erases conversation text. Retention,
+limits and processor caveats are in the [data policy](scout-data-policy.md).
+
 ## Local state
 
 `.openmerit/` may hold evaluation configuration, task fixtures, reports and budget usage, and Scout project policy, plus files left by the retired Inference Terminal (`terminal.json`, `inference.jsonl`), which upgrades do not delete. It may reveal task names, model choices, budgets or endpoint identifiers. Treat it as sensitive project metadata even though it must not contain credentials.

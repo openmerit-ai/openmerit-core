@@ -1,6 +1,7 @@
 // OpenMerit device approval. A coding agent's `openmerit install` shows a code;
 // the signed-in person confirms it here. The page never sees the device key.
 import { analytics } from '../scout/analytics.js';
+import { showLangfuse } from './langfuse.js';
 
 const $ = selector => document.querySelector(selector);
 const status = $('#connect-status');
@@ -158,7 +159,10 @@ try {
       history.replaceState(null, '', `/connect/?${query}`);
       void showRequest(client).catch(error => { clientError('load', error); say(error.message, true); });
     });
-    if (code) await showRequest(client); else { say(''); $('#code-form').hidden = false; }
+    if (code) await showRequest(client);
+    else if (params.get('integration') === 'langfuse') { $('#connect-title').textContent = 'Your connections'; say('Manage your connected evals below.'); }
+    else { say(''); $('#code-form').hidden = false; }
     await showDevices(client).catch(() => {});
+    await showLangfuse((path, options) => api(client, path, options));
   }
 } catch (error) { clientError(stage, error, stage === 'auth' ? 'auth_unavailable' : 'uncaught_error'); say(error.message, true); }

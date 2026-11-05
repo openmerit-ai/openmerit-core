@@ -1,4 +1,5 @@
 import { json, readJSON } from './http.mjs';
+import { handleEvaluations } from './evaluation-routes.ts';
 
 // OpenMerit device login (RFC 8628 shape) and per-device keys. Only hashes of
 // device codes and keys are stored; a key is minted once, when the CLI collects
@@ -116,6 +117,7 @@ async function connect(request, env, { session, now = Date.now(), analytics } = 
     if (!userId) return json({ error: 'Sign in to continue.', code: 'sign_in_required' }, 401, { 'WWW-Authenticate': 'Bearer realm="OpenMerit"' });
     analytics?.identify(userId);
     if (!await limit(`connect:user:${userId}`)) return json({ error: 'Too many requests. Please try again shortly.' }, 429, { 'Retry-After': '60' });
+    if (['langfuse', 'langfuse/sync', 'evaluations'].includes(path)) return handleEvaluations(request, env.SCOUT_EVALUATIONS, userId);
     const db = await database(env);
     if (path === 'login' && method === 'GET') {
       const login = await db.prepare('SELECT client,scope,device_name,expires_at,status,user_id FROM openmerit_device_logins WHERE user_code=?').bind(normalizeCode(url.searchParams.get('code'))).first();

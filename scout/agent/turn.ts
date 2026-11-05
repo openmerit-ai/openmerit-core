@@ -12,6 +12,9 @@ export interface TurnRequest {
   endpointIds?: string[];
   // Aggregate results the user measured with their own evals, such as candidate runs of Scout's evaluation plan.
   results?: MeasurementInput[];
+  sync?: 'langfuse';
+  // Internal routing only; parseTurn never accepts an owner from a client.
+  evaluationOwner?: string;
 }
 // Where a conversation comes from. The web page splits work into at most three
 // tasks so its answer stays readable; coding agents get as many as the work needs.
@@ -28,6 +31,7 @@ export const measurementLine = (r: Measurement) =>
 export function turnText(request: TurnRequest, measured: readonly Measurement[] = []): string {
   const parts: string[] = [];
   if (request.message?.trim()) parts.push(request.message.trim());
+  if (request.sync) parts.push('Use the current account-level eval aggregates just synced from Langfuse and recommend again. Never reuse a removed or superseded measurement from the transcript.');
   if (measured.length) parts.push(`I measured these results with my own evals (aggregates only). Use them as evidence ahead of public benchmarks, cite them as measured:<id>, and recommend again:\n${measured.map(measurementLine).join('\n')}`);
   const edited = components.filter(c => request.brief?.[c] !== undefined);
   if (edited.length) parts.push(`I edited your task brief. Treat these components as stated by me:\n${edited.map(c => `- ${c}: ${request.brief?.[c]?.trim() || 'none'}`).join('\n')}`);

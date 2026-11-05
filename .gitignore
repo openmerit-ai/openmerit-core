@@ -6,6 +6,7 @@ site/scout/vendor/
 site/scout/privacy/privacy.js
 site/scout/scout.js
 site/scout/onboarding.js
+site/connect/langfuse.js
 site/memo-access.js
 demo/memo/generated/
 site/assets/video-player.js

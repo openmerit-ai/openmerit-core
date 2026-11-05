@@ -11,7 +11,7 @@ import { gunzipSync } from 'node:zlib';
 type ObjectValue = Record<string, unknown>;
 interface Bundle { format: number; contract: string; version: string; skill: string; rule: string }
 interface UpdateRecord { enabled: boolean; version: string; runnerHash: string; hook: ObjectValue }
-export const updateContract = 'scout-recommend-v1';
+export const updateContract = 'scout-recommend-v2';
 const registry = 'https://registry.npmjs.org/openmerit/latest';
 const day = 24 * 60 * 60 * 1000;
 const retry = 15 * 60 * 1000;

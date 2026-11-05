@@ -18,3 +18,7 @@ for (const script of ['video-player', 'thread-rule', 'speed-egg']) await build({
   absWorkingDir: resolve(import.meta.dirname, '..'), entryPoints: [`site/${script}.ts`],
   outfile: `site/assets/${script}.js`, format: 'esm', platform: 'browser', target: 'es2022',
 });
+await build({
+  absWorkingDir: resolve(import.meta.dirname, '..'), entryPoints: ['site/connect/langfuse.ts'],
+  outfile: 'site/connect/langfuse.js', format: 'esm', platform: 'browser', target: 'es2022',
+});

@@ -5,6 +5,7 @@
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { credentialsPath, readCredentials, type DeviceCredentials } from './scout-credentials.ts';
+import { openBrowser } from './browser.mjs';
 
 const policyFile = '.openmerit/scout.json';
 export const components = ['input', 'work', 'output', 'criteria', 'constraints'] as const;
@@ -14,6 +15,9 @@ const help = `OpenMerit · Scout
   openmerit scout "<the work models need to do>" [--all-endpoints] [--json]
   openmerit scout --conversation <id> [--brief <component>=<text> ...] [--skip] ["<follow-up>"] [--json]
   openmerit scout --conversation <id> --results <file.json> [--json]
+  openmerit scout --conversation <id> --sync langfuse [--json]
+  openmerit connect langfuse
+  openmerit disconnect langfuse
 
 Asks Scout, the agent behind openmerit.ai/scout. Scout may first return a task
 brief with clarifying questions: answer them with --brief (components: input,
@@ -26,6 +30,12 @@ samples, source}), never inputs or outputs. kind is quality (the default), usd
 or seconds; measured usd replaces Scout's cost estimate. Scout ranks them above
 public benchmarks, for your recommendations only. A turn usually takes one to three minutes.
 
+Connect a separate Langfuse Viewer key in the signed-in browser, then --sync
+langfuse refreshes mapped, tagged experiment aggregates before recommending.
+Results are stored per user across conversations for 90 days. Disconnect deletes
+the key and imports; use Delete all evaluation data to remove reported results too.
+Past conversations remain. Never put record IDs or emails in source or scope.
+
 A new conversation is limited to the endpoint IDs in ${policyFile}
 (set with openmerit project). --all-endpoints searches the whole catalogue and is
 refused under the existing-only policy. Uses the device key that
@@ -33,7 +43,7 @@ refused under the existing-only policy. Uses the device key that
 `;
 
 type Json = Record<string, unknown>;
-interface ScoutRequest { prompt?: string; conversationId?: string; brief?: Partial<Record<typeof components[number], string>>; skip?: boolean; endpointIds?: string[]; results?: unknown[] }
+interface ScoutRequest { prompt?: string; conversationId?: string; brief?: Partial<Record<typeof components[number], string>>; skip?: boolean; endpointIds?: string[]; results?: unknown[]; sync?: 'langfuse' }
 export interface ScoutModel {
   rank: number; id: string; name: string; provider: string; rationale: string; watchOut: string | null;
   quality: { score: number; measured?: boolean; evidence: Array<{ name: string; rank: number; of: number }> };
@@ -167,13 +177,18 @@ export async function main(args: string[], { root = process.cwd(), print = conso
     } else if (arg === '--skip') request.skip = true;
     else if (arg === '--all-endpoints') request.allEndpoints = true;
     else if (arg === '--json') json = true;
+    else if (arg === '--sync') {
+      if (value() !== 'langfuse') throw new Error('--sync supports langfuse.');
+      request.sync = 'langfuse';
+    }
     else if (arg === '--results') {
       const file = value();
       let results: unknown;
       try { results = JSON.parse(await readFile(resolve(root, file), 'utf8')); } catch { throw new Error(`Could not read results from ${file}: it must be a JSON list.`); }
       if (!Array.isArray(results)) throw new Error(`${file} must hold a JSON list of results.`);
       // Scout accepts at most 50 per turn; each call is a turn that recommends again, so splitting is the caller's choice.
-      if (results.length > 50) throw new Error(`${file} holds ${results.length} results; Scout accepts at most 50 per call (200 per conversation). Split them into files of up to 50 and report each with --results in turn; Scout recommends again after each.`);
+      if (results.length > 50) throw new Error(`${file} holds ${results.length} results; Scout accepts at most 50 per call. Split them into files of up to 50 and report each with --results in turn; Scout recommends again after each.`);
+      if (results.some(r => isObject(r) && [r.source, r.scope].some(v => typeof v === 'string' && /(?:\b(?:claim|patient|member|FICT|CLM)[-_ ]?\d|\b[0-9a-f]{8}-[0-9a-f-]{27,}\b|[^\s@]+@[^\s@]+\.[^\s@]+)/i.test(v)))) print('Warning: source or scope looks like a record ID or email. Send aggregate labels only; remove identifiers before sharing.');
       request.results = results;
     }
     else if (arg.startsWith('-')) throw new Error(`Unknown option for scout: ${arg}`);
@@ -185,4 +200,12 @@ export async function main(args: string[], { root = process.cwd(), print = conso
   const result = await scoutTurn(root, request);
   print(json ? JSON.stringify(result, null, 2) : renderScout(result));
   return result.status === 'error' ? 1 : 0;
+}
+
+export async function connection(args: string[], print = console.log): Promise<number> {
+  if (!['connect', 'disconnect'].includes(args[0] ?? '') || args[1] !== 'langfuse' || args.length !== 2) throw new Error('Use openmerit connect langfuse or openmerit disconnect langfuse.');
+  const url = 'https://openmerit.ai/connect/?integration=langfuse';
+  print(args[0] === 'connect' ? `Add a separate Langfuse Viewer key in your signed-in browser: ${url}` : `Confirm “Disconnect & delete imports” in your signed-in browser: ${url}`);
+  await openBrowser(url, { allowed: (value: string) => value === url }).catch(() => false);
+  return 0;
 }
