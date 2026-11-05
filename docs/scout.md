@@ -2,7 +2,7 @@
 
 Scout is OpenMerit's model search agent. Describe your task and get provisional model guidance through the conversational page or MCP. Public catalogue evidence is not proof of application quality.
 
-**Unreleased retirement, November 2026:** this source removes `/scout/api/recommend`, its alpha/versioned aliases and the complete standalone `openmerit eval` CLI, including `plan`. Retired paths return 404 before authentication, redirects or asset fallback. The agent, canonical `/scout/mcp`, coding-agent setup, catalogue publisher, status and account/privacy capabilities remain. No remote data or existing local evaluation files are deleted. Package publication and Worker deployment require separate approval; neither is implied by this source change.
+**Retirement, November 2026:** npm 0.3.0 removed the complete standalone `openmerit eval` CLI, including `plan`. The Scout serving deploy of 5 November 2026 removed `/scout/api/recommend` and its alpha/versioned aliases; retired paths return 404 before authentication, redirects or asset fallback. The agent, canonical `/scout/mcp`, coding-agent setup, catalogue publisher, status and account/privacy capabilities remain. No remote data or existing local evaluation files are deleted.
 
 Dated receipts and the old search/ranking/JSON protocol descriptions below are historical, not supported interfaces in this source. There is no replacement frozen-plan API. See [evaluation retirement](agent-evaluations.md) and [commands](commands.md) for migration boundaries.
 
@@ -18,9 +18,9 @@ Scout is a separate hosted beta product. Npm 0.1.7 introduced optional Claude Co
 
 **Product wording — unreleased source:** the homepage, Scout page, onboarding and search/social descriptions call Scout “OpenMerit's model search agent,” with “model search” as the shorthand and “Find the right AI models for your task” as its promise. “Model recommendations” describes its output; the web and coding agents are access channels, not separate product categories. This copy is not yet deployed. Dated receipts below retain the wording and behavior of their original releases.
 
-## Evaluation plans and measured results — unreleased source
+## Evaluation plans and measured results — deployed 5 November 2026, npm 0.3.1
 
-This describes source that is not yet deployed or published. Until the Scout serving Worker is deployed, `scout_models` does not accept `results` and recommendations have no `evaluation`; until a new npm release, `openmerit scout` has no `--results` option and the installed instructions do not mention measuring.
+The Scout serving deploy of 5 November 2026 (version `ea371c78-6ccf-4931-a0b8-aa28a6599aaa`) serves this behavior to every client. A live MCP check returned an evaluation plan and agent grouping, and reported results moved a measured model below the quality bar. npm 0.3.1 adds `openmerit scout --results` and the installed instructions for measuring; older installations reach the new `scout_models` fields through MCP but their instructions do not mention measuring until the installer is rerun.
 
 OpenMerit does not run evaluations or host an eval platform. Scout tells you what to measure, your own eval system measures it, and Scout uses the aggregate results:
 

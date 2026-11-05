@@ -2,7 +2,7 @@
 
 **Pi adapter — npm 0.1.12 and later:** Pi 1.5.0 uses native MCP plus shared Scout rule/skill sections, not the former evaluation adapter. It never initiates login, changes the host model/tools/session, or provisions background jobs. Browser-approved credentials are independent per client/scope/project, stored privately outside the repository, and passed as MCP HTTP headers, never instructions. Pi's installed connection JSON contains only the private credential path. See [Pi paths and targeted removal](pi-extension.md). The standalone evaluation CLI remains separate.
 
-**Retirement:** npm 0.3.0 removes the standalone [agent-evaluation runner](agent-evaluations.md), including planning; unreleased Scout source removes `/scout/api/recommend`. Existing local reports, budgets, configuration and host-agent instructions are not deleted; review them separately. No provider billing control or remote data deletion is implied.
+**Retirement:** npm 0.3.0 removes the standalone [agent-evaluation runner](agent-evaluations.md), including planning; the Scout serving deploy of 5 November 2026 removed `/scout/api/recommend`. Existing local reports, budgets, configuration and host-agent instructions are not deleted; review them separately. No provider billing control or remote data deletion is implied.
 
 The Scout agent, MCP, publisher and account analytics/deletion capabilities remain. Historical analytics and stored catalogue/research data are not erased by endpoint retirement. Necessary provider processing for the agent and publisher continues under the [Scout data policy](scout-data-policy.md).
 
