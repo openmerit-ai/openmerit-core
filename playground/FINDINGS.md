@@ -2,6 +2,66 @@
 
 Dated observations from using OpenMerit as Sahra Health, newest release first. Each entry says what we ran, what happened and what a customer would expect.
 
+## openmerit 0.3.4 (5 Nov 2026)
+
+What changed, per the package's CHANGELOG and the release note:
+- `--results` refuses a file of more than 50 results before sending it.
+- The Claude Code install message names the MCP server, startup rule and skill.
+- **Scout serving release `a4d46878`:**
+  - Models tied under the conversation's priority, including `quality`, are ordered by measured cost.
+  - Measured results that don't separate models give them the same quality estimate.
+  - Results stored before `kind` existed count as quality again.
+
+No models were run. Every result reported here is the aggregate measured on 5 Nov (MODEL-DECISIONS.md, 0.3.1).
+
+### Installs: clean, and the Claude Code wording is fixed
+
+- **Claude Code:** `install --client claude-code --scope project` exits 0 and ends "Start a new session to load the MCP server, startup rule and skill." `status --check` reports `Automatic instruction updates: on · hooks: ready · instruction version: 0.3.4`. `doctor` is green, including the updater.
+- **Pi:** exits 0. `status --check` and `doctor` are green.
+- **No device approval was needed:** both clients reused their keys, so the 30-minute codes are still untested from our side.
+
+### Measured cost now breaks quality ties without being asked
+
+- **Setup:** new conversation `3c93de23-05c1-49d9-a935-1a998a3aa792` with the same brief as 0.3.3's `1ef2bdc0-…` (`scout-tasks/agent-models-0.3.1.txt`, "rank for the best quality", so `priority: quality`). We reported the same 69 agent-level results: each agent's own checks plus `kind: "usd"` and `kind: "seconds"`. One call per agent; no follow-up.
+- **Before results:** the shortlist had changed since 0.3.3. Opus 5 ranked first everywhere, and unmeasured Claude Sonnet 5, GPT-5.6 Sol and Gemini 3.8 Flash appeared, while GPT-6.1 Sol and Opus 5.5 did not. After the results, the five measured models replaced the unmeasured ones on every claim agent.
+- **After results:** every claim agent's shortlist is ordered strictly by measured cost per agent run, GPT-6.1 Sol first:
+
+  | Agent | Order (measured USD per 1k agent runs) |
+  |---|---|
+  | Intake | GPT-6.1 Sol 6.50, Gemini 4 Argon 8.70, Sonnet 5.5 10.37, Opus 5.5 22.78, Opus 5 33.51 |
+  | Coding | GPT-6.1 Sol 10.98, Gemini 4 Argon 14.25, Sonnet 5.5 15.39, Opus 5.5 36.72, Opus 5 57.85 |
+  | Adjudication | GPT-6.1 Sol 13.44, Sonnet 5.5 17.99, Gemini 4 Argon 22.01, Opus 5.5 42.11, Opus 5 71.65 |
+  | Fraud | GPT-6.1 Sol 13.59, Gemini 4 Argon 18.52, Sonnet 5.5 20.33, Opus 5.5 50.77, Opus 5 65.35 |
+
+- **Same quality scores, so the tie-break works:** within each claim agent all five measured models share one score (85 for intake, coding and fraud; 87 for adjudication), all with `quality.measured: true`. Opus 5 on fraud, measured on 13 claims after the 402, is tied too.
+- **Enrollment:** Sonnet 5.5, GPT-6.1 Sol, Opus 5.5 and Opus 5 tie at 85; Gemini 4 Argon is below the bar for its invented tool field. With no measured enrollment cost, the order there is not cost-based.
+
+### Regret
+
+Against the best equally correct choice (GPT-6.1 Sol on all four claim agents, USD 44.51 per 1k claims, about USD 13.35 a day at 300 claims):
+
+| Scout's first picks | Extra per day |
+|---|---|
+| 0.3.3, new conversation, no follow-up | USD 50.78 |
+| **0.3.4, new conversation, no follow-up** | **0** |
+| 0.3.4, old conversation `d16cba5a` after a new turn | 0 |
+
+### Older conversation counts as measured again
+
+- Reading `d16cba5a-…` with `--conversation` and no prompt replays its stored 0.3.3 turn, still with `quality.measured: false`. That is easy to mistake for the fix not working.
+- After one new turn ("recommend again using the results already reported"), every model shows `quality.measured: true`. The claim agents tie at one score each, and are ordered by measured cost with GPT-6.1 Sol first, as in the new conversation. Opus is no longer scored lower for the downstream misses.
+
+### `--results` limit checked locally
+
+- A 69-result file is refused before sending (exit 1): "holds 69 results; Scout accepts at most 50 per call (200 per conversation). Split them into files of up to 50…". In 0.3.3 this was an HTTP 413.
+
+### Still wrong
+
+- **Estimates beside measured cost:** the catalogue estimate in `cost.usdPer1kAgentRuns` is still 12 to 15 times the measured cost (GPT-6.1 Sol intake: 99 estimated, 6.50 measured). The ranking now ignores it, but a reader comparing columns sees two very different numbers.
+- **`best: ["cost"]`** is still given to three models per claim agent (GPT, Gemini and Sonnet), not only the measured cheapest.
+- **Summaries:** they say "unchanged" after the first report and mention the Gemini enrollment failure in every claim agent's summary.
+- **Reading a conversation:** it shows a stale turn until the next turn, with no hint that the server has changed since.
+
 ## openmerit 0.3.3 (5 Nov 2026)
 
 What changed, per the package's CHANGELOG:

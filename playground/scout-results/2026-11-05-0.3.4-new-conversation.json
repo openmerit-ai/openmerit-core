@@ -1,0 +1,1651 @@
+{
+  "conversationId": "3c93de23-05c1-49d9-a935-1a998a3aa792",
+  "status": "recommended",
+  "brief": {
+    "input": {
+      "text": "Fictional outpatient applications, eClaimLink-style claims, itemized bills, plan rules, history and provider statistics; Dubai",
+      "source": "stated"
+    },
+    "work": {
+      "text": "Enrollment eligibility; intake reconciliation; coding review; line coverage adjudication; fraud/waste/abuse review, each in multi-step tool loops",
+      "source": "stated"
+    },
+    "output": {
+      "text": "Recorded eligibility, bill mismatches, coding findings, line pay/deny with codes, and 0–1 fraud signals with pay/review/hold recommendation",
+      "source": "stated"
+    },
+    "criteria": {
+      "text": "Quality and reliable tool calling matter more than cost; rank best quality; existing Langfuse per-call, agent and claim evals",
+      "source": "stated"
+    },
+    "constraints": {
+      "text": "UAE processing required under stated residency interpretation; fictional data permits non-UAE endpoint only as recorded gap; Workers AI and OpenRouter used; human approves all payments",
+      "source": "stated"
+    }
+  },
+  "assumptions": [
+    "Treat provider region as unknown until verified contractually; catalogue model routes alone do not establish UAE processing.",
+    "Use existing 14 claims and two enrollment fixtures as starting eval labels, not definitive ranking."
+  ],
+  "catalogueVersion": "9e66fcfcbcea38ce02b53f9d0c1f7b8d",
+  "tasks": [
+    {
+      "title": "Enrollment",
+      "agent": "Enrollment agent",
+      "callsPerRun": 4,
+      "input": "Application and health declaration, ICD lookup and eligibility tool results",
+      "work": "Extract chronic ICD-10-CM prefixes and record eligibility via JSON-schema tools",
+      "output": "Chronic categories and recorded eligibility",
+      "summary": "Start with Opus 5 for eligibility and chronic-category extraction; public RCM evidence needs confirmation on your two fixtures and expanded labels. All listed routes have unverified UAE processing: recorded residency gap on fictional tests only.",
+      "workload": {
+        "inputTokens": 8000,
+        "outputTokens": 1600
+      },
+      "priority": "quality",
+      "qualityBar": 77,
+      "models": [
+        {
+          "rank": 1,
+          "id": "anthropic/claude-opus-5",
+          "name": "Claude Opus 5",
+          "provider": "Anthropic",
+          "rationale": "Leads RCM agent workflows and medical category coding.",
+          "watchOut": "UAE processing unverified.",
+          "quality": {
+            "score": 94,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.926789,
+                "rank": 1,
+                "of": 20
+              },
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.6357,
+                "rank": 1,
+                "of": 79
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 80,
+            "usdPer1kAgentRuns": 320,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5",
+            "providerModelId": "anthropic/claude-opus-5",
+            "inputPerMillion": 5,
+            "outputPerMillion": 25,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 5
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 25
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-24",
+            "ageDays": 104
+          },
+          "best": [
+            "quality"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "provider": "Google",
+          "rationale": "Strong eligibility agent and clinical coding proxy.",
+          "watchOut": "UAE processing unverified.",
+          "quality": {
+            "score": 92,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.914878,
+                "rank": 2,
+                "of": 20
+              },
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.58801,
+                "rank": 3,
+                "of": 79
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 32,
+            "usdPer1kAgentRuns": 128,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-4-argon",
+            "providerModelId": "google/gemini-4-argon",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 61,
+            "firstTokenSeconds": 41.5,
+            "tokensPerSecond": 82,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-13",
+            "ageDays": 23
+          },
+          "best": [
+            "recency"
+          ]
+        },
+        {
+          "rank": 3,
+          "id": "anthropic/claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+          "provider": "Anthropic",
+          "rationale": "Strong RCM tool workflow fit.",
+          "watchOut": "No MedCode result in checked details.",
+          "quality": {
+            "score": 88,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.912437,
+                "rank": 3,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 32,
+            "usdPer1kAgentRuns": 128,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5",
+            "providerModelId": "anthropic/claude-sonnet-5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-06-30",
+            "ageDays": 128
+          },
+          "best": []
+        },
+        {
+          "rank": 4,
+          "id": "anthropic/claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "provider": "Anthropic",
+          "rationale": "Strong eligibility workflow and coding proxy.",
+          "watchOut": "UAE processing unverified.",
+          "quality": {
+            "score": 87,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.910501,
+                "rank": 5,
+                "of": 20
+              },
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.5292,
+                "rank": 12,
+                "of": 79
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 32,
+            "usdPer1kAgentRuns": 128,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5.5",
+            "providerModelId": "anthropic/claude-sonnet-5.5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 28.1,
+            "firstTokenSeconds": 12.6,
+            "tokensPerSecond": 103,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-28",
+            "ageDays": 38
+          },
+          "best": []
+        },
+        {
+          "rank": 5,
+          "id": "google/gemini-3.8-flash",
+          "name": "Gemini 3.8 Flash",
+          "provider": "Google",
+          "rationale": "Good RCM tool-workflow benchmark.",
+          "watchOut": "UAE processing unverified.",
+          "quality": {
+            "score": 84,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.9023359999999999,
+                "rank": 6,
+                "of": 20
+              },
+              {
+                "benchmark": "arena:industry_medicine_and_healthcare",
+                "name": "Arena · Medicine & healthcare",
+                "score": 0.6580225773121797,
+                "rank": 11,
+                "of": 151
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 12,
+            "usdPer1kAgentRuns": 48,
+            "route": "Google",
+            "endpointId": "google:generateContent:gemini-3.8-flash",
+            "providerModelId": "gemini-3.8-flash",
+            "inputPerMillion": 0.75,
+            "outputPerMillion": 3.75,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.75
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 3.75
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 37.6,
+            "firstTokenSeconds": 25.3,
+            "tokensPerSecond": 130,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-02",
+            "ageDays": 64
+          },
+          "best": [
+            "cost"
+          ]
+        }
+      ],
+      "evaluation": {
+        "checks": [
+          {
+            "level": "task",
+            "metric": "ICD prefixes, eligibility and schema-valid recorded decision",
+            "how": "Replay two existing enrollment fixtures and compare with fixture labels and recorded tool traces."
+          },
+          {
+            "level": "agent",
+            "metric": "end-to-end eligibility and rejected tool-call rate",
+            "how": "Compare agent recordings and schema rejections on the same labelled fixtures."
+          },
+          {
+            "level": "environment",
+            "metric": "enrollment correctness after manual checks",
+            "how": "Compare final eligibility with existing reviewer decisions as more fixtures accrue."
+          }
+        ],
+        "samples": 30,
+        "stopEarly": "Stop when repeated invalid decision tools or chronic-condition omissions clearly exceed the incumbent on matched fixtures."
+      }
+    },
+    {
+      "title": "Claims intake",
+      "agent": "Claims intake agent",
+      "callsPerRun": 3,
+      "input": "Structured claim, itemized bill and tool results",
+      "work": "Reconcile activities and lines, total and record mismatches",
+      "output": "Recorded matched lines, totals and mismatches",
+      "summary": "Start with Opus 5 for bill-to-activity matching; confirm with existing mismatch labels rather than using RCM proxy as proof. Endpoint processing region is unknown and thus a recorded UAE residency gap on fictional tests.",
+      "workload": {
+        "inputTokens": 9000,
+        "outputTokens": 1500
+      },
+      "priority": "quality",
+      "qualityBar": 78,
+      "models": [
+        {
+          "rank": 1,
+          "id": "anthropic/claude-opus-5",
+          "name": "Claude Opus 5",
+          "provider": "Anthropic",
+          "rationale": "RCM tool and system-state benchmark leader.",
+          "watchOut": "No direct bill-line benchmark.",
+          "quality": {
+            "score": 94,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.926789,
+                "rank": 1,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 82.5,
+            "usdPer1kAgentRuns": 247.5,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5",
+            "providerModelId": "anthropic/claude-opus-5",
+            "inputPerMillion": 5,
+            "outputPerMillion": 25,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 5
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 25
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-24",
+            "ageDays": 104
+          },
+          "best": [
+            "quality"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "provider": "Google",
+          "rationale": "Strong RCM agent and analytical proxy.",
+          "watchOut": "No verified UAE route.",
+          "quality": {
+            "score": 92,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.914878,
+                "rank": 2,
+                "of": 20
+              },
+              {
+                "benchmark": "livebench:data_analysis",
+                "name": "LiveBench 2.0 · Data Analysis",
+                "score": 0.852,
+                "rank": 1,
+                "of": 27
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 33,
+            "usdPer1kAgentRuns": 99,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-4-argon",
+            "providerModelId": "google/gemini-4-argon",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 59.8,
+            "firstTokenSeconds": 41.5,
+            "tokensPerSecond": 82,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-13",
+            "ageDays": 23
+          },
+          "best": [
+            "cost",
+            "recency"
+          ]
+        },
+        {
+          "rank": 3,
+          "id": "anthropic/claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+          "provider": "Anthropic",
+          "rationale": "Strong claim submission workflow result.",
+          "watchOut": "Bill reconciliation needs local labels.",
+          "quality": {
+            "score": 89,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.912437,
+                "rank": 3,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 33,
+            "usdPer1kAgentRuns": 99,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5",
+            "providerModelId": "anthropic/claude-sonnet-5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-06-30",
+            "ageDays": 128
+          },
+          "best": [
+            "cost"
+          ]
+        },
+        {
+          "rank": 4,
+          "id": "openai/gpt-5.6-sol",
+          "name": "GPT-5.6 Sol",
+          "provider": "OpenAI",
+          "rationale": "Strong RCM workflows.",
+          "watchOut": "No direct bill-line result.",
+          "quality": {
+            "score": 88,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.9121210000000001,
+                "rank": 4,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 66,
+            "usdPer1kAgentRuns": 198,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:openai/gpt-5.6-sol",
+            "providerModelId": "openai/gpt-5.6-sol",
+            "inputPerMillion": 4,
+            "outputPerMillion": 20,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 4
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 20
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-09",
+            "ageDays": 119
+          },
+          "best": []
+        },
+        {
+          "rank": 5,
+          "id": "anthropic/claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "provider": "Anthropic",
+          "rationale": "Good RCM workflow performance.",
+          "watchOut": "Unknown UAE processing.",
+          "quality": {
+            "score": 86,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.910501,
+                "rank": 5,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 33,
+            "usdPer1kAgentRuns": 99,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5.5",
+            "providerModelId": "anthropic/claude-sonnet-5.5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 27.1,
+            "firstTokenSeconds": 12.6,
+            "tokensPerSecond": 103,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-28",
+            "ageDays": 38
+          },
+          "best": [
+            "cost"
+          ]
+        }
+      ],
+      "evaluation": {
+        "checks": [
+          {
+            "level": "task",
+            "metric": "line matching, total and mismatch precision/recall; valid recording call",
+            "how": "Run candidates as experiments on the existing 14 labelled claims using mismatch labels and tool traces."
+          },
+          {
+            "level": "agent",
+            "metric": "fully correct extracted claim and rejected tools",
+            "how": "Compare agent-run mismatch scores and recording success in Langfuse."
+          },
+          {
+            "level": "environment",
+            "metric": "claim correctness and review load",
+            "how": "Use the same end-to-end Langfuse claims experiment to check downstream correction burden."
+          }
+        ],
+        "samples": 60,
+        "stopEarly": "Stop after matched claims show repeated missing bill lines or failed recording with no plausible path to beat the incumbent."
+      }
+    },
+    {
+      "title": "Coding review",
+      "agent": "Coding review agent",
+      "callsPerRun": 4,
+      "input": "ICD-10-CM and CPT codes and lookup tool results",
+      "work": "Check coding mismatch, unbundling and E/M upcoding; record findings",
+      "output": "Recorded coding findings",
+      "summary": "Opus 5 is first for coding review from RCM agent and medical coding evidence; validate CPT, bundling and E/M locally, as MedCode covers diagnosis coding rather than those checks. All endpoints have unknown UAE processing.",
+      "workload": {
+        "inputTokens": 10000,
+        "outputTokens": 1800
+      },
+      "priority": "quality",
+      "qualityBar": 79,
+      "models": [
+        {
+          "rank": 1,
+          "id": "anthropic/claude-opus-5",
+          "name": "Claude Opus 5",
+          "provider": "Anthropic",
+          "rationale": "Leads medical coding and revenue-cycle agent benchmarks.",
+          "watchOut": "CPT and E/M not established by MedCode.",
+          "quality": {
+            "score": 94,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.926789,
+                "rank": 1,
+                "of": 20
+              },
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.6357,
+                "rank": 1,
+                "of": 79
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 95,
+            "usdPer1kAgentRuns": 380,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5",
+            "providerModelId": "anthropic/claude-opus-5",
+            "inputPerMillion": 5,
+            "outputPerMillion": 25,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 5
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 25
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-24",
+            "ageDays": 104
+          },
+          "best": [
+            "quality"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "provider": "Google",
+          "rationale": "Strong coding and RCM tool performance.",
+          "watchOut": "CPT/unbundling need local testing.",
+          "quality": {
+            "score": 90,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.914878,
+                "rank": 2,
+                "of": 20
+              },
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.58801,
+                "rank": 3,
+                "of": 79
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 38,
+            "usdPer1kAgentRuns": 152,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-4-argon",
+            "providerModelId": "google/gemini-4-argon",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 63.4,
+            "firstTokenSeconds": 41.5,
+            "tokensPerSecond": 82,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-13",
+            "ageDays": 23
+          },
+          "best": [
+            "recency"
+          ]
+        },
+        {
+          "rank": 3,
+          "id": "anthropic/claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "provider": "Anthropic",
+          "rationale": "Relevant agent and diagnosis-code evidence.",
+          "watchOut": "E/M decisions remain unvalidated.",
+          "quality": {
+            "score": 86,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.910501,
+                "rank": 5,
+                "of": 20
+              },
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.5292,
+                "rank": 12,
+                "of": 79
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 38,
+            "usdPer1kAgentRuns": 152,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5.5",
+            "providerModelId": "anthropic/claude-sonnet-5.5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 30,
+            "firstTokenSeconds": 12.6,
+            "tokensPerSecond": 103,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-28",
+            "ageDays": 38
+          },
+          "best": []
+        },
+        {
+          "rank": 4,
+          "id": "google/gemini-3.8-flash",
+          "name": "Gemini 3.8 Flash",
+          "provider": "Google",
+          "rationale": "Good RCM agent and healthcare proxy.",
+          "watchOut": "No MedCode result in checked details.",
+          "quality": {
+            "score": 83,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.9023359999999999,
+                "rank": 6,
+                "of": 20
+              },
+              {
+                "benchmark": "arena:industry_medicine_and_healthcare",
+                "name": "Arena · Medicine & healthcare",
+                "score": 0.6580225773121797,
+                "rank": 11,
+                "of": 151
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 14.25,
+            "usdPer1kAgentRuns": 57,
+            "route": "Google",
+            "endpointId": "google:generateContent:gemini-3.8-flash",
+            "providerModelId": "gemini-3.8-flash",
+            "inputPerMillion": 0.75,
+            "outputPerMillion": 3.75,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.75
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 3.75
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 39.1,
+            "firstTokenSeconds": 25.3,
+            "tokensPerSecond": 130,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-02",
+            "ageDays": 64
+          },
+          "best": [
+            "cost"
+          ]
+        },
+        {
+          "rank": 5,
+          "id": "google/gemini-3.1-pro-preview",
+          "name": "Gemini 3.1 Pro Preview",
+          "provider": "Google",
+          "rationale": "Strong coding with agent-tool proxy.",
+          "watchOut": "Preview endpoint and tool benchmark not specific to RCM.",
+          "quality": {
+            "score": 82,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "vendor:t2-bench",
+                "name": "t2-bench · vendor-reported",
+                "score": 0.993,
+                "rank": 1,
+                "of": 13
+              },
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.5906199999999999,
+                "rank": 2,
+                "of": 79
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 41.6,
+            "usdPer1kAgentRuns": 166.4,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-3.1-pro-preview",
+            "providerModelId": "google/gemini-3.1-pro-preview",
+            "inputPerMillion": 2,
+            "outputPerMillion": 12,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 12
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 33.9,
+            "firstTokenSeconds": 20.9,
+            "tokensPerSecond": 139,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-02-19",
+            "ageDays": 259
+          },
+          "best": []
+        }
+      ],
+      "evaluation": {
+        "checks": [
+          {
+            "level": "task",
+            "metric": "finding precision/recall by diagnosis mismatch, unbundling, E/M, lookup and recording validity",
+            "how": "Replay coding labels and tool traces from existing Langfuse claim experiments."
+          },
+          {
+            "level": "agent",
+            "metric": "complete accurate coded finding set",
+            "how": "Use current per-agent coding finding scores and rejected-call traces."
+          },
+          {
+            "level": "environment",
+            "metric": "payment correctness and corrections",
+            "how": "Compare end-to-end claim and payment labels where coding findings change adjudication."
+          }
+        ],
+        "samples": 80,
+        "stopEarly": "Stop when repeated missed material coding findings or unsupported upcoding alerts exceed reviewer-accepted baseline."
+      }
+    },
+    {
+      "title": "Coverage adjudication",
+      "agent": "Coverage adjudication agent",
+      "callsPerRun": 4,
+      "input": "Claims lines, plan rules and tool-calculated amounts",
+      "work": "Decide and record pay/deny per line with denial codes",
+      "output": "Recorded per-line decisions",
+      "summary": "Opus 5 leads relevant revenue-cycle tool workflows; use your labelled per-line decisions and final payment checks to select. UAE processing unknown for every route: fictional test gap only.",
+      "workload": {
+        "inputTokens": 11000,
+        "outputTokens": 1800
+      },
+      "priority": "quality",
+      "qualityBar": 82,
+      "models": [
+        {
+          "rank": 1,
+          "id": "anthropic/claude-opus-5",
+          "name": "Claude Opus 5",
+          "provider": "Anthropic",
+          "rationale": "Leading RCM agent and eligibility-rule reasoning proxy.",
+          "watchOut": "Plan-specific denial rules require local evaluation.",
+          "quality": {
+            "score": 94,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.926789,
+                "rank": 1,
+                "of": 20
+              },
+              {
+                "benchmark": "vals:public-benefits-bench",
+                "name": "Public Benefits Bench v1.1 · Vals AI",
+                "score": 0.76928,
+                "rank": 1,
+                "of": 45
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 100,
+            "usdPer1kAgentRuns": 400,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5",
+            "providerModelId": "anthropic/claude-opus-5",
+            "inputPerMillion": 5,
+            "outputPerMillion": 25,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 5
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 25
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-24",
+            "ageDays": 104
+          },
+          "best": [
+            "quality"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "provider": "Google",
+          "rationale": "Strong RCM workflows and agent planning.",
+          "watchOut": "No proven UAE endpoint.",
+          "quality": {
+            "score": 92,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.914878,
+                "rank": 2,
+                "of": 20
+              },
+              {
+                "benchmark": "epoch:APEX-Agents",
+                "name": "APEX-Agents",
+                "score": 0.8240000000000001,
+                "rank": 1,
+                "of": 53
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 40,
+            "usdPer1kAgentRuns": 160,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-4-argon",
+            "providerModelId": "google/gemini-4-argon",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 63.4,
+            "firstTokenSeconds": 41.5,
+            "tokensPerSecond": 82,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-13",
+            "ageDays": 23
+          },
+          "best": [
+            "cost",
+            "recency"
+          ]
+        },
+        {
+          "rank": 3,
+          "id": "anthropic/claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+          "provider": "Anthropic",
+          "rationale": "Strong RCM agent result.",
+          "watchOut": "No direct plan-denial benchmark.",
+          "quality": {
+            "score": 89,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.912437,
+                "rank": 3,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 40,
+            "usdPer1kAgentRuns": 160,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5",
+            "providerModelId": "anthropic/claude-sonnet-5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-06-30",
+            "ageDays": 128
+          },
+          "best": [
+            "cost"
+          ]
+        },
+        {
+          "rank": 4,
+          "id": "openai/gpt-5.6-sol",
+          "name": "GPT-5.6 Sol",
+          "provider": "OpenAI",
+          "rationale": "Strong RCM result and complex reasoning.",
+          "watchOut": "No plan-specific evidence.",
+          "quality": {
+            "score": 88,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.9121210000000001,
+                "rank": 4,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 80,
+            "usdPer1kAgentRuns": 320,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:openai/gpt-5.6-sol",
+            "providerModelId": "openai/gpt-5.6-sol",
+            "inputPerMillion": 4,
+            "outputPerMillion": 20,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 4
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 20
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-09",
+            "ageDays": 119
+          },
+          "best": []
+        },
+        {
+          "rank": 5,
+          "id": "anthropic/claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "provider": "Anthropic",
+          "rationale": "Strong RCM tool and policy proxy.",
+          "watchOut": "Potential wrong denial codes.",
+          "quality": {
+            "score": 86,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.910501,
+                "rank": 5,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 40,
+            "usdPer1kAgentRuns": 160,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5.5",
+            "providerModelId": "anthropic/claude-sonnet-5.5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 30,
+            "firstTokenSeconds": 12.6,
+            "tokensPerSecond": 103,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-28",
+            "ageDays": 38
+          },
+          "best": [
+            "cost"
+          ]
+        }
+      ],
+      "evaluation": {
+        "checks": [
+          {
+            "level": "task",
+            "metric": "line pay/deny and denial-code accuracy, successful tool recording",
+            "how": "Replay existing labelled per-line decisions and rejected-tool traces for each model."
+          },
+          {
+            "level": "agent",
+            "metric": "all lines correct per agent run",
+            "how": "Compare existing Langfuse adjudication agent runs against line labels."
+          },
+          {
+            "level": "environment",
+            "metric": "payment correctness and review load",
+            "how": "Use existing end-to-end claim correct/payment correct and reviewer load scores."
+          }
+        ],
+        "samples": 100,
+        "stopEarly": "Stop on recurring wrong-pay lines or recording failures versus incumbent even if overall accuracy appears close."
+      }
+    },
+    {
+      "title": "Fraud review",
+      "agent": "Fraud review agent",
+      "callsPerRun": 4,
+      "input": "Claim, member history and provider statistics",
+      "work": "Score fraud, waste and abuse signals and record pay/review/hold recommendation",
+      "output": "0–1 signal scores and recommendation",
+      "summary": "Opus 5 is a starting point for structured claim investigation; no public result directly proves fraud calibration. Compare recommendation and reviewer load in existing evals. Every endpoint has unknown UAE processing.",
+      "workload": {
+        "inputTokens": 12000,
+        "outputTokens": 1800
+      },
+      "priority": "quality",
+      "qualityBar": 78,
+      "models": [
+        {
+          "rank": 1,
+          "id": "anthropic/claude-opus-5",
+          "name": "Claude Opus 5",
+          "provider": "Anthropic",
+          "rationale": "Leading revenue-cycle agent system-state performance.",
+          "watchOut": "Fraud score calibration unproven.",
+          "quality": {
+            "score": 91,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.926789,
+                "rank": 1,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 105,
+            "usdPer1kAgentRuns": 420,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5",
+            "providerModelId": "anthropic/claude-opus-5",
+            "inputPerMillion": 5,
+            "outputPerMillion": 25,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 5
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 25
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-24",
+            "ageDays": 104
+          },
+          "best": [
+            "quality"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "provider": "Google",
+          "rationale": "Strong agent and analytical proxy.",
+          "watchOut": "Provider outliers can cause false holds.",
+          "quality": {
+            "score": 90,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.914878,
+                "rank": 2,
+                "of": 20
+              },
+              {
+                "benchmark": "livebench:data_analysis",
+                "name": "LiveBench 2.0 · Data Analysis",
+                "score": 0.852,
+                "rank": 1,
+                "of": 27
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 42,
+            "usdPer1kAgentRuns": 168,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-4-argon",
+            "providerModelId": "google/gemini-4-argon",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 63.4,
+            "firstTokenSeconds": 41.5,
+            "tokensPerSecond": 82,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-13",
+            "ageDays": 23
+          },
+          "best": [
+            "cost",
+            "recency"
+          ]
+        },
+        {
+          "rank": 3,
+          "id": "anthropic/claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+          "provider": "Anthropic",
+          "rationale": "Strong RCM agent benchmark.",
+          "watchOut": "No fraud-specific benchmark.",
+          "quality": {
+            "score": 87,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.912437,
+                "rank": 3,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 42,
+            "usdPer1kAgentRuns": 168,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5",
+            "providerModelId": "anthropic/claude-sonnet-5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-06-30",
+            "ageDays": 128
+          },
+          "best": [
+            "cost"
+          ]
+        },
+        {
+          "rank": 4,
+          "id": "openai/gpt-5.6-sol",
+          "name": "GPT-5.6 Sol",
+          "provider": "OpenAI",
+          "rationale": "Strong agent workflow proxy.",
+          "watchOut": "Scores require calibration.",
+          "quality": {
+            "score": 86,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.9121210000000001,
+                "rank": 4,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 84,
+            "usdPer1kAgentRuns": 336,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:openai/gpt-5.6-sol",
+            "providerModelId": "openai/gpt-5.6-sol",
+            "inputPerMillion": 4,
+            "outputPerMillion": 20,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 4
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 20
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-09",
+            "ageDays": 119
+          },
+          "best": []
+        },
+        {
+          "rank": 5,
+          "id": "anthropic/claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "provider": "Anthropic",
+          "rationale": "Relevant agent and analysis proxies.",
+          "watchOut": "No fraud-specific public result.",
+          "quality": {
+            "score": 85,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.910501,
+                "rank": 5,
+                "of": 20
+              },
+              {
+                "benchmark": "aa:analystAgent",
+                "name": "Analyst Agent · AA",
+                "score": 0.575,
+                "rank": 3,
+                "of": 41
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 42,
+            "usdPer1kAgentRuns": 168,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5.5",
+            "providerModelId": "anthropic/claude-sonnet-5.5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 30,
+            "firstTokenSeconds": 12.6,
+            "tokensPerSecond": 103,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-28",
+            "ageDays": 38
+          },
+          "best": [
+            "cost"
+          ]
+        }
+      ],
+      "evaluation": {
+        "checks": [
+          {
+            "level": "task",
+            "metric": "signal support, 0–1 score calibration and valid recorded recommendation",
+            "how": "Replay existing fraud labels and tool-call traces, inspecting evidential support for scored signals."
+          },
+          {
+            "level": "agent",
+            "metric": "pay/review/hold agreement and unnecessary holds",
+            "how": "Use existing agent fraud recommendation score against reviewer decisions."
+          },
+          {
+            "level": "environment",
+            "metric": "review load with correct payments",
+            "how": "Compare existing end-to-end Langfuse review-load and payment-correct outcomes."
+          }
+        ],
+        "samples": 100,
+        "stopEarly": "Stop if false holds rise without improvement on labelled true-risk claims or if recording repeatedly fails."
+      }
+    }
+  ],
+  "next": "Present each task's shortlist with its trade-offs and its evaluation, and let the user choose. Offer to measure the candidates with the project's existing evals as the evaluation describes, then report the aggregate results with this conversationId and results. To refine, call scout_models with this conversationId and a prompt."
+}
