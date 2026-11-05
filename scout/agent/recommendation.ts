@@ -152,8 +152,9 @@ export interface RecommendedModel {
   // endpointId and providerModelId identify that route and the model ID its API expects.
   // Token prices are kept for the shortlist table; rates lists every price used; unpriced lists quantities the route does not bill.
   // usdPer1kAgentRuns: the same route's cost of 1,000 runs of the task's agent, when one run makes the call several times.
+  // calibration: the estimate was scaled by the median ratio of measured to estimated cost on this task (results are the measured:<id> used).
   // measured: the user's own measured cost for this task, which ranks ahead of the catalogue estimate (result is its measured:<id>).
-  cost: { usdPer1kTasks: number; usdPer1kAgentRuns?: number; measured?: { usdPer1kTasks: number; usdPer1kAgentRuns?: number; result: string }; route: string; endpointId: string; providerModelId: string; inputPerMillion: number | null; outputPerMillion: number | null; rates: Array<{ unit: string; kind: string; amount: number }>; unpriced: Quantity[] } | null;
+  cost: { usdPer1kTasks: number; usdPer1kAgentRuns?: number; calibration?: { factor: number; results: string[] }; measured?: { usdPer1kTasks: number; usdPer1kAgentRuns?: number; result: string }; route: string; endpointId: string; providerModelId: string; inputPerMillion: number | null; outputPerMillion: number | null; rates: Array<{ unit: string; kind: string; amount: number }>; unpriced: Quantity[] } | null;
   latency: { seconds: number; firstTokenSeconds: number; tokensPerSecond: number; source: string | null } | null;
   recency: { released: string; ageDays: number } | null;
   best: Axis[];
@@ -313,6 +314,20 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
   // Rank by the priority, lower first; unknown values go last, and ties keep the agent's order.
   // Only the top five are shown, so a costlier unmeasured model cannot displace a cheaper one that reaches the bar.
   // A cost that leaves part of the workload unpriced understates the bill, so it ranks as unknown.
+  // The workload is Scout's guess, so the user's measured cost on this task calibrates every estimate in it:
+  // the median ratio of measured to estimated cost among measured models scales all fully priced estimates alike,
+  // which keeps their order and makes their size comparable with what the user pays.
+  const calibrating = assessed.flatMap(m => m.cost?.measured && !m.cost.unpriced.length && m.cost.usdPer1kTasks > 0 ? [{ ratio: m.cost.measured.usdPer1kTasks / m.cost.usdPer1kTasks, result: m.cost.measured.result }] : []);
+  const ratios = calibrating.map(x => x.ratio).sort((a, b) => a - b);
+  if (ratios.length) {
+    const factor = ratios.length % 2 ? ratios[(ratios.length - 1) / 2]! : (ratios[ratios.length / 2 - 1]! + ratios[ratios.length / 2]!) / 2;
+    const from = calibrating.map(x => x.result);
+    for (const m of assessed) if (m.cost && !m.cost.unpriced.length) {
+      m.cost.usdPer1kTasks = round(m.cost.usdPer1kTasks * factor, 4);
+      if (m.cost.usdPer1kAgentRuns !== undefined) m.cost.usdPer1kAgentRuns = round(m.cost.usdPer1kAgentRuns * factor, 4);
+      m.cost.calibration = { factor: round(factor, 4), results: from };
+    }
+  }
   const priority = s.priority ?? 'cost';
   const keys: Record<Axis, (m: RecommendedModel) => number | null> = {
     quality: m => -m.quality.score, cost: m => m.cost && !m.cost.unpriced.length ? m.cost.usdPer1kTasks : null, recency: m => m.recency?.ageDays ?? null,
