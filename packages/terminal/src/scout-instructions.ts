@@ -102,7 +102,11 @@ eval platform.
 Report what you measured with \`scout_models\`: the same \`conversationId\` and
 \`results\`, one aggregate per model and metric (\`level\`, \`task\` title, \`scope\`,
 \`model\` endpoint or model ID, \`metric\`, \`value\`, \`higherIsBetter\`,
-\`samples\`, \`source\`). Send aggregates only, never inputs, outputs or records.
+\`samples\`, \`source\`). Set \`kind\` to \`usd\` or \`seconds\` for measured cost
+or time (per call at the task level, per run at the agent level), so Scout uses
+your cost instead of its estimate. Report each agent's own checks at the agent
+level: an end-to-end result also measures the agents you did not swap. Send
+aggregates only, never inputs, outputs or records.
 Scout ranks them above public benchmarks for this user only; models whose
 \`quality.measured\` is true rest on them.
 

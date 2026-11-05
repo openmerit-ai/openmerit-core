@@ -91,12 +91,18 @@ export type Axis = typeof axes[number];
 export const levels = ['task', 'agent', 'environment'] as const;
 export type Level = typeof levels[number];
 
+// What a result measures: quality (the default), or what the work cost in USD or took in seconds:
+// per model call at the task level, per agent run at the agent level, per outcome at the environment level.
+export const measureKinds = ['quality', 'usd', 'seconds'] as const;
+export type MeasureKind = typeof measureKinds[number];
+
 // An aggregate result the customer measured with their own evals and reported on a conversation.
 // Only aggregates reach Scout, never the inputs or outputs they were measured on.
 // They are stored with the conversation and inform only that user's recommendations.
 export interface Measurement {
   id: string; // m1, m2, … in the order Scout received them
   level: Level;
+  kind: MeasureKind;
   task: string | null; // the plan task title it measures, when it measures one task
   scope: string; // what was measured, in the user's words, such as "adjudication agent"
   model: string; // catalogue model ID or endpoint ID
@@ -146,7 +152,8 @@ export interface RecommendedModel {
   // endpointId and providerModelId identify that route and the model ID its API expects.
   // Token prices are kept for the shortlist table; rates lists every price used; unpriced lists quantities the route does not bill.
   // usdPer1kAgentRuns: the same route's cost of 1,000 runs of the task's agent, when one run makes the call several times.
-  cost: { usdPer1kTasks: number; usdPer1kAgentRuns?: number; route: string; endpointId: string; providerModelId: string; inputPerMillion: number | null; outputPerMillion: number | null; rates: Array<{ unit: string; kind: string; amount: number }>; unpriced: Quantity[] } | null;
+  // measured: the user's own measured cost for this task, which ranks ahead of the catalogue estimate (result is its measured:<id>).
+  cost: { usdPer1kTasks: number; usdPer1kAgentRuns?: number; measured?: { usdPer1kTasks: number; usdPer1kAgentRuns?: number; result: string }; route: string; endpointId: string; providerModelId: string; inputPerMillion: number | null; outputPerMillion: number | null; rates: Array<{ unit: string; kind: string; amount: number }>; unpriced: Quantity[] } | null;
   latency: { seconds: number; firstTokenSeconds: number; tokensPerSecond: number; source: string | null } | null;
   recency: { released: string; ageDays: number } | null;
   best: Axis[];
@@ -235,14 +242,23 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
     const measured = new Set([...m.evidence.map(e => e.benchmark), ...m.boards.map(b => b.board), ...own.map(x => `measured:${x.id}`)]);
     const missing = r.evidence.filter(id => !measured.has(id));
     if (missing.length) problems.push(`${m.id} has no results on ${missing.join(', ')}; cite only benchmark or leaderboard IDs from its get_model_details results, or measured:<id> for the user's results on this model.`);
-    const uncited = own.filter(x => sameTitle(x.task, context.task?.title) && !r.evidence.includes(`measured:${x.id}`));
+    const uncited = own.filter(x => x.kind === 'quality' && sameTitle(x.task, context.task?.title) && !r.evidence.includes(`measured:${x.id}`));
     if (uncited.length) problems.push(`The user measured ${m.id} on this task (${uncited.map(x => `measured:${x.id}`).join(', ')}); cite those results and base its quality estimate on them.`);
     // An agent's call fails on a malformed tool call as surely as on a wrong answer, so domain benchmarks alone cannot put it over the bar.
-    if (context.task?.agent && r.quality >= s.qualityBar && !r.evidence.some(id => measurement.has(id) || agentic.has(id)))
+    if (context.task?.agent && r.quality >= s.qualityBar && !r.evidence.some(id => measurement.get(id)?.kind === 'quality' || agentic.has(id)))
       problems.push(`${m.id} reaches the quality bar for an agent's call without evidence of tool calling: cite a tools or agents benchmark from its get_model_details results, or the user's measured result, or estimate it below the bar.`);
   }
   const eligible = catalogue.models.filter(m => violation(m, filters) === null).length;
   const qualifying = s.candidates.filter(r => r.quality >= s.qualityBar);
+  // An environment result also measures every other agent, so a miss there need not be this task's model.
+  // A candidate whose own task- and agent-level quality results on this task match a qualifying candidate's cannot be dropped below the bar.
+  const ownQuality = (id: string) => { const m = byId.get(id); return m ? measuredOn(m, results).filter(x => x.kind === 'quality' && x.level !== 'environment' && sameTitle(x.task, context.task?.title)) : []; };
+  const peers = qualifying.flatMap(r => ownQuality(r.modelId));
+  for (const r of s.candidates.filter(r => r.quality < s.qualityBar)) {
+    const own = ownQuality(r.modelId);
+    const matched = own.length > 0 && own.every(x => peers.some(y => y.metric === x.metric && y.level === x.level && (x.higherIsBetter ? x.value >= y.value : x.value <= y.value)));
+    if (matched) problems.push(`${r.modelId} is below the bar, but its task- and agent-level results on this task (${own.map(x => `measured:${x.id}`).join(', ')}) match a candidate at or above it. Environment-level results include the other agents, so they do not show this model fell short: estimate it from its own results, or cite one that shows it is worse.`);
+  }
   // Five assessed candidates keep cheaper models from being left out; fewer may reach the bar, so the bar never has to drop to fill the list.
   if (!problems.length && s.candidates.length < Math.min(5, eligible)) problems.push(`Assess at least five candidates; ${s.candidates.length} submitted, and ${eligible} models meet the constraints${filters.kind ? '' : ' (set filters.kind when the task needs one kind of model)'}. Assess more models that can do this task.`);
   if (!problems.length && eligible && !qualifying.length) problems.push(`No candidate reaches the quality bar of ${s.qualityBar}. Assess stronger models that can do this task.`);
@@ -277,13 +293,18 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
       if (!c.used.length) continue;
       if (!best || covered > best.covered || covered === best.covered && (c.unpriced.length < best.unpriced.length || c.unpriced.length === best.unpriced.length && c.usd < best.usd)) best = { route, covered, ...c };
     }
+    // The user's measured cost on this task: per agent run at the agent level, per call at the task level.
+    const spent = measuredOn(m, results).filter(x => x.kind === 'usd' && x.level !== 'environment' && sameTitle(x.task, context.task?.title))
+      .sort((a, b) => (a.level === 'agent' ? 0 : 1) - (b.level === 'agent' ? 0 : 1))[0];
+    const perRun = spent ? (spent.level === 'agent' ? spent.value : spent.value * calls) : null;
+    const measuredCost = spent && perRun !== null ? { usdPer1kTasks: round(perRun / calls * 1000, 4), ...(calls > 1 ? { usdPer1kAgentRuns: round(perRun * 1000, 4) } : {}), result: `measured:${spent.id}` } : undefined;
     const tps = m.speed?.tokensPerSecond, ttft = m.speed?.timeToFirstToken;
     const released = m.releaseDate;
     return {
       rank: i + 1, id: m.id, name: m.name, provider: m.provider, rationale: r.rationale, watchOut: r.watchOut ?? null,
-      quality: { score: r.quality, measured: r.evidence.some(id => measurement.has(id)), evidence: r.evidence.map(id => ({ benchmark: id, name: label(id), ...standing(id, m.id) })) },
+      quality: { score: r.quality, measured: r.evidence.some(id => measurement.get(id)?.kind === 'quality'), evidence: r.evidence.map(id => ({ benchmark: id, name: label(id), ...standing(id, m.id) })) },
       cost: best ? { usdPer1kTasks: round(best.usd * 1000, 4), ...(calls > 1 ? { usdPer1kAgentRuns: round(best.usd * 1000 * calls, 4) } : {}), route: best.route.provider, endpointId: best.route.id, providerModelId: best.route.modelId, inputPerMillion: best.route.inputPrice, outputPerMillion: best.route.outputPrice,
-        rates: best.used.map(x => ({ unit: unitLabels[x.unit], kind: x.kind, amount: x.amount })), unpriced: best.unpriced } : null,
+        rates: best.used.map(x => ({ unit: unitLabels[x.unit], kind: x.kind, amount: x.amount })), unpriced: best.unpriced, ...(measuredCost ? { measured: measuredCost } : {}) } : null,
       latency: tps && ttft != null && outputTokens ? { seconds: round(ttft + outputTokens / tps, 1), firstTokenSeconds: round(ttft, 1), tokensPerSecond: Math.round(tps), source: m.speed?.source ?? null } : null,
       recency: released ? { released, ageDays: Math.max(0, Math.floor((now - Date.parse(released)) / 86_400_000)) } : null,
       best: [],
@@ -298,7 +319,10 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
   };
   // Models the user measured come first: their own result on this work outranks a public benchmark,
   // so an unmeasured model cannot lead on a benchmark-based estimate. Within each group the priority ranks.
-  const key = (m: RecommendedModel) => keys[priority](m) ?? Infinity;
+  // Measured cost replaces the estimate when every model in the group has one; estimates can be far off and must not be mixed with it.
+  const allMeasuredCost = (measured: boolean) => assessed.filter(m => m.quality.measured === measured).every(m => m.cost?.measured);
+  const useMeasured = { true: allMeasuredCost(true), false: allMeasuredCost(false) };
+  const key = (m: RecommendedModel) => (priority === 'cost' && useMeasured[`${m.quality.measured}`] ? m.cost?.measured?.usdPer1kTasks : keys[priority](m)) ?? Infinity;
   const order = (a: RecommendedModel, b: RecommendedModel) => Number(b.quality.measured) - Number(a.quality.measured) || (key(a) === key(b) ? 0 : key(a) - key(b));
   const models = assessed.sort(order).slice(0, 5);
   models.forEach((m, i) => { m.rank = i + 1; });

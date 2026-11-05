@@ -6,7 +6,7 @@
 // the conversation ID, so one user cannot open another's conversation. The MCP
 // server (../mcp.mjs) runs coding agents' turns through the same converse().
 import { json, readJSON } from '../http.mjs';
-import { components, levels, type MeasurementInput } from './recommendation.ts';
+import { components, levels, measureKinds, type MeasurementInput } from './recommendation.ts';
 import type { AgentState, BriefEdits, Channel, TurnRequest } from './turn.ts';
 
 interface Conversation { turn(request: TurnRequest, channel?: Channel): Promise<AgentState>; state(): Promise<AgentState> }
@@ -16,8 +16,8 @@ export const agentPath = /^\/scout\/api\/agent(?:\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const text = (v: unknown, max: number) => typeof v === 'string' && v.length <= max ? v : null;
 
-const resultFields = ['level', 'task', 'scope', 'model', 'metric', 'value', 'higherIsBetter', 'samples', 'source'];
-export const resultsHelp = 'results is a list of up to 50 aggregate results: {level: task|agent|environment, task?, scope, model, metric, value, higherIsBetter, samples, source}, with text fields of at most 200 characters, a finite value and a whole number of samples. Send aggregates only, never inputs or outputs.';
+const resultFields = ['level', 'kind', 'task', 'scope', 'model', 'metric', 'value', 'higherIsBetter', 'samples', 'source'];
+export const resultsHelp = 'results is a list of up to 50 aggregate results: {level: task|agent|environment, kind?: quality|usd|seconds (default quality), task?, scope, model, metric, value, higherIsBetter, samples, source}, with text fields of at most 200 characters, a finite value and a whole number of samples. Send aggregates only, never inputs or outputs.';
 // Aggregate results the user measured with their own evals, or null when they are malformed.
 function parseResults(value: unknown): MeasurementInput[] | null {
   if (!Array.isArray(value) || !value.length || value.length > 50) return null;
@@ -26,10 +26,11 @@ function parseResults(value: unknown): MeasurementInput[] | null {
     if (!isObject(r) || Object.keys(r).some(k => !resultFields.includes(k))) return null;
     const [scope, model, metric, source] = [r.scope, r.model, r.metric, r.source].map(v => text(v, 200)?.trim() || null);
     const task = r.task === undefined ? null : text(r.task, 200)?.trim() || null;
-    if (!scope || !model || !metric || !source || (r.task !== undefined && !task) || !(levels as readonly unknown[]).includes(r.level)
+    const kind = r.kind === undefined ? 'quality' : (measureKinds as readonly unknown[]).includes(r.kind) ? r.kind as MeasurementInput['kind'] : null;
+    if (!scope || !model || !metric || !source || !kind || (r.task !== undefined && !task) || !(levels as readonly unknown[]).includes(r.level)
       || typeof r.value !== 'number' || !Number.isFinite(r.value) || typeof r.higherIsBetter !== 'boolean'
       || typeof r.samples !== 'number' || !Number.isSafeInteger(r.samples) || r.samples < 1) return null;
-    parsed.push({ level: r.level as MeasurementInput['level'], task, scope, model, metric, value: r.value, higherIsBetter: r.higherIsBetter, samples: r.samples, source });
+    parsed.push({ level: r.level as MeasurementInput['level'], kind, task, scope, model, metric, value: r.value, higherIsBetter: r.higherIsBetter, samples: r.samples, source });
   }
   return parsed;
 }

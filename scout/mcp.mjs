@@ -13,6 +13,7 @@ const tool = {
     skip: { type: 'boolean', description: 'Skip the remaining clarifying questions; Scout recommends with stated assumptions.' },
     results: { type: 'array', minItems: 1, maxItems: 50, description: 'Aggregate results you measured with your own evals, such as the candidate runs of a task\'s evaluation. Aggregates only: never inputs, outputs or records.', items: { type: 'object', additionalProperties: false, required: ['level', 'scope', 'model', 'metric', 'value', 'higherIsBetter', 'samples', 'source'], properties: {
       level: { type: 'string', enum: ['task', 'agent', 'environment'], description: 'task: one model call; agent: one agent run; environment: the end-to-end outcome.' },
+      kind: { type: 'string', enum: ['quality', 'usd', 'seconds'], description: 'What value measures: quality (the default), or cost in USD or time in seconds per model call (task level), per agent run (agent level) or per outcome (environment level). Measured cost replaces Scout\'s estimate.' },
       task: { type: 'string', maxLength: 200, description: 'The title of the Scout task this measures, when it measures one task.' },
       scope: { type: 'string', maxLength: 200, description: 'What was measured, such as "adjudication agent" or "claims pipeline".' },
       model: { type: 'string', maxLength: 200, description: 'The catalogue model ID or endpoint ID that was measured.' },

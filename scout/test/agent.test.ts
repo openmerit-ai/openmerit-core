@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { benchmarkLeaderboard, modelRecord, searchModels, type Catalogue, type ModelRecord } from '../agent/catalogue.ts';
-import { finalize, type Submission } from '../agent/recommendation.ts';
+import { finalize, type Measurement, type Submission } from '../agent/recommendation.ts';
 import { handleAgent, parseTurn, type AgentNamespace } from '../agent/routes.ts';
 import { scoutTools, type Answer, type PlanState, type ToolHost } from '../agent/tools.ts';
 import { turnText, type AgentState, type Channel, type TurnRequest } from '../agent/turn.ts';
@@ -96,7 +96,7 @@ test('fewer than five may reach the bar, so the bar never drops to fill the shor
 });
 
 test('for an agent\'s call, only tool-calling evidence or a measured result puts a candidate over the bar', () => {
-  const measured = { id: 'm1', level: 'agent' as const, task: 'Extract', scope: 'extraction agent', model: 'lab/delta', metric: 'claims correct', value: 0.9, higherIsBetter: true, samples: 30, source: 'Langfuse' };
+  const measured = { id: 'm1', level: 'agent' as const, kind: 'quality' as const, task: 'Extract', scope: 'extraction agent', model: 'lab/delta', metric: 'claims correct', value: 0.9, higherIsBetter: true, samples: 30, source: 'Langfuse' };
   const agentCall = { task: { ...task('Extract'), agent: 'Extraction agent' }, measurements: [measured] };
   const shortlist = (alphaQuality: number) => submission([pick('lab/alpha', alphaQuality, ['b1']), pick('lab/gamma', 80, ['b2']), pick('lab/delta', 80, ['measured:m1']), pick('lab/beta', 30, ['b1']), pick('lab/epsilon', 30)]);
   // Alpha leads Bench One, a domain benchmark, but that alone cannot qualify it for a call that uses tools.
@@ -155,7 +155,7 @@ test('the web page splits work into at most three tasks; coding agents have no l
 
 test('the user\'s measured results outrank benchmarks: a measured candidate must cite them, and agent runs are priced', () => {
   const measured = (id: string, model: string, value: number, task: string | null = 'Extract') =>
-    ({ id, level: 'agent' as const, task, scope: 'extraction agent', model, metric: 'fields correct', value, higherIsBetter: true, samples: 40, source: 'Langfuse experiment invoices-1' });
+    ({ id, level: 'agent' as const, kind: 'quality' as const, task, scope: 'extraction agent', model, metric: 'fields correct', value, higherIsBetter: true, samples: 40, source: 'Langfuse experiment invoices-1' });
   // Alpha's result is reported by one of its endpoint IDs, beta's by its model ID; m3 is for another task.
   const measurements = [measured('m1', 'lab/beta', 0.97), measured('m2', 'Vision:m', 0.81), measured('m3', 'lab/gamma', 0.5, 'Summarize')];
   const context = { task: { ...task('Extract'), agent: 'Extraction agent', callsPerRun: 4 }, measurements };
@@ -183,14 +183,35 @@ test('the user\'s measured results outrank benchmarks: a measured candidate must
   assert.deepEqual(result.evaluation, evaluation);
 });
 
+test('an environment miss does not drop a model whose own results match, and measured cost replaces the estimate', () => {
+  const result = (id: string, model: string, value: number, extra: Partial<Measurement> = {}): Measurement =>
+    ({ id, level: 'agent', kind: 'quality', task: 'Extract', scope: 'extraction agent swapped, others fixed', model, metric: 'fields correct', value, higherIsBetter: true, samples: 14, source: 'Langfuse', ...extra });
+  const context = (measurements: Measurement[]) => ({ task: { ...task('Extract'), agent: 'Extraction agent', callsPerRun: 4 }, measurements });
+  const shortlist = (alpha: number, alphaCites: string[]) => submission([pick('lab/beta', 70, ['measured:q1']), pick('lab/alpha', alpha, alphaCites), pick('lab/gamma', 70, ['b2']), pick('lab/delta', 40), pick('lab/epsilon', 40)]);
+  // Alpha ties beta on its own agent checks; its 13/14 end-to-end result also measures the agents that were not swapped.
+  const tied = [result('q1', 'lab/beta', 1), result('q2', 'lab/alpha', 1), result('e1', 'lab/alpha', 0.93, { level: 'environment', metric: 'claims correct' })];
+  assert.throws(() => finalize(toolCatalogue, shortlist(40, ['measured:q2', 'measured:e1']), now, {}, context(tied)), /lab\/alpha is below the bar, but its task- and agent-level results on this task \(measured:q2\) match a candidate at or above it/);
+  // When its own agent checks are worse, dropping it stands.
+  const worse = [result('q1', 'lab/beta', 1), result('q2', 'lab/alpha', 0.9)];
+  assert.deepEqual(finalize(toolCatalogue, shortlist(40, ['measured:q2']), now, {}, context(worse)).models.map(m => m.id), ['lab/beta', 'lab/gamma']);
+  // Estimates put beta ($1.50 per 1k calls) ahead of alpha ($4); measured cost per agent run reverses it: alpha $0.005 (four calls, $1.25 per 1k calls), beta $0.02.
+  const costs = [...tied.slice(0, 2), result('c1', 'lab/beta', 0.02, { kind: 'usd', metric: 'usd per run', higherIsBetter: false }), result('c2', 'lab/alpha', 0.005, { kind: 'usd', metric: 'usd per run', higherIsBetter: false })];
+  const ranked = finalize(toolCatalogue, shortlist(70, ['measured:q2']), now, {}, context(costs));
+  assert.deepEqual(ranked.models.map(m => m.id), ['lab/alpha', 'lab/beta', 'lab/gamma']);
+  assert.deepEqual(ranked.models[0]?.cost?.measured, { usdPer1kTasks: 1.25, usdPer1kAgentRuns: 5, result: 'measured:c2' });
+  assert.equal(ranked.models[0]?.cost?.usdPer1kTasks, 4);
+});
+
 test('measured results are validated, labelled for the model and passed to the conversation', () => {
   const id = '6cbb63c0-e848-4d65-9231-171c95756cf1';
   const result = { level: 'environment', scope: 'claims pipeline', model: 'lab/beta', metric: 'claims correct', value: 0.98, higherIsBetter: true, samples: 42, source: 'Langfuse dataset run' };
-  assert.deepEqual(parseTurn({ conversationId: id, results: [result] }), { conversationId: id, turn: { skip: false, results: [{ ...result, task: null }] } });
-  for (const bad of [[], [{ ...result, value: Number.NaN }], [{ ...result, samples: 0 }], [{ ...result, level: 'org' }], [{ ...result, input: 'raw claim text' }], [{ ...result, source: '' }], Array(51).fill(result)])
+  assert.deepEqual(parseTurn({ conversationId: id, results: [result] }), { conversationId: id, turn: { skip: false, results: [{ ...result, kind: 'quality', task: null }] } });
+  // A cost result keeps its kind and reads as a cost, never as quality.
+  assert.deepEqual(parseTurn({ conversationId: id, results: [{ ...result, kind: 'usd', level: 'agent' }] }), { conversationId: id, turn: { skip: false, results: [{ ...result, kind: 'usd', level: 'agent', task: null }] } });
+  for (const bad of [[], [{ ...result, value: Number.NaN }], [{ ...result, samples: 0 }], [{ ...result, level: 'org' }], [{ ...result, kind: 'tokens' }], [{ ...result, input: 'raw claim text' }], [{ ...result, source: '' }], Array(51).fill(result)])
     assert.match(String(parseTurn({ conversationId: id, results: bad })), /^results is a list/);
-  assert.equal(turnText({}, [{ id: 'm1', task: 'Extract', ...result, level: 'task' }]),
-    'I measured these results with my own evals (aggregates only). Use them as evidence ahead of public benchmarks, cite them as measured:<id>, and recommend again:\n- measured:m1 · lab/beta · task level, task "Extract" (claims pipeline) · claims correct = 0.98 (higher is better) · 42 samples · Langfuse dataset run');
+  assert.equal(turnText({}, [{ id: 'm1', task: 'Extract', ...result, kind: 'quality', level: 'task' }, { id: 'm2', task: 'Extract', ...result, kind: 'usd', metric: 'cost', value: 0.01, higherIsBetter: false, level: 'agent' }]),
+    'I measured these results with my own evals (aggregates only). Use them as evidence ahead of public benchmarks, cite them as measured:<id>, and recommend again:\n- measured:m1 · lab/beta · task level, task "Extract" (claims pipeline) · claims correct = 0.98 (higher is better) · 42 samples · Langfuse dataset run\n- measured:m2 · lab/beta · agent level, cost in USD per agent run, task "Extract" (claims pipeline) · cost = 0.01 (lower is better) · 42 samples · Langfuse dataset run');
 });
 
 test('a turn ends only once every planned task has an accepted shortlist, answered in plan order', async () => {
@@ -292,7 +313,7 @@ test('coding agents reach the same conversations through MCP, relaying questions
   // Measured results continue the same conversation as a turn.
   const result = { level: 'agent', task: 'Summarize', scope: 'summary agent', model: 'lab/beta', metric: 'summaries accepted', value: 0.9, higherIsBetter: true, samples: 30, source: 'own eval' };
   await call({ conversationId: id, results: [result] });
-  assert.deepEqual(turns[2]?.request, { skip: false, results: [result] });
+  assert.deepEqual(turns[2]?.request, { skip: false, results: [{ ...result, kind: 'quality' }] });
   assert.match((await call({ conversationId: id, results: [{ ...result, output: 'raw text' }] })).content[0]?.text ?? '', /^results is a list/);
   assert.match((await call({ prompt: 'x'.repeat(4001) })).content[0]?.text ?? '', /^prompt must be text/);
 });

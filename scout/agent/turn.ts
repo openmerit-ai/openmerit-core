@@ -22,7 +22,7 @@ export interface AgentState { busy: boolean; turns: number; skipped: boolean; pr
 
 // One measured result as the model reads it, with the ID it cites.
 export const measurementLine = (r: Measurement) =>
-  `- measured:${r.id} · ${r.model} · ${r.level} level${r.task ? `, task "${r.task}"` : ''} (${r.scope}) · ${r.metric} = ${r.value} (${r.higherIsBetter ? 'higher' : 'lower'} is better) · ${r.samples} ${r.samples === 1 ? 'sample' : 'samples'} · ${r.source}`;
+  `- measured:${r.id} · ${r.model} · ${r.level} level${r.kind === 'quality' ? '' : `, ${r.kind === 'usd' ? 'cost in USD' : 'time in seconds'} per ${({ task: 'call', agent: 'agent run', environment: 'outcome' })[r.level]}`}${r.task ? `, task "${r.task}"` : ''} (${r.scope}) · ${r.metric} = ${r.value} (${r.higherIsBetter ? 'higher' : 'lower'} is better) · ${r.samples} ${r.samples === 1 ? 'sample' : 'samples'} · ${r.source}`;
 
 // The user's turn as the model reads it. Brief edits and measured results are labelled so the transcript shows where they came from.
 export function turnText(request: TurnRequest, measured: readonly Measurement[] = []): string {
