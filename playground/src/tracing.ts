@@ -5,7 +5,8 @@
 // Shape: each claim is a Langfuse session. Each agent run is a trace with one `agent` root span,
 // one `generation` per model call and one `tool` span per tool call, rebuilt from the Pi transcript.
 // The human approval and the payment form a final trace in the same session. In a scenario run, a
-// claim's final agent trace also carries Langfuse experiment attributes (its dataset item is the claim).
+// claim's final agent trace, and an enrollment's one agent trace, also carries Langfuse experiment
+// attributes (its dataset item is the claim or the application).
 
 import type { EntryRecord } from "@earendil-works/pi-durable";
 import type { AssistantMessage, Message, ToolResultMessage } from "@earendil-works/pi-ai";
@@ -21,7 +22,7 @@ export interface TraceContext {
   traceName: string;
   tags: string[];
   metadata: Record<string, string>;
-  /** Set on a claim's final agent trace in a scenario run: that trace is the claim's experiment item. */
+  /** Set on a case's final agent trace in a scenario run: that trace is the claim's or application's experiment item. */
   experiment?: ExperimentItem;
 }
 
@@ -37,7 +38,7 @@ export interface ExperimentContext {
 }
 
 export interface ExperimentItem extends ExperimentContext {
-  /** Dataset item ID; Sahra uses the claim ID. */
+  /** Dataset item ID; Sahra uses the claim ID or the application ID. */
   itemId: string;
   /** Span ID of the trace's root observation. */
   rootObservationId: string;
