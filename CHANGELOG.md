@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.4 — 2026-11-05
 
 - `openmerit scout --results` refuses a file with more than 50 results before sending it, instead of failing with HTTP 413; split larger reports into files of up to 50.
 - Claude Code's install success message names the MCP server, startup rule and skill instead of Pi's extension.
