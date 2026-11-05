@@ -72,6 +72,19 @@ jobs:
           assert.equal(typeof extension, "function");
           EOF
           node "$package_root/smoke.mjs"
+          # Claude Code auto-updates copy the shipped updater; it must exist in the package.
+          cat > "$package_root/updates-smoke.mjs" <<'EOF'
+          import assert from "node:assert/strict";
+          import { mkdtemp, readFile } from "node:fs/promises";
+          import { tmpdir } from "node:os";
+          import { join } from "node:path";
+          const updater = new URL("./node_modules/openmerit/dist/terminal/src/updates.js", import.meta.url);
+          const { configureUpdates, updatePaths } = await import(updater);
+          const base = await mkdtemp(join(tmpdir(), "claude-"));
+          await configureUpdates(base, "user", {}, "0.0.0", true);
+          assert.equal(await readFile(updatePaths(base, "user").runner, "utf8"), await readFile(updater, "utf8"));
+          EOF
+          node "$package_root/updates-smoke.mjs"
           "$package_root/node_modules/.bin/openmerit" --help | grep -q "openmerit scout"
           ./node_modules/.bin/pi --no-session \
             -e "$package_root/node_modules/openmerit/dist/pi/src/index.js" \
