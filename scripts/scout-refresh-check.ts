@@ -1,12 +1,13 @@
 // Read-only health check of Scout's catalogue refresh, run twice a day by an Amp schedule.
 // Reports failed public feeds (from /scout/api/status), catalogue imports that failed in the
-// last day (cat_runs in D1) and a catalogue that has not published for 26 hours, as JSON.
+// last day (cat_runs in D1), a catalogue that has not published for 26 hours, and a D1 read that
+// failed, as JSON.
 // Exits 1 when there is a problem. The schedule posts problems to Slack through Amp's Slack connection.
 //
 // Usage: node scripts/scout-refresh-check.ts
 import { execFileSync } from "node:child_process";
 
-interface Problem { id: string; kind: "feed" | "catalogue" | "publication"; error: string; since: string | null }
+interface Problem { id: string; kind: "feed" | "catalogue" | "publication" | "check"; error: string; since: string | null }
 const statusURL = "https://openmerit.ai/scout/api/status";
 const staleHours = 26; // The refresh runs at 00:07 and 12:07 UTC.
 
@@ -27,7 +28,8 @@ try {
   const rows = (JSON.parse(out) as Array<{ results: Array<{ source: string; status: string; error: string | null; started_at: string }> }>)[0]?.results ?? [];
   for (const r of rows) problems.push({ id: r.source, kind: "catalogue", error: short(r.error ?? (r.status === "running" ? "Import did not finish." : r.status)), since: r.started_at });
 } catch (error) {
-  console.error(`Could not read cat_runs from D1: ${short((error as Error).message)}`);
+  // An unavailable check is a problem too: never report success without it.
+  problems.push({ id: "cat_runs", kind: "check", error: `Could not read catalogue imports from D1: ${short((error as Error).message)}`, since: null });
 }
 
 const report = { checkedAt: new Date().toISOString(), catalogue: { version: status.snapshotVersion ?? null, publishedAt: status.checkedAt ?? null }, problems };

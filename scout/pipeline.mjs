@@ -167,7 +167,9 @@ export async function runRefresh(env,step,id) {
       next=retainResearch(next,previous);
       if(env.SCOUT_INDEX)next=addCatalogueRoutes(next,previous,supply,supplyError);
       // Later steps re-read the unchanged published generation instead of a copy here.
-      const key=`runs/${id}/collected.json`;await putJSON(bucket,key,{next});return key;
+      const key=`runs/${id}/collected.json`;await putJSON(bucket,key,{next});
+      // Written at collection, so the run report lists failed feeds even if a later step fails.
+      await putJSON(bucket,`runs/${id}/sources.json`,next.sources.map(({id,status,error,checkedAt})=>({id,status,error,checkedAt})));return key;
     });
     const candidateKey=await step.do('interpret-evidence',{retries:{limit:1,delay:'15 seconds'},timeout:'15 minutes'},async()=>{
       // The refresh lock keeps the published generation unchanged until this run publishes.
@@ -180,9 +182,7 @@ export async function runRefresh(env,step,id) {
       candidate=await refreshBenchmarks(candidate,previous,{...options,registry:candidate.registry,interpretations});
       candidate=await refreshSpecialists(candidate,previous,options);
       const {research:_ledgered,...records}=toRecords(candidate),key=`runs/${id}/candidate.json`;
-      await putJSON(bucket,key,{records,previous:publicationPredecessor(previous)});
-      // The run report reads only the feed states, not the whole candidate.
-      await putJSON(bucket,`runs/${id}/sources.json`,records.sources.map(({id,status,error,checkedAt})=>({id,status,error,checkedAt})));return key;
+      await putJSON(bucket,key,{records,previous:publicationPredecessor(previous)});return key;
     });
     const staged=await step.do('validate-and-stage',{retries:{limit:12,delay:'10 seconds',backoff:'constant'},timeout:'10 minutes'},async()=>{
       const {records,previous}=await getJSON(bucket,candidateKey);return stageCatalogue(bucket,records,previous,{...options,db:env.SCOUT_INDEX,vectorize:env.SCOUT_EVIDENCE});
