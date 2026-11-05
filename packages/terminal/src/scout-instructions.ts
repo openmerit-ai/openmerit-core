@@ -115,15 +115,28 @@ fixed. Use each agent's own checks to attribute failures. If all candidates scor
 100%, the eval cannot separate their quality: add harder labelled cases before
 claiming equivalent quality. Cost may break the observed tie, not prove equality.
 
-If the user has Langfuse, suggest \`openmerit connect langfuse\`. The user creates a
-separate Viewer key and enters it only in the signed-in browser, never in chat.
+If the user has Langfuse, use \`openmerit connect langfuse --help\`: the web UI is
+optional. Headless setup requires a separate connection-manager approval with
+\`openmerit connect langfuse --authorize --no-open\`. Relay its approval link and
+expiry; after approval, rerun that command. Existing recommendation keys cannot
+manage connections. The user creates a separate Viewer key; receive it through
+protected stdin or a secret-manager-injected environment, never chat, tool
+arguments, shell literals, traced commands or tracked files. The CLI accepts
+non-secret settings via \`--config mappings.json\` and reads LANGFUSE_PUBLIC_KEY
+and LANGFUSE_SECRET_KEY from its environment, or reads full settings via --stdin.
+A separate trusted MCP connection with the management key exposes
+\`scout_connection\` (status/configure/sync/disconnect/clear). For configure, keys
+must come from client-controlled HTTP headers outside model context; if the
+client cannot do this securely, use protected CLI input or the web UI instead.
 After they confirm connection and score/model mappings, call \`scout_models\` with
 \`sync: "langfuse"\` to refresh aggregate measurements before recommending. The CLI
 equivalent is \`openmerit scout --conversation <id> --sync langfuse\`. Never read
 trace bodies to work around missing mappings or untagged runs; use the aggregate
 report path instead. Results are stored per user, used in new conversations and
-expire after 90 days. Disconnect deletes the key and imported aggregates; the
-browser's Delete all evaluation data also deletes manually reported aggregates.
+expire after 90 days. Disconnect deletes the Viewer key and imported aggregates;
+Delete all evaluation data also deletes manually reported aggregates. Obtain
+consent before deleting: headless CLI requires --yes, MCP requires confirm: true.
+Deleting the connection does not revoke the separate management device key.
 Past conversation text is not erased. Never put record IDs, emails or secrets in
 \`scope\` or \`source\`; use labels such as "coding agent" and "held-out eval".
 

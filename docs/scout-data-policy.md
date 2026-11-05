@@ -37,7 +37,17 @@ Do not put record IDs, emails or sensitive information in labels; identifier-lik
 source/scope labels trigger warnings, not guaranteed redaction.
 
 Connecting Langfuse sends a separate Viewer key pair and mappings from the
-signed-in browser to Scout, encrypted at rest with a dedicated Worker secret.
+signed-in browser, headless CLI, authenticated API or trusted MCP client to Scout,
+encrypted at rest with a dedicated Worker secret. Headless management uses a
+separately approved connection-management key; existing recommendation keys do
+not gain that permission. The CLI reads Viewer credentials from a protected stdin
+pipe or secret-manager-injected environment, not command arguments, and does not
+save those Viewer credentials locally. MCP accepts them through client-controlled
+HTTP headers, not model-visible tool arguments. Keep client, proxy and shell logs
+from recording credentials. The management key is stored separately on your
+device until revoked/deleted and can delete all evaluation data for your account;
+disconnecting Langfuse does not revoke it. First-time device authorization still
+requires account sign-in and approval. The web connection UI remains optional.
 Scout requests only experiment headers/metadata and aggregate metric averages
 and counts. It does not request inputs, outputs, trace/observation bodies,
 experiment items, raw scores or score comments. Arbitrary metadata is discarded;

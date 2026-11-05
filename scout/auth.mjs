@@ -2,7 +2,7 @@ import { createClerkClient } from '@clerk/backend';
 import { parsePublishableKey } from '@clerk/shared/keys';
 import { json } from './http.mjs';
 import { productAnalyticsEnabled, accountSyncEnabled, betaEvaluationEnabled } from './product-analytics.mjs';
-import { deviceKeyUser } from './connect.mjs';
+import { connectorPermission, deviceKeyUser, scoutPermission } from './connect.mjs';
 import { agentPath } from './agent/routes.ts';
 
 // Verifies a current Clerk browser session bearer token. Returns the user ID,
@@ -27,6 +27,7 @@ export async function sessionUser(request, env) {
 }
 
 // Public assets/status need no identity; agent requests require authentication.
+/** @param {(userId: string, permissions: string[]) => void} [onAuthenticated] */
 export async function scoutAccess(request, env, onAuthenticated = () => {}) {
   const { pathname: path, origin } = new URL(request.url);
   const source = request.headers.get('origin');
@@ -57,10 +58,18 @@ export async function scoutAccess(request, env, onAuthenticated = () => {}) {
     const mcp = path === '/scout/mcp';
     const unauthorized = () => json(mcp ? { error: 'Connect this coding agent with: npx -y openmerit@latest install', code: 'device_key_required' } : { error: 'Sign in to use Scout.', code: 'sign_in_required' }, 401, { 'WWW-Authenticate': 'Bearer realm="Scout"' });
     if (!token) return unauthorized();
-    const userId = token.startsWith('om_') ? mcp ? (await deviceKeyUser(env, token))?.userId : null : await sessionUser(request, env);
+    let permissions = [scoutPermission, connectorPermission];
+    let userId;
+    if (token.startsWith('om_')) {
+      if (!mcp) return unauthorized();
+      const recommendation = await deviceKeyUser(env, token, scoutPermission);
+      const connection = await deviceKeyUser(env, token, connectorPermission);
+      userId = recommendation?.userId ?? connection?.userId;
+      permissions = [recommendation && scoutPermission, connection && connectorPermission].filter(Boolean);
+    } else userId = await sessionUser(request, env);
     if (!userId) return unauthorized();
     if (!analytics && env.SCOUT_RATE && !(await env.SCOUT_RATE.limit({ key: `user:${userId}` })).success) return limited();
-    onAuthenticated(userId);
+    onAuthenticated(userId, permissions);
     return null;
   } catch {
     // Never fall back to anonymous searches when configuration or verification

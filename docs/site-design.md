@@ -2,6 +2,24 @@
 
 Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
 
+## Langfuse connection layout — unreleased source
+
+The connection page separates instructions, connection status, credentials,
+advanced mappings and data controls with consistent spacing. Rounded buttons
+retain the site's light/dark theme, with 44px touch targets and stacked primary
+actions on narrow screens. Advanced mappings have a visible expand/collapse
+indicator. The unmodified monochrome Langfuse icon in
+`site/assets/langfuse-logo.svg` comes from the
+[official brand library](https://langfuse.com/brand); it identifies the integration,
+not an endorsement. Authentication and connector permissions are unchanged.
+
+The coding-agent connection card shares the same rounded, borderless button
+styles for Continue, approval, denial and device revocation. The code field uses
+a soft inset surface; narrow layouts stack Continue and approval actions rather
+than squeezing them beside the field. Device names and last-used dates are
+separated for readability. These presentation changes do not alter device
+approval, denial, key collection or revocation behavior.
+
 ## OpenMerit logo default — unreleased source
 
 The nested-arches mark already used on Scout is the default OpenMerit logo. The homepage, generated documentation and data policy, memo article and access-page templates, retained engineering article and favicon use the same SVG geometry and rounded strokes. Existing wordmarks, page typography, layout and theme colors are unchanged. Generated pages are updated through their generators, not edited directly. This source change does not publish retired routes or deploy the protected memo Worker; that Worker remains blocked until its newer production source is reconciled.

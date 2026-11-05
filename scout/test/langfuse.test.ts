@@ -5,6 +5,9 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { importLangfuse, parseLangfuse, verifyViewer, type LangfuseConfig } from '../langfuse.ts';
 import { handleConnect } from '../connect.mjs';
 import { handleMCP } from '../mcp.mjs';
+import { scoutAccess } from '../auth.mjs';
+import { LocalD1 } from './helpers-projection.mjs';
+import type { EvaluationNamespace } from '../evaluation-routes.ts';
 
 const config: LangfuseConfig = {
   region: 'us', publicKey: 'pk-lf-fictional-key', secretKey: 'sk-lf-fictional-secret', from: '2026-11-01', tagPrefix: 'experiment:',
@@ -25,6 +28,69 @@ test('browser evaluation routes require a same-origin signed-in session and rout
   assert.equal((await call('alice')).status, 200);
   assert.equal((await call('bob')).status, 200);
   assert.deepEqual(owners, ['alice', 'bob']);
+});
+
+test('headless management is separately approved, user-isolated, revocable and cannot widen recommendation access', async () => {
+  const states = new Map<string, { connected: boolean; results: number }>();
+  const evaluations: EvaluationNamespace = { getByName(user) {
+    const state = states.get(user) ?? { connected: false, results: 0 }; states.set(user, state);
+    return {
+      status: async () => ({ ...state }),
+      configure: async input => { parseLangfuse(input); state.connected = true; return { ...state }; },
+      sync: async () => { state.results = state.connected ? 3 : 0; return { ...state }; },
+      disconnect: async () => { state.connected = false; state.results = 0; return { ...state }; },
+      clear: async () => { state.connected = false; state.results = 0; return { ...state }; },
+      measurements: async () => [], report: async () => [],
+    };
+  } };
+  const env = { SCOUT_INDEX: new LocalD1(), SCOUT_EVALUATIONS: evaluations,
+    CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from('test.clerk.accounts.dev$').toString('base64')}`, CLERK_SECRET_KEY: 'fictional' };
+  const call = (path: string, key?: string, body?: unknown, method = body ? 'POST' : 'GET', user: string | null = null) => handleConnect(new Request(`https://openmerit.ai/connect/api/${path}`, {
+    method, headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}),
+  }), env, { session: async () => user });
+  async function issue(client: string, user: string) {
+    const login = await (await call('device', undefined, { client, scope: 'user', device_name: 'test laptop' })).json();
+    const approval = await (await call(`login?code=${login.user_code}`, undefined, undefined, 'GET', user)).json();
+    assert.deepEqual(approval.permissions, [client === 'connector' ? 'scout:connections' : 'scout:recommend']);
+    await call('login', undefined, { code: login.user_code, decision: 'approve' }, 'POST', user);
+    const issued = await (await call('token', undefined, { device_code: login.device_code })).json();
+    assert.equal(issued.scope, approval.permissions[0]);
+    return String(issued.access_token);
+  }
+  const recommend = await issue('claude-code', 'alice'), manager = await issue('connector', 'alice'), bob = await issue('connector', 'bob');
+  for (const method of ['GET', 'POST', 'DELETE']) assert.equal((await call('langfuse', recommend, method === 'POST' ? config : undefined, method)).status, 401);
+  for (const path of ['keys', 'login?code=ABCD-EFGH']) assert.equal((await call(path, manager)).status, 401);
+  assert.equal((await call('login', manager, { code: 'ABCD-EFGH', decision: 'approve' })).status, 401);
+  assert.equal((await call('langfuse', manager, config)).status, 200);
+  assert.equal((await (await call('langfuse', manager)).json()).connected, true);
+  assert.equal((await (await call('langfuse', bob)).json()).connected, false);
+  const mcp = async (key: string, method: string, args?: unknown, extraHeaders = {}) => {
+    const request = new Request('https://openmerit.ai/scout/mcp', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...extraHeaders },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, ...(args ? { params: { name: 'scout_connection', arguments: args } } : {}) }) });
+    let owner = '', grants: string[] = [];
+    const denied = await scoutAccess(request, env, (id: string, permissions: string[]) => { owner = id; grants = permissions; });
+    if (denied) return { denied: denied.status };
+    return (await handleMCP(request, undefined, owner, undefined, evaluations, grants)).json();
+  };
+  assert.deepEqual((await mcp(recommend, 'tools/list')).result.tools.map((tool: { name: string }) => tool.name), ['scout_models']);
+  assert.deepEqual((await mcp(manager, 'tools/list')).result.tools.map((tool: { name: string }) => tool.name), ['scout_connection']);
+  assert.match((await mcp(recommend, 'tools/call', { action: 'clear', confirm: true })).error.message, /separate scout:connections approval/);
+  const request = new Request('https://openmerit.ai/scout/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scout_models', arguments: { prompt: 'Should not run' } } }) });
+  assert.match((await (await handleMCP(request, undefined, 'alice', undefined, evaluations, ['scout:connections'])).json()).error.message, /manages connections only/);
+  assert.equal((await mcp(manager, 'tools/call', { action: 'sync' })).result.structuredContent.results, 3);
+  assert.equal((await mcp(manager, 'tools/call', { action: 'disconnect' })).result.isError, true);
+  assert.equal((await (await call('langfuse', manager)).json()).connected, true);
+  const { publicKey, secretKey, ...settings } = config;
+  assert.equal((await mcp(manager, 'tools/call', { action: 'configure', config: settings })).result.isError, true);
+  assert.equal((await mcp(manager, 'tools/call', { action: 'configure', config })).result.isError, true, 'keys are rejected in model-visible arguments');
+  const configured = await mcp(manager, 'tools/call', { action: 'configure', config: settings }, { 'X-Langfuse-Public-Key': publicKey, 'X-Langfuse-Secret-Key': secretKey });
+  assert.equal(configured.result.structuredContent.connected, true);
+  assert.doesNotMatch(JSON.stringify(configured), /pk-lf|sk-lf|model_coding/);
+  assert.equal((await mcp(manager, 'tools/call', { action: 'disconnect', confirm: true })).result.structuredContent.connected, false);
+  assert.equal((await call('keys/self', manager, undefined, 'DELETE')).status, 200);
+  assert.equal((await call('langfuse', manager)).status, 401);
+  assert.deepEqual(await mcp(manager, 'tools/list'), { denied: 401 });
+  assert.equal((await call('langfuse', bob)).status, 200, 'revocation is isolated');
 });
 
 test('the connector verifies a read and refuses every non-Viewer probe outcome without a valid write', async () => {

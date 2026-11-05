@@ -1,7 +1,8 @@
 # Close the model-selection loop
 
-Scout recommends candidates; your own evals decide whether they work. Never send
-Scout inputs, outputs, patient records, source code or secrets.
+Scout recommends candidates; your own evals decide whether they work. Never put
+inputs, outputs, patient records, source code or secrets in recommendation prompts
+or tool arguments. Connector credentials use the protected paths described below.
 
 **Release status:** the Langfuse connection, per-user results and `--sync` below
 are unreleased source changes. They need a Scout serving deployment and a new npm
@@ -63,11 +64,12 @@ updates that aggregate rather than duplicating it.
 
 ## Connect Langfuse
 
-After release, `openmerit connect langfuse` opens the signed-in
+After release, `openmerit connect langfuse` opens the optional signed-in
 [connection page](https://openmerit.ai/connect/?integration=langfuse). Create a
 **separate Viewer key pair** in Langfuse Project Settings → API Keys. Enter it
-only in the password fields there, never in a chat, command, issue or environment
-file. Keep the application's tracing keys unchanged. US, EU and HIPAA Cloud hosts
+in the password fields there, or use the protected headless paths below. Never
+paste it in chat, command arguments, issues or tracked files. Keep the
+application's tracing keys unchanged. US, EU and HIPAA Cloud hosts
 are supported; self-hosted instances are not. Selecting a Langfuse region does
 not promise that Scout stores or processes your data in that region.
 
@@ -75,6 +77,113 @@ You can connect the key first with empty mappings. To import results, expand
 **Score and model mappings** and supply a start date, experiment-tag prefix,
 score mappings and model aliases. To change saved settings, disconnect and
 reconnect; this deletes the old imports, not reported results.
+
+### Headless CLI setup
+
+First authorize a **separate connection-management key**. This is not an upgrade
+to your existing recommendation key and does not change Claude Code or Pi setup.
+The first account authorization still requires a signed-in person to approve the
+displayed device code; `--no-open` lets them do that on another device. After
+approval, all connector operations can run without the web UI.
+
+```sh
+openmerit connect langfuse --authorize --no-open
+```
+
+If it returns exit 10 (approval pending), approve the matching code and rerun the
+same command. The resumable login stores the management key with mode 0600 in
+`connector/user/credentials.json` under the OpenMerit config directory (normally
+`~/.config/openmerit`). Never display or share that file. The key grants
+`scout:connections`, not `scout:recommend`; it can manage **all evaluation data
+for your account**, not only one project. It cannot approve devices, list other
+device keys, run recommendations or spend on models. Like recommendation keys,
+it expires after 90 days without use and can be revoked from the connection page
+or with `openmerit logout --client connector`. Disconnecting Langfuse does not
+revoke this management credential; revoke it separately when retiring a runner.
+
+Save only non-secret settings in `mappings.json`:
+
+```json
+{
+  "region": "us",
+  "from": "2026-11-01",
+  "tagPrefix": "experiment:",
+  "mappings": [],
+  "models": {}
+}
+```
+
+Have your secret manager inject `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`
+into the CLI process environment, then run:
+
+```sh
+openmerit connect langfuse --config mappings.json
+openmerit connect langfuse --status
+openmerit connect langfuse --sync
+```
+
+Alternatively, `openmerit connect langfuse --stdin` reads a full JSON object with
+the same settings plus `publicKey` and `secretKey` from a protected pipe, up to
+18 KB. It does not echo or save the Viewer credentials locally. Do not use inline
+JSON, `echo` with literal secrets, command substitutions that print secrets into
+an agent transcript, or an interactive shell history entry. Authorize before
+piping a secret. Environment variables and pipes are not a vault: trust the
+runner and restrict process/debug access, and disable shell tracing and request
+logging. Unattended jobs may instead inject an already-approved
+`OPENMERIT_CONNECTION_KEY` through a secret manager; keep recommendation and
+management credentials separate.
+
+### MCP management
+
+The canonical `/scout/mcp` endpoint exposes `scout_connection` when authenticated
+with the separate management key (or a current browser session). Register a
+separate trusted MCP client connection using `Authorization: Bearer <management
+key>` without putting the actual key in chat or tool arguments. A recommendation
+key still discovers only `scout_models`; a management key discovers only
+`scout_connection`. This separation is enforced on calls, not just discovery.
+
+`scout_connection` supports `status`, `configure`, `sync`, `disconnect` and
+`clear`. `configure` takes the non-secret settings above as `config`. Supply the
+Viewer key pair through **client-controlled HTTP headers**
+`X-Langfuse-Public-Key` and `X-Langfuse-Secret-Key`, sourced from your secret manager,
+not from the model. These headers are consumed only for configuration and are
+never returned in tool results or sent to the recommendation model. Remove them
+from client configuration after connecting. Do not configure a client/proxy that
+records these headers. If your MCP client cannot securely inject headers outside
+model context, have the agent invoke the CLI with protected input instead, or
+use the web UI; do not fall back to putting credentials in tool arguments.
+
+```json
+{"action": "configure", "config": {"region": "us", "from": "2026-11-01", "tagPrefix": "experiment:", "mappings": [], "models": {}}}
+```
+
+This checks and saves the connection, not a sync. Send `{"action":"sync"}` to
+import mapped aggregates without starting inference. For deletion, obtain the
+user's consent and pass `confirm: true` with `disconnect` or `clear`. Tool
+confirmation is not a substitute for consent in your application.
+
+### HTTP API
+
+The same authenticated account store is available without MCP:
+
+| Method | Path | Operation |
+| --- | --- | --- |
+| GET | `/connect/api/langfuse` | Connection status and aggregate counts, never credentials |
+| POST | `/connect/api/langfuse` | Configure/replace using full JSON settings including `publicKey` and `secretKey` |
+| POST | `/connect/api/langfuse/sync` | Import mapped aggregates without inference |
+| DELETE | `/connect/api/langfuse` | Delete the Viewer key pair and imported aggregates |
+| DELETE | `/connect/api/evaluations` | Also delete manually reported aggregates |
+
+Send the management key in the `Authorization: Bearer` header and
+`Content-Type: application/json` for configuration. Browser session tokens still
+work. Recommendation keys, anonymous requests and cross-origin browser requests
+are rejected. No request accepts a target user ID: ownership comes from the
+authenticated identity. Inject credentials into the HTTP client, not command-line
+arguments; keep request bodies/headers out of logs. Check status after an ambiguous
+network failure before retrying a change. None of these paths bypasses the Viewer
+check, explicit mappings, encryption, retention limits or per-user isolation.
+
+### Attribute imported scores
 
 Every scored trace must carry a tag formed from the prefix plus its experiment
 ID, for example `experiment:<id>`. The experiment's metadata must identify the
@@ -134,7 +243,9 @@ excluded immediately and pruned daily (allow scheduling delay). An evaluation
 account inactive for 90 days is erased by the same cleanup. See the
 [data policy](scout-data-policy.md) for processors and backup limitations.
 
-`openmerit disconnect langfuse` opens the browser confirmation. **Disconnect &
+`openmerit disconnect langfuse` opens the optional browser confirmation;
+`openmerit disconnect langfuse --yes` deletes headlessly, and adding
+`--delete-all` also deletes reported results. **Disconnect &
 delete imports** removes the encrypted key pair and imported aggregates, including
 an in-flight sync. **Delete all evaluation data** also removes manually reported
 aggregates. Neither erases past conversation text or previously generated

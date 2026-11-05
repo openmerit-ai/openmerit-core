@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add optional headless Langfuse setup through the CLI, HTTP API and `scout_connection` MCP tool. A separately approved `scout:connections` key manages the authenticated user's connection and evaluation data; recommendation keys retain their existing permission. Viewer credentials enter through protected CLI input or trusted client configuration, never model-visible tool arguments. The web connection UI remains available, with revised spacing, mobile controls and the official Langfuse logo. Requires a matching Scout deployment and npm release.
+
 ## 0.3.4 — 2026-11-05
 
 - `openmerit scout --results` refuses a file with more than 50 results before sending it, instead of failing with HTTP 413; split larger reports into files of up to 50.

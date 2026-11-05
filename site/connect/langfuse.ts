@@ -6,6 +6,11 @@ function element<T extends HTMLElement>(id: string): T {
   if (!node) throw new Error(`Missing connection control: ${id}`);
   return node as T;
 }
+export function showConnectionPermissions(permissions: string[]): void {
+  element('request-permissions').textContent = permissions.includes('scout:connections')
+    ? 'Manage your account’s Langfuse connection through CLI, MCP or API: add or replace the Viewer key, sync aggregates, disconnect, or delete all evaluation data. No recommendations, code access or spending.'
+    : 'Scout model recommendations through MCP. No code access, spending or other permissions.';
+}
 export async function showLangfuse(api: Api): Promise<void> {
   const section = element('langfuse'), form = element<HTMLFormElement>('langfuse-form');
   const status = element('langfuse-status'), connected = element('langfuse-connected');

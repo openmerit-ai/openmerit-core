@@ -6,14 +6,14 @@ const help = `OpenMerit
   openmerit scout --help             Ask Scout which models fit your tasks
   openmerit install --help           Connect OpenMerit to your coding agent
   openmerit update --help            Update installed Scout instructions
-  openmerit connect langfuse         Connect a Viewer key in your browser
-  openmerit disconnect langfuse      Confirm deleting the key and imports
+  openmerit connect langfuse --help  Connect through CLI or the optional web UI
+  openmerit disconnect langfuse      Delete the connection and imports
   openmerit --help                   Show this help
 `;
 
 async function main() {
   const args = process.argv.slice(2);
-  if (['connect', 'disconnect'].includes(args[0])) { const { connection } = await import('./scout.ts'); process.exitCode = await connection(args); return; }
+  if (['connect', 'disconnect'].includes(args[0])) { const { connection } = await import('./connections.ts'); process.exitCode = await connection(args); return; }
   if (['install', 'status', 'remove', 'login', 'logout', 'project', 'doctor', 'update'].includes(args[0])) { const { main } = await import('./install.mjs'); process.exitCode = await main(args); return; }
   if (args[0] === 'scout') { const { main } = await import('./scout.ts'); process.exitCode = await main(args.slice(1)); return; }
   if (!args.length || args.includes('--help') || args.includes('-h')) { console.log(help); return; }
