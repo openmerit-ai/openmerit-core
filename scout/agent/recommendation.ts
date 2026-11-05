@@ -175,8 +175,10 @@ function leaders(models: RecommendedModel[]): void {
     for (const m of models) if (value(m) === best) m.best.push(axis);
   };
   lead('quality', m => m.quality.score, true);
-  // Only a cost covering the whole workload can lead.
-  lead('cost', m => m.cost && !m.cost.unpriced.length ? m.cost.usdPer1kTasks : null, false);
+  // Only a cost covering the whole workload can lead. When the user measured cost, only measured cost can:
+  // estimates often share one route price and are not comparable with what the user pays.
+  const measured = models.some(m => m.cost?.measured);
+  lead('cost', m => measured ? m.cost?.measured?.usdPer1kTasks ?? null : m.cost && !m.cost.unpriced.length ? m.cost.usdPer1kTasks : null, false);
   lead('recency', m => m.recency ? -m.recency.ageDays : null, true);
 }
 
