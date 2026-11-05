@@ -105,6 +105,9 @@ test('connect respects opt-out, DNT, GPC, unlink and invalid setup IDs on every 
   }
 });
 
+// Generated UUIDs can contain the hex markers below by chance, so they are blanked before checking for leaks.
+const withoutIds = value => JSON.stringify(value).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, 'uuid');
+
 test('connect exports only bounded browser failures at auth/load/approve/deny/devices/revoke stages', async () => {
   for (const [at, options] of [
     ['auth', { authError: true }], ['load', { fail: { load: 'network' } }],
@@ -121,7 +124,7 @@ test('connect exports only bounded browser failures at auth/load/approve/deny/de
     assert.equal(errors[0].properties.stage, at);
     assert.equal(errors[0].properties.code, at === 'auth' ? 'auth_unavailable' : at === 'load' ? 'network_error' : 'http_error');
     if (at !== 'auth' && at !== 'load') assert.equal(errors[0].properties.http_status, options.fail[at]);
-    assert.doesNotMatch(JSON.stringify(f.events.map(({ headers, ...event }) => event)), /PRIVATE|private-key|private-user|private-session|ABCD|1234|https:/);
+    assert.doesNotMatch(withoutIds(f.events.map(({ headers, ...event }) => event)), /PRIVATE|private-key|private-user|private-session|ABCD|1234|https:/);
   }
 });
 
@@ -147,5 +150,5 @@ test('unlink during approval discards setup correlation and uncaught errors neve
   assert.equal(error.properties.code, 'uncaught_error');
   assert.equal(error.properties.http_status, undefined);
   assert.equal(error.properties.setup_id, undefined);
-  assert.doesNotMatch(JSON.stringify(error), /PRIVATE|900/);
+  assert.doesNotMatch(withoutIds(error), /PRIVATE|900/);
 });
