@@ -50,6 +50,11 @@ test('openmerit scout talks to the Scout agent over MCP under the project policy
   await main(['--conversation', answer.conversationId, '--results', 'results.json', '--json'], { root, print: () => {} });
   assert.deepEqual(calls[3]?.body.params.arguments, { conversationId: answer.conversationId, results });
   await assert.rejects(main(['Summarize', '--results', 'results.json'], { root, print: () => {} }), /--results continues a conversation/);
+  // More than Scout's 50 per call is refused before anything is sent.
+  await writeFile(join(root, 'many.json'), JSON.stringify(Array(51).fill(results[0])));
+  const sent = calls.length;
+  await assert.rejects(main(['--conversation', answer.conversationId, '--results', 'many.json'], { root, print: () => {} }), /holds 51 results; Scout accepts at most 50 per call/);
+  assert.equal(calls.length, sent);
 });
 
 test('terminal shortlists name an explicit ranking and show the value it sorts by', () => {

@@ -51,7 +51,8 @@ export class ScoutAgent extends DurableObject<AgentEnv> {
     scope: async () => { const endpointIds = await this.ctx.storage.get<string[] | null>('endpointIds'); return endpointIds ? { endpointIds } : {}; },
     maxTasks: async () => taskLimits[(await this.ctx.storage.get<Channel>('channel')) ?? 'web'],
     plan: async () => (await this.ctx.storage.get<PlanState>('plan')) ?? null,
-    measurements: async () => (await this.ctx.storage.get<Measurement[]>('measurements')) ?? [],
+    // Results stored before kind existed were all quality results.
+    measurements: async () => ((await this.ctx.storage.get<Measurement[]>('measurements')) ?? []).map(r => ({ ...r, kind: r.kind ?? 'quality' })),
     savePlan: async plan => { await this.ctx.storage.put('plan', plan); },
     clarificationBlocked: async () => {
       if (await this.ctx.storage.get<boolean>('skipped')) return 'The user skipped clarifying questions.';

@@ -323,7 +323,10 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
   const allMeasuredCost = (measured: boolean) => assessed.filter(m => m.quality.measured === measured).every(m => m.cost?.measured);
   const useMeasured = { true: allMeasuredCost(true), false: allMeasuredCost(false) };
   const key = (m: RecommendedModel) => (priority === 'cost' && useMeasured[`${m.quality.measured}`] ? m.cost?.measured?.usdPer1kTasks : keys[priority](m)) ?? Infinity;
-  const order = (a: RecommendedModel, b: RecommendedModel) => Number(b.quality.measured) - Number(a.quality.measured) || (key(a) === key(b) ? 0 : key(a) - key(b));
+  // Models that tie on the priority, such as equal quality from the same measured results, rank by measured cost when both have one.
+  const spent = (m: RecommendedModel) => m.cost?.measured?.usdPer1kTasks ?? Infinity;
+  const diff = (x: number, y: number) => x === y ? 0 : x - y;
+  const order = (a: RecommendedModel, b: RecommendedModel) => Number(b.quality.measured) - Number(a.quality.measured) || diff(key(a), key(b)) || diff(spent(a), spent(b));
   const models = assessed.sort(order).slice(0, 5);
   models.forEach((m, i) => { m.rank = i + 1; });
   leaders(models);

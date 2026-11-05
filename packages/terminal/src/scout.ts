@@ -172,6 +172,8 @@ export async function main(args: string[], { root = process.cwd(), print = conso
       let results: unknown;
       try { results = JSON.parse(await readFile(resolve(root, file), 'utf8')); } catch { throw new Error(`Could not read results from ${file}: it must be a JSON list.`); }
       if (!Array.isArray(results)) throw new Error(`${file} must hold a JSON list of results.`);
+      // Scout accepts at most 50 per turn; each call is a turn that recommends again, so splitting is the caller's choice.
+      if (results.length > 50) throw new Error(`${file} holds ${results.length} results; Scout accepts at most 50 per call (200 per conversation). Split them into files of up to 50 and report each with --results in turn; Scout recommends again after each.`);
       request.results = results;
     }
     else if (arg.startsWith('-')) throw new Error(`Unknown option for scout: ${arg}`);
