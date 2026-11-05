@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.2 — 2026-11-05
 
 - Fix Claude Code project-scope installation for a project inside a larger git repository, such as a monorepo package. Claude Code keeps its private MCP entry under the repository root, so the installer reported "Claude Code did not save the openmerit MCP server", `status` reported it missing and a rerun clashed with it. The installer now reads the entry where Claude Code keeps it and says that the MCP server applies to the whole repository; the skill and rule stay in the project.
 - Make device approvals easier to relay. The installer prints the code's expiry in UTC with the minutes left instead of an unlabelled local time. When it returns with exit code 10, the message includes the approval link and expiry, `--json` adds `approvalUrl`, `userCode` and `expiresAt`, and the installed Scout instructions tell the agent to show the link and expiry to the person approving. The matching Scout serving release extends device codes from 10 to 30 minutes.
