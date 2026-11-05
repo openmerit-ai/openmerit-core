@@ -13,6 +13,7 @@ import { embed } from '../evidence-search.mjs';
 import { loadCatalogue, type Catalogue, type CatalogueBindings } from './catalogue.ts';
 import { agentModels, defaultAgentModel, openAIModelId } from './model.ts';
 import { preamble, sessionSection } from './prompt.ts';
+import type { Measurement } from './recommendation.ts';
 import { scoutTools, withProgress, type PlanState, type ToolHost } from './tools.ts';
 import { taskLimits, turnText, type AgentState, type Channel, type TurnAnswer, type TurnRequest } from './turn.ts';
 
@@ -23,6 +24,7 @@ export interface AgentEnv extends CatalogueBindings {
   SCOUT_AGENT_WEB_SEARCH?: string;
 }
 const maxClarificationRounds = 2;
+export const maxMeasurements = 200;
 
 // Published catalogues change twice a day; one load serves every conversation in this isolate for a while.
 let shared: { at: number; catalogue: Promise<Catalogue> } | undefined;
@@ -49,6 +51,7 @@ export class ScoutAgent extends DurableObject<AgentEnv> {
     scope: async () => { const endpointIds = await this.ctx.storage.get<string[] | null>('endpointIds'); return endpointIds ? { endpointIds } : {}; },
     maxTasks: async () => taskLimits[(await this.ctx.storage.get<Channel>('channel')) ?? 'web'],
     plan: async () => (await this.ctx.storage.get<PlanState>('plan')) ?? null,
+    measurements: async () => (await this.ctx.storage.get<Measurement[]>('measurements')) ?? [],
     savePlan: async plan => { await this.ctx.storage.put('plan', plan); },
     clarificationBlocked: async () => {
       if (await this.ctx.storage.get<boolean>('skipped')) return 'The user skipped clarifying questions.';
@@ -78,6 +81,7 @@ export class ScoutAgent extends DurableObject<AgentEnv> {
           { key: 'session', render: async () => sessionSection({
             skipped: !!(await this.ctx.storage.get<boolean>('skipped')), rounds: (await this.ctx.storage.get<number>('rounds')) ?? 0, maxRounds: maxClarificationRounds,
             maxTasks: await this.host.maxTasks(), endpointIds: (await this.ctx.storage.get<string[] | null>('endpointIds')) ?? null, plan: await this.host.plan(),
+            measurements: await this.host.measurements(),
           }) },
         ],
         tools,
@@ -109,10 +113,14 @@ export class ScoutAgent extends DurableObject<AgentEnv> {
 
   // Runs one user turn to its end. A client that disconnects can read the outcome from state().
   // The first turn fixes the conversation's channel (and so its task limit) and endpoint inventory.
+  // Measured results are added to the conversation's own store; they never leave it.
   async turn(request: TurnRequest, channel: Channel = 'web'): Promise<AgentState> {
-    const input = turnText(request);
+    const stored = await this.host.measurements();
+    const added: Measurement[] = (request.results ?? []).map((r, i) => ({ id: `m${stored.length + i + 1}`, ...r }));
+    const input = turnText(request, added);
     if (!input) throw new Error('Describe the work you want a model to do.');
     if (await this.harness.session().busy()) throw new Error('busy');
+    if (stored.length + added.length > maxMeasurements) throw new Error('results');
     const turns = (await this.ctx.storage.get<number>('turns')) ?? 0;
     if (!turns) await this.ctx.storage.put({ channel, endpointIds: request.endpointIds ?? null });
     else if (request.endpointIds !== undefined) {
@@ -120,6 +128,7 @@ export class ScoutAgent extends DurableObject<AgentEnv> {
       if (!fixed || fixed.length !== request.endpointIds.length || request.endpointIds.some(id => !fixed.includes(id))) throw new Error('endpoints');
     }
     if (request.skip) await this.ctx.storage.put('skipped', true);
+    if (added.length) await this.ctx.storage.put('measurements', [...stored, ...added]);
     this.progressLog = [];
     // A turn ends once every task has a shortlist accepted in this turn; the split itself carries over.
     const plan = await this.host.plan();

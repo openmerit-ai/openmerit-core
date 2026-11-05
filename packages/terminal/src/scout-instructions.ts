@@ -86,6 +86,26 @@ Compare quality evidence, reference cost/time and watch-outs. Prefer the cheapes
 usable option the evidence supports, without claiming benchmarks prove
 application accuracy. Use the project's actual SDK and protocol.
 
+## Measuring candidates
+
+Each task also has an \`evaluation\`: the checks (per model call, agent run or
+end-to-end outcome), labelled examples per candidate and when to stop a losing
+candidate. Offer to run it before the user commits to a model. Use the evals the
+project already has, such as datasets and experiments in its eval or tracing
+platform, or its own eval scripts and fixtures: add the shortlisted candidates as
+extra runs of those evals. Do not build a second eval or copy their datasets.
+If the project has no eval for the task, propose a minimal one built from its
+existing traces and the decisions people already make, and create it only where
+and how the user agrees. Ask before spending on model calls or writing to an
+eval platform.
+
+Report what you measured with \`scout_models\`: the same \`conversationId\` and
+\`results\`, one aggregate per model and metric (\`level\`, \`task\` title, \`scope\`,
+\`model\` endpoint or model ID, \`metric\`, \`value\`, \`higherIsBetter\`,
+\`samples\`, \`source\`). Send aggregates only, never inputs, outputs or records.
+Scout ranks them above public benchmarks for this user only; models whose
+\`quality.measured\` is true rest on them.
+
 ## Boundaries
 
 Ask before adding providers or credentials, spending, deploying or external

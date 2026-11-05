@@ -1,6 +1,6 @@
 # Scout data policy
 
-Updated 29 October 2026.
+Updated 5 November 2026.
 
 OpenMerit operates Scout. This policy covers its hosted website and connected clients.
 
@@ -9,6 +9,7 @@ OpenMerit operates Scout. This policy covers its hosted website and connected cl
 ## Data we use
 
 - **Service data:** Your submitted task and related information are processed by an AI service provider, even with analytics off. We also retain account, authorization and device details needed to provide access.
+- **Measured results:** Aggregate evaluation results you report on a Scout conversation, such as a model's score on your own eval, are stored with that conversation and used only for its recommendations. Send aggregates only, never the inputs, outputs or records they were measured on.
 - **Optional analytics:** When enabled, we collect usage, recommendations, feedback, setup activity, device/browser categories, performance and error information to improve Scout and fix problems. Account analytics may include your name, verified email and sign-in provider, and may link activity before and after sign-in.
 - **Shared content:** When prompt sharing is enabled, analytics also includes task text and analysis. We use this for product improvement, not foundation model training. There is no session recording.
 

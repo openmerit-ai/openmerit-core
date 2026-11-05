@@ -36,7 +36,7 @@ const stubSearch = (bm25: SearchHit[], embedding: SearchHit[] | Error): Catalogu
 const catalogue: Catalogue = { version: 'v-test', models, benchmarks: [], boards, semanticBenchmarks: async () => [], search: stubSearch([], []) };
 const pick = (modelId: string, evidence: string[] = []) => ({ modelId, quality: 70, evidence, rationale: 'why' });
 const submit = (candidates: Submission['candidates'], workload: Submission['workload'], filters?: Submission['filters']): Submission =>
-  ({ task: 1, workload, summary: 's', qualityBar: 50, candidates, ...(filters ? { filters } : {}) });
+  ({ task: 1, workload, summary: 's', qualityBar: 50, candidates, evaluation: { checks: [{ level: 'task', metric: 'm', how: 'h' }], samples: 10, stopEarly: 's' }, ...(filters ? { filters } : {}) });
 
 test('price sorting compares one unit at a time, so a per-image price never outranks a per-token price', () => {
   // Default unit is tokens: the image models are not billed per token (painter) or sort by their token route (painter-pro, blended 7.725).

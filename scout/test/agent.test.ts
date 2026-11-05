@@ -30,8 +30,9 @@ const catalogue: Catalogue = {
 };
 const brief = { input: { text: 'Invoices', source: 'stated' as const }, work: { text: 'Extract', source: 'stated' as const }, output: { text: 'JSON', source: 'stated' as const }, criteria: { text: '', source: 'missing' as const }, constraints: { text: '', source: 'missing' as const } };
 const pick = (modelId: string, quality: number, evidence: string[] = []) => ({ modelId, quality, evidence, rationale: 'why' });
+const evaluation: Submission['evaluation'] = { checks: [{ level: 'task', metric: 'fields correct', how: 'Compare with labelled invoices.' }], samples: 30, stopEarly: 'Stop after 10 if it trails the leader by 20 points.' };
 const submission = (candidates: Submission['candidates'], filters?: Submission['filters']): Submission =>
-  ({ task: 1, workload: { inputTokens: 2000, outputTokens: 500 }, summary: 's', qualityBar: 50, candidates, ...(filters ? { filters } : {}) });
+  ({ task: 1, workload: { inputTokens: 2000, outputTokens: 500 }, summary: 's', qualityBar: 50, candidates, evaluation, ...(filters ? { filters } : {}) });
 const now = Date.parse('2026-10-27T00:00:00Z');
 
 test('a shortlist is priced on the cheapest route that meets the constraints, with timing and age from catalogue data', () => {
@@ -100,6 +101,7 @@ function toolHost(options: { maxTasks?: number | null; endpointIds?: string[]; b
     maxTasks: async () => options.maxTasks === undefined ? 3 : options.maxTasks,
     clarificationBlocked: async () => options.blocked?.() ?? null,
     plan: async () => plan && structuredClone(plan), savePlan: async p => { plan = structuredClone(p); },
+    measurements: async () => [],
     answer: async a => { answers.push(a); }, progress: () => {},
   };
   const tools = scoutTools(host);
@@ -123,6 +125,43 @@ test('the web page splits work into at most three tasks; coding agents have no l
   const agent = toolHost({ maxTasks: null });
   assert.equal((await agent.call('plan_tasks', { brief, assumptions: [], tasks })).isError, undefined);
   assert.equal((await agent.call('plan_tasks', { brief, assumptions: [], tasks: [task('Extract'), task('extract')] })).isError, true, 'task titles must differ');
+});
+
+test('the user\'s measured results outrank benchmarks: a measured candidate must cite them, and agent runs are priced', () => {
+  const measured = (id: string, model: string, value: number, task: string | null = 'Extract') =>
+    ({ id, level: 'agent' as const, task, scope: 'extraction agent', model, metric: 'fields correct', value, higherIsBetter: true, samples: 40, source: 'Langfuse experiment invoices-1' });
+  // Alpha's result is reported by one of its endpoint IDs, beta's by its model ID; m3 is for another task.
+  const measurements = [measured('m1', 'lab/beta', 0.97), measured('m2', 'Vision:m', 0.81), measured('m3', 'lab/gamma', 0.5, 'Summarize')];
+  const context = { task: { ...task('Extract'), agent: 'Extraction agent', callsPerRun: 4 }, measurements };
+  const candidates = (cite: (id: string) => string[]) => ['lab/alpha', 'lab/beta', 'lab/gamma', 'lab/delta', 'lab/epsilon'].map(id => pick(id, 70, cite(id)));
+  assert.throws(() => finalize(catalogue, submission(candidates(() => [])), now, {}, context), (error: Error) => {
+    assert.match(error.message, /The user measured lab\/alpha on this task \(measured:m2\)/);
+    assert.match(error.message, /The user measured lab\/beta on this task \(measured:m1\)/);
+    // Gamma's result is for another task, so it need not cite it.
+    assert.doesNotMatch(error.message, /lab\/gamma on this task/);
+    return true;
+  });
+  // A model cannot cite another model's result.
+  assert.throws(() => finalize(catalogue, submission(candidates(id => id === 'lab/alpha' ? ['measured:m2', 'measured:m1'] : id === 'lab/beta' ? ['measured:m1'] : [])), now, {}, context), /lab\/alpha has no results on measured:m1/);
+  const result = finalize(catalogue, submission(candidates(id => ({ 'lab/alpha': ['measured:m2', 'b1'], 'lab/beta': ['measured:m1'] })[id] ?? [])), now, {}, context);
+  const byId = Object.fromEntries(result.models.map(m => [m.id, m]));
+  assert.deepEqual(byId['lab/beta']?.quality, { score: 70, measured: true, evidence: [{ benchmark: 'measured:m1', name: 'Your eval: fields correct (agent level, 40 samples, Langfuse experiment invoices-1)', score: 0.97, rank: 1, of: 2 }] });
+  assert.equal(byId['lab/alpha']?.quality.evidence[0]?.rank, 2);
+  assert.equal(byId['lab/gamma']?.quality.measured, false);
+  // Beta's Gateway route: (2000 × $0.50 + 500 × $1) / 1M × 1,000 = $1.50 per 1k calls; four calls per agent run.
+  assert.equal(byId['lab/beta']?.cost?.usdPer1kTasks, 1.5);
+  assert.equal(byId['lab/beta']?.cost?.usdPer1kAgentRuns, 6);
+  assert.deepEqual(result.evaluation, evaluation);
+});
+
+test('measured results are validated, labelled for the model and passed to the conversation', () => {
+  const id = '6cbb63c0-e848-4d65-9231-171c95756cf1';
+  const result = { level: 'environment', scope: 'claims pipeline', model: 'lab/beta', metric: 'claims correct', value: 0.98, higherIsBetter: true, samples: 42, source: 'Langfuse dataset run' };
+  assert.deepEqual(parseTurn({ conversationId: id, results: [result] }), { conversationId: id, turn: { skip: false, results: [{ ...result, task: null }] } });
+  for (const bad of [[], [{ ...result, value: Number.NaN }], [{ ...result, samples: 0 }], [{ ...result, level: 'org' }], [{ ...result, input: 'raw claim text' }], [{ ...result, source: '' }], Array(51).fill(result)])
+    assert.match(String(parseTurn({ conversationId: id, results: bad })), /^results is a list/);
+  assert.equal(turnText({}, [{ id: 'm1', task: 'Extract', ...result, level: 'task' }]),
+    'I measured these results with my own evals (aggregates only). Use them as evidence ahead of public benchmarks, cite them as measured:<id>, and recommend again:\n- measured:m1 · lab/beta · task level, task "Extract" (claims pipeline) · claims correct = 0.98 (higher is better) · 42 samples · Langfuse dataset run');
 });
 
 test('a turn ends only once every planned task has an accepted shortlist, answered in plan order', async () => {
@@ -176,7 +215,7 @@ test('clarifying questions are refused once the user skips them', async () => {
 
 test('turns are validated before reaching a conversation', () => {
   assert.equal(parseTurn({ skip: true }), 'Describe the work you want a model to do.');
-  assert.equal(parseTurn({ message: 'x', extra: 1 }), 'Send conversationId, message, brief, skip or endpointIds.');
+  assert.equal(parseTurn({ message: 'x', extra: 1 }), 'Send conversationId, message, brief, skip, endpointIds or results.');
   assert.match(String(parseTurn({ message: 'x', endpointIds: ['a', 'a'] })), /unique list/);
   assert.equal(parseTurn({ conversationId: 'not-a-uuid', skip: true }), 'Invalid conversationId.');
   assert.match(String(parseTurn({ message: 'x', brief: { budget: '$5' } })), /brief maps/);
@@ -221,5 +260,10 @@ test('coding agents reach the same conversations through MCP, relaying questions
   // The conversation ID alone reads the outcome without starting a turn.
   assert.equal((await call({ conversationId: id })).structuredContent?.status, 'needs_answers');
   assert.equal(turns.length, 2);
+  // Measured results continue the same conversation as a turn.
+  const result = { level: 'agent', task: 'Summarize', scope: 'summary agent', model: 'lab/beta', metric: 'summaries accepted', value: 0.9, higherIsBetter: true, samples: 30, source: 'own eval' };
+  await call({ conversationId: id, results: [result] });
+  assert.deepEqual(turns[2]?.request, { skip: false, results: [result] });
+  assert.match((await call({ conversationId: id, results: [{ ...result, output: 'raw text' }] })).content[0]?.text ?? '', /^results is a list/);
   assert.match((await call({ prompt: 'x'.repeat(4001) })).content[0]?.text ?? '', /^prompt must be text/);
 });

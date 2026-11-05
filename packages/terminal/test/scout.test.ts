@@ -43,6 +43,13 @@ test('openmerit scout talks to the Scout agent over MCP under the project policy
   await writeFile(join(root, '.openmerit/scout.json'), JSON.stringify({ version: 1, policy: 'existing-first', endpointIds: ['openai:gpt'] }));
   await scoutTurn(root, { prompt: 'Summarize tickets', allEndpoints: true });
   assert.deepEqual(calls[2]?.body.params.arguments, { prompt: 'Summarize tickets' });
+
+  // Measured results continue a conversation; Scout validates their fields.
+  const results = [{ level: 'agent', scope: 'summary agent', model: 'openai:gpt', metric: 'accepted', value: 0.9, higherIsBetter: true, samples: 30, source: 'own eval' }];
+  await writeFile(join(root, 'results.json'), JSON.stringify(results));
+  await main(['--conversation', answer.conversationId, '--results', 'results.json', '--json'], { root, print: () => {} });
+  assert.deepEqual(calls[3]?.body.params.arguments, { conversationId: answer.conversationId, results });
+  await assert.rejects(main(['Summarize', '--results', 'results.json'], { root, print: () => {} }), /--results continues a conversation/);
 });
 
 test('terminal shortlists name an explicit ranking and show the value it sorts by', () => {
@@ -57,4 +64,16 @@ test('terminal shortlists name an explicit ranking and show the value it sorts b
   assert.match(render('recency'), /1\. Quick · released 2026-08-01 · quality/);
   // Cheapest first is the default and stays unlabelled, with no extra metric.
   for (const output of [render(), render('cost')]) { assert.doesNotMatch(output, /first\./); assert.match(output, /1\. Quick · quality 80\/100/); }
+});
+
+test('terminal shortlists show the evaluation plan and which quality rests on measured results', () => {
+  const measured: ScoutModel = { rank: 1, id: 'a', name: 'Alpha', provider: 'lab', rationale: 'why', watchOut: null, quality: { score: 90, measured: true, evidence: [] }, cost: null };
+  const output = renderScout({ conversationId: 'c', status: 'recommended', tasks: [
+    { title: 'Adjudicate', work: 'w', summary: 's', agent: 'Adjudication agent', callsPerRun: 6, models: [measured], evaluation: { checks: [{ level: 'agent', metric: 'line decisions correct', how: 'Run the claims dataset.' }], samples: 40, stopEarly: 'stop after 10 if it trails by 15 points' } },
+    { title: 'Triage', work: 'w', summary: 's', models: [] }] });
+  assert.match(output, /1\. Adjudicate \(Adjudication agent, 6 calls per run\)/);
+  assert.match(output, /1\. Alpha · quality 90\/100 \(measured\)/);
+  assert.match(output, /Measure with your evals \(40 labelled examples per candidate; stop after 10 if it trails by 15 points\):\n {5}- agent: line decisions correct\. Run the claims dataset\./);
+  assert.match(output, /--conversation c --results <file\.json>/);
+  assert.match(output, /\(measured\) rests on the results you reported/);
 });

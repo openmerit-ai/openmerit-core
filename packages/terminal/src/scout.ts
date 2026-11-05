@@ -3,7 +3,7 @@
 // the same scout_models MCP tool with this device's key, so every client gets the
 // same clarifying questions and per-task shortlists.
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { credentialsPath, readCredentials, type DeviceCredentials } from './scout-credentials.ts';
 
 const policyFile = '.openmerit/scout.json';
@@ -13,12 +13,17 @@ const help = `OpenMerit · Scout
 
   openmerit scout "<the work models need to do>" [--all-endpoints] [--json]
   openmerit scout --conversation <id> [--brief <component>=<text> ...] [--skip] ["<follow-up>"] [--json]
+  openmerit scout --conversation <id> --results <file.json> [--json]
 
 Asks Scout, the agent behind openmerit.ai/scout. Scout may first return a task
 brief with clarifying questions: answer them with --brief (components: input,
 work, output, criteria, constraints) in the same conversation, or --skip to let
 Scout assume. It then splits the work into tasks and recommends up to five
-models for each. A turn usually takes one to three minutes.
+models for each, with an evaluation: how to measure the candidates with your
+own evals. Report what you measured with --results: a JSON list of aggregate
+results ({level, task?, scope, model, metric, value, higherIsBetter, samples,
+source}), never inputs or outputs. Scout ranks them above public benchmarks, for
+your recommendations only. A turn usually takes one to three minutes.
 
 A new conversation is limited to the endpoint IDs in ${policyFile}
 (set with openmerit project). --all-endpoints searches the whole catalogue and is
@@ -27,19 +32,20 @@ refused under the existing-only policy. Uses the device key that
 `;
 
 type Json = Record<string, unknown>;
-interface ScoutRequest { prompt?: string; conversationId?: string; brief?: Partial<Record<typeof components[number], string>>; skip?: boolean; endpointIds?: string[] }
+interface ScoutRequest { prompt?: string; conversationId?: string; brief?: Partial<Record<typeof components[number], string>>; skip?: boolean; endpointIds?: string[]; results?: unknown[] }
 export interface ScoutModel {
   rank: number; id: string; name: string; provider: string; rationale: string; watchOut: string | null;
-  quality: { score: number; evidence: Array<{ name: string; rank: number; of: number }> };
-  cost: { usdPer1kTasks: number; inputPerMillion: number; outputPerMillion: number; route: string; endpointId: string; providerModelId: string } | null;
+  quality: { score: number; measured?: boolean; evidence: Array<{ name: string; rank: number; of: number }> };
+  cost: { usdPer1kTasks: number; usdPer1kAgentRuns?: number; inputPerMillion: number; outputPerMillion: number; route: string; endpointId: string; providerModelId: string } | null;
   latency?: { seconds: number } | null; recency?: { released: string } | null;
 }
+interface Evaluation { checks: Array<{ level: string; metric: string; how: string }>; samples: number; stopEarly: string }
 // How a task's models are ordered. Cost (cheapest first among models that reach the quality bar) is the default.
 type Priority = 'cost' | 'quality' | 'latency' | 'recency';
 interface ScoutResult {
   conversationId: string; status: 'needs_answers' | 'recommended' | 'working' | 'message' | 'error'; next?: string;
   brief?: Record<string, { text: string; source: string }>; questions?: Array<{ component: string; question: string }>;
-  assumptions?: string[]; tasks?: Array<{ title: string; work: string; summary: string; priority?: Priority; models: ScoutModel[] }>;
+  assumptions?: string[]; tasks?: Array<{ title: string; work: string; summary: string; priority?: Priority; agent?: string; callsPerRun?: number; models: ScoutModel[]; evaluation?: Evaluation }>;
   text?: string; error?: string;
 }
 
@@ -117,7 +123,7 @@ export function renderScout(result: ScoutResult): string {
   } else if (result.status === 'recommended') {
     const tasks = result.tasks ?? [];
     tasks.forEach((task, i) => {
-      if (tasks.length > 1) lines.push(`${i + 1}. ${task.title}`, `   ${task.work}`);
+      if (tasks.length > 1) lines.push(`${i + 1}. ${task.title}${task.agent ? ` (${task.agent}${task.callsPerRun && task.callsPerRun > 1 ? `, ${task.callsPerRun} calls per run` : ''})` : ''}`, `   ${task.work}`);
       // As on the page, the default cheapest-first order is unlabelled; another priority is named with the value it sorts by.
       const priority = task.priority ?? 'cost';
       if (priority !== 'cost') lines.push(`   ${rankings[priority]}`);
@@ -125,13 +131,19 @@ export function renderScout(result: ScoutResult): string {
         const price = m.cost ? `${money(m.cost.inputPerMillion)} in / ${money(m.cost.outputPerMillion)} out per 1M via ${m.cost.route} (${m.cost.endpointId})` : 'no priced route';
         const metric = priority === 'latency' ? ` · ${m.latency ? `${m.latency.seconds.toFixed(1)}s per task` : 'time unknown'}`
           : priority === 'recency' ? ` · ${m.recency ? `released ${m.recency.released}` : 'release date unknown'}` : '';
-        lines.push(`   ${m.rank}. ${m.name}${metric} · quality ${m.quality.score}/100 · ${price}`, `      ${m.rationale}`);
+        lines.push(`   ${m.rank}. ${m.name}${metric} · quality ${m.quality.score}/100${m.quality.measured ? ' (measured)' : ''} · ${price}`, `      ${m.rationale}`);
       }
-      lines.push(`   ${task.summary}`, '');
+      lines.push(`   ${task.summary}`);
+      if (task.evaluation) lines.push(`   Measure with your evals (${task.evaluation.samples} labelled examples per candidate; ${task.evaluation.stopEarly}):`,
+        ...task.evaluation.checks.map(c => `     - ${c.level}: ${c.metric}. ${c.how}`));
+      lines.push('');
     });
     if (result.assumptions?.length) lines.push('Assumptions:', ...result.assumptions.map(a => `  - ${a}`), '');
     lines.push(`Refine: openmerit scout --conversation ${result.conversationId} "<follow-up>"`);
-    lines.push('Quality is Scout\'s estimate from public benchmarks, not measured accuracy for your application.');
+    lines.push(`Report measured results: openmerit scout --conversation ${result.conversationId} --results <file.json>`);
+    lines.push(tasks.some(t => t.models.some(m => m.quality.measured))
+      ? 'Quality marked (measured) rests on the results you reported; the rest is Scout\'s estimate from public benchmarks.'
+      : 'Quality is Scout\'s estimate from public benchmarks, not measured accuracy for your application.');
   } else if (result.status === 'working') lines.push(`Scout is still working. Read the outcome with: openmerit scout --conversation ${result.conversationId}`);
   else lines.push(result.text ?? result.error ?? 'Scout replied without an answer.');
   return lines.join('\n');
@@ -153,11 +165,19 @@ export async function main(args: string[], { root = process.cwd(), print = conso
     } else if (arg === '--skip') request.skip = true;
     else if (arg === '--all-endpoints') request.allEndpoints = true;
     else if (arg === '--json') json = true;
+    else if (arg === '--results') {
+      const file = value();
+      let results: unknown;
+      try { results = JSON.parse(await readFile(resolve(root, file), 'utf8')); } catch { throw new Error(`Could not read results from ${file}: it must be a JSON list.`); }
+      if (!Array.isArray(results)) throw new Error(`${file} must hold a JSON list of results.`);
+      request.results = results;
+    }
     else if (arg.startsWith('-')) throw new Error(`Unknown option for scout: ${arg}`);
     else words.push(arg);
   }
   if (words.length) request.prompt = words.join(' ');
   if (!request.prompt && !request.conversationId) { print(help); return 1; }
+  if (request.results && !request.conversationId) throw new Error('--results continues a conversation: pass --conversation <id> from the recommendation you measured.');
   const result = await scoutTurn(root, request);
   print(json ? JSON.stringify(result, null, 2) : renderScout(result));
   return result.status === 'error' ? 1 : 0;

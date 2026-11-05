@@ -18,6 +18,21 @@ Scout is a separate hosted beta product. Npm 0.1.7 introduced optional Claude Co
 
 **Product wording — unreleased source:** the homepage, Scout page, onboarding and search/social descriptions call Scout “OpenMerit's model search agent,” with “model search” as the shorthand and “Find the right AI models for your task” as its promise. “Model recommendations” describes its output; the web and coding agents are access channels, not separate product categories. This copy is not yet deployed. Dated receipts below retain the wording and behavior of their original releases.
 
+## Evaluation plans and measured results — unreleased source
+
+This describes source that is not yet deployed or published. Until the Scout serving Worker is deployed, `scout_models` does not accept `results` and recommendations have no `evaluation`; until a new npm release, `openmerit scout` has no `--results` option and the installed instructions do not mention measuring.
+
+OpenMerit does not run evaluations or host an eval platform. Scout tells you what to measure, your own eval system measures it, and Scout uses the aggregate results:
+
+- **Agents and calls.** A task is still one model call. When the work is an agent that calls models in a loop, a task can name its `agent` and `callsPerRun`; each model's `cost` then also has `usdPer1kAgentRuns`, the same route's cost of 1,000 runs of that agent.
+- **Evaluation plan.** Every task in a recommendation has an `evaluation`: `checks` at the `task` (one model call), `agent` (one agent run) or `environment` (end-to-end outcome) level, labelled `samples` per candidate, and a `stopEarly` rule for a candidate that is clearly losing. The installed instructions tell the coding agent to add the candidates as extra runs of evals the project already has, such as datasets and experiments in its eval or tracing platform, or its own eval scripts, and not to build a second eval. If none exists, it proposes a minimal one and creates it only where and how you agree.
+- **Measured results.** Continue the conversation with `results` (`scout_models`, `POST /scout/api/agent`) or `openmerit scout --conversation <id> --results <file.json>`. Each result is one aggregate: `level`, optional `task` title, `scope`, `model` (catalogue model or endpoint ID), `metric`, `value`, `higherIsBetter`, `samples` and `source`, at most 50 per call and 200 per conversation. Inputs, outputs and records are not accepted. Scout recommends again with measured results ranked above public benchmarks: a candidate you measured on a task must cite that result, cited results appear as evidence named "Your eval", ranked among your results on the same metric, and `quality.measured` is true for models whose estimate rests on them.
+- **Scope.** Results are stored with the conversation for your account and inform only your recommendations. They are not shared with other accounts or used to change Scout's catalogue.
+
+The quality bar now considers what an error costs once your environment's controls, such as a person approving every payment, have acted. Cost remains the default ranking among models that reach the bar.
+
+Known limitations: Scout does not connect to eval platforms yet, so results arrive only through the coding agent or the CLI; the web page neither shows the evaluation plan nor accepts results; and Scout cannot verify a reported result.
+
 ## Five-step introduction modal — deployed, 28 October 2026
 
 **Deployment receipt:** the owner approved commit, push and deployment. [PR #28](https://github.com/laz-aslam/openmerit/pull/28) merged as [a70103a](https://github.com/laz-aslam/openmerit/commit/a70103a1c8eb8a701ee262106ae6e6c026cf04b4). All PR and merged-commit CI checks passed. The guarded Scout-serving deploy moved `openmerit-scout-alpha` from `2cf2c2d3-8aef-40f0-9c44-800bcab247bf` to `17ab0166-9a5c-43e9-932b-c13bee040db7` at 20:45 UTC. Live Scout HTML, chat/auth/onboarding JavaScript, styles and Claude screenshot matched the release build. `/` and `/connect/` stayed byte-identical; other Workers were not redeployed. The catalogue remained healthy on snapshot `588855a0bf28212fad48a9513dbf3d5b`.

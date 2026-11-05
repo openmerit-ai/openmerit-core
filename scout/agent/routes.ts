@@ -6,7 +6,7 @@
 // the conversation ID, so one user cannot open another's conversation. The MCP
 // server (../mcp.mjs) runs coding agents' turns through the same converse().
 import { json, readJSON } from '../http.mjs';
-import { components } from './recommendation.ts';
+import { components, levels, type MeasurementInput } from './recommendation.ts';
 import type { AgentState, BriefEdits, Channel, TurnRequest } from './turn.ts';
 
 interface Conversation { turn(request: TurnRequest, channel?: Channel): Promise<AgentState>; state(): Promise<AgentState> }
@@ -16,9 +16,27 @@ export const agentPath = /^\/scout\/api\/agent(?:\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const text = (v: unknown, max: number) => typeof v === 'string' && v.length <= max ? v : null;
 
+const resultFields = ['level', 'task', 'scope', 'model', 'metric', 'value', 'higherIsBetter', 'samples', 'source'];
+export const resultsHelp = 'results is a list of up to 50 aggregate results: {level: task|agent|environment, task?, scope, model, metric, value, higherIsBetter, samples, source}, with text fields of at most 200 characters, a finite value and a whole number of samples. Send aggregates only, never inputs or outputs.';
+// Aggregate results the user measured with their own evals, or null when they are malformed.
+function parseResults(value: unknown): MeasurementInput[] | null {
+  if (!Array.isArray(value) || !value.length || value.length > 50) return null;
+  const parsed: MeasurementInput[] = [];
+  for (const r of value) {
+    if (!isObject(r) || Object.keys(r).some(k => !resultFields.includes(k))) return null;
+    const [scope, model, metric, source] = [r.scope, r.model, r.metric, r.source].map(v => text(v, 200)?.trim() || null);
+    const task = r.task === undefined ? null : text(r.task, 200)?.trim() || null;
+    if (!scope || !model || !metric || !source || (r.task !== undefined && !task) || !(levels as readonly unknown[]).includes(r.level)
+      || typeof r.value !== 'number' || !Number.isFinite(r.value) || typeof r.higherIsBetter !== 'boolean'
+      || typeof r.samples !== 'number' || !Number.isSafeInteger(r.samples) || r.samples < 1) return null;
+    parsed.push({ level: r.level as MeasurementInput['level'], task, scope, model, metric, value: r.value, higherIsBetter: r.higherIsBetter, samples: r.samples, source });
+  }
+  return parsed;
+}
+
 // A validated turn, or the reason the body is not one.
 export function parseTurn(body: unknown): { conversationId: string | null; turn: TurnRequest } | string {
-  if (!isObject(body) || Object.keys(body).some(k => !['conversationId', 'message', 'brief', 'skip', 'endpointIds'].includes(k))) return 'Send conversationId, message, brief, skip or endpointIds.';
+  if (!isObject(body) || Object.keys(body).some(k => !['conversationId', 'message', 'brief', 'skip', 'endpointIds', 'results'].includes(k))) return 'Send conversationId, message, brief, skip, endpointIds or results.';
   const conversationId = body.conversationId === undefined ? null : text(body.conversationId, 36);
   if (conversationId === null && body.conversationId !== undefined || conversationId && !agentPath.test(`/scout/api/agent/${conversationId}`)) return 'Invalid conversationId.';
   const message = body.message === undefined ? undefined : text(body.message, 4000);
@@ -28,11 +46,14 @@ export function parseTurn(body: unknown): { conversationId: string | null; turn:
   if (body.skip !== undefined && typeof body.skip !== 'boolean') return 'skip must be true or false.';
   const ids = body.endpointIds;
   if (ids !== undefined && (!Array.isArray(ids) || ids.length > 100 || new Set(ids).size !== ids.length || ids.some(id => typeof id !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9/_.:+-]{0,159}$/.test(id)))) return 'endpointIds must be a unique list of up to 100 catalogue endpoint IDs. An empty list allows no endpoints.';
+  const results = body.results === undefined ? undefined : parseResults(body.results);
+  if (results === null) return resultsHelp;
   if (!conversationId && !message?.trim()) return 'Describe the work you want a model to do.';
   const turn: TurnRequest = { skip: body.skip === true };
   if (edits.length) turn.brief = Object.fromEntries(edits) as BriefEdits;
   if (message !== undefined) turn.message = message;
   if (Array.isArray(ids)) turn.endpointIds = ids as string[];
+  if (results) turn.results = results;
   return { conversationId, turn };
 }
 
@@ -46,6 +67,7 @@ export async function converse(namespace: AgentNamespace, userId: string, parsed
   catch (error) {
     const message = (error as Error).message;
     if (message === 'busy') return { status: 409, body: { error: 'Scout is still working on this conversation.', conversationId } };
+    if (message === 'results') return { status: 400, body: { error: 'This conversation already holds the most measured results it can. Start a new conversation with your latest results.', conversationId } };
     if (message === 'endpoints') return { status: 400, body: { error: 'endpointIds are fixed when a conversation starts. Start a new conversation to use a different inventory.', conversationId } };
     console.error('scout-agent turn failed', message);
     // The run may still finish durably; the client can read it from the conversation.
