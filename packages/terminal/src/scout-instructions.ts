@@ -116,7 +116,9 @@ own model.
 If Scout fails or has no suitable candidate/evidence for the required deployment,
 say so and pause the model decision; do not substitute a remembered recommendation
 or SDK default. Continue only model-independent work. Local/browser models are not
-exempt when the catalogue lacks coverage. If it reports that the device key is missing,
+exempt when the catalogue lacks coverage. When an install or login waits for approval (exit code
+10), show the user the approval link and its UTC expiry in your reply, not only in
+command output, then rerun the same command once they approve. If it reports that the device key is missing,
 expired or revoked, run \`npx -y openmerit@latest login\` and then
 \`npx -y openmerit@latest install\` again. Never ask the user to paste a key.
 `;

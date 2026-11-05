@@ -56,8 +56,12 @@ test('device login: denial and expiry never issue a key', async () => {
   const denied = await start(call);
   await call('login', { body: { code: denied.user_code, decision: 'deny' }, user: 'user_alice' });
   assert.equal((await poll(call, denied.device_code)).error, 'access_denied');
-  const expired = await start(call);
+  // Codes last 30 minutes, long enough for someone else to approve.
+  const late = await start(call);
   tick(601_000);
+  assert.equal((await call('login', { body: { code: late.user_code, decision: 'approve' }, user: 'user_alice' })).status, 200);
+  const expired = await start(call);
+  tick(1_801_000);
   assert.equal((await call('login', { body: { code: expired.user_code, decision: 'approve' }, user: 'user_alice' })).status, 409);
   assert.equal((await poll(call, expired.device_code)).error, 'expired_token');
   assert.equal((await poll(call, 'unknown')).error, 'invalid_grant');
@@ -119,7 +123,7 @@ test('device lifecycle telemetry distinguishes pending, approval, collection, de
   await call('login', { code: denied.user_code, decision: 'deny' }, 'PRIVATE_USER');
   await call('token', { device_code: denied.device_code });
   const expired = await call('device', { client: 'claude-code', scope: 'user', device_name: 'PRIVATE_DEVICE' });
-  now += 601000;
+  now += 1_801_000;
   await call('token', { device_code: expired.device_code });
   const states = sent.filter(e => e.event === 'scout_connect_step').map(e => [e.properties.stage, e.properties.status, e.properties.outcome]);
   assert.deepEqual(states, [['device', undefined, 'ok'], ['token', 'pending', 'pending'], ['login', 'approved', 'ok'], ['token', 'collected', 'ok'], ['revoke', 'revoked', 'ok'], ['device', undefined, 'ok'], ['login', 'denied', 'denied'], ['token', 'denied', 'denied'], ['device', undefined, 'ok'], ['token', 'expired', 'error']]);

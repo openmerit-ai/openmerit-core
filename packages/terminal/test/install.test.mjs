@@ -10,6 +10,8 @@ import { join } from 'node:path';
 import { LocalD1 } from '../../../scout/test/helpers-projection.mjs';
 import { handleConnect, deviceKeyUser } from '../../../scout/connect.mjs';
 import { handleMCP } from '../../../scout/mcp.mjs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { main, rule } from '../src/install.mjs';
 import { browserCommand, openBrowser } from '../src/browser.mjs';
 import { clientVersion, setupUUID } from '../src/telemetry.mjs';
@@ -25,17 +27,24 @@ fs.appendFileSync(process.env.FAKE_CLAUDE_LOG, args.slice(0, 2).join(' ') + '\\n
 if (process.env.FAKE_CLAUDE_FAIL) { console.error('Failed to add server with ' + args.join(' ')); process.exit(1); }
 const config = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
 const scope = args[args.indexOf('--scope') + 1];
-const target = scope === 'user' ? config : ((config.projects ??= {})[process.cwd()] ??= {});
+// Like Claude Code, the local scope belongs to the git repository root when there is one.
+let project = process.cwd();
+try { project = require('node:child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || project; } catch {}
+const target = scope === 'user' ? config : ((config.projects ??= {})[project] ??= {});
 target.mcpServers ??= {};
 if (args[1] === 'add-json') target.mcpServers[args[4]] = JSON.parse(args[5]);
 if (args[1] === 'remove') delete target.mcpServers[args.at(-1)];
 fs.writeFileSync(file, JSON.stringify(config));
 `;
 
-async function harness(t) {
+const execFileAsync = promisify(execFile);
+
+async function harness(t, { subdirectory } = {}) {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'openmerit-install-')));
-  const bin = join(dir, 'bin'), root = join(dir, 'project'), claudeDir = join(dir, 'claude');
-  await Promise.all([mkdir(bin), mkdir(root), mkdir(claudeDir)]);
+  const bin = join(dir, 'bin'), root = join(dir, 'project', subdirectory ?? ''), claudeDir = join(dir, 'claude');
+  await Promise.all([mkdir(bin), mkdir(root, { recursive: true }), mkdir(claudeDir)]);
+  // A project inside a larger git repository, such as a package in a monorepo.
+  if (subdirectory) await execFileAsync('git', ['init', '-q', join(dir, 'project')]);
   await writeFile(join(bin, 'claude'), fakeClaude); await chmod(join(bin, 'claude'), 0o755);
   const env = { SCOUT_INDEX: new LocalD1() }, requests = [], events = [], transport = {};
   const server = createServer(async (req, res) => {
@@ -81,7 +90,7 @@ async function harness(t) {
     assert.equal(response.status, 200);
   };
   const claudeConfig = async () => JSON.parse(await readFile(join(claudeDir, '.claude.json'), 'utf8'));
-  return { run, approve, claudeConfig, env, root, claudeDir, dir, requests, events, transport };
+  return { run, approve, claudeConfig, env, root, repository: join(dir, 'project'), claudeDir, dir, requests, events, transport };
 }
 
 test('install signs in once, resumes a pending approval, installs, verifies and stays idempotent', async t => {
@@ -221,6 +230,28 @@ test('a failing claude command never leaks the key, and project scope keeps it o
   const settings = JSON.parse(await readFile(join(h.root, '.claude/settings.local.json'), 'utf8'));
   assert.match(settings.hooks.SessionStart[0].hooks[0].command, /--scope project --hook/);
   await assert.rejects(readFile(join(h.claudeDir, 'settings.json')), { code: 'ENOENT' });
+});
+
+test('a project in a subdirectory of a git repository installs at project scope', async t => {
+  const h = await harness(t, { subdirectory: 'packages/app' });
+  const first = await h.run('install', '--client', 'claude-code', '--scope', 'project', '--no-open');
+  // The expiry reads the same in any timezone; agents get the link as data to relay.
+  assert.match(first.out, /expires \d\d:\d\d UTC, in (29|30) min/);
+  const userCode = first.out.match(/Code: (\S+)/)[1];
+  const pending = JSON.parse((await h.run('install', '--client', 'claude-code', '--scope', 'project', '--no-open', '--json')).stdout);
+  assert.equal(pending.code, 'pending'); assert.equal(pending.userCode, userCode);
+  assert.match(pending.approvalUrl, new RegExp(`/connect\\?code=${userCode}`)); assert.ok(Date.parse(pending.expiresAt) > Date.now());
+  assert.match(pending.next, /Show the person approving this link/);
+  await h.approve(userCode);
+  const installed = await h.run('install', '--client', 'claude-code', '--scope', 'project');
+  assert.equal(installed.code, 0, installed.out);
+  assert.ok(installed.out.includes(`applies it to the whole git repository at ${h.repository}`), installed.out);
+  assert.deepEqual(Object.keys((await h.claudeConfig()).projects), [h.repository]);
+  assert.match(await readFile(join(h.root, '.claude/rules/openmerit-scout.md'), 'utf8'), /OpenMerit Scout/);
+  // Status and a rerun find the entry Claude Code saved, instead of reporting it missing or clashing with it.
+  const status = JSON.parse((await h.run('status', '--client', 'claude-code', '--scope', 'project', '--json')).stdout);
+  assert.equal(status.installed, true); assert.equal(status.server, 'matches');
+  assert.equal((await h.run('install', '--client', 'claude-code', '--scope', 'project')).code, 0);
 });
 
 test('install opens only the approval page, once, and resumes without reopening it', { skip: process.platform !== 'linux' }, async t => {

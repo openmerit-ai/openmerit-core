@@ -50,7 +50,9 @@ Exit codes: 0 done, 10 approval pending, 11 denied or expired, 20 conflict,
 30 OpenMerit unreachable, 1 other error.
 `;
 
-class Stop extends Error { constructor(message, code, next) { super(message); this.exit = code; this.next = next; } }
+class Stop extends Error { constructor(message, code, next, details) { super(message); this.exit = code; this.next = next; this.details = details; } }
+// An approval deadline people in any timezone, and agents relaying it, read the same way.
+const deadlineText = at => `${new Date(at).toISOString().slice(11, 16)} UTC, in ${Math.max(0, Math.round((at - Date.now()) / 60_000))} min`;
 
 const server = () => (process.env.OPENMERIT_URL ?? 'https://openmerit.ai').replace(/\/+$/, '');
 const credentialsPath = telemetry => deviceCredentialsPath(telemetry.properties.agent, telemetry.properties.scope, telemetry.root);
@@ -105,7 +107,13 @@ function claudePaths(root, scope) {
     mcpScope: scope === 'user' ? 'user' : 'local',
   };
 }
-const configuredServer = (config, root, scope) => scope === 'user' ? config.mcpServers?.openmerit : config.projects?.[root]?.mcpServers?.openmerit;
+// Claude Code keys its private local scope by the project's git repository root, so a
+// project in a subdirectory of a repository shares the entry of the whole repository.
+async function claudeProject(root) {
+  try { return (await exec('git', ['rev-parse', '--show-toplevel'], { cwd: root, timeout: 10_000, windowsHide: true })).stdout.trim() || root; }
+  catch { return root; }
+}
+const configuredServer = (config, project, scope) => scope === 'user' ? config.mcpServers?.openmerit : config.projects?.[project]?.mcpServers?.openmerit;
 const serverConfig = (key, telemetry) => ({ type: 'http', url: `${server()}/scout/mcp`, headers: { Authorization: `Bearer ${key}`, ...setupHeaders(telemetry.properties, 'agent') } });
 const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(k => [k, canonical(value[k])])) : value;
 const serverHash = value => value ? hash(JSON.stringify(canonical(value))) : null;
@@ -123,12 +131,12 @@ async function claude(args, root, key) {
 // Inspect the current Claude Code installation without changing anything.
 async function inspect(root, scope, client = 'claude-code') {
   if (client === 'pi') return { ...await inspectPi(root, scope), client };
-  const paths = claudePaths(root, scope);
+  const paths = { ...claudePaths(root, scope), project: await claudeProject(root) };
   const [record, config, installedSkill, installedRule, legacyRule] = await Promise.all([object(paths.record), object(paths.mcpFile), optional(paths.skill), optional(paths.rule), optional(paths.legacyRule)]);
   const updates = await inspectUpdates(dirname(paths.record), scope, record);
   const owned = [2, 3].includes(record.version) && record.scope === scope;
-  const current = configuredServer(config, root, scope);
-  const otherScope = configuredServer(config, root, scope === 'user' ? 'project' : 'user');
+  const current = configuredServer(config, paths.project, scope);
+  const otherScope = configuredServer(config, paths.project, scope === 'user' ? 'project' : 'user');
   const projectFile = await object(join(root, '.mcp.json'));
   return {
     paths, record, owned, current, installedSkill, installedRule, updates, client,
@@ -189,7 +197,7 @@ async function login({ client, scope, open, log, wait, telemetry }) {
   if (process.env.OPENMERIT_ANALYTICS_ACCOUNT === 'off' || !telemetryEnabled(true)) approvalURL.searchParams.set('analytics_account', 'off');
   pending = { ...pending, url: approvalURL.href, setup_id: telemetry.properties.setup_id, installation_id: telemetry.properties.installation_id };
   await save(pendingPath(telemetry), pending);
-  log(`Approve this device in your browser (opening it now):\n\n  ${pending.url}\n\n  Code: ${pending.userCode} (expires ${new Date(pending.expiresAt).toLocaleTimeString()})\n`);
+  log(`Approve this device in your browser (opening it now):\n\n  ${pending.url}\n\n  Code: ${pending.userCode} (expires ${deadlineText(pending.expiresAt)})\n`);
   await telemetry.step('browser_open', 'started');
   if (open && !pending.opened && !pending.openFailed) {
     // Only the approval page on the configured OpenMerit server may be opened.
@@ -226,7 +234,9 @@ async function login({ client, scope, open, log, wait, telemetry }) {
       if (data.error === 'access_denied') throw new Stop('The sign-in request was denied. Nothing was installed.', exitCodes.denied, 'Rerun the command to start a new request.');
       throw new Stop('The sign-in code expired or was already used. Nothing was installed.', exitCodes.denied, 'Rerun the command to get a new code.');
     }
-    if (Date.now() + interval > deadline) throw new Stop(`Waiting for approval of code ${pending.userCode}.`, exitCodes.pending, `Open ${pending.url}, click Approve, then rerun the same command. It resumes this request.`);
+    if (Date.now() + interval > deadline) throw new Stop(`Waiting for approval of code ${pending.userCode}: ${pending.url} (expires ${deadlineText(pending.expiresAt)}).`, exitCodes.pending,
+      `Show the person approving this link and its expiry in your reply. Once they click Approve, rerun the same command: it resumes this request.`,
+      { approvalUrl: pending.url, userCode: pending.userCode, expiresAt: new Date(pending.expiresAt).toISOString() });
     await new Promise(resolve => setTimeout(resolve, interval));
   }
 }
@@ -251,7 +261,7 @@ async function install(root, { client, scope, plan, open, log, wait, telemetry, 
   const found = conflicts(state);
   if (client === 'pi' && autoUpdate === 'on') throw new Stop('Pi updates are explicit: rerun install --client pi. Automatic hooks are Claude Code only.', exitCodes.error);
   const changes = [
-    `${state.current ? 'Update' : 'Add'} ${client === 'pi' ? 'native Pi MCP extension' : 'MCP server "openmerit" in Claude Code'} (${scope} scope)`,
+    `${state.current ? 'Update' : 'Add'} ${client === 'pi' ? 'native Pi MCP extension' : 'MCP server "openmerit" in Claude Code'} (${scope} scope)${client !== 'pi' && scope === 'project' && state.paths.project !== root ? `; Claude Code applies it to the whole git repository at ${state.paths.project}` : ''}`,
     `${state.installedSkill === null ? 'Create' : 'Update'} ${state.paths.skill}`,
     `${state.installedRule === null ? 'Create' : 'Update'} ${state.paths.rule} (loaded at session startup)`,
     ...(client === 'pi' ? [] : [
@@ -293,7 +303,7 @@ async function install(root, { client, scope, plan, open, log, wait, telemetry, 
     await save(state.paths.rule, rule);
     if (state.legacyRule === 'remove') await rm(state.paths.legacyRule, { force: true });
     // Record what Claude actually wrote, so later edits are detected precisely.
-    const written = configuredServer(await object(state.paths.mcpFile), root, scope);
+    const written = configuredServer(await object(state.paths.mcpFile), state.paths.project, scope);
     if (!written) throw new Stop('Claude Code did not save the "openmerit" MCP server.', exitCodes.error, 'Run "openmerit doctor".');
     const updates = await configureUpdates(dirname(state.paths.record), scope, state.record, clientVersion, enabled);
     await save(state.paths.record, { version: 3, scope, client, ...ids, serverHash: serverHash(written), skillHash: hash(skill), ruleHash: hash(rule), updates, installedAt: new Date().toISOString() });
@@ -509,7 +519,7 @@ async function runMain(args, { root = process.cwd(), print = console.log, printE
   } catch (error) {
     if (!(error instanceof Stop)) throw error;
     await telemetry.fail(error);
-    if (options.json) print(JSON.stringify({ ok: false, action, code: Object.keys(exitCodes).find(k => exitCodes[k] === error.exit), message: error.message, next: error.next }, null, 2));
+    if (options.json) print(JSON.stringify({ ok: false, action, code: Object.keys(exitCodes).find(k => exitCodes[k] === error.exit), message: error.message, next: error.next, ...error.details }, null, 2));
     else printError([error.message, error.next].filter(Boolean).join('\n'));
     return error.exit;
   }

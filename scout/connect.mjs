@@ -9,7 +9,8 @@ CREATE INDEX IF NOT EXISTS openmerit_device_keys_user ON openmerit_device_keys(u
 
 export const scoutPermission = 'scout:recommend';
 export const clients = { 'claude-code': 'Claude Code', pi: 'Pi' };
-const loginTTL = 600_000, pollInterval = 5, idleLifetime = 90 * 86400_000, touchEvery = 300_000;
+// Device codes last 30 minutes: approval often waits for a different person than the one running the installer.
+const loginTTL = 1_800_000, pollInterval = 5, idleLifetime = 90 * 86400_000, touchEvery = 300_000;
 const alphabet = 'BCDFGHJKLMNPQRSTVWXZ23456789';
 const ready = new WeakSet();
 
