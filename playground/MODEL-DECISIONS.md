@@ -2,6 +2,14 @@
 
 Every application model choice goes through Scout first (see `AGENTS.md` and `POLICY.md`). Each entry records the task text, the policy given, what Scout recommended, what we chose, and how residency was handled. Raw Scout responses are in `scout-results/`.
 
+## 5 Nov 2026: measured cost as tie-break (openmerit 0.3.4)
+
+No models were run. New conversation `3c93de23-05c1-49d9-a935-1a998a3aa792`, same task text as 0.3.3, with the same agent-level results (`scout-results/2026-11-05-0.3.4-*.json`). Without any follow-up, Scout ranks GPT-6.1 Sol first on intake, coding, adjudication and fraud: all five measured candidates tie on quality, and GPT is cheapest by measurement. Enrollment ties four models, with Sonnet 5.5 first and no measured cost. The re-recommended `d16cba5a-…` gives the same order.
+
+**Choice:** unchanged, Claude Sonnet 5.5 for all five agents. Scout's measured-cost pick is GPT-6.1 Sol, which would save about USD 5.9 a day at 300 claims. Switching still waits on more rounds and harder labelled claims, because one round of 14 cannot show equal quality on harder cases.
+
+**Residency:** unchanged, so every candidate is a recorded gap.
+
 ## 5 Nov 2026: measured cost reported to Scout (openmerit 0.3.3)
 
 No models were rerun. The measured per-agent-run USD and seconds from the 0.3.1 measurement were reported with `kind: "usd"` and `kind: "seconds"`, in two places:
