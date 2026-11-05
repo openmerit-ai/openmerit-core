@@ -33,7 +33,7 @@ async function fixture({ preferences, navigator = {}, loginStatuses = ['pending'
     addListener: fn => { observer = fn; fn({ user: client.user, session: client.session }); },
     mountUserButton() {}, openSignIn() {},
   };
-  const document = Object.assign(new EventTarget(), { querySelector: $, createElement: node, visibilityState: 'visible' });
+  const document = Object.assign(new EventTarget(), { querySelector: $, getElementById: id => $(`#${id}`), createElement: node, visibilityState: 'visible' });
   const location = { pathname: '/connect/', search: `?code=ABCD1234&setup_id=${encodeURIComponent(queryId)}${query}`, href: 'https://example.test/connect/?code=ABCD1234' };
   const env = Object.assign(new EventTarget(), { document, location, localStorage, sessionStorage, navigator, crypto,
     URL, URLSearchParams, TextEncoder, Event, AbortSignal, setTimeout: fn => { queueMicrotask(fn); return 0; }, clearTimeout() {},

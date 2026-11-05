@@ -28,8 +28,8 @@
   // Historical Analytics Engine records are untouched; new search events go to PostHog.
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
   // SCOUT_AGENT: one Pi Durable agent conversation per object (scout/agent/).
-  "durable_objects": { "bindings": [{ "name": "SCOUT_ACCOUNTS", "class_name": "ScoutAccounts" }, { "name": "SCOUT_AGENT", "class_name": "ScoutAgent" }] },
-  "migrations": [{ "tag": "accounts-1", "new_sqlite_classes": ["ScoutAccounts"] }, { "tag": "agent-1", "new_sqlite_classes": ["ScoutAgent"] }],
+  "durable_objects": { "bindings": [{ "name": "SCOUT_ACCOUNTS", "class_name": "ScoutAccounts" }, { "name": "SCOUT_AGENT", "class_name": "ScoutAgent" }, { "name": "SCOUT_EVALUATIONS", "class_name": "ScoutEvaluations" }] },
+  "migrations": [{ "tag": "accounts-1", "new_sqlite_classes": ["ScoutAccounts"] }, { "tag": "agent-1", "new_sqlite_classes": ["ScoutAgent"] }, { "tag": "evaluations-1", "new_sqlite_classes": ["ScoutEvaluations"] }],
   // Workers AI runs the agent's model and its web search tool.
   "ai": { "binding": "AI" },
   // Product analytics remain off without POSTHOG_PROJECT_TOKEN and POSTHOG_HOST.

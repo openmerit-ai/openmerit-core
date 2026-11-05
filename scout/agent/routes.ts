@@ -8,6 +8,7 @@
 import { json, readJSON } from '../http.mjs';
 import { components, levels, measureKinds, type MeasurementInput } from './recommendation.ts';
 import type { AgentState, BriefEdits, Channel, TurnRequest } from './turn.ts';
+import { evaluationError, type EvaluationNamespace } from '../evaluation-routes.ts';
 
 interface Conversation { turn(request: TurnRequest, channel?: Channel): Promise<AgentState>; state(): Promise<AgentState> }
 export interface AgentNamespace { getByName(name: string): Conversation }
@@ -37,7 +38,7 @@ function parseResults(value: unknown): MeasurementInput[] | null {
 
 // A validated turn, or the reason the body is not one.
 export function parseTurn(body: unknown): { conversationId: string | null; turn: TurnRequest } | string {
-  if (!isObject(body) || Object.keys(body).some(k => !['conversationId', 'message', 'brief', 'skip', 'endpointIds', 'results'].includes(k))) return 'Send conversationId, message, brief, skip, endpointIds or results.';
+  if (!isObject(body) || Object.keys(body).some(k => !['conversationId', 'message', 'brief', 'skip', 'endpointIds', 'results', 'sync'].includes(k))) return 'Send conversationId, message, brief, skip, endpointIds, results or sync.';
   const conversationId = body.conversationId === undefined ? null : text(body.conversationId, 36);
   if (conversationId === null && body.conversationId !== undefined || conversationId && !agentPath.test(`/scout/api/agent/${conversationId}`)) return 'Invalid conversationId.';
   const message = body.message === undefined ? undefined : text(body.message, 4000);
@@ -49,34 +50,46 @@ export function parseTurn(body: unknown): { conversationId: string | null; turn:
   if (ids !== undefined && (!Array.isArray(ids) || ids.length > 100 || new Set(ids).size !== ids.length || ids.some(id => typeof id !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9/_.:+-]{0,159}$/.test(id)))) return 'endpointIds must be a unique list of up to 100 catalogue endpoint IDs. An empty list allows no endpoints.';
   const results = body.results === undefined ? undefined : parseResults(body.results);
   if (results === null) return resultsHelp;
+  if (body.sync !== undefined && body.sync !== 'langfuse') return 'sync must be langfuse.';
   if (!conversationId && !message?.trim()) return 'Describe the work you want a model to do.';
   const turn: TurnRequest = { skip: body.skip === true };
   if (edits.length) turn.brief = Object.fromEntries(edits) as BriefEdits;
   if (message !== undefined) turn.message = message;
   if (Array.isArray(ids)) turn.endpointIds = ids as string[];
   if (results) turn.results = results;
+  if (body.sync === 'langfuse') turn.sync = 'langfuse';
   return { conversationId, turn };
 }
 
 // Runs one validated turn in the user's conversation, starting it if new.
-export async function converse(namespace: AgentNamespace, userId: string, parsed: { conversationId: string | null; turn: TurnRequest }, channel: Channel): Promise<{ status: number; body: Record<string, unknown> }> {
+export async function converse(namespace: AgentNamespace, userId: string, parsed: { conversationId: string | null; turn: TurnRequest }, channel: Channel, evaluations?: EvaluationNamespace): Promise<{ status: number; body: Record<string, unknown> }> {
   const conversationId = parsed.conversationId ?? crypto.randomUUID();
   const conversation = namespace.getByName(`${userId}:${conversationId}`);
   // A client may name a new conversation so it can poll its progress while the first turn runs.
   if (parsed.conversationId && parsed.turn.message === undefined && !(await conversation.state()).turns) return { status: 404, body: { error: 'Conversation not found.' } };
-  try { return { status: 200, body: { conversationId, ...await conversation.turn(parsed.turn, channel) } }; }
+  try {
+    if (parsed.turn.sync) {
+      if (!evaluations) return { status: 503, body: { error: 'Langfuse connections are unavailable.' } };
+      await evaluations.getByName(userId).sync();
+    }
+    const warnings = parsed.turn.results?.some(r => [r.source, r.scope].some(v => /(?:\b(?:claim|patient|member|FICT|CLM)[-_ ]?\d|\b[0-9a-f]{8}-[0-9a-f-]{27,}\b|[^\s@]+@[^\s@]+\.[^\s@]+)/i.test(v)))
+      ? ['source or scope looks like a record ID or email. Use aggregate labels only. Delete the submitted evaluation data and resubmit without identifiers.'] : [];
+    return { status: 200, body: { conversationId, ...await conversation.turn({ ...parsed.turn, ...(evaluations ? { evaluationOwner: userId } : {}) }, channel), ...(warnings.length ? { warnings } : {}) } };
+  }
   catch (error) {
     const message = (error as Error).message;
     if (message === 'busy') return { status: 409, body: { error: 'Scout is still working on this conversation.', conversationId } };
     if (message === 'results') return { status: 400, body: { error: 'This conversation already holds the most measured results it can. Start a new conversation with your latest results.', conversationId } };
     if (message === 'endpoints') return { status: 400, body: { error: 'endpointIds are fixed when a conversation starts. Start a new conversation to use a different inventory.', conversationId } };
+    const connectionError = evaluationError(error);
+    if (connectionError) return { status: 400, body: { error: connectionError, conversationId } };
     console.error('scout-agent turn failed', message);
     // The run may still finish durably; the client can read it from the conversation.
     return { status: 503, body: { error: 'Scout could not finish this turn. Please try again.', conversationId } };
   }
 }
 
-export async function handleAgent(request: Request, namespace: AgentNamespace | undefined, userId: string): Promise<Response> {
+export async function handleAgent(request: Request, namespace: AgentNamespace | undefined, userId: string, evaluations?: EvaluationNamespace): Promise<Response> {
   const match = agentPath.exec(new URL(request.url).pathname);
   if (!match) return json({ error: 'Not found.' }, 404);
   if (!namespace) return json({ error: 'The Scout agent is not available on this server.' }, 503);
@@ -92,6 +105,6 @@ export async function handleAgent(request: Request, namespace: AgentNamespace | 
   try { body = await readJSON(request); } catch (error) { return json({ error: error instanceof SyntaxError ? 'Invalid JSON.' : (error as Error).message }, (error as { status?: number }).status ?? 400); }
   const parsed = parseTurn(body);
   if (typeof parsed === 'string') return json({ error: parsed }, 400);
-  const { status, body: reply } = await converse(namespace, userId, parsed, 'web');
+  const { status, body: reply } = await converse(namespace, userId, parsed, 'web', evaluations);
   return json(reply, status);
 }

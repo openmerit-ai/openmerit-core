@@ -25,6 +25,41 @@ Setup analytics defaults on. Set `OPENMERIT_TELEMETRY=0` or `DO_NOT_TRACK=1` to 
 
 Turning sharing off stops future optional collection. It does not stop required processing or delete stored data.
 
+## Evaluation connections (unreleased)
+
+The source Langfuse connector and per-user result store are not yet released.
+Once deployed, reported and imported aggregates are held per authenticated user
+in Cloudflare Durable Objects and inform only that user's recommendations across
+conversations. No cross-customer sharing is enabled. Each aggregate records level,
+kind (quality, USD or seconds), task/scope, catalogue model/endpoint ID, metric,
+average/value, sample count, direction, source label and report/import time.
+Do not put record IDs, emails or sensitive information in labels; identifier-like
+source/scope labels trigger warnings, not guaranteed redaction.
+
+Connecting Langfuse sends a separate Viewer key pair and mappings from the
+signed-in browser to Scout, encrypted at rest with a dedicated Worker secret.
+Scout requests only experiment headers/metadata and aggregate metric averages
+and counts. It does not request inputs, outputs, trace/observation bodies,
+experiment items, raw scores or score comments. Arbitrary metadata is discarded;
+experiment source labels are hashed. A deliberately invalid write-permission
+probe does not send a valid dataset or create traces. Your Langfuse region does
+not constrain Scout's storage or AI-provider region.
+
+At most 5,000 aggregates or 1 MB are retained per user. Rows expire 90 days after
+report/import, are excluded from recommendations at expiry and pruned daily;
+cleanup may be delayed by platform scheduling. The evaluation account, including
+its encrypted connection, is erased after 90 days without a report, connection
+or successful sync. Backups and infrastructure logs follow provider policies;
+immediate backup erasure has not been independently verified.
+
+On the signed-in [connection page](/connect/?integration=langfuse), disconnecting
+deletes the key and imported aggregates, including imports from an in-flight
+sync. **Delete all evaluation data** also deletes reported aggregates. Past
+conversation text and recommendations remain and may mention prior results;
+request broader deletion through the contact below. Legacy per-conversation
+aggregates migrate when that conversation next receives a turn. Old conversations
+not reopened require the broader deletion request.
+
 ## Storage and retention
 
 - Your browser stores sign-in information, sharing preferences and temporary task drafts.

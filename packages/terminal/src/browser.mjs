@@ -10,7 +10,7 @@ export function browserCommand(url, platform = process.platform, env = process.e
   return null;
 }
 
-export async function openBrowser(url, { platform = process.platform, env = process.env, spawnProcess = spawn, timeoutMs = 3000, allowed } = {}) {
+export async function openBrowser(url, { platform = process.platform, env = process.env, spawnProcess = spawn, timeoutMs = 3000, allowed = /** @type {(url: string) => boolean} */ (() => false) } = {}) {
   const command = browserCommand(url, platform, env, allowed);
   if (!command) return false;
   return new Promise(resolve => {

@@ -22,3 +22,14 @@
 .connect-error { color: var(--error); }
 .connect-success { color: var(--ink); font-size: 13px; }
 .connect-success::before { content: "✓ "; font-weight: 700; }
+.integration-card { margin-top: 20px; }
+.integration-card h2 { margin-top: 0; font-size: 18px; }
+.integration-card label { display: block; margin: 16px 0 6px; color: var(--muted); font-size: 12px; }
+.integration-card input, .integration-card select, .integration-card textarea { box-sizing: border-box; width: 100%; min-height: 40px; padding: 10px; border: 1px solid var(--field-line); border-radius: 6px; background: var(--input); color: var(--ink); font: 12px var(--mono); }
+.integration-card textarea { resize: vertical; }
+.integration-card input::placeholder { color: var(--quiet); opacity: 1; }
+.integration-card details { margin: 20px 0; }
+.integration-card summary { cursor: pointer; font-size: 13px; }
+.integration-card li { margin-bottom: 8px; }
+.integration-card .connect-actions { flex-wrap: wrap; }
+.integration-card .quiet-button { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; background: transparent; font-size: 12px; }

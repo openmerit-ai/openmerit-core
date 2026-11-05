@@ -2,6 +2,7 @@ import scout from './worker.mjs';
 import { isRetiredAgentPath, json } from './http.mjs';
 export { ScoutAccounts } from './account-analytics.mjs';
 export { ScoutAgent } from './agent/agent.ts';
+export { ScoutEvaluations } from './agent/evaluations.ts';
 
 const base = '/scout/alpha';
 

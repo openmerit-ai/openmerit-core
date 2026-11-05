@@ -16,6 +16,9 @@ Follow [setup](getting-started.md#connect-scout-to-a-coding-agent) and [the Pi g
 
 Use your own representative task checks to evaluate model candidates. The [standalone evaluation CLI is retired in npm 0.3.0](agent-evaluations.md); existing local artifacts are not deleted.
 
+Follow [close the model-selection loop](scout-close-loop.md) to consult, measure,
+report and choose. It distinguishes npm 0.3.4 from the unreleased Langfuse connector.
+
 ## Operate and troubleshoot
 
 [Commands](commands.md) lists the Scout and setup commands. The [Inference Terminal is retired in npm 0.3.0](inference-terminal.md); existing local files are not deleted. [Troubleshooting](troubleshooting.md), [security and data](security.md), and [current limitations](roadmap.md) explain setup failures and product boundaries. [Testing and validation](testing.md) distinguishes automated coverage from product evidence.

@@ -62,7 +62,10 @@ export function sessionSection(state: SessionState): string {
   if (state.endpointIds) lines.push(state.endpointIds.length
     ? `The project can only use ${state.endpointIds.length} catalogue endpoints; every search and shortlist is limited to them. If none fits a task, say so in its summary rather than suggesting others.`
     : 'The project has no catalogue endpoints in its inventory, so no model is eligible. Plan the tasks and submit an empty shortlist for each, explaining that the inventory is empty.');
-  if (state.measurements.length) lines.push(`The user's measured results in this conversation (aggregates from their own evals; cite as measured:<id>):\n${state.measurements.map(measurementLine).join('\n')}`);
+  lines.push('Only the current measurements below are authoritative. Ignore removed or superseded measurements in conversation history. Attribute each task summary to that task\'s own checks, not a failure repeated from another agent.');
+  if (state.measurements.length) lines.push(`The user's current measured results (account aggregates from their own evals; cite as measured:<id>):\n${state.measurements.map(measurementLine).join('\n')}`);
+  else lines.push('There are no current measured results. Do not claim a measured result from the transcript remains available.');
+  lines.push('When planning evals, swap one agent at a time and hold the other agents, fixtures, prompts and controls fixed. If every candidate scores 100%, explicitly say the eval cannot separate their quality and propose harder labelled boundary, adversarial or rare-failure examples. Cost may break the observed tie, but does not prove equal quality.');
   if (state.plan) lines.push(`Current plan (submit a shortlist for every task this turn, or call plan_tasks to change it):\n${state.plan.tasks.map((t, i) => `${i + 1}. ${t.title}`).join('\n')}`);
   return lines.join('\n');
 }
