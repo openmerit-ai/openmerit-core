@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Measured-first ranking, 30-minute device codes and monorepo install — deployed 5 November 2026, npm 0.3.2
+
+Reviewed the homepage against measured results ranking ahead of unmeasured models, 30-minute device codes, the UTC expiry and approval link in the installer's pending output, and the Claude Code install fix for projects inside a larger git repository. `site/index.html` has no FAQ block and does not mention code lifetimes, installer output or ranking order. No homepage copy changes.
+
 ## Evaluation plans and measured results — deployed 5 November 2026, npm 0.3.1
 
 Reviewed the homepage against the change that adds an evaluation plan to each Scout task, lets coding agents and the CLI report aggregate results measured with the customer's own evals, and ranks those results above public benchmarks for that account only. `site/index.html` has no FAQ block; its copy says OpenMerit is a model selection layer that stays out of the live request path, which still holds because Scout runs no evaluations and calls no models. No homepage copy changes. The Scout guide and data policy describe the stored results.
