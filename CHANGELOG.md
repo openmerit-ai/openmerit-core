@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fix `openmerit install --client claude-code` exiting with `ENOENT … dist/terminal/src/updates.ts` (0.3.1 and 0.3.2). Setting up automatic Scout instruction updates copied the updater from its TypeScript source, which the package does not ship; it now copies the module that is running. The MCP server, skill and rule were already written, but automatic updates stayed off and the installer reported failure.
 - `openmerit scout --help` and the installed Scout instructions describe the new optional `kind` field for reported results (`quality`, `usd` or `seconds`), so measured cost replaces Scout's estimate, and tell the agent to report each agent's own checks at the agent level because end-to-end results also measure the agents it did not swap. Terminal output shows measured cost per 1,000 agent runs or tasks. The field needs the matching Scout serving release; `--results` in 0.3.2 already forwards it.
 
 ## 0.3.2 — 2026-11-05

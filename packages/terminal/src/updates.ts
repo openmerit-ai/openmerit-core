@@ -126,7 +126,8 @@ const quote = (value: string) => `'${value.replaceAll("'", "'\"'\"'")}'`;
 export async function configureUpdates(base: string, scope: string, record: ObjectValue, version: string, enabled: boolean) {
   const state = await inspectUpdates(base, scope, record);
   if (state.conflicts.length) throw new Error(state.conflicts.join('\n'));
-  const source = await readFile(new URL('./updates.ts', import.meta.url), 'utf8');
+  // This module is the runner: updates.ts in source, the compiled updates.js in the npm package.
+  const source = await readFile(new URL(import.meta.url), 'utf8');
   const hook = { hooks: [{ type: 'command', command: `${quote(process.execPath)} ${quote(state.paths.runner)} --base ${quote(base)} --scope ${scope} --hook`, async: true, timeout: 150 }] };
   const hooks = { ...state.hooks };
   for (const event of ['SessionStart', 'Stop']) {
