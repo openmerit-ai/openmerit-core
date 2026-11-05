@@ -4,7 +4,8 @@
 //
 // Shape: each claim is a Langfuse session. Each agent run is a trace with one `agent` root span,
 // one `generation` per model call and one `tool` span per tool call, rebuilt from the Pi transcript.
-// The human approval and the payment form a final trace in the same session.
+// The human approval and the payment form a final trace in the same session. In a scenario run, a
+// claim's final agent trace also carries Langfuse experiment attributes (its dataset item is the claim).
 
 import type { EntryRecord } from "@earendil-works/pi-durable";
 import type { AssistantMessage, Message, ToolResultMessage } from "@earendil-works/pi-ai";
@@ -20,6 +21,26 @@ export interface TraceContext {
   traceName: string;
   tags: string[];
   metadata: Record<string, string>;
+  /** Set on a claim's final agent trace in a scenario run: that trace is the claim's experiment item. */
+  experiment?: ExperimentItem;
+}
+
+/**
+ * Links a trace to a Langfuse experiment (dataset run) through OTel attributes, which replace the
+ * deprecated `POST /api/public/dataset-run-items` (https://langfuse.com/integrations/native/opentelemetry/experiments).
+ */
+export interface ExperimentContext {
+  id: string;
+  name: string;
+  datasetId: string;
+  metadata: Record<string, string>;
+}
+
+export interface ExperimentItem extends ExperimentContext {
+  /** Dataset item ID; Sahra uses the claim ID. */
+  itemId: string;
+  /** Span ID of the trace's root observation. */
+  rootObservationId: string;
 }
 
 export interface SpanInput {
@@ -81,6 +102,17 @@ function otlpSpan(trace: TraceContext, environment: string, span: SpanInput) {
   ];
   if (trace.userId) attributes.push(attribute("langfuse.user.id", trace.userId));
   for (const [key, value] of Object.entries(trace.metadata)) attributes.push(attribute(`langfuse.trace.metadata.${key}`, value));
+  const experiment = trace.experiment;
+  if (experiment) {
+    attributes.push(
+      attribute("langfuse.experiment.id", experiment.id),
+      attribute("langfuse.experiment.name", experiment.name),
+      attribute("langfuse.experiment.dataset.id", experiment.datasetId),
+      attribute("langfuse.experiment.item.id", experiment.itemId),
+      attribute("langfuse.experiment.item.root_observation_id", experiment.rootObservationId),
+    );
+    for (const [key, value] of Object.entries(experiment.metadata)) attributes.push(attribute(`langfuse.experiment.metadata.${key}`, value));
+  }
   for (const [key, value] of Object.entries(span.metadata ?? {})) attributes.push(attribute(`langfuse.observation.metadata.${key}`, value));
   if (span.input !== undefined) attributes.push(attribute("langfuse.observation.input", json(span.input)));
   if (span.output !== undefined) attributes.push(attribute("langfuse.observation.output", json(span.output)));
@@ -248,6 +280,18 @@ export async function agentRunSpans(input: {
   return spans;
 }
 
+/** Tool results the harness rejected (argument validation) or that ended in a harness error: an [error] line, alone or in a <harness> block that can follow normal output. */
+export const isRejectedToolOutput = (text: string): boolean => /(^|\n)\s*(<harness>\s*)?\[error\]/.test(text);
+
+/** Task-level facts of one agent run, from its transcript: model calls and rejected tool calls. */
+export function transcriptCounts(entries: readonly EntryRecord[]): { modelCalls: number; rejectedToolCalls: number } {
+  const messages = entries.flatMap((entry) => entry.model ?? []);
+  return {
+    modelCalls: messages.filter((message) => message.role === "assistant").length,
+    rejectedToolCalls: messages.filter((message) => message.role === "toolResult" && isRejectedToolOutput(toChat(message).content)).length,
+  };
+}
+
 export interface ScoreInput {
   traceId: string;
   observationId?: string;
@@ -255,16 +299,22 @@ export interface ScoreInput {
   value: number | string;
   dataType: "NUMERIC" | "BOOLEAN" | "CATEGORICAL";
   comment?: string;
+  metadata?: Record<string, string>;
 }
 
-/** Posts a score through the scores API (scores are not OTLP spans). */
+/**
+ * Posts a score through the scores API (scores are not OTLP spans). The score ID is derived from its
+ * trace, observation and name, so a retried step or rerun of the runner updates instead of duplicating.
+ */
 export async function postScore(env: LangfuseEnv, score: ScoreInput): Promise<void> {
   const authorization = auth(env);
   if (!authorization) return;
+  const id = await hex(`score:${score.traceId}/${score.observationId ?? ""}/${score.name}`, 32);
   const response = await fetch(`${env.LANGFUSE_BASE_URL}/api/public/scores`, {
     method: "POST",
     headers: { authorization, "content-type": "application/json" },
-    body: JSON.stringify({ ...score, environment: env.LANGFUSE_ENVIRONMENT }),
+    body: JSON.stringify([{ id, ...score, environment: env.LANGFUSE_ENVIRONMENT }]),
   });
-  if (!response.ok) throw new Error(`Langfuse score failed: ${response.status} ${(await response.text()).slice(0, 300)}`);
+  // 202 accepts the batch; 207 reports rejected scores with a 2xx status.
+  if (!response.ok || response.status === 207) throw new Error(`Langfuse score failed: ${response.status} ${(await response.text()).slice(0, 300)}`);
 }

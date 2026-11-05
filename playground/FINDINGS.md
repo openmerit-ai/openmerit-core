@@ -23,9 +23,10 @@ Dated observations from using OpenMerit as Sahra Health, newest release first. E
 - See MODEL-DECISIONS.md. Under `existing-first` with no endpoints, Scout returned no models. With the whole catalogue, it refused every agent because the catalogue has no processing-location data, and it would not treat Workers AI as an exception. Only an explicit recorded-gap exception produced rankings. This is correct and cautious behavior. The gap: Scout can never say that an endpoint **does** process data in a given region, so data-residency customers always end up on an exception.
 - Scout reported "web search was unavailable" during that turn.
 
-### Ranking ignores a stated quality priority
+### Cost-first ranking let weaker models through the quality bar
 
 - The brief stated "quality and reliable tool calling matter more than cost", and Scout captured it in `criteria`. Every task still got `priority: "cost"`, and the ranking puts Claude Haiku 5.5 (quality 82) above Claude Sonnet 5.5 (90) and Gemini 4 Argon (94).
+- Per the published guide this is by design: Scout ranks cheapest first among models that reach its quality bar, and ranks by quality only when you explicitly ask for the best quality. Our wording did not count as that. The real gap is the bar: Scout's benchmark-based estimates put Haiku and Gemini 3.7 Flash above it, and our own comparison (below) showed they were weaker on our claims.
 
 ### Suspicious latency data
 

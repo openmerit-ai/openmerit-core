@@ -1,28 +1,28 @@
 // The claim and enrollment pipelines as Cloudflare Workflows. Each agent step runs once per case
 // (agents are idempotent by operation ID), checks that the agent recorded its result, and exports
-// that run to Langfuse. Payment waits for a human approval event, and the ledger refuses to pay
+// that run to Langfuse with its task-level scores. Payment waits for a human approval event, and the ledger refuses to pay
 // without one.
 
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { NonRetryableError } from "cloudflare:workflows";
 import { type AgentRunResult, instructionsFor } from "./agents.ts";
 import type { Approval } from "./domain/types.ts";
-import type { AgentRole, ModelChoice } from "./models.ts";
-import { agentRunSpans, exportSpans, runKey, spanIdFor, type TraceContext, traceIdFor } from "./tracing.ts";
-
-/** Scenario runs may name a model for every agent, to compare Scout's candidates. */
-export type ModelOverride = NonNullable<ModelChoice["model"]>;
+import type { AgentRole, ModelOverride, ModelOverrides } from "./models.ts";
+import { agentRunSpans, type ExperimentContext, exportSpans, postScore, runKey, type ScoreInput, spanIdFor, type TraceContext, traceIdFor, transcriptCounts } from "./tracing.ts";
 
 export interface ClaimFlowParams {
   claimId: string;
   runId?: string;
-  model?: ModelOverride;
+  /** Scenario runs may override the recorded model per agent, to compare Scout's candidates. */
+  models?: ModelOverrides;
+  /** Scenario runs link the claim's final agent trace to this Langfuse experiment (dataset item = claim ID). */
+  experiment?: ExperimentContext;
 }
 
 export interface EnrollmentFlowParams {
   applicationId: string;
   runId?: string;
-  model?: ModelOverride;
+  models?: ModelOverrides;
 }
 
 export const APPROVAL_EVENT = "human-approval";
@@ -64,13 +64,24 @@ const STEP_NAMES: Record<AgentRole, string> = {
   fraud: "assess-fraud",
 };
 
-/** Runs one agent on a case and exports the run as its own trace in the case's session. */
-async function runAgent(env: Env, input: { role: AgentRole; caseId: string; prompt: string; userId?: string; runId?: string; model?: ModelOverride }): Promise<AgentRunResult & { traceId: string }> {
+/**
+ * Runs one agent on a case, checks that it recorded its result, and exports the run as its own trace
+ * in the case's session with Sahra's task-level scores. With `experiment`, the trace becomes the
+ * case's experiment item when it is the case's last agent run: the last agent, or the one that failed.
+ */
+async function runAgent(
+  env: Env,
+  input: { role: AgentRole; caseId: string; prompt: string; userId?: string; runId?: string; model?: ModelOverride; last?: boolean; experiment?: ExperimentContext },
+  recorded: () => Promise<boolean>,
+): Promise<AgentRunResult & { traceId: string; recorded: boolean }> {
   const started = Date.now();
   // One agent instance and trace per case and run, so a rerun starts fresh instead of replaying.
   const key = runKey(input.caseId, input.runId);
   const result = await agentStub(env, input.role, key).run(input.caseId, input.prompt, input.model);
+  const isRecorded = await recorded();
   const traceId = await traceIdFor(`${key}/${input.role}`);
+  const rootObservationId = await spanIdFor(`${key}/${input.role}/agent`);
+  const final = input.experiment && (input.last || !isRecorded);
   const trace: TraceContext = {
     traceId,
     sessionId: input.caseId,
@@ -78,6 +89,7 @@ async function runAgent(env: Env, input: { role: AgentRole; caseId: string; prom
     traceName: STEP_NAMES[input.role],
     tags: ["sahra-health", input.role],
     metadata: { case_id: input.caseId, agent: input.role, ...(input.runId ? { run_id: input.runId } : {}), ...(input.model ? { model_override: `${input.model.provider}/${input.model.id}` } : {}) },
+    ...(final && input.experiment ? { experiment: { ...input.experiment, itemId: input.caseId, rootObservationId } } : {}),
   };
   const spans = await agentRunSpans({
     key: `${key}/${input.role}`,
@@ -94,12 +106,25 @@ async function runAgent(env: Env, input: { role: AgentRole; caseId: string; prom
     metadata: { case_id: input.caseId },
   });
   await exportSpans(env, trace, spans);
-  return { ...result, traceId };
+  const counts = transcriptCounts(result.entries);
+  const scores: Omit<ScoreInput, "traceId" | "observationId">[] = [
+    { name: "model-calls", value: counts.modelCalls, dataType: "NUMERIC", comment: `${input.role} agent model calls` },
+    { name: "rejected-tool-calls", value: counts.rejectedToolCalls, dataType: "NUMERIC", comment: "tool calls answered by a <harness> or [error] result" },
+    { name: "result-recorded", value: isRecorded ? 1 : 0, dataType: "BOOLEAN", comment: `${input.role} agent ended ${result.status}${result.reason ? ` (${result.reason})` : ""}` },
+  ];
+  for (const score of scores) {
+    try {
+      await postScore(env, { ...score, traceId, observationId: rootObservationId, metadata: { level: "task", agent: input.role } });
+    } catch (error) {
+      console.error(`Could not send score ${score.name} for ${input.caseId}`, error);
+    }
+  }
+  return { ...result, traceId, recorded: isRecorded };
 }
 
 export class ClaimFlow extends WorkflowEntrypoint<Env, ClaimFlowParams> {
   override async run(event: WorkflowEvent<ClaimFlowParams>, step: WorkflowStep): Promise<{ state: string }> {
-    const { claimId, runId, model } = event.payload;
+    const { claimId, runId, models, experiment } = event.payload;
     const ledger = this.env.LEDGER.getByName("sahra");
     const initial = await ledger.getClaim(claimId);
     if (!initial) throw new NonRetryableError(`Unknown claim ${claimId}`);
@@ -112,11 +137,17 @@ export class ClaimFlow extends WorkflowEntrypoint<Env, ClaimFlowParams> {
       { role: "fraud", prompt: `Assess claim ${claimId} for fraud, waste and abuse.`, recorded: (record) => record.fraud !== null },
     ];
 
-    for (const stage of pipeline) {
+    for (const [index, stage] of pipeline.entries()) {
       await step.do(STEP_NAMES[stage.role], { timeout: AGENT_TIMEOUT, retries: { limit: 1, delay: "10 seconds", backoff: "constant" } }, async (): Promise<StepOutcome> => {
-        const result = await runAgent(this.env, { role: stage.role, caseId: claimId, prompt: stage.prompt, userId, runId, model });
-        const record = await ledger.getClaim(claimId);
-        if (!record || !stage.recorded(record)) {
+        const result = await runAgent(
+          this.env,
+          { role: stage.role, caseId: claimId, prompt: stage.prompt, userId, runId, model: models?.[stage.role], last: index === pipeline.length - 1, experiment },
+          async () => {
+            const record = await ledger.getClaim(claimId);
+            return !!record && stage.recorded(record);
+          },
+        );
+        if (!result.recorded) {
           const message = `${stage.role} agent ended ${result.status}${result.reason ? ` (${result.reason})` : ""} without recording its result`;
           await ledger.fail(claimId, message);
           throw new NonRetryableError(message);
@@ -182,13 +213,17 @@ export class ClaimFlow extends WorkflowEntrypoint<Env, ClaimFlowParams> {
 
 export class EnrollmentFlow extends WorkflowEntrypoint<Env, EnrollmentFlowParams> {
   override async run(event: WorkflowEvent<EnrollmentFlowParams>, step: WorkflowStep): Promise<{ decision: string }> {
-    const { applicationId, runId, model } = event.payload;
+    const { applicationId, runId, models } = event.payload;
     const ledger = this.env.LEDGER.getByName("sahra");
     return step.do(STEP_NAMES.enrollment, { timeout: AGENT_TIMEOUT, retries: { limit: 1, delay: "10 seconds", backoff: "constant" } }, async () => {
-      await runAgent(this.env, { role: "enrollment", caseId: applicationId, prompt: `Process enrollment application ${applicationId}.`, runId, model });
-      const record = await ledger.getEnrollment(applicationId);
-      if (!record || record.decision === "pending") throw new NonRetryableError("Enrollment agent ended without a decision");
-      return { decision: record.decision };
+      const decided = async () => {
+        const record = await ledger.getEnrollment(applicationId);
+        return record && record.decision !== "pending" ? record.decision : null;
+      };
+      await runAgent(this.env, { role: "enrollment", caseId: applicationId, prompt: `Process enrollment application ${applicationId}.`, runId, model: models?.enrollment }, async () => !!(await decided()));
+      const decision = await decided();
+      if (!decision) throw new NonRetryableError("Enrollment agent ended without a decision");
+      return { decision };
     });
   }
 }
