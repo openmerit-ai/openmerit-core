@@ -17,6 +17,7 @@ import {boardSources,importBoards} from './catalogue-boards.ts';
 import {loadCatalogue,catalogueRouteSource,decisionGateway} from './catalogue-routes.ts';
 import admittedProviders from './catalogue-providers.json' with { type: 'json' };
 import {evidenceLedger,migrateGeneration} from './evidence-db.ts';
+import {productAnalyticsEnabled,sendProductBatch} from './product-analytics.mjs';
 
 export function retainResearch(next,previous) {
   for(const b of previous.benchmarks.filter(b=>b.source.startsWith('research:')))if(!next.benchmarks.some(x=>x.id===b.id))next.benchmarks.push(b);
@@ -76,6 +77,32 @@ export async function migratePublished(bucket,db) {
   return key?migrateGeneration(db,await evidenceLedger(db),key,{
     load:async()=>{const records=await getJSON(bucket,key);return {records,research:records.research??await getJSON(bucket,researchKey(key))??[]};},
     save:records=>putJSON(bucket,key,records)}):{skipped:true};
+}
+
+// One PostHog event per refresh run, so operators can alert on it: whether it published, and every public
+// feed or catalogue import that failed. A failed feed never fails the run (the last good data is kept),
+// so a run can publish while degraded. Errors are the sources' own short messages; no catalogue content.
+/** @param {string} id @param {{status:'published'|'failed',version?:string|null,feeds?:Array<{id:string,status:string,error?:string,checkedAt?:string}>,imports?:Array<{source:string,status:string,error?:string|null}>,error?:string|null}} outcome @param {string} environment */
+export async function refreshEvent(id,{status,version=null,feeds=[],imports=[],error=null},environment) {
+  const short=value=>String(value??'').slice(0,200);
+  const failed=[...feeds.filter(s=>s.status==='failed').map(s=>({id:s.id,kind:'feed',error:short(s.error),lastSuccessAt:s.checkedAt??null})),
+    ...imports.map(r=>({id:r.source,kind:'catalogue',error:short(r.error??(r.status==='running'?'Import did not finish.':'')),lastSuccessAt:null}))]
+    .sort((a,b)=>a.id.localeCompare(b.id));
+  // Retried steps resend the same UUID, which PostHog deduplicates.
+  const hex=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(`scout-refresh:${id}:${status}`)))].map(b=>b.toString(16).padStart(2,'0')).join('');
+  return {event:'scout_refresh_completed',distinct_id:'scout-publisher',uuid:`${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(13,16)}-8${hex.slice(17,20)}-${hex.slice(20,32)}`,timestamp:new Date().toISOString(),
+    properties:{$process_person_profile:false,product:'scout',environment,run_id:id,status,version,...(error?{error:short(error)}:{}),
+      failed_count:failed.length,failed_source_ids:failed.map(f=>f.id).join(','),failed_sources:failed}};
+}
+async function reportRun(env,step,id,outcome) {
+  if(!productAnalyticsEnabled(env))return;
+  // Reporting never changes the run's outcome.
+  try{await step.do(`report-${outcome.status}`,{retries:{limit:2,delay:'10 seconds'},timeout:'2 minutes'},async()=>{
+    const imports=env.SCOUT_INDEX?(await env.SCOUT_INDEX.prepare("SELECT source,status,error FROM cat_runs WHERE id LIKE ?1 AND status!='ok'").bind(`${id}-%`).all()).results:[];
+    const feeds=(await getJSON(env.SCOUT_CATALOGUE,`runs/${id}/sources.json`))??[];
+    await sendProductBatch(env,[await refreshEvent(id,{...outcome,feeds,imports},env.POSTHOG_ENVIRONMENT)]);
+    return {reported:true};
+  });}catch{}
 }
 
 export async function runRefresh(env,step,id) {
@@ -153,12 +180,19 @@ export async function runRefresh(env,step,id) {
       candidate=await refreshBenchmarks(candidate,previous,{...options,registry:candidate.registry,interpretations});
       candidate=await refreshSpecialists(candidate,previous,options);
       const {research:_ledgered,...records}=toRecords(candidate),key=`runs/${id}/candidate.json`;
-      await putJSON(bucket,key,{records,previous:publicationPredecessor(previous)});return key;
+      await putJSON(bucket,key,{records,previous:publicationPredecessor(previous)});
+      // The run report reads only the feed states, not the whole candidate.
+      await putJSON(bucket,`runs/${id}/sources.json`,records.sources.map(({id,status,error,checkedAt})=>({id,status,error,checkedAt})));return key;
     });
     const staged=await step.do('validate-and-stage',{retries:{limit:12,delay:'10 seconds',backoff:'constant'},timeout:'10 minutes'},async()=>{
       const {records,previous}=await getJSON(bucket,candidateKey);return stageCatalogue(bucket,records,previous,{...options,db:env.SCOUT_INDEX,vectorize:env.SCOUT_EVIDENCE});
     });
     await step.do('publish',()=>coordinator.publish(id,staged));
+    await reportRun(env,step,id,{status:'published',version:staged.publication.id});
     return {status:'published',version:staged.publication.id};
-  } catch(error) {await step.do('record-failure',()=>coordinator.fail(id,'Refresh did not finish; serving the last committed catalogue.'));throw error;}
+  } catch(error) {
+    await step.do('record-failure',()=>coordinator.fail(id,'Refresh did not finish; serving the last committed catalogue.'));
+    await reportRun(env,step,id,{status:'failed',error:error?.message});
+    throw error;
+  }
 }

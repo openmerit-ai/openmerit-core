@@ -59,6 +59,8 @@
       }
     }
   ],
+  // Each refresh run reports scout_refresh_completed to PostHog once POSTHOG_PROJECT_TOKEN and POSTHOG_HOST are set as secrets.
+  "vars": { "POSTHOG_ENVIRONMENT": "production" },
   "triggers": {
     "crons": [
       "7 0,12 * * *"
