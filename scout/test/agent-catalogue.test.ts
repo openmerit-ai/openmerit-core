@@ -57,7 +57,7 @@ test('the kind filter restricts search, leaderboards and the number of models a 
   const ok = finalize(catalogue, submit([pick('lab/ears-hd', ['asr:multilingual']), pick('lab/ears')], { audioSeconds: 600 }, { kind: 'transcription' }), Date.parse('2026-10-29'));
   assert.equal(ok.models.length, 2);
   // ...but not without it, and a chat model breaks the constraint.
-  assert.throws(() => finalize(catalogue, submit([pick('lab/ears-hd'), pick('lab/ears')], { audioSeconds: 600 }), 0), /Five candidates must reach the quality bar of 50; 2 do, and 9 models meet the constraints \(set filters.kind/);
+  assert.throws(() => finalize(catalogue, submit([pick('lab/ears-hd'), pick('lab/ears')], { audioSeconds: 600 }), 0), /Assess at least five candidates; 2 submitted, and 9 models meet the constraints \(set filters.kind/);
   assert.throws(() => finalize(catalogue, submit([pick('lab/ears'), pick('lab/chat-a')], { audioSeconds: 600 }, { kind: 'transcription' }), 0), /lab\/chat-a breaks the hard constraints: it is a chat model, not transcription/);
 });
 

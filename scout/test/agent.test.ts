@@ -28,6 +28,8 @@ const catalogue: Catalogue = {
   semanticBenchmarks: async () => ['b1'],
   search: { bm25: async () => [], embedding: async () => [] },
 };
+// Bench Two measures tool calling, the evidence an agent's call needs to reach the bar.
+const toolCatalogue: Catalogue = { ...catalogue, benchmarks: catalogue.benchmarks.map(b => b.id === 'b2' ? { ...b, tags: ['tools'] } : b) };
 const brief = { input: { text: 'Invoices', source: 'stated' as const }, work: { text: 'Extract', source: 'stated' as const }, output: { text: 'JSON', source: 'stated' as const }, criteria: { text: '', source: 'missing' as const }, constraints: { text: '', source: 'missing' as const } };
 const pick = (modelId: string, quality: number, evidence: string[] = []) => ({ modelId, quality, evidence, rationale: 'why' });
 const evaluation: Submission['evaluation'] = { checks: [{ level: 'task', metric: 'fields correct', how: 'Compare with labelled invoices.' }], samples: 30, stopEarly: 'Stop after 10 if it trails the leader by 20 points.' };
@@ -58,8 +60,8 @@ test('rejected shortlists explain every problem so the agent can correct them', 
     assert.match(error.message, /lab\/gamma is listed twice/);
     return true;
   });
-  // Six models are eligible without constraints, so two are not a shortlist of five.
-  assert.throws(() => finalize(catalogue, submission([pick('lab/alpha', 90), pick('lab/beta', 80)]), now), /Five candidates must reach the quality bar of 50; 2 do, and 6 models meet the constraints/);
+  // Six models are eligible without constraints, so two assessed candidates are too few.
+  assert.throws(() => finalize(catalogue, submission([pick('lab/alpha', 90), pick('lab/beta', 80)]), now), /Assess at least five candidates; 2 submitted, and 6 models meet the constraints/);
 });
 
 test('axis leaders come from known values only', () => {
@@ -67,8 +69,8 @@ test('axis leaders come from known values only', () => {
   const best = Object.fromEntries(result.models.map(m => [m.id, m.best]));
   // Beta: highest quality estimate, cheapest ($1.50 per 1k tasks vs alpha's $4 and $3 on the other routes), newest release.
   assert.deepEqual(best['lab/beta'], ['quality', 'cost', 'recency']);
-  // Alpha: 2 + 500/100 = 7 s beats beta's 1 + 500/50 = 11 s; models without timing never lead.
-  assert.deepEqual(best['lab/alpha'], ['latency']);
+  // Alpha is faster (2 + 500/100 = 7 s against beta's 11 s), but speed never ranks or leads.
+  assert.deepEqual(best['lab/alpha'], []);
   assert.deepEqual(best['lab/gamma'], []);
 });
 
@@ -83,6 +85,29 @@ test('by default the five cheapest candidates that reach the quality bar are sho
   assert.deepEqual(shown(id => id === 'lab/beta' ? 60 : 80), [[1, 'lab/epsilon'], [2, 'lab/delta'], [3, 'lab/gamma'], [4, 'lab/zeta'], [5, 'lab/alpha']]);
   // An explicit quality priority shows the five highest estimates instead.
   assert.deepEqual(shown(id => ({ 'lab/alpha': 95, 'lab/zeta': 90, 'lab/beta': 75 })[id] ?? 80, 'quality').map(([, id]) => id), ['lab/alpha', 'lab/zeta', 'lab/epsilon', 'lab/delta', 'lab/gamma']);
+});
+
+test('fewer than five may reach the bar, so the bar never drops to fill the shortlist', () => {
+  const all = ['lab/epsilon', 'lab/alpha', 'lab/delta', 'lab/beta', 'lab/gamma'];
+  // Five assessed, two at the bar of 70: only those two are shown, cheapest first.
+  const result = finalize(catalogue, { ...submission(all.map(id => pick(id, ['lab/alpha', 'lab/beta'].includes(id) ? 85 : 60))), qualityBar: 70 }, now);
+  assert.deepEqual(result.models.map(m => [m.rank, m.id]), [[1, 'lab/beta'], [2, 'lab/alpha']]);
+  assert.throws(() => finalize(catalogue, { ...submission(all.map(id => pick(id, 60))), qualityBar: 70 }, now), /No candidate reaches the quality bar of 70/);
+});
+
+test('for an agent\'s call, only tool-calling evidence or a measured result puts a candidate over the bar', () => {
+  const measured = { id: 'm1', level: 'agent' as const, task: 'Extract', scope: 'extraction agent', model: 'lab/delta', metric: 'claims correct', value: 0.9, higherIsBetter: true, samples: 30, source: 'Langfuse' };
+  const agentCall = { task: { ...task('Extract'), agent: 'Extraction agent' }, measurements: [measured] };
+  const shortlist = (alphaQuality: number) => submission([pick('lab/alpha', alphaQuality, ['b1']), pick('lab/gamma', 80, ['b2']), pick('lab/delta', 80, ['measured:m1']), pick('lab/beta', 30, ['b1']), pick('lab/epsilon', 30)]);
+  // Alpha leads Bench One, a domain benchmark, but that alone cannot qualify it for a call that uses tools.
+  assert.throws(() => finalize(toolCatalogue, shortlist(90), now, {}, agentCall), (error: Error) => {
+    assert.match(error.message, /lab\/alpha reaches the quality bar for an agent's call without evidence of tool calling/);
+    assert.doesNotMatch(error.message, /lab\/(gamma|delta|beta|epsilon) reaches/);
+    return true;
+  });
+  assert.deepEqual(finalize(toolCatalogue, shortlist(40), now, {}, agentCall).models.map(m => m.id), ['lab/gamma', 'lab/delta']);
+  // A standalone call is not held to it.
+  assert.equal(finalize(toolCatalogue, shortlist(90), now, {}, { task: task('Extract'), measurements: [measured] }).models.length, 3);
 });
 
 test('model search applies constraints, treats PDF as a document input and ranks by benchmark among measured models', () => {
@@ -133,7 +158,7 @@ test('the user\'s measured results outrank benchmarks: a measured candidate must
   // Alpha's result is reported by one of its endpoint IDs, beta's by its model ID; m3 is for another task.
   const measurements = [measured('m1', 'lab/beta', 0.97), measured('m2', 'Vision:m', 0.81), measured('m3', 'lab/gamma', 0.5, 'Summarize')];
   const context = { task: { ...task('Extract'), agent: 'Extraction agent', callsPerRun: 4 }, measurements };
-  const candidates = (cite: (id: string) => string[]) => ['lab/alpha', 'lab/beta', 'lab/gamma', 'lab/delta', 'lab/epsilon'].map(id => pick(id, 70, cite(id)));
+  const candidates = (cite: (id: string) => string[], quality = (_id: string) => 70) => ['lab/alpha', 'lab/beta', 'lab/gamma', 'lab/delta', 'lab/epsilon'].map(id => pick(id, quality(id), cite(id)));
   assert.throws(() => finalize(catalogue, submission(candidates(() => [])), now, {}, context), (error: Error) => {
     assert.match(error.message, /The user measured lab\/alpha on this task \(measured:m2\)/);
     assert.match(error.message, /The user measured lab\/beta on this task \(measured:m1\)/);
@@ -143,7 +168,8 @@ test('the user\'s measured results outrank benchmarks: a measured candidate must
   });
   // A model cannot cite another model's result.
   assert.throws(() => finalize(catalogue, submission(candidates(id => id === 'lab/alpha' ? ['measured:m2', 'measured:m1'] : id === 'lab/beta' ? ['measured:m1'] : [])), now, {}, context), /lab\/alpha has no results on measured:m1/);
-  const result = finalize(catalogue, submission(candidates(id => ({ 'lab/alpha': ['measured:m2', 'b1'], 'lab/beta': ['measured:m1'] })[id] ?? [])), now, {}, context);
+  // Gamma reaches the bar of this agent's call on a tool-calling benchmark; delta and epsilon have no evidence and stay below it.
+  const result = finalize(toolCatalogue, submission(candidates(id => ({ 'lab/alpha': ['measured:m2', 'b1'], 'lab/beta': ['measured:m1'], 'lab/gamma': ['b2'] })[id] ?? [], id => ['lab/delta', 'lab/epsilon'].includes(id) ? 40 : 70)), now, {}, context);
   const byId = Object.fromEntries(result.models.map(m => [m.id, m]));
   assert.deepEqual(byId['lab/beta']?.quality, { score: 70, measured: true, evidence: [{ benchmark: 'measured:m1', name: 'Your eval: fields correct (agent level, 40 samples, Langfuse experiment invoices-1)', score: 0.97, rank: 1, of: 2 }] });
   assert.equal(byId['lab/alpha']?.quality.evidence[0]?.rank, 2);

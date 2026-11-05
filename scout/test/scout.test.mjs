@@ -42,7 +42,7 @@ test('CSV parsing preserves quotes, commas, newlines, zero, and blank cells', ()
 
 function fixtures() {
   const models = Array.from({ length: 12 }, (_, i) => ({ id: `lab/model-${i}`, canonical_slug: `lab/model-${i}-2026-10-01`, name: `Lab: Model ${i}`, architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] }, pricing: { prompt: '.000001', completion: '.000002' }, supported_parameters: ['response_format'] }));
-  const rows = models.map((m, i) => ({ slug: `model-${i}`, name: m.name.slice(5), scores: { 'gpqa-diamond': i / 12 }, medianOutputTokensPerSecond: 100, medianTimeToFirstTokenSeconds: 1, deprecated: false }));
+  const rows = models.map((m, i) => ({ slug: `model-${i}`, name: m.name.slice(5), scores: { 'gpqa-diamond': i / 12 }, outputSpeed: 100, timeToFirstToken: 1, deprecated: false }));
   const flight = `a:${JSON.stringify({ models: rows })}\n`;
   const analysisHTML = `<script>self.__next_f.push([1,${JSON.stringify(flight)}])</script>`;
   const metadata = 'benchmark,source_file,score_column,scale\n' + Array.from({ length: 10 }, (_, i) => `Bench${i},results.csv,Score,1`).join('\n');
@@ -109,8 +109,8 @@ test('benchmark rows match catalogue aliases and run settings, but never move a 
 
 test('reference speed preserves first-answer delay and does not mistake reasoning tokens for an answer', () => {
   const input = fixtures(), rows = parseAnalysis(input.analysisHTML);
-  Object.assign(rows[0], { isReasoning: true, medianTimeToFirstTokenSeconds: .1, medianTimeToFirstAnswerTokenSeconds: 12 });
-  Object.assign(rows[1], { isReasoning: true, medianTimeToFirstTokenSeconds: .2 });
+  Object.assign(rows[0], { isReasoning: true, timeToFirstToken: .1, timeToFirstAnswerToken: 12 });
+  Object.assign(rows[1], { isReasoning: true, timeToFirstToken: .2 });
   const flight = `a:${JSON.stringify({ models: rows })}\n`;
   const data = compileSnapshot({ ...input, analysisHTML: `<script>self.__next_f.push([1,${JSON.stringify(flight)}])</script>` });
   assert.equal(data.models[0].speed.timeToFirstAnswer, 12);
