@@ -65,7 +65,7 @@ export function parseAnalysis(html) {
   function walk(value) {
     if (!value || typeof value !== 'object') return;
     // Locate the record shape, independently of framework/component prop names.
-    if (Array.isArray(value) && value.length > found.length && value.every(m => m && typeof m === 'object' && typeof m.name === 'string' && typeof m.slug === 'string') && value.some(m => 'medianOutputTokensPerSecond' in m)) found = value;
+    if (Array.isArray(value) && value.length > found.length && value.every(m => m && typeof m === 'object' && typeof m.name === 'string' && typeof m.slug === 'string') && value.some(m => 'outputSpeed' in m)) found = value;
     for (const child of Object.values(value)) if (typeof child === 'object') walk(child);
   }
   for (const line of flight.split('\n')) { const match = line.match(/^[\da-f]+:(\[.*|\{.*)$/); if (match) { try { walk(JSON.parse(match[1])); } catch {} } }
@@ -599,16 +599,16 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     for (const row of rated) add(row.name, benchmark, 1 / (1 + 10 ** ((median - row.scores[slug]) / 400)), { url: `https://artificialanalysis.ai/models/${encodeURIComponent(row.slug)}`, observedAt: null, sourceModel: row.name, metric: 'Win rate vs median model', historical: !!row.deprecated });
   }
   for (const row of aa) {
-    const { model } = resolve(row.name); if (!model || !(row.medianOutputTokensPerSecond > 0)) continue;
+    const { model } = resolve(row.name); if (!model || !(row.outputSpeed > 0)) continue;
     const entries = speedByModel.get(model.id) ?? []; entries.push(row); speedByModel.set(model.id, entries);
   }
   for (const model of models) {
     const rows = speedByModel.get(model.id); if (!rows) continue;
     // Reasoning may stream before the answer. Preserve each measured configuration
     // so the ranker never combines one mode's startup time with another's throughput.
-    const measurements = rows.map(r => ({ configuration: r.name, tokensPerSecond: r.medianOutputTokensPerSecond,
-      timeToFirstAnswer: number(r.medianTimeToFirstAnswerTokenSeconds) ?? (r.isReasoning ? null : number(r.medianTimeToFirstTokenSeconds)) }));
-    model.speed = { tokensPerSecond: median(rows.map(r => r.medianOutputTokensPerSecond)), timeToFirstToken: median(rows.map(r => r.medianTimeToFirstTokenSeconds).filter(v => v > 0)),
+    const measurements = rows.map(r => ({ configuration: r.name, tokensPerSecond: r.outputSpeed,
+      timeToFirstAnswer: number(r.timeToFirstAnswerToken) ?? (r.isReasoning ? null : number(r.timeToFirstToken)) }));
+    model.speed = { tokensPerSecond: median(rows.map(r => r.outputSpeed)), timeToFirstToken: median(rows.map(r => r.timeToFirstToken).filter(v => v > 0)),
       timeToFirstAnswer: median(measurements.map(m => m.timeToFirstAnswer).filter(v => v !== null && v >= 0)), measurements,
       source: 'Artificial Analysis', url: `https://artificialanalysis.ai/models/${rows[0].slug}`, configurations: rows.map(r => r.name), observedAt: null, historical: rows.every(r => r.deprecated) };
   }
