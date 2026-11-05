@@ -105,7 +105,8 @@ test('for an agent\'s call, only tool-calling evidence or a measured result puts
     assert.doesNotMatch(error.message, /lab\/(gamma|delta|beta|epsilon) reaches/);
     return true;
   });
-  assert.deepEqual(finalize(toolCatalogue, shortlist(40), now, {}, agentCall).models.map(m => m.id), ['lab/gamma', 'lab/delta']);
+  // Delta's measured result ranks it ahead of gamma's benchmark estimate.
+  assert.deepEqual(finalize(toolCatalogue, shortlist(40), now, {}, agentCall).models.map(m => m.id), ['lab/delta', 'lab/gamma']);
   // A standalone call is not held to it.
   assert.equal(finalize(toolCatalogue, shortlist(90), now, {}, { task: task('Extract'), measurements: [measured] }).models.length, 3);
 });
@@ -174,6 +175,8 @@ test('the user\'s measured results outrank benchmarks: a measured candidate must
   assert.deepEqual(byId['lab/beta']?.quality, { score: 70, measured: true, evidence: [{ benchmark: 'measured:m1', name: 'Your eval: fields correct (agent level, 40 samples, Langfuse experiment invoices-1)', score: 0.97, rank: 1, of: 2 }] });
   assert.equal(byId['lab/alpha']?.quality.evidence[0]?.rank, 2);
   assert.equal(byId['lab/gamma']?.quality.measured, false);
+  // Measured models lead even though gamma ($1/$2 Gateway, $3 per 1k) is cheaper than alpha ($4 on Cheap): cheapest first within each group.
+  assert.deepEqual(result.models.map(m => m.id), ['lab/beta', 'lab/alpha', 'lab/gamma']);
   // Beta's Gateway route: (2000 × $0.50 + 500 × $1) / 1M × 1,000 = $1.50 per 1k calls; four calls per agent run.
   assert.equal(byId['lab/beta']?.cost?.usdPer1kTasks, 1.5);
   assert.equal(byId['lab/beta']?.cost?.usdPer1kAgentRuns, 6);
