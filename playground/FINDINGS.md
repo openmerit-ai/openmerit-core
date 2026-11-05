@@ -2,6 +2,58 @@
 
 Dated observations from using OpenMerit as Sahra Health, newest release first. Each entry says what we ran, what happened and what a customer would expect.
 
+## openmerit 0.3.3 (5 Nov 2026)
+
+What changed, per the package's CHANGELOG:
+- The Claude Code install no longer fails with `ENOENT … updates.ts`.
+- Reported results take an optional `kind` (`quality`, `usd` or `seconds`), and measured `usd` replaces Scout's cost estimate.
+- The installed instructions tell the agent to report each agent's own checks at the agent level, because end-to-end results also measure the agents it did not swap.
+- The matching Scout serving release is deployed.
+
+### Installs: both clean, auto-updates on
+
+- **Claude Code:** `install --client claude-code --scope project` exits 0. It says the MCP server applies to the whole git repository and writes `.claude/openmerit-updater.mts` with SessionStart/Stop hooks. `status --check` reports `Automatic instruction updates: on · hooks: ready · instruction version: 0.3.3`. `doctor` is green, including `updater: Automatic instruction hooks installed`.
+- **Pi:** exits 0. `status --check` and `doctor` are green.
+- **No device approval was needed:** both clients reused their device keys, so the 30-minute codes and UTC expiry are still untested from our side.
+- **Nit:** the Claude Code success message says "Start a new session to load the extension, instructions and skill". Claude Code has no extension; that is Pi's wording.
+
+### Measured cost: Scout uses it, but only orders by it when asked
+
+We reran no models. We resent the per-agent-run USD and seconds measured on 5 Nov (MODEL-DECISIONS.md, 0.3.1) as `kind: "usd"` and `kind: "seconds"` at the agent level. Enrollment has no measured cost: the runner's cost summary read Langfuse before ingestion finished (known playground bug).
+
+**A. Same conversation (`d16cba5a-…`)**, which already held the 0.3.1 results, including environment-level ones. We added 40 results (`scout-results/2026-11-05-0.3.3-measured-cost-same-conversation.json`).
+- **`cost.measured`:** appears on every claim-agent candidate, and its `usdPer1kAgentRuns` equals what we reported (for example 6.4975 for GPT-6.1 Sol on intake).
+- **Opus kept:** no Opus model is dropped any more. Scout's summaries say the 13/14 end-to-end misses are "not proven coding-agent errors" and need "trace attribution before calling it a model failure". Opus still gets a lower quality score from them (intake Opus 5 87 vs 95; coding both Opus 89 vs 95; fraud 90–91 vs 95), so they rank last.
+- **Order:** the order is not by measured cost. First picks are GPT-6.1 Sol for intake and adjudication, and Sonnet 5.5 for coding and fraud, even though GPT is cheaper on both. Within ties Gemini (cheaper than Sonnet on intake and fraud) ranks below Sonnet.
+- **Regression:** every model now shows `quality.measured: false`, although its evidence is all "Your eval: …". After the 0.3.1 report it was `true`.
+- **`best: ["cost"]`** is given to two or three models per task, including Sonnet where GPT is cheaper.
+
+**B. New conversation (`1ef2bdc0-0d0d-4e59-ab2e-4f535938a443`), as the 0.3.3 skill describes.** Same brief. We reported only each agent's own checks at the agent level, plus `usd` and `seconds`, with no environment-level results.
+- **New shortlist:** before results it named Claude Fable 5.1 and GPT-5.6 Sol, which we have not measured, and put Opus 5 or Opus 5.5 first everywhere.
+- **413 on one call:** sending all 69 results in one call failed with `Scout returned HTTP 413: Request is too large..` (exit 1). The docs allow 50 per call, and the CLI does not check the count before sending or explain the limit. One call per agent (9 to 15 results each) worked.
+- **After results:** every measured candidate is `quality.measured: true` and tied within each task, and no model is dropped. Only Gemini on enrollment falls below the bar, correctly.
+- **But measured cost did not order the tie.** The benchmark order stayed, so the most expensive model ranks first: Opus 5 first on intake, coding and adjudication; Opus 5.5 first on fraud. GPT-6.1 Sol ranks last or fourth, even though every summary calls it "the provisional lower-cost choice". This contradicts the release note that Scout ranks the group by measured cost when every compared model has it. Our brief said "rank for the best quality", so `priority` was `quality` and measured cost was apparently not the tiebreak.
+- **Follow-up:** "Within a measured quality tie, rank by the measured cost we reported." Scout then ranked all four claim agents strictly by measured cost: GPT-6.1 Sol, then Gemini 4 Argon or Sonnet 5.5, then Opus 5.5, then Opus 5. All five were kept, and Opus 5 on fraud went back to the tie (92).
+- **Estimates still too high:** `cost.usdPer1kAgentRuns` still shows the estimate next to the measured figure, and it is 15 to 25 times too high (for example USD 150 against a measured 6.50 per 1k intake runs).
+
+### Regret
+
+Measured USD per 1,000 claims (intake, coding, adjudication and fraud runs) for each choice, at about 300 claims a day. The best equally correct choice is GPT-6.1 Sol on all four agents: USD 44.51 per 1k claims, about USD 13.35 a day.
+
+| Scout's first picks | Per 1k claims | Extra per day |
+|---|---|---|
+| 0.3.1, benchmarks only (Opus 5 or 5.5) | 213.78 | 50.78 |
+| 0.3.1, after our results | 60.20 | 4.71 |
+| 0.3.3, same conversation with measured cost (A) | 55.65 | 3.34 |
+| 0.3.3, new conversation, agent-level results (B) | 213.78 | 50.78 |
+| 0.3.3, B after asking to break ties by measured cost | 44.51 | 0 |
+| Our current choice (Sonnet 5.5 everywhere) | 64.08 | 5.87 |
+
+- **Compared with 0.3.1:** the misattribution is fixed. Opus is no longer dropped for downstream misses, and B shows that agent-level-only reporting gives clean ties.
+- **Measured cost:** Scout now takes measured cost and shows it, but it ordered by it only when we asked. Following the 0.3.3 skill exactly (B) left Scout's first pick as costly as benchmarks alone.
+- **Takeaway:** with "rank for the best quality" in the brief, a customer who stops at the first answer pays about USD 50 a day more for the same measured quality on these claims.
+- **Limits:** one round of 14 claims, few labelled intake and coding findings, so these ties are not evidence of equal quality on harder claims.
+
 ## openmerit 0.3.2 (5 Nov 2026)
 
 What changed, per the package's CHANGELOG:
