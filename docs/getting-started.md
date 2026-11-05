@@ -34,4 +34,4 @@ See [the Pi extension guide](pi-extension.md) for installed paths, migration fro
 
 ## Evaluate application changes
 
-The standalone evaluation CLI is retired in npm 0.3.0, and the legacy JSON recommendation API in unreleased Scout source. Scout guidance is not measured application quality; use your own task checks and provider budget controls. See [retirement details](agent-evaluations.md).
+The standalone evaluation CLI is retired in npm 0.3.0, and the legacy JSON recommendation API went offline with the Scout serving deploy of 5 November 2026. Scout guidance is not measured application quality; use your own task checks and provider budget controls. See [retirement details](agent-evaluations.md).

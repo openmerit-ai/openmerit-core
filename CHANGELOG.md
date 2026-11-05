@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 — 2026-11-05
 
 - `openmerit scout --conversation <id> --results <file.json>` reports aggregate results you measured with your own evals. Scout then ranks them above public benchmarks for your recommendations only. Terminal output shows each task's evaluation plan, its agent and calls per run, and marks quality that rests on measured results.
 - The installed Scout instructions for Claude Code and Pi tell the agent to measure shortlisted candidates as extra runs of the project's existing evals, never a second eval, and to report aggregates only. This needs the matching hosted Scout release, whose `scout_models` tool returns `tasks[].evaluation` and accepts `results`.

@@ -24,7 +24,7 @@ Package publication and website deployment are separate releases. Pi setup requi
 
 ## Evaluation CLI retirement — npm 0.3.0
 
-OpenMerit 0.3.0 removes the standalone `openmerit eval` commands, including planning. Existing local evaluation files are not deleted. The old Scout JSON recommendation API is retired in source and goes offline with a separate Scout deployment. Scout's conversational agent, MCP, coding-agent setup and catalogue publication remain available; see [retirement details](docs/agent-evaluations.md).
+OpenMerit 0.3.0 removes the standalone `openmerit eval` commands, including planning. Existing local evaluation files are not deleted. The old Scout JSON recommendation API went offline with the Scout serving deploy of 5 November 2026. Scout's conversational agent, MCP, coding-agent setup and catalogue publication remain available; see [retirement details](docs/agent-evaluations.md).
 
 ## Inference Terminal retirement — npm 0.3.0
 

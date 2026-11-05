@@ -1,6 +1,6 @@
 # OpenMerit documentation
 
-These maintained Markdown guides distinguish current source work from published behavior. OpenMerit **0.1.12** added native Scout support for Pi **1.5.0**, replacing the old Pi 0.87 evaluation extension. OpenMerit **0.3.0** retires the Inference Terminal (`openmerit dash`) and standalone evaluation CLI. Unreleased source also retires the legacy recommendation API and the unpublished docs website shell. The policy, protected memo, Scout service and npm package are deployed independently; dated receipts describe the versions actually tested.
+These maintained Markdown guides distinguish current source work from published behavior. OpenMerit **0.1.12** added native Scout support for Pi **1.5.0**, replacing the old Pi 0.87 evaluation extension. OpenMerit **0.3.0** retires the Inference Terminal (`openmerit dash`) and standalone evaluation CLI. The Scout serving deploy of 5 November 2026 retired the legacy recommendation API; unreleased source also retires the unpublished docs website shell. The policy, protected memo, Scout service and npm package are deployed independently; dated receipts describe the versions actually tested.
 
 ## Discover model candidates
 

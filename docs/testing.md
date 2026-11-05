@@ -1,6 +1,6 @@
 # Testing and validation
 
-**Cleanup:** npm 0.3.0 retires the standalone evaluation CLI and the Inference Terminal; unreleased source also retires the legacy JSON recommendation pipeline and unpublished docs website shell. Dated evaluation/API acceptance records below describe historical releases, not current supported commands. Current verification retains agent, MCP, publisher, status, policy and protected-memo coverage; it does not publish or deploy anything.
+**Cleanup:** npm 0.3.0 retires the standalone evaluation CLI and the Inference Terminal; the Scout serving deploy of 5 November 2026 retired the legacy JSON recommendation pipeline, and unreleased source retires the unpublished docs website shell. Dated evaluation/API acceptance records below describe historical releases, not current supported commands. Current verification retains agent, MCP, publisher, status, policy and protected-memo coverage; it does not publish or deploy anything.
 
 **Pi adapter — npm 0.1.12 and later:** the Pi 1.5.0 adapter uses native Scout MCP and shared guidance only. Dated acceptance records below describe the packages tested at the time; some mention package exports that have since been removed. Standalone evaluation tests remain separate.
 
