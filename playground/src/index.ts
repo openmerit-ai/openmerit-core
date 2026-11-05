@@ -4,9 +4,10 @@
 import { ClaimXmlError, parseClaimSubmission } from "./domain/eclaim.ts";
 import { PLAN } from "./domain/plan.ts";
 import type { Approval, EnrollmentApplication } from "./domain/types.ts";
+import type { ModelOverrides } from "./models.ts";
 import { SEED } from "../fixtures/seed.ts";
-import { runKey, VERSIONS } from "./tracing.ts";
-import { APPROVAL_EVENT, type ModelOverride } from "./workflow.ts";
+import { type ExperimentContext, runKey, VERSIONS } from "./tracing.ts";
+import { APPROVAL_EVENT } from "./workflow.ts";
 
 export { AdjudicationAgent, CodingAgent, EnrollmentAgent, FraudAgent, IntakeAgent } from "./agents.ts";
 export { Ledger } from "./ledger.ts";
@@ -41,10 +42,10 @@ export default {
     }
 
     if (request.method === "POST" && path === "/enrollments") {
-      const { application, runId, model } = (await request.json()) as { application: EnrollmentApplication; runId?: string; model?: ModelOverride };
+      const { application, runId, models } = (await request.json()) as { application: EnrollmentApplication; runId?: string; models?: ModelOverrides };
       if (await ledger.getEnrollment(application.applicationId)) return json({ error: `Application ${application.applicationId} already received` }, 409);
       await ledger.saveEnrollment({ application, decision: "pending", memberId: null, reason: "", runId: runId ?? null });
-      await env.ENROLLMENT_FLOW.create({ id: runKey(application.applicationId, runId), params: { applicationId: application.applicationId, runId, model } });
+      await env.ENROLLMENT_FLOW.create({ id: runKey(application.applicationId, runId), params: { applicationId: application.applicationId, runId, models } });
       return json({ applicationId: application.applicationId, decision: "pending" }, 202);
     }
 
@@ -57,7 +58,7 @@ export default {
     }
 
     if (request.method === "POST" && path === "/claims") {
-      const { xml, bill, runId, model } = (await request.json()) as { xml: string; bill: string; runId?: string; model?: ModelOverride };
+      const { xml, bill, runId, models, experiment } = (await request.json()) as { xml: string; bill: string; runId?: string; models?: ModelOverrides; experiment?: ExperimentContext };
       let parsed;
       try {
         parsed = parseClaimSubmission(xml);
@@ -70,7 +71,7 @@ export default {
       if (claim.payerId !== PLAN.payerId) return json({ error: `PayerID must be ${PLAN.payerId}` }, 400);
       if (await ledger.getClaim(claim.id)) return json({ error: `Claim ${claim.id} already received` }, 409);
       await ledger.receiveClaim({ claim, xml, bill, runId });
-      await env.CLAIM_FLOW.create({ id: runKey(claim.id, runId), params: { claimId: claim.id, runId, model } });
+      await env.CLAIM_FLOW.create({ id: runKey(claim.id, runId), params: { claimId: claim.id, runId, models, experiment } });
       return json({ claimId: claim.id, state: "received" }, 202);
     }
 

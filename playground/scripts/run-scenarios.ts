@@ -1,21 +1,31 @@
 // Seeds the ledger, submits every fixture enrollment and claim, waits for each to reach human
-// approval (or fail), and scores the agents against the fixtures' expected outcomes. Scores are
-// also sent to Langfuse when LANGFUSE_* are set, on the trace of the agent being scored.
+// approval (or fail), and scores the run at three levels in Langfuse when LANGFUSE_* are set:
+// - task: the Worker posts model-calls, rejected-tool-calls and result-recorded on every agent trace;
+// - agent: this runner posts each agent's checks (line-decisions-correct, ...) on that agent's trace;
+// - environment: this runner posts claim-correct, payment-correct and review-load on the claim's
+//   final agent trace (fraud, or the agent that failed), which is also the claim's experiment item.
+// Claims run as an experiment (dataset run) on Sahra's `sahra-outpatient-claims` dataset, which this
+// runner upserts first. Enrollments are checked but have no dataset.
 // Usage: npm run scenarios -- [--only <fixture-name>] [--timeout-minutes 20]
-//          [--model openrouter/<id>] [--out results.json]
-// --model runs every agent on one model, to compare Scout's candidates; without it each agent uses
-// its recorded choice in src/models.ts. --out writes each check plus model cost and latency from Langfuse.
+//          [--model openrouter/<id> | --model intake=openrouter/<id>,coding=openrouter/<id>] [--out results.json]
+// --model runs every agent, or only the named agents, on another model to compare Scout's candidates;
+// agents not named use their recorded choice in src/models.ts. --out writes each check, the claim
+// outcomes, and model cost and latency from Langfuse.
 
 import { parseArgs } from "node:util";
 import { CLAIM_FIXTURES, ENROLLMENT_FIXTURES } from "../fixtures/claims.ts";
 import { toClaimSubmissionXml } from "../src/domain/eclaim.ts";
 import type { Member } from "../src/domain/types.ts";
 import type { ClaimRecord, EnrollmentRecord } from "../src/ledger.ts";
-import { type LangfuseEnv, postScore, runKey, traceIdFor, VERSIONS } from "../src/tracing.ts";
+import { type AgentRole, effectiveModels, overridesLabel, parseModelFlag } from "../src/models.ts";
+import { type ExperimentContext, type LangfuseEnv, postScore, runKey, spanIdFor, traceIdFor, VERSIONS } from "../src/tracing.ts";
 import { baseUrl, call } from "./client.ts";
 
+const DATASET = "sahra-outpatient-claims";
+
 const { values } = parseArgs({ options: { only: { type: "string" }, "timeout-minutes": { type: "string", default: "20" }, model: { type: "string" }, out: { type: "string" } } });
-const model = values.model ? { provider: values.model.split("/")[0] as "openrouter" | "cloudflare", id: values.model.split("/").slice(1).join("/") } : undefined;
+const models = parseModelFlag(values.model);
+const runModels = effectiveModels(models);
 const runId = `run-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 const deadline = Date.now() + Number(values["timeout-minutes"]) * 60_000;
 const claims = CLAIM_FIXTURES.filter((fixture) => !values.only || fixture.name === values.only);
@@ -26,16 +36,69 @@ const langfuse: LangfuseEnv = {
   LANGFUSE_BASE_URL: process.env.LANGFUSE_BASE_URL ?? "https://us.cloud.langfuse.com",
   LANGFUSE_ENVIRONMENT: "playground",
 };
+const authorization = langfuse.LANGFUSE_PUBLIC_KEY && langfuse.LANGFUSE_SECRET_KEY ? `Basic ${btoa(`${langfuse.LANGFUSE_PUBLIC_KEY}:${langfuse.LANGFUSE_SECRET_KEY}`)}` : null;
 
-console.log(`Model ${values.model ?? "recorded choices (src/models.ts)"}`);
+/** Calls the Langfuse public API, waiting out rate limits (429). Returns null for 404 when allowed. */
+async function langfuseApi<T>(method: string, path: string, body?: unknown, options: { allowNotFound?: boolean } = {}): Promise<T | null> {
+  if (!authorization) throw new Error("Langfuse keys are not set");
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetch(`${langfuse.LANGFUSE_BASE_URL}${path}`, {
+      method,
+      headers: { authorization, "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (response.status === 429 && attempt < 6) {
+      const seconds = Number(response.headers.get("retry-after")) || 5 * 2 ** attempt;
+      await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+      continue;
+    }
+    if (response.status === 404 && options.allowNotFound) return null;
+    const text = await response.text();
+    if (!response.ok) throw new Error(`Langfuse ${method} ${path} → ${response.status}: ${text.slice(0, 300)}`);
+    return (text ? JSON.parse(text) : null) as T;
+  }
+}
+
+const submissionXml = (fixture: (typeof CLAIM_FIXTURES)[number]): string =>
+  toClaimSubmissionXml(fixture.claim, { senderId: fixture.claim.providerId, receiverId: fixture.claim.payerId, transactionDate: fixture.claim.activities[0]!.start, dispositionFlag: "TEST" });
+
+/** Upserts Sahra's dataset and one item per claim fixture (item ID = claim ID), and returns the dataset ID. */
+async function ensureDataset(): Promise<string> {
+  const description = "Sahra Health outpatient claims under Sahra Essential: one item per fixture claim, with the outcome a correct pipeline produces.";
+  const dataset =
+    (await langfuseApi<{ id: string }>("GET", `/api/public/v2/datasets/${encodeURIComponent(DATASET)}`, undefined, { allowNotFound: true })) ??
+    (await langfuseApi<{ id: string }>("POST", "/api/public/v2/datasets", { name: DATASET, description, metadata: { owner: "Sahra Health", plan: "Sahra Essential" } }));
+  if (!dataset?.id) throw new Error(`Langfuse returned no ID for dataset ${DATASET}`);
+  for (const fixture of CLAIM_FIXTURES) {
+    await langfuseApi("POST", "/api/public/dataset-items", {
+      datasetName: DATASET,
+      id: fixture.claim.id,
+      input: { name: fixture.name, description: fixture.description, xml: submissionXml(fixture), bill: fixture.bill },
+      expectedOutput: fixture.expected,
+      metadata: { fixture: fixture.name },
+    });
+  }
+  return dataset.id;
+}
+
+let experiment: ExperimentContext | undefined;
+if (authorization) {
+  const datasetId = await ensureDataset();
+  experiment = {
+    id: runId,
+    name: `${overridesLabel(models)}-${runId}`,
+    datasetId,
+    metadata: { openmerit_version: VERSIONS.openmerit, ...Object.fromEntries(Object.entries(runModels).map(([role, model]) => [`model_${role}`, model])) },
+  };
+}
+
+console.log(`Models ${Object.entries(runModels).map(([role, model]) => `${role}=${model}${models[role as AgentRole] ? "" : " (recorded)"}`).join(", ")}`);
 console.log(`Run ${runId} against ${baseUrl} · openmerit@${VERSIONS.openmerit} · agents@${VERSIONS.agents} · pi@${VERSIONS.pi}`);
+if (experiment) console.log(`Dataset ${DATASET} · experiment ${experiment.name}`);
 await call("POST", "/admin/seed");
 
-for (const fixture of enrollments) await call("POST", "/enrollments", { application: fixture.application, runId, model });
-for (const fixture of claims) {
-  const xml = toClaimSubmissionXml(fixture.claim, { senderId: fixture.claim.providerId, receiverId: fixture.claim.payerId, transactionDate: fixture.claim.activities[0]!.start, dispositionFlag: "TEST" });
-  await call("POST", "/claims", { xml, bill: fixture.bill, runId, model });
-}
+for (const fixture of enrollments) await call("POST", "/enrollments", { application: fixture.application, runId, models });
+for (const fixture of claims) await call("POST", "/claims", { xml: submissionXml(fixture), bill: fixture.bill, runId, models, experiment });
 
 const settledClaim = (record: ClaimRecord): boolean => ["awaiting_approval", "error", "approved", "rejected", "paid"].includes(record.state);
 let claimRecords: ClaimRecord[] = [];
@@ -50,9 +113,11 @@ while (Date.now() < deadline) {
 }
 process.stdout.write("\n");
 
-async function score(caseId: string, agent: string, name: string, value: number, comment: string): Promise<void> {
+async function score(caseId: string, agent: string, name: string, value: number, comment: string, onRoot = false): Promise<void> {
   try {
-    await postScore(langfuse, { traceId: await traceIdFor(`${runKey(caseId, runId)}/${agent}`), name, value, dataType: "BOOLEAN", comment });
+    const key = `${runKey(caseId, runId)}/${agent}`;
+    const environment = onRoot ? { observationId: await spanIdFor(`${key}/agent`), metadata: { level: "environment", agent } } : {};
+    await postScore(langfuse, { traceId: await traceIdFor(key), name, value, dataType: "BOOLEAN", comment, ...environment });
   } catch (error) {
     console.error(`Could not send score ${name} for ${caseId}: ${error instanceof Error ? error.message : error}`);
   }
@@ -82,12 +147,28 @@ for (const fixture of enrollments) {
   console.log(`${decisionOk ? "✓" : "✗"} enrollment ${fixture.name}: ${record?.decision ?? "no decision"}${conditions}`);
 }
 
+/** The claim's last agent run: fraud, or the first agent that did not record its result (as in ClaimFlow). */
+const finalAgent = (record: ClaimRecord): AgentRole => (!record.extraction ? "intake" : !record.coding ? "coding" : !record.adjudication ? "adjudication" : "fraud");
+
+// Environment-level outcome of each claim, posted on its final agent trace's root observation.
+const outcomes: { caseId: string; trace: AgentRole; claimCorrect: boolean; paymentCorrect: boolean; reviewLoad: boolean | null }[] = [];
+async function postOutcome(record: ClaimRecord, claimCorrect: boolean, paymentCorrect: boolean, reviewLoad: boolean | null, comments: { claim: string; payment: string; review?: string }): Promise<void> {
+  const agent = finalAgent(record);
+  outcomes.push({ caseId: record.id, trace: agent, claimCorrect, paymentCorrect, reviewLoad });
+  await score(record.id, agent, "claim-correct", claimCorrect ? 1 : 0, comments.claim, true);
+  await score(record.id, agent, "payment-correct", paymentCorrect ? 1 : 0, comments.payment, true);
+  if (reviewLoad !== null) await score(record.id, agent, "review-load", reviewLoad ? 1 : 0, comments.review ?? "", true);
+}
+
 for (const fixture of claims) {
   const record = claimRecords.find((item) => item.id === fixture.claim.id);
+  const expectedPayment = (fixture.expected.payment / 100).toFixed(2);
   if (!record || record.state === "error" || !record.adjudication) {
     total += 1;
     results.push({ caseId: fixture.claim.id, agent: "pipeline", check: "claim-settled", pass: false, comment: record?.error ?? record?.state ?? "not found" });
-    console.log(`✗ ${fixture.name}: ${record ? `${record.state}${record.error ? ` (${record.error})` : ""}` : "not found"}`);
+    const state = record ? `${record.state}${record.error ? ` (${record.error})` : ""}` : "not found";
+    if (record) await postOutcome(record, false, false, null, { claim: `claim did not settle: ${state}`, payment: `no adjudication; expected AED ${expectedPayment}` });
+    console.log(`✗ ${fixture.name}: ${state}`);
     continue;
   }
   const lineResults = Object.entries(fixture.expected.lines).map(([activityId, outcome]) => {
@@ -98,29 +179,42 @@ for (const fixture of claims) {
   const decisions = await check(record.id, "adjudication", "line-decisions-correct", lineResults.every((item) => item.ok), lineResults.map((item) => `${item.activityId}: ${item.got} (expected ${item.expected})`).join("; "));
   const fraud = await check(record.id, "fraud", "fraud-recommendation-correct", !!record.fraud && fixture.expected.fraud.includes(record.fraud.recommendation), `got ${record.fraud?.recommendation}, expected ${fixture.expected.fraud.join("|")}`);
   const notes: string[] = [];
+  const passed = [decisions, fraud];
   if (fixture.expected.billMismatch) {
     const ok = await check(record.id, "intake", "bill-mismatch-found", (record.extraction?.mismatches.length ?? 0) > 0, record.extraction?.mismatches.join("; ") ?? "");
+    passed.push(ok);
     notes.push(`mismatch ${ok ? "✓" : "✗"}`);
   }
   if (fixture.expected.codingFinding) {
     const ok = await check(record.id, "coding", "coding-finding-found", !!record.coding?.findings.some((item) => item.kind === fixture.expected.codingFinding), JSON.stringify(record.coding?.findings ?? []));
+    passed.push(ok);
     notes.push(`${fixture.expected.codingFinding} ${ok ? "✓" : "✗"}`);
   }
-  const paid = record.adjudication.totals.payment / 100;
-  console.log(`${decisions && fraud ? "✓" : "✗"} ${fixture.name}: lines ${decisions ? "✓" : "✗"} · fraud ${record.fraud?.recommendation} ${fraud ? "✓" : "✗"} · pay AED ${paid.toFixed(2)} (expected ${(fixture.expected.payment / 100).toFixed(2)})${notes.length ? ` · ${notes.join(" · ")}` : ""}`);
+  const paid = (record.adjudication.totals.payment / 100).toFixed(2);
+  const paymentOk = record.adjudication.totals.payment === fixture.expected.payment;
+  const recommendation = record.fraud?.recommendation;
+  const onlyPay = fixture.expected.fraud.length === 1 && fixture.expected.fraud[0] === "pay";
+  await postOutcome(record, passed.every(Boolean), paymentOk, record.fraud ? onlyPay && recommendation !== "pay" : null, {
+    claim: `${passed.filter(Boolean).length}/${passed.length} checks passed`,
+    payment: `pay AED ${paid}, expected AED ${expectedPayment}`,
+    review: `fraud recommended ${recommendation}; expected ${fixture.expected.fraud.join("|")}`,
+  });
+  console.log(`${decisions && fraud ? "✓" : "✗"} ${fixture.name}: lines ${decisions ? "✓" : "✗"} · fraud ${recommendation} ${fraud ? "✓" : "✗"} · pay AED ${paid} (expected ${expectedPayment}) ${paymentOk ? "✓" : "✗"}${notes.length ? ` · ${notes.join(" · ")}` : ""}`);
   for (const item of lineResults.filter((result) => !result.ok)) console.log(`    ${item.activityId}: got ${item.got}, expected ${item.expected}`);
 }
 
 // Model cost and latency per agent run, from the run's Langfuse traces.
 const usage: { caseId: string; agent: string; cost: number; seconds: number; generations: number }[] = [];
-if (langfuse.LANGFUSE_PUBLIC_KEY && langfuse.LANGFUSE_SECRET_KEY) {
-  const authorization = `Basic ${btoa(`${langfuse.LANGFUSE_PUBLIC_KEY}:${langfuse.LANGFUSE_SECRET_KEY}`)}`;
-  const runs = [...enrollments.map((fixture) => [fixture.application.applicationId, "enrollment"] as const), ...claims.flatMap((fixture) => ["intake", "coding", "adjudication", "fraud"].map((agent) => [fixture.claim.id, agent] as const))];
+if (authorization) {
+  const runs = [...enrollments.map((fixture) => [fixture.application.applicationId, "enrollment"] as const), ...claims.flatMap((fixture) => (["intake", "coding", "adjudication", "fraud"] as const).map((agent) => [fixture.claim.id, agent] as const))];
   for (const [caseId, agent] of runs) {
     const traceId = await traceIdFor(`${runKey(caseId, runId)}/${agent}`);
-    const response = await fetch(`${langfuse.LANGFUSE_BASE_URL}/api/public/v2/observations?traceId=${traceId}&fields=core,basic,usage`, { headers: { authorization } });
-    if (!response.ok) continue;
-    const { data } = (await response.json()) as { data: { type: string; totalCost?: number | null; latency?: number | null }[] };
+    let data: { type: string; totalCost?: number | null; latency?: number | null }[];
+    try {
+      data = (await langfuseApi<{ data: typeof data }>("GET", `/api/public/v2/observations?traceId=${traceId}&fields=core,basic,usage`))?.data ?? [];
+    } catch {
+      continue;
+    }
     const generations = data.filter((item) => item.type === "GENERATION");
     usage.push({ caseId, agent, cost: generations.reduce((sum, item) => sum + (item.totalCost ?? 0), 0), seconds: data.find((item) => item.type === "AGENT")?.latency ?? 0, generations: generations.length });
   }
@@ -132,7 +226,9 @@ if (langfuse.LANGFUSE_PUBLIC_KEY && langfuse.LANGFUSE_SECRET_KEY) {
 }
 if (values.out) {
   const { writeFileSync } = await import("node:fs");
-  writeFileSync(values.out, `${JSON.stringify({ runId, model: values.model ?? null, versions: VERSIONS, correct, total, results, usage }, null, 2)}\n`);
+  writeFileSync(values.out, `${JSON.stringify({ runId, model: values.model ?? null, models: runModels, experiment: experiment?.name ?? null, versions: VERSIONS, correct, total, results, outcomes, usage }, null, 2)}\n`);
 }
 
-console.log(`\n${correct}/${total} checks passed. Run ID ${runId}; claims now await approval: npm run approve -- <claim-id>`);
+const count = (pick: (item: (typeof outcomes)[number]) => boolean | null): number => outcomes.filter((item) => pick(item) === true).length;
+console.log(`\nClaims correct ${count((item) => item.claimCorrect)}/${claims.length} · payment correct ${count((item) => item.paymentCorrect)}/${claims.length} · review load ${count((item) => item.reviewLoad)}`);
+console.log(`${correct}/${total} checks passed. Run ID ${runId}; claims now await approval: npm run approve -- <claim-id>`);

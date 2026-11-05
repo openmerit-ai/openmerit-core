@@ -23,6 +23,10 @@ Before choosing, changing or adding any application model (chat, extraction, emb
 - Deploys, secret changes and any other change to Cloudflare resources need the user's explicit approval each time. `wrangler dev` is fine.
 - Langfuse keys come from the environment (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`). Never print them or ask for them in chat.
 
+## Evals
+
+The Langfuse project, the `sahra-outpatient-claims` dataset and every score name belong to Sahra. Never name them with an `om-` prefix. README.md lists the task, agent and environment scores and where each is posted; keep that table in step with `src/workflow.ts` and `scripts/run-scenarios.ts`.
+
 ## Commands
 
 All from `playground/`, with Node.js 22.19 or newer:
@@ -31,7 +35,7 @@ All from `playground/`, with Node.js 22.19 or newer:
 npm ci                     # install exactly the lockfile
 npm run check              # typecheck and deterministic tests (what CI runs)
 npm run dev                # wrangler dev (Workers AI calls run on the account)
-npm run scenarios          # submit the fixture claims to the dev server
+npm run scenarios          # submit the fixtures to the dev server; --model <agent>=openrouter/<id>,... per agent
 npm run approve -- <claim-id> approve|reject --by <name> [--note <text>]
 ```
 

@@ -24,7 +24,21 @@ Each agent's model is in `src/models.ts`, and every choice must come from a Scou
 
 ## Langfuse
 
-Traces go to Langfuse Cloud (US) over OTLP/HTTP with the v4 ingestion header (`src/tracing.ts`). Each claim or application is a **session**, and each agent run is a **trace**: an `agent` root, plus a `generation` per model call (conversation, tokens, cost) and a `tool` span per tool call, rebuilt from the Pi transcript. Approval and payment form a `settle-claim` trace. Release is `openmerit@<version>` and environment is `playground`. The scenario runner posts boolean scores, such as `line-decisions-correct` and `fraud-recommendation-correct`, on the scored agent's trace.
+Traces go to Sahra's own Langfuse Cloud (US) project over OTLP/HTTP with the v4 ingestion header (`src/tracing.ts`). Each claim or application is a **session**, and each agent run is a **trace**: an `agent` root, plus a `generation` per model call (conversation, tokens, cost) and a `tool` span per tool call, rebuilt from the Pi transcript. Approval and payment form a `settle-claim` trace. Release is `openmerit@<version>` and environment is `playground`.
+
+These evals are Sahra's own, so none of their names carry an `om-` prefix. Scores come at three levels:
+
+| Level | Score | Type | Posted by, on |
+| --- | --- | --- | --- |
+| Task | `model-calls` | numeric | the Worker, on every agent trace's root observation |
+| Task | `rejected-tool-calls` (tool results starting `<harness>` or `[error]`: argument validation or harness errors) | numeric | the Worker, same |
+| Task | `result-recorded` (the agent recorded its extraction, review, adjudication, assessment or decision) | boolean | the Worker, same |
+| Agent | `line-decisions-correct`, `fraud-recommendation-correct`, `bill-mismatch-found`, `coding-finding-found`, `enrollment-decision-correct`, `declared-conditions-found` | boolean | the scenario runner, on the scored agent's trace |
+| Environment | `claim-correct` (every agent check for the claim passes), `payment-correct` (proposed payment equals the fixture's), `review-load` (fraud recommended review or hold on a claim whose only acceptable recommendation is pay) | boolean | the scenario runner, on the root observation of the claim's **final agent trace** |
+
+A claim's final agent trace is its `assess-fraud` trace, or, when the pipeline stopped early, the trace of the agent that did not record its result. Scores carry `metadata.level` (`task` or `environment`). The settlement trace is not used for scores: scenario runs end at human approval, so it does not exist yet.
+
+**Dataset and experiments.** The runner upserts the dataset `sahra-outpatient-claims` with one item per claim fixture: item ID is the claim ID, input is the fixture name, description, submitted `Claim.Submission` XML and itemized bill, and expected output is the fixture's `expected`. Each scenario run is an experiment (dataset run) named `<model label>-<runId>`, for example `intake+coding=claude-haiku-5.5-run-2026-11-05T11-19-04-305Z` (`claude-haiku-5.5-…` when every agent runs one model, `recorded-…` without `--model`), with metadata `openmerit_version` and `model_<agent>` for each agent. Each claim's final agent trace is its experiment item, so the environment scores show per item in Langfuse's experiment comparison. Traces are linked with Langfuse's OpenTelemetry experiment attributes (`langfuse.experiment.*`, set by the Worker from the `experiment` field of `POST /claims`), because `POST /api/public/dataset-run-items` is deprecated and Langfuse Cloud stops serving it on 16 November 2026. Enrollment fixtures are checked as before but have no dataset.
 
 **Residency caveat:** Workers AI, Durable Objects and Langfuse US all process data outside the UAE. This setup is acceptable only because the data is fictional. A real Sahra Health could not run this way.
 
@@ -37,11 +51,18 @@ npm ci
 cp .dev.vars.example .dev.vars          # fill in Langfuse and OpenRouter keys and any PLAYGROUND_TOKEN
 npm run check                           # typecheck and deterministic tests (CI runs this)
 npm run dev                             # wrangler dev; Workers AI calls are billed to the account
-PLAYGROUND_TOKEN=... npm run scenarios  # seed, submit every fixture, score the agents
-PLAYGROUND_TOKEN=... npm run approve -- FICT-CLM-1001 approve --by "<your name>"
+set -a; . ./.dev.vars; set +a          # in the runner's shell: PLAYGROUND_TOKEN and Langfuse keys
+npm run scenarios                       # seed, submit every fixture, score the run, link the experiment
+npm run approve -- FICT-CLM-1001 approve --by "<your name>"
 ```
 
-`npm run scenarios -- --model openrouter/<id> --out run.json` runs every agent on one model and writes the scores, cost and latency. Run scenarios one at a time: each run reseeds the one shared ledger, so a run started while another's workflows are still going corrupts both. Restart `wrangler dev` to drop leftover workflows.
+`npm run scenarios -- --model openrouter/<id> --out run.json` runs every agent on one model and writes the checks, claim outcomes, cost and latency. To compare models per agent, name only the agents to change; the others keep `src/models.ts`:
+
+```sh
+npm run scenarios -- --model intake=openrouter/anthropic/claude-haiku-5.5,coding=openrouter/anthropic/claude-haiku-5.5
+```
+
+The runner sends the overrides as `models` (agent → `{ provider, id }`) on `POST /claims` and `POST /enrollments`. Without Langfuse keys in its environment it still checks the run but sends no scores, dataset or experiment. Run scenarios one at a time: each run reseeds the one shared ledger, so a run started while another's workflows are still going corrupts both. Restart `wrangler dev` to drop leftover workflows.
 
 Cloudflare resources are named `playground-` (Worker `playground-claims`; Workflows `playground-claim-flow` and `playground-enrollment-flow`). Deploying, and setting secrets with `wrangler secret put`, needs the owner's approval each time.
 
@@ -52,7 +73,7 @@ For each new `openmerit` release:
 1. Pin the new version exactly in `package.json` and run `npm install`.
 2. Rerun `npx openmerit@<version> install --client claude-code --scope project` and `--client pi`, then `openmerit status --check` and `openmerit doctor` for each client. Installer output under `.claude/` and `.pi/` is per device and gitignored; `.openmerit/scout.json` is the committed policy.
 3. In a fresh coding-agent session rooted here, one that has never seen OpenMerit source, ask for the model decisions in `scout-tasks/`. Note whether the agent consults Scout unprompted, how it handles the policy and residency, and what it recommends.
-4. Apply model changes, run `npm run scenarios`, and compare the run's scores, cost and latency in Langfuse by release.
+4. Apply model changes, run `npm run scenarios`, and compare the run's scores, cost and latency in Langfuse by release, using the experiments on the `sahra-outpatient-claims` dataset.
 5. Add a dated entry to [FINDINGS.md](FINDINGS.md).
 
 ## Sources
