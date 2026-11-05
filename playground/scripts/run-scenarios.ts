@@ -3,9 +3,10 @@
 // - task: the Worker posts model-calls, rejected-tool-calls and result-recorded on every agent trace;
 // - agent: this runner posts each agent's checks (line-decisions-correct, ...) on that agent's trace;
 // - environment: this runner posts claim-correct, payment-correct and review-load on the claim's
-//   final agent trace (fraud, or the agent that failed), which is also the claim's experiment item.
-// Claims run as an experiment (dataset run) on Sahra's `sahra-outpatient-claims` dataset, which this
-// runner upserts first. Enrollments are checked but have no dataset.
+//   final agent trace (fraud, or the agent that failed), which is also the claim's experiment item,
+//   and enrollment-correct on the enrollment agent's trace, which is the application's experiment item.
+// Claims run as an experiment (dataset run) on Sahra's `sahra-outpatient-claims` dataset and
+// enrollments on `sahra-enrollments`, both upserted by this runner first.
 // Usage: npm run scenarios -- [--only <fixture-name>] [--timeout-minutes 20]
 //          [--model openrouter/<id> | --model intake=openrouter/<id>,coding=openrouter/<id>] [--out results.json]
 // --model runs every agent, or only the named agents, on another model to compare Scout's candidates;
@@ -22,6 +23,7 @@ import { type ExperimentContext, type LangfuseEnv, postScore, runKey, spanIdFor,
 import { baseUrl, call } from "./client.ts";
 
 const DATASET = "sahra-outpatient-claims";
+const ENROLLMENT_DATASET = "sahra-enrollments";
 
 const { values } = parseArgs({ options: { only: { type: "string" }, "timeout-minutes": { type: "string", default: "20" }, model: { type: "string" }, out: { type: "string" } } });
 const models = parseModelFlag(values.model);
@@ -62,42 +64,43 @@ async function langfuseApi<T>(method: string, path: string, body?: unknown, opti
 const submissionXml = (fixture: (typeof CLAIM_FIXTURES)[number]): string =>
   toClaimSubmissionXml(fixture.claim, { senderId: fixture.claim.providerId, receiverId: fixture.claim.payerId, transactionDate: fixture.claim.activities[0]!.start, dispositionFlag: "TEST" });
 
-/** Upserts Sahra's dataset and one item per claim fixture (item ID = claim ID), and returns the dataset ID. */
-async function ensureDataset(): Promise<string> {
-  const description = "Sahra Health outpatient claims under Sahra Essential: one item per fixture claim, with the outcome a correct pipeline produces.";
+type DatasetItem = { id: string; input: unknown; expectedOutput: unknown; metadata: Record<string, string> };
+
+/** Upserts one of Sahra's datasets and its items (item ID = claim or application ID), and returns the dataset ID. */
+async function ensureDataset(name: string, description: string, items: DatasetItem[]): Promise<string> {
   const dataset =
-    (await langfuseApi<{ id: string }>("GET", `/api/public/v2/datasets/${encodeURIComponent(DATASET)}`, undefined, { allowNotFound: true })) ??
-    (await langfuseApi<{ id: string }>("POST", "/api/public/v2/datasets", { name: DATASET, description, metadata: { owner: "Sahra Health", plan: "Sahra Essential" } }));
-  if (!dataset?.id) throw new Error(`Langfuse returned no ID for dataset ${DATASET}`);
-  for (const fixture of CLAIM_FIXTURES) {
-    await langfuseApi("POST", "/api/public/dataset-items", {
-      datasetName: DATASET,
-      id: fixture.claim.id,
-      input: { name: fixture.name, description: fixture.description, xml: submissionXml(fixture), bill: fixture.bill },
-      expectedOutput: fixture.expected,
-      metadata: { fixture: fixture.name },
-    });
-  }
+    (await langfuseApi<{ id: string }>("GET", `/api/public/v2/datasets/${encodeURIComponent(name)}`, undefined, { allowNotFound: true })) ??
+    (await langfuseApi<{ id: string }>("POST", "/api/public/v2/datasets", { name, description, metadata: { owner: "Sahra Health", plan: "Sahra Essential" } }));
+  if (!dataset?.id) throw new Error(`Langfuse returned no ID for dataset ${name}`);
+  for (const item of items) await langfuseApi("POST", "/api/public/dataset-items", { datasetName: name, ...item });
   return dataset.id;
 }
 
 let experiment: ExperimentContext | undefined;
+let enrollmentExperiment: ExperimentContext | undefined;
 if (authorization) {
-  const datasetId = await ensureDataset();
-  experiment = {
-    id: runId,
-    name: `${overridesLabel(models)}-${runId}`,
-    datasetId,
-    metadata: { openmerit_version: VERSIONS.openmerit, ...Object.fromEntries(Object.entries(runModels).map(([role, model]) => [`model_${role}`, model])) },
-  };
+  const datasetId = await ensureDataset(
+    DATASET,
+    "Sahra Health outpatient claims under Sahra Essential: one item per fixture claim, with the outcome a correct pipeline produces.",
+    CLAIM_FIXTURES.map((fixture) => ({ id: fixture.claim.id, input: { name: fixture.name, description: fixture.description, xml: submissionXml(fixture), bill: fixture.bill }, expectedOutput: fixture.expected, metadata: { fixture: fixture.name } })),
+  );
+  const enrollmentDatasetId = await ensureDataset(
+    ENROLLMENT_DATASET,
+    "Sahra Health enrollment applications under Sahra Essential: one item per fixture application, with the eligibility decision and declared conditions a correct enrollment agent records.",
+    ENROLLMENT_FIXTURES.map((fixture) => ({ id: fixture.application.applicationId, input: { name: fixture.name, application: fixture.application }, expectedOutput: fixture.expected, metadata: { fixture: fixture.name } })),
+  );
+  const name = `${overridesLabel(models)}-${runId}`;
+  const metadata = { openmerit_version: VERSIONS.openmerit, ...Object.fromEntries(Object.entries(runModels).map(([role, model]) => [`model_${role}`, model])) };
+  experiment = { id: runId, name, datasetId, metadata };
+  enrollmentExperiment = { id: `${runId}--enrollments`, name, datasetId: enrollmentDatasetId, metadata };
 }
 
 console.log(`Models ${Object.entries(runModels).map(([role, model]) => `${role}=${model}${models[role as AgentRole] ? "" : " (recorded)"}`).join(", ")}`);
 console.log(`Run ${runId} against ${baseUrl} · openmerit@${VERSIONS.openmerit} · agents@${VERSIONS.agents} · pi@${VERSIONS.pi}`);
-if (experiment) console.log(`Dataset ${DATASET} · experiment ${experiment.name}`);
+if (experiment) console.log(`Datasets ${DATASET}, ${ENROLLMENT_DATASET} · experiment ${experiment.name}`);
 await call("POST", "/admin/seed");
 
-for (const fixture of enrollments) await call("POST", "/enrollments", { application: fixture.application, runId, models });
+for (const fixture of enrollments) await call("POST", "/enrollments", { application: fixture.application, runId, models, experiment: enrollmentExperiment });
 for (const fixture of claims) await call("POST", "/claims", { xml: submissionXml(fixture), bill: fixture.bill, runId, models, experiment });
 
 const settledClaim = (record: ClaimRecord): boolean => ["awaiting_approval", "error", "approved", "rejected", "paid"].includes(record.state);
@@ -137,13 +140,18 @@ const check = async (caseId: string, agent: string, name: string, pass: boolean,
 for (const fixture of enrollments) {
   const { enrollment: record, member } = await call<{ enrollment: EnrollmentRecord | null; member: Member | null }>("GET", `/enrollments/${fixture.application.applicationId}`);
   const id = fixture.application.applicationId;
+  const passed: boolean[] = [];
   const decisionOk = await check(id, "enrollment", "enrollment-decision-correct", record?.decision === fixture.expected.decision, `expected ${fixture.expected.decision}, got ${record?.decision ?? "none"}`);
   let conditions = "";
   if (fixture.expected.decision === "enrolled") {
     const declared = member?.declaredConditions ?? [];
     const ok = await check(id, "enrollment", "declared-conditions-found", fixture.expected.declaredConditions.every((code) => declared.some((item) => item.startsWith(code))), `declared ${declared.join(", ") || "none"}; expected ${fixture.expected.declaredConditions.join(", ")}`);
     conditions = ` · conditions ${declared.join(", ") || "none"} ${ok ? "✓" : "✗"}`;
+    passed.push(ok);
   }
+  passed.push(decisionOk);
+  // Environment level: the application's one agent trace is its experiment item, as a claim's final agent trace is.
+  await score(id, "enrollment", "enrollment-correct", passed.every(Boolean) ? 1 : 0, `${passed.filter(Boolean).length}/${passed.length} checks passed`, true);
   console.log(`${decisionOk ? "✓" : "✗"} enrollment ${fixture.name}: ${record?.decision ?? "no decision"}${conditions}`);
 }
 

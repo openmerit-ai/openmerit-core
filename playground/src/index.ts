@@ -42,10 +42,10 @@ export default {
     }
 
     if (request.method === "POST" && path === "/enrollments") {
-      const { application, runId, models } = (await request.json()) as { application: EnrollmentApplication; runId?: string; models?: ModelOverrides };
+      const { application, runId, models, experiment } = (await request.json()) as { application: EnrollmentApplication; runId?: string; models?: ModelOverrides; experiment?: ExperimentContext };
       if (await ledger.getEnrollment(application.applicationId)) return json({ error: `Application ${application.applicationId} already received` }, 409);
       await ledger.saveEnrollment({ application, decision: "pending", memberId: null, reason: "", runId: runId ?? null });
-      await env.ENROLLMENT_FLOW.create({ id: runKey(application.applicationId, runId), params: { applicationId: application.applicationId, runId, models } });
+      await env.ENROLLMENT_FLOW.create({ id: runKey(application.applicationId, runId), params: { applicationId: application.applicationId, runId, models, experiment } });
       return json({ applicationId: application.applicationId, decision: "pending" }, 202);
     }
 

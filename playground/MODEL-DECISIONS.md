@@ -2,6 +2,57 @@
 
 Every application model choice goes through Scout first (see `AGENTS.md` and `POLICY.md`). Each entry records the task text, the policy given, what Scout recommended, what we chose, and how residency was handled. Raw Scout responses are in `scout-results/`.
 
+## 5 Nov 2026: environment brief and measurement plan (openmerit 0.3.1)
+
+**Task text:** `scout-tasks/agent-models-0.3.1.txt`. It covers the same five agents as before, plus:
+- model calls per agent run, as measured on `run-2026-11-05T13-18-33-931Z`;
+- about 300 claims a day, and human approval before payment;
+- our existing Langfuse evals (`sahra-outpatient-claims`, 14 labelled claims, with task, agent and environment scores; enrollment has no dataset);
+- the UAE residency rule, with non-UAE endpoints accepted only as a recorded gap because the data is fictional;
+- "rank for the best quality".
+
+**Run:** `openmerit scout "<task>" --all-endpoints --json` (openmerit 0.3.1). Conversation `d16cba5a-c418-4653-80d8-71ed7088074d`, catalogue `9e66fcfcbcea38ce02b53f9d0c1f7b8d`. The raw response is in `scout-results/2026-11-05-0.3.1-environment-brief.json`. We used `--all-endpoints` because the saved `existing-first` inventory is empty, and the recorded-gap exception in `POLICY.md` already covers non-UAE endpoints.
+
+**Result:** `recommended` in one turn, with no clarifying questions. Every task got `priority: quality`, with quality bars from 78 (enrollment) to 85 (adjudication). The candidates are the same five for every agent, all on OpenRouter, and none has measured quality yet:
+
+| Agent | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| Enrollment | Claude Opus 5 (95) | Gemini 4 Argon (94) | Claude Opus 5.5 (93) | Claude Sonnet 5.5 (89) | GPT-6.1 Sol (84) |
+| Intake | Claude Opus 5.5 (96) | Gemini 4 Argon (94) | Claude Opus 5 (93) | Claude Sonnet 5.5 (91) | GPT-6.1 Sol (87) |
+| Coding | Claude Opus 5 (97) | Gemini 4 Argon (94) | Claude Opus 5.5 (92) | Claude Sonnet 5.5 (90) | GPT-6.1 Sol (85) |
+| Adjudication | Claude Opus 5.5 (97) | Gemini 4 Argon (95) | Claude Opus 5 (94) | Claude Sonnet 5.5 (92) | GPT-6.1 Sol (88) |
+| Fraud | Claude Opus 5.5 (95) | Gemini 4 Argon (94) | Claude Opus 5 (91) | Claude Sonnet 5.5 (89) | GPT-6.1 Sol (86) |
+
+**Evaluation plans:**
+- **Claim agents:** each plan says to add candidate runs to the existing 14-claim Langfuse experiment and to use the existing agent and environment scores (line decisions, mismatch, payment correctness, review load) and rejected-tool traces. Each plans 14 samples per candidate, with stop rules such as "stop when a candidate makes repeated consequential wrong-pay decisions".
+- **Enrollment:** the plan uses the two fixtures, with a stop rule of one failed fixture. It says that two fixtures "cannot establish statistical superiority".
+
+**Residency:** none of the models carries a processing location. Scout's assumptions say "endpoint residency must be verified independently, unknown counted outside UAE", and the response says "Endpoint residency unverified" once. Every candidate is therefore a recorded residency gap, as on 4 Nov.
+
+### Measurement on the deployed Worker (5 Nov 2026, 13:42–14:37 UTC)
+
+Each candidate replaced one agent at a time (`npm run scenarios -- --model <agent>=openrouter/<id>`), with the other agents on recorded Sonnet 5.5. Every run was one round of the 14 claims in `sahra-outpatient-claims`, as an experiment named `<agent>=<model>-<runId>`. The incumbent is `recorded-run-2026-11-05T13-42-09-533Z` (36/36). Cells show agent-check pass rate · claims correct end to end · measured USD per agent run · seconds per agent run.
+
+| Agent | Sonnet 5.5 (recorded) | Opus 5.5 | Gemini 4 Argon | Opus 5 | GPT-6.1 Sol |
+|---|---|---|---|---|---|
+| Intake | 1/1 · 14/14 · 0.010 · 9.4 | 1/1 · 14/14 · 0.023 · 12.4 | 1/1 · 14/14 · 0.009 · 22.8 | 1/1 · 12/14 · 0.034 · 16.1 | 1/1 · 14/14 · 0.006 · 8.7 |
+| Coding | 4/4 · 14/14 · 0.015 · 11.3 | 4/4 · 13/14 · 0.037 · 16.9 | 4/4 · 14/14 · 0.014 · 37.4 ¹ | 4/4 · 13/14 · 0.058 · 23.9 | 4/4 · 14/14 · 0.011 · 14.0 |
+| Adjudication | 14/14 · 14/14 · 0.018 · 11.2 | 14/14 · 14/14 · 0.042 · 17.0 | 14/14 · 14/14 · 0.022 · 40.7 | 14/14 · 14/14 · 0.072 · 24.0 | 14/14 · 14/14 · 0.013 · 15.8 |
+| Fraud | 14/14 · 14/14 · 0.020 · 13.1 | 14/14 · 13/14 · 0.051 · 22.0 | 14/14 · 14/14 · 0.019 · 28.4 | 13/13 · 13/13 · 0.065 · 24.5 ² | 14/14 · 14/14 · 0.014 · 18.9 |
+| Enrollment (2 fixtures) | 2/2 | 2/2 | 0/1, stopped ³ | 2/2 | 2/2 |
+
+1. The first Gemini coding run (`run-2026-11-05T13-58-28-332Z`) errored on all 14 claims with OpenRouter 402 "requires more credits", because the account was down to about USD 5. It is not a model result. The rerun is `run-2026-11-05T14-06-47-059Z`.
+2. FICT-CLM-1011 hit an OpenRouter 402 "in-flight budget exhausted" and is excluded.
+3. Gemini sent `decide_enrollment` an invented field, the harness rejected the call, and Gemini then reported the application as recorded without retrying. Scout's stop rule stopped it after fixture 1.
+
+Every end-to-end miss above (claims correct 12/14 or 13/14) came from an agent that was not swapped. These are the recorded Sonnet adjudication's SH-BILL-01 on borderline-upcoding, and one extra Sonnet fraud `review`. The swapped agent passed every one of its own checks.
+
+**Reported to Scout:** 129 aggregates in four `--results` calls on the same conversation. They are in `scout-results/2026-11-05-0.3.1-reported-results.json`, and the new recommendation is in `scout-results/2026-11-05-0.3.1-after-results.json`. Scout's first choice became Sonnet 5.5 for enrollment, coding, adjudication and fraud, and GPT-6.1 Sol for intake. It dropped Gemini on enrollment, Opus 5 on intake, both Opus models on coding, and Opus 5.5 on fraud. See FINDINGS.md for why some of those drops misattribute downstream misses.
+
+**Choice:** keep Claude Sonnet 5.5 for all five agents, with no change to `src/models.ts`. Scout and our measurements agree that nothing beats it on quality on these claims. GPT-6.1 Sol tied on every check at 25–40% lower cost per agent run. It is the cheaper challenger worth more rounds and harder claims before we switch; one round of 14 claims cannot separate them. We would not take the Opus models: no measurable gain at 2 to 4 times the cost. Gemini 4 Argon is ruled out for enrollment and is 2 to 4 times slower elsewhere.
+
+**Residency:** unchanged. Every candidate is an OpenRouter route with unknown processing location, so this is a recorded gap, acceptable only because all data is fictional.
+
 ## 4 Nov 2026: first model choice for all five agents (openmerit 0.3.0)
 
 **Task text:** `scout-tasks/agent-models.txt`. One conversation covers enrollment, intake/extraction, coding review, adjudication and fraud review. It states the UAE residency requirement (Federal Law No. 2 of 2019, Art. 13), treats an unknown processing location as outside the UAE, and says we prefer Workers AI and care more about quality and tool calling than cost.

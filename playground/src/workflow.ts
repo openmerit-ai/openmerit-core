@@ -23,6 +23,8 @@ export interface EnrollmentFlowParams {
   applicationId: string;
   runId?: string;
   models?: ModelOverrides;
+  /** Scenario runs link the enrollment agent's trace to this Langfuse experiment (dataset item = application ID). */
+  experiment?: ExperimentContext;
 }
 
 export const APPROVAL_EVENT = "human-approval";
@@ -213,14 +215,14 @@ export class ClaimFlow extends WorkflowEntrypoint<Env, ClaimFlowParams> {
 
 export class EnrollmentFlow extends WorkflowEntrypoint<Env, EnrollmentFlowParams> {
   override async run(event: WorkflowEvent<EnrollmentFlowParams>, step: WorkflowStep): Promise<{ decision: string }> {
-    const { applicationId, runId, models } = event.payload;
+    const { applicationId, runId, models, experiment } = event.payload;
     const ledger = this.env.LEDGER.getByName("sahra");
     return step.do(STEP_NAMES.enrollment, { timeout: AGENT_TIMEOUT, retries: { limit: 1, delay: "10 seconds", backoff: "constant" } }, async () => {
       const decided = async () => {
         const record = await ledger.getEnrollment(applicationId);
         return record && record.decision !== "pending" ? record.decision : null;
       };
-      await runAgent(this.env, { role: "enrollment", caseId: applicationId, prompt: `Process enrollment application ${applicationId}.`, runId, model: models?.enrollment }, async () => !!(await decided()));
+      await runAgent(this.env, { role: "enrollment", caseId: applicationId, prompt: `Process enrollment application ${applicationId}.`, runId, model: models?.enrollment, last: true, experiment }, async () => !!(await decided()));
       const decision = await decided();
       if (!decision) throw new NonRetryableError("Enrollment agent ended without a decision");
       return { decision };
