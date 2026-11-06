@@ -328,7 +328,7 @@ test('LiveBench, τ-bench, OpenCompass, HELM Arabic, BRIDGE and SuperCLUE keep t
   // SuperCLUE: the newest month that is not a 404, read by header label, not column position.
   const sheet = rows => `<worksheet><sheetData>${rows.map((r, i) => `<row r="${i + 1}">${r.map((v, j) => `<c r="${String.fromCharCode(65 + j)}${i + 1}" ${typeof v === 'number' ? `t="n"><v>${v}</v>` : `t="inlineStr"><is><t>${v.replace(/[^\x00-\x7f]/g, c => `&#${c.codePointAt(0)};`)}</t></is>`}</c>`).join('')}</row>`).join('')}</sheetData></worksheet>`;
   const labels = superclueCategories.map(c => c[0]).reverse();
-  const xlsx = zipSync({ 'xl/worksheets/sheet1.xml': strToU8(sheet([['排名', '模型名称', '总分', ...labels], ...names.map((n, i) => [String(i), `${n}(max)`, 99, 10 * i, ...labels.slice(1).map(() => 50)])])), 'docProps/core.xml': strToU8('<dcterms:created xsi:type="dcterms:W3CDTF">2026-09-10T09:55:33Z</dcterms:created>') });
+  const xlsx = zipSync({ 'xl/worksheets/sheet1.xml': strToU8(sheet([['排名', '模型名称', '总分', ...labels], ...names.map((n, i) => [String(i), `${n}(max)`, 99, 10 * i, ...labels.slice(1).map(() => 50)])])), 'docProps/core.xml': strToU8('<dcterms:created xsi:type="dcterms:W3CDTF">2023-05-12T19:15:00Z</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">2026-09-10T09:55:33Z</dcterms:modified>') });
   const now = new Date('2026-10-29T00:00:00Z'), notFound = Promise.reject(new Error('Source returned 404: www.superclueai.com')); notFound.catch(() => {});
   const superclue = await readSuperCLUE(async url => url === superclueURL(2026, 9) ? xlsx : url === superclueURL(2026, 7) ? Promise.reject(new Error('stale')) : notFound, now);
   assert.deepEqual([superclue.month, superclue.publishedAt, superclue.rows[2].scores[superclueCategories.at(-1)[1]]], ['2026-09', '2026-09-10', 20]);
@@ -342,8 +342,8 @@ test('LiveBench, τ-bench, OpenCompass, HELM Arabic, BRIDGE and SuperCLUE keep t
   // Model 7's display name strips to "Model 7", but its ID names another model.
   assert.deepEqual([score('model-6', 'helm:arabic'), score('model-4', 'helm:arabic'), score('model-7', 'helm:arabic')], [.3, undefined, undefined]);
   assert.deepEqual([score('model-3', 'bridge:zero-shot'), score('model-5', 'bridge:zero-shot')], [.03, undefined]);
-  assert.equal(score('model-2', 'superclue:agentic-planning'), .2);
-  const ids = ['livebench:coding', 'livebench:reasoning', 'tau:airline', 'tau:banking_knowledge', 'opencompass:knowledge', 'opencompass:agent', 'helm:arabic', 'bridge:zero-shot', 'superclue:math', 'superclue:agentic-planning'];
+  assert.equal(score('model-2', 'superclue:long-context'), .2);
+  const ids = ['livebench:coding', 'livebench:reasoning', 'tau:airline', 'tau:banking_knowledge', 'opencompass:knowledge', 'opencompass:agent', 'helm:arabic', 'bridge:zero-shot', 'superclue:math-science', 'superclue:long-context'];
   const families = ids.map(id => snap.benchmarks.find(b => b.id === id)?.family);
   assert.deepEqual([families.includes(undefined), new Set(families).size, snap.benchmarks.filter(b => ids.includes(b.id) && b.definition.suite).length], [false, ids.length, 0]);
   // Sierra's banking run is the same evaluation Artificial Analysis publishes; its other names stay distinct.

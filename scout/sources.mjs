@@ -272,8 +272,10 @@ export function parseBRIDGE(data) {
 // SuperCLUE (Chinese general board) publishes about every two months as a spreadsheet named
 // by month. The six months before the refresh are tried and the newest is read. Only its
 // first sheet's inline cells are read; the total is a composite and is not kept.
-export const superclueCategories = [['数学推理', 'math', 'Mathematical reasoning'], ['幻觉控制', 'hallucination', 'Hallucination control'], ['科学推理', 'science', 'Scientific reasoning'],
-  ['精确指令遵循', 'instructions', 'Precise instruction following'], ['智能体编程', 'agentic-coding', 'Agentic coding'], ['智能体任务规划', 'agentic-planning', 'Agentic task planning']];
+// From the November 2026 board, 数理推理 merges the former math and science categories, so it is a
+// new series rather than a continuation of either; agentic task planning is no longer published.
+export const superclueCategories = [['智能体编程', 'agentic-coding', 'Agentic coding'], ['数理推理', 'math-science', 'Mathematical and scientific reasoning'], ['幻觉控制', 'hallucination', 'Hallucination control'],
+  ['精确指令遵循', 'instructions', 'Precise instruction following'], ['超长上下文', 'long-context', 'Very long context']];
 export const superclueURL = (year, month) => `https://www.superclueai.com/data/generalboard/${year}${encodeURIComponent('年')}${month}${encodeURIComponent('月')}.xlsx`;
 export function parseSuperCLUE(xlsx) {
   let size = 0;
@@ -287,8 +289,10 @@ export function parseSuperCLUE(xlsx) {
   if (!model || columns.some(c => !c)) throw new Error('SuperCLUE format changed.');
   const kept = rows.filter(r => r[model]).map(r => ({ model: r[model], scores: Object.fromEntries(superclueCategories.map(([, id], i) => [id, number(r[columns[i]])])) }));
   if (kept.length < 10) throw new Error('Too few SuperCLUE results.');
-  const created = files['docProps/core.xml'] ? strFromU8(files['docProps/core.xml']).match(/<dcterms:created[^>]*>(\d{4}-\d{2}-\d{2})/)?.[1] ?? null : null;
-  return { rows: kept, publishedAt: created };
+  // The workbook is regenerated from a template whose creation date predates the board, so the
+  // last-modified date is the board's publication date.
+  const modified = files['docProps/core.xml'] ? strFromU8(files['docProps/core.xml']).match(/<dcterms:modified[^>]*>(\d{4}-\d{2}-\d{2})/)?.[1] ?? null : null;
+  return { rows: kept, publishedAt: modified };
 }
 export async function readSuperCLUE(read, now) {
   const months = Array.from({ length: 6 }, (_, i) => { const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1)); return [d.getUTCFullYear(), d.getUTCMonth() + 1]; });
