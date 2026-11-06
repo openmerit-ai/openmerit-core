@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Eval readiness and evidence-first cleanup — unreleased instructions, 6 November 2026
+
+Reviewed the homepage against guidance for three eval-readiness paths, local/custom aggregate reporting, customer-owned platform writes and approved temporary-run cleanup after saving local Markdown evidence. `site/index.html` has no FAQ block or claims that OpenMerit hosts evals or deletes records. It still describes a model-selection layer outside the live request path. No homepage copy changes; these instructions need an npm release and fresh-agent acceptance, not a new connector or automated cleanup service.
+
 ## Measured-cost tie-break and CLI result limit — deployed 5 November 2026, npm 0.3.4
 
 Reviewed the homepage against measured cost breaking ties under any ranking priority, older reported results counting as quality again, the CLI refusing more than 50 results per call and Claude Code's install wording. `site/index.html` has no FAQ block and does not mention ranking inputs or installer output. No homepage copy changes.

@@ -28,6 +28,31 @@ Each recommended model names an exact endpoint and provider model ID.
 
 ## Measure with your own evals
 
+**Eval-readiness and evidence guidance — unreleased npm instructions:** the next
+package adds the readiness and cleanup workflow below to the installed Scout
+skill. Existing npm 0.3.6 instructions cover measuring and aggregate reporting,
+but do not yet prescribe all three readiness paths or an evidence-first cleanup
+record. This is guidance for the customer's coding agent, not an automated eval
+runner, platform provisioner or deletion service.
+
+### Choose the readiness path
+
+- **No eval setup.** Scout can still suggest candidates from public evidence;
+  that is not measured application quality. Propose a minimal customer-owned
+  eval setup and obtain approval before creating it. Langfuse is the default
+  suggestion because Scout has its aggregate connector. A hosted platform is
+  optional: customer-owned scripts and fixtures can report aggregates directly.
+  Phoenix/Arize and Braintrust are alternatives, not supported Scout connectors.
+- **A setup exists, but the evals are missing or too weak for model selection.**
+  Keep the existing system. Have the user or their coding agent write a local
+  task-specific Markdown eval plan with exact candidates/endpoints, quality floor,
+  task/agent/outcome checks, labelled boundary cases and controls, sample size,
+  early stopping, spend cap, aggregate mappings and temporary-run retention.
+  Review it before implementing it with the customer's tools. OpenMerit's access
+  remains Viewer-only; it does not install or maintain those evals.
+- **Suitable evals already exist.** Reuse their fixtures and definitions. Add
+  approved candidate runs rather than creating another dataset or platform.
+
 Add the shortlist as runs of your existing evals, not a second platform. Obtain
 approval before model spend or platform writes. For agents, change **one agent at
 a time** while holding the other models, prompts, tools, fixtures and controls
@@ -37,6 +62,34 @@ failures. Include cost and latency per call or agent run.
 If every candidate scores 100%, the eval does not distinguish their quality.
 Add harder labelled boundary cases, rare failures and adversarial examples;
 cheaper on this test is not proof of equal quality in production.
+
+### Preserve evidence, then request cleanup
+
+Save a local Markdown decision record before removing temporary comparison data.
+Include the date, package and service versions, task and policy, exact candidates,
+unchanged controls, metric definitions and direction, sample counts, aggregate
+quality/cost/time, failures and exclusions, decision, limitations and next review.
+Exclude keys, private record identifiers, prompts, outputs and trace bodies.
+
+State cost regret in a consistent unit (for example USD per agent run): the
+chosen model's measured cost minus the cheapest measured candidate meeting the
+same quality floor on comparable evals. If there is no measured comparison,
+write **not measurable**, not zero. One success or all candidates scoring 100%
+on a tiny eval is not proof of equal production quality.
+
+Comparison records are temporary, but deletion is **not automatic**. After
+checking the saved evidence, propose the exact newly created comparison runs and
+any cascading deletions, then obtain explicit scoped approval. The customer or
+their coding agent performs cleanup using customer-controlled write access;
+Scout's Viewer key cannot delete Langfuse data. Never delete pre-existing customer
+records, reusable fixtures, dataset definitions or eval definitions. Verify that
+only the approved records disappeared and retained controls still exist. Record
+cleanup as pending when permission or verification is missing.
+
+Deleting platform runs, disconnecting Scout and deleting Scout's stored aggregates
+are separate operations. Disconnect does not erase past conversations or customer
+platform records. Keep enough permitted aggregate evidence locally to explain a
+later decision, without promising Scout can refresh a deleted source experiment.
 
 ## Report aggregates
 
