@@ -3,7 +3,7 @@
 
 import type { SeedData } from "../src/ledger.ts";
 import { PLAN } from "../src/domain/plan.ts";
-import type { Member } from "../src/domain/types.ts";
+import type { Activity, AdjudicationLine, Member, SubmittedClaim } from "../src/domain/types.ts";
 
 const member = (id: string, name: string, overrides: Partial<Member> = {}): Member => ({
   id,
@@ -19,6 +19,35 @@ const member = (id: string, name: string, overrides: Partial<Member> = {}): Memb
   declaredConditions: [],
   ...overrides,
 });
+
+/** A paid outpatient visit at 20% coinsurance, for history-dependent fixtures. */
+function paidVisit(id: string, memberId: string, providerId: string, clinician: string, start: string, diagnosis: string, items: [code: string, net: number][]): SeedData["paidClaims"][number] {
+  const activities: Activity[] = items.map(([code, net], index) => ({ id: `A${index + 1}`, start, type: 3, code, quantity: 1, net, clinician, observations: [] }));
+  const gross = activities.reduce((sum, item) => sum + item.net, 0);
+  const claim: SubmittedClaim = {
+    id,
+    memberId,
+    payerId: PLAN.payerId,
+    providerId,
+    emiratesIdNumber: `784-0000-000${memberId.slice(-4)}-0`,
+    gross,
+    patientShare: 0,
+    net: gross,
+    encounter: { facilityId: providerId, type: 1, patientId: memberId, start },
+    diagnoses: [{ type: "Principal", code: diagnosis }],
+    activities,
+  };
+  const lines: AdjudicationLine[] = activities.map((item) => ({
+    activityId: item.id,
+    code: item.code,
+    benefit: item.code.startsWith("99") ? "consultation" : "laboratory",
+    gross: item.net,
+    patientShare: item.net / 5,
+    paymentAmount: item.net - item.net / 5,
+    reason: "Seeded history",
+  }));
+  return { receivedAt: new Date(new Date(start).getTime() + 86_400_000).toISOString(), claim, lines };
+}
 
 export const SEED: SeedData = {
   members: [
@@ -36,16 +65,33 @@ export const SEED: SeedData = {
     member("SH-M-1012", "Samir Haddad (fictional)", { declaredConditions: ["E11"] }),
     member("SH-M-1013", "Liza Cruz (fictional)"),
     member("SH-M-1014", "Kiran Rao (fictional)"),
+    member("SH-M-1015", "Layla Mansour (fictional)"),
+    member("SH-M-1016", "Omar Siddiqui (fictional)"),
+    member("SH-M-1017", "Nikhil Varma (fictional)"),
+    member("SH-M-1018", "Hana Yusuf (fictional)"),
+    member("SH-M-1020", "Ahmed Farouk (fictional)", { declaredConditions: ["E11"] }),
+    member("SH-M-1021", "Sofia Rossi (fictional)"),
+    member("SH-M-1022", "Wei Zhang (fictional)"),
+    member("SH-M-1023", "Priya Nair (fictional)"),
+    member("SH-M-1024", "Mark Evans (fictional)"),
+    member("SH-M-1025", "Yousef Haddad (fictional)"),
+    member("SH-M-1026", "Elena Popescu (fictional)"),
+    member("SH-M-1027", "Rashid Khan (fictional)", { declaredConditions: ["E11", "I10"] }),
+    member("SH-M-1028", "George Mathew (fictional)"),
+    // Members with history only: earlier visits at Jumeirah Wellness Clinic.
+    ...["1090", "1091", "1092", "1093", "1094"].map((number) => member(`SH-M-${number}`, `Jumeirah patient ${number} (fictional)`)),
   ],
   providers: [
     { id: "FICT-DHA-F-0001", name: "Al Noor Family Clinic (fictional)", facilityType: "clinic", inNetwork: true },
     { id: "FICT-DHA-F-0002", name: "Creek Specialist Centre (fictional)", facilityType: "hospital", inNetwork: true },
     { id: "FICT-DHA-F-0003", name: "Marina Medical Centre (fictional)", facilityType: "clinic", inNetwork: true },
+    { id: "FICT-DHA-F-0004", name: "Jumeirah Wellness Clinic (fictional)", facilityType: "clinic", inNetwork: true },
   ],
   clinicians: [
     { id: "FICT-DHA-P-1001", name: "Dr Sara Haddad (fictional)", role: "GP" },
     { id: "FICT-DHA-P-1002", name: "Dr Omar Farouk (fictional)", role: "Specialist", specialty: "Orthopaedics" },
     { id: "FICT-DHA-P-1003", name: "Dr Lena Kovac (fictional)", role: "GP" },
+    { id: "FICT-DHA-P-1004", name: "Dr Karim Saleh (fictional)", role: "GP" },
   ],
   paidClaims: [
     {
@@ -108,5 +154,19 @@ export const SEED: SeedData = {
         { activityId: "A2", code: "87880", benefit: "laboratory", gross: 70_00, patientShare: 14_00, paymentAmount: 56_00, reason: "Seeded history" },
       ],
     },
+    // Wei's first strep throat; the claim two weeks later is a recurrence, not a duplicate.
+    paidVisit("FICT-CLM-0903", "SH-M-1022", "FICT-DHA-F-0001", "FICT-DHA-P-1001", "2026-10-20T17:00:00+04:00", "J02.0", [["99213", 160_00], ["87880", 70_00]]),
+    // Priya's UTI visit; a later claim resubmits it with a higher consultation amount.
+    paidVisit("FICT-CLM-0904", "SH-M-1023", "FICT-DHA-F-0003", "FICT-DHA-P-1003", "2026-10-22T09:00:00+04:00", "N39.0", [["99213", 160_00], ["81003", 35_00]]),
+    // Jumeirah Wellness Clinic bills the highest E/M level for simple visits.
+    ...(
+      [
+        ["FICT-CLM-0905", "SH-M-1090", "2026-10-06T10:00:00+04:00", "J06.9"],
+        ["FICT-CLM-0906", "SH-M-1091", "2026-10-09T11:00:00+04:00", "J02.9"],
+        ["FICT-CLM-0907", "SH-M-1092", "2026-10-14T09:30:00+04:00", "R51.9"],
+        ["FICT-CLM-0908", "SH-M-1093", "2026-10-21T16:00:00+04:00", "J06.9"],
+        ["FICT-CLM-0909", "SH-M-1094", "2026-10-28T12:00:00+04:00", "K21.9"],
+      ] as const
+    ).map(([id, memberId, start, diagnosis]) => paidVisit(id, memberId, "FICT-DHA-F-0004", "FICT-DHA-P-1004", start, diagnosis, [["99215", 350_00]])),
   ],
 };

@@ -7,7 +7,7 @@ test("every scored agent trace carries its experiment tag without changing final
   // Exercise the real workflows and OTLP exporter, with no platform or model calls.
   const source = new URL("../src/workflow.ts", import.meta.url).href;
   const hooks = registerHooks({ resolve(specifier, context, next) {
-    const stub = specifier === "cloudflare:workers" ? "export class WorkflowEntrypoint {}"
+    const stub = specifier === "cloudflare:workers" ? "export class WorkflowEntrypoint {} export class DurableObject {}"
       : specifier === "cloudflare:workflows" ? "export class NonRetryableError extends Error {}"
       : specifier === "./agents.ts" && context.parentURL === source ? "export const instructionsFor = () => 'Fictional test instructions';" : null;
     return stub ? { url: `data:text/javascript,${encodeURIComponent(stub)}`, shortCircuit: true } : next(specifier, context);

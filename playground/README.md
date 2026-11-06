@@ -12,7 +12,9 @@ The first loop covers outpatient claims under **Sahra Essential**, a fictional p
    - **coding**: checks codes against the 2024 code sets, and looks for unbundling and upcoding.
    - **adjudication**: decides pay or deny for each line. `propose_adjudication` computes every amount and refuses decisions that break a hard rule: eligibility, deleted codes, prior approval, exclusions, the pre-existing waiting period, and specialist care without a referral.
    - **fraud**: checks duplicates, frequency and provider patterns.
-3. The claim waits in `awaiting_approval` until a person runs `npm run approve -- <claim-id> approve|reject --by <name>`. The ledger pays only claims with a recorded approval, and this is enforced in code, not in a prompt.
+
+   An agent that ends without recording its result, often after one rejected tool call, gets one follow-up prompt in the same session asking it to fix the call and record. If it still has not recorded, the claim ends in `error`.
+3. The claim waits in `awaiting_approval` until a person runs `npm run approve -- <claim-id> approve|reject --by <name>` (with `--run <run-id>` for a scenario run's claim). The ledger pays only claims with a recorded approval, and this is enforced in code, not in a prompt.
 
 Enrollment (`POST /enrollments`) runs a fifth agent. It checks EBP eligibility (Dubai visa, salary of AED 4,000 or less) and reads the health declaration for pre-existing conditions.
 
@@ -32,10 +34,12 @@ These evals are Sahra's own, so none of their names carry an `om-` prefix. Score
 | --- | --- | --- | --- |
 | Task | `model-calls` | numeric | the Worker, on every agent trace's root observation |
 | Task | `rejected-tool-calls` (tool results starting `<harness>` or `[error]`: argument validation or harness errors) | numeric | the Worker, same |
+| Task | `nudges` (follow-up prompts after the agent ended without recording its result; at most one) | numeric | the Worker, same |
 | Task | `result-recorded` (the agent recorded its extraction, review, adjudication, assessment or decision) | boolean | the Worker, same |
 | Agent | `line-decisions-correct`, `fraud-recommendation-correct`, `bill-mismatch-found`, `coding-finding-found`, `coding-findings-match`, `enrollment-decision-correct`, `declared-conditions-found` | boolean | the scenario runner, on the scored agent's trace |
 | Agent | `usd-per-agent-run`, `seconds-per-agent-run` | numeric | the scenario runner, on each agent's trace, only when that measurement is known |
 | Environment | `claim-correct` (every agent check for the claim passes), `payment-correct` (proposed payment equals the fixture's), `review-load` (fraud recommended review or hold on a claim whose only acceptable recommendation is pay) | boolean | the scenario runner, on the root observation of the claim's **final agent trace** |
+| Environment | `error-cost-aed` (what the claim's mistakes cost Sahra: the proposed payment's distance from the correct one, plus AED 30 of manual handling for an unnecessary review or an unfinished claim) | numeric | the scenario runner, same |
 | Environment | `enrollment-correct` (every agent check for the application passes) | boolean | the scenario runner, on the root observation of the application's enrollment agent trace |
 
 A claim's final agent trace is its `assess-fraud` trace, or, when the pipeline stopped early, the trace of the agent that did not record its result. An application has one agent trace, `assess-enrollment`. Scores carry `metadata.level` (`task` or `environment`). The settlement trace is not used for scores: scenario runs end at human approval, so it does not exist yet.
@@ -90,7 +94,7 @@ npm run approve -- FICT-CLM-1001 approve --by "<your name>"
 npm run scenarios -- --model intake=openrouter/anthropic/claude-haiku-5.5,coding=openrouter/anthropic/claude-haiku-5.5
 ```
 
-The runner sends the overrides as `models` (agent → `{ provider, id }`) on `POST /claims` and `POST /enrollments`. Without Langfuse keys in its environment it still checks the run but sends no scores, dataset or experiment. Run scenarios one at a time: each run reseeds the one shared ledger, so a run started while another's workflows are still going corrupts both. Restart `wrangler dev` to drop leftover workflows.
+The runner sends the overrides as `models` (agent → `{ provider, id }`) on `POST /claims` and `POST /enrollments`. Without Langfuse keys in its environment it still checks the run but sends no scores, dataset or experiment. Each run seeds and uses its own ledger, named by its run ID, so runs can go in parallel, for example one per candidate model. Requests without a run ID, such as real submissions, use the `sahra` ledger. To approve a claim from a scenario run, pass its run ID: `npm run approve -- <claim-id> approve --by <name> --run <run-id>` (the runner prints it).
 
 **Delayed cost ingestion:** after scoring, the runner waits up to two minutes for
 each agent root's declared generation count and every generation's cost. Missing

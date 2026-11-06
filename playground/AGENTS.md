@@ -36,7 +36,7 @@ npm ci                     # install exactly the lockfile
 npm run check              # typecheck and deterministic tests (what CI runs)
 npm run dev                # wrangler dev (Workers AI calls run on the account)
 npm run scenarios          # submit the fixtures to the dev server; --model <agent>=openrouter/<id>,... per agent
-npm run approve -- <claim-id> approve|reject --by <name> [--note <text>]
+npm run approve -- <claim-id> approve|reject --by <name> [--note <text>] [--run <run-id>]
 ```
 
 Write TypeScript only. `README.md` describes the design; `FINDINGS.md` is the release-testing log.

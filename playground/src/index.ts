@@ -4,6 +4,7 @@
 import { ClaimXmlError, parseClaimSubmission } from "./domain/eclaim.ts";
 import { PLAN } from "./domain/plan.ts";
 import type { Approval, EnrollmentApplication } from "./domain/types.ts";
+import { ledgerName } from "./ledger.ts";
 import type { ModelOverrides } from "./models.ts";
 import { SEED } from "../fixtures/seed.ts";
 import { type ExperimentContext, runKey, VERSIONS } from "./tracing.ts";
@@ -33,9 +34,14 @@ export default {
     if (!env.PLAYGROUND_TOKEN || request.headers.get("authorization") !== `Bearer ${env.PLAYGROUND_TOKEN}`) {
       return json({ error: "unauthorized" }, 401);
     }
-    const ledger = env.LEDGER.getByName("sahra");
+    // Scenario runs name their run: POST bodies carry `runId`, GET and approval routes take `?runId=`.
+    const queryRunId = url.searchParams.get("runId") ?? undefined;
+    const ledgerFor = (runId?: string) => env.LEDGER.getByName(ledgerName(runId));
+    const ledger = ledgerFor(queryRunId);
 
     if (request.method === "POST" && path === "/admin/seed") {
+      const { runId } = (await request.json().catch(() => ({}))) as { runId?: string };
+      const ledger = ledgerFor(runId);
       await ledger.reset();
       await ledger.seed(SEED);
       return json({ members: SEED.members.length, providers: SEED.providers.length, clinicians: SEED.clinicians.length, paidClaims: SEED.paidClaims.length });
@@ -43,6 +49,7 @@ export default {
 
     if (request.method === "POST" && path === "/enrollments") {
       const { application, runId, models, experiment } = (await request.json()) as { application: EnrollmentApplication; runId?: string; models?: ModelOverrides; experiment?: ExperimentContext };
+      const ledger = ledgerFor(runId);
       if (await ledger.getEnrollment(application.applicationId)) return json({ error: `Application ${application.applicationId} already received` }, 409);
       await ledger.saveEnrollment({ application, decision: "pending", memberId: null, reason: "", runId: runId ?? null });
       await env.ENROLLMENT_FLOW.create({ id: runKey(application.applicationId, runId), params: { applicationId: application.applicationId, runId, models, experiment } });
@@ -68,6 +75,7 @@ export default {
       }
       const [claim] = parsed.claims;
       if (!claim || parsed.claims.length !== 1) return json({ error: "Submit exactly one claim per transaction" }, 400);
+      const ledger = ledgerFor(runId);
       if (claim.payerId !== PLAN.payerId) return json({ error: `PayerID must be ${PLAN.payerId}` }, 400);
       if (await ledger.getClaim(claim.id)) return json({ error: `Claim ${claim.id} already received` }, 409);
       await ledger.receiveClaim({ claim, xml, bill, runId });
@@ -76,7 +84,7 @@ export default {
     }
 
     if (request.method === "GET" && path === "/claims") {
-      return json(await ledger.listClaims(url.searchParams.get("runId") ?? undefined));
+      return json(await ledger.listClaims(queryRunId));
     }
 
     const claimRoute = /^\/claims\/([^/]+)(\/approval)?$/.exec(path);
