@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gatewayIdentities, importCatalogueSource, parseDeepInfra, parseOpenRouter, mergeListings, mergeModel, rebuildModels, rebuildOfferings, routeVoice, type Bucket, type ImportResult, type SourceListing } from '../catalogue-db.ts';
+import { gatewayIdentities, importCatalogueSource, parseDeepInfra, parseOpenRouter, mergeListings, mergeModel, rebuildModels, rebuildOfferings, resolveListings, routeVoice, type Bucket, type ImportResult, type Listing, type SourceListing } from '../catalogue-db.ts';
 import { d1 } from './helpers-d1.ts';
 
 const bucket = (): Bucket & { data: Map<string, Uint8Array> } => { const data = new Map<string, Uint8Array>(); return { data, head: async (k: string) => data.has(k) ? {} : null, put: async (k: string, v: Uint8Array) => data.set(k, v) }; };
@@ -277,6 +277,26 @@ test('OpenRouter non-text models get their kind as type, and per-token "0" on ge
   const judges = parseOpenRouter({ data: [{ ...row('lab/judge', ['decisions'], { prompt: '0.00000002', completion: '0' }), expiration_date: '2026-11-20' }, row('~lab/judge-latest', ['decisions'], { prompt: '0.00000002', completion: '0' })] }).listings;
   assert.deepEqual(gatewayIdentities('openrouter', judges).map(m => m.id), ['lab/judge']);
   assert.deepEqual(judges.map(l => [l.provider_model_id, l.model_id, l.deprecated_at]), [['lab/judge', 'lab/judge', '2026-11-20'], ['~lab/judge-latest', null, null]]);
+});
+
+test('hosts that spell versions or prefix the lab differently resolve, and a gateway identity moves onto the model it duplicates', () => {
+  const owned = new Map([['cohere/embed-v4.0', 'modelsdev-model'], ['cohere/embed-v5.0-fast', 'modelsdev-route'], ['cohere/embed-5-fast', 'openrouter-id'], ['amazon/titan-embed-text-v2', 'vercel-id'],
+    ['alibaba/qwen3-embedding-0.6b', 'modelsdev-route'], ['mistral/mistral-embed', 'modelsdev-model'], ['mistralai/mistral-embed-2312', 'openrouter-id'], ['lab/model-4', 'modelsdev-model'], ['other/model-v4.0', 'modelsdev-model']]);
+  const listing = (provider_id: string, provider_model_id: string) => ({ provider_id, provider_model_id, model_id: null, model_basis: null, hf_id: null }) as unknown as Listing;
+  const listings = [listing('amazon-bedrock', 'eu.cohere.embed-v4:0'), listing('azure', 'embed-v-4-0'), listing('azure', 'Cohere-Embed-V5-Fast'), listing('amazon-bedrock', 'us-gov-west-1/amazon.titan-embed-text-v2:0'),
+    listing('fireworks-ai', 'accounts/fireworks/models/qwen3-embedding-0p6b'), listing('databricks', 'databricks-qwen3-embedding-0-6b'), listing('openrouter', 'cohere/embed-5-fast'), listing('openrouter', 'mistralai/mistral-embed-2312'),
+    // A leading name must be the matched model's own lab: Mistral's prefix never reaches Cohere's embed-v4.0.
+    listing('azure', 'Mistral-embed-v4-0'),
+    // Two models share the loose slug model-4, so it resolves nothing.
+    listing('azure', 'model-v-4-0')];
+  resolveListings(listings, { routes: [], models: new Set(owned.keys()), owned });
+  assert.deepEqual(listings.map(l => [l.provider_model_id, l.model_id, l.model_basis]), [
+    ['eu.cohere.embed-v4:0', 'cohere/embed-v4.0', 'slug-loose'], ['embed-v-4-0', 'cohere/embed-v4.0', 'slug-loose'], ['Cohere-Embed-V5-Fast', 'cohere/embed-v5.0-fast', 'slug-loose'],
+    ['us-gov-west-1/amazon.titan-embed-text-v2:0', 'amazon/titan-embed-text-v2', 'slug-loose'], ['accounts/fireworks/models/qwen3-embedding-0p6b', 'alibaba/qwen3-embedding-0.6b', 'slug-loose'],
+    ['databricks-qwen3-embedding-0-6b', 'alibaba/qwen3-embedding-0.6b', 'slug-loose'], ['cohere/embed-5-fast', 'cohere/embed-v5.0-fast', 'slug-loose'], ['mistralai/mistral-embed-2312', 'mistral/mistral-embed', 'reviewed-route'],
+    ['Mistral-embed-v4-0', null, null], ['model-v-4-0', null, null]]);
+  // OpenRouter no longer keeps the duplicate identities it introduced.
+  assert.deepEqual(gatewayIdentities('openrouter', listings.filter(l => l.provider_id === 'openrouter'), owned), []);
 });
 
 test('DeepInfra prices convert from cents per unit, modalities follow type and tags, and past deprecations retire the route', () => {

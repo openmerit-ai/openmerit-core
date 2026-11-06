@@ -35,6 +35,9 @@ export const reviewedRoutes: readonly ReviewedRoute[] = [
   { provider: 'litellm:laya', route: 'english', model: 'convaiinnovations/laya-english' },
   { provider: 'litellm:laya', route: 'multilingual', model: 'convaiinnovations/laya-multilingual' },
   { provider: 'litellm:strands_decider', route: 'strands-decider-2B-hobson-v19', model: 'strands/strands-decider-2b-hobson-v19' },
+  // (2026-11-06) mistral-embed has only ever pointed at mistral-embed-2312; the dated ID is the same model.
+  { provider: 'openrouter', route: 'mistralai/mistral-embed-2312', model: 'mistral/mistral-embed' },
+  { provider: 'mistral', route: 'mistral-embed-2312', model: 'mistral/mistral-embed' },
 ];
 
 // Reviewed leaderboard aliases (2026-10-29): a board's display name or Hugging Face repository

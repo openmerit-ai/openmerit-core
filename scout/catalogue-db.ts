@@ -665,6 +665,14 @@ const weightRepos = (models: ReadonlyArray<{ id: string; weights: string | null 
 // A route's model slug: the last path segment without a :variant suffix, so
 // accounts/fireworks/models/qwen3-8b and Qwen/Qwen3-8B:free both give qwen3-8b.
 export const modelSlug = (id: string): string => (baseID(id).split('/').pop() ?? id).toLowerCase();
+// A slug with version spellings unified: Azure's embed-v-4-0 and Bedrock's
+// embed-v4 both give embed-4, as does embed-v4.0; Fireworks' 0p6b gives 0.6b.
+const looseSlug = (slug: string): string => slug.replace(/_/g, '-').replace(/(\d)[p-](?=\d)/g, '$1.').replace(/(^|-)v-?(?=\d)/g, '$1').replace(/\.0+(?=\D|$)/g, '');
+// Splits a route slug that names its lab first, as Bedrock's [region.]cohere.embed-v4
+// or Azure's Cohere-embed-v3-english, into the lab and the rest, among the first separators.
+const labSplits = (slug: string): Array<[string, string]> =>
+  [...slug.matchAll(/[.-]/g)].slice(0, 3).map(m => [slug.slice(0, m.index).split('.').pop() ?? '', slug.slice(m.index + 1)]);
+const gatewayOwned = (basis: string | undefined) => basis === 'openrouter-id' || basis === 'vercel-id';
 // Gateways' moving aliases (OpenRouter and Kilo's ~lab/…-latest) point at whichever model is current.
 const movingAlias = (id: string): boolean => id.startsWith('~');
 // Service variants of one model: OpenRouter's :free or :batch, Vercel's -batch.
@@ -680,18 +688,30 @@ const index = (pairs: Iterable<readonly [string, string]>) => {
 // Hugging Face repository named for one model, and a model slug equal to one
 // canonical model's slug. Ambiguous keys resolve nothing. The Hub keeps
 // slugs off: a repository named like a lab's model may be anyone's fine-tune.
+// Last, a loose slug (version spellings unified, after a leading name of the
+// model's own lab or of the host) equal to one model's, preferring models a
+// gateway did not introduce. The same loose match moves a gateway's own
+// identity onto such a model, so a gateway never duplicates one.
 export function resolveListings(listings: Listing[], backbone: Backbone, { slugs = true }: { slugs?: boolean } = {}): Listing[] {
   const routes = new Map<string, string>();
   for (const r of backbone.routes) if (r.model_id) routes.set(`${r.provider_id}|${r.provider_model_id}`, r.model_id);
   const same = index(backbone.routes.flatMap(r => r.model_id ? [[r.provider_model_id, r.model_id] as const] : []));
   const repo = index((backbone.repos ?? []).map(r => [r.repo, r.model_id] as const)), slug = index([...backbone.models].map(m => [modelSlug(m), m] as const));
+  const looseKeys = (m: string) => [looseSlug(modelSlug(m)), `${m.split('/')[0]}|${looseSlug(modelSlug(m))}`];
+  const firm = index([...backbone.models].filter(m => !gatewayOwned(backbone.owned?.get(m))).flatMap(m => looseKeys(m).map(k => [k, m] as const)));
+  const anyLoose = index([...backbone.models].flatMap(m => looseKeys(m).map(k => [k, m] as const)));
+  const loose = (l: Listing, onlyFirm = false) => {
+    const s = modelSlug(l.provider_model_id), keys = [looseSlug(s), ...labSplits(s).flatMap(([lab, rest]) => lab === l.provider_id ? [looseSlug(rest)] : [`${lab}|${looseSlug(rest)}`])];
+    return keys.map(firm).find(Boolean) ?? (onlyFirm ? null : keys.map(anyLoose).find(Boolean)) ?? null;
+  };
   const canonical = (id: string) => [id, baseID(id)].find(x => backbone.models.has(x)) ?? null;
   const reviewed = new Map(reviewedRoutes.filter(r => backbone.models.has(r.model)).map(r => [`${r.provider}|${r.route}`, r.model]));
   for (const l of listings) {
     // A link the source itself gives ranks after Models.dev's routes and IDs.
-    const id = l.provider_model_id, exact = routes.get(`${l.provider_id}|${id}`), lower = id.toLowerCase();
-    const found: Array<[string | null | undefined, string | null]> = [[exact, 'modelsdev-route'], [reviewed.get(`${l.provider_id}|${id}`), 'reviewed-route'], [canonical(id), 'modelsdev-canonical-id'], [same(id), 'modelsdev-same-id'], [l.model_id, l.model_basis],
-      [repo(lower.includes('/') ? lower : null) ?? repo(l.hf_id?.toLowerCase()), 'hf-repo'], [slugs ? slug(modelSlug(id)) : null, 'slug-unique']];
+    const id = l.provider_model_id, exact = routes.get(`${l.provider_id}|${id}`), lower = id.toLowerCase(), own = canonical(id);
+    const moved = slugs && gatewayOwned(backbone.owned?.get(own ?? '')) ? loose(l, true) : null;
+    const found: Array<[string | null | undefined, string | null]> = [[exact, 'modelsdev-route'], [reviewed.get(`${l.provider_id}|${id}`), 'reviewed-route'], [moved && moved !== own ? moved : null, 'slug-loose'], [own, 'modelsdev-canonical-id'], [same(id), 'modelsdev-same-id'], [l.model_id, l.model_basis],
+      [repo(lower.includes('/') ? lower : null) ?? repo(l.hf_id?.toLowerCase()), 'hf-repo'], [slugs ? slug(modelSlug(id)) : null, 'slug-unique'], [slugs ? loose(l) : null, 'slug-loose']];
     const [model_id, model_basis] = movingAlias(id) ? [null, null] : found.find(([m]) => m) ?? [null, null];
     Object.assign(l, { model_id: model_id ?? null, model_basis: model_id ? model_basis : null });
   }

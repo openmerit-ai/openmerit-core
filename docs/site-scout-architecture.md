@@ -541,6 +541,7 @@ Two changes widen what reaches Scout from the D1 catalogue.
 4. a link the source itself gives;
 5. a Hugging Face repository named for one model, by Models.dev `weights` or by an already-resolved route's `hf_id` (`hf-repo`);
 6. the route's model slug equal to exactly one canonical model's slug (`slug-unique`). For example, `accounts/fireworks/models/qwen3-8b` and `Qwen/Qwen3-8B` both resolve to `alibaba/qwen3-8b`.
+7. **Unreleased, not deployed:** a loose slug equal to exactly one model's (`slug-loose`). Version spellings are unified (`v-4-0`, `v4` and `v4.0` give `4`; `0p6b` gives `0.6b`; `_` is `-`). A leading name among the first three `.` or `-` separators may be dropped when it is the matched model's own lab (Bedrock's `[region.]cohere.embed-v4:0`, Azure's `Cohere-Embed-V5-Fast`) or the host itself (`databricks-…`). Models a gateway did not introduce win over gateway identities. A gateway listing whose own `openrouter-id` or `vercel-id` identity loosely matches such a model moves onto it, so the duplicate identity is withdrawn. On 6 November data this links or moves 411 of 9,313 gateway and price-list listings (274 chat, 31 embedding), with no false match found on review.
 
 Models.dev's own unlinked provider entries go through the same tiers against Models.dev itself. Hub crawls keep slugs off, because a repository named like a lab's model may be anyone's fine-tune. On 26 October data, Models.dev's canonical slugs had no collisions.
 
