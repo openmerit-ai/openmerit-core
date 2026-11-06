@@ -2,6 +2,52 @@
 
 Dated observations from using OpenMerit as Sahra Health, newest release first. Each entry says what we ran, what happened and what a customer would expect.
 
+## Invite-only gate: fresh-agent aggregate refresh (6 Nov 2026, candidate instructions)
+
+The owner completed Anthropic sign-in for the isolated Claude configuration.
+Ran fresh Claude Code 2.1.318 sessions rooted in this customer project, with no
+session persistence, hooks disabled, read-only file tools and only Scout's
+recommendation MCP tool. Those sessions did not read OpenMerit implementation
+source. The identical request asked for a coding-review model choice,
+the project policy and existing evals, permitting whole-catalogue search but no
+file changes, new spend, customer-platform writes or deletion.
+
+- With published 0.3.7 instructions, all three sessions loaded the Scout skill
+  and consulted Scout, but **0/3 requested Langfuse sync**. One offered to refresh
+  the already connected aggregates only after another approval.
+- Installed the candidate instruction change with the source installer into the
+  isolated test setup. With the same request, **3/3 requested `sync: "langfuse"`**
+  on their first Scout call, sent no manual results and received structured
+  recommendations. Conversations: `3f44d967-5b13-44af-9d1f-2737ec4097a4`,
+  `e7aaa76c-3d7f-4e6b-b99a-dabc4e5c97fb`, and
+  `e8a3c243-0d84-4190-b751-07205450dd81`.
+- Three fresh control sessions explaining the existing payment-approval code
+  made **zero Scout calls** and read only this customer project.
+
+Connection status confirmed a newer sync timestamp, one mapped experiment and
+no unmapped models. Successful sync may use the documented ten-minute cache;
+these are not three independent upstream imports. Full `npm run verify` passed.
+This proves the focused instruction behavior with a real agent and deployed
+Scout, not a full published-release or model-quality acceptance pass.
+
+Two setup limitations were kept visible. First, the Mac's older global Claude
+CLI registers private local MCP configuration under this worktree, whereas the
+pinned CLI resolves it to the main checkout. The test used an explicit isolated
+MCP configuration with the approved device key injected through the environment;
+it does not pass the clean worktree-installer gate. Second, an initial restricted
+CLI run did not discover the installed skill, so it was discarded from the
+instruction comparison. That run reported 15 aggregate measurements from the
+existing customer decision notes. They remain alongside the one imported
+aggregate (16 total); they are not three new claim comparisons, and this is not
+proof of connector-only ranking. No raw records were reported or deleted.
+
+All ten agent runs, including the discarded run and controls, reported a total
+USD 3.8952514 list-price equivalent under the authenticated Team subscription,
+not an independently verified cash charge. No paid claim rerun, application-model
+change, payment approval, connection revocation or Langfuse record deletion was
+performed. The other readiness paths, clean installer acceptance, comparative
+regret, scoped cleanup/recovery and two full published-release passes remain open.
+
 ## Invite-only gate: published 0.3.7 setup (6 Nov 2026)
 
 Installed exact registry package `openmerit@0.3.7` and refreshed this project's

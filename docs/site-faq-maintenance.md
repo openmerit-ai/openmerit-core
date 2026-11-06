@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Refresh an approved Langfuse connection — unreleased instructions, 6 November 2026
+
+Reviewed the homepage against coding agents refreshing an already approved Langfuse connection before recommending, without creating customer-platform records or executing candidate models. `site/index.html` has no FAQ block and makes no promise of implicit connector refresh. No homepage changes are needed; this changes npm guidance, not the server's explicit-sync contract or the customer's approval for eval runs and cleanup.
+
 ## Eval readiness and evidence-first cleanup — unreleased instructions, 6 November 2026
 
 Reviewed the homepage against guidance for three eval-readiness paths, local/custom aggregate reporting, customer-owned platform writes and approved temporary-run cleanup after saving local Markdown evidence. `site/index.html` has no FAQ block or claims that OpenMerit hosts evals or deletes records. It still describes a model-selection layer outside the live request path. No homepage copy changes; these instructions need an npm release and fresh-agent acceptance, not a new connector or automated cleanup service.
