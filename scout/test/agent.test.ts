@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { benchmarkLeaderboard, modelRecord, searchModels, type Catalogue, type ModelRecord } from '../agent/catalogue.ts';
 import { finalize, type Measurement, type Submission } from '../agent/recommendation.ts';
 import { handleAgent, parseTurn, type AgentNamespace } from '../agent/routes.ts';
@@ -36,6 +38,95 @@ const evaluation: Submission['evaluation'] = { checks: [{ level: 'task', metric:
 const submission = (candidates: Submission['candidates'], filters?: Submission['filters']): Submission =>
   ({ task: 1, workload: { inputTokens: 2000, outputTokens: 500 }, summary: 's', qualityBar: 50, candidates, evaluation, ...(filters ? { filters } : {}) });
 const now = Date.parse('2026-10-27T00:00:00Z');
+
+test('durable turns recover prose into validated answers, retain partial shortlists and bound recovery', async () => {
+  // Only model responses and catalogue I/O are substituted: the real Durable
+  // Object, Pi harness, answer tools and shortlist validation all run in workerd.
+  const bundle = await build({ stdin: { contents: `
+    import { ScoutAgent } from './scout/agent/agent.ts';
+    import { AssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
+    export class TestAgent extends ScoutAgent {
+      constructor(ctx, env) {
+        super(ctx, env);
+        this.host.catalogue = async () => (${JSON.stringify(catalogue)});
+        const provider = this.agentModels.models.getProvider('openai');
+        const stream = (model, context) => {
+          const output = new AssistantMessageEventStream();
+          (async () => {
+            const response = await fetch('https://model.test', { method: 'POST', body: JSON.stringify(context) });
+            const answer = await response.json();
+            output.push(answer.stopReason === 'error'
+              ? { type: 'error', reason: 'error', error: answer }
+              : { type: 'done', reason: answer.stopReason, message: answer });
+            output.end();
+          })();
+          return output;
+        };
+        this.agentModels.models.setProvider({ ...provider, stream, streamSimple: stream });
+      }
+    }
+    export default { async fetch(request, env) {
+      const name = new URL(request.url).pathname;
+      return Response.json(await env.AGENTS.getByName(name).turn(await request.json(), 'agent'));
+    }};`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', external: ['cloudflare:workers', 'node:*'], conditions: ['workerd', 'worker', 'browser'] });
+  const prose = (text: string) => [{ type: 'text', text }];
+  const call = (name: string, args: unknown) => [{ type: 'toolCall', id: crypto.randomUUID(), name, arguments: args }];
+  let responses: unknown[][] = [], requests: string[] = [];
+  let providerError = false;
+  const mf = new Miniflare(convertV4MiniflareOptions({ modules: true, script: bundle.outputFiles[0]!.text, compatibilityDate: '2026-09-28', compatibilityFlags: ['nodejs_compat'],
+    durableObjects: { AGENTS: { className: 'TestAgent', useSQLite: true } },
+    bindings: { AI: {}, OPENAI_API_KEY: 'fictional-test-key', SCOUT_AGENT_WEB_SEARCH: 'off' },
+    outboundService: async request => {
+      requests.push(await request.text());
+      const content = responses.shift() ?? prose('Still unfinished');
+      return Response.json({ role: 'assistant', content, api: 'openai-responses', provider: 'openai', model: 'gpt-6-sol',
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        stopReason: providerError ? 'error' : (content[0] as { type: string }).type === 'toolCall' ? 'toolUse' : 'stop', timestamp: Date.now(), ...(providerError ? { errorMessage: 'Provider unavailable' } : {}) });
+    } }));
+  const turn = async (name: string, skip = false) => {
+    const response = await mf.dispatchFetch(`http://local/${name}`, { method: 'POST', body: JSON.stringify({ message: 'Select invoice models', skip }) });
+    assert.equal(response.status, 200, await response.clone().text());
+    return response.json() as Promise<AgentState>;
+  };
+  try {
+    const clarification = call('ask_clarifying_questions', { brief, questions: [{ component: 'criteria', question: 'What accuracy is required?' }] });
+    responses = [clarification];
+    assert.equal((await turn('already-valid')).answer?.kind, 'clarification');
+    assert.equal(requests.length, 1, 'an accepted answer needs no extra model call');
+    requests = [];
+    responses = [prose('Which accuracy?'), clarification];
+    assert.equal((await turn('clarification')).answer?.kind, 'clarification');
+    assert.equal(requests.length, 2);
+    requests = [];
+    const tasks = ['Extract invoice', 'Classify invoice'].map(title => ({ title, work: 'Extract', input: 'Text', output: 'JSON' }));
+    const candidates = models.slice(0, 5).map(m => pick(m.id, 90));
+    responses = [call('plan_tasks', { brief, assumptions: [], tasks }), call('submit_recommendation', submission(candidates)),
+      prose('Task one is done'), call('submit_recommendation', { ...submission(candidates), task: 2 })];
+    const result = (await turn('partial', true)).answer;
+    assert.equal(result?.kind, 'recommendation');
+    if (result?.kind === 'recommendation') assert.deepEqual(result.tasks.map(t => t.title), tasks.map(t => t.title));
+    assert.match(requests[3]!, /2\. Classify invoice/);
+    assert.doesNotMatch(requests[3]!, /remaining tasks:\\n1\. Extract invoice/);
+    requests = [];
+    responses = [call('plan_tasks', { brief, assumptions: [], tasks: tasks.slice(0, 1) }),
+      call('submit_recommendation', submission([pick('not/in/catalogue', 99)])), prose('This must not count as success'),
+      call('submit_recommendation', submission(candidates))];
+    assert.equal((await turn('validation', true)).answer?.kind, 'recommendation');
+    assert.match(requests[3]!, /not\/in\/catalogue is not in the catalogue/);
+    requests = [];
+    responses = [prose('Not done'), prose('Not done again'), prose('Stopped safely')];
+    assert.deepEqual((await turn('bounded')).answer, { kind: 'message', text: 'Stopped safely' });
+    assert.equal(requests.length, 3, 'two continuations, not an unbounded model loop');
+    requests = [];
+    responses = [prose('Try a new turn'), clarification];
+    assert.equal((await turn('bounded')).answer?.kind, 'clarification', 'a later turn receives a fresh recovery budget');
+    assert.equal(requests.length, 2);
+    requests = [];
+    providerError = true;
+    assert.equal((await turn('provider-error')).answer?.kind, 'error');
+    assert.ok(requests.length <= 4, 'provider retry policy is not multiplied by completion recovery');
+  } finally { await mf.dispose(); }
+});
 
 test('a shortlist is priced on the cheapest route that meets the constraints, with timing and age from catalogue data', () => {
   // Only alpha has an image route, so one model is a complete shortlist here.

@@ -4,7 +4,7 @@
 // for every task the work splits into. The web page and coding agents (MCP and
 // the openmerit CLI) all hold their conversations here.
 import { DurableObject } from 'cloudflare:workers';
-import { createRegistry, Harness } from '@earendil-works/pi-durable';
+import { createRegistry, GenerationTask, Harness, hook, type TaskId } from '@earendil-works/pi-durable';
 import { PiHarness } from 'agents/harness/pi';
 import { Lifecycle } from 'agents/lifecycle';
 import { createAI } from 'agents/models/pi-ai';
@@ -77,6 +77,24 @@ export class ScoutAgent extends DurableObject<AgentEnv> {
       if (this.env.SCOUT_AGENT_WEB_SEARCH !== 'off') tools.push(withProgress(webSearchTool({ binding: this.env.AI, limit: 5 }), this.host, args => `Searching the web for “${args.query}”`));
       this.registry.install({
         name: 'scout',
+        hooks: [hook(GenerationTask, {
+          onYield: async (_answer, api) => {
+            if (await this.ctx.storage.get<TurnAnswer>('answer')) return;
+            // Each continuation gets a new generation task. Persist its ID so
+            // replay cannot consume another attempt, or eviction reset the cap.
+            const attempts = (await this.ctx.storage.get<TaskId[]>('completionAttempts')) ?? [];
+            if (!attempts.includes(api.taskId)) {
+              if (attempts.length >= 2) return;
+              attempts.push(api.taskId);
+              await this.ctx.storage.put('completionAttempts', attempts);
+            }
+            const plan = await this.host.plan();
+            const remaining = plan?.tasks.flatMap((task, i) => plan.results[i] ? [] : [`${i + 1}. ${task.title}`]);
+            return { continue: `This turn has no validated answer yet. Prose alone does not finish it. ${plan
+              ? `Keep the existing plan and accepted shortlists. Call submit_recommendation for the remaining tasks:\n${remaining?.join('\n')}`
+              : 'Call ask_clarifying_questions if clarification is allowed and needed; otherwise call plan_tasks, then submit_recommendation for every task.'} Correct any tool validation errors. Do not claim success without an accepted answer tool.` };
+          },
+        })],
         sections: [
           { key: 'preamble', render: () => preamble, tag: false },
           { key: 'today', render: () => new Date().toISOString().slice(0, 10) },
@@ -148,7 +166,7 @@ export class ScoutAgent extends DurableObject<AgentEnv> {
     // A turn ends once every task has a shortlist accepted in this turn; the split itself carries over.
     const plan = await this.host.plan();
     if (plan) await this.host.savePlan({ ...plan, results: plan.tasks.map(() => null) });
-    await this.ctx.storage.put({ answer: null, progress: [], turns: turns + 1 });
+    await this.ctx.storage.put({ answer: null, progress: [], completionAttempts: [], turns: turns + 1 });
     const result = await this.harness.prompt(input, { operationId: crypto.randomUUID() });
     if (!(await this.ctx.storage.get<TurnAnswer>('answer'))) {
       // The model ended the run without an answer tool: keep what it said rather than nothing.
