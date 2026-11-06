@@ -20,6 +20,14 @@ Scout is a separate hosted beta product. Npm 0.1.7 introduced optional Claude Co
 
 ## Evaluation plans and measured results — deployed 5 November 2026, npm 0.3.1
 
+**Rank-aligned summaries — unreleased source:** after filtering and ranking,
+Scout builds each nonempty task summary from the first model's name, rationale
+and caveat. A summary written before sorting could previously name a different
+leader, particularly after measured evidence or measured cost changed the order.
+Ranking and quality scores are unchanged. One measured success still does not
+establish superiority over untested candidates. This needs a Scout serving deploy;
+past saved answers do not change until the conversation is recomputed.
+
 The Scout serving deploy of 5 November 2026 (version `ea371c78-6ccf-4931-a0b8-aa28a6599aaa`) serves this behavior to every client. A live MCP check returned an evaluation plan and agent grouping, and reported results moved a measured model below the quality bar. npm 0.3.1 adds `openmerit scout --results` and the installed instructions for measuring; older installations reach the new `scout_models` fields through MCP but their instructions do not mention measuring until the installer is rerun.
 
 OpenMerit does not run evaluations or host an eval platform. Scout tells you what to measure, your own eval system measures it, and Scout uses the aggregate results:

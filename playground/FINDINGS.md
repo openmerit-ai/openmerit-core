@@ -2,6 +2,49 @@
 
 Dated observations from using OpenMerit as Sahra Health, newest release first. Each entry says what we ran, what happened and what a customer would expect.
 
+## Invite-only gate: first automatic import (6 Nov 2026, openmerit 0.3.6)
+
+PR #80 deployed playground version `0779fd69-3a77-4dd5-aa89-21a8d92e5f2e`
+from merged commit `ba93b1cb8841deb598e473295baf0d33f69ba947`. Its public
+version endpoint reported registry package 0.3.6. No active claim workflows were
+present before starting the one serial run.
+
+`npm run scenarios -- --only unbundled-lab-panel --out <local evidence file>`
+ran `run-2026-11-06T08-38-39-159Z` on the unchanged recorded Sonnet 5.5 models.
+All 3 checks passed; the proposed payment was AED 224.00, matching the label.
+The claim remains at human approval; no payment was approved. All four agents'
+usage was complete: intake USD 0.0150592, coding 0.0216270, adjudication
+0.0219827, fraud 0.0230311. Total USD 0.0817; summed agent time 41.945 seconds.
+OpenRouter total key usage rose from USD 30.429638705 to 30.511338705,
+independently matching the bill. Conservatively counting all historical usage
+against USD 50 leaves USD 19.488661295 for further comparisons.
+
+Published CLI `connect langfuse --sync --json` imported **1 aggregate from
+1 experiment**, with 1 mapping, 1 model alias and 0 unmapped models; MCP status
+confirmed the same result. The saved Viewer key stayed on Scout. No raw traces
+were converted into aggregates locally or reported manually. The coding quality
+mapping imported `coding-finding-found = 1`, one sample, for Sonnet 5.5.
+
+Conversation `e3253de4-fb9e-4287-bb1c-7c2f93da6f0c` reranked Sonnet from third,
+unmeasured, to first with the imported evidence; the other four agents remained
+unmeasured. **Bug:** the summary still called Opus the lead, contradicting that
+final order. A new conversation `2a14d5e9-8f31-4b81-8987-8b3bb3de0c73` received
+and cited the same aggregate without resending results, proving account-level
+reuse, but returned a prose message instead of a validated structured shortlist.
+That is not a clean cross-conversation recommendation acceptance pass.
+
+This is plumbing evidence, not a model comparison or quality win: there is one
+sample and no competing model in this run. Regret is not measured here. No
+existing Langfuse records or connection credentials were deleted. Disconnect
+acceptance, recovery/revocation tests, all three customer readiness paths,
+fresh-agent usability and two consecutive full release passes remain pending.
+
+An existing-trace control recovered 3 generations at USD 0.0113691 and 8.204
+seconds with the new reader. The old field selection also returned latency on
+that trace: explicit metrics selection is not evidence that latency was broken.
+The demonstrated cost repair is waiting for complete generation counts/prices
+and representing unknown costs as unknown rather than zero.
+
 ## Invite-only gate: setup checkpoint (6 Nov 2026, openmerit 0.3.6)
 
 Upgraded this customer project from registry 0.3.5 to registry 0.3.6, never linked

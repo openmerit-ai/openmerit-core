@@ -198,6 +198,9 @@ test('an environment miss does not drop a model whose own results match, and mea
   const costs = [...tied.slice(0, 2), result('c1', 'lab/beta', 0.02, { kind: 'usd', metric: 'usd per run', higherIsBetter: false }), result('c2', 'lab/alpha', 0.005, { kind: 'usd', metric: 'usd per run', higherIsBetter: false })];
   const ranked = finalize(toolCatalogue, shortlist(70, ['measured:q2']), now, {}, context(costs));
   assert.deepEqual(ranked.models.map(m => m.id), ['lab/alpha', 'lab/beta', 'lab/gamma']);
+  // The summary must follow the final measured-cost order, not the submitted beta-first order.
+  assert.match(ranked.summary, /LAB\/ALPHA/);
+  assert.doesNotMatch(ranked.summary, /LAB\/BETA/);
   assert.deepEqual(ranked.models[0]?.cost?.measured, { usdPer1kTasks: 1.25, usdPer1kAgentRuns: 5, result: 'measured:c2' });
   // Measured over estimated per call: alpha $1.25 / $4 = 0.3125, beta $5 / $1.50 = 3.3333; the median of the two scales every estimate,
   // so unmeasured gamma's $3 becomes 3 × 1.822917 = $5.4688 per 1k calls and alpha's own estimate $7.2917.
@@ -238,7 +241,8 @@ test('a turn ends only once every planned task has an accepted shortlist, answer
   assert.deepEqual(first.control, { terminate: true });
   const [answer] = answers;
   assert.ok(answer?.kind === 'recommendation');
-  assert.deepEqual(answer.tasks.map(t => [t.title, t.summary, t.models.length]), [['Extract', 'first', 5], ['Summarize', 'second', 5]]);
+  assert.deepEqual(answer.tasks.map(t => [t.title, t.models.length]), [['Extract', 5], ['Summarize', 5]]);
+  for (const t of answer.tasks) assert.match(t.summary, /LAB\/BETA/);
   assert.deepEqual(answer.assumptions, ['English only']);
 });
 
@@ -255,6 +259,9 @@ test('the endpoint inventory limits every search and shortlist, whatever filters
   await empty.call('plan_tasks', { brief, assumptions: [], tasks: [task('Extract')] });
   assert.match(JSON.stringify((await empty.call('submit_recommendation', submission([pick('lab/beta', 80)]))).output), /not accepted/);
   assert.deepEqual((await empty.call('submit_recommendation', submission([]))).control, { terminate: true });
+  const [noCandidates] = empty.answers;
+  assert.ok(noCandidates?.kind === 'recommendation');
+  assert.equal(noCandidates.tasks[0]?.summary, 's', 'retain the explanation when no candidate is eligible');
   assert.equal(answers.length, 0);
 });
 

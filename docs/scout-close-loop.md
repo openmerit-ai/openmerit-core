@@ -236,8 +236,11 @@ experiment headers/metadata and aggregate Metrics v2 reads are requested. A
 deliberately invalid dataset-create request checks read-only permission without
 ever sending a valid write payload. Only an authenticated read followed by HTTP
 403 on that probe is accepted; other responses fail closed. Live Viewer-key
-connection acceptance was verified on 6 November 2026; fresh mapped aggregate
-import and reranking remain separate release checks.
+connection acceptance, one fresh mapped aggregate import and measured reranking
+were verified on 6 November 2026 with npm 0.3.6 and the matching deployments.
+This one-sample plumbing check is not comparative quality acceptance. A new
+conversation received the aggregate, but returned prose instead of a validated
+shortlist; full fresh-agent and two-release acceptance remain open.
 
 Click **Sync aggregates**, or request a fresh recommendation with:
 
