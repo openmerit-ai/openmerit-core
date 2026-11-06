@@ -289,8 +289,10 @@ export function parseSuperCLUE(xlsx) {
   if (!model || columns.some(c => !c)) throw new Error('SuperCLUE format changed.');
   const kept = rows.filter(r => r[model]).map(r => ({ model: r[model], scores: Object.fromEntries(superclueCategories.map(([, id], i) => [id, number(r[columns[i]])])) }));
   if (kept.length < 10) throw new Error('Too few SuperCLUE results.');
-  const created = files['docProps/core.xml'] ? strFromU8(files['docProps/core.xml']).match(/<dcterms:created[^>]*>(\d{4}-\d{2}-\d{2})/)?.[1] ?? null : null;
-  return { rows: kept, publishedAt: created };
+  // The workbook is regenerated from a template whose creation date predates the board, so the
+  // last-modified date is the board's publication date.
+  const modified = files['docProps/core.xml'] ? strFromU8(files['docProps/core.xml']).match(/<dcterms:modified[^>]*>(\d{4}-\d{2}-\d{2})/)?.[1] ?? null : null;
+  return { rows: kept, publishedAt: modified };
 }
 export async function readSuperCLUE(read, now) {
   const months = Array.from({ length: 6 }, (_, i) => { const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1)); return [d.getUTCFullYear(), d.getUTCMonth() + 1]; });
