@@ -90,14 +90,27 @@ application accuracy. Use the project's actual SDK and protocol.
 
 Each task also has an \`evaluation\`: the checks (per model call, agent run or
 end-to-end outcome), labelled examples per candidate and when to stop a losing
-candidate. Offer to run it before the user commits to a model. Use the evals the
-project already has, such as datasets and experiments in its eval or tracing
-platform, or its own eval scripts and fixtures: add the shortlisted candidates as
-extra runs of those evals. Do not build a second eval or copy their datasets.
-If the project has no eval for the task, propose a minimal one built from its
-existing traces and the decisions people already make, and create it only where
-and how the user agrees. Ask before spending on model calls or writing to an
-eval platform.
+candidate. Offer to run it before the user commits to a model. First assess the
+project's readiness for this task:
+
+- **No eval setup:** propose a customer-owned setup. Langfuse is the default
+  suggestion for its supported aggregate connector, not a requirement: existing
+  local/custom eval scripts can report aggregates without a hosted platform.
+  Phoenix/Arize and Braintrust are alternatives, not supported Scout connectors.
+  Ask which system the user wants before creating accounts or resources.
+- **Setup exists but evidence is insufficient:** keep that system. Write a
+  task-specific eval plan in the project's local Markdown decision record for
+  the user or their coding agent to implement. Name exact candidates/endpoints,
+  quality floor and task/agent/outcome checks, labelled boundary cases and
+  controls, sample size, early-stop rule, spend cap, aggregate mappings and
+  temporary run retention. Explain what the current evidence cannot decide.
+- **Suitable evals exist:** reuse their fixtures and definitions; add only the
+  approved candidate runs. Do not build a second eval or copy their datasets.
+
+OpenMerit does not host or run these evals. The customer or their coding agent
+implements and maintains them with the customer's tools; Scout keeps Viewer-only
+access. Ask before model spend or any platform write. Without measured evidence,
+Scout may suggest candidates, but do not claim validated model quality.
 
 Report what you measured with \`scout_models\`: the same \`conversationId\` and
 \`results\`, one aggregate per model and metric (\`level\`, \`task\` title, \`scope\`,
@@ -114,6 +127,25 @@ Swap one agent at a time, holding the other agents, prompts, fixtures and contro
 fixed. Use each agent's own checks to attribute failures. If all candidates score
 100%, the eval cannot separate their quality: add harder labelled cases before
 claiming equivalent quality. Cost may break the observed tie, not prove equality.
+
+## Preserve evidence before cleanup
+
+Before removing temporary comparison runs, save a local Markdown decision record
+with the package/service versions, date, task and policy, exact candidates,
+unchanged controls, metric definitions/directions, sample counts, aggregate
+quality/cost/time, failures and exclusions, chosen model, limitations and next
+review. Record regret against the cheapest measured candidate meeting the same
+quality floor; write "not measurable" when comparable evidence is missing.
+Exclude secrets, private record IDs, prompts, outputs and trace bodies.
+
+Temporary comparison traces/records are not permanent: after the record is saved
+and checked, propose the exact newly created comparison runs to remove. Obtain
+explicit scoped approval, including any cascading deletion, before the customer
+or their coding agent deletes them with customer-controlled write access. Scout's
+Viewer key cannot do this. Never delete pre-existing customer records, reusable
+fixtures, dataset definitions or eval definitions. Verify the approved cleanup
+and retained controls, then record the outcome locally. If not approved, leave
+records unchanged and state cleanup is pending; do not imply it happened.
 
 If the user has Langfuse, use \`openmerit connect langfuse --help\`: the web UI is
 optional. Headless setup requires a separate connection-manager approval with
