@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { catalogueSchema } from '../catalogue-db.ts';
-import { agentRows, agentSchema, stageAgentCatalogue, type Sources } from '../agent-projection.ts';
+import { agentRows, agentSchema, readSources, stageAgentCatalogue, type Sources } from '../agent-projection.ts';
 import { benchmarkLeaderboard, loadCatalogue, modelDetails, modelRecord, searchCatalogue, searchModels, type Catalogue, type CatalogueBindings, type ModelRecord } from '../agent/catalogue.ts';
 import { finalize, routeCost, type Submission } from '../agent/recommendation.ts';
 import { reciprocalRankFusion, type SearchHit } from '../agent/search.ts';
@@ -170,6 +170,21 @@ function liveCatalogue() {
 const bindings = (db: ReturnType<typeof d1>, vectors?: CatalogueBindings['SCOUT_EVIDENCE']): CatalogueBindings => ({
   SCOUT_CATALOGUE: { get: async (key: string) => { const value = key === 'active.json' ? { key: 'manifests/v1.json' } : key === 'manifests/v1.json' ? { publication: { id: 'v1' }, benchmarks: [{ id: 'b1', name: 'Bench One' }], evidenceIndex: { documents: [] } } : null; return value ? { json: async <T>() => value as T } : null; } },
   SCOUT_INDEX: db, SCOUT_EVIDENCE: vectors ?? { query: async () => ({ matches: [] }) },
+});
+
+test('an OpenRouter route whose removal date has passed is hidden, an upcoming one carries retiresAt, and zero-only prices are no route', async () => {
+  const db = liveCatalogue(), input = (amount: number): Array<[string, string, number]> => [['input', 'usd_per_mtok', amount], ['output', 'usd_per_mtok', 0]];
+  db.all("INSERT INTO cat_model_merged (id,kind,name,input_modalities,output_modalities,sources,provenance) VALUES ('lab/decider','decision','Decider','[\"text\"]','[\"text\"]','[]','{}')");
+  for (const [route, amount, removal] of [['lab/decider-old', 0.02, '2020-01-01'], ['lab/decider', 0.02, '2099-01-01'], ['lab/decider-now', 0.03, null], ['lab/decider:free', 0, null]] as const) {
+    db.all("INSERT INTO cat_offerings (provider_id,provider_model_id,model_id,deprecated_at,sources,first_seen,last_seen) VALUES ('openrouter',?,'lab/decider',?,'[]','t','t')", route, removal);
+    for (const [kind, unit, value] of input(amount)) db.all("INSERT INTO cat_prices (source,provider_id,provider_model_id,kind,tier,unit,amount,valid_from) VALUES ('openrouter','openrouter',?,?,'',?,?,'t')", route, kind, unit, value);
+  }
+  // Another host's past deprecation date is not a removal: the route stays, without retiresAt.
+  db.all("INSERT INTO cat_offerings (provider_id,provider_model_id,model_id,deprecated_at,sources,first_seen,last_seen) VALUES ('azure','decider-azure','lab/decider','2020-01-01','[]','t','t')");
+  for (const [kind, unit, value] of input(0.04)) db.all("INSERT INTO cat_prices (source,provider_id,provider_model_id,kind,tier,unit,amount,valid_from) VALUES ('litellm','azure','decider-azure',?,'',?,?,'t')", kind, unit, value);
+  const payload = agentRows(await readSources(db), []).payloads.find(p => p.id === 'lab/decider') ?? assert.fail('lab/decider');
+  const record = modelRecord(payload, { kind: 'decision', endpoints: payload.endpoints }) ?? assert.fail('record');
+  assert.deepEqual(record.endpoints.map(e => [e.modelId, e.retiresAt]), [['lab/decider', '2099-01-01'], ['lab/decider-now', null], ['decider-azure', null]]);
 });
 
 test('the agent reads the published version, not live catalogue tables that change during a refresh', async () => {

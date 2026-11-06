@@ -7,6 +7,7 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloud
 import { NonRetryableError } from "cloudflare:workflows";
 import { type AgentRunResult, instructionsFor } from "./agents.ts";
 import type { Approval } from "./domain/types.ts";
+import { ledgerName } from "./ledger.ts";
 import type { AgentRole, ModelOverride, ModelOverrides } from "./models.ts";
 import { agentRunSpans, type ExperimentContext, exportSpans, postScore, runKey, type ScoreInput, spanIdFor, type TraceContext, traceIdFor, transcriptCounts } from "./tracing.ts";
 
@@ -31,6 +32,8 @@ export const APPROVAL_EVENT = "human-approval";
 
 const AGENT_TIMEOUT = "10 minutes";
 
+const NUDGE = "You ended without recording your result. If a tool rejected a call, fix the arguments as its error says and call it again. Finish by calling your record tool.";
+
 interface StepOutcome {
   status: string;
   traceId: string;
@@ -38,7 +41,7 @@ interface StepOutcome {
 }
 
 interface AgentStub {
-  run(caseId: string, prompt: string, override?: ModelOverride): Promise<AgentRunResult>;
+  run(input: { caseId: string; runId?: string; prompt: string; override?: ModelOverride; attempt?: number }): Promise<AgentRunResult>;
 }
 
 // Typed by hand: the generated RPC type of the transcript entries is too deep for TypeScript.
@@ -79,8 +82,17 @@ async function runAgent(
   const started = Date.now();
   // One agent instance and trace per case and run, so a rerun starts fresh instead of replaying.
   const key = runKey(input.caseId, input.runId);
-  const result = await agentStub(env, input.role, key).run(input.caseId, input.prompt, input.model);
-  const isRecorded = await recorded();
+  const stub = agentStub(env, input.role, key);
+  let result = await stub.run({ caseId: input.caseId, runId: input.runId, prompt: input.prompt, override: input.model });
+  let isRecorded = await recorded();
+  // An agent that ended without recording (often after one rejected tool call) gets one nudge in
+  // the same session. The trace covers the whole session, and `nudges` shows that it was needed.
+  let nudges = 0;
+  if (!isRecorded && result.model) {
+    nudges = 1;
+    result = await stub.run({ caseId: input.caseId, runId: input.runId, prompt: NUDGE, override: input.model, attempt: nudges });
+    isRecorded = await recorded();
+  }
   const traceId = await traceIdFor(`${key}/${input.role}`);
   const rootObservationId = await spanIdFor(`${key}/${input.role}/agent`);
   const final = input.experiment && (input.last || !isRecorded);
@@ -112,6 +124,7 @@ async function runAgent(
   const scores: Omit<ScoreInput, "traceId" | "observationId">[] = [
     { name: "model-calls", value: counts.modelCalls, dataType: "NUMERIC", comment: `${input.role} agent model calls` },
     { name: "rejected-tool-calls", value: counts.rejectedToolCalls, dataType: "NUMERIC", comment: "tool calls answered by a <harness> or [error] result" },
+    { name: "nudges", value: nudges, dataType: "NUMERIC", comment: "follow-up prompts after the agent ended without recording its result" },
     { name: "result-recorded", value: isRecorded ? 1 : 0, dataType: "BOOLEAN", comment: `${input.role} agent ended ${result.status}${result.reason ? ` (${result.reason})` : ""}` },
   ];
   for (const score of scores) {
@@ -127,7 +140,7 @@ async function runAgent(
 export class ClaimFlow extends WorkflowEntrypoint<Env, ClaimFlowParams> {
   override async run(event: WorkflowEvent<ClaimFlowParams>, step: WorkflowStep): Promise<{ state: string }> {
     const { claimId, runId, models, experiment } = event.payload;
-    const ledger = this.env.LEDGER.getByName("sahra");
+    const ledger = this.env.LEDGER.getByName(ledgerName(runId));
     const initial = await ledger.getClaim(claimId);
     if (!initial) throw new NonRetryableError(`Unknown claim ${claimId}`);
     const userId = initial.memberId ?? undefined;
@@ -216,7 +229,7 @@ export class ClaimFlow extends WorkflowEntrypoint<Env, ClaimFlowParams> {
 export class EnrollmentFlow extends WorkflowEntrypoint<Env, EnrollmentFlowParams> {
   override async run(event: WorkflowEvent<EnrollmentFlowParams>, step: WorkflowStep): Promise<{ decision: string }> {
     const { applicationId, runId, models, experiment } = event.payload;
-    const ledger = this.env.LEDGER.getByName("sahra");
+    const ledger = this.env.LEDGER.getByName(ledgerName(runId));
     return step.do(STEP_NAMES.enrollment, { timeout: AGENT_TIMEOUT, retries: { limit: 1, delay: "10 seconds", backoff: "constant" } }, async () => {
       const decided = async () => {
         const record = await ledger.getEnrollment(applicationId);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { importCatalogueSource, parseDeepInfra, parseOpenRouter, mergeListings, mergeModel, rebuildModels, rebuildOfferings, routeVoice, type Bucket, type ImportResult, type SourceListing } from '../catalogue-db.ts';
+import { gatewayIdentities, importCatalogueSource, parseDeepInfra, parseOpenRouter, mergeListings, mergeModel, rebuildModels, rebuildOfferings, routeVoice, type Bucket, type ImportResult, type SourceListing } from '../catalogue-db.ts';
 import { d1 } from './helpers-d1.ts';
 
 const bucket = (): Bucket & { data: Map<string, Uint8Array> } => { const data = new Map<string, Uint8Array>(); return { data, head: async (k: string) => data.has(k) ? {} : null, put: async (k: string, v: Uint8Array) => data.set(k, v) }; };
@@ -195,9 +195,9 @@ test('merging prefers Models.dev field by field and needs two other sources to a
   assert.deepEqual([one.model_id, one.model_basis, one.context, one.max_output, one.input_modalities, one.tool_call], ['lab/m', 'modelsdev-route', 200000, 8000, '["text"]', 0]);
   assert.deepEqual(JSON.parse(String(one.conflicts)).context, { modelsdev: 200000, litellm: 128000 });
   assert.deepEqual(JSON.parse(one.provenance).max_output, ['litellm']);
-  // Kind normalizes each source's type label: an API mode is chat, Vercel's "evaluation" is a decision model.
+  // Kind normalizes each source's type label: an API mode is chat, Vercel's "evaluation" and OpenRouter's "decisions" are decision models.
   assert.equal(one.kind, null);
-  assert.deepEqual(['responses', 'evaluation', 'feature-extraction', 'unheard-of'].map(type => mergeListings([listing('litellm', { type })]).kind), ['chat', 'decision', 'embedding', null]);
+  assert.deepEqual(['responses', 'evaluation', 'decisions', 'feature-extraction', 'unheard-of'].map(type => mergeListings([listing('litellm', { type })]).kind), ['chat', 'decision', 'decision', 'embedding', null]);
   // Two independent claims add the capability, and both are credited.
   const two = mergeListings([md, listing('litellm', { input_modalities: '["text","image"]', tool_call: 1 }), listing('vercel', { input_modalities: '["image","text"]', tool_call: 1 })]);
   assert.deepEqual([two.input_modalities, two.tool_call], ['["text","image"]', 1]);
@@ -237,6 +237,26 @@ test('reviewed identities link LiteLLM-only decision routes but never moving ali
   assert.equal(one(db, "SELECT basis FROM cat_models WHERE id='nace/drex-v2.0'").basis, 'modelsdev-route');
 });
 
+test('a moving ~alias never takes an identity, and a gateway revives a model ID another source withdrew', async () => {
+  const db = d1(), OR = 'https://openrouter.ai/api/v1/models?output_modalities=all', VC = 'https://ai-gateway.vercel.sh/v1/models';
+  const judge = (id: string) => ({ id, name: id, architecture: { input_modalities: ['text'], output_modalities: ['decisions'] }, pricing: { prompt: '0.00000002', completion: '0' } });
+  // Models.dev links OpenRouter's moving alias to a canonical model, and a reseller's route introduces lab/decider-1.2.
+  const linked = { ...api, openrouter: { id: 'openrouter', name: 'OpenRouter', models: { '~lab/judge-latest': { id: '~lab/judge-latest', canonical_model_id: 'lab/judge-latest' } } },
+    reseller: { id: 'reseller', name: 'Reseller', models: { 'lab/decider-1.2': { id: 'lab/decider-1.2', canonical_model_id: 'lab/decider-1.2', type: 'decision' } } } };
+  const vercel = { data: [{ id: 'lab/decider-1.2', name: 'Decider 1.2', type: 'evaluation', modalities: { input: ['text'], output: ['text'] }, pricing: { input: '0.00000002', output: '0' } }] };
+  const files = { [MD]: linked, [MDM]: models, [OR]: { data: [judge('~lab/judge-latest')] }, [VC]: vercel };
+  for (const source of ['modelsdev', 'openrouter', 'vercel'] as const) ok(await importCatalogueSource(db, source, { fetcher: serve(files), now: '2026-11-01T00:00:00Z', run: `${source}-1` }));
+  assert.deepEqual(db.all("SELECT source,model_id FROM cat_listings WHERE provider_model_id='~lab/judge-latest' ORDER BY source").map(r => [r.source, r.model_id]), [['modelsdev', null], ['openrouter', null]]);
+  assert.equal(db.all("SELECT id FROM cat_models WHERE id='lab/judge-latest'").length, 0);
+  assert.deepEqual({ ...one(db, "SELECT basis,withdrawn_at FROM cat_models WHERE id='lab/decider-1.2'") }, { basis: 'modelsdev-route', withdrawn_at: null });
+  // The reseller drops the route: Models.dev withdraws its model, and Vercel's listing of that ID takes it over.
+  const later = { ...files, [MD]: { ...linked, reseller: { id: 'reseller', name: 'Reseller', models: {} } } };
+  for (const source of ['modelsdev', 'vercel'] as const) ok(await importCatalogueSource(db, source, { fetcher: serve(later), now: '2026-11-02T00:00:00Z', run: `${source}-2` }));
+  assert.deepEqual({ ...one(db, "SELECT basis,withdrawn_at FROM cat_models WHERE id='lab/decider-1.2'") }, { basis: 'vercel-id', withdrawn_at: null });
+  await rebuildOfferings(db); await rebuildModels(db);
+  assert.deepEqual({ ...one(db, "SELECT kind FROM cat_model_merged WHERE id='lab/decider-1.2'") }, { kind: 'decision' });
+});
+
 test('OpenRouter non-text models get their kind as type, and per-token "0" on generated media is no price', () => {
   const row = (id: string, output: string[], pricing: Record<string, string>) => ({ id, name: id, architecture: { input_modalities: ['text'], output_modalities: output }, pricing });
   const { listings } = parseOpenRouter({ data: [row('lab/chat', ['text'], { prompt: '0.000001', completion: '0.000002' }), row('lab/clip', ['video'], { prompt: '0', completion: '0' }),
@@ -253,6 +273,10 @@ test('OpenRouter non-text models get their kind as type, and per-token "0" on ge
     'lab/vec': ['embedding', '["embedding"]', ['input 0.1 usd_per_mtok', 'output 0 usd_per_mtok']],
     'lab/voice': ['speech', '["audio"]', ['input 4 usd_per_mtok']],
     'lab/rank:free': ['rerank', '["ranking"]', ['input 0 usd_per_mtok', 'output 0 usd_per_mtok']] });
+  // A decision model's expiration date is kept as its deprecation; a moving "~…-latest" alias gets no identity of its own.
+  const judges = parseOpenRouter({ data: [{ ...row('lab/judge', ['decisions'], { prompt: '0.00000002', completion: '0' }), expiration_date: '2026-11-20' }, row('~lab/judge-latest', ['decisions'], { prompt: '0.00000002', completion: '0' })] }).listings;
+  assert.deepEqual(gatewayIdentities('openrouter', judges).map(m => m.id), ['lab/judge']);
+  assert.deepEqual(judges.map(l => [l.provider_model_id, l.model_id, l.deprecated_at]), [['lab/judge', 'lab/judge', '2026-11-20'], ['~lab/judge-latest', null, null]]);
 });
 
 test('DeepInfra prices convert from cents per unit, modalities follow type and tags, and past deprecations retire the route', () => {

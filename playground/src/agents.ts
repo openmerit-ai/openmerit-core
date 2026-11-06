@@ -16,6 +16,7 @@ import { computeRemittance, requiredDenials } from "./domain/adjudicate.ts";
 import { DELETED_ICD10CM, findActivity, findDiagnosis } from "./domain/codes.ts";
 import { DENIAL_CODES, PLAN } from "./domain/plan.ts";
 import type { ActivityType, Member } from "./domain/types.ts";
+import { ledgerName } from "./ledger.ts";
 import { AGENT_MODELS, type AgentRole, type ModelChoice, modelLabel } from "./models.ts";
 
 export interface AgentRunResult {
@@ -36,6 +37,7 @@ interface RoleDefinition {
 const SHARED_RULES = `You work for Sahra Health, a fictional health insurer in Dubai. All people, IDs and amounts are fictional test data.
 Work only from what your tools return; never invent codes, members, amounts or history.
 Finish by calling your record tool exactly once, then reply with a one-paragraph summary of what you recorded and why.
+If a tool rejects a call, read the error, fix the arguments and call it again. Never stop without recording your result.
 Amounts are in AED.`;
 
 /** Fields stored in fils; agents see them in AED, renamed with an `Aed` suffix, to match bills. */
@@ -376,6 +378,7 @@ export function instructionsFor(role: AgentRole): string {
 }
 
 const CASE_KEY = "caseId";
+const LEDGER_KEY = "ledger";
 
 abstract class SahraAgent extends DurableObject<Env> {
   readonly role: AgentRole;
@@ -417,7 +420,7 @@ abstract class SahraAgent extends DurableObject<Env> {
   }
 
   ledger() {
-    return this.env.LEDGER.getByName("sahra");
+    return this.env.LEDGER.getByName(this.ctx.storage.kv.get<string>(LEDGER_KEY) ?? ledgerName());
   }
 
   caseId(): string {
@@ -426,15 +429,20 @@ abstract class SahraAgent extends DurableObject<Env> {
     return id;
   }
 
-  /** Runs the agent on its case once; a retried call with the same operation returns the first result. */
+  /**
+   * Runs the agent on its case once; a retried call with the same operation returns the first result.
+   * `attempt` 1 and later are nudges in the same session, after the agent ended without recording.
+   */
   // `override` is only for comparing Scout's candidates on the fixtures; it bypasses the recorded choice.
-  async run(caseId: string, prompt: string, override?: NonNullable<ModelChoice["model"]>): Promise<AgentRunResult> {
+  async run(input: { caseId: string; runId?: string; prompt: string; override?: NonNullable<ModelChoice["model"]>; attempt?: number }): Promise<AgentRunResult> {
+    const { caseId, override, attempt = 0 } = input;
     if (override) await this.harness.session().setModel(this.resolveModel(override));
     else if (!AGENT_MODELS[this.role].model) {
       return { role: this.role, model: null, status: "unanswered", reason: "no_model_decision: consult Scout and record the choice in MODEL-DECISIONS.md", entries: [] };
     }
     this.ctx.storage.kv.put(CASE_KEY, caseId);
-    const receipt = await this.harness.submit(prompt, { operationId: `${this.role}:${caseId}` });
+    this.ctx.storage.kv.put(LEDGER_KEY, ledgerName(input.runId));
+    const receipt = await this.harness.submit(input.prompt, { operationId: `${this.role}:${caseId}${attempt ? `:nudge-${attempt}` : ""}` });
     const result = await this.harness.wait(receipt.operationId);
     return {
       role: this.role,

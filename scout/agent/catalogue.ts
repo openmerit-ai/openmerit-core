@@ -25,6 +25,8 @@ export interface Rate { unit: Unit; kind: string; amount: number }
 export interface Endpoint {
   id: string; provider: string; modelId: string; inputPrice: number | null; outputPrice: number | null; rates: Rate[];
   context: number | null; inputs: string[]; outputs: string[]; parameters: string[]; deployment: string; url: string | null;
+  // The date the route's host announced it will be removed, when that date is still ahead.
+  retiresAt: string | null;
 }
 export interface Observation { benchmark: string; score: number; metric: string | null; observedAt: string | null; url: string | null }
 // A published leaderboard result: rank among every result on that board version, in the board's direction.
@@ -104,7 +106,7 @@ function endpoint(raw: unknown): Endpoint | null {
   return {
     id, provider: str(raw.provider) ?? 'unknown', modelId: str(raw.modelId) ?? id, inputPrice: tokenRate(rates, 'input'), outputPrice: tokenRate(rates, 'output'), rates, context: num(raw.context),
     inputs: lower(strings(raw.modalities)).map(modality), outputs: lower(strings(raw.outputModalities)), parameters: strings(raw.parameters),
-    deployment: str(raw.deployment) ?? 'hosted', url: str(raw.url),
+    deployment: str(raw.deployment) ?? 'hosted', url: str(raw.url), retiresAt: day(raw.retiresAt),
   };
 }
 function speed(raw: unknown): Speed | null {
@@ -355,7 +357,7 @@ const nameMatch = (value: string, wanted: string[]) => wanted.some(w => value.to
 // A model without listed routes (for example open weights to host yourself) is judged on its own record.
 export function eligibleEndpoints(model: ModelRecord, f: Filters = {}): Endpoint[] {
   const routes = model.endpoints.length ? model.endpoints
-    : [{ id: `${model.id}:unlisted`, provider: model.provider, modelId: model.id, inputPrice: null, outputPrice: null, rates: [], context: null, inputs: [], outputs: [], parameters: [], deployment: 'unlisted', url: null }];
+    : [{ id: `${model.id}:unlisted`, provider: model.provider, modelId: model.id, inputPrice: null, outputPrice: null, rates: [], context: null, inputs: [], outputs: [], parameters: [], deployment: 'unlisted', url: null, retiresAt: null }];
   return routes.filter(e => (!f.endpointIds || f.endpointIds.includes(e.id)) &&
     includesAll(e.inputs.length ? e.inputs : model.inputs, (f.inputs ?? []).map(modality)) && includesAll(e.outputs.length ? e.outputs : model.outputs, f.outputs)
     && (f.parameters ?? []).every(p => (e.parameters.length ? e.parameters : model.parameters).includes(p))
@@ -465,7 +467,7 @@ export function modelDetails(catalogue: Catalogue, ids: string[], f: Filters = {
     return {
       ...modelSummary(m, f), parameters: m.parameters, constraintViolation: violation(m, f),
       routes: [...m.endpoints].sort((a, b) => (headlineRate(a.rates, 'token') ?? Infinity) - (headlineRate(b.rates, 'token') ?? Infinity)).slice(0, 8)
-        .map(e => ({ provider: e.provider, modelId: e.modelId, prices: ratesByUnit(e.rates), context: e.context, deployment: e.deployment })),
+        .map(e => ({ provider: e.provider, modelId: e.modelId, prices: ratesByUnit(e.rates), context: e.context, deployment: e.deployment, ...(e.retiresAt ? { retiresAt: e.retiresAt } : {}) })),
       // Strongest standings first; a rank is only meaningful within its own benchmark.
       benchmarks: [...best.values()].map(e => {
         const s = standings(catalogue, e.benchmark).find(x => x.model.id === m.id);

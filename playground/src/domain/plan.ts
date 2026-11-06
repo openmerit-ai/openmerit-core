@@ -88,6 +88,7 @@ export const DENIAL_CODES = {
   "SH-CODE-01": "Invalid or deleted code for the date of service",
   "SH-CODE-02": "Activity not supported by the documented diagnosis",
   "SH-CODE-03": "Service is included in another billed service (unbundling)",
+  "SH-CODE-04": "Level of service not supported by the documentation (upcoding)",
   "SH-NCOV-01": "Service is excluded from the plan",
   "SH-PREX-01": "Pre-existing condition within the waiting period",
   "SH-LIM-01": "Benefit or annual limit exhausted",

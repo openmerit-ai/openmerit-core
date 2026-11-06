@@ -55,6 +55,10 @@ function claim(id: string, memberNumber: string, start: string, diagnoses: Submi
   };
 }
 
+function withReferral(referral: string, item: Activity): Activity {
+  return { ...item, observations: [{ type: "Text", code: "eReferral", value: referral, valueType: "Text" }] };
+}
+
 function withPriorAuthorization(id: string, submitted: SubmittedClaim): SubmittedClaim {
   return { ...submitted, activities: submitted.activities.map((item) => ({ ...item, priorAuthorizationId: id })) };
 }
@@ -177,7 +181,7 @@ Patient: Fatima Noor (SH-M-1008). 29/10/2026. Mild cold, no fever, chest clear.
 GP consultation (brief) ....... AED 120.00
 Paracetamol 500mg x20 ......... AED 8.00
 Total ......................... AED 128.00`,
-    expected: { lines: { A1: ["SH-BILL-01", "SH-CODE-02", "SH-MNEC-01"], A2: ["SH-BILL-01", "SH-MNEC-01", "SH-CODE-02"] }, payment: 0, patientShare: 0, billMismatch: true, fraud: ["review", "hold"] },
+    expected: { lines: { A1: ["SH-BILL-01", "SH-CODE-04", "SH-CODE-02", "SH-MNEC-01"], A2: ["SH-BILL-01", "SH-MNEC-01", "SH-CODE-02"] }, payment: 0, patientShare: 0, billMismatch: true, fraud: ["review", "hold"] },
   },
   {
     name: "pre-existing-waiting-period",
@@ -224,7 +228,7 @@ Patient: Peter Nolan (SH-M-1011). 30/10/2026. Sore throat for two days, no fever
 Throat examined, advised fluids and paracetamol. No tests, no prescription. Seen for 10 minutes.
 Consultation (comprehensive) ..... AED 350.00
 Total ............................ AED 350.00`,
-    expected: { lines: { A1: ["SH-CODE-02", "SH-MNEC-01"] }, payment: 0, patientShare: 0, codingFinding: "upcoding", fraud: ["pay", "review"] },
+    expected: { lines: { A1: ["SH-CODE-04", "SH-CODE-02", "SH-MNEC-01"] }, payment: 0, patientShare: 0, codingFinding: "upcoding", fraud: ["pay", "review"] },
   },
   {
     name: "several-problems-in-one-claim",
@@ -344,12 +348,245 @@ Three days of uncomplicated low back pain. Low-complexity established-patient GP
 advice and home exercises. Diagnosis M54.50. Consultation AED 160.00. Total AED 160.00.`,
     expected: { lines: { A1: "pay" }, payment: 128_00, patientShare: 32_00, codingFindings: [], fraud: ["pay", "review"] },
   },
+  // Second round (6 Nov 2026): cases aimed at the misses seen in model comparisons: clean claims
+  // that look expensive or unusual (over-flagging), lines the bill or diagnosis does not support
+  // (paying what should be denied), false unbundling, subtle duplicates and provider patterns.
+  {
+    name: "high-value-clean-asthma-visit",
+    description: "Asthma flare with a moderate visit, chest X-ray and blood count. Expensive for a GP visit but fully supported: pay, no review.",
+    claim: claim("FICT-CLM-1019", "1015", "2026-11-02T08:30:00+04:00", [{ type: "Principal", code: "J45.909" }], [
+      activity("A1", "2026-11-02T08:30:00+04:00", 3, "99214", 250_00),
+      activity("A2", "2026-11-02T09:00:00+04:00", 3, "71046", 180_00),
+      activity("A3", "2026-11-02T09:10:00+04:00", 3, "85025", 60_00),
+      activity("A4", "2026-11-02T09:10:00+04:00", 3, "36415", 25_00),
+    ]),
+    bill: `Al Noor Family Clinic (fictional) - Invoice INV-55401
+Patient: Layla Mansour (SH-M-1015). 02/11/2026. Known asthmatic, wheeze and cough for four days, using her inhaler six times a day.
+Low-grade fever; chest X-ray to rule out pneumonia (clear), blood count normal. Inhaler technique reviewed, steroid plan agreed. 30 minutes.
+GP consultation (established patient, moderate) ... AED 250.00
+Chest X-ray, 2 views ................................ AED 180.00
+Complete blood count with differential .............. AED 60.00
+Blood draw .......................................... AED 25.00
+Total ............................................... AED 515.00`,
+    // All at 20% → payment 200 + 144 + 48 + 20, member share 50 + 36 + 12 + 5.
+    expected: { lines: { A1: "pay", A2: "pay", A3: "pay", A4: "pay" }, payment: 412_00, patientShare: 103_00, fraud: ["pay"] },
+  },
+  {
+    name: "billed-above-tariff",
+    description: "A clean visit billed at AED 200 against Sahra's AED 160 tariff. The bill agrees with the XML; pay, and the remittance allows the tariff.",
+    claim: claim("FICT-CLM-1020", "1016", "2026-11-02T12:00:00+04:00", [{ type: "Principal", code: "J06.9" }], [activity("A1", "2026-11-02T12:00:00+04:00", 3, "99213", 200_00)]),
+    bill: `Al Noor Family Clinic (fictional) - Invoice INV-55409
+Patient: Omar Siddiqui (SH-M-1016). 02/11/2026. Runny nose, sore throat and cough for three days. Chest clear. Advised rest and fluids.
+GP consultation (established patient) ... AED 200.00
+Total ................................... AED 200.00`,
+    // Allowed at tariff 160 at 20% → payment 128, member share 32. The 40 above tariff is not the member's.
+    expected: { lines: { A1: "pay" }, payment: 128_00, patientShare: 32_00, fraud: ["pay", "review"] },
+  },
+  {
+    name: "physiotherapy-units-exceed-bill",
+    description: "Approved physiotherapy, but the XML bills four exercise units and the bill shows two. Pay the evaluation, deny the unsupported exercise line.",
+    claim: withPriorAuthorization("FICT-PA-7790", claim("FICT-CLM-1021", "1017", "2026-11-03T10:00:00+04:00", [{ type: "Principal", code: "M54.50" }], [
+        activity("A1", "2026-11-03T10:00:00+04:00", 3, "97161", 200_00),
+        activity("A2", "2026-11-03T10:30:00+04:00", 3, "97110", 480_00, 4),
+      ])),
+    bill: `Al Noor Family Clinic (fictional) - Invoice INV-55415
+Patient: Nikhil Varma (SH-M-1017). 03/11/2026. Low back pain, physiotherapy approved under PA FICT-PA-7790.
+Physiotherapy evaluation .............. AED 200.00
+Therapeutic exercise, 2 x 15 minutes .. AED 240.00
+Total ................................. AED 440.00`,
+    // A1 at 20% → payment 160, member share 40.
+    expected: { lines: { A1: "pay", A2: ["SH-BILL-01"] }, payment: 160_00, patientShare: 40_00, billMismatch: true, fraud: ["review", "hold"] },
+  },
+  {
+    name: "test-not-supported-by-diagnosis",
+    description: "UTI visit with an HbA1c the patient asked for. No diabetes diagnosis, so the HbA1c is denied; the rest pays.",
+    claim: claim("FICT-CLM-1022", "1018", "2026-11-03T15:30:00+04:00", [{ type: "Principal", code: "N39.0" }], [
+      activity("A1", "2026-11-03T15:30:00+04:00", 3, "99213", 160_00),
+      activity("A2", "2026-11-03T15:45:00+04:00", 3, "81003", 35_00),
+      activity("A3", "2026-11-03T15:45:00+04:00", 3, "83036", 80_00),
+    ]),
+    bill: `Al Noor Family Clinic (fictional) - Invoice INV-55422
+Patient: Hana Yusuf (SH-M-1018). 03/11/2026. Burning on urination for two days. Dipstick positive for nitrites.
+Patient asked for a sugar check while here; no history or symptoms of diabetes.
+GP consultation ............... AED 160.00
+Urinalysis .................... AED 35.00
+HbA1c ......................... AED 80.00
+Total ......................... AED 275.00`,
+    // A1 and A2 at 20% → payment 128 + 28, member share 32 + 7.
+    expected: { lines: { A1: "pay", A2: "pay", A3: ["SH-CODE-02", "SH-MNEC-01"] }, payment: 156_00, patientShare: 39_00, codingFinding: "diagnosis_mismatch", fraud: ["pay", "review"] },
+  },
+  {
+    name: "separate-labs-not-unbundled",
+    description: "Diabetes review with a basic panel, HbA1c, blood count and blood draw. None includes another: every line pays.",
+    claim: claim("FICT-CLM-1023", "1020", "2026-11-04T08:00:00+04:00", [{ type: "Principal", code: "E11.9" }], [
+      activity("A1", "2026-11-04T08:00:00+04:00", 3, "99213", 160_00),
+      activity("A2", "2026-11-04T08:20:00+04:00", 3, "80048", 90_00),
+      activity("A3", "2026-11-04T08:20:00+04:00", 3, "83036", 80_00),
+      activity("A4", "2026-11-04T08:20:00+04:00", 3, "85025", 60_00),
+      activity("A5", "2026-11-04T08:20:00+04:00", 3, "36415", 25_00),
+    ]),
+    bill: `Al Noor Family Clinic (fictional) - Invoice INV-55436
+Patient: Ahmed Farouk (SH-M-1020). 04/11/2026. Six-monthly diabetes review; on metformin, feels well.
+GP consultation ............... AED 160.00
+Basic metabolic panel ......... AED 90.00
+HbA1c ......................... AED 80.00
+CBC with differential ......... AED 60.00
+Blood draw .................... AED 25.00
+Total ......................... AED 415.00`,
+    // All at 20% → payment 128 + 72 + 64 + 48 + 20, member share 32 + 18 + 16 + 12 + 5.
+    expected: { lines: { A1: "pay", A2: "pay", A3: "pay", A4: "pay", A5: "pay" }, payment: 332_00, patientShare: 83_00, fraud: ["pay"] },
+  },
+  {
+    name: "specialist-with-referral",
+    description: "Orthopaedic specialist visit with a GP e-Referral in the XML and on the bill. Payable.",
+    claim: claim(
+      "FICT-CLM-1024",
+      "1021",
+      "2026-11-04T11:00:00+04:00",
+      [{ type: "Principal", code: "M54.50" }],
+      [withReferral("FICT-REF-55102", activity("A1", "2026-11-04T11:00:00+04:00", 3, "99204", 300_00, 1, "FICT-DHA-P-1002"))],
+      "FICT-DHA-F-0002",
+    ),
+    bill: `Creek Specialist Centre (fictional) - Invoice CSC-4466
+Patient: Sofia Rossi (SH-M-1021). 04/11/2026. Referred by Dr Sara Haddad (GP), e-Referral FICT-REF-55102: low back pain six weeks, not improving.
+Orthopaedic consultation, new patient ...... AED 300.00
+Total ...................................... AED 300.00`,
+    // At 20% → payment 240, member share 60.
+    expected: { lines: { A1: "pay" }, payment: 240_00, patientShare: 60_00, fraud: ["pay"] },
+  },
+  {
+    name: "recurrence-not-duplicate",
+    description: "Second strep throat in two weeks at the same clinic, with the same codes as a paid claim from 20 October. A new episode, not a duplicate.",
+    claim: claim("FICT-CLM-1025", "1022", "2026-11-03T17:00:00+04:00", [{ type: "Principal", code: "J02.0" }], [
+      activity("A1", "2026-11-03T17:00:00+04:00", 3, "99213", 160_00),
+      activity("A2", "2026-11-03T17:15:00+04:00", 3, "87880", 70_00),
+    ]),
+    bill: `Al Noor Family Clinic (fictional) - Invoice INV-55441
+Patient: Wei Zhang (SH-M-1022). 03/11/2026. Sore throat and fever again; last episode 20/10/2026 treated with amoxicillin and resolved.
+Rapid strep positive again. Switched to a different antibiotic (patient's own supply from pharmacy, not billed).
+GP consultation ............... AED 160.00
+Rapid strep A test ............ AED 70.00
+Total ......................... AED 230.00`,
+    // 14 days after the last visit, so coinsurance applies: payment 128 + 56, member share 32 + 14.
+    expected: { lines: { A1: "pay", A2: "pay" }, payment: 184_00, patientShare: 46_00, fraud: ["pay", "review"] },
+  },
+  {
+    name: "duplicate-with-changed-amount",
+    description: "The visit already paid as FICT-CLM-0904 resubmitted under a new claim and invoice number, with the consultation raised from AED 160 to 180.",
+    claim: claim(
+      "FICT-CLM-1026",
+      "1023",
+      "2026-10-22T09:00:00+04:00",
+      [{ type: "Principal", code: "N39.0" }],
+      [
+        activity("A1", "2026-10-22T09:00:00+04:00", 3, "99213", 180_00, 1, "FICT-DHA-P-1003"),
+        activity("A2", "2026-10-22T09:15:00+04:00", 3, "81003", 35_00, 1, "FICT-DHA-P-1003"),
+      ],
+      "FICT-DHA-F-0003",
+    ),
+    bill: `Marina Medical Centre (fictional) - Invoice MMC-10057
+Patient: Priya Nair (SH-M-1023). 22/10/2026. Burning on urination, frequency.
+GP consultation ............... AED 180.00
+Urinalysis .................... AED 35.00
+Total ......................... AED 215.00`,
+    expected: { lines: { A1: ["SH-DUPL-01"], A2: ["SH-DUPL-01"] }, payment: 0, patientShare: 0, fraud: ["hold", "review"] },
+  },
+  {
+    name: "excluded-condition-only-secondary",
+    description: "A cold, with obesity noted as a secondary diagnosis. The exclusion covers weight treatment, not this visit: pay, no review.",
+    claim: claim("FICT-CLM-1027", "1024", "2026-11-04T16:00:00+04:00", [{ type: "Principal", code: "J06.9" }, { type: "Secondary", code: "E66.9" }], [
+      activity("A1", "2026-11-04T16:00:00+04:00", 3, "99213", 160_00),
+      activity("A2", "2026-11-04T16:15:00+04:00", 3, "87880", 70_00),
+    ]),
+    bill: `Al Noor Family Clinic (fictional) - Invoice INV-55452
+Patient: Mark Evans (SH-M-1024). 04/11/2026. Sore throat, runny nose for three days. Rapid strep negative.
+BMI 32 noted; brief diet advice given, no charge, no weight-loss treatment.
+GP consultation ............... AED 160.00
+Rapid strep A test ............ AED 70.00
+Total ......................... AED 230.00`,
+    // At 20% → payment 128 + 56, member share 32 + 14.
+    expected: { lines: { A1: "pay", A2: "pay" }, payment: 184_00, patientShare: 46_00, fraud: ["pay"] },
+  },
+  {
+    name: "arabic-itemized-bill",
+    description: "A clean UTI claim whose itemized bill is in Arabic with Arabic-Indic digits. Everything is payable.",
+    claim: claim("FICT-CLM-1028", "1025", "2026-11-03T18:00:00+04:00", [{ type: "Principal", code: "N39.0" }], [
+      activity("A1", "2026-11-03T18:00:00+04:00", 3, "99213", 160_00),
+      activity("A2", "2026-11-03T18:15:00+04:00", 3, "81003", 35_00),
+      activity("A3", "2026-11-03T18:30:00+04:00", 5, "FICT-DDC-0004", 40_00),
+    ]),
+    bill: `عيادة النور العائلية (وهمية) - فاتورة رقم ٥٥٤٦٠
+المريض: يوسف حداد، رقم العضوية SH-M-1025، التاريخ ٠٣/١١/٢٠٢٦
+الشكوى: حرقة عند التبول منذ يومين، بدون حمى
+١. استشارة طبيب عام (مريض مراجع) ............ ١٦٠٫٠٠ درهم
+٢. تحليل بول آلي ............................ ٣٥٫٠٠ درهم
+٣. نيتروفورانتوين ١٠٠ ملغ، ١٠ كبسولات ........ ٤٠٫٠٠ درهم
+المجموع ..................................... ٢٣٥٫٠٠ درهم`,
+    // 160 and 35 at 20%, 40 at 30% → payment 128 + 28 + 28, member share 32 + 7 + 12.
+    expected: { lines: { A1: "pay", A2: "pay", A3: "pay" }, payment: 184_00, patientShare: 51_00, fraud: ["pay"] },
+  },
+  {
+    name: "upcoded-new-patient-visit",
+    description: "Highest-level new patient visit (99205) for a one-day uncomplicated UTI seen in ten minutes. Deny the visit as upcoded; the test and drug pay.",
+    claim: claim("FICT-CLM-1029", "1026", "2026-11-04T19:00:00+04:00", [{ type: "Principal", code: "N39.0" }], [
+      activity("A1", "2026-11-04T19:00:00+04:00", 3, "99205", 400_00, 1, "FICT-DHA-P-1003"),
+      activity("A2", "2026-11-04T19:10:00+04:00", 3, "81003", 35_00, 1, "FICT-DHA-P-1003"),
+      activity("A3", "2026-11-04T19:15:00+04:00", 5, "FICT-DDC-0004", 40_00, 1, "FICT-DHA-P-1003"),
+    ]),
+    bill: `Al Noor Family Clinic (fictional) - Invoice INV-55468
+Patient: Elena Popescu (SH-M-1026). 04/11/2026. First visit. Burning on urination since yesterday, no fever, no back pain, otherwise well.
+Dipstick positive; three days of nitrofurantoin. Seen for 10 minutes.
+New patient consultation (high complexity) ...... AED 400.00
+Urinalysis ...................................... AED 35.00
+Nitrofurantoin 100mg x10 ........................ AED 40.00
+Total ........................................... AED 475.00`,
+    // 35 at 20%, 40 at 30% → payment 28 + 28, member share 7 + 12.
+    expected: { lines: { A1: ["SH-CODE-04", "SH-MNEC-01", "SH-CODE-02"], A2: "pay", A3: "pay" }, payment: 56_00, patientShare: 19_00, codingFinding: "upcoding", fraud: ["pay", "review"] },
+  },
+  {
+    name: "justified-visit-at-upcoding-provider",
+    description: "A genuinely complex diabetes and hypertension visit, coded 99215, at a clinic that bills 99215 for every visit. Pay the lines; the provider pattern needs review.",
+    claim: claim(
+      "FICT-CLM-1030",
+      "1027",
+      "2026-11-05T10:00:00+04:00",
+      [{ type: "Principal", code: "E11.65" }, { type: "Secondary", code: "I10" }],
+      [activity("A1", "2026-11-05T10:00:00+04:00", 3, "99215", 350_00, 1, "FICT-DHA-P-1004"), activity("A2", "2026-11-05T10:30:00+04:00", 3, "83036", 80_00, 1, "FICT-DHA-P-1004")],
+      "FICT-DHA-F-0004",
+    ),
+    bill: `Jumeirah Wellness Clinic (fictional) - Invoice JWC-2210
+Patient: Rashid Khan (SH-M-1027). 05/11/2026. Type 2 diabetes with fasting sugars of 14-16 on maximum oral therapy, and blood pressure 168/102 on two drugs.
+Started basal insulin with dose titration plan and hypoglycaemia teaching, changed antihypertensives, reviewed kidney function. 45 minutes.
+Consultation (established patient, high complexity) ... AED 350.00
+HbA1c ................................................. AED 80.00
+Total ................................................. AED 430.00`,
+    // At 20% → payment 280 + 64, member share 70 + 16.
+    expected: { lines: { A1: "pay", A2: "pay" }, payment: 344_00, patientShare: 86_00, fraud: ["review", "hold"] },
+  },
+  {
+    name: "implausible-drug-quantity",
+    description: "Strep throat with ten packs of amoxicillin, enough for 70 days of treatment. Pay the visit and test; deny the drug line.",
+    claim: claim("FICT-CLM-1031", "1028", "2026-11-05T13:00:00+04:00", [{ type: "Principal", code: "J02.0" }], [
+      activity("A1", "2026-11-05T13:00:00+04:00", 3, "99213", 160_00),
+      activity("A2", "2026-11-05T13:15:00+04:00", 3, "87880", 70_00),
+      activity("A3", "2026-11-05T13:30:00+04:00", 5, "FICT-DDC-0001", 250_00, 10),
+    ]),
+    bill: `Al Noor Family Clinic (fictional) - Invoice INV-55480
+Patient: George Mathew (SH-M-1028). 05/11/2026. Sore throat and fever, rapid strep positive. Ten-day course of amoxicillin prescribed.
+GP consultation ................... AED 160.00
+Rapid strep A test ................ AED 70.00
+Amoxicillin 500mg x21, 10 packs ... AED 250.00
+Total ............................. AED 480.00`,
+    // A1 and A2 at 20% → payment 128 + 56, member share 32 + 14.
+    expected: { lines: { A1: "pay", A2: "pay", A3: ["SH-MNEC-01"] }, payment: 184_00, patientShare: 46_00, fraud: ["review", "hold"] },
+  },
 ];
 
 export interface EnrollmentFixture {
   name: string;
   application: EnrollmentApplication;
-  expected: { decision: "enrolled" | "declined"; declaredConditions: string[] };
+  /** `notDeclared`: condition prefixes the agent must not list, such as a resolved condition. */
+  expected: { decision: "enrolled" | "declined"; declaredConditions: string[]; notDeclared?: string[] };
 }
 
 export const ENROLLMENT_FIXTURES: EnrollmentFixture[] = [
@@ -384,5 +621,71 @@ export const ENROLLMENT_FIXTURES: EnrollmentFixture[] = [
       healthDeclaration: "No medical conditions.",
     },
     expected: { decision: "declined", declaredConditions: [] },
+  },
+  {
+    name: "visa-from-another-emirate",
+    application: {
+      applicationId: "APP-2003",
+      name: "Kavya Iyer (fictional)",
+      emiratesId: "784-0000-0002003-0",
+      dateOfBirth: "1994-11-20",
+      visaEmirate: "Abu Dhabi",
+      monthlySalaryAed: 3_000,
+      employer: "Fictional Retail LLC (Dubai branch)",
+      requestedStart: "2026-11-15",
+      previousUaeInsurance: false,
+      healthDeclaration: "No medical conditions. I work in Dubai but my visa was issued in Abu Dhabi.",
+    },
+    expected: { decision: "declined", declaredConditions: [] },
+  },
+  {
+    name: "applicant-already-a-member",
+    application: {
+      applicationId: "APP-2004",
+      name: "Ravi Menon (fictional)",
+      emiratesId: "784-0000-0001001-0",
+      dateOfBirth: "1990-01-01",
+      visaEmirate: "Dubai",
+      monthlySalaryAed: 3_200,
+      employer: "Fictional Logistics LLC",
+      requestedStart: "2026-11-15",
+      previousUaeInsurance: true,
+      healthDeclaration: "No medical conditions.",
+    },
+    expected: { decision: "declined", declaredConditions: [] },
+  },
+  {
+    name: "resolved-conditions-not-pre-existing",
+    application: {
+      applicationId: "APP-2005",
+      name: "Maria Santos (fictional)",
+      emiratesId: "784-0000-0002005-0",
+      dateOfBirth: "1991-05-09",
+      visaEmirate: "Dubai",
+      monthlySalaryAed: 3_800,
+      employer: "Fictional Hospitality LLC",
+      requestedStart: "2026-11-15",
+      previousUaeInsurance: false,
+      healthDeclaration:
+        "I had diabetes during my pregnancy in 2021 but it went away after my daughter was born, and my sugar tests since then are normal. I take thyroxine every morning for an underactive thyroid. Asthma as a child; no inhaler needed for 15 years.",
+    },
+    // Gestational diabetes resolved: not E11 or O24. Childhood asthma is left to judgement.
+    expected: { decision: "enrolled", declaredConditions: ["E03"], notDeclared: ["E11", "O24"] },
+  },
+  {
+    name: "arabic-health-declaration",
+    application: {
+      applicationId: "APP-2006",
+      name: "Khalid Al Amiri (fictional)",
+      emiratesId: "784-0000-0002006-0",
+      dateOfBirth: "1979-02-17",
+      visaEmirate: "Dubai",
+      monthlySalaryAed: 2_800,
+      employer: "Fictional Construction LLC",
+      requestedStart: "2026-11-15",
+      previousUaeInsurance: false,
+      healthDeclaration: "أعاني من ارتفاع ضغط الدم منذ ٢٠٢٣ وأتناول أملوديبين يومياً. لدي أيضاً ربو وأستخدم بخاخاً عند الحاجة.",
+    },
+    expected: { decision: "enrolled", declaredConditions: ["I10", "J45"] },
   },
 ];

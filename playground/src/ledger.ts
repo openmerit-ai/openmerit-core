@@ -1,4 +1,4 @@
-// Sahra Health's system of record: one SQLite-backed Durable Object named "sahra".
+// Sahra Health's system of record: a SQLite-backed Durable Object named "sahra", plus one per scenario run.
 // Every state change of a claim goes through here, and payment is refused unless a human approval
 // is recorded first.
 
@@ -54,6 +54,12 @@ export interface SeedData {
   /** Earlier claims, already paid, that history-dependent fixtures rely on. */
   paidClaims: { claim: SubmittedClaim; lines: AdjudicationLine[]; receivedAt: string }[];
 }
+
+/**
+ * The ledger a case lives in. Each scenario run gets its own ledger, named by its run ID, so runs can
+ * go in parallel without sharing members, claims or history. Everything else uses "sahra".
+ */
+export const ledgerName = (runId?: string | null): string => runId || "sahra";
 
 type Row = Record<string, SqlStorageValue>;
 

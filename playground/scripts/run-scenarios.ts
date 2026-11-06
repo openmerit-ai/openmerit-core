@@ -102,7 +102,8 @@ if (authorization) {
 console.log(`Models ${Object.entries(runModels).map(([role, model]) => `${role}=${model}${models[role as AgentRole] ? "" : " (recorded)"}`).join(", ")}`);
 console.log(`Run ${runId} against ${baseUrl} · openmerit@${VERSIONS.openmerit} · agents@${VERSIONS.agents} · pi@${VERSIONS.pi}`);
 if (experiment) console.log(`Datasets ${DATASET}, ${ENROLLMENT_DATASET} · experiment ${experiment.name}`);
-await call("POST", "/admin/seed");
+// The run's own ledger, so runs can go in parallel.
+await call("POST", "/admin/seed", { runId });
 
 for (const fixture of enrollments) await call("POST", "/enrollments", { application: fixture.application, runId, models, experiment: enrollmentExperiment });
 for (const fixture of claims) await call("POST", "/claims", { xml: submissionXml(fixture), bill: fixture.bill, runId, models, experiment });
@@ -112,7 +113,7 @@ let claimRecords: ClaimRecord[] = [];
 let enrollmentRecords: (EnrollmentRecord | null)[] = [];
 while (Date.now() < deadline) {
   claimRecords = await call<ClaimRecord[]>("GET", `/claims?runId=${encodeURIComponent(runId)}`);
-  enrollmentRecords = await Promise.all(enrollments.map(async (fixture) => (await call<{ enrollment: EnrollmentRecord | null }>("GET", `/enrollments/${fixture.application.applicationId}`)).enrollment));
+  enrollmentRecords = await Promise.all(enrollments.map(async (fixture) => (await call<{ enrollment: EnrollmentRecord | null }>("GET", `/enrollments/${fixture.application.applicationId}?runId=${encodeURIComponent(runId)}`)).enrollment));
   const done = claimRecords.filter(settledClaim).length + enrollmentRecords.filter((record) => record && record.decision !== "pending").length;
   process.stdout.write(`\r${done}/${claims.length + enrollments.length} settled`);
   if (done === claims.length + enrollments.length) break;
@@ -142,14 +143,16 @@ const check = async (caseId: string, agent: string, name: string, pass: boolean,
 };
 
 for (const fixture of enrollments) {
-  const { enrollment: record, member } = await call<{ enrollment: EnrollmentRecord | null; member: Member | null }>("GET", `/enrollments/${fixture.application.applicationId}`);
+  const { enrollment: record, member } = await call<{ enrollment: EnrollmentRecord | null; member: Member | null }>("GET", `/enrollments/${fixture.application.applicationId}?runId=${encodeURIComponent(runId)}`);
   const id = fixture.application.applicationId;
   const passed: boolean[] = [];
   const decisionOk = await check(id, "enrollment", "enrollment-decision-correct", record?.decision === fixture.expected.decision, `expected ${fixture.expected.decision}, got ${record?.decision ?? "none"}`);
   let conditions = "";
   if (fixture.expected.decision === "enrolled") {
     const declared = member?.declaredConditions ?? [];
-    const ok = await check(id, "enrollment", "declared-conditions-found", fixture.expected.declaredConditions.every((code) => declared.some((item) => item.startsWith(code))), `declared ${declared.join(", ") || "none"}; expected ${fixture.expected.declaredConditions.join(", ")}`);
+    const found = fixture.expected.declaredConditions.every((code) => declared.some((item) => item.startsWith(code)));
+    const wrong = (fixture.expected.notDeclared ?? []).filter((code) => declared.some((item) => item.startsWith(code)));
+    const ok = await check(id, "enrollment", "declared-conditions-found", found && !wrong.length, `declared ${declared.join(", ") || "none"}; expected ${fixture.expected.declaredConditions.join(", ") || "none"}${wrong.length ? `; should not declare ${wrong.join(", ")}` : ""}`);
     conditions = ` · conditions ${declared.join(", ") || "none"} ${ok ? "✓" : "✗"}`;
     passed.push(ok);
   }
@@ -162,14 +165,24 @@ for (const fixture of enrollments) {
 /** The claim's last agent run: fraud, or the first agent that did not record its result (as in ClaimFlow). */
 const finalAgent = (record: ClaimRecord): AgentRole => (!record.extraction ? "intake" : !record.coding ? "coding" : !record.adjudication ? "adjudication" : "fraud");
 
+/**
+ * What a claim's mistakes cost Sahra, in AED: the proposed payment's distance from the correct one
+ * (over- and underpayment both count in full), plus one manual handling for an unnecessary fraud
+ * review or a claim the pipeline could not finish. Fictional rate: 15 reviewer minutes at AED 120 an hour.
+ */
+const MANUAL_HANDLING_AED = 30;
+const errorCost = (input: { paymentErrorAed: number; reviewLoad: boolean | null; settled: boolean }): number =>
+  input.paymentErrorAed + (input.reviewLoad || !input.settled ? MANUAL_HANDLING_AED : 0);
+
 // Environment-level outcome of each claim, posted on its final agent trace's root observation.
-const outcomes: { caseId: string; trace: AgentRole; claimCorrect: boolean; paymentCorrect: boolean; reviewLoad: boolean | null }[] = [];
-async function postOutcome(record: ClaimRecord, claimCorrect: boolean, paymentCorrect: boolean, reviewLoad: boolean | null, comments: { claim: string; payment: string; review?: string }): Promise<void> {
+const outcomes: { caseId: string; trace: AgentRole; claimCorrect: boolean; paymentCorrect: boolean; reviewLoad: boolean | null; errorCostAed: number }[] = [];
+async function postOutcome(record: ClaimRecord, claimCorrect: boolean, paymentCorrect: boolean, reviewLoad: boolean | null, cost: number, comments: { claim: string; payment: string; review?: string; cost: string }): Promise<void> {
   const agent = finalAgent(record);
-  outcomes.push({ caseId: record.id, trace: agent, claimCorrect, paymentCorrect, reviewLoad });
+  outcomes.push({ caseId: record.id, trace: agent, claimCorrect, paymentCorrect, reviewLoad, errorCostAed: cost });
   await score(record.id, agent, "claim-correct", claimCorrect ? 1 : 0, comments.claim, true);
   await score(record.id, agent, "payment-correct", paymentCorrect ? 1 : 0, comments.payment, true);
   if (reviewLoad !== null) await score(record.id, agent, "review-load", reviewLoad ? 1 : 0, comments.review ?? "", true);
+  await score(record.id, agent, "error-cost-aed", cost, comments.cost, true, "NUMERIC");
 }
 
 for (const fixture of claims) {
@@ -188,7 +201,8 @@ for (const fixture of claims) {
     total += 1;
     results.push({ caseId: fixture.claim.id, agent: "pipeline", check: "claim-settled", pass: false, comment: record?.error ?? record?.state ?? "not found" });
     const state = record ? `${record.state}${record.error ? ` (${record.error})` : ""}` : "not found";
-    if (record) await postOutcome(record, false, false, null, { claim: `claim did not settle: ${state}`, payment: `no adjudication; expected AED ${expectedPayment}` });
+    if (record) await postOutcome(record, false, false, null, errorCost({ paymentErrorAed: 0, reviewLoad: null, settled: false }), { claim: `claim did not settle: ${state}`, payment: `no adjudication; expected AED ${expectedPayment}`, cost: `manual handling AED ${MANUAL_HANDLING_AED}` });
+    else outcomes.push({ caseId: fixture.claim.id, trace: "intake", claimCorrect: false, paymentCorrect: false, reviewLoad: null, errorCostAed: MANUAL_HANDLING_AED });
     console.log(`✗ ${fixture.name}: ${state}`);
     continue;
   }
@@ -214,10 +228,13 @@ for (const fixture of claims) {
   const paymentOk = record.adjudication.totals.payment === fixture.expected.payment;
   const recommendation = record.fraud?.recommendation;
   const onlyPay = fixture.expected.fraud.length === 1 && fixture.expected.fraud[0] === "pay";
-  await postOutcome(record, passed.every(Boolean), paymentOk, record.fraud ? onlyPay && recommendation !== "pay" : null, {
+  const reviewLoad = record.fraud ? onlyPay && recommendation !== "pay" : null;
+  const paymentErrorAed = Math.abs(record.adjudication.totals.payment - fixture.expected.payment) / 100;
+  await postOutcome(record, passed.every(Boolean), paymentOk, reviewLoad, errorCost({ paymentErrorAed, reviewLoad, settled: settledClaim(record) }), {
     claim: `${passed.filter(Boolean).length}/${passed.length} checks passed`,
     payment: `pay AED ${paid}, expected AED ${expectedPayment}`,
     review: `fraud recommended ${recommendation}; expected ${fixture.expected.fraud.join("|")}`,
+    cost: `payment off by AED ${paymentErrorAed.toFixed(2)}${reviewLoad ? `; unnecessary review AED ${MANUAL_HANDLING_AED}` : ""}`,
   });
   console.log(`${decisions && fraud ? "✓" : "✗"} ${fixture.name}: lines ${decisions ? "✓" : "✗"} · fraud ${recommendation} ${fraud ? "✓" : "✗"} · pay AED ${paid} (expected ${expectedPayment}) ${paymentOk ? "✓" : "✗"}${notes.length ? ` · ${notes.join(" · ")}` : ""}`);
   for (const item of lineResults.filter((result) => !result.ok)) console.log(`    ${item.activityId}: got ${item.got}, expected ${item.expected}`);
@@ -248,5 +265,6 @@ if (values.out) {
 }
 
 const count = (pick: (item: (typeof outcomes)[number]) => boolean | null): number => outcomes.filter((item) => pick(item) === true).length;
-console.log(`\nClaims correct ${count((item) => item.claimCorrect)}/${claims.length} · payment correct ${count((item) => item.paymentCorrect)}/${claims.length} · review load ${count((item) => item.reviewLoad)}`);
-console.log(`${correct}/${total} checks passed. Run ID ${runId}; claims now await approval: npm run approve -- <claim-id>`);
+const totalErrorCost = outcomes.reduce((sum, item) => sum + item.errorCostAed, 0);
+console.log(`\nClaims correct ${count((item) => item.claimCorrect)}/${claims.length} · payment correct ${count((item) => item.paymentCorrect)}/${claims.length} · review load ${count((item) => item.reviewLoad)} · error cost AED ${totalErrorCost.toFixed(2)}`);
+console.log(`${correct}/${total} checks passed. Run ID ${runId}; claims now await approval: npm run approve -- <claim-id> --run ${runId}`);
