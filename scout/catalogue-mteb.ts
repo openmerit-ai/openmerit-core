@@ -2,7 +2,7 @@
 // embeddings, predictions or the expanded per-example results export.
 // These stay outside chat evidence: a retrieval score is not chat quality.
 import { type Database, type Bucket, type Row, chunked, digest, ensureCatalogueSchema, isObject, obj, readSource } from './catalogue-db.ts';
-import { linkCandidates, linkResults } from './catalogue-boards.ts';
+import { type LinkCandidate, linkCandidates, linkResults } from './catalogue-boards.ts';
 
 export const mtebAPI = 'https://mteb-leaderboard-backend.hf.space/v1';
 type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
@@ -52,13 +52,37 @@ export function parseMTEB(data: unknown, name: string): { summary: Record<string
 }
 
 export type MTEBImport = { status: 'ok'; rows: number; models: number; linked: number } | { status: 'failed'; error: string };
-export async function importMTEB(db: Database, benchmark: MTEBBenchmark, options: Options = {}): Promise<MTEBImport> {
-  const { fetcher = fetch, bucket, now = new Date().toISOString() } = options;
-  const name = benchmark.name, source = `mteb:${name}`, run = options.run ?? `${source}-${now}`, url = `${mtebAPI}/benchmarks/${encodeURIComponent(name)}/scores`;
+async function prepareMTEB(db: Database): Promise<void> {
   await ensureCatalogueSchema(db);
   await db.batch(schema.map(sql => db.prepare(sql)));
   if (!(await db.prepare("SELECT name FROM pragma_table_info('cat_mteb_results') WHERE name='model_id'").all()).results.length) await db.prepare('ALTER TABLE cat_mteb_results ADD COLUMN model_id TEXT').run();
   await db.prepare('CREATE INDEX IF NOT EXISTS cat_mteb_results_model_id ON cat_mteb_results(model_id)').run();
+}
+export async function importMTEB(db: Database, benchmark: MTEBBenchmark, options: Options = {}): Promise<MTEBImport> {
+  await prepareMTEB(db);
+  return importBoard(db, benchmark, options, () => linkCandidates(db));
+}
+// Several boards in one workflow step: schema checks and link candidates are
+// read once, and up to `concurrency` boards are fetched and written at a time.
+// Each board still records its own run (`<run>-<name>`) and fails alone.
+export async function importMTEBGroup(db: Database, benchmarks: readonly MTEBBenchmark[], options: Options & { concurrency?: number } = {}): Promise<MTEBImport[]> {
+  const { concurrency = 4, run, ...rest } = options;
+  await prepareMTEB(db);
+  let shared: Promise<LinkCandidate[]> | undefined;
+  const candidates = () => shared ??= linkCandidates(db);
+  const results: MTEBImport[] = [];
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, benchmarks.length) }, async () => {
+    for (let i = next++; i < benchmarks.length; i = next++) {
+      const benchmark = benchmarks[i];
+      if (benchmark) results[i] = await importBoard(db, benchmark, { ...rest, ...(run ? { run: `${run}-${benchmark.name}` } : {}) }, candidates);
+    }
+  }));
+  return results;
+}
+async function importBoard(db: Database, benchmark: MTEBBenchmark, options: Options, candidates: () => Promise<LinkCandidate[]>): Promise<MTEBImport> {
+  const { fetcher = fetch, bucket, now = new Date().toISOString() } = options;
+  const name = benchmark.name, source = `mteb:${name}`, run = options.run ?? `${source}-${now}`, url = `${mtebAPI}/benchmarks/${encodeURIComponent(name)}/scores`;
   await db.batch([
     db.prepare('INSERT INTO cat_sources (id,name,url,license,role) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET name=excluded.name,url=excluded.url,license=excluded.license,role=excluded.role')
       .bind(source, `MTEB · ${name}`, url, 'CC0-1.0 (MTEB results); task dataset licences are separate', 'Published embedding/retrieval leaderboard results; not chat quality or independent verification'),
@@ -78,7 +102,7 @@ export async function importMTEB(db: Database, benchmark: MTEBBenchmark, options
       identities.add(key); models.add(model);
       rows.push({ model, variant, payload: JSON.stringify(r) });
     }
-    const links = linkResults([...models].map(model => ({ model })), 'embedding', await linkCandidates(db), source), ids = new Map([...links].map(([r, id]) => [r.model, id]));
+    const links = linkResults([...models].map(model => ({ model })), 'embedding', await candidates(), source), ids = new Map([...links].map(([r, id]) => [r.model, id]));
     for (const r of rows) r.model_id = ids.get(String(r.model)) ?? null;
     if (bucket && !await bucket.head(artifact)) await bucket.put(artifact, bytes, { httpMetadata: { contentType: 'application/json' } });
     await chunked(db, `INSERT OR REPLACE INTO cat_mteb_results (benchmark,version,model,variant,payload,model_id)
