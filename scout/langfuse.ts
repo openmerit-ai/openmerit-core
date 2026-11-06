@@ -27,6 +27,13 @@ export interface LangfuseConfig {
   // Explicit aliases from experiment metadata to catalogue model/endpoint IDs.
   models: Record<string, string>;
 }
+export class LangfuseRateLimitError extends Error {
+  retryAfter: number;
+  constructor(retryAfter: number) {
+    super(`Langfuse rate limited the read. Wait ${retryAfter} seconds before syncing again.`);
+    this.retryAfter = retryAfter;
+  }
+}
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const label = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0 && v.length <= 120;
 export function parseLangfuse(value: unknown): LangfuseConfig {
@@ -60,7 +67,11 @@ async function request(config: LangfuseConfig, path: '/api/public/experiments' |
 async function data(response: Response): Promise<Record<string, unknown>> {
   if (!response.ok) {
     await response.body?.cancel();
-    throw new Error(response.status === 429 ? 'Langfuse rate limited the read. Wait at least one minute before syncing again.' : `Langfuse read failed (HTTP ${response.status}). Check the region and Viewer key.`);
+    if (response.status === 429) {
+      const seconds = Number(response.headers.get('Retry-After'));
+      throw new LangfuseRateLimitError(Number.isSafeInteger(seconds) && seconds > 0 ? seconds : 60);
+    }
+    throw new Error(`Langfuse read failed (HTTP ${response.status}). Check the region and Viewer key.`);
   }
   const reader = response.body?.getReader();
   if (!reader) throw new Error('Langfuse returned an empty response.');
@@ -100,34 +111,42 @@ export async function importLangfuse(config: LangfuseConfig, fetcher: typeof fet
     for (const e of page.data) {
       if (!object(e) || typeof e.id !== 'string' || e.id.length > 200 || !object(e.metadata)) continue;
       if (++experiments > 100) throw new Error('More than 100 experiments match. Narrow the start date; no partial import was saved.');
+      const groups = new Map<string, { mapping: ScoreMapping; model: string }[]>();
       for (const m of config.mappings) {
         const rawModel = e.metadata[m.modelKey];
         if (!label(rawModel)) { unmapped++; continue; }
         const model = Object.hasOwn(config.models, rawModel) ? config.models[rawModel] : undefined;
         if (!model) { unmapped++; continue; }
+        const group = groups.get(m.traceName) ?? [];
+        group.push({ mapping: m, model });
+        groups.set(m.traceName, group);
+      }
+      for (const [traceName, group] of groups) {
         // Scores with no explicit experiment tag are NOT attributed by time or
         // by the currently selected model. Concurrent runs cannot contaminate it.
         const query = new URLSearchParams({ query: JSON.stringify({
-          view: 'scores-numeric', dimensions: [],
+          view: 'scores-numeric', dimensions: [{ field: 'name' }],
           metrics: [{ measure: 'value', aggregation: 'avg' }, { measure: 'count', aggregation: 'count' }],
           filters: [
             { column: 'tags', type: 'arrayOptions', operator: 'any of', value: [`${config.tagPrefix}${e.id}`] },
-            { column: 'traceName', type: 'string', operator: '=', value: m.traceName },
-            { column: 'name', type: 'string', operator: '=', value: m.metric },
+            { column: 'traceName', type: 'string', operator: '=', value: traceName },
+            { column: 'name', type: 'stringOptions', operator: 'any of', value: group.map(({ mapping }) => mapping.metric) },
           ],
-          fromTimestamp: `${config.from}T00:00:00Z`, toTimestamp: new Date(now).toISOString(), config: { row_limit: 1 },
+          fromTimestamp: `${config.from}T00:00:00Z`, toTimestamp: new Date(now).toISOString(), config: { row_limit: group.length },
         }) });
         const metrics = await data(await request(config, '/api/public/v2/metrics', query, fetcher));
         if (!Array.isArray(metrics.data)) throw new Error('Langfuse returned invalid aggregate metrics.');
-        const row: unknown = metrics.data[0];
-        if (!object(row) || typeof row.count_count !== 'number' || row.count_count === 0) continue;
-        if (!Number.isSafeInteger(row.count_count) || row.count_count < 1 || typeof row.avg_value !== 'number' || !Number.isFinite(row.avg_value)) throw new Error('Langfuse returned invalid aggregate values.');
         // Never keep names, descriptions, arbitrary metadata, record IDs or raw scores.
         // A hash identifies an experiment without importing its potentially sensitive name.
         const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(e.id));
         const experiment = [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
-        results.push({ level: m.level, kind: m.kind, task: m.task, scope: m.task, model, metric: m.metric,
-          value: row.avg_value, samples: row.count_count, higherIsBetter: m.higherIsBetter, source: `Langfuse experiment ${experiment}` });
+        for (const { mapping: m, model } of group) {
+          const row: unknown = metrics.data.find(row => object(row) && row.name === m.metric);
+          if (!object(row) || typeof row.count_count !== 'number' || row.count_count === 0) continue;
+          if (!Number.isSafeInteger(row.count_count) || row.count_count < 1 || typeof row.avg_value !== 'number' || !Number.isFinite(row.avg_value)) throw new Error('Langfuse returned invalid aggregate values.');
+          results.push({ level: m.level, kind: m.kind, task: m.task, scope: m.task, model, metric: m.metric,
+            value: row.avg_value, samples: row.count_count, higherIsBetter: m.higherIsBetter, source: `Langfuse experiment ${experiment}` });
+        }
       }
     }
     cursor = object(page.meta) && typeof page.meta.cursor === 'string' ? page.meta.cursor : '';

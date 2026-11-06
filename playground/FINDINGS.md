@@ -2,6 +2,40 @@
 
 Dated observations from using OpenMerit as Sahra Health, newest release first. Each entry says what we ran, what happened and what a customer would expect.
 
+## Published 0.3.10: approved mappings blocked by Metrics quota (6 Nov 2026)
+
+Installed the exact registry release and upgraded the isolated Claude setup;
+installation and connected status passed with instruction version 0.3.10. The
+first doctor request reported the service unreachable despite connected status;
+an unchanged rerun passed all checks, including MCP connectivity. The first
+failure's cause is unverified; this is not a clean first-attempt install pass.
+
+The owner approved four saved mappings (existing presence score, exact clinical
+quality, USD and seconds) and the Sonnet/GPT aliases. Configuration succeeded,
+invalidating the one old import while retaining 15 reported aggregates. The
+subsequent sync failed. The authored server diagnostic and a direct aggregate
+endpoint response confirmed HTTP 429, not invalid credentials or missing mappings.
+Langfuse's `Retry-After` was 18,653 seconds, pointing to approximately 22:05 UTC
+on 6 November (02:05 Dubai on 7 November). No new import or reranking is claimed.
+No application model changed and no Langfuse record was deleted.
+
+The day's 29 experiment headers contain 27 mapped coding experiments. The old
+importer needs 108 metric reads for these four mappings; grouped score-name reads
+need 27. These are request-count calculations over real headers, not evidence
+that the grouped query succeeded live. Langfuse's Metrics limits are shared across
+the organization and can be hourly or daily. A one-minute retry message was wrong.
+
+Candidate server changes group mapped scores within each experiment/trace role,
+retain exact attribution, and persist the upstream cooldown. Local regression
+tests reproduce the old quota failure and the incorrect retry message; grouped
+quality/cost/time import and cooldown denial now pass. Live grouped import and
+measured reranking remain unverified until the upstream quota resets.
+
+The latest OpenRouter cumulative usage read was USD 37.256949764. Counting the
+previous USD 10.0077634 Team list-price equivalent conservatively leaves USD
+2.735286836 under the cap. Account-wide changes since the previous checkpoint
+are not attributed to this work. No additional model runs were started here.
+
 ## Harder coding controls and published 0.3.9 readiness (6 Nov 2026)
 
 Used registry `openmerit@0.3.9`, not linked source. Fresh Claude sessions passed
