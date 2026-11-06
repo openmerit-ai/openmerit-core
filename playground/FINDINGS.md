@@ -2,6 +2,43 @@
 
 Dated observations from using OpenMerit as Sahra Health, newest release first. Each entry says what we ran, what happened and what a customer would expect.
 
+## Invite-only gate: published 0.3.8 and candidate worktree repair (6 Nov 2026)
+
+Installed exact registry package `openmerit@0.3.8` and refreshed the lockfile.
+Downloaded tarball SHA-1 `c4aa6c4a6e92cd951e911bd7068574623341818e` and
+SHA-512 matched registry metadata. The installed package metadata, instruction
+bundle and close-the-loop guide matched those tarball files byte for byte.
+The customer project's typecheck and all 14 deterministic tests passed.
+
+The remaining worktree setup failure is version-dependent: Claude Code 2.1.63
+introduced shared project configuration across git worktrees. Our older global
+Claude 2.1.7 uses this worktree's root; pinned Claude 2.1.318 uses the main
+checkout root. The candidate 0.3.9 installer follows the active CLI's version.
+Its public-CLI regression detects an existing unowned MCP entry at the expected
+scope for 2.1.62, 2.1.63 and 2.1.318; the 2.1.63 case failed before the fix.
+No existing MCP entries were migrated or deleted.
+
+Operator-side verification used that candidate installer, not the published
+0.3.8 installer, with the real pinned Claude and an isolated Claude configuration.
+Install, `status --check` and `doctor` passed; Claude's own `mcp list` found Scout
+connected. A packed 0.3.9 candidate also reported installed/matching/connected.
+No shared Claude login or the other checkout's files were changed.
+
+Three fresh Claude sessions then used normal MCP discovery, **without an
+explicit MCP configuration override**. Each loaded the installed Scout skill,
+requested `sync: "langfuse"`, sent no manual results and received one structured
+coding recommendation. Conversations: `8c52f113-b702-4cac-8103-8c1605116480`,
+`2a57f770-6a88-4808-8b4a-d28fac8a4077`, and
+`c6c492d0-86fa-4725-84df-9993b30e76f9`. These sessions reported USD 2.2240298
+list-price equivalent on Team, not an independently verified cash charge.
+
+This closes the focused default-discovery check on the candidate installer,
+not clean published 0.3.9 acceptance or a complete release-loop pass. Sync can
+use its ten-minute cache, and the account still has mixed historical reported
+and connector-imported evidence. No new claim comparison ran, so new comparative
+regret is **not measurable**. Readiness-path acceptance, harder comparisons,
+scoped cleanup/recovery and two full published-release passes remain open.
+
 ## Invite-only gate: fresh-agent aggregate refresh (6 Nov 2026, candidate instructions)
 
 The owner completed Anthropic sign-in for the isolated Claude configuration.
