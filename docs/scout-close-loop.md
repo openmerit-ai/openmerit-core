@@ -28,13 +28,12 @@ Each recommended model names an exact endpoint and provider model ID.
 
 ## Measure with your own evals
 
-**Eval-readiness and evidence guidance — npm 0.3.7 release preparation:** this
+**Eval-readiness and evidence guidance — npm 0.3.7:** this
 package adds the readiness and cleanup workflow below to the installed Scout
 skill. Existing npm 0.3.6 instructions cover measuring and aggregate reporting,
 but do not yet prescribe all three readiness paths or an evidence-first cleanup
-record. Registry publication is separate from these source changes. This is
-guidance for the customer's coding agent, not an automated eval runner, platform
-provisioner or deletion service.
+record. This is guidance for the customer's coding agent, not an automated eval
+runner, platform provisioner or deletion service.
 
 ### Choose the readiness path
 
@@ -299,6 +298,18 @@ returned five structured tasks each, reused the measured coding result without
 resending it and retained the one-sample caveat. This focused check does not
 establish fresh-coding-agent usability; full fresh-agent and two-release
 acceptance remain open.
+
+**npm 0.3.8 release preparation (unreleased guidance):** when your project records a confirmed
+Langfuse connection and mappings, the coding agent should request aggregate sync
+on its first consultation and before a final model decision. This refresh reads
+Langfuse aggregates and updates Scout's cache; it does not execute candidates or
+create customer-platform records, so it does not require new model-spend or
+platform-write approval. Do not retype old measurements from project notes in
+place of refreshing the connection. If sync fails, disclose the failure and
+distinguish retained cached evidence from a fresh import. A tracing key in the
+application does not establish that Scout is connected: check connection status
+before proposing another setup. This guidance does not make the server sync
+implicitly; the agent still requests it through the existing command or tool.
 
 Click **Sync aggregates**, or request a fresh recommendation with:
 

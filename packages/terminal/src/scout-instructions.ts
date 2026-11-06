@@ -160,11 +160,20 @@ A separate trusted MCP connection with the management key exposes
 \`scout_connection\` (status/configure/sync/disconnect/clear). For configure, keys
 must come from client-controlled HTTP headers outside model context; if the
 client cannot do this securely, use protected CLI input or the web UI instead.
-After they confirm connection and score/model mappings, call \`scout_models\` with
-\`sync: "langfuse"\` to refresh aggregate measurements before recommending. The CLI
-equivalent is \`openmerit scout --conversation <id> --sync langfuse\`. Never read
-trace bodies to work around missing mappings or untagged runs; use the aggregate
-report path instead. Results are stored per user, used in new conversations and
+Once the user has confirmed the connection and score/model mappings (including
+a connection already recorded in the project), call \`scout_models\` with
+\`sync: "langfuse"\` on the first consultation and before a final model decision.
+The CLI equivalent is \`openmerit scout --conversation <id> --sync langfuse\`.
+Refreshing that approved connection reads aggregates and updates Scout's cache;
+it does not run candidates or create/change records in Langfuse. Do not ask for
+new spend or platform-write approval just to refresh it. Do not reconstruct and
+re-report old measurements from project notes instead of using the connection.
+If connection status is unknown, check \`openmerit connect langfuse --status\`
+before proposing setup; application tracing keys alone do not prove a Scout
+connection. If sync fails, disclose the failure and any use of cached evidence;
+do not describe it as fresh. Never read trace bodies to work around missing
+mappings or untagged runs; use the aggregate report path for those gaps instead.
+Results are stored per user, used in new conversations and
 expire after 90 days. Disconnect deletes the Viewer key and imported aggregates;
 Delete all evaluation data also deletes manually reported aggregates. Obtain
 consent before deleting: headless CLI requires --yes, MCP requires confirm: true.

@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.3.7 — 2026-11-06 (release preparation)
+## 0.3.8 — 2026-11-06 (release preparation)
+
+- The Scout skill tells coding agents to refresh an already approved Langfuse connection on the first consultation and before a final model decision, without asking for new candidate-spend or customer-platform-write approval for that read. Old project notes are not a substitute for connector refresh; failed sync must be disclosed as stale evidence. The server still requires an explicit sync request, and candidate runs, platform writes and deletion still require approval.
+
+## 0.3.7 — 2026-11-06
 
 - The installed Scout skill distinguishes no eval setup, insufficient evals and suitable existing evals. Langfuse is the default customer-owned platform suggestion, not a requirement; local/custom evals can report aggregates. The customer's coding agent implements evals, while OpenMerit remains Viewer-only. Instructions require a local Markdown decision record before proposing explicitly approved cleanup of newly created comparison runs; existing records and reusable fixtures/definitions stay intact. This adds guidance, not an eval runner, automatic deletion or another platform connector. Fresh-agent acceptance remains a release gate.
 
