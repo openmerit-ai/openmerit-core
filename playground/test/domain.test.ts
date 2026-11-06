@@ -102,3 +102,23 @@ test("a denial needs a known denial code", () => {
   assert.ok(remittance.violations.some((item) => item.includes("A1") && item.includes("denial code")));
   assert.ok(remittance.violations.some((item) => item.includes("A3") && item.includes("no decision")));
 });
+
+test("triage metrics score calibration and ranking against the fixture labels", async () => {
+  const { needsReviewLabel, triageMetrics } = await import("../src/triage.ts");
+  const clean = CLAIM_FIXTURES.find((item) => item.name === "clean-gp-visit")!, reviewOnly = CLAIM_FIXTURES.find((item) => item.name === "justified-visit-at-upcoding-provider")!;
+  assert.equal(needsReviewLabel(clean.expected), false);
+  assert.equal(needsReviewLabel(reviewOnly.expected), true, "every line pays, but fraud must not recommend pay");
+  const at = (p: number | null) => ({ needsReview: p, model: "m", startedAt: "t", latencyMs: 1, usage: { inputTokens: 1, outputTokens: 0, costUsd: 0.001 } });
+  // Positives 0.9 and 0.4, negatives 0.4 and 0.1, one failed call: pairs 1 + 1 + 0.5 + 1 = 3.5 of 4.
+  const metrics = triageMetrics([
+    { label: true, triage: at(0.9) }, { label: true, triage: at(0.4) },
+    { label: false, triage: at(0.4) }, { label: false, triage: at(0.1) }, { label: true, triage: at(null) },
+  ]);
+  assert.equal(metrics.scored, 4);
+  assert.equal(metrics.failed, 1);
+  assert.equal(metrics.auc, 0.875);
+  assert.equal(metrics.accuracy, 0.75);
+  assert.equal(metrics.missedReviews, 1);
+  assert.ok(Math.abs((metrics.brier ?? 0) - (0.01 + 0.36 + 0.16 + 0.01) / 4) < 1e-12);
+  assert.ok(Math.abs(metrics.costUsd - 0.005) < 1e-12);
+});

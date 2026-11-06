@@ -1,0 +1,9 @@
+Sahra Health (fictional Dubai health insurer) needs a model to triage outpatient claims before its claim-review agents run.
+
+Task: for each claim, answer one yes/no question as a calibrated probability: "does this claim need review before payment?" (yes when any line should be denied or reduced, or the claim looks like a duplicate, billing mismatch, upcoding, unbundling, unsupported service, ineligible member, missing referral or prior approval, excluded service, or pre-existing condition in its waiting period).
+Input per claim: a JSON state of roughly 2,000-4,000 tokens: plan rules, the eClaimLink claim (ICD-10-CM diagnoses, CPT and drug codes, AED amounts), a free-text itemized bill (English, sometimes Arabic), the member record, the member's claim history and provider statistics.
+Output: one probability; no free text, no tool calls.
+Volume: about 1,000 claims a month. Priority: calibration and not missing claims that need review (a missed review can mean a wrong payment), then cost and latency. It runs in shadow mode first; a person approves every payment either way.
+We already call OpenRouter (chat and its Decisions API), so OpenRouter decision models are in reach; chat models used as classifiers are also acceptable candidates.
+
+Data policy: health data must stay in the UAE (Federal Law No. 2 of 2019, Art. 13). Any model that receives claim content must run in the UAE or under a recorded exception; unknown processing location counts as outside the UAE. This project runs only on fictional data under a recorded residency gap, so rank candidates under that recorded-gap exception and say where each endpoint processes data.

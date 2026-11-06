@@ -4,6 +4,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import type { Accumulators } from "./domain/adjudicate.ts";
+import type { Triage } from "./triage.ts";
 import { findActivity } from "./domain/codes.ts";
 import type {
   AdjudicationLine,
@@ -34,6 +35,8 @@ export interface ClaimRecord {
   coding: { findings: CodingFinding[]; summary: string } | null;
   adjudication: { lines: AdjudicationLine[]; totals: { gross: Fils; patientShare: Fils; payment: Fils }; summary: string } | null;
   fraud: { signals: FraudSignal[]; score: number; recommendation: "pay" | "review" | "hold"; summary: string } | null;
+  /** Shadow-mode triage by a decision model, recorded before the agents run. */
+  triage: Triage | null;
   approval: Approval | null;
   payment: { amount: Fils; reference: string; at: string } | null;
   error: string | null;
@@ -63,7 +66,7 @@ export const ledgerName = (runId?: string | null): string => runId || "sahra";
 
 type Row = Record<string, SqlStorageValue>;
 
-const JSON_COLUMNS = ["claim", "extraction", "coding", "adjudication", "fraud", "approval", "payment"] as const;
+const JSON_COLUMNS = ["claim", "extraction", "coding", "adjudication", "fraud", "approval", "payment", "triage"] as const;
 
 function parse<T>(value: SqlStorageValue | undefined): T | null {
   return typeof value === "string" ? (JSON.parse(value) as T) : null;
@@ -81,9 +84,11 @@ export class Ledger extends DurableObject<Env> {
         id TEXT PRIMARY KEY, member_id TEXT, provider_id TEXT NOT NULL, state TEXT NOT NULL,
         received_at TEXT NOT NULL, run_id TEXT, xml TEXT NOT NULL, bill TEXT NOT NULL,
         claim TEXT NOT NULL, extraction TEXT, coding TEXT, adjudication TEXT, fraud TEXT,
-        approval TEXT, payment TEXT, error TEXT
+        approval TEXT, payment TEXT, error TEXT, triage TEXT
       );
     `);
+    // Ledgers created before triage get its column.
+    if (!ctx.storage.sql.exec<Row>("SELECT name FROM pragma_table_info('claims') WHERE name = 'triage'").toArray().length) ctx.storage.sql.exec("ALTER TABLE claims ADD COLUMN triage TEXT");
   }
 
   reset(): void {
@@ -232,6 +237,11 @@ export class Ledger extends DurableObject<Env> {
 
   setFraud(id: string, fraud: NonNullable<ClaimRecord["fraud"]>): ClaimRecord {
     return this.update(id, ["adjudicated", "fraud_checked"], "fraud_checked", "fraud", fraud);
+  }
+
+  /** Triage does not change the claim's state. */
+  setTriage(id: string, triage: Triage): void {
+    this.ctx.storage.sql.exec("UPDATE claims SET triage = ? WHERE id = ?", JSON.stringify(triage), id);
   }
 
   requestApproval(id: string): ClaimRecord {

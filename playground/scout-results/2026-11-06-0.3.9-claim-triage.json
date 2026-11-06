@@ -1,0 +1,347 @@
+{
+  "conversationId": "81eecb47-550d-4d9f-8ce6-8f17c1502d14",
+  "status": "recommended",
+  "brief": {
+    "input": {
+      "text": "2,000–4,000-token JSON claim state with plan rules, eClaimLink codes and AED amounts, English/occasional Arabic bill, member history and provider statistics; fictional data",
+      "source": "stated"
+    },
+    "work": {
+      "text": "Classify whether any claim issue warrants review before payment; calibrate probability",
+      "source": "stated"
+    },
+    "output": {
+      "text": "One probability, no free text or tool calls",
+      "source": "stated"
+    },
+    "criteria": {
+      "text": "Prioritize calibration and recall of review-needed claims, then cost and latency; shadow mode first, person approves every payment; ~1,000 claims/month",
+      "source": "stated"
+    },
+    "constraints": {
+      "text": "Health data UAE residency or recorded exception; unknown location treated outside UAE; fictional data only under recorded residency-gap exception; identify each endpoint's processing location",
+      "source": "stated"
+    }
+  },
+  "assumptions": [
+    "A single decision/classification call can evaluate the supplied state; no separate preprocessing model.",
+    "For comparison use 3,000 input tokens and 10 output tokens per claim; calibrate thresholds on labelled claims."
+  ],
+  "catalogueVersion": "ce269f4de509b0c9495ae173ce6e531f",
+  "tasks": [
+    {
+      "title": "Claim review probability",
+      "work": "Assess the whole claim against rules and history and emit a calibrated probability that human review is needed.",
+      "input": "JSON claim state plus English or Arabic bill",
+      "output": "One numeric probability",
+      "summary": "Perplexity: Decider Flash V1.2 ranks first in this shortlist. Native probability-oriented decision model; inexpensive comparator for shadow-mode screening. Quality inferred from decision leaderboards, not Sahra claims. Generic leaderboards cannot establish Arabic-bill recall or UAE processing; endpoint location unverified.",
+      "workload": {
+        "inputTokens": 3000,
+        "outputTokens": 10
+      },
+      "priority": "cost",
+      "qualityBar": 60,
+      "models": [
+        {
+          "rank": 1,
+          "id": "perplexity/pplx-decider-flash-v1.2",
+          "name": "Perplexity: Decider Flash V1.2",
+          "provider": "Perplexity",
+          "rationale": "Native probability-oriented decision model; inexpensive comparator for shadow-mode screening. Quality inferred from decision leaderboards, not Sahra claims.",
+          "watchOut": "Generic leaderboards cannot establish Arabic-bill recall or UAE processing; endpoint location unverified.",
+          "quality": {
+            "score": 60,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "jevbench:capability",
+                "name": "JevBench capability (v1.8.7)",
+                "score": 61.73656759548264,
+                "rank": 154,
+                "of": 283
+              },
+              {
+                "benchmark": "analysis:decision-index",
+                "name": "Artificial Analysis · Decision Index",
+                "score": 50.153108044043115,
+                "rank": 33,
+                "of": 38
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 0.03,
+            "route": "OpenRouter",
+            "endpointId": "catalogue:openrouter:perplexity/pplx-decider-flash-v1.2",
+            "providerModelId": "perplexity/pplx-decider-flash-v1.2",
+            "inputPerMillion": 0.01,
+            "outputPerMillion": 0,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.01
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 0
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-10-16",
+            "ageDays": 21
+          },
+          "best": [
+            "cost",
+            "recency"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "inception/mercury-decide",
+          "name": "Mercury Decide",
+          "provider": "Inception",
+          "rationale": "Decision model suitable for single-score output; leaderboard-based estimate only.",
+          "watchOut": "OpenRouter route retires 2026-11-08; processing location unverified.",
+          "quality": {
+            "score": 61,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "jevbench:capability",
+                "name": "JevBench capability (v1.8.7)",
+                "score": 73.62521498320774,
+                "rank": 69,
+                "of": 283
+              },
+              {
+                "benchmark": "analysis:decision-index",
+                "name": "Artificial Analysis · Decision Index",
+                "score": 52.72371648704283,
+                "rank": 29,
+                "of": 38
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 0.06,
+            "route": "OpenRouter",
+            "endpointId": "catalogue:openrouter:inception/mercury-decide",
+            "providerModelId": "inception/mercury-decide",
+            "inputPerMillion": 0.02,
+            "outputPerMillion": 0,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.02
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 0
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-09-30",
+            "ageDays": 37
+          },
+          "best": []
+        },
+        {
+          "rank": 3,
+          "id": "perplexity/pplx-decider-v1.2",
+          "name": "Perplexity: Decider V1.2",
+          "provider": "Perplexity",
+          "rationale": "Native decision output with stronger generic calibration-related standing than its Flash variant; unmeasured on Sahra claims.",
+          "watchOut": "Generic decision tasks do not establish claim-specific recall or endpoint residency.",
+          "quality": {
+            "score": 68,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "jevbench:capability",
+                "name": "JevBench capability (v1.8.7)",
+                "score": 80.83996247579987,
+                "rank": 31,
+                "of": 283
+              },
+              {
+                "benchmark": "analysis:decision-index",
+                "name": "Artificial Analysis · Decision Index",
+                "score": 56.17404470463419,
+                "rank": 23,
+                "of": 38
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 0.06,
+            "route": "OpenRouter",
+            "endpointId": "catalogue:openrouter:perplexity/pplx-decider-v1.2",
+            "providerModelId": "perplexity/pplx-decider-v1.2",
+            "inputPerMillion": 0.02,
+            "outputPerMillion": 0,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.02
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 0
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-10-16",
+            "ageDays": 21
+          },
+          "best": [
+            "recency"
+          ]
+        },
+        {
+          "rank": 4,
+          "id": "liquid/d1-ultra",
+          "name": "LiquidAI: d1-ultra",
+          "provider": "Liquid Inference",
+          "rationale": "Decision specialist with strong decision-index standing; unmeasured on Sahra claims.",
+          "watchOut": "Neither claim-specific calibration nor UAE processing has been verified.",
+          "quality": {
+            "score": 72,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "jevbench:capability",
+                "name": "JevBench capability (v1.8.7)",
+                "score": 80.47704277896817,
+                "rank": 32,
+                "of": 283
+              },
+              {
+                "benchmark": "analysis:decision-index",
+                "name": "Artificial Analysis · Decision Index",
+                "score": 65.24809097459318,
+                "rank": 6,
+                "of": 38
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 0.126,
+            "route": "OpenRouter",
+            "endpointId": "catalogue:openrouter:liquid/d1-ultra",
+            "providerModelId": "liquid/d1-ultra",
+            "inputPerMillion": 0.042,
+            "outputPerMillion": 0,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.042
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 0
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-10-15",
+            "ageDays": 22
+          },
+          "best": [
+            "quality"
+          ]
+        },
+        {
+          "rank": 5,
+          "id": "deepseek/deepseek-v4.1-flash",
+          "name": "DeepSeek V4.1 Flash",
+          "provider": "DeepSeek",
+          "rationale": "Chat classifier alternative with medical-domain evidence and numeric-output prompting; not measured on Sahra claims.",
+          "watchOut": "Medical chat ranking does not measure insurance recall or calibration; validate numeric-only responses and processing location.",
+          "quality": {
+            "score": 70,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "arena:industry_medicine_and_healthcare",
+                "name": "Arena · Medicine & healthcare",
+                "score": 0.6578279315588825,
+                "rank": 12,
+                "of": 151
+              },
+              {
+                "benchmark": "arena:factuality:industry_medicine_and_healthcare",
+                "name": "Arena · Factuality: medicine & healthcare",
+                "score": 0.5566656341629344,
+                "rank": 7,
+                "of": 83
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 0.1587,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:deepseek/deepseek-v4.1-flash",
+            "providerModelId": "deepseek/deepseek-v4.1-flash",
+            "inputPerMillion": 0.051,
+            "outputPerMillion": 0.5670000000000001,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.051
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 0.5670000000000001
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-09-10",
+            "ageDays": 57
+          },
+          "best": []
+        }
+      ],
+      "evaluation": {
+        "checks": [
+          {
+            "level": "task",
+            "metric": "Recall at fixed review capacity, Brier score, reliability curve and numeric-only valid rate",
+            "how": "Add each candidate as a run of the existing labelled claim eval; stratify Arabic bills, rare exclusions, waiting periods and duplicates, tune thresholds on separate labels."
+          },
+          {
+            "level": "environment",
+            "metric": "Wrong payments escaping human review and workload at the selected threshold",
+            "how": "In shadow mode compare each model's scored claims to reviewers' existing decisions and eventual approved payments, holding fixtures, prompts and controls fixed."
+          }
+        ],
+        "samples": 500,
+        "stopEarly": "Stop a candidate if its confidence interval for missed-review rate clearly exceeds the acceptable threshold or it persistently fails numeric-only output; if all reach 100%, use harder labelled boundary and rare-failure examples, since the eval cannot distinguish quality."
+      }
+    }
+  ],
+  "next": "Present each task's shortlist with its trade-offs and its evaluation, and let the user choose. Offer to measure the candidates with the project's existing evals as the evaluation describes, then report the aggregate results with this conversationId and results. To refine, call scout_models with this conversationId and a prompt."
+}

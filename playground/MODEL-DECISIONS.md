@@ -2,6 +2,34 @@
 
 Every application model choice goes through Scout first (see `AGENTS.md` and `POLICY.md`). Each entry records the task text, the policy given, what Scout recommended, what we chose, and how residency was handled. Raw Scout responses are in `scout-results/`.
 
+## 6 Nov 2026: claim triage decision model, shadow mode (openmerit 0.3.9)
+
+**Task and policy:** `scout-tasks/claim-triage.txt`. One calibrated probability per claim, "does this claim need review before payment?", from a JSON state of plan rules, the claim, the itemized bill, member, history and provider statistics. Calibration and not missing reviews come first, then cost. `existing-first` with no endpoint IDs returns no models (see 4 Nov), so we asked with `--all-endpoints` under the recorded residency gap. Conversation `81eecb47-550d-4d9f-8ce6-8f17c1502d14`, catalogue `ce269f4d…`.
+
+**Scout recommended** (`scout-results/2026-11-06-0.3.9-claim-triage.json`), with `priority: cost` and quality bar 60:
+
+1. `perplexity/pplx-decider-flash-v1.2` (OpenRouter Decisions), USD 0.03 per 1,000 claims
+2. `inception/mercury-decide`, flagged "OpenRouter route retires 2026-11-08"
+3. `perplexity/pplx-decider-v1.2`
+4. `liquid/d1-ultra`
+5. `deepseek/deepseek-v4.1-flash` (chat classifier)
+
+**Measured** on the 31 fixture claims (17 need review, 14 clean), one round each, shadow mode, run IDs `run-2026-11-06T15-56-25-998Z`, `…-29-059Z`, `…-32-108Z`:
+
+| Scout rank | Model | AUC | Brier | Missed at 0.5 | Clean claims flagged at the threshold that catches every review | Failed calls | Median latency |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Decider Flash v1.2 | 0.840 | 0.220 | 10 | 11 of 14 | 0 | 0.4 s |
+| 3 | Decider v1.2 | **0.975** | **0.059** | 2 | **5 of 14** | 2 (429 capacity) | 1.2 s |
+| 4 | d1-ultra | 0.958 | 0.082 | 3 | 7 of 14 | 0 | 1.5 s |
+
+Skipped: `mercury-decide` (its route retires in two days) and the DeepSeek chat classifier (the triage client calls only the Decisions API). Every model missed `deleted-diagnosis-code`, which the deterministic hard rules already catch, so routing on triage must combine both.
+
+**Reported to Scout** (`scout-results/2026-11-06-0.3.9-claim-triage-reported.json`, aggregates only). Scout re-ranked to Decider v1.2, d1-ultra, then unmeasured alternatives, and dropped Flash (`…-after-results.json`).
+
+**Choice:** `perplexity/pplx-decider-v1.2` as `TRIAGE_MODEL`, shadow mode only: it records a probability per claim and changes no routing. One round of 29–31 claims is too little to set a routing threshold; that needs more labelled claims and repeated rounds.
+
+**Residency:** Scout marked every endpoint's processing location as unverified. OpenRouter and Perplexity are an unknown/non-UAE gap, accepted only for the fictional playground data.
+
 ## 6 Nov 2026: harder coding comparison with published openmerit 0.3.9
 
 **Consultation:** reused Scout's recorded coding shortlist and measured-cost pick
