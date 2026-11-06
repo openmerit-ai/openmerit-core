@@ -1,0 +1,1804 @@
+{
+  "conversationId": "e3253de4-fb9e-4287-bb1c-7c2f93da6f0c",
+  "status": "recommended",
+  "brief": {
+    "input": {
+      "text": "Fictional applications, health declarations, structured eClaimLink-style claims, bills, coding lookups, plan rules, member history and provider statistics; ~300 claims/day",
+      "source": "stated"
+    },
+    "work": {
+      "text": "Five Pi Durable agents use JSON-schema tools in loops: enrollment, bill matching, coding review, coverage adjudication, and fraud review",
+      "source": "stated"
+    },
+    "output": {
+      "text": "Eligibility decisions and ICD-10-CM prefixes; bill mismatches; coding findings; per-line pay/deny with codes; fraud signals 0–1 and pay/review/hold; tool-recorded results",
+      "source": "stated"
+    },
+    "criteria": {
+      "text": "Best quality and reliable tool calling above cost; existing Langfuse 14-claim dataset with agent, call and end-to-end scores; two enrollment fixtures; human approves each claim",
+      "source": "stated"
+    },
+    "constraints": {
+      "text": "Endpoints must process health data in UAE; unknown treated outside UAE; fictional data permits non-UAE endpoint as documented residency gap; Cloudflare Workers AI and OpenRouter in use",
+      "source": "stated"
+    }
+  },
+  "assumptions": [
+    "One distinct model per agent, repeated calls share model; no assured UAE-processing endpoint until verified per route.",
+    "Quality estimates based on public benchmarks pending the existing Langfuse experiments; human approval reduces but does not eliminate adjudication harm."
+  ],
+  "catalogueVersion": "5207770f28b2c7ccf48e9106e2b4ba9b",
+  "tasks": [
+    {
+      "title": "Enrollment",
+      "work": "Extract chronic condition ICD-10-CM category prefixes and record eligibility via schema tool.",
+      "input": "Application, free-text declaration and eligibility tool results",
+      "output": "ICD-10-CM prefixes and recorded eligibility",
+      "agent": "Enrollment",
+      "callsPerRun": 4,
+      "summary": "Start with Opus 5 for category extraction, then validate eligibility on existing fixtures.",
+      "workload": {
+        "inputTokens": 3500,
+        "outputTokens": 350
+      },
+      "priority": "quality",
+      "qualityBar": 78,
+      "models": [
+        {
+          "rank": 1,
+          "id": "anthropic/claude-opus-5",
+          "name": "Claude Opus 5",
+          "provider": "Anthropic",
+          "rationale": "Top category coding and agent evidence.",
+          "watchOut": null,
+          "quality": {
+            "score": 94,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.6357,
+                "rank": 1,
+                "of": 79
+              },
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.662,
+                "rank": 7,
+                "of": 14
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 26.25,
+            "usdPer1kAgentRuns": 105,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5",
+            "providerModelId": "anthropic/claude-opus-5",
+            "inputPerMillion": 5,
+            "outputPerMillion": 25,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 5
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 25
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-24",
+            "ageDays": 105
+          },
+          "best": [
+            "quality"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "provider": "Google",
+          "rationale": "Strong coding and tools.",
+          "watchOut": null,
+          "quality": {
+            "score": 93,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.58801,
+                "rank": 3,
+                "of": 79
+              },
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.746,
+                "rank": 2,
+                "of": 14
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 10.5,
+            "usdPer1kAgentRuns": 42,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-4-argon",
+            "providerModelId": "google/gemini-4-argon",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 45.4,
+            "firstTokenSeconds": 40.7,
+            "tokensPerSecond": 73,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-13",
+            "ageDays": 24
+          },
+          "best": [
+            "cost",
+            "recency"
+          ]
+        },
+        {
+          "rank": 3,
+          "id": "anthropic/claude-opus-5.5",
+          "name": "Claude Opus 5.5",
+          "provider": "Anthropic",
+          "rationale": "Excellent tool use and clinical text.",
+          "watchOut": null,
+          "quality": {
+            "score": 89,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.773,
+                "rank": 1,
+                "of": 14
+              },
+              {
+                "benchmark": "vals:medscribe",
+                "name": "MedScribe · Vals AI",
+                "score": 0.9143000000000001,
+                "rank": 1,
+                "of": 81
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 21,
+            "usdPer1kAgentRuns": 84,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5.5",
+            "providerModelId": "anthropic/claude-opus-5.5",
+            "inputPerMillion": 4,
+            "outputPerMillion": 20,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 4
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 20
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 40.4,
+            "firstTokenSeconds": 37.1,
+            "tokensPerSecond": 107,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-22",
+            "ageDays": 45
+          },
+          "best": []
+        },
+        {
+          "rank": 4,
+          "id": "anthropic/claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "provider": "Anthropic",
+          "rationale": "Clinical text and tools.",
+          "watchOut": null,
+          "quality": {
+            "score": 87,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.687,
+                "rank": 6,
+                "of": 14
+              },
+              {
+                "benchmark": "vals:medscribe",
+                "name": "MedScribe · Vals AI",
+                "score": 0.91101,
+                "rank": 3,
+                "of": 81
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 10.5,
+            "usdPer1kAgentRuns": 42,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5.5",
+            "providerModelId": "anthropic/claude-sonnet-5.5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 16,
+            "firstTokenSeconds": 13.5,
+            "tokensPerSecond": 138,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-28",
+            "ageDays": 39
+          },
+          "best": [
+            "cost"
+          ]
+        },
+        {
+          "rank": 5,
+          "id": "anthropic/claude-fable-5.1",
+          "name": "Claude Fable 5.1",
+          "provider": "Anthropic",
+          "rationale": "Coding and tools.",
+          "watchOut": null,
+          "quality": {
+            "score": 86,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.74,
+                "rank": 3,
+                "of": 14
+              },
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.53509,
+                "rank": 8,
+                "of": 79
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 52.5,
+            "usdPer1kAgentRuns": 210,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-fable-5.1",
+            "providerModelId": "anthropic/claude-fable-5.1",
+            "inputPerMillion": 10,
+            "outputPerMillion": 50,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 10
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 50
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 20.5,
+            "firstTokenSeconds": 16.5,
+            "tokensPerSecond": 86,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-08-31",
+            "ageDays": 67
+          },
+          "best": []
+        }
+      ],
+      "evaluation": {
+        "checks": [
+          {
+            "level": "task",
+            "metric": "condition prefix accuracy and rejected tool calls",
+            "how": "Score the two labelled enrollment fixtures and existing traces."
+          },
+          {
+            "level": "agent",
+            "metric": "recorded eligibility correctness",
+            "how": "Compare agent result against fixture label holding tools fixed."
+          }
+        ],
+        "samples": 2,
+        "stopEarly": "Stop on repeated schema errors; if all reach 100%, this eval cannot separate quality: add labelled ambiguous declarations and rare errors."
+      }
+    },
+    {
+      "title": "Claims intake",
+      "work": "Match structured claim activities against itemized bill, reconcile totals and record mismatches.",
+      "input": "Structured claim and free-text bill",
+      "output": "Matched lines, totals, mismatches and tool record",
+      "agent": "Claims intake",
+      "callsPerRun": 3,
+      "summary": "Start with Gemini 4 Argon for bill matching, comparing to Opus 5 on existing mismatch labels.",
+      "workload": {
+        "inputTokens": 5500,
+        "outputTokens": 450
+      },
+      "priority": "quality",
+      "qualityBar": 80,
+      "models": [
+        {
+          "rank": 1,
+          "id": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "provider": "Google",
+          "rationale": "Strong RCM, analysis and agent evidence.",
+          "watchOut": null,
+          "quality": {
+            "score": 94,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.914878,
+                "rank": 2,
+                "of": 20
+              },
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.746,
+                "rank": 2,
+                "of": 14
+              },
+              {
+                "benchmark": "livebench:data_analysis",
+                "name": "LiveBench 2.0 · Data Analysis",
+                "score": 0.852,
+                "rank": 1,
+                "of": 27
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 15.5,
+            "usdPer1kAgentRuns": 46.5,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-4-argon",
+            "providerModelId": "google/gemini-4-argon",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 46.8,
+            "firstTokenSeconds": 40.7,
+            "tokensPerSecond": 73,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-13",
+            "ageDays": 24
+          },
+          "best": [
+            "quality",
+            "cost",
+            "recency"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "anthropic/claude-opus-5",
+          "name": "Claude Opus 5",
+          "provider": "Anthropic",
+          "rationale": "Leads RCM benchmark.",
+          "watchOut": null,
+          "quality": {
+            "score": 93,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.926789,
+                "rank": 1,
+                "of": 20
+              },
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.662,
+                "rank": 7,
+                "of": 14
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 38.75,
+            "usdPer1kAgentRuns": 116.25,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5",
+            "providerModelId": "anthropic/claude-opus-5",
+            "inputPerMillion": 5,
+            "outputPerMillion": 25,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 5
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 25
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-24",
+            "ageDays": 105
+          },
+          "best": []
+        },
+        {
+          "rank": 3,
+          "id": "anthropic/claude-opus-5.5",
+          "name": "Claude Opus 5.5",
+          "provider": "Anthropic",
+          "rationale": "Strong enterprise tools.",
+          "watchOut": null,
+          "quality": {
+            "score": 90,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.9013890000000001,
+                "rank": 7,
+                "of": 20
+              },
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.773,
+                "rank": 1,
+                "of": 14
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 31,
+            "usdPer1kAgentRuns": 93,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5.5",
+            "providerModelId": "anthropic/claude-opus-5.5",
+            "inputPerMillion": 4,
+            "outputPerMillion": 20,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 4
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 20
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 41.3,
+            "firstTokenSeconds": 37.1,
+            "tokensPerSecond": 107,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-22",
+            "ageDays": 45
+          },
+          "best": []
+        },
+        {
+          "rank": 4,
+          "id": "anthropic/claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "provider": "Anthropic",
+          "rationale": "Strong RCM and tools.",
+          "watchOut": null,
+          "quality": {
+            "score": 89,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.910501,
+                "rank": 5,
+                "of": 20
+              },
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.687,
+                "rank": 6,
+                "of": 14
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 15.5,
+            "usdPer1kAgentRuns": 46.5,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5.5",
+            "providerModelId": "anthropic/claude-sonnet-5.5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 16.7,
+            "firstTokenSeconds": 13.5,
+            "tokensPerSecond": 138,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-28",
+            "ageDays": 39
+          },
+          "best": [
+            "cost"
+          ]
+        },
+        {
+          "rank": 5,
+          "id": "openai/gpt-5.6-sol",
+          "name": "GPT-5.6 Sol",
+          "provider": "OpenAI",
+          "rationale": "Good RCM and workflow proxy.",
+          "watchOut": null,
+          "quality": {
+            "score": 86,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.9121210000000001,
+                "rank": 4,
+                "of": 20
+              },
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.647,
+                "rank": 8,
+                "of": 14
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 31,
+            "usdPer1kAgentRuns": 93,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:openai/gpt-5.6-sol",
+            "providerModelId": "openai/gpt-5.6-sol",
+            "inputPerMillion": 4,
+            "outputPerMillion": 20,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 4
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 20
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-09",
+            "ageDays": 120
+          },
+          "best": []
+        }
+      ],
+      "evaluation": {
+        "checks": [
+          {
+            "level": "task",
+            "metric": "line matching, totals and rejected tool calls",
+            "how": "Use Langfuse mismatch labels and tool-call traces."
+          },
+          {
+            "level": "agent",
+            "metric": "mismatch precision/recall",
+            "how": "Compare 14 labelled claims with only intake model swapped."
+          },
+          {
+            "level": "environment",
+            "metric": "claim correctness and review load",
+            "how": "Use existing end-to-end labels keeping other agents fixed."
+          }
+        ],
+        "samples": 14,
+        "stopEarly": "Stop on repeated missed mismatches; if all achieve 100%, eval cannot separate quality: add split and duplicate bill lines."
+      }
+    },
+    {
+      "title": "Coding review",
+      "work": "Consult ICD-10-CM/CPT lookup tools and flag mismatches, unbundling and E/M upcoding.",
+      "input": "Claim codes, lookup tool results",
+      "output": "Recorded coding findings",
+      "agent": "Coding review",
+      "callsPerRun": 4,
+      "summary": "Start with Opus 5 for coding findings, using lookup tools as authoritative.",
+      "workload": {
+        "inputTokens": 5000,
+        "outputTokens": 450
+      },
+      "priority": "quality",
+      "qualityBar": 85,
+      "models": [
+        {
+          "rank": 1,
+          "id": "anthropic/claude-opus-5",
+          "name": "Claude Opus 5",
+          "provider": "Anthropic",
+          "rationale": "Leading medical coding and RCM with agent evidence.",
+          "watchOut": null,
+          "quality": {
+            "score": 96,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.6357,
+                "rank": 1,
+                "of": 79
+              },
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.662,
+                "rank": 7,
+                "of": 14
+              },
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.926789,
+                "rank": 1,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 36.25,
+            "usdPer1kAgentRuns": 145,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5",
+            "providerModelId": "anthropic/claude-opus-5",
+            "inputPerMillion": 5,
+            "outputPerMillion": 25,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 5
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 25
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-24",
+            "ageDays": 105
+          },
+          "best": [
+            "quality"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "provider": "Google",
+          "rationale": "Strong coding and agent evidence.",
+          "watchOut": null,
+          "quality": {
+            "score": 94,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.58801,
+                "rank": 3,
+                "of": 79
+              },
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.746,
+                "rank": 2,
+                "of": 14
+              },
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.914878,
+                "rank": 2,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 14.5,
+            "usdPer1kAgentRuns": 58,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-4-argon",
+            "providerModelId": "google/gemini-4-argon",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 46.8,
+            "firstTokenSeconds": 40.7,
+            "tokensPerSecond": 73,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-13",
+            "ageDays": 24
+          },
+          "best": [
+            "cost",
+            "recency"
+          ]
+        },
+        {
+          "rank": 3,
+          "id": "anthropic/claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "provider": "Anthropic",
+          "rationale": "Strong RCM and coding.",
+          "watchOut": null,
+          "quality": {
+            "score": 89,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.5292,
+                "rank": 12,
+                "of": 79
+              },
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.687,
+                "rank": 6,
+                "of": 14
+              },
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.910501,
+                "rank": 5,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 14.5,
+            "usdPer1kAgentRuns": 58,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5.5",
+            "providerModelId": "anthropic/claude-sonnet-5.5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 16.7,
+            "firstTokenSeconds": 13.5,
+            "tokensPerSecond": 138,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-28",
+            "ageDays": 39
+          },
+          "best": [
+            "cost"
+          ]
+        },
+        {
+          "rank": 4,
+          "id": "anthropic/claude-opus-5.5",
+          "name": "Claude Opus 5.5",
+          "provider": "Anthropic",
+          "rationale": "Strong enterprise tool use.",
+          "watchOut": null,
+          "quality": {
+            "score": 88,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.49796999999999997,
+                "rank": 16,
+                "of": 79
+              },
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.773,
+                "rank": 1,
+                "of": 14
+              },
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.9013890000000001,
+                "rank": 7,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 29,
+            "usdPer1kAgentRuns": 116,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5.5",
+            "providerModelId": "anthropic/claude-opus-5.5",
+            "inputPerMillion": 4,
+            "outputPerMillion": 20,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 4
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 20
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 41.3,
+            "firstTokenSeconds": 37.1,
+            "tokensPerSecond": 107,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-22",
+            "ageDays": 45
+          },
+          "best": []
+        },
+        {
+          "rank": 5,
+          "id": "anthropic/claude-fable-5.1",
+          "name": "Claude Fable 5.1",
+          "provider": "Anthropic",
+          "rationale": "Medical coding and tools.",
+          "watchOut": null,
+          "quality": {
+            "score": 87,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.53509,
+                "rank": 8,
+                "of": 79
+              },
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.74,
+                "rank": 3,
+                "of": 14
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 72.5,
+            "usdPer1kAgentRuns": 290,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-fable-5.1",
+            "providerModelId": "anthropic/claude-fable-5.1",
+            "inputPerMillion": 10,
+            "outputPerMillion": 50,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 10
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 50
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 21.7,
+            "firstTokenSeconds": 16.5,
+            "tokensPerSecond": 86,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-08-31",
+            "ageDays": 67
+          },
+          "best": []
+        }
+      ],
+      "evaluation": {
+        "checks": [
+          {
+            "level": "task",
+            "metric": "lookup accuracy and tool schema acceptance",
+            "how": "Score existing Langfuse call traces."
+          },
+          {
+            "level": "agent",
+            "metric": "coding findings recall and precision",
+            "how": "Compare labelled coding findings with only coding model swapped."
+          },
+          {
+            "level": "environment",
+            "metric": "payment correctness and review load",
+            "how": "Compare existing claim-level labels keeping other models fixed."
+          }
+        ],
+        "samples": 14,
+        "stopEarly": "Stop on repeated missed serious findings; if all reach 100%, eval cannot separate quality: add subtle unbundling and E/M upcoding cases."
+      }
+    },
+    {
+      "title": "Coverage adjudication",
+      "work": "Apply fetched plan rules to each claim line and record pay/deny and denial codes; tool computes amounts.",
+      "input": "Claim lines and plan-rule tool results",
+      "output": "Recorded line decisions and denial codes",
+      "agent": "Coverage adjudication",
+      "callsPerRun": 4,
+      "summary": "Start with Gemini 4 Argon for plan-rule decisions and tool reliability, checking against Opus 5 in line-level evals.",
+      "workload": {
+        "inputTokens": 5300,
+        "outputTokens": 500
+      },
+      "priority": "quality",
+      "qualityBar": 87,
+      "models": [
+        {
+          "rank": 1,
+          "id": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "provider": "Google",
+          "rationale": "Excellent agent and RCM evidence.",
+          "watchOut": null,
+          "quality": {
+            "score": 95,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.746,
+                "rank": 2,
+                "of": 14
+              },
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.914878,
+                "rank": 2,
+                "of": 20
+              },
+              {
+                "benchmark": "seal:mcp_atlas",
+                "name": "MCP Atlas · SEAL",
+                "score": 0.907,
+                "rank": 1,
+                "of": 28
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 15.6,
+            "usdPer1kAgentRuns": 62.4,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-4-argon",
+            "providerModelId": "google/gemini-4-argon",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 47.5,
+            "firstTokenSeconds": 40.7,
+            "tokensPerSecond": 73,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-13",
+            "ageDays": 24
+          },
+          "best": [
+            "quality",
+            "cost",
+            "recency"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "anthropic/claude-opus-5",
+          "name": "Claude Opus 5",
+          "provider": "Anthropic",
+          "rationale": "Leads RCM and benefits proxy.",
+          "watchOut": null,
+          "quality": {
+            "score": 94,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.662,
+                "rank": 7,
+                "of": 14
+              },
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.926789,
+                "rank": 1,
+                "of": 20
+              },
+              {
+                "benchmark": "vals:public-benefits-bench",
+                "name": "Public Benefits Bench v1.1 · Vals AI",
+                "score": 0.76928,
+                "rank": 1,
+                "of": 45
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 39,
+            "usdPer1kAgentRuns": 156,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5",
+            "providerModelId": "anthropic/claude-opus-5",
+            "inputPerMillion": 5,
+            "outputPerMillion": 25,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 5
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 25
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-24",
+            "ageDays": 105
+          },
+          "best": []
+        },
+        {
+          "rank": 3,
+          "id": "anthropic/claude-opus-5.5",
+          "name": "Claude Opus 5.5",
+          "provider": "Anthropic",
+          "rationale": "Leads enterprise tool consistency.",
+          "watchOut": null,
+          "quality": {
+            "score": 92,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.773,
+                "rank": 1,
+                "of": 14
+              },
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.9013890000000001,
+                "rank": 7,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 31.2,
+            "usdPer1kAgentRuns": 124.8,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5.5",
+            "providerModelId": "anthropic/claude-opus-5.5",
+            "inputPerMillion": 4,
+            "outputPerMillion": 20,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 4
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 20
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 41.8,
+            "firstTokenSeconds": 37.1,
+            "tokensPerSecond": 107,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-22",
+            "ageDays": 45
+          },
+          "best": []
+        },
+        {
+          "rank": 4,
+          "id": "anthropic/claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "provider": "Anthropic",
+          "rationale": "Strong RCM and tools.",
+          "watchOut": null,
+          "quality": {
+            "score": 90,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.687,
+                "rank": 6,
+                "of": 14
+              },
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.910501,
+                "rank": 5,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 15.6,
+            "usdPer1kAgentRuns": 62.4,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5.5",
+            "providerModelId": "anthropic/claude-sonnet-5.5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 17.1,
+            "firstTokenSeconds": 13.5,
+            "tokensPerSecond": 138,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-28",
+            "ageDays": 39
+          },
+          "best": [
+            "cost"
+          ]
+        },
+        {
+          "rank": 5,
+          "id": "openai/gpt-5.6-sol",
+          "name": "GPT-5.6 Sol",
+          "provider": "OpenAI",
+          "rationale": "Good RCM and agent proxy.",
+          "watchOut": null,
+          "quality": {
+            "score": 88,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.647,
+                "rank": 8,
+                "of": 14
+              },
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.9121210000000001,
+                "rank": 4,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 31.2,
+            "usdPer1kAgentRuns": 124.8,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:openai/gpt-5.6-sol",
+            "providerModelId": "openai/gpt-5.6-sol",
+            "inputPerMillion": 4,
+            "outputPerMillion": 20,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 4
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 20
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-09",
+            "ageDays": 120
+          },
+          "best": []
+        }
+      ],
+      "evaluation": {
+        "checks": [
+          {
+            "level": "task",
+            "metric": "tool acceptance and record completeness",
+            "how": "Score rejected tool calls and result recorded from existing traces."
+          },
+          {
+            "level": "agent",
+            "metric": "line decisions and denial-code accuracy",
+            "how": "Score existing line labels with only adjudication model swapped."
+          },
+          {
+            "level": "environment",
+            "metric": "payment correctness and reviewer load",
+            "how": "Use existing claim-level metrics with other agents fixed."
+          }
+        ],
+        "samples": 14,
+        "stopEarly": "Stop on repeated wrong decisions or missing codes; if all achieve 100%, eval cannot separate quality: add exclusions and plan-exception boundary cases."
+      }
+    },
+    {
+      "title": "Fraud review",
+      "work": "Contrast claim, member history and provider statistics, score signals and recommend disposition.",
+      "input": "Claim, history and provider statistics",
+      "output": "Recorded signal scores 0–1 and pay/review/hold recommendation",
+      "agent": "Fraud review",
+      "callsPerRun": 4,
+      "summary": "Start with Gemini 4 Argon for history/statistics-based fraud review; verify misses versus false holds on the existing labels.",
+      "workload": {
+        "inputTokens": 6000,
+        "outputTokens": 500
+      },
+      "priority": "quality",
+      "qualityBar": 83,
+      "models": [
+        {
+          "rank": 1,
+          "id": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "provider": "Google",
+          "rationale": "Strong enterprise tools and RCM proxy.",
+          "watchOut": null,
+          "quality": {
+            "score": 94,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.746,
+                "rank": 2,
+                "of": 14
+              },
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.914878,
+                "rank": 2,
+                "of": 20
+              },
+              {
+                "benchmark": "seal:mcp_atlas",
+                "name": "MCP Atlas · SEAL",
+                "score": 0.907,
+                "rank": 1,
+                "of": 28
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 17,
+            "usdPer1kAgentRuns": 68,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:google/gemini-4-argon",
+            "providerModelId": "google/gemini-4-argon",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 47.5,
+            "firstTokenSeconds": 40.7,
+            "tokensPerSecond": 73,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-13",
+            "ageDays": 24
+          },
+          "best": [
+            "quality",
+            "cost",
+            "recency"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "anthropic/claude-opus-5.5",
+          "name": "Claude Opus 5.5",
+          "provider": "Anthropic",
+          "rationale": "Excellent enterprise agent reliability.",
+          "watchOut": null,
+          "quality": {
+            "score": 92,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.773,
+                "rank": 1,
+                "of": 14
+              },
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.9013890000000001,
+                "rank": 7,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 34,
+            "usdPer1kAgentRuns": 136,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5.5",
+            "providerModelId": "anthropic/claude-opus-5.5",
+            "inputPerMillion": 4,
+            "outputPerMillion": 20,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 4
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 20
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 41.8,
+            "firstTokenSeconds": 37.1,
+            "tokensPerSecond": 107,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-22",
+            "ageDays": 45
+          },
+          "best": []
+        },
+        {
+          "rank": 3,
+          "id": "anthropic/claude-opus-5",
+          "name": "Claude Opus 5",
+          "provider": "Anthropic",
+          "rationale": "Leads RCM.",
+          "watchOut": null,
+          "quality": {
+            "score": 91,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.662,
+                "rank": 7,
+                "of": 14
+              },
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.926789,
+                "rank": 1,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 42.5,
+            "usdPer1kAgentRuns": 170,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-opus-5",
+            "providerModelId": "anthropic/claude-opus-5",
+            "inputPerMillion": 5,
+            "outputPerMillion": 25,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 5
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 25
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-07-24",
+            "ageDays": 105
+          },
+          "best": []
+        },
+        {
+          "rank": 4,
+          "id": "anthropic/claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "provider": "Anthropic",
+          "rationale": "Strong quantitative agent and RCM proxy.",
+          "watchOut": null,
+          "quality": {
+            "score": 89,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.687,
+                "rank": 6,
+                "of": 14
+              },
+              {
+                "benchmark": "aa:analystAgent",
+                "name": "Analyst Agent · AA",
+                "score": 0.575,
+                "rank": 3,
+                "of": 41
+              },
+              {
+                "benchmark": "fireworks:rcm-benchmark-1",
+                "name": "RCM-Bench-1 · Fireworks",
+                "score": 0.910501,
+                "rank": 5,
+                "of": 20
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 17,
+            "usdPer1kAgentRuns": 68,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-sonnet-5.5",
+            "providerModelId": "anthropic/claude-sonnet-5.5",
+            "inputPerMillion": 2,
+            "outputPerMillion": 10,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 2
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 10
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 17.1,
+            "firstTokenSeconds": 13.5,
+            "tokensPerSecond": 138,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-09-28",
+            "ageDays": 39
+          },
+          "best": [
+            "cost"
+          ]
+        },
+        {
+          "rank": 5,
+          "id": "anthropic/claude-fable-5.1",
+          "name": "Claude Fable 5.1",
+          "provider": "Anthropic",
+          "rationale": "Enterprise workflow and data analysis.",
+          "watchOut": null,
+          "quality": {
+            "score": 87,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "fireworks:enterprisebench",
+                "name": "Enterprise Tool Use · Fireworks",
+                "score": 0.74,
+                "rank": 3,
+                "of": 14
+              },
+              {
+                "benchmark": "aa:analystAgent",
+                "name": "Analyst Agent · AA",
+                "score": 0.575,
+                "rank": 2,
+                "of": 41
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 85,
+            "usdPer1kAgentRuns": 340,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-fable-5.1",
+            "providerModelId": "anthropic/claude-fable-5.1",
+            "inputPerMillion": 10,
+            "outputPerMillion": 50,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 10
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 50
+              }
+            ],
+            "unpriced": []
+          },
+          "latency": {
+            "seconds": 22.2,
+            "firstTokenSeconds": 16.5,
+            "tokensPerSecond": 86,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-08-31",
+            "ageDays": 67
+          },
+          "best": []
+        }
+      ],
+      "evaluation": {
+        "checks": [
+          {
+            "level": "task",
+            "metric": "0–1 bounds, retrieval and valid tools",
+            "how": "Score existing fraud traces for signals, schema rejects and result records."
+          },
+          {
+            "level": "agent",
+            "metric": "pay/review/hold agreement and false hold rate",
+            "how": "Use 14 existing fraud labels changing only fraud agent model."
+          },
+          {
+            "level": "environment",
+            "metric": "missed fraud and reviewer load",
+            "how": "Compare existing end-to-end metrics with other agents fixed."
+          }
+        ],
+        "samples": 14,
+        "stopEarly": "Stop on repeated missed holds or false holds; if all reach 100%, eval cannot separate quality: add rare-fraud and benign-outlier labelled cases."
+      }
+    }
+  ],
+  "next": "Present each task's shortlist with its trade-offs and its evaluation, and let the user choose. Offer to measure the candidates with the project's existing evals as the evaluation describes, then report the aggregate results with this conversationId and results. To refine, call scout_models with this conversationId and a prompt."
+}

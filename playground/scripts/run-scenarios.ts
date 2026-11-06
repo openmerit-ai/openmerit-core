@@ -14,6 +14,7 @@
 // outcomes, and model cost and latency from Langfuse.
 
 import { parseArgs } from "node:util";
+import { setTimeout as delay } from "node:timers/promises";
 import { CLAIM_FIXTURES, ENROLLMENT_FIXTURES } from "../fixtures/claims.ts";
 import { toClaimSubmissionXml } from "../src/domain/eclaim.ts";
 import type { Member } from "../src/domain/types.ts";
@@ -21,6 +22,7 @@ import type { ClaimRecord, EnrollmentRecord } from "../src/ledger.ts";
 import { type AgentRole, effectiveModels, overridesLabel, parseModelFlag } from "../src/models.ts";
 import { type ExperimentContext, type LangfuseEnv, postScore, runKey, spanIdFor, traceIdFor, VERSIONS } from "../src/tracing.ts";
 import { baseUrl, call } from "./client.ts";
+import { collectUsage, type AgentUsage, type Observation } from "./usage.ts";
 
 const DATASET = "sahra-outpatient-claims";
 const ENROLLMENT_DATASET = "sahra-enrollments";
@@ -32,6 +34,7 @@ const runId = `run-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 const deadline = Date.now() + Number(values["timeout-minutes"]) * 60_000;
 const claims = CLAIM_FIXTURES.filter((fixture) => !values.only || fixture.name === values.only);
 const enrollments = ENROLLMENT_FIXTURES.filter((fixture) => !values.only || fixture.name === values.only);
+if (!claims.length && !enrollments.length) throw new Error("No fixtures match --only; no scenarios were started.");
 const langfuse: LangfuseEnv = {
   LANGFUSE_PUBLIC_KEY: process.env.LANGFUSE_PUBLIC_KEY,
   LANGFUSE_SECRET_KEY: process.env.LANGFUSE_SECRET_KEY,
@@ -41,17 +44,18 @@ const langfuse: LangfuseEnv = {
 const authorization = langfuse.LANGFUSE_PUBLIC_KEY && langfuse.LANGFUSE_SECRET_KEY ? `Basic ${btoa(`${langfuse.LANGFUSE_PUBLIC_KEY}:${langfuse.LANGFUSE_SECRET_KEY}`)}` : null;
 
 /** Calls the Langfuse public API, waiting out rate limits (429). Returns null for 404 when allowed. */
-async function langfuseApi<T>(method: string, path: string, body?: unknown, options: { allowNotFound?: boolean } = {}): Promise<T | null> {
+async function langfuseApi<T>(method: string, path: string, body?: unknown, options: { allowNotFound?: boolean; signal?: AbortSignal } = {}): Promise<T | null> {
   if (!authorization) throw new Error("Langfuse keys are not set");
   for (let attempt = 0; ; attempt += 1) {
     const response = await fetch(`${langfuse.LANGFUSE_BASE_URL}${path}`, {
       method,
       headers: { authorization, "content-type": "application/json" },
+      signal: options.signal,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (response.status === 429 && attempt < 6) {
       const seconds = Number(response.headers.get("retry-after")) || 5 * 2 ** attempt;
-      await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+      await delay(seconds * 1000, undefined, { signal: options.signal });
       continue;
     }
     if (response.status === 404 && options.allowNotFound) return null;
@@ -212,25 +216,19 @@ for (const fixture of claims) {
 }
 
 // Model cost and latency per agent run, from the run's Langfuse traces.
-const usage: { caseId: string; agent: string; cost: number; seconds: number; generations: number }[] = [];
+let usage: AgentUsage[] = [];
 if (authorization) {
   const runs = [...enrollments.map((fixture) => [fixture.application.applicationId, "enrollment"] as const), ...claims.flatMap((fixture) => (["intake", "coding", "adjudication", "fraud"] as const).map((agent) => [fixture.claim.id, agent] as const))];
-  for (const [caseId, agent] of runs) {
-    const traceId = await traceIdFor(`${runKey(caseId, runId)}/${agent}`);
-    let data: { type: string; totalCost?: number | null; latency?: number | null }[];
-    try {
-      data = (await langfuseApi<{ data: typeof data }>("GET", `/api/public/v2/observations?traceId=${traceId}&fields=core,basic,usage`))?.data ?? [];
-    } catch {
-      continue;
-    }
-    const generations = data.filter((item) => item.type === "GENERATION");
-    usage.push({ caseId, agent, cost: generations.reduce((sum, item) => sum + (item.totalCost ?? 0), 0), seconds: data.find((item) => item.type === "AGENT")?.latency ?? 0, generations: generations.length });
-  }
-  const cost = usage.reduce((sum, item) => sum + item.cost, 0);
+  const traces = await Promise.all(runs.map(async ([caseId, agent]) => ({ caseId, agent, traceId: await traceIdFor(`${runKey(caseId, runId)}/${agent}`) })));
+  usage = await collectUsage(traces, async (traceId, signal) =>
+    (await langfuseApi<{ data: Observation[] }>("GET", `/api/public/v2/observations?traceId=${traceId}&fields=core,usage,metadata,metrics&limit=100`, undefined, { signal }))?.data ?? []);
+  const cost = usage.reduce((sum, item) => sum + (item.cost ?? 0), 0);
+  const missing = usage.filter(item => !item.complete).length;
   const caseSeconds = new Map<string, number>();
-  for (const item of usage) caseSeconds.set(item.caseId, (caseSeconds.get(item.caseId) ?? 0) + item.seconds);
+  for (const item of usage) if (item.seconds !== null) caseSeconds.set(item.caseId, (caseSeconds.get(item.caseId) ?? 0) + item.seconds);
   const perCase = [...caseSeconds.values()].sort((a, b) => a - b);
-  console.log(`Model cost USD ${cost.toFixed(4)} over ${usage.length} agent runs · median case ${(perCase[Math.floor(perCase.length / 2)] ?? 0).toFixed(1)} s of agent time`);
+  const latency = usage.every(item => item.seconds !== null) ? `${perCase[Math.floor(perCase.length / 2)]?.toFixed(1)} s` : "incomplete";
+  console.log(`${missing ? `Model cost incomplete (${missing}/${usage.length} agent runs missing); known subtotal` : "Model cost"} USD ${cost.toFixed(4)} · median case ${latency} of agent time`);
 }
 if (values.out) {
   const { writeFileSync } = await import("node:fs");
