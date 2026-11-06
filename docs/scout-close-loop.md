@@ -113,13 +113,13 @@ openmerit scout --conversation <id> --results results.json
 ```
 
 Use `kind: "usd"` or `"seconds"` for measured money or time; they are not quality
-scores. Once the per-user change is deployed, aggregates apply across your
+scores. On the enabled hosted connector, aggregates apply across your
 conversations. Re-reporting the same level/kind/task/scope/model/metric/source
 updates that aggregate rather than duplicating it.
 
 ## Connect Langfuse
 
-After release, `openmerit connect langfuse` opens the optional signed-in
+`openmerit connect langfuse` opens the optional signed-in
 [connection page](https://openmerit.ai/connect/?integration=langfuse). Create a
 **separate Viewer key pair** in Langfuse Project Settings → API Keys. Enter it
 in the password fields there, or use the protected headless paths below. Never
@@ -288,18 +288,10 @@ read per sync. Narrow the date if a response or import exceeds its limit. Only
 experiment headers/metadata and aggregate Metrics v2 reads are requested. A
 deliberately invalid dataset-create request checks read-only permission without
 ever sending a valid write payload. Only an authenticated read followed by HTTP
-403 on that probe is accepted; other responses fail closed. Live Viewer-key
-connection acceptance, one fresh mapped aggregate import and measured reranking
-were verified on 6 November 2026 with npm 0.3.6 and the matching deployments.
-This one-sample plumbing check is not comparative quality acceptance. Two new
-conversations received the aggregate but returned prose before the 6 November
-structured-completion deploy. After it, three fresh published-CLI conversations
-returned five structured tasks each, reused the measured coding result without
-resending it and retained the one-sample caveat. This focused check does not
-establish fresh-coding-agent usability; full fresh-agent and two-release
-acceptance remain open.
+403 on that probe is accepted; other responses fail closed. A connected key or
+nonzero import proves neither application quality nor a completed customer loop.
 
-**npm 0.3.8 release preparation (unreleased guidance):** when your project records a confirmed
+**npm 0.3.8 and later:** when your project records a confirmed
 Langfuse connection and mappings, the coding agent should request aggregate sync
 on its first consultation and before a final model decision. This refresh reads
 Langfuse aggregates and updates Scout's cache; it does not execute candidates or

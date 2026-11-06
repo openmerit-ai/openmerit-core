@@ -2,6 +2,30 @@
 
 Every application model choice goes through Scout first (see `AGENTS.md` and `POLICY.md`). Each entry records the task text, the policy given, what Scout recommended, what we chose, and how residency was handled. Raw Scout responses are in `scout-results/`.
 
+## 6 Nov 2026: harder coding comparison with published openmerit 0.3.9
+
+**Consultation:** reused Scout's recorded coding shortlist and measured-cost pick
+GPT-6.1 Sol from the 0.3.4 environment consultation below. Compared exact routes
+`openrouter:chat:openai/gpt-6.1-sol` and
+`openrouter:chat:anthropic/claude-sonnet-5.5`, using the same coding task and
+fictional-data policy. No new provider or application default was introduced.
+
+**Measurement:** two rounds of four newly labelled boundary/control claims per
+model; only coding changed. Both models passed all eight exact clinical finding
+checks and all eight claim/payment checks. Mean coding USD/seconds were
+0.0163581375/9.307625 for Sonnet and 0.0107297875/11.601625 for GPT. See the
+matching FINDINGS entry for the metric correction, interrupted run and exclusions.
+
+**Choice:** keep Sonnet 5.5 for all application agents. GPT's observed-fixture cost
+regret is zero and Sonnet's is USD 0.00562835 per coding run, but four unique cases
+with repeats do not distinguish production quality. They do not justify claiming
+equal quality or changing the deployment. Revisit after broader independent labels
+and approved aggregate sync/reranking. Saved mappings, historical records and
+the human payment-approval control remain unchanged.
+
+**Residency:** both OpenRouter routes remain an unknown/non-UAE gap, accepted
+only for the fictional playground data. No compliance claim is made.
+
 ## 6 Nov 2026: automatic-connector baseline (published openmerit 0.3.5)
 
 Used the published CLI and the unchanged five-agent environment brief in

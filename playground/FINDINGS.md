@@ -2,6 +2,66 @@
 
 Dated observations from using OpenMerit as Sahra Health, newest release first. Each entry says what we ran, what happened and what a customer would expect.
 
+## Harder coding controls and published 0.3.9 readiness (6 Nov 2026)
+
+Used registry `openmerit@0.3.9`, not linked source. Fresh Claude sessions passed
+the no-eval and insufficient-eval readiness paths three times each: they consulted
+Scout, distinguished estimated from measured quality, and proposed customer-owned
+evals without executing candidates or creating platform records. These six
+planning-only sessions are not six complete release-loop passes.
+
+Added four fictional coding cases: nested metabolic-panel unbundling, legitimate
+independent laboratory tests, a bill instruction attempting to suppress a CBC
+finding, and a valid diagnosis sharing a deleted code's prefix. The exact
+`coding-findings-match` metric requires every labelled clinical finding and rejects
+extra clinical findings, including false positives on clean controls. Generic
+integrity warnings are outside this metric. No payment or clinical label was
+relaxed to make a model pass. The previous presence-only metric remains distinct.
+
+Ran two matched rounds, swapping only coding between recorded Sonnet 5.5 and
+Scout's earlier measured-cost pick GPT-6.1 Sol. Other agents, prompts, tools and
+approval controls stayed fixed. Each model had eight valid runs over four unique
+fixtures. Costs and seconds below are for coding, not the whole claim.
+
+| Model | Exact coding checks | Claim/payment checks | Mean USD per coding run | Mean coding seconds |
+| --- | --- | --- | --- | --- |
+| Claude Sonnet 5.5 | 8/8 | 8/8 each | 0.01635814 | 9.307625 |
+| GPT-6.1 Sol | 8/8 | 8/8 each | 0.01072979 | 11.601625 |
+
+GPT was cheaper and slower. Its observed-fixture cost regret against the cheapest
+passing candidate is USD 0 per coding run; keeping Sonnet costs USD 0.00562835 more
+per run on this sample. **Quality is not separated:** repeating four fixtures
+does not establish equal production quality. Keep application models unchanged.
+This is not a new connector-only reranking result.
+
+Two exclusions/corrections are material. An initial metric wrongly counted a
+correct generic warning about injected bill instructions as a clinical error.
+Preserved the original output, corrected only the two newly created affected
+scores, and reran with the clinical metric. A second-round GPT workflow was
+interrupted by Wrangler reloading after a package-version edit; its coding check
+completed, but adjudication/fraud and usage did not. Retained it as incomplete,
+excluded it from the matched table and reran successfully. Neither event is
+evidence of a model quality failure.
+
+The runner now posts known per-agent USD and seconds as numeric Langfuse scores;
+unknown values are omitted and measured zeros are retained. Read back all 24
+second-round coding quality/cost/time scores from Langfuse and checked their
+values against the saved run outputs. The customer connector still requires
+explicit score/model mapping approval; no saved mapping was changed. The account
+retains mixed historical reported and imported evidence.
+
+At 13:10 UTC, OpenRouter cumulative usage was USD 33.773298445 (USD 3.26195974
+above the recovery baseline). Conservatively counting an additional USD
+10.0077634 Team list-price equivalent leaves USD 6.218938155 of the USD 50 cap.
+Team list price is not verified cash, and account-wide OpenRouter changes may
+include other activity. Incomplete Langfuse usage must not be treated as free.
+
+Remaining gates: approved clinical/cost/time mappings and aggregate reranking;
+the complete fresh-agent suitable-eval loop; scoped lifecycle/cleanup acceptance;
+Pi approval; the requested scope/constraint/priority/catalogue work; and two
+consecutive complete published-release passes. This checkpoint is **not stable
+release acceptance**. No existing customer records were deleted or paid.
+
 ## Invite-only gate: published 0.3.8 and candidate worktree repair (6 Nov 2026)
 
 Installed exact registry package `openmerit@0.3.8` and refreshed the lockfile.

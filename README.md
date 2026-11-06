@@ -10,7 +10,7 @@ Run `npx -y openmerit@latest install --client claude-code`, then approve the dev
 
 ## Connect Scout to Pi
 
-OpenMerit **0.1.12** adds a thin Scout adapter for Pi **1.5.0**, replacing the old Pi 0.87 evaluation extension:
+The thin Scout adapter supports Pi **1.5.0** through native MCP:
 
 ```sh
 npx -y openmerit@latest install --client pi --scope user
@@ -36,17 +36,7 @@ The [documentation overview](docs/index.md) links the maintained Markdown guides
 
 - [Getting started](docs/getting-started.md) and [troubleshooting](docs/troubleshooting.md)
 - [Scout](docs/scout.md) and [Pi adapter](docs/pi-extension.md)
+- [Close the model-selection loop](docs/scout-close-loop.md): consult, measure, import and choose
 - Retired: [Inference Terminal](docs/inference-terminal.md) and [agent evaluations](docs/agent-evaluations.md)
 - [Security and data handling](docs/security.md)
 - [Testing](docs/testing.md) and [current limitations](docs/roadmap.md)
-
-## Development
-
-```sh
-npm ci
-npm run verify
-```
-
-`packages/terminal` contains the `openmerit` CLI: Scout setup, updates and the `scout` command; `packages/pi` supplies only the native Scout adapter. The package exports `openmerit/pi` and the `openmerit` command. See the [Pi package README](packages/pi/README.md) for bounded adapter tests. Provider credentials belong to the harness or its environment and must never be committed.
-
-Edit documentation in `docs/`, then run `npm run check:docs`. `npm run build:site` builds only the Scout data policy and protected memo, not a docs website. A local build does not publish changes; follow [deployment maintenance](docs/site-deployment.md) before any approved release.

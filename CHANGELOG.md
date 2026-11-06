@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.10 — 2026-11-06 (release preparation)
+
+- Refocus the Scout guide on supported setup, model selection, customer-owned evals and data handling. Preserve historical operator receipts in an internal archive excluded from npm, retain existing section links, remove repository-development instructions from the package README, and distinguish released Langfuse guidance from old preparation notes. This does not change model selection, credentials or permissions.
+- Align the data policy's opening aggregate-results description with its existing per-user, cross-conversation connection contract. Hosted policy publication requires the separate Scout-serving deployment; npm publication alone does not update it.
+
 ## 0.3.9 — 2026-11-06 (release preparation)
 
 - Fix Claude Code project setup, status and conflict detection in linked git worktrees. Claude Code 2.1.63 and newer share private project MCP configuration under the main checkout; older versions use the linked worktree root. The installer follows the Claude CLI on PATH, leaves the project's skill and rule in place, and does not migrate or delete existing MCP entries.
