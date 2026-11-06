@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Claude Code worktree setup — npm 0.3.9 release preparation, 6 November 2026
+
+Reviewed the homepage against private MCP configuration being shared across linked worktrees by newer Claude Code versions. `site/index.html` makes no worktree or project-scope installation claims and has no FAQ block. No homepage copy change is needed; the Scout setup guide documents the version boundary and the wider MCP scope.
+
 ## Refresh an approved Langfuse connection — unreleased instructions, 6 November 2026
 
 Reviewed the homepage against coding agents refreshing an already approved Langfuse connection before recommending, without creating customer-platform records or executing candidate models. `site/index.html` has no FAQ block and makes no promise of implicit connector refresh. No homepage changes are needed; this changes npm guidance, not the server's explicit-sync contract or the customer's approval for eval runs and cleanup.

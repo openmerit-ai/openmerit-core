@@ -389,6 +389,17 @@ When the command can open a browser, it waits up to nine minutes for the Approve
 
 `--client` defaults to the agent running the command (Claude Code sets `CLAUDECODE=1`). `--scope` defaults to `user`, which makes Scout available in every project. `--scope project` writes the skill to `.claude/skills/` and startup rule to `.claude/rules/` in the current project and stores the MCP server in Claude Code's private per-project (`local`) configuration, so the key never enters the repository. Claude Code keys that configuration by the git repository root, so for a project inside a larger repository (such as a monorepo package) the MCP server applies to every Claude Code session in that repository, while the skill and rule stay in the project; npm 0.3.2 and later say so, and earlier versions report a failed install in this case. `--plan` lists the changes without making them. `--json` prints one result object for agents.
 
+**Linked worktrees — npm 0.3.9 release preparation:** the installer follows
+the `claude` version on PATH. Before Claude Code 2.1.63, private local MCP setup
+belongs to the linked worktree root. From 2.1.63, Claude shares it under the main
+checkout root across that repository's worktrees; the skill and rule still stay
+in the project where you ran setup. This follows [Claude's configuration-sharing
+change](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#2163).
+Use the same Claude CLI for installation and agent sessions. Existing entries
+are not migrated or deleted automatically. Published npm 0.3.8 and earlier
+resolve only the current worktree root and can incorrectly report missing setup
+with newer Claude versions.
+
 | Exit code | Meaning |
 |---|---|
 | 0 | Done |

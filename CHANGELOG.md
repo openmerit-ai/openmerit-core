@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.3.8 — 2026-11-06 (release preparation)
+## 0.3.9 — 2026-11-06 (release preparation)
+
+- Fix Claude Code project setup, status and conflict detection in linked git worktrees. Claude Code 2.1.63 and newer share private project MCP configuration under the main checkout; older versions use the linked worktree root. The installer follows the Claude CLI on PATH, leaves the project's skill and rule in place, and does not migrate or delete existing MCP entries.
+
+## 0.3.8 — 2026-11-06
 
 - The Scout skill tells coding agents to refresh an already approved Langfuse connection on the first consultation and before a final model decision, without asking for new candidate-spend or customer-platform-write approval for that read. Old project notes are not a substitute for connector refresh; failed sync must be disclosed as stale evidence. The server still requires an explicit sync request, and candidate runs, platform writes and deletion still require approval.
 

@@ -10,6 +10,7 @@ import { configureUpdates, inspectUpdates, recoverUpdates, removeUpdates, runUpd
 import { credentialsPath as deviceCredentialsPath, pendingPath as devicePendingPath } from './scout-credentials.ts';
 import { rule, skill } from './scout-instructions.ts';
 import { piPaths, inspectPi, configurePi, removePi, piConflicts, piVersion } from './scout-pi.ts';
+import { claudeProject } from './scout-claude.ts';
 export { rule, skill } from './scout-instructions.ts';
 
 // One-command coding-agent setup: device sign-in in the browser, then the MCP
@@ -108,12 +109,6 @@ function claudePaths(root, scope) {
     mcpFile: process.env.CLAUDE_CONFIG_DIR ? join(config, '.claude.json') : join(homedir(), '.claude.json'),
     mcpScope: scope === 'user' ? 'user' : 'local',
   };
-}
-// Claude Code keys its private local scope by the project's git repository root, so a
-// project in a subdirectory of a repository shares the entry of the whole repository.
-async function claudeProject(root) {
-  try { return (await exec('git', ['rev-parse', '--show-toplevel'], { cwd: root, timeout: 10_000, windowsHide: true })).stdout.trim() || root; }
-  catch { return root; }
 }
 const configuredServer = (config, project, scope) => scope === 'user' ? config.mcpServers?.openmerit : config.projects?.[project]?.mcpServers?.openmerit;
 const serverConfig = (key, telemetry) => ({ type: 'http', url: `${server()}/scout/mcp`, headers: { Authorization: `Bearer ${key}`, ...setupHeaders(telemetry.properties, 'agent') } });
