@@ -131,7 +131,7 @@ export const SubmissionSchema = Type.Object({
   priority: Type.Optional(StringEnum(axes, { description: 'How to rank the shortlist. cost (the default): models that hold the task\'s quality bar, cheapest first. Use quality only when the user explicitly asks for the best quality, recency only when they ask for the newest.' })),
   filters: Type.Optional(FiltersSchema),
   workload: WorkloadSchema,
-  summary: Type.String({ description: 'One short sentence on what to choose for this task, such as the cheapest model and what it gives up. Do not describe how candidates were assessed, filtered or ranked; the page states that. When there are no candidates, say why.' }),
+  summary: Type.String({ description: 'When there are no candidates, explain why. Otherwise leave empty: Scout builds the summary from the first model after ranking, using its rationale and watchOut.' }),
   qualityBar: Type.Integer({ minimum: 0, maximum: 100, description: 'The lowest quality estimate at which a model still does THIS task to the brief\'s standard. Candidates below it are never shown.' }),
   candidates: Type.Array(Type.Object({
     modelId: Type.String({ description: 'Model ID from the catalogue tools.' }),
@@ -347,5 +347,11 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
   const models = assessed.sort(order).slice(0, 5);
   models.forEach((m, i) => { m.rank = i + 1; });
   leaders(models);
-  return { summary: s.summary, workload: s.workload, priority, qualityBar: s.qualityBar, models, evaluation: s.evaluation };
+  // The model writes before sorting; its proposed winner can disagree with the final order.
+  // Keep the explanation and caveat attached to the candidate that actually ranks first.
+  const first = models[0];
+  const summary = first
+    ? `${first.name} ranks first in this shortlist. ${first.rationale}${first.watchOut ? ` ${first.watchOut}` : ''}`
+    : s.summary;
+  return { summary, workload: s.workload, priority, qualityBar: s.qualityBar, models, evaluation: s.evaluation };
 }
