@@ -2,6 +2,35 @@
 
 Dated observations from using OpenMerit as Sahra Health, newest release first. Each entry says what we ran, what happened and what a customer would expect.
 
+## Invite-only gate: setup checkpoint (6 Nov 2026, openmerit 0.3.6)
+
+Upgraded this customer project from registry 0.3.5 to registry 0.3.6, never linked
+OpenMerit source. The matching hosted settings update lets the published CLI
+configure non-secret mappings using the already connected encrypted Viewer key.
+The same settings-only API request failed HTTP 400 before the serving update.
+The recovered application tracing key was Full access (invalid permission probe
+returned 400), so it was not substituted for the customer's Viewer connection.
+
+Before new model spend, OpenRouter's key-usage endpoint reported USD 30.429638705
+total usage and zero daily usage. Counting all of it against the owner's USD 50
+allowance leaves a conservative USD 19.570361295 ceiling for this continuation;
+that is not a claim that all historical use belongs to this approval window.
+No application model was changed; the fresh Scout baseline and retained choice
+are in MODEL-DECISIONS.md.
+
+**Cost-summary repair:** the scenario runner used to treat empty observations or
+unpriced generations as zero and did not request the latency field group. It now
+waits for the agent root's recorded generation count and all prices, with a
+two-minute deadline including rate-limit waits. Incomplete costs stay null;
+genuine zero-priced generations remain valid. Deterministic checks cover delayed,
+partial, unpriced and unavailable observations plus a zero-cost control. A
+read-only request against an existing trace confirmed that root generation count,
+cost and latency are available with the chosen fields.
+
+**Still pending:** fresh mapped import, measured reranking, cross-conversation
+reuse, disconnect acceptance, fresh-agent usability and two consecutive release
+passes. This setup checkpoint is not a completed automatic loop.
+
 ## Langfuse aggregate connection (6 Nov 2026)
 
 The hosted connector authenticated and read 25 experiments but imported zero

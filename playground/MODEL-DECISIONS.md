@@ -2,6 +2,27 @@
 
 Every application model choice goes through Scout first (see `AGENTS.md` and `POLICY.md`). Each entry records the task text, the policy given, what Scout recommended, what we chose, and how residency was handled. Raw Scout responses are in `scout-results/`.
 
+## 6 Nov 2026: automatic-connector baseline (published openmerit 0.3.5)
+
+Used the published CLI and the unchanged five-agent environment brief in
+`scout-tasks/agent-models-0.3.1.txt`, with the existing fictional-data residency
+exception and `--all-endpoints`. New conversation
+`e3253de4-fb9e-4287-bb1c-7c2f93da6f0c` returned a recommendation without questions;
+the complete response is `scout-results/2026-11-06-0.3.5-connector-before.json`.
+Sonnet 5.5 was third for Coding review, unmeasured, with quality estimate 89;
+Scout gave its exact route as
+`openrouter:chat:anthropic/claude-sonnet-5.5`.
+
+**Choice:** leave every recorded application model unchanged. The first fresh
+connector smoke will use recorded Sonnet 5.5, not introduce a new candidate.
+This is a plumbing check, not evidence of equal model quality. The score mapping
+uses the exact task title `Coding review` and the catalogue ID
+`anthropic/claude-sonnet-5.5`, explicitly aliased from the experiment metadata
+value `openrouter/anthropic/claude-sonnet-5.5`.
+
+**Residency:** still unknown/non-UAE and accepted only as a recorded gap for
+fictional data. Scout's response is not a residency certification.
+
 ## 5 Nov 2026: measured cost as tie-break (openmerit 0.3.4)
 
 No models were run. New conversation `3c93de23-05c1-49d9-a935-1a998a3aa792`, same task text as 0.3.3, with the same agent-level results (`scout-results/2026-11-05-0.3.4-*.json`). Without any follow-up, Scout ranks GPT-6.1 Sol first on intake, coding, adjudication and fraud: all five measured candidates tie on quality, and GPT is cheapest by measurement. Enrollment ties four models, with Sonnet 5.5 first and no measured cost. The re-recommended `d16cba5a-…` gives the same order.

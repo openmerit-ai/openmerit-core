@@ -75,6 +75,14 @@ npm run scenarios -- --model intake=openrouter/anthropic/claude-haiku-5.5,coding
 
 The runner sends the overrides as `models` (agent → `{ provider, id }`) on `POST /claims` and `POST /enrollments`. Without Langfuse keys in its environment it still checks the run but sends no scores, dataset or experiment. Run scenarios one at a time: each run reseeds the one shared ledger, so a run started while another's workflows are still going corrupts both. Restart `wrangler dev` to drop leftover workflows.
 
+**Delayed cost ingestion:** after scoring, the runner waits up to two minutes for
+each agent root's declared generation count and every generation's cost. Missing
+or unpriced observations remain `cost: null, complete: false` in `--out`, not zero.
+The console labels the total incomplete and shows only the known subtotal. Real
+zero-cost generations remain valid. Latency uses the API's explicit metrics field
+group and stays unknown when unavailable. These reads belong to Sahra's runner;
+OpenMerit's Viewer connector still reads only aggregate metrics, not observations.
+
 Cloudflare resources are named `playground-` (Worker `playground-claims`; Workflows `playground-claim-flow` and `playground-enrollment-flow`). Deploying, and setting secrets with `wrangler secret put`, needs the owner's approval each time.
 
 ## Release testing
@@ -86,6 +94,35 @@ For each new `openmerit` release:
 3. In a fresh coding-agent session rooted here, one that has never seen OpenMerit source, ask for the model decisions in `scout-tasks/`. Note whether the agent consults Scout unprompted, how it handles the policy and residency, and what it recommends.
 4. Apply model changes, run `npm run scenarios`, and compare the run's scores, cost and latency in Langfuse by release, using the experiments on the `sahra-outpatient-claims` dataset.
 5. Add a dated entry to [FINDINGS.md](FINDINGS.md).
+
+### Invite-only release gate (approved 6 November 2026)
+
+Do not count green CI or a connected key as a completed customer loop. Two
+consecutive published releases must pass from a fresh coding-agent session using
+only the published package, its shipped docs and Scout, without a hand-written
+aggregate-conversion script or undocumented operator help:
+
+- Install and authorize; record fresh-approval and key-reuse outcomes separately.
+- Identify whether Sahra has no eval setup, insufficient evals or suitable evals.
+  For missing evidence, obtain a task-specific plan and let Sahra's coding agent
+  implement it. Langfuse is the first connector; local/custom evals can report
+  aggregates. Do not claim other platform connectors exist.
+- Run approved comparisons on customer-owned evals, changing one agent at a time.
+  Retain hard labelled boundary cases; all candidates passing is inconclusive.
+- Import nonzero, correctly attributed aggregates through the connector. Verify
+  measured reranking and reuse in a new conversation without resending results.
+- Verify interrupted/failed sync preserves the previous complete import, missing
+  mappings are actionable, and revoked credentials fail safely.
+- Preserve a local Markdown decision record with versions, aggregate results,
+  controls, sample counts, spend, limitations and regret. Exclude keys and raw
+  customer records. Then verify approved disconnect removes imported results.
+- Clean up only explicitly approved comparison runs, after evidence is saved;
+  retain reusable fixtures/eval definitions and never delete existing customer
+  records. OpenMerit remains Viewer-only; the customer controls platform writes.
+
+Ship focused checkpoints, then rerun the applicable playground checks. Record
+actual outcomes and remaining gaps in FINDINGS; a plumbing smoke test is not
+proof of model quality, fresh-agent usability or the two-release gate.
 
 ## Sources
 
