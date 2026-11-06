@@ -20,7 +20,8 @@ Rerun --authorize if pending (exit 10). This never replaces recommendation keys.
 The management key is saved separately with owner-only file permissions.
 
 --config reads non-secret region, from (YYYY-MM-DD), tagPrefix, mappings and models.
-Supply LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY through a secret manager.
+For a new connection, supply LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY through
+a secret manager. Omit both to update settings using the saved Viewer key.
 --stdin reads the full JSON settings including the Viewer key pair from a protected
 pipe (maximum 18 KB), never echoes them, and does not save them locally.
 Never put keys in arguments, chat, shell history or a tracked file. Use a separate
@@ -54,6 +55,10 @@ async function settings(file: string | undefined, stdin: boolean, root: string):
   const fields = ['region', 'from', 'tagPrefix', 'mappings', 'models', ...(stdin ? ['publicKey', 'secretKey'] : [])];
   if (!object(config) || Object.keys(config).some(key => !fields.includes(key))) throw new Error('Use non-secret settings in --config; credentials must come from a secret manager or --stdin.');
   if (!stdin) config = { ...config, publicKey: process.env.LANGFUSE_PUBLIC_KEY, secretKey: process.env.LANGFUSE_SECRET_KEY };
+  if (object(config) && !stdin && config.publicKey === undefined && config.secretKey === undefined) {
+    delete config.publicKey; delete config.secretKey;
+    return config;
+  }
   if (!object(config) || typeof config.publicKey !== 'string' || typeof config.secretKey !== 'string' || !config.publicKey || !config.secretKey) throw new Error('Supply a separate Viewer key pair through a secret manager or --stdin.');
   return config;
 }

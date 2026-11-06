@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.3.6 — 2026-11-06
 
 - Distinguish a connected Langfuse key from incomplete score-import setup. Connection status exposes only score-mapping and model-alias counts, and the web UI explains when either is missing. The CLI preserves those counts when the server provides them. Requires the corresponding Scout deployment and npm patch; does not change credentials, mappings or experiment attribution.
+- Update an existing Langfuse connection's non-secret settings through CLI, MCP or API without retrieving or re-entering its Viewer key. Omit both Viewer credentials; Scout reuses and reverifies the encrypted key internally. New connections still require a protected Viewer pair, and partial pairs are rejected. Settings changes invalidate imported aggregates; sync again afterwards. Requires the matching Scout deployment.
 
 ## 0.3.5 — 2026-11-05
 

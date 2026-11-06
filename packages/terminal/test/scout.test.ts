@@ -34,7 +34,9 @@ test('headless CLI resumes explicit management approval, protects keys, and mana
     if (options?.method === 'DELETE') { connected = false; results = 0; }
     if (path.endsWith('/sync')) results = connected ? 7 : 0;
     else if (options?.method === 'POST') {
-      assert.equal(body.publicKey, 'pk-lf-fictional-key'); assert.equal(body.secretKey, 'sk-lf-fictional-secret'); connected = true;
+      if (!connected) { assert.equal(body.publicKey, 'pk-lf-fictional-key'); assert.equal(body.secretKey, 'sk-lf-fictional-secret'); }
+      else { assert.equal(body.publicKey, undefined); assert.equal(body.secretKey, undefined); }
+      connected = true;
     }
     return Response.json({ connected, results, mappingCount: 3, modelAliasCount: 11 });
   });
@@ -49,6 +51,11 @@ test('headless CLI resumes explicit management approval, protects keys, and mana
   await writeFile(join(home, 'mappings.json'), JSON.stringify(config));
   assert.equal(await run(['connect', 'langfuse', '--config', 'mappings.json']), 0);
   assert.equal(JSON.parse(printed.at(-1) ?? '').connected, true);
+  delete process.env.LANGFUSE_PUBLIC_KEY; delete process.env.LANGFUSE_SECRET_KEY;
+  assert.equal(await run(['connect', 'langfuse', '--config', 'mappings.json']), 0);
+  process.env.LANGFUSE_PUBLIC_KEY = 'pk-lf-fictional-key';
+  await assert.rejects(run(['connect', 'langfuse', '--config', 'mappings.json']), /Viewer key pair/);
+  process.env.LANGFUSE_SECRET_KEY = 'sk-lf-fictional-secret';
   await run(['connect', 'langfuse', '--sync']);
   assert.equal(JSON.parse(printed.at(-1) ?? '').results, 7);
   assert.equal(JSON.parse(printed.at(-1) ?? '').mappingCount, 3);

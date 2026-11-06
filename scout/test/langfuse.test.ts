@@ -36,7 +36,7 @@ test('headless management is separately approved, user-isolated, revocable and c
     const state = states.get(user) ?? { connected: false, results: 0 }; states.set(user, state);
     return {
       status: async () => ({ ...state }),
-      configure: async input => { parseLangfuse(input); state.connected = true; return { ...state }; },
+      configure: async input => { parseLangfuse({ ...(state.connected ? config : {}), ...input as Record<string, unknown> }); state.connected = true; return { ...state }; },
       sync: async () => { state.results = state.connected ? 3 : 0; return { ...state }; },
       disconnect: async () => { state.connected = false; state.results = 0; return { ...state }; },
       clear: async () => { state.connected = false; state.results = 0; return { ...state }; },
@@ -81,7 +81,8 @@ test('headless management is separately approved, user-isolated, revocable and c
   assert.equal((await mcp(manager, 'tools/call', { action: 'disconnect' })).result.isError, true);
   assert.equal((await (await call('langfuse', manager)).json()).connected, true);
   const { publicKey, secretKey, ...settings } = config;
-  assert.equal((await mcp(manager, 'tools/call', { action: 'configure', config: settings })).result.isError, true);
+  assert.equal((await mcp(manager, 'tools/call', { action: 'configure', config: settings })).result.structuredContent.connected, true);
+  assert.equal((await mcp(manager, 'tools/call', { action: 'configure', config: settings }, { 'X-Langfuse-Public-Key': publicKey })).result.isError, true);
   assert.equal((await mcp(manager, 'tools/call', { action: 'configure', config })).result.isError, true, 'keys are rejected in model-visible arguments');
   const configured = await mcp(manager, 'tools/call', { action: 'configure', config: settings }, { 'X-Langfuse-Public-Key': publicKey, 'X-Langfuse-Secret-Key': secretKey });
   assert.equal(configured.result.structuredContent.connected, true);
@@ -170,6 +171,7 @@ test('per-user storage persists only encrypted credentials, isolates users, and 
     durableObjects: { EVALS: { className: 'TestEvaluations', useSQLite: true } }, bindings: { SCOUT_CONNECTOR_KEY: 'fictional-encryption-secret-for-test' },
     outboundService: async request => {
       const url = new URL(request.url);
+      if (request.headers.get('authorization') !== `Basic ${btoa(`${config.publicKey}:${config.secretKey}`)}`) return new Response(null, { status: 401 });
       if (request.method === 'POST') return new Response(null, { status: 403 });
       if (url.pathname === '/api/public/experiments') return Response.json({ data: [{ id: 'first', metadata: { model_coding: 'provider/first' } }], meta: {} });
       if (hold) { waiting?.(); await new Promise<void>(resolve => { release = resolve; }); }
@@ -187,7 +189,8 @@ test('per-user storage persists only encrypted credentials, isolates users, and 
     const empty = await call('sync') as Record<string, unknown>;
     assert.equal(empty.experiments, 1);
     assert.equal(empty.results, 0);
-    await call('connect', config);
+    const { publicKey: _publicKey, secretKey: _secretKey, ...settings } = config;
+    await call('connect', settings);
     const configured = await call('status') as Record<string, unknown>;
     assert.equal(configured.mappingCount, 1);
     assert.equal(configured.modelAliasCount, 2);
@@ -199,6 +202,13 @@ test('per-user storage persists only encrypted credentials, isolates users, and 
     await call('sync');
     assert.equal((await call('measurements') as unknown[]).length, 2);
     assert.deepEqual(await call('measurements?user=b'), []);
+    const wrongUser = await mf.dispatchFetch('http://local/connect?user=b', { method: 'POST', body: JSON.stringify(settings) });
+    assert.equal(wrongUser.status, 500, 'another user cannot reuse the connected key');
+    const partialKey = await mf.dispatchFetch('http://local/connect', { method: 'POST', body: JSON.stringify({ ...settings, publicKey: config.publicKey }) });
+    assert.equal(partialKey.status, 500, 'partial key pairs must not silently reuse saved credentials');
+    const unsupported = await mf.dispatchFetch('http://local/connect', { method: 'POST', body: JSON.stringify({ ...settings, unsupported: true }) });
+    assert.equal(unsupported.status, 500);
+    assert.equal((await call('measurements') as unknown[]).length, 2, 'invalid updates preserve existing results');
     await call('disconnect');
     assert.equal((await call('measurements') as unknown[]).length, 1);
     assert.equal((await call('inspect') as Record<string, unknown>).credentials, undefined);
