@@ -10,6 +10,9 @@ export function d1(): Database & { all(sql: string, ...args: Value[]): Record<st
   const positional = (sql: string, args: Value[]): [string, Value[]] => { const order: Value[] = []; return [sql.replace(/\?(\d+)/g, (_, n: string) => (order.push(args[Number(n) - 1] ?? null), '?')), order.length ? order : args]; };
   const statement = (sql: string, args: Value[] = []): Statement => { const [q, a] = positional(sql, args); return { bind: (...b: Value[]) => statement(sql, b), run: async () => ({ meta: { changes: Number(db.prepare(q).run(...a).changes) } }),
     all: async <Row>() => ({ results: db.prepare(q).all(...a) as Row[] }) }; };
+  // D1 runs batches one at a time; queue them so concurrent callers cannot nest transactions.
+  let queue: Promise<unknown> = Promise.resolve();
+  const batch = async (statements: Statement[]) => { db.exec('BEGIN'); try { const out = []; for (const s of statements) out.push(await s.run()); db.exec('COMMIT'); return out; } catch (e) { db.exec('ROLLBACK'); throw e; } };
   return { prepare: (sql: string) => statement(sql), all: (sql: string, ...a: Value[]) => db.prepare(sql).all(...a),
-    batch: async (statements: Statement[]) => { db.exec('BEGIN'); try { const out = []; for (const s of statements) out.push(await s.run()); db.exec('COMMIT'); return out; } catch (e) { db.exec('ROLLBACK'); throw e; } } };
+    batch: (statements: Statement[]) => { const result = queue.then(() => batch(statements)); queue = result.catch(() => undefined); return result; } };
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { discoverMTEB, importMTEB, mtebAPI } from '../catalogue-mteb.ts';
+import { discoverMTEB, importMTEB, importMTEBGroup, mtebAPI } from '../catalogue-mteb.ts';
 import { type Bucket, type Database } from '../catalogue-db.ts';
 import { d1 } from './helpers-d1.ts';
 
@@ -79,4 +79,22 @@ test('MTEB results link to a catalogue model by exact ID or repository, and othe
   const rows = [row('Lab/Model'), row('Lab/Model', { embed_dim: 512 }), row('Other/Model'), row('Lab/Model-2')];
   assert.deepEqual(await importMTEB(db, board(), { fetcher: async () => Response.json(summary(rows)) }), { status: 'ok', rows: 4, models: 3, linked: 1 });
   assert.deepEqual(db.all('SELECT model,model_id FROM cat_mteb_results ORDER BY model,variant').map(r => Object.values(r)), [['Lab/Model', 'lab/model'], ['Lab/Model', 'lab/model'], ['Lab/Model-2', null], ['Other/Model', null]]);
+});
+
+test('MTEB boards imported as a group run concurrently, keep their own runs and fail alone', async () => {
+  const db = d1(), names = ['A', 'B', 'C'];
+  let inFlight = 0, most = 0;
+  const fetcher = async (url: string) => {
+    inFlight++; most = Math.max(most, inFlight);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    inFlight--;
+    const name = names.find(n => url === `${mtebAPI}/benchmarks/${n}/scores`) ?? '';
+    return Response.json(summary(name === 'B' ? [] : undefined, name));
+  };
+  const results = await importMTEBGroup(db, names.map(board), { fetcher, run: 'refresh-mteb', concurrency: 2, now: '2026-11-06T00:00:00Z' });
+  assert.deepEqual(results.map(r => r.status), ['ok', 'failed', 'ok'], 'results keep the input order and an empty board fails alone');
+  assert.equal(most, 2);
+  assert.deepEqual(db.all("SELECT id,source,status FROM cat_runs ORDER BY id").map(r => Object.values(r)),
+    [['refresh-mteb-A', 'mteb:A', 'ok'], ['refresh-mteb-B', 'mteb:B', 'failed'], ['refresh-mteb-C', 'mteb:C', 'ok']]);
+  assert.deepEqual([...new Set(active(db).map(r => r.benchmark))], ['A', 'C']);
 });

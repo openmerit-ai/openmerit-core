@@ -230,13 +230,13 @@ test('a globally collapsed completed feed is rejected before any bounded apply a
   const db = d1(), seed = Array.from({ length: 60 }, (_, i) => served(`person/model-${i}`));
   assert.equal((await refreshHubProviders(db, { now: '2026-10-01T00:00:00.000Z', run: 'healthy', fetcher: hub({ [hubProvidersURL]: { body: seed } }) })).complete, true);
   const before = ['cat_listings', 'cat_prices', 'cat_hf_models'].map(table => db.all(`SELECT * FROM ${table} ORDER BY 1,2,3`));
-  const failed = await refreshHubProviders(db, { now: '2026-10-02T00:00:00.000Z', run: 'collapsed', applyBatches: 1, batchModels: 1,
+  const failed = await refreshHubProviders(db, { now: '2026-10-01T01:00:00.000Z', run: 'collapsed', applyBatches: 1, batchModels: 1,
     fetcher: hub({ [hubProvidersURL]: { body: [served('person/new')] } }) });
   assert.equal(failed.complete, false); assert.match(failed.error ?? '', /listings dropped from 60 to 1/); assert.equal(failed.appliedModels, 0);
   assert.deepEqual(['cat_listings', 'cat_prices', 'cat_hf_models'].map(table => db.all(`SELECT * FROM ${table} ORDER BY 1,2,3`)), before);
   assert.equal(db.all("SELECT last_run FROM cat_sources WHERE id='huggingface-providers'")[0]?.last_run, 'healthy');
   assert.equal(db.all('SELECT count(*) n FROM cat_hf_provider_crawl')[0]?.n, 0, 'a rejected complete generation must not trap future refreshes');
-  const recovered = await refreshHubProviders(db, { now: '2026-10-03T00:00:00.000Z', run: 'recovered', fetcher: hub({ [hubProvidersURL]: { body: seed } }) });
+  const recovered = await refreshHubProviders(db, { now: '2026-10-01T02:00:00.000Z', run: 'recovered', fetcher: hub({ [hubProvidersURL]: { body: seed } }) });
   assert.deepEqual([recovered.complete, recovered.stagedModels, recovered.appliedModels], [true, 60, 0], 'the recovered feed matches what was applied, so nothing is rewritten');
 });
 
@@ -247,7 +247,7 @@ test('a globally healthy feed can shrink a greater-than-50-route exact repositor
   const first = await refreshHubProviders(db, { now: '2026-10-01T00:00:00.000Z', run: 'many', batchModels: 1,
     fetcher: hub({ [hubProvidersURL]: { body: [many('person/a', 60), many('person/z', 60)] } }) });
   assert.equal(first.complete, true); assert.equal(first.appliedRoutes, 120);
-  const second = await refreshHubProviders(db, { now: '2026-10-02T00:00:00.000Z', run: 'healthy-decline', batchModels: 1,
+  const second = await refreshHubProviders(db, { now: '2026-10-01T01:00:00.000Z', run: 'healthy-decline', batchModels: 1,
     fetcher: hub({ [hubProvidersURL]: { body: [many('person/a', 10), many('person/z', 60)] } }) });
   assert.equal(second.error, null, 'the global feed retains 70/120 routes, although the first exact batch retains only 10/60');
   assert.equal(second.complete, true); assert.equal(second.appliedRoutes, 10, 'unchanged person/z is not applied again');
@@ -255,24 +255,33 @@ test('a globally healthy feed can shrink a greater-than-50-route exact repositor
   assert.deepEqual(db.all("SELECT provider_model_id,count(*) n FROM cat_listings WHERE source='huggingface-providers' AND withdrawn_at IS NULL GROUP BY provider_model_id ORDER BY provider_model_id").map(r => Object.values(r)), [['person/a', 10], ['person/z', 60]]);
 });
 
-test('a later crawl applies only new, changed, returning or long-unapplied repositories', async () => {
+test('a later crawl applies only new, changed or returning repositories', async () => {
   const db = d1(), crawl = (now: string, body: unknown[]) => refreshHubProviders(db, { now, run: now, fetcher: hub({ [hubProvidersURL]: { body } }) });
   const row = (repo: string) => db.all(`SELECT * FROM cat_listings WHERE provider_model_id='${repo}'`);
   const changed = { lastModified: '2026-10-01T12:00:00Z' };
   await crawl('2026-10-01T00:00:00.000Z', [served('person/a'), served('person/b'), served('person/c')]);
   const a = row('person/a');
-  const second = await crawl('2026-10-02T00:00:00.000Z', [served('person/a', 'conversational', { downloads: 999, likes: 50 }), served('person/b', 'conversational', changed), served('person/d')]);
+  const second = await crawl('2026-10-01T01:00:00.000Z', [served('person/a', 'conversational', { downloads: 999, likes: 50 }), served('person/b', 'conversational', changed), served('person/d')]);
   assert.deepEqual([second.complete, second.stagedModels, second.appliedModels], [true, 3, 2], 'only changed b and new d are applied');
   assert.deepEqual(row('person/a'), a, 'a popularity-only change rewrites nothing');
-  assert.equal(row('person/b')[0]?.last_seen, '2026-10-02T00:00:00.000Z');
-  assert.equal(row('person/c')[0]?.withdrawn_at, '2026-10-02T00:00:00.000Z');
+  assert.equal(row('person/b')[0]?.last_seen, '2026-10-01T01:00:00.000Z');
+  assert.equal(row('person/c')[0]?.withdrawn_at, '2026-10-01T01:00:00.000Z');
   assert.equal(row('person/d')[0]?.withdrawn_at, null);
-  const third = await crawl('2026-10-03T00:00:00.000Z', [served('person/a'), served('person/b', 'conversational', changed), served('person/c'), served('person/d')]);
+  const third = await crawl('2026-10-01T02:00:00.000Z', [served('person/a'), served('person/b', 'conversational', changed), served('person/c'), served('person/d')]);
   assert.equal(third.appliedModels, 1, 'only c, which returned unchanged, is applied');
   assert.equal(row('person/c')[0]?.withdrawn_at, null, 'a returning repository is restored even though its metadata is unchanged');
-  const weekly = await crawl('2026-10-09T00:00:00.000Z', [served('person/a'), served('person/b', 'conversational', changed), served('person/c'), served('person/d')]);
-  assert.equal(weekly.appliedModels, 1, `only a was last applied more than ${hubPolicy.providerReapplyDays} days ago; b exactly that long ago is still skipped`);
-  assert.equal(row('person/a')[0]?.last_seen, '2026-10-09T00:00:00.000Z');
+});
+
+test('unchanged repositories applied together are re-applied once per period, spread across refreshes', async () => {
+  const db = d1(), repos = Array.from({ length: 42 }, (_, i) => served(`person/m${i}`)), start = Date.parse('2026-10-01T00:00:00.000Z');
+  const crawl = (hours: number) => refreshHubProviders(db, { now: new Date(start + hours * 3_600_000).toISOString(), run: `r${hours}`, fetcher: hub({ [hubProvidersURL]: { body: repos } }) });
+  assert.equal((await crawl(0)).appliedModels, 42);
+  // Twice-daily refreshes through one whole period, then the first refresh of the next.
+  const applied: number[] = [];
+  for (let run = 1; run <= hubPolicy.providerReapplyDays * 2; run++) applied.push((await crawl(run * 12)).appliedModels);
+  assert.equal(applied.reduce((a, b) => a + b), 42, `every repository is re-applied exactly once within ${hubPolicy.providerReapplyDays} days`);
+  assert.ok(Math.max(...applied) <= 10, `no refresh re-applies most of the cohort: ${applied.join(',')}`);
+  assert.equal(new Set(db.all("SELECT last_seen FROM cat_listings WHERE source='huggingface-providers'").map(r => r.last_seen)).size > 7, true, 'last applications are spread');
 });
 
 test('failed final cleanup cannot advance source freshness, and retry preserves final withdrawal counters', async () => {

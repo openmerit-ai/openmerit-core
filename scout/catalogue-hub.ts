@@ -16,7 +16,8 @@ export const hubPolicy = {
   // Requests per run stay far below the Hub's 1,000 per 5 minutes and the Worker subrequest limit.
   overviewsPerRun: 400, pagesPerRun: 250, recheckDays: 7, recrawlDays: 7, concurrency: 6,
   providerPagesPerRun: 4, providerPageBytes: 4_000_000, providerRowBytes: 250_000, providerApplyBatches: 4, providerBatchModels: 50, providerApplyBytes: 1_000_000,
-  // Unchanged repositories are re-applied at least this often, so identity links and parser changes still reach them.
+  // Unchanged repositories are re-applied once in each such period, so identity links and parser changes still reach them.
+  // Each repository's period starts at its own offset, so about 1/14 of them come due in each twice-daily refresh.
   providerReapplyDays: 7,
   // Discovery proposes organisations from the most-downloaded models; only verified ones are admitted.
   discovery: ['text-generation', 'image-text-to-text', 'text-to-image'],
@@ -387,13 +388,18 @@ export async function refreshHubProviders(db: Database, options: HubOptions & { 
     }
     // Only new or changed repositories are applied. One whose metadata hash
     // matches what was applied recently keeps its rows; final withdrawal still
-    // uses the whole staged feed.
-    const recent = daysAgo(crawl.started_at, hubPolicy.providerReapplyDays);
+    // uses the whole staged feed. An unchanged repository is due again once the
+    // latest start of its reapply period has passed since it was last applied.
+    // Periods start at an offset taken from the first three hex digits of its
+    // SHA-256 metadata hash, so repositories applied together do not all come due together.
+    const period = hubPolicy.providerReapplyDays * 86_400, at = Math.floor(Date.parse(crawl.started_at) / 1000);
+    const digit = (n: number) => `(instr('0123456789abcdef',substr(s.hash,${n},1))-1)`;
+    const periodStart = `?4-((?4-(${digit(1)}*256+${digit(2)}*16+${digit(3)})*?5/4096)%?5)`;
     for (let i = 0; crawl.phase === 'apply' && i < batches; i++) {
       const rows = (await db.prepare(`WITH candidates AS (SELECT id,payload,hash FROM cat_hf_provider_stage s WHERE id>?1 AND payload IS NOT NULL
-          AND NOT EXISTS (SELECT 1 FROM cat_hf_provider_seen v WHERE v.id=s.id AND v.hash=s.hash AND v.applied_at>=?4) ORDER BY id LIMIT ?2)
+          AND NOT EXISTS (SELECT 1 FROM cat_hf_provider_seen v WHERE v.id=s.id AND v.hash=s.hash AND CAST(strftime('%s',v.applied_at) AS INTEGER)>=${periodStart}) ORDER BY id LIMIT ?2)
         SELECT id,payload,hash FROM (SELECT id,payload,hash,sum(length(CAST(payload AS BLOB))) OVER (ORDER BY id) bytes FROM candidates) WHERE bytes<=?3 ORDER BY id`)
-        .bind(crawl.cursor, batchModels, hubPolicy.providerApplyBytes, recent).all<{ id: string; payload: string; hash: string | null }>()).results;
+        .bind(crawl.cursor, batchModels, hubPolicy.providerApplyBytes, at, period).all<{ id: string; payload: string; hash: string | null }>()).results;
       if (!rows.length) { crawl.phase = 'done'; await db.prepare("UPDATE cat_hf_provider_crawl SET phase='done' WHERE id=1").run(); break; }
       const repos = rows.map(r => r.id), parsedPage = parseHubPage(rows.map(r => JSON.parse(r.payload) as unknown));
       const listings = resolveListings(parsedPage.listings, await providerBackbone(db, repos), { slugs: false });

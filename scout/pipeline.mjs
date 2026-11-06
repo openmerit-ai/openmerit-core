@@ -12,7 +12,7 @@ import {structured} from './structured.mjs';
 import {embed} from './evidence-search.mjs';
 import {catalogueSources,importCatalogueSource,rebuildOfferings,rebuildModels} from './catalogue-db.ts';
 import {refreshHubOrgs,crawlHubModels,refreshHubProviders} from './catalogue-hub.ts';
-import {discoverMTEB,importMTEB} from './catalogue-mteb.ts';
+import {discoverMTEB,importMTEBGroup} from './catalogue-mteb.ts';
 import {boardSources,importBoards} from './catalogue-boards.ts';
 import {loadCatalogue,catalogueRouteSource,decisionGateway,openRouterDecisionGateway} from './catalogue-routes.ts';
 import admittedProviders from './catalogue-providers.json' with { type: 'json' };
@@ -134,12 +134,12 @@ export async function runRefresh(env,step,id) {
       // A timed-out step keeps running beside its retry; the long timeout keeps a slow D1 from starting one.
       for(const [name,rebuild] of [['offerings',rebuildOfferings],['models',rebuildModels]])
         try{await step.do(`catalogue-${name}`,{retries:{limit:1,delay:'30 seconds'},timeout:'30 minutes'},()=>rebuild(env.SCOUT_INDEX));}catch{}
-      // One compact final-results response per step; never hold every MTEB
-      // leaderboard in memory or download its benchmark datasets/results dump.
+      // Compact final-results responses, eight boards per step and four at a time;
+      // never hold every MTEB leaderboard in memory or download its benchmark datasets/results dump.
       let mteb=[];
       try{mteb=await step.do('catalogue-mteb-directory',{retries:{limit:1,delay:'30 seconds'},timeout:'2 minutes'},()=>discoverMTEB());}catch{}
-      for(const benchmark of mteb)
-        try{await step.do(`catalogue-mteb-${benchmark.name}`,{retries:{limit:1,delay:'30 seconds'},timeout:'2 minutes'},()=>importMTEB(env.SCOUT_INDEX,benchmark,{bucket,run:`${id}-mteb-${benchmark.name}`}));}catch{}
+      for(let i=0;i<mteb.length;i+=8)
+        try{await step.do(`catalogue-mteb-group-${i/8}`,{retries:{limit:1,delay:'30 seconds'},timeout:'10 minutes'},()=>importMTEBGroup(env.SCOUT_INDEX,mteb.slice(i,i+8),{bucket,run:`${id}-mteb`,concurrency:4}));}catch{}
       // Media leaderboards, one page or parquet per step, after models are rebuilt so links use this run's catalogue.
       for(const source of boardSources)
         try{await step.do(`catalogue-${source.id.replace(':','-')}`,{retries:{limit:1,delay:'30 seconds'},timeout:'2 minutes'},()=>importBoards(env.SCOUT_INDEX,source,{bucket,run:`${id}-${source.id}`}));}catch{}
