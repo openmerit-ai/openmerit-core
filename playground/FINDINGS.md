@@ -33,6 +33,20 @@ and cited the same aggregate without resending results, proving account-level
 reuse, but returned a prose message instead of a validated structured shortlist.
 That is not a clean cross-conversation recommendation acceptance pass.
 
+**Summary correction deployed:** PR #81 merged with all PR/main checks green.
+Scout serving version `86d43d6c-e60f-4989-be50-9461d48f37cf` went live at 08:54
+UTC. Repeating the published CLI's `--sync langfuse` recommendation returned five
+structured tasks; every summary named its actual first model, and the coding
+summary retained its one-sample caveat. Landing, Scout, connection, status and
+version endpoints all returned HTTP 200. This check did not rerun the claim or
+change models, credentials or platform records.
+
+A second fresh conversation `f1febf1a-157b-42e2-9202-159ff7c15cdc` again cited the
+imported coding aggregate without receiving a results file but returned prose.
+Thus account-level evidence reuse works, while fresh structured completion has
+failed twice and remains a release blocker. The existing conversation's successful
+structured rerank does not override those failures.
+
 This is plumbing evidence, not a model comparison or quality win: there is one
 sample and no competing model in this run. Regret is not measured here. No
 existing Langfuse records or connection credentials were deleted. Disconnect
