@@ -2,6 +2,33 @@
 
 Dated observations from using OpenMerit as Sahra Health, newest release first. Each entry says what we ran, what happened and what a customer would expect.
 
+## Invite-only gate: published 0.3.7 setup (6 Nov 2026)
+
+Installed exact registry package `openmerit@0.3.7` and refreshed this project's
+lockfile. The downloaded tarball's SHA-1 and SHA-512 matched registry metadata;
+SHA-1 was `864e235232c79d10c5a4183801bdea5b57232703`. The first install hit
+cached pre-publication metadata and returned ETARGET; `--prefer-online` fetched
+current metadata and succeeded. Typecheck and all 14 deterministic tests passed.
+
+The published CLI returned five structured tasks in conversation
+`ca0bb4be-8f0e-4db3-b8ba-3fd6a01232c0`, without a results file. All five summaries
+named their final first model. The saved Langfuse connection still held one
+aggregate from one experiment. This is a package/recommendation smoke check, not
+a new claim comparison or a full release-loop pass.
+
+Fresh Claude project setup first reported a conflict with the Mac's existing
+user-scope MCP server. Rather than remove or update another session's connection,
+used an isolated `CLAUDE_CONFIG_DIR` and disabled automatic instruction updates.
+The owner approved the new device request; the published installer completed
+with `connection: connected`. The isolated Claude configuration still needs its
+own Anthropic authentication before fresh-agent readiness tests can run. No
+shared Claude login or existing Scout connection was replaced.
+
+The three customer-readiness cases, comparative regret, approved destructive
+recovery/cleanup checks and two consecutive full published-release passes remain
+open. No application model changed, new claim comparison ran, payment was
+approved or platform data was deleted during this checkpoint.
+
 ## Invite-only gate: structured reuse passes (6 Nov 2026, published openmerit 0.3.6)
 
 Scout serving version `fe34446b-528c-4b90-b0a0-60946caa0d78` deployed at
