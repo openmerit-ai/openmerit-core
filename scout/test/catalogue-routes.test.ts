@@ -79,7 +79,7 @@ test('a Scout model reaching a canonical model and its dated copy owns both: the
   assert.deepEqual(catalogue.models(models, now), []);
 });
 
-test('Vercel decision routes preserve typed contracts, live prices and benchmark scores', async () => {
+test('Vercel and OpenRouter decision routes preserve typed contracts, live prices and benchmark scores', async () => {
   const db = d1(), now = '2026-10-28T00:00:00.000Z', VC = 'https://ai-gateway.vercel.sh/v1/models';
   const decision = (id: string, pricing: Record<string, string> | undefined, input = ['text'], name = id) => ({ id, name, type: 'evaluation', context_window: 32000, modalities: { input, output: ['text'] }, ...(pricing ? { pricing } : {}) });
   const files: Record<string, unknown> = { [MD]: { openai: api.openai, anthropic: api.anthropic }, [MDM]: {}, [VC]: { data: [
@@ -90,8 +90,16 @@ test('Vercel decision routes preserve typed contracts, live prices and benchmark
     // No published rate: unknown cost is never shown as free.
     decision('lab/decide-unpriced', undefined),
     { id: 'lab/chat-1', name: 'Chat 1', type: 'language', modalities: { input: ['text'], output: ['text'] }, pricing: { input: '0.000001', output: '0.000002' } }] } };
+  const judge = (id: string, prompt: string, extra: Record<string, unknown> = {}, name = id) => ({ id, name, architecture: { input_modalities: ['text', 'image'], output_modalities: ['decisions'] }, pricing: { prompt, completion: '0' }, context_length: 65536, ...extra });
+  files[OR] = { data: [
+    // OpenRouter routes decide-2 too: the model gets a route from each gateway.
+    judge('lab/decide-2', '0.00000003'), judge('lab/or-judge', '0.00000001'),
+    // A free variant of or-judge (same canonical model) adds no second entry.
+    judge('lab/or-judge:free', '0', {}, 'Lab: or-judge (free)'),
+    // A moving "latest" alias and a model whose removal date has passed are left out; an upcoming removal is marked.
+    judge('~lab/judge-latest', '0.00000001'), judge('lab/or-retired', '0.00000001', { expiration_date: '2020-01-01' }), judge('lab/or-retiring', '0.00000001', { expiration_date: '2099-01-01' })] };
   const fetcher = async (url: string) => new Response(JSON.stringify(files[url]));
-  for (const source of ['modelsdev', 'vercel'] as const) assert.equal((await importCatalogueSource(db, source, { fetcher, now, run: source })).status, 'ok');
+  for (const source of ['modelsdev', 'vercel', 'openrouter'] as const) assert.equal((await importCatalogueSource(db, source, { fetcher, now, run: source })).status, 'ok');
   await rebuildOfferings(db);
   // JevBench ranks decide-2 above decide-1; the free model has no results.
   await rebuildModels(db);
@@ -104,6 +112,11 @@ test('Vercel decision routes preserve typed contracts, live prices and benchmark
   assert.deepEqual(contracts.map(c => [c.id, c.model, c.api, c.protocol, c.inputPrice, c.outputPrice, c.modalities, c.operations]), [
     ['vercel-decisions:vercel-evaluate:lab/decide-1', 'lab/decide-1', 'https://ai-gateway.vercel.sh/v1/evaluate', 'vercel-evaluate', 0.02, 0, ['text', 'image'], ['classify', 'judge']],
     ['vercel-decisions:vercel-evaluate:lab/decide-2', 'lab/decide-2', 'https://ai-gateway.vercel.sh/v1/evaluate', 'vercel-evaluate', 0.02, 0, ['text'], ['classify', 'judge']],
-    ['vercel-decisions:vercel-evaluate:lab/decide-free', 'lab/decide-free', 'https://ai-gateway.vercel.sh/v1/evaluate', 'vercel-evaluate', 0, 0, ['text'], ['classify', 'judge']]]);
+    ['vercel-decisions:vercel-evaluate:lab/decide-free', 'lab/decide-free', 'https://ai-gateway.vercel.sh/v1/evaluate', 'vercel-evaluate', 0, 0, ['text'], ['classify', 'judge']],
+    ['openrouter-decisions:openrouter-decisions:lab/decide-2', 'lab/decide-2', 'https://openrouter.ai/api/alpha/decisions', 'openrouter-decisions', 0.03, 0, ['text', 'image'], ['classify', 'judge']],
+    ['openrouter-decisions:openrouter-decisions:lab/or-judge', 'lab/or-judge', 'https://openrouter.ai/api/alpha/decisions', 'openrouter-decisions', 0.01, 0, ['text', 'image'], ['classify', 'judge']],
+    ['openrouter-decisions:openrouter-decisions:lab/or-retiring', 'lab/or-retiring', 'https://openrouter.ai/api/alpha/decisions', 'openrouter-decisions', 0.01, 0, ['text', 'image'], ['classify', 'judge']]]);
+  assert.deepEqual(contracts.filter(c => c.source === 'openrouter-decisions').map(c => [c.provider, c.status, c.context, c.retiresAt]),
+    [['OpenRouter', 'alpha', 65536, undefined], ['OpenRouter', 'alpha', 65536, undefined], ['OpenRouter', 'alpha', 65536, '2099-01-01']]);
 
 });

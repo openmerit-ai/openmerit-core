@@ -29,7 +29,7 @@ export interface CatalogueSupply {
   // The model family each Scout model links to through an exact identity: its canonical ID
   // without namespace, punctuation or a dated suffix, so catalogue copies of one model agree.
   families(models: readonly ScoutModelLike[]): Map<string, string>;
-  // Vercel AI Gateway decision routes as typed endpoint contracts, in endpoint-contracts.json's shape.
+  // Vercel AI Gateway and OpenRouter decision routes as typed endpoint contracts, in endpoint-contracts.json's shape.
   decisionRoutes(): DecisionContract[];
   // Linked decision-leaderboard results per canonical model (catalogue-boards.ts).
   decisionScores(): Record<string, DecisionScore>;
@@ -40,9 +40,21 @@ export interface DecisionScore { quality: number; results: Array<{ board: string
 export interface DecisionContract {
   id: string; model: string; name: string; provider: string; modelId: string; api: string; protocol: string; operations: string[]; labelMode: 'supplied';
   modalities: string[]; parameters: string[]; context: number | null; inputPrice: number; outputPrice: number; url: string; source: string; status: string; pricingBasis: string; limits: string;
+  // The gateway's announced removal date, while it is still ahead.
+  retiresAt?: string;
 }
-// Vercel's gateway answers choice, score and boolean questions for every decision model it routes.
-export const decisionGateway = { source: 'vercel-decisions', provider: 'Vercel AI Gateway', api: 'https://ai-gateway.vercel.sh/v1/evaluate', protocol: 'vercel-evaluate', url: 'https://vercel.com/docs/ai-gateway/modalities/decision' };
+// Each gateway answers choice, score and boolean questions for every decision model it routes, through one documented contract.
+interface DecisionGateway { source: string; provider: string; api: string; protocol: string; url: string; status: string; pricingBasis: string; limits: string }
+const decisionLimits = 'Supplied choices, ordered rubric scores and boolean probabilities. No arbitrary field extraction, free-form answers, tool execution, boxes or masks.';
+export const decisionGateway: DecisionGateway = { source: 'vercel-decisions', provider: 'Vercel AI Gateway', api: 'https://ai-gateway.vercel.sh/v1/evaluate', protocol: 'vercel-evaluate', url: 'https://vercel.com/docs/ai-gateway/modalities/decision',
+  status: 'listed', pricingBasis: 'Vercel AI Gateway decision rate: input tokens only. Promotional and free-tier rates can end; image tokenization affects the actual bill.', limits: decisionLimits };
+// OpenRouter's alpha Decisions API: typed noul (boolean), choice and score questions about a state.
+// Its box questions are model-specific (Jev 1.14 only), so they are not part of the shared contract.
+export const openRouterDecisionGateway: DecisionGateway = { source: 'openrouter-decisions', provider: 'OpenRouter', api: 'https://openrouter.ai/api/alpha/decisions', protocol: 'openrouter-decisions',
+  url: 'https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-request', status: 'alpha',
+  pricingBasis: 'OpenRouter decision rate: input (prompt) tokens only; completion is listed at 0. Free-tier rates can end; image tokenization affects the actual bill.', limits: decisionLimits };
+// Decision gateways by catalogue provider ID.
+export const decisionGateways: Readonly<Record<string, DecisionGateway>> = { vercel: decisionGateway, openrouter: openRouterDecisionGateway };
 
 export const catalogueRouteSource = 'catalogue';
 const strings = (v: string | null): string[] => { try { const parsed: unknown = JSON.parse(v ?? 'null'); return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []; } catch { return []; } };
@@ -147,11 +159,14 @@ export async function loadCatalogue(db: Database, admitted: Readonly<Record<stri
   // other repository by that name, such as the base model, makes the name ambiguous.
   for (const r of (await db.prepare(`SELECT id FROM cat_hf_models WHERE model_id IS NULL AND withdrawn_at IS NULL
     AND author IN (SELECT author FROM cat_hf_models WHERE model_id IS NOT NULL AND withdrawn_at IS NULL)`).all<{ id: string }>()).results) named(r.id.split('/').pop(), `huggingface:${r.id}`);
-  // Decision routes need a current input rate; Vercel bills decisions on input tokens only.
-  const decisionRows = (await db.prepare(`SELECT o.provider_model_id,o.model_id,o.name,o.status,o.context,o.input_modalities,p.amount input FROM cat_offerings o
+  // Decision routes need a current input rate; the gateways bill decisions on input tokens only. OpenRouter's
+  // `~lab/…-latest` IDs are moving aliases, never one model. A route whose announced removal date has passed is retired.
+  const decisionRows = (await db.prepare(`SELECT o.provider_id,o.provider_model_id,o.model_id,o.name,o.status,o.context,o.input_modalities,o.deprecated_at,p.amount input FROM cat_offerings o
     JOIN cat_prices p ON p.provider_id=o.provider_id AND p.provider_model_id=o.provider_model_id AND p.valid_to IS NULL AND p.tier='' AND p.unit='usd_per_mtok' AND p.kind='input'
-    WHERE o.provider_id='vercel' AND o.kind='decision' AND o.model_id IS NOT NULL AND (o.status IS NULL OR o.status<>'deprecated') ORDER BY o.provider_model_id,CASE p.source WHEN 'vercel' THEN 0 ELSE 1 END`)
-    .all<{ provider_model_id: string; model_id: string; name: string | null; status: string | null; context: number | null; input_modalities: string | null; input: number }>()).results;
+    WHERE o.provider_id IN (SELECT value FROM json_each(?1)) AND o.kind='decision' AND o.model_id IS NOT NULL AND (o.status IS NULL OR o.status<>'deprecated')
+      AND o.provider_model_id NOT LIKE '~%' AND (o.deprecated_at IS NULL OR o.deprecated_at>date('now'))
+    ORDER BY o.provider_id DESC,o.provider_model_id,CASE p.source WHEN o.provider_id THEN 0 ELSE 1 END`).bind(JSON.stringify(Object.keys(decisionGateways)))
+    .all<{ provider_id: string; provider_model_id: string; model_id: string; name: string | null; status: string | null; context: number | null; input_modalities: string | null; deprecated_at: string | null; input: number }>()).results;
   // The board tables exist only once a refresh has imported a leaderboard.
   const boardRows = (await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='cat_board_results'").all()).results.length ? (await db.prepare(`SELECT b.id board,b.title,b.url,b.metric,b.direction,b.published_at,r.model,r.score,r.model_id
     FROM cat_board_results r JOIN cat_boards b ON b.id=r.board AND b.version=r.version WHERE b.kind='decision'`)
@@ -171,18 +186,18 @@ export async function loadCatalogue(db: Database, admitted: Readonly<Record<stri
       return Object.fromEntries([...best].map(([id, m]) => { const results = [...m.values()]; return [id, { quality: results.reduce((n, x) => n + x.percentile, 0) / results.length, results }]; }));
     },
     decisionRoutes() {
-      // Vercel can list one model under a paid and a free-tier ID with the same name; the first ID stands for both.
+      // A gateway can list one model under a paid and a free-tier ID with the same name; the first ID stands for both.
+      // A model both gateways route gets one route from each, as other multi-host models do.
       const out = new Map<string, DecisionContract>(), seen = new Set<string>();
       for (const r of decisionRows) {
-        const model = canonical.get(r.model_id), inputs = strings(r.input_modalities), name = model?.name ?? r.name ?? r.provider_model_id;
-        const same = `${r.provider_model_id.split('/')[0]}|${norm(name)}`;
-        if (out.has(r.provider_model_id) || !(r.input >= 0) || !inputs.includes('text') || seen.has(same)) continue;
+        const gateway = decisionGateways[r.provider_id], model = canonical.get(r.model_id), inputs = strings(r.input_modalities), name = model?.name ?? r.name ?? r.provider_model_id;
+        const key = `${r.provider_id}|${r.provider_model_id}`, same = `${r.provider_id}|${r.provider_model_id.split('/')[0]}|${norm(name)}`;
+        if (!gateway || out.has(key) || !(r.input >= 0) || !inputs.includes('text') || seen.has(same)) continue;
         seen.add(same);
-        out.set(r.provider_model_id, { id: `${decisionGateway.source}:${decisionGateway.protocol}:${r.provider_model_id}`, model: r.model_id, name,
-          provider: decisionGateway.provider, modelId: r.provider_model_id, api: decisionGateway.api, protocol: decisionGateway.protocol, operations: ['classify', 'judge'], labelMode: 'supplied',
-          modalities: inputs, parameters: ['structured_outputs'], context: r.context ?? model?.context ?? null, inputPrice: r.input, outputPrice: 0, url: decisionGateway.url, source: decisionGateway.source,
-          status: r.status ?? 'listed', pricingBasis: 'Vercel AI Gateway decision rate: input tokens only. Promotional and free-tier rates can end; image tokenization affects the actual bill.',
-          limits: 'Supplied choices, ordered rubric scores and boolean probabilities. No arbitrary field extraction, free-form answers, tool execution, boxes or masks.' });
+        out.set(key, { id: `${gateway.source}:${gateway.protocol}:${r.provider_model_id}`, model: r.model_id, name,
+          provider: gateway.provider, modelId: r.provider_model_id, api: gateway.api, protocol: gateway.protocol, operations: ['classify', 'judge'], labelMode: 'supplied',
+          modalities: inputs, parameters: ['structured_outputs'], context: r.context ?? model?.context ?? null, inputPrice: r.input, outputPrice: 0, url: gateway.url, source: gateway.source,
+          status: r.status ?? gateway.status, pricingBasis: gateway.pricingBasis, limits: gateway.limits, ...(r.deprecated_at ? { retiresAt: r.deprecated_at } : {}) });
       }
       return [...out.values()];
     },

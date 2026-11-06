@@ -141,7 +141,8 @@ export function parseModelsDev(api: unknown, models: unknown): Parsed {
     for (const value of Object.values(obj(p.models))) {
       const m = obj(value), modelId = id(m.id);
       if (!modelId) continue;
-      const canonical = id(m.canonical_model_id);
+      // Models.dev links gateways' moving aliases (OpenRouter's ~lab/…-latest) to a canonical model too; they are never one model.
+      const canonical = movingAlias(modelId) ? null : id(m.canonical_model_id);
       listings.push({ provider_id: providerId, provider_model_id: modelId, model_id: canonical, model_basis: canonical ? 'modelsdev-canonical' : null, hf_id: providerId === 'huggingface' ? modelId : null, ...route(m), prices: modelsDevPrices(obj(m.cost)), payload: m });
       if (canonical && !referenced.has(canonical)) referenced.set(canonical, m);
     }
@@ -664,6 +665,8 @@ const weightRepos = (models: ReadonlyArray<{ id: string; weights: string | null 
 // A route's model slug: the last path segment without a :variant suffix, so
 // accounts/fireworks/models/qwen3-8b and Qwen/Qwen3-8B:free both give qwen3-8b.
 export const modelSlug = (id: string): string => (baseID(id).split('/').pop() ?? id).toLowerCase();
+// Gateways' moving aliases (OpenRouter and Kilo's ~lab/…-latest) point at whichever model is current.
+const movingAlias = (id: string): boolean => id.startsWith('~');
 // Service variants of one model: OpenRouter's :free or :batch, Vercel's -batch.
 const baseID = (id: string): string => id.replace(/(:[^/]*|-batch)$/, '');
 const index = (pairs: Iterable<readonly [string, string]>) => {
@@ -689,7 +692,7 @@ export function resolveListings(listings: Listing[], backbone: Backbone, { slugs
     const id = l.provider_model_id, exact = routes.get(`${l.provider_id}|${id}`), lower = id.toLowerCase();
     const found: Array<[string | null | undefined, string | null]> = [[exact, 'modelsdev-route'], [reviewed.get(`${l.provider_id}|${id}`), 'reviewed-route'], [canonical(id), 'modelsdev-canonical-id'], [same(id), 'modelsdev-same-id'], [l.model_id, l.model_basis],
       [repo(lower.includes('/') ? lower : null) ?? repo(l.hf_id?.toLowerCase()), 'hf-repo'], [slugs ? slug(modelSlug(id)) : null, 'slug-unique']];
-    const [model_id, model_basis] = found.find(([m]) => m) ?? [null, null];
+    const [model_id, model_basis] = movingAlias(id) ? [null, null] : found.find(([m]) => m) ?? [null, null];
     Object.assign(l, { model_id: model_id ?? null, model_basis: model_id ? model_basis : null });
   }
   return listings;
@@ -772,12 +775,13 @@ export async function storeCatalogue(db: Database, source: string, parsed: Parse
   await chunked(db, `INSERT INTO cat_providers (source,id,name,api,doc,npm,env,first_seen,last_seen) SELECT ?1,${extract(['id', 'name', 'api', 'doc', 'npm', 'env'])},?2,?2 FROM json_each(?3) WHERE true
     ON CONFLICT(source,id) DO UPDATE SET name=excluded.name,api=excluded.api,doc=excluded.doc,npm=excluded.npm,env=excluded.env,last_seen=excluded.last_seen`, parsed.providers, [source, now]);
   // Each source keeps and withdraws only its own models (basis prefix). Models.dev
-  // takes over an ID a gateway introduced; a gateway never overwrites another's.
+  // takes over an ID a gateway introduced; a gateway never overwrites another's
+  // active model, but takes over one another source withdrew.
   if (parsed.models.length || ['openrouter', 'vercel'].includes(source)) {
     const models: Row[] = [];
     for (const m of parsed.models) models.push({ ...pick(modelColumns, { ...m, payload: JSON.stringify(m.payload) }), payload_hash: await digest(m.payload) });
     await chunked(db, `INSERT INTO cat_models (${modelColumns.join(',')},first_seen,last_seen,withdrawn_at) SELECT ${extract(modelColumns)},?1,?1,NULL FROM json_each(?3) WHERE true
-      ON CONFLICT(id) DO UPDATE SET ${updates(modelColumns, ['id'])},last_seen=excluded.last_seen,withdrawn_at=NULL WHERE ?2='modelsdev' OR cat_models.basis=excluded.basis`, models, [now, source]);
+      ON CONFLICT(id) DO UPDATE SET ${updates(modelColumns, ['id'])},last_seen=excluded.last_seen,withdrawn_at=NULL WHERE ?2='modelsdev' OR cat_models.basis=excluded.basis OR cat_models.withdrawn_at IS NOT NULL`, models, [now, source]);
     await db.prepare("UPDATE cat_models SET withdrawn_at=?1 WHERE last_seen<?1 AND withdrawn_at IS NULL AND substr(basis,1,instr(basis,'-')-1)=?2").bind(now, source).run();
   }
   // Prices are intervals: an unchanged price stays open, a changed or removed one

@@ -14,7 +14,7 @@ import {catalogueSources,importCatalogueSource,rebuildOfferings,rebuildModels} f
 import {refreshHubOrgs,crawlHubModels,refreshHubProviders} from './catalogue-hub.ts';
 import {discoverMTEB,importMTEB} from './catalogue-mteb.ts';
 import {boardSources,importBoards} from './catalogue-boards.ts';
-import {loadCatalogue,catalogueRouteSource,decisionGateway} from './catalogue-routes.ts';
+import {loadCatalogue,catalogueRouteSource,decisionGateway,openRouterDecisionGateway} from './catalogue-routes.ts';
 import admittedProviders from './catalogue-providers.json' with { type: 'json' };
 import {evidenceLedger,migrateGeneration} from './evidence-db.ts';
 import {productAnalyticsEnabled,sendProductBatch} from './product-analytics.mjs';
@@ -52,20 +52,22 @@ export function addCatalogueRoutes(next,previous,supply,error=null) {
     attribution:"Hosted chat routes, token prices and model identities from reviewed inference hosts and model makers' APIs, merged from Models.dev, OpenRouter, Vercel AI Gateway, LiteLLM and genai-prices. Availability on your account is not checked."};
   const decisions={id:decisionGateway.source,name:'Vercel AI Gateway · decision routes',url:decisionGateway.url,publishedAt:null,refreshPolicy:'catalogue-refresh',
     attribution:'Decision models Vercel AI Gateway routes, with their input rates, from the OpenMerit catalogue. One documented typed-question contract covers them all; not a quality measurement.'};
-  const others=next.sources.filter(s=>s.id!==catalogueRouteSource&&s.id!==decisions.id);
+  const openRouterDecisions={id:openRouterDecisionGateway.source,name:'OpenRouter · decision routes',url:openRouterDecisionGateway.url,publishedAt:null,refreshPolicy:'catalogue-refresh',
+    attribution:'Decision models OpenRouter routes, with their input rates, from the OpenMerit catalogue. One documented typed-question contract (the alpha Decisions API) covers them all; not a quality measurement.'};
+  const others=next.sources.filter(s=>s.id!==catalogueRouteSource&&s.id!==decisions.id&&s.id!==openRouterDecisions.id);
   if(supply) {
     const routes=supply.routes(next.catalogue,next.checkedAt);
     for(const m of next.catalogue)m.endpoints.push(...(routes.get(m.id)??[]));
     next.contracts=supply.decisionRoutes().map(c=>({...c,checkedAt:next.checkedAt}));
     next.decisionScores=supply.decisionScores();
-    next.sources=[...others,{...source,status:'ok',checkedAt:next.checkedAt},{...decisions,status:'ok',checkedAt:next.checkedAt}];
+    next.sources=[...others,...[source,decisions,openRouterDecisions].map(s=>({...s,status:'ok',checkedAt:next.checkedAt}))];
   } else {
     const old=new Map((previous.catalogue??[]).map(m=>[m.id,(m.endpoints??[]).filter(e=>e.source===catalogueRouteSource)]));
     for(const m of next.catalogue)m.endpoints.push(...(old.get(m.id)??[]));
     next.contracts=previous.contracts??[];
     next.decisionScores=previous.decisionScores??{};
     const failed=s=>({status:'failed',checkedAt:previous.sources?.find(p=>p.id===s.id)?.checkedAt??null,attemptedAt:next.checkedAt,error:String(error?.message??error??'Catalogue unavailable.').slice(0,200)});
-    next.sources=[...others,{...source,...failed(source)},{...decisions,...failed(decisions)}];
+    next.sources=[...others,...[source,decisions,openRouterDecisions].map(s=>({...s,...failed(s)}))];
   }
   return next;
 }

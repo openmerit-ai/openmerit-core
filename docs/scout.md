@@ -172,6 +172,15 @@ outdated; citations do not certify model quality, access, residency or zero
 retention. Verify the exact endpoint in your application. No claim is made that
 all catalogue models can be run in your environment.
 
+**Unreleased, not deployed:** decision models that OpenRouter routes (supplied
+choices, ordered rubric scores and boolean probabilities through its alpha
+Decisions API) are listed alongside Vercel AI Gateway's. An OpenRouter route
+whose expiration date has passed is no longer listed; a route with a removal
+date still ahead shows it as `retiresAt`, and Scout mentions it when it
+recommends a model through that route. Other hosts' deprecation dates do not
+remove a route. Moving aliases such as OpenRouter's `~lab/…-latest` IDs are
+never treated as one model.
+
 On enabled deployments, reported and imported aggregates belong to your account
 and apply across conversations. They are not shared with other customers. The
 connector reads experiment headers/metadata and aggregate metrics, never trace

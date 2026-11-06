@@ -52,7 +52,7 @@ export interface Sources {
   merged: Array<{ id: string; kind: string | null; name: string | null; release_date: string | null; open_weights: number | null; input_modalities: string | null; output_modalities: string | null; context: number | null; lab: string | null }>;
   // Release facts for Scout's chat records, as the agent read them before this projection.
   release: Array<{ id: string; release_date: string | null; open_weights: number | null }>;
-  offerings: Array<{ provider_id: string; provider_model_id: string; model_id: string; provider: string | null; context: number | null; input_modalities: string | null; output_modalities: string | null; tool_call: number | null; structured_output: number | null }>;
+  offerings: Array<{ provider_id: string; provider_model_id: string; model_id: string; provider: string | null; context: number | null; input_modalities: string | null; output_modalities: string | null; tool_call: number | null; structured_output: number | null; deprecated_at?: string | null }>;
   // Current base-tier prices, Models.dev first, then by source.
   prices: Array<{ provider_id: string; provider_model_id: string; kind: string; unit: string; amount: number }>;
   boards: Array<{ id: string; source: string; title: string; kind: string; metric: string; direction: string; url: string; published_at: string | null; version: string; checked_at: string }>;
@@ -67,12 +67,15 @@ export async function readSources(db: Database): Promise<Sources> {
   const all = async <T>(sql: string) => (await db.prepare(sql).all<T>()).results;
   const present = new Set((await all<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'")).map(r => r.name));
   const mtebLinked = present.has('cat_mteb_results') && (await all<{ name: string }>("SELECT name FROM pragma_table_info('cat_mteb_results')")).some(c => c.name === 'model_id');
-  const live = "(o.status IS NULL OR o.status<>'deprecated') AND o.model_id IN (SELECT id FROM cat_model_merged)";
+  // OpenRouter's expiration_date is the day it stops serving a route, so a past one retires the route, as DeepInfra's past
+  // `deprecated` timestamps do. Other sources' deprecation dates can mean "deprecated" rather than "removed": those routes
+  // stay. Any date still ahead is published as retiresAt.
+  const live = "(o.status IS NULL OR o.status<>'deprecated') AND (o.provider_id<>'openrouter' OR o.deprecated_at IS NULL OR o.deprecated_at>date('now')) AND o.model_id IN (SELECT id FROM cat_model_merged)";
   const [merged, release, offerings, prices, boards, boardResults, mteb, mtebResults, repos] = await Promise.all([
     all<Sources['merged'][number]>(`SELECT g.id,g.kind,g.name,coalesce(g.release_date,c.release_date) release_date,coalesce(g.open_weights,c.open_weights) open_weights,g.input_modalities,g.output_modalities,g.context,
       coalesce(p.name,c.lab_id) lab FROM cat_model_merged g LEFT JOIN cat_models c ON c.id=g.id LEFT JOIN cat_providers p ON p.source='modelsdev' AND p.id=c.lab_id ORDER BY g.id`),
     all<Sources['release'][number]>('SELECT c.id,coalesce(g.release_date,c.release_date) release_date,coalesce(g.open_weights,c.open_weights) open_weights FROM cat_models c LEFT JOIN cat_model_merged g ON g.id=c.id WHERE c.withdrawn_at IS NULL'),
-    all<Sources['offerings'][number]>(`SELECT o.provider_id,o.provider_model_id,o.model_id,p.name provider,o.context,o.input_modalities,o.output_modalities,o.tool_call,o.structured_output
+    all<Sources['offerings'][number]>(`SELECT o.provider_id,o.provider_model_id,o.model_id,p.name provider,o.context,o.input_modalities,o.output_modalities,o.tool_call,o.structured_output,CASE WHEN o.deprecated_at>date('now') THEN o.deprecated_at END deprecated_at
       FROM cat_offerings o LEFT JOIN cat_providers p ON p.source='modelsdev' AND p.id=o.provider_id WHERE ${live} ORDER BY o.model_id,o.provider_id,o.provider_model_id`),
     all<Sources['prices'][number]>(`SELECT x.provider_id,x.provider_model_id,x.kind,x.unit,x.amount FROM cat_prices x JOIN cat_offerings o ON o.provider_id=x.provider_id AND o.provider_model_id=x.provider_model_id
       WHERE x.valid_to IS NULL AND x.tier='' AND ${live} ORDER BY CASE x.source WHEN 'modelsdev' THEN 0 ELSE 1 END,x.source`),
@@ -105,7 +108,7 @@ export function agentRows(src: Sources, scoutPayloads: readonly Json[]): { paylo
     const own = rates.get(`${o.provider_id}|${o.provider_model_id}`); if (!own?.length || own.every(r => r.amount === 0)) continue;
     const list_ = routes.get(o.model_id) ?? [];
     list_.push({ id: `catalogue:${o.provider_id}:${o.provider_model_id}`, provider: o.provider ?? o.provider_id, modelId: o.provider_model_id, rates: own, context: o.context,
-      modalities: list(o.input_modalities), outputModalities: list(o.output_modalities), parameters: [o.tool_call === 1 && 'tools', o.structured_output === 1 && 'structured_outputs'].filter(Boolean) });
+      modalities: list(o.input_modalities), outputModalities: list(o.output_modalities), parameters: [o.tool_call === 1 && 'tools', o.structured_output === 1 && 'structured_outputs'].filter(Boolean), ...(o.deprecated_at ? { retiresAt: o.deprecated_at } : {}) });
     routes.set(o.model_id, list_);
   }
   const routesOf = (id: string) => {
