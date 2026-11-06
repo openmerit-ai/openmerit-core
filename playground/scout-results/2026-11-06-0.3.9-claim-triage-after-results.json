@@ -1,0 +1,392 @@
+{
+  "conversationId": "81eecb47-550d-4d9f-8ce6-8f17c1502d14",
+  "status": "recommended",
+  "brief": {
+    "input": {
+      "text": "2,000–4,000-token JSON claim state with plan rules, eClaimLink codes and AED amounts, English/occasional Arabic bill, member history and provider statistics; fictional data",
+      "source": "stated"
+    },
+    "work": {
+      "text": "Classify whether any claim issue warrants review before payment; calibrate probability",
+      "source": "stated"
+    },
+    "output": {
+      "text": "One probability, no free text or tool calls",
+      "source": "stated"
+    },
+    "criteria": {
+      "text": "Prioritize calibration and recall of review-needed claims, then cost and latency; shadow mode first, person approves every payment; ~1,000 claims/month",
+      "source": "stated"
+    },
+    "constraints": {
+      "text": "Health data UAE residency or recorded exception; unknown location treated outside UAE; fictional data only under recorded residency-gap exception; identify each endpoint's processing location",
+      "source": "stated"
+    }
+  },
+  "assumptions": [
+    "A single decision/classification call can evaluate the supplied state; no separate preprocessing model.",
+    "For comparison use 3,000 input tokens and 10 output tokens per claim; calibrate thresholds on labelled claims."
+  ],
+  "catalogueVersion": "ce269f4de509b0c9495ae173ce6e531f",
+  "tasks": [
+    {
+      "title": "Claim review probability",
+      "work": "Assess the whole claim against rules and history and emit a calibrated probability that human review is needed.",
+      "input": "JSON claim state plus English or Arabic bill",
+      "output": "One numeric probability",
+      "summary": "Perplexity: Decider V1.2 ranks first in this shortlist. Direct Sahra measurements on 29 scored claims show strong AUC and Brier performance; native probability output matches the task. Two of the 31 scenario claims were not scored; inspect why. Neither threshold recall nor UAE processing location is established.",
+      "workload": {
+        "inputTokens": 3000,
+        "outputTokens": 10
+      },
+      "priority": "cost",
+      "qualityBar": 65,
+      "models": [
+        {
+          "rank": 1,
+          "id": "perplexity/pplx-decider-v1.2",
+          "name": "Perplexity: Decider V1.2",
+          "provider": "Perplexity",
+          "rationale": "Direct Sahra measurements on 29 scored claims show strong AUC and Brier performance; native probability output matches the task.",
+          "watchOut": "Two of the 31 scenario claims were not scored; inspect why. Neither threshold recall nor UAE processing location is established.",
+          "quality": {
+            "score": 85,
+            "measured": true,
+            "evidence": [
+              {
+                "benchmark": "measured:r_758109ac-c18c-43c6-924a-60fb112854ad",
+                "name": "Your eval: AUC (task level, 29 samples, Sahra scenario run run-2026-11-06T15-56-29-059Z)",
+                "score": 0.975,
+                "rank": 1,
+                "of": 3
+              },
+              {
+                "benchmark": "measured:r_182c7da8-2f92-4caa-a9e2-0a8daa22c296",
+                "name": "Your eval: Brier score (task level, 29 samples, Sahra scenario run run-2026-11-06T15-56-29-059Z)",
+                "score": 0.059,
+                "rank": 1,
+                "of": 3
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 26.5952,
+            "route": "OpenRouter",
+            "endpointId": "catalogue:openrouter:perplexity/pplx-decider-v1.2",
+            "providerModelId": "perplexity/pplx-decider-v1.2",
+            "inputPerMillion": 0.02,
+            "outputPerMillion": 0,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.02
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 0
+              }
+            ],
+            "unpriced": [],
+            "measured": {
+              "usdPer1kTasks": 27,
+              "result": "measured:r_4b373d80-3486-4494-a723-9db42a236f1d"
+            },
+            "calibration": {
+              "factor": 443.254,
+              "results": [
+                "measured:r_4b373d80-3486-4494-a723-9db42a236f1d",
+                "measured:r_91aa15fe-8ed7-4e05-9c5e-ea0e0aabeee8"
+              ]
+            }
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-10-16",
+            "ageDays": 21
+          },
+          "best": [
+            "quality",
+            "cost",
+            "recency"
+          ]
+        },
+        {
+          "rank": 2,
+          "id": "liquid/d1-ultra",
+          "name": "LiquidAI: d1-ultra",
+          "provider": "Liquid Inference",
+          "rationale": "Direct Sahra measurements on 31 claims support strong discrimination and Brier performance with a native decision output.",
+          "watchOut": "Small test set does not establish recall for rare payment errors or UAE processing location.",
+          "quality": {
+            "score": 79,
+            "measured": true,
+            "evidence": [
+              {
+                "benchmark": "measured:r_70209424-c9ee-4b28-b7c0-bd7c98b4cdcb",
+                "name": "Your eval: AUC (task level, 31 samples, Sahra scenario run run-2026-11-06T15-56-32-108Z)",
+                "score": 0.958,
+                "rank": 2,
+                "of": 3
+              },
+              {
+                "benchmark": "measured:r_f1d97dd5-963e-40f5-b76d-66d38b4657ab",
+                "name": "Your eval: Brier score (task level, 31 samples, Sahra scenario run run-2026-11-06T15-56-32-108Z)",
+                "score": 0.082,
+                "rank": 2,
+                "of": 3
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 55.85,
+            "route": "OpenRouter",
+            "endpointId": "catalogue:openrouter:liquid/d1-ultra",
+            "providerModelId": "liquid/d1-ultra",
+            "inputPerMillion": 0.042,
+            "outputPerMillion": 0,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.042
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 0
+              }
+            ],
+            "unpriced": [],
+            "measured": {
+              "usdPer1kTasks": 55,
+              "result": "measured:r_91aa15fe-8ed7-4e05-9c5e-ea0e0aabeee8"
+            },
+            "calibration": {
+              "factor": 443.254,
+              "results": [
+                "measured:r_4b373d80-3486-4494-a723-9db42a236f1d",
+                "measured:r_91aa15fe-8ed7-4e05-9c5e-ea0e0aabeee8"
+              ]
+            }
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-10-15",
+            "ageDays": 22
+          },
+          "best": []
+        },
+        {
+          "rank": 3,
+          "id": "inception/mercury-decide",
+          "name": "Mercury Decide",
+          "provider": "Inception",
+          "rationale": "Unmeasured Sahra alternative; generic decision and calibration-related standings make it worth a limited comparison.",
+          "watchOut": "OpenRouter route retires 2026-11-08; not suitable for a sustained rollout through that route. Endpoint location unverified.",
+          "quality": {
+            "score": 66,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "jevbench:capability",
+                "name": "JevBench capability (v1.8.7)",
+                "score": 73.62521498320774,
+                "rank": 69,
+                "of": 283
+              },
+              {
+                "benchmark": "analysis:decision-index",
+                "name": "Artificial Analysis · Decision Index",
+                "score": 52.72371648704283,
+                "rank": 29,
+                "of": 38
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 26.5952,
+            "route": "OpenRouter",
+            "endpointId": "catalogue:openrouter:inception/mercury-decide",
+            "providerModelId": "inception/mercury-decide",
+            "inputPerMillion": 0.02,
+            "outputPerMillion": 0,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.02
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 0
+              }
+            ],
+            "unpriced": [],
+            "calibration": {
+              "factor": 443.254,
+              "results": [
+                "measured:r_4b373d80-3486-4494-a723-9db42a236f1d",
+                "measured:r_91aa15fe-8ed7-4e05-9c5e-ea0e0aabeee8"
+              ]
+            }
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-09-30",
+            "ageDays": 37
+          },
+          "best": []
+        },
+        {
+          "rank": 4,
+          "id": "deepseek/deepseek-v4.1-flash",
+          "name": "DeepSeek V4.1 Flash",
+          "provider": "DeepSeek",
+          "rationale": "Unmeasured Sahra chat-classifier alternative with medical-domain proxy evidence; can be instructed to emit a numeric score.",
+          "watchOut": "Medical benchmark results do not establish probability calibration or numeric-only compliance; UAE processing location unverified.",
+          "quality": {
+            "score": 68,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "arena:industry_medicine_and_healthcare",
+                "name": "Arena · Medicine & healthcare",
+                "score": 0.6578279315588825,
+                "rank": 12,
+                "of": 151
+              },
+              {
+                "benchmark": "arena:factuality:industry_medicine_and_healthcare",
+                "name": "Arena · Factuality: medicine & healthcare",
+                "score": 0.5566656341629344,
+                "rank": 7,
+                "of": 83
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 70.3444,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:deepseek/deepseek-v4.1-flash",
+            "providerModelId": "deepseek/deepseek-v4.1-flash",
+            "inputPerMillion": 0.051,
+            "outputPerMillion": 0.5670000000000001,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.051
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 0.5670000000000001
+              }
+            ],
+            "unpriced": [],
+            "calibration": {
+              "factor": 443.254,
+              "results": [
+                "measured:r_4b373d80-3486-4494-a723-9db42a236f1d",
+                "measured:r_91aa15fe-8ed7-4e05-9c5e-ea0e0aabeee8"
+              ]
+            }
+          },
+          "latency": null,
+          "recency": {
+            "released": "2026-09-10",
+            "ageDays": 57
+          },
+          "best": []
+        },
+        {
+          "rank": 5,
+          "id": "anthropic/claude-haiku-5.5",
+          "name": "Claude Haiku 5.5",
+          "provider": "Anthropic",
+          "rationale": "Unmeasured Sahra chat alternative with relevant coding and medical proxies.",
+          "watchOut": "Public coding benchmarks do not establish UAE-claim recall or probability calibration; processing location unverified.",
+          "quality": {
+            "score": 70,
+            "measured": false,
+            "evidence": [
+              {
+                "benchmark": "vals:medcode",
+                "name": "MedCode · Vals AI",
+                "score": 0.51542,
+                "rank": 14,
+                "of": 79
+              },
+              {
+                "benchmark": "aa:healthbench",
+                "name": "HealthBench · AA",
+                "score": 0.5848216837943483,
+                "rank": 3,
+                "of": 11
+              }
+            ]
+          },
+          "cost": {
+            "usdPer1kTasks": 135.1925,
+            "route": "OpenRouter",
+            "endpointId": "openrouter:chat:anthropic/claude-haiku-5.5",
+            "providerModelId": "anthropic/claude-haiku-5.5",
+            "inputPerMillion": 0.09999999999999999,
+            "outputPerMillion": 0.5,
+            "rates": [
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "input",
+                "amount": 0.09999999999999999
+              },
+              {
+                "unit": "USD per 1M tokens",
+                "kind": "output",
+                "amount": 0.5
+              }
+            ],
+            "unpriced": [],
+            "calibration": {
+              "factor": 443.254,
+              "results": [
+                "measured:r_4b373d80-3486-4494-a723-9db42a236f1d",
+                "measured:r_91aa15fe-8ed7-4e05-9c5e-ea0e0aabeee8"
+              ]
+            }
+          },
+          "latency": {
+            "seconds": 24.8,
+            "firstTokenSeconds": 24.8,
+            "tokensPerSecond": 219,
+            "source": "Artificial Analysis"
+          },
+          "recency": {
+            "released": "2026-10-07",
+            "ageDays": 30
+          },
+          "best": []
+        }
+      ],
+      "evaluation": {
+        "checks": [
+          {
+            "level": "task",
+            "metric": "Coverage, recall at fixed review workload, AUC, Brier score, calibration by language and claim issue",
+            "how": "Add the candidates as runs in the existing Sahra eval, using the same labelled claims, investigating the two missing Decider scores and expanding with Arabic, duplicates, exclusions and waiting-period cases."
+          },
+          {
+            "level": "environment",
+            "metric": "Wrong payments after human approval and review workload",
+            "how": "Compare shadow-mode outputs against existing reviewer decisions and final payment outcomes, swapping only this classifier while keeping agents, fixtures, prompts and approval controls fixed."
+          }
+        ],
+        "samples": 500,
+        "stopEarly": "Stop if a candidate persistently fails numeric-only output or its confidence bound for missed-review rate exceeds the accepted limit; if all score 100%, the eval cannot separate quality, so add harder labelled boundary, adversarial and rare-failure claims."
+      }
+    }
+  ],
+  "next": "Present each task's shortlist with its trade-offs and its evaluation, and let the user choose. Offer to measure the candidates with the project's existing evals as the evaluation describes, then report the aggregate results with this conversationId and results. To refine, call scout_models with this conversationId and a prompt."
+}

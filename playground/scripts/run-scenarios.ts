@@ -19,15 +19,20 @@ import { CLAIM_FIXTURES, ENROLLMENT_FIXTURES } from "../fixtures/claims.ts";
 import { toClaimSubmissionXml } from "../src/domain/eclaim.ts";
 import type { Member } from "../src/domain/types.ts";
 import type { ClaimRecord, EnrollmentRecord } from "../src/ledger.ts";
-import { type AgentRole, effectiveModels, overridesLabel, parseModelFlag } from "../src/models.ts";
+import { type AgentRole, effectiveModels, overridesLabel, parseModelFlag, TRIAGE_MODEL } from "../src/models.ts";
 import { type ExperimentContext, type LangfuseEnv, postScore, runKey, spanIdFor, traceIdFor, VERSIONS } from "../src/tracing.ts";
 import { baseUrl, call } from "./client.ts";
+import { needsReviewLabel, type TriageMetrics, triageMetrics } from "../src/triage.ts";
 import { collectUsage, type AgentUsage, type Observation } from "./usage.ts";
 
 const DATASET = "sahra-outpatient-claims";
 const ENROLLMENT_DATASET = "sahra-enrollments";
 
-const { values } = parseArgs({ options: { only: { type: "string" }, "timeout-minutes": { type: "string", default: "20" }, model: { type: "string" }, out: { type: "string" } } });
+const { values } = parseArgs({ options: { only: { type: "string" }, "timeout-minutes": { type: "string", default: "20" }, model: { type: "string" }, out: { type: "string" }, "triage-model": { type: "string" } } });
+// --triage-model openrouter/<id> triages every claim with that decision model (shadow mode), overriding src/models.ts.
+const triageFlag = values["triage-model"];
+if (triageFlag && !triageFlag.startsWith("openrouter/")) throw new Error(`--triage-model is openrouter/<id>, not "${triageFlag}"`);
+const triageModel = triageFlag?.slice("openrouter/".length) ?? TRIAGE_MODEL.id ?? undefined;
 const models = parseModelFlag(values.model);
 const runModels = effectiveModels(models);
 const runId = `run-${new Date().toISOString().replace(/[:.]/g, "-")}`;
@@ -93,8 +98,8 @@ if (authorization) {
     "Sahra Health enrollment applications under Sahra Essential: one item per fixture application, with the eligibility decision and declared conditions a correct enrollment agent records.",
     ENROLLMENT_FIXTURES.map((fixture) => ({ id: fixture.application.applicationId, input: { name: fixture.name, application: fixture.application }, expectedOutput: fixture.expected, metadata: { fixture: fixture.name } })),
   );
-  const name = `${overridesLabel(models)}-${runId}`;
-  const metadata = { openmerit_version: VERSIONS.openmerit, ...Object.fromEntries(Object.entries(runModels).map(([role, model]) => [`model_${role}`, model])) };
+  const name = `${overridesLabel(models)}${triageFlag ? `+triage=${triageModel?.split("/").at(-1)}` : ""}-${runId}`;
+  const metadata = { openmerit_version: VERSIONS.openmerit, ...Object.fromEntries(Object.entries(runModels).map(([role, model]) => [`model_${role}`, model])), ...(triageModel ? { model_triage: `openrouter/${triageModel}` } : {}) };
   experiment = { id: runId, name, datasetId, metadata };
   enrollmentExperiment = { id: `${runId}--enrollments`, name, datasetId: enrollmentDatasetId, metadata };
 }
@@ -106,15 +111,17 @@ if (experiment) console.log(`Datasets ${DATASET}, ${ENROLLMENT_DATASET} · exper
 await call("POST", "/admin/seed", { runId });
 
 for (const fixture of enrollments) await call("POST", "/enrollments", { application: fixture.application, runId, models, experiment: enrollmentExperiment });
-for (const fixture of claims) await call("POST", "/claims", { xml: submissionXml(fixture), bill: fixture.bill, runId, models, experiment });
+for (const fixture of claims) await call("POST", "/claims", { xml: submissionXml(fixture), bill: fixture.bill, runId, models, experiment, triageModel: triageFlag ? triageModel : undefined });
 
 const settledClaim = (record: ClaimRecord): boolean => ["awaiting_approval", "error", "approved", "rejected", "paid"].includes(record.state);
 let claimRecords: ClaimRecord[] = [];
 let enrollmentRecords: (EnrollmentRecord | null)[] = [];
 while (Date.now() < deadline) {
   claimRecords = await call<ClaimRecord[]>("GET", `/claims?runId=${encodeURIComponent(runId)}`);
-  enrollmentRecords = await Promise.all(enrollments.map(async (fixture) => (await call<{ enrollment: EnrollmentRecord | null }>("GET", `/enrollments/${fixture.application.applicationId}?runId=${encodeURIComponent(runId)}`)).enrollment));
-  const done = claimRecords.filter(settledClaim).length + enrollmentRecords.filter((record) => record && record.decision !== "pending").length;
+  const enrollmentStates = await Promise.all(enrollments.map((fixture) => call<{ enrollment: EnrollmentRecord | null; workflow: { status?: string } | null }>("GET", `/enrollments/${fixture.application.applicationId}?runId=${encodeURIComponent(runId)}`)));
+  enrollmentRecords = enrollmentStates.map((state) => state.enrollment);
+  // An enrollment whose workflow ended without a decision stays pending; it is settled and fails its checks.
+  const done = claimRecords.filter(settledClaim).length + enrollmentStates.filter((state) => (state.enrollment && state.enrollment.decision !== "pending") || ["errored", "terminated"].includes(state.workflow?.status ?? "")).length;
   process.stdout.write(`\r${done}/${claims.length + enrollments.length} settled`);
   if (done === claims.length + enrollments.length) break;
   await new Promise((resolve) => setTimeout(resolve, 10_000));
@@ -240,6 +247,26 @@ for (const fixture of claims) {
   for (const item of lineResults.filter((result) => !result.ok)) console.log(`    ${item.activityId}: got ${item.got}, expected ${item.expected}`);
 }
 
+// Shadow-mode triage: each claim's probability against its fixture label, and the run's calibration.
+let triage: (TriageMetrics & { model: string }) | null = null;
+if (triageModel) {
+  const items = claims.map((fixture) => ({ fixture, label: needsReviewLabel(fixture.expected), triage: claimRecords.find((item) => item.id === fixture.claim.id)?.triage ?? null }));
+  for (const item of items) {
+    const p = item.triage?.needsReview;
+    if (p == null) continue;
+    try {
+      const key = `${runKey(item.fixture.claim.id, runId)}/triage`;
+      await postScore(langfuse, { traceId: await traceIdFor(key), observationId: await spanIdFor(`${key}/root`), name: "triage-error", value: Math.abs(p - (item.label ? 1 : 0)), dataType: "NUMERIC", comment: `needs review ${p.toFixed(3)}; label ${item.label}`, metadata: { level: "task", agent: "triage" } });
+    } catch (error) {
+      console.error(`Could not send triage score for ${item.fixture.claim.id}: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+  triage = { model: `openrouter/${triageModel}`, ...triageMetrics(items) };
+  const f = (value: number | null, digits = 3) => (value === null ? "n/a" : value.toFixed(digits));
+  console.log(`Triage ${triage.model}: accuracy ${f(triage.accuracy)} · Brier ${f(triage.brier)} · AUC ${f(triage.auc)} · missed reviews ${triage.missedReviews} · failed ${triage.failed}/${items.length} · USD ${triage.costUsd.toFixed(5)}`);
+  for (const item of items) console.log(`    ${item.fixture.name}: ${item.triage?.needsReview == null ? `error ${item.triage?.error ?? "not run"}` : item.triage.needsReview.toFixed(3)} (label ${item.label ? "review" : "clean"})`);
+}
+
 // Model cost and latency per agent run, from the run's Langfuse traces.
 let usage: AgentUsage[] = [];
 if (authorization) {
@@ -261,7 +288,7 @@ if (authorization) {
 }
 if (values.out) {
   const { writeFileSync } = await import("node:fs");
-  writeFileSync(values.out, `${JSON.stringify({ runId, model: values.model ?? null, models: runModels, experiment: experiment?.name ?? null, versions: VERSIONS, correct, total, results, outcomes, usage }, null, 2)}\n`);
+  writeFileSync(values.out, `${JSON.stringify({ runId, model: values.model ?? null, models: runModels, experiment: experiment?.name ?? null, versions: VERSIONS, correct, total, results, outcomes, usage, triage }, null, 2)}\n`);
 }
 
 const count = (pick: (item: (typeof outcomes)[number]) => boolean | null): number => outcomes.filter((item) => pick(item) === true).length;

@@ -24,6 +24,17 @@ export const AGENT_MODELS: Record<AgentRole, ModelChoice> = {
   fraud: SONNET,
 };
 
+/**
+ * The decision model that triages each claim before the agents (OpenRouter's Decisions API). Shadow mode:
+ * it records how likely the claim needs review but changes no routing. Set only after consulting Scout and
+ * recording the decision in MODEL-DECISIONS.md; `null` skips triage.
+ */
+// Scout endpoint catalogue:openrouter:perplexity/pplx-decider-v1.2 (its rank 3, then rank 1 after our measured results).
+export const TRIAGE_MODEL: { id: string | null; decision: string } = {
+  id: "perplexity/pplx-decider-v1.2",
+  decision: "6 Nov 2026: claim triage decision model, shadow mode (openmerit 0.3.9)",
+};
+
 export const modelLabel = (choice: ModelChoice): string | null => (choice.model ? `${choice.model.provider}/${choice.model.id}` : null);
 
 // Scenario runs may override the recorded choice per agent, to compare Scout's candidates.

@@ -65,7 +65,7 @@ export default {
     }
 
     if (request.method === "POST" && path === "/claims") {
-      const { xml, bill, runId, models, experiment } = (await request.json()) as { xml: string; bill: string; runId?: string; models?: ModelOverrides; experiment?: ExperimentContext };
+      const { xml, bill, runId, models, experiment, triageModel } = (await request.json()) as { xml: string; bill: string; runId?: string; models?: ModelOverrides; experiment?: ExperimentContext; triageModel?: string };
       let parsed;
       try {
         parsed = parseClaimSubmission(xml);
@@ -79,7 +79,7 @@ export default {
       if (claim.payerId !== PLAN.payerId) return json({ error: `PayerID must be ${PLAN.payerId}` }, 400);
       if (await ledger.getClaim(claim.id)) return json({ error: `Claim ${claim.id} already received` }, 409);
       await ledger.receiveClaim({ claim, xml, bill, runId });
-      await env.CLAIM_FLOW.create({ id: runKey(claim.id, runId), params: { claimId: claim.id, runId, models, experiment } });
+      await env.CLAIM_FLOW.create({ id: runKey(claim.id, runId), params: { claimId: claim.id, runId, models, experiment, triageModel } });
       return json({ claimId: claim.id, state: "received" }, 202);
     }
 

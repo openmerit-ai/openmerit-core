@@ -16,6 +16,8 @@ The first loop covers outpatient claims under **Sahra Essential**, a fictional p
    An agent that ends without recording its result, often after one rejected tool call, gets one follow-up prompt in the same session asking it to fix the call and record. If it still has not recorded, the claim ends in `error`.
 3. The claim waits in `awaiting_approval` until a person runs `npm run approve -- <claim-id> approve|reject --by <name>` (with `--run <run-id>` for a scenario run's claim). The ledger pays only claims with a recorded approval, and this is enforced in code, not in a prompt.
 
+**Triage (shadow mode).** Before the agents run, `src/triage.ts` asks a decision model through OpenRouter's Decisions API (`POST /api/alpha/decisions`) for one probability: does this claim need review before payment? It is recorded on the claim and traced as `triage-claim`, but every claim still takes the full pipeline and human approval, and a failed call never stops a claim. The model is `TRIAGE_MODEL` in `src/models.ts`; `npm run scenarios -- --triage-model openrouter/<id>` tries another. The runner scores each claim (`triage-error`, the distance from its fixture label) and prints AUC, Brier score, accuracy and missed reviews at 0.5. A claim's label is "needs review" when any line should be denied or the fraud review should not simply pay it.
+
 Enrollment (`POST /enrollments`) runs a fifth agent. It checks EBP eligibility (Dubai visa, salary of AED 4,000 or less) and reads the health declaration for pre-existing conditions.
 
 State lives in one SQLite Durable Object (`src/ledger.ts`). Benefit math is in `src/domain/` and is unit-tested against amounts worked out by hand.
@@ -39,6 +41,7 @@ These evals are Sahra's own, so none of their names carry an `om-` prefix. Score
 | Agent | `line-decisions-correct`, `fraud-recommendation-correct`, `bill-mismatch-found`, `coding-finding-found`, `coding-findings-match`, `enrollment-decision-correct`, `declared-conditions-found` | boolean | the scenario runner, on the scored agent's trace |
 | Agent | `usd-per-agent-run`, `seconds-per-agent-run` | numeric | the scenario runner, on each agent's trace, only when that measurement is known |
 | Environment | `claim-correct` (every agent check for the claim passes), `payment-correct` (proposed payment equals the fixture's), `review-load` (fraud recommended review or hold on a claim whose only acceptable recommendation is pay) | boolean | the scenario runner, on the root observation of the claim's **final agent trace** |
+| Task | `triage-error` (absolute distance of the triage probability from the claim's needs-review label) | numeric | the scenario runner, on the root observation of the claim's `triage-claim` trace |
 | Environment | `error-cost-aed` (what the claim's mistakes cost Sahra: the proposed payment's distance from the correct one, plus AED 30 of manual handling for an unnecessary review or an unfinished claim) | numeric | the scenario runner, same |
 | Environment | `enrollment-correct` (every agent check for the application passes) | boolean | the scenario runner, on the root observation of the application's enrollment agent trace |
 

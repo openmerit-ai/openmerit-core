@@ -16,6 +16,8 @@ test("every scored agent trace carries its experiment tag without changing final
   const { ClaimFlow, EnrollmentFlow } = await import("../src/workflow.ts");
   const spans: Array<{ name: string; attributes: Array<{ key: string; value: { stringValue?: string; arrayValue?: { values: { stringValue: string }[] } } }> }> = [];
   t.mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
+    // Triage calls OpenRouter's Decisions API before the agents run.
+    if (String(input) === "https://openrouter.ai/api/alpha/decisions") return Response.json({ model: "fictional/decider", answers: { needs_review: { type: "noul", noul: 0.2 } }, usage: { input_tokens: 10, output_tokens: 1, cost: 0.000001 } });
     assert(String(input).startsWith("https://langfuse.example/"));
     if (String(input).endsWith("/otel/v1/traces")) {
       const body = JSON.parse(String(init?.body)) as { resourceSpans: { scopeSpans: { spans: typeof spans }[] }[] };
@@ -24,8 +26,9 @@ test("every scored agent trace carries its experiment tag without changing final
     return Response.json({});
   });
   const agent = { getByName: () => ({ run: async () => ({ entries: [], status: "completed", text: "Fictional result" }) }) };
-  const env = { LANGFUSE_PUBLIC_KEY: "pk-lf-fictional", LANGFUSE_SECRET_KEY: "sk-lf-fictional", LANGFUSE_BASE_URL: "https://langfuse.example", LANGFUSE_ENVIRONMENT: "test",
-    LEDGER: { getByName: () => ({ getClaim: async () => ({ extraction: {}, coding: {}, adjudication: {}, fraud: {} }), requestApproval: async () => {}, getEnrollment: async () => ({ decision: "enrolled" }) }) },
+  const env = { OPENROUTER_API_KEY: "fictional-key", LANGFUSE_PUBLIC_KEY: "pk-lf-fictional", LANGFUSE_SECRET_KEY: "sk-lf-fictional", LANGFUSE_BASE_URL: "https://langfuse.example", LANGFUSE_ENVIRONMENT: "test",
+    LEDGER: { getByName: () => ({ getClaim: async () => ({ memberId: null, providerId: "fictional-provider", bill: "", claim: { id: "fictional-claim", providerId: "fictional-provider", gross: 0, diagnoses: [], activities: [] }, extraction: {}, coding: {}, adjudication: {}, fraud: {} }),
+      getClinicians: async () => [], providerStats: async () => ({}), setTriage: async () => {}, requestApproval: async () => {}, getEnrollment: async () => ({ decision: "enrolled" }) }) },
     INTAKE_AGENT: agent, CODING_AGENT: agent, ADJUDICATION_AGENT: agent, FRAUD_AGENT: agent, ENROLLMENT_AGENT: agent };
   const stop = new Error("Stop before human approval");
   const step = { do: async (_name: string, ...args: unknown[]) => (args.at(-1) as () => Promise<unknown>)(),
@@ -41,7 +44,7 @@ test("every scored agent trace carries its experiment tag without changing final
     for (const flow of [claim, enrollment]) Object.defineProperty(flow, "env", { value: env });
     await assert.rejects(claim.run({ payload: { claimId: "fictional-claim", ...shared }, timestamp: new Date(), instanceId: "claim-test", workflowName: "playground-claim-flow" }, step), error => error === stop);
     await enrollment.run({ payload: { applicationId: "fictional-application", ...shared }, timestamp: new Date(), instanceId: "enrollment-test", workflowName: "playground-enrollment-flow" }, step);
-    assert.deepEqual(spans.map(span => span.name), ["extract-claim", "review-coding", "adjudicate-claim", "assess-fraud", "assess-enrollment"]);
+    assert.deepEqual(spans.map(span => span.name), ["triage-claim", "decide-needs-review", "extract-claim", "review-coding", "adjudicate-claim", "assess-fraud", "assess-enrollment"]);
     for (const span of spans) {
       const tags = span.attributes.find(a => a.key === "langfuse.trace.tags")?.value.arrayValue?.values.map(v => v.stringValue) ?? [];
       assert.equal(tags[0], "sahra-health");

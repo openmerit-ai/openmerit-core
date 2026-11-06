@@ -8,7 +8,8 @@ import { NonRetryableError } from "cloudflare:workflows";
 import { type AgentRunResult, instructionsFor } from "./agents.ts";
 import type { Approval } from "./domain/types.ts";
 import { ledgerName } from "./ledger.ts";
-import type { AgentRole, ModelOverride, ModelOverrides } from "./models.ts";
+import { type AgentRole, type ModelOverride, type ModelOverrides, TRIAGE_MODEL } from "./models.ts";
+import { TRIAGE_QUESTION, triageClaim, triageState } from "./triage.ts";
 import { agentRunSpans, type ExperimentContext, exportSpans, postScore, runKey, type ScoreInput, spanIdFor, type TraceContext, traceIdFor, transcriptCounts } from "./tracing.ts";
 
 export interface ClaimFlowParams {
@@ -18,6 +19,8 @@ export interface ClaimFlowParams {
   models?: ModelOverrides;
   /** Scenario runs link the claim's final agent trace to this Langfuse experiment (dataset item = claim ID). */
   experiment?: ExperimentContext;
+  /** Scenario runs may triage with another OpenRouter decision model, to compare Scout's candidates. */
+  triageModel?: string;
 }
 
 export interface EnrollmentFlowParams {
@@ -144,6 +147,52 @@ export class ClaimFlow extends WorkflowEntrypoint<Env, ClaimFlowParams> {
     const initial = await ledger.getClaim(claimId);
     if (!initial) throw new NonRetryableError(`Unknown claim ${claimId}`);
     const userId = initial.memberId ?? undefined;
+
+    // Shadow-mode triage: recorded and traced, but the claim takes the full pipeline either way.
+    const triageModel = event.payload.triageModel ?? TRIAGE_MODEL.id;
+    if (triageModel) {
+      await step.do("triage-claim", { timeout: "2 minutes", retries: { limit: 1, delay: "10 seconds", backoff: "constant" } }, async () => {
+        const member = initial.memberId ? await ledger.getMember(initial.memberId) : null;
+        const state = triageState({
+          record: initial,
+          member,
+          clinicians: await ledger.getClinicians([...new Set(initial.claim.activities.map((activity) => activity.clinician))]),
+          history: member ? await ledger.claimHistory(member.id, claimId) : [],
+          providerStats: await ledger.providerStats(initial.providerId),
+        });
+        const triage = await triageClaim(this.env.OPENROUTER_API_KEY, triageModel, state, claimId);
+        await ledger.setTriage(claimId, triage);
+        const key = runKey(claimId, runId);
+        const rootId = await spanIdFor(`${key}/triage/root`);
+        const ended = Date.parse(triage.startedAt) + triage.latencyMs;
+        await exportSpans(this.env, {
+          traceId: await traceIdFor(`${key}/triage`),
+          sessionId: claimId,
+          userId,
+          traceName: "triage-claim",
+          tags: ["sahra-health", "triage", ...(experiment ? [`experiment:${experiment.id}`] : [])],
+          metadata: { case_id: claimId, ...(runId ? { run_id: runId } : {}) },
+        }, [
+          { spanId: rootId, name: "triage-claim", type: "chain", startMs: Date.parse(triage.startedAt), endMs: ended, input: { claimId }, output: { needsReview: triage.needsReview } },
+          {
+            spanId: await spanIdFor(`${key}/triage/decision`),
+            parentSpanId: rootId,
+            name: "decide-needs-review",
+            type: "generation",
+            startMs: Date.parse(triage.startedAt),
+            endMs: ended,
+            model: triage.servedModel ?? triageModel,
+            input: { questions: { needs_review: TRIAGE_QUESTION }, state },
+            output: triage.error ? { error: triage.error } : { needs_review: triage.needsReview },
+            ...(triage.usage ? { usage: { input: triage.usage.inputTokens, output: triage.usage.outputTokens, total: triage.usage.inputTokens + triage.usage.outputTokens } } : {}),
+            ...(triage.usage?.costUsd ? { cost: { total: triage.usage.costUsd } } : {}),
+            ...(triage.error ? { level: "ERROR" as const, statusMessage: triage.error.slice(0, 200) } : {}),
+            metadata: { requested_model: triageModel, ...(triage.provider ? { provider: triage.provider } : {}) },
+          },
+        ]);
+        return { needsReview: triage.needsReview, error: triage.error ?? null };
+      });
+    }
 
     const pipeline: { role: AgentRole; prompt: string; recorded: (record: NonNullable<Awaited<ReturnType<typeof ledger.getClaim>>>) => boolean }[] = [
       { role: "intake", prompt: `Process the itemized bill and eClaimLink submission for claim ${claimId}.`, recorded: (record) => record.extraction !== null },

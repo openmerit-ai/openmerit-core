@@ -36,6 +36,18 @@ previous USD 10.0077634 Team list-price equivalent conservatively leaves USD
 2.735286836 under the cap. Account-wide changes since the previous checkpoint
 are not attributed to this work. No additional model runs were started here.
 
+## Decision-model triage with published 0.3.9 (6 Nov 2026, catalogue ce269f4d…)
+
+- **Ran:** `openmerit scout "<scout-tasks/claim-triage.txt>" --all-endpoints --json`, then `--results` with measured AUC, Brier score and cost. See MODEL-DECISIONS.md.
+- **Worked as expected:**
+  - OpenRouter decision models were recommended: four of five candidates use OpenRouter's Decisions API.
+  - Scout warned "OpenRouter route retires 2026-11-08" on `inception/mercury-decide`, before and after our results.
+  - Residency: every endpoint's processing location was marked unverified, never assumed to be UAE.
+  - After our results, Scout ranked the measured best (Decider v1.2) first, so regret went from rank 3 to 0.
+- **Cost-first ranking again picked the weakest candidate:** the brief put calibration and missed reviews ahead of cost, and Scout still set `priority: cost`. Its rank 1, Decider Flash v1.2, had AUC 0.840 and Brier 0.220, against 0.975 and 0.059 for its rank 3. In money the gap is fractions of a cent per 1,000 claims, but at a 0.5 threshold Flash missed 10 of 17 claims that need review. This is the 4 Nov "cost-first ranking" finding, now for decision models.
+- **Scout's cost estimate:** USD 0.03 per 1,000 claims for Flash, against a measured USD 0.014. Within the expected range.
+- **Not an OpenMerit issue:** Perplexity returned `429 No capacity available` on 2 of 31 Decider v1.2 calls. Separately, three scenario runs in parallel exhausted the OpenRouter credit balance (402 `billing_error` counting in-flight requests), so agent results for two runs are invalid. Triage ran first and is unaffected.
+
 ## Harder coding controls and published 0.3.9 readiness (6 Nov 2026)
 
 Used registry `openmerit@0.3.9`, not linked source. Fresh Claude sessions passed
