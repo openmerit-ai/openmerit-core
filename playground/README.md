@@ -41,6 +41,16 @@ A claim's final agent trace is its `assess-fraud` trace, or, when the pipeline s
 
 **Dataset and experiments.** The runner upserts the dataset `sahra-outpatient-claims` with one item per claim fixture: item ID is the claim ID, input is the fixture name, description, submitted `Claim.Submission` XML and itemized bill, and expected output is the fixture's `expected`. Each scenario run is an experiment (dataset run) named `<model label>-<runId>`, for example `intake+coding=claude-haiku-5.5-run-2026-11-05T11-19-04-305Z` (`claude-haiku-5.5-…` when every agent runs one model, `recorded-…` without `--model`), with metadata `openmerit_version` and `model_<agent>` for each agent. Each claim's final agent trace is its experiment item, so the environment scores show per item in Langfuse's experiment comparison. Traces are linked with Langfuse's OpenTelemetry experiment attributes (`langfuse.experiment.*`, set by the Worker from the `experiment` field of `POST /claims`), because `POST /api/public/dataset-run-items` is deprecated and Langfuse Cloud stops serving it on 16 November 2026. Enrollments work the same way on a second dataset, `sahra-enrollments`: item ID is the application ID, input is the fixture name and application (with its health declaration), and expected output is the fixture's `expected`. Each run is also an experiment there, with the same name and metadata, and each application's enrollment agent trace is its experiment item.
 
+**Aggregate import attribution.** After the tagging fix is deployed, every agent
+trace in an experiment also carries `experiment:<experiment.id>`, alongside its
+existing Sahra and role tags. This includes intermediate agents, not only the
+final dataset-item trace. The tag uses the experiment ID, not the workflow run
+ID; ordinary runs without an experiment get no experiment tag. Native experiment
+item linkage and human payment approval are unchanged. Scout's aggregate
+connector still needs explicit score mappings and model aliases. Historical
+untagged traces are not rewritten by this release; they need attributable
+aggregate reporting or a separately approved tagging backfill.
+
 **Residency caveat:** Workers AI, Durable Objects and Langfuse US all process data outside the UAE. This setup is acceptable only because the data is fictional. A real Sahra Health could not run this way.
 
 ## Run it

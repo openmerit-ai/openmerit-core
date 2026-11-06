@@ -36,7 +36,7 @@ test('headless CLI resumes explicit management approval, protects keys, and mana
     else if (options?.method === 'POST') {
       assert.equal(body.publicKey, 'pk-lf-fictional-key'); assert.equal(body.secretKey, 'sk-lf-fictional-secret'); connected = true;
     }
-    return Response.json({ connected, results });
+    return Response.json({ connected, results, mappingCount: 3, modelAliasCount: 11 });
   });
   await assert.rejects(run(['connect', 'langfuse', '--status']), /Authorize connection management first/);
   assert.equal(await run(['connect', 'langfuse', '--authorize', '--no-open', '--json']), 10);
@@ -51,6 +51,8 @@ test('headless CLI resumes explicit management approval, protects keys, and mana
   assert.equal(JSON.parse(printed.at(-1) ?? '').connected, true);
   await run(['connect', 'langfuse', '--sync']);
   assert.equal(JSON.parse(printed.at(-1) ?? '').results, 7);
+  assert.equal(JSON.parse(printed.at(-1) ?? '').mappingCount, 3);
+  assert.equal(JSON.parse(printed.at(-1) ?? '').modelAliasCount, 11);
   await assert.rejects(run(['disconnect', 'langfuse', '--delete-all']), /requires --yes/);
   await run(['disconnect', 'langfuse', '--yes']);
   assert.equal(JSON.parse(printed.at(-1) ?? '').connected, false);

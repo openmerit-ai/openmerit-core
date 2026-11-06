@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Distinguish a connected Langfuse key from incomplete score-import setup. Connection status exposes only score-mapping and model-alias counts, and the web UI explains when either is missing. The CLI preserves those counts when the server provides them. Requires the corresponding Scout deployment and npm patch; does not change credentials, mappings or experiment attribution.
+
 ## 0.3.5 — 2026-11-05
 
 - Add optional headless Langfuse setup through the CLI, HTTP API and `scout_connection` MCP tool. A separately approved `scout:connections` key manages the authenticated user's connection and evaluation data; recommendation keys retain their existing permission. Viewer credentials enter through protected CLI input or trusted client configuration, never model-visible tool arguments. The web connection UI remains available, with revised spacing, mobile controls and the official Langfuse logo. Hosted features require a matching Scout deployment; saving Langfuse credentials also requires its dedicated encryption secret. Publishing this package does not deploy or enable the hosted connector.

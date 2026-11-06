@@ -21,6 +21,7 @@ const workers: Readonly<Record<string, Worker>> = {
   "domain-router": { config: "wrangler.domains.jsonc" },
   "scout-serving": { config: "wrangler.scout-alpha.jsonc" },
   "scout-publisher": { config: "wrangler.scout.jsonc" },
+  "playground-claims": { config: "playground/wrangler.jsonc" },
   site: {
     config: "wrangler.jsonc",
   },
@@ -58,7 +59,7 @@ async function deploy(key: string, flags: readonly string[]): Promise<void> {
   run("git", ["fetch", "--quiet", "origin", "main"]);
   const commit = run("git", ["rev-parse", "HEAD"]).trim();
   if (!succeeds("git", ["merge-base", "--is-ancestor", commit, "origin/main"])) fail(`HEAD ${commit.slice(0, 12)} is not on origin/main. Merge the change before deploying it.`);
-  requireGreenCI(commit);
+  requireGreenCI(commit, key === "playground-claims" ? ["verify", "package-smoke", "playground"] : ["verify", "package-smoke"]);
 
   const subject = run("git", ["log", "-1", "--format=%s", commit]).trim();
   console.log(`Deploying ${name} from ${worker.config} at ${commit.slice(0, 12)} (${subject}).`);
@@ -84,7 +85,7 @@ async function deploy(key: string, flags: readonly string[]): Promise<void> {
 
   const args = ["deploy", "--config", worker.config, "--strict", "--tag", commit.slice(0, 12), "--message", `${commit.slice(0, 12)} ${subject}`.slice(0, 100)];
   if (dryRun) args.push("--dry-run");
-  const result = spawnSync("wrangler", args, { cwd: root, stdio: "inherit" });
+  const result = spawnSync(key === "playground-claims" ? join(root, "playground/node_modules/.bin/wrangler") : "wrangler", args, { cwd: root, stdio: "inherit" });
   if (result.error) throw result.error;
   if (result.status !== 0) fail(`wrangler deploy exited with ${result.status}.`);
   if (dryRun || !before) return;
@@ -129,12 +130,11 @@ async function status(): Promise<void> {
   if (typeof catalogue["refreshError"] === "string") console.log(`  ${catalogue["refreshError"]}`);
 }
 
-function requireGreenCI(commit: string): void {
+function requireGreenCI(commit: string, required: readonly string[]): void {
   const repository = run("gh", ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).trim();
   const runs = json<{ check_runs: readonly { name: string; status: string; conclusion: string | null }[] }>(
     run("gh", ["api", `repos/${repository}/commits/${commit}/check-runs?per_page=100`]),
   ).check_runs;
-  const required = ["verify", "package-smoke"];
   const missing = required.filter((name) => !runs.some((check) => check.name === name));
   const failing = runs.filter((check) => check.status !== "completed" || !["success", "skipped", "neutral"].includes(check.conclusion ?? ""));
   if (missing.length || failing.length) {

@@ -233,6 +233,26 @@ failed read cannot be retried for one minute. A failed import leaves the previou
 complete set intact. `conversationId` alone reads a saved answer, not a rerank;
 send a follow-up or `sync` to recompute with the current results.
 
+### When a sync imports zero aggregates
+
+A connected Viewer key and a successful experiment read do not establish that
+score import is configured. Empty mappings are allowed when first connecting.
+Before repeating sync, check the score mappings and model aliases, then check
+that scored traces carry the exact experiment tag, trace name and metric name
+in those mappings. Merely linking a trace through Langfuse's native experiment
+attributes does not add the explicit experiment tag required by this connector.
+Do not remove the tag filter to make an import nonempty: that can combine scores
+from different models or runs. Untagged historical results need attributable
+aggregate reporting or a separately approved, verified tagging backfill.
+
+**Diagnostic version requirement:** a matching Scout serving deployment adds
+`mappingCount` and `modelAliasCount` to connection status, without returning the
+saved keys or mapping values. The web page distinguishes a connected key from
+incomplete setup and warns when a sync imports no matching scores. npm 0.3.5
+does not display these new counts; use authenticated API/MCP status until a
+matching CLI patch is published. These counts diagnose missing configuration,
+not whether matching scores exist or whether a model improves quality.
+
 ## Choose and delete
 
 Check measured quality, the quality floor, price calibration and limitations

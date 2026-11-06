@@ -2,6 +2,24 @@
 
 Dated observations from using OpenMerit as Sahra Health, newest release first. Each entry says what we ran, what happened and what a customer would expect.
 
+## Langfuse aggregate connection (6 Nov 2026)
+
+The hosted connector authenticated and read 25 experiments but imported zero
+aggregates. Read-only Metrics v2 queries found 133 `coding-finding-found` scores
+on `review-coding` and 83 `enrollment-decision-correct` scores on
+`assess-enrollment`; adding `experiment:<id>` filters for those experiments
+returned zero. Aggregate tag groups contained only `sahra-health` and the role,
+not experiment IDs. Native experiment item links alone did not satisfy the
+connector's explicit tag attribution contract.
+
+The local tagging fix adds the experiment tag to every agent trace in future
+experiment runs. A deterministic test exercises both workflows and the real
+OTLP exporter with simulated agents, two different experiment IDs and a
+non-experiment control. It checks intermediate agents as well as final agents,
+and preserves final-item linkage. No inference or historical backfill is part of
+that validation. A deployment alone does not make old untagged data importable;
+mapping configuration and fresh-run import acceptance remain separate checks.
+
 ## Scout f9c8c494 (5 Nov 2026, openmerit 0.3.4)
 
 The Scout serving release adds a per-call workload estimate and calibrates it from measured cost (`cost.calibration`). When cost is measured, only the cheapest measured model earns `best: ["cost"]`. The npm package is unchanged at 0.3.4.

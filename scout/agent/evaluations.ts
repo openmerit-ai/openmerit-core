@@ -35,8 +35,11 @@ export class ScoutEvaluations extends DurableObject<EvaluationEnv> {
   }
   async status() {
     const state = await this.ctx.storage.get<{ connectedAt: number; syncedAt?: number; experiments?: number; unmapped?: number }>('connection');
+    const encrypted = await this.ctx.storage.get<Encrypted>('credentials');
+    const config = encrypted ? await this.decrypt(encrypted) : undefined;
     const measurements = await this.measurements();
-    return { connected: !!state, ...state, results: measurements.length, busy: this.busy };
+    return { connected: !!state, ...state, mappingCount: config?.mappings.length ?? 0,
+      modelAliasCount: Object.keys(config?.models ?? {}).length, results: measurements.length, busy: this.busy };
   }
   async configure(input: unknown) {
     if (this.busy) throw new Error('A Langfuse request is already running. Try again shortly.');

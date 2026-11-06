@@ -180,7 +180,18 @@ test('per-user storage persists only encrypted credentials, isolates users, and 
     assert.equal(r.status, 200, r.status === 200 ? undefined : await r.text()); return r.json();
   };
   try {
+    const incomplete = await call('connect', { ...config, mappings: [], models: {} }) as Record<string, unknown>;
+    assert.equal(incomplete.connected, true);
+    assert.equal(incomplete.mappingCount, 0);
+    assert.equal(incomplete.modelAliasCount, 0);
+    const empty = await call('sync') as Record<string, unknown>;
+    assert.equal(empty.experiments, 1);
+    assert.equal(empty.results, 0);
     await call('connect', config);
+    const configured = await call('status') as Record<string, unknown>;
+    assert.equal(configured.mappingCount, 1);
+    assert.equal(configured.modelAliasCount, 2);
+    assert.doesNotMatch(JSON.stringify(configured), /pk-lf|sk-lf|provider\/|model_coding/);
     assert.doesNotMatch(JSON.stringify(await call('inspect')), /pk-lf|sk-lf|provider\/first/);
     const reported = { level: 'agent', kind: 'quality', task: 'Coding', scope: 'Coding', model: 'lab/second', metric: 'correct', value: 1, samples: 31, source: 'Customer eval', higherIsBetter: true };
     await call('report', [reported]);
@@ -201,5 +212,8 @@ test('per-user storage persists only encrypted credentials, isolates users, and 
     assert.equal((await call('measurements') as unknown[]).length, 1);
     assert.equal((await call('inspect') as Record<string, unknown>).credentials, undefined);
     await call('clear'); assert.deepEqual(await call('measurements'), []);
+    const cleared = await call('status') as Record<string, unknown>;
+    assert.equal(cleared.mappingCount, 0);
+    assert.equal(cleared.modelAliasCount, 0);
   } finally { release?.(); await mf.dispose(); }
 });
