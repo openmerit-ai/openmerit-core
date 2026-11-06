@@ -77,8 +77,10 @@ not promise that Scout stores or processes your data in that region.
 
 You can connect the key first with empty mappings. To import results, expand
 **Score and model mappings** and supply a start date, experiment-tag prefix,
-score mappings and model aliases. To change saved settings, disconnect and
-reconnect; this deletes the old imports, not reported results.
+score mappings and model aliases. In npm 0.3.6 with the matching Scout deployment,
+the headless paths below can update settings without re-entering the saved Viewer
+key. Changing settings invalidates old imports; sync again afterwards. Reported
+results remain. Older deployments require disconnecting and reconnecting.
 
 ### Headless CLI setup
 
@@ -124,6 +126,14 @@ openmerit connect langfuse --status
 openmerit connect langfuse --sync
 ```
 
+**Updating an existing connection (npm 0.3.6 and matching deployment):** edit the
+non-secret settings file and run the same `--config` command with both
+`LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` absent. Scout reuses and reverifies
+the encrypted Viewer key internally; neither CLI nor model receives it. One key
+without the other is rejected. Without a connected key, first connect through a
+protected credential path. Settings changes remove prior imports, not reported
+results, and require a new sync.
+
 Alternatively, `openmerit connect langfuse --stdin` reads a full JSON object with
 the same settings plus `publicKey` and `secretKey` from a protected pipe, up to
 18 KB. It does not echo or save the Viewer credentials locally. Do not use inline
@@ -154,6 +164,12 @@ from client configuration after connecting. Do not configure a client/proxy that
 records these headers. If your MCP client cannot securely inject headers outside
 model context, have the agent invoke the CLI with protected input instead, or
 use the web UI; do not fall back to putting credentials in tool arguments.
+
+On the matching 0.3.6 deployment, omit both Viewer headers to update an existing
+connection using its saved encrypted key. A new connection still needs both.
+The authenticated HTTP POST similarly accepts non-secret settings without either
+key field for an existing connection. The saved key is never exported. Settings
+changes reverify Viewer access and invalidate imported results before a new sync.
 
 ```json
 {"action": "configure", "config": {"region": "us", "from": "2026-11-01", "tagPrefix": "experiment:", "mappings": [], "models": {}}}
@@ -219,8 +235,9 @@ read per sync. Narrow the date if a response or import exceeds its limit. Only
 experiment headers/metadata and aggregate Metrics v2 reads are requested. A
 deliberately invalid dataset-create request checks read-only permission without
 ever sending a valid write payload. Only an authenticated read followed by HTTP
-403 on that probe is accepted; other responses fail closed. Actual Viewer-key
-acceptance remains pending the release check.
+403 on that probe is accepted; other responses fail closed. Live Viewer-key
+connection acceptance was verified on 6 November 2026; fresh mapped aggregate
+import and reranking remain separate release checks.
 
 Click **Sync aggregates**, or request a fresh recommendation with:
 

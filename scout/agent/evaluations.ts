@@ -43,9 +43,18 @@ export class ScoutEvaluations extends DurableObject<EvaluationEnv> {
   }
   async configure(input: unknown) {
     if (this.busy) throw new Error('A Langfuse request is already running. Try again shortly.');
-    const config = parseLangfuse(input), generation = this.generation;
+    const generation = this.generation;
     this.busy = true;
     try {
+      let value = input;
+      if (input && typeof input === 'object' && !Array.isArray(input) && !('publicKey' in input) && !('secretKey' in input)) {
+        if (Object.keys(input).some(key => !['region', 'from', 'tagPrefix', 'mappings', 'models'].includes(key))) throw new Error('Langfuse settings contain an unsupported field.');
+        const saved = await this.ctx.storage.get<Encrypted>('credentials');
+        if (!saved) throw new Error('Connect Langfuse with a separate Viewer key before updating settings.');
+        const previous = await this.decrypt(saved);
+        value = { ...previous, ...input };
+      }
+      const config = parseLangfuse(value);
       // Fail before making upstream calls if encryption is not provisioned.
       const encrypted = await this.encrypt(config);
       await verifyViewer(config);

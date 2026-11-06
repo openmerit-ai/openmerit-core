@@ -1,5 +1,4 @@
 import { json, readJSON } from './http.mjs';
-import { parseLangfuse } from './langfuse.ts';
 import type { Measurement, MeasurementInput } from './agent/recommendation.ts';
 
 export interface EvaluationStore {
@@ -30,8 +29,8 @@ export async function handleEvaluations(request: Request, namespace: EvaluationN
       if (request.method === 'DELETE') return json(await store.disconnect());
       if (request.method === 'POST') {
         if (!request.headers.get('content-type')?.startsWith('application/json')) return json({ error: 'Use application/json.' }, 415);
-        let config;
-        try { config = parseLangfuse(await readJSON(request)); } catch { return json({ error: 'Invalid Langfuse settings. Check the region, key pair, start date and score mappings.' }, 400); }
+        let config: unknown;
+        try { config = await readJSON(request); } catch { return json({ error: 'Invalid Langfuse settings. Use a JSON object.' }, 400); }
         return json(await store.configure(config));
       }
     }

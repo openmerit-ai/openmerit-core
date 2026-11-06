@@ -12,14 +12,15 @@ OpenMerit accepts no model-provider or Jev credential. Credentials belong to the
 
 Never place secrets in evaluation configuration, task fixtures, Scout project policy, traces, or committed environment files.
 
-### Langfuse connector (unreleased)
+### Langfuse connector
 
-The [connection guide](scout-close-loop.md#connect-langfuse) describes the source
-implementation, not npm 0.3.4 or a deployed acceptance result. Only a separate
+The [connection guide](scout-close-loop.md#connect-langfuse) requires npm 0.3.5
+and the matching hosted deployment. Only a separate
 Viewer key pair is accepted. A successful read plus a deliberately invalid
 dataset-create permission probe (HTTP 403 required) fails closed for Full keys;
-no valid write payload is sent. Positive Viewer-key acceptance still needs a real
-Viewer key. Fixed US/EU/HIPAA hosts, manual redirects, timeouts and bounded reads
+no valid write payload is sent. Live Viewer connection acceptance was verified
+on 6 November 2026; fresh mapped import/reranking remain separate release gates.
+Fixed US/EU/HIPAA hosts, manual redirects, timeouts and bounded reads
 prevent credential forwarding and unbounded response bodies. The connector reads
 only experiment headers/metadata and aggregate Metrics v2 values, never trace,
 observation, experiment-item or raw-score bodies. Extra metadata fields are
@@ -29,6 +30,10 @@ Credentials and mappings are AES-GCM encrypted in one Cloudflare Durable Object
 per authenticated user, bound to that object's ID with a dedicated Worker secret.
 Keys never enter browser storage, URLs or analytics. Keep that encryption secret
 stable: replacing it invalidates stored connections and requires reconnecting.
+With npm 0.3.6 and the matching deployment, authenticated settings-only updates
+reuse and reverify the saved encrypted key without exporting it. Supplying a
+partial key pair fails; first connection still requires a protected Viewer pair.
+Changing settings invalidates imported aggregates and requires syncing again.
 Disconnect deletes the key and imported aggregates; deleting all evaluation data
 also deletes reported aggregates. Neither erases conversation text. Retention,
 limits and processor caveats are in the [data policy](scout-data-policy.md).
