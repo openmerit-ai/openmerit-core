@@ -4,6 +4,9 @@ const sharedAssets = new Set([
   '/',
   '/favicon.svg',
   '/styles.css',
+  // A shareable walkthrough of the Sahra Health playground; nothing else under /playground.
+  '/playground/scout',
+  '/playground/scout/',
 ]);
 
 export function publicSiteResponse(request) {
