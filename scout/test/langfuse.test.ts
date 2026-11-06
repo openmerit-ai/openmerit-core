@@ -134,10 +134,10 @@ test('aggregate reads isolate each run and trace role, paginate and drop arbitra
     }
     assert.equal(url.pathname, '/api/public/v2/metrics');
     const query = JSON.parse(url.searchParams.get('query') ?? '{}');
-    assert.deepEqual(query.dimensions, []);
-    assert.deepEqual(query.filters.slice(1), [{ column: 'traceName', type: 'string', operator: '=', value: 'review-coding' }, { column: 'name', type: 'string', operator: '=', value: 'correct' }]);
+    assert.deepEqual(query.dimensions, [{ field: 'name' }]);
+    assert.deepEqual(query.filters.slice(1), [{ column: 'traceName', type: 'string', operator: '=', value: 'review-coding' }, { column: 'name', type: 'stringOptions', operator: 'any of', value: ['correct'] }]);
     const first = query.filters[0].value[0] === 'experiment:first';
-    return Response.json({ data: [{ avg_value: first ? 0.75 : 1, count_count: first ? 12 : 31, input: 'PRIVATE', comment: 'PRIVATE' }] });
+    return Response.json({ data: [{ name: 'correct', avg_value: first ? 0.75 : 1, count_count: first ? 12 : 31, input: 'PRIVATE', comment: 'PRIVATE' }] });
   };
   const imported = await importLangfuse(config, fetcher, now);
   assert.deepEqual(imported.results.map(r => [r.model, r.value, r.samples]), [['lab/first', 0.75, 12], ['lab/second', 1, 31]]);
@@ -146,11 +146,48 @@ test('aggregate reads isolate each run and trace role, paginate and drop arbitra
   await assert.rejects(importLangfuse(config, async () => Response.json({ data: [], meta: { cursor: 'loop' } }), now), /repeated/);
 });
 
+test('mapped quality, cost and time import together within a provider aggregate-read quota', async () => {
+  let reads = 0;
+  const combined: LangfuseConfig = { ...config, mappings: [
+    config.mappings[0]!,
+    { ...config.mappings[0]!, metric: 'cost', kind: 'usd', higherIsBetter: false },
+    { ...config.mappings[0]!, metric: 'seconds', kind: 'seconds', higherIsBetter: false },
+    { ...config.mappings[0]!, metric: 'correct', modelKey: 'model_intake', traceName: 'extract-claim', task: 'Intake' },
+  ] };
+  const imported = await importLangfuse(combined, async input => {
+    const url = new URL(String(input));
+    if (url.pathname === '/api/public/experiments') return Response.json({ data: [
+      { id: 'first', metadata: { model_coding: 'provider/first', model_intake: 'provider/second' } },
+      { id: 'second', metadata: { model_coding: 'provider/second' } },
+    ], meta: {} });
+    if (++reads > 3) return new Response(null, { status: 429, headers: { 'Retry-After': '3600' } });
+    const query = JSON.parse(url.searchParams.get('query') ?? '{}');
+    const first = query.filters[0].value[0] === 'experiment:first';
+    const intake = query.filters[1].value === 'extract-claim';
+    return Response.json({ data: intake ? [{ name: 'correct', avg_value: 0.6, count_count: 5 }] : [
+      { name: 'seconds', avg_value: first ? 7.5 : 11, count_count: first ? 3 : 8 },
+      { name: 'correct', avg_value: first ? 0.75 : 1, count_count: first ? 4 : 9 },
+      { name: 'cost', avg_value: first ? 0 : 0.012, count_count: first ? 4 : 8 },
+    ] });
+  }, now);
+  assert.deepEqual(imported.results.map(r => [r.task, r.model, r.kind, r.metric, r.value, r.samples]), [
+    ['Coding', 'lab/first', 'quality', 'correct', 0.75, 4],
+    ['Coding', 'lab/first', 'usd', 'cost', 0, 4],
+    ['Coding', 'lab/first', 'seconds', 'seconds', 7.5, 3],
+    ['Intake', 'lab/second', 'quality', 'correct', 0.6, 5],
+    ['Coding', 'lab/second', 'quality', 'correct', 1, 9],
+    ['Coding', 'lab/second', 'usd', 'cost', 0.012, 8],
+    ['Coding', 'lab/second', 'seconds', 'seconds', 11, 8],
+  ]);
+  assert.equal(imported.unmapped, 1);
+});
+
 test('per-user storage persists only encrypted credentials, isolates users, and disconnect wins an in-flight sync', async () => {
   let release: (() => void) | undefined;
   let waiting: (() => void) | undefined;
   const started = new Promise<void>(resolve => { waiting = resolve; });
   let hold = false;
+  let limited = false;
   const bundle = await build({ stdin: { contents: `
     import { ScoutEvaluations } from './scout/agent/evaluations.ts';
     export class TestEvaluations extends ScoutEvaluations {
@@ -174,8 +211,9 @@ test('per-user storage persists only encrypted credentials, isolates users, and 
       if (request.headers.get('authorization') !== `Basic ${btoa(`${config.publicKey}:${config.secretKey}`)}`) return new Response(null, { status: 401 });
       if (request.method === 'POST') return new Response(null, { status: 403 });
       if (url.pathname === '/api/public/experiments') return Response.json({ data: [{ id: 'first', metadata: { model_coding: 'provider/first' } }], meta: {} });
+      if (limited) return new Response(null, { status: 429, headers: { 'Retry-After': '3600' } });
       if (hold) { waiting?.(); await new Promise<void>(resolve => { release = resolve; }); }
-      return Response.json({ data: [{ avg_value: 0.75, count_count: 12 }] });
+      return Response.json({ data: [{ name: 'correct', avg_value: 0.75, count_count: 12 }] });
     } }));
   const call = async (path: string, body?: unknown) => {
     const r = await mf.dispatchFetch(`http://local/${path}`, { method: body ? 'POST' : 'GET', ...(body ? { body: JSON.stringify(body) } : {}) });
@@ -225,5 +263,17 @@ test('per-user storage persists only encrypted credentials, isolates users, and 
     const cleared = await call('status') as Record<string, unknown>;
     assert.equal(cleared.mappingCount, 0);
     assert.equal(cleared.modelAliasCount, 0);
+    hold = false;
+    await call('connect', config);
+    await call('report', [reported]);
+    limited = true;
+    const rateLimited = await mf.dispatchFetch('http://local/sync');
+    assert.equal(rateLimited.status, 500);
+    assert.match(await rateLimited.text(), /3600 seconds/);
+    limited = false;
+    const coolingDown = await mf.dispatchFetch('http://local/sync');
+    assert.equal(coolingDown.status, 500, 'a failed import must not be reported as a cached success');
+    assert.match(await coolingDown.text(), /Langfuse rate limited/);
+    assert.equal((await call('measurements') as unknown[]).length, 1, 'failed import retains reported results');
   } finally { release?.(); await mf.dispose(); }
 });

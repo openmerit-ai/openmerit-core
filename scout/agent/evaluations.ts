@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { importLangfuse, parseLangfuse, verifyViewer, type LangfuseConfig } from '../langfuse.ts';
+import { importLangfuse, LangfuseRateLimitError, parseLangfuse, verifyViewer, type LangfuseConfig } from '../langfuse.ts';
 import type { Measurement, MeasurementInput } from './recommendation.ts';
 
 interface EvaluationEnv { SCOUT_CONNECTOR_KEY?: string }
@@ -71,9 +71,12 @@ export class ScoutEvaluations extends DurableObject<EvaluationEnv> {
     if (this.busy) throw new Error('A Langfuse request is already running. Try again shortly.');
     this.busy = true;
     const generation = this.generation;
+    let retryAt = 0;
     try {
       const encrypted = await this.ctx.storage.get<Encrypted>('credentials');
       if (!encrypted) throw new Error('Connect Langfuse at https://openmerit.ai/connect/?integration=langfuse first.');
+      retryAt = (await this.ctx.storage.get<number>('retryAt')) ?? 0;
+      if (Date.now() < retryAt) throw new LangfuseRateLimitError(Math.ceil((retryAt - Date.now()) / 1000));
       if (Date.now() < ((await this.ctx.storage.get<number>('nextSync')) ?? 0)) return { ...await this.status(), cached: true };
       await this.ctx.storage.put('nextSync', Date.now() + 60_000);
       const imported = await importLangfuse(await this.decrypt(encrypted));
@@ -90,6 +93,11 @@ export class ScoutEvaluations extends DurableObject<EvaluationEnv> {
         await storage.setAlarm(at + 86400_000);
       });
       return { ...await this.status(), cached: false };
+    } catch (error) {
+      if (error instanceof LangfuseRateLimitError && Date.now() >= retryAt && generation === this.generation) {
+        await this.ctx.storage.put('retryAt', Date.now() + error.retryAfter * 1000);
+      }
+      throw error;
     } finally { this.busy = false; }
   }
   async disconnect() {
@@ -97,7 +105,7 @@ export class ScoutEvaluations extends DurableObject<EvaluationEnv> {
     await this.ctx.storage.transaction(async storage => {
       const saved = (await storage.get<Saved[]>('results')) ?? [];
       await storage.put('results', saved.filter(r => r.origin !== 'langfuse'));
-      await storage.delete(['credentials', 'connection', 'nextSync']);
+      await storage.delete(['credentials', 'connection', 'nextSync', 'retryAt']);
     });
     return { connected: false, deleted: 'Langfuse credentials and imported aggregates' };
   }
