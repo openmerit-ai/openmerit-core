@@ -89,7 +89,7 @@ async function runAgent(
     sessionId: input.caseId,
     userId: input.userId,
     traceName: STEP_NAMES[input.role],
-    tags: ["sahra-health", input.role],
+    tags: ["sahra-health", input.role, ...(input.experiment ? [`experiment:${input.experiment.id}`] : [])],
     metadata: { case_id: input.caseId, agent: input.role, ...(input.runId ? { run_id: input.runId } : {}), ...(input.model ? { model_override: `${input.model.provider}/${input.model.id}` } : {}) },
     ...(final && input.experiment ? { experiment: { ...input.experiment, itemId: input.caseId, rootObservationId } } : {}),
   };

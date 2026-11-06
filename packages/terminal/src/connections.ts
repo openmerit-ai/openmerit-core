@@ -109,7 +109,7 @@ export async function connection(args: string[], { root = process.cwd(), print =
   }
   const value: unknown = await response.json();
   if (!object(value)) throw new Error('OpenMerit returned an invalid connection response.');
-  const state = Object.fromEntries(Object.entries(value).filter(([name]) => ['connected', 'connectedAt', 'syncedAt', 'experiments', 'unmapped', 'results', 'busy', 'cached', 'deleted'].includes(name)));
+  const state = Object.fromEntries(Object.entries(value).filter(([name]) => ['connected', 'connectedAt', 'syncedAt', 'mappingCount', 'modelAliasCount', 'experiments', 'unmapped', 'results', 'busy', 'cached', 'deleted'].includes(name)));
   print(JSON.stringify(state, null, 2));
   return 0;
 }

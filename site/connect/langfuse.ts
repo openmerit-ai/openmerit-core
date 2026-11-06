@@ -26,9 +26,12 @@ export async function showLangfuse(api: Api): Promise<void> {
     const state = await api('langfuse');
     form.hidden = !!state.connected;
     connected.hidden = !state.connected;
+    const missing = [state.mappingCount === 0 ? 'score mappings' : '', state.modelAliasCount === 0 ? 'model aliases' : ''].filter(Boolean);
+    const emptySync = !!state.syncedAt && state.results === 0;
     say(state.connected
-      ? `Connected · ${state.results ?? 0} account aggregates${state.syncedAt ? ` · last sync ${new Date(Number(state.syncedAt)).toLocaleString()}` : ' · not synced yet'}${Number(state.unmapped) ? ` · ${state.unmapped} mappings need a model alias` : ''}`
-      : 'Connect a separate Viewer key. Your tracing keys stay unchanged.');
+      ? missing.length ? `Key connected, setup incomplete. Reconnect with ${missing.join(' and ')} to import results. Your tracing keys stay unchanged.`
+        : `Connected · ${state.results ?? 0} account aggregates${state.syncedAt ? ` · last sync ${new Date(Number(state.syncedAt)).toLocaleString()}` : ' · not synced yet'}${Number(state.unmapped) ? ` · ${state.unmapped} mappings need a model alias` : ''}${emptySync ? ' · no matching scores imported; check experiment tags, trace names and metric names' : ''}`
+      : 'Connect a separate Viewer key. Your tracing keys stay unchanged.', !!state.connected && (missing.length > 0 || emptySync));
   };
   section.hidden = false;
   try { await refresh(); } catch { say('Connection status is unavailable. Try again shortly.', true); }

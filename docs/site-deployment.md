@@ -16,6 +16,11 @@ npm run deploy -- <worker>                 # asks you to type "deploy"
 - `HEAD` is on `origin/main`;
 - the `verify` and `package-smoke` CI checks passed for that commit.
 
+The `playground-claims` target also requires its `playground` CI check and uses
+the Wrangler pinned in `playground/node_modules`; run `npm ci` in `playground/`
+first. Its deployment does not start scenarios, call models, approve payments or
+backfill historical Langfuse data.
+
 It runs the pinned Wrangler with `--strict`, which stops if someone changed the Worker in the dashboard. It tags the new version with the commit's short SHA, and the version message includes the commit subject. A receipt is written to `.deploys/<worker>/<time>.json` (ignored by Git). The receipt records the versions before and after the deploy and the exact rollback command. Pass `--yes` only when a non-interactive run has the owner's approval.
 
 `deploy:status` lists the live versions of every Worker. For each tagged version, it shows how far it is behind `origin/main`. "Untagged" means the version was deployed outside the wrapper. The report ends with the Scout catalogue's refresh state. The publisher also reports every refresh run to PostHog; see [Refresh monitoring](#refresh-monitoring).
@@ -25,6 +30,7 @@ It runs the pinned Wrangler with `--strict`, which stops if someone changed the 
 | `domain-router` | `openmerit-domains` | `wrangler.domains.jsonc` | Every public host; redirects; `/memo` to `openmerit-site` |
 | `scout-serving` | `openmerit-scout-alpha` | `wrangler.scout-alpha.jsonc` | Landing page, `/scout/`, `/connect/` |
 | `scout-publisher` | `openmerit-scout` | `wrangler.scout.jsonc` | Catalogue refresh, twice a day (00:07 and 12:07 UTC). Validate collection in isolation before each release |
+| `playground-claims` | `playground-claims` | `playground/wrangler.jsonc` | Sahra Health's customer claims and enrollment workflows |
 | `site` | `openmerit-site` | `wrangler.jsonc` | Protected memo. Locally reconciled; code-only release with asset-retention checks and no container rollout |
 
 Deploy `scout-serving` before `domain-router` when a change spans both, as the rebuild cutover did.
