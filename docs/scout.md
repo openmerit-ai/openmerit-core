@@ -172,7 +172,7 @@ outdated; citations do not certify model quality, access, residency or zero
 retention. Verify the exact endpoint in your application. No claim is made that
 all catalogue models can be run in your environment.
 
-**Unreleased, not deployed:** decision models that OpenRouter routes (supplied
+**Deployed 6 November 2026:** decision models that OpenRouter routes (supplied
 choices, ordered rubric scores and boolean probabilities through its alpha
 Decisions API) are listed alongside Vercel AI Gateway's. An OpenRouter route
 whose expiration date has passed is no longer listed; a route with a removal
@@ -180,6 +180,13 @@ date still ahead shows it as `retiresAt`, and Scout mentions it when it
 recommends a model through that route. Other hosts' deprecation dates do not
 remove a route. Moving aliases such as OpenRouter's `~lab/…-latest` IDs are
 never treated as one model.
+
+**Unreleased, not deployed:** more host routes are matched to the model they
+serve when a host spells the version or names the lab differently, for example
+Amazon Bedrock's `eu.cohere.embed-v4:0`, Azure's `embed-v-4-0` or Fireworks'
+`glm-5p2`. A model that OpenRouter or Vercel AI Gateway listed under its own
+spelling, such as `cohere/embed-5-fast` beside `cohere/embed-v5.0-fast`, is
+merged into the existing model, so it no longer appears twice.
 
 On enabled deployments, reported and imported aggregates belong to your account
 and apply across conversations. They are not shared with other customers. The
