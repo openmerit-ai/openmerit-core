@@ -29,10 +29,11 @@ establish superiority over untested candidates. Scout serving version
 `86d43d6c-e60f-4989-be50-9461d48f37cf` passed a live published-CLI check: all five
 task summaries matched their final first model, including measured coding review.
 Past saved answers do not change until the conversation is recomputed. Fresh
-conversations can still return a prose message rather than a validated shortlist;
-this remains an invite-release gate, not a successful structured recommendation.
+conversations returned prose rather than validated shortlists in two acceptance
+runs before the structured-completion deployment below. A prose fallback is not
+a successful structured recommendation.
 
-**Structured completion recovery — unreleased source:** when the model ends a
+**Structured completion recovery — deployed 6 November 2026:** when the model ends a
 turn with prose before an answer tool accepts a clarification or all planned
 shortlists, Scout continues the same durable run at most twice. Recovery keeps
 accepted task shortlists and names the remaining tasks; it does not bypass
@@ -40,8 +41,10 @@ catalogue, evidence, scope or quality validation. The attempt budget survives
 object eviction and resets only for a new user turn. An already accepted answer
 adds no model call. If recovery is exhausted, the existing prose/error fallback
 remains explicitly unstructured; provider failures do not start completion
-recovery. This needs a Scout serving deployment and fresh-conversation acceptance
-before the invite-release gate can close.
+recovery. PR #83 passed all PR/main CI checks and deployed Scout serving version
+`fe34446b-528c-4b90-b0a0-60946caa0d78` at 09:38 UTC. Landing, Scout, connection,
+status and version endpoints returned HTTP 200. Fresh-conversation acceptance is
+separate from deployment health and is required before this release gate closes.
 
 The Scout serving deploy of 5 November 2026 (version `ea371c78-6ccf-4931-a0b8-aa28a6599aaa`) serves this behavior to every client. A live MCP check returned an evaluation plan and agent grouping, and reported results moved a measured model below the quality bar. npm 0.3.1 adds `openmerit scout --results` and the installed instructions for measuring; older installations reach the new `scout_models` fields through MCP but their instructions do not mention measuring until the installer is rerun.
 

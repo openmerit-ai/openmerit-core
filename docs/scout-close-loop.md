@@ -28,12 +28,13 @@ Each recommended model names an exact endpoint and provider model ID.
 
 ## Measure with your own evals
 
-**Eval-readiness and evidence guidance — unreleased npm instructions:** the next
+**Eval-readiness and evidence guidance — npm 0.3.7 release preparation:** this
 package adds the readiness and cleanup workflow below to the installed Scout
 skill. Existing npm 0.3.6 instructions cover measuring and aggregate reporting,
 but do not yet prescribe all three readiness paths or an evidence-first cleanup
-record. This is guidance for the customer's coding agent, not an automated eval
-runner, platform provisioner or deletion service.
+record. Registry publication is separate from these source changes. This is
+guidance for the customer's coding agent, not an automated eval runner, platform
+provisioner or deletion service.
 
 ### Choose the readiness path
 
@@ -291,9 +292,13 @@ ever sending a valid write payload. Only an authenticated read followed by HTTP
 403 on that probe is accepted; other responses fail closed. Live Viewer-key
 connection acceptance, one fresh mapped aggregate import and measured reranking
 were verified on 6 November 2026 with npm 0.3.6 and the matching deployments.
-This one-sample plumbing check is not comparative quality acceptance. A new
-conversation received the aggregate, but returned prose instead of a validated
-shortlist; full fresh-agent and two-release acceptance remain open.
+This one-sample plumbing check is not comparative quality acceptance. Two new
+conversations received the aggregate but returned prose before the 6 November
+structured-completion deploy. After it, three fresh published-CLI conversations
+returned five structured tasks each, reused the measured coding result without
+resending it and retained the one-sample caveat. This focused check does not
+establish fresh-coding-agent usability; full fresh-agent and two-release
+acceptance remain open.
 
 Click **Sync aggregates**, or request a fresh recommendation with:
 

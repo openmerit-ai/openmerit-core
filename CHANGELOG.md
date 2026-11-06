@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.7 — 2026-11-06 (release preparation)
 
 - The installed Scout skill distinguishes no eval setup, insufficient evals and suitable existing evals. Langfuse is the default customer-owned platform suggestion, not a requirement; local/custom evals can report aggregates. The customer's coding agent implements evals, while OpenMerit remains Viewer-only. Instructions require a local Markdown decision record before proposing explicitly approved cleanup of newly created comparison runs; existing records and reusable fixtures/definitions stay intact. This adds guidance, not an eval runner, automatic deletion or another platform connector. Fresh-agent acceptance remains a release gate.
 

@@ -2,6 +2,40 @@
 
 Dated observations from using OpenMerit as Sahra Health, newest release first. Each entry says what we ran, what happened and what a customer would expect.
 
+## Invite-only gate: structured reuse passes (6 Nov 2026, published openmerit 0.3.6)
+
+Scout serving version `fe34446b-528c-4b90-b0a0-60946caa0d78` deployed at
+09:38 UTC after PR #83 and merged-commit CI passed. Cloudflare's deployment
+metadata API initially returned HTTP 503; the guarded release stopped before
+upload. A later attempt succeeded, with the new version serving 100% of traffic.
+Landing, Scout, connection, status and version health checks returned HTTP 200.
+
+Repeated the same published-package command serially three times, each creating
+a new conversation and sending no results file:
+
+`node_modules/.bin/openmerit scout "$(cat scout-tasks/agent-models-0.3.1.txt)" --all-endpoints --json`
+
+- `173fc90a-22d0-46b8-bfb8-9d818a6327e3`: recommended, five structured tasks.
+- `9ea5f307-53e3-48a4-94b6-6ec559884923`: recommended, five structured tasks.
+- `254ab173-fc7f-42f1-9839-b832762649fa`: recommended, five structured tasks.
+
+All three reused the existing Langfuse coding aggregate without resending it;
+Sonnet 5.5 ranked first for medical coding review with `quality.measured: true`
+and "Your eval" evidence naming one sample. All 15 task summaries named their
+actual final first model. Coding summaries retained the one-sample and unknown
+UAE-processing caveats. The model's quality estimates varied (85, 90, 91); those
+are not measured accuracy. Before this deployment, both recorded fresh reuse
+attempts returned prose rather than structured recommendations (0/2); after it,
+these three returned structured recommendations (3/3).
+
+This passes the focused structured-completion/account-reuse check, not a full
+fresh-coding-agent or two-release acceptance pass. These commands ran in the
+existing coordinator session, not a new agent isolated from implementation
+knowledge. No claim/model comparison, application-model change, payment approval,
+connection deletion or customer-platform cleanup occurred. Cost regret remains
+**not measurable** from this one-sample, one-model import. Live revocation and
+disconnect/cleanup still require scoped consent and a safe reconnect path.
+
 ## Invite-only gate: first automatic import (6 Nov 2026, openmerit 0.3.6)
 
 PR #80 deployed playground version `0779fd69-3a77-4dd5-aa89-21a8d92e5f2e`
