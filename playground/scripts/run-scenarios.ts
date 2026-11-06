@@ -120,11 +120,11 @@ while (Date.now() < deadline) {
 }
 process.stdout.write("\n");
 
-async function score(caseId: string, agent: string, name: string, value: number, comment: string, onRoot = false): Promise<void> {
+async function score(caseId: string, agent: string, name: string, value: number, comment: string, onRoot = false, dataType: "BOOLEAN" | "NUMERIC" = "BOOLEAN"): Promise<void> {
   try {
     const key = `${runKey(caseId, runId)}/${agent}`;
     const environment = onRoot ? { observationId: await spanIdFor(`${key}/agent`), metadata: { level: "environment", agent } } : {};
-    await postScore(langfuse, { traceId: await traceIdFor(key), name, value, dataType: "BOOLEAN", comment, ...environment });
+    await postScore(langfuse, { traceId: await traceIdFor(key), name, value, dataType, comment, ...environment });
   } catch (error) {
     console.error(`Could not send score ${name} for ${caseId}: ${error instanceof Error ? error.message : error}`);
   }
@@ -175,6 +175,15 @@ async function postOutcome(record: ClaimRecord, claimCorrect: boolean, paymentCo
 for (const fixture of claims) {
   const record = claimRecords.find((item) => item.id === fixture.claim.id);
   const expectedPayment = (fixture.expected.payment / 100).toFixed(2);
+  const passed: boolean[] = [];
+  const notes: string[] = [];
+  if (fixture.expected.codingFindings && record?.coding) {
+    const actual = record.coding.findings.filter(item => item.severity !== "info" && item.kind !== "other").map(item => `${item.activityId ?? ""}:${item.kind}`).sort();
+    const expected = fixture.expected.codingFindings.map(item => `${item.activityId ?? ""}:${item.kind}`).sort();
+    const ok = await check(record.id, "coding", "coding-findings-match", JSON.stringify(actual) === JSON.stringify(expected), `got ${JSON.stringify(actual)}; expected ${JSON.stringify(expected)}`);
+    passed.push(ok);
+    notes.push(`exact coding ${ok ? "✓" : "✗"}`);
+  }
   if (!record || record.state === "error" || !record.adjudication) {
     total += 1;
     results.push({ caseId: fixture.claim.id, agent: "pipeline", check: "claim-settled", pass: false, comment: record?.error ?? record?.state ?? "not found" });
@@ -190,8 +199,7 @@ for (const fixture of claims) {
   });
   const decisions = await check(record.id, "adjudication", "line-decisions-correct", lineResults.every((item) => item.ok), lineResults.map((item) => `${item.activityId}: ${item.got} (expected ${item.expected})`).join("; "));
   const fraud = await check(record.id, "fraud", "fraud-recommendation-correct", !!record.fraud && fixture.expected.fraud.includes(record.fraud.recommendation), `got ${record.fraud?.recommendation}, expected ${fixture.expected.fraud.join("|")}`);
-  const notes: string[] = [];
-  const passed = [decisions, fraud];
+  passed.push(decisions, fraud);
   if (fixture.expected.billMismatch) {
     const ok = await check(record.id, "intake", "bill-mismatch-found", (record.extraction?.mismatches.length ?? 0) > 0, record.extraction?.mismatches.join("; ") ?? "");
     passed.push(ok);
@@ -222,6 +230,10 @@ if (authorization) {
   const traces = await Promise.all(runs.map(async ([caseId, agent]) => ({ caseId, agent, traceId: await traceIdFor(`${runKey(caseId, runId)}/${agent}`) })));
   usage = await collectUsage(traces, async (traceId, signal) =>
     (await langfuseApi<{ data: Observation[] }>("GET", `/api/public/v2/observations?traceId=${traceId}&fields=core,usage,metadata,metrics&limit=100`, undefined, { signal }))?.data ?? []);
+  for (const item of usage) {
+    if (item.cost !== null) await score(item.caseId, item.agent, "usd-per-agent-run", item.cost, "Sum of every declared generation's measured cost in USD", false, "NUMERIC");
+    if (item.seconds !== null) await score(item.caseId, item.agent, "seconds-per-agent-run", item.seconds, "Agent root latency in seconds", false, "NUMERIC");
+  }
   const cost = usage.reduce((sum, item) => sum + (item.cost ?? 0), 0);
   const missing = usage.filter(item => !item.complete).length;
   const caseSeconds = new Map<string, number>();

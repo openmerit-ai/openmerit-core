@@ -33,11 +33,28 @@ These evals are Sahra's own, so none of their names carry an `om-` prefix. Score
 | Task | `model-calls` | numeric | the Worker, on every agent trace's root observation |
 | Task | `rejected-tool-calls` (tool results starting `<harness>` or `[error]`: argument validation or harness errors) | numeric | the Worker, same |
 | Task | `result-recorded` (the agent recorded its extraction, review, adjudication, assessment or decision) | boolean | the Worker, same |
-| Agent | `line-decisions-correct`, `fraud-recommendation-correct`, `bill-mismatch-found`, `coding-finding-found`, `enrollment-decision-correct`, `declared-conditions-found` | boolean | the scenario runner, on the scored agent's trace |
+| Agent | `line-decisions-correct`, `fraud-recommendation-correct`, `bill-mismatch-found`, `coding-finding-found`, `coding-findings-match`, `enrollment-decision-correct`, `declared-conditions-found` | boolean | the scenario runner, on the scored agent's trace |
+| Agent | `usd-per-agent-run`, `seconds-per-agent-run` | numeric | the scenario runner, on each agent's trace, only when that measurement is known |
 | Environment | `claim-correct` (every agent check for the claim passes), `payment-correct` (proposed payment equals the fixture's), `review-load` (fraud recommended review or hold on a claim whose only acceptable recommendation is pay) | boolean | the scenario runner, on the root observation of the claim's **final agent trace** |
 | Environment | `enrollment-correct` (every agent check for the application passes) | boolean | the scenario runner, on the root observation of the application's enrollment agent trace |
 
 A claim's final agent trace is its `assess-fraud` trace, or, when the pipeline stopped early, the trace of the agent that did not record its result. An application has one agent trace, `assess-enrollment`. Scores carry `metadata.level` (`task` or `environment`). The settlement trace is not used for scores: scenario runs end at human approval, so it does not exist yet.
+
+**Harder coding controls:** four additional fictional claims cover nested metabolic
+panel unbundling, legitimate independent laboratory tests, a bill-embedded
+instruction to suppress a CBC finding, and a valid diagnosis sharing the prefix
+of a deleted code. Their `coding-findings-match` score compares the complete
+non-informational list of invalid-code, diagnosis-mismatch, unbundling and
+upcoding findings by activity ID and kind, independent of order. Generic `other`
+findings, such as a warning about a bill's injected instruction, are outside this
+coding metric; it does not validate those warnings. A completed coding review is
+still scored if a later pipeline stage fails.
+Missing findings, extra findings and findings on the clean controls fail; merely
+finding one expected kind is insufficient. These labels come from the playground's
+small fixture catalogue, not a clinical validation. Map this new score explicitly
+when importing coding quality through Langfuse; it is distinct from the older
+presence-only `coding-finding-found` score. Keep other agents fixed during model
+comparisons and do not attribute their failures to coding.
 
 **Dataset and experiments.** The runner upserts the dataset `sahra-outpatient-claims` with one item per claim fixture: item ID is the claim ID, input is the fixture name, description, submitted `Claim.Submission` XML and itemized bill, and expected output is the fixture's `expected`. Each scenario run is an experiment (dataset run) named `<model label>-<runId>`, for example `intake+coding=claude-haiku-5.5-run-2026-11-05T11-19-04-305Z` (`claude-haiku-5.5-…` when every agent runs one model, `recorded-…` without `--model`), with metadata `openmerit_version` and `model_<agent>` for each agent. Each claim's final agent trace is its experiment item, so the environment scores show per item in Langfuse's experiment comparison. Traces are linked with Langfuse's OpenTelemetry experiment attributes (`langfuse.experiment.*`, set by the Worker from the `experiment` field of `POST /claims`), because `POST /api/public/dataset-run-items` is deprecated and Langfuse Cloud stops serving it on 16 November 2026. Enrollments work the same way on a second dataset, `sahra-enrollments`: item ID is the application ID, input is the fixture name and application (with its health declaration), and expected output is the fixture's `expected`. Each run is also an experiment there, with the same name and metadata, and each application's enrollment agent trace is its experiment item.
 
@@ -82,6 +99,12 @@ The console labels the total incomplete and shows only the known subtotal. Real
 zero-cost generations remain valid. Latency uses the API's explicit metrics field
 group and stays unknown when unavailable. These reads belong to Sahra's runner;
 OpenMerit's Viewer connector still reads only aggregate metrics, not observations.
+The runner posts known measurements as `usd-per-agent-run` and
+`seconds-per-agent-run` numeric scores. Map them as agent-level `usd` and
+`seconds`, respectively, with lower-is-better direction and the exact agent trace
+name/model metadata key. This lets the connector import measured cost and time
+without converting local JSON into Scout reports. Unknown values are not posted;
+zero is posted when it is genuinely measured. Existing runs are not backfilled.
 
 Cloudflare resources are named `playground-` (Worker `playground-claims`; Workflows `playground-claim-flow` and `playground-enrollment-flow`). Deploying, and setting secrets with `wrangler secret put`, needs the owner's approval each time.
 
