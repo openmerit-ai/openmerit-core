@@ -342,8 +342,8 @@ test('LiveBench, τ-bench, OpenCompass, HELM Arabic, BRIDGE and SuperCLUE keep t
   // Model 7's display name strips to "Model 7", but its ID names another model.
   assert.deepEqual([score('model-6', 'helm:arabic'), score('model-4', 'helm:arabic'), score('model-7', 'helm:arabic')], [.3, undefined, undefined]);
   assert.deepEqual([score('model-3', 'bridge:zero-shot'), score('model-5', 'bridge:zero-shot')], [.03, undefined]);
-  assert.equal(score('model-2', 'superclue:agentic-planning'), .2);
-  const ids = ['livebench:coding', 'livebench:reasoning', 'tau:airline', 'tau:banking_knowledge', 'opencompass:knowledge', 'opencompass:agent', 'helm:arabic', 'bridge:zero-shot', 'superclue:math', 'superclue:agentic-planning'];
+  assert.equal(score('model-2', 'superclue:long-context'), .2);
+  const ids = ['livebench:coding', 'livebench:reasoning', 'tau:airline', 'tau:banking_knowledge', 'opencompass:knowledge', 'opencompass:agent', 'helm:arabic', 'bridge:zero-shot', 'superclue:math-science', 'superclue:long-context'];
   const families = ids.map(id => snap.benchmarks.find(b => b.id === id)?.family);
   assert.deepEqual([families.includes(undefined), new Set(families).size, snap.benchmarks.filter(b => ids.includes(b.id) && b.definition.suite).length], [false, ids.length, 0]);
   // Sierra's banking run is the same evaluation Artificial Analysis publishes; its other names stay distinct.
