@@ -541,6 +541,15 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
     record.values.push(score); record.variants.add(modelName); record.records.push(details); observations.set(key, record);
   }
   // Each source commits independently. A broken feed cannot freeze fresh prices or other benchmarks.
+  // A benchmark a source stops publishing keeps its last definition and evidence, as a
+  // missing Vals AI page does; otherwise the publish guard rejects the refresh.
+  function keepDropped(source) {
+    const listed = new Set(benchmarks.filter(b => b.source === source).map(b => b.id));
+    for (const old of previous?.benchmarks.filter(b => b.source === source && !listed.has(b.id)) ?? []) {
+      benchmarks.push(old);
+      for (const model of models) model.evidence.push(...(previous.models.find(m => m.id === model.id)?.evidence.filter(e => e.benchmark === old.id) ?? []));
+    }
+  }
   function collect(id, name, url, attribution, work, extra = {}) {
     const start = benchmarks.length;
     try {
@@ -775,6 +784,8 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
         { publishedAt: superclue.publishedAt, family: `superclue:${id}` });
       for (const row of superclue.rows) add(row.model, benchmark, row.scores[id] === null ? null : row.scores[id] / 100, { url: 'https://www.superclueai.com/generalpage', observedAt: null, sourceModel: row.model, metric: 'Score / 100' });
     }
+    // The November 2026 board retired math, science and agentic planning.
+    keepDropped('superclue');
     return { publishedAt: superclue.publishedAt };
   });
   collect('fireworks', 'Fireworks Specialized Intelligence Index', 'https://fireworks.ai/specialized-intelligence-index/', 'Domain benchmarks contributed by practitioner companies and published by Fireworks AI, each with its own headline metric; only headline scores on a 0–100 scale are imported, without cost or duration. Most are run by the contributor, who keeps the task set or harness; some are run by Fireworks or on public harnesses. Per-model evaluation dates are not supplied; each series records the benchmark\'s last update. Matched by Scout.', () => {
@@ -800,14 +811,8 @@ export function compileSnapshot({ epochZip, analysisHTML, openvlm, router, omnid
         add(name, benchmark, row.score, { url: `https://llm-stats.com/models/${encodeURIComponent(row.id)}`, observedAt: null, sourceModel: row.id, metric: benchmark.definition.metric });
       }
     }
-    // The feed lists only LLM Stats' top 100 benchmarks; one that drops out keeps its last
-    // published definition and evidence, as a missing Vals AI page does (29 October 2026:
-    // TruthfulQA and BLINK dropped out and the publish guard rejected the refresh).
-    const listed = new Set(benchmarks.filter(b => b.source === 'vendor').map(b => b.id));
-    for (const old of previous?.benchmarks.filter(b => b.source === 'vendor' && !listed.has(b.id)) ?? []) {
-      benchmarks.push(old);
-      for (const model of models) model.evidence.push(...(previous.models.find(m => m.id === model.id)?.evidence.filter(e => e.benchmark === old.id) ?? []));
-    }
+    // The feed lists only LLM Stats' top 100 benchmarks (29 October 2026: TruthfulQA and BLINK dropped out).
+    keepDropped('vendor');
   }, { license: 'https://llm-stats.com/terms' });
   collect('bfcl', 'Berkeley Function Calling Leaderboard', 'https://gorilla.cs.berkeley.edu/leaderboard', 'BFCL v4 native function-calling evaluations. Memory uses the named external backend, not built-in model memory. Per-model measurement dates are not supplied.', () => {
     const rows = parseBFCL(bfclCSV);

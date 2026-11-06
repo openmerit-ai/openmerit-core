@@ -343,6 +343,12 @@ test('LiveBench, τ-bench, OpenCompass, HELM Arabic, BRIDGE and SuperCLUE keep t
   assert.deepEqual([score('model-6', 'helm:arabic'), score('model-4', 'helm:arabic'), score('model-7', 'helm:arabic')], [.3, undefined, undefined]);
   assert.deepEqual([score('model-3', 'bridge:zero-shot'), score('model-5', 'bridge:zero-shot')], [.03, undefined]);
   assert.equal(score('model-2', 'superclue:long-context'), .2);
+  // A category the board retires keeps its last definition and scores, so the publish guard accepts the refresh.
+  const retired = { ...snap.benchmarks.find(b => b.id === 'superclue:math-science'), id: 'superclue:math', name: 'SuperCLUE · Mathematical reasoning' };
+  const before = { ...snap, benchmarks: [...snap.benchmarks, retired],
+    models: snap.models.map(m => m.id === 'lab/model-2' ? { ...m, evidence: [...m.evidence, { ...m.evidence.find(e => e.benchmark === 'superclue:math-science'), benchmark: 'superclue:math', score: .42 }] } : m) };
+  const after = compileSnapshot({ ...fixtures(), livebench, tau, opencompass, helm, bridge, superclue, previous: before });
+  assert.deepEqual([after.benchmarks.find(b => b.id === 'superclue:math')?.name, after.models.find(m => m.id === 'lab/model-2')?.evidence.find(e => e.benchmark === 'superclue:math')?.score], ['SuperCLUE · Mathematical reasoning', .42]);
   const ids = ['livebench:coding', 'livebench:reasoning', 'tau:airline', 'tau:banking_knowledge', 'opencompass:knowledge', 'opencompass:agent', 'helm:arabic', 'bridge:zero-shot', 'superclue:math-science', 'superclue:long-context'];
   const families = ids.map(id => snap.benchmarks.find(b => b.id === id)?.family);
   assert.deepEqual([families.includes(undefined), new Set(families).size, snap.benchmarks.filter(b => ids.includes(b.id) && b.definition.suite).length], [false, ids.length, 0]);
