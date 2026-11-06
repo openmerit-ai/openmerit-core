@@ -28,7 +28,7 @@ It runs the pinned Wrangler with `--strict`, which stops if someone changed the 
 | Key | Worker | Config | Serves |
 |---|---|---|---|
 | `domain-router` | `openmerit-domains` | `wrangler.domains.jsonc` | Every public host; redirects; `/memo` to `openmerit-site` |
-| `scout-serving` | `openmerit-scout-alpha` | `wrangler.scout-alpha.jsonc` | Landing page, `/scout/`, `/connect/` |
+| `scout-serving` | `openmerit-scout-alpha` | `wrangler.scout-alpha.jsonc` | Landing page, `/scout/`, `/connect/`, `/playground/scout/` |
 | `scout-publisher` | `openmerit-scout` | `wrangler.scout.jsonc` | Catalogue refresh, twice a day (00:07 and 12:07 UTC). Validate collection in isolation before each release |
 | `playground-claims` | `playground-claims` | `playground/wrangler.jsonc` | Sahra Health's customer claims and enrollment workflows |
 | `site` | `openmerit-site` | `wrangler.jsonc` | Protected memo. Locally reconciled; code-only release with asset-retention checks and no container rollout |

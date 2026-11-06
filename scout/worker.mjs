@@ -67,6 +67,7 @@ export default {
     const unavailable=publicSiteResponse(request);
     if(unavailable)return unavailable;
     if(path==='/scout')return Response.redirect(`${url.origin}/scout/${url.search}`,308);
+    if(path==='/playground/scout')return Response.redirect(`${url.origin}/playground/scout/${url.search}`,308);
     if(path==='/connect')return Response.redirect(`${url.origin}/connect/${url.search}`,308);
     // Product-level device sign-in for coding agents. The page is a static asset.
     if(path.startsWith('/connect/api/')) {

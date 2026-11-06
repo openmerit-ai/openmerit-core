@@ -22,12 +22,14 @@ test('the landing page stays at root and Scout keeps its own canonical page',asy
     const response=await router.fetch(new Request('https://example.test/scout?q=birds'),env,{});
     assert.equal(response.status,308);assert.equal(response.headers.get('location'),'https://example.test/scout/?q=birds');
     assert.equal((await router.fetch(new Request('https://example.test/scout/'),env,{})).status,200);
+    const playground=await router.fetch(new Request('https://example.test/playground/scout'),env,{});
+    assert.equal(playground.status,308);assert.equal(playground.headers.get('location'),'https://example.test/playground/scout/');
   }
 });
 test('retired pages cannot fall through to old assets or the original website',async t=>{
   t.mock.method(globalThis,'fetch',()=>assert.fail('Retired pages must not proxy to the old website'));
   const unavailable=new Proxy({},{get(){assert.fail('Retired pages must not read bindings or assets');}});
-  for(const router of [worker,alpha])for(const path of ['/scouting','/scout-other','/connections','/index.html','/docs/','/docs/scout/','/docs/scout/source.md','/docs/manifest.json','/memo/','/engineering/','/demo/api/session'])for(const method of ['GET','HEAD','POST']){
+  for(const router of [worker,alpha])for(const path of ['/scouting','/scout-other','/playground','/playground/other','/playground/scout/extra','/connections','/index.html','/docs/','/docs/scout/','/docs/scout/source.md','/docs/manifest.json','/memo/','/engineering/','/demo/api/session'])for(const method of ['GET','HEAD','POST']){
     assert.equal((await router.fetch(new Request(`https://example.test${path}`,{method}),unavailable,{})).status,404,`${method} ${path}`);
   }
 });
