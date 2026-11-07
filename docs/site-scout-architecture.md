@@ -1,5 +1,32 @@
 # Scout architecture and operations
 
+## Playground ranking baseline, dominated candidates and quality tie band (not yet deployed), 7 November 2026
+
+`scout/experiments/playground-ranking.ts` replays the Sahra Health playground's five-agent brief (`playground/scout-tasks/agent-models-0.3.1.txt`) through the real `ScoutAgent` in Miniflare. It reads the production catalogue read-only: R2 through `wrangler r2 object get`, D1 by SELECT only and Vectorize queries through the Cloudflare API. Web search is off. Each run has two conversations: one fresh, and one that also reports the playground's 49 agent-level quality and USD results from 5 November (`playground/scout-results/2026-11-05-0.3.4-reported-agent-level.json`; the 20 seconds results are left out because a turn takes at most 50 and Scout does not rank on latency). Each shortlist is scored on whether the cheapest model that passed every check is listed, whether a model that failed one is in the top two, and the extra cost of Scout's #1 over that cheapest model at 300 claims a day. Run it with `RUNS=3 node scout/experiments/playground-ranking.ts <report.json>` and `OPENAI_API_KEY`, `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. It is one customer's five tasks, so use it as a regression check, not a target to tune to.
+
+**Baseline**, catalogue `63be8685`, 3 runs:
+
+| | Fresh | With measured results |
+|---|---|---|
+| Cheapest passing model listed | 2/12 | 12/12 |
+| Failing model in the top two | 3/15 | 0/15 |
+| Extra cost of #1 per day | USD 34.3 | USD 0 |
+
+In the fresh runs, Claude Fable 5.1, GPT-5.6 Sol and GPT-6 Astra were shortlisted although another candidate on the same list had a higher quality estimate and a lower price. `finalize` in `scout/agent/recommendation.ts` now leaves out an unmeasured candidate when another unmeasured candidate beats it on both quality estimate and fully priced estimated cost. Equal prices keep both, because the same list price can cost differently per run. Measured candidates are never left out this way, because measured ties on easy examples do not prove equal quality.
+
+**After the change**, same catalogue and harness, 3 runs: no fresh shortlist contains Fable 5.1, GPT-5.6 Sol or GPT-6 Astra, and the extra cost of #1 fell from USD 34.3 to 24.3 a day. The failing model is still in the top two in 3/15 (Gemini 4 Argon on Enrollment), and the cheapest passing model (GPT-6.1 Sol) is listed in 0/12, against 2/12 before. Scout usually assesses about five candidates, so a dropped candidate's place stays empty and fresh shortlists now hold one to four models. Measured results are unchanged: 12/12, 0/15 and USD 0.
+
+**Quality tie band.** Under the quality priority, `finalize` now treats unmeasured quality estimates within three points (`qualityTie`) of the best estimate not yet placed as tied, and ranks that band by cost: measured cost when every unmeasured candidate has one, otherwise the fully priced estimate. Bands repeat from the next best estimate. Measured models keep their order. With the task-relevant evidence change (`benchmarkIds` in `get_model_details`) also applied, same catalogue and harness, 3 runs:
+
+| Fresh conversations | Dominance only | + evidence | + 3-point band (kept) | + 2-point band |
+|---|---|---|---|---|
+| Cheapest passing model listed | 0/12 | 1/12 | 9/12 | 5/12 |
+| Failing model in the top two | 3/15 | 3/15 | 3/15 | 3/15 |
+| Extra cost of #1 per day | USD 24.3 | USD 48.2 | USD 9.1 | USD 25.2 |
+| Distinct #1 across 3 runs, per task | 1–2 | 1–2 | 1 (Fraud review: 3) | 1–2 |
+
+The owner tried two points and kept three. The band cannot add a model to a shortlist, so how often GPT-6.1 Sol is listed comes from which models the agent chose to assess, not from the band. With two points, Opus 5 or Opus 5.5 stayed first on Coding review and Fraud review, where the agent usually put it exactly three points above Gemini 4 Argon; that accounts for nearly all of the two-point band's extra cost. With three points, Argon ranks first on most tasks, including Enrollment, where it failed the playground's check: its estimate is within three points of Opus 5's at less than half the price, and no public benchmark shows its tool-schema failure. Measured results are unchanged: 12/12, 0/15 and USD 0.
+
 ## TrueFoundry catalogue source retired (not yet deployed), 7 November 2026
 
 `github.com/truefoundry/models` returns 404 from GitHub, its codeload zip, raw files and the GitHub API since 6 November 2026, with no redirect, so it was deleted or made private. None of TrueFoundry's public repositories replaces it. Every `truefoundry` import since 6 November 14:20 UTC failed. The owner chose to retire the source rather than replace it.

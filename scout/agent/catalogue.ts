@@ -391,8 +391,14 @@ export function standings(catalogue: Catalogue, id: string): Standing[] {
       for (const [benchmark, observation] of top) { const rows = best.get(benchmark) ?? []; rows.push({ model, observation }); best.set(benchmark, rows); }
       for (const b of model.boards) { const rows = ranked.get(b.board) ?? []; rows.push({ model, score: b.score, rank: b.rank, of: b.of, observedAt: b.observedAt, metric: null }); ranked.set(b.board, rows); }
     }
-    boards = new Map([...best].map(([benchmark, rows]) => [benchmark, rows.sort((a, b) => b.observation.score - a.observation.score)
-      .map((s, i): Standing => ({ model: s.model, score: s.observation.score, rank: i + 1, of: rows.length, observedAt: s.observation.observedAt, metric: s.observation.metric }))]));
+    boards = new Map([...best].map(([benchmark, rows]) => {
+      rows.sort((a, b) => b.observation.score - a.observation.score);
+      let rank = 1;
+      return [benchmark, rows.map((s, i): Standing => {
+        if (i > 0 && s.observation.score !== rows[i - 1]?.observation.score) rank = i + 1;
+        return { model: s.model, score: s.observation.score, rank, of: rows.length, observedAt: s.observation.observedAt, metric: s.observation.metric };
+      })];
+    }));
     const metrics = new Map(catalogue.boards.map(b => [b.id, b.metric]));
     for (const [board, rows] of ranked) boards.set(board, rows.sort((a, b) => a.rank - b.rank).map(s => ({ ...s, metric: metrics.get(board) ?? null })));
     leaderboards.set(catalogue, boards);
@@ -455,7 +461,9 @@ export function benchmarkLeaderboard(catalogue: Catalogue, id: string, f: Filter
   };
 }
 
-export function modelDetails(catalogue: Catalogue, ids: string[], f: Filters = {}) {
+export function modelDetails(catalogue: Catalogue, ids: string[], f: Filters = {}, benchmarkIds?: string[]) {
+  if (benchmarkIds && benchmarkIds.length > 40) throw new Error('Request at most 40 benchmark or leaderboard IDs per call; split larger selections across calls.');
+  const requested = benchmarkIds === undefined ? null : new Set(benchmarkIds);
   const byId = new Map(catalogue.models.map(m => [m.id, m])), names = new Map(catalogue.benchmarks.map(b => [b.id, b.name])), boards = new Map(catalogue.boards.map(b => [b.id, b]));
   return ids.map(id => {
     const m = byId.get(id);
@@ -464,20 +472,28 @@ export function modelDetails(catalogue: Catalogue, ids: string[], f: Filters = {
     for (const e of m.evidence) if ((best.get(e.benchmark)?.score ?? -Infinity) < e.score) best.set(e.benchmark, e);
     const own = new Map<string, BoardResult>();
     for (const r of m.boards) if ((own.get(r.board)?.rank ?? Infinity) > r.rank) own.set(r.board, r);
+    // Explicit selections never compete with stronger, unrelated evidence for a slot.
+    const benchmarks = [...best.values()].filter(e => !requested || requested.has(e.benchmark)).map(e => {
+      const s = standings(catalogue, e.benchmark).find(x => x.model.id === m.id);
+      return { id: e.benchmark, name: names.get(e.benchmark) ?? e.benchmark, score: e.score, rank: s?.rank ?? null, of: s?.of ?? null, observedAt: e.observedAt };
+    }).sort((a, b) => (a.rank ?? 1e9) / (a.of ?? 1) - (b.rank ?? 1e9) / (b.of ?? 1)).slice(0, 40);
+    const leaderboards = [...own.values()].filter(r => !requested || requested.has(r.board)).map(r => {
+      const b = boards.get(r.board);
+      return { id: r.board, name: b?.title ?? r.board, metric: b?.metric ?? null, higherIsBetter: b?.direction !== 'lower', score: r.score, rank: r.rank, of: r.of, version: b?.version ?? null, date: r.observedAt, source: b?.url ?? null };
+    }).sort((a, b) => a.rank / a.of - b.rank / b.of).slice(0, requested ? 40 : 30);
     return {
       ...modelSummary(m, f), parameters: m.parameters, constraintViolation: violation(m, f),
       routes: [...m.endpoints].sort((a, b) => (headlineRate(a.rates, 'token') ?? Infinity) - (headlineRate(b.rates, 'token') ?? Infinity)).slice(0, 8)
         .map(e => ({ provider: e.provider, modelId: e.modelId, prices: ratesByUnit(e.rates), context: e.context, deployment: e.deployment, ...(e.retiresAt ? { retiresAt: e.retiresAt } : {}) })),
       // Strongest standings first; a rank is only meaningful within its own benchmark.
-      benchmarks: [...best.values()].map(e => {
-        const s = standings(catalogue, e.benchmark).find(x => x.model.id === m.id);
-        return { id: e.benchmark, name: names.get(e.benchmark) ?? e.benchmark, score: e.score, rank: s?.rank ?? null, of: s?.of ?? null, observedAt: e.observedAt };
-      }).sort((a, b) => (a.rank ?? 1e9) / (a.of ?? 1) - (b.rank ?? 1e9) / (b.of ?? 1)).slice(0, 40),
+      benchmarks,
       // Leaderboard results rank among every result on that board, in its own direction.
-      leaderboards: [...own.values()].map(r => {
-        const b = boards.get(r.board);
-        return { id: r.board, name: b?.title ?? r.board, metric: b?.metric ?? null, higherIsBetter: b?.direction !== 'lower', score: r.score, rank: r.rank, of: r.of, version: b?.version ?? null, date: r.observedAt, source: b?.url ?? null };
-      }).sort((a, b) => a.rank / a.of - b.rank / b.of).slice(0, 30),
+      leaderboards,
+      evidenceCoverage: {
+        benchmarks: { total: best.size, omitted: best.size - benchmarks.length },
+        leaderboards: { total: own.size, omitted: own.size - leaderboards.length },
+        missingRequested: requested ? [...requested].filter(id => !best.has(id) && !own.has(id)) : [],
+      },
     };
   });
 }

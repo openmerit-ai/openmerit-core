@@ -63,6 +63,13 @@ explicitly use `--skip` to continue with stated assumptions. A recommendation
 names exact model/endpoint IDs, quality evidence, estimated workload cost and gaps.
 Cheapest meeting the quality bar is the default; an explicit quality or recency
 priority changes the order. The bar is an estimate, not a measured accuracy floor.
+Under the quality priority, unmeasured quality estimates within three points of
+the best one not yet placed count as tied, and the cheaper model ranks first.
+Measured models keep their measured order.
+An unmeasured candidate that another unmeasured candidate beats on both quality
+estimate and estimated cost is left out, so a shortlist can have fewer than five
+models. Candidates at the same price stay, and measured candidates are never left
+out this way.
 Unknown processing location is not evidence of residency compliance.
 
 ## Close the loop
@@ -166,6 +173,29 @@ and sign-in providers. It is identifiable, not anonymous. Account deletion is
 asynchronous and broader deletion may require contacting the policy's address.
 
 ## Refresh and data handling
+
+### Task-relevant catalogue evidence — unreleased source, 7 November 2026
+
+The agent's internal `get_model_details` tool accepts optional `benchmarkIds`:
+up to 40 benchmark or leaderboard IDs from task research, shared across up to
+eight requested models. When supplied, only those results are returned, even
+when their standings are weaker than unrelated evidence. Split larger selections
+across calls; an empty list selects no evidence. Without this option, the tool
+keeps its strongest-40 benchmark and strongest-30 leaderboard defaults.
+
+Each model's `evidenceCoverage` reports distinct result `total` and `omitted`
+counts separately for `benchmarks` and `leaderboards`. Omitted counts include
+results outside an explicit selection as well as results beyond default caps.
+`missingRequested` lists requested IDs with no result for that model, including
+unknown IDs; absence is not a zero score. Hard constraints and endpoint inventory
+still apply: details retain `constraintViolation` rather than hiding an
+ineligible model's record or making it eligible.
+
+Equal chat benchmark scores share competition ranks (1, 1, 3), including ranks
+shown in citations. Those ranks remain among all measured catalogue models, not
+just those meeting a filter. Leaderboards keep their own ranks and direction.
+This source change does not establish better shortlist quality or publish a
+hosted release. The homepage has no FAQ block; no homepage claim changes.
 
 Public benchmarks, catalogue prices and vendor metadata may be incomplete or
 outdated; citations do not certify model quality, access, residency or zero

@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Dominated candidates, quality tie band and requested benchmark evidence — unreleased source, 7 November 2026
+
+Reviewed the homepage against Scout leaving out unmeasured candidates beaten on both quality estimate and cost, treating unmeasured quality estimates within three points as tied under the quality priority, `get_model_details` returning requested benchmark results, and tied benchmark scores sharing ranks. `site/index.html` has no FAQ block and does not mention ranking order, shortlist length or benchmark ranks. No homepage copy changes.
+
 ## Claude Code worktree setup — npm 0.3.9 release preparation, 6 November 2026
 
 Reviewed the homepage against private MCP configuration being shared across linked worktrees by newer Claude Code versions. `site/index.html` makes no worktree or project-scope installation claims and has no FAQ block. No homepage copy change is needed; the Scout setup guide documents the version boundary and the wider MCP scope.

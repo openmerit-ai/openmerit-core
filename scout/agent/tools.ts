@@ -57,6 +57,7 @@ const SearchModels = Type.Object({
 const Details = Type.Object({
   modelIds: Type.Array(Type.String(), { minItems: 1, maxItems: 8 }),
   filters: Type.Optional(FiltersSchema),
+  benchmarkIds: Type.Optional(Type.Array(Type.String(), { maxItems: 40, description: 'Only return results for these benchmark or leaderboard IDs from task research, even when their standings are weak. Omit for the strongest 40 benchmarks and 30 boards; split larger selections across calls. An empty array selects no evidence.' })),
 });
 
 export function scoutTools(host: ToolHost): ToolRegistration[] {
@@ -100,11 +101,11 @@ export function scoutTools(host: ToolHost): ToolRegistration[] {
   };
   const detailsTool: ToolRegistration<typeof Details> = {
     name: 'get_model_details', replay: 'safe',
-    description: 'Full records for up to eight models of any kind: routes with unit prices, parameters, reference speed, release date, every benchmark result with its rank, and leaderboard results (media, speech, embedding, MTEB) with metric, direction and rank. Use it on finalists before recommending them, and cite benchmark or leaderboard IDs from it.',
+    description: 'Records for up to eight models of any kind: routes with unit prices, parameters, reference speed, release date, and bounded benchmark and leaderboard results with ranks. Pass task-relevant benchmarkIds from research to retrieve their results regardless of standing; defaults show only the strongest 40 benchmarks and 30 boards. evidenceCoverage reports total and omitted distinct results (including unselected results), and missingRequested IDs with no result for that model, not zero scores. Equal chat scores share a competition rank (1,1,3); board ranks retain their own direction. Use it on finalists before recommending them, and cite benchmark or leaderboard IDs from it.',
     parameters: Details,
-    async execute({ modelIds, filters }) {
+    async execute({ modelIds, filters, benchmarkIds }) {
       host.progress(`Comparing ${modelIds.length} ${modelIds.length === 1 ? 'model' : 'models'}`);
-      return text(modelDetails(await host.catalogue(), modelIds, { ...filters, ...await host.scope() }));
+      try { return text(modelDetails(await host.catalogue(), modelIds, { ...filters, ...await host.scope() }, benchmarkIds)); } catch (error) { return failure((error as Error).message); }
     },
   };
   const askTool: ToolRegistration<typeof ClarificationSchema> = {
