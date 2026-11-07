@@ -63,6 +63,9 @@ explicitly use `--skip` to continue with stated assumptions. A recommendation
 names exact model/endpoint IDs, quality evidence, estimated workload cost and gaps.
 Cheapest meeting the quality bar is the default; an explicit quality or recency
 priority changes the order. The bar is an estimate, not a measured accuracy floor.
+Under the quality priority, unmeasured quality estimates within three points of
+the best one not yet placed count as tied, and the cheaper model ranks first.
+Measured models keep their measured order.
 An unmeasured candidate that another unmeasured candidate beats on both quality
 estimate and estimated cost is left out, so a shortlist can have fewer than five
 models. Candidates at the same price stay, and measured candidates are never left

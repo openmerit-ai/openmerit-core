@@ -191,6 +191,18 @@ test('an unmeasured candidate beaten on both quality estimate and cost gives its
   assert.deepEqual(finalize(catalogue, { ...submission(all.map(id => pick(id, id === 'lab/alpha' ? 95 : quality[id]!))), qualityBar: 70, priority: 'quality' }, now).models.map(m => m.id)[0], 'lab/alpha');
 });
 
+test('under the quality priority, estimates within three points of the best remaining one rank cheapest first', () => {
+  // Per 1k tasks: beta $1.50, the Gateway routes (gamma, delta, epsilon, zeta) $3, alpha $4. Nothing is dominated.
+  const quality: Record<string, number> = { 'lab/alpha': 95, 'lab/zeta': 93, 'lab/epsilon': 92, 'lab/delta': 91, 'lab/beta': 89 };
+  const shown = (q: Record<string, number>) => finalize(catalogue, { ...submission(Object.keys(q).map(id => pick(id, q[id]!))), qualityBar: 70, priority: 'quality' }, now).models.map(m => m.id);
+  // Band 95–92 (epsilon exactly three below): zeta and epsilon at $3 before alpha at $4, equal costs keeping estimate order.
+  // Delta, four below, starts the next band (91–88) with beta: beta at $1.50 first. Estimates alone would give
+  // alpha, zeta, epsilon, delta, beta; a two-point band would give zeta, alpha, epsilon, delta, beta.
+  assert.deepEqual(shown(quality), ['lab/zeta', 'lab/epsilon', 'lab/alpha', 'lab/beta', 'lab/delta']);
+  // Four points apart is not a tie: alpha at 97 leads its own band.
+  assert.equal(shown({ ...quality, 'lab/alpha': 97 })[0], 'lab/alpha');
+});
+
 test('fewer than five may reach the bar, so the bar never drops to fill the shortlist', () => {
   const all = ['lab/epsilon', 'lab/alpha', 'lab/delta', 'lab/beta', 'lab/gamma'];
   // Five assessed, two at the bar of 70: only those two are shown, cheapest first.

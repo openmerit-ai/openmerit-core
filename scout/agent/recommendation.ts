@@ -166,6 +166,8 @@ export interface Recommendation {
 }
 
 const round = (v: number, digits: number) => Number(v.toFixed(digits));
+// Quality estimates this close are within the spread between public benchmarks, so they rank as tied.
+const qualityTie = 3;
 // The axis leaders among the shortlist; ties share the label, unknown values never lead.
 function leaders(models: RecommendedModel[]): void {
   const lead = (axis: Axis, value: (m: RecommendedModel) => number | null, higher: boolean) => {
@@ -351,7 +353,22 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
   const priced = (m: RecommendedModel) => m.cost && !m.cost.unpriced.length ? m.cost.usdPer1kTasks : null;
   const dominated = (m: RecommendedModel) => !m.quality.measured && priced(m) !== null
     && assessed.some(o => !o.quality.measured && o.quality.score > m.quality.score && (priced(o) ?? Infinity) < priced(m)!);
-  const models = assessed.filter(m => !dominated(m)).sort(order).slice(0, 5);
+  const ranked = assessed.filter(m => !dominated(m)).sort(order);
+  // Under the quality priority, unmeasured estimates within qualityTie points of the best remaining one are a tie:
+  // public benchmarks cannot separate them, so the cheaper model ranks first. Each band starts at the best estimate
+  // not yet placed. Measured models keep their order, because a measured gap is the user's own result.
+  if (priority === 'quality') {
+    const cost = (m: RecommendedModel) => (useMeasured.false ? m.cost?.measured?.usdPer1kTasks : keys.cost(m)) ?? Infinity;
+    let rest = ranked.filter(m => !m.quality.measured);
+    const placed = ranked.filter(m => m.quality.measured);
+    while (rest.length) {
+      const top = rest[0]!.quality.score, band = rest.filter(m => m.quality.score >= top - qualityTie);
+      placed.push(...[...band].sort((a, b) => diff(cost(a), cost(b))));
+      rest = rest.filter(m => !band.includes(m));
+    }
+    ranked.splice(0, ranked.length, ...placed);
+  }
+  const models = ranked.slice(0, 5);
   models.forEach((m, i) => { m.rank = i + 1; });
   leaders(models);
   // The model writes before sorting; its proposed winner can disagree with the final order.
