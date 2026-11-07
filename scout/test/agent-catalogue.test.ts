@@ -5,6 +5,7 @@ import { agentRows, agentSchema, readSources, stageAgentCatalogue, type Sources 
 import { benchmarkLeaderboard, loadCatalogue, modelDetails, modelRecord, searchCatalogue, searchModels, type Catalogue, type CatalogueBindings, type ModelRecord } from '../agent/catalogue.ts';
 import { finalize, routeCost, type Submission } from '../agent/recommendation.ts';
 import { reciprocalRankFusion, type SearchHit } from '../agent/search.ts';
+import { scoutTools, type ToolHost } from '../agent/tools.ts';
 import { d1 } from './helpers-d1.ts';
 import { digest } from '../utils.mjs';
 
@@ -99,8 +100,72 @@ test('leaderboard IDs work wherever benchmark IDs do, with the board\'s own rank
   assert.deepEqual(board.results.map(r => [r.model, r.rank, r.of]), [['lab/ears-hd', 1, 20], ['lab/ears', 3, 20]]);
   assert.equal(board.benchmark.higherIsBetter, false);
   assert.deepEqual(searchModels(catalogue, { benchmark: 'arena:t2i' }).models.map(m => m.id), ['lab/painter-pro', 'lab/painter']);
-  const [details] = modelDetails(catalogue, ['lab/ears']);
+  const [details] = modelDetails(catalogue, ['lab/ears'], {}, ['asr:multilingual']);
   assert.deepEqual(details && 'leaderboards' in details ? details.leaderboards : null, [{ id: 'asr:multilingual', name: 'Open ASR · Multilingual', metric: 'WER (%)', higherIsBetter: false, score: 7.5, rank: 3, of: 20, version: 'v2', date: null, source: 'https://asr.example' }]);
+});
+
+test('requested evidence exposes weak task results beyond the default caps and reports missing results without relaxing constraints', async () => {
+  const unrelated = Array.from({ length: 40 }, (_, i) => ({ benchmark: `unrelated:${i}`, score: 0.95 }));
+  const evidence = [...unrelated, { benchmark: 'task:recovery', score: 0.2 }, { benchmark: 'task:recovery', score: 0.1 }];
+  const boardResults = Array.from({ length: 40 }, (_, i) => ({ board: `board:${i}`, score: i, rank: i + 1, of: 100 }));
+  const candidate = model('lab/candidate', 'chat', [route('A', [rate('token', 'input', 2)])], boardResults, { evidence });
+  const peer = model('lab/peer', 'chat', [route('B', [rate('token', 'input', 1)])], [],
+    { evidence: [...unrelated.map(e => ({ ...e, score: 0.5 })), { benchmark: 'task:recovery', score: 0.9 }] });
+  const fixed: Catalogue = { ...catalogue, models: [candidate, peer], benchmarks: [...unrelated, { benchmark: 'task:recovery' }, { benchmark: 'task:unmeasured' }].map(e =>
+    ({ id: e.benchmark, name: e.benchmark, tags: [], source: 'fixture', description: '', releaseDate: null, models: 2 })),
+    boards: boardResults.map(r => ({ ...boards[0]!, id: r.board })) };
+  const [overview] = modelDetails(fixed, [candidate.id]);
+  assert.ok(overview && 'benchmarks' in overview);
+  assert.equal(overview.benchmarks.length, 40);
+  assert.equal(overview.benchmarks.some(b => b.id === 'task:recovery'), false);
+  assert.equal(overview.leaderboards.length, 30);
+  assert.deepEqual(overview.evidenceCoverage, { benchmarks: { total: 41, omitted: 1 }, leaderboards: { total: 40, omitted: 10 }, missingRequested: [] });
+
+  const requested = ['task:recovery', 'board:39', 'task:unmeasured', 'unknown', 'task:recovery'];
+  const [details, missingModel] = modelDetails(fixed, [candidate.id, 'lab/missing'], { endpointIds: [peer.endpoints[0]!.id] }, requested);
+  assert.ok(details && 'benchmarks' in details);
+  assert.deepEqual(details.benchmarks.map(b => [b.id, b.score, b.rank, b.of]), [['task:recovery', 0.2, 2, 2]]);
+  assert.deepEqual(details.leaderboards.map(b => [b.id, b.rank, b.of]), [['board:39', 40, 100]]);
+  assert.deepEqual(details.evidenceCoverage, { benchmarks: { total: 41, omitted: 40 }, leaderboards: { total: 40, omitted: 39 }, missingRequested: ['task:unmeasured', 'unknown'] });
+  assert.match(details.constraintViolation ?? '', /none of its routes is in the project's endpoint inventory/);
+  assert.ok(missingModel && 'error' in missingModel);
+  const [allBoards] = modelDetails(fixed, [candidate.id], {}, boardResults.map(r => r.board));
+  assert.ok(allBoards && 'leaderboards' in allBoards);
+  assert.equal(allBoards.leaderboards.length, 40, 'every requested board fits, including results beyond the default 30');
+  assert.throws(() => modelDetails(fixed, [candidate.id], {}, Array.from({ length: 41 }, (_, i) => `board:${i}`)), /at most 40/);
+  const [empty] = modelDetails(fixed, [peer.id], {}, ['task:unmeasured', 'board:39']);
+  assert.ok(empty && 'benchmarks' in empty);
+  assert.deepEqual([empty.benchmarks, empty.leaderboards, empty.evidenceCoverage.missingRequested], [[], [], ['task:unmeasured', 'board:39']]);
+  const [none] = modelDetails(fixed, [candidate.id], {}, []);
+  assert.ok(none && 'benchmarks' in none);
+  assert.deepEqual([none.benchmarks, none.leaderboards], [[], []], 'an explicit empty selection returns no evidence');
+
+  const host: ToolHost = {
+    catalogue: async () => fixed, now: () => 0, scope: async () => ({ endpointIds: [peer.endpoints[0]!.id] }),
+    maxTasks: async () => null, clarificationBlocked: async () => null, plan: async () => null, measurements: async () => [],
+    savePlan: async () => {}, answer: async () => {}, progress: () => {},
+  };
+  const tool = scoutTools(host).find(t => t.name === 'get_model_details');
+  assert.ok(tool);
+  const result = await tool.execute({ modelIds: [candidate.id], filters: { endpointIds: [candidate.endpoints[0]!.id] }, benchmarkIds: requested } as never, {} as never, {} as never);
+  assert.deepEqual(result.output, [{ type: 'text', text: JSON.stringify([details]) }], 'the tool forwards the selection and the conversation inventory overrides caller filters');
+  const oversized = await tool.execute({ modelIds: [candidate.id], benchmarkIds: Array.from({ length: 41 }, (_, i) => `board:${i}`) } as never, {} as never, {} as never);
+  assert.equal(oversized.isError, true);
+  assert.match(JSON.stringify(oversized.output), /at most 40/);
+});
+
+test('equal chat scores share competition ranks across leaderboards, model search and details regardless of input order', () => {
+  const measured = [0.8, 0.95, 0.8, 0.5].map((score, i) => model(`lab/tie-${i}`, 'chat', [route(`P${i}`, [rate('token', 'input', 1)])], [],
+    { evidence: [{ benchmark: 'tied', score }, { benchmark: 'tied', score: score - 0.1 }] }));
+  for (const rows of [measured, [...measured].reverse()]) {
+    const fixed = { ...catalogue, models: rows, benchmarks: [{ id: 'tied', name: 'Tied', tags: [], source: 'fixture', description: '', releaseDate: null, models: 4 }] };
+    const expected = [['lab/tie-0', 2, 4], ['lab/tie-1', 1, 4], ['lab/tie-2', 2, 4], ['lab/tie-3', 4, 4]];
+    assert.deepEqual(benchmarkLeaderboard(fixed, 'tied').results.map(r => [r.model, r.rank, r.of]).sort(), expected);
+    assert.deepEqual(searchModels(fixed, { benchmark: 'tied' }).models.map(m => [m.id, m.benchmark?.rank, m.benchmark?.of]).sort(), expected);
+    assert.deepEqual(modelDetails(fixed, rows.map(m => m.id)).map(m => [m.id, 'benchmarks' in m ? m.benchmarks[0]?.rank : null, 'benchmarks' in m ? m.benchmarks[0]?.of : null]).sort(), expected);
+    assert.deepEqual(benchmarkLeaderboard(fixed, 'tied', { endpointIds: ['P0:r', 'P3:r'] }).results.map(r => [r.model, r.rank, r.of]), [expected[0], expected[3]], 'filtering eligibility does not renumber ranks');
+    assert.equal(benchmarkLeaderboard(fixed, 'tied', { endpointIds: [] }).results.length, 0);
+  }
 });
 
 const hit = (id: string, score: number, fields: SearchHit['fields']): SearchHit => ({ type: 'model', id, kind: null, score, fields });
