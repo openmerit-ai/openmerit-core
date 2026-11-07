@@ -68,6 +68,10 @@ Reviewed ranking and coverage claims against the change that stores the Artifici
 
 Reviewed ranking and coverage claims against the change that stores final results from Artificial Analysis and Arena image, video, speech, transcription and music leaderboards in the catalogue database. Scout does not use them in recommendations yet, and the homepage FAQ names no benchmark sources or media coverage, so no FAQ or guide copy changes.
 
+## TrueFoundry catalogue source retired — source only, 7 November 2026
+
+Reviewed coverage and pricing claims against the change that retires the TrueFoundry registry after its repository disappeared. The homepage FAQ names no catalogue sources, provider counts or price units, so no FAQ copy changes. The Scout guide's catalogue row no longer lists the source.
+
 ## TrueFoundry model registry in the catalogue — source only, 28 October 2026
 
 Reviewed coverage and pricing claims against the change that imports TrueFoundry's MIT-licensed model registry into the D1 catalogue. The homepage FAQ names no catalogue sources, provider counts or price units, so no FAQ copy changes. The Scout guide's catalogue row lists the source and what it leaves out.

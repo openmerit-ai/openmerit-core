@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gatewayIdentities, importCatalogueSource, parseDeepInfra, parseOpenRouter, mergeListings, mergeModel, rebuildModels, rebuildOfferings, resolveListings, routeVoice, type Bucket, type ImportResult, type Listing, type SourceListing } from '../catalogue-db.ts';
+import { ensureCatalogueSchema, gatewayIdentities, importCatalogueSource, parseDeepInfra, parseOpenRouter, mergeListings, mergeModel, rebuildModels, rebuildOfferings, resolveListings, routeVoice, type Bucket, type ImportResult, type Listing, type SourceListing } from '../catalogue-db.ts';
 import { d1 } from './helpers-d1.ts';
 
 const bucket = (): Bucket & { data: Map<string, Uint8Array> } => { const data = new Map<string, Uint8Array>(); return { data, head: async (k: string) => data.has(k) ? {} : null, put: async (k: string, v: Uint8Array) => data.set(k, v) }; };
@@ -361,42 +361,16 @@ test('Portkey reviewed media quotes retain character, input-audio and image unit
   assert.equal(db.all('SELECT count(*) n FROM cat_models WHERE basis<>\'reviewed-model\'')[0]?.n, 0, 'price aliases do not manufacture canonical model identities');
 });
 
-test('TrueFoundry configs import from the repository zip with base-region prices, service tiers and per-second media units', async () => {
-  const { zipSync, strToU8 } = await import('fflate');
-  const yaml = (lines: string[]) => strToU8(lines.join('\n'));
-  const zip = zipSync({
-    // Region us-east-1 is the base; eu-west-2's different rate is kept as a region tier, sa-east-1's identical one is not.
-    'models-main/providers/aws-bedrock/lab.chat-1.yaml': yaml(['model: lab.chat-1', 'mode: chat', 'status: active', 'features:', '    - function_calling', 'limits:', '    max_input_tokens: 128000', '    max_output_tokens: 8000',
-      'costs:', '    - input_cost_per_token: 2e-6', '      output_cost_per_token: 8e-6', '      region: eu-west-2', '    - input_cost_per_token: 1e-6', '      output_cost_per_token: 4e-6',
-      '      input_cost_per_token_batches: 5e-7', '      priority_pricing:', '          input_cost_per_token: 1.5e-6', '      tiered_pricing:', '          input:', '              - cost_per_token: 9e-6', '                from: 200000',
-      '      region: us-east-1', '    - input_cost_per_token: 1e-6', '      output_cost_per_token: 4e-6', '      region: sa-east-1']),
-    'models-main/providers/aws-bedrock/lab.clip-1.yaml': yaml(['model: lab.clip-1', 'mode: video', 'costs:', '    - output_cost_per_second_720p: 1.5', '      output_cost_per_second_720p_noaudio: 1', '      region: "*"']),
-    'models-main/providers/azure-open-ai/lab-voice.yaml': yaml(['model: lab-voice', 'mode: text_to_speech', 'status: deprecated', 'costs:', '    - input_cost_per_character: 0.00003', '      region: "*"']),
-    // Retired routes, unsupported modes, OpenRouter's directory and default configs are skipped.
-    'models-main/providers/azure-open-ai/lab-old.yaml': yaml(['model: lab-old', 'mode: chat', 'status: retired', 'costs:', '    - input_cost_per_token: 1e-6', '      region: "*"']),
-    'models-main/providers/azure-open-ai/lab-odd.yaml': yaml(['model: lab-odd', 'mode: unsupported', 'costs:', '    - input_cost_per_token: 1e-6', '      region: "*"']),
-    'models-main/providers/openrouter/lab-x.yaml': yaml(['model: lab-x', 'mode: chat']),
-    'models-main/providers/typesafe/default.yaml': yaml(['model: default', 'mode: decision']),
-    // Microsoft Foundry and Azure AI Foundry list the same deployment; Microsoft Foundry's wins.
-    'models-main/providers/azure-ai-foundry/Lab-1.yaml': yaml(['model: Lab-1', 'mode: chat', 'costs:', '    - input_cost_per_token: 9e-6', '      region: "*"']),
-    'models-main/providers/microsoft-foundry/Lab-1.yaml': yaml(['model: Lab-1', 'mode: chat', 'costs:', '    - input_cost_per_token: 3e-6', '      region: "*"']),
-    // The parser rejects a registry that collapsed below 1,000 routes.
-    ...Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`models-main/providers/groq/filler-${i}.yaml`, yaml([`model: filler-${i}`, 'mode: embedding'])])),
-  });
-  const db = d1(), raw = bucket();
-  const result = await importCatalogueSource(db, 'truefoundry', { fetcher: serve({}), bucket: raw, now: '2026-10-28T00:00:00Z' }).catch(e => e);
-  assert.equal((result as ImportResult).status, 'failed', 'an unreachable registry fails without rows');
-  const fetcher = async () => new Response(Uint8Array.from(zip));
-  ok(await importCatalogueSource(db, 'truefoundry', { fetcher, bucket: raw, now: '2026-10-28T00:00:00Z' }));
-  assert.ok([...raw.data.keys()].every(k => k.endsWith('.zip')));
-  const routes = db.all("SELECT provider_id,provider_model_id,type,status,context,tool_call FROM cat_listings WHERE provider_model_id NOT LIKE 'filler-%' ORDER BY provider_id,provider_model_id").map(r => Object.values(r));
-  assert.deepEqual(routes, [['amazon-bedrock', 'lab.chat-1', 'chat', null, 128000, 1], ['amazon-bedrock', 'lab.clip-1', 'video', null, null, null], ['azure', 'Lab-1', 'chat', null, null, null], ['azure', 'lab-voice', 'text_to_speech', 'deprecated', null, null]]);
-  assert.deepEqual(db.all("SELECT provider_model_id,kind,tier,unit,amount FROM cat_prices WHERE provider_model_id NOT LIKE 'filler-%' ORDER BY provider_model_id,kind,tier").map(r => Object.values(r)), [
-    ['Lab-1', 'input', '', 'usd_per_mtok', 3],
-    ['lab-voice', 'input', '', 'usd_per_mchar', 30],
-    ['lab.chat-1', 'input', '', 'usd_per_mtok', 1], ['lab.chat-1', 'input', 'batch', 'usd_per_mtok', .5], ['lab.chat-1', 'input', 'priority', 'usd_per_mtok', 1.5], ['lab.chat-1', 'input', 'region=eu-west-2', 'usd_per_mtok', 2],
-    ['lab.chat-1', 'output', '', 'usd_per_mtok', 4], ['lab.chat-1', 'output', 'region=eu-west-2', 'usd_per_mtok', 8],
-    ['lab.clip-1', 'output_video', 'resolution=720p', 'usd_per_second', 1.5], ['lab.clip-1', 'output_video', 'resolution=720p,audio=none', 'usd_per_second', 1]]);
+test('a retired source\'s routes and prices are withdrawn and stop reaching offerings', async () => {
+  const db = d1();
+  await ensureCatalogueSchema(db);
+  const listing = (source: string, route: string) => db.prepare("INSERT INTO cat_listings (source,provider_id,provider_model_id,payload,payload_hash,first_seen,last_seen) VALUES (?1,'azure',?2,'{}','h','t','t')").bind(source, route).run();
+  const price = (source: string, route: string) => db.prepare("INSERT INTO cat_prices (source,provider_id,provider_model_id,kind,tier,unit,amount,valid_from) VALUES (?1,'azure',?2,'input','','usd_per_mtok',1,'t')").bind(source, route).run();
+  for (const [source, route] of [['truefoundry', 'shared'], ['litellm', 'shared'], ['truefoundry', 'only-retired'], ['litellm', 'only-kept']] as const) { await listing(source, route); await price(source, route); }
+  await rebuildOfferings(db);
+  assert.deepEqual(db.all('SELECT provider_model_id,sources FROM cat_offerings ORDER BY 1').map(r => Object.values(r)), [['only-kept', '["litellm"]'], ['shared', '["litellm"]']]);
+  assert.deepEqual(db.all('SELECT source,count(*) n FROM cat_listings WHERE withdrawn_at IS NULL GROUP BY 1').map(r => Object.values(r)), [['litellm', 2]]);
+  assert.deepEqual(db.all('SELECT source,count(*) n FROM cat_prices WHERE valid_to IS NULL GROUP BY 1').map(r => Object.values(r)), [['litellm', 2]]);
 });
 
 test('Eden AI expert models price per one unit of the quoted quantity, keep undirected token quotes unpriced and link only speech and OCR models that exist', async () => {

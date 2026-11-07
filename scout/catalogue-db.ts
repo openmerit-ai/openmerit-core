@@ -6,8 +6,6 @@
 
 // The subset of D1 and R2 this module uses. Runtime Worker types are not
 // committed yet (docs/site-typescript-migration.md), and tests pass SQLite.
-import { unzipSync, strFromU8 } from 'fflate';
-import { parse as parseYAML } from 'yaml';
 import { reviewedModels, reviewedRoutes } from './catalogue-identities.ts';
 
 type Value = string | number | null;
@@ -26,7 +24,7 @@ export interface Bucket {
 }
 type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 type Json = Record<string, unknown>;
-export type CatalogueSource = 'modelsdev' | 'litellm' | 'openrouter' | 'vercel' | 'deepinfra' | 'genaiprices' | 'epoch' | 'portkey-deepgram' | 'portkey-elevenlabs' | 'portkey-stability-ai' | 'truefoundry' | 'edenai';
+export type CatalogueSource = 'modelsdev' | 'litellm' | 'openrouter' | 'vercel' | 'deepinfra' | 'genaiprices' | 'epoch' | 'portkey-deepgram' | 'portkey-elevenlabs' | 'portkey-stability-ai' | 'edenai';
 
 interface SourceConfig { name: string; url: string; modelsURL?: string; license: string; role: string; maxBytes: number }
 // Import order matters: Models.dev first, as every later source resolves against it,
@@ -39,7 +37,6 @@ export const catalogueSources: Record<CatalogueSource, SourceConfig> = {
   deepinfra: { name: 'DeepInfra models API', url: 'https://api.deepinfra.com/models/list', license: 'Public API; DeepInfra terms of service', role: "A host's own list: chat, media, audio, embedding, rerank and decision models with prices", maxBytes: 4_000_000 },
   genaiprices: { name: 'genai-prices (Pydantic)', url: 'https://raw.githubusercontent.com/pydantic/genai-prices/main/prices/data.json', license: 'MIT', role: 'Provider prices with tiers and dated changes', maxBytes: 8_000_000 },
   epoch: { name: 'Epoch AI models database', url: 'https://epoch.ai/data/all_ai_models.csv', license: 'CC BY 4.0', role: 'Model creators, countries, release dates, size and openness, including models no gateway lists', maxBytes: 30_000_000 },
-  truefoundry: { name: 'TrueFoundry models registry', url: 'https://codeload.github.com/truefoundry/models/zip/refs/heads/main', license: 'MIT · Copyright (c) TrueFoundry · https://github.com/truefoundry/models/blob/main/LICENSE', role: 'Per-provider model configs: modes, modalities, limits and prices per region, including media, speech, rerank and decision models', maxBytes: 10_000_000 },
   'portkey-deepgram': { name: 'Portkey · Deepgram prices', url: 'https://configs.portkey.ai/pricing/deepgram.json', license: 'MIT · Copyright (c) 2025 Portkey.ai · https://github.com/Portkey-AI/models/blob/main/LICENSE', role: 'Reviewed Aura voice prices per character; not token prices', maxBytes: 1_000_000 },
   'portkey-elevenlabs': { name: 'Portkey · ElevenLabs prices', url: 'https://configs.portkey.ai/pricing/elevenlabs.json', license: 'MIT · Copyright (c) 2025 Portkey.ai · https://github.com/Portkey-AI/models/blob/main/LICENSE', role: 'Reviewed speech model prices per character or input-audio second', maxBytes: 1_000_000 },
   'portkey-stability-ai': { name: 'Portkey · Stability AI prices', url: 'https://configs.portkey.ai/pricing/stability-ai.json', license: 'MIT · Copyright (c) 2025 Portkey.ai · https://github.com/Portkey-AI/models/blob/main/LICENSE', role: 'Image prices with quality/size tiers', maxBytes: 1_000_000 },
@@ -341,87 +338,6 @@ export function parseDeepInfra(data: unknown, now: string): Parsed {
       structured_output: chat ? flag(tags.includes('structured-output') || tags.includes('json'), tags.length > 0) : null, open_weights: null, prices, payload: m });
   }
   return { providers: [{ id: 'deepinfra', name: 'Deep Infra', api: 'https://api.deepinfra.com/v1/openai', doc: 'https://deepinfra.com/models', npm: null, env: null }], listings, models: [] };
-}
-
-// TrueFoundry's registry: one YAML file per provider route. Directories map to the
-// catalogue's provider IDs; OpenRouter and DeepInfra are read from their own feeds,
-// and TrueFoundry's managed hosting is not a public provider. Microsoft Foundry and
-// Azure AI Foundry list the same Azure deployments; the first listed wins.
-const trueFoundryProviders: Record<string, string | null> = {
-  ai21: 'ai21', anthropic: 'anthropic', 'aws-bedrock': 'amazon-bedrock', 'aws-bedrock-mantle': 'truefoundry:aws-bedrock-mantle', 'microsoft-foundry': 'azure', 'azure-ai-foundry': 'azure',
-  'azure-open-ai': 'azure', cerebras: 'cerebras', cohere: 'cohere', databricks: 'databricks', deepgram: 'litellm:deepgram', elevenlabs: 'litellm:elevenlabs', 'fireworks-ai': 'fireworks-ai',
-  'google-gemini': 'google', 'google-vertex': 'google-vertex', groq: 'groq', 'mistral-ai': 'mistral', openai: 'openai', 'perplexity-ai': 'perplexity', sambanova: 'sambanova',
-  'together-ai': 'togetherai', typesafe: 'litellm:typesafe', wafer: 'truefoundry:wafer', xai: 'xai', openrouter: null, deepinfra: null, 'truefoundry-managed': null,
-};
-// Price fields with one documented unit. Batch, priority, flex and ultrafast rates are
-// tiers. Context tiers (tiered_pricing) are left out: "cumulative" does not say
-// whether the whole request or only the excess pays the higher rate. Per-hour cache
-// storage is left out: it means storage on Google and a 1-hour write on Anthropic.
-const trueFoundryRates: Record<string, readonly [string, string, number]> = {
-  input_cost_per_token: ['input', 'usd_per_mtok', 1e6], output_cost_per_token: ['output', 'usd_per_mtok', 1e6],
-  cache_read_input_token_cost: ['cache_read', 'usd_per_mtok', 1e6], cache_creation_input_token_cost: ['cache_write', 'usd_per_mtok', 1e6],
-  input_cost_per_audio_token: ['input_audio', 'usd_per_mtok', 1e6], output_cost_per_audio_token: ['output_audio', 'usd_per_mtok', 1e6],
-  cache_read_input_audio_token_cost: ['cache_read_audio', 'usd_per_mtok', 1e6], cache_creation_input_audio_token_cost: ['cache_write_audio', 'usd_per_mtok', 1e6],
-  input_cost_per_image_token: ['input_image', 'usd_per_mtok', 1e6], output_cost_per_image_token: ['output_image', 'usd_per_mtok', 1e6],
-  cache_read_input_image_token_cost: ['cache_read_image', 'usd_per_mtok', 1e6], input_cost_per_video_token: ['input_video', 'usd_per_mtok', 1e6], output_cost_per_video_token: ['output_video', 'usd_per_mtok', 1e6],
-  input_cost_per_image: ['input_image', 'usd_per_image', 1], output_cost_per_image: ['output_image', 'usd_per_image', 1], input_cost_per_character: ['input', 'usd_per_mchar', 1e6],
-  input_cost_per_request: ['request', 'usd_per_request', 1], input_cost_per_query: ['query', 'usd_per_query', 1], input_cost_per_page: ['ocr', 'usd_per_page', 1],
-};
-const trueFoundryModes: Record<string, string> = {
-  chat: 'chat', completion: 'completion', responses: 'responses', realtime: 'realtime', embedding: 'embedding', rerank: 'rerank', decision: 'decision', moderation: 'moderation', ocr: 'ocr',
-  image: 'image', video: 'video', text_to_speech: 'text_to_speech', audio_transcription: 'audio_transcription', audio_translation: 'audio_translation',
-};
-// The region a provider-wide price applies to, else the most common US default.
-const baseRegions = ['*', 'global', 'us-east-1', 'eastus2', 'eastus', 'us-central1', 'us'];
-function trueFoundryPrices(cost: Json, mode: string, tier: string): Price[] {
-  const prices: Price[] = [], add = (kind: string, unit: string, amount: number | null, extra = '') => priced(prices, kind, [tier, extra].filter(Boolean).join(','), unit, amount);
-  const rate = (v: unknown, scale: number) => { const n = num(v); return n !== null && n >= 0 ? money(n * scale) : null; };
-  for (const [field, value] of Object.entries(cost)) {
-    const known = trueFoundryRates[field.replace(/_batches$/, '')], batch = field.endsWith('_batches');
-    if (known) { add(known[0], known[1], rate(value, known[2]), batch ? 'batch' : ''); continue; }
-    const seconds = /^(input|output)_cost_per_second(?:_(\d+p|4k)(_noaudio)?)?$/.exec(field), images = /^output_cost_per_image_(\dk)$/.exec(field);
-    // Seconds are of the generated video or audio, or of the transcribed input audio.
-    if (seconds?.[1] === 'output' && (mode === 'video' || mode === 'text_to_speech')) add(mode === 'video' ? 'output_video' : 'output_audio', 'usd_per_second', rate(value, 1), [seconds[2] && `resolution=${seconds[2]}`, seconds[3] && 'audio=none'].filter(Boolean).join(','));
-    else if (seconds?.[1] === 'input' && !seconds[2] && (mode === 'audio_transcription' || mode === 'audio_translation')) add('input_audio', 'usd_per_second', rate(value, 1));
-    else if (images) add('output_image', 'usd_per_image', rate(value, 1), `size=${images[1]}`);
-    else if (field === 'input_cost_per_annotated_page') add('ocr', 'usd_per_page', rate(value, 1), 'annotated');
-    else if (isObject(value) && /^(priority|flex|ultrafast)_pricing$/.test(field)) prices.push(...trueFoundryPrices(value, mode, [tier, field.slice(0, -8)].filter(Boolean).join(',')));
-  }
-  return prices;
-}
-export function parseTrueFoundry(zip: Uint8Array): Parsed {
-  const files = unzipSync(zip, { filter: f => /^[^/]+\/providers\/[^/]+\/[^/]+\.yaml$/.test(f.name) && !f.name.endsWith('/default.yaml') });
-  const listings = new Map<string, Listing>();
-  for (const name of Object.keys(files).sort((a, b) => {
-    // Directory order of trueFoundryProviders decides which duplicate route wins.
-    const order = Object.keys(trueFoundryProviders), d = (f: string) => order.indexOf(f.split('/')[2] ?? '');
-    return d(a) - d(b) || a.localeCompare(b);
-  })) {
-    const dir = name.split('/')[2] ?? '', provider = trueFoundryProviders[dir], bytes = files[name];
-    if (!provider || !bytes) continue;
-    let doc: unknown;
-    try { doc = parseYAML(strFromU8(bytes)); } catch { continue; }
-    const m = obj(doc), modelId = id(m.model), mode = trueFoundryModes[text(m.mode) ?? ''];
-    if (!modelId || !mode || m.status === 'retired' || listings.has(`${provider}|${modelId}`)) continue;
-    // One base region's prices, and each other region's base input/output where they differ.
-    const costs = (Array.isArray(m.costs) ? m.costs : []).map(obj), regions = costs.map(c => text(c.region) ?? '');
-    const baseIndex = Math.max(0, baseRegions.map(r => regions.indexOf(r)).find(i => i >= 0) ?? 0), base = costs[baseIndex];
-    const prices = base ? trueFoundryPrices(base, mode, '') : [];
-    for (const [i, cost] of costs.entries()) {
-      if (i === baseIndex) continue;
-      for (const p of trueFoundryPrices(cost, mode, `region=${regions[i]}`)) if (p.tier === `region=${regions[i]}` && (p.kind === 'input' || p.kind === 'output') && !prices.some(b => b.tier === '' && b.kind === p.kind && b.unit === p.unit && b.amount === p.amount)) prices.push(p);
-    }
-    const limits = obj(m.limits), modalities = obj(m.modalities), features = Array.isArray(m.features) ? m.features : [], chat = ['chat', 'completion', 'responses', 'realtime'].includes(mode);
-    const deprecated = m.status === 'deprecated' || m.isDeprecated === true;
-    listings.set(`${provider}|${modelId}`, { ...unlisted, provider_id: provider, provider_model_id: modelId, hf_id: null, name: null, type: mode, status: deprecated ? 'deprecated' : m.status === 'preview' ? 'preview' : null,
-      release_date: null, knowledge: null, deprecated_at: date(m.retirementDate) ?? date(m.deprecationDate), context: int(limits.max_input_tokens ?? limits.max_tokens), max_input: int(limits.max_input_tokens), max_output: int(limits.max_output_tokens),
-      input_modalities: list(modalities.input), output_modalities: list(modalities.output),
-      reasoning: chat && isObject(m.thinking) ? 1 : null, tool_call: chat ? flag(features.includes('function_calling') || features.includes('tool_choice'), features.length > 0) : null,
-      structured_output: chat ? flag(features.includes('structured_output'), features.length > 0) : null, open_weights: null, prices, payload: { ...m, directory: dir } });
-  }
-  if (listings.size < 1000) throw new Error('TrueFoundry registry format changed.');
-  const providers = [...new Set([...listings.values()].map(l => l.provider_id))].map(p => ({ id: p, name: p.startsWith('truefoundry:') ? p.slice(12) : p, api: null, doc: 'https://github.com/truefoundry/models/tree/main/providers', npm: null, env: null }));
-  return { providers, listings: [...listings.values()], models: [] };
 }
 
 // Eden AI's expert models: a gateway's own routes, one per model string it bills
@@ -848,7 +764,7 @@ export async function storeSourceModels(db: Database, source: string, models: So
 // added only when two other sources claim it, so one stale or optimistic feed
 // cannot add support. Each row records which sources supplied each field and
 // any disagreement.
-export const sourcePreference = ['modelsdev', 'reviewed', 'openrouter', 'vercel', 'deepinfra', 'litellm', 'genaiprices', 'portkey-deepgram', 'portkey-elevenlabs', 'portkey-stability-ai', 'truefoundry', 'edenai', 'huggingface', 'epoch'];
+export const sourcePreference = ['modelsdev', 'reviewed', 'openrouter', 'vercel', 'deepinfra', 'litellm', 'genaiprices', 'portkey-deepgram', 'portkey-elevenlabs', 'portkey-stability-ai', 'edenai', 'huggingface', 'epoch'];
 const offeringFields = ['model_id', 'model_basis', 'name', 'family', 'type', 'status', 'release_date', 'deprecated_at', 'context', 'max_input', 'max_output', 'input_modalities', 'output_modalities',
   'reasoning', 'tool_call', 'structured_output', 'attachment', 'open_weights', 'hf_id'] as const;
 const capabilityFlags = new Set(['reasoning', 'tool_call', 'structured_output', 'attachment']), corroboration = 2;
@@ -961,8 +877,17 @@ async function swapStage(db: Database, stage: string, target: string, columns: s
 
 // Merged rows are staged, then swapped in with one batch, so a failed rebuild
 // leaves the previous offerings in place.
+// Sources no longer imported. Their routes are withdrawn and their open prices
+// closed before each rebuild, so frozen rows stop reaching offerings. TrueFoundry
+// deleted or privatised github.com/truefoundry/models on 6 November 2026.
+const retiredCatalogueSources = ['truefoundry'];
 export async function rebuildOfferings(db: Database): Promise<{ offerings: number; conflicts: number; corroborated: number }> {
   await ensureCatalogueSchema(db);
+  const retired = JSON.stringify(retiredCatalogueSources), now = new Date().toISOString();
+  await db.batch([
+    db.prepare('UPDATE cat_listings SET withdrawn_at=?1 WHERE withdrawn_at IS NULL AND source IN (SELECT value FROM json_each(?2))').bind(now, retired),
+    db.prepare('UPDATE cat_prices SET valid_to=?1 WHERE valid_to IS NULL AND source IN (SELECT value FROM json_each(?2))').bind(now, retired),
+  ]);
   const columns = ['provider_id', 'provider_model_id', ...offeringFields, 'kind', 'sources', 'provenance', 'conflicts', 'first_seen', 'last_seen'];
   const run = await stageToken(db, 'cat_offering_stage');
   const stats = { offerings: 0, conflicts: 0, corroborated: 0 };
@@ -1049,8 +974,8 @@ export async function importCatalogueSource(db: Database, source: CatalogueSourc
     const hashes: string[] = [];
     for (const bytes of files) {
       const hash = await hex(bytes); hashes.push(hash);
-      const ext = config.url.endsWith('.csv') ? 'csv' : source === 'truefoundry' ? 'zip' : 'json', key = `catalogue-raw/${source}/${hash}.${ext}`;
-      if (bucket && !await bucket.head(key)) await bucket.put(key, bytes, { httpMetadata: { contentType: ext === 'csv' ? 'text/csv' : ext === 'zip' ? 'application/zip' : 'application/json' } });
+      const ext = config.url.endsWith('.csv') ? 'csv' : 'json', key = `catalogue-raw/${source}/${hash}.${ext}`;
+      if (bucket && !await bucket.head(key)) await bucket.put(key, bytes, { httpMetadata: { contentType: ext === 'csv' ? 'text/csv' : 'application/json' } });
     }
     const [first, second] = files;
     if (!first) throw new Error('Source returned no data.');
@@ -1069,8 +994,8 @@ export async function importCatalogueSource(db: Database, source: CatalogueSourc
           repos: [...linked.flatMap(l => l.hf_id && l.model_id ? [{ repo: l.hf_id.toLowerCase(), model_id: l.model_id }] : []), ...weightRepos(parsed.models)] });
       } else {
         const known = new Set((await db.prepare("SELECT id FROM cat_providers WHERE source='modelsdev'").all<{ id: string }>()).results.map(r => r.id));
-        const data = source === 'truefoundry' ? null : decode(first);
-        parsed = source === 'truefoundry' ? parseTrueFoundry(first) : source === 'litellm' ? parseLiteLLM(data, known) : source === 'openrouter' ? parseOpenRouter(data) : source === 'vercel' ? parseVercel(data) : source === 'deepinfra' ? parseDeepInfra(data, now) : source.startsWith('portkey-') ? parsePortkey(data, source.slice('portkey-'.length), known) : source === 'edenai' ? parseEdenAI(data) : parseGenaiPrices(data, known, now);
+        const data = decode(first);
+        parsed = source === 'litellm' ? parseLiteLLM(data, known) : source === 'openrouter' ? parseOpenRouter(data) : source === 'vercel' ? parseVercel(data) : source === 'deepinfra' ? parseDeepInfra(data, now) : source.startsWith('portkey-') ? parsePortkey(data, source.slice('portkey-'.length), known) : source === 'edenai' ? parseEdenAI(data) : parseGenaiPrices(data, known, now);
         const backbone = await loadBackbone(db);
         // Eden AI's vendor/model links only an existing canonical model; its paths have no meaningful slug.
         if (source === 'edenai') for (const l of parsed.listings) if (l.model_id && !backbone.models.has(l.model_id)) Object.assign(l, { model_id: null, model_basis: null });

@@ -1,5 +1,13 @@
 # Scout architecture and operations
 
+## TrueFoundry catalogue source retired (not yet deployed), 7 November 2026
+
+`github.com/truefoundry/models` returns 404 from GitHub, its codeload zip, raw files and the GitHub API since 6 November 2026, with no redirect, so it was deleted or made private. None of TrueFoundry's public repositories replaces it. Every `truefoundry` import since 6 November 14:20 UTC failed. The owner chose to retire the source rather than replace it.
+
+- **Removed:** the `truefoundry` catalogue source, `parseTrueFoundry` and the root `yaml` dependency it alone used.
+- **Withdrawn:** `rebuildOfferings` now withdraws the routes and closes the open prices of retired sources before it rebuilds, so the frozen rows stop reaching offerings. In production D1 that is 1,636 routes in 21 providers and 7,206 open prices. About 660 of those routes have no other source, mostly Azure (217), Deepgram (117), Bedrock Mantle (62), Google Vertex (60) and Databricks (33). Three catalogue models lose their only route: `google/gemma-3n-e2b-it`, `mistral/devstral-medium-2507` and `mistralai/mistral-embed-2312`. TrueFoundry supplied no benchmarks.
+- Its raw zips stay in R2 and its `cat_runs` history stays in D1. The health check stops reporting it 24 hours after its last failed run.
+
 ## Faster refresh: staggered Hugging Face re-apply and grouped MTEB boards (not yet deployed), 6 November 2026
 
 Run `hour-498312` (00:07 UTC, 6 November) took 82 minutes. Its Hugging Face provider apply took 3,897 s, because every unchanged repository had last been applied together and all of them passed the 7-day `providerReapplyDays` at once: it re-applied 63,889 repositories. Normal runs take 18–32 minutes. Pauses between Workflow steps added up to only 4 s across 164 steps in `manual-20261106-openrouter-decisions-1`, so the time goes to each step's own work. Each MTEB step took 3–7 s, while one `/scores` request takes about 0.4 s and the shared link queries about 0.25 s on D1.
@@ -198,7 +206,7 @@ Two decision-model boards join the leaderboard results store (`scout/catalogue-b
 
 **Local replay, 28 October:** 24 boards, 1,388 results. Against the deployed catalogue's 157 image, video, speech and transcription models, 461 results link, for example GPT Image 2.5 Sunburst, MiniMax H3, Eleven v4, Voxtral Transcribe 3 and GPT Live Transcribe. Music links none: no catalogue source lists Suno or its peers yet. Link counts should rise once OpenRouter's media models, DeepInfra and TrueFoundry are deployed.
 
-## TrueFoundry model registry — deployed, 29 October 2026
+## TrueFoundry model registry — deployed 29 October 2026, retired 7 November 2026
 
 New catalogue source `truefoundry` reads the [TrueFoundry models](https://github.com/truefoundry/models) repository (MIT) as one zip, `codeload.github.com/truefoundry/models/zip/refs/heads/main` (about 2.8 MB, under a second; the tar.gz endpoint streams for 50 seconds). The repository publishes its unified JSON only to a private S3 bucket, so `parseTrueFoundry` reads the per-route YAML files with the `yaml` package and stores the raw zip in R2 like other sources.
 
