@@ -344,7 +344,14 @@ export function finalize(catalogue: Catalogue, s: Submission, now: number, scope
   const spent = (m: RecommendedModel) => m.cost?.measured?.usdPer1kTasks ?? Infinity;
   const diff = (x: number, y: number) => x === y ? 0 : x - y;
   const order = (a: RecommendedModel, b: RecommendedModel) => Number(b.quality.measured) - Number(a.quality.measured) || diff(key(a), key(b)) || diff(spent(a), spent(b));
-  const models = assessed.sort(order).slice(0, 5);
+  // An unmeasured candidate that another unmeasured candidate beats on both quality estimate and fully priced
+  // estimated cost is never the better choice, so it gives its place to the next one. Equal estimates or equal
+  // prices keep both: the same list price can cost differently per run, which only measurement shows. Measured
+  // models stay, because measured quality ties on easy examples do not prove equal quality.
+  const priced = (m: RecommendedModel) => m.cost && !m.cost.unpriced.length ? m.cost.usdPer1kTasks : null;
+  const dominated = (m: RecommendedModel) => !m.quality.measured && priced(m) !== null
+    && assessed.some(o => !o.quality.measured && o.quality.score > m.quality.score && (priced(o) ?? Infinity) < priced(m)!);
+  const models = assessed.filter(m => !dominated(m)).sort(order).slice(0, 5);
   models.forEach((m, i) => { m.rank = i + 1; });
   leaders(models);
   // The model writes before sorting; its proposed winner can disagree with the final order.

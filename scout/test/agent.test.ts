@@ -156,13 +156,14 @@ test('rejected shortlists explain every problem so the agent can correct them', 
 });
 
 test('axis leaders come from known values only', () => {
-  const result = finalize(catalogue, submission(['lab/alpha', 'lab/beta', 'lab/gamma', 'lab/delta', 'lab/epsilon'].map((id, i) => pick(id, i === 1 ? 95 : 70))), now);
+  const result = finalize(catalogue, submission(['lab/alpha', 'lab/beta', 'lab/gamma', 'lab/delta', 'lab/epsilon'].map(id => pick(id, ['lab/alpha', 'lab/beta'].includes(id) ? 95 : 70))), now);
   const best = Object.fromEntries(result.models.map(m => [m.id, m.best]));
-  // Beta: highest quality estimate, cheapest ($1.50 per 1k tasks vs alpha's $4 and $3 on the other routes), newest release.
+  // Beta: highest quality estimate (tied with alpha), cheapest ($1.50 per 1k tasks vs alpha's $4 and $3 on the other routes), newest release.
   assert.deepEqual(best['lab/beta'], ['quality', 'cost', 'recency']);
   // Alpha is faster (2 + 500/100 = 7 s against beta's 11 s), but speed never ranks or leads.
-  assert.deepEqual(best['lab/alpha'], []);
-  assert.deepEqual(best['lab/gamma'], []);
+  assert.deepEqual(best['lab/alpha'], ['quality']);
+  // Beta beats gamma, delta and epsilon on both quality and cost, so they leave the shortlist.
+  assert.deepEqual(result.models.map(m => m.id), ['lab/beta', 'lab/alpha']);
 });
 
 test('by default the five cheapest candidates that reach the quality bar are shown, cheapest first', () => {
@@ -176,6 +177,18 @@ test('by default the five cheapest candidates that reach the quality bar are sho
   assert.deepEqual(shown(id => id === 'lab/beta' ? 60 : 80), [[1, 'lab/epsilon'], [2, 'lab/delta'], [3, 'lab/gamma'], [4, 'lab/zeta'], [5, 'lab/alpha']]);
   // An explicit quality priority shows the five highest estimates instead.
   assert.deepEqual(shown(id => ({ 'lab/alpha': 95, 'lab/zeta': 90, 'lab/beta': 75 })[id] ?? 80, 'quality').map(([, id]) => id), ['lab/alpha', 'lab/zeta', 'lab/epsilon', 'lab/delta', 'lab/gamma']);
+});
+
+test('an unmeasured candidate beaten on both quality estimate and cost gives its place to the next one', () => {
+  // Per 1k tasks: beta $1.50, the Gateway routes (gamma, delta, epsilon, zeta) $3, alpha $4.
+  const all = ['lab/alpha', 'lab/beta', 'lab/gamma', 'lab/delta', 'lab/epsilon', 'lab/zeta'];
+  const quality: Record<string, number> = { 'lab/alpha': 85, 'lab/beta': 80, 'lab/gamma': 88, 'lab/delta': 88, 'lab/epsilon': 80, 'lab/zeta': 80 };
+  const shown = finalize(catalogue, { ...submission(all.map(id => pick(id, quality[id]!))), qualityBar: 70, priority: 'quality' }, now).models.map(m => m.id);
+  // Gamma and delta score above alpha and cost less, so alpha leaves and zeta takes the fifth place. Beta is
+  // cheapest but scores lowest, and the $3 models tie on price with each other, so none of them is dropped.
+  assert.deepEqual(shown, ['lab/gamma', 'lab/delta', 'lab/beta', 'lab/epsilon', 'lab/zeta']);
+  // A higher estimate at a higher price is a trade-off, not dominance: alpha at 95 stays and leads on quality.
+  assert.deepEqual(finalize(catalogue, { ...submission(all.map(id => pick(id, id === 'lab/alpha' ? 95 : quality[id]!))), qualityBar: 70, priority: 'quality' }, now).models.map(m => m.id)[0], 'lab/alpha');
 });
 
 test('fewer than five may reach the bar, so the bar never drops to fill the shortlist', () => {
