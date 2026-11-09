@@ -36,11 +36,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/laz-aslam/openmerit.git"
+    "url": "git+https://github.com/openmerit-ai/openmerit-core.git"
   },
-  "homepage": "https://github.com/laz-aslam/openmerit#readme",
+  "homepage": "https://github.com/openmerit-ai/openmerit-core#readme",
   "bugs": {
-    "url": "https://github.com/laz-aslam/openmerit/issues"
+    "url": "https://github.com/openmerit-ai/openmerit-core/issues"
   },
   "publishConfig": {
     "access": "public"
