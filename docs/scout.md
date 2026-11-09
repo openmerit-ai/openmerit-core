@@ -212,7 +212,7 @@ recommends a model through that route. Other hosts' deprecation dates do not
 remove a route. Moving aliases such as OpenRouter's `~lab/…-latest` IDs are
 never treated as one model.
 
-**Unreleased, not deployed:** more host routes are matched to the model they
+**Deployed 6 November 2026:** more host routes are matched to the model they
 serve when a host spells the version or names the lab differently, for example
 Amazon Bedrock's `eu.cohere.embed-v4:0`, Azure's `embed-v-4-0` or Fireworks'
 `glm-5p2`. A model that OpenRouter or Vercel AI Gateway listed under its own
