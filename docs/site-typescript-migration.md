@@ -18,12 +18,13 @@ All first-party JavaScript, including Workers, browser code, tests and deploymen
 | `tsconfig.json` | Node.js | `packages/**/*.ts`, `scripts/**/*.ts` |
 | `tsconfig.build.json` | Node.js emit | Package sources compiled into `dist/` |
 | `tsconfig.scout.json` | Scout Worker and its Node.js tests | `scout/**/*.ts`; D1 and R2 use small structural interfaces until Worker runtime types are committed |
+| `email/tsconfig.json` | Email forwarding Worker and its Node.js test | `email/*.ts`; the inbound message is a small structural interface |
 
 Each Worker gets its own project when its first TypeScript file lands, because generated Worker types declare one global `Cloudflare.Env` per Worker. A browser project arrives with the first browser module.
 
 ## Worker binding types
 
-`npm run types:workers` writes binding types for each Wrangler configuration into `types/cloudflare/`, using interfaces `SiteEnv`, `DomainRouterEnv`, `ScoutServingEnv`, `ScoutPublisherEnv` and `TerminalPreviewEnv`. CI's `worker-types` job runs `npm run check:worker-types` and fails when a configuration changes without regenerated types. Each `wrangler types` run takes about a minute, so it stays out of `npm run verify`.
+`npm run types:workers` writes binding types for each Wrangler configuration into `types/cloudflare/`, using interfaces `SiteEnv`, `DomainRouterEnv`, `ScoutServingEnv`, `ScoutPublisherEnv`, `EmailEnv` and `TerminalPreviewEnv`. CI's `worker-types` job runs `npm run check:worker-types` and fails when a configuration changes without regenerated types. Each `wrangler types` run takes about a minute, so it stays out of `npm run verify`.
 
 Runtime types (about 600 KB per compatibility date) are not committed yet. They are generated for a Worker's project when that Worker migrates. Secrets are not part of the configuration, so each Worker declares its secret names next to its entry point.
 

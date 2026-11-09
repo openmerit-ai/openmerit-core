@@ -31,11 +31,28 @@ It runs the pinned Wrangler with `--strict`, which stops if someone changed the 
 | `scout-serving` | `openmerit-scout-alpha` | `wrangler.scout-alpha.jsonc` | Landing page, `/scout/`, `/connect/`, `/playground/scout/` |
 | `scout-publisher` | `openmerit-scout` | `wrangler.scout.jsonc` | Catalogue refresh, twice a day (00:07 and 12:07 UTC). Validate collection in isolation before each release |
 | `playground-claims` | `playground-claims` | `playground/wrangler.jsonc` | Sahra Health's customer claims and enrollment workflows |
+| `email` | `openmerit-email` | `wrangler.email.jsonc` | Inbound `openmerit.ai` aliases that reach more than one person; see [Email forwarding](#email-forwarding) |
 | `site` | `openmerit-site` | `wrangler.jsonc` | Protected memo. Locally reconciled; code-only release with asset-retention checks and no container rollout |
 
 Deploy `scout-serving` before `domain-router` when a change spans both, as the rebuild cutover did.
 
 The hosted terminal sample's `openmerit-terminal-preview` Worker and its configuration were removed from the repository. The router had already stopped binding it. Any Worker still deployed in Cloudflare is not managed from this checkout; deleting it is a separate action that needs the owner's approval.
+
+## Email forwarding
+
+An Email Routing rule forwards an alias to exactly one verified destination, so the single-person aliases on `openmerit.ai` (`lazim@`, `praveen@`, `akhil@`, `invest@`) are plain forwarding rules. An alias that reaches several people has a rule that sends it to the `openmerit-email` Worker instead. [`email/worker.ts`](../email/worker.ts) lists each such alias with its recipients, forwards every message to all of them and rejects addresses it has no list for.
+
+| Alias | Recipients |
+|---|---|
+| `code@openmerit.ai` | lazim and praveen |
+
+To add a recipient or alias:
+
+1. Check that each destination is a verified address under Email Routing's destination addresses; the Worker cannot forward to an unverified one. Adding a destination sends its owner a verification email.
+2. Add it to `recipients` in `email/worker.ts`, merge, and deploy with `npm run deploy -- email`.
+3. For a new alias, create the routing rule only after that deploy: a custom address on the `openmerit.ai` zone whose action is **Send to a Worker** with `openmerit-email`.
+
+Rule changes and destination changes are email changes and need the owner's approval, like deploys. After a change, send a real message to the alias and confirm that every recipient received it; the zone's Email Routing activity log shows each delivery. A successful deploy or API response is not proof of delivery.
 
 ## Refresh monitoring
 
@@ -67,5 +84,6 @@ Per Worker:
 
 - **`scout-serving`:** a rollback also changes the landing page. Check `/`, `/scout/`, `/connect/` and `/scout/api/status`.
 - **`domain-router`:** check apex, `www` and legacy `.site` hosts, plus `/memo`. The route cases are in `demo/test/domain-migration.test.mjs`.
+- **`email`:** send a real message to each alias in [Email forwarding](#email-forwarding) and confirm every recipient received it. If the Worker itself is failing, pointing the alias's rule back at a single verified destination restores delivery to that person.
 - **`scout-publisher`:** it is not deployed from main. Roll back only to a version listed in its deployment history, and confirm the next hourly run in `deploy:status`.
 - **`site`:** keep version `9b0ea195-8c33-40b0-a5ee-a21f3e31a46d` while the [code-only restoration](site-memo.md#protected-memo-reconciliation--local-only-29-october-2026) is awaiting an approved release. Its configuration retains uploaded assets. The next release also applies the `remove-demo-v1` migration, which deletes the retired demo's container and Durable Object classes; see [demo retirement](site-memo.md#demo-retirement--unreleased-source-3-november-2026). Because `keep_assets` inherits the latest upload, the wrapper requires a sole 100% active version matching the latest upload, except for the exact verified 145-active/146-latest retention chain documented in memo maintenance. It rejects every other undeployed latest version and split deployment. Do not activate an intermediate version merely to clear this guard. Do not run concurrent uploads during a site release: the remote check and upload are not atomic. After an approved release, check an existing memo session, real email-code login, protected Markdown, reader/admin permissions, logout and all referenced assets. No production test writes or real email sends are authorized by local verification alone.

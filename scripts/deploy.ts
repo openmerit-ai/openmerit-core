@@ -22,6 +22,7 @@ const workers: Readonly<Record<string, Worker>> = {
   "scout-serving": { config: "wrangler.scout-alpha.jsonc" },
   "scout-publisher": { config: "wrangler.scout.jsonc" },
   "playground-claims": { config: "playground/wrangler.jsonc" },
+  email: { config: "wrangler.email.jsonc" },
   site: {
     config: "wrangler.jsonc",
   },
@@ -88,10 +89,10 @@ async function deploy(key: string, flags: readonly string[]): Promise<void> {
   const result = spawnSync(key === "playground-claims" ? join(root, "playground/node_modules/.bin/wrangler") : "wrangler", args, { cwd: root, stdio: "inherit" });
   if (result.error) throw result.error;
   if (result.status !== 0) fail(`wrangler deploy exited with ${result.status}.`);
-  if (dryRun || !before) return;
+  if (dryRun) return;
 
-  const after = activeDeployment(name);
-  const previous = before.versions[0]?.version_id;
+  const after = activeDeployment(name) ?? fail(`${name} has no active deployment after the upload.`);
+  const previous = before?.versions[0]?.version_id;
   const receipt = {
     worker: name, config: worker.config, commit, subject, deployedAt: new Date().toISOString(),
     before, after,
@@ -110,6 +111,10 @@ async function status(): Promise<void> {
   for (const [key, worker] of Object.entries(workers)) {
     const name = workerName(worker.config);
     const deployment = activeDeployment(name);
+    if (!deployment) {
+      console.log(`${key} (${name}, ${worker.config})\n  not deployed yet`);
+      continue;
+    }
     const lines = deployment.versions.map(({ version_id, percentage }) => {
       const version = json<Version>(wrangler(["versions", "view", version_id, "--name", name, "--json"]));
       const tag = version.annotations?.["workers/tag"];
@@ -149,8 +154,14 @@ function relation(tag: string): string {
   return `tag ${tag} (${behind ? `${behind} commits behind origin/main` : "at origin/main"})`;
 }
 
-function activeDeployment(name: string): Deployment {
-  return json<Deployment>(wrangler(["deployments", "status", "--name", name, "--json"]));
+/** The live deployment, or undefined for a Worker that was never deployed. */
+function activeDeployment(name: string): Deployment | undefined {
+  const result = spawnSync("wrangler", ["deployments", "status", "--name", name, "--json"], { cwd: root, encoding: "utf8" });
+  if (result.error) throw result.error;
+  // Cloudflare API code 10007: the Worker does not exist on the account.
+  if (result.status !== 0 && `${result.stdout}${result.stderr}`.includes("[code: 10007]")) return undefined;
+  if (result.status !== 0) fail(`wrangler deployments status --name ${name} failed:\n${result.stderr || result.stdout}`);
+  return json<Deployment>(result.stdout);
 }
 
 function describe(deployment: Deployment): string {
