@@ -47,4 +47,4 @@ Both are retired in npm 0.3.0; see the [Inference Terminal](inference-terminal.m
 
 Include OpenMerit, Pi and Node.js versions, the client/scope, the triggering command, and a sanitized error. Remove credentials, private paths, prompts and proprietary data before sharing. Do not attach credential or connection files containing private configuration.
 
-[Open an issue on GitHub](https://github.com/laz-aslam/openmerit/issues)
+[Open an issue on GitHub](https://github.com/openmerit-ai/openmerit-core/issues)

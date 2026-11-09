@@ -26,7 +26,7 @@ for (let i = 0; i < body.length; i++) {
 }
 markdown.renderer.rules.link_open = (tokens, i, options, _env, renderer) => {
   const token = tokens[i]!, href = String(token.attrGet('href'));
-  if (!/^(?:[a-z]+:|\/|#)/i.test(href)) token.attrSet('href', `https://github.com/laz-aslam/openmerit/blob/main/docs/${posix.normalize(href)}`);
+  if (!/^(?:[a-z]+:|\/|#)/i.test(href)) token.attrSet('href', `https://github.com/openmerit-ai/openmerit-core/blob/main/docs/${posix.normalize(href)}`);
   return renderer.renderToken(tokens, i, options);
 };
 markdown.renderer.rules.heading_close = (tokens, i, options, _env, renderer) => {
