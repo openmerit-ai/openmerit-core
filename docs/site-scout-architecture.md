@@ -29,7 +29,9 @@ In the fresh runs, Claude Fable 5.1, GPT-5.6 Sol and GPT-6 Astra were shortliste
 
 The owner tried two points and kept three. The band cannot add a model to a shortlist, so how often GPT-6.1 Sol is listed comes from which models the agent chose to assess, not from the band. With two points, Opus 5 or Opus 5.5 stayed first on Coding review and Fraud review, where the agent usually put it exactly three points above Gemini 4 Argon; that accounts for nearly all of the two-point band's extra cost. With three points, Argon ranks first on most tasks, including Enrollment, where it failed the playground's check: its estimate is within three points of Opus 5's at less than half the price, and no public benchmark shows its tool-schema failure. Measured results are unchanged: 12/12, 0/15 and USD 0.
 
-## TrueFoundry catalogue source retired (not yet deployed), 7 November 2026
+## TrueFoundry catalogue source retired — deployed, 7 November 2026
+
+**Receipt.** [PR #98](https://github.com/openmerit-ai/openmerit-core/pull/98) merged as [8bb5b8e](https://github.com/openmerit-ai/openmerit-core/commit/8bb5b8e4be60). Publisher `openmerit-scout` moved from `bdb68349-1b1a-4cfd-995d-75c473640caa` to `439a45ee-9392-49ad-870b-a7a50d5e0707` at 04:30 UTC, tagged `8bb5b8e4be60` by the deploy wrapper (from `wrangler deployments list`; this receipt was recorded on 9 November). On 9 November `deploy:status` reported the catalogue neither stale nor degraded, last attempt 12:31 UTC, snapshot `8a1879fa73e3fd2e168e895b1fa07262`. The production route and price withdrawal counts below were measured before the release; the rows withdrawn by the live run were not rechecked.
 
 `github.com/truefoundry/models` returns 404 from GitHub, its codeload zip, raw files and the GitHub API since 6 November 2026, with no redirect, so it was deleted or made private. None of TrueFoundry's public repositories replaces it. Every `truefoundry` import since 6 November 14:20 UTC failed. The owner chose to retire the source rather than replace it.
 
@@ -37,7 +39,9 @@ The owner tried two points and kept three. The band cannot add a model to a shor
 - **Withdrawn:** `rebuildOfferings` now withdraws the routes and closes the open prices of retired sources before it rebuilds, so the frozen rows stop reaching offerings. In production D1 that is 1,636 routes in 21 providers and 7,206 open prices. About 660 of those routes have no other source, mostly Azure (217), Deepgram (117), Bedrock Mantle (62), Google Vertex (60) and Databricks (33). Three catalogue models lose their only route: `google/gemma-3n-e2b-it`, `mistral/devstral-medium-2507` and `mistralai/mistral-embed-2312`. TrueFoundry supplied no benchmarks.
 - Its raw zips stay in R2 and its `cat_runs` history stays in D1. The health check stops reporting it 24 hours after its last failed run.
 
-## Faster refresh: staggered Hugging Face re-apply and grouped MTEB boards (not yet deployed), 6 November 2026
+## Faster refresh: staggered Hugging Face re-apply and grouped MTEB boards — deployed, 6 November 2026
+
+**Receipt.** [PR #96](https://github.com/openmerit-ai/openmerit-core/pull/96) merged as [b1ab2cd](https://github.com/openmerit-ai/openmerit-core/commit/b1ab2cd82824). Publisher `openmerit-scout` moved from `b2934f85-ccff-42a2-813d-f6bedd660fae` to `bdb68349-1b1a-4cfd-995d-75c473640caa` at 18:32 UTC, tagged `b1ab2cd82824` by the deploy wrapper (from `wrangler deployments list`; this receipt was recorded on 9 November). It was replaced on 7 November by the TrueFoundry release above, which includes it.
 
 Run `hour-498312` (00:07 UTC, 6 November) took 82 minutes. Its Hugging Face provider apply took 3,897 s, because every unchanged repository had last been applied together and all of them passed the 7-day `providerReapplyDays` at once: it re-applied 63,889 repositories. Normal runs take 18–32 minutes. Pauses between Workflow steps added up to only 4 s across 164 steps in `manual-20261106-openrouter-decisions-1`, so the time goes to each step's own work. Each MTEB step took 3–7 s, while one `/scores` request takes about 0.4 s and the shared link queries about 0.25 s on D1.
 
