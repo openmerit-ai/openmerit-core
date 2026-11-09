@@ -314,10 +314,10 @@ failed read cannot be retried for one minute. A failed import leaves the previou
 complete set intact. `conversationId` alone reads a saved answer, not a rerank;
 send a follow-up or `sync` to recompute with the current results.
 
-**Serving update in preparation:** aggregate queries group mapped score names
+**Deployed 6 November 2026:** aggregate queries group mapped score names
 within each experiment and trace role, rather than requesting every metric
 separately. Experiment tags and explicit model aliases still isolate attribution.
-On this updated deployment, a rate-limited sync honors Langfuse's `Retry-After`
+A rate-limited sync honors Langfuse's `Retry-After`
 duration, persists the cooldown and continues to report failure during it; a
 failed refresh is not a successful cache hit. Without a valid duration the
 fallback is one minute. Langfuse's Metrics quota can be hourly or daily and is
