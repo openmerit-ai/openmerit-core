@@ -1,0 +1,10 @@
+{
+  // Email forwarding Worker and its Node.js test. The Worker uses a small
+  // structural message interface, so it needs no Workers runtime types.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "include": ["*.ts"]
+}
