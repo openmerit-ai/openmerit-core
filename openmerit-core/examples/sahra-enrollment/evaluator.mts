@@ -6,7 +6,8 @@
 //   PLAYGROUND_URL (default http://localhost:8787), PLAYGROUND_TOKEN, LANGFUSE_* for measured cost.
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-// Copy this file into your project to adapt it; it has no runtime import from OpenMerit.
+// Copy this file into your project to adapt it; it has no runtime import from OpenMerit. The .mts
+// extension makes Node.js load it as an ES module whatever your package.json says.
 // In your project, import the type from the package instead: `import type { EvaluatorPlugin } from "openmerit"`.
 import type { EvaluatorPlugin } from "../../src/scout/evaluators/module.ts";
 
@@ -103,7 +104,7 @@ const plugin: EvaluatorPlugin = {
       const expected = item.expectedOutput as Expected;
       // Outlast EnrollmentFlow's own 10-minute limit and one retry, so the workflow decides the outcome.
       const signal = AbortSignal.any([AbortSignal.timeout(25 * 60_000), ...(context.signal ? [context.signal] : [])]);
-      const call = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+      const call = async <T,>(method: string, path: string, body?: unknown): Promise<T> => {
         const response = await fetch(`${url}${path}`, { method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: body === undefined ? null : JSON.stringify(body), signal });
         if (!response.ok) throw new Error(`Playground ${method} ${path.split("?")[0]} HTTP ${response.status}`);
         return await response.json() as T;

@@ -38,7 +38,7 @@ openmerit scout "Extract chronic conditions as ICD-10-CM categories from health 
   --dataset examples/health-declaration-codes/dataset.jsonl --providers openrouter --max-price 30 --execute
 
 # The search alone, without the agent: deterministic, for CI and other coding agents (JSON output with --json).
-openmerit run --langfuse-dataset sahra-enrollments --evaluator ./evaluator.ts --execute
+openmerit run --langfuse-dataset sahra-enrollments --evaluator ./evaluator.mts --execute
 openmerit run --dataset items.jsonl --system-prompt "$(cat prompt.txt)" --grader json --execute
 
 # Interactive: Pi with Scout. Ask "which model should I use for …" or type /scout.
@@ -72,7 +72,7 @@ Every run writes `.openmerit/runs/<run-id>/report.md` and `report.json` in the p
   - `json`: every expected field must match; arrays are compared as sets.
   - `exact` and `contains`: for short answers.
   - `judge`: a rubric checked by Scout's model.
-- **Your harness** (`--evaluator module.ts`): default-export an `EvaluatorPlugin` that runs one item through your real system and returns `{ pass, output, costUsd? }`. When a model cannot run, throw an error whose `name` is `"CandidateUnavailable"`; Scout then skips it as untested. Throw any other error to stop the run. [`examples/sahra-enrollment/evaluator.ts`](examples/sahra-enrollment/evaluator.ts), which you can copy into your project, drives a deployed multi-step tool-calling agent over HTTP. It reads cost and provider errors from that agent's own Langfuse traces.
+- **Your harness** (`--evaluator module.mts`, relative to the current directory): default-export an `EvaluatorPlugin` that runs one item through your real system and returns `{ pass, output, costUsd? }`. When a model cannot run, throw an error whose `name` is `"CandidateUnavailable"`; Scout then skips it as untested. Throw any other error to stop the run. [`examples/sahra-enrollment/evaluator.mts`](examples/sahra-enrollment/evaluator.mts), which you can copy into your project (change its type import to `"openmerit"`), drives a deployed multi-step tool-calling agent over HTTP. It reads cost and provider errors from that agent's own Langfuse traces.
 
 ## Limitations
 

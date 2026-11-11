@@ -1,6 +1,6 @@
 {
   "name": "openmerit",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Find the right model for your task: Scout reads your task or codebase, binary-searches benchmark-ranked models on your own labelled examples, and picks the winner from Langfuse evaluations.",
   "type": "module",
   "license": "MIT",
@@ -40,7 +40,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/cli.js",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/rewrite-declaration-imports.ts && chmod +x dist/cli.js",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test \"src/**/*.test.ts\" \"test/**/*.test.ts\"",
     "check": "npm run typecheck && npm test",

@@ -19,7 +19,7 @@ Options:
   --codebase <dir>          Project Scout reads (default: current directory)
   --langfuse-dataset <name> Labelled Langfuse dataset
   --dataset <file.jsonl>    Local labelled items {id?, input, expectedOutput}; pushed to Langfuse
-  --evaluator <module.ts>   Evaluator module that runs your real harness
+  --evaluator <module.mts>  Evaluator module that runs your real harness (relative to the current directory)
   --system-prompt <text>    run: production system prompt for the built-in Pi evaluator
   --grader <exact|contains|json|judge>  run: how the Pi evaluator checks a reply (default json)
   --rubric <text>           run: rubric for the judge grader
@@ -111,7 +111,7 @@ async function main() {
   if (command === "run") {
     const { host } = await hostFor(values);
     const evaluator = values.evaluator
-      ? { type: "module" as const, path: values.evaluator }
+      ? { type: "module" as const, path: resolve(values.evaluator) }
       : (() => {
         if (!values["system-prompt"]) throw new Error("run needs --evaluator <module> or --system-prompt for the built-in Pi evaluator");
         const kind = values.grader ?? "json";
@@ -121,7 +121,7 @@ async function main() {
       })();
     const params = {
       task: values.task ?? positionals.join(" ") ?? "", evaluator, filter: filterFrom(values),
-      ...(values["langfuse-dataset"] ? { langfuseDataset: values["langfuse-dataset"] } : {}), ...(values.dataset ? { datasetPath: values.dataset } : {}),
+      ...(values["langfuse-dataset"] ? { langfuseDataset: values["langfuse-dataset"] } : {}), ...(values.dataset ? { datasetPath: resolve(values.dataset) } : {}),
       ...(values["sample-size"] ? { sampleSize: Number(values["sample-size"]) } : {}), ...(values.finalists ? { finalists: Number(values.finalists) } : {}),
       ...(values.repeats ? { repeats: Number(values.repeats) } : {}),
     };
@@ -158,8 +158,8 @@ async function main() {
     });
     const hints = [
       values["langfuse-dataset"] && `Use the Langfuse dataset "${values["langfuse-dataset"]}".`,
-      values.dataset && `Use the local dataset ${values.dataset}.`,
-      values.evaluator && `Use the evaluator module ${values.evaluator}.`,
+      values.dataset && `Use the local dataset ${resolve(values.dataset)}.`,
+      values.evaluator && `Use the evaluator module ${resolve(values.evaluator)}.`,
       (values.providers || values.tools || values["max-price"] || values.exclude) && `Candidate filter: ${JSON.stringify(filterFrom(values))}.`,
       values["sample-size"] && `sampleSize ${values["sample-size"]}.`, values.finalists && `finalists ${values.finalists}.`, values.repeats && `repeats ${values.repeats}.`,
     ].filter(Boolean).join(" ");

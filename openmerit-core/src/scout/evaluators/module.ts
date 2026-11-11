@@ -21,7 +21,7 @@ export interface EvaluatorPlugin {
   create(context: { env: Record<string, string | undefined>; log: (line: string) => void }): Evaluate | Promise<Evaluate>;
 }
 
-/** Imports a `.ts` or `.js` evaluator module from the user's project. Node.js 22.19 strips its types. */
+/** Imports an evaluator module (`.mts`, `.ts`, `.mjs` or `.js`) from the user's project. Node.js 22.19 strips its types. */
 export async function loadEvaluatorPlugin(path: string, cwd = process.cwd()): Promise<EvaluatorPlugin> {
   const loaded = await import(pathToFileURL(resolve(cwd, path)).href) as { default?: unknown };
   const plugin = loaded.default as EvaluatorPlugin | undefined;
