@@ -121,6 +121,8 @@ const plugin: EvaluatorPlugin = {
           const state = await call<State>("GET", path);
           const decision = state.enrollment?.decision;
           if (["errored", "terminated"].includes(state.workflow?.status ?? "")) {
+            // The playground's own Pi model registry lacks this OpenRouter model, so the harness cannot run it.
+            if (/^Unknown model /.test(state.workflow?.error?.message ?? "")) throw new CandidateUnavailable(`the playground cannot run this model (run ${runId}): ${state.workflow?.error?.message}`);
             if (!NO_DECISION.test(state.workflow?.error?.message ?? "")) {
               throw new Error(`Enrollment workflow ${state.workflow?.status} (run ${runId}): ${state.workflow?.error?.message ?? "no message"}; no quality verdict`);
             }
