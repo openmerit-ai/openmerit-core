@@ -1,0 +1,179 @@
+# ScoutBM ECI estimates. Catalogue 357d7378c58637dd44e7de07c3371f7b checked 2026-11-10T01:05:22.911Z; Epoch ECI fetched 2026-11-10T03:15:23.201Z (https://epoch.ai/data/eci_scores.csv, https://epoch.ai/data/eci_benchmarks.csv; CC BY 4.0). Regenerate with scripts/build-eci-estimates.ts.
+catalogue_model,name,openrouter_id,eci,eci_source,standard_error,benchmarks
+alibaba/qwen-max,Qwen Max,,132.68,estimated,0.94,Aider polyglot; Fiction.LiveBench; GPQA diamond; MATH level 5; OTIS Mock AIME 2024-2025
+alibaba/qwen3-next-80b-a3b-thinking,Qwen3-Next 80B-A3B (Thinking),,144.13,estimated,2.04,GPQA diamond
+alibaba/qwen3-vl-235b-a22b-thinking,Qwen3 VL 235B A22B Thinking,,146.84,estimated,12.66,MMLU
+alibaba/qwen3.5-plus,Qwen3.5 Plus,,147.58,estimated,1.25,CL-bench; CL-bench Life; Chess Puzzles; DTBench; GPQA diamond; LMCA; Mystery Game Puzzles; OTIS Mock AIME 2024-2025; SimpleQA Verified
+alibaba/qwen3.8-flash-next,Qwen3.8 Flash Next,,154.54,estimated,4.89,GPQA diamond
+amazon/nova-2-lite-v1,Nova 2 Lite,amazon/nova-2-lite-v1,145.33,estimated,2.22,GPQA diamond
+amazon/nova-lite-v1,Nova Lite 1.0,amazon/nova-lite-v1,119.96,calibrated,4.44,arena:creative_writing; arena:expert; arena:hard_prompts; arena:industry_business_and_management_and_financial_operations; arena:industry_entertainment_and_sports_and_media; arena:industry_legal_and_government; arena:industry_life_and_physical_and_social_science; arena:industry_medicine_and_healthcare; arena:industry_writing_and_literature_and_language; arena:instruction_following; arena:longer_query; arena:multi_turn; arena:vision
+amazon/nova-premier-v1,Nova Premier 1.0,amazon/nova-premier-v1,136.10,estimated,1.47,GPQA diamond
+amazon/nova-pro-v1,Nova Pro 1.0,amazon/nova-pro-v1,124.03,calibrated,4.44,arena:creative_writing; arena:expert; arena:hard_prompts; arena:industry_business_and_management_and_financial_operations; arena:industry_entertainment_and_sports_and_media; arena:industry_legal_and_government; arena:industry_life_and_physical_and_social_science; arena:industry_medicine_and_healthcare; arena:industry_writing_and_literature_and_language; arena:instruction_following; arena:longer_query; arena:multi_turn; arena:vision
+anthropic/claude-haiku-4-5-20251001,Claude Haiku 4.5,,138.82,estimated,0.75,ARC-AGI; ARC-AGI-2; Balrog; Chess Puzzles; DTBench; DeepResearch Bench; ExploitBench; GPQA diamond; LMCA; MATH level 5; OTIS Mock AIME 2024-2025; SimpleQA Verified; Terminal Bench; WeirdML
+anthropic/claude-haiku-4.5,Claude Haiku 4.5,anthropic/claude-haiku-4.5,145.84,calibrated,3.22,arena:creative_writing; arena:document; arena:expert; arena:factuality; arena:factuality:industry_business_and_management_and_financial_operations; arena:factuality:industry_legal_and_government; arena:hard_prompts; arena:industry_business_and_management_and_financial_operations; arena:industry_entertainment_and_sports_and_media; arena:industry_legal_and_government; arena:industry_life_and_physical_and_social_science; arena:industry_medicine_and_healthcare; arena:industry_writing_and_literature_and_language; arena:instruction_following; arena:longer_query; arena:multi_turn; arena:webdev; arena:webdev:webdev-html; arena:webdev:webdev-react; seal:mcp_atlas
+anthropic/claude-opus-4-5,Claude Opus 4.5 (latest),,154.49,calibrated,3.22,arena:creative_writing; arena:document; arena:expert; arena:factuality; arena:factuality:industry_business_and_management_and_financial_operations; arena:factuality:industry_legal_and_government; arena:hard_prompts; arena:industry_business_and_management_and_financial_operations; arena:industry_entertainment_and_sports_and_media; arena:industry_legal_and_government; arena:industry_life_and_physical_and_social_science; arena:industry_medicine_and_healthcare; arena:industry_writing_and_literature_and_language; arena:instruction_following; arena:longer_query; arena:multi_turn; arena:webdev; arena:webdev:webdev-html; arena:webdev:webdev-react; seal:mcp_atlas; tau:banking_knowledge
+anthropic/claude-opus-4-5-20251101,Claude Opus 4.5,,148.83,estimated,0.52,ARC-AGI; ARC-AGI-2; Balrog; CL-bench; Chess Puzzles; Cybench; DTBench; DeepResearch Bench; EBR-bench; FrontierMath-Tier-4-v2-Private; FrontierMath-Tiers-1-3-v2-Private; Furniture Assembly; GDPval; GPQA diamond; GSO-Bench; GeoBench; LMCA; METR Time Horizons; Mystery Game Puzzles; OSWorld; OTIS Mock AIME 2024-2025; ProofBench; Remote Labor Index; SimpleBench; SimpleQA Verified; Terminal Bench; VPCT; WeirdML; WeirdML v3
+anthropic/claude-opus-4.1,Claude Opus 4.1,anthropic/claude-opus-4.1,146.03,estimated,2.33,GPQA diamond
+anthropic/claude-sonnet-4-5,Claude Sonnet 4.5 (latest),,151.55,calibrated,3.22,arena:creative_writing; arena:document; arena:expert; arena:factuality; arena:factuality:industry_business_and_management_and_financial_operations; arena:factuality:industry_legal_and_government; arena:hard_prompts; arena:industry_business_and_management_and_financial_operations; arena:industry_entertainment_and_sports_and_media; arena:industry_legal_and_government; arena:industry_life_and_physical_and_social_science; arena:industry_medicine_and_healthcare; arena:industry_writing_and_literature_and_language; arena:instruction_following; arena:longer_query; arena:multi_turn; arena:webdev; arena:webdev:webdev-html; arena:webdev:webdev-react; seal:mcp_atlas
+anthropic/claude-sonnet-4-5-20250929,Claude Sonnet 4.5,,144.28,estimated,0.55,ARC-AGI; ARC-AGI-2; Chess Puzzles; Cybench; DTBench; DeepResearch Bench; EBR-bench; FrontierMath-Tier-4-v2-Private; FrontierMath-Tiers-1-3-v2-Private; GDPval; GPQA diamond; GSO-Bench; LMCA; MATH level 5; METR Time Horizons; Mystery Game Puzzles; OSWorld; OTIS Mock AIME 2024-2025; ProofBench; Remote Labor Index; SimpleBench; SimpleQA Verified; Terminal Bench; VPCT; WeirdML
+arcee-ai/trinity-large-thinking,Trinity Large Thinking,,142.62,estimated,1.75,GPQA diamond; Surface Evolver Bench
+baidu/ernie-4.5-300b-a47b,ERNIE 4.5 300B A47B,,146.15,estimated,2.35,GPQA diamond
+bytedance-seed/seed-1-8,Seed 1.8,,151.16,estimated,15.17,MMLU
+bytedance-seed/seed-1.6,Seed 1.6,bytedance-seed/seed-1.6,142.40,estimated,1.37,Chess Puzzles; GPQA diamond; OTIS Mock AIME 2024-2025; SimpleQA Verified
+bytedance-seed/seed-2-1-turbo,Seed 2.1 Turbo,bytedance-seed/seed-2-1-turbo,151.21,estimated,2.53,Chess Puzzles; GPQA diamond; OTIS Mock AIME 2024-2025; SimpleQA Verified
+bytedance-seed/seed-2.0-lite,Seed-2.0-Lite,bytedance-seed/seed-2.0-lite,148.96,estimated,2.22,Chess Puzzles; GPQA diamond; OTIS Mock AIME 2024-2025; SimpleQA Verified
+bytedance-seed/seed-2.0-mini,Seed-2.0-Mini,bytedance-seed/seed-2.0-mini,145.02,estimated,2.17,GPQA diamond
+bytedance-seed/seed-2.0-pro,Seed 2.0 Pro,,150.53,estimated,2.44,Chess Puzzles; GPQA diamond; OTIS Mock AIME 2024-2025; SimpleQA Verified
+bytedance-seed/seed-2.1-pro,Seed 2.1 Pro,,151.52,estimated,2.57,Chess Puzzles; GPQA diamond; OTIS Mock AIME 2024-2025; SimpleQA Verified
+bytedance-seed/seed-evolving,Seed Evolving,,156.46,estimated,2.95,Chess Puzzles; GPQA diamond; OTIS Mock AIME 2024-2025; SimpleQA Verified
+bytedance-seed/seed-oss-36b-instruct,Seed-OSS-36B-Instruct,,140.99,estimated,1.27,GPQA diamond; OTIS Mock AIME 2024-2025
+cohere/c4ai-aya-expanse-32b,Aya Expanse 32B,,122.11,calibrated,4.44,arena:creative_writing; arena:expert; arena:hard_prompts; arena:industry_business_and_management_and_financial_operations; arena:industry_entertainment_and_sports_and_media; arena:industry_legal_and_government; arena:industry_life_and_physical_and_social_science; arena:industry_medicine_and_healthcare; arena:industry_writing_and_literature_and_language; arena:instruction_following; arena:longer_query; arena:multi_turn
+cohere/command-a,Command A,cohere/command-a,134.68,estimated,1.44,GPQA diamond
+cohere/command-a-plus,Command A+,cohere/command-a-plus,143.58,estimated,1.98,GPQA diamond
+cohere/command-a-reasoning-08-2025,Command A Reasoning,,138.86,calibrated,4.44,bfcl:memoryKV; bfcl:memorySummary; bfcl:memoryVector
+cohere/command-r-08-2024,Command R (08-2024),cohere/command-r-08-2024,116.72,calibrated,4.44,arena:creative_writing; arena:expert; arena:hard_prompts; arena:industry_business_and_management_and_financial_operations; arena:industry_entertainment_and_sports_and_media; arena:industry_legal_and_government; arena:industry_life_and_physical_and_social_science; arena:industry_medicine_and_healthcare; arena:industry_writing_and_literature_and_language; arena:instruction_following; arena:longer_query; arena:multi_turn; vals:legal_bench
+cohere/command-r-plus-08-2024,Command R+ (08-2024),cohere/command-r-plus-08-2024,124.47,estimated,5.86,MMLU
+cohere/command-r7b-12-2024,Command R7B (12-2024),cohere/command-r7b-12-2024,123.79,calibrated,4.44,bfcl:memoryKV; bfcl:memorySummary; bfcl:memoryVector
+cohere/north-mini-code-1-0,North Mini Code,,143.40,estimated,1.95,GPQA diamond
+deepseek/deepseek-chat-v3-0324,DeepSeek V3 0324,deepseek/deepseek-chat-v3-0324,137.10,estimated,0.79,Aider polyglot; DTBench; GPQA diamond; LMCA; MATH level 5; METR Time Horizons; OTIS Mock AIME 2024-2025; SimpleBench; WeirdML
+deepseek/deepseek-r1-0528,R1 0528,deepseek/deepseek-r1-0528,140.91,estimated,0.73,ARC-AGI; ARC-AGI-2; Aider polyglot; DeepResearch Bench; GPQA diamond; MATH level 5; METR Time Horizons; OTIS Mock AIME 2024-2025; SimpleBench; WeirdML
+deepseek/deepseek-r1-0528-qwen3-8b,DeepSeek R1 0528 Qwen3 8B,,118.30,estimated,2.93,GPQA diamond; OTIS Mock AIME 2024-2025
+deepseek/deepseek-r1-distill-qwen-32b,DeepSeek-R1-Distill-Qwen-32B,,137.62,estimated,1.08,Balrog; GPQA diamond; OTIS Mock AIME 2024-2025
+deepseek/deepseek-v3.1-terminus,DeepSeek V3.1 Terminus,deepseek/deepseek-v3.1-terminus,144.50,estimated,1.96,DTBench; LMCA
+deepseek/deepseek-v4-flash-vision-exp,DeepSeek V4 Flash Vision Exp,deepseek/deepseek-v4-flash-vision-exp,155.52,calibrated,1.66,fireworks:frontierswe-v2; vendor:agents-last-exam; vendor:nl2repo; vendor:terminal-bench-2.1
+deepseek/deepseek-v4.1-flash-1017,DeepSeek V4.1 Flash 1017,deepseek/deepseek-v4.1-flash-1017,159.14,estimated,0.73,APEX-Agents; ARC-AGI; ARC-AGI-2; Chess Puzzles; FrontierMath-Tier-4-v2-Private; FrontierMath-Tiers-1-3-v2-Private; GPQA diamond; Mystery Game Puzzles; OTIS Mock AIME 2024-2025; SimpleQA Verified; WeirdML v3
+fireworks/ember-1,Ember-1,fireworks/ember-1,158.01,calibrated,2.25,fireworks:bedside-bench; fireworks:big-finance-benchmark; fireworks:healthbench-professional; vals:biomysterybench; vals:code-migration; vals:emb; vals:fabv2; vals:ioi; vals:legal_research; vals:mysterymechanism; vals:public-benefits-bench; vals:sage; vals:vibe-code; vendor:deepswe-1.1; vendor:swe-bench-verified; vendor:terminal-bench-2.1
+google/gemini-2.5-flash,Gemini 2.5 Flash,google/gemini-2.5-flash,143.31,estimated,1.07,Balrog; DTBench; GPQA diamond; LMCA; SimpleBench; Terminal Bench
+google/gemini-2.5-flash-lite,Gemini 2.5 Flash Lite,google/gemini-2.5-flash-lite,138.87,estimated,1.57,GPQA diamond
+google/gemini-2.5-pro,Gemini 2.5 Pro,google/gemini-2.5-pro,143.98,estimated,0.63,ARC-AGI; ARC-AGI-2; DTBench; DeepResearch Bench; FrontierMath-Tier-4-v2-Private; FrontierMath-Tiers-1-3-v2-Private; GDPval; GPQA diamond; GSO-Bench; LMCA; OTIS Mock AIME 2024-2025; Terminal Bench; WeirdML
+google/gemini-2.5-pro-preview,Gemini 2.5 Pro Preview 06-05,google/gemini-2.5-pro-preview,142.68,estimated,0.76,ARC-AGI; ARC-AGI-2; Aider polyglot; DeepResearch Bench; Fiction.LiveBench; GPQA diamond; GSO-Bench; METR Time Horizons; Remote Labor Index; SimpleBench; VPCT
+google/gemini-3-flash-preview,Gemini 3 Flash Preview,google/gemini-3-flash-preview,148.90,estimated,0.58,ARC-AGI; ARC-AGI-2; Balrog; Chess Puzzles; DTBench; DeepResearch Bench; FrontierMath-Tier-4-v2-Private; FrontierMath-Tiers-1-3-v2-Private; GPQA diamond; GSO-Bench; GeoBench; LMCA; Mystery Game Puzzles; OTIS Mock AIME 2024-2025; ProofBench; SimpleBench; SimpleQA Verified; Terminal Bench; VPCT; WeirdML
+google/gemini-3.1-flash-lite-preview,Gemini 3.1 Flash Lite Preview,google/gemini-3.1-flash-lite-preview,149.85,estimated,3.16,GPQA diamond
+google/gemini-3.1-pro-preview,Gemini 3.1 Pro Preview,google/gemini-3.1-pro-preview,155.79,estimated,0.49,APEX-Agents; ARC-AGI; ARC-AGI-2; Balrog; CL-bench; CL-bench Life; Chess Puzzles; DTBench; DeepResearch Bench; EBR-bench; ExploitBench; FrontierMath-Tier-4-v2-Private; FrontierMath-Tiers-1-3-v2-Private; Furniture Assembly; GPQA diamond; GSO-Bench; LMCA; METR Time Horizons; MirrorCode; Mystery Game Puzzles; OTIS Mock AIME 2024-2025; PostTrainBench; ProofBench; SimpleBench; SimpleQA Verified; Terminal Bench; WeirdML
+google/gemma-3-12b-it,Gemma 3 12B,google/gemma-3-12b-it,129.93,estimated,1.11,DTBench; GPQA diamond; LMCA; OTIS Mock AIME 2024-2025
+google/gemma-3-4b-it,Gemma 3 4B,google/gemma-3-4b-it,126.68,estimated,1.32,DTBench; GPQA diamond; LMCA; OTIS Mock AIME 2024-2025
+google/gemma-4-12b-it,Gemma 4 12B IT,,144.92,estimated,2.15,GPQA diamond
+ibm-granite/granite-4.2-8b,Granite 4.2 8B,ibm-granite/granite-4.2-8b,138.51,estimated,1.55,GPQA diamond
+inception/mercury-2,Mercury 2,,142.54,estimated,1.67,GPQA diamond; WeirdML
+inception/mercury-2.5,Mercury 2.5,,144.66,estimated,12.30,ProofBench
+inception/mercury-3,Mercury 3,,151.74,estimated,3.74,GPQA diamond
+inclusionai/ling-3.0-flash,Ling 3.0 Flash,inclusionai/ling-3.0-flash,148.16,calibrated,2.33,vendor:browsecomp; vendor:ifbench; vendor:livecodebench-v6; vendor:swe-bench-multilingual; vendor:swe-bench-pro; vendor:terminal-bench-2.1
+inclusionai/ling-3.0-flash-fin,Ling 3.0 Flash Fin,,147.90,calibrated,2.78,aa:analystAgent; aa:automationbench; aa:critpt; aa:gdpPdf; aa:gdpvalRating; aa:hle; aa:hleDiamond; aa:lcr; aa:mlcr; aa:scicode; aa:tauBanking; aa:terminalBench21; aa:terminalBench40
+inclusionai/ling-3.0-flash-vl,Ling 3.0 Flash VL,inclusionai/ling-3.0-flash-vl,149.31,estimated,3.02,GPQA diamond
+inclusionai/ling-3.0-tiny,Ling 3.0 Tiny,inclusionai/ling-3.0-tiny,142.40,estimated,1.84,GPQA diamond
+inclusionai/ling-3.1-flash,Ling 3.1 Flash,inclusionai/ling-3.1-flash,156.79,calibrated,4.51,aa:automationbench; aa:critpt; aa:gdpPdf; aa:gdpvalRating; aa:hle; aa:lcr; aa:mlcr; aa:scicode; aa:terminalBench40; opencompass:abstraction; opencompass:agent; opencompass:knowledge
+liquid/lfm-2.5-2.6b,LFM2.5-2.6B,liquid/lfm-2.5-2.6b,135.72,estimated,1.46,GPQA diamond
+liquid/lfm-3-1.7b,LFM3-1.7B,liquid/lfm-3-1.7b,138.41,estimated,1.55,GPQA diamond
+meituan/longcat-2.0,LongCat 2.0,meituan/longcat-2.0,144.51,estimated,2.10,GPQA diamond
+meta-llama/llama-3.1-70b-instruct,Llama 3.1 70B Instruct,meta-llama/llama-3.1-70b-instruct,128.54,estimated,0.94,Balrog; DTBench; GPQA diamond; LMCA; MATH level 5; MMLU; OTIS Mock AIME 2024-2025; The Agent Company; WeirdML
+meta-llama/llama-3.1-8b-instruct,Llama 3.1 8B Instruct,meta-llama/llama-3.1-8b-instruct,123.18,estimated,1.18,Balrog; DTBench; GPQA diamond; GSM8K; LMCA; MATH level 5; MMLU; OTIS Mock AIME 2024-2025; PIQA; WeirdML
+meta-llama/llama-3.2-1b-instruct,Llama 3.2 1B Instruct,meta-llama/llama-3.2-1b-instruct,122.38,estimated,2.03,Balrog; GPQA diamond; OTIS Mock AIME 2024-2025
+meta-llama/llama-3.2-3b-instruct,Llama 3.2 3B Instruct,meta-llama/llama-3.2-3b-instruct,125.70,estimated,1.67,Balrog; GPQA diamond; MMLU
+meta-llama/llama-3.3-70b-instruct,Llama 3.3 70B Instruct,meta-llama/llama-3.3-70b-instruct,130.09,estimated,0.91,Balrog; DTBench; Fiction.LiveBench; GPQA diamond; LMCA; MATH level 5; MMLU; OTIS Mock AIME 2024-2025; SimpleBench; WeirdML
+meta/llama-3.2-11b-vision-instruct,Llama-3.2-11B-Vision-Instruct,,108.55,estimated,4.21,Balrog; MMLU
+meta/llama-3.2-90b-vision-instruct,Llama-3.2-90B-Vision-Instruct,,127.09,estimated,1.11,Balrog; GPQA diamond; GeoBench; MATH level 5; MMLU; OTIS Mock AIME 2024-2025
+meta/muse-ember,Muse Ember,meta/muse-ember,160.08,calibrated,3.12,aa:automationbench; aa:critptV2Hard; aa:frontiercode20; aa:gdpPdf; aa:hleDiamond; aa:mlcr; aa:omniscienceAccuracy; aa:terminalBench40; aa:terminalBenchScience; vals:emb-v1-1; vals:fabv2-1; vals:legal_research; vals:vibe-code
+meta/muse-glimmer-30b,Muse Glimmer 30B,meta/muse-glimmer-30b,147.54,estimated,2.61,GPQA diamond
+microsoft/wizardlm-2-8x22b,WizardLM 2 8x22B,microsoft/wizardlm-2-8x22b,126.30,estimated,1.24,GPQA diamond; MATH level 5
+minimax/MiniMax-M2,MiniMax-M2,,144.27,estimated,1.35,GPQA diamond; Terminal Bench
+minimax/MiniMax-M2.1,MiniMax-M2.1,,145.34,estimated,1.34,GPQA diamond; Terminal Bench
+minimax/minimax-m1-80k,MiniMax M1 80K,,140.97,estimated,1.63,Fiction.LiveBench; GPQA diamond
+minimax/minimax-m2.5,MiniMax M2.5,minimax/minimax-m2.5,146.86,estimated,0.75,ARC-AGI; ARC-AGI-2; CL-bench; CL-bench Life; ProofBench; Terminal Bench
+minimax/minimax-m2.7,MiniMax M2.7,minimax/minimax-m2.7,146.52,estimated,1.37,ExploitBench; ProofBench; Terminal Bench; WeirdML
+minimax/minimax-m3.1-flash,MiniMax M3.1 Flash,minimax/minimax-m3.1-flash,157.54,calibrated,1.66,aa:automationbench; aa:critpt; aa:critptV2Hard; aa:frontiercode; aa:frontiercode20; aa:gdpPdf; aa:gdpvalRating; aa:hle; aa:hleDiamond; aa:lcr; aa:mlcr; aa:mmmuPro; aa:omniscienceAccuracy; aa:scicode; aa:terminalBench40; aa:terminalBenchScience; arena:webdev; arena:webdev:webdev-html; arena:webdev:webdev-react; fireworks:o11y-bench; livebench:browser; livebench:coding; livebench:design; livebench:long_agentic; livebench:reasoning; livebench:research; opencompass:abstraction; opencompass:agent; opencompass:knowledge; seal:prbench-finance; vals:emb-v1-1; vals:fabv2-1; vals:legal_research; vals:sage; vals:vibe-code; vendor:agents-last-exam; vendor:charxiv-r; vendor:cybergym; vendor:deepswe-1.1; vendor:nl2repo; vendor:terminal-bench-4.0
+mistral/mistral-7b-instruct-v0.3,Mistral 7B Instruct v0.3,,112.98,estimated,2.74,GPQA diamond; MATH level 5; MMLU; OTIS Mock AIME 2024-2025
+mistral/mistral-small-2506,Mistral Small 3.2,,140.42,estimated,2.68,DTBench
+mistral/mixtral-8x7b-instruct-v0.1,Mixtral 8x7B Instruct v0.1,,120.61,estimated,1.63,GPQA diamond; MATH level 5
+mistral/pixtral-12b,Pixtral 12B,,118.00,estimated,5.06,MMLU
+mistralai/devstral-2512,Devstral 2 2512,mistralai/devstral-2512,138.40,calibrated,3.22,arena:webdev; arena:webdev:webdev-html
+mistralai/ministral-3b-latest,Ministral 3B (latest),,134.91,estimated,1.45,GPQA diamond
+mistralai/ministral-8b-latest,Ministral 8B (latest),,139.70,estimated,1.62,GPQA diamond
+mistralai/mistral-large-2407,Mistral Large 2407,mistralai/mistral-large-2407,130.98,estimated,0.96,DTBench; GPQA diamond; MATH level 5; MMLU; OTIS Mock AIME 2024-2025; SimpleBench
+mistralai/mistral-large-2512,Mistral Large 3 2512,mistralai/mistral-large-2512,133.80,estimated,1.19,DTBench; GPQA diamond; LMCA
+mistralai/mistral-large-latest,Mistral Large (latest),,131.67,estimated,1.46,GPQA diamond
+mistralai/mistral-medium-3.1,Mistral Medium 3.1,mistralai/mistral-medium-3.1,142.80,calibrated,4.44,arena:creative_writing; arena:expert; arena:factuality; arena:factuality:industry_business_and_management_and_financial_operations; arena:factuality:industry_legal_and_government; arena:hard_prompts; arena:industry_business_and_management_and_financial_operations; arena:industry_entertainment_and_sports_and_media; arena:industry_legal_and_government; arena:industry_life_and_physical_and_social_science; arena:industry_medicine_and_healthcare; arena:industry_writing_and_literature_and_language; arena:instruction_following; arena:longer_query; arena:multi_turn; arena:vision; arena:vision:creative_writing_vision; arena:vision:diagram; arena:vision:homework; arena:vision:ocr
+mistralai/mistral-medium-latest,Mistral Medium (latest),,145.90,calibrated,7.87,seal:prbench-finance
+mistralai/mistral-small-24b-instruct-2501,Mistral Small 3,mistralai/mistral-small-24b-instruct-2501,132.15,estimated,1.45,GPQA diamond
+mistralai/mistral-small-2603,Mistral Small 4,mistralai/mistral-small-2603,139.93,estimated,1.26,DTBench; GPQA diamond; LMCA
+mistralai/mistral-small-3.1-24b-instruct,Mistral Small 3.1 24B,mistralai/mistral-small-3.1-24b-instruct,132.29,estimated,1.42,GPQA diamond; MMLU
+mistralai/mistral-small-3.2-24b-instruct,Mistral Small 3.2 24B,mistralai/mistral-small-3.2-24b-instruct,132.34,estimated,1.42,GPQA diamond; MMLU
+mistralai/mistral-small-latest,Mistral Small (latest),,141.45,estimated,1.75,GPQA diamond
+mistralai/mixtral-8x22b-instruct,Mixtral 8x22B Instruct,mistralai/mixtral-8x22b-instruct,133.09,estimated,2.09,Cybench; DTBench; WeirdML
+moonshotai/kimi-k2-0905,Kimi K2 0905,moonshotai/kimi-k2-0905,143.54,estimated,1.94,GPQA diamond; MMLU
+moonshotai/kimi-k2-instruct,Kimi K2 Instruct,,142.16,estimated,1.11,Aider polyglot; Fiction.LiveBench; GPQA diamond; GSO-Bench; MMLU; SimpleBench; Terminal Bench; WeirdML
+nvidia/llama-3.1-nemotron-70b-instruct,Llama 3.1 Nemotron 70B Instruct,,129.67,estimated,6.79,MMLU
+nvidia/llama-3.3-nemotron-super-49b-v1,Llama 3.3 Nemotron Super 49B v1,,139.65,estimated,1.62,GPQA diamond
+nvidia/nemotron-3-nano-30b-a3b,Nemotron 3 Nano 30B A3B,nvidia/nemotron-3-nano-30b-a3b,139.54,estimated,1.61,GPQA diamond
+nvidia/nemotron-3-nano-omni-30b-a3b-reasoning,Nemotron 3 Nano Omni 30B A3B Reasoning,,132.69,estimated,1.44,GPQA diamond
+nvidia/nemotron-3-super-120b-a12b,Nemotron 3 Super,nvidia/nemotron-3-super-120b-a12b,145.01,estimated,1.88,GPQA diamond; WeirdML
+nvidia/nemotron-3.5-lightning,Nemotron 3.5 Lightning,nvidia/nemotron-3.5-lightning,143.05,estimated,1.91,GPQA diamond
+nvidia/nemotron-3.5-super-vl,Nemotron 3.5 Super VL,nvidia/nemotron-3.5-super-vl,152.00,estimated,3.83,GPQA diamond
+nvidia/nemotron-nano-12b-v2-vl,Nemotron Nano 12B v2 VL,,133.94,estimated,1.44,GPQA diamond
+nvidia/nemotron-nano-9b-v2,Nemotron Nano 9B v2,,138.65,estimated,1.56,GPQA diamond
+openai/gpt-3.5-turbo-0613,GPT-3.5 Turbo (older v0613),openai/gpt-3.5-turbo-0613,113.67,estimated,2.60,BBH; GSM8K; MMLU; Winogrande
+openai/gpt-4,GPT-4,openai/gpt-4,129.18,estimated,1.51,GPQA diamond; MMLU
+openai/gpt-4o,GPT-4o,openai/gpt-4o,132.63,calibrated,4.44,arena:creative_writing; arena:expert; arena:hard_prompts; arena:industry_business_and_management_and_financial_operations; arena:industry_entertainment_and_sports_and_media; arena:industry_legal_and_government; arena:industry_life_and_physical_and_social_science; arena:industry_medicine_and_healthcare; arena:industry_writing_and_literature_and_language; arena:instruction_following; arena:longer_query; arena:multi_turn; arena:vision
+openai/gpt-4o-2024-05-13,GPT-4o (2024-05-13),openai/gpt-4o-2024-05-13,131.13,estimated,0.85,Balrog; DTBench; GPQA diamond; LMCA; MATH level 5; METR Time Horizons; MMLU; OTIS Mock AIME 2024-2025
+openai/gpt-4o-2024-08-06,GPT-4o (2024-08-06),openai/gpt-4o-2024-08-06,131.51,estimated,0.93,Aider polyglot; CadEval; Chess Puzzles; FrontierMath-Tiers-1-3-v2-Private; GPQA diamond; MATH level 5; MMLU; OTIS Mock AIME 2024-2025; SimpleBench; SimpleQA Verified
+openai/gpt-4o-2024-11-20,GPT-4o (2024-11-20),openai/gpt-4o-2024-11-20,129.76,estimated,0.94,ARC-AGI; ARC-AGI-2; Aider polyglot; Cybench; GDPval; GPQA diamond; GSO-Bench; GeoBench; MATH level 5; MMLU; OTIS Mock AIME 2024-2025; The Agent Company; VPCT; WeirdML
+openai/gpt-4o-mini-2024-07-18,GPT-4o-mini (2024-07-18),openai/gpt-4o-mini-2024-07-18,128.64,estimated,0.93,ARC-AGI-2; Aider polyglot; Balrog; Chess Puzzles; DTBench; FrontierMath-Tiers-1-3-v2-Private; GPQA diamond; GSM8K; GeoBench; LMCA; MATH level 5; MMLU; Mystery Game Puzzles; OTIS Mock AIME 2024-2025; PIQA; SimpleBench; SimpleQA Verified; VPCT; WeirdML
+openai/gpt-5.1-codex,GPT-5.1-Codex,openai/gpt-5.1-codex,150.24,estimated,1.53,Terminal Bench
+openai/gpt-5.1-codex-max,GPT-5.1-Codex-Max,openai/gpt-5.1-codex-max,151.26,estimated,1.18,METR Time Horizons; ProofBench; Terminal Bench
+openai/gpt-5.1-codex-mini,GPT-5.1-Codex-Mini,openai/gpt-5.1-codex-mini,147.65,estimated,1.55,Terminal Bench
+openai/gpt-5.2-chat,GPT-5.2 Chat,openai/gpt-5.2-chat,154.94,calibrated,4.44,arena:creative_writing; arena:expert; arena:factuality; arena:factuality:industry_business_and_management_and_financial_operations; arena:factuality:industry_legal_and_government; arena:hard_prompts; arena:industry_business_and_management_and_financial_operations; arena:industry_entertainment_and_sports_and_media; arena:industry_legal_and_government; arena:industry_life_and_physical_and_social_science; arena:industry_medicine_and_healthcare; arena:industry_writing_and_literature_and_language; arena:instruction_following; arena:longer_query; arena:multi_turn; arena:vision; arena:vision:creative_writing_vision; arena:vision:diagram; arena:vision:homework; arena:vision:ocr
+openai/gpt-5.2-codex,GPT-5.2-Codex,openai/gpt-5.2-codex,153.66,estimated,1.71,Terminal Bench
+openai/gpt-5.3-codex,GPT-5.3-Codex,openai/gpt-5.3-codex,156.34,estimated,1.53,GPQA diamond; METR Time Horizons; Terminal Bench; WeirdML
+openai/gpt-5.6,GPT-5.6,,159.76,calibrated,1.80,fireworks:frontierswe-v2; seal:mcp_atlas
+particle-ai/particle-1,Particle-1,particle-ai/particle-1,151.71,estimated,3.63,GPQA diamond; MMLU
+qwen/qwen-2.5-72b-instruct,Qwen2.5 72B Instruct,qwen/qwen-2.5-72b-instruct,130.52,estimated,0.83,Balrog; DTBench; GPQA diamond; LMCA; MATH level 5; METR Time Horizons; MMLU; OTIS Mock AIME 2024-2025; The Agent Company; WeirdML
+qwen/qwen-2.5-7b-instruct,Qwen2.5 7B Instruct,qwen/qwen-2.5-7b-instruct,127.57,estimated,1.22,Balrog; DTBench; GPQA diamond; LMCA; MMLU; OTIS Mock AIME 2024-2025
+qwen/qwen-2.5-coder-32b-instruct,Qwen2.5 Coder 32B Instruct,qwen/qwen-2.5-coder-32b-instruct,125.13,estimated,4.11,Aider polyglot; GSM8K; MMLU
+qwen/qwen-plus,Qwen-Plus,qwen/qwen-plus,131.32,estimated,1.03,GPQA diamond; MATH level 5; OTIS Mock AIME 2024-2025
+qwen/qwen2.5-vl-72b-instruct,Qwen2.5 VL 72B Instruct,qwen/qwen2.5-vl-72b-instruct,126.67,estimated,11.48,GeoBench; OSWorld
+qwen/qwen3-235b-a22b-2507,Qwen3 235B A22B Instruct 2507,qwen/qwen3-235b-a22b-2507,140.07,estimated,0.82,ARC-AGI; ARC-AGI-2; Aider polyglot; DTBench; GPQA diamond; LMCA; WeirdML
+qwen/qwen3-235b-a22b-thinking-2507,Qwen3 235B A22B Thinking 2507,qwen/qwen3-235b-a22b-thinking-2507,144.97,estimated,1.21,DTBench; GPQA diamond; LMCA; Mystery Game Puzzles; OTIS Mock AIME 2024-2025; SimpleQA Verified; WeirdML
+qwen/qwen3-30b-a3b-instruct-2507,Qwen3 30B A3B Instruct 2507,qwen/qwen3-30b-a3b-instruct-2507,137.90,estimated,0.97,DTBench; GPQA diamond; LMCA; OTIS Mock AIME 2024-2025
+qwen/qwen3-coder,Qwen3 Coder 480B A35B,qwen/qwen3-coder,142.37,estimated,1.78,GSO-Bench; Terminal Bench; WeirdML
+qwen/qwen3-coder-next,Qwen3 Coder Next,qwen/qwen3-coder-next,141.59,estimated,1.60,GPQA diamond; WeirdML
+qwen/qwen3-next-80b-a3b-instruct,Qwen3 Next 80B A3B Instruct,qwen/qwen3-next-80b-a3b-instruct,142.37,estimated,1.84,GPQA diamond
+qwen/qwen3-vl-235b-a22b-instruct,Qwen3 VL 235B A22B Instruct,qwen/qwen3-vl-235b-a22b-instruct,142.97,estimated,10.84,MMLU
+qwen/qwen3-vl-30b-a3b-instruct,Qwen3 VL 30B A3B Instruct,qwen/qwen3-vl-30b-a3b-instruct,140.97,estimated,1.69,GPQA diamond; MMLU
+qwen/qwen3-vl-30b-a3b-thinking,Qwen3 VL 30B A3B Thinking,qwen/qwen3-vl-30b-a3b-thinking,142.76,estimated,1.85,GPQA diamond; MMLU
+qwen/qwen3-vl-8b-instruct,Qwen3 VL 8B Instruct,qwen/qwen3-vl-8b-instruct,130.30,estimated,6.92,MMLU
+qwen/qwen3.5-122b-a10b,Qwen3.5-122B-A10B,qwen/qwen3.5-122b-a10b,147.45,estimated,1.55,DTBench; GPQA diamond; LMCA; Mystery Game Puzzles
+qwen/qwen3.5-27b,Qwen3.5-27B,qwen/qwen3.5-27b,146.28,estimated,1.41,DTBench; GPQA diamond; LMCA; WeirdML
+qwen/qwen3.5-flash-02-23,Qwen3.5-Flash,qwen/qwen3.5-flash-02-23,144.29,estimated,1.04,Chess Puzzles; DTBench; FrontierMath-Tiers-1-3-v2-Private; GPQA diamond; LMCA; Mystery Game Puzzles; OTIS Mock AIME 2024-2025; SimpleQA Verified
+qwen/qwen3.7-flash,Qwen3.7 Flash,qwen/qwen3.7-flash,144.42,estimated,1.26,FrontierMath-Tiers-1-3-v2-Private; GPQA diamond; Mystery Game Puzzles; OTIS Mock AIME 2024-2025
+qwen/qwen3.8-2.4t-a95b,Qwen3.8 2.4T A95B,qwen/qwen3.8-2.4t-a95b,156.48,estimated,5.95,GPQA diamond
+qwen/qwen3.8-flash,Qwen3.8 Flash,qwen/qwen3.8-flash,154.18,estimated,4.73,GPQA diamond
+reflection/beam-1.0-501b-a23b,Beam 1.0 501B A23B,reflection/beam-1.0-501b-a23b,148.39,estimated,0.85,APEX-Agents; ARC-AGI; ARC-AGI-2; GPQA diamond; ProofBench
+rekaai/reka-flash-3,Reka Flash 3,rekaai/reka-flash-3,134.77,estimated,1.41,Balrog; GPQA diamond
+sakana/sakana-namazu,Sakana Namazu,sakana/sakana-namazu,151.20,calibrated,2.35,vendor:livecodebench-v6; vendor:mmlu-pro
+sarvam/sarvam-105b,Sarvam 105B,,143.77,estimated,1.97,GPQA diamond; MMLU
+stepfun/step-3.5-flash,Step 3.5 Flash,stepfun/step-3.5-flash,145.57,calibrated,2.35,arena:creative_writing; arena:expert; arena:factuality; arena:factuality:industry_business_and_management_and_financial_operations; arena:factuality:industry_legal_and_government; arena:hard_prompts; arena:industry_business_and_management_and_financial_operations; arena:industry_entertainment_and_sports_and_media; arena:industry_legal_and_government; arena:industry_life_and_physical_and_social_science; arena:industry_medicine_and_healthcare; arena:industry_writing_and_literature_and_language; arena:instruction_following; arena:longer_query; arena:multi_turn; vendor:aime-2025; vendor:browsecomp; vendor:livecodebench-v6; vendor:swe-bench-verified; vendor:terminal-bench-2
+stepfun/step-3.7-flash,Step 3.7 Flash,stepfun/step-3.7-flash,149.22,calibrated,2.46,vendor:swe-bench-pro; vendor:terminal-bench-2.1
+stepfun/step-5-preview,Step 5 Preview,stepfun/step-5-preview,155.57,estimated,1.47,ProofBench
+swiss-ai/apertus-70b,Apertus 70B,,125.37,estimated,1.82,GPQA diamond
+tencent/hy3,Hy3,tencent/hy3,152.49,estimated,4.01,GPQA diamond
+tencent/hy3-preview,Hy3 preview,tencent/hy3-preview,145.69,calibrated,3.41,arena:creative_writing; arena:expert; arena:factuality; arena:hard_prompts; arena:industry_business_and_management_and_financial_operations; arena:industry_entertainment_and_sports_and_media; arena:industry_legal_and_government; arena:industry_life_and_physical_and_social_science; arena:industry_medicine_and_healthcare; arena:industry_writing_and_literature_and_language; arena:instruction_following; arena:longer_query; arena:multi_turn; arena:webdev; arena:webdev:webdev-react
+tencent/hy4,Hy4,tencent/hy4,160.41,calibrated,3.12,aa:automationbench; aa:critptV2Hard; aa:frontiercode20; aa:gdpPdf; aa:hleDiamond; aa:omniscienceAccuracy; aa:terminalBench40; aa:terminalBenchScience; opencompass:abstraction; opencompass:agent; opencompass:knowledge; vals:emb-v1-1; vals:fabv2-1; vals:legal_research; vals:vibe-code
+tencent/hy4-preview,Hy4 preview,tencent/hy4-preview,160.17,estimated,1.79,GPQA diamond; ProofBench
+upstage/solar-mini4,Solar Mini 4,upstage/solar-mini4,148.40,calibrated,4.54,aa:automationbench; aa:critpt; aa:gdpPdf; aa:gdpvalRating; aa:hle; aa:lcr; aa:mlcr; aa:omniscienceAccuracy; aa:scicode; aa:terminalBench40
+upstage/solar-pro4,Solar Pro 4,upstage/solar-pro4,151.57,estimated,3.69,GPQA diamond
+x-ai/grok-4.20-0309-reasoning,Grok 4.20 (Reasoning),,150.32,estimated,1.12,Chess Puzzles; FrontierMath-Tier-4-v2-Private; FrontierMath-Tiers-1-3-v2-Private; GPQA diamond; OTIS Mock AIME 2024-2025; ProofBench; SimpleQA Verified
+x-ai/grok-4.3,Grok 4.3,x-ai/grok-4.3,149.23,estimated,0.98,Chess Puzzles; DTBench; FrontierMath-Tier-4-v2-Private; FrontierMath-Tiers-1-3-v2-Private; GPQA diamond; LMCA; OTIS Mock AIME 2024-2025; ProofBench; SimpleQA Verified; WeirdML
+x-ai/grok-build-0.1,Grok Build 0.1,x-ai/grok-build-0.1,146.05,calibrated,3.35,vals:vibe-code
+xiaomi/mimo-v2-flash,MiMo-V2-Flash,,147.67,estimated,2.64,GPQA diamond
+xiaomi/mimo-v2.5,MiMo-V2.5,xiaomi/mimo-v2.5,150.95,estimated,2.66,ProofBench
+xiaomi/mimo-v2.5-pro,MiMo-V2.5-Pro,xiaomi/mimo-v2.5-pro,142.66,estimated,1.34,DTBench; GPQA diamond; LMCA; MMLU; ProofBench
+xiaomi/mimo-v2.6-flash,MiMo-V2.6-Flash,xiaomi/mimo-v2.6-flash,158.53,estimated,1.54,ProofBench
+xiaomi/mimo-v2.6-pro,MiMo-V2.6-Pro,xiaomi/mimo-v2.6-pro,159.52,estimated,1.56,APEX-Agents; ProofBench
+z-ai/glm-4.5,GLM 4.5,z-ai/glm-4.5,144.06,estimated,1.79,GPQA diamond; WeirdML
+z-ai/glm-4.5-air,GLM 4.5 Air,z-ai/glm-4.5-air,143.09,estimated,1.88,GPQA diamond; GSO-Bench
+z-ai/glm-4.5v,GLM 4.5V,z-ai/glm-4.5v,134.67,calibrated,4.88,arena:creative_writing; arena:hard_prompts; arena:industry_business_and_management_and_financial_operations; arena:industry_entertainment_and_sports_and_media; arena:industry_life_and_physical_and_social_science; arena:industry_writing_and_literature_and_language; arena:instruction_following; arena:longer_query; arena:multi_turn; arena:vision; arena:vision:diagram; arena:vision:ocr
+z-ai/glm-4.6,GLM 4.6,z-ai/glm-4.6,144.00,estimated,1.36,GPQA diamond; Terminal Bench
+z-ai/glm-4.6v,GLM 4.6V,z-ai/glm-4.6v,138.68,calibrated,4.88,arena:creative_writing; arena:factuality; arena:hard_prompts; arena:industry_business_and_management_and_financial_operations; arena:industry_entertainment_and_sports_and_media; arena:industry_life_and_physical_and_social_science; arena:industry_writing_and_literature_and_language; arena:instruction_following; arena:longer_query; arena:multi_turn; arena:vision; arena:vision:diagram; arena:vision:ocr
+z-ai/glm-4.7-flash,GLM 4.7 Flash,z-ai/glm-4.7-flash,136.83,estimated,1.08,GPQA diamond; OTIS Mock AIME 2024-2025
+z-ai/glm-5.3,GLM 5.3,z-ai/glm-5.3,156.86,estimated,0.69,APEX-Agents; Chess Puzzles; DTBench; FrontierCode; FrontierMath-Tier-4-v2-Private; FrontierMath-Tiers-1-3-v2-Private; FrontierSWE; GPQA diamond; LMCA; Mystery Game Puzzles; OTIS Mock AIME 2024-2025; ProofBench; SimpleQA Verified; WeirdML
+z-ai/glm-5.3-flash,GLM 5.3 Flash,z-ai/glm-5.3-flash,152.40,estimated,0.67,APEX-Agents; ARC-AGI; ARC-AGI-2; Chess Puzzles; FrontierCode; FrontierMath-Tier-4-v2-Private; FrontierMath-Tiers-1-3-v2-Private; FrontierSWE; GPQA diamond; Mystery Game Puzzles; OTIS Mock AIME 2024-2025; ProofBench; Surface Evolver Bench
+z-ai/glm-5v-turbo,GLM 5V Turbo,z-ai/glm-5v-turbo,148.70,calibrated,3.14,arena:creative_writing; arena:document; arena:expert; arena:factuality; arena:factuality:industry_business_and_management_and_financial_operations; arena:hard_prompts; arena:industry_business_and_management_and_financial_operations; arena:industry_entertainment_and_sports_and_media; arena:industry_legal_and_government; arena:industry_life_and_physical_and_social_science; arena:industry_medicine_and_healthcare; arena:industry_writing_and_literature_and_language; arena:instruction_following; arena:longer_query; arena:multi_turn; arena:vision; arena:vision:creative_writing_vision; arena:vision:diagram; arena:vision:homework; arena:vision:ocr; arena:webdev; arena:webdev:image_to_webdev; arena:webdev:webdev-react

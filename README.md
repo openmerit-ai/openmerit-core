@@ -1,42 +1,17 @@
 # OpenMerit
 
-OpenMerit provides Scout guidance for application-model choices: in the browser, from the `openmerit scout` command, and through MCP for Claude Code and Pi.
+OpenMerit finds the right model for your task from measured results on your own labelled examples. This repository holds:
 
-Scout recommends candidates to evaluate. It is not a request router or proof of application-quality improvements.
+- **[`openmerit-core/`](openmerit-core/README.md)**: the `openmerit` npm package. Scout runs on the Pi coding agent, searches benchmark-ranked candidates on your examples and reads results through the Langfuse connector. It has its own lockfile, tests and build.
+- **[`playground/`](playground/README.md)**: Sahra Health, a fictional customer project that uses the published `openmerit` package. It has its own lockfile and checks.
+- **The openmerit.ai website**: the landing page (`site/index.html`), the protected memo (`docs/memo-published.md`, served by `demo/site.ts`) and the Clerk sign-in at `/scout/` (`site/scout/`, served by `demo/web.ts`). `demo/domain-router.mjs` routes the public hosts between them.
 
-## Connect Scout to Claude Code
-
-Run `npx -y openmerit@latest install --client claude-code`, then approve the device in your browser. The command installs the MCP server and shared Scout guidance and checks the connection. New Claude Code sessions can consult Scout before choosing application models. Requires the `claude` CLI on PATH; see [setup, project policy and removal](docs/scout.md#connect-a-coding-agent). Installing the npm package alone makes no agent configuration changes.
-
-## Connect Scout to Pi
-
-The thin Scout adapter supports Pi **1.5.0** through native MCP:
+## Commands
 
 ```sh
-npx -y openmerit@latest install --client pi --scope user
+npm ci && npm run verify                           # website: typecheck, tests, memo and docs checks, build
+(cd openmerit-core && npm ci && npm run check)     # the npm package
+(cd playground && npm ci && npm run check)         # the customer playground
 ```
 
-Approve the matching device code in your browser, then start a new Pi session. Scope defaults to `user`; run with `--scope project` from a project's root for project-only setup. Each client/scope installation has its own key; project credentials stay outside the repository. The installed `openmerit-scout.ts` extension references private configuration and uses Pi's native MCP with the shared Scout rule and skill. Pi owns tools, model, permissions and sessions.
-
-There are no `/openmerit` lifecycle commands, evaluation setup, scheduler, LaunchAgent, or automatic update hooks. To update, explicitly rerun the installer with the same scope. Shell `login`, `logout`, `status`, `remove` and `doctor` support `--client pi --scope user|project`. See [Pi setup and migration](docs/pi-extension.md) for paths, conflicts, old background-job removal, and SDK embedding with `createScoutPiExtension` plus Pi's explicit `createMcpExtension()`.
-
-Package publication and website deployment are separate releases. Pi setup requires OpenMerit 0.1.12 or newer; check the resolved package version when using `@latest`.
-
-## Evaluation CLI retirement — npm 0.3.0
-
-OpenMerit 0.3.0 removes the standalone `openmerit eval` commands, including planning. Existing local evaluation files are not deleted. The old Scout JSON recommendation API went offline with the Scout serving deploy of 5 November 2026. Scout's conversational agent, MCP, coding-agent setup and catalogue publication remain available; see [retirement details](docs/agent-evaluations.md).
-
-## Inference Terminal retirement — npm 0.3.0
-
-OpenMerit 0.3.0 also removes the local Inference Terminal: `openmerit dash`, its `--demo` sample, collectors, repository index and browser interface. Existing `.openmerit/terminal.json`, `.openmerit/inference.jsonl` and application logs are not deleted. Older installed packages keep the command until they are upgraded. See [retirement details](docs/inference-terminal.md).
-
-## Documentation
-
-The [documentation overview](docs/index.md) links the maintained Markdown guides. The unpublished `/docs/` website shell is retired; the live Scout data policy and protected memo have separate builds.
-
-- [Getting started](docs/getting-started.md) and [troubleshooting](docs/troubleshooting.md)
-- [Scout](docs/scout.md) and [Pi adapter](docs/pi-extension.md)
-- [Close the model-selection loop](docs/scout-close-loop.md): consult, measure, import and choose
-- Retired: [Inference Terminal](docs/inference-terminal.md) and [agent evaluations](docs/agent-evaluations.md)
-- [Security and data handling](docs/security.md)
-- [Testing](docs/testing.md) and [current limitations](docs/roadmap.md)
+Deployment and rollback of the website Workers are in [docs/site-deployment.md](docs/site-deployment.md). The memo is described in [docs/site-memo.md](docs/site-memo.md).

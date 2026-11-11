@@ -1,9 +1,9 @@
 {
-  // Node.js project: packages and repository tooling.
+  // Node.js project: repository tooling.
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "allowJs": true,
     "types": ["node"]
   },
-  "include": ["packages/**/*.ts", "scripts/**/*.ts"]
+  "include": ["scripts/**/*.ts"]
 }

@@ -1,6 +1,6 @@
 # TypeScript migration
 
-All first-party JavaScript, including Workers, browser code, tests and deployment tooling, moves to strictly typechecked TypeScript. Generated and vendored output (`dist/`, `site/docs/`, `site/scout/vendor/`, terminal browser bundles) is excluded. Migration happens in stages; this note records the rules and the current state.
+All first-party JavaScript, including Workers, browser code, tests and deployment tooling, moves to strictly typechecked TypeScript. Generated output (`dist/`, the esbuild bundles beside `site/` sources, `demo/memo/generated/`) is excluded. `openmerit-core/` and `playground/` have their own `tsconfig.json` with the same flags. Migration happens in stages; this note records the rules and the current state.
 
 ## Rules
 
@@ -15,16 +15,14 @@ All first-party JavaScript, including Workers, browser code, tests and deploymen
 
 | Project | Runtime | Contents |
 |---|---|---|
-| `tsconfig.json` | Node.js | `packages/**/*.ts`, `scripts/**/*.ts` |
-| `tsconfig.build.json` | Node.js emit | Package sources compiled into `dist/` |
-| `tsconfig.scout.json` | Scout Worker and its Node.js tests | `scout/**/*.ts`; D1 and R2 use small structural interfaces until Worker runtime types are committed |
-| `email/tsconfig.json` | Email forwarding Worker and its Node.js test | `email/*.ts`; the inbound message is a small structural interface |
+| `tsconfig.json` | Node.js | `scripts/**/*.ts` |
+| `tsconfig.site.json` | Website Workers, their Node.js tests and browser scripts | `demo/**/*.ts` (memo, web Worker, public-site boundary) and the `site/` browser sources; bindings use small structural interfaces until Worker runtime types are committed |
 
 Each Worker gets its own project when its first TypeScript file lands, because generated Worker types declare one global `Cloudflare.Env` per Worker. A browser project arrives with the first browser module.
 
 ## Worker binding types
 
-`npm run types:workers` writes binding types for each Wrangler configuration into `types/cloudflare/`, using interfaces `SiteEnv`, `DomainRouterEnv`, `ScoutServingEnv`, `ScoutPublisherEnv`, `EmailEnv` and `TerminalPreviewEnv`. CI's `worker-types` job runs `npm run check:worker-types` and fails when a configuration changes without regenerated types. Each `wrangler types` run takes about a minute, so it stays out of `npm run verify`.
+`npm run types:workers` writes binding types for each Wrangler configuration into `types/cloudflare/`, using interfaces `SiteEnv`, `DomainRouterEnv` and `ScoutServingEnv`. CI's `worker-types` job runs `npm run check:worker-types` and fails when a configuration changes without regenerated types. Each `wrangler types` run takes about a minute, so it stays out of `npm run verify`.
 
 Runtime types (about 600 KB per compatibility date) are not committed yet. They are generated for a Worker's project when that Worker migrates. Secrets are not part of the configuration, so each Worker declares its secret names next to its entry point.
 
@@ -35,14 +33,11 @@ One boundary, such as a directory or a Worker, per pull request, with no behavio
 1. Format the files, if needed, in a separate commit.
 2. `git mv` each `.mjs` to `.ts` and update imports, in a separate commit so history follows the rename.
 3. Add types until `npm run typecheck` passes, then `npm run check:typescript -- --update`.
-4. Run `npm run verify`. Also run the boundary's extra checks: `npm pack --dry-run` file lists for the package, `wrangler deploy --dry-run --outdir` bundles for Workers, and built-asset comparisons for browser code.
+4. Run `npm run verify`. Also run the boundary's extra checks: `wrangler deploy --dry-run --outdir` bundles for Workers and built-asset comparisons for browser code.
 
 ## Order
 
 1. **Baseline (done):** strict shared configuration, ratchet, pinned Wrangler, generated binding types.
-2. **Tooling and routers:** `scripts/`, `demo/domain-router.mjs`, and the deployment wrapper.
-3. **Scout:** becomes a workspace package, split into domain, storage, HTTP and analytics modules.
-4. **Package:** the `openmerit` CLI.
-5. **Browser and demo:** `site/`, with an esbuild step. The JavaScript baseline reaches zero.
-
-The test safety net (API/MCP contract tests and browser smoke tests) lands before the Scout stage.
+2. **Scout and the old package (removed, 10 November 2026):** the Scout Workers and the former `openmerit` CLI left the repository; `openmerit-core/` is TypeScript from the start.
+3. **Tooling and routers:** `scripts/build-memo.mjs`, `scripts/build-scout.mjs`, `demo/domain-router.mjs` and `demo/domain-migration.mjs` with its test.
+4. **Memo views:** `demo/memo/views.mjs`. The JavaScript baseline reaches zero.

@@ -1,212 +1,41 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Sign in to OpenMerit.">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
-  <meta name="description" content="Scout is OpenMerit's model search agent. Describe your task and get model recommendations.">
-  <title>Scout by OpenMerit</title>
+  <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#171915" media="(prefers-color-scheme: dark)">
+  <meta name="robots" content="noindex">
+  <title>Sign in · OpenMerit</title>
   <link rel="canonical" href="https://openmerit.ai/scout/">
-  <meta property="og:type" content="website">
-  <meta property="og:title" content="Scout by OpenMerit">
-  <meta property="og:description" content="Scout is OpenMerit's model search agent. Describe your task and get model recommendations.">
-  <meta property="og:url" content="https://openmerit.ai/scout/">
-  <meta property="og:site_name" content="OpenMerit">
-  <meta property="og:image" content="https://openmerit.ai/scout/scout-og.png">
-  <meta property="og:image:type" content="image/png">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Scout by OpenMerit. One task branches into five model candidates along colored paths on a graphite background.">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Scout by OpenMerit">
-  <meta name="twitter:description" content="Scout is OpenMerit's model search agent. Describe your task and get model recommendations.">
-  <meta name="twitter:image" content="https://openmerit.ai/scout/scout-og.png">
-  <meta name="twitter:image:alt" content="Scout by OpenMerit. One task branches into five model candidates along colored paths on a graphite background.">
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/scout/scout.css">
-  <link rel="stylesheet" href="/scout/table.css">
-  <link rel="stylesheet" href="/scout/chat.css">
-  <link rel="stylesheet" href="/scout/onboarding.css">
-  <script src="/scout/scout.js" type="module"></script>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preload" href="/assets/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css?v=20261110-sign-in-v1">
+  <script src="/scout/sign-in.js?v=20261110-v1" type="module"></script>
 </head>
-<body class="scout-page onboarding-active">
-  <div id="onboarding" class="onboarding" data-step="0" hidden>
-    <section class="welcome-dialog" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-description">
-    <div class="welcome-content">
-      <div class="welcome-copy">
-        <p id="welcome-eyebrow" class="welcome-eyebrow" hidden></p>
-        <h2 id="welcome-title" class="sr-only" tabindex="-1"><span>Scout beta</span></h2>
-        <p id="welcome-description" class="welcome-description">Hello, we’re building Scout, OpenMerit’s model search agent. This is an early beta.</p>
+<body class="landing-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="letter-header">
+    <a class="brand" href="/" aria-label="OpenMerit home">
+      <svg class="brand-mark" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg>
+      <span>openmerit</span>
+    </a>
+    <nav aria-label="Primary navigation"><a href="/memo/">Memo</a><div id="user-account" aria-label="Your account" hidden></div></nav>
+  </header>
+  <main id="main" class="letter-main">
+    <section aria-labelledby="sign-in-title">
+      <h1 id="sign-in-title" class="sr-only">Sign in</h1>
+      <div class="letter-copy">
+        <p id="sign-in-status" role="status">Sign in to your OpenMerit account.</p>
       </div>
-      <div class="welcome-stage">
-        <figure id="welcome-note" class="welcome-figure">
-          <div class="beta-note">
-            <p>We’d love your help shaping it. Tell us what’s useful, what’s confusing, and what could be better.</p>
-            <p>Thank you.</p>
-            <p class="beta-signature">— Lazim &amp; Praveen</p>
-          </div>
-        </figure>
-        <figure id="welcome-intro" class="welcome-figure" hidden>
-          <div class="coverage-preview">
-            <div class="coverage-logos" role="img" aria-label="Including OpenAI, Anthropic, Google, Meta, Mistral, DeepSeek and Hugging Face">
-              <span><img src="/scout/providers/openai.png" width="28" height="28" alt=""></span>
-              <span><img src="/scout/providers/anthropic.png" width="28" height="28" alt=""></span>
-              <span><img src="/scout/providers/google.png" width="28" height="28" alt=""></span>
-              <span><img src="/scout/providers/meta.ico" width="28" height="28" alt=""></span>
-              <span><img src="/scout/providers/mistral.png" width="28" height="28" alt=""></span>
-              <span><img src="/scout/providers/deepseek.ico" width="28" height="28" alt=""></span>
-              <span><img src="/scout/providers/huggingface.svg" width="28" height="28" alt=""></span>
-            </div>
-            <p class="coverage-caption">A wider view of what’s possible.</p>
-            <div class="coverage-detail">
-              <p id="welcome-coverage-summary">Models, benchmarks and source-linked research.</p>
-              <dl id="welcome-coverage" class="coverage-metrics" hidden>
-                <div><dt>Indexed models</dt><dd id="welcome-model-count"></dd></div>
-                <div><dt>Benchmarked labs</dt><dd id="welcome-lab-count"></dd></div>
-                <div><dt>Benchmarks</dt><dd id="welcome-benchmark-count"></dd></div>
-                <div><dt>Source feeds</dt><dd id="welcome-source-count"></dd></div>
-              </dl>
-              <p id="welcome-hub-count" class="coverage-hub" hidden></p>
-            </div>
-          </div>
-        </figure>
-        <figure id="welcome-stack" class="welcome-figure" hidden>
-          <div class="stack-preview" role="img" aria-label="Scout recommends before you build, based on the endpoints you share. Separately, your app calls your provider or router to run your chosen model. Scout is not in that inference path. This illustration does not connect or configure a provider.">
-            <div class="stack-advice">
-              <span class="stack-scout-icon"><svg width="26" height="28" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg></span>
-              <div><p class="stack-kicker">Before you build</p><p class="stack-advice-title">Scout recommends.</p><p class="stack-advice-description">Your task. The endpoints you share.</p></div>
-              <svg class="stack-check" width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 10 3 3 7-7"/></svg>
-            </div>
-            <div class="stack-runtime">
-              <p class="stack-kicker">When your app runs</p>
-              <div class="stack-path">
-                <div class="stack-node"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m8 10 2 2-2 2m5 0h3"/></svg><span>Your app</span></div>
-                <svg class="stack-arrow" width="24" height="20" viewBox="0 0 24 20" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 10h19m-5-5 5 5-5 5"/></svg>
-                <div class="stack-node"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01M12 10v4"/></svg><span>Your provider<br>or router</span></div>
-                <svg class="stack-arrow" width="24" height="20" viewBox="0 0 24 20" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 10h19m-5-5 5 5-5 5"/></svg>
-                <div class="stack-node"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 9 8-4.5m-8 4.5L4 7.5M12 12v9"/></svg><span>Your chosen<br>model</span></div>
-              </div>
-              <p class="stack-runtime-note">No Scout in the middle.</p>
-            </div>
-          </div>
-        </figure>
-        <figure id="welcome-product" class="welcome-figure" hidden>
-          <div class="product-preview" role="img" aria-label="Illustrative Scout conversation: a task about support tickets followed by a five-model comparison. These are example values, not a live recommendation.">
-            <div class="preview-chrome"><svg width="50" height="12" viewBox="0 0 50 12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="#ff5f57"/><circle cx="23" cy="6" r="5" fill="#febc2e"/><circle cx="40" cy="6" r="5" fill="#28c840"/></svg></div>
-            <div class="preview-conversation">
-              <div class="preview-prompt">Summarize support tickets and tag each one with a category.</div>
-              <div class="preview-response">
-                <span class="preview-scout"><svg width="16" height="18" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg> Scout</span>
-                <div class="preview-table">
-                  <div class="preview-table-head"><span>Model</span><span>Quality <small>estimate / 100</small></span><span>Input <small>$ / 1M tokens</small></span></div>
-                  <div><span><img src="/scout/providers/anthropic.png" width="16" height="16" alt="">Claude Haiku 4.5</span><span>86</span><span>$1.00</span></div>
-                  <div><span><img src="/scout/providers/google.png" width="16" height="16" alt="">Gemini 2.5 Flash</span><span>84</span><span>$0.30</span></div>
-                  <div><span><img src="/scout/providers/openai.png" width="16" height="16" alt="">GPT-4.1 mini</span><span>83</span><span>$0.40</span></div>
-                  <div><span><img src="/scout/providers/deepseek.ico" width="16" height="16" alt="">DeepSeek V3.2</span><span>82</span><span>$0.28</span></div>
-                  <div><span><img src="/scout/providers/google.png" width="16" height="16" alt="">Gemma 3 12B</span><span>78</span><span>$0.04</span></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </figure>
-        <figure id="welcome-claude" class="welcome-figure" hidden>
-          <div class="claude-preview">
-            <div class="preview-chrome"><img src="/scout/agents/claude.png" width="18" height="18" alt=""><span>Claude Code</span></div>
-            <p class="claude-request">A model decision, in the flow of work.</p>
-            <a class="claude-capture" href="/scout/onboarding/claude-code.webp" target="_blank" rel="noreferrer" aria-label="Open the Claude Code screenshot excerpts at full size"><img src="/scout/onboarding/claude-code.webp" width="1480" height="334" alt="Two cropped excerpts from a Claude Code session: the Scout tool call and a recommendation explaining its cost and unmeasured latency." loading="lazy"></a>
-            <blockquote class="claude-excerpt">“I recommend Google Gemma 3 12B … Its speed hasn’t been measured, so the under-five-second goal is not confirmed.”</blockquote>
-            <div class="claude-steps"><p><span>01</span> Connect Scout once.</p><p><span>02</span> Ask as you build.</p></div>
-          </div>
-        </figure>
+      <div class="letter-actions">
+        <button id="sign-in" class="letter-cta" type="button">Sign in</button>
       </div>
-      <div class="welcome-bottom">
-        <div class="welcome-actions">
-          <div class="welcome-progress" role="group" aria-label="Introduction screens">
-            <button type="button" data-welcome-step="0" aria-label="Screen 1: Scout beta" aria-current="step"><span></span></button>
-            <button type="button" data-welcome-step="1" aria-label="Screen 2: Introducing Scout" disabled><span></span></button>
-            <button type="button" data-welcome-step="2" aria-label="Screen 3: Your existing stack" disabled><span></span></button>
-            <button type="button" data-welcome-step="3" aria-label="Screen 4: Find your model" disabled><span></span></button>
-            <button type="button" data-welcome-step="4" aria-label="Screen 5: Scout in Claude Code" disabled><span></span></button>
-          </div>
-          <button id="welcome-next" class="welcome-next" type="button"><span id="welcome-next-label">Continue</span><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5"/></svg></button>
-        </div>
-        <p id="welcome-error" class="welcome-error" role="alert" hidden></p>
-      </div>
-    </div>
+      <p id="sign-in-error" class="sign-in-error" role="alert" hidden></p>
+      <noscript><p class="sign-in-error">Enable JavaScript to sign in.</p></noscript>
     </section>
-  </div>
-  <noscript><p class="welcome-error">Enable JavaScript to continue and sign in to Scout.</p></noscript>
-  <a class="skip-link" href="#prompt" hidden>Skip to message</a>
-  <div id="scout-app" class="scout-wrap agent-page" inert aria-busy="true">
-    <header class="scout-header">
-      <div class="header-inner">
-        <a class="scout-brand" href="/scout/"><span class="scout-wordmark">Scout</span> <span class="beta-label">Beta</span></a>
-        <div class="account-controls"><button id="sign-in" class="sign-in-button" type="button">Sign in</button><div id="user-account" aria-label="Your account" hidden></div></div>
-        <button id="new-conversation" class="secondary-button" type="button" aria-label="New conversation" title="New conversation" hidden>
-          <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>
-          <span>New</span>
-        </button>
-      </div>
-    </header>
-    <section class="scout-intro" aria-labelledby="agent-title">
-      <div class="intro-copy">
-        <h1 id="agent-title">Find the right AI models for your task.</h1>
-        <p>Describe your task. Get model recommendations.</p>
-        <div class="index-coverage">
-          <div class="lab-stack" role="img" aria-label="Including OpenAI, Anthropic, Google, Meta, Mistral, DeepSeek and Hugging Face">
-            <span><img src="/scout/providers/openai.png" width="16" height="16" alt=""></span>
-            <span><img src="/scout/providers/anthropic.png" width="16" height="16" alt=""></span>
-            <span><img src="/scout/providers/google.png" width="16" height="16" alt=""></span>
-            <span><img src="/scout/providers/meta.ico" width="16" height="16" alt=""></span>
-            <span><img src="/scout/providers/mistral.png" width="16" height="16" alt=""></span>
-            <span><img src="/scout/providers/deepseek.ico" width="16" height="16" alt=""></span>
-            <span><img src="/scout/providers/huggingface.svg" width="16" height="16" alt=""></span>
-          </div>
-          <div id="index-counts" class="index-counts" hidden></div>
-        </div>
-        <div class="claude-setup">
-          <button id="add-to-claude" class="secondary-button claude-setup-button" type="button" aria-describedby="claude-setup-status"><img src="/scout/agents/claude.png" width="18" height="18" alt="">Add to Claude Code</button>
-          <p id="claude-setup-status" class="claude-setup-status" role="status" hidden></p>
-          <button id="add-to-pi" class="secondary-button claude-setup-button" type="button" aria-describedby="pi-setup-status"><img src="/assets/pi-logo.svg" width="18" height="18" alt="">Add to Pi</button>
-          <p id="pi-setup-status" class="claude-setup-status" role="status" hidden></p>
-        </div>
-      </div>
-    </section>
-    <main class="chat-panel" id="main" aria-label="Chat with Scout">
-      <ol id="conversation" class="conversation" aria-label="Conversation" aria-live="polite" tabindex="0"></ol>
-      <section id="chat-examples" class="chat-examples" aria-labelledby="examples-title">
-        <div class="example-tasks">
-          <h2 id="examples-title">Try these</h2>
-          <button type="button" data-example-task="0">Summarize customer support tickets and tag each one with a category.</button>
-          <button type="button" data-example-task="1">Extract invoice dates, line items and totals into JSON.</button>
-          <button type="button" data-example-task="2">Find products in photos and identify their category.</button>
-        </div>
-      </section>
-      <p class="error-message" id="error" role="alert" hidden></p>
-      <form id="composer" class="prompt-box composer">
-        <label for="prompt" id="prompt-label" class="sr-only">Describe your work</label>
-        <div class="prompt-field">
-          <textarea id="prompt" name="prompt" rows="3" maxlength="4000" spellcheck="false" aria-describedby="prompt-hint" placeholder="Summarize customer support tickets and tag each one with a category."></textarea>
-          <span id="prompt-hint" class="sr-only">Shift + Enter for a new line.</span>
-          <div class="prompt-footer">
-            <button class="find-button" type="submit" title="Send"><span class="sr-only">Send</span><svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-          </div>
-        </div>
-      </form>
-      <noscript><p class="error-message">Enable JavaScript to talk to Scout.</p></noscript>
-    </main>
-    <footer class="scout-footer">
-      <button class="update-notice" id="update-notice" type="button" hidden>A new version of Scout is available. Refresh to update.</button>
-      <div class="footer-meta">
-        <a href="/scout/data-policy/">Data policy <span aria-hidden="true">↗</span></a>
-        <a href="/scout/privacy/">Privacy &amp; analytics</a>
-        <span>Scout by OpenMerit</span>
-      </div>
-      <a class="parent-brand" href="/" aria-label="OpenMerit home"><svg width="22" height="25" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span>openmerit</span></a>
-    </footer>
-  </div>
-  <p class="sr-only" id="announcement" role="status" aria-live="polite"></p>
+  </main>
 </body>
 </html>

@@ -36,6 +36,6 @@ jobs:
           echo "merged=true" >> "$GITHUB_OUTPUT"
       - name: Run CI on main
         # Pushes made with GITHUB_TOKEN start no workflows, and scripts/deploy.ts needs
-        # verify and package-smoke results on the main commit.
+        # a verify result on the main commit.
         if: steps.merge.outputs.merged == 'true'
         run: gh workflow run ci.yml --ref main
