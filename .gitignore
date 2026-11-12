@@ -1,12 +1,7 @@
 node_modules/
 dist/
 site/memo/
-site/scout/data-policy/
-site/scout/vendor/
-site/scout/privacy/privacy.js
-site/scout/scout.js
-site/scout/onboarding.js
-site/connect/langfuse.js
+site/scout/sign-in.js
 site/memo-access.js
 demo/memo/generated/
 site/assets/video-player.js

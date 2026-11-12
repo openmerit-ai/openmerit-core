@@ -1,0 +1,11 @@
+export { rankCandidates, rank, openRouterToolSupport, type Candidate, type CandidateFilter, type RunnableModel } from "./scout/candidates.ts";
+export { loadEci, parseEciScores, ECI_ATTRIBUTION, type EciRow, type EciSource } from "./scout/eci.ts";
+export { scoutSearch, CandidateUnavailable, outward, compareFinals, meanCost, SAMPLE_SIZE, FINALISTS, type EvalItem, type Evaluate, type Outcome, type SearchOptions, type SearchResult, type Stage, type Trial } from "./scout/search.ts";
+export { runScout, type ScoutReport, type ScoutRunOptions, type FinalVerdict, type DatasetSource } from "./scout/pipeline.ts";
+export { reportMarkdown } from "./scout/report.ts";
+export { piEvaluator, jsonMatches, extractJson, type Grader, type ModelCaller, type PiTaskSpec } from "./scout/evaluators/pi.ts";
+export { loadEvaluatorPlugin, type EvaluatorPlugin } from "./scout/evaluators/module.ts";
+export * as scout from "./scout/service.ts";
+export { createScoutExtension, type ScoutExtensionOptions } from "./pi/extension.ts";
+export { configureHarness } from "./pi/harness.ts";
+export * as langfuse from "./connectors/langfuse/index.ts";

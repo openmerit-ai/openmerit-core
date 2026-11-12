@@ -1,5 +1,5 @@
 import { withPrimaryDomain } from './domain-migration.mjs';
-import { publicSiteResponse } from '../scout/public-site.mjs';
+import { publicSiteResponse } from './public-site.ts';
 
 const siteHosts = new Set(['openmerit.ai', 'www.openmerit.ai', 'openmerit.site', 'www.openmerit.site']);
 const memoAssets = new Set(['/memo.css', '/memo-access.css', '/memo-access.js']);

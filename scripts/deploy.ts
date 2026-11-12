@@ -20,9 +20,7 @@ interface Worker {
 const workers: Readonly<Record<string, Worker>> = {
   "domain-router": { config: "wrangler.domains.jsonc" },
   "scout-serving": { config: "wrangler.scout-alpha.jsonc" },
-  "scout-publisher": { config: "wrangler.scout.jsonc" },
   "playground-claims": { config: "playground/wrangler.jsonc" },
-  email: { config: "wrangler.email.jsonc" },
   site: {
     config: "wrangler.jsonc",
   },
@@ -60,7 +58,7 @@ async function deploy(key: string, flags: readonly string[]): Promise<void> {
   run("git", ["fetch", "--quiet", "origin", "main"]);
   const commit = run("git", ["rev-parse", "HEAD"]).trim();
   if (!succeeds("git", ["merge-base", "--is-ancestor", commit, "origin/main"])) fail(`HEAD ${commit.slice(0, 12)} is not on origin/main. Merge the change before deploying it.`);
-  requireGreenCI(commit, key === "playground-claims" ? ["verify", "package-smoke", "playground"] : ["verify", "package-smoke"]);
+  requireGreenCI(commit, key === "playground-claims" ? ["verify", "playground"] : ["verify"]);
 
   const subject = run("git", ["log", "-1", "--format=%s", commit]).trim();
   console.log(`Deploying ${name} from ${worker.config} at ${commit.slice(0, 12)} (${subject}).`);
@@ -122,17 +120,6 @@ async function status(): Promise<void> {
     });
     console.log(`${key} (${name}, ${worker.config})${worker.blocked ? " [deploy blocked]" : ""}\n  deployed ${deployment.created_on}\n${lines.join("\n")}`);
   }
-  // The publisher's health is visible only through the serving catalogue.
-  const response = await fetch("https://openmerit.ai/scout/api/status", { headers: { "user-agent": "openmerit-deploy-status" } });
-  const catalogue = response.ok ? (await response.json()) as Readonly<Record<string, unknown>> : undefined;
-  if (!catalogue) {
-    console.log(`\nScout catalogue: status request failed with HTTP ${response.status}.`);
-    return;
-  }
-  // degraded means a source failed even while refreshStatus is idle and retained data is fresh.
-  const healthy = catalogue["refreshStatus"] !== "failed" && catalogue["stale"] !== true && catalogue["degraded"] !== true;
-  console.log(`\nScout catalogue${healthy ? "" : " [WARNING]"}: refresh ${String(catalogue["refreshStatus"])}, stale ${String(catalogue["stale"])}, degraded ${String(catalogue["degraded"])}, last attempt ${String(catalogue["lastAttemptAt"])}, snapshot ${String(catalogue["snapshotVersion"])}`);
-  if (typeof catalogue["refreshError"] === "string") console.log(`  ${catalogue["refreshError"]}`);
 }
 
 function requireGreenCI(commit: string, required: readonly string[]): void {

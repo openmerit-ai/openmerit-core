@@ -6,7 +6,7 @@ import MarkdownIt from 'markdown-it';
 import {memo} from './memo.config.ts';
 
 const root = resolve(import.meta.dirname, '..'), site = join(root, 'site');
-const pages = await Promise.all(['/', '/scout/', '/scout/data-policy/', '/memo/'].map(async url => ({url, text: await readFile(join(site, url, 'index.html'), 'utf8')})));
+const pages = await Promise.all(['/', '/scout/', '/memo/'].map(async url => ({url, text: await readFile(join(site, url, 'index.html'), 'utf8')})));
 
 test('live pages keep valid links, unique section IDs and device-driven appearance', async () => {
   for (const page of pages) {
@@ -26,13 +26,6 @@ test('live pages keep valid links, unique section IDs and device-driven appearan
       if (url.hash && path.endsWith('.html')) assert.ok((await readFile(path, 'utf8')).includes(`id="${decodeURIComponent(url.hash.slice(1))}"`), `${page.url}: ${url.href}`);
     }
   }
-});
-
-test('policy Markdown matches its maintained source; docs shell stays absent', async () => {
-  assert.equal(await readFile(join(site, 'scout/data-policy/source.md'), 'utf8'), await readFile(join(root, 'docs/scout-data-policy.md'), 'utf8'));
-  await assert.rejects(stat(join(site, 'docs')), {code: 'ENOENT'});
-  const policy = pages.find(page => page.url === '/scout/data-policy/')!.text;
-  assert.doesNotMatch(policy, /docs-search|docs-sidebar|docs\.js|product-analytics\.js/);
 });
 
 test('memo publishes only its gate, not the protected article or Markdown', async () => {

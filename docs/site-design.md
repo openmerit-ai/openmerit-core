@@ -2,24 +2,6 @@
 
 Domain operations: see the [primary domain migration](site-domain-migration.md) for current routing, email, auth, and deployment constraints. Historical publication records below retain their original domains.
 
-## Langfuse connection layout — unreleased source
-
-The connection page separates instructions, connection status, credentials,
-advanced mappings and data controls with consistent spacing. Rounded buttons
-retain the site's light/dark theme, with 44px touch targets and stacked primary
-actions on narrow screens. Advanced mappings have a visible expand/collapse
-indicator. The unmodified monochrome Langfuse icon in
-`site/assets/langfuse-logo.svg` comes from the
-[official brand library](https://langfuse.com/brand); it identifies the integration,
-not an endorsement. Authentication and connector permissions are unchanged.
-
-The coding-agent connection card shares the same rounded, borderless button
-styles for Continue, approval, denial and device revocation. The code field uses
-a soft inset surface; narrow layouts stack Continue and approval actions rather
-than squeezing them beside the field. Device names and last-used dates are
-separated for readability. These presentation changes do not alter device
-approval, denial, key collection or revocation behavior.
-
 ## OpenMerit logo default — unreleased source
 
 The nested-arches mark already used on Scout is the default OpenMerit logo. The homepage, generated documentation and data policy, memo article and access-page templates, retained engineering article and favicon use the same SVG geometry and rounded strokes. Existing wordmarks, page typography, layout and theme colors are unchanged. Generated pages are updated through their generators, not edited directly. This source change does not publish retired routes or deploy the protected memo Worker; that Worker remains blocked until its newer production source is reconciled.
@@ -104,16 +86,6 @@ The final encode fully decoded without errors. `npm run verify` passed using
 Node 22.19.0 and `TMPDIR=/private/tmp`; the default macOS symlinked temporary
 path exposes an existing updater-entry test failure unrelated to this player.
 
-## Scout setup analytics default — source only, 25 October 2026
-
-The homepage's copied/deep-linked command now starts with `npx`, without
-`DO_NOT_TRACK=1` or an analytics-enabling prefix. Scout setup analytics defaults
-on in the source installer; terminal/evaluation analytics stay opt-in. Explicit
-opt-outs remain supported, including Scout's privacy-aware handoff. The homepage
-still generates no browser setup ID. Publish the updated npm installer before
-deploying these prompts; neither release is implied by local checks. See the
-[setup contract](scout.md#scout-setup-analytics-default-version-0110).
-
 ## Homepage scope note removal — published 25 October 2026
 
 The owner requested removal of the scope note below the Claude setup CTA.
@@ -176,7 +148,7 @@ runtime errors. Both default layouts were captured and inspected. Native Claude
 launch, completed installation and authenticated Scout/memo flows were not
 exercised by this homepage deployment check.
 
-The website lives in `site/`. The homepage is plain HTML, CSS and TypeScript-built browser scripts. The unpublished documentation shell is retired in source; `npm run build:site` builds only the live Scout policy and protected memo, keeping product guides as Markdown. The former guided demo and its container were removed by the first cleanup. Follow [deployment maintenance](site-deployment.md) rather than the historical publication instructions below.
+The website lives in `site/`. The homepage is plain HTML, CSS and TypeScript-built browser scripts. The unpublished documentation shell is retired in source; `npm run build:site` builds the protected memo and the browser scripts. Scout, its data policy and `/connect/` were removed from source on 10 November 2026; `/scout/` is now the Clerk sign-in page, which reuses the homepage header and styles, and the homepage's Scout links lead to it. The former guided demo and its container were removed by the first cleanup. Follow [deployment maintenance](site-deployment.md) rather than the historical publication instructions below.
 
 The playback-only revision is published as Worker `31c181c9-c083-4eb4-85a4-f47516eba877`, build `demo-20260928-fieldkit-v1`. It removes live sandbox controls, disables public session creation, adds a dedicated Demo documentation group, and adds the six-task Field kit recording. Each of the five examples has a persistent two-sentence description below its tabs. Both Field kit paths already use six distinct models; five assignments change while the feasibility model is retained. The recorded comparison shows 22% lower observed cost and 13% lower mean latency, with 4/4 evaluation and 4/4 separate verification goals passing. The deployment history below describes earlier published behavior.
 
@@ -208,7 +180,6 @@ Production verification: 54 URLs across both domains match the checked local fil
 ## Assets
 
 - The self-hosted Inter Latin variable font comes from Google Fonts. Its SIL Open Font License is included at `site/assets/inter-LICENSE.txt`.
-- The “Works with pi” link uses Pi’s unmodified [official primary SVG](https://pi.dev/logo.svg), downloaded from its [press kit](https://pi.dev/press-kit) to `site/assets/pi-logo.svg`, and links to https://pi.dev/.
 - The 1200 × 630 PNG social card contains only “Good models prove themselves in the work.” and a matching miniature workshop illustration. Open Graph and Twitter metadata reference `site/assets/openmerit-og-v1.png`; see [the generation prompt and asset provenance](site-og-image.md).
 
 ## Full-site publication, September 28, 2026

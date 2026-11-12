@@ -1,0 +1,10 @@
+{
+  // Website Workers (memo, web, domain router), their Node.js tests and the browser scripts.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "allowJs": true,
+    "types": ["node"]
+  },
+  "include": ["demo/**/*.ts", "site/memo-access.ts", "site/scout/sign-in.ts", "site/video-player.ts", "site/thread-rule.ts", "site/speed-egg.ts"]
+}

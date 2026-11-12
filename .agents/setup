@@ -45,20 +45,18 @@ npm_auth='//registry.npmjs.org/:_authToken=${NPM_TOKEN}'
 grep -Fqx "$npm_auth" "$HOME/.npmrc" 2>/dev/null || echo "$npm_auth" >> "$HOME/.npmrc"
 
 # npm ci always deletes node_modules, so a stale snapshot would reinstall everything.
-# Skip it when the manifests, lockfile and Node.js version match the last install;
+# Skip it when the manifest, lockfile and Node.js version match the last install;
 # the marker lives inside node_modules so it disappears with it.
 deps_marker=node_modules/.orb-setup-fingerprint
 deps_fingerprint="$(
   {
     node --version
-    cat package-lock.json package.json packages/*/package.json
+    cat package-lock.json package.json
   } | sha256sum | cut -d' ' -f1
 )"
 if [[ -d node_modules && "$(cat "$deps_marker" 2>/dev/null)" == "$deps_fingerprint" ]]; then
-  # The checkout may be newer than the snapshot; rebuild dist/ as npm ci's prepare would.
-  step "npm run build (dependencies unchanged)" npm run build
+  echo "npm dependencies unchanged"
 else
-  # npm ci also runs the prepare script, which builds dist/.
   step "npm ci" npm ci --prefer-offline --no-audit --no-fund
   echo "$deps_fingerprint" > "$deps_marker"
 fi

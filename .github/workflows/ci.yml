@@ -35,7 +35,7 @@ jobs:
       - run: npm run check:worker-types
 
   # The Sahra Health customer playground: its own lockfile, the published openmerit package, no
-  # model calls. Kept out of `npm run verify` and the npm package.
+  # model calls. Kept out of `npm run verify`.
   playground:
     runs-on: ubuntu-latest
     defaults:
@@ -51,41 +51,19 @@ jobs:
       - run: npm ci
       - run: npm run check
 
-  package-smoke:
+  # The openmerit npm package: its own lockfile, typecheck, tests and build. No model calls.
+  openmerit-core:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: openmerit-core
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22.19.0
           cache: npm
+          cache-dependency-path: openmerit-core/package-lock.json
       - run: npm ci
-      - name: Install and load the npm artifact
-        shell: bash
-        run: |
-          package_file="$(npm pack --silent)"
-          package_root="$(mktemp -d)"
-          npm install --prefix "$package_root" "./$package_file"
-          cat > "$package_root/smoke.mjs" <<'EOF'
-          import assert from "node:assert/strict";
-          import extension from "openmerit/pi";
-          assert.equal(typeof extension, "function");
-          EOF
-          node "$package_root/smoke.mjs"
-          # Claude Code auto-updates copy the shipped updater; it must exist in the package.
-          cat > "$package_root/updates-smoke.mjs" <<'EOF'
-          import assert from "node:assert/strict";
-          import { mkdtemp, readFile } from "node:fs/promises";
-          import { tmpdir } from "node:os";
-          import { join } from "node:path";
-          const updater = new URL("./node_modules/openmerit/dist/terminal/src/updates.js", import.meta.url);
-          const { configureUpdates, updatePaths } = await import(updater);
-          const base = await mkdtemp(join(tmpdir(), "claude-"));
-          await configureUpdates(base, "user", {}, "0.0.0", true);
-          assert.equal(await readFile(updatePaths(base, "user").runner, "utf8"), await readFile(updater, "utf8"));
-          EOF
-          node "$package_root/updates-smoke.mjs"
-          "$package_root/node_modules/.bin/openmerit" --help | grep -q "openmerit scout"
-          ./node_modules/.bin/pi --no-session \
-            -e "$package_root/node_modules/openmerit/dist/pi/src/index.js" \
-            --list-models > /dev/null
+      - run: npm run check
+      - run: npm run build

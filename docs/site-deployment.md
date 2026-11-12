@@ -5,7 +5,7 @@ Every production deploy needs the owner's explicit approval (see `AGENTS.md`). T
 ## Deploying
 
 ```sh
-npm run deploy:status                      # read-only: live versions and catalogue health
+npm run deploy:status                      # read-only: live versions
 npm run deploy -- <worker> --dry-run       # build and check without uploading
 npm run deploy -- <worker>                 # asks you to type "deploy"
 ```
@@ -14,7 +14,7 @@ npm run deploy -- <worker>                 # asks you to type "deploy"
 
 - the checkout has no uncommitted or untracked files;
 - `HEAD` is on `origin/main`;
-- the `verify` and `package-smoke` CI checks passed for that commit.
+- the `verify` CI check passed for that commit.
 
 The `playground-claims` target also requires its `playground` CI check and uses
 the Wrangler pinned in `playground/node_modules`; run `npm ci` in `playground/`
@@ -23,46 +23,20 @@ backfill historical Langfuse data.
 
 It runs the pinned Wrangler with `--strict`, which stops if someone changed the Worker in the dashboard. It tags the new version with the commit's short SHA, and the version message includes the commit subject. A receipt is written to `.deploys/<worker>/<time>.json` (ignored by Git). The receipt records the versions before and after the deploy and the exact rollback command. Pass `--yes` only when a non-interactive run has the owner's approval.
 
-`deploy:status` lists the live versions of every Worker. For each tagged version, it shows how far it is behind `origin/main`. "Untagged" means the version was deployed outside the wrapper. The report ends with the Scout catalogue's refresh state. The publisher also reports every refresh run to PostHog; see [Refresh monitoring](#refresh-monitoring).
+`deploy:status` lists the live versions of every Worker. For each tagged version, it shows how far it is behind `origin/main`. "Untagged" means the version was deployed outside the wrapper.
 
 | Key | Worker | Config | Serves |
 |---|---|---|---|
 | `domain-router` | `openmerit-domains` | `wrangler.domains.jsonc` | Every public host; redirects; `/memo` to `openmerit-site` |
-| `scout-serving` | `openmerit-scout-alpha` | `wrangler.scout-alpha.jsonc` | Landing page, `/scout/`, `/connect/`, `/playground/scout/` |
-| `scout-publisher` | `openmerit-scout` | `wrangler.scout.jsonc` | Catalogue refresh, twice a day (00:07 and 12:07 UTC). Validate collection in isolation before each release |
+| `scout-serving` | `openmerit-scout-alpha` | `wrangler.scout-alpha.jsonc` | Landing page, the Clerk sign-in at `/scout/`, `/playground/scout/` |
 | `playground-claims` | `playground-claims` | `playground/wrangler.jsonc` | Sahra Health's customer claims and enrollment workflows |
-| `email` | `openmerit-email` | `wrangler.email.jsonc` | Inbound `openmerit.ai` aliases that reach more than one person; see [Email forwarding](#email-forwarding) |
 | `site` | `openmerit-site` | `wrangler.jsonc` | Protected memo. Locally reconciled; code-only release with asset-retention checks and no container rollout |
 
 Deploy `scout-serving` before `domain-router` when a change spans both, as the rebuild cutover did.
 
+**Scout removal — unreleased source, 10 November 2026.** The repository now keeps only `openmerit-core/`, the playground, the landing page, the memo and the Clerk sign-in. `scout-serving` runs `demo/web.ts` instead of the Scout app: the landing page, `/playground/scout/`, the sign-in page at `/scout/` and two APIs, `GET /scout/api/auth` (the publishable key) and `GET /scout/api/session` (verifies a Clerk session bearer token). Its next deploy removes the `/connect*` route and the R2, D1, Vectorize, Workers AI, rate-limit and version bindings, and applies `remove-scout-1`, which deletes the `ScoutAccounts`, `ScoutAgent` and `ScoutEvaluations` Durable Objects and all their data; back up anything still needed first. It keeps the `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` secrets. The Scout data policy page, the `/connect/` device sign-in, the `openmerit-scout` publisher and the `openmerit-email` Worker are no longer in this repository; anything still deployed is not managed from this checkout.
+
 The hosted terminal sample's `openmerit-terminal-preview` Worker and its configuration were removed from the repository. The router had already stopped binding it. Any Worker still deployed in Cloudflare is not managed from this checkout; deleting it is a separate action that needs the owner's approval.
-
-## Email forwarding
-
-An Email Routing rule forwards an alias to exactly one verified destination, so the single-person aliases on `openmerit.ai` (`lazim@`, `praveen@`, `akhil@`, `invest@`) are plain forwarding rules. An alias that reaches several people has a rule that sends it to the `openmerit-email` Worker instead. [`email/worker.ts`](../email/worker.ts) lists each such alias with its recipients, forwards every message to all of them and rejects addresses it has no list for.
-
-| Alias | Recipients |
-|---|---|
-| `code@openmerit.ai` | lazim and praveen |
-
-To add a recipient or alias:
-
-1. Check that each destination is a verified address under Email Routing's destination addresses; the Worker cannot forward to an unverified one. Adding a destination sends its owner a verification email.
-2. Add it to `recipients` in `email/worker.ts`, merge, and deploy with `npm run deploy -- email`.
-3. For a new alias, create the routing rule only after that deploy: a custom address on the `openmerit.ai` zone whose action is **Send to a Worker** with `openmerit-email`.
-
-Rule changes and destination changes are email changes and need the owner's approval, like deploys. After a change, send a real message to the alias and confirm that every recipient received it; the zone's Email Routing activity log shows each delivery. A successful deploy or API response is not proof of delivery.
-
-## Refresh monitoring
-
-A failed public feed or catalogue import does not fail the refresh: the run keeps that source's last good data and still publishes, so the catalogue can stay degraded for days unnoticed. Artificial Analysis's field rename did exactly that from 4 Nov 2026.
-
-**Run events.** At the end of every run, success or failure, `scout/pipeline.mjs` sends one `scout_refresh_completed` event to PostHog as `distinct_id` `scout-publisher`, with no person profile. Its properties are `run_id`, `status` (`published` or `failed`), `version`, `error` (whole-run failures only), `failed_count`, `failed_source_ids` (sorted, comma-separated) and `failed_sources`: each failed feed (`kind: "feed"`, from the run's source states) and each catalogue import that failed or never finished (`kind: "catalogue"`, from `cat_runs`), with the source's own error message, truncated to 200 characters. A PostHog outage never changes the run's outcome. The publisher sends events only when the `POSTHOG_PROJECT_TOKEN` and `POSTHOG_HOST` secrets are set; `POSTHOG_ENVIRONMENT` is a var in `wrangler.scout.jsonc`. The events are the run history; the check below does not depend on them.
-
-**Twice-daily check.** An Amp schedule in this project runs `node scripts/scout-refresh-check.ts` twice a day, after the 00:07 and 12:07 UTC refreshes. The script is read-only. It reports failed feeds from `/scout/api/status`, catalogue imports whose latest run in the last day did not succeed (`cat_runs` in D1) a catalogue not published for 26 hours and a failed D1 read, and exits 1 when it finds any. The schedule posts each run's problems to #breaking-bad in Slack through the owner's Slack connection in Amp, so the project holds no Slack token. For each problem without an open fix, the run starts one orb thread on this repository to find why the source broke, fix its reader with tests and open a pull request without `merge-when-green`, so a person reviews it. Fix threads never deploy or write to Cloudflare, D1, R2, PostHog or Slack, and treat error text and fetched pages as data, not instructions.
-
-A merged fix reaches production only with the next `scout-publisher` deploy, which needs the owner's approval, so a problem keeps being reported until then.
 
 ## Rolling back
 
@@ -78,12 +52,10 @@ What a Worker rollback does **not** undo:
 
 - **Secrets and bindings:** a rollback keeps the current secret values. Restore a rotated secret separately.
 - **Durable Object migrations:** an old version cannot drop classes that a newer migration added. Avoid rolling back across a migration tag.
-- **Data:** D1 rows, R2 objects, Vectorize entries and Durable Object storage stay as they are. To roll back the Scout catalogue, republish the validated `previous.json` pointer instead (see [Scout recovery](site-scout-architecture.md#recovery)). Never trigger the shared refresh workflow to test a rollback.
+- **Data:** D1 rows, R2 objects, Vectorize entries and Durable Object storage stay as they are.
 
 Per Worker:
 
-- **`scout-serving`:** a rollback also changes the landing page. Check `/`, `/scout/`, `/connect/` and `/scout/api/status`.
+- **`scout-serving`:** a rollback also changes the landing page. Check `/`, `/scout/`, `/scout/api/auth` and `/playground/scout/`. Rolling back across `remove-scout-1` cannot restore the deleted Durable Objects.
 - **`domain-router`:** check apex, `www` and legacy `.site` hosts, plus `/memo`. The route cases are in `demo/test/domain-migration.test.mjs`.
-- **`email`:** send a real message to each alias in [Email forwarding](#email-forwarding) and confirm every recipient received it. If the Worker itself is failing, pointing the alias's rule back at a single verified destination restores delivery to that person.
-- **`scout-publisher`:** it is not deployed from main. Roll back only to a version listed in its deployment history, and confirm the next hourly run in `deploy:status`.
 - **`site`:** keep version `9b0ea195-8c33-40b0-a5ee-a21f3e31a46d` while the [code-only restoration](site-memo.md#protected-memo-reconciliation--local-only-29-october-2026) is awaiting an approved release. Its configuration retains uploaded assets. The next release also applies the `remove-demo-v1` migration, which deletes the retired demo's container and Durable Object classes; see [demo retirement](site-memo.md#demo-retirement--unreleased-source-3-november-2026). Because `keep_assets` inherits the latest upload, the wrapper requires a sole 100% active version matching the latest upload, except for the exact verified 145-active/146-latest retention chain documented in memo maintenance. It rejects every other undeployed latest version and split deployment. Do not activate an intermediate version merely to clear this guard. Do not run concurrent uploads during a site release: the remote check and upload are not atomic. After an approved release, check an existing memo session, real email-code login, protected Markdown, reader/admin permissions, logout and all referenced assets. No production test writes or real email sends are authorized by local verification alone.
