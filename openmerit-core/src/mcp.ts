@@ -5,7 +5,8 @@
 import { createInterface } from "node:readline";
 import { renderRun, renderStep } from "./cli/render.ts";
 import { localContext, missingSetup, startRun } from "./local.ts";
-import { advance, step, type Answers } from "./scout/workflow.ts";
+import { advanceInDaemon } from "./daemon/daemon.ts";
+import { step, type Answers } from "./scout/workflow.ts";
 import { checkForUpdate, packageVersion, updateNotice, type UpdateInfo } from "./update.ts";
 
 const PROTOCOL = "2025-06-18";
@@ -80,7 +81,7 @@ export async function serveMcp(input: NodeJS.ReadableStream = process.stdin, out
         if (running.has(runId)) return { text: `Run ${runId} is already being advanced by another call.`, data: { runId, status: "busy" }, isError: true };
         running.add(runId);
         try {
-          const result = await advance(ctx, runId, (args.answers && typeof args.answers === "object" ? args.answers : {}) as Answers);
+          const result = await advanceInDaemon({ runId, cwd, env, answers: (args.answers && typeof args.answers === "object" ? args.answers : {}) as Answers, log: line => { progress.push(line); log(line); } });
           const questions = result.questions.map(question => `- [${question.id}] (${question.kind}) ${question.prompt}${question.options ? `\n  Options: ${question.options.map(option => `${option.value}${option.label !== option.value ? ` = ${option.label}` : ""}`).join(" | ")}` : ""}${question.detail ? `\n  ${question.detail.split("\n").join("\n  ")}` : ""}`).join("\n");
           const text = [
             ...(notice ? [notice] : []), ...result.notices,

@@ -4,7 +4,7 @@
 
 OpenMerit finds cheaper models that perform at least as well as the ones your code uses today, measured with your repository's own evals. It is a global npm CLI and a local MCP server. It runs on your machine with no OpenMerit account, login or hosted service.
 
-- **OpenMerit Harness**, built on [Pi](https://pi.dev), does Scout's reasoning: it maps model usages to tasks and finds each task's eval and how to run it per model. Claude Code or Codex powers it through their own non-interactive modes, or an API key does.
+- **OpenMerit Harness**, built on [Pi](https://pi.dev), does Scout's reasoning: it maps model usages to tasks and finds each task's eval and how to run it per model. Claude Code (through [pi-claude-bridge](https://pi.dev/packages/pi-claude-bridge) and your Claude login), Codex models (through a ChatGPT Plus or Pro sign-in) or an API key powers it. `openmerit connect` chooses which.
 - **Scout** is the first workflow: scan → choose a model and tasks → find the eval → Scout Model Binary Search → compare → optionally configure. Tuner, for prompt optimization and fine-tuning, comes later.
 - **The model catalogue** ships in the package (`data/catalogue.json`): OpenRouter's model list with list prices and capabilities, and the [Epoch Capabilities Index](https://epoch.ai/benchmarks/eci) (CC BY 4.0) with ScoutBM's estimates for models Epoch does not score. Scout never downloads a catalogue.
 
@@ -18,8 +18,8 @@ openmerit setup
 
 `openmerit setup` is safe to rerun. It verifies what is saved, keeps what still works and offers a retry or reconfiguration for anything that fails. It never switches to another provider on its own.
 
-1. **Harness (global).** Setup detects Claude Code and Codex and asks which one powers OpenMerit Harness, or takes an API provider, model and key instead. It then makes one round trip through the harness and saves the choice only when that works. OpenMerit runs `claude -p` or `codex exec` read-only, with no MCP servers and no session files. It never reads their credential files: log in with `claude auth login` or `codex login` first.
-2. **MCP (global).** Setup registers OpenMerit's stdio server as `openmerit` with Claude Code (user scope) and Codex, through their own `mcp add` commands. An existing `openmerit` entry is left unchanged.
+1. **Harness (global).** Setup runs `openmerit connect` (see [Connect the harness](#connect-the-harness)).
+2. **MCP (global).** When the `claude` or `codex` CLI is on your `PATH`, setup registers OpenMerit's stdio server as `openmerit` with Claude Code (user scope) and Codex, through their own `mcp add` commands. An existing `openmerit` entry is left unchanged.
 3. **Langfuse (this repository; needed when the eval records its results there).** Give a URL (Cloud or self-hosted) and a separate **Viewer** key pair. Setup refuses a key that can write. OpenMerit reads each eval run's per-item scores back from the experiment your eval records, plus aggregate production metrics: generation counts, cost and latency by model for a trace name, and score averages. It never creates datasets, experiments, traces or scores; your eval writes them with your application's own keys.
 4. **Candidate endpoints (this repository).** The default offer is OpenRouter with every OpenRouter model eligible. OpenAI and other OpenAI-compatible endpoints work too. Each endpoint has its own key and allowed models: `all`, or a list of IDs. These keys run candidate evals only, and are separate from whatever powers the harness.
 5. **Eval budget.** The default is $10 per Scout run.
@@ -29,11 +29,32 @@ Settings live in two places:
 | File | Holds |
 | --- | --- |
 | `~/.openmerit/config.json` | The harness choice |
+| `~/.openmerit/agent/` | Pi's files: `auth.json` (mode 0600) with the ChatGPT sign-in, and pi-claude-bridge's config and log |
 | `<repo>/.openmerit/config.json` | Endpoints, allowed models, Langfuse URL and mappings, evals, budget. Keys appear only as references: `{"env": "OPENROUTER_API_KEY"}` or `{"secret": "<name>"}` |
 | `~/.openmerit/secrets.json` (mode 0600) | Keys you type in at the prompt |
 | `~/.openmerit/state.db` | SQLite run history for every repository |
+| `~/.openmerit/rivet/` | The daemon's Rivet engine data: each run's workflow and its pending question |
+| `~/.openmerit/daemon.json` (mode 0600), `daemon.log` | The running daemon's pid, port and access token, and its log |
 
-Set `OPENMERIT_HOME` to move `~/.openmerit`. For scripts, `openmerit setup --help` lists flags such as `--harness codex --endpoint openrouter:OPENROUTER_API_KEY --allowed-models a,b --budget 5 --yes`.
+Set `OPENMERIT_HOME` to move `~/.openmerit`. For scripts, `openmerit help` lists flags such as `--harness codex --device-code --endpoint openrouter:OPENROUTER_API_KEY --allowed-models a,b --budget 5 --yes`.
+
+### Connect the harness
+
+```sh
+openmerit connect                 # keep the working connection, or choose one
+openmerit connect claude-code     # Claude Code with your Claude login
+openmerit connect codex           # Codex models with your ChatGPT Plus or Pro sign-in
+openmerit connect codex --device-code --yes   # the same on a server without a browser
+openmerit connect api --api-provider anthropic --api-model claude-sonnet-5-5 --api-key-env ANTHROPIC_API_KEY
+```
+
+`openmerit connect` signs in where needed, makes one round trip through the harness and saves the connection only when that works. A failed check keeps the previous connection. `--model <id>` picks the model for Claude Code (default `claude-sonnet-5-5`) or Codex (default `gpt-6.1-sol`).
+
+- **Claude Code** runs through pi-claude-bridge with the Claude Agent SDK's bundled Claude Code, so you do not need Claude Code installed. It uses your Claude Code login in `~/.claude`; when you are not logged in, `openmerit connect claude-code` offers `claude auth login`. On a server, set `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `ANTHROPIC_API_KEY`. Claude Code gets no tools of its own and loads no project `.claude` settings.
+- **Codex** uses pi's ChatGPT Plus or Pro sign-in, the same one pi's own `/login` offers. It is a browser sign-in, or a code you enter at `auth.openai.com/codex/device` from any device with `--device-code`, which also works on a server. You do not need the Codex CLI installed. Pi keeps the tokens in `~/.openmerit/agent/auth.json` (mode 0600) and refreshes them; OpenMerit does not read the Codex CLI's own login.
+- **An API key** uses any provider pi knows, with a key from an environment variable or typed in and stored in `~/.openmerit/secrets.json`.
+
+Whichever powers it, the harness reads the repository only through pi's read-only tools (read, grep, find and ls), and they refuse any path outside the repository.
 
 ## Scout
 
@@ -102,7 +123,17 @@ A non-zero exit, or no result for a requested item, marks the run failed. The te
 | `openmerit_scout` | not read-only | The same workflow and state as the CLI |
 | `openmerit_history` | read-only | Runs, or one run in detail |
 
-`openmerit_scout` returns structured `questions` (missing input, disclosure, eval approval, budget, configuration) instead of prompting. The client asks the user and calls the tool again with `answers`. A run started in the CLI can continue through MCP and the other way round. One process works on a run at a time.
+`openmerit_scout` returns structured `questions` (missing input, disclosure, eval approval, budget, configuration) instead of prompting. The client asks the user and calls the tool again with `answers`. A run started in the CLI can continue through MCP and the other way round. The daemon works on a run one step at a time.
+
+## Daemon
+
+Scout runs in a background process, the OpenMerit daemon. `openmerit scout` and `openmerit mcp` are its clients: the first one that needs it starts it, and it keeps running after they exit. `openmerit setup` and `openmerit history` do not use it.
+
+- Each Scout run is a Rivet Workflow actor in a local Rivet engine that ships in the package. The engine listens on `127.0.0.1` only: port 6720 (set `OPENMERIT_DAEMON_PORT` to change it), with 6721 for its peer API and 6730 for metrics. It makes no connections of its own outside the machine, and it accepts only requests that carry the token in `~/.openmerit/daemon.json`, which is new at every start.
+- A run waiting for your answer keeps waiting when the daemon stops, crashes or the machine restarts: the next command starts the daemon again and the run continues from its question.
+- A step cut off in the middle, such as an eval in progress, stops the run as interrupted. `openmerit scout --resume <run>` continues it and asks before running an interrupted eval again; its earlier requests stay counted against the budget.
+- Each step works with the directory and environment of the CLI or MCP server that sent your answers: its endpoint keys, your application's `LANGFUSE_*` keys and `PATH`. The daemon keeps them in memory only, never on disk.
+- `openmerit daemon status` shows whether it runs; `openmerit daemon stop` stops it. After an update, the next command replaces a daemon of the old version.
 
 ## Updates
 
@@ -118,10 +149,12 @@ Updating the package refreshes the bundled catalogue; history stays intact. Set 
 
 | Data | Where it goes |
 | --- | --- |
-| Redacted snippets, file names, package scripts and files the harness opens read-only | The harness provider you chose (Anthropic, OpenAI or your API provider), after you approve |
+| Redacted snippets, file names, package scripts and files the harness opens read-only | The harness provider you chose (Anthropic through Claude Code, OpenAI through your ChatGPT sign-in, or your API provider), after you approve |
+| The ChatGPT sign-in | Your machine, in `~/.openmerit/agent/auth.json` (mode 0600); pi refreshes it with OpenAI |
 | Eval inputs and prompts | The candidate endpoints you configured, during approved evals only |
 | Langfuse | OpenMerit reads per-item scores of the experiments your eval records, and aggregates, with a Viewer key. It never writes; your eval writes with your application's keys, as it does without OpenMerit |
 | Run history | Your machine. SQLite keeps no keys and no dataset contents. Failed eval logs keep their last lines, redacted |
+| Daemon | Your machine. The Rivet engine listens on `127.0.0.1` only and keeps each run's progress and pending question under `~/.openmerit/rivet`, never keys or your environment |
 
 ## Limitations
 
@@ -130,7 +163,11 @@ Updating the package refreshes the bundled catalogue; history stays intact. Set 
 - Configure edits only literal model IDs on an already-matching provider. Other changes come as instructions.
 - Measured quality is only as good as the eval: few items, or an eval every model passes, cannot separate candidates. Screens use five items the current model passes in every run, so a task needs at least five.
 - The binary search assumes that a higher ECI means a model that is at least as capable on the task. It screens about log₂ of the pool size, so a cheaper model that the ranking places out of order can be missed.
-- Harness inference through Claude Code or Codex is billed by your plan, so its cost is shown as tokens, not dollars.
+- Harness inference through Claude Code or a ChatGPT sign-in is billed by your plan, so its cost is shown as tokens, not dollars.
+- pi-claude-bridge drives Claude Code through the Claude Agent SDK with your subscription. Anthropic has changed its stated billing for that use before and may again.
+- The install is larger with the bridge: the Claude Agent SDK's bundled Claude Code is about 330 MB on Linux.
+- The local Rivet engine makes the install larger: about 300 MB on Linux and 160 MB on macOS. An empty engine store takes about 130 MB on disk.
+- Stopping the daemon (or `openmerit daemon stop`) while a step runs interrupts that run; it does not continue on its own.
 
 ## Development
 

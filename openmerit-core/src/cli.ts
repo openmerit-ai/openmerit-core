@@ -8,21 +8,32 @@ const HELP = `OpenMerit: find cheaper models that perform at least as well as th
 measured with your own evals. Runs locally; no OpenMerit account.
 
 Usage:
-  openmerit setup                 Power OpenMerit Harness (Claude Code, Codex or an API key), register the
-                                  MCP server, and configure this repository: read-only Langfuse, candidate
+  openmerit setup                 Connect OpenMerit Harness (as openmerit connect does), register the MCP
+                                  server, and configure this repository: read-only Langfuse, candidate
                                   endpoints and allowed models, default eval budget. Rerunnable.
+  openmerit connect [claude-code|codex|api]
+                                  Power OpenMerit Harness with Claude Code (its own login), Codex models
+                                  (a ChatGPT Plus/Pro sign-in) or an API key. Signs in when needed.
   openmerit scout                 Scan model usages, pick a model and tasks, binary-search cheaper models on your eval
                                   candidates, compare with the current model, optionally configure.
   openmerit scout --resume <run>  Continue a paused, interrupted or failed run.
   openmerit history [<run>]       This repository's runs, or one run in detail.
   openmerit mcp                   The local MCP server (stdio), for Claude Code, Codex and other clients.
+  openmerit daemon [status|stop]  The background process that runs Scout (started by scout and mcp when needed).
+                                  Without an argument it runs in the foreground.
 
 Scout options:
   --answer <id=value>   Answer a question without a prompt (repeatable), as --json returns them
   --json                Print the run state as JSON and stop at the first question
 
+Connect options (setup takes them too, with --harness <claude-code|codex|api> and --harness-model <id>):
+  --model <id>          Model for claude-code or codex
+  --device-code         Sign in to ChatGPT with a code entered on any device (for servers)
+  --api-provider <pi provider> --api-model <id> --api-key-env <VAR>
+  --yes                 Accept defaults; never prompt
+
 Setup options (for scripts; interactive setup asks instead):
-  --harness <claude-code|codex|api>  --harness-model <id>
+  --harness <claude-code|codex|api>  --harness-model <id>  --device-code
   --api-provider <pi provider> --api-model <id> --api-key-env <VAR>
   --endpoint <openrouter:VAR | openai:VAR | id=https://host/v1:VAR> (repeatable)
   --allowed-models <a,b>  --budget <usd>  --register-mcp | --no-register-mcp
@@ -54,7 +65,7 @@ async function setup(args: string[]) {
   const { values } = parseArgs({ args, options: {
     harness: { type: "string" }, "harness-model": { type: "string" }, "api-provider": { type: "string" }, "api-model": { type: "string" }, "api-key-env": { type: "string" },
     endpoint: { type: "string", multiple: true }, "allowed-models": { type: "string" }, budget: { type: "string" }, "register-mcp": { type: "boolean" }, "no-register-mcp": { type: "boolean" },
-    "langfuse-url": { type: "string" }, "langfuse-public-key-env": { type: "string" }, "langfuse-secret-key-env": { type: "string" }, yes: { type: "boolean" },
+    "langfuse-url": { type: "string" }, "langfuse-public-key-env": { type: "string" }, "langfuse-secret-key-env": { type: "string" }, yes: { type: "boolean" }, "device-code": { type: "boolean" },
   } });
   if (values.harness && !["claude-code", "codex", "api"].includes(values.harness)) throw new Error("--harness is claude-code, codex or api");
   const { runSetup } = await import("./setup.ts");
@@ -69,7 +80,7 @@ async function setup(args: string[]) {
       repo: findRepo(process.cwd()), state, prompter, log, env: process.env, mcpCommand: mcpCommand(),
       flags: {
         ...(values.harness ? { harness: values.harness as "claude-code" | "codex" | "api" } : {}), ...(values["harness-model"] ? { harnessModel: values["harness-model"] } : {}),
-        ...(values["api-provider"] ? { apiProvider: values["api-provider"] } : {}), ...(values["api-model"] ? { apiModel: values["api-model"] } : {}), ...(values["api-key-env"] ? { apiKeyEnv: values["api-key-env"] } : {}),
+        ...(values["device-code"] ? { deviceCode: true } : {}), ...(values["api-provider"] ? { apiProvider: values["api-provider"] } : {}), ...(values["api-model"] ? { apiModel: values["api-model"] } : {}), ...(values["api-key-env"] ? { apiKeyEnv: values["api-key-env"] } : {}),
         ...(values.endpoint ? { endpoints: values.endpoint } : {}), ...(values["allowed-models"] ? { allowedModels: values["allowed-models"].split(",").map(item => item.trim()).filter(Boolean) } : {}),
         ...(values.budget ? { budget: Number(values.budget) } : {}), ...(values["register-mcp"] ? { registerMcp: true } : values["no-register-mcp"] ? { registerMcp: false } : {}),
         ...(values["langfuse-url"] ? { langfuseUrl: values["langfuse-url"] } : {}), ...(values["langfuse-public-key-env"] ? { langfusePublicKeyEnv: values["langfuse-public-key-env"] } : {}),
@@ -80,10 +91,33 @@ async function setup(args: string[]) {
   } finally { prompter?.close(); state.close(); }
 }
 
+async function connectCommand(args: string[]) {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
+    model: { type: "string" }, "device-code": { type: "boolean" }, "api-provider": { type: "string" }, "api-model": { type: "string" }, "api-key-env": { type: "string" }, yes: { type: "boolean" },
+  } });
+  const [kind] = positionals;
+  if (kind && !["claude-code", "codex", "api"].includes(kind)) throw new Error("Connect claude-code, codex or api.");
+  const { connect } = await import("./connect.ts");
+  const { findRepo } = await import("./state/paths.ts");
+  const { terminalPrompter } = await import("./cli/prompt.ts");
+  const interactive = process.stdin.isTTY === true && !values.yes;
+  const prompter = interactive ? terminalPrompter() : null;
+  let root = process.cwd();
+  try { root = findRepo(root).root; } catch { /* outside a repository: the check reads nothing */ }
+  try {
+    const saved = await connect({ root, prompter, log, env: process.env, flags: {
+      ...(values.model ? { model: values.model } : {}), ...(values["device-code"] ? { deviceCode: true } : {}), ...(values["api-provider"] ? { apiProvider: values["api-provider"] } : {}),
+      ...(values["api-model"] ? { apiModel: values["api-model"] } : {}), ...(values["api-key-env"] ? { apiKeyEnv: values["api-key-env"] } : {}), ...(!interactive ? { nonInteractive: true } : {}),
+    } }, kind as "claude-code" | "codex" | "api" | undefined);
+    if (saved) log("Saved to ~/.openmerit/config.json. Next: openmerit setup in a repository, or openmerit scout.");
+    else process.exitCode = 1;
+  } finally { prompter?.close(); }
+}
+
 async function scout(args: string[]) {
   const { values } = parseArgs({ args, options: { resume: { type: "string" }, answer: { type: "string", multiple: true }, json: { type: "boolean", default: false } } });
   const { localContext, missingSetup, startRun } = await import("./local.ts");
-  const { advance } = await import("./scout/workflow.ts");
+  const { advanceInDaemon } = await import("./daemon/daemon.ts");
   type Answers = import("./scout/workflow.ts").Answers;
   const { renderStep } = await import("./cli/render.ts");
   const { askQuestion, terminalPrompter } = await import("./cli/prompt.ts");
@@ -107,7 +141,7 @@ async function scout(args: string[]) {
       return [item.slice(0, at), item.slice(at + 1)];
     }));
     for (;;) {
-      const result = await advance(ctx, runId, answers);
+      const result = await advanceInDaemon({ runId, cwd: process.cwd(), env: process.env, answers, log, signal: controller.signal });
       answers = {};
       for (const notice of result.notices) log(notice);
       if (result.questions.length && prompter && !controller.signal.aborted) {
@@ -149,14 +183,28 @@ async function history(args: string[]) {
   } finally { ctx.state.close(); }
 }
 
+async function daemon(args: string[]) {
+  const { readDaemonInfo, serveDaemon, stopDaemon } = await import("./daemon/daemon.ts");
+  const [action] = args;
+  if (!action) return serveDaemon();
+  if (action === "stop") return void log((await stopDaemon()) ? "Stopped the OpenMerit daemon. Runs it was working on continue with `openmerit scout --resume <run>`." : "The OpenMerit daemon is not running.");
+  if (action !== "status") throw new Error(`Unknown daemon command "${action}". Use \`openmerit daemon status\` or \`openmerit daemon stop\`.`);
+  const info = readDaemonInfo();
+  let up = false;
+  if (info) { try { up = (await fetch(`http://127.0.0.1:${info.port}/health`, { signal: AbortSignal.timeout(2000) })).ok; } catch { /* not running */ } }
+  process.stdout.write(up && info ? `running: openmerit ${info.version}, pid ${info.pid}, 127.0.0.1:${info.port}, since ${info.startedAt}\n` : "not running\n");
+}
+
 async function main() {
   if (command === "help" || command === "--help" || command === "-h") return void process.stdout.write(`${HELP}\n`);
   if (command === "--version" || command === "-v" || command === "version") return void process.stdout.write(`${(await import("./update.ts")).packageVersion()}\n`);
   if (command === "mcp") return (await import("./mcp.ts")).serveMcp();
-  if (!["setup", "scout", "history"].includes(command)) throw new Error(`Unknown command "${command}". Run \`openmerit help\`.`);
+  if (command === "daemon") return daemon(rest);
+  if (!["setup", "connect", "scout", "history"].includes(command)) throw new Error(`Unknown command "${command}". Run \`openmerit help\`.`);
   const took = await update(rest.includes("--json"));
   if (took !== null) { process.exitCode = took; return; }
   if (command === "setup") return setup(rest);
+  if (command === "connect") return connectCommand(rest);
   if (command === "scout") return scout(rest);
   return history(rest);
 }

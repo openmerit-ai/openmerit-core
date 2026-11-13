@@ -4,12 +4,12 @@
 // working settings unless the user replaces them, and a failed connection is offered for retry or
 // reconfiguration; nothing switches provider on its own.
 import { spawnSync } from "node:child_process";
-import { createHarness, detectAgents, verifyHarness } from "./harness/harness.ts";
+import { confirm, connect, credential, HARNESS_LABEL } from "./connect.ts";
 import { createLangfuseConnector } from "./connectors/langfuse/index.ts";
 import type { Prompter } from "./cli/prompt.ts";
 import {
-  DEFAULT_BUDGET_USD, describeCredential, OPENAI_ENDPOINT, OPENROUTER_ENDPOINT, readGlobalConfig, readRepoConfig, resolveCredential, storeSecret, updateGlobalConfig, updateRepoConfig,
-  type CredentialRef, type Endpoint, type HarnessKind, type HarnessSettings, type LangfuseSettings,
+  DEFAULT_BUDGET_USD, describeCredential, OPENAI_ENDPOINT, OPENROUTER_ENDPOINT, readRepoConfig, resolveCredential, updateRepoConfig,
+  type Endpoint, type HarnessKind, type HarnessSettings, type LangfuseSettings,
 } from "./state/config.ts";
 import type { State } from "./state/db.ts";
 import type { Repo } from "./state/paths.ts";
@@ -20,6 +20,8 @@ export interface SetupFlags {
   apiProvider?: string;
   apiModel?: string;
   apiKeyEnv?: string;
+  /** Sign in to ChatGPT with a device code (for --harness codex on a server). */
+  deviceCode?: boolean;
   /** `openrouter:ENV_VAR`, `openai:ENV_VAR` or `<id>=<baseUrl>:ENV_VAR` (OpenAI-compatible). */
   endpoints?: string[];
   allowedModels?: string[];
@@ -34,20 +36,6 @@ export interface SetupFlags {
 
 interface SetupContext { repo: Repo; state: State; prompter: Prompter | null; log: (line: string) => void; env: Record<string, string | undefined>; fetch?: typeof fetch; flags: SetupFlags; mcpCommand: string[] }
 
-const AGENT_LABEL: Record<HarnessKind, string> = { "claude-code": "Claude Code", codex: "Codex", api: "an API key" };
-
-async function confirm(ctx: SetupContext, question: string, fallback: boolean) { return ctx.prompter && !ctx.flags.nonInteractive ? ctx.prompter.confirm(question, fallback) : fallback; }
-
-/** A key from an environment variable (kept as a reference) or typed in (stored in ~/.openmerit/secrets.json). */
-async function credential(ctx: SetupContext, label: string, envNames: string[], secretName: string, flagEnv?: string): Promise<CredentialRef | null> {
-  if (flagEnv) return ctx.env[flagEnv] ? { env: flagEnv } : (() => { throw new Error(`$${flagEnv} is not set.`); })();
-  const present = envNames.find(name => ctx.env[name]?.trim());
-  if (present && await confirm(ctx, `Use $${present} for ${label}? (OpenMerit stores the variable name, not the key)`, true)) return { env: present };
-  if (!ctx.prompter || ctx.flags.nonInteractive) return null;
-  const value = await ctx.prompter.secret(`${label} (input hidden; stored in ~/.openmerit/secrets.json, outside the repository):`);
-  return value ? storeSecret(secretName, value, ctx.env) : null;
-}
-
 export async function verifyEndpoint(endpoint: Endpoint, env: Record<string, string | undefined>, fetcher: typeof fetch = fetch): Promise<{ ok: boolean; detail: string }> {
   const key = resolveCredential(endpoint.apiKey, env);
   if (!key) return { ok: false, detail: `no key (${describeCredential(endpoint.apiKey)} is empty)` };
@@ -59,59 +47,9 @@ export async function verifyEndpoint(endpoint: Endpoint, env: Record<string, str
   } catch (error) { return { ok: false, detail: error instanceof Error ? error.message : String(error) }; }
 }
 
-async function setupHarness(ctx: SetupContext): Promise<HarnessSettings | null> {
-  const existing = readGlobalConfig(ctx.env).harness;
-  if (existing && !ctx.flags.harness) {
-    ctx.log(`Checking the current harness connection (${AGENT_LABEL[existing.kind]}${existing.model ? `, ${existing.model}` : ""})…`);
-    const check = await verifyHarness(await createHarness(existing, ctx.env), ctx.repo.root).catch((error: unknown) => ({ ok: false as const, detail: String(error) }));
-    if (check.ok) {
-      ctx.log(`  ✓ OpenMerit Harness runs on ${AGENT_LABEL[existing.kind]} (${check.detail}).`);
-      if (!(await confirm(ctx, "Keep this harness connection?", true))) return chooseHarness(ctx, existing);
-      updateGlobalConfig({ harness: { ...existing, verifiedAt: new Date().toISOString() } }, ctx.env);
-      return existing;
-    }
-    ctx.log(`  ✗ The saved harness connection failed: ${check.detail}`);
-    return chooseHarness(ctx, existing);
-  }
-  return chooseHarness(ctx, existing);
-}
-
-async function chooseHarness(ctx: SetupContext, previous: HarnessSettings | undefined): Promise<HarnessSettings | null> {
-  const agents = await detectAgents();
-  for (const agent of agents) ctx.log(`  ${agent.kind === "claude-code" ? "Claude Code" : "Codex"}: ${agent.detail}`);
-  let kind: HarnessKind | undefined = ctx.flags.harness;
-  for (;;) {
-    if (!kind) {
-      if (!ctx.prompter || ctx.flags.nonInteractive) throw new Error("Choose how to power OpenMerit Harness: --harness claude-code, codex or api.");
-      kind = await ctx.prompter.choose<HarnessKind>("Which should power OpenMerit Harness?", [
-        ...agents.filter(agent => agent.installed).map(agent => ({ value: agent.kind, label: `${agent.kind === "claude-code" ? "Claude Code" : "Codex"} (${agent.detail})` })),
-        { value: "api", label: "An API endpoint, key and model" },
-      ], agents.find(agent => agent.loggedIn)?.kind ?? "api");
-    }
-    const settings: HarnessSettings = { kind };
-    if (kind === "api") {
-      const provider = ctx.flags.apiProvider ?? (ctx.prompter && !ctx.flags.nonInteractive ? await ctx.prompter.ask("Pi provider for the harness (anthropic, openai, openrouter, google, ...)", previous?.api?.provider ?? "anthropic") : "anthropic");
-      const model = ctx.flags.apiModel ?? (ctx.prompter && !ctx.flags.nonInteractive ? await ctx.prompter.ask("Model", previous?.api?.model ?? (provider === "openai" ? "gpt-6.1-sol" : provider === "openrouter" ? "anthropic/claude-sonnet-5.5" : "claude-sonnet-5-5")) : "claude-sonnet-5-5");
-      const envNames = { anthropic: ["ANTHROPIC_API_KEY"], openai: ["OPENAI_API_KEY"], openrouter: ["OPENROUTER_API_KEY"], google: ["GEMINI_API_KEY", "GOOGLE_API_KEY"] }[provider] ?? [];
-      const apiKey = await credential(ctx, `${provider} API key for the harness`, envNames, `harness-${provider}`, ctx.flags.apiKeyEnv);
-      if (!apiKey) throw new Error("The API harness needs a key.");
-      settings.api = { provider, model, apiKey };
-    } else if (ctx.flags.harnessModel) settings.model = ctx.flags.harnessModel;
-    ctx.log(`Verifying that ${AGENT_LABEL[kind]} powers OpenMerit Harness…`);
-    const check = await createHarness(settings, ctx.env).then(harness => verifyHarness(harness, ctx.repo.root), (error: unknown) => ({ ok: false as const, detail: error instanceof Error ? error.message : String(error) }));
-    if (check.ok) {
-      ctx.log(`  ✓ ${AGENT_LABEL[kind]} answered through OpenMerit Harness (${check.detail}).`);
-      const saved = { ...settings, verifiedAt: new Date().toISOString() };
-      updateGlobalConfig({ harness: saved }, ctx.env);
-      return saved;
-    }
-    ctx.log(`  ✗ ${AGENT_LABEL[kind]} did not answer: ${check.detail}`);
-    if (kind !== "api") ctx.log(`    Log in with \`${kind === "claude-code" ? "claude auth login" : "codex login"}\`, then retry. OpenMerit does not read coding-agent credentials itself.`);
-    if (!ctx.prompter || ctx.flags.nonInteractive) throw new Error(`${AGENT_LABEL[kind]} could not power the harness: ${check.detail}${previous ? ". Your previous harness settings are unchanged." : ""}`);
-    const next = await ctx.prompter.choose("What now?", [{ value: "retry", label: `Retry ${AGENT_LABEL[kind]}` }, { value: "other", label: "Choose another connection" }, { value: "quit", label: previous ? "Stop and keep the previous settings" : "Stop setup" }], "retry");
-    if (next === "quit") return null;
-    if (next === "other") kind = undefined;
-  }
+/** Claude Code and Codex CLIs on PATH, which can register OpenMerit's MCP server. */
+function mcpClients(env: Record<string, string | undefined>): ("claude-code" | "codex")[] {
+  return (["claude-code", "codex"] as const).filter(kind => !spawnSync(kind === "claude-code" ? env.OPENMERIT_CLAUDE_BIN ?? "claude" : env.OPENMERIT_CODEX_BIN ?? "codex", ["--version"], { env, stdio: "ignore" }).error);
 }
 
 /** Adds OpenMerit's stdio MCP server to Claude Code and Codex through their own `mcp add` commands; existing entries are left alone. */
@@ -240,9 +178,10 @@ async function setupEndpoints(ctx: SetupContext): Promise<Endpoint[]> {
 
 export async function runSetup(ctx: SetupContext): Promise<{ harness: HarnessSettings | null; endpoints: Endpoint[]; langfuse: boolean; budgetUsd: number }> {
   ctx.log("OpenMerit setup\n\n1. OpenMerit Harness (global)");
-  const harness = await setupHarness(ctx);
+  const { harness: kind, harnessModel, apiProvider, apiModel, apiKeyEnv, deviceCode, nonInteractive } = ctx.flags;
+  const harness = await connect({ ...ctx, root: ctx.repo.root, flags: { ...(harnessModel ? { model: harnessModel } : {}), ...(apiProvider ? { apiProvider } : {}), ...(apiModel ? { apiModel } : {}), ...(apiKeyEnv ? { apiKeyEnv } : {}), ...(deviceCode ? { deviceCode } : {}), ...(nonInteractive ? { nonInteractive } : {}) } }, kind);
   if (!harness) return { harness: null, endpoints: [], langfuse: false, budgetUsd: DEFAULT_BUDGET_USD };
-  const agents = (await detectAgents()).filter(agent => agent.installed).map(agent => agent.kind);
+  const agents = mcpClients(ctx.env);
   if (agents.length && (ctx.flags.registerMcp ?? await confirm(ctx, `Register OpenMerit's MCP server with ${agents.map(kind => (kind === "claude-code" ? "Claude Code" : "Codex")).join(" and ")}?`, true))) registerMcp(ctx, agents);
   ctx.log(`\n2. This repository: ${ctx.repo.root}`);
   const langfuse = await setupLangfuse(ctx);
@@ -255,6 +194,6 @@ export async function runSetup(ctx: SetupContext): Promise<{ harness: HarnessSet
     if (Number.isFinite(answer) && answer > 0) budgetUsd = answer;
   }
   updateRepoConfig(ctx.repo.root, { endpoints, budget: { defaultUsd: budgetUsd }, ...(langfuse ? { langfuse } : {}) });
-  ctx.log(`\nSaved. Harness: ${AGENT_LABEL[harness.kind]}. Endpoints: ${endpoints.map(item => item.id).join(", ") || "none"}. Langfuse: ${langfuse ? "read-only" : "not connected"}. Eval budget: $${budgetUsd.toFixed(2)} per run.\nSettings: ~/.openmerit/config.json (global) and .openmerit/config.json (this repository; credential references only). Next: openmerit scout`);
+  ctx.log(`\nSaved. Harness: ${HARNESS_LABEL[harness.kind]}. Endpoints: ${endpoints.map(item => item.id).join(", ") || "none"}. Langfuse: ${langfuse ? "read-only" : "not connected"}. Eval budget: $${budgetUsd.toFixed(2)} per run.\nSettings: ~/.openmerit/config.json (global) and .openmerit/config.json (this repository; credential references only). Next: openmerit scout`);
   return { harness, endpoints, langfuse: !!langfuse, budgetUsd };
 }

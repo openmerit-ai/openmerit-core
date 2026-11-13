@@ -128,8 +128,8 @@ export class State {
     this.transaction(() => {
       this.db.prepare("INSERT OR IGNORE INTO repos (id, root, created_at) VALUES (?, ?, ?)").run(input.repo.id, input.repo.root, at);
       this.db.prepare(`INSERT INTO runs (id, repo_id, revision, status, phase, created_at, updated_at, package_version, catalogue_version, harness, budget_usd, state_json, lock_pid)
-        VALUES (?, ?, ?, 'running', 'scan', ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(input.id, input.repo.id, input.repo.revision ? `${input.repo.revision}${input.repo.dirty ? "+dirty" : ""}` : null, at, at, input.packageVersion, input.catalogueVersion, input.harness, input.budgetUsd, JSON.stringify(input.state), process.pid);
+        VALUES (?, ?, ?, 'running', 'scan', ?, ?, ?, ?, ?, ?, ?, NULL)`)
+        .run(input.id, input.repo.id, input.repo.revision ? `${input.repo.revision}${input.repo.dirty ? "+dirty" : ""}` : null, at, at, input.packageVersion, input.catalogueVersion, input.harness, input.budgetUsd, JSON.stringify(input.state));
     });
     this.event(input.id, "start", `Run started (openmerit ${input.packageVersion}, catalogue ${input.catalogueVersion}, harness ${input.harness}, budget $${input.budgetUsd.toFixed(2)})`);
     return this.getRun(input.id)!;
