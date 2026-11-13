@@ -185,7 +185,7 @@ Scout runs in a background process, the OpenMerit daemon. `openmerit scout` and 
 
 - Each Scout run is a Rivet Workflow actor in a local Rivet engine that ships in the package. The engine listens on `127.0.0.1` only: port 6720, with the next port (6721) for its peer API and the port 10 above (6730) for metrics. `OPENMERIT_DAEMON_PORT` moves all three: `7720` uses 7720, 7721 and 7730. It makes no connections of its own outside the machine, and it accepts only requests that carry the token in `~/.openmerit/daemon.json`, which is new at every start.
 - A run waiting for your answer keeps waiting when the daemon stops, crashes or the machine restarts: the next command starts the daemon again and the run continues from its question.
-- When the daemon stops answering (no reply in 30 s, or the connection drops), the CLI and MCP server say the connection was lost and reconnect, starting a new daemon if needed. After three failed attempts they stop and print `openmerit scout --resume <run>`.
+- When the daemon stops answering (no reply in 30 s, or the connection drops), the CLI and MCP server say the connection was lost and reconnect, starting a new daemon if needed. After three failed attempts they stop and print `openmerit scout --resume <run>`. A daemon that cannot start is not a lost connection: they stop at once with its reason, such as a port in use, and the same resume command.
 - A step cut off in the middle, such as an eval in progress, stops the run as interrupted. `openmerit scout --resume <run>` continues it and asks before running an interrupted eval again; its earlier requests stay counted against the budget.
 - Each step works with the directory and environment of the CLI or MCP server that sent your answers: its endpoint keys, your application's `LANGFUSE_*` keys and `PATH`. The daemon keeps them in memory only, never on disk.
 - `openmerit daemon status` shows whether it runs; `openmerit daemon stop` stops it. After an update, the next command replaces a daemon of the old version.
@@ -219,7 +219,7 @@ To free disk space without uninstalling, stop the daemon with `openmerit daemon 
 
 ## Troubleshooting
 
-**Scout says the connection to the daemon was lost, or that it did not start.** Read `~/.openmerit/daemon.log` first. A common cause is another process on one of the daemon's three ports (6720, 6721 and 6730 by default). The daemon does not report that the port is taken: after about a minute its log says `RivetKit registry did not register with the Engine within 60000ms` and `Engine health check failed after 64 attempts`. The CLI prints `Connection to the OpenMerit daemon lost. Reconnecting…`, then `The OpenMerit daemon did not start within 90 s` for each of three attempts, and gives up after about six minutes with `openmerit scout --resume <run>`. To find what holds the ports and move the daemon:
+**Scout says the daemon could not start, or that the connection to it was lost.** A common cause is another process on one of the daemon's three ports (6720, 6721 and 6730 by default). The daemon checks them before it starts, and Scout stops within seconds with the ports that are taken and a free port to use instead, for example `Port 6721 on 127.0.0.1 is already in use by another program, possibly another user's OpenMerit daemon. … Set OPENMERIT_DAEMON_PORT to another port, such as 6820.`, followed by `openmerit scout --resume <run>`. For any other cause the message quotes the daemon's error. When Scout instead says the connection was lost and it could not reconnect, the daemon's log, `~/.openmerit/daemon.log`, shows why. To find what holds the ports and move the daemon:
 
 ```sh
 lsof -nP -iTCP:6720 -iTCP:6721 -iTCP:6730 -sTCP:LISTEN
@@ -229,7 +229,7 @@ openmerit scout --resume <run>
 
 The first client that finds no daemon starts it, so set `OPENMERIT_DAEMON_PORT` everywhere OpenMerit runs: in your shell profile, and in the environment your MCP client starts `openmerit mcp` in.
 
-**Several users on one machine.** Each user has their own `~/.openmerit` and daemon, but every daemon defaults to port 6720, so only the first one starts. Give each user their own `OPENMERIT_DAEMON_PORT`, 20 apart (such as 6740, 6760) so that no two users' three ports overlap.
+**Several users on one machine.** Each user has their own `~/.openmerit` and daemon, but every daemon defaults to port 6720, so only the first one starts; the others stop with the port message above. Give each user their own `OPENMERIT_DAEMON_PORT`, 20 apart (such as 6740, 6760) so that no two users' three ports overlap.
 
 **A daemon that seems stuck.** `openmerit daemon status` shows whether it answers, with its version, pid and port. `openmerit daemon stop` stops it; the next command starts a new one, and interrupted runs continue with `openmerit scout --resume <run>`. A daemon of an older version is replaced on its own.
 

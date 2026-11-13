@@ -9,7 +9,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
-import { advanceInDaemon, readDaemonInfo, stopDaemon } from "../src/daemon/daemon.ts";
+import { advanceInDaemon, DaemonStartError, ensureDaemon, readDaemonInfo, stopDaemon } from "../src/daemon/daemon.ts";
 import { localContext, startRun } from "../src/local.ts";
 import type { Answer, Step } from "../src/scout/workflow.ts";
 import { updateGlobalConfig, updateRepoConfig } from "../src/state/config.ts";
@@ -137,5 +137,50 @@ test("a run survives a SIGKILL of the daemon at every question, and the harness 
     endpoint.close();
     // The daemon's Rivet store is about 130 MB; repeated runs would fill the disk.
     for (const path of [root, outside, home]) rmSync(path, { recursive: true, force: true });
+  }
+});
+
+const daemonEnv = (port: number) => ({ ...process.env, OPENMERIT_HOME: mkdtempSync(join(tmpdir(), "openmerit-home-")), OPENMERIT_DAEMON_PORT: String(port), OPENMERIT_NO_UPDATE_CHECK: "1" });
+const randomPort = () => 21000 + Math.floor(Math.random() * 8000);
+
+test("a daemon that cannot bind its engine's peer port fails at once with the cause, and is not a lost connection", { timeout: 60_000 }, async () => {
+  const port = randomPort();
+  const env = daemonEnv(port);
+  // The engine's peer API listens on port + 1; another program holds it.
+  const holder = createServer((_req, res) => { res.writeHead(404); res.end(); });
+  await new Promise<void>(resolve => holder.listen(port + 1, "127.0.0.1", resolve));
+  const lines: string[] = [];
+  const started = Date.now();
+  try {
+    await assert.rejects(advanceInDaemon({ runId: "run-start-failure", cwd: tmpdir(), env, answers: {}, log: line => lines.push(line) }), (error: Error) => {
+      assert.match(error.message, new RegExp(`Port ${port + 1} on 127\\.0\\.0\\.1 is already in use`));
+      assert.match(error.message, new RegExp(`OPENMERIT_DAEMON_PORT \\(${port}\\)`));
+      assert.match(error.message, /openmerit scout --resume run-start-failure/);
+      return true;
+    });
+    assert.ok(Date.now() - started < 20_000, `failed after ${Date.now() - started} ms, not after rivetkit's 60 s or the reconnects`);
+    assert.deepEqual(lines, [], "no lost-connection or reconnect lines");
+  } finally {
+    holder.close();
+    rmSync(env.OPENMERIT_HOME, { recursive: true, force: true });
+  }
+});
+
+test("a second OpenMerit home on the same port does not use the first home's engine", { timeout: 60_000 }, async () => {
+  const port = randomPort();
+  const first = daemonEnv(port);
+  const second = daemonEnv(port);
+  try {
+    await ensureDaemon(first);
+    await assert.rejects(ensureDaemon(second), (error: Error) => {
+      assert.ok(error instanceof DaemonStartError);
+      assert.match(error.message, new RegExp(`Ports ${port}, ${port + 1} and ${port + 10} on 127\\.0\\.0\\.1 are already in use`));
+      assert.match(error.message, /Set OPENMERIT_DAEMON_PORT to another port/);
+      return true;
+    });
+    assert.equal(readDaemonInfo(second), null);
+  } finally {
+    await stopDaemon(first);
+    for (const env of [first, second]) rmSync(env.OPENMERIT_HOME, { recursive: true, force: true });
   }
 });
