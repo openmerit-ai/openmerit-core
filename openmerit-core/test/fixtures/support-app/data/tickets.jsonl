@@ -1,0 +1,10 @@
+{"id": "ticket-01", "ticket": "I was charged twice for my November invoice. Please refund the duplicate payment.", "queue": "billing"}
+{"id": "ticket-02", "ticket": "The mobile app crashes every time I open the reports tab on Android 15.", "queue": "technical"}
+{"id": "ticket-03", "ticket": "How do I change the email address I use to sign in?", "queue": "account"}
+{"id": "ticket-04", "ticket": "Can you send me your company's mailing address for a thank-you card?", "queue": "other"}
+{"id": "ticket-05", "ticket": "My card was declined but the money left my bank account. Where did it go?", "queue": "billing"}
+{"id": "ticket-06", "ticket": "The API returns HTTP 500 whenever I upload a CSV larger than 10 MB.", "queue": "technical"}
+{"id": "ticket-07", "ticket": "Please delete my account and all of my data.", "queue": "account"}
+{"id": "ticket-08", "ticket": "I want to downgrade from the Pro plan to Basic before my next renewal so I pay less.", "queue": "billing"}
+{"id": "ticket-09", "ticket": "Two-factor codes never arrive by SMS, so I cannot log in at all.", "queue": "account"}
+{"id": "ticket-10", "ticket": "Webhooks stopped firing after your maintenance window last night.", "queue": "technical"}

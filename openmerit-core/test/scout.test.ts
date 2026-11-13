@@ -1,184 +1,366 @@
-// Mocked: no model or Langfuse calls. Candidates are fixtures; a model "passes" an item when its
-// ECI reaches the item's difficulty, so the right search path and winner are known in advance.
+// Scout end to end against the support-app fixture, with a scripted harness and a local fake
+// OpenAI endpoint: no real model calls. The fake endpoint answers correctly for some models and
+// wrongly (or with HTTP 500) for others, so the right ranking is known in advance.
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import type { ExperimentQuery, ExperimentRecording, LangfuseConnector } from "../src/connectors/langfuse/index.ts";
-import { rankCandidates, type Candidate } from "../src/scout/candidates.ts";
-import { parseEciScores } from "../src/scout/eci.ts";
-import { jsonMatches } from "../src/scout/evaluators/pi.ts";
-import { runScout } from "../src/scout/pipeline.ts";
-import { scoutSearch, type EvalItem, type Evaluate } from "../src/scout/search.ts";
+import { execFileSync } from "node:child_process";
+import { cpSync, mkdtempSync, readFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, test } from "node:test";
+import { loadCatalogue } from "../src/catalogue/catalogue.ts";
+import { EvalProxy } from "../src/eval/proxy.ts";
+import type { Harness, JsonRequest } from "../src/harness/harness.ts";
+import { startRun } from "../src/local.ts";
+import { scanRepo } from "../src/scout/scan.ts";
+import { advance, CONFIGURE_QUESTION, TASK_QUESTION, type Answer, type Context, type Question, type Step } from "../src/scout/workflow.ts";
+import { readRepoConfig, updateGlobalConfig, updateRepoConfig } from "../src/state/config.ts";
+import { State } from "../src/state/db.ts";
+import { findRepo } from "../src/state/paths.ts";
 
-const candidate = (name: string, eci: number, price: number | null = 1): Candidate =>
-  ({ model: `openrouter/x/${name}`, provider: "openrouter", id: `x/${name}`, name, eci, eciModel: name, eciSource: "published", price });
-// Ten models; ECI 100, 110, ..., 190 (listed out of order on purpose).
-const models = [5, 2, 9, 0, 7, 1, 8, 3, 6, 4].map(index => candidate(`m${index}`, 100 + index * 10, 10 - index));
-// Seven items with difficulty 125: models from ECI 130 pass every item; one hard item needs 165.
-const dataset: EvalItem[] = [...Array.from({ length: 6 }, (_, index) => ({ id: `item-${index}`, input: index, expectedOutput: 125 })), { id: "hard", input: 6, expectedOutput: 165 }];
-const passes: Evaluate = async (model, item) => ({ pass: model.eci >= (item.expectedOutput as number), costUsd: model.price! / 1000 });
-const firstFive = (remaining: number) => (remaining > 2 ? 0 : remaining - 1);
+const fixture = new URL("./fixtures/support-app/", import.meta.url).pathname;
+const tickets = new Map(readFileSync(join(fixture, "data/tickets.jsonl"), "utf8").trim().split("\n").map(line => { const item = JSON.parse(line) as { ticket: string; queue: string }; return [item.ticket, item.queue]; }));
+const ALLOWED = ["gpt-5-nano", "gpt-4.1-nano", "gpt-6-luna", "gpt-4o-mini", "gpt-5.6-luna", "gpt-5.4-nano", "gpt-5-mini"];
 
-test("binary search finds the weakest model passing the samples, then screens neighbours and runs finals on every item", async () => {
-  const result = await scoutSearch({ dataset, candidates: models, evaluate: passes, pickIndex: firstFive });
-  assert.equal(result.status, "selected");
-  assert.deepEqual(result.sampleIds, ["item-0", "item-1", "item-2", "item-3", "item-4"]);
-  // Probes 140 (pass), 110 (fail), 120 (fail), 130 (pass): the pick is the weakest passing model.
-  assert.deepEqual(result.trials.filter(trial => trial.stage === "search").map(trial => trial.candidate.eci), [140, 110, 120, 130]);
-  assert.equal(result.selected?.eci, 130);
-  // 120 failed below the pick, so neighbours are taken from above only: 140 (already passed), 150, 160, 170.
-  assert.deepEqual(result.finals.map(trial => trial.candidate.eci).filter(eci => eci <= 170).sort(), [130, 140, 150, 160, 170]);
-  // Of the five, only 170 passes the hard item, so it leads. 180 ($2) and 190 ($1) are stronger and
-  // cheaper than 170 ($3) but untested: they are screened as challengers, cheapest first, and join the finals.
-  assert.deepEqual(result.trials.filter(trial => trial.stage === "challenger").map(trial => trial.candidate.eci), [190, 180]);
-  assert.equal(result.finals.length, 7);
-  // Every finalist runs every item three times (the default), and each run carries its repeat number.
-  assert.ok(result.finals.every(trial => trial.runs === 3 && trial.outcomes.length === dataset.length * 3));
-  assert.deepEqual([...new Set(result.finals[0]!.outcomes.map(outcome => outcome.repeat))], [1, 2, 3]);
-  assert.ok(result.trials.every(trial => trial.runs === 1 && trial.outcomes.length === 5));
-  assert.equal(result.finals[0]!.candidate.eci, 190);
-  assert.equal(result.finals[0]!.passes, 21);
+// Fake OpenAI. Right answers by default; gpt-4o-mini always says "other"; gpt-4.1-nano does not exist
+// (HTTP 404); gpt-5.6-luna answers its first five requests (one screen) and then fails with HTTP 500.
+const requests: string[] = [];
+let server: Server;
+let baseUrl = "";
+before(async () => {
+  server = createServer((req, res) => {
+    let body = "";
+    req.on("data", chunk => { body += chunk; });
+    req.on("end", () => {
+      const parsed = JSON.parse(body) as { model: string; messages: { role: string; content: string }[] };
+      requests.push(parsed.model);
+      const fail = (status: number, message: string) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify({ error: { message } })); };
+      if (req.headers.authorization !== "Bearer sk-fake-endpoint") return fail(401, "bad key");
+      if (parsed.model === "gpt-4.1-nano") return fail(404, "The model `gpt-4.1-nano` does not exist or you do not have access to it.");
+      if (parsed.model === "gpt-5.6-luna" && requests.filter(model => model === "gpt-5.6-luna").length > 5) return fail(500, "upstream overloaded");
+      const ticket = parsed.messages.find(message => message.role === "user")!.content;
+      const answer = parsed.model === "gpt-4o-mini" ? "other" : tickets.get(ticket) ?? "other";
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: answer } }], usage: { prompt_tokens: 100, completion_tokens: 5 } }));
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
 });
+after(() => { server.close(); });
 
-test("4/5 on the samples is a fail, and an evaluator error stops the search instead of counting as a fail", async () => {
-  const flaky: Evaluate = async (model, item) => ({ pass: !(model.eci === 140 && item.id === "item-3") && model.eci >= 125 });
-  const result = await scoutSearch({ dataset, candidates: models, evaluate: flaky, pickIndex: firstFive });
-  assert.equal(result.trials[0]!.passes, 4);
-  assert.equal(result.trials[0]!.accepted, false);
-
-  const broken: Evaluate = async model => { if (model.eci === 110) throw new Error("HTTP 402 insufficient credit"); return { pass: true }; };
-  const stopped = await scoutSearch({ dataset, candidates: models, evaluate: broken, pickIndex: firstFive });
-  assert.equal(stopped.status, "stopped");
-  assert.match(stopped.error ?? "", /402/);
-  assert.equal(stopped.finals.length, 0);
-});
-
-test("fewer than five labelled items is refused", async () => {
-  await assert.rejects(scoutSearch({ dataset: dataset.slice(0, 4), candidates: models, evaluate: passes }), /at least 5/);
-});
-
-test("the recommendation comes from Langfuse's read-back results, not the local verdicts", async () => {
-  const recordings: ExperimentRecording[] = [];
-  // Langfuse reports the hard item as failed for ECI 170 (a late human relabel, say): 170 drops to 6/7
-  // and ties four others, so the lower measured cost per item decides among the tied finalists.
-  const fake = {
-    baseUrl: "https://langfuse.test",
-    check: async () => ({ baseUrl: "https://langfuse.test", projectId: "p1", projectName: "test" }),
-    getDataset: async () => ({ id: "d1", name: "ds" }),
-    getDatasetItems: async () => dataset.map(item => ({ ...item, metadata: {} })),
-    recordExperimentItems: async (recording: ExperimentRecording) => { recordings.push(recording); return { experimentId: recording.experimentId, traceIds: {}, url: `https://langfuse.test/${recording.experimentId}` }; },
-    waitForExperiment: async (query: ExperimentQuery) => {
-      const recording = recordings.find(item => item.experimentId === query.experimentId)!;
-      const items = recording.items.map(item => ({ itemId: item.itemId, traceId: "t", passed: item.scores[0]!.value === true && !(item.model.endsWith("m7") && item.itemId === "hard"), missingScore: false, scores: {}, costUsd: item.costUsd ?? null }));
-      return { experimentId: recording.experimentId, experimentName: recording.experimentName, datasetId: "d1", items, passes: items.filter(item => item.passed).length, total: items.length, missing: [], missingScores: [], costUsd: items.reduce((sum, item) => sum + (item.costUsd ?? 0), 0) };
-    },
-  } as unknown as LangfuseConnector;
-  const report = await runScout({ task: "t", dataset: { langfuseDataset: "ds" }, candidates: models, evaluate: passes, langfuse: fake, passScore: "correct", pickIndex: firstFive, challengers: 0 });
-  // Every probe and screen became one Langfuse experiment, and every final one experiment per repeat
-  // (Langfuse keeps one result per dataset item per experiment), each carrying the pass score per item.
-  assert.equal(recordings.length, report.search.trials.length + report.finals.length * 3);
-  assert.ok(recordings.every(recording => new Set(recording.items.map(item => item.itemId)).size === recording.items.length));
-  assert.deepEqual(report.finals[0]!.experimentIds.map(id => /-final-(r\d)-/.exec(id)?.[1]), ["r1", "r2", "r3"]);
-  assert.ok(recordings.every(recording => recording.items.every(item => item.scores[0]!.name === "correct")));
-  const finalsByEci = Object.fromEntries(report.finals.map(item => [item.eci, item.passes]));
-  assert.deepEqual(finalsByEci, { 130: 18, 140: 18, 150: 18, 160: 18, 170: 18 });
-  assert.equal(report.finals.find(item => item.eci === 170)!.localPasses, 21);
-  assert.deepEqual(report.finals.find(item => item.eci === 170)!.passesByItem, { "item-0": 3, "item-1": 3, "item-2": 3, "item-3": 3, "item-4": 3, "item-5": 3, hard: 0 });
-  // All tie on 18/21; cost per item is price/1000 and price falls as ECI rises, so ECI 170 ($0.003) is cheapest.
-  assert.equal(report.recommendation!.eci, 170);
-  assert.ok(Math.abs(report.recommendation!.costPerItemUsd! - 0.003) < 1e-12);
-  assert.ok(report.recommendation!.verifiedInLangfuse);
-  assert.ok(report.limitations.some(line => /differ/.test(line)));
-});
-
-test("candidates are runnable models with a published ECI, one per Epoch row, cheapest listing first", () => {
-  const rows = parseEciScores('Model,Display name,eci,eci_ci_low,eci_ci_high,date,model_versions\nGPT-6.1 Sol,GPT-6.1 Sol,168.9,166,172,2026-09-29,"gpt-6.1-sol-2026-09,gpt-6.1-sol"\nDeepSeek V4 Pro,DeepSeek V4 Pro,150.2,148,152,2026-06-01,\n');
-  const ranked = rankCandidates([
-    { provider: "openrouter", id: "openai/gpt-6.1-sol", name: "OpenAI: GPT-6.1 Sol", cost: { input: 2, output: 10 } },
-    { provider: "openai", id: "gpt-6.1-sol", name: "GPT-6.1 Sol", cost: { input: 2, output: 10 } },
-    { provider: "openrouter", id: "deepseek/deepseek-v4-pro", name: "DeepSeek: DeepSeek V4 Pro", cost: { input: 0.3, output: 0.5 } },
-    { provider: "openrouter", id: "deepseek/deepseek-v4-pro:free", name: "DeepSeek: DeepSeek V4 Pro (free)" },
-    { provider: "openrouter", id: "~openai/gpt-sol-latest", name: "OpenAI: GPT Sol Latest" },
-    { provider: "openrouter", id: "acme/unknown-1", name: "Acme: Unknown 1" },
-  ], rows, { providers: ["openai", "openrouter"] });
-  assert.deepEqual(ranked.candidates.map(item => item.model), ["openrouter/deepseek/deepseek-v4-pro", "openai/gpt-6.1-sol"]);
-  assert.equal(ranked.candidates[0]!.price, 0.8);
-  assert.deepEqual(ranked.unranked, ["openrouter/acme/unknown-1"]);
-});
-
-test("the json grader needs every expected field: arrays as sets, strings case-insensitive", () => {
-  assert.ok(jsonMatches({ decision: "Declined", codes: ["E11", "I10"] }, { decision: "declined", codes: ["I10", "E11"], note: "extra" }));
-  assert.ok(!jsonMatches({ decision: "enrolled", codes: ["E11"] }, { decision: "enrolled", codes: ["E11", "O24"] }));
-  assert.ok(!jsonMatches({ decision: "enrolled" }, { decision: "declined" }));
-});
-
-test("a candidate that cannot run is skipped as untested, and the search continues without it", async () => {
-  const { CandidateUnavailable } = await import("../src/scout/search.ts");
-  // ECI 140 is the first probe; the provider rejects it (402). The search must not count it as a fail.
-  const evaluate: Evaluate = async (model, item) => {
-    if (model.eci === 140) throw new CandidateUnavailable("402: requires more credits");
-    return passes(model, item, { stage: "search" });
-  };
-  const result = await scoutSearch({ dataset, candidates: models, evaluate, pickIndex: firstFive });
-  assert.equal(result.status, "selected");
-  assert.deepEqual(result.unavailable.map(item => item.model), ["openrouter/x/m4"]);
-  assert.equal(result.selected?.eci, 130);
-  assert.ok(!result.trials.some(trial => trial.candidate.eci === 140));
-  assert.ok(!result.finals.some(trial => trial.candidate.eci === 140));
-  // Without 140 the pick is 130 again; its five finalists reach up to 180, and 190 joins as a challenger.
-  assert.deepEqual(result.finals.map(trial => trial.candidate.eci).sort(), [130, 150, 160, 170, 180, 190]);
-});
-
-test("the Pi evaluator retries transient provider errors, marks rejected models unavailable, and grades the reply", async () => {
-  const { piEvaluator } = await import("../src/scout/evaluators/pi.ts");
-  const { CandidateUnavailable } = await import("../src/scout/search.ts");
-  const replies: { stopReason: "stop" | "error"; text?: string; errorMessage?: string }[] = [];
-  const caller = {
-    getModel: (provider: string, id: string) => ({ provider, id }) as never,
-    complete: async () => {
-      const next = replies.shift()!;
-      return { role: "assistant", content: next.text ? [{ type: "text", text: next.text }] : [], stopReason: next.stopReason, errorMessage: next.errorMessage,
-        usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.002 } } } as never;
+/** Scripted OpenAI Harness: maps usages by file and finds the fixture's eval (recording to Langfuse when `langfuse`). */
+function scriptedHarness(langfuse = false): Harness & { calls: string[] } {
+  const calls: string[] = [];
+  return {
+    kind: "codex", destination: "the test harness", calls, usage: { calls: 0, costUsd: 0, unknownCost: 0, inputTokens: 0, outputTokens: 0 },
+    async json<T>(request: JsonRequest): Promise<T> {
+      this.usage.calls++;
+      if (request.system.includes("map model usages")) {
+        calls.push("map");
+        const byTask = new Map<string, string[]>();
+        for (const [, id, file] of request.prompt.matchAll(/^### (u\d+) model[^\n]* at ([^:\n]+):\d+$/gm)) {
+          const name = file!.includes("classify") ? "ticket classifier" : file!.includes("draft") ? "reply drafter" : "escalation router";
+          byTask.set(name, [...byTask.get(name) ?? [], id!]);
+        }
+        return { tasks: [...byTask].map(([name, usageIds]) => ({ name, description: `the ${name}`, usageIds, usesTools: false, needsVision: false, structuredOutput: false })) } as T;
+      }
+      calls.push(`discover:${/Task: ([^:]+):/.exec(request.prompt)?.[1]}`);
+      const env = [{ name: "CLASSIFIER_MODEL", value: "{{model}}" }, ...(langfuse ? [{ name: "CLASSIFY_LANGFUSE_DATASET", value: "support-tickets" }] : [])];
+      return { found: true, command: "node evals/classify.eval.ts", cwd: ".", env, threshold: null, langfuseDataset: langfuse ? "support-tickets" : "", passScore: langfuse ? "correct" : "", passMin: null, helpers: [], explanation: "npm run eval:classify", missing: "" } as T;
     },
   };
-  const evaluate = piEvaluator(caller, { systemPrompt: "List codes as JSON.", grader: { type: "json" } }, { retryDelaysMs: [1, 1] });
-  const item = { id: "HD-08", input: "AF and hypertension", expectedOutput: { conditions: ["I48", "I10"] } };
-  const model = candidate("m", 150);
+}
 
-  replies.push({ stopReason: "error", errorMessage: "429: rate limited upstream" }, { stopReason: "stop", text: "```json\n{\"conditions\": [\"I10\", \"I48\"]}\n```" });
-  const outcome = await evaluate(model, item, { stage: "search" });
-  assert.equal(outcome.pass, true);
-  assert.equal(outcome.costUsd, 0.002);
-  assert.equal(replies.length, 0);
+function repo() {
+  const root = mkdtempSync(join(tmpdir(), "openmerit-repo-"));
+  cpSync(fixture, root, { recursive: true });
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
+  git("init", "-q"); git("add", "-A"); git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "fixture");
+  return root;
+}
 
-  replies.push({ stopReason: "stop", text: "{\"conditions\": [\"I48\"]}" });
-  assert.equal((await evaluate(model, item, { stage: "search" })).pass, false);
+function context(root: string, home: string, harness = scriptedHarness(), extraEnv: Record<string, string> = {}): Context & { harnessCalls: string[] } {
+  // The orb's own Langfuse keys must never reach the fixture eval: only a test's fake Langfuse.
+  const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("LANGFUSE_")));
+  const env = { ...inherited, OPENMERIT_HOME: home, FAKE_ENDPOINT_KEY: "sk-fake-endpoint", ...extraEnv };
+  updateGlobalConfig({ harness: { kind: "codex" } }, env);
+  if (!readRepoConfig(root).endpoints) updateRepoConfig(root, { endpoints: [{ id: "openai", kind: "openai", baseUrl, apiKey: { env: "FAKE_ENDPOINT_KEY" }, allowedModels: ALLOWED }] });
+  return { state: new State(env), repo: findRepo(root), catalogue: loadCatalogue(), env, harness: async () => harness, log: () => {}, harnessCalls: harness.calls, langfusePoll: { intervalMs: 5, timeoutMs: 3000 } };
+}
 
-  replies.push({ stopReason: "error", errorMessage: "404: No endpoints found for x/m" });
-  await assert.rejects(evaluate(model, item, { stage: "search" }), CandidateUnavailable);
+const DEFAULTS: Record<string, Answer> = { disclose_harness: true, model: "openai/gpt-4.1-mini", corrections: "", tasks: ["ticket classifier"], approve_evals: true, retry_units: false, configure_ticket_classifier: false };
 
-  replies.push({ stopReason: "error", errorMessage: "401: invalid key" });
-  await assert.rejects(evaluate(model, item, { stage: "search" }), (error: unknown) => error instanceof Error && !(error instanceof CandidateUnavailable) && /401/.test(error.message));
+/** Answers every question from `answers` (falling back to DEFAULTS) until the run stops asking or an answer is missing. */
+async function drive(ctx: Context, runId: string, answers: Record<string, Answer> = {}) {
+  const asked: Question[] = [];
+  let step: Step = await advance(ctx, runId, {});
+  for (let guard = 0; step.questions.length && guard < 30; guard++) {
+    asked.push(...step.questions);
+    const next: Record<string, Answer> = {};
+    for (const question of step.questions) {
+      const answer = answers[question.id] ?? DEFAULTS[question.id];
+      if (answer === undefined) return { step, asked };
+      next[question.id] = answer;
+    }
+    step = await advance(ctx, runId, next);
+  }
+  return { step, asked };
+}
+
+test("scan finds both models, the model shared by two tasks and dynamic uses, without showing secrets", () => {
+  const root = repo();
+  const scan = scanRepo(root, loadCatalogue());
+  assert.deepEqual(scan.models.map(model => [model.catalogueId, model.usageIds.length]), [["openai/gpt-4.1-mini", 2], ["openai/gpt-5.4", 1]]);
+  const shared = scan.usages.filter(usage => usage.catalogueId === "openai/gpt-4.1-mini").map(usage => `${usage.file}:${usage.line}`);
+  assert.deepEqual(shared, ["src/classify.ts:3", "src/draft-reply.ts:3"]);
+  const classifier = scan.usages.find(usage => usage.file === "src/classify.ts" && usage.kind === "model")!;
+  assert.equal(classifier.dynamic, true);
+  assert.equal(classifier.envVar, "CLASSIFIER_MODEL");
+  assert.ok(scan.usages.some(usage => usage.dynamic && usage.envVar === "ESCALATION_MODEL" && usage.catalogueId === null));
+  assert.ok(scan.usages.some(usage => usage.kind === "endpoint" && usage.value === "https://api.openai.com/v1"));
+  assert.doesNotMatch(JSON.stringify(scan), /sk-test-abcdefgh/);
+  assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }), "", "the scan changes nothing");
 });
 
-test("models Epoch does not score rank on ScoutBM's bundled estimates, and published scores win", async () => {
-  const { loadEciEstimates } = await import("../src/scout/eci.ts");
-  const bundled = await loadEciEstimates();
-  assert.ok(bundled.estimates.length > 100, "the package ships the estimates CSV");
-  assert.match(bundled.provenance, /Catalogue [0-9a-f]{32}/);
-  const rows = parseEciScores('Model,Display name,eci,eci_ci_low,eci_ci_high,date,model_versions\nGPT-6.1 Sol,GPT-6.1 Sol,168.9,166,172,2026-09-29,\n');
-  const estimates = [
-    { catalogueModel: "qwen/qwen3.8-flash", name: "Qwen3.8 Flash", openRouterId: "qwen/qwen3.8-flash", eci: 154.2, source: "estimated" as const, standardError: 4.7, benchmarks: ["GPQA diamond"] },
-    { catalogueModel: "openai/gpt-6.1-sol", name: "GPT-6.1 Sol", openRouterId: "openai/gpt-6.1-sol", eci: 140, source: "calibrated" as const, standardError: 2, benchmarks: [] },
-  ];
-  const ranked = rankCandidates([
-    { provider: "openrouter", id: "qwen/qwen3.8-flash", name: "Qwen: Qwen3.8 Flash", cost: { input: 0.1, output: 0.4 } },
-    { provider: "openrouter", id: "openai/gpt-6.1-sol", name: "OpenAI: GPT-6.1 Sol", cost: { input: 2, output: 10 } },
-    { provider: "openrouter", id: "acme/unknown-1", name: "Acme: Unknown 1" },
-  ], rows, {}, estimates);
-  assert.deepEqual(ranked.candidates.map(item => [item.model, item.eciSource, item.eci]), [
-    ["openrouter/qwen/qwen3.8-flash", "estimated", 154.2],
-    ["openrouter/openai/gpt-6.1-sol", "published", 168.9],
+/** The search path the fake endpoint implies over the six-model pool (ascending ECI: gpt-4o-mini 123.9,
+ * gpt-4.1-nano 126.8, gpt-5-nano 139.1, gpt-5.4-nano 146.4, gpt-6-luna 156.4, gpt-5.6-luna 156.7). */
+const EXPECTED_TRIALS = [
+  ["search", "openai/gpt-5-nano", true], // middle of six: passes, so look weaker
+  ["search", "openai/gpt-4o-mini", false], // weakest: fails, so look stronger; gpt-4.1-nano is next
+  ["neighbour", "openai/gpt-5.4-nano", true], // gpt-4o-mini, the weaker neighbour, already failed: only stronger ones now
+  ["neighbour", "openai/gpt-6-luna", true],
+  ["neighbour", "openai/gpt-5.6-luna", true],
+];
+/** Per-item cost at list price for one request of 100 input and 5 output tokens, cheapest first. */
+const EXPECTED_TOP = ["openai/gpt-5-nano", "openai/gpt-6-luna", "openai/gpt-5.4-nano"];
+
+function assertSearch(ctx: Context, runId: string, step: Step) {
+  const task = step.result!.tasks[0]!;
+  const search = task.search!;
+  assert.deepEqual(search.trials.map(trial => [trial.stage, trial.model, trial.accepted]), EXPECTED_TRIALS);
+  assert.deepEqual(search.skipped.map(item => [item.model, item.stage]), [["openai/gpt-4.1-nano", "search"]], "a model the endpoint rejects is skipped as untested");
+  assert.match(search.skipped[0]!.reason, /HTTP 404/);
+  assert.equal(search.pick, "openai/gpt-5-nano");
+  assert.deepEqual(search.finalists, ["openai/gpt-5-nano", "openai/gpt-5.4-nano", "openai/gpt-6-luna", "openai/gpt-5.6-luna"]);
+  assert.match(search.shortfall ?? "", /Only 4 finalists/);
+  // Screens run on five items the current model passed in every run; finals and the baseline on all ten, three times.
+  const units = ctx.state.units(runId);
+  const screens = units.filter(unit => unit.role === "screen");
+  assert.equal(search.sampleIds.length, 5);
+  assert.ok(screens.filter(unit => unit.status === "done").every(unit => JSON.stringify(Object.keys((unit.result as { items: object }).items).sort()) === JSON.stringify([...search.sampleIds].sort())));
+  assert.deepEqual([task.baseline!.passes, task.baseline!.total, task.baseline!.runs], [30, 30, 3]);
+  assert.deepEqual(task.candidates.map(item => [item.model, item.status, item.total]), [
+    ["openai/gpt-5-nano", "measured", 30], ["openai/gpt-5.4-nano", "measured", 30], ["openai/gpt-6-luna", "measured", 30], ["openai/gpt-5.6-luna", "failed", 0],
   ]);
-  assert.equal(ranked.candidates[0]!.eciError, 4.7);
-  assert.deepEqual(ranked.unranked, ["openrouter/acme/unknown-1"]);
+  assert.equal(task.candidates.find(item => item.model === "openai/gpt-5.6-luna")!.qualified, false, "a final that failed never qualifies");
+  assert.deepEqual(task.top.map(item => item.model), EXPECTED_TOP);
+  assert.ok(Math.abs(task.top[0]!.costPerItemUsd! - (100 * 0.05 + 5 * 0.4) / 1e6) < 1e-12);
+  assert.ok(task.top[0]!.costIsEstimate);
+  // Requests per model: the failing and rejected models stop after their screen; gpt-5-mini costs more than the current model and is never sent.
+  const count = (model: string) => requests.filter(item => item === model).length;
+  assert.equal(count("gpt-4o-mini"), 5);
+  assert.equal(count("gpt-4.1-nano"), 1, "the eval stops at the first rejected request");
+  assert.equal(count("gpt-5-mini"), 0);
+  assert.equal(count("gpt-4.1-mini"), 30);
+  assert.equal(count("gpt-5-nano"), 35);
+  assert.ok(requests.every(model => model === "gpt-4.1-mini" || ALLOWED.includes(model)));
+  assert.equal(ctx.state.spend(runId).requests, requests.length, "the ledger accounts for every request the endpoint received");
+}
+
+test("Scout Model Binary Search screens the ECI-ranked pool, runs finalists on every item, and ranks the cheapest at least as good as the current model", async () => {
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  const ctx = context(root, home);
+  const runId = startRun(ctx);
+  requests.length = 0;
+  const before = readFileSync(join(root, "src/classify.ts"), "utf8");
+  const { step, asked } = await drive(ctx, runId);
+  assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
+  assert.ok(asked.some(question => question.prompt === TASK_QUESTION));
+  assert.deepEqual(asked.find(question => question.id === "tasks")!.options!.map(option => option.value).sort(), ["reply drafter", "ticket classifier"], "both tasks of the shared model are offered");
+  assert.ok(asked.some(question => question.id === "retry_units"), "the failed final asks before running again");
+  assert.ok(asked.some(question => question.prompt === CONFIGURE_QUESTION));
+  // Only the selected task is discovered and evaluated.
+  assert.deepEqual(ctx.harnessCalls.filter(call => call.startsWith("discover")), ["discover:ticket classifier"]);
+  assert.ok(ctx.state.units(runId).every(unit => unit.task === "ticket classifier"));
+  assertSearch(ctx, runId, step);
+  assert.equal(step.result!.tasks[0]!.top[0]!.source, "eval");
+  assert.equal(readFileSync(join(root, "src/classify.ts"), "utf8"), before);
+  assert.equal(ctx.state.decisions(runId).find(item => item.kind === "configure")!.decision, "no");
+  // A finished run replays from SQLite: resuming sends nothing.
+  const sent = requests.length;
+  await advance(ctx, runId, {});
+  assert.equal(requests.length, sent);
+  // History survives a restart, and another repository has none of it.
+  const reopened = new State(ctx.env);
+  assert.equal(reopened.listRuns(ctx.repo.id)[0]!.status, "done");
+  assert.equal(reopened.listRuns(findRepo(repo()).id).length, 0);
+});
+
+test("with a Langfuse eval, the eval records each run with the app's keys and Scout reads the results back with GETs only", async () => {
+  // Fake Langfuse v4: the app's keys write OTLP experiment spans and scores; the Viewer key gets 403 on
+  // writes. A run's items show up one poll late, as after ingestion.
+  const runItems: { experiment: string; itemId: string; traceId: string; spanId: string; at: string }[] = [];
+  const scores = new Map<string, number>(); // observation ID → value
+  const calls: { method: string; path: string; key: string }[] = [];
+  const polls = new Map<string, number>();
+  const lf = createServer((req, res) => {
+    let body = "";
+    req.on("data", chunk => { body += chunk; });
+    req.on("end", () => {
+      const url = new URL(req.url!, "http://x");
+      const key = Buffer.from((req.headers.authorization ?? "").replace(/^Basic /, ""), "base64").toString().split(":")[0]!;
+      calls.push({ method: req.method!, path: url.pathname, key });
+      const send = (status: number, value: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(value)); };
+      if (req.method !== "GET") {
+        if (key !== "pk-lf-app") return send(403, { message: "read-only key" });
+        if (url.pathname === "/api/public/otel/v1/traces") {
+          const parsed = JSON.parse(body) as { resourceSpans: { scopeSpans: { spans: { traceId: string; spanId: string; attributes: { key: string; value: { stringValue: string } }[] }[] }[] }[] };
+          for (const span of parsed.resourceSpans.flatMap(item => item.scopeSpans).flatMap(item => item.spans)) {
+            const attr = (name: string) => span.attributes.find(item => item.key === name)?.value.stringValue;
+            if (attr("langfuse.experiment.name")) runItems.push({ experiment: attr("langfuse.experiment.name")!, itemId: attr("langfuse.experiment.item.id")!, traceId: span.traceId, spanId: span.spanId, at: new Date().toISOString() });
+          }
+          return send(200, {});
+        }
+        if (url.pathname === "/api/public/scores") { for (const score of JSON.parse(body) as { observationId: string; value: number }[]) scores.set(score.observationId, score.value); return send(200, {}); }
+        return send(404, {});
+      }
+      if (url.pathname === "/api/public/v2/datasets/support-tickets") return send(200, { id: "ds-1", name: "support-tickets" });
+      if (url.pathname === "/api/public/dataset-items") return send(200, { data: [...tickets.keys()].map((_, index) => ({ id: `ticket-${String(index + 1).padStart(2, "0")}`, status: "ACTIVE" })), meta: { totalPages: 1 } });
+      if (url.pathname === "/api/public/experiment-items") {
+        const name = url.searchParams.get("experimentName")!;
+        polls.set(name, (polls.get(name) ?? 0) + 1);
+        const data = polls.get(name)! < 2 ? [] : runItems.filter(item => item.experiment === name).map(item => ({
+          experimentItemId: item.itemId, traceId: item.traceId, experimentId: name, experimentName: name, startTime: item.at,
+          scores: scores.has(item.spanId) ? [{ name: "correct", dataType: "BOOLEAN", value: scores.get(item.spanId) === 1, timestamp: item.at }] : [],
+        }));
+        return send(200, { data, meta: {} });
+      }
+      return send(404, {});
+    });
+  });
+  await new Promise<void>(resolve => lf.listen(0, "127.0.0.1", resolve));
+  const lfUrl = `http://127.0.0.1:${(lf.address() as AddressInfo).port}`;
+  try {
+    const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+    updateRepoConfig(root, { langfuse: { baseUrl: lfUrl, publicKey: { env: "LF_VIEWER_PUBLIC" }, secretKey: { env: "LF_VIEWER_SECRET" }, mappings: [] } });
+    const ctx = context(root, home, scriptedHarness(true), { LANGFUSE_BASE_URL: lfUrl, LANGFUSE_PUBLIC_KEY: "pk-lf-app", LANGFUSE_SECRET_KEY: "sk-lf-app", LF_VIEWER_PUBLIC: "pk-lf-viewer", LF_VIEWER_SECRET: "sk-lf-viewer" });
+    const runId = startRun(ctx);
+    requests.length = 0;
+    const { step } = await drive(ctx, runId);
+    assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
+    assertSearch(ctx, runId, step);
+    const task = step.result!.tasks[0]!;
+    assert.equal(task.eval.langfuse, "score correct on dataset support-tickets");
+    assert.ok([task.baseline!, ...task.top].every(item => item.source === "langfuse"));
+    // Each eval run recorded its own experiment; Scout read it back under the same name.
+    const done = ctx.state.units(runId).filter(unit => unit.status === "done").map(unit => unit.result as { experiment: string; source: string });
+    assert.equal(new Set(done.map(item => item.experiment)).size, done.length);
+    assert.ok(done.every(item => item.source === "langfuse" && polls.get(item.experiment)! >= 2), "Scout waited for ingestion");
+    // OpenMerit's Viewer key only read; every write came from the eval with the app's keys.
+    const viewer = calls.filter(call => call.key === "pk-lf-viewer");
+    assert.ok(viewer.length > 0 && viewer.every(call => call.method === "GET"), JSON.stringify(viewer.filter(call => call.method !== "GET")));
+    assert.ok(calls.filter(call => call.method !== "GET").every(call => call.key === "pk-lf-app"));
+    assert.ok(calls.every(call => call.key === "pk-lf-viewer" || call.key === "pk-lf-app"));
+  } finally { lf.close(); }
+});
+
+test("Yes previews and applies only the approved edit", async () => {
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  const ctx = context(root, home);
+  const runId = startRun(ctx);
+  requests.length = 0;
+  const before = readFileSync(join(root, "src/classify.ts"), "utf8").split("\n");
+  const draft = readFileSync(join(root, "src/draft-reply.ts"), "utf8");
+  const { step, asked } = await drive(ctx, runId, { configure_ticket_classifier: true, apply_ticket_classifier: true });
+  assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
+  assert.match(asked.find(question => question.id === "apply_ticket_classifier")!.detail!, /-export const CLASSIFIER_MODEL = process\.env\.CLASSIFIER_MODEL \?\? "gpt-4\.1-mini";\n\+export const CLASSIFIER_MODEL = process\.env\.CLASSIFIER_MODEL \?\? "gpt-5-nano";/);
+  const afterLines = readFileSync(join(root, "src/classify.ts"), "utf8").split("\n");
+  assert.deepEqual(afterLines.map((line, index) => (line === before[index] ? null : index + 1)).filter(Boolean), [3]);
+  assert.equal(readFileSync(join(root, "src/draft-reply.ts"), "utf8"), draft, "the unselected reply drafter keeps its model");
+  assert.ok(step.result!.configuration["ticket classifier"]!.manual!.some(item => item.includes("CLASSIFIER_MODEL")));
+});
+
+test("near the budget a request is refused before it is sent; decline keeps the run paused; a run-only raise continues after a restart", async () => {
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  const ctx = context(root, home);
+  const runId = startRun(ctx);
+  ctx.state.updateRun(runId, { budgetUsd: 0.0035 });
+  requests.length = 0;
+  const paused = await drive(ctx, runId);
+  assert.equal(paused.step.status, "budget_paused");
+  assert.ok(paused.step.spend.totalUsd <= 0.0035);
+  const sent = requests.length;
+  assert.ok(sent > 0 && sent < 10, `paused part-way through the baseline eval (${sent} requests)`);
+  assert.equal(ctx.state.units(runId).find(unit => unit.role === "baseline")!.status, "budget_paused");
+
+  const declined = await advance(ctx, runId, { budget_action: "decline" });
+  assert.equal(declined.status, "budget_paused");
+  assert.equal(requests.length, sent, "declining sends nothing");
+
+  ctx.state.close();
+  const restarted = context(root, home);
+  const raised = await drive(restarted, runId, { budget_action: "run", budget_amount: "1" });
+  assert.equal(raised.step.status, "done", raised.step.error ?? JSON.stringify([raised.step.questions, raised.step.notices]).slice(0, 1500));
+  assert.ok(!raised.asked.some(question => question.id === "approve_evals"), "the eval approval is kept across the restart");
+  assert.equal(readRepoConfig(root).budget, undefined, "a run-only raise does not change the default");
+  assert.deepEqual(restarted.state.budgetEvents(runId).map(event => [event.kind, event.scope]), [["alert", null], ["decline", null], ["raise", "run"]]);
+  assert.equal(restarted.state.getRun(runId)!.budgetUsd, 1);
+  assert.equal(restarted.state.spend(runId).requests, requests.length, "every sent request is in the ledger once");
+
+  // A second run saves its raise as the repository default.
+  const second = startRun(restarted);
+  restarted.state.updateRun(second, { budgetUsd: 0.0035 });
+  const again = await drive(restarted, second, { budget_action: "default", budget_amount: "0.5" });
+  assert.equal(again.step.status, "done", again.step.error);
+  assert.equal(readRepoConfig(root).budget?.defaultUsd, 0.5);
+});
+
+test("the ledger refuses the first request that would pass the budget, exactly at the boundary", () => {
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  const ctx = context(root, home);
+  const runId = startRun(ctx);
+  ctx.state.updateRun(runId, { budgetUsd: 1 });
+  const first = ctx.state.reserve({ runId, unitId: "u", model: "m", endpoint: "e", expectedUsd: 0.95 });
+  assert.ok(first.ok);
+  ctx.state.settle(first.id, { actualUsd: 0.9, estimatedUsd: null, latencyMs: 1 });
+  assert.ok(ctx.state.reserve({ runId, unitId: "u", model: "m", endpoint: "e", expectedUsd: 0.1 }).ok, "exactly at the limit is allowed");
+  const refused = ctx.state.reserve({ runId, unitId: "u", model: "m", endpoint: "e", expectedUsd: 0.0001 });
+  assert.equal(refused.ok, false);
+  // The second reservation never settled: it counts as in-flight spend, not as zero.
+  assert.equal(ctx.state.spend(runId).inFlight, 1);
+});
+
+test("a run whose process died becomes interrupted and keeps its in-flight spend", () => {
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  const ctx = context(root, home);
+  const runId = startRun(ctx);
+  ctx.state.ensureUnit({ id: "unit-1", runId, task: "t", model: "m", endpoint: "e", role: "baseline", repeat: 1 });
+  ctx.state.setUnit("unit-1", { status: "running" });
+  ctx.state.reserve({ runId, unitId: "unit-1", model: "m", endpoint: "e", expectedUsd: 0.02 });
+  ctx.state.db.prepare("UPDATE runs SET lock_pid = 4194303 WHERE id = ?").run(runId);
+  assert.deepEqual(ctx.state.reapInterrupted(ctx.repo.id), [runId]);
+  assert.equal(ctx.state.getRun(runId)!.status, "interrupted");
+  assert.equal(ctx.state.units(runId)[0]!.status, "interrupted");
+  assert.equal(ctx.state.spend(runId).inFlightUsd, 0.02);
+});
+
+test("the metering proxy refuses models outside the allowed pool without forwarding them", async () => {
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  const ctx = context(root, home);
+  const runId = startRun(ctx);
+  const proxy = new EvalProxy(ctx.state);
+  const url = await proxy.start();
+  const catalogue = loadCatalogue();
+  const nano = catalogue.models.find(model => model.id === "openai/gpt-5-nano")!;
+  const { token, tally } = proxy.open({ runId, unitId: "unit", endpointId: "openai", baseUrl, apiKey: "sk-fake-endpoint", model: "gpt-5-nano", allowed: model => (model === "gpt-5-nano" ? nano : undefined) });
+  requests.length = 0;
+  const post = (model: string) => fetch(`${url}/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ model, max_tokens: 10, messages: [{ role: "user", content: "hi" }] }) });
+  assert.equal((await post("gpt-4o")).status, 403);
+  assert.equal((await post("gpt-5-nano")).status, 200);
+  assert.deepEqual(requests, ["gpt-5-nano"]);
+  assert.deepEqual(tally.poolViolations, ["gpt-4o"]);
+  assert.equal((await fetch(`${url}/chat/completions`, { method: "POST", headers: { authorization: "Bearer wrong" }, body: "{}" })).status, 401);
+  await proxy.stop();
 });

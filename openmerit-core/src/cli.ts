@@ -1,178 +1,164 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { resolve } from "node:path";
-import { configureHarness, openRuntime, pickScoutModel } from "./pi/harness.ts";
-import type { Grader } from "./scout/evaluators/pi.ts";
 
-const HELP = `OpenMerit: find the right model for your task.
+const HELP = `OpenMerit: find cheaper models that perform at least as well as the ones your code uses today,
+measured with your own evals. Runs locally; no OpenMerit account.
 
 Usage:
-  openmerit                          Pi coding agent with OpenMerit Scout (/scout, scout_* tools)
-  openmerit login                    Connect a subscription or API key (Pi's /login)
-  openmerit status                   Connected providers, Scout's model and Langfuse
-  openmerit scout "<task>" [options] Scout agent: reads the task and codebase, runs the search, recommends a model
-  openmerit run [options]            The search alone, without the agent (for CI and coding agents)
-  openmerit candidates [options]     ECI-ranked candidates the connected providers can run
-  openmerit pi [pi args]             Pi itself, with the Scout extension
+  openmerit setup                 Power OpenMerit Harness (Claude Code, Codex or an API key), register the
+                                  MCP server, and configure this repository: read-only Langfuse, candidate
+                                  endpoints and allowed models, default eval budget. Rerunnable.
+  openmerit scout                 Scan model usages, pick a model and tasks, binary-search cheaper models on your eval
+                                  candidates, compare with the current model, optionally configure.
+  openmerit scout --resume <run>  Continue a paused, interrupted or failed run.
+  openmerit history [<run>]       This repository's runs, or one run in detail.
+  openmerit mcp                   The local MCP server (stdio), for Claude Code, Codex and other clients.
 
-Options:
-  --codebase <dir>          Project Scout reads (default: current directory)
-  --langfuse-dataset <name> Labelled Langfuse dataset
-  --dataset <file.jsonl>    Local labelled items {id?, input, expectedOutput}; pushed to Langfuse
-  --evaluator <module.mts>  Evaluator module that runs your real harness (relative to the current directory)
-  --system-prompt <text>    run: production system prompt for the built-in Pi evaluator
-  --grader <exact|contains|json|judge>  run: how the Pi evaluator checks a reply (default json)
-  --rubric <text>           run: rubric for the judge grader
-  --task <text>             run: task description recorded with the experiments
-  --providers <a,b>         Candidate providers (default: every connected provider)
-  --tools                   Candidates must support tool calls
-  --max-price <usd>         Max list price per million input+output tokens
-  --exclude <a,b>           Drop candidates whose provider/id contains any of these
-  --model <provider/id>     Model Scout itself runs on
-  --sample-size <n>         Items per binary-search probe (default 5)
-  --finalists <n>           Finalists run on every item (default 5)
-  --repeats <n>             Runs of every item per finalist (default 3)
-  --execute                 Allow spending provider credit (otherwise plan only)
-  --json                    Machine-readable output
+Scout options:
+  --answer <id=value>   Answer a question without a prompt (repeatable), as --json returns them
+  --json                Print the run state as JSON and stop at the first question
 
-Credentials come from Pi: API keys in the environment (OPENROUTER_API_KEY, ANTHROPIC_API_KEY,
-OPENAI_API_KEY, ...), subscriptions via \`openmerit login\`, or CLAUDE_CODE_OAUTH_TOKEN. Langfuse:
-LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL (Cloud or self-hosted). No OpenMerit account.`;
+Setup options (for scripts; interactive setup asks instead):
+  --harness <claude-code|codex|api>  --harness-model <id>
+  --api-provider <pi provider> --api-model <id> --api-key-env <VAR>
+  --endpoint <openrouter:VAR | openai:VAR | id=https://host/v1:VAR> (repeatable)
+  --allowed-models <a,b>  --budget <usd>  --register-mcp | --no-register-mcp
+  --langfuse-url <url> --langfuse-public-key-env <VAR> --langfuse-secret-key-env <VAR>
+  --yes                 Accept defaults; never prompt`;
 
-const [command = "", ...rest] = process.argv.slice(2);
-configureHarness();
-
-async function launchPi(args: string[]) {
-  const { main } = await import("@earendil-works/pi-coding-agent");
-  const { createScoutExtension } = await import("./pi/extension.ts");
-  await main(args, { extensionFactories: [{ name: "openmerit-scout", factory: createScoutExtension({ allowSpend: "ask" }) }] });
-}
-
-function options(args: string[]) {
-  return parseArgs({
-    args, allowPositionals: true,
-    options: {
-      codebase: { type: "string" }, "langfuse-dataset": { type: "string" }, dataset: { type: "string" }, evaluator: { type: "string" },
-      "system-prompt": { type: "string" }, grader: { type: "string" }, rubric: { type: "string" }, task: { type: "string" },
-      providers: { type: "string" }, tools: { type: "boolean" }, "max-price": { type: "string" }, exclude: { type: "string" },
-      model: { type: "string" }, "sample-size": { type: "string" }, finalists: { type: "string" }, repeats: { type: "string" },
-      execute: { type: "boolean", default: false }, json: { type: "boolean", default: false }, help: { type: "boolean" },
-    },
-  });
-}
-
-type Values = ReturnType<typeof options>["values"];
-const list = (value?: string) => value?.split(",").map(item => item.trim()).filter(Boolean);
-const filterFrom = (values: Values) => ({
-  ...(values.providers ? { providers: list(values.providers)! } : {}), ...(values.tools ? { tools: true } : {}),
-  ...(values["max-price"] ? { maxPrice: Number(values["max-price"]) } : {}), ...(values.exclude ? { exclude: list(values.exclude)! } : {}),
-});
+const [command = "help", ...rest] = process.argv.slice(2);
 const log = (line: string) => process.stderr.write(`${line}\n`);
 
-async function hostFor(values: Values) {
-  const { runtime, caller, models } = await openRuntime();
-  const scout = await pickScoutModel(runtime, values.model).catch(() => null);
-  return { runtime, scout, host: { caller, models, cwd: resolve(values.codebase ?? "."), env: process.env, log, ...(scout ? { scoutModel: `${scout.provider}/${scout.id}` } : {}) } };
+async function update(json: boolean): Promise<number | null> {
+  const { checkForUpdate, offerUpdate } = await import("./update.ts");
+  const info = await checkForUpdate();
+  if (!info.available) return null;
+  const interactive = process.stdin.isTTY === true && !json;
+  if (!interactive) { log(`openmerit ${info.latest} is available (installed ${info.current}). Update with: npm install -g openmerit@${info.latest}`); return null; }
+  const { terminalPrompter } = await import("./cli/prompt.ts");
+  const prompter = terminalPrompter();
+  try { return await offerUpdate(info, { interactive, confirm: question => prompter.confirm(question, true), log, argv: process.argv.slice(2) }); } finally { prompter.close(); }
+}
+
+function mcpCommand(): string[] {
+  const self = realpathSync(fileURLToPath(import.meta.url));
+  const found = spawnSync("sh", ["-c", "command -v openmerit"], { encoding: "utf8" }).stdout.trim();
+  try { if (found && realpathSync(found) === self) return ["openmerit", "mcp"]; } catch { /* fall through */ }
+  return [process.execPath, self, "mcp"];
+}
+
+async function setup(args: string[]) {
+  const { values } = parseArgs({ args, options: {
+    harness: { type: "string" }, "harness-model": { type: "string" }, "api-provider": { type: "string" }, "api-model": { type: "string" }, "api-key-env": { type: "string" },
+    endpoint: { type: "string", multiple: true }, "allowed-models": { type: "string" }, budget: { type: "string" }, "register-mcp": { type: "boolean" }, "no-register-mcp": { type: "boolean" },
+    "langfuse-url": { type: "string" }, "langfuse-public-key-env": { type: "string" }, "langfuse-secret-key-env": { type: "string" }, yes: { type: "boolean" },
+  } });
+  if (values.harness && !["claude-code", "codex", "api"].includes(values.harness)) throw new Error("--harness is claude-code, codex or api");
+  const { runSetup } = await import("./setup.ts");
+  const { State } = await import("./state/db.ts");
+  const { findRepo } = await import("./state/paths.ts");
+  const { terminalPrompter } = await import("./cli/prompt.ts");
+  const interactive = process.stdin.isTTY === true && !values.yes;
+  const prompter = interactive ? terminalPrompter() : null;
+  const state = new State();
+  try {
+    const result = await runSetup({
+      repo: findRepo(process.cwd()), state, prompter, log, env: process.env, mcpCommand: mcpCommand(),
+      flags: {
+        ...(values.harness ? { harness: values.harness as "claude-code" | "codex" | "api" } : {}), ...(values["harness-model"] ? { harnessModel: values["harness-model"] } : {}),
+        ...(values["api-provider"] ? { apiProvider: values["api-provider"] } : {}), ...(values["api-model"] ? { apiModel: values["api-model"] } : {}), ...(values["api-key-env"] ? { apiKeyEnv: values["api-key-env"] } : {}),
+        ...(values.endpoint ? { endpoints: values.endpoint } : {}), ...(values["allowed-models"] ? { allowedModels: values["allowed-models"].split(",").map(item => item.trim()).filter(Boolean) } : {}),
+        ...(values.budget ? { budget: Number(values.budget) } : {}), ...(values["register-mcp"] ? { registerMcp: true } : values["no-register-mcp"] ? { registerMcp: false } : {}),
+        ...(values["langfuse-url"] ? { langfuseUrl: values["langfuse-url"] } : {}), ...(values["langfuse-public-key-env"] ? { langfusePublicKeyEnv: values["langfuse-public-key-env"] } : {}),
+        ...(values["langfuse-secret-key-env"] ? { langfuseSecretKeyEnv: values["langfuse-secret-key-env"] } : {}), ...(!interactive ? { nonInteractive: true } : {}),
+      },
+    });
+    if (!result.harness) process.exitCode = 1;
+  } finally { prompter?.close(); state.close(); }
+}
+
+async function scout(args: string[]) {
+  const { values } = parseArgs({ args, options: { resume: { type: "string" }, answer: { type: "string", multiple: true }, json: { type: "boolean", default: false } } });
+  const { localContext, missingSetup, startRun } = await import("./local.ts");
+  const { advance } = await import("./scout/workflow.ts");
+  type Answers = import("./scout/workflow.ts").Answers;
+  const { renderStep } = await import("./cli/render.ts");
+  const { askQuestion, terminalPrompter } = await import("./cli/prompt.ts");
+  const controller = new AbortController();
+  let interrupts = 0;
+  process.on("SIGINT", () => { if (++interrupts > 1) process.exit(130); log("\nStopping; the run is saved and can be resumed. Press Ctrl-C again to quit now."); controller.abort(); });
+  const ctx = localContext({ cwd: process.cwd(), log, signal: controller.signal });
+  const interactive = process.stdin.isTTY === true && !values.json;
+  const prompter = interactive ? terminalPrompter() : null;
+  try {
+    const missing = missingSetup(ctx);
+    if (missing.length) {
+      if (values.json) return void process.stdout.write(`${JSON.stringify({ status: "needs_setup", missing }, null, 2)}\n`);
+      throw new Error(`Run \`openmerit setup\` first:\n  - ${missing.join("\n  - ")}`);
+    }
+    const runId = values.resume ?? startRun(ctx);
+    if (!values.resume) log(`Scout run ${runId} in ${ctx.repo.root}`);
+    let answers: Answers = Object.fromEntries((values.answer ?? []).map(item => {
+      const at = item.indexOf("=");
+      if (at < 1) throw new Error(`--answer ${item}: write <question id>=<value>`);
+      return [item.slice(0, at), item.slice(at + 1)];
+    }));
+    for (;;) {
+      const result = await advance(ctx, runId, answers);
+      answers = {};
+      for (const notice of result.notices) log(notice);
+      if (result.questions.length && prompter && !controller.signal.aborted) {
+        for (const question of result.questions) {
+          if (question.id === "budget_amount" && answers.budget_action === "decline") continue;
+          answers[question.id] = await askQuestion(prompter, question, log);
+        }
+        continue;
+      }
+      if (values.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      else {
+        if (result.questions.length) log(`Run ${runId} is waiting for: ${result.questions.map(question => `${question.id} (${question.prompt})`).join("; ")}. Answer with --answer <id>=<value>.`);
+        process.stdout.write(`${renderStep(result)}\n`);
+      }
+      if (result.status === "failed" || result.status === "interrupted") process.exitCode = 1;
+      return;
+    }
+  } finally { prompter?.close(); ctx.state.close(); }
+}
+
+async function history(args: string[]) {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { json: { type: "boolean", default: false } } });
+  const { localContext } = await import("./local.ts");
+  const { step } = await import("./scout/workflow.ts");
+  const { renderHistory, renderRun } = await import("./cli/render.ts");
+  const ctx = localContext({ cwd: process.cwd() });
+  try {
+    ctx.state.reapInterrupted(ctx.repo.id);
+    const id = positionals[0];
+    if (id) {
+      const run = ctx.state.getRun(id);
+      if (!run || run.repoId !== ctx.repo.id) throw new Error(`No run ${id} in ${ctx.repo.root}.`);
+      const current = step(ctx, id, [], []);
+      process.stdout.write(values.json ? `${JSON.stringify({ run, step: current, units: ctx.state.units(id), budget: ctx.state.budgetEvents(id), decisions: ctx.state.decisions(id), events: ctx.state.events(id) }, null, 2)}\n` : `${renderRun(ctx.state, run, current)}\n`);
+      return;
+    }
+    const runs = ctx.state.listRuns(ctx.repo.id);
+    process.stdout.write(values.json ? `${JSON.stringify(runs.map(run => ({ ...run, spend: ctx.state.spend(run.id) })), null, 2)}\n` : `${renderHistory(ctx.state, runs)}\n`);
+  } finally { ctx.state.close(); }
 }
 
 async function main() {
-  if (command === "" ) return launchPi(rest);
-  if (command === "pi") return launchPi(rest);
-  if (command === "login") return launchPi(["/login", ...rest]);
   if (command === "help" || command === "--help" || command === "-h") return void process.stdout.write(`${HELP}\n`);
-  if (command === "--version" || command === "-v") {
-    const { readFile } = await import("node:fs/promises");
-    const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
-    return void process.stdout.write(`${pkg.version}\n`);
-  }
-  const { values, positionals } = options(rest);
-  if (values.help) return void process.stdout.write(`${HELP}\n`);
-  const service = await import("./scout/service.ts");
-
-  if (command === "status") {
-    const { host } = await hostFor(values);
-    const status = await service.connections(host);
-    if (values.json) return void process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
-    process.stdout.write(`Providers: ${Object.entries(status.providers).map(([name, count]) => `${name} (${count} models)`).join(", ") || "none"}\n`);
-    process.stdout.write(`Scout model: ${status.scoutModel ?? "none"}\n`);
-    process.stdout.write(`Langfuse: ${status.langfuse.connected ? `${status.langfuse.project} at ${status.langfuse.baseUrl}; datasets ${status.langfuse.datasets?.join(", ") || "none"}` : `not connected${status.langfuse.error ? ` (${status.langfuse.error})` : ""}`}\n`);
-    return;
-  }
-
-  if (command === "candidates") {
-    const { host } = await hostFor(values);
-    const ranked = await service.candidates(host, filterFrom(values));
-    if (values.json) return void process.stdout.write(`${JSON.stringify(ranked, null, 2)}\n`);
-    for (const item of ranked.candidates) process.stdout.write(`${item.eci.toFixed(1).padStart(6)}  ${item.eciSource === "published" ? "         " : `${item.eciSource.slice(0, 4)} ±${(item.eciError ?? 0).toFixed(1)}`.padEnd(9)}  ${item.model}  ${item.price === null ? "?" : `$${item.price.toFixed(2)}/M`}\n`);
-    process.stdout.write(`${ranked.candidates.length} candidates (${ranked.counts.published} published ECI, ${ranked.counts.estimated} estimated, ${ranked.counts.calibrated} calibrated from data/eci-estimates.csv), ${ranked.unranked.length} unranked, ${ranked.dropped.length} filtered. ${ranked.eci.attribution}\n`);
-    return;
-  }
-
-  if (command === "run") {
-    const { host } = await hostFor(values);
-    const evaluator = values.evaluator
-      ? { type: "module" as const, path: resolve(values.evaluator) }
-      : (() => {
-        if (!values["system-prompt"]) throw new Error("run needs --evaluator <module> or --system-prompt for the built-in Pi evaluator");
-        const kind = values.grader ?? "json";
-        const grader: Grader = kind === "judge" ? { type: "judge", rubric: values.rubric ?? "The output must agree with the expected output." }
-          : kind === "exact" ? { type: "exact" } : kind === "contains" ? { type: "contains" } : { type: "json" };
-        return { type: "pi" as const, systemPrompt: values["system-prompt"], grader };
-      })();
-    const params = {
-      task: values.task ?? positionals.join(" ") ?? "", evaluator, filter: filterFrom(values),
-      ...(values["langfuse-dataset"] ? { langfuseDataset: values["langfuse-dataset"] } : {}), ...(values.dataset ? { datasetPath: resolve(values.dataset) } : {}),
-      ...(values["sample-size"] ? { sampleSize: Number(values["sample-size"]) } : {}), ...(values.finalists ? { finalists: Number(values.finalists) } : {}),
-      ...(values.repeats ? { repeats: Number(values.repeats) } : {}),
-    };
-    if (!values.execute) {
-      const planned = await service.plan(host, params);
-      const out = { status: "plan_only", candidates: planned.ranked.candidates.length, datasetSize: planned.datasetSize, estimate: planned.estimate, evaluator: planned.plugin?.name ?? "pi", note: "Add --execute to run it." };
-      return void process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
-    }
-    const result = await service.run(host, params);
-    process.stdout.write(values.json ? `${JSON.stringify(result.report, null, 2)}\n` : `${result.markdown}\nReport: ${result.files.markdown}\n`);
-    return;
-  }
-
-  if (command === "scout") {
-    const task = positionals.join(" ").trim();
-    if (!task) throw new Error("Describe the task: openmerit scout \"<what the model does>\"");
-    const { createAgentSession, DefaultResourceLoader, SessionManager, getAgentDir } = await import("@earendil-works/pi-coding-agent");
-    const { createScoutExtension } = await import("./pi/extension.ts");
-    const { runtime, scout, host } = await hostFor(values);
-    if (!scout) throw new Error("No model provider is connected for Scout. Set an API key or run `openmerit login`.");
-    const cwd = host.cwd;
-    const resourceLoader = new DefaultResourceLoader({
-      cwd, agentDir: getAgentDir(), noSkills: true, noPromptTemplates: true,
-      extensionFactories: [{ name: "openmerit-scout", factory: createScoutExtension({ allowSpend: values.execute, log, scoutModel: host.scoutModel! }) }],
-    });
-    await resourceLoader.reload();
-    const { session } = await createAgentSession({
-      cwd, model: scout, thinkingLevel: "medium", modelRuntime: runtime, resourceLoader, sessionManager: SessionManager.inMemory(cwd),
-      tools: ["read", "grep", "find", "ls", "scout_connections", "scout_candidates", "scout_dataset", "scout_save_dataset", "scout_run"],
-    });
-    log(`Scout on ${host.scoutModel} in ${cwd}${values.execute ? "" : " (plan only: add --execute to spend)"}`);
-    session.subscribe((event) => {
-      if (event.type === "tool_execution_start") log(`→ ${event.toolName} ${JSON.stringify(event.args ?? {}).slice(0, 300)}`);
-    });
-    const hints = [
-      values["langfuse-dataset"] && `Use the Langfuse dataset "${values["langfuse-dataset"]}".`,
-      values.dataset && `Use the local dataset ${resolve(values.dataset)}.`,
-      values.evaluator && `Use the evaluator module ${resolve(values.evaluator)}.`,
-      (values.providers || values.tools || values["max-price"] || values.exclude) && `Candidate filter: ${JSON.stringify(filterFrom(values))}.`,
-      values["sample-size"] && `sampleSize ${values["sample-size"]}.`, values.finalists && `finalists ${values.finalists}.`, values.repeats && `repeats ${values.repeats}.`,
-    ].filter(Boolean).join(" ");
-    try {
-      await session.prompt(`Recommend the model for this task.\n\nTask: ${task}\n\n${hints}`.trim());
-      const answer = session.getLastAssistantText() ?? "";
-      process.stdout.write(values.json ? `${JSON.stringify({ task, scoutModel: host.scoutModel, answer }, null, 2)}\n` : `${answer}\n`);
-    } finally {
-      session.dispose();
-    }
-    return;
-  }
-  throw new Error(`Unknown command "${command}". Run \`openmerit help\`.`);
+  if (command === "--version" || command === "-v" || command === "version") return void process.stdout.write(`${(await import("./update.ts")).packageVersion()}\n`);
+  if (command === "mcp") return (await import("./mcp.ts")).serveMcp();
+  if (!["setup", "scout", "history"].includes(command)) throw new Error(`Unknown command "${command}". Run \`openmerit help\`.`);
+  const took = await update(rest.includes("--json"));
+  if (took !== null) { process.exitCode = took; return; }
+  if (command === "setup") return setup(rest);
+  if (command === "scout") return scout(rest);
+  return history(rest);
 }
 
 main().catch((error: unknown) => {

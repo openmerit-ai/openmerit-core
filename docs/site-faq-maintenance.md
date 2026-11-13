@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Local CLI and MCP — unreleased npm source, 12 November 2026
+
+Reviewed the homepage against the `openmerit` package becoming a local CLI and MCP server (`setup`, `scout`, `history`) that runs Scout Model Binary Search with the customer's own evals on candidate models through a local metering proxy, within a per-run budget, reads per-item results back read-only from the Langfuse experiments those evals record, and can edit a model ID after approval. `site/index.html` has no FAQ block and makes no claims about commands, accounts, eval execution or configuration edits. Its statement that OpenMerit stays out of the live request path still holds: the proxy exists only during approved evals on the user's machine. No homepage copy changes.
+
 ## Dominated candidates, quality tie band and requested benchmark evidence — deployed 9 November 2026
 
 Reviewed the homepage against Scout leaving out unmeasured candidates beaten on both quality estimate and cost, treating unmeasured quality estimates within three points as tied under the quality priority, `get_model_details` returning requested benchmark results, and tied benchmark scores sharing ranks. `site/index.html` has no FAQ block and does not mention ranking order, shortlist length or benchmark ranks. No homepage copy changes.
