@@ -174,6 +174,7 @@ Updating the package refreshes the bundled catalogue; history stays intact. Set 
 ```sh
 npm ci
 npm run check            # strict typecheck and tests (mocked endpoints and harness; no paid calls)
+npm run test:fast        # the tests without the 90 s daemon crash-recovery test, while iterating
 npm run build:catalogue  # maintainers: regenerate data/catalogue.json from OpenRouter and Epoch
 npm run build && npm pack
 ```

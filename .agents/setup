@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Prepares an Amp orb: installs the Node.js version CI uses and the npm dependencies.
+# Prepares an Amp orb: installs the Node.js version CI uses and the npm dependencies of the
+# website (root), the openmerit package (openmerit-core/) and the Sahra Health playground.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -47,16 +48,25 @@ grep -Fqx "$npm_auth" "$HOME/.npmrc" 2>/dev/null || echo "$npm_auth" >> "$HOME/.
 # npm ci always deletes node_modules, so a stale snapshot would reinstall everything.
 # Skip it when the manifest, lockfile and Node.js version match the last install;
 # the marker lives inside node_modules so it disappears with it.
-deps_marker=node_modules/.orb-setup-fingerprint
-deps_fingerprint="$(
-  {
-    node --version
-    cat package-lock.json package.json
-  } | sha256sum | cut -d' ' -f1
-)"
-if [[ -d node_modules && "$(cat "$deps_marker" 2>/dev/null)" == "$deps_fingerprint" ]]; then
-  echo "npm dependencies unchanged"
-else
-  step "npm ci" npm ci --prefer-offline --no-audit --no-fund
-  echo "$deps_fingerprint" > "$deps_marker"
-fi
+install_deps() {
+  local dir="$1"
+  local marker="$dir/node_modules/.orb-setup-fingerprint"
+  local fingerprint
+  fingerprint="$(
+    {
+      node --version
+      cat "$dir/package-lock.json" "$dir/package.json"
+    } | sha256sum | cut -d' ' -f1
+  )"
+  if [[ -d "$dir/node_modules" && "$(cat "$marker" 2>/dev/null)" == "$fingerprint" ]]; then
+    echo "npm dependencies in $dir unchanged"
+  else
+    step "npm ci in $dir" npm ci --prefix "$dir" --prefer-offline --no-audit --no-fund
+    echo "$fingerprint" > "$marker"
+  fi
+}
+
+# demo/ is left out: npm run check:demo installs it on every run.
+for dir in . openmerit-core playground; do
+  install_deps "$dir"
+done

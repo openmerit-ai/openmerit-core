@@ -32,7 +32,8 @@
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/rewrite-declaration-imports.ts && chmod +x dist/cli.js",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --test \"src/**/*.test.ts\" \"test/**/*.test.ts\"",
+    "test": "node --test --test-concurrency=3 \"src/**/*.test.ts\" \"test/**/*.test.ts\"",
+    "test:fast": "node --test \"src/**/*.test.ts\" \"test/**/!(daemon).test.ts\"",
     "check": "npm run typecheck && npm test",
     "prepack": "npm run build",
     "openmerit": "node src/cli.ts",
