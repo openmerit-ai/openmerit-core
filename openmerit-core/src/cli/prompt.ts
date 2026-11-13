@@ -3,7 +3,8 @@ import { createInterface } from "node:readline/promises";
 import type { Answer, Question } from "../scout/workflow.ts";
 
 export interface Prompter {
-  ask(question: string, fallback?: string): Promise<string>;
+  /** `signal` cancels a pending question, which then rejects. */
+  ask(question: string, fallback?: string, signal?: AbortSignal): Promise<string>;
   secret(question: string): Promise<string>;
   confirm(question: string, fallback?: boolean): Promise<boolean>;
   choose<T extends string>(question: string, options: { value: T; label: string }[], fallback?: T): Promise<T>;
@@ -15,8 +16,8 @@ export function terminalPrompter(input: NodeJS.ReadableStream = process.stdin, o
   let muted = false;
   const write = (output as NodeJS.WriteStream).write.bind(output);
   (rl as unknown as { _writeToOutput: (text: string) => void })._writeToOutput = (text: string) => { if (!muted || text.includes("\n")) write(muted ? "\n" : text); };
-  const ask = async (question: string, fallback?: string) => {
-    const answer = (await rl.question(`${question}${fallback !== undefined && fallback !== "" ? ` [${fallback}]` : ""} `)).trim();
+  const ask = async (question: string, fallback?: string, signal?: AbortSignal) => {
+    const answer = (await rl.question(`${question}${fallback !== undefined && fallback !== "" ? ` [${fallback}]` : ""} `, signal ? { signal } : {})).trim();
     return answer || fallback || "";
   };
   return {

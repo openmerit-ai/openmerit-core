@@ -1,5 +1,13 @@
 # Website FAQ maintenance
 
+## `openmerit connect` with Claude Code and ChatGPT sign-ins — unreleased npm source, 13 November 2026
+
+Reviewed the homepage against `openmerit connect`, which powers OpenMerit Harness with Claude Code through pi-claude-bridge and the machine's Claude login, with Codex models through pi's ChatGPT Plus or Pro sign-in (tokens kept in `~/.openmerit/agent/auth.json`), or with an API key. `site/index.html` has no FAQ block and mentions no coding agents, subscriptions, sign-ins or where credentials are kept. No homepage copy changes.
+
+## Local daemon on Rivet — unreleased npm source, 13 November 2026
+
+Reviewed the homepage against Scout moving into a local background daemon that runs a Rivet engine on `127.0.0.1` and keeps each run as a Rivet Workflow actor, with the CLI and MCP server as its clients. `site/index.html` has no FAQ block and makes no claims about background processes, local services or where run state is kept. The engine makes no outside connections of its own, and OpenMerit still stays out of the live request path. No homepage copy changes.
+
 ## Local CLI and MCP — unreleased npm source, 12 November 2026
 
 Reviewed the homepage against the `openmerit` package becoming a local CLI and MCP server (`setup`, `scout`, `history`) that runs Scout Model Binary Search with the customer's own evals on candidate models through a local metering proxy, within a per-run budget, reads per-item results back read-only from the Langfuse experiments those evals record, and can edit a model ID after approval. `site/index.html` has no FAQ block and makes no claims about commands, accounts, eval execution or configuration edits. Its statement that OpenMerit stays out of the live request path still holds: the proxy exists only during approved evals on the user's machine. No homepage copy changes.
