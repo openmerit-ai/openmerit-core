@@ -16,6 +16,21 @@ cd your-repo
 openmerit setup
 ```
 
+### Supported platforms
+
+OpenMerit needs Node.js 22.19 or newer and the local Rivet engine that runs Scout (see [Daemon](#daemon)). The engine comes as a binary per platform, installed with the package:
+
+| Platform | Status |
+| --- | --- |
+| Linux x64 | Tested with Node 22.19.0: install, setup, Scout, history and MCP |
+| macOS arm64 (Apple silicon) | Tested with Node 22.19.0: the same. The daemon also starts with Node 26 |
+| Linux arm64, macOS x64 (Intel) | Engine binaries exist; untested |
+| Windows | Not supported: Rivet publishes no Windows engine, so Scout and the MCP server cannot start the daemon. WSL 2 is untested |
+
+A global install takes about 780 MB on Linux and 660 MB on macOS, most of it the engine and the bundled Claude Code (see [Limitations](#limitations)).
+
+### Setup
+
 `openmerit setup` is safe to rerun. It verifies what is saved, keeps what still works and offers a retry or reconfiguration for anything that fails. It never switches to another provider on its own.
 
 1. **Harness (global).** Setup runs `openmerit connect` (see [Connect the harness](#connect-the-harness)).
@@ -37,6 +52,15 @@ Settings live in two places:
 | `~/.openmerit/daemon.json` (mode 0600), `daemon.log` | The running daemon's pid, port and access token, and its log |
 
 Set `OPENMERIT_HOME` to move `~/.openmerit`. For scripts, `openmerit help` lists flags such as `--harness codex --device-code --endpoint openrouter:OPENROUTER_API_KEY --allowed-models a,b --budget 5 --yes`.
+
+### Commit `.openmerit/` or ignore it
+
+Setup leaves `<repo>/.openmerit/` untracked; OpenMerit never commits or ignores it for you. It holds `config.json` and any eval helper files you approved under `.openmerit/evals/`, and never a key's value, so it is safe to commit.
+
+- **Commit it** when your team should share the same endpoints, allowed models, evals and budget. Use `{"env": "..."}` key references in a shared file: a `{"secret": "<name>"}` reference resolves only on the machine whose `~/.openmerit/secrets.json` stored it. Expect diffs: rerunning setup rewrites each entry's `verifiedAt` time, and Scout saves each eval you approve and any budget raise you make the new default.
+- **Ignore it** (add `.openmerit/` to `.gitignore`) when the settings are yours alone.
+
+Each run records the repository revision, and an untracked or uncommitted `.openmerit/` marks it `+dirty` in `openmerit history`. A committed or ignored `.openmerit/` does not.
 
 ### Connect the harness
 
@@ -101,10 +125,36 @@ OpenMerit runs the eval command once per model and item set, through a metering 
 
 Per-item results come one of two ways:
 
-- **Langfuse.** The eval records the run as a Langfuse experiment named `$OPENMERIT_EXPERIMENT` on the configured dataset, with a per-item score, using your application's own keys. OpenMerit reads the experiment back with the Viewer key, using GET requests only, and waits for Langfuse to ingest every requested item (up to five minutes). An item passes when its score is boolean true or 1, or at least the configured minimum. An item without the score never counts as a pass: the run fails and asks before running again. The experiment must be a Langfuse v4 experiment, as the Langfuse SDKs' experiment runners record it, or OTLP spans with `langfuse.experiment.*` attributes like the fixture's eval. Legacy dataset runs (`POST /api/public/dataset-run-items`) are not read: Langfuse Cloud removes them on 16 November 2026, and organizations created since 16 September 2026 never had them.
+- **Langfuse.** The eval records the run as a Langfuse experiment named `$OPENMERIT_EXPERIMENT` on the configured dataset, with a per-item score, using your application's own keys. OpenMerit reads the experiment back with the Viewer key, using GET requests only, and waits for Langfuse to ingest every requested item (up to five minutes). An item passes when its score is boolean true or 1, or at least the configured minimum. An item without the score never counts as a pass: the run fails and asks before running again. The experiment must be a Langfuse v4 experiment, as the Langfuse SDKs' experiment runners record it, or the OTLP spans with `langfuse.experiment.*` attributes that those runners send. Legacy dataset runs (`POST /api/public/dataset-run-items`) are not read: Langfuse Cloud removes them on 16 November 2026, and organizations created since 16 September 2026 never had them.
 - **The eval's own report.** The eval writes `{"items": [{"id": string, "pass": boolean}]}` to `$OPENMERIT_RESULT`, or prints it as the last JSON line of stdout.
 
-A non-zero exit, or no result for a requested item, marks the run failed. The test fixture `test/fixtures/support-app` is a minimal example of both.
+A non-zero exit, or no result for a requested item, marks the run failed.
+
+A minimal eval that reports its own results, run as `node evals/classify.mjs`. It reads labelled tickets such as `{"id": "t1", "text": "I was charged twice this month.", "queue": "billing"}` from `evals/tickets.jsonl`:
+
+```js
+import { readFileSync, writeFileSync } from "node:fs";
+
+const only = (process.env.OPENMERIT_ITEMS ?? "").split(",").filter(Boolean);
+const tickets = readFileSync("evals/tickets.jsonl", "utf8").trim().split("\n").map(line => JSON.parse(line))
+  .filter(ticket => only.length === 0 || only.includes(ticket.id));
+
+const items = [];
+for (const ticket of tickets) {
+  const response = await fetch(`${process.env.OPENAI_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: process.env.OPENMERIT_MODEL,
+      messages: [{ role: "user", content: `Answer billing, bug or other: which queue gets this ticket?\n\n${ticket.text}` }],
+    }),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`); // exits non-zero: the run fails
+  const answer = (await response.json()).choices[0].message.content.trim().toLowerCase();
+  items.push({ id: ticket.id, pass: answer === ticket.queue });
+}
+writeFileSync(process.env.OPENMERIT_RESULT, JSON.stringify({ items }));
+```
 
 ### Eval budget
 
@@ -133,7 +183,7 @@ A non-zero exit, or no result for a requested item, marks the run failed. The te
 
 Scout runs in a background process, the OpenMerit daemon. `openmerit scout` and `openmerit mcp` are its clients: the first one that needs it starts it, and it keeps running after they exit. `openmerit setup` and `openmerit history` do not use it.
 
-- Each Scout run is a Rivet Workflow actor in a local Rivet engine that ships in the package. The engine listens on `127.0.0.1` only: port 6720 (set `OPENMERIT_DAEMON_PORT` to change it), with 6721 for its peer API and 6730 for metrics. It makes no connections of its own outside the machine, and it accepts only requests that carry the token in `~/.openmerit/daemon.json`, which is new at every start.
+- Each Scout run is a Rivet Workflow actor in a local Rivet engine that ships in the package. The engine listens on `127.0.0.1` only: port 6720, with the next port (6721) for its peer API and the port 10 above (6730) for metrics. `OPENMERIT_DAEMON_PORT` moves all three: `7720` uses 7720, 7721 and 7730. It makes no connections of its own outside the machine, and it accepts only requests that carry the token in `~/.openmerit/daemon.json`, which is new at every start.
 - A run waiting for your answer keeps waiting when the daemon stops, crashes or the machine restarts: the next command starts the daemon again and the run continues from its question.
 - When the daemon stops answering (no reply in 30 s, or the connection drops), the CLI and MCP server say the connection was lost and reconnect, starting a new daemon if needed. After three failed attempts they stop and print `openmerit scout --resume <run>`.
 - A step cut off in the middle, such as an eval in progress, stops the run as interrupted. `openmerit scout --resume <run>` continues it and asks before running an interrupted eval again; its earlier requests stay counted against the budget.
@@ -149,6 +199,43 @@ Every `setup`, `scout` and `history` checks npm for a newer `openmerit`:
 - The MCP server reports updates through the client: in its initialize instructions and as a log notification.
 
 Updating the package refreshes the bundled catalogue; history stays intact. Set `OPENMERIT_NO_UPDATE_CHECK=1` to skip the check.
+
+## Uninstall
+
+```sh
+openmerit daemon stop                       # stop the background daemon first
+claude mcp remove --scope user openmerit    # if setup registered the MCP server with Claude Code
+codex mcp remove openmerit                  # and with Codex
+npm uninstall -g openmerit
+rm -rf ~/.openmerit                         # or your $OPENMERIT_HOME
+```
+
+Removing `~/.openmerit` deletes the harness connection and ChatGPT sign-in, the keys you typed in, the run history of every repository, the daemon's engine store and its log. Besides the files in the [settings table](#setup), it holds SQLite's `state.db-wal` and `state.db-shm`, and `daemon.lock` while a daemon starts. Each repository keeps its own `.openmerit/`; delete it there unless you committed it. Model changes you applied in Configure stay in your code.
+
+To free disk space without uninstalling, stop the daemon with `openmerit daemon stop`, then:
+
+- Delete `~/.openmerit/rivet/`. The engine store takes about 130 MB even when empty, and the next command recreates it. Do this only when no run is paused or interrupted: the store holds each run's workflow and pending question. `openmerit history` lives in `state.db` and stays.
+- Delete `~/.openmerit/daemon.log`, which grows without rotation.
+
+## Troubleshooting
+
+**Scout says the connection to the daemon was lost, or that it did not start.** Read `~/.openmerit/daemon.log` first. A common cause is another process on one of the daemon's three ports (6720, 6721 and 6730 by default). The daemon does not report that the port is taken: after about a minute its log says `RivetKit registry did not register with the Engine within 60000ms` and `Engine health check failed after 64 attempts`. The CLI prints `Connection to the OpenMerit daemon lost. Reconnecting…`, then `The OpenMerit daemon did not start within 90 s` for each of three attempts, and gives up after about six minutes with `openmerit scout --resume <run>`. To find what holds the ports and move the daemon:
+
+```sh
+lsof -nP -iTCP:6720 -iTCP:6721 -iTCP:6730 -sTCP:LISTEN
+export OPENMERIT_DAEMON_PORT=7720           # the daemon then uses 7720, 7721 and 7730
+openmerit scout --resume <run>
+```
+
+The first client that finds no daemon starts it, so set `OPENMERIT_DAEMON_PORT` everywhere OpenMerit runs: in your shell profile, and in the environment your MCP client starts `openmerit mcp` in.
+
+**Several users on one machine.** Each user has their own `~/.openmerit` and daemon, but every daemon defaults to port 6720, so only the first one starts. Give each user their own `OPENMERIT_DAEMON_PORT`, 20 apart (such as 6740, 6760) so that no two users' three ports overlap.
+
+**A daemon that seems stuck.** `openmerit daemon status` shows whether it answers, with its version, pid and port. `openmerit daemon stop` stops it; the next command starts a new one, and interrupted runs continue with `openmerit scout --resume <run>`. A daemon of an older version is replaced on its own.
+
+**Warnings in `daemon.log`.** Rivet logs `SQLite transaction is unnamed` warnings during runs. They appear in successful runs too and do not mean a run failed.
+
+**Windows.** Not supported; see [Supported platforms](#supported-platforms).
 
 ## Data handling
 
@@ -183,3 +270,5 @@ npm run test:fast        # the tests without the 90 s daemon crash-recovery test
 npm run build:catalogue  # maintainers: regenerate data/catalogue.json from OpenRouter and Epoch
 npm run build && npm pack
 ```
+
+The tests' fictional application, `test/fixtures/support-app` (in the repository, not the npm package), has a fuller eval that can also record a Langfuse v4 experiment through OTLP.
