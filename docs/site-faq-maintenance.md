@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Homepage for the self-hosted CLI — draft for review, 13 November 2026
+
+Hosted Scout was removed on 12 November, and the homepage still advertised its index (400+ models, 30+ labs, 500+ benchmark series, 200+ source feeds) and sent **Try Scout** to a Clerk sign-in the CLI does not use. The entries below from 12 and 13 November are right that `site/index.html` has no FAQ block, but those hosted-index claims had gone stale. The draft replaces them with claims checked against `openmerit-core/README.md` on `main`: the local CLI and MCP server with no OpenMerit account, the 349-model catalogue that ships in the package, the install commands, Node.js 22.19 or newer on macOS or Linux, the three ways to power the harness, MCP registration with Claude Code and Codex, and candidate evals that run on the user's own key only after approval, within a per-run budget ($10 by default). The page still says OpenMerit stays out of the live request path. It makes no licensing or source-availability claims. These claims hold only once the new CLI is npm `latest` (0.4.1 is the older build), so the page waits for that release. See [the design record](site-design.md#self-hosted-cli-homepage--draft-for-review-13-november-2026).
+
 ## Scout no longer asks before mapping, and skips data files — unreleased npm source, 13 November 2026
 
 Reviewed the homepage against Scout sending code context to OpenMerit Harness without a separate question (eval runs still need approval), and skipping JSON data files that name many models plus the repository's `scan.exclude` patterns. `site/index.html` has no FAQ block and makes no claim that Scout asks before code context leaves the machine. No homepage copy changes.

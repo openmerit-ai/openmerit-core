@@ -122,6 +122,12 @@ code { font-family: var(--mono); }
 .letter-cta { display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin-top: 25px; padding: 6px 12px; min-height: 32px; border: 0; border-radius: 8px; background: var(--soft); color: var(--ink); font-size: 12px; font-weight: 500; line-height: 20px; -webkit-user-select: none; user-select: none; transition: background 160ms ease, transform 160ms var(--ease-out); }
 .letter-cta img { flex-shrink: 0; }
 .letter-cta:active:not(:focus-visible) { transform: scale(.97); }
+/* Install commands below the homepage letter. */
+.letter-install { margin-top: 36px; }
+.letter-install h2 { font-size: 13px; font-weight: 500; }
+.letter-install pre { margin: 10px 0 0; padding: 14px 18px; overflow-x: auto; border: 1px solid var(--code-line); border-radius: 8px; background: var(--code-bg); color: var(--code-ink); font-size: 14px; line-height: 1.7; }
+.letter-install p { margin-top: 14px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.letter-install p a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--link-line); text-underline-offset: 3px; }
 /* The Clerk sign-in page at /scout/ reuses the homepage layout. */
 .letter-header nav #user-account { display: flex; align-items: center; }
 .letter-header nav #user-account[hidden] { display: none; }

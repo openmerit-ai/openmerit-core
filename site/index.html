@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Meet Scout, OpenMerit's model search agent. Find the right AI models for your task, on the web or inside your coding agent.">
+  <meta name="description" content="Scout by OpenMerit finds cheaper models that perform at least as well as the ones your code uses, measured with your own evals. It runs on your machine as a CLI and MCP server.">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#171915" media="(prefers-color-scheme: dark)">
   <meta property="og:type" content="website">
   <meta property="og:title" content="OpenMerit — Your team has better things to build.">
-  <meta property="og:description" content="Meet Scout, OpenMerit's model search agent. Find the right AI models for your task, on the web or inside your coding agent.">
+  <meta property="og:description" content="Scout by OpenMerit finds cheaper models that perform at least as well as the ones your code uses, measured with your own evals. It runs on your machine as a CLI and MCP server.">
   <meta property="og:url" content="https://openmerit.ai/">
   <meta property="og:site_name" content="OpenMerit">
   <meta property="og:image" content="https://openmerit.ai/assets/openmerit-og-v1.png">
@@ -24,7 +24,7 @@
   <link rel="canonical" href="https://openmerit.ai/">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preload" href="/assets/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/styles.css?v=20261103-speed-v1">
+  <link rel="stylesheet" href="/styles.css?v=20261113-install-v1">
   <script src="/assets/video-player.js?v=20261031-v2" type="module"></script>
   <script src="/assets/thread-rule.js?v=20261103-v1" type="module"></script>
   <script src="/assets/speed-egg.js?v=20261103-v2" type="module"></script>
@@ -36,7 +36,7 @@
       <svg class="brand-mark" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg>
       <span>openmerit</span>
     </a>
-    <nav aria-label="Primary navigation"><a href="/scout/">Scout</a><a href="/memo/">Memo</a></nav>
+    <nav aria-label="Primary navigation"><a href="#install">Install</a><a href="/memo/">Memo</a></nav>
   </header>
   <main id="main" class="letter-main">
     <section aria-labelledby="hero-title">
@@ -44,10 +44,15 @@
       <div class="letter-copy">
         <p>There’s more to picking a model than an eval, a skill or an “auto” setting. It needs to do the job, fit your budget and meet your <span class="speed-egg">needs for speed</span>, security and where your data lives. You also need a fallback, and a sense of when it’s time to switch. OpenMerit is a model selection layer in your infrastructure, not a router. We stay out of your live request path, and we don’t sell you tokens (we checked, it’s a very crowded business). Read our memo, <a href="/memo/">Optimum Inference For All</a>.</p>
         <div class="thread-rule" aria-hidden="true"><svg><path/></svg></div>
-        <p>We’re launching <a href="/scout/">Scout</a> by OpenMerit in beta, our model search agent. It’ll help you find the right models for your task, weighing quality and cost across text, code and vision. Its growing index covers 400+ open-weight and closed models, results from 30+ labs, 500+ benchmark series and 200+ source feeds.</p>
+        <p>Our first workflow is Scout by OpenMerit, now in beta. It finds cheaper models that perform at least as well as the ones your code uses today, measured with your repository’s own evals and within a budget you set. Scout runs on your machine as a command-line tool and an MCP server for Claude Code and Codex, with no OpenMerit account. Its catalogue of 349 models ships with it.</p>
       </div>
-      <div class="letter-actions">
-        <a class="letter-cta" href="/scout/">Try Scout</a>
+      <div class="letter-install" id="install">
+        <h2>Install Scout</h2>
+        <pre><code>npm install -g openmerit
+cd your-repo
+openmerit setup
+openmerit scout</code></pre>
+        <p>You need Node.js 22.19 or newer on macOS or Linux. Setup connects Claude Code with your Claude login, Codex models with a ChatGPT Plus or Pro sign-in, or an API key, and adds OpenMerit’s MCP server to Claude Code and Codex when they’re installed. Candidate evals run on your own OpenRouter or OpenAI-compatible key, only after you approve them, within a per-run budget ($10 by default). <a href="https://www.npmjs.com/package/openmerit">Read the guide</a>.</p>
       </div>
     </section>
     <section class="intro-film" aria-labelledby="film-title">
