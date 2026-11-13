@@ -14,7 +14,7 @@ function row(label: string, result: ModelResult): string[] {
     result.meanLatencyMs === null ? "—" : `${Math.round(result.meanLatencyMs)} ms`, result.status === "measured" ? (result.role === "baseline" ? "baseline" : result.qualified ? "qualifies" : result.note || "below baseline") : result.note];
 }
 
-export function renderComparison(task: TaskComparison): string {
+export function renderComparison(task: TaskComparison, runId?: string): string {
   const lines = [`Task "${task.task}"`, `  Eval: ${task.eval.command || "none"} (${task.eval.source}; per-item results ${task.eval.langfuse ? `from Langfuse, ${task.eval.langfuse}` : "reported by the eval"}${task.eval.threshold !== null ? `; required pass rate ${task.eval.threshold}` : ""})`];
   if (task.status === "no_eval") return [...lines, `  Not reviewed: ${task.note}`].join("\n");
   if (task.search) lines.push(...renderSearch(task.search));
@@ -31,7 +31,7 @@ export function renderComparison(task: TaskComparison): string {
     if ("error" in task.langfuse) lines.push(`  Langfuse (read-only): not available (${task.langfuse.error})`);
     else lines.push(`  Langfuse production evidence, ${task.langfuse.traceName} since ${task.langfuse.from.slice(0, 10)}: ${task.langfuse.models.map(model => `${model.model} ${model.generations} generations, ${model.costUsd === null ? "cost unknown" : `$${model.costUsd.toFixed(4)}`}`).join("; ") || "no generations"}${task.langfuse.scores.length ? `; scores ${task.langfuse.scores.map(score => `${score.name} ${score.average.toFixed(3)} (n=${score.count})`).join(", ")}` : ""}`);
   }
-  lines.push(`  Evidence: openmerit history <run id> lists every eval run (${[task.baseline, ...task.candidates].filter(Boolean).reduce((sum, item) => sum + item!.evidence.length, 0)} recorded).`);
+  lines.push(`  Evidence: openmerit history ${runId ?? "<run id>"} lists every eval run (${[task.baseline, ...task.candidates].filter(Boolean).reduce((sum, item) => sum + item!.evidence.length, 0)} recorded).`);
   return lines.join("\n");
 }
 
@@ -45,9 +45,10 @@ export function renderSearch(search: SearchSummary): string[] {
   return lines;
 }
 
-export function renderStep(step: Step): string {
+/** The run's outcome; `comparisons: false` leaves out the task comparisons, such as when they were shown already. */
+export function renderStep(step: Step, options: { comparisons?: boolean } = {}): string {
   const lines: string[] = [];
-  if (step.result) for (const task of step.result.tasks) lines.push(renderComparison(task), "");
+  if (step.result && options.comparisons !== false) for (const task of step.result.tasks) lines.push(renderComparison(task, step.runId), "");
   for (const [task, configure] of Object.entries(step.result?.configuration ?? {})) {
     if (configure.decision === "no") lines.push(`"${task}": not configured; your application configuration is unchanged.`);
     else if (configure.applied) lines.push(`"${task}": configured (${configure.edits!.map(edit => `${edit.file}:${edit.line}`).join(", ")}).`);
@@ -66,11 +67,17 @@ export function spendLine(step: Pick<Step, "spend" | "budgetUsd" | "harnessUsage
     + (harness ? ` Harness inference (separate from the eval budget): ${harness.calls} calls, ${harness.inputTokens + harness.outputTokens} tokens${harness.costUsd ? `, $${harness.costUsd.toFixed(4)}` : ""}${harness.unknownCost ? ` (${harness.unknownCost} calls billed by your coding-agent plan)` : ""}.` : "");
 }
 
+/** A run's selected tasks, cut to one short cell; `openmerit history <run>` lists them all. */
+function tasksCell(selected: string[]): string {
+  const text = selected.join(", ");
+  return !text ? "—" : text.length <= 40 ? text : `${text.slice(0, 39)}… (${selected.length})`;
+}
+
 export function renderHistory(state: State, runs: RunRow[]): string {
   if (!runs.length) return "No Scout runs in this repository yet. Start one with: openmerit scout";
   return pad([["Run", "Started", "Status", "Phase", "Model", "Tasks", "Eval spend", "openmerit / catalogue"], ...runs.map(run => {
     const data = run.state as { model?: string; selected?: string[] };
-    return [run.id, run.createdAt.slice(0, 16).replace("T", " "), run.status, run.phase, data.model ?? "—", (data.selected ?? []).join(", ") || "—", `$${state.spend(run.id).totalUsd.toFixed(4)} / $${run.budgetUsd.toFixed(2)}`, `${run.packageVersion} / ${run.catalogueVersion}`];
+    return [run.id, run.createdAt.slice(0, 16).replace("T", " "), run.status, run.phase, data.model ?? "—", tasksCell(data.selected ?? []), `$${state.spend(run.id).totalUsd.toFixed(4)} / $${run.budgetUsd.toFixed(2)}`, `${run.packageVersion} / ${run.catalogueVersion}`];
   })]);
 }
 

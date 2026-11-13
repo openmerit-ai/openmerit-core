@@ -53,7 +53,8 @@ export function claudeBinary(env: Record<string, string | undefined> = process.e
   if (env.OPENMERIT_CLAUDE_BIN) return env.OPENMERIT_CLAUDE_BIN;
   try {
     const fromBridge = createRequire(createRequire(import.meta.url).resolve("pi-claude-bridge/package.json"));
-    const fromSdk = createRequire(fromBridge.resolve("@anthropic-ai/claude-agent-sdk/package.json"));
+    // The SDK's exports do not include its package.json, so resolve its entry point.
+    const fromSdk = createRequire(fromBridge.resolve("@anthropic-ai/claude-agent-sdk"));
     for (const variant of ["", "-musl"]) {
       try {
         const path = join(dirname(fromSdk.resolve(`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}${variant}/package.json`)), process.platform === "win32" ? "claude.exe" : "claude");

@@ -8,6 +8,7 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { setTimeout as sleep } from "node:timers/promises";
 import { requestPrice, type CatalogueModel } from "../catalogue/catalogue.ts";
 import type { State } from "../state/db.ts";
 
@@ -63,6 +64,16 @@ async function body(req: IncomingMessage): Promise<Buffer> {
   for await (const chunk of req) { size += (chunk as Buffer).length; if (size > 50_000_000) throw new Error("request too large"); chunks.push(chunk as Buffer); }
   return Buffer.concat(chunks);
 }
+
+/** How often a failed model call is sent again before the eval sees the failure. */
+export const MODEL_CALL_RETRIES = 3;
+/** Failures that may pass: timeouts, rate limits and server errors. Rejections such as 400 or 404 get the same answer again. */
+export const retryable = (status: number) => status === 408 || status === 429 || status >= 500;
+/** Retry-After when the endpoint sends one (at most 30 s), else 2, 4 and 8 s. */
+const retryDelayMs = (retryAfter: string | null, attempt: number) => {
+  const seconds = Number(retryAfter);
+  return retryAfter !== null && Number.isFinite(seconds) && seconds >= 0 ? Math.min(seconds, 30) * 1000 : 2000 * 2 ** attempt;
+};
 
 export class EvalProxy {
   private server: Server | null = null;
@@ -127,15 +138,21 @@ export class EvalProxy {
     }
     tally.requests++;
     const started = Date.now();
-    let upstream: Response;
-    try {
-      upstream = await this.fetcher(`${unit.baseUrl.replace(/\/$/, "")}${path}`, {
-        method: "POST", body: forwarded, redirect: "manual", signal: AbortSignal.timeout(600_000),
-        headers: { authorization: `Bearer ${unit.apiKey}`, "content-type": "application/json", accept: req.headers.accept ?? "application/json", ...(unit.baseUrl.includes("openrouter.ai") ? { "x-title": "OpenMerit Scout eval" } : {}) },
-      });
-    } catch (error) {
+    const forward = () => this.fetcher(`${unit.baseUrl.replace(/\/$/, "")}${path}`, {
+      method: "POST", body: forwarded, redirect: "manual", signal: AbortSignal.timeout(600_000),
+      headers: { authorization: `Bearer ${unit.apiKey}`, "content-type": "application/json", accept: req.headers.accept ?? "application/json", ...(unit.baseUrl.includes("openrouter.ai") ? { "x-title": "OpenMerit Scout eval" } : {}) },
+    }).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+    // A failed call that may pass is sent again, so the eval only sees failures that last; failed calls are not charged.
+    let upstream = await forward();
+    for (let attempt = 0; attempt < MODEL_CALL_RETRIES && (upstream instanceof Error || retryable(upstream.status)); attempt++) {
+      if (!(upstream instanceof Error)) await upstream.body?.cancel();
+      await sleep(retryDelayMs(upstream instanceof Error ? null : upstream.headers.get("retry-after"), attempt));
+      upstream = await forward();
+    }
+    if (upstream instanceof Error) {
+      tally.upstreamErrors.push(502);
       this.state.settle(reservation.id, { actualUsd: 0, estimatedUsd: null, latencyMs: Date.now() - started, failed: true });
-      return send(res, 502, `OpenMerit proxy: ${unit.endpointId} did not answer (${error instanceof Error ? error.message : String(error)}).`, "openmerit_upstream");
+      return send(res, 502, `OpenMerit proxy: ${unit.endpointId} did not answer (${upstream.message}).`, "openmerit_upstream");
     }
     res.writeHead(upstream.status, { "content-type": upstream.headers.get("content-type") ?? "application/json" });
     let text = "";

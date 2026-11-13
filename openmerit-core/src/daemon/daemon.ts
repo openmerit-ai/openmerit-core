@@ -104,22 +104,59 @@ export function daemonClient(info: DaemonInfo) {
   return createClient<Registry>({ endpoint: `http://127.0.0.1:${info.port}`, token: info.token });
 }
 
+/** A daemon call that takes longer than this counts as a lost connection. A daemon that just started can take a while to wake a run. */
+const CALL_TIMEOUT_MS = 30_000;
+/** Reconnect attempts after a lost connection, before the client gives up. */
+export const RECONNECTS = 3;
+
+/** `call`, or a rejection once it has taken CALL_TIMEOUT_MS. */
+function within<T>(call: Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`no answer in ${CALL_TIMEOUT_MS / 1000} s`)), CALL_TIMEOUT_MS);
+    call.then(value => { clearTimeout(timer); resolve(value); }, (error: unknown) => { clearTimeout(timer); reject(error); });
+  });
+}
+
+const reason = (error: unknown) => (error instanceof Error ? error.message : String(error)).split("\n")[0]!.replace(/^HTTP request error: Request failed: /, "").slice(0, 160);
+
 /**
  * Advances a Scout run in the daemon: attaches this client's directory and environment, sends the
  * answers, and waits for the step's outcome while relaying its progress lines. Aborting `signal` stops
- * the step, which saves the run as interrupted.
+ * the step, which saves the run as interrupted. When the daemon stops answering, the client reconnects
+ * (starting a new daemon if needed) up to RECONNECTS times, then gives up with the resume command.
  */
 export async function advanceInDaemon(input: { runId: string; cwd: string; env: Env; answers: Answers; log: (line: string) => void; signal?: AbortSignal }): Promise<Step> {
-  const run = daemonClient(await ensureDaemon(input.env)).scoutRun.getOrCreate([input.runId]);
-  const { since } = await run.attach({ cwd: input.cwd, env: input.env });
+  // process.env is not a plain object, and the client cannot serialize it: send a copy with only the set variables.
+  const env = Object.fromEntries(Object.entries(input.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  const connect = async () => {
+    const handle = daemonClient(await ensureDaemon(input.env)).scoutRun.getOrCreate([input.runId]);
+    const { since } = await within(handle.attach({ cwd: input.cwd, env }));
+    return { handle, since };
+  };
+  const reconnect = async (error: unknown) => {
+    input.log(`Connection to the OpenMerit daemon lost${/no answer in/.test(reason(error)) ? ` (no answer in ${CALL_TIMEOUT_MS / 1000} s)` : ""}. Reconnecting…`);
+    for (let attempt = 1; attempt <= RECONNECTS; attempt++) {
+      await sleep(1000 * attempt);
+      try { const next = await connect(); input.log("Reconnected."); return next; }
+      catch (retry) { input.log(`  Reconnect ${attempt}/${RECONNECTS} failed: ${reason(retry)}`); }
+    }
+    throw new Error(`Could not reconnect to the OpenMerit daemon. Resume later with: openmerit scout --resume ${input.runId}`);
+  };
+  // Attaching is safe to repeat, so a first attach that gets no answer reconnects too; the send below is not repeated.
+  let { handle, since: cursor } = await connect().catch(reconnect);
+  // The request waits in the run's queue and its outcome in the run's state, so both survive a daemon restart.
   const requestId = randomUUID();
-  await run.send("advance", { requestId, answers: input.answers });
-  let cursor = since, stopping = false;
+  await within(handle.send("advance", { requestId, answers: input.answers }));
+  let stopping = false;
   for (;;) {
-    if (input.signal?.aborted && !stopping) { stopping = true; await run.stop(); }
     let polled;
-    try { polled = await run.poll({ requestId, since: cursor }); }
-    catch (error) { throw new Error(`Lost the OpenMerit daemon while run ${input.runId} was working (${error instanceof Error ? error.message : String(error)}). Continue with \`openmerit scout --resume ${input.runId}\`.`); }
+    try {
+      if (input.signal?.aborted && !stopping) { stopping = true; await within(handle.stop()); }
+      polled = await within(handle.poll({ requestId, since: cursor }));
+    } catch (error) {
+      ({ handle, since: cursor } = await reconnect(error));
+      continue;
+    }
     for (const line of polled.lines) input.log(line);
     cursor = polled.next;
     if (polled.outcome) {

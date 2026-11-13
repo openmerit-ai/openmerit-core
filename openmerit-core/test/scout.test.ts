@@ -3,7 +3,7 @@
 // wrongly (or with HTTP 500) for others, so the right ranking is known in advance.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -26,6 +26,8 @@ const ALLOWED = ["gpt-5-nano", "gpt-4.1-nano", "gpt-6-luna", "gpt-4o-mini", "gpt
 // Fake OpenAI. Right answers by default; gpt-4o-mini always says "other"; gpt-4.1-nano does not exist
 // (HTTP 404); gpt-5.6-luna answers its first five requests (one screen) and then fails with HTTP 500.
 const requests: string[] = [];
+/** The fake endpoint answers HTTP 429 to `model`'s next `remaining` requests. */
+const rateLimit = { model: "", remaining: 0 };
 let server: Server;
 let baseUrl = "";
 before(async () => {
@@ -35,8 +37,10 @@ before(async () => {
     req.on("end", () => {
       const parsed = JSON.parse(body) as { model: string; messages: { role: string; content: string }[] };
       requests.push(parsed.model);
-      const fail = (status: number, message: string) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify({ error: { message } })); };
+      // Retry-After 0 keeps the proxy's retries of a failing call fast.
+      const fail = (status: number, message: string) => { res.writeHead(status, { "content-type": "application/json", "retry-after": "0" }); res.end(JSON.stringify({ error: { message } })); };
       if (req.headers.authorization !== "Bearer sk-fake-endpoint") return fail(401, "bad key");
+      if (parsed.model === rateLimit.model && rateLimit.remaining-- > 0) { res.writeHead(429, { "content-type": "application/json", "retry-after": "0" }); return res.end(JSON.stringify({ error: { message: "rate-limited upstream" } })); }
       if (parsed.model === "gpt-4.1-nano") return fail(404, "The model `gpt-4.1-nano` does not exist or you do not have access to it.");
       if (parsed.model === "gpt-5.6-luna" && requests.filter(model => model === "gpt-5.6-luna").length > 5) return fail(500, "upstream overloaded");
       const ticket = parsed.messages.find(message => message.role === "user")!.content;
@@ -54,7 +58,7 @@ after(() => { server.close(); });
 function scriptedHarness(langfuse = false): Harness & { calls: string[] } {
   const calls: string[] = [];
   return {
-    kind: "codex", destination: "the test harness", calls, usage: { calls: 0, costUsd: 0, unknownCost: 0, inputTokens: 0, outputTokens: 0 },
+    kind: "codex", calls, usage: { calls: 0, costUsd: 0, unknownCost: 0, inputTokens: 0, outputTokens: 0 },
     async json<T>(request: JsonRequest): Promise<T> {
       this.usage.calls++;
       if (request.system.includes("map model usages")) {
@@ -90,7 +94,7 @@ function context(root: string, home: string, harness = scriptedHarness(), extraE
   return { state: new State(env), repo: findRepo(root), catalogue: loadCatalogue(), env, harness: async () => harness, log: () => {}, harnessCalls: harness.calls, langfusePoll: { intervalMs: 5, timeoutMs: 3000 } };
 }
 
-const DEFAULTS: Record<string, Answer> = { disclose_harness: true, model: "openai/gpt-4.1-mini", corrections: "", tasks: ["ticket classifier"], approve_evals: true, retry_units: false, configure_ticket_classifier: false };
+const DEFAULTS: Record<string, Answer> = { model: "openai/gpt-4.1-mini", corrections: "", tasks: ["ticket classifier"], approve_evals: true, retry_units: false, configure_ticket_classifier: false };
 
 /** Answers every question from `answers` (falling back to DEFAULTS) until the run stops asking or an answer is missing. */
 async function drive(ctx: Context, runId: string, answers: Record<string, Answer> = {}) {
@@ -109,6 +113,22 @@ async function drive(ctx: Context, runId: string, answers: Record<string, Answer
   return { step, asked };
 }
 
+test("the task question lists each task once and takes a mapping correction", async () => {
+  const root = repo(), ctx = context(root, mkdtempSync(join(tmpdir(), "openmerit-home-")));
+  const runId = startRun(ctx);
+  const draft = scanRepo(root, loadCatalogue()).usages.find(usage => usage.file === "src/draft-reply.ts" && usage.kind === "model")!;
+  let step = await advance(ctx, runId, {});
+  assert.deepEqual(step.questions[0]!.options!.map(option => option.value), ["openai/gpt-4.1-mini", "openai/gpt-5.4"], "only catalogue models are offered");
+  step = await advance(ctx, runId, { model: "openai/gpt-4.1-mini" });
+  assert.deepEqual(step.questions.map(question => question.id), ["tasks"], "no separate corrections question");
+  step = await advance(ctx, runId, { tasks: [`${draft.id}=ticket classifier`] });
+  const options = step.questions.find(question => question.id === "tasks")!.options!;
+  assert.deepEqual(options.map(option => option.value), ["ticket classifier"], "the reply drafter's usage moved to the classifier");
+  assert.match(options[0]!.detail!, new RegExp(`${draft.id} draft-reply.ts:3`));
+  step = await advance(ctx, runId, { tasks: ["ticket classifier"] });
+  assert.ok(!step.questions.some(question => question.id === "tasks"), "a task name answers the question");
+});
+
 test("scan finds both models, the model shared by two tasks and dynamic uses, without showing secrets", () => {
   const root = repo();
   const scan = scanRepo(root, loadCatalogue());
@@ -122,6 +142,22 @@ test("scan finds both models, the model shared by two tasks and dynamic uses, wi
   assert.ok(scan.usages.some(usage => usage.kind === "endpoint" && usage.value === "https://api.openai.com/v1"));
   assert.doesNotMatch(JSON.stringify(scan), /sk-test-abcdefgh/);
   assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }), "", "the scan changes nothing");
+
+  // A JSON file naming more than 20 models is data and skipped; a small JSON config is still scanned; scan.exclude skips the rest.
+  const catalogue = loadCatalogue();
+  mkdirSync(join(root, "data"), { recursive: true });
+  writeFileSync(join(root, "data", "models.json"), JSON.stringify(catalogue.models.slice(0, 21).map(model => ({ model: model.id })), null, 1));
+  writeFileSync(join(root, "data", "few.json"), JSON.stringify(catalogue.models.slice(0, 20).map(model => ({ model: model.id })), null, 1));
+  writeFileSync(join(root, "app.json"), JSON.stringify({ model: "openai/gpt-5-nano", saved: { model: "catalogue:openrouter:openai/gpt-5.4" } }, null, 1));
+  mkdirSync(join(root, "scripts", "old"), { recursive: true });
+  writeFileSync(join(root, "scripts", "old", "try.ts"), `const model = "openai/gpt-6-luna";\n`);
+  const filtered = scanRepo(root, catalogue, { exclude: ["scripts/old", "data/few.json"] });
+  assert.deepEqual(filtered.skipped, ["data/models.json"]);
+  assert.ok(filtered.usages.some(usage => usage.file === "app.json" && usage.catalogueId === "openai/gpt-5-nano"), "a small JSON config is scanned");
+  assert.deepEqual(filtered.usages.filter(usage => usage.file === "app.json").map(usage => usage.value), ["openai/gpt-5-nano"], "OpenMerit's own catalogue references are not usages");
+  assert.ok(!filtered.usages.some(usage => usage.file.startsWith("data/") || usage.file.startsWith("scripts/")));
+  assert.deepEqual(filtered.usages.map(usage => usage.id), filtered.usages.map((_, index) => `u${index + 1}`), "usage IDs stay sequential");
+  assert.equal(scanRepo(root, catalogue).usages.filter(usage => usage.file === "data/few.json").length, 20, "20 models is still configuration");
 });
 
 /** The search path the fake endpoint implies over the six-model pool (ascending ECI: gpt-4o-mini 123.9,
@@ -140,8 +176,9 @@ function assertSearch(ctx: Context, runId: string, step: Step) {
   const task = step.result!.tasks[0]!;
   const search = task.search!;
   assert.deepEqual(search.trials.map(trial => [trial.stage, trial.model, trial.accepted]), EXPECTED_TRIALS);
-  assert.deepEqual(search.skipped.map(item => [item.model, item.stage]), [["openai/gpt-4.1-nano", "search"]], "a model the endpoint rejects is skipped as untested");
-  assert.match(search.skipped[0]!.reason, /HTTP 404/);
+  assert.deepEqual(search.skipped.map(item => [item.model, item.stage]), [["openai/gpt-4.1-nano", "search"], ["openai/gpt-5.6-luna", "final"]], "a rejected model, and one whose calls keep failing, are skipped as untested");
+  assert.match(search.skipped[0]!.reason, /rejected gpt-4.1-nano \(HTTP 404\)/);
+  assert.match(search.skipped[1]!.reason, /kept failing for gpt-5.6-luna \(HTTP 500\)/);
   assert.equal(search.pick, "openai/gpt-5-nano");
   assert.deepEqual(search.finalists, ["openai/gpt-5-nano", "openai/gpt-5.4-nano", "openai/gpt-6-luna", "openai/gpt-5.6-luna"]);
   assert.match(search.shortfall ?? "", /Only 4 finalists/);
@@ -152,7 +189,7 @@ function assertSearch(ctx: Context, runId: string, step: Step) {
   assert.ok(screens.filter(unit => unit.status === "done").every(unit => JSON.stringify(Object.keys((unit.result as { items: object }).items).sort()) === JSON.stringify([...search.sampleIds].sort())));
   assert.deepEqual([task.baseline!.passes, task.baseline!.total, task.baseline!.runs], [30, 30, 3]);
   assert.deepEqual(task.candidates.map(item => [item.model, item.status, item.total]), [
-    ["openai/gpt-5-nano", "measured", 30], ["openai/gpt-5.4-nano", "measured", 30], ["openai/gpt-6-luna", "measured", 30], ["openai/gpt-5.6-luna", "failed", 0],
+    ["openai/gpt-5-nano", "measured", 30], ["openai/gpt-5.4-nano", "measured", 30], ["openai/gpt-6-luna", "measured", 30], ["openai/gpt-5.6-luna", "unavailable", 0],
   ]);
   assert.equal(task.candidates.find(item => item.model === "openai/gpt-5.6-luna")!.qualified, false, "a final that failed never qualifies");
   assert.deepEqual(task.top.map(item => item.model), EXPECTED_TOP);
@@ -166,7 +203,8 @@ function assertSearch(ctx: Context, runId: string, step: Step) {
   assert.equal(count("gpt-4.1-mini"), 30);
   assert.equal(count("gpt-5-nano"), 35);
   assert.ok(requests.every(model => model === "gpt-4.1-mini" || ALLOWED.includes(model)));
-  assert.equal(ctx.state.spend(runId).requests, requests.length, "the ledger accounts for every request the endpoint received");
+  // The proxy sent gpt-5.6-luna's failing final request three more times; the ledger meters it once.
+  assert.equal(ctx.state.spend(runId).requests, requests.length - 3, "the ledger accounts for every eval request");
 }
 
 test("Scout Model Binary Search screens the ECI-ranked pool, runs finalists on every item, and ranks the cheapest at least as good as the current model", async () => {
@@ -179,7 +217,7 @@ test("Scout Model Binary Search screens the ECI-ranked pool, runs finalists on e
   assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
   assert.ok(asked.some(question => question.prompt === TASK_QUESTION));
   assert.deepEqual(asked.find(question => question.id === "tasks")!.options!.map(option => option.value).sort(), ["reply drafter", "ticket classifier"], "both tasks of the shared model are offered");
-  assert.ok(asked.some(question => question.id === "retry_units"), "the failed final asks before running again");
+  assert.ok(!asked.some(question => question.id === "retry_units"), "a final whose model calls keep failing is skipped, not asked about");
   assert.ok(asked.some(question => question.prompt === CONFIGURE_QUESTION));
   // Only the selected task is discovered and evaluated.
   assert.deepEqual(ctx.harnessCalls.filter(call => call.startsWith("discover")), ["discover:ticket classifier"]);
@@ -192,6 +230,15 @@ test("Scout Model Binary Search screens the ECI-ranked pool, runs finalists on e
   const sent = requests.length;
   await advance(ctx, runId, {});
   assert.equal(requests.length, sent);
+  // A search that stopped recommends nothing, but each measured finalist keeps its real comparison with the current model.
+  const run = ctx.state.getRun(runId)!;
+  ctx.state.updateRun(runId, { phase: "compare", status: "running", state: { ...run.state, stopped: { "ticket classifier": "a screen failed and was not retried" } } });
+  const stopped = (await advance(ctx, runId, {})).result!.tasks[0]!;
+  assert.equal(stopped.status, "stopped");
+  assert.deepEqual(stopped.top, []);
+  assert.deepEqual(stopped.candidates.filter(item => item.status === "measured").map(item => [item.model, item.qualified]),
+    step.result!.tasks[0]!.candidates.filter(item => item.status === "measured").map(item => [item.model, item.qualified]), "measured finalists are not all labelled below the current model");
+  assert.ok(stopped.candidates.some(item => item.qualified));
   // History survives a restart, and another repository has none of it.
   const reopened = new State(ctx.env);
   assert.equal(reopened.listRuns(ctx.repo.id)[0]!.status, "done");
@@ -307,7 +354,8 @@ test("near the budget a request is refused before it is sent; decline keeps the 
   assert.equal(readRepoConfig(root).budget, undefined, "a run-only raise does not change the default");
   assert.deepEqual(restarted.state.budgetEvents(runId).map(event => [event.kind, event.scope]), [["alert", null], ["decline", null], ["raise", "run"]]);
   assert.equal(restarted.state.getRun(runId)!.budgetUsd, 1);
-  assert.equal(restarted.state.spend(runId).requests, requests.length, "every sent request is in the ledger once");
+  // The proxy sent gpt-5.6-luna's failing final request three more times; the ledger meters it once.
+  assert.equal(restarted.state.spend(runId).requests, requests.length - 3, "every eval request is in the ledger once");
 
   // A second run saves its raise as the repository default.
   const second = startRun(restarted);
@@ -346,6 +394,22 @@ test("a run whose process died becomes interrupted and keeps its in-flight spend
   assert.equal(ctx.state.spend(runId).inFlightUsd, 0.02);
 });
 
+test("a candidate still rate-limited after the proxy's retries is skipped as untested, without a retry question", async () => {
+  const ctx = context(repo(), mkdtempSync(join(tmpdir(), "openmerit-home-")));
+  const runId = startRun(ctx);
+  requests.length = 0;
+  Object.assign(rateLimit, { model: "gpt-5-nano", remaining: Infinity });
+  try {
+    const { step, asked } = await drive(ctx, runId);
+    assert.equal(step.status, "done", step.error ?? JSON.stringify(step.questions).slice(0, 500));
+    const search = step.result!.tasks[0]!.search!;
+    assert.deepEqual(search.skipped.filter(item => item.model === "openai/gpt-5-nano").map(item => [item.stage, item.reason.split("\n")[0]]), [["search", "openai rate-limited gpt-5-nano (HTTP 429)"]]);
+    // Without gpt-5-nano the middle of the five left (4o-mini, 4.1-nano, 5.4-nano, 6-luna, 5.6-luna) is gpt-5.4-nano.
+    assert.equal(search.trials[0]!.model, "openai/gpt-5.4-nano", "the search went on without it");
+    assert.ok(!asked.some(question => question.id === "retry_units" && question.detail?.includes("gpt-5-nano")), "no retry question for the rate limit");
+  } finally { rateLimit.remaining = 0; }
+});
+
 test("the metering proxy refuses models outside the allowed pool without forwarding them", async () => {
   const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
   const ctx = context(root, home);
@@ -363,4 +427,27 @@ test("the metering proxy refuses models outside the allowed pool without forward
   assert.deepEqual(tally.poolViolations, ["gpt-4o"]);
   assert.equal((await fetch(`${url}/chat/completions`, { method: "POST", headers: { authorization: "Bearer wrong" }, body: "{}" })).status, 401);
   await proxy.stop();
+});
+
+test("the metering proxy sends a failed model call again, and passes on a failure that lasts", async () => {
+  const ctx = context(repo(), mkdtempSync(join(tmpdir(), "openmerit-home-")));
+  const runId = startRun(ctx);
+  const nano = loadCatalogue().models.find(model => model.id === "openai/gpt-5-nano")!;
+  const proxy = new EvalProxy(ctx.state);
+  const url = await proxy.start();
+  const { token, tally } = proxy.open({ runId, unitId: "unit", endpointId: "openai", baseUrl, apiKey: "sk-fake-endpoint", model: "gpt-5-nano", allowed: () => nano });
+  const post = () => fetch(`${url}/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ model: "gpt-5-nano", max_tokens: 10, messages: [{ role: "user", content: "hi" }] }) });
+  try {
+    requests.length = 0;
+    Object.assign(rateLimit, { model: "gpt-5-nano", remaining: 2 });
+    assert.equal((await post()).status, 200, "a brief failure never reaches the eval");
+    assert.equal(requests.length, 3);
+    assert.deepEqual(tally.upstreamErrors, []);
+    requests.length = 0;
+    rateLimit.remaining = Infinity;
+    assert.equal((await post()).status, 429, "a lasting failure reaches the eval");
+    assert.equal(requests.length, 4, "the first send and three retries");
+    assert.deepEqual(tally.upstreamErrors, [429]);
+    assert.equal(ctx.state.spend(runId).requests, 2, "each eval request is metered once, however often it was sent");
+  } finally { rateLimit.remaining = 0; await proxy.stop(); }
 });

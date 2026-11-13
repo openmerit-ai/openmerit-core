@@ -78,6 +78,8 @@ export interface RepoConfig {
   endpoints?: Endpoint[];
   budget?: { defaultUsd: number };
   evals?: Record<string, EvalSpec>;
+  /** Glob patterns, relative to the repository root, of files or directories Scout's scan skips. */
+  scan?: { exclude?: string[] };
   /** Runs of every item for the current model and each finalist; default 3. */
   repeats?: number;
   [key: string]: unknown;

@@ -30,7 +30,7 @@ Settings live in two places:
 | --- | --- |
 | `~/.openmerit/config.json` | The harness choice |
 | `~/.openmerit/agent/` | Pi's files: `auth.json` (mode 0600) with the ChatGPT sign-in, and pi-claude-bridge's config and log |
-| `<repo>/.openmerit/config.json` | Endpoints, allowed models, Langfuse URL and mappings, evals, budget. Keys appear only as references: `{"env": "OPENROUTER_API_KEY"}` or `{"secret": "<name>"}` |
+| `<repo>/.openmerit/config.json` | Endpoints, allowed models, Langfuse URL and mappings, evals, budget, scan excludes. Keys appear only as references: `{"env": "OPENROUTER_API_KEY"}` or `{"secret": "<name>"}` |
 | `~/.openmerit/secrets.json` (mode 0600) | Keys you type in at the prompt |
 | `~/.openmerit/state.db` | SQLite run history for every repository |
 | `~/.openmerit/rivet/` | The daemon's Rivet engine data: each run's workflow and its pending question |
@@ -48,7 +48,7 @@ openmerit connect codex --device-code --yes   # the same on a server without a b
 openmerit connect api --api-provider anthropic --api-model claude-sonnet-5-5 --api-key-env ANTHROPIC_API_KEY
 ```
 
-`openmerit connect` signs in where needed, makes one round trip through the harness and saves the connection only when that works. A failed check keeps the previous connection. `--model <id>` picks the model for Claude Code (default `claude-sonnet-5-5`) or Codex (default `gpt-6.1-sol`).
+`openmerit connect` signs in where needed, makes one round trip through the harness and saves the connection only when that works. A failed check keeps the previous connection. `--model <id>` picks the model for Claude Code (default `claude-sonnet-5-5`) or Codex. Which Codex models a ChatGPT account may use depends on its plan, so without `--model` `openmerit connect codex` tries them from the highest catalogue ECI down and saves the first one the plan accepts.
 
 - **Claude Code** runs through pi-claude-bridge with the Claude Agent SDK's bundled Claude Code, so you do not need Claude Code installed. It uses your Claude Code login in `~/.claude`; when you are not logged in, `openmerit connect claude-code` offers `claude auth login`. On a server, set `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `ANTHROPIC_API_KEY`. Claude Code gets no tools of its own and loads no project `.claude` settings.
 - **Codex** uses pi's ChatGPT Plus or Pro sign-in, the same one pi's own `/login` offers. It is a browser sign-in, or a code you enter at `auth.openai.com/codex/device` from any device with `--device-code`, which also works on a server. You do not need the Codex CLI installed. Pi keeps the tokens in `~/.openmerit/agent/auth.json` (mode 0600) and refreshes them; OpenMerit does not read the Codex CLI's own login.
@@ -63,21 +63,25 @@ openmerit scout                    # interactive
 openmerit scout --resume <run-id>  # continue a paused, interrupted or failed run
 ```
 
+In a terminal, a step that prints nothing for a few seconds, such as a long eval, shows a spinner with how long it has been quiet.
+
 1. **Scan.** Scout reads files Git does not ignore, without changing them. It lists model and endpoint usages with file and line, marks dynamic ones (an environment variable, a variable) and redacts anything shaped like a key.
-2. **Disclose.** Before any code context leaves the machine, Scout names where the harness sends it and asks.
-3. **Choose.** Pick the current model, review the agents/tasks the harness mapped it to (and correct them), then answer *"Select which Agents/Tasks do you want OpenMerit to review?"*
-4. **Pool.** A candidate must be in the allowed pool, have a list price below the current model's, support what the task needs (tool calls, images, structured output) and have an ECI score. Scout ranks the pool by ECI. Models without an ECI are left out, and Scout says how many.
-5. **Find the eval.** The harness looks for the task's existing eval and says how to run it per model and item set: the command, any variable mapping such as `CLASSIFIER_MODEL={{model}}`, and, when the eval records its results in Langfuse, the dataset and the per-item score that decides pass or fail. It may propose helper files, only under `.openmerit/evals/`. With no eval, Scout asks you for the command or lets you skip the task; it never invents an eval or labels.
-6. **Approve.** Scout shows the eval command, environment, helper files (as a diff), where per-item results come from, the search's run counts, where eval data goes and the budget. Nothing runs or is written before you approve.
-7. **Evaluate: Scout Model Binary Search.** The same eval command runs for every model, so inputs, prompts, tools and scoring stay identical; only the model and the items change.
+   - A JSON file that names more than 20 models is data, such as a model catalogue or saved results, and is skipped. Scout says which files it skipped.
+   - To skip other files, add glob patterns relative to the repository root to `.openmerit/config.json`, such as `"scan": {"exclude": ["playground/**", "scripts/old"]}`. A directory name skips everything under it.
+2. **Choose.** Pick the current model from the catalogue models found, then answer *"Select which Agents/Tasks do you want OpenMerit to review?"* Each task shows a one-line description and its usages. To fix the mapping, answer `<usage>=<task>` (such as `u12=reply drafter`) to move a usage to that task or to a new one; the question then asks again.
+3. **Pool.** A candidate must be in the allowed pool, have a list price below the current model's, support what the task needs (tool calls, images, structured output) and have an ECI score. Scout ranks the pool by ECI. Models without an ECI are left out, and Scout says how many.
+4. **Find the eval.** The harness looks for the task's existing eval and says how to run it per model and item set: the command, any variable mapping such as `CLASSIFIER_MODEL={{model}}`, and, when the eval records its results in Langfuse, the dataset and the per-item score that decides pass or fail. It may propose helper files, only under `.openmerit/evals/`. With no eval, Scout asks you for the command or lets you skip the task; it never invents an eval or labels.
+5. **Approve.** Scout shows the eval command, environment, helper files (as a diff), where per-item results come from, the search's run counts, where eval data goes and the budget. Nothing runs or is written before you approve.
+6. **Evaluate: Scout Model Binary Search.** The same eval command runs for every model, so inputs, prompts, tools and scoring stay identical; only the model and the items change.
    - The current model runs every item three times (`repeats` in the repository config).
    - Scout draws five items the current model passed in every run. Each screen runs a candidate on those five items. A candidate passes a screen only when it passes all five.
    - Binary search over the ECI ranking: a pass moves to weaker models, a fail to stronger ones. The weakest model that passed is the pick.
    - Neighbours of the pick are screened on the same items, nearest first and weaker first at equal distance, until there are five finalists. Once a weaker neighbour fails, only stronger ones are tried.
    - The finalists run every item three times. Then up to three challengers, stronger models at the same or a lower list price than the leading finalist, are screened, and those that pass run every item too.
-   - A model the endpoint rejects outright (HTTP 400, 402, 404, 413 or 422) is skipped as untested and the search goes on without it. Any other failure asks before running again; declining stops that task's search, or reports a failed finalist as unmeasured.
-8. **Compare.** A finalist qualifies when it passes at least as many item runs as the current model and meets the eval's own required pass rate. Qualified finalists rank cheapest first by measured eval cost per item on the same workload. Scout shows the search path, then the **Top 3 beside the current model** with endpoint, passes, cost per item, latency, and the eval runs and Langfuse experiments behind each. Failed and unmeasured finalists are labelled and never count as success. If no screened candidate failed and every finalist matched the current model, the eval did not separate the models, and Scout asks before ranking on cost alone.
-9. **Configure.** Scout asks *"Should OpenMerit configure this? Yes / No."* No leaves your application unchanged. Yes previews the narrowest edit: the task's literal model ID, when the app already calls that provider. Scout applies only the previewed lines, and only while each line is unchanged. Changing the endpoint, or a model read from an environment variable, comes as manual instructions: OpenMerit cannot change your shell's environment.
+   - The metering proxy sends a model call that times out, is rate-limited, fails with a server error (HTTP 408, 429 or 5xx) or gets no answer again up to three times, waiting as long as `Retry-After` says (at most 30 s) or 2, 4 and 8 s. The retries are metered as one request.
+   - A candidate whose calls still fail after those retries, or that the endpoint rejects outright (HTTP 400, 402, 404, 413 or 422), is skipped as untested and the search goes on without it. Any other eval failure asks before running again, listing what each failed run already spent; declining stops that task's search, or reports a failed finalist as unmeasured.
+7. **Compare.** A finalist qualifies when it passes at least as many item runs as the current model and meets the eval's own required pass rate. Qualified finalists rank cheapest first by measured eval cost per item on the same workload. Scout shows the search path, then the **Top 3 beside the current model** with endpoint, passes, cost per item, latency, and the eval runs and Langfuse experiments behind each. Failed and unmeasured finalists are labelled and never count as success. If no screened candidate failed and every finalist matched the current model, the eval did not separate the models, and Scout asks before ranking on cost alone.
+8. **Configure.** Scout asks *"Should OpenMerit configure this? Yes / No."* No leaves your application unchanged. Yes previews the narrowest edit: the task's literal model ID, when the app already calls that provider. Scout applies only the previewed lines, and only while each line is unchanged. Changing the endpoint, or a model read from an environment variable, comes as manual instructions: OpenMerit cannot change your shell's environment.
 
 `openmerit history` lists this repository's runs, including failed, interrupted and budget-paused ones. `openmerit history <run-id>` shows one run's results, eval runs, spend, budget changes, configuration decisions (with the applied diff) and events. Each run records the repository revision and the package and catalogue versions it used.
 
@@ -123,7 +127,7 @@ A non-zero exit, or no result for a requested item, marks the run failed. The te
 | `openmerit_scout` | not read-only | The same workflow and state as the CLI |
 | `openmerit_history` | read-only | Runs, or one run in detail |
 
-`openmerit_scout` returns structured `questions` (missing input, disclosure, eval approval, budget, configuration) instead of prompting. The client asks the user and calls the tool again with `answers`. A run started in the CLI can continue through MCP and the other way round. The daemon works on a run one step at a time.
+`openmerit_scout` returns structured `questions` (missing input, task choice, eval approval, budget, configuration) instead of prompting. The client asks the user and calls the tool again with `answers`. A run started in the CLI can continue through MCP and the other way round. The daemon works on a run one step at a time.
 
 ## Daemon
 
@@ -131,6 +135,7 @@ Scout runs in a background process, the OpenMerit daemon. `openmerit scout` and 
 
 - Each Scout run is a Rivet Workflow actor in a local Rivet engine that ships in the package. The engine listens on `127.0.0.1` only: port 6720 (set `OPENMERIT_DAEMON_PORT` to change it), with 6721 for its peer API and 6730 for metrics. It makes no connections of its own outside the machine, and it accepts only requests that carry the token in `~/.openmerit/daemon.json`, which is new at every start.
 - A run waiting for your answer keeps waiting when the daemon stops, crashes or the machine restarts: the next command starts the daemon again and the run continues from its question.
+- When the daemon stops answering (no reply in 30 s, or the connection drops), the CLI and MCP server say the connection was lost and reconnect, starting a new daemon if needed. After three failed attempts they stop and print `openmerit scout --resume <run>`.
 - A step cut off in the middle, such as an eval in progress, stops the run as interrupted. `openmerit scout --resume <run>` continues it and asks before running an interrupted eval again; its earlier requests stay counted against the budget.
 - Each step works with the directory and environment of the CLI or MCP server that sent your answers: its endpoint keys, your application's `LANGFUSE_*` keys and `PATH`. The daemon keeps them in memory only, never on disk.
 - `openmerit daemon status` shows whether it runs; `openmerit daemon stop` stops it. After an update, the next command replaces a daemon of the old version.
@@ -149,7 +154,7 @@ Updating the package refreshes the bundled catalogue; history stays intact. Set 
 
 | Data | Where it goes |
 | --- | --- |
-| Redacted snippets, file names, package scripts and files the harness opens read-only | The harness provider you chose (Anthropic through Claude Code, OpenAI through your ChatGPT sign-in, or your API provider), after you approve |
+| Redacted snippets, file names, package scripts and files the harness opens read-only | The harness provider you chose (Anthropic through Claude Code, OpenAI through your ChatGPT sign-in, or your API provider), when Scout maps usages and finds evals. Evals, which spend money, run only after you approve |
 | The ChatGPT sign-in | Your machine, in `~/.openmerit/agent/auth.json` (mode 0600); pi refreshes it with OpenAI |
 | Eval inputs and prompts | The candidate endpoints you configured, during approved evals only |
 | Langfuse | OpenMerit reads per-item scores of the experiments your eval records, and aggregates, with a Viewer key. It never writes; your eval writes with your application's keys, as it does without OpenMerit |

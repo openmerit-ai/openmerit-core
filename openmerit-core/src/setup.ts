@@ -158,16 +158,17 @@ async function setupEndpoints(ctx: SetupContext): Promise<Endpoint[]> {
     }
   }
   if (!ctx.prompter || ctx.flags.nonInteractive) return kept;
-  if (!kept.some(item => item.kind === "openrouter") && await ctx.prompter.confirm("Add OpenRouter as a candidate endpoint, with every OpenRouter model eligible?", !kept.length)) {
-    const apiKey = await credential(ctx, "OpenRouter API key (used only to run candidate evals)", ["OPENROUTER_API_KEY"], `endpoint-openrouter-${ctx.repo.id}`);
-    if (apiKey) kept.push(...await added({ ...OPENROUTER_ENDPOINT, apiKey }));
+  if (!kept.some(item => item.kind === "openrouter") && await ctx.prompter.confirm("Add OpenRouter for candidates (all its models eligible)?", !kept.length)) {
+    const apiKey = await credential(ctx, "OpenRouter key", ["OPENROUTER_API_KEY"], `endpoint-openrouter-${ctx.repo.id}`);
+    if (apiKey) kept.push(...await added({ ...OPENROUTER_ENDPOINT, apiKey }, "all"));
   }
-  if (!kept.some(item => item.kind === "openai") && await ctx.prompter.confirm("Add OpenAI as a candidate endpoint?", false)) {
-    const apiKey = await credential(ctx, "OpenAI API key (used only to run candidate evals)", ["OPENAI_API_KEY"], `endpoint-openai-${ctx.repo.id}`);
+  if (!kept.some(item => item.kind === "openai") && await ctx.prompter.confirm("Add OpenAI for candidates?", false)) {
+    const apiKey = await credential(ctx, "OpenAI key", ["OPENAI_API_KEY"], `endpoint-openai-${ctx.repo.id}`);
     if (apiKey) kept.push(...await added({ ...OPENAI_ENDPOINT, apiKey }));
   }
-  async function added(endpoint: Endpoint): Promise<Endpoint[]> {
-    const models = await ctx.prompter!.ask(`Allowed models on ${endpoint.id}: "all", or IDs comma-separated`, "all");
+  // OpenRouter's question already says every model is eligible; other endpoints ask which.
+  async function added(endpoint: Endpoint, allowed?: string): Promise<Endpoint[]> {
+    const models = allowed ?? await ctx.prompter!.ask(`Allowed models on ${endpoint.id}: "all", or IDs comma-separated`, "all");
     const next: Endpoint = { ...endpoint, allowedModels: /^all$/i.test(models) ? "all" : models.split(",").map(item => item.trim()).filter(Boolean) };
     const check = await verifyEndpoint(next, ctx.env, ctx.fetch);
     ctx.log(`  ${check.ok ? "✓" : "✗"} ${endpoint.id}: ${check.detail}`);

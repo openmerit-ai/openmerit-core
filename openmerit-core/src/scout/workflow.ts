@@ -3,7 +3,7 @@
 // budget or fails. Every step is saved in SQLite, so a run continues after a restart and history
 // keeps failed, interrupted and budget-paused runs.
 //
-// scan → disclose → map → model → corrections → tasks → pool → discover → approve → evaluate
+// scan → map → model → tasks (with corrections) → pool → discover → approve → evaluate
 // → compare → configure → done
 //
 // Evaluate is Scout Model Binary Search (search.ts) on the task's own eval: the current model runs
@@ -13,10 +13,10 @@
 // Per-item results come from the Langfuse experiment the eval records, read with a Viewer key.
 import { createHash, randomInt } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { catalogueIndex, type Catalogue, type CatalogueModel } from "../catalogue/catalogue.ts";
 import { createLangfuseConnector, type LangfuseConnector, type TaskEvidence } from "../connectors/langfuse/index.ts";
-import { EvalProxy } from "../eval/proxy.ts";
+import { EvalProxy, retryable } from "../eval/proxy.ts";
 import { runEval } from "../eval/runner.ts";
 import type { Harness, HarnessUsage } from "../harness/harness.ts";
 import { DEFAULT_BUDGET_USD, DEFAULT_REPEATS, readRepoConfig, resolveCredential, updateRepoConfig, type Endpoint, type EvalSpec, type RepoConfig } from "../state/config.ts";
@@ -36,6 +36,8 @@ export interface Question {
   detail?: string;
   options?: { value: string; label: string; detail?: string }[];
   default?: Answer;
+  /** What to type, for answers beyond the options, such as a mapping correction. */
+  hint?: string;
 }
 
 export interface Task { name: string; description: string; usageIds: string[]; usesTools: boolean; needsVision: boolean; structuredOutput: boolean }
@@ -108,7 +110,6 @@ interface ConfigureState { decision?: "yes" | "no"; edits?: { file: string; line
 
 export interface RunState {
   scan?: ScanResult;
-  harnessApproved?: boolean;
   tasks?: Task[];
   model?: string;
   corrected?: boolean;
@@ -169,6 +170,7 @@ export const TASK_QUESTION = "Select which Agents/Tasks do you want OpenMerit to
 export const CONFIGURE_QUESTION = "Should OpenMerit configure this? Yes / No.";
 /** Provider answers that mean the model cannot run at all: skipped as untested, not failed. */
 const UNAVAILABLE_STATUSES = [400, 402, 404, 413, 422];
+
 
 const slug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "task";
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
@@ -286,37 +288,31 @@ const plannedEvals = (data: RunState) => Object.entries(data.evals ?? {}).filter
 
 const PHASE_HANDLERS: Record<Phase, Handler> = {
   async scan({ ctx, runId, data }) {
-    ctx.log("Scanning the repository for model and endpoint usages…");
-    const scan = scanRepo(ctx.repo.root, ctx.catalogue);
+    ctx.log("Scanning codebase for models and endpoints…");
+    const scan = scanRepo(ctx.repo.root, ctx.catalogue, { exclude: repoConfig(ctx).scan?.exclude ?? [] });
     data.scan = scan;
+    if (scan.skipped.length) {
+      ctx.log(`Skipped ${scan.skipped.length} data file${scan.skipped.length === 1 ? "" : "s"}: ${scan.skipped.slice(0, 2).join(", ")}${scan.skipped.length > 2 ? ` and ${scan.skipped.length - 2} more` : ""}`);
+      ctx.state.event(runId, "scan", `Skipped data files that list many models: ${scan.skipped.join(", ")}.`);
+    }
     const models = scan.usages.filter(usage => usage.kind === "model");
     ctx.state.event(runId, "scan", `Scanned ${scan.files} files: ${models.length} model usages (${models.filter(usage => usage.dynamic).length} dynamic), ${scan.usages.length - models.length} endpoint usages.`);
     if (!models.length) throw new Error("No model usages found in this repository. Scout looks for model IDs in code and configuration that Git does not ignore.");
-    return "disclose";
+    return "map";
   },
 
-  async disclose({ ctx, data, answers }) {
-    if (data.harnessApproved) return "map";
-    const answer = answers.disclose_harness;
-    if (yes(answer)) { data.harnessApproved = true; return "map"; }
-    if (no(answer)) return "cancelled";
-    const harness = await ctxHarnessDestination(ctx);
-    throw new NeedsInput([{
-      id: "disclose_harness", kind: "confirm", default: true,
-      prompt: "Send code context to OpenMerit Harness to map usages to agents and tasks?",
-      detail: `Destination: ${harness}.\nIt receives redacted snippets around ${data.scan!.usages.length} usages, file names, package scripts and eval files, and may open repository files read-only. OpenMerit changes no file without a separate approval.`,
-    }]);
-  },
+  // Scout used to ask here before sending code context to the harness; runs saved at that question continue to the mapping.
+  async disclose() { return "map"; },
 
   async map({ ctx, runId, data, getHarness }) {
     const scan = data.scan!;
-    ctx.log(`OpenMerit Harness is mapping ${scan.usages.length} usages to agents and tasks…`);
+    ctx.log(`Mapping ${scan.usages.length} usages to tasks…`);
     const harness = await getHarness();
     const listing = scan.usages.slice(0, 120).map(usage => `### ${usage.id} ${usage.kind}${usage.dynamic ? " (dynamic)" : ""}: ${usage.value}${usage.catalogueId ? ` = catalogue ${usage.catalogueId}` : ""} at ${ref(usage)}\n${context(ctx.repo.root, usage)}`).join("\n\n");
     const reply = await harness.json<{ tasks: Task[] }>({
       cwd: ctx.repo.root,
       system: "You are OpenMerit Harness running OpenMerit Scout. You map model usages in a codebase to the agents or tasks they serve. Read files only to understand them; never change anything.",
-      prompt: `Repository: ${ctx.repo.root}\n\nGroup these model usages into the agents or tasks they serve (one task per distinct job a model does in production, such as \"ticket classifier\" or \"claim summary\"). A model used by two jobs belongs to two tasks. Include every model usage, including dynamic ones, in a task. For each task say whether the call uses tool calls, image input, or structured (JSON) output. Use short task names.\n\n${listing}`,
+      prompt: `Repository: ${ctx.repo.root}\n\nGroup these model usages into the agents or tasks they serve (one task per distinct job a model does in production, such as \"ticket classifier\" or \"claim summary\"). A model used by two jobs belongs to two tasks. Include every model usage, including dynamic ones, in a task. For each task say whether the call uses tool calls, image input, or structured (JSON) output. Use short task names, and describe each task in one short sentence.\n\n${listing}`,
       schema: strict({ tasks: { type: "array", items: strict({ name: { type: "string" }, description: { type: "string" }, usageIds: { type: "array", items: { type: "string" } }, usesTools: { type: "boolean" }, needsVision: { type: "boolean" }, structuredOutput: { type: "boolean" } }) } }),
     });
     const known = usageById(data);
@@ -343,40 +339,36 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
       if (!match) throw new NeedsInput([modelQuestion(data)], "needs_input", [`${value} is not one of the models found in this repository.`]);
       data.model = match.catalogueId ?? `?${match.value}`;
       if (!match.catalogueId) throw new Error(`${match.value} is not in the bundled catalogue (version ${ctx.catalogue.version}), so Scout cannot price or place it. Update openmerit, or choose a catalogue model.`);
-      return "corrections";
+      return "tasks";
     }
+    if (!data.scan!.models.some(item => item.catalogueId)) throw new Error(`None of the models found in this repository is in the bundled catalogue (version ${ctx.catalogue.version}), so Scout cannot price or place them. Update openmerit.`);
     throw new NeedsInput([modelQuestion(data)]);
   },
 
-  async corrections({ data, answers }) {
-    if (data.corrected) return "tasks";
-    const answer = answers.corrections;
-    if (answer === undefined) throw new NeedsInput([correctionsQuestion(data)]);
-    for (const item of list(answer)) {
+  // Scout used to ask for mapping corrections here; the task question takes them now.
+  async corrections() { return "tasks"; },
+
+  async tasks({ data, answers }) {
+    const chosen = list(answers.tasks);
+    // <usage id>=<task name> moves a usage to that task, or to a new one, before the selection.
+    for (const item of chosen.filter(entry => entry.includes("="))) {
       const [id = "", ...rest] = item.split("=");
       const name = rest.join("=").trim();
       const usage = usageById(data).get(id.trim());
-      if (!usage || !name) throw new NeedsInput([correctionsQuestion(data)], "needs_input", [`Write each correction as <usage id>=<task name>, not "${item}".`]);
+      if (!usage || !name) throw new NeedsInput([tasksQuestion(data)], "needs_input", [`Write a correction as <usage id>=<task name>, not "${item}".`]);
       for (const task of data.tasks!) task.usageIds = task.usageIds.filter(other => other !== usage.id);
       const target = data.tasks!.find(task => task.name === name);
       if (target) target.usageIds.push(usage.id);
       else data.tasks!.push({ name, description: "Added by the user", usageIds: [usage.id], usesTools: false, needsVision: false, structuredOutput: false });
+      data.tasks = data.tasks!.filter(task => task.usageIds.length);
     }
-    data.tasks = data.tasks!.filter(task => task.usageIds.length);
-    data.corrected = true;
-    return "tasks";
-  },
-
-  async tasks({ data, answers }) {
+    const names = chosen.filter(entry => !entry.includes("="));
+    if (!names.length) throw new NeedsInput([tasksQuestion(data)]);
     const available = tasksForModel(data);
-    const chosen = list(answers.tasks);
-    if (chosen.length) {
-      const unknown = chosen.filter(name => !available.some(task => task.name === name));
-      if (unknown.length) throw new NeedsInput([tasksQuestion(data)], "needs_input", [`Not a task of ${data.model}: ${unknown.join(", ")}.`]);
-      data.selected = chosen;
-      return "pool";
-    }
-    throw new NeedsInput([tasksQuestion(data)]);
+    const unknown = names.filter(name => !available.some(task => task.name === name));
+    if (unknown.length) throw new NeedsInput([tasksQuestion(data)], "needs_input", [`Not a task of ${data.model}: ${unknown.join(", ")}.`]);
+    data.selected = names;
+    return "pool";
   },
 
   async pool({ ctx, runId, data }) {
@@ -410,7 +402,7 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
       }
       if (saved[name]) { data.evals[name] = { ...saved[name], source: "saved" }; continue; }
       if (data[`asked_${key}`]) { missing.push(evalQuestion(name, String(data[`asked_${key}`]))); continue; }
-      ctx.log(`OpenMerit Harness is looking for the existing eval of "${name}"…`);
+      ctx.log(`Finding the eval for ${name}…`);
       const harness = await getHarness();
       const task = data.tasks!.find(item => item.name === name)!;
       const usages = usageById(data);
@@ -490,7 +482,7 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
         const answer = answers[key] ?? data.accepted[name];
         if (answer === "accept") { data.accepted[name] = "accept"; Object.assign(comparison, rank(comparison, true)); }
         else if (answer === "stop") data.accepted[name] = "stop";
-        else pending.push({ id: key, kind: "choice", prompt: `The eval for "${name}" gave every measured model the same pass rate. Use it anyway?`, detail: `${comparison.note}\nWith equal pass rates the ranking rests on cost alone. Harder labelled cases make the result meaningful.`, options: [{ value: "accept", label: "Accept: rank the qualifying models by cost" }, { value: "stop", label: "Stop: no recommendation for this task until the eval is improved" }] });
+        else pending.push({ id: key, kind: "choice", prompt: `Every model scored the same on the ${name} eval. Rank by cost anyway?`, detail: comparison.note, options: [{ value: "accept", label: "Accept: rank the qualifying models by cost" }, { value: "stop", label: "Stop: no recommendation for this task until the eval is improved" }] });
       }
       const mapping = config.langfuse?.mappings.find(item => item.task === name);
       if (config.langfuse && mapping) {
@@ -520,14 +512,14 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
           ctx.state.decision(runId, "configure", "no", { task: comparison.task, model: winner.model });
           continue;
         }
-        if (!yes(answer)) throw new NeedsInput([{ id: `configure_${key}`, kind: "confirm", default: false, prompt: CONFIGURE_QUESTION, detail: `Task "${comparison.task}": switch ${data.model} to ${winner.model} on ${winner.endpoint} (${winner.endpointModel}). No leaves your application configuration unchanged.` }]);
+        if (!yes(answer)) throw new NeedsInput([{ id: `configure_${key}`, kind: "confirm", default: false, prompt: CONFIGURE_QUESTION, detail: `${comparison.task}: ${data.model} → ${winner.model} (${winner.endpoint})` }]);
         current.decision = "yes";
         Object.assign(current, planEdit(ctx, data, comparison, winner));
         if (!current.edits?.length) { ctx.state.decision(runId, "configure", "manual", { task: comparison.task, model: winner.model, manual: current.manual }); continue; }
       }
       const answer = answers[`apply_${key}`];
       if (no(answer)) { current.applied = false; current.edits = []; ctx.state.decision(runId, "configure", "preview_declined", { task: comparison.task }); continue; }
-      if (!yes(answer)) throw new NeedsInput([{ id: `apply_${key}`, kind: "confirm", default: false, prompt: `Apply this change for "${comparison.task}"?`, detail: `${diff(current.edits!)}${current.manual?.length ? `\n\nAlso, by hand:\n${current.manual.map(item => `- ${item}`).join("\n")}` : ""}` }]);
+      if (!yes(answer)) throw new NeedsInput([{ id: `apply_${key}`, kind: "confirm", default: false, prompt: `Apply this change to ${comparison.task}?`, detail: `${diff(current.edits!)}${current.manual?.length ? `\n\nAlso, by hand:\n${current.manual.map(item => `- ${item}`).join("\n")}` : ""}` }]);
       applyEdits(ctx.repo.root, current.edits!);
       current.applied = true;
       ctx.state.decision(runId, "configure", "applied", { task: comparison.task, model: winner.model, diff: diff(current.edits!) });
@@ -589,7 +581,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
   const runUnit = async (task: string, plan: PlannedEval, kind: UnitRow["role"], entry: ModelRef, repeat: number, items: readonly string[] | null): Promise<UnitResult> => {
     const id = `${runId}|${slug(task)}|${kind}|${entry.endpoint}|${entry.model}|r${repeat}`;
     const unit = state.ensureUnit({ id, runId, task, model: entry.model, endpoint: entry.endpoint, role: kind, repeat });
-    const label = `${task} · ${kind === "baseline" ? "current model" : kind} ${entry.model}${kind === "screen" ? "" : ` · run ${repeat}/${repeats}`}`;
+    const label = `${kind === "baseline" ? "current" : kind} ${entry.model}${kind === "screen" ? "" : ` ${repeat}/${repeats}`}`;
     if (unit.status === "done") return unit.result as unknown as UnitResult;
     if (unit.status === "unavailable") throw new CandidateUnavailable(unit.error ?? "could not run");
     if (unit.status === "budget_paused") throw new NeedsInput(budgetQuestions(ctx, runId), "budget_paused");
@@ -604,7 +596,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     // The expected items: the sample for a screen; every dataset item (or the current model's first run's items) otherwise.
     const expected = items ?? (plan.langfuse ? data.datasetItems![task]! : kind === "baseline" && repeat === 1 ? null : Object.keys(firstBaseline(task)?.items ?? {}));
     const experiment = `openmerit-${runId}-${slug(task)}-${kind}-${entry.endpointModel.replace(/[^a-zA-Z0-9.]+/g, "-")}-r${repeat}-a${unit.attempts + 1}`;
-    ctx.log(`Evaluating ${label}${items ? ` on ${items.length} sampled items` : ""}…`);
+    ctx.log(`${label}${items ? ` (${items.length} items)` : ""}…`);
     state.setUnit(id, { status: "running", attempt: true });
     const pooled = allowedOn(endpoint, ctx.catalogue);
     // The baseline is the model already in production: it runs even when the candidate pool leaves it out.
@@ -622,14 +614,18 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     }
     const refused = tally.poolViolations.length ? `; refused models outside the allowed pool: ${[...new Set(tally.poolViolations)].join(", ")}` : "";
     if (!outcome.ok) {
-      const rejected = tally.upstreamErrors.find(status => UNAVAILABLE_STATUSES.includes(status));
+      // A candidate the endpoint rejects, or whose calls still fail after the proxy's retries, is skipped as untested.
+      const rejected = tally.upstreamErrors.find(status => UNAVAILABLE_STATUSES.includes(status) || retryable(status));
       if (kind !== "baseline" && rejected) {
-        state.setUnit(id, { status: "unavailable", error: `${entry.endpoint} rejected ${entry.endpointModel} (HTTP ${rejected})${outcome.log ? `\n${outcome.log}` : ""}` });
-        ctx.log(`  skipped: ${entry.endpoint} rejected the model (HTTP ${rejected}); untested, not failed`);
+        const reason = rejected === 429 ? `${entry.endpoint} rate-limited ${entry.endpointModel} (HTTP 429)`
+          : retryable(rejected) ? `${entry.endpoint} kept failing for ${entry.endpointModel} (HTTP ${rejected})` : `${entry.endpoint} rejected ${entry.endpointModel} (HTTP ${rejected})`;
+        state.setUnit(id, { status: "unavailable", error: `${reason}${outcome.log ? `\n${outcome.log}` : ""}` });
+        ctx.log(`  skipped: ${entry.endpoint} HTTP ${rejected}`);
         save();
-        throw new CandidateUnavailable(`${entry.endpoint} rejected ${entry.endpointModel} (HTTP ${rejected})`);
+        throw new CandidateUnavailable(reason);
       }
-      return fail(`${outcome.error ?? "eval failed"}${refused}${outcome.log ? `\n${outcome.log}` : ""}`);
+      const statuses = [...new Set(tally.upstreamErrors)];
+      return fail(`${outcome.error ?? "eval failed"}${statuses.length ? ` (${entry.endpoint} answered HTTP ${statuses.join(", ")})` : ""}${refused}${outcome.log ? `\n${outcome.log}` : ""}`);
     }
     let results: Record<string, boolean>;
     let source: UnitResult["source"];
@@ -653,7 +649,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     const passes = Object.values(results).filter(Boolean).length, total = Object.keys(results).length;
     const result: UnitResult = { items: results, passes, total, source, experiment, requests: tally.requests, durationMs: outcome.durationMs };
     state.setUnit(id, { status: "done", result: result as unknown as Record<string, unknown> });
-    ctx.log(`  ${passes}/${total} passed${source === "langfuse" ? " (read back from Langfuse)" : ""} · ${tally.requests} requests · eval spend so far ${usd(state.spend(runId).totalUsd)} of $${state.getRun(runId)!.budgetUsd.toFixed(2)}`);
+    ctx.log(`  ${passes}/${total} · ${usd(state.spend(runId).totalUsd)} of $${state.getRun(runId)!.budgetUsd.toFixed(2)}`);
     save();
     return result;
   };
@@ -743,46 +739,32 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
   return "compare";
 }
 
-async function ctxHarnessDestination(ctx: Context) {
-  try { return (await ctx.harness()).destination; } catch (error) { throw new Error(`OpenMerit Harness is not ready: ${error instanceof Error ? error.message : String(error)} Run \`openmerit setup\`.`); }
-}
-
 function modelQuestion(data: RunState): Question {
   const usages = usageById(data);
-  const dynamic = data.scan!.usages.filter(usage => usage.kind === "model" && usage.dynamic && !usage.catalogueId);
-  const endpointUsages = data.scan!.usages.filter(usage => usage.kind === "endpoint");
   return {
-    id: "model", kind: "choice", prompt: "Which current model should Scout review?",
-    options: data.scan!.models.map(item => ({
-      value: item.catalogueId ?? `?${item.value}`, label: `${item.value}${item.catalogueId ? "" : " (not in the catalogue)"}`,
+    id: "model", kind: "choice", prompt: "Which model should Scout review?",
+    // Scout can only price and place catalogue models, so only those are offered.
+    options: data.scan!.models.filter(item => item.catalogueId).map(item => ({
+      value: item.catalogueId!, label: item.value,
       detail: item.usageIds.map(id => usages.get(id)).filter((usage): usage is Usage => !!usage).map(usage => `${ref(usage)}${usage.dynamic ? ` (default of ${usage.envVar})` : ""}`).join(", "),
     })),
-    detail: [
-      dynamic.length ? `Dynamic, resolved at run time:\n${dynamic.map(usage => `- ${ref(usage)}: ${usage.value}${usage.envVar ? ` (env ${usage.envVar})` : ""}`).join("\n")}` : "",
-      endpointUsages.length ? `Endpoints:\n${endpointUsages.map(usage => `- ${ref(usage)}: ${usage.value}`).join("\n")}` : "",
-    ].filter(Boolean).join("\n"),
-  };
-}
-
-function correctionsQuestion(data: RunState): Question {
-  const usages = usageById(data);
-  return {
-    id: "corrections", kind: "text", default: "",
-    prompt: "Correct the inferred task mapping? Enter <usage id>=<task name>, comma-separated, or leave empty to keep it.",
-    detail: tasksForModel(data).map(task => `${task.name}: ${task.usageIds.map(id => usages.get(id)).filter((usage): usage is Usage => !!usage).map(usage => `${usage.id} ${ref(usage)} ${usage.value}`).join("; ")}`).join("\n"),
   };
 }
 
 function tasksQuestion(data: RunState): Question {
   const usages = usageById(data);
   return {
-    id: "tasks", kind: "multi", prompt: TASK_QUESTION,
-    options: tasksForModel(data).map(task => ({ value: task.name, label: task.name, detail: `${task.description} — ${task.usageIds.map(id => usages.get(id)).filter((usage): usage is Usage => !!usage && usage.kind === "model").map(ref).join(", ")}` })),
+    id: "tasks", kind: "multi", prompt: TASK_QUESTION, hint: "or <usage>=<task> to fix the mapping",
+    options: tasksForModel(data).map(task => {
+      const uses = task.usageIds.map(id => usages.get(id)).filter((usage): usage is Usage => !!usage && usage.kind === "model" && modelKey(usage) === data.model);
+      const refs = [...uses.slice(0, 2).map(usage => `${usage.id} ${basename(usage.file)}:${usage.line}`), ...(uses.length > 2 ? [`+${uses.length - 2} more`] : [])].join(", ");
+      return { value: task.name, label: task.name, detail: `${task.description.split(/(?<=\.)\s/)[0]} (${refs})` };
+    }),
   };
 }
 
 function evalQuestion(task: string, reason: string): Question {
-  return { id: `eval_${slug(task)}`, kind: "text", prompt: `No runnable eval found for "${task}". Enter the command that runs its eval, or "skip".`, detail: `${reason}\n${EVAL_CONTRACT}\nScout never invents an eval or labels.` };
+  return { id: `eval_${slug(task)}`, kind: "text", prompt: `No eval found for ${task}. Command to run it, or "skip":`, detail: `${reason}\n${EVAL_CONTRACT}` };
 }
 
 /** Upper estimate of eval runs: baseline and finals on every item, screens on the sample. */
@@ -810,26 +792,25 @@ function approvalQuestion(ctx: Context, runId: string, data: RunState): Question
       `${name}`,
       `  Command: ${plan.command}${plan.cwd ? ` (in ${plan.cwd})` : ""}`,
       ...(plan.env && Object.keys(plan.env).length ? [`  Env: ${Object.entries(plan.env).map(([key, value]) => `${key}=${value}`).join(" ")}`] : []),
-      `  Per-item results: ${plan.langfuse ? `the eval records each run as a Langfuse experiment on dataset ${plan.langfuse.dataset} with its own keys; OpenMerit reads score ${plan.langfuse.score}${plan.langfuse.min !== undefined ? ` ≥ ${plan.langfuse.min}` : ""} back with the Viewer key` : "reported by the eval in $OPENMERIT_RESULT"}${plan.threshold !== undefined ? `; required pass rate ${plan.threshold}` : ""}`,
-      ...(plan.explanation ? [`  Why: ${plan.explanation}`] : []),
-      `  Search: ${candidates.length} ECI-ranked candidates cheaper than ${data.model}${data.unranked?.[name] ? ` (${data.unranked[name]} without an ECI left out)` : ""}${candidates.length ? `, ECI ${candidates[0]!.eci.toFixed(1)}–${candidates.at(-1)!.eci.toFixed(1)}` : ""}.`,
-      `  Runs: the current model on every item ${repeats}×; binary search screens on ${SAMPLE_SIZE} items it passes (about ${runs.probes} probes, up to ${runs.screens} screens with neighbours and challengers); up to ${FINALISTS} finalists and ${CHALLENGERS} challengers on every item ${repeats}×. At most ${runs.fullRuns} full eval runs and ${runs.screens} screens.`,
+      `  Results: ${plan.langfuse ? `Langfuse dataset ${plan.langfuse.dataset}, score ${plan.langfuse.score}${plan.langfuse.min !== undefined ? ` ≥ ${plan.langfuse.min}` : ""}` : "$OPENMERIT_RESULT"}${plan.threshold !== undefined ? `; pass rate ≥ ${plan.threshold}` : ""}`,
+      `  Candidates: ${candidates.length} cheaper than ${data.model}${candidates.length ? `, ECI ${candidates[0]!.eci.toFixed(1)}–${candidates.at(-1)!.eci.toFixed(1)}` : ""}${data.unranked?.[name] ? ` (${data.unranked[name]} without ECI left out)` : ""}`,
+      `  Runs: at most ${runs.fullRuns} full and ${runs.screens} ${SAMPLE_SIZE}-item screens`,
       ...(plan.helperFiles ?? []).map(helper => `  New helper file ${helper.path} (${helper.purpose}):\n${helper.content.split("\n").map(line => `    + ${line}`).join("\n")}`),
     ].join("\n");
   });
   return {
     id: "approve_evals", kind: "confirm", default: false,
-    prompt: "Run these evals? They make paid model requests.",
-    detail: `${sections.join("\n\n")}\n\nEval inputs and prompts go to: ${[...destinations].join(", ")}, through OpenMerit's local metering proxy (127.0.0.1).\nEval budget for this run: $${run.budgetUsd.toFixed(2)}. Requests that would pass it are refused before they are sent, and the run pauses to ask. Harness inference is billed separately by the harness provider.\nOpenMerit's Langfuse connection stays read-only; any Langfuse writes are your eval's own.`,
+    prompt: "Run these evals? They make paid requests.",
+    detail: `${sections.join("\n\n")}\n\nSent to: ${[...destinations].join(", ")}. Budget: $${run.budgetUsd.toFixed(2)}; requests past it are refused.`,
   };
 }
 
 function retryQuestion(ctx: Context, runId: string, stale: UnitRow[]): Question {
-  const spent = stale.reduce((sum, unit) => sum + ctx.state.spend(runId, unit.id).totalUsd, 0);
   return {
     id: "retry_units", kind: "confirm", default: false,
-    prompt: `${stale.length} eval run(s) failed or were interrupted. Run them again?`,
-    detail: `${stale.map(unit => `- ${unit.task} · ${unit.role} ${unit.model} (run ${unit.repeat}): ${(unit.error ?? unit.status).split("\n")[0]}`).join("\n")}\nTheir earlier requests already cost ${usd(spent)} and stay counted against this run's budget; running again spends again. Answer no to stop that task's search when the current model's run or a screen failed, or to report a failed final as unmeasured.`,
+    // A run cut off by a stopped daemon or process is interrupted, not failed; say which it was.
+    prompt: `${stale.length} eval run${stale.length === 1 ? "" : "s"} ${stale.every(unit => unit.status !== "failed") ? (stale.length === 1 ? "was interrupted" : "were interrupted") : stale.some(unit => unit.status !== "failed") ? "failed or were interrupted" : "failed"}. Run ${stale.length === 1 ? "it" : "them"} again?`,
+    detail: stale.map(unit => `- ${unit.role} ${unit.model} ${unit.repeat}: ${(unit.error ?? unit.status).split("\n")[0]}, ${usd(ctx.state.spend(runId, unit.id).totalUsd)} spent`).join("\n"),
   };
 }
 
@@ -837,10 +818,10 @@ function budgetQuestions(ctx: Context, runId: string): Question[] {
   const run = ctx.state.getRun(runId)!;
   const spend = ctx.state.spend(runId);
   return [
-    { id: "budget_action", kind: "choice", prompt: `The eval budget of $${run.budgetUsd.toFixed(2)} is reached. Raise it to continue?`,
-      detail: `${ctx.state.units(runId).some(unit => unit.status === "budget_paused") ? "The paused eval run restarts from its beginning when it continues; requests it already made stay counted. " : ""}Used: $${spend.settledUsd.toFixed(4)} settled (${spend.estimatedUsd > 0 ? `$${spend.estimatedUsd.toFixed(4)} of it estimated from list prices` : "provider-reported"})${spend.inFlight ? `, $${spend.inFlightUsd.toFixed(4)} reserved for ${spend.inFlight} request(s) whose cost is unknown` : ""}${spend.unknown ? `, ${spend.unknown} request(s) without a price, counted at their reservation` : ""}. Providers bill independently; this is OpenMerit's ledger, not a provider-enforced cap.`,
-      options: [{ value: "run", label: "Raise for this run only" }, { value: "default", label: "Raise for this run and save it as the repository's default" }, { value: "decline", label: "Keep the run paused" }] },
-    { id: "budget_amount", kind: "text", prompt: "New budget for this run in USD", default: String(Math.max(run.budgetUsd * 2, run.budgetUsd + 5)) },
+    { id: "budget_action", kind: "choice", prompt: `Budget of $${run.budgetUsd.toFixed(2)} reached. Raise it?`,
+      detail: `Used $${(spend.settledUsd + spend.inFlightUsd).toFixed(4)}${spend.estimatedUsd > 0 || spend.inFlight || spend.unknown ? " (partly estimated)" : ""}.`,
+      options: [{ value: "run", label: "This run only" }, { value: "default", label: "This run and future runs" }, { value: "decline", label: "Keep paused" }] },
+    { id: "budget_amount", kind: "text", prompt: "New budget (USD)", default: String(Math.max(run.budgetUsd * 2, run.budgetUsd + 5)) },
   ];
 }
 
@@ -918,7 +899,8 @@ function compareTask(ctx: Context, runId: string, data: RunState, name: string, 
     baseline, candidates, top: [], status: "incomplete", note: "", ...(summary ? { search: summary } : {}),
   };
   if (baseline.status !== "measured") return { ...comparison, status: "baseline_failed", note: `The current model's eval did not complete (${baseline.note}), so no candidate can be compared. Fix the eval and resume the run.` };
-  if (data.stopped?.[name]) return { ...comparison, status: "stopped", note: `The search stopped, so no model is recommended: ${data.stopped[name]}` };
+  // A stopped search recommends nothing, but the finalists it measured keep their real comparison with the current model.
+  if (data.stopped?.[name]) return { ...comparison, candidates: rank(comparison, false).candidates, status: "stopped", note: `The search stopped, so no model is recommended: ${data.stopped[name]}` };
   if (summary?.status === "no_passing_model") return { ...comparison, status: "no_passing_model", note: `No candidate in the pool passed all ${SAMPLE_SIZE} screening items the current model passes.` };
   const measured = candidates.filter(item => item.status === "measured");
   // Finalists pass the screen by construction; a failed screen already shows the eval separates models.
