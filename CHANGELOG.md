@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — local CLI and MCP
+
+- Replace the `openmerit` package's commands with the single-user local CLI: `openmerit setup`, `openmerit scout`, `openmerit history` and `openmerit mcp` (a stdio MCP server with `openmerit_status`, `openmerit_scout` and `openmerit_history`). `run`, `candidates`, `status`, `login`, `pi` and the Pi extension export are removed. No OpenMerit account or hosted service.
+- OpenMerit Harness runs on Pi, powered by Claude Code (`claude -p`), Codex (`codex exec`) or an API provider and key, verified in setup with no silent fallback. Setup registers the MCP server with Claude Code and Codex.
+- Scout scans the repository's model and endpoint usages and maps them to tasks. After approval it runs Scout Model Binary Search with the task's existing eval over the repository's allowed, ECI-ranked models that are cheaper than the current model. The current model runs every item three times. Candidates are screened on five items it passes, five finalists and up to three challengers run every item, and models the endpoint rejects are skipped as untested. Scout shows the search path and the three cheapest finalists at least as good as the current model by measured cost per item. A Yes to configure applies only the previewed model-ID edit.
+- The eval gets `OPENMERIT_ITEMS` and `OPENMERIT_EXPERIMENT`. It records each run as a Langfuse experiment with the application's own keys, and Scout reads the per-item scores back with a Viewer key using GET requests only; or the eval reports `{"items": [{"id", "pass"}]}` itself. The earlier `{"score", "samples"}` report is gone.
+- A local metering proxy enforces a per-run eval budget (default $10) before each paid request, with run-only or saved-default raises. Runs, eval results, spend, approvals and configuration decisions are kept in SQLite under `~/.openmerit/`.
+- The Langfuse connector is read-only: Viewer keys only, reading experiment results and aggregate metrics. The earlier dataset, experiment and score writes are removed.
+- The model catalogue (OpenRouter models, Epoch ECI and ScoutBM estimates) ships in the package as `data/catalogue.json`; no catalogue is fetched at run time. Every invocation checks npm for a newer version and asks before updating.
+
 ## 0.3.11 — 2026-11-09
 
 - The repository moved to `github.com/openmerit-ai/openmerit-core`. Package metadata (repository, homepage and issues) and the troubleshooting guide's issue link point there. No CLI, installer or MCP behavior changes.
