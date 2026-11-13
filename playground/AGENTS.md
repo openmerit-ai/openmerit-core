@@ -4,7 +4,7 @@ This directory is a **customer project**. Sahra Health is a fictional, AI-native
 
 ## Treat it as a customer
 
-- Do not read, search, import or copy OpenMerit source outside `playground/`. That includes the parent repository's `packages/`, `scout/`, `scripts/`, `docs/`, `site/` and git history. Use only what a customer has: the published `openmerit` package in `node_modules/openmerit` (including its `docs/` and `README.md`), `npx openmerit@<version> --help`, the public website, and Scout itself.
+- Do not read, search, import or copy OpenMerit source outside `playground/`. That includes the parent repository's `openmerit-core/` (the package source), `scripts/`, `docs/`, `site/` and git history. Use only what a customer has: the published `openmerit` package in `node_modules/openmerit` (including its `docs/` and `README.md`), `npx openmerit@<version> --help`, the public website, and Scout itself.
 - Install `openmerit` from npm at the exact version pinned in `package.json`. Never link or install the local workspace source.
 - If OpenMerit behaves unexpectedly, record it in `FINDINGS.md` as a customer would report it. Do not fix OpenMerit from here.
 

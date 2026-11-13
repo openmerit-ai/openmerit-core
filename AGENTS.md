@@ -1,12 +1,34 @@
 # Amp orbs
 
-`.agents/setup` installs Node.js 22.19.0 (the CI version) into `~/.local/bin` and runs `npm ci` for the website at the repository root. `openmerit-core/` (the `openmerit` npm package) and `playground/` have their own lockfiles; run `npm ci` in each before working there. The project declares no orb services.
+`.agents/setup` installs Node.js 22.19.0 (the CI version) into `~/.local/bin` and runs `npm ci` at the repository root (the website), in `openmerit-core/` (the `openmerit` npm package) and in `playground/`, each with its own lockfile; `.agents/resume` checks they are still installed. Rerun `.agents/setup` after changing a lockfile. The project declares no orb services.
 
 `openmerit.ai` is the primary domain; `openmerit.site` hosts only legacy redirects. Use `.ai` in new links and copy; `docs/site-domain-migration.md` describes the routing.
 
 Orbs receive a project-wide `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` for Wrangler. The token also reaches other projects in the same Cloudflare account: never change the `docex.dev` zone or any Worker outside the OpenMerit configurations in this repository. Read-only commands are fine; deploys and DNS, route, or email changes need the user's explicit approval each time. Deploy only through `npm run deploy -- <worker>` and roll back as described in `docs/site-deployment.md`; `npm run deploy:status` is read-only. Load the `deploying-openmerit-workers` skill before any deploy, rollback or secret change; `.agents/skills/README.md` lists the project skills.
 
 Orbs also receive an `NPM_TOKEN` project secret limited to the `openmerit` package, which is published from `openmerit-core/`; `.agents/setup` points `~/.npmrc` at it. `npm publish` and dist-tag changes need the user's explicit approval each time. Release with a patch bump (0.3.0 → 0.3.1) by default, including for new features; bump the minor or major version only when the user says the change warrants it.
+
+# Verifying your work
+
+Every check below runs against local fakes: no secret, no paid model call, no Cloudflare or npm change. Times are from a 2-CPU orb.
+
+| Change in | While iterating | Before you finish |
+|---|---|---|
+| `openmerit-core/` | `npm run typecheck` (7 s), `npm run test:fast` (25 s) | `npm run check` (100 s), `npm run build` (6 s) |
+| `playground/` | | `npm run check` (12 s) |
+| website, `docs/`, `scripts/`, `demo/` | `npm run check:docs` (2 s) | `npm run verify` (15 s); `npm run check:worker-types` (18 s) after a Wrangler configuration change |
+| several of these | | `npm run check:all` at the root runs every CI job (2.5 min) |
+
+- `test:fast` skips the openmerit-core daemon test, which kills the daemon at each of six questions and waits about 13 s each time for the local Rivet engine to resume the run. It takes 90 s and is not hung.
+- To drive the CLI by hand, run `node src/cli.ts` from `openmerit-core/` with `OPENMERIT_HOME` set to a temporary directory and `OPENMERIT_NO_UPDATE_CHECK=1`. Without a TTY it never prompts: `scout --json` stops at the first question, `--answer <id=value>` answers it, and setup takes `--yes`. `test/daemon.test.ts` shows a full run against a fake harness and endpoint.
+- `npm run memo` serves the website and memo locally on port 45834 (no real email).
+
+# Working unattended
+
+- Push branches and land work through `merge-when-green` pull requests (see Landing changes) without asking. The green CI run is the approval.
+- Deploys, Cloudflare secret, DNS, route or email changes, `npm publish` and dist-tag changes still need explicit approval each time. When a goal reaches one, finish, verify and land everything that does not depend on it, then stop and report the exact command to approve. Do not stop earlier to ask.
+- Real model calls are allowed when the goal needs real results: `openmerit connect`, `setup` or `scout` with a real harness (it bills its plan or key, and evals bill the candidate endpoints, within Scout's per-run eval budget), and `npm run dev` and `npm run scenarios` in `playground/` (Workers AI on the account, OpenRouter). No check needs them. `npm run build:catalogue` is free but fetches public OpenRouter and Epoch data and rewrites `data/catalogue.json`, so run it only to refresh the catalogue.
+- The playground's keys reach orbs as the project secrets `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `OPENROUTER_API_KEY` and `PLAYGROUND_TOKEN`. Its scripts read them from the environment, but `wrangler dev` reads Worker secrets only from `playground/.dev.vars` (gitignored), so write that file from the environment before `npm run dev`: `for v in LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY OPENROUTER_API_KEY PLAYGROUND_TOKEN; do echo "$v=${!v}"; done > .dev.vars`. Do not set `CLOUDFLARE_INCLUDE_PROCESS_ENV`, which would bind every orb secret, including the Cloudflare and npm tokens, into the local Worker.
 
 # Landing changes
 

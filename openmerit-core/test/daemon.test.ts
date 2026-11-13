@@ -3,7 +3,7 @@
 // so no real model is called.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -132,5 +132,7 @@ test("a run survives a SIGKILL of the daemon at every question, and the harness 
   } finally {
     await stopDaemon(env);
     endpoint.close();
+    // The daemon's Rivet store is about 130 MB; repeated runs would fill the disk.
+    for (const path of [root, outside, home]) rmSync(path, { recursive: true, force: true });
   }
 });
