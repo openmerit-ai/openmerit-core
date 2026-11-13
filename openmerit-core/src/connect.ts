@@ -126,7 +126,8 @@ export async function connect(ctx: ConnectContext, kind?: HarnessKind): Promise<
     const settings: HarnessSettings = { kind };
     if (kind === "api") {
       const provider = ctx.flags.apiProvider ?? (interactive(ctx) ? await ctx.prompter!.ask("Pi provider for the harness (anthropic, openai, openrouter, google, ...)", existing?.api?.provider ?? "anthropic") : "anthropic");
-      const model = ctx.flags.apiModel ?? (interactive(ctx) ? await ctx.prompter!.ask("Model", existing?.api?.model ?? (provider === "openai" ? "gpt-6.1-sol" : provider === "openrouter" ? "anthropic/claude-sonnet-5.5" : "claude-sonnet-5-5")) : "claude-sonnet-5-5");
+      const suggested = (existing?.api?.provider === provider ? existing.api.model : undefined) ?? (provider === "openai" ? "gpt-6.1-sol" : provider === "openrouter" ? "anthropic/claude-sonnet-5.5" : "claude-sonnet-5-5");
+      const model = ctx.flags.apiModel ?? (interactive(ctx) ? await ctx.prompter!.ask("Model", suggested) : suggested);
       const envNames = { anthropic: ["ANTHROPIC_API_KEY"], openai: ["OPENAI_API_KEY"], openrouter: ["OPENROUTER_API_KEY"], google: ["GEMINI_API_KEY", "GOOGLE_API_KEY"] }[provider] ?? [];
       const apiKey = await credential(ctx, `${provider} API key for the harness`, envNames, `harness-${provider}`, ctx.flags.apiKeyEnv);
       if (!apiKey) throw new Error("The API harness needs a key: pass --api-key-env <VAR>.");
