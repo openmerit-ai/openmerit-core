@@ -67,3 +67,25 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run build
+
+  # The packed openmerit tarball installed globally, as users get it, on Linux and macOS: connect,
+  # setup, scout, history and MCP against a local fake model endpoint. No model calls.
+  openmerit-packed:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: openmerit-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: openmerit-core/package-lock.json
+      - run: npm ci
+      - run: node scripts/smoke-packed.ts

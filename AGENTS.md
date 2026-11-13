@@ -17,7 +17,8 @@ Every check below runs against local fakes: no secret, no paid model call, no Cl
 | `openmerit-core/` | `npm run typecheck` (7 s), `npm run test:fast` (25 s) | `npm run check` (100 s), `npm run build` (6 s) |
 | `playground/` | | `npm run check` (12 s) |
 | website, `docs/`, `scripts/`, `demo/` | `npm run check:docs` (2 s) | `npm run verify` (15 s); `npm run check:worker-types` (18 s) after a Wrangler configuration change |
-| several of these | | `npm run check:all` at the root runs every CI job (2.5 min) |
+| packaging, the CLI or the daemon in `openmerit-core/` | | also `node scripts/smoke-packed.ts` (60 s): packs and installs the tarball globally, then runs connect, setup, scout, history and MCP against a local fake |
+| several of these | | `npm run check:all` at the root runs every CI job (3.5 min) |
 
 - `test:fast` skips the openmerit-core daemon test, which kills the daemon at each of six questions and waits about 13 s each time for the local Rivet engine to resume the run. It takes 90 s and is not hung.
 - To drive the CLI by hand, run `node src/cli.ts` from `openmerit-core/` with `OPENMERIT_HOME` set to a temporary directory and `OPENMERIT_NO_UPDATE_CHECK=1`. Without a TTY it never prompts: `scout --json` stops at the first question, `--answer <id=value>` answers it, and setup takes `--yes`. `test/daemon.test.ts` shows a full run against a fake harness and endpoint.
