@@ -22,7 +22,8 @@ type Env = Record<string, string | undefined>;
 
 /** Pi's provider for ChatGPT Plus/Pro sign-ins, which serves Codex models. */
 export const CODEX_PROVIDER = "openai-codex";
-export const DEFAULT_CODEX_MODEL = "gpt-6.1-sol";
+/** Used only when saved settings name no model; `openmerit connect codex` saves the best one the plan accepts. */
+export const DEFAULT_CODEX_MODEL = "gpt-5.6-terra";
 
 export interface HarnessUsage { calls: number; costUsd: number; unknownCost: number; inputTokens: number; outputTokens: number }
 
@@ -38,8 +39,6 @@ export interface JsonRequest {
 
 export interface Harness {
   readonly kind: HarnessSettings["kind"];
-  /** Who receives code and context sent to the harness, for disclosure. */
-  readonly destination: string;
   readonly usage: HarnessUsage;
   json<T>(request: JsonRequest): Promise<T>;
 }
@@ -97,12 +96,6 @@ export function parseJsonObject(reply: string): Record<string, unknown> {
   throw new Error(`The harness did not reply with a JSON object: ${reply.slice(0, 200)}`);
 }
 
-const DESTINATIONS: Record<HarnessSettings["kind"], string> = {
-  "claude-code": "Claude Code on this machine, which sends prompts and the files OpenMerit Harness reads to Anthropic (or the API your Claude Code is configured for)",
-  codex: "OpenAI, through your ChatGPT sign-in (Codex models), which receives prompts and the files OpenMerit Harness reads",
-  api: "the configured API provider",
-};
-
 /** Builds the harness from saved settings. Fails clearly, without falling back, when it cannot. */
 export async function createHarness(settings: HarnessSettings, env: Env = process.env): Promise<Harness> {
   const runtime = await harnessRuntime(env);
@@ -123,12 +116,12 @@ export async function createHarness(settings: HarnessSettings, env: Env = proces
   } else {
     model = runtime.getModel(CODEX_PROVIDER, settings.model ?? DEFAULT_CODEX_MODEL);
     if (!model) throw new Error(`Codex has no model ${settings.model}. Run \`openmerit connect codex --model <id>\` with one of: ${runtime.getModels(CODEX_PROVIDER).map(item => item.id).join(", ")}.`);
-    if (!runtime.hasConfiguredAuth(CODEX_PROVIDER)) throw new Error("OpenMerit is not signed in to ChatGPT. Run `openmerit connect codex`.");
+    // checkAuth reads the stored credential; hasConfiguredAuth waits for an availability refresh, which create() skips.
+    if (!(await runtime.checkAuth(CODEX_PROVIDER))) throw new Error("OpenMerit is not signed in to ChatGPT. Run `openmerit connect codex`.");
   }
   const chosen = model;
 
   const usage: HarnessUsage = { calls: 0, costUsd: 0, unknownCost: 0, inputTokens: 0, outputTokens: 0 };
-  const destination = settings.kind === "api" ? `${DESTINATIONS.api} (${settings.api!.provider}, model ${settings.api!.model})` : DESTINATIONS[settings.kind];
   const complete = async (system: string, messages: Message[], tools: Tool[], input: JsonRequest, sessionId: string) => {
     const reply = await runtime.complete(chosen, { systemPrompt: system, messages, ...(tools.length ? { tools } : {}) },
       { ...(input.signal ? { signal: input.signal } : {}), ...(apiKey ? { apiKey } : {}), sessionId, maxTokens: 16_000 });
@@ -140,7 +133,7 @@ export async function createHarness(settings: HarnessSettings, env: Env = proces
   };
   const replyText = (reply: AssistantMessage) => reply.content.filter(part => part.type === "text").map(part => part.text).join("");
   return {
-    kind: settings.kind, destination, usage,
+    kind: settings.kind, usage,
     async json<T>(input: JsonRequest): Promise<T> {
       const system = `${input.system}\n\nReply with one JSON object that matches this JSON Schema, and nothing else:\n${JSON.stringify(input.schema)}`;
       const messages: Message[] = [{ role: "user", content: input.prompt, timestamp: Date.now() }];
@@ -199,7 +192,7 @@ export async function detectAgents(env: Env = process.env): Promise<{ kind: "cla
   try { claudeLogin = (JSON.parse((await runClaude(["auth", "status"], { env, signal: AbortSignal.timeout(20_000) })).stdout) as { loggedIn?: boolean }).loggedIn === true; } catch { /* no status */ }
   // Claude Code also runs with ANTHROPIC_API_KEY or a third-party provider; its status only covers logins.
   if (env.ANTHROPIC_API_KEY || env.CLAUDE_CODE_OAUTH_TOKEN || env.CLAUDE_CODE_USE_BEDROCK || env.CLAUDE_CODE_USE_VERTEX) claudeLogin = true;
-  const codexLogin = (await harnessRuntime(env)).hasConfiguredAuth(CODEX_PROVIDER);
+  const codexLogin = (await (await harnessRuntime(env)).checkAuth(CODEX_PROVIDER)) !== undefined;
   return [
     { kind: "claude-code", loggedIn: claudeLogin, detail: claudeLogin ? "logged in" : "not logged in" },
     { kind: "codex", loggedIn: codexLogin, detail: codexLogin ? "signed in to ChatGPT" : "not signed in to ChatGPT" },

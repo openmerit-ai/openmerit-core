@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Scout no longer asks before mapping, and skips data files — unreleased npm source, 13 November 2026
+
+Reviewed the homepage against Scout sending code context to OpenMerit Harness without a separate question (eval runs still need approval), and skipping JSON data files that name many models plus the repository's `scan.exclude` patterns. `site/index.html` has no FAQ block and makes no claim that Scout asks before code context leaves the machine. No homepage copy changes.
+
 ## `openmerit connect` with Claude Code and ChatGPT sign-ins — unreleased npm source, 13 November 2026
 
 Reviewed the homepage against `openmerit connect`, which powers OpenMerit Harness with Claude Code through pi-claude-bridge and the machine's Claude login, with Codex models through pi's ChatGPT Plus or Pro sign-in (tokens kept in `~/.openmerit/agent/auth.json`), or with an API key. `site/index.html` has no FAQ block and mentions no coding agents, subscriptions, sign-ins or where credentials are kept. No homepage copy changes.

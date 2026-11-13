@@ -2,13 +2,14 @@
 // HTTP server stands in for the npm registry, and Langfuse is a fake fetch.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { test } from "node:test";
 import { createLangfuseConnector } from "../src/connectors/langfuse/index.ts";
+import { claudeBinary } from "../src/harness/claude-bridge.ts";
 import { checkForUpdate, newer, offerUpdate, packageVersion } from "../src/update.ts";
 
 const cli = new URL("../src/cli.ts", import.meta.url).pathname;
@@ -22,6 +23,12 @@ test("version comparison, and offline or failing registries continue on the inst
   assert.deepEqual(await checkForUpdate({}, offline).then(info => [info.available, info.latest, info.current]), [false, null, packageVersion()]);
   const missing = (async () => new Response("{}", { status: 404 })) as unknown as typeof fetch;
   assert.equal((await checkForUpdate({}, missing)).available, false);
+});
+
+test("Claude Code login runs the executable bundled with the Claude Agent SDK, so no `claude` on PATH is needed", () => {
+  const binary = claudeBinary({});
+  assert.ok(isAbsolute(binary) && existsSync(binary), `expected the bundled executable, got ${binary}`);
+  assert.equal(claudeBinary({ OPENMERIT_CLAUDE_BIN: "/opt/claude" }), "/opt/claude");
 });
 
 test("an update installs only with approval and continues on the chosen version", async () => {

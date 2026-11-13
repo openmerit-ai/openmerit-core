@@ -1,9 +1,11 @@
 // Step 1 of Scout: find model and endpoint usages in the repository without changing it. Reads only
-// files Git does not ignore (or, outside Git, skips dependency and build directories). Snippets are
-// redacted: anything shaped like a key or token is replaced before it is shown, stored or sent.
+// files Git does not ignore (or, outside Git, skips dependency and build directories), minus the
+// repository's `scan.exclude` patterns. A JSON file that names many models is data (a catalogue,
+// saved results, a dataset), not configuration, and is skipped. Snippets are redacted: anything
+// shaped like a key or token is replaced before it is shown, stored or sent.
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { extname, join, relative } from "node:path";
+import { extname, join, matchesGlob, relative } from "node:path";
 import { catalogueIndex, type Catalogue } from "../catalogue/catalogue.ts";
 
 export interface Usage {
@@ -28,6 +30,13 @@ export interface ScanResult {
   usages: Usage[];
   /** Catalogue models found, with their usage IDs. */
   models: { catalogueId: string | null; value: string; usageIds: string[] }[];
+  /** JSON files skipped as data because they name more than MAX_DATA_FILE_MODELS models. */
+  skipped: string[];
+}
+
+export interface ScanOptions {
+  /** Glob patterns, relative to the repository root, of files or directories not to scan. */
+  exclude?: string[];
 }
 
 const TEXT = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".py", ".go", ".rb", ".java", ".kt", ".rs", ".php", ".cs", ".swift",
@@ -35,6 +44,11 @@ const TEXT = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cj
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", "out", ".next", ".venv", "venv", "__pycache__", "target", ".openmerit", "coverage", ".amp"]);
 const SKIP_FILES = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|poetry\.lock|Cargo\.lock|go\.sum)$/;
 const MAX_BYTES = 512_000;
+/** More model usages than this in one JSON file make it data rather than configuration. */
+export const MAX_DATA_FILE_MODELS = 20;
+
+/** True when `file` matches a pattern, or sits in a directory a pattern names. */
+const excluded = (file: string, patterns: readonly string[]) => patterns.some(pattern => matchesGlob(file, pattern) || matchesGlob(file, `${pattern.replace(/\/+$/, "")}/**`));
 
 const SECRET_PATTERNS: RegExp[] = [
   /\b(sk|pk|rk)-(?:proj-|ant-|or-|lf-|live-|test-)?[A-Za-z0-9_-]{8,}/g,
@@ -82,10 +96,11 @@ const ENDPOINT_HOSTS = /(api\.openai\.com|openrouter\.ai|api\.anthropic\.com|gen
 const BASE_URL_KEY = /\b(base_?url|baseURL|api_?base|endpoint)\b["']?\s*(?::|=(?!=))\s*([^\n,;]+)/i;
 
 /** Scans the repository. Deterministic; no model is called. */
-export function scanRepo(root: string, catalogue: Catalogue): ScanResult {
+export function scanRepo(root: string, catalogue: Catalogue, options: ScanOptions = {}): ScanResult {
   const index = catalogueIndex(catalogue);
   const usages: Usage[] = [];
-  const files = listFiles(root).filter(file => isText(file) && !SKIP_FILES.test(file));
+  const skipped: string[] = [];
+  const files = listFiles(root).filter(file => isText(file) && !SKIP_FILES.test(file) && !excluded(file, options.exclude ?? []));
   let scanned = 0;
   for (const file of files) {
     const path = join(root, file);
@@ -96,6 +111,7 @@ export function scanRepo(root: string, catalogue: Catalogue): ScanResult {
     } catch { continue; }
     if (text.includes("\0")) continue;
     scanned++;
+    const before = usages.length;
     const lines = text.split("\n");
     lines.forEach((raw, lineIndex) => {
       if (raw.length > 2000) return;
@@ -108,7 +124,8 @@ export function scanRepo(root: string, catalogue: Catalogue): ScanResult {
       let literalModel = false;
       for (const match of raw.matchAll(STRING)) {
         const value = match[2]!;
-        if (value.length < 3 || value.length > 120 || /\s/.test(value)) continue;
+        // catalogue:<endpoint>:<model> is how OpenMerit's own saved results name a model, not a model an app calls.
+        if (value.length < 3 || value.length > 120 || /\s/.test(value) || value.startsWith("catalogue:")) continue;
         const model = index.find(value);
         const keyed = MODEL_KEY.test(raw.slice(Math.max(0, match.index! - 40), match.index!));
         if (model && (keyed || value.includes("/") || /\d/.test(value))) {
@@ -144,6 +161,12 @@ export function scanRepo(root: string, catalogue: Catalogue): ScanResult {
       }
       URL_PATTERN.lastIndex = 0;
     });
+    // This file's usages are the last ones added, so dropping them keeps usage IDs sequential.
+    if (extname(file) === ".json" && usages.slice(before).filter(usage => usage.kind === "model").length > MAX_DATA_FILE_MODELS) {
+      usages.length = before;
+      skipped.push(file);
+      scanned--;
+    }
   }
   const groups = new Map<string, ScanResult["models"][number]>();
   for (const usage of usages.filter(item => item.kind === "model" && !item.dynamic || item.kind === "model" && item.catalogueId)) {
@@ -152,7 +175,7 @@ export function scanRepo(root: string, catalogue: Catalogue): ScanResult {
     group.usageIds.push(usage.id);
     groups.set(key, group);
   }
-  return { files: scanned, usages, models: [...groups.values()].sort((a, b) => b.usageIds.length - a.usageIds.length || a.value.localeCompare(b.value)) };
+  return { files: scanned, usages, models: [...groups.values()].sort((a, b) => b.usageIds.length - a.usageIds.length || a.value.localeCompare(b.value)), skipped };
 }
 
 /** A few lines around a usage, redacted, for the harness. */

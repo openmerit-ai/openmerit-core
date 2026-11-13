@@ -119,11 +119,11 @@ async function scout(args: string[]) {
   const { localContext, missingSetup, startRun } = await import("./local.ts");
   const { advanceInDaemon } = await import("./daemon/daemon.ts");
   type Answers = import("./scout/workflow.ts").Answers;
-  const { renderStep } = await import("./cli/render.ts");
-  const { askQuestion, terminalPrompter } = await import("./cli/prompt.ts");
+  const { renderComparison, renderStep } = await import("./cli/render.ts");
+  const { askQuestion, terminalPrompter, workingTicker } = await import("./cli/prompt.ts");
   const controller = new AbortController();
   let interrupts = 0;
-  process.on("SIGINT", () => { if (++interrupts > 1) process.exit(130); log("\nStopping; the run is saved and can be resumed. Press Ctrl-C again to quit now."); controller.abort(); });
+  process.on("SIGINT", () => { if (++interrupts > 1) process.exit(130); log("\nStopping; the run is saved. Ctrl-C again to quit now."); controller.abort(); });
   const ctx = localContext({ cwd: process.cwd(), log, signal: controller.signal });
   const interactive = process.stdin.isTTY === true && !values.json;
   const prompter = interactive ? terminalPrompter() : null;
@@ -134,17 +134,20 @@ async function scout(args: string[]) {
       throw new Error(`Run \`openmerit setup\` first:\n  - ${missing.join("\n  - ")}`);
     }
     const runId = values.resume ?? startRun(ctx);
-    if (!values.resume) log(`Scout run ${runId} in ${ctx.repo.root}`);
     let answers: Answers = Object.fromEntries((values.answer ?? []).map(item => {
       const at = item.indexOf("=");
       if (at < 1) throw new Error(`--answer ${item}: write <question id>=<value>`);
       return [item.slice(0, at), item.slice(at + 1)];
     }));
+    let compared = false;
     for (;;) {
-      const result = await advanceInDaemon({ runId, cwd: process.cwd(), env: process.env, answers, log, signal: controller.signal });
+      const ticker = values.json ? null : workingTicker();
+      const result = await advanceInDaemon({ runId, cwd: process.cwd(), env: process.env, answers, log: ticker?.log ?? log, signal: controller.signal }).finally(() => ticker?.stop());
       answers = {};
       for (const notice of result.notices) log(notice);
       if (result.questions.length && prompter && !controller.signal.aborted) {
+        // The comparison comes before the question whether to configure its result.
+        if (result.result && !compared) { process.stdout.write(`${result.result.tasks.map(task => renderComparison(task, runId)).join("\n\n")}\n`); compared = true; }
         for (const question of result.questions) {
           if (question.id === "budget_amount" && answers.budget_action === "decline") continue;
           answers[question.id] = await askQuestion(prompter, question, log);
@@ -153,8 +156,8 @@ async function scout(args: string[]) {
       }
       if (values.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       else {
-        if (result.questions.length) log(`Run ${runId} is waiting for: ${result.questions.map(question => `${question.id} (${question.prompt})`).join("; ")}. Answer with --answer <id>=<value>.`);
-        process.stdout.write(`${renderStep(result)}\n`);
+        if (result.questions.length) log(`Waiting for ${result.questions.map(question => question.id).join(", ")}. Answer: openmerit scout --resume ${runId} --answer <id>=<value>`);
+        process.stdout.write(`${renderStep(result, { comparisons: !compared })}\n`);
       }
       if (result.status === "failed" || result.status === "interrupted") process.exitCode = 1;
       return;

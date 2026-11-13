@@ -38,7 +38,7 @@ function harnessReply(body: { messages: { role: string; content: unknown }[] }, 
 
 const sse = (chunks: object[]) => `${chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`;
 
-const ANSWERS: Record<string, Answer> = { disclose_harness: true, model: "openai/gpt-4.1-mini", corrections: "", tasks: ["ticket classifier"], approve_evals: true, retry_units: false, configure_ticket_classifier: false };
+const ANSWERS: Record<string, Answer> = { model: "openai/gpt-4.1-mini", corrections: "", tasks: ["ticket classifier"], approve_evals: true, retry_units: false, configure_ticket_classifier: false };
 
 test("a run survives a SIGKILL of the daemon at every question, and the harness reads only inside the repository", async () => {
   const root = mkdtempSync(join(tmpdir(), "openmerit-repo-"));
@@ -89,7 +89,10 @@ test("a run survives a SIGKILL of the daemon at every question, and the harness 
   const ctx = localContext({ cwd: root, env });
   const runId = startRun(ctx);
   ctx.state.close();
-  const advance = (answers: Record<string, Answer>) => advanceInDaemon({ runId, cwd: root, env, answers, log: () => {} });
+  // The CLI passes process.env itself, which is not a plain object; the test does the same.
+  for (const key of Object.keys(process.env)) if (key.startsWith("LANGFUSE_")) delete process.env[key];
+  Object.assign(process.env, env);
+  const advance = (answers: Record<string, Answer>) => advanceInDaemon({ runId, cwd: root, env: process.env, answers, log: () => {} });
 
   const restart = async () => {
     const before = readDaemonInfo(env)!;
@@ -112,7 +115,7 @@ test("a run survives a SIGKILL of the daemon at every question, and the harness 
       assert.notEqual(readDaemonInfo(env)!.pid, killed, "a new daemon was started");
     }
     assert.equal(step.status, "done", step.error ?? JSON.stringify(step.questions));
-    for (const id of ["disclose_harness", "model", "tasks", "approve_evals"]) assert.ok(asked.includes(id), `the run asked ${id} and survived a restart there`);
+    for (const id of ["model", "tasks", "approve_evals"]) assert.ok(asked.includes(id), `the run asked ${id} and survived a restart there`);
     assert.ok(step.result!.tasks[0]!.top.length > 0, "the search ranked qualifying finalists");
     assert.ok(requests > 0);
 

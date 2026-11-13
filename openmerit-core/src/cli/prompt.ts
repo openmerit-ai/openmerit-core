@@ -8,14 +8,20 @@ export interface Prompter {
   secret(question: string): Promise<string>;
   confirm(question: string, fallback?: boolean): Promise<boolean>;
   choose<T extends string>(question: string, options: { value: T; label: string }[], fallback?: T): Promise<T>;
+  /** Releases the terminal to `run`, such as a child process with inherited stdin, then takes it back. */
+  handOver<T>(run: () => Promise<T>): Promise<T>;
   close(): void;
 }
 
 export function terminalPrompter(input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stderr): Prompter {
-  const rl = createInterface({ input, output, terminal: (input as NodeJS.ReadStream).isTTY === true });
   let muted = false;
   const write = (output as NodeJS.WriteStream).write.bind(output);
-  (rl as unknown as { _writeToOutput: (text: string) => void })._writeToOutput = (text: string) => { if (!muted || text.includes("\n")) write(muted ? "\n" : text); };
+  const open = () => {
+    const next = createInterface({ input, output, terminal: (input as NodeJS.ReadStream).isTTY === true });
+    (next as unknown as { _writeToOutput: (text: string) => void })._writeToOutput = (text: string) => { if (!muted || text.includes("\n")) write(muted ? "\n" : text); };
+    return next;
+  };
+  let rl = open();
   const ask = async (question: string, fallback?: string, signal?: AbortSignal) => {
     const answer = (await rl.question(`${question}${fallback !== undefined && fallback !== "" ? ` [${fallback}]` : ""} `, signal ? { signal } : {})).trim();
     return answer || fallback || "";
@@ -44,7 +50,37 @@ export function terminalPrompter(input: NodeJS.ReadableStream = process.stdin, o
         if (picked) return picked.value;
       }
     },
+    // An open readline keeps reading the terminal, so a child sharing it would lose keystrokes to it.
+    async handOver(run) {
+      rl.close();
+      try { return await run(); } finally { rl = open(); }
+    },
     close() { rl.close(); },
+  };
+}
+
+const WORKING = ["eval-ing", "checking", "understanding", "proof-reading", "comparing", "tallying", "weighing", "cross-checking", "pondering", "measuring"];
+const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+
+/**
+ * On a terminal, shows that Scout is still working when nothing has been printed for `quietMs`: one
+ * line with a spinner, a rotating word and the seconds since the last output. `log` clears it before
+ * printing. Without a terminal it only prints.
+ */
+export function workingTicker(output: NodeJS.WriteStream = process.stderr, quietMs = 3000) {
+  let last = Date.now(), shown = false, frame = 0;
+  const first = Math.floor(Math.random() * WORKING.length);
+  const clear = () => { if (shown) { output.write("\r\x1b[2K"); shown = false; } };
+  const timer = output.isTTY ? setInterval(() => {
+    const quiet = Date.now() - last;
+    if (quiet < quietMs) return;
+    output.write(`\r\x1b[2K${SPINNER[frame++ % SPINNER.length]} ${WORKING[(first + Math.floor(quiet / 4000)) % WORKING.length]}… ${Math.round(quiet / 1000)}s`);
+    shown = true;
+  }, 120) : null;
+  timer?.unref();
+  return {
+    log(line: string) { clear(); output.write(`${line}\n`); last = Date.now(); },
+    stop() { if (timer) clearInterval(timer); clear(); },
   };
 }
 
@@ -58,9 +94,13 @@ export async function askQuestion(prompter: Prompter, question: Question, log: (
       const options = question.options ?? [];
       log(`${question.prompt}\n${options.map((option, index) => `  ${index + 1}. ${option.label}${option.detail ? `\n     ${option.detail}` : ""}`).join("\n")}`);
       for (;;) {
-        const answer = await prompter.ask("Numbers, comma-separated (or \"all\")", options.length === 1 ? "1" : undefined);
-        const picked = /^all$/i.test(answer) ? options : answer.split(/[\s,]+/).filter(Boolean).map(item => options[Number(item) - 1]);
-        if (picked.length && picked.every(Boolean)) return picked.map(option => option!.value);
+        const answer = await prompter.ask(`Numbers or "all"${question.hint ? `, ${question.hint}` : ""}`, options.length === 1 ? "1" : undefined);
+        // Entries with "=" (such as a mapping correction) pass through as typed; the rest are option numbers.
+        const items = answer.split(",").map(item => item.trim()).filter(Boolean);
+        const typed = question.hint ? items.filter(item => item.includes("=")) : [];
+        const numbers = items.filter(item => !typed.includes(item)).flatMap(item => item.split(/\s+/));
+        const picked = numbers.length === 1 && /^all$/i.test(numbers[0]!) ? options : numbers.map(item => options[Number(item) - 1]);
+        if ((picked.length || typed.length) && picked.every(Boolean)) return [...typed, ...picked.map(option => option!.value)];
       }
     }
     case "text": return prompter.ask(question.prompt, typeof question.default === "string" ? question.default : undefined);
