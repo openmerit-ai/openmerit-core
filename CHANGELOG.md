@@ -10,6 +10,7 @@
 - A local metering proxy enforces a per-run eval budget (default $10) before each paid request, with run-only or saved-default raises. Runs, eval results, spend, approvals and configuration decisions are kept in SQLite under `~/.openmerit/`.
 - The Langfuse connector is read-only: Viewer keys only, reading experiment results and aggregate metrics. The earlier dataset, experiment and score writes are removed.
 - The model catalogue (OpenRouter models, Epoch ECI and ScoutBM estimates) ships in the package as `data/catalogue.json`; no catalogue is fetched at run time. Every invocation checks npm for a newer version and asks before updating.
+- The harness asks once more when a reply is not a JSON object with the schema's required keys, as when a model echoes the schema's `type` and `properties` around its answer. Harness token counts include cached prompt tokens. `openmerit connect api --api-provider <provider>` without `--api-model` uses that provider's default model instead of `claude-sonnet-5-5`.
 
 ## 0.3.11 — 2026-11-09
 

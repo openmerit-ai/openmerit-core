@@ -86,12 +86,17 @@ async function runTool(tools: Tool[], call: ToolCall, signal?: AbortSignal): Pro
 /** Tool rounds one harness request may take before it is stopped. */
 const MAX_TOOL_ROUNDS = 40;
 
-/** The first JSON object in a reply, with code fences removed. */
-export function parseJsonObject(reply: string): Record<string, unknown> {
+/** The first JSON object in a reply, with code fences removed. With `required`, the object must have those keys. */
+export function parseJsonObject(reply: string, required: string[] = []): Record<string, unknown> {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(reply)?.[1] ?? reply;
   const start = fenced.indexOf("{");
   for (let end = fenced.length; start >= 0 && end > start; end--) {
-    try { const value: unknown = JSON.parse(fenced.slice(start, end)); if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>; } catch { /* shorten */ }
+    let value: unknown;
+    try { value = JSON.parse(fenced.slice(start, end)); } catch { continue; }
+    if (!value || typeof value !== "object" || Array.isArray(value)) break;
+    const missing = required.filter(key => !(key in value));
+    if (missing.length) throw new Error(`The harness reply is missing ${missing.join(", ")}: ${reply.slice(0, 200)}`);
+    return value as Record<string, unknown>;
   }
   throw new Error(`The harness did not reply with a JSON object: ${reply.slice(0, 200)}`);
 }
@@ -126,7 +131,8 @@ export async function createHarness(settings: HarnessSettings, env: Env = proces
     const reply = await runtime.complete(chosen, { systemPrompt: system, messages, ...(tools.length ? { tools } : {}) },
       { ...(input.signal ? { signal: input.signal } : {}), ...(apiKey ? { apiKey } : {}), sessionId, maxTokens: 16_000 });
     usage.calls++;
-    usage.inputTokens += reply.usage.input; usage.outputTokens += reply.usage.output;
+    // Pi reports cached prompt tokens apart from `input`, which is then only the uncached remainder.
+    usage.inputTokens += reply.usage.input + reply.usage.cacheRead + reply.usage.cacheWrite; usage.outputTokens += reply.usage.output;
     if (Number.isFinite(reply.usage.cost.total)) usage.costUsd += reply.usage.cost.total; else usage.unknownCost++;
     if (reply.stopReason === "error" || reply.stopReason === "aborted") throw new Error(reply.errorMessage ?? reply.stopReason);
     return reply;
@@ -135,17 +141,27 @@ export async function createHarness(settings: HarnessSettings, env: Env = proces
   return {
     kind: settings.kind, usage,
     async json<T>(input: JsonRequest): Promise<T> {
-      const system = `${input.system}\n\nReply with one JSON object that matches this JSON Schema, and nothing else:\n${JSON.stringify(input.schema)}`;
+      const system = `${input.system}\n\nReply with one JSON object that matches this JSON Schema, and nothing else. Give your answer's values, not the schema itself:\n${JSON.stringify(input.schema)}`;
       const messages: Message[] = [{ role: "user", content: input.prompt, timestamp: Date.now() }];
       const tools = input.cwd ? repositoryTools(input.cwd) : [];
       const sessionId = `openmerit-${randomUUID()}`;
+      const required = Array.isArray(input.schema.required) ? input.schema.required.map(String) : [];
       const ask = async (): Promise<T> => {
+        let reasked = false;
         for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
           const reply = await complete(system, messages, tools, input, sessionId);
           const calls = reply.content.filter((part): part is ToolCall => part.type === "toolCall");
-          if (reply.stopReason !== "toolUse" || !calls.length) return parseJsonObject(replyText(reply)) as T;
-          messages.push(reply);
-          for (const call of calls) messages.push(await runTool(tools, call, input.signal));
+          if (reply.stopReason === "toolUse" && calls.length) {
+            messages.push(reply);
+            for (const call of calls) messages.push(await runTool(tools, call, input.signal));
+            continue;
+          }
+          try { return parseJsonObject(replyText(reply), required) as T; } catch (error) {
+            // Some models echo the schema's "type" and "properties" around their answer and drop a brace: ask once more.
+            if (reasked) throw error;
+            reasked = true;
+            messages.push(reply, { role: "user", content: `${error instanceof Error ? error.message : String(error)}\nReply again with only the JSON object of your answer's values, without the schema's "type" or "properties".`, timestamp: Date.now() });
+          }
         }
         throw new Error(`OpenMerit Harness stopped after ${MAX_TOOL_ROUNDS} rounds of file reads without an answer.`);
       };
