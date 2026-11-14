@@ -107,6 +107,8 @@ function writeJson(path: string, value: unknown, mode = 0o644) {
 }
 
 export const globalConfigPath = (env?: Record<string, string | undefined>) => join(openmeritHome(env), "config.json");
+/** The global settings file as messages show it: the default home abbreviated, an OPENMERIT_HOME one in full. */
+export const globalConfigLabel = (env: Record<string, string | undefined> = process.env) => (env.OPENMERIT_HOME ? globalConfigPath(env) : "~/.openmerit/config.json");
 export const repoConfigPath = (root: string) => join(root, ".openmerit", "config.json");
 const secretsPath = (env?: Record<string, string | undefined>) => join(openmeritHome(env), "secrets.json");
 

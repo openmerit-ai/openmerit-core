@@ -98,6 +98,7 @@ async function connectCommand(args: string[]) {
   const [kind] = positionals;
   if (kind && !["claude-code", "codex", "api"].includes(kind)) throw new Error("Connect claude-code, codex or api.");
   const { connect } = await import("./connect.ts");
+  const { globalConfigLabel } = await import("./state/config.ts");
   const { findRepo } = await import("./state/paths.ts");
   const { terminalPrompter } = await import("./cli/prompt.ts");
   const interactive = process.stdin.isTTY === true && !values.yes;
@@ -109,7 +110,7 @@ async function connectCommand(args: string[]) {
       ...(values.model ? { model: values.model } : {}), ...(values["device-code"] ? { deviceCode: true } : {}), ...(values["api-provider"] ? { apiProvider: values["api-provider"] } : {}),
       ...(values["api-model"] ? { apiModel: values["api-model"] } : {}), ...(values["api-key-env"] ? { apiKeyEnv: values["api-key-env"] } : {}), ...(!interactive ? { nonInteractive: true } : {}),
     } }, kind as "claude-code" | "codex" | "api" | undefined);
-    if (saved) log("Saved to ~/.openmerit/config.json. Next: openmerit setup in a repository, or openmerit scout.");
+    if (saved) log(`Saved to ${globalConfigLabel()}. Next: openmerit setup in a repository, or openmerit scout.`);
     else process.exitCode = 1;
   } finally { prompter?.close(); }
 }
