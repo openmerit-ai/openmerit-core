@@ -24,7 +24,11 @@ export interface ProxyUnit {
   allowed: (endpointModel: string) => CatalogueModel | null | undefined;
 }
 
-export interface UnitTally { requests: number; refused: number; budgetHit: boolean; poolViolations: string[]; upstreamErrors: number[] }
+export interface UnitTally {
+  requests: number; refused: number; budgetHit: boolean; poolViolations: string[]; upstreamErrors: number[];
+  /** Answers the output token limit cut off before any text, as when the provider has the model reason first. */
+  cutOff: number;
+}
 
 /** Assumed output tokens when a request sets no maximum; reasoning models can use many. */
 export const DEFAULT_OUTPUT_TOKENS = 4096;
@@ -51,6 +55,23 @@ export function readUsage(text: string): { input: number; output: number; costUs
     } catch { /* not JSON */ }
   }
   return found;
+}
+
+/** True when an OpenAI-style answer (body or SSE stream) stopped at its token limit without any text. */
+export function cutOffBeforeText(text: string): boolean {
+  const chunks = text.trimStart().startsWith("{") ? [text] : text.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trim()).filter(line => line.startsWith("{"));
+  let content = "", length = false;
+  for (const chunk of chunks) {
+    try {
+      const value = JSON.parse(chunk) as { choices?: { finish_reason?: string | null; message?: { content?: unknown }; delta?: { content?: unknown } }[] };
+      for (const choice of value.choices ?? []) {
+        const part = choice.message?.content ?? choice.delta?.content;
+        if (typeof part === "string") content += part;
+        if (choice.finish_reason === "length") length = true;
+      }
+    } catch { /* not JSON */ }
+  }
+  return length && !content.trim();
 }
 
 const send = (res: ServerResponse, status: number, message: string, type: string) => {
@@ -100,7 +121,7 @@ export class EvalProxy {
   /** A token for one eval unit; requests with it are metered against the unit's run. */
   open(unit: ProxyUnit): { token: string; tally: UnitTally } {
     const token = `om-eval-${randomBytes(18).toString("hex")}`;
-    const tally: UnitTally = { requests: 0, refused: 0, budgetHit: false, poolViolations: [], upstreamErrors: [] };
+    const tally: UnitTally = { requests: 0, refused: 0, budgetHit: false, poolViolations: [], upstreamErrors: [], cutOff: 0 };
     this.units.set(token, { unit, tally });
     return { token, tally };
   }
@@ -169,6 +190,7 @@ export class EvalProxy {
     const latencyMs = Date.now() - started;
     const usage = readUsage(text);
     if (!upstream.ok) tally.upstreamErrors.push(upstream.status);
+    else if (cutOffBeforeText(text)) tally.cutOff++;
     if (!upstream.ok) this.state.settle(reservation.id, { actualUsd: usage?.costUsd ?? 0, estimatedUsd: null, latencyMs, failed: true });
     else this.state.settle(reservation.id, { actualUsd: usage?.costUsd ?? null, estimatedUsd: usage ? requestPrice(catalogue ?? null, usage.input, usage.output) : null, latencyMs });
   }

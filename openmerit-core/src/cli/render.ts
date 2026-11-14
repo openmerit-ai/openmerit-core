@@ -1,6 +1,6 @@
 // Plain-text rendering of Scout results and history for the terminal.
 import type { RunRow, State } from "../state/db.ts";
-import type { ModelResult, SearchSummary, Step, TaskComparison } from "../scout/workflow.ts";
+import { logTail, type ModelResult, type SearchSummary, type Step, type TaskComparison } from "../scout/workflow.ts";
 
 // Two significant digits below a cent, so per-item costs such as $0.000023 and $0.0000088 stay apart.
 const money = (value: number | null, estimate = false) => (value === null ? "unknown" : `${estimate ? "~" : ""}$${value.toFixed(value > 0 && value < 0.01 ? Math.min(10, 1 - Math.floor(Math.log10(value))) : 4)}`);
@@ -15,8 +15,8 @@ function row(label: string, result: ModelResult): string[] {
 }
 
 export function renderComparison(task: TaskComparison, runId?: string): string {
+  if (task.status === "no_eval") return [`Task "${task.task}"`, `  Not reviewed: ${task.note}`].join("\n");
   const lines = [`Task "${task.task}"`, `  Eval: ${task.eval.command || "none"} (${task.eval.source}; per-item results ${task.eval.langfuse ? `from Langfuse, ${task.eval.langfuse}` : "reported by the eval"}${task.eval.threshold !== null ? `; required pass rate ${task.eval.threshold}` : ""})`];
-  if (task.status === "no_eval") return [...lines, `  Not reviewed: ${task.note}`].join("\n");
   if (task.search) lines.push(...renderSearch(task.search));
   const header = ["", "Model", "Endpoint", "Passed", "Cost/item", "Latency/request", "Status"];
   const table = [header, ...(task.baseline ? [row("Current", task.baseline)] : []), ...task.top.map((result, index) => row(`#${index + 1}`, result))];
@@ -87,7 +87,7 @@ export function renderRun(state: State, run: RunRow, step: Step): string {
     `Run ${run.id} (${run.status === "done" ? "done" : `${run.status} at ${run.phase}`})`, `  Repository ${run.repoRoot} at ${run.revision ?? "no commit"}`,
     `  openmerit ${run.packageVersion}, catalogue ${run.catalogueVersion}, harness ${run.harness}`, "",
     renderStep(step),
-    ...section("Eval runs:", state.units(run.id).map(unit => `  ${unit.status.padEnd(13)} ${unit.task} · ${unit.role} ${unit.model} on ${unit.endpoint} · run ${unit.repeat} · ${unit.attempts} attempt(s) · ${money(state.spend(run.id, unit.id).totalUsd)}${typeof unit.result?.total === "number" ? ` · ${String(unit.result.passes)}/${String(unit.result.total)} passed${unit.result.source === "langfuse" ? ` (Langfuse ${String(unit.result.experiment)})` : ""}` : ""}${unit.error ? ` · ${unit.error.split("\n")[0]}` : ""}`), "none"),
+    ...section("Eval runs:", state.units(run.id).map(unit => `  ${unit.status.padEnd(13)} ${unit.task} · ${unit.role} ${unit.model} on ${unit.endpoint} · run ${unit.repeat} · ${unit.attempts} attempt(s) · ${money(state.spend(run.id, unit.id).totalUsd)}${typeof unit.result?.total === "number" ? ` · ${String(unit.result.passes)}/${String(unit.result.total)} passed${unit.result.source === "langfuse" ? ` (Langfuse ${String(unit.result.experiment)})` : ""}` : ""}${unit.error ? ` · ${unit.error.split("\n")[0]}${unit.status === "failed" ? logTail(unit.error) : ""}` : ""}`), "none"),
     ...section("Budget:", state.budgetEvents(run.id).map(event => `  ${event.at.slice(0, 19)} ${event.kind}${event.toUsd !== null ? ` $${event.fromUsd.toFixed(2)} → $${event.toUsd.toFixed(2)} (${event.scope})` : ` at $${event.spentUsd.toFixed(4)} of $${event.fromUsd.toFixed(2)}`}`), `$${run.budgetUsd.toFixed(2)} for this run; not reached or changed.`),
     ...section("Decisions:", state.decisions(run.id).map(decision => `  ${decision.at.slice(0, 19)} ${decision.kind}: ${decision.decision}${decision.kind === "configure" && (decision.detail as { diff?: string }).diff ? `\n${(decision.detail as { diff: string }).diff.split("\n").map(line => `    ${line}`).join("\n")}` : ""}`), "none"),
     ...section("Events:", state.events(run.id).map(event => `  ${event.at.slice(0, 19)} ${event.kind}: ${event.message}`), "none"),
