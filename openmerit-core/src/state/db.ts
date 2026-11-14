@@ -152,7 +152,7 @@ export class State {
     };
   }
 
-  updateRun(id: string, patch: { status?: RunStatus; phase?: string; state?: Record<string, unknown>; error?: string | null; budgetUsd?: number }) {
+  updateRun(id: string, patch: { status?: RunStatus; phase?: string; state?: Record<string, unknown>; error?: string | null; budgetUsd?: number; harness?: string }) {
     const sets: string[] = ["updated_at = ?"];
     const values: (string | number | null)[] = [now()];
     if (patch.status) { sets.push("status = ?"); values.push(patch.status); }
@@ -160,6 +160,7 @@ export class State {
     if (patch.state) { sets.push("state_json = ?"); values.push(JSON.stringify(patch.state)); }
     if (patch.error !== undefined) { sets.push("error = ?"); values.push(patch.error); }
     if (patch.budgetUsd !== undefined) { sets.push("budget_usd = ?"); values.push(patch.budgetUsd); }
+    if (patch.harness) { sets.push("harness = ?"); values.push(patch.harness); }
     this.db.prepare(`UPDATE runs SET ${sets.join(", ")} WHERE id = ?`).run(...values, id);
   }
 

@@ -1,7 +1,7 @@
 // What the CLI and the MCP server share: one repository's local context, and starting a run.
 import { loadCatalogue } from "./catalogue/catalogue.ts";
 import { createHarness, type Harness } from "./harness/harness.ts";
-import { DEFAULT_BUDGET_USD, readGlobalConfig, readRepoConfig } from "./state/config.ts";
+import { DEFAULT_BUDGET_USD, harnessLabel, readGlobalConfig, readRepoConfig } from "./state/config.ts";
 import { State } from "./state/db.ts";
 import { findRepo } from "./state/paths.ts";
 import { packageVersion } from "./update.ts";
@@ -40,10 +40,8 @@ export function missingSetup(ctx: Context): string[] {
 
 export function startRun(ctx: Context): string {
   const id = newRunId();
-  const harness = readGlobalConfig(ctx.env).harness!;
   ctx.state.createRun({
-    id, repo: ctx.repo, packageVersion: packageVersion(), catalogueVersion: ctx.catalogue.version,
-    harness: `${harness.kind}${harness.kind === "api" ? `:${harness.api?.provider}/${harness.api?.model}` : harness.model ? `:${harness.model}` : ""}`,
+    id, repo: ctx.repo, packageVersion: packageVersion(), catalogueVersion: ctx.catalogue.version, harness: harnessLabel(readGlobalConfig(ctx.env).harness!),
     budgetUsd: readRepoConfig(ctx.repo.root).budget?.defaultUsd ?? DEFAULT_BUDGET_USD, state: {},
   });
   return id;

@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { validateToolCall, type Api, type AssistantMessage, type Message, type Model, type ToolCall, type ToolResultMessage } from "@earendil-works/pi-ai";
 import { createReadOnlyTools, ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { resolveCredential, type HarnessSettings } from "../state/config.ts";
+import { harnessLabel, resolveCredential, type HarnessSettings } from "../state/config.ts";
 import { openmeritHome } from "../state/paths.ts";
 import { CLAUDE_BRIDGE_PROVIDER, claudeBinary, DEFAULT_CLAUDE_MODEL, inBridgeSession, loadClaudeBridge, type ClaudeBridge } from "./claude-bridge.ts";
 
@@ -39,6 +39,8 @@ export interface JsonRequest {
 
 export interface Harness {
   readonly kind: HarnessSettings["kind"];
+  /** The settings it runs on, as history names them. */
+  readonly label: string;
   readonly usage: HarnessUsage;
   json<T>(request: JsonRequest): Promise<T>;
 }
@@ -139,7 +141,7 @@ export async function createHarness(settings: HarnessSettings, env: Env = proces
   };
   const replyText = (reply: AssistantMessage) => reply.content.filter(part => part.type === "text").map(part => part.text).join("");
   return {
-    kind: settings.kind, usage,
+    kind: settings.kind, label: harnessLabel(settings), usage,
     async json<T>(input: JsonRequest): Promise<T> {
       const system = `${input.system}\n\nReply with one JSON object that matches this JSON Schema, and nothing else. Give your answer's values, not the schema itself:\n${JSON.stringify(input.schema)}`;
       const messages: Message[] = [{ role: "user", content: input.prompt, timestamp: Date.now() }];

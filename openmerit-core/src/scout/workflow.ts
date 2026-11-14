@@ -203,7 +203,15 @@ export async function advance(ctx: Context, runId: string, answers: Answers = {}
   let harnessStart: HarnessUsage | null = null;
   let harness: Harness | null = null;
   const getHarness = async () => {
-    if (!harness) { harness = await ctx.harness(); harnessStart = { ...harness.usage }; }
+    if (!harness) {
+      harness = await ctx.harness(); harnessStart = { ...harness.usage };
+      // `openmerit connect` between steps switches the harness for the rest of the run: history lists each one in order.
+      const used = state.getRun(runId)!.harness.split(" → ");
+      if (used.at(-1) !== harness.label) {
+        state.updateRun(runId, { harness: [...used, harness.label].join(" → ") });
+        state.event(runId, "harness", `Harness switched from ${used.at(-1)} to ${harness.label}.`);
+      }
+    }
     return harness;
   };
   const save = (phase?: Phase, status: RunStatus = "running") => {
