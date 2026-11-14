@@ -5,12 +5,15 @@
 // - The engine listens on 127.0.0.1 only (port 6720 by default, peers on 6721, metrics on 6730), so it
 //   does not collide with a Rivet dev server on 6420. No connection leaves the machine.
 // - Its data lives in ~/.openmerit/rivet. ~/.openmerit/daemon.json (mode 0600) holds the pid, port,
-//   version and a random token generated at each start; the engine refuses requests without it.
+//   version and a random token generated at each start; the engine refuses requests without it. The
+//   daemon refreshes the file's modification time every few seconds, so a client can tell a frozen
+//   daemon from a working one: the engine's health check answers from the engine's own process.
+// - Its output goes to ~/.openmerit/daemon.log, errors only, moved to daemon.log.1 when it grows too large.
 // - A client of another package version stops the daemon and starts its own, so an update takes
 //   effect on the next command.
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,6 +25,18 @@ import type { Registry } from "./registry.ts";
 
 export const DEFAULT_PORT = 6720;
 const START_TIMEOUT_MS = 90_000;
+/** How often the daemon refreshes daemon.json's modification time, its heartbeat. */
+const HEARTBEAT_MS = 5_000;
+/**
+ * A heartbeat older than this means the daemon is frozen: its event loop is blocked or the process is
+ * stopped. Six heartbeats, and as long as a client waits for a call (CALL_TIMEOUT_MS): a daemon busy for
+ * longer already counts as a lost connection, so a client's first or second reconnect replaces it.
+ */
+const STALE_MS = 30_000;
+/** A daemon.log larger than this moves to daemon.log.1 when the next daemon starts. */
+const LOG_MAX_BYTES = 5 * 1024 * 1024;
+/** Engine starts whose logs are kept. rivetkit writes a stdout and a stderr log at every start and deletes none. */
+const ENGINE_LOG_STARTS = 5;
 
 export interface DaemonInfo { pid: number; port: number; token: string; version: string; startedAt: string }
 type Env = Record<string, string | undefined>;
@@ -70,12 +85,28 @@ function ownEngine(storage: string): number | null {
   } catch { return null; }
 }
 
+/** Whether `pid` is an OpenMerit daemon, and not another process that reused a crashed daemon's pid. */
+function ownDaemon(pid: number): boolean {
+  try { return /\bcli\.\w+ daemon$/.test(execFileSync("ps", ["-ww", "-o", "command=", "-p", String(pid)], { encoding: "utf8" }).trim()); } catch { return false; }
+}
+
 async function terminate(pid: number, graceMs: number): Promise<void> {
   try { process.kill(pid, "SIGTERM"); } catch { return; }
   for (let waited = 0; alive(pid) && waited < graceMs; waited += 200) await sleep(200);
   if (!alive(pid)) return;
   process.kill(pid, "SIGKILL");
   for (let waited = 0; alive(pid) && waited < 2000; waited += 100) await sleep(100);
+}
+
+/** Deletes the engine logs of all but the last ENGINE_LOG_STARTS starts. */
+function pruneEngineLogs(storage: string): void {
+  const { logs } = engineFiles(storage);
+  let names: string[];
+  try { names = readdirSync(logs); } catch { return; }
+  const start = (name: string) => /^engine-(\d+)-/.exec(name)?.[1];
+  const starts = [...new Set(names.map(start).filter(value => value !== undefined))].sort((a, b) => Number(a) - Number(b));
+  const old = new Set(starts.slice(0, -ENGINE_LOG_STARTS));
+  for (const name of names) if (old.has(start(name)!)) rmSync(join(logs, name), { force: true });
 }
 
 const stderrLogs = (logs: string) => { try { return readdirSync(logs).filter(name => name.endsWith("-stderr.log")); } catch { return []; } };
@@ -101,8 +132,16 @@ async function engineFailure(storage: string, port: number, signal: AbortSignal)
   return new Promise<never>(() => {});
 }
 
-async function healthy(info: DaemonInfo): Promise<boolean> {
+const heartbeatAge = (env: Env) => { try { return Date.now() - statSync(paths(env).info).mtimeMs; } catch { return Infinity; } };
+
+/** Whether the daemon of `info` runs, has a recent heartbeat and its engine answers. `openmerit daemon status` uses it too. */
+export async function healthy(info: DaemonInfo, env: Env = process.env): Promise<boolean> {
   if (!alive(info.pid)) return false;
+  // A daemon on a machine that just woke from sleep refreshes its heartbeat within one interval; a frozen one does not.
+  for (let waited = 0; heartbeatAge(env) > STALE_MS; waited += 250) {
+    if (waited >= HEARTBEAT_MS + 2000) return false;
+    await sleep(250);
+  }
   try { return (await fetch(`http://127.0.0.1:${info.port}/health`, { signal: AbortSignal.timeout(2000) })).ok; } catch { return false; }
 }
 
@@ -119,6 +158,7 @@ export async function serveDaemon(env: Env = process.env): Promise<void> {
   // Linux but reuses it on macOS, where it then refuses the new token: stop it on every platform.
   const leftover = ownEngine(storage);
   if (leftover !== null) await terminate(leftover, 10_000);
+  pruneEngineLogs(storage);
   // Any other holder of the ports fails the start: rivetkit would use another home's engine, or wait 60 s on a port it cannot bind.
   const taken = await portsInUse(enginePorts(port));
   if (taken.length) throw await portsError(port, taken);
@@ -134,6 +174,10 @@ export async function serveDaemon(env: Env = process.env): Promise<void> {
   const record: DaemonInfo = { pid: process.pid, port, token, version: packageVersion(), startedAt: new Date().toISOString() };
   writeFileSync(info, JSON.stringify(record), { mode: 0o600 });
   process.on("exit", () => { if (readDaemonInfo(env)?.pid === process.pid) rmSync(info, { force: true }); });
+  setInterval(() => {
+    const now = new Date();
+    try { if (readDaemonInfo(env)?.pid === process.pid) utimesSync(info, now, now); } catch { /* removed meanwhile */ }
+  }, HEARTBEAT_MS).unref();
   process.stderr.write(`OpenMerit daemon ${record.version} on 127.0.0.1:${port} (pid ${process.pid}), data in ${storage}\n`);
 }
 
@@ -167,13 +211,14 @@ function startLog(log: string, from: number): string {
 /** The running daemon of this package version, started in the background when there is none. Throws DaemonStartError when it does not start. */
 export async function ensureDaemon(env: Env = process.env): Promise<DaemonInfo> {
   const current = readDaemonInfo(env);
-  if (current && current.version === packageVersion() && await healthy(current)) return current;
+  if (current && current.version === packageVersion() && await healthy(current, env)) return current;
   const { home, lock, log } = paths(env);
   mkdirSync(home, { recursive: true, mode: 0o700 });
   // One starter at a time: the CLI and an MCP server may both find no daemon.
   let owner = false;
   try { closeSync(openSync(lock, "wx")); owner = true; }
   catch { if (Date.now() - statSync(lock).mtimeMs > START_TIMEOUT_MS) { rmSync(lock, { force: true }); return ensureDaemon(env); } }
+  if (owner && existsSync(log) && statSync(log).size > LOG_MAX_BYTES) renameSync(log, `${log}.1`);
   const from = existsSync(log) ? statSync(log).size : 0;
   const failed = (what: string) => {
     const said = startLog(log, from);
@@ -184,10 +229,16 @@ export async function ensureDaemon(env: Env = process.env): Promise<DaemonInfo> 
     if (owner) {
       const stale = readDaemonInfo(env);
       if (stale && stale.version !== packageVersion()) await stopDaemon(env);
-      else if (stale) rmSync(paths(env).info, { force: true });
+      else if (stale) {
+        // Its heartbeat stopped or its engine does not answer. SIGKILL also ends a stopped process, which never handles SIGTERM.
+        if (ownDaemon(stale.pid)) await terminate(stale.pid, 0);
+        rmSync(paths(env).info, { force: true });
+      }
       const cli = fileURLToPath(new URL(`../cli${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
       const out = openSync(log, "a");
-      const child = spawn(process.execPath, [cli, "daemon"], { detached: true, stdio: ["ignore", out, out], env: { ...env, OPENMERIT_NO_UPDATE_CHECK: "1" } });
+      // rivetkit logs warnings by default, such as one for every unnamed SQLite transaction; the log keeps its errors.
+      const childEnv = { ...env, OPENMERIT_NO_UPDATE_CHECK: "1", RIVET_LOG_LEVEL: env.RIVET_LOG_LEVEL ?? "error" };
+      const child = spawn(process.execPath, [cli, "daemon"], { detached: true, stdio: ["ignore", out, out], env: childEnv });
       child.once("exit", (code, signal) => { exited = signal ?? `code ${code}`; });
       child.unref();
       closeSync(out);
@@ -196,7 +247,7 @@ export async function ensureDaemon(env: Env = process.env): Promise<DaemonInfo> 
       // Checked before the health check: a starter that finished before a failed check gave up.
       const starterDone = !owner && !existsSync(lock);
       const info = readDaemonInfo(env);
-      if (info && info.version === packageVersion() && await healthy(info)) return info;
+      if (info && info.version === packageVersion() && await healthy(info, env)) return info;
       if (exited !== null) throw failed(`could not start (it exited with ${exited})`);
       if (starterDone) throw failed("that another OpenMerit process was starting did not start");
       await sleep(250);

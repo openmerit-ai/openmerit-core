@@ -189,7 +189,9 @@ Scout runs in a background process, the OpenMerit daemon. `openmerit scout` and 
 - When the daemon stops answering (no reply in 30 s, or the connection drops), the CLI and MCP server say the connection was lost and reconnect, starting a new daemon if needed. After three failed attempts they stop and print `openmerit scout --resume <run>`. A daemon that cannot start is not a lost connection: they stop at once with its reason, such as a port in use, and the same resume command.
 - A step cut off in the middle, such as an eval in progress, stops the run as interrupted. `openmerit scout --resume <run>` continues it and asks before running an interrupted eval again; its earlier requests stay counted against the budget.
 - Each step works with the directory and environment of the CLI or MCP server that sent your answers: its endpoint keys, your application's `LANGFUSE_*` keys and `PATH`. The daemon keeps them in memory only, never on disk.
+- A daemon that freezes, its process stopped or busy without a break for over 30 s, is replaced too: the daemon refreshes a heartbeat every 5 s, and a client that finds it older than 30 s stops the daemon and starts a new one. Its runs continue with `openmerit scout --resume <run>`.
 - `openmerit daemon status` shows whether it runs; `openmerit daemon stop` stops it. After an update, the next command replaces a daemon of the old version.
+- The daemon logs its errors to `~/.openmerit/daemon.log`. A daemon that starts moves a log larger than 5 MB to `daemon.log.1`, replacing the one there. The engine writes logs for each start to `~/.openmerit/rivet/.rivetkit/var/logs/rivet-engine/`, and the daemon deletes all but the last five starts' logs.
 
 ## Updates
 
@@ -216,7 +218,7 @@ Removing `~/.openmerit` deletes the harness connection and ChatGPT sign-in, the 
 To free disk space without uninstalling, stop the daemon with `openmerit daemon stop`, then:
 
 - Delete `~/.openmerit/rivet/`. The engine store takes about 130 MB even when empty, and the next command recreates it. Do this only when no run is paused or interrupted: the store holds each run's workflow and pending question. `openmerit history` lives in `state.db` and stays.
-- Delete `~/.openmerit/daemon.log`, which grows without rotation.
+- Delete `~/.openmerit/daemon.log` and `daemon.log.1`. Together they stay under about 10 MB.
 
 ## Troubleshooting
 
@@ -232,9 +234,9 @@ The first client that finds no daemon starts it, so set `OPENMERIT_DAEMON_PORT` 
 
 **Several users on one machine.** Each user has their own `~/.openmerit` and daemon, but every daemon defaults to port 6720, so only the first one starts; the others stop with the port message above. Give each user their own `OPENMERIT_DAEMON_PORT`, 20 apart (such as 6740, 6760) so that no two users' three ports overlap.
 
-**A daemon that seems stuck.** `openmerit daemon status` shows whether it answers, with its version, pid and port. `openmerit daemon stop` stops it; the next command starts a new one, and interrupted runs continue with `openmerit scout --resume <run>`. A daemon of an older version is replaced on its own.
+**A daemon that seems stuck.** `openmerit daemon status` shows whether it answers, with its version, pid and port; a frozen daemon shows as `not running`. `openmerit daemon stop` stops it; the next command starts a new one, and interrupted runs continue with `openmerit scout --resume <run>`. A daemon of an older version, or one frozen for over 30 s, is replaced on its own.
 
-**Warnings in `daemon.log`.** Rivet logs `SQLite transaction is unnamed` warnings during runs. They appear in successful runs too and do not mean a run failed.
+**More detail in `daemon.log`.** The log has the daemon's errors only. To also log Rivet's warnings, stop the daemon and set `RIVET_LOG_LEVEL=warn` (or `info`) in the environment of the next command that starts it. Warnings such as `SQLite transaction is unnamed` appear in successful runs too and do not mean a run failed.
 
 **Windows.** Not supported; see [Supported platforms](#supported-platforms).
 

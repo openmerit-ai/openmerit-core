@@ -187,15 +187,14 @@ async function history(args: string[]) {
 }
 
 async function daemon(args: string[]) {
-  const { readDaemonInfo, serveDaemon, stopDaemon } = await import("./daemon/daemon.ts");
+  const { healthy, readDaemonInfo, serveDaemon, stopDaemon } = await import("./daemon/daemon.ts");
   const [action] = args;
   if (!action) return serveDaemon();
   if (action === "stop") return void log((await stopDaemon()) ? "Stopped the OpenMerit daemon. Runs it was working on continue with `openmerit scout --resume <run>`." : "The OpenMerit daemon is not running.");
   if (action !== "status") throw new Error(`Unknown daemon command "${action}". Use \`openmerit daemon status\` or \`openmerit daemon stop\`.`);
   const info = readDaemonInfo();
-  let up = false;
-  if (info) { try { up = (await fetch(`http://127.0.0.1:${info.port}/health`, { signal: AbortSignal.timeout(2000) })).ok; } catch { /* not running */ } }
-  process.stdout.write(up && info ? `running: openmerit ${info.version}, pid ${info.pid}, 127.0.0.1:${info.port}, since ${info.startedAt}\n` : "not running\n");
+  if (info && await healthy(info)) return void process.stdout.write(`running: openmerit ${info.version}, pid ${info.pid}, 127.0.0.1:${info.port}, since ${info.startedAt}\n`);
+  process.stdout.write("not running\n");
 }
 
 async function main() {
