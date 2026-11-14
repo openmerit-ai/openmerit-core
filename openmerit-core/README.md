@@ -60,7 +60,7 @@ Setup leaves `<repo>/.openmerit/` untracked; OpenMerit never commits or ignores 
 - **Commit it** when your team should share the same endpoints, allowed models, evals and budget. Use `{"env": "..."}` key references in a shared file: a `{"secret": "<name>"}` reference resolves only on the machine whose `~/.openmerit/secrets.json` stored it. Expect diffs: rerunning setup rewrites each entry's `verifiedAt` time, and Scout saves each eval you approve and any budget raise you make the new default.
 - **Ignore it** (add `.openmerit/` to `.gitignore`) when the settings are yours alone.
 
-Each run records the repository revision, and an untracked or uncommitted `.openmerit/` marks it `+dirty` in `openmerit history`. A committed or ignored `.openmerit/` does not.
+Each run records the repository revision. Uncommitted changes mark it `+dirty` in `openmerit history`, except changes under `.openmerit/`, whether you commit it or not.
 
 ### Connect the harness
 
@@ -107,7 +107,7 @@ In a terminal, a step that prints nothing for a few seconds, such as a long eval
 7. **Compare.** A finalist qualifies when it passes at least as many item runs as the current model and meets the eval's own required pass rate. Qualified finalists rank cheapest first by measured eval cost per item on the same workload. Scout shows the search path, then the **Top 3 beside the current model** with endpoint, passes, cost per item, latency, and the eval runs and Langfuse experiments behind each. Failed and unmeasured finalists are labelled and never count as success. If no screened candidate failed and every finalist matched the current model, the eval did not separate the models, and Scout asks before ranking on cost alone.
 8. **Configure.** Scout asks *"Should OpenMerit configure this? Yes / No."* No leaves your application unchanged. Yes previews the narrowest edit: the task's literal model ID, when the app already calls that provider. Scout applies only the previewed lines, and only while each line is unchanged. Changing the endpoint, or a model read from an environment variable, comes as manual instructions: OpenMerit cannot change your shell's environment.
 
-`openmerit history` lists this repository's runs, including failed, interrupted and budget-paused ones. `openmerit history <run-id>` shows one run's results, eval runs, spend, budget changes, configuration decisions (with the applied diff) and events. Each run records the repository revision and the package and catalogue versions it used.
+`openmerit history` lists this repository's runs, including failed, interrupted and budget-paused ones. `openmerit history <run-id>` shows one run's results, eval runs, spend, budget changes, configuration decisions (with the applied diff) and events. Each run records the repository revision, the package and catalogue versions and the harness it used. When `openmerit connect` switched the harness between steps of a run, history lists each harness in order, such as `api:openrouter/anthropic/claude-haiku-5.5 → api:openrouter/anthropic/claude-sonnet-5.5`. A run that fails, such as on a harness error, prints its error and `openmerit scout --resume <run>`, and keeps everything it finished.
 
 ### Eval contract
 

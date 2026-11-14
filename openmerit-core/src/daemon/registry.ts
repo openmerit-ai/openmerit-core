@@ -51,7 +51,7 @@ async function advanceAttached(runId: string, answers: Answers): Promise<Step | 
     try {
       if (state.getRun(runId)?.status === "running") state.markInterrupted(runId, "The OpenMerit daemon restarted during this step; completed work and spend are kept.");
     } finally { state.close(); }
-    return { error: "The OpenMerit daemon restarted while this run was working. Continue it with `openmerit scout --resume`." };
+    return { error: `The OpenMerit daemon restarted while this run was working. Continue it with \`openmerit scout --resume ${runId}\`.` };
   }
   const controller = new AbortController();
   session.controller = controller;
@@ -77,7 +77,8 @@ export const scoutRun = workflow({
         name: "advance", timeout: 0, maxRetries: 0,
         run: async s => {
           const result = await advanceAttached(runId, answers);
-          s.state.outcome = "error" in result ? { requestId, error: result.error } : { requestId, step: result };
+          // A failed run is a Step too, with its own `error`: only a step that threw has no runId.
+          s.state.outcome = "runId" in result ? { requestId, step: result } : { requestId, error: result.error };
           s.state.inFlight = null;
         },
       });

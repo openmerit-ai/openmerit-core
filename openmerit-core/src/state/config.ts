@@ -21,6 +21,9 @@ export interface HarnessSettings {
   verifiedAt?: string;
 }
 
+/** How history names a harness, such as `api:openrouter/anthropic/claude-sonnet-5.5` or `codex`. */
+export const harnessLabel = (settings: HarnessSettings) => `${settings.kind}${settings.kind === "api" ? `:${settings.api?.provider}/${settings.api?.model}` : settings.model ? `:${settings.model}` : ""}`;
+
 export interface GlobalConfig {
   harness?: HarnessSettings;
   [key: string]: unknown;

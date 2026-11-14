@@ -9,6 +9,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
+import { renderStep } from "../src/cli/render.ts";
 import { advanceInDaemon, DaemonStartError, ensureDaemon, readDaemonInfo, stopDaemon } from "../src/daemon/daemon.ts";
 import { localContext, startRun } from "../src/local.ts";
 import type { Answer, Step } from "../src/scout/workflow.ts";
@@ -142,6 +143,26 @@ test("a run survives a SIGKILL of the daemon at every question, and the harness 
 
 const daemonEnv = (port: number) => ({ ...process.env, OPENMERIT_HOME: mkdtempSync(join(tmpdir(), "openmerit-home-")), OPENMERIT_DAEMON_PORT: String(port), OPENMERIT_NO_UPDATE_CHECK: "1" });
 const randomPort = () => 21000 + Math.floor(Math.random() * 8000);
+
+test("a run that fails in the daemon comes back as its failed step, which says how to resume it", { timeout: 60_000 }, async () => {
+  const env = daemonEnv(randomPort());
+  // A repository without model usages: the scan fails the run.
+  const root = mkdtempSync(join(tmpdir(), "openmerit-repo-"));
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  updateGlobalConfig({ harness: { kind: "codex" } }, env);
+  const ctx = localContext({ cwd: root, env });
+  const runId = startRun(ctx);
+  ctx.state.close();
+  try {
+    const step = await advanceInDaemon({ runId, cwd: root, env, answers: {}, log: () => {} });
+    assert.equal(step.status, "failed");
+    assert.match(step.error ?? "", /No model usages found/);
+    assert.match(renderStep(step), new RegExp(`failed at scan — No model usages found.*Resume with: openmerit scout --resume ${runId}`));
+  } finally {
+    await stopDaemon(env);
+    for (const path of [root, env.OPENMERIT_HOME]) rmSync(path, { recursive: true, force: true });
+  }
+});
 
 test("a daemon that cannot bind its engine's peer port fails at once with the cause, and is not a lost connection", { timeout: 60_000 }, async () => {
   const port = randomPort();

@@ -82,15 +82,15 @@ export function renderHistory(state: State, runs: RunRow[]): string {
 }
 
 export function renderRun(state: State, run: RunRow, step: Step): string {
-  const units = state.units(run.id);
+  const section = (title: string, lines: string[], none: string) => ["", title, ...(lines.length ? lines : [`  ${none}`])];
   const lines = [
-    `Run ${run.id} (${run.status}, ${run.phase})`, `  Repository ${run.repoRoot} at ${run.revision ?? "no commit"}`,
-    `  openmerit ${run.packageVersion}, catalogue ${run.catalogueVersion}, harness ${run.harness}`, ...(run.error ? [`  Error: ${run.error}`] : []), "",
-    renderStep(step), "",
-    "Eval runs:", ...units.map(unit => `  ${unit.status.padEnd(13)} ${unit.task} · ${unit.role} ${unit.model} on ${unit.endpoint} · run ${unit.repeat} · ${unit.attempts} attempt(s) · ${money(state.spend(run.id, unit.id).totalUsd)}${typeof unit.result?.total === "number" ? ` · ${String(unit.result.passes)}/${String(unit.result.total)} passed${unit.result.source === "langfuse" ? ` (Langfuse ${String(unit.result.experiment)})` : ""}` : ""}${unit.error ? ` · ${unit.error.split("\n")[0]}` : ""}`),
-    "", "Budget:", ...(state.budgetEvents(run.id).map(event => `  ${event.at.slice(0, 19)} ${event.kind}${event.toUsd !== null ? ` $${event.fromUsd.toFixed(2)} → $${event.toUsd.toFixed(2)} (${event.scope})` : ` at $${event.spentUsd.toFixed(4)} of $${event.fromUsd.toFixed(2)}`}`)),
-    "", "Decisions:", ...state.decisions(run.id).map(decision => `  ${decision.at.slice(0, 19)} ${decision.kind}: ${decision.decision}${decision.kind === "configure" && (decision.detail as { diff?: string }).diff ? `\n${(decision.detail as { diff: string }).diff.split("\n").map(line => `    ${line}`).join("\n")}` : ""}`),
-    "", "Events:", ...state.events(run.id).map(event => `  ${event.at.slice(0, 19)} ${event.kind}: ${event.message}`),
+    `Run ${run.id} (${run.status === "done" ? "done" : `${run.status} at ${run.phase}`})`, `  Repository ${run.repoRoot} at ${run.revision ?? "no commit"}`,
+    `  openmerit ${run.packageVersion}, catalogue ${run.catalogueVersion}, harness ${run.harness}`, "",
+    renderStep(step),
+    ...section("Eval runs:", state.units(run.id).map(unit => `  ${unit.status.padEnd(13)} ${unit.task} · ${unit.role} ${unit.model} on ${unit.endpoint} · run ${unit.repeat} · ${unit.attempts} attempt(s) · ${money(state.spend(run.id, unit.id).totalUsd)}${typeof unit.result?.total === "number" ? ` · ${String(unit.result.passes)}/${String(unit.result.total)} passed${unit.result.source === "langfuse" ? ` (Langfuse ${String(unit.result.experiment)})` : ""}` : ""}${unit.error ? ` · ${unit.error.split("\n")[0]}` : ""}`), "none"),
+    ...section("Budget:", state.budgetEvents(run.id).map(event => `  ${event.at.slice(0, 19)} ${event.kind}${event.toUsd !== null ? ` $${event.fromUsd.toFixed(2)} → $${event.toUsd.toFixed(2)} (${event.scope})` : ` at $${event.spentUsd.toFixed(4)} of $${event.fromUsd.toFixed(2)}`}`), `$${run.budgetUsd.toFixed(2)} for this run; not reached or changed.`),
+    ...section("Decisions:", state.decisions(run.id).map(decision => `  ${decision.at.slice(0, 19)} ${decision.kind}: ${decision.decision}${decision.kind === "configure" && (decision.detail as { diff?: string }).diff ? `\n${(decision.detail as { diff: string }).diff.split("\n").map(line => `    ${line}`).join("\n")}` : ""}`), "none"),
+    ...section("Events:", state.events(run.id).map(event => `  ${event.at.slice(0, 19)} ${event.kind}: ${event.message}`), "none"),
   ];
   return lines.join("\n");
 }

@@ -12,6 +12,7 @@
 - The Langfuse connector is read-only: Viewer keys only, reading experiment results and aggregate metrics. The earlier dataset, experiment and score writes are removed.
 - The model catalogue (OpenRouter models, Epoch ECI and ScoutBM estimates) ships in the package as `data/catalogue.json`; no catalogue is fetched at run time. Every invocation checks npm for a newer version and asks before updating.
 - The harness asks once more when a reply is not a JSON object with the schema's required keys, as when a model echoes the schema's `type` and `properties` around its answer. Harness token counts include cached prompt tokens. `openmerit connect api --api-provider <provider>` without `--api-model` uses that provider's default model instead of `claude-sonnet-5-5`.
+- A run that fails, such as when the harness does not reply with JSON, prints its failed step with the error and `openmerit scout --resume <run>`, and `scout --json` returns that step with `"status": "failed"`. The CLI used to print only the error. `openmerit history <run>` lists every harness a run used, in order, when `openmerit connect` switched it between steps, and records the switch as an event. Its header reads `(done)` or `(failed at discover)` instead of `(done, done)`, sections with nothing to show say so, the Budget section shows the run's budget when nothing reached or changed it, and changes under `.openmerit/` no longer mark the revision `+dirty`.
 
 ## 0.3.11 — 2026-11-09
 

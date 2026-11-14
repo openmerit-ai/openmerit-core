@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { loadCatalogue } from "../src/catalogue/catalogue.ts";
+import { renderRun } from "../src/cli/render.ts";
 import { EvalProxy } from "../src/eval/proxy.ts";
 import type { Harness, JsonRequest } from "../src/harness/harness.ts";
 import { startRun } from "../src/local.ts";
@@ -58,7 +59,7 @@ after(() => { server.close(); });
 function scriptedHarness(langfuse = false): Harness & { calls: string[] } {
   const calls: string[] = [];
   return {
-    kind: "codex", calls, usage: { calls: 0, costUsd: 0, unknownCost: 0, inputTokens: 0, outputTokens: 0 },
+    kind: "codex", label: "codex", calls, usage: { calls: 0, costUsd: 0, unknownCost: 0, inputTokens: 0, outputTokens: 0 },
     async json<T>(request: JsonRequest): Promise<T> {
       this.usage.calls++;
       if (request.system.includes("map model usages")) {
@@ -127,6 +128,18 @@ test("the task question lists each task once and takes a mapping correction", as
   assert.match(options[0]!.detail!, new RegExp(`${draft.id} draft-reply.ts:3`));
   step = await advance(ctx, runId, { tasks: ["ticket classifier"] });
   assert.ok(!step.questions.some(question => question.id === "tasks"), "a task name answers the question");
+});
+
+test("history names every harness a run used, in order, when `openmerit connect` switched it between steps", async () => {
+  const root = repo(), harness = scriptedHarness(), ctx = context(root, mkdtempSync(join(tmpdir(), "openmerit-home-")), harness);
+  const runId = startRun(ctx);
+  await advance(ctx, runId, {});
+  // The usages were mapped with the first harness; eval discovery runs on the one connected now.
+  const switched = { ...harness, label: "api:openrouter/anthropic/claude-sonnet-5.5" };
+  const step = await advance({ ...ctx, harness: async () => switched }, runId, { model: "openai/gpt-4.1-mini", tasks: ["ticket classifier"] });
+  assert.ok(ctx.harnessCalls.some(call => call.startsWith("discover")), JSON.stringify(step.questions));
+  assert.equal(ctx.state.getRun(runId)!.harness, "codex → api:openrouter/anthropic/claude-sonnet-5.5");
+  assert.deepEqual(ctx.state.events(runId).filter(event => event.kind === "harness").map(event => event.message), ["Harness switched from codex to api:openrouter/anthropic/claude-sonnet-5.5."]);
 });
 
 test("scan finds both models, the model shared by two tasks and dynamic uses, without showing secrets", () => {
@@ -226,6 +239,10 @@ test("Scout Model Binary Search screens the ECI-ranked pool, runs finalists on e
   assert.equal(step.result!.tasks[0]!.top[0]!.source, "eval");
   assert.equal(readFileSync(join(root, "src/classify.ts"), "utf8"), before);
   assert.equal(ctx.state.decisions(runId).find(item => item.kind === "configure")!.decision, "no");
+  // History: the untracked .openmerit/ that setup wrote does not mark the revision dirty, and a budget nothing touched still shows.
+  const shown = renderRun(ctx.state, ctx.state.getRun(runId)!, step);
+  assert.match(shown, new RegExp(`^Run ${runId} \\(done\\)\n  Repository \\S+ at [0-9a-f]{40}\n`));
+  assert.match(shown, /\nBudget:\n  \$10\.00 for this run; not reached or changed\.\n/);
   // A finished run replays from SQLite: resuming sends nothing.
   const sent = requests.length;
   await advance(ctx, runId, {});

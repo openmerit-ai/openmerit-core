@@ -24,6 +24,7 @@ const git = (cwd: string, args: string[]) => {
 export function findRepo(cwd: string): Repo {
   const root = realpathSync(git(cwd, ["rev-parse", "--show-toplevel"]) ?? cwd);
   const revision = git(root, ["rev-parse", "HEAD"]);
-  const status = git(root, ["status", "--porcelain"]);
+  // OpenMerit's own files (config, saved evals) do not make the code under test differ from the commit.
+  const status = git(root, ["status", "--porcelain", "--", ".", ":(exclude).openmerit"]);
   return { id: createHash("sha256").update(root).digest("hex").slice(0, 16), root, revision, dirty: !!status };
 }
