@@ -2,7 +2,8 @@
 // self-hosted flow with the installed `openmerit` binary: connect api, setup, scout (scan, map,
 // approve, binary search, compare), history and the MCP server's tools/list. The harness and the
 // candidate endpoint are a local fake OpenAI server, so no model is called. CI runs it on Linux
-// and macOS; locally: `node scripts/smoke-packed.ts` from openmerit-core/ after `npm ci`.
+// x64 and arm64 and on macOS arm64 and x64; locally: `node scripts/smoke-packed.ts` from
+// openmerit-core/ after `npm ci`.
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -115,8 +116,13 @@ try {
   // Not --json: the prepack build also prints to stdout.
   await run("npm", ["pack", "--pack-destination", work], { cwd: pkg, maxBuffer: 16 << 20 });
   const tarball = join(work, `openmerit-${version}.tgz`);
-  say(`npm install -g openmerit-${version}.tgz`);
-  await run("npm", ["install", "-g", "--prefix", prefix, "--no-audit", "--no-fund", tarball], { cwd: work, maxBuffer: 16 << 20 });
+  // An empty npm cache, as on a machine that never installed these packages: every dependency,
+  // including the platform's engine binary, comes from the registry.
+  say(`npm install -g openmerit-${version}.tgz (empty npm cache)`);
+  const installed = Date.now();
+  await run("npm", ["install", "-g", "--prefix", prefix, "--no-audit", "--no-fund", tarball], { cwd: work, env: { ...process.env, npm_config_cache: join(work, "npm-cache") }, maxBuffer: 16 << 20 });
+  const [installMb, cacheMb] = (await run("du", ["-sk", prefix, join(work, "npm-cache")])).stdout.trim().split("\n").map(line => Math.round(Number(line.split("\t")[0]) / 1024));
+  say(`installed ${process.platform}-${process.arch} in ${((Date.now() - installed) / 1000).toFixed(1)}s: ${installMb} MB installed, ${cacheMb} MB downloaded into the npm cache`);
 
   cpSync(fixture, repo, { recursive: true });
   for (const args of [["init", "-q"], ["add", "-A"], ["-c", "user.email=smoke@example.com", "-c", "user.name=smoke", "commit", "-qm", "fixture"]]) await run("git", args, { cwd: repo });
