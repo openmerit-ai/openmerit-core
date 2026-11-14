@@ -234,9 +234,9 @@ The first client that finds no daemon starts it, so set `OPENMERIT_DAEMON_PORT` 
 
 **Several users on one machine.** Each user has their own `~/.openmerit` and daemon, but every daemon defaults to port 6720, so only the first one starts; the others stop with the port message above. Give each user their own `OPENMERIT_DAEMON_PORT`, 20 apart (such as 6740, 6760) so that no two users' three ports overlap.
 
-**A daemon that seems stuck.** `openmerit daemon status` shows whether it answers, with its version, pid and port; a frozen daemon shows as `not running`. `openmerit daemon stop` stops it; the next command starts a new one, and interrupted runs continue with `openmerit scout --resume <run>`. A daemon of an older version, or one frozen for over 30 s, is replaced on its own.
+**A daemon that seems stuck.** `openmerit daemon status` shows whether it answers, with its version, pid and port; a frozen daemon shows as `not running`. `openmerit daemon stop` stops it, at once when it is frozen; the next command starts a new one, and interrupted runs continue with `openmerit scout --resume <run>`. A daemon of an older version, or one frozen for over 30 s, is replaced on its own.
 
-**More detail in `daemon.log`.** The log has the daemon's errors only. To also log Rivet's warnings, stop the daemon and set `RIVET_LOG_LEVEL=warn` (or `info`) in the environment of the next command that starts it. Warnings such as `SQLite transaction is unnamed` appear in successful runs too and do not mean a run failed.
+**More detail in `daemon.log`.** The log has the daemon's errors only. To also log Rivet's warnings, stop the daemon and set `RIVET_LOG_LEVEL=warn` (or `info`) in the environment of the next command that starts it. The same setting shows the warnings of the CLI's and MCP server's own Rivet client, such as each retry while reconnecting, which they otherwise leave out. Warnings such as `SQLite transaction is unnamed` appear in successful runs too and do not mean a run failed.
 
 **Windows.** Not supported; see [Supported platforms](#supported-platforms).
 

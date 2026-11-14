@@ -185,7 +185,8 @@ export async function serveDaemon(env: Env = process.env): Promise<void> {
 export async function stopDaemon(env: Env = process.env): Promise<boolean> {
   const info = readDaemonInfo(env);
   if (!info || !alive(info.pid)) { rmSync(paths(env).info, { force: true }); return false; }
-  await terminate(info.pid, 20_000);
+  // A frozen daemon never handles SIGTERM: do not wait for it.
+  await terminate(info.pid, heartbeatAge(env) > STALE_MS ? 0 : 20_000);
   rmSync(paths(env).info, { force: true });
   return true;
 }
@@ -257,6 +258,9 @@ export async function ensureDaemon(env: Env = process.env): Promise<DaemonInfo> 
 }
 
 export function daemonClient(info: DaemonInfo) {
+  // rivetkit's client logs each retry at warn level to the terminal (or the MCP client's log), on top of
+  // the reconnect lines the CLI prints. Read when rivetkit makes its first logger; the user's setting wins.
+  process.env.RIVET_LOG_LEVEL ??= "error";
   return createClient<Registry>({ endpoint: `http://127.0.0.1:${info.port}`, token: info.token });
 }
 
