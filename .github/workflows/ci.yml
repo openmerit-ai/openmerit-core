@@ -70,8 +70,9 @@ jobs:
 
   # The packed openmerit tarball installed globally with an empty npm cache, as users get it, on
   # every platform with a Rivet engine binary: connect, setup, scout, history and MCP against a
-  # local fake model endpoint. Off Linux x64, where the openmerit-core job already runs it, also the
-  # daemon test, which SIGKILLs the daemon at every question. No model calls.
+  # local fake model endpoint. On Linux arm64 and Apple silicon also the daemon test, which SIGKILLs
+  # the daemon at every question: the openmerit-core job runs it on Linux x64, and it is left out
+  # on Intel Macs, where it takes almost three minutes (macOS minutes cost 10x). No model calls.
   openmerit-packed:
     strategy:
       fail-fast: false
@@ -92,5 +93,5 @@ jobs:
           cache-dependency-path: openmerit-core/package-lock.json
       - run: npm ci
       - run: node scripts/smoke-packed.ts
-      - if: matrix.os != 'ubuntu-latest'
+      - if: matrix.os == 'ubuntu-24.04-arm' || matrix.os == 'macos-latest'
         run: node --test test/daemon.test.ts

@@ -22,12 +22,13 @@ OpenMerit needs Node.js 22.19 or newer and the local Rivet engine that runs Scou
 
 | Platform | Status |
 | --- | --- |
-| Linux x64 | Tested with Node 22.19.0: install, setup, Scout, history and MCP |
-| macOS arm64 (Apple silicon) | Tested with Node 22.19.0: the same. The daemon also starts with Node 26 |
-| Linux arm64, macOS x64 (Intel) | Engine binaries exist; untested |
+| Linux x64 | Tested in CI with Node 22.19.0 on Ubuntu 26.04: a global install with an empty npm cache, then setup, Scout, history and MCP, plus a Scout run that survives the daemon being killed at every question |
+| Linux arm64 | Tested in CI the same way, on Ubuntu 24.04 |
+| macOS arm64 (Apple silicon) | Tested in CI the same way, on macOS 26. The daemon also starts with Node 26 |
+| macOS x64 (Intel) | Tested in CI on macOS 15: the install, setup, Scout, history and MCP. Recovery from a daemon crash is tested on Apple silicon only |
 | Windows | Not supported: Rivet publishes no Windows engine, so Scout and the MCP server cannot start the daemon. WSL 2 is untested |
 
-A global install takes about 780 MB on Linux and 660 MB on macOS, most of it the engine and the bundled Claude Code (see [Limitations](#limitations)).
+A global install takes about 790 MB on Linux x64, 770 MB on Linux arm64, 660 MB on Apple silicon and 700 MB on an Intel Mac, most of it the engine and the bundled Claude Code (see [Limitations](#limitations)). An install with an empty npm cache downloads 610 to 660 MB.
 
 ### Setup
 
