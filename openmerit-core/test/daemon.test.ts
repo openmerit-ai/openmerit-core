@@ -232,6 +232,13 @@ test("the next client replaces a frozen daemon, and a new daemon moves an oversi
     assert.notEqual(next.pid, frozen, "a new daemon was started");
     assert.throws(() => process.kill(frozen!, 0), "the frozen daemon was killed");
     assert.match(status(), new RegExp(`^running: .*pid ${next.pid}`));
+    // `openmerit daemon stop` does not wait for a frozen daemon to handle SIGTERM.
+    process.kill(next.pid, "SIGSTOP");
+    utimesSync(join(home, "daemon.json"), past, past);
+    const stopping = Date.now();
+    assert.equal(await stopDaemon(env), true);
+    assert.ok(Date.now() - stopping < 5000, `stopped after ${Date.now() - stopping} ms`);
+    assert.throws(() => process.kill(next.pid, 0), "the frozen daemon was killed");
   } finally {
     if (frozen) try { process.kill(frozen, "SIGKILL"); } catch { /* already replaced */ }
     await stopDaemon(env);
