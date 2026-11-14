@@ -3,7 +3,7 @@
 // so no real model is called.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -119,6 +119,7 @@ test("a run survives a SIGKILL of the daemon at every question, and the harness 
     for (const id of ["model", "tasks", "approve_evals"]) assert.ok(asked.includes(id), `the run asked ${id} and survived a restart there`);
     assert.ok(step.result!.tasks[0]!.top.length > 0, "the search ranked qualifying finalists");
     assert.ok(requests > 0);
+    assert.doesNotMatch(readFileSync(join(home, "daemon.log"), "utf8"), /level=warn/, "rivetkit's warnings stay out of the daemon's log");
 
     assert.deepEqual(harnessCalls, ["map", "map", "discover"], "mapping (one file-read round) and eval discovery each ran once across the restarts");
     assert.equal(toolResults.length, 2);
@@ -203,5 +204,37 @@ test("a second OpenMerit home on the same port does not use the first home's eng
   } finally {
     await stopDaemon(first);
     for (const env of [first, second]) rmSync(env.OPENMERIT_HOME, { recursive: true, force: true });
+  }
+});
+
+test("the next client replaces a frozen daemon, and a new daemon moves an oversized log aside and prunes old engine logs", { timeout: 90_000 }, async () => {
+  const env = daemonEnv(randomPort());
+  const home = env.OPENMERIT_HOME;
+  const engineLogs = join(home, "rivet", ".rivetkit", "var", "logs", "rivet-engine");
+  const pair = (start: number) => [`engine-${start}-stderr.log`, `engine-${start}-stdout.log`];
+  mkdirSync(engineLogs, { recursive: true });
+  for (let start = 100; start < 107; start++) for (const name of pair(start)) writeFileSync(join(engineLogs, name), "");
+  writeFileSync(join(home, "daemon.log"), "x".repeat(6 * 1024 * 1024));
+  const status = () => execFileSync(process.execPath, [new URL("../src/cli.ts", import.meta.url).pathname, "daemon", "status"], { env, encoding: "utf8" });
+  let frozen: number | undefined;
+  try {
+    frozen = (await ensureDaemon(env)).pid;
+    assert.equal(statSync(join(home, "daemon.log.1")).size, 6 * 1024 * 1024, "the oversized log was moved aside");
+    assert.ok(statSync(join(home, "daemon.log")).size < 10_000, "the new log has only the new daemon's lines");
+    assert.deepEqual(readdirSync(engineLogs).filter(name => /^engine-1\d\d-/.test(name)).sort(), [102, 103, 104, 105, 106].flatMap(pair), "the logs of the last five engine starts are kept");
+
+    // Stop the daemon's process, and age its heartbeat instead of waiting out the threshold. Its engine still answers.
+    process.kill(frozen, "SIGSTOP");
+    const past = new Date(Date.now() - 10 * 60_000);
+    utimesSync(join(home, "daemon.json"), past, past);
+    assert.equal(status(), "not running\n");
+    const next = await ensureDaemon(env);
+    assert.notEqual(next.pid, frozen, "a new daemon was started");
+    assert.throws(() => process.kill(frozen!, 0), "the frozen daemon was killed");
+    assert.match(status(), new RegExp(`^running: .*pid ${next.pid}`));
+  } finally {
+    if (frozen) try { process.kill(frozen, "SIGKILL"); } catch { /* already replaced */ }
+    await stopDaemon(env);
+    rmSync(home, { recursive: true, force: true });
   }
 });
