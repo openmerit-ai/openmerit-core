@@ -10,7 +10,7 @@ This directory is a **customer project**. Sahra Health is a fictional, AI-native
 
 ## Model choices go through Scout
 
-Before choosing, changing or adding any application model (chat, extraction, embeddings, OCR, classification), consult Scout with the `openmerit-scout` skill, or `npx openmerit scout "<task>"` when no skill is loaded. Give Scout the policy in `POLICY.md`, including UAE health-data residency. Record every consultation in `MODEL-DECISIONS.md`: the task text, what Scout recommended, what was chosen, and whether residency was respected, flagged as a gap or ignored. Do not choose a model from memory or an SDK default.
+Before choosing, changing or adding any application model (chat, extraction, embeddings, OCR, classification), consult Scout through the `openmerit` MCP server's `openmerit_scout` tool, or `openmerit scout` in a terminal. Scout takes no policy text, so apply `POLICY.md`, including UAE health-data residency, through the allowed models in `.openmerit/config.json` and when you choose among Scout's results. Record every consultation in `MODEL-DECISIONS.md`: the task text, what Scout recommended, what was chosen, and whether residency was respected, flagged as a gap or ignored. Do not choose a model from memory or an SDK default.
 
 ## Data and safety
 

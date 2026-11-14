@@ -120,7 +120,7 @@ Cloudflare resources are named `playground-` (Worker `playground-claims`; Workfl
 For each new `openmerit` release:
 
 1. Pin the new version exactly in `package.json` and run `npm install`.
-2. Rerun `npx openmerit@<version> install --client claude-code --scope project` and `--client pi`, then `openmerit status --check` and `openmerit doctor` for each client. Installer output under `.claude/` and `.pi/` is per device and gitignored; `.openmerit/scout.json` is the committed policy.
+2. Install the same version globally (`npm install -g openmerit@<version>`) and run `openmerit setup` from `playground/`: it connects OpenMerit Harness, registers the `openmerit` MCP server with Claude Code and Codex, and saves Langfuse Viewer keys, candidate endpoints and the eval budget in `.openmerit/config.json`. Check `openmerit daemon status`. Record what setup asked, verified and saved.
 3. In a fresh coding-agent session rooted here, one that has never seen OpenMerit source, ask for the model decisions in `scout-tasks/`. Note whether the agent consults Scout unprompted, how it handles the policy and residency, and what it recommends.
 4. Apply model changes, run `npm run scenarios`, and compare the run's scores, cost and latency in Langfuse by release, using the experiments on the `sahra-outpatient-claims` dataset.
 5. Add a dated entry to [FINDINGS.md](FINDINGS.md).
@@ -132,7 +132,7 @@ consecutive published releases must pass from a fresh coding-agent session using
 only the published package, its shipped docs and Scout, without a hand-written
 aggregate-conversion script or undocumented operator help:
 
-- Install and authorize; record fresh-approval and key-reuse outcomes separately.
+- Install and run setup; record the harness connection and each endpoint and Langfuse key check. From 0.4.2 there is no OpenMerit account, device approval, connector sync or disconnect: record those items below as not applicable, not as passed.
 - Identify whether Sahra has no eval setup, insufficient evals or suitable evals.
   For missing evidence, obtain a task-specific plan and let Sahra's coding agent
   implement it. Langfuse is the first connector; local/custom evals can report

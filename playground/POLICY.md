@@ -1,6 +1,6 @@
 # Sahra Health model and data policy
 
-Sahra Health is a fictional health insurer in Dubai. This policy is what our coding agents give Scout when choosing application models. Scout's machine-readable policy is in `.openmerit/scout.json`, written by `openmerit project`.
+Sahra Health is a fictional health insurer in Dubai. This policy is what our coding agents give Scout when choosing application models. Since `openmerit` 0.4.2, Scout takes no written policy: `.openmerit/config.json`, written by `openmerit setup`, lists the candidate endpoints and allowed models, so we keep residency by what we allow there. `.openmerit/scout.json` is the earlier hosted Scout's policy file, kept for the findings that used it.
 
 ## Data residency (UAE)
 
