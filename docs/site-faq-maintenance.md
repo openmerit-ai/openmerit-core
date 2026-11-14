@@ -1,18 +1,22 @@
 # Website FAQ maintenance
 
-## Scout no longer asks before mapping, and skips data files — unreleased npm source, 13 November 2026
+## Local CLI, MCP and daemon — npm 0.4.2 release preparation, 14 November 2026
+
+Reviewed the homepage against the whole 0.4.2 package: the four entries below plus daemon start failures that name the busy port, frozen-daemon replacement, error-only daemon logs, failed runs that print their step with the resume command, and the tested platforms (Linux x64 and arm64, macOS arm64 and x64; no Windows). `site/index.html` still has no FAQ block and makes no claim about any of these, so no FAQ copy changes. Remaining limits outside this review: the homepage letter describes the hosted Scout beta ("400+ models … 200+ source feeds", while the bundled catalogue lists 349 models) and its "Try Scout" link opens a sign-in page the CLI does not use; neither is an FAQ claim, and changing them needs a copy decision and a deploy. npm's `latest` stays 0.4.1, a separate Pi-extension build, until 0.4.2 is promoted.
+
+## Scout no longer asks before mapping, and skips data files — npm 0.4.2, 13 November 2026
 
 Reviewed the homepage against Scout sending code context to OpenMerit Harness without a separate question (eval runs still need approval), and skipping JSON data files that name many models plus the repository's `scan.exclude` patterns. `site/index.html` has no FAQ block and makes no claim that Scout asks before code context leaves the machine. No homepage copy changes.
 
-## `openmerit connect` with Claude Code and ChatGPT sign-ins — unreleased npm source, 13 November 2026
+## `openmerit connect` with Claude Code and ChatGPT sign-ins — npm 0.4.2, 13 November 2026
 
 Reviewed the homepage against `openmerit connect`, which powers OpenMerit Harness with Claude Code through pi-claude-bridge and the machine's Claude login, with Codex models through pi's ChatGPT Plus or Pro sign-in (tokens kept in `~/.openmerit/agent/auth.json`), or with an API key. `site/index.html` has no FAQ block and mentions no coding agents, subscriptions, sign-ins or where credentials are kept. No homepage copy changes.
 
-## Local daemon on Rivet — unreleased npm source, 13 November 2026
+## Local daemon on Rivet — npm 0.4.2, 13 November 2026
 
 Reviewed the homepage against Scout moving into a local background daemon that runs a Rivet engine on `127.0.0.1` and keeps each run as a Rivet Workflow actor, with the CLI and MCP server as its clients. `site/index.html` has no FAQ block and makes no claims about background processes, local services or where run state is kept. The engine makes no outside connections of its own, and OpenMerit still stays out of the live request path. No homepage copy changes.
 
-## Local CLI and MCP — unreleased npm source, 12 November 2026
+## Local CLI and MCP — npm 0.4.2, 12 November 2026
 
 Reviewed the homepage against the `openmerit` package becoming a local CLI and MCP server (`setup`, `scout`, `history`) that runs Scout Model Binary Search with the customer's own evals on candidate models through a local metering proxy, within a per-run budget, reads per-item results back read-only from the Langfuse experiments those evals record, and can edit a model ID after approval. `site/index.html` has no FAQ block and makes no claims about commands, accounts, eval execution or configuration edits. Its statement that OpenMerit stays out of the live request path still holds: the proxy exists only during approved evals on the user's machine. No homepage copy changes.
 
