@@ -23,7 +23,7 @@ import { DEFAULT_BUDGET_USD, DEFAULT_REPEATS, readRepoConfig, resolveCredential,
 import type { RunStatus, Spend, State, UnitRow } from "../state/db.ts";
 import type { Repo } from "../state/paths.ts";
 import { allowedOn, baselineEndpoint, blendedPrice, pool, type PoolModel } from "./pool.ts";
-import { context, listFiles, redact, scanRepo, type ScanResult, type Usage } from "./scan.ts";
+import { context, isExampleFile, isSupportFile, listFiles, redact, scanRepo, type ScanResult, type Usage } from "./scan.ts";
 import { binarySearch, CandidateUnavailable, CHALLENGERS, challengers, FINALISTS, order, SAMPLE_SIZE, type Stage } from "./search.ts";
 
 export type Answer = string | string[] | boolean | number;
@@ -50,7 +50,11 @@ interface ModelRef { model: string; endpoint: string; endpointModel: string }
 interface PlannedEval extends EvalSpec { source: "saved" | "harness" | "user"; helperFiles?: { path: string; content: string; purpose: string }[]; explanation?: string }
 
 /** One eval run's result as recorded in SQLite: pass/fail per item, nothing else from the item. */
-export interface UnitResult { items: Record<string, boolean>; passes: number; total: number; source: "langfuse" | "eval"; experiment: string; requests: number; durationMs: number }
+export interface UnitResult {
+  items: Record<string, boolean>; passes: number; total: number; source: "langfuse" | "eval"; experiment: string; requests: number; durationMs: number;
+  /** Answers cut off by their token limit before any text (absent in runs saved before it was counted). */
+  cutOff?: number;
+}
 
 export interface SearchSummary {
   status: "running" | "selected" | "no_passing_model" | "stopped";
@@ -166,6 +170,10 @@ export interface ScoutResult {
 const PHASES = ["scan", "disclose", "map", "model", "corrections", "tasks", "pool", "discover", "approve", "evaluate", "compare", "configure", "done"] as const;
 type Phase = typeof PHASES[number];
 export const TOP = 3;
+/** Usages the mapping step shows the harness, with their context. */
+const MAP_USAGES = 120;
+const UNMAPPED_SUPPORT = "unmapped: tests, fixtures and docs";
+const NO_EVAL_NEXT = "To review it, add an eval that follows the eval contract in OpenMerit's README (it runs once per model and reports pass or fail per item), then run `openmerit scout` again and give its command.";
 export const TASK_QUESTION = "Select which Agents/Tasks do you want OpenMerit to review?";
 export const CONFIGURE_QUESTION = "Should OpenMerit configure this? Yes / No.";
 /** Provider answers that mean the model cannot run at all: skipped as untested, not failed. */
@@ -278,9 +286,18 @@ type Handler = (input: PhaseInput) => Promise<Phase | "done" | "cancelled">;
 const usageById = (data: RunState) => new Map((data.scan?.usages ?? []).map(usage => [usage.id, usage]));
 const ref = (usage: Usage) => `${usage.file}:${usage.line}`;
 const modelKey = (usage: Usage) => usage.catalogueId ?? `?${usage.value}`;
+/** A usage Scout reviews for the chosen model: that model, or a model the application's code reads at run time without naming a catalogue model. */
+const reviewed = (data: RunState) => (usage: Usage | undefined): usage is Usage => !!usage && usage.kind === "model"
+  && (modelKey(usage) === data.model || (usage.dynamic && !usage.catalogueId && !isSupportFile(usage.file)));
+/** Tasks that use the chosen model, then tasks whose model is only known at run time (the user named it), then unmapped usages. */
 function tasksForModel(data: RunState): Task[] {
   const usages = usageById(data);
-  return (data.tasks ?? []).filter(task => task.usageIds.some(id => { const usage = usages.get(id); return usage && usage.kind === "model" && modelKey(usage) === data.model; }));
+  const uses = (task: Task, test: (usage: Usage | undefined) => boolean) => task.usageIds.some(id => test(usages.get(id)));
+  const direct = (data.tasks ?? []).filter(task => uses(task, usage => !!usage && usage.kind === "model" && modelKey(usage) === data.model));
+  const offered = [...direct, ...(data.tasks ?? []).filter(task => !direct.includes(task) && uses(task, reviewed(data)))];
+  // Usages the harness did not map come last, tests, fixtures and docs at the very end.
+  const rank = (task: Task) => (task.name === UNMAPPED_SUPPORT ? 2 : task.name.startsWith("unmapped: ") ? 1 : 0);
+  return offered.map((task, index) => ({ task, index })).sort((a, b) => rank(a.task) - rank(b.task) || a.index - b.index).map(item => item.task);
 }
 function repoConfig(ctx: Context): RepoConfig { return readRepoConfig(ctx.repo.root); }
 function endpoints(ctx: Context): Endpoint[] {
@@ -316,17 +333,24 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
     const scan = data.scan!;
     ctx.log(`Mapping ${scan.usages.length} usages to tasks…`);
     const harness = await getHarness();
-    const listing = scan.usages.slice(0, 120).map(usage => `### ${usage.id} ${usage.kind}${usage.dynamic ? " (dynamic)" : ""}: ${usage.value}${usage.catalogueId ? ` = catalogue ${usage.catalogueId}` : ""} at ${ref(usage)}\n${context(ctx.repo.root, usage)}`).join("\n\n");
+    // The harness sees at most MAP_USAGES usages with their context: the application's own code before examples and
+    // scripts, those before tests, fixtures and docs, and in each a catalogue model before a model set at run time.
+    const tier = (usage: Usage) => (isSupportFile(usage.file) ? 4 : isExampleFile(usage.file) ? 2 : 0) + (usage.catalogueId ? 0 : 1);
+    const shown = scan.usages.map((usage, index) => ({ usage, index })).sort((a, b) => tier(a.usage) - tier(b.usage) || a.index - b.index).slice(0, MAP_USAGES).map(item => item.usage);
+    // Saved evals are keyed by task name: ask for the same names again so an approved eval is reused, not found and paid for again.
+    const savedTasks = Object.keys(repoConfig(ctx).evals ?? {});
+    const listing = shown.map(usage => `### ${usage.id} ${usage.kind}${usage.dynamic ? " (dynamic)" : ""}: ${usage.value}${usage.catalogueId ? ` = catalogue ${usage.catalogueId}` : ""} at ${ref(usage)}\n${context(ctx.repo.root, usage)}`).join("\n\n");
     const reply = await harness.json<{ tasks: Task[] }>({
       cwd: ctx.repo.root,
       system: "You are OpenMerit Harness running OpenMerit Scout. You map model usages in a codebase to the agents or tasks they serve. Read files only to understand them; never change anything.",
-      prompt: `Repository: ${ctx.repo.root}\n\nGroup these model usages into the agents or tasks they serve (one task per distinct job a model does in production, such as \"ticket classifier\" or \"claim summary\"). A model used by two jobs belongs to two tasks. Include every model usage, including dynamic ones, in a task. For each task say whether the call uses tool calls, image input, or structured (JSON) output. Use short task names, and describe each task in one short sentence.\n\n${listing}`,
+      prompt: `Repository: ${ctx.repo.root}\n\nGroup these model usages into the agents or tasks they serve (one task per distinct job a model does in production, such as \"ticket classifier\" or \"claim summary\"). A model used by two jobs belongs to two tasks. Include every model usage of the application, including dynamic ones, in a task; leave out usages in tests, fixtures, recorded responses and docs unless they configure a production task. For each task say whether the call uses tool calls, image input, or structured (JSON) output. Use short task names, and describe each task in one short sentence.${savedTasks.length ? ` This repository has saved evals for these tasks; when usages serve one of them, use its exact name: ${savedTasks.map(name => JSON.stringify(name)).join(", ")}.` : ""}\n\n${listing}`,
       schema: strict({ tasks: { type: "array", items: strict({ name: { type: "string" }, description: { type: "string" }, usageIds: { type: "array", items: { type: "string" } }, usesTools: { type: "boolean" }, needsVision: { type: "boolean" }, structuredOutput: { type: "boolean" } }) } }),
     });
     const known = usageById(data);
     const tasks = (reply.tasks ?? []).map(task => ({ ...task, name: String(task.name).trim().slice(0, 80), usageIds: [...new Set(task.usageIds.filter(id => known.has(id)))] })).filter(task => task.name && task.usageIds.length);
+    // What the harness left out stays selectable: per file in application code, in one task for tests, fixtures and docs.
     for (const usage of scan.usages.filter(item => item.kind === "model" && !tasks.some(task => task.usageIds.includes(item.id)))) {
-      const name = `unmapped: ${usage.file}`;
+      const name = isSupportFile(usage.file) ? UNMAPPED_SUPPORT : `unmapped: ${usage.file}`;
       const existing = tasks.find(task => task.name === name);
       if (existing) existing.usageIds.push(usage.id);
       else tasks.push({ name, description: "Model usage the harness did not map to a task", usageIds: [usage.id], usesTools: false, needsVision: false, structuredOutput: false });
@@ -405,10 +429,12 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
       const key = `eval_${slug(name)}`;
       const answer = answers[key];
       if (typeof answer === "string" && answer.trim()) {
-        data.evals[name] = /^skip$/i.test(answer.trim()) ? { skipped: "No eval: skipped by the user" } : { source: "user", command: answer.trim() };
+        const found = typeof data[`asked_${key}`] === "string" ? String(data[`asked_${key}`]).split(/(?<=\.)\s/)[0] : "";
+        data.evals[name] = /^skip$/i.test(answer.trim()) ? { skipped: `Skipped for lack of an eval${found ? `: ${found}` : ""}` } : { source: "user", command: answer.trim() };
         continue;
       }
-      if (saved[name]) { data.evals[name] = { ...saved[name], source: "saved" }; continue; }
+      const savedName = Object.keys(saved).find(other => other.toLowerCase() === name.toLowerCase());
+      if (savedName) { data.evals[name] = { ...saved[savedName]!, source: "saved" }; continue; }
       if (data[`asked_${key}`]) { missing.push(evalQuestion(name, String(data[`asked_${key}`]))); continue; }
       ctx.log(`Finding the eval for ${name}…`);
       const harness = await getHarness();
@@ -419,7 +445,7 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
       const reply = await harness.json<{ found: boolean; command: string; cwd: string; env: { name: string; value: string }[]; threshold: number | null; langfuseDataset: string; passScore: string; passMin: number | null; helpers: { path: string; content: string; purpose: string }[]; explanation: string; missing: string }>({
         cwd: ctx.repo.root,
         system: "You are OpenMerit Harness running OpenMerit Scout's evaluation step. You find the eval a task already has and say exactly how to run it for another model. Never invent an eval, dataset or labels: if the repository has none for this task, say so.",
-        prompt: `Task: ${task.name}: ${task.description}\nUsages:\n${task.usageIds.map(id => usages.get(id)).filter((usage): usage is Usage => !!usage).map(usage => `- ${usage.value} at ${ref(usage)}\n${context(ctx.repo.root, usage, 4)}`).join("\n")}\n\npackage.json scripts: ${pkg}\nFiles that look like evals, tests or datasets:\n${files.join("\n")}\n\n${EVAL_CONTRACT}\n\nIf the eval records its results as a Langfuse experiment (dataset run) with a per-item score, give the Langfuse dataset name and that score's name (and passMin for a numeric score with a pass bound; null when the score is boolean or 1 means pass). OpenMerit reads each item's result back from Langfuse with a read-only key, so the eval must record under the OPENMERIT_EXPERIMENT name and run only the OPENMERIT_ITEMS items when given. Otherwise leave langfuseDataset and passScore empty: the eval must then report its items itself. Only if the existing eval cannot take the model, the items or the experiment name this way may you add helper files, and only under .openmerit/evals/; they must call the existing eval code with the same inputs, prompts, tools and scoring. threshold is the minimum pass rate (0 to 1) the eval itself requires, or null. Set found false and explain in missing when there is no eval for this task.`,
+        prompt: `Task: ${task.name}: ${task.description}\nUsages:\n${task.usageIds.map(id => usages.get(id)).filter((usage): usage is Usage => !!usage).map(usage => `- ${usage.value} at ${ref(usage)}\n${context(ctx.repo.root, usage, 4)}`).join("\n")}\n\npackage.json scripts: ${pkg}\nFiles that look like evals, tests or datasets:\n${files.join("\n")}\n\n${EVAL_CONTRACT}\n\nThe model under test is the one this task's usages call: the eval must send those calls to {{model}}, such as the judge's calls for a judge task, and leave its other model calls as they are. The repository's dependencies are installed, so the command runs the eval only, with no install or build step.\n\nIf the eval records its results as a Langfuse experiment (dataset run) with a per-item score, give the Langfuse dataset name and that score's name (and passMin for a numeric score with a pass bound; null when the score is boolean or 1 means pass). OpenMerit reads each item's result back from Langfuse with a read-only key, so the eval must record under the OPENMERIT_EXPERIMENT name and run only the OPENMERIT_ITEMS items when given. Otherwise leave langfuseDataset and passScore empty: the eval must then report its items itself. Only if the existing eval cannot take the model, the items or the experiment name this way may you add helper files, and only under .openmerit/evals/; they must call the existing eval code with the same inputs, prompts, tools and scoring. threshold is the minimum pass rate (0 to 1) the eval itself requires, or null. Set found false and explain in missing when there is no eval for this task.`,
         schema: strict({ found: { type: "boolean" }, command: { type: "string" }, cwd: { type: "string" }, env: { type: "array", items: strict({ name: { type: "string" }, value: { type: "string" } }) }, threshold: { type: ["number", "null"] }, langfuseDataset: { type: "string" }, passScore: { type: "string" }, passMin: { type: ["number", "null"] }, helpers: { type: "array", items: strict({ path: { type: "string" }, content: { type: "string" }, purpose: { type: "string" } }) }, explanation: { type: "string" }, missing: { type: "string" } }),
       });
       if (!reply.found || !reply.command?.trim()) {
@@ -443,7 +469,8 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
       save();
     }
     if (missing.length) throw new NeedsInput(missing, "needs_input", ["Scout does not fabricate quality: each task needs its existing eval, or skip it."]);
-    if (!plannedEvals(data).length) throw new Error("Every selected task was skipped for lack of an eval, so nothing can be measured.");
+    // Nothing to measure is an answer, not a failure: the comparison lists each task as not reviewed, and why.
+    if (!plannedEvals(data).length) return "compare";
     if (plannedEvals(data).some(([, plan]) => plan.langfuse) && !repoConfig(ctx).langfuse) throw new Error("This eval records its results in Langfuse, but this repository has no read-only Langfuse connection to read them back. Run `openmerit setup` and connect a Viewer key, then resume.");
     return "approve";
   },
@@ -481,7 +508,7 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
     for (const name of data.selected!) {
       const plan = data.evals![name]!;
       if ("skipped" in plan) {
-        data.compare[name] = { task: name, eval: { command: "", source: "none", threshold: null, langfuse: null }, baseline: null, candidates: [], top: [], status: "no_eval", note: plan.skipped };
+        data.compare[name] = { task: name, eval: { command: "", source: "none", threshold: null, langfuse: null }, baseline: null, candidates: [], top: [], status: "no_eval", note: `${plan.skipped.replace(/\.$/, "")}. ${NO_EVAL_NEXT}` };
         continue;
       }
       const comparison = compareTask(ctx, runId, data, name, plan);
@@ -655,7 +682,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
       source = "eval";
     }
     const passes = Object.values(results).filter(Boolean).length, total = Object.keys(results).length;
-    const result: UnitResult = { items: results, passes, total, source, experiment, requests: tally.requests, durationMs: outcome.durationMs };
+    const result: UnitResult = { items: results, passes, total, source, experiment, requests: tally.requests, durationMs: outcome.durationMs, cutOff: tally.cutOff };
     state.setUnit(id, { status: "done", result: result as unknown as Record<string, unknown> });
     ctx.log(`  ${passes}/${total} · ${usd(state.spend(runId).totalUsd)} of $${state.getRun(runId)!.budgetUsd.toFixed(2)}`);
     save();
@@ -677,7 +704,12 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     // Screens draw from items the current model passes in every run, so a 5/5 screen asks whether a candidate keeps up with it.
     if (!data.samples![task]) {
       const reliable = Object.keys(baseline[0]!.items).filter(item => baseline.every(run => run.items[item] === true));
-      if (reliable.length < SAMPLE_SIZE) throw new StopTask(`The current model passes only ${reliable.length} items in every run; Scout screens candidates on ${SAMPLE_SIZE} items it passes. Add labelled items the current model gets right.`);
+      if (reliable.length < SAMPLE_SIZE) {
+        // A reasoning default on the endpoint can use up a small token limit before any answer: say so, since it is not the model's quality.
+        const cutOff = baseline.reduce((sum, run) => sum + (run.cutOff ?? 0), 0), requests = baseline.reduce((sum, run) => sum + run.requests, 0);
+        const why = cutOff ? ` ${cutOff} of its ${requests} answers stopped at the request's output token limit before any text, as when ${base.endpoint} has the model reason first; production may call it elsewhere, where it does not. Raise the eval's token limit, or add the endpoint your application calls with \`openmerit setup\`.` : " Add labelled items the current model gets right.";
+        throw new StopTask(`The current model passes only ${reliable.length} items in every run; Scout screens candidates on ${SAMPLE_SIZE} items it passes.${why}`);
+      }
       const pool = [...reliable], picked: string[] = [];
       for (let count = 0; count < SAMPLE_SIZE; count++) picked.push(pool.splice(randomInt(pool.length), 1)[0]!);
       data.samples![task] = picked;
@@ -752,10 +784,14 @@ function modelQuestion(data: RunState): Question {
   return {
     id: "model", kind: "choice", prompt: "Which model should Scout review?",
     // Scout can only price and place catalogue models, so only those are offered.
-    options: data.scan!.models.filter(item => item.catalogueId).map(item => ({
-      value: item.catalogueId!, label: item.value,
-      detail: item.usageIds.map(id => usages.get(id)).filter((usage): usage is Usage => !!usage).map(usage => `${ref(usage)}${usage.dynamic ? ` (default of ${usage.envVar})` : ""}`).join(", "),
-    })),
+    options: data.scan!.models.filter(item => item.catalogueId).map(item => {
+      const uses = item.usageIds.map(id => usages.get(id)).filter((usage): usage is Usage => !!usage);
+      const app = uses.filter(usage => !isSupportFile(usage.file)), support = uses.length - app.length;
+      return {
+        value: item.catalogueId!, label: item.value,
+        detail: [app.map(usage => `${ref(usage)}${usage.dynamic ? ` (default of ${usage.envVar})` : ""}`).join(", "), support ? `${app.length ? "+" : "only "}${support} in tests, fixtures or docs` : ""].filter(Boolean).join(", "),
+      };
+    }),
   };
 }
 
@@ -764,9 +800,10 @@ function tasksQuestion(data: RunState): Question {
   return {
     id: "tasks", kind: "multi", prompt: TASK_QUESTION, hint: "or <usage>=<task> to fix the mapping",
     options: tasksForModel(data).map(task => {
-      const uses = task.usageIds.map(id => usages.get(id)).filter((usage): usage is Usage => !!usage && usage.kind === "model" && modelKey(usage) === data.model);
+      const uses = task.usageIds.map(id => usages.get(id)).filter(reviewed(data));
       const refs = [...uses.slice(0, 2).map(usage => `${usage.id} ${basename(usage.file)}:${usage.line}`), ...(uses.length > 2 ? [`+${uses.length - 2} more`] : [])].join(", ");
-      return { value: task.name, label: task.name, detail: `${task.description.split(/(?<=\.)\s/)[0]} (${refs})` };
+      const runtime = uses.every(usage => modelKey(usage) !== data.model) ? `; its model is set at run time${uses[0]?.envVar ? ` by ${uses[0].envVar}` : ""}, so choose it if that is ${data.model}` : "";
+      return { value: task.name, label: task.name, detail: `${task.description.split(/(?<=\.)\s/)[0]} (${refs}${runtime})` };
     }),
   };
 }
@@ -818,8 +855,15 @@ function retryQuestion(ctx: Context, runId: string, stale: UnitRow[]): Question 
     id: "retry_units", kind: "confirm", default: false,
     // A run cut off by a stopped daemon or process is interrupted, not failed; say which it was.
     prompt: `${stale.length} eval run${stale.length === 1 ? "" : "s"} ${stale.every(unit => unit.status !== "failed") ? (stale.length === 1 ? "was interrupted" : "were interrupted") : stale.some(unit => unit.status !== "failed") ? "failed or were interrupted" : "failed"}. Run ${stale.length === 1 ? "it" : "them"} again?`,
-    detail: stale.map(unit => `- ${unit.role} ${unit.model} ${unit.repeat}: ${(unit.error ?? unit.status).split("\n")[0]}, ${usd(ctx.state.spend(runId, unit.id).totalUsd)} spent`).join("\n"),
+    // The eval's last output lines say why it failed, such as a missing dependency.
+    detail: stale.map(unit => `- ${unit.role} ${unit.model} ${unit.repeat}: ${(unit.error ?? unit.status).split("\n")[0]}, ${usd(ctx.state.spend(runId, unit.id).totalUsd)} spent${logTail(unit.error)}`).join("\n"),
   };
+}
+
+/** The eval output a failed unit's error keeps after its first line, indented, or "". */
+export function logTail(error: string | null | undefined, lines = 8): string {
+  const log = (error ?? "").split("\n").slice(1).filter(line => line.trim()).slice(-lines);
+  return log.length ? `\n${log.map(line => `    | ${line.slice(0, 200)}`).join("\n")}` : "";
 }
 
 function budgetQuestions(ctx: Context, runId: string): Question[] {
@@ -906,7 +950,7 @@ function compareTask(ctx: Context, runId: string, data: RunState, name: string, 
     task: name, eval: { command: redact(plan.command), source: plan.source, threshold: plan.threshold ?? null, langfuse: plan.langfuse ? `score ${plan.langfuse.score} on dataset ${plan.langfuse.dataset}` : null },
     baseline, candidates, top: [], status: "incomplete", note: "", ...(summary ? { search: summary } : {}),
   };
-  if (baseline.status !== "measured") return { ...comparison, status: "baseline_failed", note: `The current model's eval did not complete (${baseline.note}), so no candidate can be compared. Fix the eval and resume the run.` };
+  if (baseline.status !== "measured") return { ...comparison, status: "baseline_failed", note: `The current model's eval did not complete (${baseline.note}), so no candidate can be compared. Fix the eval, then run \`openmerit scout\` again: it reuses the eval you approved.` };
   // A stopped search recommends nothing, but the finalists it measured keep their real comparison with the current model.
   if (data.stopped?.[name]) return { ...comparison, candidates: rank(comparison, false).candidates, status: "stopped", note: `The search stopped, so no model is recommended: ${data.stopped[name]}` };
   if (summary?.status === "no_passing_model") return { ...comparison, status: "no_passing_model", note: `No candidate in the pool passed all ${SAMPLE_SIZE} screening items the current model passes.` };
@@ -948,11 +992,12 @@ function planEdit(ctx: Context, data: RunState, comparison: TaskComparison, winn
   const host = endpoint.kind === "openai" ? "api.openai.com" : endpoint.kind === "openrouter" ? "openrouter.ai" : new URL(endpoint.baseUrl).host;
   const edits: NonNullable<ConfigureState["edits"]> = [];
   const manual: string[] = [];
-  for (const usage of task.usageIds.map(id => usages.get(id)).filter((item): item is Usage => !!item && item.kind === "model" && modelKey(item) === data.model)) {
+  for (const usage of task.usageIds.map(id => usages.get(id)).filter(reviewed(data))) {
     const fileEndpoints = endpointUsages.filter(item => item.file === usage.file);
     const sameEndpoint = (fileEndpoints.length ? fileEndpoints : endpointUsages).some(item => item.value.includes(host)) || (!endpointUsages.length && endpoint.kind === "openai");
     const style = usage.value.includes("/") ? "openrouter" : "openai";
-    const target = style === "openrouter" ? winner.model : winner.endpointModel;
+    // SDKs that name the provider in the model string (`openai:gpt-4.1`) need it kept.
+    const target = `${/^[a-z][a-z_-]*:(?!\/)/i.exec(usage.value)?.[0] ?? ""}${style === "openrouter" ? winner.model : winner.endpointModel}`;
     if (usage.dynamic && !usage.catalogueId) { manual.push(`${ref(usage)} reads ${usage.envVar ?? usage.value} at run time: set it to ${winner.endpointModel} where that environment is configured (OpenMerit cannot change your shell's environment).`); continue; }
     if (!sameEndpoint || (style === "openrouter") !== (endpoint.kind === "openrouter")) { manual.push(`${ref(usage)} calls a different endpoint than ${endpoint.id}: switching needs an endpoint change too. Point it at ${endpoint.baseUrl} and use model ${winner.endpointModel}.`); continue; }
     const raw = readFileSync(join(ctx.repo.root, usage.file), "utf8").split("\n")[usage.line - 1] ?? "";

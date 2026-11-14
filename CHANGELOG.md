@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+Fixes from running the self-hosted flow on 29 open-source repositories that call models.
+
+- Scout recognizes catalogue models as SDKs and clouds write them: `openai:gpt-4.1` and `google_genai:gemini-3.5-flash-lite` (LangChain, pydantic-ai), `azure/gpt-4o`, `models/gemini-2.5-flash`, Bedrock IDs such as `us.anthropic.claude-sonnet-4-5-20250929-v1:0`, and dated snapshots such as `claude-haiku-4-5-20251001`. Until now these were unknown, so applications written this way could not be reviewed. A Configure edit keeps the `provider:` prefix. The scan also reads Elixir, Scala, Dart, Lua, Vue, Svelte, Astro, Groovy, Gradle, Kotlin script, R, Julia, Clojure, F#, Java `.properties` and Azure Bicep files, finds models written without quotes in configuration (`default-model: gpt-4o`, `OPENAI_MODEL=gpt-4o-mini`), skips YAML and TOML files that name more than 20 models as data, as it does JSON files, and no longer takes an environment variable's name, such as `AZURE_OPENAI_CHATGPT_MODEL`, for a model.
+- The model question puts models the application's own code uses first, and counts uses in tests, fixtures, recorded responses, docs and saved results apart. Ranking by every use put test and benchmark-result models first. The harness now sees the application's usages first, then examples and scripts, then tests, and catalogue models before models set at run time, and what it leaves out of tests, fixtures and docs is one "unmapped" task instead of one per file: in large repositories the production code used to fall past the first 120 usages and the task question listed dozens of unmapped test files.
+- The task question also offers tasks whose model is set at run time, such as from an environment variable, after the chosen model's own tasks. They could not be chosen before. Unmapped usages are listed last, and minified JavaScript is not scanned.
+- A later run reuses an approved eval even when the harness names the task differently, such as "scope guard" for "Scope guard": the mapping step asks for the saved tasks' names, and the lookup ignores case. The eval used to be looked for, and proposed for approval, again.
+- A run whose selected tasks all have no eval finishes, listing each task as not reviewed with what the harness found missing and how to add an eval. It used to fail with a resume command that failed the same way.
+- When the current model passes too few items to screen candidates because its answers stopped at the request's output token limit before any text, Scout says so. This happens when the endpoint has the model reason first, as OpenRouter does for `deepseek/deepseek-v4-flash`, while the application's own provider does not; Scout used to say only that the current model passed 0 items.
+- The harness is told that the eval must send the task's own model calls to the model under test, such as a judge task's judge calls, and that the eval command must not install dependencies. It had proposed an MT-bench eval that varied the answering model for the judge task, and a PHP eval that ran `composer install` before every run.
+- When an eval fails, the retry question and `openmerit history <run>` show the last lines it printed, such as a missing dependency, instead of only its exit code. A comparison whose current model's eval failed says to run `openmerit scout` again rather than to resume the finished run.
+
 ## 0.4.2 — 2026-11-14
 
 The first release of the local CLI and MCP server. npm's 0.4.0 and 0.4.1 were a separate Pi-extension build and are not listed here.

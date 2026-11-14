@@ -1,6 +1,6 @@
 // Step 1 of Scout: find model and endpoint usages in the repository without changing it. Reads only
 // files Git does not ignore (or, outside Git, skips dependency and build directories), minus the
-// repository's `scan.exclude` patterns. A JSON file that names many models is data (a catalogue,
+// repository's `scan.exclude` patterns. A JSON, YAML or TOML file that names many models is data (a catalogue,
 // saved results, a dataset), not configuration, and is skipped. Snippets are redacted: anything
 // shaped like a key or token is replaced before it is shown, stored or sent.
 import { execFileSync } from "node:child_process";
@@ -40,12 +40,20 @@ export interface ScanOptions {
 }
 
 const TEXT = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".py", ".go", ".rb", ".java", ".kt", ".rs", ".php", ".cs", ".swift",
-  ".json", ".jsonc", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".env", ".example", ".sh", ".tf"]);
+  ".ex", ".exs", ".scala", ".dart", ".lua", ".vue", ".svelte", ".astro", ".groovy", ".gradle", ".kts", ".r", ".jl", ".clj", ".fs",
+  ".json", ".jsonc", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".properties", ".env", ".example", ".sh", ".tf", ".bicep"]);
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", "out", ".next", ".venv", "venv", "__pycache__", "target", ".openmerit", "coverage", ".amp"]);
-const SKIP_FILES = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|poetry\.lock|Cargo\.lock|go\.sum)$/;
+const SKIP_FILES = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|poetry\.lock|Cargo\.lock|go\.sum)$|\.min\.(js|mjs|cjs)$/;
 const MAX_BYTES = 512_000;
-/** More model usages than this in one JSON file make it data rather than configuration. */
+/** More model usages than this in one JSON, YAML or TOML file make it data rather than configuration. */
 export const MAX_DATA_FILE_MODELS = 20;
+
+const SUPPORT = /(^|\/)(tests?|specs?|__tests__|__mocks__|mocks?|fixtures?|testdata|cassettes|vcr_cassettes|snapshots?|__snapshots__|docs?|results|benchmark_results)\/|(^|\/)(test_[^/]+|[^/]+_test\.\w+|[^/]+\.(test|spec)\.\w+|[^/]+_spec\.rb|conftest\.py)$/i;
+/** Tests, fixtures, recorded responses, docs and saved results: they name models, but no production task runs there. */
+export const isSupportFile = (file: string) => SUPPORT.test(file);
+const EXAMPLE = /(^|\/)(examples?|samples?|demos?|cookbooks?|notebooks?|scripts|benchmarks?|playground|tutorials?)\//i;
+/** Examples, demos, scripts and benchmarks: the application's code, but less often its production path. */
+export const isExampleFile = (file: string) => EXAMPLE.test(file);
 
 /** True when `file` matches a pattern, or sits in a directory a pattern names. */
 const excluded = (file: string, patterns: readonly string[]) => patterns.some(pattern => matchesGlob(file, pattern) || matchesGlob(file, `${pattern.replace(/\/+$/, "")}/**`));
@@ -84,6 +92,10 @@ export function listFiles(root: string): string[] {
     return files;
   }
 }
+
+/** Configuration files, where a model is often written without quotes: `model: gpt-4o`, `OPENAI_MODEL=gpt-4o-mini`. */
+const CONFIG = /(\.(ya?ml|toml|ini|cfg|properties|env|example|sh)|(^|\/)\.env(\.[\w-]+)?|(^|\/)Dockerfile)$/;
+const UNQUOTED = /\b(?:\w*model\w*|engine|deployment)\b\s*(?::|=)\s*([\w.:/@-]+)\s*(?:#.*)?$/i;
 
 const isText = (file: string) => TEXT.has(extname(file)) || /(^|\/)\.env(\.[\w-]+)?$/.test(file) || /(^|\/)Dockerfile$/.test(file);
 
@@ -133,10 +145,16 @@ export function scanRepo(root: string, catalogue: Catalogue, options: ScanOption
           const env = ENV.exec(raw);
           const envVar = env?.slice(1).find(Boolean);
           add({ kind: "model", value: redact(value), dynamic: !!envVar, ...(envVar ? { envVar } : {}), catalogueId: model.id });
-        } else if (keyed && /^[\w.:/@-]+$/.test(value) && /[a-z]/i.test(value) && /\d|gpt|claude|gemini|llama|mistral|qwen|deepseek/i.test(value) && !/^https?:/.test(value)) {
+        } else if (keyed && /^[\w.:/@-]+$/.test(value) && !/^[A-Z][A-Z0-9_]*$/.test(value) && /[a-z]/i.test(value) && /\d|gpt|claude|gemini|llama|mistral|qwen|deepseek/i.test(value) && !/^https?:/.test(value)) {
           literalModel = true;
           add({ kind: "model", value: redact(value), dynamic: false, catalogueId: null });
         }
+      }
+      const bare = !literalModel && CONFIG.test(file) ? UNQUOTED.exec(raw) : null;
+      const configured = bare ? index.find(bare[1]!) : null;
+      if (bare && configured) {
+        literalModel = true;
+        add({ kind: "model", value: redact(bare[1]!), dynamic: false, catalogueId: configured.id });
       }
       if (!literalModel) {
         const dynamic = DYNAMIC.exec(raw);
@@ -162,7 +180,7 @@ export function scanRepo(root: string, catalogue: Catalogue, options: ScanOption
       URL_PATTERN.lastIndex = 0;
     });
     // This file's usages are the last ones added, so dropping them keeps usage IDs sequential.
-    if (extname(file) === ".json" && usages.slice(before).filter(usage => usage.kind === "model").length > MAX_DATA_FILE_MODELS) {
+    if ([".json", ".yaml", ".yml", ".toml"].includes(extname(file)) && usages.slice(before).filter(usage => usage.kind === "model").length > MAX_DATA_FILE_MODELS) {
       usages.length = before;
       skipped.push(file);
       scanned--;
@@ -175,7 +193,10 @@ export function scanRepo(root: string, catalogue: Catalogue, options: ScanOption
     group.usageIds.push(usage.id);
     groups.set(key, group);
   }
-  return { files: scanned, usages, models: [...groups.values()].sort((a, b) => b.usageIds.length - a.usageIds.length || a.value.localeCompare(b.value)), skipped };
+  // Models the application's own code uses come first: a model named only in tests is rarely the one in production.
+  const byId = new Map(usages.map(usage => [usage.id, usage]));
+  const app = (group: ScanResult["models"][number]) => group.usageIds.filter(id => !isSupportFile(byId.get(id)!.file)).length;
+  return { files: scanned, usages, models: [...groups.values()].sort((a, b) => app(b) - app(a) || b.usageIds.length - a.usageIds.length || a.value.localeCompare(b.value)), skipped };
 }
 
 /** A few lines around a usage, redacted, for the harness. */

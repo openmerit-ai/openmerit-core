@@ -29,6 +29,8 @@ const ALLOWED = ["gpt-5-nano", "gpt-4.1-nano", "gpt-6-luna", "gpt-4o-mini", "gpt
 const requests: string[] = [];
 /** The fake endpoint answers HTTP 429 to `model`'s next `remaining` requests. */
 const rateLimit = { model: "", remaining: 0 };
+/** The fake endpoint stops `model`'s answers at their token limit before any text, as a model that reasons first does. */
+const cutOff = { model: "" };
 let server: Server;
 let baseUrl = "";
 before(async () => {
@@ -42,6 +44,7 @@ before(async () => {
       const fail = (status: number, message: string) => { res.writeHead(status, { "content-type": "application/json", "retry-after": "0" }); res.end(JSON.stringify({ error: { message } })); };
       if (req.headers.authorization !== "Bearer sk-fake-endpoint") return fail(401, "bad key");
       if (parsed.model === rateLimit.model && rateLimit.remaining-- > 0) { res.writeHead(429, { "content-type": "application/json", "retry-after": "0" }); return res.end(JSON.stringify({ error: { message: "rate-limited upstream" } })); }
+      if (parsed.model === cutOff.model) { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: null }, finish_reason: "length" }], usage: { prompt_tokens: 100, completion_tokens: 2000 } })); }
       if (parsed.model === "gpt-4.1-nano") return fail(404, "The model `gpt-4.1-nano` does not exist or you do not have access to it.");
       if (parsed.model === "gpt-5.6-luna" && requests.filter(model => model === "gpt-5.6-luna").length > 5) return fail(500, "upstream overloaded");
       const ticket = parsed.messages.find(message => message.role === "user")!.content;
@@ -124,7 +127,7 @@ test("the task question lists each task once and takes a mapping correction", as
   assert.deepEqual(step.questions.map(question => question.id), ["tasks"], "no separate corrections question");
   step = await advance(ctx, runId, { tasks: [`${draft.id}=ticket classifier`] });
   const options = step.questions.find(question => question.id === "tasks")!.options!;
-  assert.deepEqual(options.map(option => option.value), ["ticket classifier"], "the reply drafter's usage moved to the classifier");
+  assert.deepEqual(options.map(option => option.value), ["ticket classifier", "escalation router"], "the reply drafter's usage moved to the classifier");
   assert.match(options[0]!.detail!, new RegExp(`${draft.id} draft-reply.ts:3`));
   step = await advance(ctx, runId, { tasks: ["ticket classifier"] });
   assert.ok(!step.questions.some(question => question.id === "tasks"), "a task name answers the question");
@@ -171,6 +174,65 @@ test("scan finds both models, the model shared by two tasks and dynamic uses, wi
   assert.ok(!filtered.usages.some(usage => usage.file.startsWith("data/") || usage.file.startsWith("scripts/")));
   assert.deepEqual(filtered.usages.map(usage => usage.id), filtered.usages.map((_, index) => `u${index + 1}`), "usage IDs stay sequential");
   assert.equal(scanRepo(root, catalogue).usages.filter(usage => usage.file === "data/few.json").length, 20, "20 models is still configuration");
+
+  // SDK spellings name catalogue models; a model named often, but only in tests, ranks after the application's models.
+  writeFileSync(join(root, "agent.py"), `llm = init_chat_model("openai:gpt-5-nano")\nBEDROCK_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"\nclaude = "claude-haiku-4-5-20251001"\n`);
+  writeFileSync(join(root, "config.yml"), "default-model: gpt-4o-mini # unquoted\nname: gpt-4o\n");
+  writeFileSync(join(root, "registry.yml"), catalogue.models.slice(0, 21).map(model => `- model: ${model.id}`).join("\n"));
+  mkdirSync(join(root, "tests"), { recursive: true });
+  writeFileSync(join(root, "tests", "test_agent.py"), Array.from({ length: 5 }, (_, index) => `model_${index} = "openai/gpt-6-luna"`).join("\n"));
+  const sdk = scanRepo(root, catalogue, { exclude: ["data", "scripts", "app.json"] });
+  assert.deepEqual(sdk.usages.filter(usage => usage.file === "agent.py").map(usage => usage.catalogueId), ["openai/gpt-5-nano", "anthropic/claude-sonnet-4.5", "anthropic/claude-haiku-4.5"]);
+  assert.deepEqual(sdk.models.map(model => model.catalogueId).slice(-1), ["openai/gpt-6-luna"], "five uses in tests rank below one in the application");
+  assert.deepEqual(sdk.usages.filter(usage => usage.file === "config.yml").map(usage => usage.catalogueId), ["openai/gpt-4o-mini"], "an unquoted model in configuration, but not any unquoted value");
+  assert.deepEqual(sdk.skipped, ["registry.yml"], "a YAML file naming more than 20 models is data");
+});
+
+test("a run whose every task has no eval finishes, saying what was not reviewed and how to add an eval", async () => {
+  const root = repo(), scripted = scriptedHarness();
+  const harness: Harness & { calls: string[] } = { ...scripted, json: async <T>(request: JsonRequest) => (request.system.includes("map model usages") ? scripted.json<T>(request)
+    : { found: false, command: "", cwd: "", env: [], threshold: null, langfuseDataset: "", passScore: "", passMin: null, helpers: [], explanation: "", missing: "The repository has no labelled tickets. A runner would also be needed." } as T) };
+  const ctx = context(root, mkdtempSync(join(tmpdir(), "openmerit-home-")), harness);
+  const runId = startRun(ctx);
+  const { step, asked } = await drive(ctx, runId, { eval_ticket_classifier: "skip" });
+  assert.ok(asked.some(question => question.id === "eval_ticket_classifier"));
+  assert.equal(step.status, "done", step.error);
+  assert.deepEqual(step.result!.tasks.map(task => task.status), ["no_eval"]);
+  assert.match(step.result!.tasks[0]!.note, /^Skipped for lack of an eval: The repository has no labelled tickets\. To review it, add an eval that follows the eval contract/);
+  assert.ok(!asked.some(question => question.id === "approve_evals"), "nothing to approve");
+});
+
+test("a later run reuses the approved eval although the harness names the task differently", async () => {
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  updateRepoConfig(root, { evals: { "ticket classifier": { command: "node evals/classify.eval.ts", env: { CLASSIFIER_MODEL: "{{model}}" } } } });
+  const scripted = scriptedHarness(), prompts: string[] = [];
+  const harness: Harness & { calls: string[] } = { ...scripted, json: async <T>(request: JsonRequest) => {
+    prompts.push(request.prompt);
+    const reply = await scripted.json<{ tasks?: { name: string }[] }>(request);
+    for (const task of reply.tasks ?? []) task.name = task.name.replace("ticket classifier", "Ticket Classifier");
+    return reply as T;
+  } };
+  const ctx = context(root, home, harness);
+  const runId = startRun(ctx);
+  await advance(ctx, runId, {});
+  const step = await advance(ctx, runId, { model: "openai/gpt-4.1-mini", tasks: ["Ticket Classifier"] });
+  assert.match(prompts[0]!, /saved evals for these tasks; when usages serve one of them, use its exact name: "ticket classifier"/);
+  assert.deepEqual(step.questions.map(question => question.id), ["approve_evals"]);
+  assert.ok(!scripted.calls.some(call => call.startsWith("discover")), "no harness call to find the eval again");
+});
+
+test("an eval that fails before any model call shows why in the retry question and in history", async () => {
+  const root = repo(), scripted = scriptedHarness();
+  const command = `node -e "console.error('ModuleNotFoundError: No module named langchain_openai'); process.exit(2)"`;
+  const harness: Harness & { calls: string[] } = { ...scripted, json: async <T>(request: JsonRequest) => (request.system.includes("map model usages") ? scripted.json<T>(request)
+    : { found: true, command, cwd: ".", env: [], threshold: null, langfuseDataset: "", passScore: "", passMin: null, helpers: [], explanation: "", missing: "" } as T) };
+  const ctx = context(root, mkdtempSync(join(tmpdir(), "openmerit-home-")), harness);
+  const runId = startRun(ctx);
+  const { step, asked } = await drive(ctx, runId);
+  assert.match(asked.find(question => question.id === "retry_units")!.detail!, /eval exited with 2, \$0\.00000 spent\n {4}\| ModuleNotFoundError: No module named langchain_openai/);
+  assert.equal(step.result!.tasks[0]!.status, "baseline_failed");
+  assert.match(step.result!.tasks[0]!.note, /run `openmerit scout` again/);
+  assert.match(renderRun(ctx.state, ctx.state.getRun(runId)!, step), /eval exited with 2\n {4}\| ModuleNotFoundError/);
 });
 
 /** The search path the fake endpoint implies over the six-model pool (ascending ECI: gpt-4o-mini 123.9,
@@ -229,7 +291,9 @@ test("Scout Model Binary Search screens the ECI-ranked pool, runs finalists on e
   const { step, asked } = await drive(ctx, runId);
   assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
   assert.ok(asked.some(question => question.prompt === TASK_QUESTION));
-  assert.deepEqual(asked.find(question => question.id === "tasks")!.options!.map(option => option.value).sort(), ["reply drafter", "ticket classifier"], "both tasks of the shared model are offered");
+  const offered = asked.find(question => question.id === "tasks")!.options!;
+  assert.deepEqual(offered.map(option => option.value), ["ticket classifier", "reply drafter", "escalation router"], "both tasks of the shared model are offered, then the task whose model is set at run time");
+  assert.match(offered[2]!.detail!, /model is set at run time by ESCALATION_MODEL, so choose it if that is openai\/gpt-4\.1-mini/);
   assert.ok(!asked.some(question => question.id === "retry_units"), "a final whose model calls keep failing is skipped, not asked about");
   assert.ok(asked.some(question => question.prompt === CONFIGURE_QUESTION));
   // Only the selected task is discovered and evaluated.
@@ -425,6 +489,17 @@ test("a candidate still rate-limited after the proxy's retries is skipped as unt
     assert.equal(search.trials[0]!.model, "openai/gpt-5.4-nano", "the search went on without it");
     assert.ok(!asked.some(question => question.id === "retry_units" && question.detail?.includes("gpt-5-nano")), "no retry question for the rate limit");
   } finally { rateLimit.remaining = 0; }
+});
+
+test("when the current model's answers are cut off before any text, the stopped search says so", async () => {
+  const ctx = context(repo(), mkdtempSync(join(tmpdir(), "openmerit-home-")));
+  const runId = startRun(ctx);
+  cutOff.model = "gpt-4.1-mini";
+  try {
+    const { step } = await drive(ctx, runId);
+    assert.equal(step.result!.tasks[0]!.status, "stopped");
+    assert.match(step.result!.tasks[0]!.note, /passes only 0 items in every run; .* 30 of its 30 answers stopped at the request's output token limit before any text, as when openai has the model reason first/);
+  } finally { cutOff.model = ""; }
 });
 
 test("the metering proxy refuses models outside the allowed pool without forwarding them", async () => {
