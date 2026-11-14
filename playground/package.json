@@ -21,7 +21,7 @@
     "@earendil-works/pi-durable": "1.5.0",
     "@earendil-works/pi-schema": "1.5.0",
     "agents": "0.33.0",
-    "openmerit": "0.3.10"
+    "openmerit": "0.4.2"
   },
   "devDependencies": {
     "@anthropic-ai/claude-code": "2.1.318",
