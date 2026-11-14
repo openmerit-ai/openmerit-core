@@ -699,16 +699,21 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
       data.datasetItems![task] = await viewer.datasetItemIds(plan.langfuse.dataset);
       save();
     }
-    const baseline: UnitResult[] = [];
-    for (let repeat = 1; repeat <= repeats; repeat++) baseline.push(await runUnit(task, plan, "baseline", base, repeat, null));
     // Screens draw from items the current model passes in every run, so a 5/5 screen asks whether a candidate keeps up with it.
+    const baseline: UnitResult[] = [];
+    const reliableItems = () => Object.keys(baseline[0]!.items).filter(item => baseline.every(run => run.items[item] === true));
+    for (let repeat = 1; repeat <= repeats; repeat++) {
+      baseline.push(await runUnit(task, plan, "baseline", base, repeat, null));
+      // Another run can only shrink that set, so stop paying for runs once it is too small to screen on.
+      if (!data.samples![task] && reliableItems().length < SAMPLE_SIZE) break;
+    }
     if (!data.samples![task]) {
-      const reliable = Object.keys(baseline[0]!.items).filter(item => baseline.every(run => run.items[item] === true));
+      const reliable = reliableItems();
       if (reliable.length < SAMPLE_SIZE) {
         // A reasoning default on the endpoint can use up a small token limit before any answer: say so, since it is not the model's quality.
         const cutOff = baseline.reduce((sum, run) => sum + (run.cutOff ?? 0), 0), requests = baseline.reduce((sum, run) => sum + run.requests, 0);
         const why = cutOff ? ` ${cutOff} of its ${requests} answers stopped at the request's output token limit before any text, as when ${base.endpoint} has the model reason first; production may call it elsewhere, where it does not. Raise the eval's token limit, or add the endpoint your application calls with \`openmerit setup\`.` : " Add labelled items the current model gets right.";
-        throw new StopTask(`The current model passes only ${reliable.length} items in every run; Scout screens candidates on ${SAMPLE_SIZE} items it passes.${why}`);
+        throw new StopTask(`The current model passes only ${reliable.length} items in ${baseline.length === 1 ? "its first run" : `every one of its ${baseline.length} runs`}; Scout screens candidates on ${SAMPLE_SIZE} items it passes.${why}`);
       }
       const pool = [...reliable], picked: string[] = [];
       for (let count = 0; count < SAMPLE_SIZE; count++) picked.push(pool.splice(randomInt(pool.length), 1)[0]!);
@@ -941,7 +946,9 @@ function compareTask(ctx: Context, runId: string, data: RunState, name: string, 
   const repeats = data.repeats ?? DEFAULT_REPEATS;
   const base = baselineRef(ctx, data);
   const baseEci = ctx.catalogue.models.find(model => model.id === base.model)?.eci ?? null;
-  const baseline = measure(ctx, runId, units.filter(unit => unit.role === "baseline"), repeats, "baseline", base, baseEci);
+  const baseUnits = units.filter(unit => unit.role === "baseline");
+  // A search that stopped on the baseline ran only the baseline runs it needed.
+  const baseline = measure(ctx, runId, baseUnits, data.stopped?.[name] && !data.samples?.[name] ? baseUnits.length : repeats, "baseline", base, baseEci);
   const summary = data.search?.[name];
   const byModel = new Map((data.pool?.[name] ?? []).map(entry => [entry.model, entry]));
   const finals = [...(summary?.finalists ?? []), ...(summary?.challengers ?? [])].map(model => byModel.get(model)!).filter(Boolean);
