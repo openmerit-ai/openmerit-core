@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased — local CLI and MCP
+## 0.4.2 — 2026-11-14
+
+The first release of the local CLI and MCP server. npm's 0.4.0 and 0.4.1 were a separate Pi-extension build and are not listed here.
 
 - Scout now runs in the OpenMerit daemon, a background process that the CLI and the MCP server start when they need it (`openmerit daemon status` and `openmerit daemon stop` manage it). Each run is a Rivet Workflow actor in a local Rivet engine shipped in the package, listening on `127.0.0.1:6720` behind a per-start token, with data in `~/.openmerit/rivet`. A run waiting for an answer survives a daemon crash or restart. When the daemon stops answering, the client reconnects up to three times, then prints the resume command. A step cut off in the middle stops the run as interrupted, and resuming asks before running an interrupted eval again. The install grows by about 300 MB on Linux.
 - A daemon that cannot start fails within seconds instead of after about six minutes of reconnects. The daemon checks its three ports before it starts and names the ones in use, with `OPENMERIT_DAEMON_PORT` and a free port to set it to; it reports an engine that exits while starting; and it no longer uses an engine that another OpenMerit home, such as another user's, runs on the same port. The CLI and MCP server treat a start failure as such, not as a lost connection, and print its reason with the resume command. On macOS, a daemon now starts again after a crash: the engine the crashed daemon left running refused the new daemon's token, and the daemon now stops that engine first, as rivetkit already did on Linux.

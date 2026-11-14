@@ -1,7 +1,5 @@
 # OpenMerit
 
-> **Unreleased.** This README describes the local CLI on `main`. The published npm package (`openmerit@0.4.1`) still has the earlier `run`, `candidates`, `status` and `login` commands; they are gone from this version.
-
 OpenMerit finds cheaper models that perform at least as well as the ones your code uses today, measured with your repository's own evals. It is a global npm CLI and a local MCP server. It runs on your machine with no OpenMerit account, login or hosted service.
 
 - **OpenMerit Harness**, built on [Pi](https://pi.dev), does Scout's reasoning: it maps model usages to tasks and finds each task's eval and how to run it per model. Claude Code (through [pi-claude-bridge](https://pi.dev/packages/pi-claude-bridge) and your Claude login), Codex models (through a ChatGPT Plus or Pro sign-in) or an API key powers it. `openmerit connect` chooses which.
