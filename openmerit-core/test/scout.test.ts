@@ -498,7 +498,9 @@ test("when the current model's answers are cut off before any text, the stopped 
   try {
     const { step } = await drive(ctx, runId);
     assert.equal(step.result!.tasks[0]!.status, "stopped");
-    assert.match(step.result!.tasks[0]!.note, /passes only 0 items in every run; .* 30 of its 30 answers stopped at the request's output token limit before any text, as when openai has the model reason first/);
+    // The first run already leaves no item to screen on, so the other two baseline runs are not paid for.
+    assert.deepEqual([step.result!.tasks[0]!.baseline!.status, step.result!.tasks[0]!.baseline!.runs], ["measured", 1]);
+    assert.match(step.result!.tasks[0]!.note, /passes only 0 items in its first run; .* 10 of its 10 answers stopped at the request's output token limit before any text, as when openai has the model reason first/);
   } finally { cutOff.model = ""; }
 });
 
