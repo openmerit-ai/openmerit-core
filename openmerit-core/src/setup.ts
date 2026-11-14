@@ -8,7 +8,7 @@ import { confirm, connect, credential, HARNESS_LABEL } from "./connect.ts";
 import { createLangfuseConnector } from "./connectors/langfuse/index.ts";
 import type { Prompter } from "./cli/prompt.ts";
 import {
-  DEFAULT_BUDGET_USD, describeCredential, OPENAI_ENDPOINT, OPENROUTER_ENDPOINT, readRepoConfig, resolveCredential, updateRepoConfig,
+  DEFAULT_BUDGET_USD, describeCredential, globalConfigLabel, OPENAI_ENDPOINT, OPENROUTER_ENDPOINT, readRepoConfig, resolveCredential, updateRepoConfig,
   type Endpoint, type HarnessKind, type HarnessSettings, type LangfuseSettings,
 } from "./state/config.ts";
 import type { State } from "./state/db.ts";
@@ -195,6 +195,6 @@ export async function runSetup(ctx: SetupContext): Promise<{ harness: HarnessSet
     if (Number.isFinite(answer) && answer > 0) budgetUsd = answer;
   }
   updateRepoConfig(ctx.repo.root, { endpoints, budget: { defaultUsd: budgetUsd }, ...(langfuse ? { langfuse } : {}) });
-  ctx.log(`\nSaved. Harness: ${HARNESS_LABEL[harness.kind]}. Endpoints: ${endpoints.map(item => item.id).join(", ") || "none"}. Langfuse: ${langfuse ? "read-only" : "not connected"}. Eval budget: $${budgetUsd.toFixed(2)} per run.\nSettings: ~/.openmerit/config.json (global) and .openmerit/config.json (this repository; credential references only). Next: openmerit scout`);
+  ctx.log(`\nSaved. Harness: ${HARNESS_LABEL[harness.kind]}. Endpoints: ${endpoints.map(item => item.id).join(", ") || "none"}. Langfuse: ${langfuse ? "read-only" : "not connected"}. Eval budget: $${budgetUsd.toFixed(2)} per run.\nSettings: ${globalConfigLabel(ctx.env)} (global) and .openmerit/config.json (this repository; credential references only). Next: openmerit scout`);
   return { harness, endpoints, langfuse: !!langfuse, budgetUsd };
 }
