@@ -1,5 +1,6 @@
 // Terminal prompts on stderr, so stdout stays clean for --json output.
 import { createInterface } from "node:readline/promises";
+import { Writable } from "node:stream";
 import type { Answer, Question } from "../scout/workflow.ts";
 
 export interface Prompter {
@@ -16,11 +17,11 @@ export interface Prompter {
 export function terminalPrompter(input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stderr): Prompter {
   let muted = false;
   const write = (output as NodeJS.WriteStream).write.bind(output);
-  const open = () => {
-    const next = createInterface({ input, output, terminal: (input as NodeJS.ReadStream).isTTY === true });
-    (next as unknown as { _writeToOutput: (text: string) => void })._writeToOutput = (text: string) => { if (!muted || text.includes("\n")) write(muted ? "\n" : text); };
-    return next;
-  };
+  // readline echoes typed characters to its output, so a secret is hidden by giving it this stream
+  // instead of `output`; overriding readline's `_writeToOutput` no longer reaches its own writes.
+  const echo = new Writable({ write(chunk, _encoding, done) { const text = String(chunk); if (!muted || text.includes("\n")) write(muted ? "\n" : text); done(); } });
+  Object.defineProperty(echo, "columns", { get: () => (output as NodeJS.WriteStream).columns });
+  const open = () => createInterface({ input, output: echo, terminal: (input as NodeJS.ReadStream).isTTY === true });
   let rl = open();
   const ask = async (question: string, fallback?: string, signal?: AbortSignal) => {
     const answer = (await rl.question(`${question}${fallback !== undefined && fallback !== "" ? ` [${fallback}]` : ""} `, signal ? { signal } : {})).trim();
