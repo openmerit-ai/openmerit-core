@@ -1,0 +1,532 @@
+{
+  "model": "anthropic/claude-sonnet-5.5",
+  "tasks": [
+    {
+      "task": "Coding agent",
+      "eval": {
+        "command": "node .openmerit/evals/coding-review.ts",
+        "source": "harness",
+        "threshold": null,
+        "langfuse": null
+      },
+      "baseline": {
+        "model": "anthropic/claude-sonnet-5.5",
+        "endpoint": "openrouter",
+        "endpointModel": "anthropic/claude-sonnet-5.5",
+        "role": "baseline",
+        "eci": 166.56,
+        "status": "measured",
+        "passes": 18,
+        "total": 18,
+        "runs": 3,
+        "score": 1,
+        "source": "eval",
+        "costPerItemUsd": 0.02838488888888889,
+        "costIsEstimate": false,
+        "meanLatencyMs": 2194.625,
+        "requests": 72,
+        "qualified": false,
+        "note": "",
+        "evidence": [
+          "run-20261114-212008-0118|coding_agent|baseline|openrouter|anthropic/claude-sonnet-5.5|r1",
+          "run-20261114-212008-0118|coding_agent|baseline|openrouter|anthropic/claude-sonnet-5.5|r2",
+          "run-20261114-212008-0118|coding_agent|baseline|openrouter|anthropic/claude-sonnet-5.5|r3"
+        ],
+        "experiments": [
+          "openmerit-run-20261114-212008-0118-coding_agent-baseline-anthropic-claude-sonnet-5.5-r1-a1",
+          "openmerit-run-20261114-212008-0118-coding_agent-baseline-anthropic-claude-sonnet-5.5-r2-a1",
+          "openmerit-run-20261114-212008-0118-coding_agent-baseline-anthropic-claude-sonnet-5.5-r3-a1"
+        ]
+      },
+      "candidates": [
+        {
+          "key": "qwen/qwen3.6-27b",
+          "model": "qwen/qwen3.6-27b",
+          "endpoint": "openrouter",
+          "endpointModel": "qwen/qwen3.6-27b",
+          "eci": 146.73,
+          "eciSource": "published",
+          "price": 3.52,
+          "role": "candidate",
+          "status": "measured",
+          "passes": 17,
+          "total": 18,
+          "runs": 3,
+          "score": 0.9444444444444444,
+          "source": "eval",
+          "costPerItemUsd": 0.011219999444444443,
+          "costIsEstimate": false,
+          "meanLatencyMs": 9818.527777777777,
+          "requests": 72,
+          "qualified": false,
+          "note": "passed 17/18 vs the current model's 18/18",
+          "evidence": [
+            "run-20261114-212008-0118|coding_agent|final|openrouter|qwen/qwen3.6-27b|r1",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|qwen/qwen3.6-27b|r2",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|qwen/qwen3.6-27b|r3"
+          ],
+          "experiments": [
+            "openmerit-run-20261114-212008-0118-coding_agent-final-qwen-qwen3.6-27b-r1-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-qwen-qwen3.6-27b-r2-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-qwen-qwen3.6-27b-r3-a1"
+          ]
+        },
+        {
+          "key": "minimax/minimax-m2.5",
+          "model": "minimax/minimax-m2.5",
+          "endpoint": "openrouter",
+          "endpointModel": "minimax/minimax-m2.5",
+          "eci": 146.86,
+          "eciSource": "estimated",
+          "price": 1.35,
+          "role": "candidate",
+          "status": "measured",
+          "passes": 16,
+          "total": 18,
+          "runs": 3,
+          "score": 0.8888888888888888,
+          "source": "eval",
+          "costPerItemUsd": 0.0030856030555555555,
+          "costIsEstimate": false,
+          "meanLatencyMs": 5827.354166666667,
+          "requests": 96,
+          "qualified": false,
+          "note": "passed 16/18 vs the current model's 18/18",
+          "evidence": [
+            "run-20261114-212008-0118|coding_agent|final|openrouter|minimax/minimax-m2.5|r1",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|minimax/minimax-m2.5|r2",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|minimax/minimax-m2.5|r3"
+          ],
+          "experiments": [
+            "openmerit-run-20261114-212008-0118-coding_agent-final-minimax-minimax-m2.5-r1-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-minimax-minimax-m2.5-r2-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-minimax-minimax-m2.5-r3-a1"
+          ]
+        },
+        {
+          "key": "openai/o3",
+          "model": "openai/o3",
+          "endpoint": "openrouter",
+          "endpointModel": "openai/o3",
+          "eci": 147.05,
+          "eciSource": "published",
+          "price": 10,
+          "role": "candidate",
+          "status": "measured",
+          "passes": 18,
+          "total": 18,
+          "runs": 3,
+          "score": 1,
+          "source": "eval",
+          "costPerItemUsd": 0.018877222222222226,
+          "costIsEstimate": false,
+          "meanLatencyMs": 1932.1349206349207,
+          "requests": 126,
+          "qualified": true,
+          "note": "",
+          "evidence": [
+            "run-20261114-212008-0118|coding_agent|final|openrouter|openai/o3|r1",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|openai/o3|r2",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|openai/o3|r3"
+          ],
+          "experiments": [
+            "openmerit-run-20261114-212008-0118-coding_agent-final-openai-o3-r1-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-openai-o3-r2-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-openai-o3-r3-a1"
+          ]
+        },
+        {
+          "key": "meta/muse-glimmer-30b",
+          "model": "meta/muse-glimmer-30b",
+          "endpoint": "openrouter",
+          "endpointModel": "meta/muse-glimmer-30b",
+          "eci": 147.54,
+          "eciSource": "estimated",
+          "price": 1.5,
+          "role": "candidate",
+          "status": "measured",
+          "passes": 18,
+          "total": 18,
+          "runs": 3,
+          "score": 1,
+          "source": "eval",
+          "costPerItemUsd": 0.003948150555555555,
+          "costIsEstimate": false,
+          "meanLatencyMs": 4832.052083333333,
+          "requests": 96,
+          "qualified": true,
+          "note": "",
+          "evidence": [
+            "run-20261114-212008-0118|coding_agent|final|openrouter|meta/muse-glimmer-30b|r1",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|meta/muse-glimmer-30b|r2",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|meta/muse-glimmer-30b|r3"
+          ],
+          "experiments": [
+            "openmerit-run-20261114-212008-0118-coding_agent-final-meta-muse-glimmer-30b-r1-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-meta-muse-glimmer-30b-r2-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-meta-muse-glimmer-30b-r3-a1"
+          ]
+        },
+        {
+          "key": "openai/gpt-5.1-codex-mini",
+          "model": "openai/gpt-5.1-codex-mini",
+          "endpoint": "openrouter",
+          "endpointModel": "openai/gpt-5.1-codex-mini",
+          "eci": 147.65,
+          "eciSource": "estimated",
+          "price": 2.25,
+          "role": "candidate",
+          "status": "measured",
+          "passes": 15,
+          "total": 18,
+          "runs": 3,
+          "score": 0.8333333333333334,
+          "source": "eval",
+          "costPerItemUsd": 0.0032848716666666663,
+          "costIsEstimate": false,
+          "meanLatencyMs": 3214.8275862068967,
+          "requests": 87,
+          "qualified": false,
+          "note": "passed 15/18 vs the current model's 18/18",
+          "evidence": [
+            "run-20261114-212008-0118|coding_agent|final|openrouter|openai/gpt-5.1-codex-mini|r1",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|openai/gpt-5.1-codex-mini|r2",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|openai/gpt-5.1-codex-mini|r3"
+          ],
+          "experiments": [
+            "openmerit-run-20261114-212008-0118-coding_agent-final-openai-gpt-5.1-codex-mini-r1-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-openai-gpt-5.1-codex-mini-r2-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-openai-gpt-5.1-codex-mini-r3-a1"
+          ]
+        },
+        {
+          "key": "z-ai/glm-5.3-flash",
+          "model": "z-ai/glm-5.3-flash",
+          "endpoint": "openrouter",
+          "endpointModel": "z-ai/glm-5.3-flash",
+          "eci": 153.82,
+          "eciSource": "published",
+          "price": 0.11829999999999999,
+          "role": "candidate",
+          "status": "measured",
+          "passes": 18,
+          "total": 18,
+          "runs": 3,
+          "score": 1,
+          "source": "eval",
+          "costPerItemUsd": 0.0006113617055555556,
+          "costIsEstimate": false,
+          "meanLatencyMs": 3104.527777777778,
+          "requests": 72,
+          "qualified": true,
+          "note": "",
+          "evidence": [
+            "run-20261114-212008-0118|coding_agent|final|openrouter|z-ai/glm-5.3-flash|r1",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|z-ai/glm-5.3-flash|r2",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|z-ai/glm-5.3-flash|r3"
+          ],
+          "experiments": [
+            "openmerit-run-20261114-212008-0118-coding_agent-final-z-ai-glm-5.3-flash-r1-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-z-ai-glm-5.3-flash-r2-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-z-ai-glm-5.3-flash-r3-a1"
+          ]
+        },
+        {
+          "key": "inclusionai/ling-3.1-flash",
+          "model": "inclusionai/ling-3.1-flash",
+          "endpoint": "openrouter",
+          "endpointModel": "inclusionai/ling-3.1-flash",
+          "eci": 156.79,
+          "eciSource": "calibrated",
+          "price": 0.18,
+          "role": "candidate",
+          "status": "measured",
+          "passes": 16,
+          "total": 18,
+          "runs": 3,
+          "score": 0.8888888888888888,
+          "source": "eval",
+          "costPerItemUsd": 0.0008327209999999999,
+          "costIsEstimate": false,
+          "meanLatencyMs": 13336.614285714286,
+          "requests": 70,
+          "qualified": false,
+          "note": "passed 16/18 vs the current model's 18/18",
+          "evidence": [
+            "run-20261114-212008-0118|coding_agent|final|openrouter|inclusionai/ling-3.1-flash|r1",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|inclusionai/ling-3.1-flash|r2",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|inclusionai/ling-3.1-flash|r3"
+          ],
+          "experiments": [
+            "openmerit-run-20261114-212008-0118-coding_agent-final-inclusionai-ling-3.1-flash-r1-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-inclusionai-ling-3.1-flash-r2-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-inclusionai-ling-3.1-flash-r3-a1"
+          ]
+        }
+      ],
+      "top": [
+        {
+          "key": "z-ai/glm-5.3-flash",
+          "model": "z-ai/glm-5.3-flash",
+          "endpoint": "openrouter",
+          "endpointModel": "z-ai/glm-5.3-flash",
+          "eci": 153.82,
+          "eciSource": "published",
+          "price": 0.11829999999999999,
+          "role": "candidate",
+          "status": "measured",
+          "passes": 18,
+          "total": 18,
+          "runs": 3,
+          "score": 1,
+          "source": "eval",
+          "costPerItemUsd": 0.0006113617055555556,
+          "costIsEstimate": false,
+          "meanLatencyMs": 3104.527777777778,
+          "requests": 72,
+          "qualified": true,
+          "note": "",
+          "evidence": [
+            "run-20261114-212008-0118|coding_agent|final|openrouter|z-ai/glm-5.3-flash|r1",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|z-ai/glm-5.3-flash|r2",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|z-ai/glm-5.3-flash|r3"
+          ],
+          "experiments": [
+            "openmerit-run-20261114-212008-0118-coding_agent-final-z-ai-glm-5.3-flash-r1-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-z-ai-glm-5.3-flash-r2-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-z-ai-glm-5.3-flash-r3-a1"
+          ]
+        },
+        {
+          "key": "meta/muse-glimmer-30b",
+          "model": "meta/muse-glimmer-30b",
+          "endpoint": "openrouter",
+          "endpointModel": "meta/muse-glimmer-30b",
+          "eci": 147.54,
+          "eciSource": "estimated",
+          "price": 1.5,
+          "role": "candidate",
+          "status": "measured",
+          "passes": 18,
+          "total": 18,
+          "runs": 3,
+          "score": 1,
+          "source": "eval",
+          "costPerItemUsd": 0.003948150555555555,
+          "costIsEstimate": false,
+          "meanLatencyMs": 4832.052083333333,
+          "requests": 96,
+          "qualified": true,
+          "note": "",
+          "evidence": [
+            "run-20261114-212008-0118|coding_agent|final|openrouter|meta/muse-glimmer-30b|r1",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|meta/muse-glimmer-30b|r2",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|meta/muse-glimmer-30b|r3"
+          ],
+          "experiments": [
+            "openmerit-run-20261114-212008-0118-coding_agent-final-meta-muse-glimmer-30b-r1-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-meta-muse-glimmer-30b-r2-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-meta-muse-glimmer-30b-r3-a1"
+          ]
+        },
+        {
+          "key": "openai/o3",
+          "model": "openai/o3",
+          "endpoint": "openrouter",
+          "endpointModel": "openai/o3",
+          "eci": 147.05,
+          "eciSource": "published",
+          "price": 10,
+          "role": "candidate",
+          "status": "measured",
+          "passes": 18,
+          "total": 18,
+          "runs": 3,
+          "score": 1,
+          "source": "eval",
+          "costPerItemUsd": 0.018877222222222226,
+          "costIsEstimate": false,
+          "meanLatencyMs": 1932.1349206349207,
+          "requests": 126,
+          "qualified": true,
+          "note": "",
+          "evidence": [
+            "run-20261114-212008-0118|coding_agent|final|openrouter|openai/o3|r1",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|openai/o3|r2",
+            "run-20261114-212008-0118|coding_agent|final|openrouter|openai/o3|r3"
+          ],
+          "experiments": [
+            "openmerit-run-20261114-212008-0118-coding_agent-final-openai-o3-r1-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-openai-o3-r2-a1",
+            "openmerit-run-20261114-212008-0118-coding_agent-final-openai-o3-r3-a1"
+          ]
+        }
+      ],
+      "status": "ranked",
+      "note": "3 of 7 finalists performed at least as well as anthropic/claude-sonnet-5.5; the 3 cheapest are shown.",
+      "search": {
+        "status": "selected",
+        "pool": 177,
+        "unranked": 46,
+        "sampleIds": [
+          "FICT-CLM-1005",
+          "FICT-CLM-1015",
+          "FICT-CLM-1016",
+          "FICT-CLM-1022",
+          "FICT-CLM-1018"
+        ],
+        "pick": "qwen/qwen3.6-27b",
+        "trials": [
+          {
+            "stage": "search",
+            "model": "google/gemini-3.5-flash-lite",
+            "eci": 145.63,
+            "passes": 4,
+            "total": 5,
+            "accepted": false
+          },
+          {
+            "stage": "search",
+            "model": "openai/gpt-5.1-codex-max",
+            "eci": 151.26,
+            "passes": 5,
+            "total": 5,
+            "accepted": true
+          },
+          {
+            "stage": "search",
+            "model": "thinkingmachines/inkling",
+            "eci": 148.39,
+            "passes": 5,
+            "total": 5,
+            "accepted": true
+          },
+          {
+            "stage": "search",
+            "model": "minimax/minimax-m2.5",
+            "eci": 146.86,
+            "passes": 5,
+            "total": 5,
+            "accepted": true
+          },
+          {
+            "stage": "search",
+            "model": "qwen/qwen3.5-27b",
+            "eci": 146.28,
+            "passes": 4,
+            "total": 5,
+            "accepted": false
+          },
+          {
+            "stage": "search",
+            "model": "minimax/minimax-m2.7",
+            "eci": 146.52,
+            "passes": 4,
+            "total": 5,
+            "accepted": false
+          },
+          {
+            "stage": "search",
+            "model": "qwen/qwen3.6-27b",
+            "eci": 146.73,
+            "passes": 5,
+            "total": 5,
+            "accepted": true
+          },
+          {
+            "stage": "neighbour",
+            "model": "deepseek/deepseek-v4-flash",
+            "eci": 146.85,
+            "passes": 4,
+            "total": 5,
+            "accepted": false
+          },
+          {
+            "stage": "neighbour",
+            "model": "nvidia/nemotron-3-ultra-550b-a55b",
+            "eci": 146.95,
+            "passes": 4,
+            "total": 5,
+            "accepted": false
+          },
+          {
+            "stage": "neighbour",
+            "model": "openai/o3",
+            "eci": 147.05,
+            "passes": 5,
+            "total": 5,
+            "accepted": true
+          },
+          {
+            "stage": "neighbour",
+            "model": "qwen/qwen3.5-122b-a10b",
+            "eci": 147.45,
+            "passes": 4,
+            "total": 5,
+            "accepted": false
+          },
+          {
+            "stage": "neighbour",
+            "model": "meta/muse-glimmer-30b",
+            "eci": 147.54,
+            "passes": 5,
+            "total": 5,
+            "accepted": true
+          },
+          {
+            "stage": "neighbour",
+            "model": "openai/gpt-5.1-codex-mini",
+            "eci": 147.65,
+            "passes": 5,
+            "total": 5,
+            "accepted": true
+          },
+          {
+            "stage": "challenger",
+            "model": "inclusionai/ling-3.0-flash",
+            "eci": 148.16,
+            "passes": 4,
+            "total": 5,
+            "accepted": false
+          },
+          {
+            "stage": "challenger",
+            "model": "z-ai/glm-5.3-flash",
+            "eci": 153.82,
+            "passes": 5,
+            "total": 5,
+            "accepted": true
+          },
+          {
+            "stage": "challenger",
+            "model": "inclusionai/ling-3.1-flash",
+            "eci": 156.79,
+            "passes": 5,
+            "total": 5,
+            "accepted": true
+          }
+        ],
+        "skipped": [],
+        "finalists": [
+          "qwen/qwen3.6-27b",
+          "minimax/minimax-m2.5",
+          "openai/o3",
+          "meta/muse-glimmer-30b",
+          "openai/gpt-5.1-codex-mini"
+        ],
+        "challengers": [
+          "z-ai/glm-5.3-flash",
+          "inclusionai/ling-3.1-flash"
+        ]
+      }
+    }
+  ],
+  "configuration": {
+    "Coding agent": {
+      "decision": "yes",
+      "edits": [],
+      "manual": [],
+      "applied": false
+    }
+  }
+}

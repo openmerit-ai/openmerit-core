@@ -2,6 +2,61 @@
 
 Dated observations from using OpenMerit as Sahra Health, newest release first. Each entry says what we ran, what happened and what a customer would expect.
 
+## Published 0.4.2: local CLI, setup and Scout Model Binary Search (14 Nov 2026)
+
+We followed "Release testing" steps 1–5 against the registry package `openmerit@0.4.2`. It is on the `next` dist-tag; `latest` is still 0.4.1, so we installed `openmerit@0.4.2` explicitly. The harness was an API key over OpenRouter (`anthropic/claude-sonnet-5.5`, `OPENROUTER_API_KEY`). The Claude Code and ChatGPT harness sign-ins need a person, so we did not test them. The coding agent was a fresh Claude Code 2.1.318 session (`535f9ab8-3ca1-4cd7-b98e-a8aadc3a168e`) running over OpenRouter, rooted at `playground/`, with the `openmerit` MCP server that setup registered. It had never seen OpenMerit source. This is **not release acceptance**. Only the coding agent completed a comparison, the scenario comparison was cut for budget, and it is one release, not two.
+
+**Steps**
+
+| Step | Outcome |
+| --- | --- |
+| 1. Pin and install | **Passed.** The lockfile resolves `openmerit-0.4.2.tgz` with the registry's sha512 (`XsP2HIOI…FM3Q==`). `npm run check` passed 27/27. |
+| 2. Global install and setup | **Passed, with findings 1, 2 and 7.** `npm install -g openmerit@0.4.2` took 51 s and uses 781 MB. Setup asked which harness to use (Claude Code and Codex shown as not signed in), the pi provider, the model (default Sonnet 5.5) and whether to use `$OPENROUTER_API_KEY`. It verified one harness round trip. For Langfuse it asked for the URL and a typed Viewer key pair, then refused our application keys: "This key pair can write to Langfuse". We have no Viewer key, so Langfuse is not connected. It asked whether to add OpenRouter for candidates (key accepted, all models allowed), whether to add OpenAI (no) and the budget (default $10; we set $5). `openmerit daemon status` printed `not running` after setup, as documented, since setup does not use the daemon. After the first Scout call it printed `running: openmerit 0.4.2, pid 7564, 127.0.0.1:6720`. |
+| 3. Fresh coding-agent session | **Partly passed.** Unprompted, the agent read `AGENTS.md` and `POLICY.md`, called `openmerit_status` and `openmerit_scout`, asked about the residency gap before any spend, and spotted the scan-scope problem itself. In this monorepo Scout failed at discover (finding 2). In a standalone copy of `playground/` it completed a Scout Model Binary Search for the coding agent (see the table). We did not attempt triage or the other four agents, because of the budget. |
+| 4. Model changes and scenarios | **Not done.** We made no model change (see MODEL-DECISIONS.md). One fixture, `clean-gp-visit`, passed 2/2 checks on the 0.4.2 pin: experiment `recorded-run-2026-11-14T21-45-25-834Z`, release `openmerit@0.4.2`, USD 0.0696. The full run and the Langfuse comparison by release were not run, for budget. |
+| 5. FINDINGS entry | This entry. |
+
+**Invite-only gate**
+
+| Criterion | Outcome |
+| --- | --- |
+| Install, setup, harness connection, endpoint and Langfuse key checks | **Passed, with findings.** The harness round trip and the OpenRouter key check passed. The Langfuse check correctly refused a write-capable key. No Viewer key was available, so Langfuse stayed unconnected. **Not applicable from 0.4.2:** OpenMerit account, device approval, connector sync, disconnect. |
+| Identify the eval state; obtain a plan; let Sahra's agent implement it | **Passed for coding.** The state was *insufficient*: no eval in Scout's contract, and only four exact coding labels against Scout's five-item screens. The harness's first plan bypassed the meter (finding 3), so Sahra's agent built a metered, coding-only eval instead. It exists only in the standalone copy and is not landed here. |
+| Approved comparison on customer-owned evals, one agent at a time, with hard labelled cases kept | **Passed for coding only.** We used 6 items (4 exact-labelled boundary/control claims, plus FICT-CLM-1005 unbundling and FICT-CLM-1022 diagnosis mismatch under the older presence-only label), with 3 repeats each. Four of seven finalists dropped items, so the result is not inconclusive. The sample is small. |
+| Import aggregates through the connector; measured reranking; reuse in a new conversation | **Not applicable** for the connector: 0.4.2 has none. The Langfuse per-item path is untested without a Viewer key. Reuse was not tested; approved evals are saved under drifting task names (finding 6). |
+| Interrupted or failed sync, missing mappings, revoked credentials | **Not applicable** for sync and mappings. Revoked credentials were not tested. An interrupted (budget-paused) run kept a stale reservation on resume (finding 4). |
+| Local Markdown decision record; approved disconnect | **Passed** for the record (MODEL-DECISIONS.md, 14 Nov). Disconnect is **not applicable**. |
+| Cleanup | **Passed.** Scout's eval runs wrote nothing to Langfuse, because the eval ran with Langfuse keys blanked. The one smoke experiment is kept as a customer record. Nothing was deleted or paid. |
+
+**Coding agent, Scout run `run-20261114-212008-0118`** (catalogue 2026-11-12; 177 ECI-ranked candidates cheaper than Sonnet; 46 without ECI left out; 16 screens on 5 items, then 7 finalists × 3 runs × 6 items):
+
+| | Model | Passed | Cost/item | Latency/request |
+| --- | --- | --- | --- | --- |
+| Current | anthropic/claude-sonnet-5.5 | 18/18 | $0.0284 | 2195 ms |
+| #1 | z-ai/glm-5.3-flash | 18/18 | $0.00061 | 3105 ms |
+| #2 | meta/muse-glimmer-30b | 18/18 | $0.0039 | 4832 ms |
+| #3 | openai/o3 | 18/18 | $0.0189 | 1932 ms |
+| | qwen/qwen3.6-27b (search pick) | 17/18 | $0.0112 | 9819 ms |
+| | minimax/minimax-m2.5 | 16/18 | $0.0031 | 5827 ms |
+| | inclusionai/ling-3.1-flash | 16/18 | $0.00083 | 13337 ms |
+| | openai/gpt-5.1-codex-mini | 15/18 | $0.0033 | 3215 ms |
+
+The raw result is in `scout-results/2026-11-14-0.4.2-coding-binary-search.json`. Candidates ran through OpenRouter's OpenAI-compatible API behind Scout's proxy, capped at 4,096 output tokens, with intake extractions cached from one real Sonnet run per claim.
+
+### Findings
+
+1. **"Input hidden" key prompts show the key.** In a real terminal (tmux, no pipe), setup's prompts `Langfuse Viewer public key (input hidden; …)` and `… secret key (input hidden; …)` erased their own label and echoed what we typed in clear text. We confirmed it with a dummy secret, `sk-lf-DUMMY-not-a-real-key`, which appeared verbatim on screen. We did not type the real secret. A customer typing a Langfuse secret would leave it on screen and in scrollback. Also, a setup aborted after the public-key prompt had already saved that key to `~/.openmerit/secrets.json`.
+2. **A project in a subdirectory of its git repository does not work.** From `playground/`, setup reported "This repository: /home/user/workspace/repo" and wrote `.openmerit/config.json` at the git root. Scout (CLI and MCP with `cwd` set to `playground/`) scanned the whole repository. Its first question offered models from directories that are not ours, and it sent their code to the harness, until we listed every sibling in `scan.exclude`. Discover then failed twice in `run-20261114-205515-37bd`: "The harness proposed a helper outside .openmerit/evals/ (playground/.openmerit/evals/coding-review.ts); refusing it". The harness writes helpers relative to the project, and Scout accepts only the git root's `.openmerit/evals/`. The refusal is safe, but it is a dead end: USD 0.43 of harness spend, no eval. A standalone `git init` copy of `playground/` worked.
+3. **The first proposed eval would have bypassed the meter, and the approval did not say so.** The harness proposed running the full claim pipeline per fixture with `--model coding=openrouter/<candidate>`. The Worker would call OpenRouter directly with its own key, never through `OPENAI_BASE_URL`, and the other three agents would run on Sonnet for every candidate. The approval still showed "Budget: $3.00. Requests past it are refused." The README says such an eval "is measured as zero requests, and Scout says so", but nothing said so before approval. We declined. Whether Scout would have flagged zero requests afterwards is unverified.
+4. **One request's reservation paused the budget, and resume never released it.** Our agents' framework sends `max_completion_tokens: 128000`, the model's limit. Scout reserved USD 1.286 for one Sonnet request and paused a $2.50 run during its first baseline item, with USD 0.0208 settled (`run-20261114-211024-3024`). Reserving by the request's maximum is documented, but the README does not warn that agent frameworks commonly send the model maximum. After we capped output at 4,096 tokens, `--resume` re-paused at once with identical figures. Only a raise or a new run continues. A finished run (`run-20261114-211621-4047`) still lists USD 0.0937 "reserved for 2 request(s) of unknown cost".
+5. **Four items: Scout spent first, then stopped with a clear message.** `run-20261114-211621-4047` ran the baseline three times (USD 0.40). Then it stopped: "The current model passes only 4 items in every run; Scout screens candidates on 5 items it passes. Add labelled items the current model gets right." The message is actionable. However, the approval showed no item count, and the result header still read "screening on 5 items the current model passes".
+6. **Task names drift between runs.** The harness named the same usage "Medical coding reviewer", "Medical coding agent", "Coding review agent" and "Coding agent" in four runs. Approved evals are saved in `.openmerit/config.json` under those names, so we got duplicate `evals` entries, and runs do not line up in `openmerit history`.
+7. **Configure would have switched all five agents.** Scout asked "Coding agent: anthropic/claude-sonnet-5.5 → z-ai/glm-5.3-flash", then previewed a one-line edit to `src/models.ts` line 15. That line is the shared `SONNET` constant used by enrollment, intake, coding, adjudication and fraud. Nothing warned that four agents Scout never evaluated would change too, or that the `decision` text would go stale. We declined at "Apply this change to Coding agent?"; the two-step confirmation is what saved us.
+8. **Minor issues.** `openmerit setup --help` printed "Unknown option '--help'". Setup's Langfuse URL defaults to `https://cloud.langfuse.com` even with `LANGFUSE_BASE_URL` set to the US region. Setup says nothing when it skips MCP registration because neither `claude` nor `codex` is on `PATH`. Ours is in `node_modules/.bin`, and a rerun with it on `PATH` registered and connected.
+9. **Not OpenMerit issues.** The orb's npm global bin directory was not on `PATH`. Claude Code's self-reported turn costs did not match OpenRouter's meter, so we report spend from the key.
+
+**Spend.** The OpenRouter key's usage rose USD 13.07 during the check, under the USD 15 cap. That figure is an upper bound: the key is shared, and the account showed other usage earlier in the day. Scout eval spend settled about USD 2.03: 1.7025, 0.401 and 0.0208, plus USD 1.286 still counted as an unknown-cost reservation on the paused run. Harness inference across seven runs was USD 1.49. The scenario smoke run was USD 0.07. The four cached intake runs were not metered and were cents. The rest, about USD 9, was the fresh Claude Code session. Workers AI ran only under `wrangler dev`. There were no deploys, Cloudflare changes or npm changes.
+
 ## Published 0.3.10: approved mappings blocked by Metrics quota (6 Nov 2026)
 
 Installed the exact registry release and upgraded the isolated Claude setup;

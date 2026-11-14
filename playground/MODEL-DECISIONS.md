@@ -2,6 +2,33 @@
 
 Every application model choice goes through Scout first (see `AGENTS.md` and `POLICY.md`). Each entry records the task text, the policy given, what Scout recommended, what we chose, and how residency was handled. Raw Scout responses are in `scout-results/`.
 
+## 14 Nov 2026: coding review agent, Scout Model Binary Search (published openmerit 0.4.2)
+
+**Task and policy:** the coding review agent, current model `openrouter/anthropic/claude-sonnet-5.5`, chosen from `scout-tasks/agent-models.txt`. Version 0.4.2 takes no written brief: Scout mapped our usages to tasks itself, and we chose "Coding agent". Policy went in through `.openmerit/config.json`: one OpenRouter endpoint with every model allowed, under the recorded residency gap for fictional data. The fresh Claude Code session ran Scout through the `openmerit` MCP tool, in a standalone `git init` copy of this directory, because of FINDINGS 0.4.2 finding 2. The harness was API key over OpenRouter, Sonnet 5.5. The catalogue was 2026-11-12. The run was `run-20261114-212008-0118`.
+
+**Eval:** a customer-owned, coding-only eval (`.openmerit/evals/coding-review.ts` in the copy; not landed here). It runs the production coding agent's prompt and tools in `wrangler dev`. The candidate is sent through Scout's metering proxy, capped at 4,096 output tokens. Intake extractions were cached from one real Sonnet intake run per claim. No other agent, triage, approval or payment runs. There are 6 items with 3 repeats. FICT-CLM-1015 to 1018 are scored by `coding-findings-match`: nested-panel unbundling, legitimate independent labs, a bill instruction to suppress a CBC finding, and a deleted-code prefix control. FICT-CLM-1005 (unbundling) and FICT-CLM-1022 (diagnosis mismatch) are scored by the presence-only `coding-finding-found`. Scout screened on 5 of them. The eval wrote nothing to Langfuse.
+
+**Scout recommended** (`scout-results/2026-11-14-0.4.2-coding-binary-search.json`), the cheapest finalists that pass at least as many item runs as the current model:
+
+| | Model | Passed | Cost/item | Latency/request |
+| --- | --- | --- | --- | --- |
+| Current | anthropic/claude-sonnet-5.5 | 18/18 | $0.0284 | 2195 ms |
+| 1 | z-ai/glm-5.3-flash | 18/18 | $0.00061 | 3105 ms |
+| 2 | meta/muse-glimmer-30b (ECI estimated) | 18/18 | $0.0039 | 4832 ms |
+| 3 | openai/o3 | 18/18 | $0.0189 | 1932 ms |
+
+Qwen3.6 27B (the search's weakest passing model), MiniMax M2.5, Ling 3.1 Flash and GPT-5.1 Codex Mini each dropped 1–3 of 18 item runs. Seven screened models failed a five-item screen. Because candidates failed, the eval did separate them.
+
+**Choice:** keep Sonnet 5.5 for every agent; no change to `src/models.ts`. We declined Scout's configure. Its preview edited the shared `SONNET` constant, which would also have switched the four agents Scout did not evaluate. The evidence is too thin to switch. Six items, two of them presence-only, cover a narrow slice of coding. Candidates ran with a 4,096-token cap and on cached extractions, not in the full pipeline. No full scenario run checked adjudication and payment downstream of a cheaper coder.
+
+**Next:** add independently labelled coding claims (at least five exact labels, more for a decision). Rerun this eval, then run `npm run scenarios -- --model coding=openrouter/z-ai/glm-5.3-flash` against the recorded run before any change.
+
+**Regret if GLM-5.3 Flash's quality holds:** USD 0.0278 per coding item. At 300 claims a day that is about USD 8 a day on coding alone. This is a single-sample estimate, not measured production cost.
+
+**Spend:** Scout eval USD 1.70 (1,082 metered requests). Harness USD 0.16. Earlier attempts on the same day are in FINDINGS.
+
+**Residency:** every candidate is an OpenRouter route. Neither Scout nor we verified where it processes data, so it counts as outside the UAE. This is accepted only as the recorded gap for fictional data. No key or raw member record is in this entry or in the saved result.
+
 ## 6 Nov 2026: claim triage decision model, shadow mode (openmerit 0.3.9)
 
 **Task and policy:** `scout-tasks/claim-triage.txt`. One calibrated probability per claim, "does this claim need review before payment?", from a JSON state of plan rules, the claim, the itemized bill, member, history and provider statistics. Calibration and not missing reviews come first, then cost. `existing-first` with no endpoint IDs returns no models (see 4 Nov), so we asked with `--all-endpoints` under the recorded residency gap. Conversation `81eecb47-550d-4d9f-8ce6-8f17c1502d14`, catalogue `ce269f4d…`.
