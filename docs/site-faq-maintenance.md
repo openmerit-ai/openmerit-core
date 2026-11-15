@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Acceptance fixes and real-repository fixes — npm 0.4.3 release preparation, 15 November 2026
+
+Reviewed the homepage against the 0.4.3 changes: a project in a subdirectory of its Git repository is its own project, an eval that sends no request through the metering proxy stops after one run, too-small evals are caught before spending where possible, a budget-paused run can continue at the same budget, Configure gives an instruction instead of editing a model setting other code shares, hidden key prompts no longer echo, `--help` works on every command, and Scout recognizes more model ID forms and file types. `site/index.html` still has no FAQ block and makes no claim about any of these, including the budget guarantee, which the approval text now limits to requests sent through the proxy. No homepage copy changes. The limits noted for 0.4.2 below still apply, and npm's `latest` stays 0.4.1 until a promotion.
+
 ## Local CLI, MCP and daemon — npm 0.4.2 release preparation, 14 November 2026
 
 Reviewed the homepage against the whole 0.4.2 package: the four entries below plus daemon start failures that name the busy port, frozen-daemon replacement, error-only daemon logs, failed runs that print their step with the resume command, and the tested platforms (Linux x64 and arm64, macOS arm64 and x64; no Windows). `site/index.html` still has no FAQ block and makes no claim about any of these, so no FAQ copy changes. Remaining limits outside this review: the homepage letter describes the hosted Scout beta ("400+ models … 200+ source feeds", while the bundled catalogue lists 349 models) and its "Try Scout" link opens a sign-in page the CLI does not use; neither is an FAQ claim, and changing them needs a copy decision and a deploy. npm's `latest` stays 0.4.1, a separate Pi-extension build, until 0.4.2 is promoted.

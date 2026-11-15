@@ -1,6 +1,6 @@
 {
   "name": "openmerit",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Find cheaper models that perform at least as well as the ones your code uses, measured with your own evals: a local CLI and MCP server built on Pi, powered by Claude Code, Codex or an API key.",
   "type": "module",
   "license": "MIT",

@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.4.3 — 2026-11-15
 
-Fixes from running the self-hosted flow on 29 open-source repositories that call models.
+Fixes from running the self-hosted flow on 29 open-source repositories that call models, and from the 0.4.2 customer acceptance check.
 
 - Scout recognizes catalogue models as SDKs and clouds write them: `openai:gpt-4.1` and `google_genai:gemini-3.5-flash-lite` (LangChain, pydantic-ai), `azure/gpt-4o`, `models/gemini-2.5-flash`, Bedrock IDs such as `us.anthropic.claude-sonnet-4-5-20250929-v1:0`, and dated snapshots such as `claude-haiku-4-5-20251001`. Until now these were unknown, so applications written this way could not be reviewed. A Configure edit keeps the `provider:` prefix. The scan also reads Elixir, Scala, Dart, Lua, Vue, Svelte, Astro, Groovy, Gradle, Kotlin script, R, Julia, Clojure, F#, Java `.properties` and Azure Bicep files, finds models written without quotes in configuration (`default-model: gpt-4o`, `OPENAI_MODEL=gpt-4o-mini`), skips YAML and TOML files that name more than 20 models as data, as it does JSON files, and no longer takes an environment variable's name, such as `AZURE_OPENAI_CHATGPT_MODEL`, for a model.
 - The model question puts models the application's own code uses first, and counts uses in tests, fixtures, recorded responses, docs and saved results apart. Ranking by every use put test and benchmark-result models first. The harness now sees the application's usages first, then examples and scripts, then tests, and catalogue models before models set at run time, and what it leaves out of tests, fixtures and docs is one "unmapped" task instead of one per file: in large repositories the production code used to fall past the first 120 usages and the task question listed dozens of unmapped test files.
