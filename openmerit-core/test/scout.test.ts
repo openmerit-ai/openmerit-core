@@ -59,7 +59,7 @@ before(async () => {
 after(() => { server.close(); });
 
 /** Scripted OpenAI Harness: maps usages by file and finds the fixture's eval (recording to Langfuse when `langfuse`). */
-function scriptedHarness(langfuse = false): Harness & { calls: string[] } {
+function scriptedHarness(langfuse = false, discover: Record<string, unknown> = {}): Harness & { calls: string[] } {
   const calls: string[] = [];
   return {
     kind: "codex", label: "codex", calls, usage: { calls: 0, costUsd: 0, unknownCost: 0, inputTokens: 0, outputTokens: 0 },
@@ -76,7 +76,7 @@ function scriptedHarness(langfuse = false): Harness & { calls: string[] } {
       }
       calls.push(`discover:${/Task: ([^:]+):/.exec(request.prompt)?.[1]}`);
       const env = [{ name: "CLASSIFIER_MODEL", value: "{{model}}" }, ...(langfuse ? [{ name: "CLASSIFY_LANGFUSE_DATASET", value: "support-tickets" }] : [])];
-      return { found: true, command: "node evals/classify.eval.ts", cwd: ".", env, threshold: null, langfuseDataset: langfuse ? "support-tickets" : "", passScore: langfuse ? "correct" : "", passMin: null, helpers: [], explanation: "npm run eval:classify", missing: "" } as T;
+      return { found: true, command: "node evals/classify.eval.ts", cwd: ".", env, threshold: null, langfuseDataset: langfuse ? "support-tickets" : "", passScore: langfuse ? "correct" : "", passMin: null, helpers: [], explanation: "npm run eval:classify", missing: "", items: null, ...discover } as T;
     },
   };
 }
@@ -446,6 +446,34 @@ test("Yes leaves a model setting that other code shares to the user, as an instr
   assert.equal(readFileSync(join(root, "src/classify.ts"), "utf8"), before);
   const manual = step.result!.configuration["ticket classifier"]!.manual!;
   assert.ok(manual.some(item => /^src\/classify\.ts:3 sets CLASSIFIER_MODEL, which 3 other places use \(.*src\/triage\.ts:2.*\): editing it would switch all of them/.test(item)), manual.join("\n"));
+});
+
+test("an eval that sends no model request through the proxy stops after one run of the current model", async () => {
+  // The eval answers from a file instead of calling the model: whatever it spends elsewhere is not metered, and it never ran the candidate.
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  writeFileSync(join(root, "evals", "offline.ts"), `console.log(JSON.stringify({ items: Array.from({ length: 10 }, (_, index) => ({ id: "t" + index, pass: true })) }));\n`);
+  const ctx = context(root, home, scriptedHarness(false, { command: "node evals/offline.ts" }));
+  requests.length = 0;
+  const { step, asked } = await drive(ctx, startRun(ctx));
+  assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
+  assert.match(asked.find(question => question.id === "approve_evals")!.detail!, /Only model requests the eval sends to OPENAI_BASE_URL \(OpenMerit's proxy\) are metered and capped/);
+  const task = step.result!.tasks[0]!;
+  assert.equal(task.status, "stopped");
+  assert.match(task.note, /After one run of the current model: the eval made no model requests through OpenMerit's proxy/);
+  assert.deepEqual(ctx.state.units(step.runId).map(unit => `${unit.role} r${unit.repeat}`), ["baseline r1"]);
+  assert.match(renderRun(ctx.state, ctx.state.getRun(step.runId)!, step), /stopped before screening any candidate/);
+});
+
+test("an eval the harness counts fewer than five items in is asked about before anything is spent", async () => {
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  const ctx = context(root, home, scriptedHarness(false, { items: 4 }));
+  requests.length = 0;
+  const { step, asked } = await drive(ctx, startRun(ctx), { eval_ticket_classifier: "skip" });
+  assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
+  assert.match(asked.find(question => question.id === "eval_ticket_classifier")!.detail!, /has 4 labelled items, and Scout screens candidates on 5 items the current model passes/);
+  assert.ok(!asked.some(question => question.id === "approve_evals"));
+  assert.equal(step.result!.tasks[0]!.status, "no_eval");
+  assert.equal(requests.length, 0, "no eval ran");
 });
 
 test("near the budget a request is refused before it is sent; decline keeps the run paused; a run-only raise continues after a restart", async () => {

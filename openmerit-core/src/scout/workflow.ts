@@ -185,7 +185,8 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 const yes = (value: Answer | undefined) => value === true || (typeof value === "string" && /^(y|yes|true|approve|ok)$/i.test(value.trim()));
 const no = (value: Answer | undefined) => value === false || (typeof value === "string" && /^(n|no|false|decline|cancel)$/i.test(value.trim()));
 const list = (value: Answer | undefined): string[] => (Array.isArray(value) ? value.map(String) : typeof value === "string" ? value.split(",").map(item => item.trim()).filter(Boolean) : []);
-const strict = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
+/** An object schema; `optional` properties may be left out of a reply. */
+const strict = (properties: Record<string, unknown>, optional: Record<string, unknown> = {}) => ({ type: "object", properties: { ...properties, ...optional }, required: Object.keys(properties), additionalProperties: false });
 const usd = (value: number | null) => (value === null ? "unknown" : `$${value.toFixed(value < 0.01 ? 5 : 4)}`);
 
 class NeedsInput {
@@ -442,14 +443,16 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
       const usages = usageById(data);
       const files = listFiles(ctx.repo.root).filter(file => /(eval|bench|test|spec|dataset|fixture|golden|score|grade|langfuse)/i.test(file)).slice(0, 200);
       const pkg = existsSync(join(ctx.repo.root, "package.json")) ? JSON.stringify((JSON.parse(readFileSync(join(ctx.repo.root, "package.json"), "utf8")) as { scripts?: unknown }).scripts ?? {}, null, 1) : "(no package.json)";
-      const reply = await harness.json<{ found: boolean; command: string; cwd: string; env: { name: string; value: string }[]; threshold: number | null; langfuseDataset: string; passScore: string; passMin: number | null; helpers: { path: string; content: string; purpose: string }[]; explanation: string; missing: string }>({
+      const reply = await harness.json<{ found: boolean; command: string; cwd: string; env: { name: string; value: string }[]; threshold: number | null; langfuseDataset: string; passScore: string; passMin: number | null; helpers: { path: string; content: string; purpose: string }[]; explanation: string; missing: string; items?: number | null }>({
         cwd: ctx.repo.root,
         system: "You are OpenMerit Harness running OpenMerit Scout's evaluation step. You find the eval a task already has and say exactly how to run it for another model. Never invent an eval, dataset or labels: if the repository has none for this task, say so.",
-        prompt: `Task: ${task.name}: ${task.description}\nUsages:\n${task.usageIds.map(id => usages.get(id)).filter((usage): usage is Usage => !!usage).map(usage => `- ${usage.value} at ${ref(usage)}\n${context(ctx.repo.root, usage, 4)}`).join("\n")}\n\npackage.json scripts: ${pkg}\nFiles that look like evals, tests or datasets:\n${files.join("\n")}\n\n${EVAL_CONTRACT}\n\nThe model under test is the one this task's usages call: the eval must send those calls to {{model}}, such as the judge's calls for a judge task, and leave its other model calls as they are. The repository's dependencies are installed, so the command runs the eval only, with no install or build step.\n\nIf the eval records its results as a Langfuse experiment (dataset run) with a per-item score, give the Langfuse dataset name and that score's name (and passMin for a numeric score with a pass bound; null when the score is boolean or 1 means pass). OpenMerit reads each item's result back from Langfuse with a read-only key, so the eval must record under the OPENMERIT_EXPERIMENT name and run only the OPENMERIT_ITEMS items when given. Otherwise leave langfuseDataset and passScore empty: the eval must then report its items itself. Only if the existing eval cannot take the model, the items or the experiment name this way may you add helper files, and only under .openmerit/evals/; they must call the existing eval code with the same inputs, prompts, tools and scoring. threshold is the minimum pass rate (0 to 1) the eval itself requires, or null. Set found false and explain in missing when there is no eval for this task.`,
-        schema: strict({ found: { type: "boolean" }, command: { type: "string" }, cwd: { type: "string" }, env: { type: "array", items: strict({ name: { type: "string" }, value: { type: "string" } }) }, threshold: { type: ["number", "null"] }, langfuseDataset: { type: "string" }, passScore: { type: "string" }, passMin: { type: ["number", "null"] }, helpers: { type: "array", items: strict({ path: { type: "string" }, content: { type: "string" }, purpose: { type: "string" } }) }, explanation: { type: "string" }, missing: { type: "string" } }),
+        prompt: `Task: ${task.name}: ${task.description}\nUsages:\n${task.usageIds.map(id => usages.get(id)).filter((usage): usage is Usage => !!usage).map(usage => `- ${usage.value} at ${ref(usage)}\n${context(ctx.repo.root, usage, 4)}`).join("\n")}\n\npackage.json scripts: ${pkg}\nFiles that look like evals, tests or datasets:\n${files.join("\n")}\n\n${EVAL_CONTRACT}\n\nThe model under test is the one this task's usages call: the eval must send those calls to {{model}}, such as the judge's calls for a judge task, and leave its other model calls as they are. Every model call of the task must go to OPENAI_BASE_URL (or OPENMERIT_BASE_URL) with OPENAI_API_KEY: OpenMerit meters and caps eval spend there, and a call that goes elsewhere, such as through a provider SDK with its own key or a deployed service, is neither metered nor made with {{model}}. If the existing eval cannot be pointed there, add a helper that is. The repository's dependencies are installed, so the command runs the eval only, with no install or build step.\n\nIf the eval records its results as a Langfuse experiment (dataset run) with a per-item score, give the Langfuse dataset name and that score's name (and passMin for a numeric score with a pass bound; null when the score is boolean or 1 means pass). OpenMerit reads each item's result back from Langfuse with a read-only key, so the eval must record under the OPENMERIT_EXPERIMENT name and run only the OPENMERIT_ITEMS items when given. Otherwise leave langfuseDataset and passScore empty: the eval must then report its items itself. Only if the existing eval cannot take the model, the items or the experiment name this way may you add helper files, and only under .openmerit/evals/; they must call the existing eval code with the same inputs, prompts, tools and scoring. threshold is the minimum pass rate (0 to 1) the eval itself requires, or null. items is how many labelled items the eval runs in all, or null when you cannot tell from the repository. Set found false and explain in missing when there is no eval for this task.`,
+        schema: strict({ found: { type: "boolean" }, command: { type: "string" }, cwd: { type: "string" }, env: { type: "array", items: strict({ name: { type: "string" }, value: { type: "string" } }) }, threshold: { type: ["number", "null"] }, langfuseDataset: { type: "string" }, passScore: { type: "string" }, passMin: { type: ["number", "null"] }, helpers: { type: "array", items: strict({ path: { type: "string" }, content: { type: "string" }, purpose: { type: "string" } }) }, explanation: { type: "string" }, missing: { type: "string" } }, { items: { type: ["number", "null"] } }),
       });
-      if (!reply.found || !reply.command?.trim()) {
-        data[`asked_${key}`] = reply.missing || "The harness found no eval for this task.";
+      // Too few items to screen on is known before any spend: ask, so the user can give a larger eval, insist on this one or skip.
+      const tooSmall = reply.found && typeof reply.items === "number" && reply.items < SAMPLE_SIZE;
+      if (!reply.found || !reply.command?.trim() || tooSmall) {
+        data[`asked_${key}`] = tooSmall ? `The eval the harness found (\`${redact(reply.command.trim())}\`) has ${reply.items} labelled item${reply.items === 1 ? "" : "s"}, and Scout screens candidates on ${SAMPLE_SIZE} items the current model passes, so it would stop after paying for the current model's first run. Add labelled items, then give the command; or give it anyway if that count is wrong.` : reply.missing || "The harness found no eval for this task.";
         missing.push(evalQuestion(name, String(data[`asked_${key}`])));
         save();
         continue;
@@ -688,6 +691,14 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     }
     const passes = Object.values(results).filter(Boolean).length, total = Object.keys(results).length;
     const result: UnitResult = { items: results, passes, total, source, experiment, requests: tally.requests, durationMs: outcome.durationMs, cutOff: tally.cutOff };
+    // An eval that sends no request through the proxy did not use the model under test, and its spend was neither metered nor capped.
+    if (!tally.requests) {
+      const unmetered = `the eval made no model requests through OpenMerit's proxy (OPENAI_BASE_URL), so ${entry.endpointModel} was not what it ran, and any spend was not metered or capped by the budget`;
+      state.setUnit(id, kind === "baseline" ? { status: "done", result: result as unknown as Record<string, unknown> } : { status: "unavailable", error: unmetered });
+      save();
+      if (kind !== "baseline") throw new CandidateUnavailable(unmetered);
+      throw new StopTask(`After one run of the current model: ${unmetered}. Make the eval send this task's model calls to OPENAI_BASE_URL with OPENAI_API_KEY, then run \`openmerit scout\` again.`);
+    }
     state.setUnit(id, { status: "done", result: result as unknown as Record<string, unknown> });
     ctx.log(`  ${passes}/${total} · ${usd(state.spend(runId).totalUsd)} of $${state.getRun(runId)!.budgetUsd.toFixed(2)}`);
     save();
@@ -704,6 +715,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
       data.datasetItems![task] = await viewer.datasetItemIds(plan.langfuse.dataset);
       save();
     }
+    if (plan.langfuse && data.datasetItems![task]!.length < SAMPLE_SIZE) throw new StopTask(`The Langfuse dataset ${plan.langfuse.dataset} has ${data.datasetItems![task]!.length} item(s); Scout screens candidates on ${SAMPLE_SIZE} items the current model passes, so nothing was run. Add labelled items.`);
     // Screens draw from items the current model passes in every run, so a 5/5 screen asks whether a candidate keeps up with it.
     const baseline: UnitResult[] = [];
     const reliableItems = () => Object.keys(baseline[0]!.items).filter(item => baseline.every(run => run.items[item] === true));
@@ -856,7 +868,7 @@ function approvalQuestion(ctx: Context, runId: string, data: RunState): Question
   return {
     id: "approve_evals", kind: "confirm", default: false,
     prompt: "Run these evals? They make paid requests.",
-    detail: `${sections.join("\n\n")}\n\nSent to: ${[...destinations].join(", ")}. Budget: $${run.budgetUsd.toFixed(2)}; requests past it are refused.`,
+    detail: `${sections.join("\n\n")}\n\nSent to: ${[...destinations].join(", ")}. Budget: $${run.budgetUsd.toFixed(2)}; requests past it are refused. Only model requests the eval sends to OPENAI_BASE_URL (OpenMerit's proxy) are metered and capped: a task whose eval sends none there stops after one run of the current model.`,
   };
 }
 
