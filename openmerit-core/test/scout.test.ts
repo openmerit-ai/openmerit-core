@@ -484,6 +484,49 @@ test("near the budget a request is refused before it is sent; decline keeps the 
   assert.equal(readRepoConfig(root).budget?.defaultUsd, 0.5);
 });
 
+test("a run paused by one request's output limit says so, and continues at the same budget once the eval asks for less", async () => {
+  // The classifier asks for up to 2000 output tokens: at gpt-4.1-mini's list price that reservation alone passes a $0.003 budget.
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  const ctx = context(root, home);
+  const runId = startRun(ctx);
+  ctx.state.updateRun(runId, { budgetUsd: 0.003 });
+  requests.length = 0;
+  const paused = await drive(ctx, runId);
+  assert.equal(paused.step.status, "budget_paused");
+  assert.equal(requests.length, 0, "the first request is refused before it is sent");
+  const question = paused.step.questions.find(item => item.id === "budget_action")!;
+  assert.match(question.detail!, /A request needed about \$0\.00\d+ for up to 2000 output tokens\. Scout reserves each request's cost at its max_tokens/);
+  assert.ok(question.options!.some(option => option.value === "continue"));
+
+  // Continuing unchanged pauses again without sending anything; after the eval asks for 20 tokens, it runs at the same budget.
+  assert.equal((await advance(ctx, runId, { budget_action: "continue" })).status, "budget_paused");
+  assert.equal(requests.length, 0);
+  const source = join(root, "src", "classify.ts");
+  writeFileSync(source, readFileSync(source, "utf8").replace("max_completion_tokens: 2000", "max_completion_tokens: 20"));
+  await advance(ctx, runId, { budget_action: "continue" });
+  assert.ok(requests.length >= 10, `the current model ran (${requests.length} requests)`);
+  assert.equal(ctx.state.units(runId).find(unit => unit.role === "baseline" && unit.repeat === 1)!.status, "done");
+  assert.equal(ctx.state.getRun(runId)!.budgetUsd, 0.003, "the budget did not change");
+});
+
+test("the metering proxy estimates an answer without token usage by its size, not at the request's maximum", async () => {
+  const ctx = context(repo(), mkdtempSync(join(tmpdir(), "openmerit-home-")));
+  const runId = startRun(ctx);
+  const nano = loadCatalogue().models.find(model => model.id === "openai/gpt-5-nano")!;
+  // An endpoint that answers without a usage block, as some providers and streams do.
+  const bare = (async () => new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "billing" } }] }), { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+  const proxy = new EvalProxy(ctx.state, bare);
+  const url = await proxy.start();
+  const { token } = proxy.open({ runId, unitId: "unit", endpointId: "openai", baseUrl, apiKey: "sk-fake-endpoint", model: "gpt-5-nano", allowed: () => nano });
+  const answer = await fetch(`${url}/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ model: "gpt-5-nano", max_completion_tokens: 128000, messages: [{ role: "user", content: "I was charged twice." }] }) });
+  assert.equal(answer.status, 200);
+  await proxy.stop();
+  const spend = ctx.state.spend(runId);
+  const reserved = (128000 * nano.outputPerM!) / 1e6;
+  assert.deepEqual([spend.unknown, spend.inFlight], [0, 0]);
+  assert.ok(spend.estimatedUsd > 0 && spend.totalUsd < reserved / 1000, `estimated $${spend.totalUsd}, reserved $${reserved}`);
+});
+
 test("the ledger refuses the first request that would pass the budget, exactly at the boundary", () => {
   const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
   const ctx = context(root, home);

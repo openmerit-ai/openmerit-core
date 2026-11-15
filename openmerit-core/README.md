@@ -162,10 +162,10 @@ writeFileSync(process.env.OPENMERIT_RESULT, JSON.stringify({ items }));
 
 ### Eval budget
 
-- Before forwarding a request, the proxy reserves its expected cost in SQLite: prompt size and the request's maximum output at list price, or 4,096 output tokens when the request sets no maximum. A request that would pass the run's budget is refused before it is sent. The run then pauses and asks to raise the budget for **this run only** or **as the new default**.
+- Before forwarding a request, the proxy reserves its expected cost in SQLite: prompt size and the request's maximum output at list price, or 4,096 output tokens when the request sets no maximum. A request that would pass the run's budget is refused before it is sent. The run then pauses and asks to raise the budget for **this run only** or **as the new default**, or to **keep the budget and continue**. The question says how much the refused request needed and for how many output tokens: agent frameworks often send the model's whole output limit (such as `max_completion_tokens: 128000`), and Scout reserves that at list price, so one such request can pause a run that has spent little. Lower the limit in the eval, then continue at the same budget; a request that still does not fit pauses again.
 - Declining, or not answering, leaves the run paused. Spending is never silent, and the default never changes without that choice.
-- Each settled request records the provider-reported cost (OpenRouter), or a list-price estimate from the reported tokens (OpenAI-style endpoints, marked `~`).
-- A request cut off by an interruption stays counted at its reservation, as in-flight spend of unknown cost.
+- Each settled request records the provider-reported cost (OpenRouter), or a list-price estimate from the reported tokens (OpenAI-style endpoints, marked `~`). An answer that reports no token usage, or that the connection cut off part-way, is estimated from the bytes sent and received at list price (about three bytes a token), not counted at its maximum.
+- A request cut off because OpenMerit itself stopped, such as a killed daemon, stays counted at its reservation, as in-flight spend of unknown cost.
 - Usage, budget changes and approvals survive restarts. A finished eval run is never repeated. Failed or interrupted runs are repeated only after you approve it, with their earlier cost shown.
 - After a budget raise, a paused eval run starts again from its beginning, because an eval command cannot resume halfway. The question says so.
 - This is OpenMerit's ledger, not a cap your provider enforces.

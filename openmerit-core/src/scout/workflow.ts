@@ -594,7 +594,11 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
       state.budgetEvent(runId, { kind: "decline", fromUsd: run.budgetUsd, spentUsd: spent });
       throw new NeedsInput([], "budget_paused", [`Budget not raised. The run stays paused at $${spent.toFixed(4)} of $${run.budgetUsd.toFixed(2)}; continue later with \`openmerit scout --resume ${runId}\`.`]);
     }
-    if ((action === "run" || action === "default") && Number.isFinite(amount) && amount > run.budgetUsd) {
+    if (action === "continue") {
+      // After the eval asks for fewer output tokens, its requests may fit the same budget; one that does not pauses again.
+      for (const unit of paused) state.setUnit(unit.id, { status: "pending" });
+      state.event(runId, "budget", `Continued at the same budget of $${run.budgetUsd.toFixed(2)}; ${paused.length} paused eval run(s) try again.`);
+    } else if ((action === "run" || action === "default") && Number.isFinite(amount) && amount > run.budgetUsd) {
       state.updateRun(runId, { budgetUsd: amount });
       state.budgetEvent(runId, { kind: "raise", fromUsd: run.budgetUsd, toUsd: amount, scope: action, spentUsd: spent });
       if (action === "default") updateRepoConfig(ctx.repo.root, { budget: { defaultUsd: amount } });
@@ -641,7 +645,8 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     let outcome;
     try { outcome = await runEval(plan, { root: ctx.repo.root, model: entry.endpointModel, baseUrl: proxyUrl, token, items, experiment, env: ctx.env, ...(ctx.signal ? { signal: ctx.signal } : {}) }); } finally { proxy.close(token); }
     if (tally.budgetHit) {
-      state.setUnit(id, { status: "budget_paused", error: "Paused: the eval budget was reached." });
+      const need = tally.refusedLargest;
+      state.setUnit(id, { status: "budget_paused", error: `Paused: the eval budget was reached${need ? `; a request needed about $${need.usd.toFixed(4)} for up to ${need.outputTokens} output tokens` : ""}.` });
       const run = state.getRun(runId)!, spend = state.spend(runId);
       state.budgetEvent(runId, { kind: "alert", fromUsd: run.budgetUsd, spentUsd: spend.totalUsd });
       state.event(runId, "budget", `Eval budget reached: $${spend.totalUsd.toFixed(4)} of $${run.budgetUsd.toFixed(2)}. Further paid eval requests are paused.`);
@@ -874,10 +879,12 @@ export function logTail(error: string | null | undefined, lines = 8): string {
 function budgetQuestions(ctx: Context, runId: string): Question[] {
   const run = ctx.state.getRun(runId)!;
   const spend = ctx.state.spend(runId);
+  const why = ctx.state.units(runId).filter(unit => unit.status === "budget_paused").map(unit => unit.error ?? "").find(error => error.includes("output tokens"));
   return [
     { id: "budget_action", kind: "choice", prompt: `Budget of $${run.budgetUsd.toFixed(2)} reached. Raise it?`,
-      detail: `Used $${(spend.settledUsd + spend.inFlightUsd).toFixed(4)}${spend.estimatedUsd > 0 || spend.inFlight || spend.unknown ? " (partly estimated)" : ""}.`,
-      options: [{ value: "run", label: "This run only" }, { value: "default", label: "This run and future runs" }, { value: "decline", label: "Keep paused" }] },
+      // Scout reserves each request's most expensive outcome before sending it, so one request asking for the model's whole output limit can pause a run that has spent little.
+      detail: `Used $${(spend.settledUsd + spend.inFlightUsd).toFixed(4)}${spend.estimatedUsd > 0 || spend.inFlight || spend.unknown ? " (partly estimated)" : ""}.${why ? ` ${why.replace(/^Paused: the eval budget was reached; a/, "A")} Scout reserves each request's cost at its max_tokens before sending it; if the eval asks for far more than it needs, as agent frameworks that send the model's limit do, lower it and choose "Keep the budget and continue".` : ""}`,
+      options: [{ value: "run", label: "This run only" }, { value: "default", label: "This run and future runs" }, { value: "continue", label: "Keep the budget and continue (after lowering the eval's max tokens)" }, { value: "decline", label: "Keep paused" }] },
     { id: "budget_amount", kind: "text", prompt: "New budget (USD)", default: String(Math.max(run.budgetUsd * 2, run.budgetUsd + 5)) },
   ];
 }
