@@ -23,7 +23,7 @@ import { DEFAULT_BUDGET_USD, DEFAULT_REPEATS, readRepoConfig, resolveCredential,
 import type { RunStatus, Spend, State, UnitRow } from "../state/db.ts";
 import type { Repo } from "../state/paths.ts";
 import { allowedOn, baselineEndpoint, blendedPrice, pool, type PoolModel } from "./pool.ts";
-import { context, isExampleFile, isSupportFile, listFiles, redact, scanRepo, type ScanResult, type Usage } from "./scan.ts";
+import { context, isExampleFile, isSupportFile, listFiles, redact, scanRepo, sourceFiles, type ScanResult, type Usage } from "./scan.ts";
 import { binarySearch, CandidateUnavailable, CHALLENGERS, challengers, FINALISTS, order, SAMPLE_SIZE, type Stage } from "./search.ts";
 
 export type Answer = string | string[] | boolean | number;
@@ -1007,13 +1007,46 @@ function planEdit(ctx: Context, data: RunState, comparison: TaskComparison, winn
     const target = `${/^[a-z][a-z_-]*:(?!\/)/i.exec(usage.value)?.[0] ?? ""}${style === "openrouter" ? winner.model : winner.endpointModel}`;
     if (usage.dynamic && !usage.catalogueId) { manual.push(`${ref(usage)} reads ${usage.envVar ?? usage.value} at run time: set it to ${winner.endpointModel} where that environment is configured (OpenMerit cannot change your shell's environment).`); continue; }
     if (!sameEndpoint || (style === "openrouter") !== (endpoint.kind === "openrouter")) { manual.push(`${ref(usage)} calls a different endpoint than ${endpoint.id}: switching needs an endpoint change too. Point it at ${endpoint.baseUrl} and use model ${winner.endpointModel}.`); continue; }
-    const raw = readFileSync(join(ctx.repo.root, usage.file), "utf8").split("\n")[usage.line - 1] ?? "";
+    const lines = readFileSync(join(ctx.repo.root, usage.file), "utf8").split("\n");
+    const raw = lines[usage.line - 1] ?? "";
     const quoted = new RegExp(`(["'\`])${usage.value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\1`);
     if (!quoted.test(raw)) { manual.push(`${ref(usage)}: change ${usage.value} to ${target} by hand.`); continue; }
+    // Never switch code Scout did not evaluate for this task: a line other tasks use, or a module-level setting used in several places.
+    const others = data.tasks!.filter(other => other.name !== task.name && other.usageIds.includes(usage.id)).map(other => other.name);
+    if (others.length) { manual.push(`${ref(usage)} also serves ${others.join(", ")}: editing it would switch ${others.length === 1 ? "that task" : "those tasks"} too, which Scout did not evaluate. Give ${task.name} its own model setting of ${target}, or change it by hand if all of them should switch.`); continue; }
+    const shared = sharedDefinition(ctx, usage, lines);
+    if (shared) { manual.push(`${ref(usage)} sets ${shared.name}, which ${shared.uses.length} other places use (${shared.uses.slice(0, 3).join(", ")}${shared.uses.length > 3 ? ", …" : ""}): editing it would switch all of them, not only ${task.name}. Give ${task.name} its own model setting of ${target}, or change ${shared.name} by hand if every use should switch.`); continue; }
     edits.push({ file: usage.file, line: usage.line, before: redact(raw), after: redact(raw.replace(quoted, `$1${target}$1`)), hash: hash(raw), from: usage.value, to: target });
     if (usage.envVar) manual.push(`${ref(usage)}: ${usage.envVar} overrides this default when it is set; update it too if your environment sets it.`);
   }
   return { edits, manual };
+}
+
+/**
+ * When the model literal is part of a module-level setting (`const SONNET = { id: "…" }`, `MODEL = "…"`) used in more
+ * than one other place, its name and those places: editing it would switch every one of them. Null otherwise, including
+ * literals inside a function or call, which only that code uses.
+ */
+function sharedDefinition(ctx: Context, usage: Usage, lines: readonly string[]): { name: string; uses: string[] } | null {
+  // The top-level statement the literal belongs to: the nearest line at or above it that is not indented.
+  let start = usage.line - 1;
+  while (start > 0 && start > usage.line - 60 && /^\s/.test(lines[start] ?? "")) start--;
+  const declared = /^(?:export\s+)?(?:(?:const|let|var|final|static|val)\s+)?([A-Za-z_$][\w$]*)\s*(?::[^=]*)?=(?![=>])/.exec(lines[start] ?? "");
+  const name = declared?.[1];
+  if (!name || /^(?:if|for|while|return|module)$/.test(name)) return null;
+  const pattern = new RegExp(`(?<![\\w$.])${name.replace(/\$/g, "\\$")}(?![\\w$])`, "g");
+  const uses: string[] = [];
+  for (const file of sourceFiles(ctx.repo.root, repoConfig(ctx).scan?.exclude ?? [])) {
+    let text: string;
+    try { text = readFileSync(join(ctx.repo.root, file), "utf8"); } catch { continue; }
+    if (text.length > 512_000 || !text.includes(name)) continue;
+    text.split("\n").forEach((line, index) => {
+      // The declaration itself, from its first line to the literal, is not a use.
+      if (file === usage.file && index >= start && index <= usage.line - 1) return;
+      for (const _ of line.matchAll(pattern)) uses.push(`${file}:${index + 1}`);
+    });
+  }
+  return uses.length > 1 ? { name, uses } : null;
 }
 
 const diff = (edits: NonNullable<ConfigureState["edits"]>) => edits.map(edit => `--- a/${edit.file}\n+++ b/${edit.file}\n@@ line ${edit.line} @@\n-${edit.before}\n+${edit.after}`).join("\n");
