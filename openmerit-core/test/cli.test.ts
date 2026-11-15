@@ -1,4 +1,4 @@
-// Update prompts, the stdio MCP server and the read-only Langfuse connector. No network: a local
+// Terminal prompts, update prompts, the stdio MCP server and the read-only Langfuse connector. No network: a local
 // HTTP server stands in for the npm registry, and Langfuse is a fake fetch.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
@@ -7,12 +7,31 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { PassThrough } from "node:stream";
 import { test } from "node:test";
+import { terminalPrompter } from "../src/cli/prompt.ts";
 import { createLangfuseConnector } from "../src/connectors/langfuse/index.ts";
 import { claudeBinary } from "../src/harness/claude-bridge.ts";
 import { checkForUpdate, newer, offerUpdate, packageVersion } from "../src/update.ts";
 
 const cli = new URL("../src/cli.ts", import.meta.url).pathname;
+test("a secret typed at a terminal prompt is not echoed", async () => {
+  const input = Object.assign(new PassThrough(), { isTTY: true, setRawMode: () => input });
+  let shown = "";
+  const output = Object.assign(new PassThrough(), { isTTY: true, columns: 80 });
+  output.on("data", chunk => { shown += String(chunk); });
+  const prompter = terminalPrompter(input, output);
+  const answer = prompter.secret("API key (input hidden):");
+  input.write("sk-typed-secret\r");
+  assert.equal(await answer, "sk-typed-secret");
+  const name = prompter.ask("Name?");
+  input.write("visible\r");
+  assert.equal(await name, "visible");
+  prompter.close();
+  assert.ok(shown.includes("API key (input hidden):") && shown.includes("visible"), shown);
+  assert.ok(!shown.includes("sk-typed-secret"), shown);
+});
+
 const offline = (async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;
 
 test("version comparison, and offline or failing registries continue on the installed version", async () => {

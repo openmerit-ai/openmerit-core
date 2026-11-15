@@ -14,6 +14,7 @@ Fixes from running the self-hosted flow on 29 open-source repositories that call
 - The harness is told that the eval must send the task's own model calls to the model under test, such as a judge task's judge calls, and that the eval command must not install dependencies. It had proposed an MT-bench eval that varied the answering model for the judge task, and a PHP eval that ran `composer install` before every run.
 - `openmerit setup` and `openmerit connect` name the settings file they wrote under `OPENMERIT_HOME` when it is set, instead of always `~/.openmerit/config.json`.
 - When an eval fails, the retry question and `openmerit history <run>` show the last lines it printed, such as a missing dependency, instead of only its exit code. A comparison whose current model's eval failed says to run `openmerit scout` again rather than to resume the finished run.
+- From the 0.4.2 customer acceptance check: a key typed at an "input hidden" prompt, such as `openmerit connect`'s API key or setup's Langfuse and endpoint keys, is no longer shown on the terminal. In 0.4.2 it was echoed as you typed it, although it was stored correctly.
 
 ## 0.4.2 — 2026-11-14
 
