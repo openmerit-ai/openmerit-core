@@ -199,7 +199,7 @@ async function daemon(args: string[]) {
 }
 
 async function main() {
-  if (command === "help" || command === "--help" || command === "-h") return void process.stdout.write(`${HELP}\n`);
+  if (command === "help" || command === "--help" || command === "-h" || rest.includes("--help") || rest.includes("-h")) return void process.stdout.write(`${HELP}\n`);
   if (command === "--version" || command === "-v" || command === "version") return void process.stdout.write(`${(await import("./update.ts")).packageVersion()}\n`);
   if (command === "mcp") return (await import("./mcp.ts")).serveMcp();
   if (command === "daemon") return daemon(rest);

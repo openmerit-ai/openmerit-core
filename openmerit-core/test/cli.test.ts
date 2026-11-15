@@ -32,6 +32,14 @@ test("a secret typed at a terminal prompt is not echoed", async () => {
   assert.ok(!shown.includes("sk-typed-secret"), shown);
 });
 
+test("--help after a command prints the usage instead of failing", () => {
+  const home = mkdtempSync(join(tmpdir(), "openmerit-help-"));
+  for (const args of [["setup", "--help"], ["scout", "-h"]]) {
+    const out = execFileSync(process.execPath, [cli, ...args], { encoding: "utf8", env: { ...process.env, OPENMERIT_HOME: home, OPENMERIT_NO_UPDATE_CHECK: "1" } });
+    assert.match(out, /Setup options/);
+  }
+});
+
 const offline = (async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;
 
 test("version comparison, and offline or failing registries continue on the installed version", async () => {
