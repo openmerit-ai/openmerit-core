@@ -434,6 +434,20 @@ test("Yes previews and applies only the approved edit", async () => {
   assert.ok(step.result!.configuration["ticket classifier"]!.manual!.some(item => item.includes("CLASSIFIER_MODEL")));
 });
 
+test("Yes leaves a model setting that other code shares to the user, as an instruction instead of an edit", async () => {
+  // CLASSIFIER_MODEL becomes a shared setting: the classifier and a second job Scout never evaluated both use it.
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  writeFileSync(join(root, "src", "triage.ts"), `import { CLASSIFIER_MODEL } from "./classify.ts";\nexport const triageModel = CLASSIFIER_MODEL;\n`);
+  const ctx = context(root, home);
+  const before = readFileSync(join(root, "src/classify.ts"), "utf8");
+  const { step, asked } = await drive(ctx, startRun(ctx), { configure_ticket_classifier: true });
+  assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
+  assert.ok(!asked.some(question => question.id === "apply_ticket_classifier"), "nothing to apply");
+  assert.equal(readFileSync(join(root, "src/classify.ts"), "utf8"), before);
+  const manual = step.result!.configuration["ticket classifier"]!.manual!;
+  assert.ok(manual.some(item => /^src\/classify\.ts:3 sets CLASSIFIER_MODEL, which 3 other places use \(.*src\/triage\.ts:2.*\): editing it would switch all of them/.test(item)), manual.join("\n"));
+});
+
 test("near the budget a request is refused before it is sent; decline keeps the run paused; a run-only raise continues after a restart", async () => {
   const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
   const ctx = context(root, home);

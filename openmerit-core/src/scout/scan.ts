@@ -108,11 +108,16 @@ const ENDPOINT_HOSTS = /(api\.openai\.com|openrouter\.ai|api\.anthropic\.com|gen
 const BASE_URL_KEY = /\b(base_?url|baseURL|api_?base|endpoint)\b["']?\s*(?::|=(?!=))\s*([^\n,;]+)/i;
 
 /** Scans the repository. Deterministic; no model is called. */
+/** The text files a scan reads: not ignored by Git, not lockfiles or minified, not under `exclude`. */
+export function sourceFiles(root: string, exclude: readonly string[] = []): string[] {
+  return listFiles(root).filter(file => isText(file) && !SKIP_FILES.test(file) && !excluded(file, exclude));
+}
+
 export function scanRepo(root: string, catalogue: Catalogue, options: ScanOptions = {}): ScanResult {
   const index = catalogueIndex(catalogue);
   const usages: Usage[] = [];
   const skipped: string[] = [];
-  const files = listFiles(root).filter(file => isText(file) && !SKIP_FILES.test(file) && !excluded(file, options.exclude ?? []));
+  const files = sourceFiles(root, options.exclude ?? []);
   let scanned = 0;
   for (const file of files) {
     const path = join(root, file);
