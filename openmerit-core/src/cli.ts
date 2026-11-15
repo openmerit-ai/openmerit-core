@@ -150,7 +150,7 @@ async function scout(args: string[]) {
         // The comparison comes before the question whether to configure its result.
         if (result.result && !compared) { process.stdout.write(`${result.result.tasks.map(task => renderComparison(task, runId)).join("\n\n")}\n`); compared = true; }
         for (const question of result.questions) {
-          if (question.id === "budget_amount" && answers.budget_action === "decline") continue;
+          if (question.id === "budget_amount" && (answers.budget_action === "decline" || answers.budget_action === "continue")) continue;
           answers[question.id] = await askQuestion(prompter, question, log);
         }
         continue;

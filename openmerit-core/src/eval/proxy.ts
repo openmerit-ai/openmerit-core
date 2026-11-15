@@ -28,6 +28,8 @@ export interface UnitTally {
   requests: number; refused: number; budgetHit: boolean; poolViolations: string[]; upstreamErrors: number[];
   /** Answers the output token limit cut off before any text, as when the provider has the model reason first. */
   cutOff: number;
+  /** The largest request refused on the budget: what it needed, and the output tokens it allowed. */
+  refusedLargest?: { usd: number; outputTokens: number };
 }
 
 /** Assumed output tokens when a request sets no maximum; reasoning models can use many. */
@@ -35,11 +37,17 @@ export const DEFAULT_OUTPUT_TOKENS = 4096;
 /** Reservation for a request whose price is unknown. */
 export const UNKNOWN_PRICE_RESERVATION_USD = 0.05;
 
-export function expectedCost(model: CatalogueModel | null | undefined, body: Record<string, unknown>, bodyBytes: number): { usd: number; priced: boolean } {
-  const output = [body.max_completion_tokens, body.max_tokens, body.max_output_tokens].find(value => typeof value === "number" && value > 0) as number | undefined;
-  const price = requestPrice(model ?? null, Math.ceil(bodyBytes / 3), output ?? DEFAULT_OUTPUT_TOKENS);
-  return price === null ? { usd: UNKNOWN_PRICE_RESERVATION_USD, priced: false } : { usd: price, priced: true };
+export function expectedCost(model: CatalogueModel | null | undefined, body: Record<string, unknown>, bodyBytes: number): { usd: number; priced: boolean; outputTokens: number } {
+  const output = ([body.max_completion_tokens, body.max_tokens, body.max_output_tokens].find(value => typeof value === "number" && value > 0) as number | undefined) ?? DEFAULT_OUTPUT_TOKENS;
+  const price = requestPrice(model ?? null, Math.ceil(bodyBytes / 3), output);
+  return price === null ? { usd: UNKNOWN_PRICE_RESERVATION_USD, priced: false, outputTokens: output } : { usd: price, priced: true, outputTokens: output };
 }
+
+/**
+ * A list-price estimate from the bytes sent and received, for an answer that reports no token usage (or was cut off):
+ * about three bytes a token, which overcounts JSON and SSE framing. Null when the model has no price.
+ */
+export const sizeEstimate = (model: CatalogueModel | null | undefined, sentBytes: number, receivedBytes: number) => requestPrice(model ?? null, Math.ceil(sentBytes / 3), Math.ceil(receivedBytes / 3));
 
 /** Token counts and provider cost from an OpenAI-style (or OpenRouter) response body or SSE stream. */
 export function readUsage(text: string): { input: number; output: number; costUsd: number | null } | null {
@@ -155,43 +163,54 @@ export class EvalProxy {
     const reservation = this.state.reserve({ runId: unit.runId, unitId: unit.unitId, model, endpoint: unit.endpointId, expectedUsd: expected.usd });
     if (!reservation.ok) {
       tally.refused++; tally.budgetHit = true;
+      if (!tally.refusedLargest || expected.usd > tally.refusedLargest.usd) tally.refusedLargest = { usd: expected.usd, outputTokens: expected.outputTokens };
       return send(res, 402, `OpenMerit eval budget reached: $${reservation.spend.totalUsd.toFixed(4)} used or reserved of $${reservation.budgetUsd.toFixed(2)}; this request needs about $${expected.usd.toFixed(4)}. Paid evaluation is paused until the budget is raised.`, "openmerit_budget");
     }
     tally.requests++;
     const started = Date.now();
-    const forward = () => this.fetcher(`${unit.baseUrl.replace(/\/$/, "")}${path}`, {
-      method: "POST", body: forwarded, redirect: "manual", signal: AbortSignal.timeout(600_000),
-      headers: { authorization: `Bearer ${unit.apiKey}`, "content-type": "application/json", accept: req.headers.accept ?? "application/json", ...(unit.baseUrl.includes("openrouter.ai") ? { "x-title": "OpenMerit Scout eval" } : {}) },
-    }).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
-    // A failed call that may pass is sent again, so the eval only sees failures that last; failed calls are not charged.
-    let upstream = await forward();
-    for (let attempt = 0; attempt < MODEL_CALL_RETRIES && (upstream instanceof Error || retryable(upstream.status)); attempt++) {
-      if (!(upstream instanceof Error)) await upstream.body?.cancel();
-      await sleep(retryDelayMs(upstream instanceof Error ? null : upstream.headers.get("retry-after"), attempt));
-      upstream = await forward();
+    // Every reservation is settled, even when the endpoint or the eval drops the connection part-way.
+    let settled = false, received = 0;
+    const settle = (cost: Parameters<State["settle"]>[1]) => { settled = true; this.state.settle(reservation.id, cost); };
+    try {
+      const forward = () => this.fetcher(`${unit.baseUrl.replace(/\/$/, "")}${path}`, {
+        method: "POST", body: forwarded, redirect: "manual", signal: AbortSignal.timeout(600_000),
+        headers: { authorization: `Bearer ${unit.apiKey}`, "content-type": "application/json", accept: req.headers.accept ?? "application/json", ...(unit.baseUrl.includes("openrouter.ai") ? { "x-title": "OpenMerit Scout eval" } : {}) },
+      }).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+      // A failed call that may pass is sent again, so the eval only sees failures that last; failed calls are not charged.
+      let upstream = await forward();
+      for (let attempt = 0; attempt < MODEL_CALL_RETRIES && (upstream instanceof Error || retryable(upstream.status)); attempt++) {
+        if (!(upstream instanceof Error)) await upstream.body?.cancel();
+        await sleep(retryDelayMs(upstream instanceof Error ? null : upstream.headers.get("retry-after"), attempt));
+        upstream = await forward();
+      }
+      if (upstream instanceof Error) {
+        tally.upstreamErrors.push(502);
+        settle({ actualUsd: 0, estimatedUsd: null, latencyMs: Date.now() - started, failed: true });
+        return send(res, 502, `OpenMerit proxy: ${unit.endpointId} did not answer (${upstream.message}).`, "openmerit_upstream");
+      }
+      res.writeHead(upstream.status, { "content-type": upstream.headers.get("content-type") ?? "application/json" });
+      let text = "";
+      const decoder = new TextDecoder();
+      const reader = upstream.body?.getReader();
+      for (;;) {
+        if (!reader) break;
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+        received += value.length;
+        text += decoder.decode(value, { stream: true });
+      }
+      res.end();
+      const latencyMs = Date.now() - started;
+      const usage = readUsage(text);
+      if (!upstream.ok) tally.upstreamErrors.push(upstream.status);
+      else if (cutOffBeforeText(text)) tally.cutOff++;
+      if (!upstream.ok) settle({ actualUsd: usage?.costUsd ?? 0, estimatedUsd: null, latencyMs, failed: true });
+      // An answer without usage is estimated from its size, not counted at the request's maximum.
+      else settle({ actualUsd: usage?.costUsd ?? null, estimatedUsd: usage ? requestPrice(catalogue ?? null, usage.input, usage.output) : sizeEstimate(catalogue, forwarded.length, received), latencyMs });
+    } finally {
+      // Cut off part-way: what arrived is estimated by its size; nothing arrived, nothing is charged.
+      if (!settled) settle({ actualUsd: received ? null : 0, estimatedUsd: received ? sizeEstimate(catalogue, forwarded.length, received) : null, latencyMs: Date.now() - started, failed: true });
     }
-    if (upstream instanceof Error) {
-      tally.upstreamErrors.push(502);
-      this.state.settle(reservation.id, { actualUsd: 0, estimatedUsd: null, latencyMs: Date.now() - started, failed: true });
-      return send(res, 502, `OpenMerit proxy: ${unit.endpointId} did not answer (${upstream.message}).`, "openmerit_upstream");
-    }
-    res.writeHead(upstream.status, { "content-type": upstream.headers.get("content-type") ?? "application/json" });
-    let text = "";
-    const decoder = new TextDecoder();
-    const reader = upstream.body?.getReader();
-    for (;;) {
-      if (!reader) break;
-      const { done, value } = await reader.read();
-      if (done) break;
-      res.write(value);
-      text += decoder.decode(value, { stream: true });
-    }
-    res.end();
-    const latencyMs = Date.now() - started;
-    const usage = readUsage(text);
-    if (!upstream.ok) tally.upstreamErrors.push(upstream.status);
-    else if (cutOffBeforeText(text)) tally.cutOff++;
-    if (!upstream.ok) this.state.settle(reservation.id, { actualUsd: usage?.costUsd ?? 0, estimatedUsd: null, latencyMs, failed: true });
-    else this.state.settle(reservation.id, { actualUsd: usage?.costUsd ?? null, estimatedUsd: usage ? requestPrice(catalogue ?? null, usage.input, usage.output) : null, latencyMs });
   }
 }
