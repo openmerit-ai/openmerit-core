@@ -188,6 +188,30 @@ test("scan finds both models, the model shared by two tasks and dynamic uses, wi
   assert.deepEqual(sdk.skipped, ["registry.yml"], "a YAML file naming more than 20 models is data");
 });
 
+test("a project in a subdirectory of its Git repository keeps its settings, scan and dirty state to that directory", () => {
+  // A monorepo: the root and apps/web are projects; docs/ is not. Only apps/web's model may be scanned from it.
+  const top = mkdtempSync(join(tmpdir(), "openmerit-mono-"));
+  mkdirSync(join(top, "apps", "web", "src"), { recursive: true });
+  mkdirSync(join(top, "docs"), { recursive: true });
+  writeFileSync(join(top, "package.json"), "{}");
+  writeFileSync(join(top, "server.ts"), `const model = "openai/gpt-5.4";\n`);
+  writeFileSync(join(top, "apps", "web", "package.json"), "{}");
+  writeFileSync(join(top, "apps", "web", "src", "chat.ts"), `const model = "openai/gpt-4.1-mini";\n`);
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: top, stdio: "ignore" });
+  git("init", "-q"); git("add", "-A"); git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "monorepo");
+  const real = findRepo(top).root;
+  const web = findRepo(join(top, "apps", "web", "src"));
+  assert.deepEqual([web.root, web.gitRoot], [join(real, "apps", "web"), real]);
+  assert.notEqual(web.id, findRepo(top).id);
+  assert.deepEqual([findRepo(join(top, "docs")).root, findRepo(join(top, "docs")).gitRoot], [real, null], "a directory without a project file belongs to the repository");
+  assert.deepEqual(scanRepo(web.root, loadCatalogue()).usages.map(usage => `${usage.file} ${usage.catalogueId}`), ["src/chat.ts openai/gpt-4.1-mini"]);
+  writeFileSync(join(top, "server.ts"), `const model = "openai/gpt-5-nano";\n`);
+  assert.deepEqual([findRepo(join(top, "apps", "web")).dirty, findRepo(top).dirty], [false, true], "a change outside the project leaves it clean");
+  // A repository set up at its root stays one project, from anywhere inside it.
+  updateRepoConfig(real, { budget: { defaultUsd: 3 } });
+  assert.equal(findRepo(join(top, "apps", "web", "src")).root, real);
+});
+
 test("a run whose every task has no eval finishes, saying what was not reviewed and how to add an eval", async () => {
   const root = repo(), scripted = scriptedHarness();
   const harness: Harness & { calls: string[] } = { ...scripted, json: async <T>(request: JsonRequest) => (request.system.includes("map model usages") ? scripted.json<T>(request)

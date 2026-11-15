@@ -50,6 +50,10 @@ Settings live in two places:
 | `~/.openmerit/rivet/` | The daemon's Rivet engine data: each run's workflow and its pending question |
 | `~/.openmerit/daemon.json` (mode 0600), `daemon.log` | The running daemon's pid, port and access token, and its log |
 
+### Projects in a subdirectory
+
+`<repo>` is the project OpenMerit works on. From a directory inside a Git repository, that is the nearest directory up to the Git root that has `.openmerit/config.json`, else the nearest with a project file (`package.json`, `pyproject.toml`, `requirements.txt`, `go.mod`, `Cargo.toml` and the like), else the Git root. So in a monorepo, `openmerit setup` and `openmerit scout` run from `packages/api/` (with its own `package.json`) keep the settings in `packages/api/.openmerit/`, scan only `packages/api/` and send the harness only its code; setup says so. Run them from the Git root to review the whole repository. The MCP tools take the same directory as `cwd`.
+
 Set `OPENMERIT_HOME` to move `~/.openmerit`. For scripts, `openmerit help` lists flags such as `--harness codex --device-code --endpoint openrouter:OPENROUTER_API_KEY --allowed-models a,b --budget 5 --yes`.
 
 ### Commit `.openmerit/` or ignore it
@@ -59,7 +63,7 @@ Setup leaves `<repo>/.openmerit/` untracked; OpenMerit never commits or ignores 
 - **Commit it** when your team should share the same endpoints, allowed models, evals and budget. Use `{"env": "..."}` key references in a shared file: a `{"secret": "<name>"}` reference resolves only on the machine whose `~/.openmerit/secrets.json` stored it. Expect diffs: rerunning setup rewrites each entry's `verifiedAt` time, and Scout saves each eval you approve and any budget raise you make the new default.
 - **Ignore it** (add `.openmerit/` to `.gitignore`) when the settings are yours alone.
 
-Each run records the repository revision. Uncommitted changes mark it `+dirty` in `openmerit history`, except changes under `.openmerit/`, whether you commit it or not.
+Each run records the repository revision. Uncommitted changes in the project mark it `+dirty` in `openmerit history`, except changes under `.openmerit/`, whether you commit it or not.
 
 ### Connect the harness
 
@@ -91,7 +95,7 @@ In a terminal, a step that prints nothing for a few seconds, such as a long eval
 1. **Scan.** Scout reads files Git does not ignore, without changing them. It lists model and endpoint usages with file and line, marks dynamic ones (an environment variable, a variable) and redacts anything shaped like a key.
    - It recognizes catalogue models as SDKs and clouds write them: `openai:gpt-4.1` (LangChain, pydantic-ai), `azure/gpt-4o`, `models/gemini-2.5-flash`, Bedrock IDs such as `us.anthropic.claude-sonnet-4-5-20250929-v1:0`, and dated snapshots such as `claude-haiku-4-5-20251001`. In configuration files it also finds models written without quotes, such as `default-model: gpt-4o` or `OPENAI_MODEL=gpt-4o-mini`.
    - A JSON, YAML or TOML file that names more than 20 models is data, such as a model catalogue, saved results or recorded responses, and is skipped. Scout says which files it skipped.
-   - To skip other files, add glob patterns relative to the repository root to `.openmerit/config.json`, such as `"scan": {"exclude": ["playground/**", "scripts/old"]}`. A directory name skips everything under it.
+   - To skip other files, add glob patterns relative to the project root to `.openmerit/config.json`, such as `"scan": {"exclude": ["playground/**", "scripts/old"]}`. A directory name skips everything under it.
 2. **Choose.** Pick the current model from the catalogue models found. Models the application's own code uses come first; the question counts uses in tests, fixtures, recorded responses, docs and saved results separately. Then answer *"Select which Agents/Tasks do you want OpenMerit to review?"* Each task shows a one-line description and its usages. Tasks whose model is set at run time, such as from an environment variable, follow the chosen model's own tasks: choose one when that variable names the model you picked. To fix the mapping, answer `<usage>=<task>` (such as `u12=reply drafter`) to move a usage to that task or to a new one; the question then asks again.
 3. **Pool.** A candidate must be in the allowed pool, have a list price below the current model's, support what the task needs (tool calls, images, structured output) and have an ECI score. Scout ranks the pool by ECI. Models without an ECI are left out, and Scout says how many.
 4. **Find the eval.** The harness looks for the task's existing eval and says how to run it per model and item set: the command, any variable mapping such as `CLASSIFIER_MODEL={{model}}`, and, when the eval records its results in Langfuse, the dataset and the per-item score that decides pass or fail. It may propose helper files, only under `.openmerit/evals/`. With no eval, Scout asks you for the command or lets you skip the task; it never invents an eval or labels. A run whose tasks were all skipped finishes, listing each as not reviewed with what is missing.
