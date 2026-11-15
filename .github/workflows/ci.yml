@@ -71,15 +71,28 @@ jobs:
   # The packed openmerit tarball installed globally with an empty npm cache, as users get it, on
   # every platform with a Rivet engine binary: connect, setup, scout, history and MCP against a
   # local fake model endpoint. On Linux arm64 and Apple silicon also the daemon test, which SIGKILLs
-  # the daemon at every question: the openmerit-core job runs it on Linux x64, and it is left out
-  # on Intel Macs, where it takes almost three minutes (macOS minutes cost 10x). No model calls.
+  # the daemon at every question: the openmerit-core job runs it on Linux x64. No model calls.
+  # The Intel Mac job runs x64 Node under Rosetta 2 on Apple silicon, so npm installs the darwin-x64
+  # engine and rivetkit-napi binaries, as on an Intel Mac. Keep these jobs on GitHub-hosted runners:
+  # the repository is public, so pull requests from forks run this workflow.
   openmerit-packed:
+    name: openmerit-packed (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
-        # Linux x64 and arm64, macOS arm64 (Apple silicon) and x64 (Intel).
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel]
-    runs-on: ${{ matrix.os }}
+        include:
+          - platform: linux-x64
+            runner: ubuntu-latest
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+            daemon: true
+          - platform: darwin-arm64
+            runner: macos-latest
+            daemon: true
+          - platform: darwin-x64
+            runner: macos-latest
+            node-arch: x64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     defaults:
       run:
@@ -89,9 +102,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.19.0
+          architecture: ${{ matrix.node-arch }}
           cache: npm
           cache-dependency-path: openmerit-core/package-lock.json
+      # Fails instead of testing the wrong binaries if the runner did not give the expected platform.
+      - run: node -e 'const p = `${process.platform}-${process.arch}`; if (p !== process.argv[1]) throw new Error(`expected ${process.argv[1]}, got ${p}`)' '${{ matrix.platform }}'
       - run: npm ci
       - run: node scripts/smoke-packed.ts
-      - if: matrix.os == 'ubuntu-24.04-arm' || matrix.os == 'macos-latest'
+      - if: matrix.daemon
         run: node --test test/daemon.test.ts
