@@ -83,7 +83,9 @@ async function setupLangfuse(ctx: SetupContext): Promise<LangfuseSettings | unde
     if (!check.ok && !(await confirm(ctx, "Reconfigure Langfuse now?", false))) return existing;
   } else if (!ctx.flags.langfuseUrl && !(await confirm(ctx, "Connect this repository's Langfuse (read-only aggregates)?", false))) return existing;
   for (;;) {
-    const baseUrl = ctx.flags.langfuseUrl ?? (ctx.prompter ? await ctx.prompter.ask("Langfuse URL (Cloud or self-hosted)", existing?.baseUrl ?? "https://cloud.langfuse.com") : "https://cloud.langfuse.com");
+    // The application's own Langfuse SDK settings name the instance: LANGFUSE_BASE_URL, or the older LANGFUSE_HOST.
+    const fallback = existing?.baseUrl ?? ctx.env.LANGFUSE_BASE_URL ?? ctx.env.LANGFUSE_HOST ?? "https://cloud.langfuse.com";
+    const baseUrl = ctx.flags.langfuseUrl ?? (ctx.prompter ? await ctx.prompter.ask("Langfuse URL (Cloud or self-hosted)", fallback) : fallback);
     ctx.log("  OpenMerit needs a separate Viewer key pair (Project Settings → API Keys → Viewer); it never writes to Langfuse.");
     const publicKey = await credential(ctx, "Langfuse Viewer public key", ["OPENMERIT_LANGFUSE_PUBLIC_KEY"], `langfuse-public-${ctx.repo.id}`, ctx.flags.langfusePublicKeyEnv);
     const secretKey = await credential(ctx, "Langfuse Viewer secret key", ["OPENMERIT_LANGFUSE_SECRET_KEY"], `langfuse-secret-${ctx.repo.id}`, ctx.flags.langfuseSecretKeyEnv);
@@ -184,6 +186,7 @@ export async function runSetup(ctx: SetupContext): Promise<{ harness: HarnessSet
   if (!harness) return { harness: null, endpoints: [], langfuse: false, budgetUsd: DEFAULT_BUDGET_USD };
   const agents = mcpClients(ctx.env);
   if (agents.length && (ctx.flags.registerMcp ?? await confirm(ctx, `Register OpenMerit's MCP server with ${agents.map(kind => (kind === "claude-code" ? "Claude Code" : "Codex")).join(" and ")}?`, true))) registerMcp(ctx, agents);
+  else ctx.log(`  MCP server not registered${agents.length ? "" : ": no claude or codex CLI on PATH"}. To add it to a client, register the stdio command: ${ctx.mcpCommand.join(" ")}`);
   ctx.log(`\n2. This repository: ${ctx.repo.root}`);
   const langfuse = await setupLangfuse(ctx);
   const endpoints = await setupEndpoints(ctx);
