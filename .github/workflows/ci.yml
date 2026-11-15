@@ -72,9 +72,9 @@ jobs:
   # every platform with a Rivet engine binary: connect, setup, scout, history and MCP against a
   # local fake model endpoint. On Linux arm64 and Apple silicon also the daemon test, which SIGKILLs
   # the daemon at every question: the openmerit-core job runs it on Linux x64. No model calls.
-  # Linux arm64 and both macOS jobs run on the self-hosted Apple silicon Mac mini (arm64 in a Linux
-  # VM on it), which GitHub does not bill. The Intel Mac job runs x64 Node under Rosetta 2, so npm
-  # installs the darwin-x64 engine and rivetkit-napi binaries, as on an Intel Mac.
+  # The Intel Mac job runs x64 Node under Rosetta 2 on Apple silicon, so npm installs the darwin-x64
+  # engine and rivetkit-napi binaries, as on an Intel Mac. Keep these jobs on GitHub-hosted runners:
+  # the repository is public, so pull requests from forks run this workflow.
   openmerit-packed:
     name: openmerit-packed (${{ matrix.platform }})
     strategy:
@@ -82,15 +82,15 @@ jobs:
       matrix:
         include:
           - platform: linux-x64
-            runner: [ubuntu-latest]
+            runner: ubuntu-latest
           - platform: linux-arm64
-            runner: [self-hosted, Linux, ARM64]
+            runner: ubuntu-24.04-arm
             daemon: true
           - platform: darwin-arm64
-            runner: [self-hosted, macOS, ARM64]
+            runner: macos-latest
             daemon: true
           - platform: darwin-x64
-            runner: [self-hosted, macOS, ARM64]
+            runner: macos-latest
             node-arch: x64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
