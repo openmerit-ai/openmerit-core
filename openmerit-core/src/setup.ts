@@ -187,7 +187,8 @@ export async function runSetup(ctx: SetupContext): Promise<{ harness: HarnessSet
   const agents = mcpClients(ctx.env);
   if (agents.length && (ctx.flags.registerMcp ?? await confirm(ctx, `Register OpenMerit's MCP server with ${agents.map(kind => (kind === "claude-code" ? "Claude Code" : "Codex")).join(" and ")}?`, true))) registerMcp(ctx, agents);
   else ctx.log(`  MCP server not registered${agents.length ? "" : ": no claude or codex CLI on PATH"}. To add it to a client, register the stdio command: ${ctx.mcpCommand.join(" ")}`);
-  ctx.log(`\n2. This repository: ${ctx.repo.root}`);
+  ctx.log(`\n2. This ${ctx.repo.gitRoot ? "project" : "repository"}: ${ctx.repo.root}`);
+  if (ctx.repo.gitRoot) ctx.log(`  A project in the Git repository ${ctx.repo.gitRoot}: settings go to its own .openmerit/, and Scout scans only this directory. Run setup from ${ctx.repo.gitRoot} to review the whole repository instead.`);
   const langfuse = await setupLangfuse(ctx);
   const endpoints = await setupEndpoints(ctx);
   if (!endpoints.length) ctx.log("  No candidate endpoints: Scout needs at least one to evaluate models. Run setup again to add one.");
