@@ -37,7 +37,9 @@ export function renderComparison(task: TaskComparison, runId?: string): string {
 
 /** The search path: each screen, in order, with its result on the sampled items. */
 export function renderSearch(search: SearchSummary): string[] {
-  const lines = [`  Scout Model Binary Search over ${search.pool} ECI-ranked candidates${search.unranked ? ` (${search.unranked} without an ECI left out)` : ""}, screening on ${search.sampleIds.length || 5} items the current model passes:`];
+  const pool = `${search.pool} ECI-ranked candidates${search.unranked ? ` (${search.unranked} without an ECI left out)` : ""}`;
+  // A search that stopped on the current model never drew its screening items.
+  const lines = [search.sampleIds.length ? `  Scout Model Binary Search over ${pool}, screening on ${search.sampleIds.length} items the current model passes:` : `  Scout Model Binary Search over ${pool}: stopped before screening any candidate.`];
   for (const trial of search.trials) lines.push(`    ${trial.stage.padEnd(10)} ${trial.model} (ECI ${trial.eci.toFixed(1)}): ${trial.passes}/${trial.total} ${trial.accepted ? "pass" : "fail"}`);
   for (const item of search.skipped) lines.push(`    skipped    ${item.model} at ${item.stage}: ${item.reason.split("\n")[0]}`);
   if (search.pick) lines.push(`    Weakest passing model: ${search.pick}. Finalists: ${search.finalists.join(", ") || "none"}${search.challengers.length ? `. Challengers: ${search.challengers.join(", ")}` : ""}.`);
