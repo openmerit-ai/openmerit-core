@@ -60,7 +60,7 @@ export async function startJob(client: AppClient, start: { accountId: string; en
   const provisional: Provisional = measured
     ? { model: measured.pick!, endpoint: measured.endpoint ?? "openrouter", reason: `Measured for this task on ${measured.finishedAt.slice(0, 10)} (job ${measured.jobId}); this job measures it again.`, estCostPerCallUsd: null }
     : provisionalPick(catalogue, buildPool({ catalogue, endpoints, bundle: input.bundle, guardrails: guardrails.effective }), input.bundle);
-  await task.recordJob({ jobId, bundle: input.bundle, agent: input.agent });
+  await task.recordJob({ jobId, bundle: input.bundle, agent: input.agent, kind: input.kind });
   await client.job.create([jobId], { input: { accountId: input.accountId, taskId, environment: input.environment, agent: input.agent, bundle: input.bundle, kind: input.kind, provisional, createdAt: new Date().toISOString() } });
   return { ok: true, jobId, taskId, provisional };
 }

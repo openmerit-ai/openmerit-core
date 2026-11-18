@@ -7,6 +7,7 @@ import { createClient } from "rivetkit/client";
 import { NO_ORGANIZATION } from "../src/auth.ts";
 import { signStripePayload } from "../src/billing.ts";
 import type { Registry } from "../src/registry.ts";
+import { watchState } from "../src/actors/account.ts";
 import { bundle, caller, costOf, crash, fakeModels, startApp, stop, subscribe, waitFor, WEAK_BELOW, WRITTEN, catalogue, type App, type FakeModels } from "./helpers.ts";
 
 const CLERK = { CLERK_SECRET_KEY: "sk_test_fake", CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from("clerk.openmerit.test$").toString("base64")}` };
@@ -38,7 +39,7 @@ describe("the cloud app", () => {
     const init = await signedIn.rpc("initialize", { protocolVersion: "2025-06-18" });
     assert.equal(init.body.result?.protocolVersion, "2025-06-18");
     const tools = await signedIn.rpc("tools/list");
-    assert.deepEqual(tools.body.result?.tools?.map(tool => tool.name), ["openmerit_recommend", "openmerit_result", "openmerit_answer", "openmerit_tasks", "openmerit_watch"]);
+    assert.deepEqual(tools.body.result?.tools?.map(tool => tool.name), ["openmerit_recommend", "openmerit_result", "openmerit_answer", "openmerit_tasks", "openmerit_retire"]);
 
     const noOrganization = await caller(app, "test:user_b").tool("openmerit_tasks", {});
     assert.equal(noOrganization.isError, true);
@@ -171,8 +172,10 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     assert.equal(me.body.plan.usedEvals, 1);
 
     // Watching is on from the first job: a new catalogue version starts a watch job, which reuses the saved label and written case and asks nothing.
-    const [taskRow] = (await agent().api<{ id: string; watching: boolean }[]>("/api/tasks")).body;
-    assert.equal(taskRow!.watching, true);
+    type TaskView = { id: string; state: string; idleSince: string | null; watching: boolean };
+    const taskView = async () => (await agent().api<TaskView[]>("/api/tasks")).body[0]!;
+    const taskRow = await taskView();
+    assert.deepEqual([taskRow.state, taskRow.idleSince, taskRow.watching], ["watching", null, true]);
     const rivet = createClient<Registry>({ endpoint: `http://127.0.0.1:${app.enginePort}`, token: "test-token" });
     assert.deepEqual(await rivet.catalogue.getOrCreate(["global"]).refresh(), { version: "next", changed: true });
     const runs = await waitFor(() => agent().api<{ id: string; kind: string; status: string }[]>("/api/runs"), value => value.body.some(run => run.kind === "watch" && run.status === "done"))
@@ -187,12 +190,42 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     const watched = await agent().api<{ pick: { total: number } }>(`/api/runs/${runs.body.find(run => run.kind === "watch")!.id}`);
     assert.equal(watched.body.pick.total, 8);
     const tasks = await agent().tool("openmerit_tasks", {});
-    assert.match(tasks.text, /ticket classifier \[[\w-]+\] \(acme\/support\): openai\/gpt-5\.4 → .*, picked, watched/);
-    // The coding agent turns it off, such as to freeze the model choice; a newer catalogue then starts nothing.
-    assert.deepEqual((await agent().tool("openmerit_watch", { task_id: taskRow!.id, on: false })).data, { task_id: taskRow!.id, watching: false });
-    assert.equal((await agent().api<{ watching: boolean }[]>("/api/tasks")).body[0]!.watching, false);
-    assert.equal((await agent().tool("openmerit_watch", { task_id: "nope", on: true })).isError, true);
+    assert.match(tasks.text, /ticket classifier \[[\w-]+\] \(acme\/support\): openai\/gpt-5\.4 → .*, picked, watching/);
+
+    // Freezing: the watch guardrail inherits from the environment, a task-level value overrides it, and a frozen task's tick starts nothing.
+    const tick = () => rivet.task.get(["org_run", taskRow.id]).watchTick();
+    const guardrail = (level: string, id: string, settings: Record<string, unknown>) => agent().api("/api/guardrails", { method: "PUT", body: JSON.stringify({ level, id, settings }) });
+    await guardrail("environment", "acme/support", { watch: false });
+    assert.deepEqual([(await taskView()).state, (await taskView()).watching], ["frozen", false]);
+    assert.deepEqual(await tick(), { started: null, reason: "task is frozen" });
+    await guardrail("task", taskRow.id, { watch: true });
+    assert.equal((await taskView()).state, "watching");
+    await guardrail("task", taskRow.id, {});
+    assert.equal((await taskView()).state, "frozen");
+    await guardrail("environment", "acme/support", {});
+
+    // Retiring stops the watch and keeps the runs and reports; the next recommend call brings the task back.
+    assert.deepEqual((await agent().tool("openmerit_retire", { task_id: taskRow.id })).data, { task_id: taskRow.id, state: "retired" });
+    assert.equal((await taskView()).state, "retired");
+    assert.deepEqual(await tick(), { started: null, reason: "not watching" });
+    assert.equal((await agent().fetch(`/r/${jobId}.md`)).status, 200);
+    assert.equal((await agent().api<unknown[]>("/api/runs")).body.length, 2);
+    assert.equal((await agent().tool("openmerit_retire", { task_id: "nope" })).isError, true);
+    const back = await agent().tool("openmerit_recommend", { bundle: bundle(), environment: "acme/support" });
+    assert.equal(back.isError, false, back.text);
+    assert.equal((await taskView()).state, "watching");
+    await waitFor(() => agent().tool("openmerit_result", { job_id: back.data.job_id }), value => value.data.status === "done");
   } finally { await stop(app); await models.close(); }
+});
+
+test("a task goes idle once no recommend call came for the idle period, and retired and frozen say why it stopped first", () => {
+  const day = 24 * 60 * 60 * 1000, base = { retired: false, watch: undefined, lastRecommendAt: 0, idleAfterMs: 30 * day };
+  assert.deepEqual(watchState({ ...base, now: 30 * day - 1 }), { state: "watching", idleSince: null });
+  assert.deepEqual(watchState({ ...base, now: 30 * day }), { state: "idle", idleSince: new Date(30 * day).toISOString() });
+  assert.deepEqual(watchState({ ...base, lastRecommendAt: null, now: 90 * day }), { state: "watching", idleSince: null });
+  assert.equal(watchState({ ...base, watch: true, now: 30 * day }).state, "idle");
+  assert.equal(watchState({ ...base, watch: false, now: 30 * day }).state, "frozen");
+  assert.equal(watchState({ ...base, retired: true, watch: false, now: 30 * day }).state, "retired");
 });
 
 test("a measure step replayed after a crash does not count its spend twice", async () => {
