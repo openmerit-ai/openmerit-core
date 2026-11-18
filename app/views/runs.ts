@@ -29,8 +29,8 @@ export const result = (task: Task, link: (text: Html | string) => Html = (text) 
 
 const jobStatus: Record<string, Html> = {
   queued: html`<span class="pill">Queued</span>`,
-  running: html`<span class="pill">Measuring</span>`,
-  needs_input: html`<span class="pill warn">Waiting for your answer</span><span class="sub">in your coding agent</span>`,
+  running: html`<span class="pill">Evaluating</span>`,
+  needs_input: html`<span class="pill warn">Needs input</span><span class="sub">in your coding agent</span>`,
   failed: html`<span class="pill bad">Did not finish</span>`,
   stopped: html`<span class="pill">Stopped</span>`,
 };
@@ -60,9 +60,25 @@ const when = (iso: string): Html => html`<span title="${date(iso)}">${ago(iso)}<
 // Runs still measuring. Each row polls its run (app/live.ts): Torph morphs the cases, pass rate
 // and status, and Liveline draws the pass rate so far against the model in use today. A run the
 // cloud reports no live data for shows its measurements and the provisional pick instead.
-function inProgress(jobs: JobView[], runs: Run[], byId: Map<string, Task>): Html {
-  if (!jobs.length) return html``;
+// Rows go by what they need: runs waiting for input first, oldest first; then runs evaluating,
+// least time left first; then the queue in the order it runs, oldest first.
+const RANK: Record<string, number> = { needs_input: 0, running: 1, queued: 2 };
+function remaining(job: JobView): number {
+  if (job.live?.minutesLeft != null) return job.live.minutesLeft;
+  const planned = job.progress.planned;
+  return planned ? (planned - job.progress.measured) / planned * 1e6 : Infinity;
+}
+function ordered(jobs: JobView[], startOf: (job: JobView) => string): JobView[] {
+  return jobs.slice().sort((a, b) => (RANK[a.status] ?? 3) - (RANK[b.status] ?? 3)
+    || (a.status === "running" ? remaining(a) - remaining(b) : 0)
+    || startOf(a).localeCompare(startOf(b)));
+}
+const agentName = (run: Run | undefined): string | undefined => (run?.askedBy ? harness(run.askedBy).name : run?.kind === "watch" ? "OpenMerit" : undefined);
+
+function inProgress(all: JobView[], runs: Run[], byId: Map<string, Task>): Html {
+  if (!all.length) return html``;
   const runOf = new Map(runs.map((run) => [run.id, run]));
+  const jobs = ordered(all, (job) => runOf.get(job.jobId)?.startedAt ?? job.createdAt);
   return html`<section aria-labelledby="progress">
       <h2 id="progress">In progress <span class="count">${jobs.length}</span></h2>
       <div class="tablewrap">
@@ -72,9 +88,10 @@ function inProgress(jobs: JobView[], runs: Run[], byId: Map<string, Task>): Html
             ${jobs.map((job) => {
               const run = runOf.get(job.jobId);
               const task = byId.get(job.taskId);
-              const text = liveText(job), id = job.jobId, live = job.live;
+              const agent = agentName(run);
+              const text = liveText(job, agent), id = job.jobId, live = job.live;
               const testing = live?.model ?? job.provisional?.model;
-              return html`<tr data-live="${id}" data-status="${job.status}">
+              return html`<tr data-live="${id}" data-status="${job.status}"${agent ? html` data-agent="${agent}"` : ""}>
               <td><a href="/r/${id}/">${job.task}</a><span class="sub">${task?.environment ?? ""}${run ? html` · ${when(run.startedAt)}` : ""}</span></td>
               <td>${testing ? model(testing) : html`<span class="sub">–</span>`}${live?.baseline ? html`<span class="sub">vs ${model(live.baseline.model)} · ${Math.round(live.baseline.rate)}%</span>` : job.provisional ? html`<span class="sub">on ${endpointName(job.provisional.endpoint)}</span>` : ""}</td>
               <td class="num"><span data-live="${id}" data-morph="cases">${text.cases}</span></td>

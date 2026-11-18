@@ -9,12 +9,13 @@ import type { Draw } from "./live-chart.ts";
 
 const POLL_MS = 3000;
 
-/** The texts a live run shows, by data-morph name. Pages render the same texts first. */
-export function liveText(job: JobView): Record<string, string> {
+/** The texts a live run shows, by data-morph name. Pages render the same texts first. agent names
+ * the coding agent a run waiting for input waits on, such as Claude Code. */
+export function liveText(job: JobView, agent?: string): Record<string, string> {
   const live = job.live;
   const status = job.status === "running"
-    ? live?.minutesLeft ? `Measuring · about ${live.minutesLeft} min left` : "Measuring"
-    : job.status === "queued" ? "Queued" : job.status === "needs_input" ? "Waiting for your answer" : job.status;
+    ? live?.minutesLeft ? `Evaluating · about ${live.minutesLeft} min left` : "Evaluating"
+    : job.status === "queued" ? "Queued" : job.status === "needs_input" ? (agent ? `Needs input · ${agent}` : "Needs input") : job.status;
   return {
     status,
     cases: live ? `${live.done} of ${live.total}` : job.progress.planned ? `${job.progress.measured} of about ${job.progress.planned}` : "–",
@@ -38,7 +39,7 @@ export function startLive(root: HTMLElement, api: Api, refresh: () => Promise<vo
   const charts = new Map<HTMLElement, Promise<Draw>>();
 
   const update = (id: string, job: JobView): void => {
-    const text = liveText(job);
+    const text = liveText(job, root.querySelector<HTMLElement>(`[data-live="${id}"][data-status]`)?.dataset.agent);
     for (const element of Array.from(root.querySelectorAll<HTMLElement>(`[data-live="${id}"][data-morph]`))) {
       const next = text[element.dataset.morph ?? ""];
       // Torph adds its own nodes to the element, so compare with the last text shown, not textContent.
