@@ -1,5 +1,5 @@
-import type { JobView, MeasuredModel, Report } from "../api.ts";
-import { date, endpointName, html, model, modelName, per1k, plural, seconds, usd, type Html } from "../html.ts";
+import type { Endpoint, JobView, MeasuredModel, Report } from "../api.ts";
+import { date, endpointName, html, setEndpoints, model, modelName, per1k, plural, seconds, usd, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { show } from "./guardrails.ts";
 
@@ -153,7 +153,12 @@ function report(data: Report, accountName: string): Html {
 }
 
 export const runView: View<Data> = {
-  load: ({ api, id }) => api.get<Data>(`/api/runs/${encodeURIComponent(id ?? "")}`),
+  async load({ api, id }) {
+    // The endpoints name each endpoint ID's provider; the report still shows without them.
+    const [data, endpoints] = await Promise.all([api.get<Data>(`/api/runs/${encodeURIComponent(id ?? "")}`), api.get<Endpoint[]>("/api/endpoints").catch((): Endpoint[] => [])]);
+    setEndpoints(endpoints);
+    return data;
+  },
   title,
   render: (data, { me }) => (isLive(data) ? live(data) : report(data, me.account.name)),
   actions: {

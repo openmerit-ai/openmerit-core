@@ -47,7 +47,44 @@ export function providerLogo(model: string): string | null {
 // A model ID such as anthropic/claude-haiku-5-5, shown without its provider prefix.
 export const modelName = (id: string): string => id.split("/").at(-1) ?? id;
 export const model = (id: string): Html => html`${logo(providerLogo(id))}${modelName(id)}`;
-export const endpointName = (id: string): string => (id === "openrouter" ? "OpenRouter" : id);
+// A coding agent's name and logo from the MCP client name it connects with, such as claude-code.
+// A name that matches none is a custom harness, shown as it named itself.
+const HARNESSES: [RegExp, string, string | null][] = [
+  [/claude/, "Claude Code", "claude-code"], [/codex/, "Codex", "codex"], [/^pi\b|pi-coding|\bpi$/, "Pi", "pi"], [/cursor/, "Cursor", "cursor"],
+  [/opencode/, "OpenCode", "opencode"], [/gemini/, "Gemini CLI", "geminicli"], [/^amp\b/, "Amp", "amp"], [/goose/, "Goose", "goose"], [/cline/, "Cline", "cline"],
+  [/roo/, "Roo Code", "roocode"], [/kilo/, "Kilo Code", "kilocode"], [/windsurf/, "Windsurf", "windsurf"], [/copilot|vscode|visual studio code/, "GitHub Copilot", "githubcopilot"],
+];
+export function harness(client: string): { name: string; logo: string | null; custom: boolean } {
+  const found = HARNESSES.find(([pattern]) => pattern.test(client.toLowerCase()));
+  return found ? { name: found[1], logo: found[2], custom: false } : { name: client, logo: null, custom: true };
+}
+
+// An endpoint's provider, from its base URL.
+const PROVIDERS: [RegExp, string, string | null][] = [
+  [/openrouter\.ai/, "OpenRouter", "openrouter"], [/api\.openai\.com/, "OpenAI", "openai"], [/anthropic\.com/, "Anthropic", "anthropic"], [/fireworks\.ai/, "Fireworks", "fireworks"],
+  [/groq\.com/, "Groq", "groq"], [/mistral\.ai/, "Mistral", "mistral"], [/together\.(ai|xyz)/, "Together", "together"], [/baseten\.co/, "Baseten", "baseten"],
+  [/deepinfra\.com/, "DeepInfra", "deepinfra"], [/cerebras\.ai/, "Cerebras", "cerebras"], [/deepseek\.com/, "DeepSeek", "deepseek"], [/x\.ai\b/, "xAI", "xai"],
+  [/googleapis\.com|generativelanguage/, "Google", "gemini"], [/azure/, "Azure", "azure"], [/bedrock|amazonaws\.com/, "Bedrock", "bedrock"],
+  [/cloudflare|workers\.dev/, "Workers AI", "workersai"], [/moonshot/, "Moonshot", "kimi"], [/localhost|127\.0\.0\.1|ollama/, "Ollama", "ollama"],
+];
+export function provider(baseUrl: string): { name: string; logo: string | null } {
+  const found = PROVIDERS.find(([pattern]) => pattern.test(baseUrl.toLowerCase()));
+  if (found) return { name: found[1], logo: found[2] };
+  let host = baseUrl;
+  try { host = new URL(baseUrl).hostname; } catch { /* keep the text as given */ }
+  return { name: host, logo: null };
+}
+
+// The customer's endpoints, which the run page loads so a report's endpoint IDs show their provider.
+let endpointUrls: ReadonlyMap<string, string> = new Map();
+export const setEndpoints = (list: readonly { id: string; baseUrl: string }[]): void => { endpointUrls = new Map(list.map((item) => [item.id, item.baseUrl])); };
+export function endpointName(id: string): Html {
+  if (id === "openrouter") return html`${logo("openrouter")}OpenRouter`;
+  const url = endpointUrls.get(id);
+  if (!url) return html`${id}`;
+  const found = provider(url);
+  return html`${logo(found.logo)}${found.name}`;
+}
 
 export function usd(value: number | null | undefined): string {
   if (value === null || value === undefined) return "–";

@@ -130,9 +130,9 @@ export function caller(app: App, token: string | null) {
       const response = await fetch(`${app.url}/mcp`, { method: "POST", headers: headers({ accept: "application/json, text/event-stream" }), body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) });
       return { status: response.status, headers: response.headers, body: await response.json() as { result?: { content?: { text: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean; tools?: { name: string }[] } & Record<string, unknown>; error?: { message: string } } };
     },
-    tool: async (name: string, args: Record<string, unknown>) => {
+    tool: async (name: string, args: Record<string, unknown>, extra: Record<string, string> = {}) => {
       const { body } = await (async () => {
-        const response = await fetch(`${app.url}/mcp`, { method: "POST", headers: headers(), body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method: "tools/call", params: { name, arguments: args } }) });
+        const response = await fetch(`${app.url}/mcp`, { method: "POST", headers: headers(extra), body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method: "tools/call", params: { name, arguments: args } }) });
         return { body: await response.json() as { result: { content: { text: string }[]; structuredContent: Record<string, unknown>; isError?: boolean } } };
       })();
       return { text: body.result.content[0]!.text, data: body.result.structuredContent, isError: body.result.isError === true };

@@ -1,6 +1,6 @@
 import type { Endpoint, EndpointKind } from "../api.ts";
 import { ApiError } from "../api.ts";
-import { date, html, plural, type Html } from "../html.ts";
+import { date, html, logo, plural, provider, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { header, install } from "./common.ts";
 
@@ -12,16 +12,17 @@ const kinds: Record<EndpointKind, { label: string; baseUrl: string }> = {
 const isKind = (value: string): value is EndpointKind => value in kinds;
 
 // OpenRouter on OpenMerit's key is always there; /api/endpoints lists only the customer's own.
-const builtIn = html`<div class="row">
-          <span>OpenRouter<span class="sub">https://openrouter.ai/api/v1</span><span class="sub">Every model</span></span>
+const builtIn = (): Html => html`<div class="row">
+          <span>${logo("openrouter")}OpenRouter<span class="sub">https://openrouter.ai/api/v1 · OpenRouter API</span><span class="sub">Every model</span></span>
           <span class="endpoint-meta"><span class="pill">OpenMerit's key · OpenMerit pays</span></span>
           <span></span>
         </div>`;
 
 function endpointRow(endpoint: Endpoint, admin: boolean): Html {
   const models = endpoint.allowedModels === "all" ? "Every model" : endpoint.allowedModels.join(", ");
+  const found = provider(endpoint.baseUrl);
   return html`<div class="row">
-          <span>${kinds[endpoint.kind]?.label ?? endpoint.kind}<span class="sub">${endpoint.baseUrl}</span><span class="sub">${models}</span></span>
+          <span>${logo(found.logo)}${found.name}<span class="sub">${endpoint.baseUrl} · ${kinds[endpoint.kind]?.label ?? endpoint.kind} API</span><span class="sub">${models}</span></span>
           <span class="endpoint-meta"><span class="pill">Key ending ${endpoint.keyLast4} · you pay</span><span class="sub">${endpoint.verifiedAt ? `Checked ${date(endpoint.verifiedAt)}` : "Not checked yet"}</span></span>
           ${admin ? html`<button class="btn danger" type="button" data-action="remove" data-id="${endpoint.id}" aria-label="Remove ${endpoint.baseUrl}">Remove</button>` : html`<span></span>`}
         </div>`;
@@ -47,7 +48,7 @@ export const connectionsView: View<Endpoint[]> = {
     <section aria-labelledby="endpoints">
       <h2 id="endpoints">Measuring endpoints</h2>
       <p class="note" style="margin: -2px 0 8px">Calls on your own endpoints use your key and bill your provider account. Add the endpoint your app calls so its current model is measured where it really runs.</p>
-      <div class="card">${builtIn}${own.map((endpoint) => endpointRow(endpoint, admin))}</div>
+      <div class="card">${builtIn()}${own.map((endpoint) => endpointRow(endpoint, admin))}</div>
     </section>
 
     ${admin ? html`<section aria-labelledby="add">

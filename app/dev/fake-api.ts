@@ -28,13 +28,13 @@ function populated(): State {
     task("enrollment-checker", "Enrollment checker", { environment: "sahra-health/enroll", currentModel: "openai/gpt-5-mini", status: "running", lastRunAt: "2026-11-18T11:40:00Z", lastJobId: "e4n6t0" }),
     task("coding-reviewer", "Coding reviewer", { currentModel: "anthropic/claude-sonnet-5-5", status: "failed", lastRunAt: "2026-11-12T10:00:00Z", lastJobId: "z1c7m4" }),
   ];
-  const run = (id: string, taskId: string, status: string, startedAt: string, kind = "run"): Run => ({ id, taskId, kind, status, startedAt, finishedAt: status === "done" || status === "failed" ? startedAt : null, result: null });
+  const run = (id: string, taskId: string, status: string, startedAt: string, kind = "run", askedBy: string | null = kind === "watch" ? null : "claude-code"): Run => ({ id, taskId, kind, status, startedAt, finishedAt: status === "done" || status === "failed" ? startedAt : null, askedBy, result: null });
   const runs: Run[] = [
     run("e4n6t0", "enrollment-checker", "running", "2026-11-18T11:40:00Z"),
     run("w8r3k1", "ticket-router", "needs_input", "2026-11-18T11:20:00Z"),
     run("k7m2q9", "ticket-router", "done", "2026-11-18T09:40:00Z"),
     run("p3x8d1", "bill-matcher", "done", "2026-11-17T08:00:00Z", "watch"),
-    run("f9q2w7", "fraud-reviewer", "done", "2026-11-16T12:00:00Z"),
+    run("f9q2w7", "fraud-reviewer", "done", "2026-11-16T12:00:00Z", "run", "codex"),
     run("z1c7m4", "coding-reviewer", "failed", "2026-11-12T10:00:00Z"),
     run("b2v5h3", "ticket-router", "done", "2026-10-30T10:00:00Z"),
   ];

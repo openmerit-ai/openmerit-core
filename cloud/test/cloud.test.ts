@@ -112,7 +112,9 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     const customerKey = "sk-customer-key-9876";
     await caller(app, "test:user_r:org_run:admin").api("/api/endpoints", { method: "POST", body: JSON.stringify({ kind: "openai-compatible", baseUrl: `${models.url}/v1`, apiKey: customerKey, allowedModels: ["acme/fine-tune-1"] }) });
     const agent = () => caller(app, "test:user_r:org_run:admin");
-    const started = await agent().tool("openmerit_recommend", { bundle: bundle(), environment: "acme/support" });
+    // The session ID from initialize names the client, and the run records it.
+    const session = (await agent().rpc("initialize", { protocolVersion: "2025-06-18", clientInfo: { name: "claude-code", version: "2.1.0" } })).headers.get("mcp-session-id") ?? "";
+    const started = await agent().tool("openmerit_recommend", { bundle: bundle(), environment: "acme/support" }, { "mcp-session-id": session });
     assert.equal(started.isError, false, started.text);
     const jobId = started.data.job_id as string;
     const provisional = started.data.provisional as { model: string; reason: string };
@@ -177,8 +179,10 @@ test("a job waits on its label check across a restart, then measures on OpenRout
       .catch(async (error: Error) => { throw new Error(`${error.message}\nTask: ${JSON.stringify((await agent().api(`/api/tasks/${taskRow!.id}`)).body).slice(0, 1500)}`); });
     assert.equal(runs.body.filter(run => run.kind === "watch").length, 1);
     // The first run is no longer the task's latest, and the list still says what it found.
-    const first = (await agent().api<{ id: string; result: { status: string; model: string | null; from: string | null } | null }[]>("/api/runs")).body.find(run => run.id === jobId);
+    const listed = (await agent().api<{ id: string; kind: string; askedBy: string | null; result: { status: string; model: string | null; from: string | null } | null }[]>("/api/runs")).body;
+    const first = listed.find(run => run.id === jobId);
     assert.deepEqual(first?.result && [first.result.status, first.result.model, first.result.from], ["picked", measured.pick!.model, "openai/gpt-5.4"]);
+    assert.deepEqual([first?.askedBy, listed.find(run => run.kind === "watch")?.askedBy], ["claude-code", null]);
     assert.equal(writerCalls(models).length, 2, "the watch job writes no new cases");
     const watched = await agent().api<{ pick: { total: number } }>(`/api/runs/${runs.body.find(run => run.kind === "watch")!.id}`);
     assert.equal(watched.body.pick.total, 8);

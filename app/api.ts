@@ -44,7 +44,8 @@ export type JobStatus = "queued" | "running" | "needs_input" | "done" | "failed"
 
 // What a finished run's report found: its result status, the model it picked and the one in use then.
 export interface RunResult { status: string; model: string | null; from: string | null; savingPerCallUsd: number | null }
-export interface Run { id: string; taskId: string; kind: string; status: JobStatus | string; startedAt: string; finishedAt: string | null; result: RunResult | null }
+// askedBy is the name the asking coding agent's MCP client sent, such as claude-code; null for a watch run or an unnamed client.
+export interface Run { id: string; taskId: string; kind: string; status: JobStatus | string; startedAt: string; finishedAt: string | null; askedBy: string | null; result: RunResult | null }
 
 export interface MeasuredModel {
   model: string;

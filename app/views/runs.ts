@@ -1,5 +1,5 @@
 import type { Run, Task } from "../api.ts";
-import { day, html, model, per1k, plural, usd, type Html } from "../html.ts";
+import { day, harness, html, logo, model, per1k, plural, usd, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { empty, header } from "./common.ts";
 
@@ -45,6 +45,14 @@ function outcome(run: Run, task: Task | undefined): Html {
   return describe({ status: found.status, pick: found.model, current: found.from ?? task?.currentModel ?? "", saving }, (text) => html`${text}`);
 }
 
+// Who started the run: the coding agent that asked, by the name its MCP client sent, or a watch.
+function askedBy(run: Run): Html {
+  if (run.kind === "watch") return html`<span class="sub">Watch re-run</span>`;
+  if (!run.askedBy) return html`Coding agent`;
+  const found = harness(run.askedBy);
+  return html`${logo(found.logo)}${found.name}${found.custom ? html`<span class="sub">custom harness</span>` : ""}`;
+}
+
 export const runsView: View<{ runs: Run[]; tasks: Task[] }> = {
   async load({ api }) {
     const [runs, tasks] = await Promise.all([api.get<Run[]>("/api/runs"), api.get<Task[]>("/api/tasks")]);
@@ -80,7 +88,7 @@ export const runsView: View<{ runs: Run[]; tasks: Task[] }> = {
           <tbody>
             ${runs.map((run) => {
               const task = byId.get(run.taskId);
-              return html`<tr><td><a href="/r/${run.id}/">${task?.name ?? run.taskId}</a><span class="sub">${task?.environment ?? ""}</span></td><td>${outcome(run, task)}</td><td>${run.kind === "watch" ? "Watch re-run" : "Coding agent"}</td><td class="num">${day(run.startedAt)}</td></tr>`;
+              return html`<tr><td><a href="/r/${run.id}/">${task?.name ?? run.taskId}</a><span class="sub">${task?.environment ?? ""}</span></td><td>${outcome(run, task)}</td><td>${askedBy(run)}</td><td class="num">${day(run.startedAt)}</td></tr>`;
             })}
           </tbody>
         </table>
