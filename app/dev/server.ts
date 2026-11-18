@@ -31,7 +31,9 @@ const assets = { async fetch(request: Request): Promise<Response> {
 } };
 
 const preview = createServer(async (incoming, outgoing) => {
-  const origin = `http://${incoming.headers.host ?? `localhost:${port}`}`;
+  // Behind an https proxy, such as an Amp orb portal, keep the page and the fake API on one scheme.
+  const scheme = incoming.headers["x-forwarded-proto"] === "https" ? "https" : "http";
+  const origin = `${scheme}://${incoming.headers.host ?? `localhost:${port}`}`;
   const method = incoming.method ?? "GET";
   const request = new Request(new URL(incoming.url ?? "/", origin), {
     method, headers: Object.entries(incoming.headers).flatMap(([name, value]) => (typeof value === "string" ? [[name, value] as [string, string]] : [])),
@@ -53,5 +55,5 @@ const preview = createServer(async (incoming, outgoing) => {
   outgoing.writeHead(response.status, headers);
   outgoing.end(Buffer.from(await response.arrayBuffer()));
 });
-const api = createFakeApi({ appUrl: `http://localhost:${port}` });
-preview.listen(port, () => console.log(`app.openmerit.ai preview on http://localhost:${port}/ (fake API and sign-in; ?preview=populated|empty|noplan|member|error|slow|expired|signed-out)`));
+const api = createFakeApi();
+preview.listen(port, () => console.log(`app.openmerit.ai preview on http://localhost:${port}/ (fake API and sign-in; ?preview=tonic|populated|empty|noplan|member|error|slow|expired|signed-out)`));
