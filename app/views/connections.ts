@@ -14,7 +14,7 @@ const isKind = (value: string): value is EndpointKind => value in kinds;
 // OpenRouter on OpenMerit's key is always there; /api/endpoints lists only the customer's own.
 const builtIn = (): Html => html`<div class="row">
           <span>${logo("openrouter")}OpenRouter<span class="sub">https://openrouter.ai/api/v1 · OpenRouter API</span><span class="sub">Every model</span></span>
-          <span class="endpoint-meta"><span class="pill">OpenMerit's key · OpenMerit pays</span></span>
+          <span class="endpoint-meta"><span class="pill tag">OpenMerit's key · OpenMerit pays</span></span>
           <span></span>
         </div>`;
 
@@ -23,7 +23,7 @@ function endpointRow(endpoint: Endpoint, admin: boolean): Html {
   const found = provider(endpoint.baseUrl);
   return html`<div class="row">
           <span>${logo(found.logo)}${found.name}<span class="sub">${endpoint.baseUrl} · ${kinds[endpoint.kind]?.label ?? endpoint.kind} API</span><span class="sub">${models}</span></span>
-          <span class="endpoint-meta"><span class="pill">Key ending ${endpoint.keyLast4} · you pay</span><span class="sub">${endpoint.verifiedAt ? `Checked ${date(endpoint.verifiedAt)}` : "Not checked yet"}</span></span>
+          <span class="endpoint-meta"><span class="pill tag">Key ending ${endpoint.keyLast4} · you pay</span><span class="sub">${endpoint.verifiedAt ? `Checked ${date(endpoint.verifiedAt)}` : "Not checked yet"}</span></span>
           ${admin ? html`<button class="btn danger" type="button" data-action="remove" data-id="${endpoint.id}" aria-label="Remove ${endpoint.baseUrl}">Remove</button>` : html`<span></span>`}
         </div>`;
 }

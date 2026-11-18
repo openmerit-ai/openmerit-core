@@ -8,7 +8,7 @@ import { empty, header } from "./common.ts";
 function describe(found: { status: string; pick: string | null; current: string; saving: string }, link: (text: Html | string) => Html): Html {
   switch (found.status) {
     case "new": return html`<span class="sub">Not measured yet</span>`;
-    case "running": return html`<span class="pill">Measuring</span>`;
+    case "running": return html`<span class="pill live">Evaluating</span>`;
     case "picked": return found.pick
       ? html`${link(html`Switch to ${model(found.pick)}`)}<span class="sub">from ${model(found.current)}${found.saving ? ` · ${found.saving}` : ""}</span>`
       : link("Cheaper model found");
@@ -29,7 +29,7 @@ export const result = (task: Task, link: (text: Html | string) => Html = (text) 
 
 const jobStatus: Record<string, Html> = {
   queued: html`<span class="pill">Queued</span>`,
-  running: html`<span class="pill">Evaluating</span>`,
+  running: html`<span class="pill live">Evaluating</span>`,
   needs_input: html`<span class="pill warn">Needs input</span><span class="sub">in your coding agent</span>`,
   failed: html`<span class="pill bad">Did not finish</span>`,
   stopped: html`<span class="pill">Stopped</span>`,
@@ -97,7 +97,7 @@ function inProgress(all: JobView[], runs: Run[], byId: Map<string, Task>): Html 
               <td class="num"><span data-live="${id}" data-morph="cases">${text.cases}</span></td>
               <td class="num"><span data-live="${id}" data-morph="rate">${text.rate}</span></td>
               <td>${live ? html`<div class="live-spark" data-live="${id}" role="img" aria-label="Pass rate so far"></div>` : job.progress.planned ? html`<div class="meter" data-live="${id}" aria-hidden="true"><i style="width: ${Math.round((job.progress.measured / job.progress.planned) * 100)}%"></i></div>` : ""}</td>
-              <td class="num"><span class="pill${job.status === "needs_input" ? " warn" : ""}" data-live="${id}" data-morph="status">${text.status}</span></td>
+              <td class="num"><span class="pill${job.status === "needs_input" ? " warn" : job.status === "running" ? " live" : ""}" data-live="${id}" data-morph="status">${text.status}</span></td>
             </tr>`;
             })}
           </tbody>

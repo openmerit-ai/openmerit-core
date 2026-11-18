@@ -60,7 +60,7 @@ const editable = (key: string, value: unknown): string => {
 
 function from(level: Level | undefined, here: Level): Html {
   if (!level) return html`<span class="sub">Not set</span>`;
-  return level === here ? html`<span class="pill good">This level</span>` : html`<span class="pill">${level[0]?.toUpperCase()}${level.slice(1)}</span>`;
+  return level === here ? html`<span class="pill tag good">This level</span>` : html`<span class="pill tag">${level[0]?.toUpperCase()}${level.slice(1)}</span>`;
 }
 
 interface Data { tasks: Task[]; level: Level; id: string | null; guardrails: GuardrailsAt | null }
