@@ -1,9 +1,7 @@
-// Builds the app.openmerit.ai mockup into dist/app: wraps each page in app/pages
-// with the shared sidebar layout and compiles the sidebar script.
-//
-// A page starts with `<!-- title: <title> | nav: <section> | path: <url path> -->`;
-// a path ending in .html, such as 404.html, names the output file itself.
-// `{{logo:<name>}}` inlines app/logos/<name>.svg, so single-colour logos follow the text colour.
+// Builds app.openmerit.ai into dist/app: one page shell per view with the shared
+// sidebar layout, the pages' script (app/main.ts) and the sidebar script. The
+// shells show a loading state; app/main.ts signs in and fills them from the
+// cloud app's /api/*. app/worker.ts serves them.
 import { build } from "esbuild";
 import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -20,9 +18,33 @@ const nav = [
 
 const accountPages = [
   { id: "connections", href: "/connections/", label: "Connections", icon: '<path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/>' },
+  { id: "guardrails", href: "/guardrails/", label: "Guardrails", icon: '<path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/>' },
   { id: "plan", href: "/plan/", label: "Plan and usage", icon: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/>' },
   { id: "data", href: "/data/", label: "Your data", icon: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>' },
 ] as const;
+
+// Each view's shell: its title, the sidebar item it marks, and its address.
+const pages = [
+  { view: "runs", title: "Runs", nav: "runs", path: "/" },
+  { view: "run", title: "Run report", nav: "runs", path: "r" },
+  { view: "tasks", title: "Tasks", nav: "tasks", path: "tasks" },
+  { view: "connections", title: "Connections", nav: "connections", path: "connections" },
+  { view: "guardrails", title: "Guardrails", nav: "guardrails", path: "guardrails" },
+  { view: "plan", title: "Plan and usage", nav: "plan", path: "plan" },
+  { view: "data", title: "Your data", nav: "data", path: "data" },
+] as const;
+
+const escape = (text: string): string => text.replace(/[&<>"]/g, (char) => `&#${char.charCodeAt(0)};`);
+
+// What a page shows until its data arrives.
+const loading = (view: string, title: string): string => `        <div id="view" data-view="${view}" data-title="${escape(title)}" aria-busy="true">
+          <div class="eyebrow"><span class="skeleton" style="width: 120px"></span></div>
+          <h1 class="title">${escape(title)}</h1>
+          <p class="lede"><span class="skeleton" style="width: min(560px, 90%)"></span></p>
+          <section><span class="skeleton block"></span></section>
+          <p class="sr-only">Loading…</p>
+          <noscript><p class="lede">These pages need JavaScript.</p></noscript>
+        </div>`;
 
 const icon = (paths: string): string =>
   `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
@@ -48,6 +70,7 @@ function page(title: string, active: string, body: string): string {
   <link rel="preload" href="/assets/geist-sans.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/app.css">
   <script src="/sidebar.js" type="module"></script>
+  <script src="/main.js" type="module"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -65,16 +88,16 @@ function page(title: string, active: string, body: string): string {
         ${links}
         </nav>
         <div class="sidebar-foot">
-          <button class="profile${onAccountPage ? " current" : ""}" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="profile-menu" title="Amira Haddad · Sahra Health">
-            <span class="avatar" aria-hidden="true">A<span class="org-badge">S</span></span>
-            <span class="label">Amira Haddad<span class="sub">Sahra Health · Cloud plan</span></span>
+          <button class="profile${onAccountPage ? " current" : ""}" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="profile-menu" title="Account">
+            <span class="avatar" aria-hidden="true"></span>
+            <span class="label"><span class="skeleton" style="width: 110px"></span><span class="sub"><span class="skeleton" style="width: 80px"></span></span></span>
             ${icon('<path d="m8 9 4-4 4 4M8 15l4 4 4-4"/>')}
           </button>
           <div class="profile-menu" id="profile-menu" role="menu" aria-label="Account" hidden>
-            <div class="menu-who"><span class="avatar" aria-hidden="true">A<span class="org-badge">S</span></span><span>Amira Haddad<span class="sub">amira@sahra.example</span></span></div>
+            <div class="menu-who"><span class="avatar" aria-hidden="true"></span><span>…</span></div>
             ${menuLinks}
             <hr>
-            <a role="menuitem" href="#">${icon('<path d="M9 4H5v16h4M14 8l4 4-4 4M18 12H9"/>')}Sign out</a>
+            <a role="menuitem" href="#" data-global="sign-out">${icon('<path d="M9 4H5v16h4M14 8l4 4-4 4M18 12H9"/>')}<span>Sign out</span></a>
           </div>
         </div>
       </div>
@@ -82,7 +105,6 @@ function page(title: string, active: string, body: string): string {
     <div class="content">
       <div class="topbar">
         <button class="menu-toggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Open menu">${icon('<path d="M4 7h16M4 12h16M4 17h16"/>')}</button>
-        <span class="mock-note">Mockup. Every name, number and price is fictional.</span>
       </div>
       <main id="main">
 ${body}
@@ -95,28 +117,21 @@ ${body}
 `;
 }
 
-const logos = new Map(readdirSync(join(source, "logos")).filter((name) => name.endsWith(".svg")).map((name) => [name.slice(0, -4), readFileSync(join(source, "logos", name), "utf8").trim()]));
-let logoCount = 0;
-function inlineLogos(file: string, html: string): string {
-  return html.replace(/\{\{logo:([\w-]+)\}\}/g, (_, name: string) => {
-    const svg = logos.get(name);
-    if (!svg) throw new Error(`${file}: no app/logos/${name}.svg.`);
-    // Gradient ids must stay unique when a logo appears more than once on a page.
-    return svg.replace("<svg ", '<svg class="logo" aria-hidden="true" ').replaceAll("_R_0_", `_${logoCount++}`);
-  });
-}
+const notFound = `        <h1 class="title">Page not found</h1>
+        <p class="lede">This page does not exist. <a href="/">Back to runs</a></p>`;
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-for (const file of readdirSync(join(source, "pages")).filter((name) => name.endsWith(".html"))) {
-  const text = readFileSync(join(source, "pages", file), "utf8");
-  const header = /^<!-- title: (.+?) \| nav: (\w+) \| path: (\S+) -->\n/.exec(text);
-  if (!header) throw new Error(`${file}: missing the title, nav and path header.`);
-  const [whole, title = "", active = "", path = ""] = header;
-  const target = path.endsWith(".html") ? join(out, path) : join(out, path, "index.html");
+for (const { view, title, nav, path } of pages) {
+  const target = join(out, path, "index.html");
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, page(title, active, inlineLogos(file, text.slice(whole.length))));
+  writeFileSync(target, page(title, nav, loading(view, title)));
 }
+writeFileSync(join(out, "404.html"), page("Not found", "none", notFound));
 cpSync(join(source, "assets"), join(out, "assets"), { recursive: true });
 for (const file of ["app.css", "favicon.svg"]) cpSync(join(source, file), join(out, file));
-await build({ absWorkingDir: root, entryPoints: ["app/sidebar.ts"], outfile: join(out, "sidebar.js"), format: "esm", platform: "browser", target: "es2022", minify: true });
+// The pages inline provider and agent logos, so single-colour ones follow the text colour.
+const logos = Object.fromEntries(readdirSync(join(source, "logos")).filter((name) => name.endsWith(".svg")).map((name) => [name.slice(0, -4), readFileSync(join(source, "logos", name), "utf8").trim()]));
+const options = { absWorkingDir: root, format: "esm", platform: "browser", target: "es2022", minify: true, bundle: true } as const;
+await build({ ...options, entryPoints: ["app/sidebar.ts"], outfile: join(out, "sidebar.js") });
+await build({ ...options, entryPoints: ["app/main.ts"], outfile: join(out, "main.js"), define: { __LOGOS__: JSON.stringify(logos) } });
