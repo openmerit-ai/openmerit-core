@@ -64,7 +64,7 @@ function inProgress(jobs: JobView[], runs: Run[], byId: Map<string, Task>): Html
   if (!jobs.length) return html``;
   const runOf = new Map(runs.map((run) => [run.id, run]));
   return html`<section aria-labelledby="progress">
-      <h2 id="progress">In progress</h2>
+      <h2 id="progress">In progress <span class="count">${jobs.length}</span></h2>
       <div class="tablewrap">
         <table class="running">
           <thead><tr><th>Task</th><th>Testing</th><th class="num">Cases</th><th class="num">Passed</th><th>So far</th><th class="num">Status</th></tr></thead>
@@ -102,30 +102,13 @@ export const runsView: View<{ runs: Run[]; tasks: Task[]; jobs: JobView[] }> = {
     return { runs, tasks, jobs: jobs.filter((job): job is JobView => job !== null && "report" in job && job.report === null) };
   },
   render({ runs, tasks, jobs }, { me }) {
-    const top = header(me, "Runs", "Each time a coding agent asks which model to use, OpenMerit runs the task's tests on the candidates and the answer lands here with its evidence. Link a run in a pull request so reviewers can see why.", [plural(tasks.length, "task"), plural(runs.length, "run")]);
+    const top = header(me, "Runs", "Each time a coding agent asks which model to use, OpenMerit runs the task's tests on the candidates and the answer lands here with its evidence. Link a run in a pull request so reviewers can see why.", [plural(tasks.length, "task")]);
     if (!runs.length) return html`${top}<section aria-labelledby="all"><h2 id="all">All runs</h2>${empty("No runs yet", "Add OpenMerit to a coding agent, then ask it which model a task should use. The run and its evidence appear here.")}</section>`;
     const byId = new Map(tasks.map((task) => [task.id, task]));
-    const saving = tasks.reduce((sum, task) => sum + (task.status === "picked" ? task.monthlySavingUsd ?? 0 : 0), 0);
-    const month = new Date().toISOString().slice(0, 7);
-    const recent = runs.filter((run) => run.startedAt.startsWith(month));
-    const breakdown = (["done", "running", "needs_input", "failed"] as const)
-      .map((status) => [recent.filter((run) => run.status === status || (status === "running" && run.status === "queued")).length, { done: "done", running: "measuring", needs_input: "waiting for an answer", failed: "did not finish" }[status]] as const)
-      .filter(([count]) => count).map(([count, label]) => `${count} ${label}`).join(", ");
-    const plan = me.plan;
     return html`${top}
     ${inProgress(jobs, runs, byId)}
-    <section aria-labelledby="summary">
-      <h2 id="summary">This month</h2>
-      <div class="grid3">
-        <div class="card"><span class="big">${usd(saving)}</span><span class="sub">estimated monthly saving from the cheaper models OpenMerit found</span></div>
-        <div class="card"><span class="big">${recent.length}</span><span class="sub">${recent.length === 1 ? "run" : "runs"}${breakdown ? ` · ${breakdown}` : ""}</span></div>
-        <div class="card">${plan.status !== "none" && plan.status !== "canceled"
-          ? html`<span class="big">${plan.usedEvals} / ${plan.includedEvals}</span><span class="sub">evaluations used${plan.name ? ` on the ${plan.name} plan` : ""}</span>`
-          : html`<span class="big">No plan</span><span class="sub"><a href="/plan/">Choose a plan</a> to measure new tasks</span>`}</div>
-      </div>
-    </section>
     <section aria-labelledby="all">
-      <h2 id="all">All runs</h2>
+      <h2 id="all">All runs <span class="count">${runs.length.toLocaleString("en-US")}</span></h2>
       <div class="tablewrap">
         <table>
           <thead><tr><th>Task</th><th>Outcome</th><th>Asked by</th><th class="num">Last run</th></tr></thead>
