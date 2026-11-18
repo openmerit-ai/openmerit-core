@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prepares an Amp orb: installs the Node.js version CI uses and the npm dependencies of the
-# website (root), the openmerit package (openmerit-core/) and the Sahra Health playground.
+# website (root), the openmerit package (openmerit-core/), the Sahra Health playground and the cloud app (cloud/).
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -67,6 +67,6 @@ install_deps() {
 }
 
 # demo/ is left out: npm run check:demo installs it on every run.
-for dir in . openmerit-core playground; do
+for dir in . openmerit-core playground cloud; do
   install_deps "$dir"
 done

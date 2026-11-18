@@ -1,0 +1,27 @@
+{
+  "name": "openmerit-cloud",
+  "private": true,
+  "description": "OpenMerit cloud: the Node.js app behind openmerit.ai/mcp, its Rivet actors and its account API. Runs on a Rivet Cloud hosted actor node.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "start": "node src/server.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.ts\"",
+    "check": "npm run typecheck && npm test",
+    "deploy": "node scripts/deploy.ts"
+  },
+  "dependencies": {
+    "@clerk/backend": "3.26.1",
+    "@rivet-dev/workflows": "1.1.1",
+    "rivetkit": "3.1.1"
+  },
+  "devDependencies": {
+    "@rivetkit/cli": "3.1.1",
+    "@types/node": "22.19.1",
+    "typescript": "5.9.3"
+  }
+}
