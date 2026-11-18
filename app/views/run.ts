@@ -18,7 +18,7 @@ const verdicts: Record<Report["status"], string> = {
 };
 
 function title(data: Data): string {
-  if (isLive(data)) return data.status === "failed" ? `${data.task}: the run did not finish` : data.status === "stopped" ? `${data.task}: stopped` : data.status === "needs_input" ? `${data.task}: waiting for your answer` : `${data.task}: measuring`;
+  if (isLive(data)) return data.status === "failed" ? `${data.task}: the run did not finish` : data.status === "stopped" ? `${data.task}: stopped` : data.status === "needs_input" ? `${data.task}: needs input` : `${data.task}: evaluating`;
   if (data.status === "picked" && data.pick) return `${data.task}: switch to ${modelName(data.pick.model)}`;
   if (data.status === "keep_current" && data.baseline) return `${data.task}: keep ${modelName(data.baseline.model)}`;
   return `${data.task}: no switch`;
@@ -28,7 +28,7 @@ function title(data: Data): string {
 // the model in use today, with the numbers Torph morphs as each case finishes (app/live.ts).
 function measuring(job: JobView): Html {
   const live = job.live!, text = liveText(job), id = job.jobId;
-  return html`<div class="pick-head"><span class="pick-model">${model(live.model)}</span><span class="pill" data-live="${id}" data-morph="status">${text.status}</span></div>
+  return html`<div class="pick-head"><span class="pick-model">${model(live.model)}</span><span class="pill live" data-live="${id}" data-morph="status">${text.status}</span></div>
       <span class="sub">on ${endpointName(live.endpoint)}${live.baseline ? html` · against ${model(live.baseline.model)}, which passed ${Math.round(live.baseline.rate)}%` : ""}</span>
       <div class="live-chart" data-live="${id}" role="img" aria-label="Pass rate so far"></div>
       <div class="stats"><div class="stat"><b data-live="${id}" data-morph="cases">${text.cases}</b><span>cases run</span></div><div class="stat"><b data-live="${id}" data-morph="rate">${text.rate}</b><span>passed so far</span></div></div>
@@ -39,8 +39,8 @@ function live(job: JobView): Html {
   const progress = job.progress.planned ? `${job.progress.measured} of about ${job.progress.planned} measurements done` : `${plural(job.progress.measured, "measurement")} done`;
   const body = {
     queued: html`<span class="pill">Queued</span><p class="note">The run starts in a moment.</p>`,
-    running: job.live ? measuring(job) : html`<span class="pill">Measuring</span><span class="sub">${job.phase.replace("_", " ")} · ${progress}</span><p class="note">Your coding agent gets the result on its next OpenMerit call, and this page shows the report.</p>`,
-    needs_input: html`<span class="pill warn">Waiting for your answer</span><p class="note">OpenMerit asked ${plural(job.questions.length, "question")} in your coding agent, such as a check of the test labels. The run continues once it answers.</p>`,
+    running: job.live ? measuring(job) : html`<span class="pill live">Evaluating</span><span class="sub">${job.phase.replace("_", " ")} · ${progress}</span><p class="note">Your coding agent gets the result on its next OpenMerit call, and this page shows the report.</p>`,
+    needs_input: html`<span class="pill warn">Needs input</span><p class="note">OpenMerit asked ${plural(job.questions.length, "question")} in your coding agent, such as a check of the test labels. The run continues once it answers.</p>`,
     failed: html`<p>${job.error ?? "The run stopped before it could recommend a model."}</p>`,
     stopped: html`<p>The run was stopped${job.error ? `: ${job.error}` : "."}</p>`,
     done: html`<p>The run finished; its report is being saved. Reload in a moment.</p>`,
@@ -53,7 +53,7 @@ function live(job: JobView): Html {
 }
 
 function verdict(item: MeasuredModel, pick: string | null): Html {
-  if (item.role === "baseline") return html`<span class="pill">In use today</span>`;
+  if (item.role === "baseline") return html`<span class="pill tag">In use today</span>`;
   if (item.model === pick) return html`<span class="pill good">Picked</span>`;
   if (item.status === "unavailable") return html`<span class="pill warn">Unavailable</span>`;
   if (item.status === "screened_out") return html`<span class="pill">Screened out</span>`;
@@ -63,7 +63,7 @@ function verdict(item: MeasuredModel, pick: string | null): Html {
 function pickCard(report: Report): Html {
   const pick = report.pick, base = report.baseline;
   if (!pick) return base
-    ? html`<div class="card"><div class="pick-head"><span class="pick-model">${model(base.model)}</span><span class="pill">In use today</span></div><span class="sub">${endpointName(base.endpoint)}</span>
+    ? html`<div class="card"><div class="pick-head"><span class="pick-model">${model(base.model)}</span><span class="pill tag">In use today</span></div><span class="sub">${endpointName(base.endpoint)}</span>
         <div class="stats"><div class="stat"><b>${base.passes}/${base.total}</b><span>cases passed</span></div><div class="stat"><b>${per1k(base.costPerCallUsd)}</b><span>per 1,000 calls</span></div><div class="stat"><b>${seconds(base.latencyMs)}</b><span>mean latency</span></div></div></div>`
     : html`<div class="card"><p>${verdicts[report.status]}</p></div>`;
   const measured = report.candidates.find((item) => item.model === pick.model && item.endpoint === pick.endpoint);
@@ -148,7 +148,7 @@ function report(data: Report, accountName: string): Html {
     ${from.length || data.guardrails.rejected.length ? html`<section aria-labelledby="rules">
       <h2 id="rules">Guardrails this run used</h2>
       <div class="card">
-        ${from.map(([key, level]) => html`<div class="row"><span><code>${key}</code></span><span>${show(key, (data.guardrails.effective as Record<string, unknown>)[key])} <span class="pill">${level}</span></span></div>`)}
+        ${from.map(([key, level]) => html`<div class="row"><span><code>${key}</code></span><span>${show(key, (data.guardrails.effective as Record<string, unknown>)[key])} <span class="pill tag">${level}</span></span></div>`)}
         ${data.guardrails.rejected.map((item) => html`<p class="note">Not applied: <code>${item.key}</code> at the ${item.level} level, which ${item.reason}.</p>`)}
       </div>
     </section>` : ""}
