@@ -4,7 +4,8 @@
 // sign-in returns to it; the other scenarios are Sahra Health's.
 import { clerkGlobals, type Clerk } from "../auth.ts";
 
-const key = "om-preview";
+// Renamed from om-preview when Tonic Ultra became the default, so an old choice does not stick.
+const key = "om-preview-account";
 const chosen = new URLSearchParams(location.search).get("preview");
 if (chosen) localStorage.setItem(key, chosen);
 const scenario = localStorage.getItem(key) ?? "tonic";
