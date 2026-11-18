@@ -47,9 +47,9 @@ function live(job: JobView): Html {
   }[job.status];
   return html`<div class="eyebrow" data-live="${job.jobId}" data-status="${job.status}"><a href="/">Runs</a><span>›</span><span>${job.jobId}</span><span>Started ${date(job.createdAt)}</span></div>
     <h1 class="title">${title(job)}</h1>
-    <div class="card${job.status === "failed" ? " notice bad" : ""}" style="margin-top: 20px"${job.status === "failed" ? html` role="alert"` : ""}>${body}</div>
+    <div class="card${job.status === "failed" ? " notice bad" : ""}" style="margin-top: 20px"${job.status === "failed" ? html` role="alert"` : ""}>${body}${job.notices.map((notice) => html`<p class="note">${notice}</p>`)}</div>
     ${job.provisional ? html`<section aria-labelledby="provisional"><h2 id="provisional">Provisional pick</h2><div class="card"><p>${model(job.provisional.model)} on ${endpointName(job.provisional.endpoint)}${job.provisional.estCostPerCallUsd !== null ? html` · about ${per1k(job.provisional.estCostPerCallUsd)} per 1,000 calls` : ""}</p><p class="note">${job.provisional.reason} Chosen from the catalogue before measuring.</p></div></section>` : ""}
-    ${job.notices.length ? html`<section aria-labelledby="notes"><h2 id="notes">Notes</h2><div class="card">${job.notices.map((notice) => html`<p class="sub">${notice}</p>`)}</div></section>` : ""}`;
+`;
 }
 
 function verdict(item: MeasuredModel, pick: string | null): Html {
@@ -95,7 +95,9 @@ function change(report: Report): Html {
       </div>`;
 }
 
-function report(data: Report, accountName: string): Html {
+const list = (items: string[]): string => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+
+function report(data: Report): Html {
   const models = [data.baseline, ...data.candidates].filter((item): item is MeasuredModel => item !== null);
   const pick = data.pick?.model ?? null;
   const from = Object.entries(data.guardrails.from);
@@ -132,9 +134,14 @@ function report(data: Report, accountName: string): Html {
     <section aria-labelledby="search">
       <h2 id="search">How OpenMerit searched</h2>
       <div class="card">
-        <p>Searched ${plural(search.pool, "ranked model")}${search.unplaced ? ` and ${search.unplaced} placed by measurement only` : ""} on ${plural(search.samples.length, "sample case")}, then measured ${plural(search.finalists.length, "finalist")}${search.challengers.length ? ` and ${plural(search.challengers.length, "challenger")}` : ""} on every case.</p>
+        <dl class="steps">
+          <dt>1 · Shortlist</dt><dd>${plural(search.pool, "model")} cheaper than ${data.baseline ? modelName(data.baseline.model) : "the model in use today"} that fit this task's guardrails, ordered by capability${search.unplaced ? `, plus ${search.unplaced} with no capability score, measured as ${search.unplaced === 1 ? "a challenger" : "challengers"}` : ""}.</dd>
+          <dt>2 · Screen</dt><dd>Tested the shortlist on ${plural(search.samples.length, "case")} the model in use today passes, halving it at each step, to find the cheapest models that pass them all.</dd>
+          <dt>3 · Measure</dt><dd>Ran ${list([...search.finalists.map(modelName), ...search.challengers.map(modelName)]) || "no model"} on all ${data.cases.total} cases${search.challengers.length ? html` (${list(search.challengers.map(modelName))} as ${search.challengers.length === 1 ? "a challenger" : "challengers"})` : ""}.</dd>
+          <dt>Cost</dt><dd>${usd(data.spend.openmeritUsd)} on OpenMerit's account${data.spend.customerUsd ? ` and ${usd(data.spend.customerUsd)} on your own endpoints' keys` : ""}.</dd>
+        </dl>
         ${search.shortfall ? html`<p class="note">${search.shortfall}</p>` : ""}
-        <p class="note">This run cost ${usd(data.spend.openmeritUsd)} on OpenMerit's account${data.spend.customerUsd ? ` and ${usd(data.spend.customerUsd)} on your own endpoints' keys` : ""}.</p>
+        ${data.notices.map((notice) => html`<p class="note">${notice}</p>`)}
       </div>
     </section>
 
@@ -148,20 +155,10 @@ function report(data: Report, accountName: string): Html {
     ${from.length || data.guardrails.rejected.length ? html`<section aria-labelledby="rules">
       <h2 id="rules">Guardrails this run used</h2>
       <div class="card">
-        ${from.map(([key, level]) => html`<div class="row"><span><code>${key}</code></span><span>${show(key, (data.guardrails.effective as Record<string, unknown>)[key])} <span class="pill tag">${level}</span></span></div>`)}
+        ${from.map(([key, level]) => html`<div class="row"><span><span class="pill tag level">${level}</span><code>${key}</code></span><span>${show(key, (data.guardrails.effective as Record<string, unknown>)[key])}</span></div>`)}
         ${data.guardrails.rejected.map((item) => html`<p class="note">Not applied: <code>${item.key}</code> at the ${item.level} level, which ${item.reason}.</p>`)}
       </div>
-    </section>` : ""}
-
-    ${data.notices.length ? html`<section aria-labelledby="notes"><h2 id="notes">Notes</h2><div class="card">${data.notices.map((notice) => html`<p class="sub">${notice}</p>`)}</div></section>` : ""}
-
-    <section aria-labelledby="share">
-      <h2 id="share">Share</h2>
-      <div class="card split">
-        <p>Only members of ${accountName} can open this page. A public link to the report as Markdown lets pull request reviewers read it.</p>
-        <button class="btn" type="button" data-action="share">Get public link</button>
-      </div>
-    </section>`;
+    </section>` : ""}`;
 }
 
 export const runView: View<Data> = {
@@ -172,14 +169,5 @@ export const runView: View<Data> = {
     return data;
   },
   title,
-  render: (data, { me }) => (isLive(data) ? live(data) : report(data, me.account.name)),
-  actions: {
-    // The link is the same on every call, and the report does not carry it, so ask for it here.
-    async share(target, data, { api, toast }) {
-      const { url } = await api.send<{ url: string }>("POST", `/api/runs/${encodeURIComponent(isLive(data) ? data.jobId : data.jobId)}/share`);
-      const card = target.closest(".card");
-      if (card) card.innerHTML = html`<p>Anyone with this link can read the report: <a href="${url}">${url}</a></p>`.__html;
-      toast("Public link ready.");
-    },
-  },
+  render: (data) => (isLive(data) ? live(data) : report(data)),
 };
