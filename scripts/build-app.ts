@@ -37,7 +37,7 @@ function page(title: string, active: string, body: string): string {
   <title>${title} · OpenMerit</title>
   ${initialMode}
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <link rel="preload" href="/assets/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/geist-sans.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/app.css">
   <script src="/sidebar.js" type="module"></script>
 </head>

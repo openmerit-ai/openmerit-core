@@ -179,7 +179,7 @@ Production verification: 54 URLs across both domains match the checked local fil
 
 ## Assets
 
-- The self-hosted Inter Latin variable font comes from Google Fonts. Its SIL Open Font License is included at `site/assets/inter-LICENSE.txt`.
+- Typography uses Vercel's Geist family from the `geist` npm package (1.9.2), self-hosted in `site/assets/` and `app/assets/`: Geist Sans (variable) for body and UI text (`--sans`), Geist Serif Regular for titles and serif text (`--serif`), and Geist Mono (variable) for code (`--mono`). Geist Serif ships only at weight 400. Their SIL Open Font License is included at `site/assets/geist-LICENSE.txt`.
 - The 1200 × 630 PNG social card contains only “Good models prove themselves in the work.” and a matching miniature workshop illustration. Open Graph and Twitter metadata reference `site/assets/openmerit-og-v1.png`; see [the generation prompt and asset provenance](site-og-image.md).
 
 ## Full-site publication, September 28, 2026

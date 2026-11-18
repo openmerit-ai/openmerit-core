@@ -81,7 +81,7 @@ export async function buildMemo(root) {
   <title>${escape(title)} · OpenMerit</title>
 ${sharingMetadata}
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="preload" href="/assets/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/geist-sans.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css?v=${revision}">
   <link rel="stylesheet" href="/memo.css?v=${revision}">
   <meta name="robots" content="noindex, nofollow, noarchive">
