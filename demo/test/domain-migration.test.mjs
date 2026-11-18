@@ -99,3 +99,52 @@ test('retired pages and APIs are offline on every public host', async () => {
   const redirect = await router.fetch(new Request('https://www.openmerit.ai/scout/?q=hello'), env);
   assert.equal(redirect.status, 308); assert.equal(redirect.headers.get('location'), 'https://openmerit.ai/scout/?q=hello');
 });
+
+test('MCP, its OAuth metadata and the account API go to the cloud app with the request intact', async () => {
+  const { default: router } = await import('../domain-router.mjs');
+  const env = { CLOUD_APP_ORIGIN: 'https://cloud.example', SCOUT: { fetch() { assert.fail('Cloud paths must not reach the web Worker'); } } };
+  const seen = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const request = new Request(url, init);
+    seen.push({ url: request.url, method: request.method, authorization: request.headers.get('authorization'), cookie: request.headers.get('cookie'), host: request.headers.get('x-forwarded-host'), body: await request.text() });
+    return new Response('{"error":"Sign in first."}', { status: 401, headers: { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer resource_metadata="https://openmerit.ai/.well-known/oauth-protected-resource/mcp"' } });
+  };
+  try {
+    for (const [method, path] of [['POST', '/mcp'], ['GET', '/mcp'], ['GET', '/.well-known/oauth-protected-resource'], ['GET', '/.well-known/oauth-protected-resource/mcp'], ['GET', '/api/me?x=1'], ['POST', '/api/endpoints'], ['DELETE', '/api/account'], ['OPTIONS', '/api/tasks']]) {
+      seen.length = 0;
+      const body = method === 'POST' ? '{"jsonrpc":"2.0","id":1,"method":"initialize"}' : undefined;
+      const result = await router.fetch(new Request(`https://openmerit.ai${path}`, { method, body, headers: { Authorization: 'Bearer token', Cookie: '__session=site; other=1' } }), env);
+      assert.equal(result.status, 401, `${method} ${path}`);
+      assert.match(result.headers.get('www-authenticate'), /resource_metadata="https:\/\/openmerit\.ai\//);
+      assert.deepEqual(seen, [{ url: `https://cloud.example${path}`, method, authorization: 'Bearer token', cookie: null, host: 'openmerit.ai', body: body ?? '' }]);
+    }
+    seen.length = 0;
+    const redirect = await router.fetch(new Request('https://www.openmerit.ai/mcp', { method: 'POST', body: '{}' }), env);
+    assert.equal(redirect.status, 308); assert.equal(redirect.headers.get('location'), 'https://openmerit.ai/mcp');
+    for (const path of ['/mcpx', '/apis', '/api-docs', '/.well-known/oauth-protected-resources', '/scout/api/session']) {
+      const scout = { ...env, SCOUT: { fetch: () => new Response('web') } };
+      const result = await router.fetch(new Request(`https://openmerit.ai${path}`), scout);
+      assert.notEqual(result.status, 401, path);
+    }
+    assert.deepEqual(seen, []);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('cloud paths fail closed until the cloud app origin is configured', async () => {
+  const { default: router } = await import('../domain-router.mjs');
+  const env = { CLOUD_APP_ORIGIN: '', SCOUT: { fetch() { assert.fail('Cloud paths must not reach the web Worker'); } } };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = () => assert.fail('Nothing to proxy to');
+  try {
+    for (const path of ['/mcp', '/.well-known/oauth-protected-resource', '/api/me']) {
+      const result = await router.fetch(new Request(`https://openmerit.ai${path}`, { method: 'POST', body: '{}' }), env);
+      assert.equal(result.status, 503, path);
+      assert.equal(result.headers.get('cache-control'), 'no-store');
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
