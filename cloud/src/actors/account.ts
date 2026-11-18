@@ -39,7 +39,9 @@ const ACTIVE_PLAN = new Set(["active", "trialing"]);
 export interface Plan { name: string; status: string; periodStart: number | null; periodEnd: number | null; includedEvals: number; usedEvals: number; overage: "metered" | "refuse"; customerId: string | null }
 export interface EndpointView { id: string; kind: EndpointKind; baseUrl: string; allowedModels: string[] | "all"; keyLast4: string; verifiedAt: string | null; builtIn: boolean }
 export interface TaskRow { id: string; environment: string; agent: string | null; name: string; currentModel: string; pick: string | null; status: string; watching: boolean; lastRunAt: string | null; lastJobId: string | null; monthlySavingUsd: number | null }
-export interface JobRow { id: string; taskId: string; kind: string; status: string; startedAt: string; finishedAt: string | null }
+/** What a finished job's report found, so a list of runs can say it without loading each report. */
+export interface RunResult { status: string; model: string | null; from: string | null; savingPerCallUsd: number | null }
+export interface JobRow { id: string; taskId: string; kind: string; status: string; startedAt: string; finishedAt: string | null; result: RunResult | null }
 export interface GuardrailSetting { key: string; value: unknown; kind: "constraint" | "default" }
 export type Started = { ok: true } | { ok: false; error: string };
 
@@ -53,7 +55,17 @@ const taskRow = (row: Row): TaskRow => ({
   pick: (row.pick as string | null) ?? null, status: String(row.status), watching: row.watching === 1, lastRunAt: iso(row.last_run_at), lastJobId: (row.last_job_id as string | null) ?? null,
   monthlySavingUsd: (row.monthly_saving_usd as number | null) ?? null,
 });
-const jobRow = (row: Row): JobRow => ({ id: String(row.id), taskId: String(row.task_id), kind: String(row.kind), status: String(row.status), startedAt: iso(row.started_at)!, finishedAt: iso(row.finished_at) });
+function runResult(json: unknown): RunResult | null {
+  if (typeof json !== "string") return null;
+  const report = JSON.parse(json) as { status?: unknown; pick?: { model?: unknown; savingPerCallUsd?: unknown } | null; baseline?: { model?: unknown } | null };
+  if (typeof report.status !== "string") return null;
+  const text = (value: unknown) => (typeof value === "string" ? value : null);
+  return { status: report.status, model: text(report.pick?.model), from: text(report.baseline?.model), savingPerCallUsd: typeof report.pick?.savingPerCallUsd === "number" ? report.pick.savingPerCallUsd : null };
+}
+const jobRow = (row: Row): JobRow => ({
+  id: String(row.id), taskId: String(row.task_id), kind: String(row.kind), status: String(row.status), startedAt: iso(row.started_at)!, finishedAt: iso(row.finished_at),
+  result: runResult(row.report_json),
+});
 
 export const account = actor({
   db: db({ onMigrate: async database => { for (const statement of SCHEMA) await database.execute(statement); } }),
@@ -120,14 +132,14 @@ export const account = actor({
     },
 
     job: async (c, jobId: string): Promise<JobRow | null> => {
-      const [row] = await c.db.execute(`SELECT * FROM jobs WHERE id = ?`, jobId);
+      const [row] = await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id WHERE jobs.id = ?`, jobId);
       return row ? jobRow(row) : null;
     },
 
     jobs: async (c, input: { taskId?: string; limit?: number } = {}): Promise<JobRow[]> => {
       const rows = input.taskId
-        ? await c.db.execute(`SELECT * FROM jobs WHERE task_id = ? ORDER BY started_at DESC LIMIT ?`, input.taskId, input.limit ?? 50)
-        : await c.db.execute(`SELECT * FROM jobs ORDER BY started_at DESC LIMIT ?`, input.limit ?? 50);
+        ? await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id WHERE jobs.task_id = ? ORDER BY jobs.started_at DESC LIMIT ?`, input.taskId, input.limit ?? 50)
+        : await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id ORDER BY jobs.started_at DESC LIMIT ?`, input.limit ?? 50);
       return rows.map(jobRow);
     },
 
@@ -289,7 +301,7 @@ export const account = actor({
     readySince: async (c, userId: string): Promise<JobRow[]> => {
       const [member] = await c.db.execute(`SELECT last_session_at FROM members WHERE user_id = ?`, userId);
       const since = Number(member?.last_session_at ?? 0);
-      const rows = await c.db.execute(`SELECT * FROM jobs WHERE finished_at > ? ORDER BY finished_at DESC LIMIT 20`, since);
+      const rows = await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id WHERE jobs.finished_at > ? ORDER BY jobs.finished_at DESC LIMIT 20`, since);
       await c.db.execute(`UPDATE members SET last_session_at = ? WHERE user_id = ?`, Date.now(), userId);
       return rows.map(jobRow);
     },

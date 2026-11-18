@@ -176,6 +176,9 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     const runs = await waitFor(() => agent().api<{ id: string; kind: string; status: string }[]>("/api/runs"), value => value.body.some(run => run.kind === "watch" && run.status === "done"))
       .catch(async (error: Error) => { throw new Error(`${error.message}\nTask: ${JSON.stringify((await agent().api(`/api/tasks/${taskRow!.id}`)).body).slice(0, 1500)}`); });
     assert.equal(runs.body.filter(run => run.kind === "watch").length, 1);
+    // The first run is no longer the task's latest, and the list still says what it found.
+    const first = (await agent().api<{ id: string; result: { status: string; model: string | null; from: string | null } | null }[]>("/api/runs")).body.find(run => run.id === jobId);
+    assert.deepEqual(first?.result && [first.result.status, first.result.model, first.result.from], ["picked", measured.pick!.model, "openai/gpt-5.4"]);
     assert.equal(writerCalls(models).length, 2, "the watch job writes no new cases");
     const watched = await agent().api<{ pick: { total: number } }>(`/api/runs/${runs.body.find(run => run.kind === "watch")!.id}`);
     assert.equal(watched.body.pick.total, 8);

@@ -28,7 +28,7 @@ function populated(): State {
     task("enrollment-checker", "Enrollment checker", { environment: "sahra-health/enroll", currentModel: "openai/gpt-5-mini", status: "running", lastRunAt: "2026-11-18T11:40:00Z", lastJobId: "e4n6t0" }),
     task("coding-reviewer", "Coding reviewer", { currentModel: "anthropic/claude-sonnet-5-5", status: "failed", lastRunAt: "2026-11-12T10:00:00Z", lastJobId: "z1c7m4" }),
   ];
-  const run = (id: string, taskId: string, status: string, startedAt: string, kind = "run"): Run => ({ id, taskId, kind, status, startedAt, finishedAt: status === "done" || status === "failed" ? startedAt : null });
+  const run = (id: string, taskId: string, status: string, startedAt: string, kind = "run"): Run => ({ id, taskId, kind, status, startedAt, finishedAt: status === "done" || status === "failed" ? startedAt : null, result: null });
   const runs: Run[] = [
     run("e4n6t0", "enrollment-checker", "running", "2026-11-18T11:40:00Z"),
     run("w8r3k1", "ticket-router", "needs_input", "2026-11-18T11:20:00Z"),
@@ -133,7 +133,13 @@ export function createFakeApi(options: { publicUrl?: string; appUrl?: string } =
       task.watching = input.on;
       return json(200, { watching: task.watching });
     }
-    if (path === "/api/runs" && method === "GET") return json(200, state.runs);
+    if (path === "/api/runs" && method === "GET") {
+      // As the cloud app does, each finished run carries what its report found.
+      return json(200, state.runs.map((run): Run => {
+        const report = state.reports[run.id];
+        return { ...run, result: report ? { status: report.status, model: report.pick?.model ?? null, from: report.baseline?.model ?? null, savingPerCallUsd: report.pick?.savingPerCallUsd ?? null } : null };
+      }));
+    }
     if ((match = /^\/api\/runs\/([\w-]+)$/.exec(path)) && method === "GET") {
       const id = match[1] ?? "";
       if (!state.runs.some((run) => run.id === id)) return error(404, "No such run in this account.");

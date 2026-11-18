@@ -218,7 +218,7 @@ export function tonicUltra(): State {
     const steps = spec.runs.map(([at, outcome, pick, kind], index) => ({ id: runId(), at, outcome, pick, kind: kind ?? "run", index }));
     for (const step of steps) {
       const done = !LIVE.has(step.outcome);
-      runs.push({ id: step.id, taskId: spec.id, kind: step.kind, status: done ? "done" : step.outcome, startedAt: step.at, finishedAt: done || step.outcome === "failed" || step.outcome === "stopped" ? step.at : null });
+      runs.push({ id: step.id, taskId: spec.id, kind: step.kind, status: done ? "done" : step.outcome, startedAt: step.at, finishedAt: done || step.outcome === "failed" || step.outcome === "stopped" ? step.at : null, result: null });
       if (done) reports[step.id] = report(spec, step.id, step.at, step.outcome, step.pick, step.index);
       else jobs[step.id] = job(spec, step.id, step.at, step.outcome);
     }
