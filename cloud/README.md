@@ -19,11 +19,15 @@ The account is the token's Clerk organization (`org_id`). A token without one is
 ## Actors
 
 - `account` (key: Clerk organization ID), in SQLite: the plan from Stripe, members, endpoints with keys encrypted by `OPENMERIT_KEY_ENCRYPTION_KEY` (AES-256-GCM, the account ID as associated data), guardrails at the environment, agent (`environment:agent`) and task levels, the spend ledger, jobs, tasks and reports. It checks the plan, jobs per hour and concurrent jobs at every job start, and reserves spend against the job's budget, the guardrail caps and the monthly caps before every model call.
-- `task` (key: account and task ID): the latest bundle, the labels the user gave, the last result and the watch schedule. A watched task checks the catalogue on its schedule and when the catalogue changes, and starts a watch job when the catalogue version is newer than its last run's.
-- `job` (key: job ID): the workflow Source ▶ Cases (label check, which waits on the job's queue for `openmerit_answer`) ▶ Models ▶ Ranking (Scout Model Binary Search from `openmerit/engine`, each measure call its own step) ▶ Agent eval (the engine's `checkAgent` rule) ▶ Action (the edit and the report). Each model call's ledger key is the job, the step and the case, so a step that Rivet replays after a crash counts no spend twice.
+- `task` (key: account and task ID): the latest bundle, the labels the user gave, the written cases the user approved, the last result and the watch schedule. A watched task checks the catalogue on its schedule and when the catalogue changes, and starts a watch job when the catalogue version is newer than its last run's.
+- `job` (key: job ID): the workflow Source ▶ Cases ▶ label check ▶ Models ▶ Ranking ▶ Agent eval ▶ Action.
+  - **Cases** are the bundle's examples, then up to 12 cases that `openmerit/ranking`'s case writer writes on OpenMerit's OpenRouter key (`OPENMERIT_CASE_WRITER_MODEL`). Writing them is billed to the job. A task's later runs, such as watch jobs, reuse the written cases the user approved and write none.
+  - **The label check** waits on the job's queue for `openmerit_answer`. It asks `label_<case>` for each example without an expected answer, and `label_check` (a multi-select) for the written cases: an unticked case is dropped.
+  - **Ranking** is Scout Model Binary Search from `openmerit/engine` over `openmerit/ranking`'s `createMeasure`, each measure call its own step. Text answers are graded by a fixed judge (`OPENMERIT_JUDGE_MODEL`), whose calls count in the job's spend but not in a candidate's cost per call. Each model call's ledger key is the job, the step, the candidate and the case, so a step that Rivet replays after a crash counts no spend twice.
+  - **Agent eval** is the engine's `checkAgent` rule; **Action** writes the edit and the report.
 - `catalogue` (one): openmerit-core's bundled catalogue, refreshed daily when the app has a refresh source.
 
-`src/ranking.ts` stands in for W2's `openmerit/ranking` until it lands: cases come only from the bundle's examples, every endpoint is called as OpenAI chat completions, and grading is exact match or equal JSON. `src/engine.ts` re-exports openmerit-core's `openmerit/engine` from source.
+The app imports `openmerit/engine` (through `src/engine.ts`) and `openmerit/ranking` from openmerit-core's source, which the image copies.
 
 ## Checks
 
@@ -40,6 +44,7 @@ To run it by hand against a local engine: `TEST_STORAGE=$(mktemp -d) TEST_ENGINE
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_ID` | secret, secret, setting | Checkout, the portal, webhooks and metered usage (`STRIPE_METER_EVENT`, default `openmerit_evaluation`). A price's metadata sets `included_evals` and `overage` (`metered` or `refuse`) |
 | `OPENMERIT_KEY_ENCRYPTION_KEY` | secret | 32 bytes, base64. Without it `/api/endpoints` refuses new endpoints |
 | `OPENMERIT_PUBLIC_URL`, `OPENMERIT_APP_URL` | setting | Default `https://openmerit.ai` and `https://app.openmerit.ai` |
+| `OPENMERIT_CASE_WRITER_MODEL`, `OPENMERIT_JUDGE_MODEL` | setting | Catalogue models on OpenRouter that write cases and judge text answers; both default to `anthropic/claude-sonnet-5.5` |
 | `OPENMERIT_JOBS_PER_HOUR`, `OPENMERIT_CONCURRENT_JOBS`, `OPENMERIT_JOB_BUDGET_USD`, `OPENMERIT_MONTHLY_CAP_USD`, `OPENMERIT_CUSTOMER_CAP_USD` | setting | Limits: 20, 3, $5, $100 and $100 by default |
 
 The cluster sets `RIVET_ENDPOINT`, `RIVET_TOKEN` and `RIVET_POOL` on every deploy; do not set them.

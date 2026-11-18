@@ -48,6 +48,8 @@ export interface Config {
   /** Lets customer endpoints use http:// and private hosts. Tests only. */
   allowPrivateEndpoints: boolean;
   limits: Limits;
+  /** Models on OpenMerit's OpenRouter key that write a task's cases and judge text answers. */
+  models: { caseWriter: string; judge: string };
   /** How often a watched task checks the catalogue. */
   watchIntervalMs: number;
 }
@@ -93,6 +95,7 @@ export function loadConfig(env: Env = process.env): Config {
       monthlyCapUsd: number(env.OPENMERIT_MONTHLY_CAP_USD, 100),
       customerCapUsd: number(env.OPENMERIT_CUSTOMER_CAP_USD, 100),
     },
+    models: { caseWriter: env.OPENMERIT_CASE_WRITER_MODEL || "anthropic/claude-sonnet-5.5", judge: env.OPENMERIT_JUDGE_MODEL || "anthropic/claude-sonnet-5.5" },
     watchIntervalMs: number(env.OPENMERIT_WATCH_INTERVAL_MS, 24 * 60 * 60 * 1000),
   };
 }

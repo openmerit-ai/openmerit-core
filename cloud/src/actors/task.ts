@@ -2,7 +2,7 @@
 // results, the agent it belongs to and its watch schedule. A watched task checks the catalogue on
 // its schedule and starts a watch job when the catalogue changed since its last run.
 import { actor } from "rivetkit";
-import type { TaskBundle } from "../ranking.ts";
+import type { Case, TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
 import type { JobResult } from "../report.ts";
 import { services } from "../services.ts";
 import type { Registry } from "../registry.ts";
@@ -17,6 +17,8 @@ export interface TaskState {
   bundle: TaskBundle | null;
   /** Labels keyed by the case input's hash (job.ts `caseKey`). */
   labels: Record<string, { expected: unknown; approved: boolean }>;
+  /** The written cases the user approved in the label check, which later runs reuse instead of writing new ones. */
+  written?: Case[] | null;
   jobs: string[];
   lastResult: { jobId: string; status: string; pick: string | null; endpoint: string | null; currentModel: string; finishedAt: string } | null;
   watching: boolean;
@@ -31,7 +33,7 @@ const save = (c: { saveState: (opts: { immediate: boolean }) => Promise<void> })
 
 export const task = actor({
   createState: (_c, input: { accountId: string; taskId: string; environment: string; name: string }): TaskState => ({
-    ...input, agent: null, bundle: null, labels: {}, jobs: [], lastResult: null, watching: false, catalogueVersion: null, notices: [],
+    ...input, agent: null, bundle: null, labels: {}, written: null, jobs: [], lastResult: null, watching: false, catalogueVersion: null, notices: [],
   }),
   actions: {
     info: (c): TaskState => c.state,
@@ -50,6 +52,8 @@ export const task = actor({
 
     labels: (c): TaskState["labels"] => c.state.labels,
     saveLabels: async (c, labels: TaskState["labels"]): Promise<void> => { Object.assign(c.state.labels, labels); await save(c); },
+    written: (c): Case[] | null => c.state.written ?? null,
+    saveWritten: async (c, cases: Case[]): Promise<void> => { c.state.written = cases; await save(c); },
 
     recordResult: async (c, input: { jobId: string; status: string; result: JobResult | null }): Promise<void> => {
       const pick = input.result?.pick ?? null;

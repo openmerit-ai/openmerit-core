@@ -4,7 +4,7 @@
 import type { AppDeps } from "./app.ts";
 import type { AuthResult, Identity } from "./auth.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
-import type { EndpointKind } from "./ranking.ts";
+import type { EndpointKind } from "../../openmerit-core/src/ranking/index.ts";
 
 type Json = Record<string, unknown>;
 
@@ -132,14 +132,14 @@ export function apiRoutes(deps: AppDeps) {
       const denied = admin(); if (denied) return denied;
       if (!deps.billing) return error(503, "Billing is not configured on this server.");
       const info = await account.info();
-      return json(200, await deps.billing.checkout({ accountId: who.accountId, customerId: info.plan?.customerId ?? null, email: null, successUrl: `${config.appUrl}/billing?checkout=done`, cancelUrl: `${config.appUrl}/billing` }));
+      return json(200, await deps.billing.checkout({ accountId: who.accountId, customerId: info.plan?.customerId ?? null, email: null, successUrl: `${config.appUrl}/plan/?checkout=done`, cancelUrl: `${config.appUrl}/plan/` }));
     }
     if (path === "/api/billing/portal" && method === "POST") {
       const denied = admin(); if (denied) return denied;
       if (!deps.billing) return error(503, "Billing is not configured on this server.");
       const customerId = (await account.info()).plan?.customerId;
       if (!customerId) return error(409, "This account has no Stripe customer yet: subscribe first.");
-      return json(200, await deps.billing.portal({ customerId, returnUrl: `${config.appUrl}/billing` }));
+      return json(200, await deps.billing.portal({ customerId, returnUrl: `${config.appUrl}/plan/` }));
     }
 
     if (path === "/api/account/export" && method === "POST") return json(200, await account.export(), { "content-disposition": `attachment; filename="openmerit-${who.accountId}.json"` });
