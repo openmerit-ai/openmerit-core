@@ -24,22 +24,12 @@ export const tasksView: View<Task[]> = {
               <td>${model(task.currentModel)}</td>
               <td>${task.status === "running" ? "Running" : day(task.lastRunAt)}</td>
               <td>${result(task, (text) => (task.lastJobId ? html`<a href="/r/${task.lastJobId}/">${text}</a>` : html`${text}`))}</td>
-              <td class="num">${task.watching
-                ? html`<button class="btn" type="button" data-action="watch" data-id="${task.id}" data-on="false" aria-label="Stop watching ${task.name}">Stop watching</button>`
-                : html`<span class="sub">Not watched</span><button class="btn" type="button" data-action="watch" data-id="${task.id}" data-on="true" aria-label="Watch ${task.name}">Watch</button>`}</td>
+              <td class="num">${task.watching ? "Watching" : html`<span class="sub">Off</span>`}</td>
             </tr>`)}
           </tbody>
         </table>
       </div>
-      <p class="note">Stopping a watch keeps the task's runs. Your coding agent's next OpenMerit call says when a watched task has a new result.</p>
+      <p class="note">Every task is watched from its first run. Your coding agent turns watching off or on again, and its next OpenMerit call says when a watched task has a new result.</p>
     </section>`;
-  },
-  actions: {
-    async watch(target, _tasks, { api, refresh, toast }) {
-      const on = target.dataset.on === "true";
-      await api.send("POST", `/api/tasks/${encodeURIComponent(target.dataset.id ?? "")}/watch`, { on });
-      await refresh();
-      toast(on ? "Watching again." : "Stopped watching. Its runs are kept.");
-    },
   },
 };

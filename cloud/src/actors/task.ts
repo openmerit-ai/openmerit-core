@@ -1,6 +1,7 @@
 // The task actor, keyed by account and task ID: the latest bundle, the labels the user gave, past
-// results, the agent it belongs to and its watch schedule. A watched task checks the catalogue on
-// its schedule and starts a watch job when the catalogue changed since its last run.
+// results, the agent it belongs to and its watch schedule. Tasks are watched from their first job
+// unless the coding agent turns it off: a watched task checks the catalogue on its schedule and
+// starts a watch job when the catalogue changed since its last run.
 import { actor } from "rivetkit";
 import type { Case, TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
 import type { JobResult } from "../report.ts";
@@ -21,6 +22,7 @@ export interface TaskState {
   written?: Case[] | null;
   jobs: string[];
   lastResult: { jobId: string; status: string; pick: string | null; endpoint: string | null; currentModel: string; finishedAt: string } | null;
+  /** On from the first job; openmerit_watch turns it off, such as to freeze a model choice. */
   watching: boolean;
   /** The catalogue version the last job ran on. */
   catalogueVersion: string | null;
@@ -33,20 +35,26 @@ const save = (c: { saveState: (opts: { immediate: boolean }) => Promise<void> })
 
 export const task = actor({
   createState: (_c, input: { accountId: string; taskId: string; environment: string; name: string }): TaskState => ({
-    ...input, agent: null, bundle: null, labels: {}, written: null, jobs: [], lastResult: null, watching: false, catalogueVersion: null, notices: [],
+    ...input, agent: null, bundle: null, labels: {}, written: null, jobs: [], lastResult: null, watching: true, catalogueVersion: null, notices: [],
   }),
   actions: {
     info: (c): TaskState => c.state,
 
     /** The bundle the coding agent sent with a new job. */
     recordJob: async (c, input: { jobId: string; bundle: TaskBundle; agent: string | null }): Promise<void> => {
+      const first = !c.state.jobs.length;
       c.state.bundle = input.bundle;
       c.state.agent = input.agent;
       c.state.jobs = [input.jobId, ...c.state.jobs].slice(0, 200);
       await save(c);
+      // Every task is watched from its first job, until the coding agent turns it off.
+      if (first && c.state.watching) {
+        await c.cron.every({ name: WATCH, interval: Math.max(5_000, services().config.watchIntervalMs), action: "watchTick", maxHistory: 20 });
+        await c.client<Registry>().catalogue.getOrCreate(["global"]).subscribe({ accountId: c.state.accountId, taskId: c.state.taskId });
+      }
       await c.client<Registry>().account.getOrCreate([c.state.accountId]).upsertTask({
         id: c.state.taskId, environment: c.state.environment, agent: input.agent, name: c.state.name, currentModel: input.bundle.current.model,
-        pick: null, status: "running", lastRunAt: Date.now(), lastJobId: input.jobId,
+        pick: null, status: "running", lastRunAt: Date.now(), lastJobId: input.jobId, ...(first ? { watching: c.state.watching } : {}),
       });
     },
 
@@ -89,6 +97,8 @@ export const task = actor({
     /** Starts a watch job when the catalogue changed since the last run. Runs on the schedule and when the catalogue tells it. */
     watchTick: async (c): Promise<{ started: string | null; reason: string }> => {
       if (!c.state.watching || !c.state.bundle) return { started: null, reason: "not watching" };
+      // The first job sets the catalogue version; until it finishes there is nothing to re-run against.
+      if (!c.state.lastResult) return { started: null, reason: "the first run has not finished" };
       const client = c.client<Registry>();
       const version = await client.catalogue.getOrCreate(["global"]).version();
       if (version === c.state.catalogueVersion) return { started: null, reason: `catalogue ${version} unchanged` };

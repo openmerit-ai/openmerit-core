@@ -69,13 +69,6 @@ export function apiRoutes(deps: AppDeps) {
       const info = await client.task.get([who.accountId, row.id]).info();
       return json(200, { ...row, bundle: info.bundle, lastResult: info.lastResult, notices: info.notices, jobs: await account.jobs({ taskId: row.id, limit: 20 }), guardrails: await account.resolveGuardrails({ environment: row.environment, agent: row.agent, taskId: row.id }) });
     }
-    if ((match = /^\/api\/tasks\/([\w-]+)\/watch$/.exec(path)) && method === "POST") {
-      const row = await account.task(match[1]!);
-      if (!row) return error(404, "No such task in this account.");
-      const input = await body(request);
-      if (typeof input?.on !== "boolean") return error(400, "Send {\"on\": true} or {\"on\": false}.");
-      return json(200, await client.task.get([who.accountId, row.id]).setWatch(input.on));
-    }
 
     if (path === "/api/runs" && method === "GET") return json(200, await account.jobs({ limit: Math.min(200, Number(url.searchParams.get("limit") ?? 50) || 50) }));
     if ((match = /^\/api\/runs\/([\w-]+)$/.exec(path)) && method === "GET") {

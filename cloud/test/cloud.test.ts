@@ -38,7 +38,7 @@ describe("the cloud app", () => {
     const init = await signedIn.rpc("initialize", { protocolVersion: "2025-06-18" });
     assert.equal(init.body.result?.protocolVersion, "2025-06-18");
     const tools = await signedIn.rpc("tools/list");
-    assert.deepEqual(tools.body.result?.tools?.map(tool => tool.name), ["openmerit_recommend", "openmerit_result", "openmerit_answer", "openmerit_tasks"]);
+    assert.deepEqual(tools.body.result?.tools?.map(tool => tool.name), ["openmerit_recommend", "openmerit_result", "openmerit_answer", "openmerit_tasks", "openmerit_watch"]);
 
     const noOrganization = await caller(app, "test:user_b").tool("openmerit_tasks", {});
     assert.equal(noOrganization.isError, true);
@@ -170,9 +170,9 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     const me = await agent().api<{ plan: { usedEvals: number } }>("/api/me");
     assert.equal(me.body.plan.usedEvals, 1);
 
-    // Watching: a new catalogue version starts a watch job, which reuses the saved label and written case and asks nothing.
-    const [taskRow] = (await agent().api<{ id: string }[]>("/api/tasks")).body;
-    assert.deepEqual((await agent().api(`/api/tasks/${taskRow!.id}/watch`, { method: "POST", body: JSON.stringify({ on: true }) })).body, { watching: true });
+    // Watching is on from the first job: a new catalogue version starts a watch job, which reuses the saved label and written case and asks nothing.
+    const [taskRow] = (await agent().api<{ id: string; watching: boolean }[]>("/api/tasks")).body;
+    assert.equal(taskRow!.watching, true);
     const rivet = createClient<Registry>({ endpoint: `http://127.0.0.1:${app.enginePort}`, token: "test-token" });
     assert.deepEqual(await rivet.catalogue.getOrCreate(["global"]).refresh(), { version: "next", changed: true });
     const runs = await waitFor(() => agent().api<{ id: string; kind: string; status: string }[]>("/api/runs"), value => value.body.some(run => run.kind === "watch" && run.status === "done"))
@@ -187,7 +187,11 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     const watched = await agent().api<{ pick: { total: number } }>(`/api/runs/${runs.body.find(run => run.kind === "watch")!.id}`);
     assert.equal(watched.body.pick.total, 8);
     const tasks = await agent().tool("openmerit_tasks", {});
-    assert.match(tasks.text, /ticket classifier \(acme\/support\): openai\/gpt-5\.4 → .*, picked, watched/);
+    assert.match(tasks.text, /ticket classifier \[[\w-]+\] \(acme\/support\): openai\/gpt-5\.4 → .*, picked, watched/);
+    // The coding agent turns it off, such as to freeze the model choice; a newer catalogue then starts nothing.
+    assert.deepEqual((await agent().tool("openmerit_watch", { task_id: taskRow!.id, on: false })).data, { task_id: taskRow!.id, watching: false });
+    assert.equal((await agent().api<{ watching: boolean }[]>("/api/tasks")).body[0]!.watching, false);
+    assert.equal((await agent().tool("openmerit_watch", { task_id: "nope", on: true })).isError, true);
   } finally { await stop(app); await models.close(); }
 });
 
