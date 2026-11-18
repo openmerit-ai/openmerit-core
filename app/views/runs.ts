@@ -69,11 +69,11 @@ export const runsView: View<{ runs: Run[]; tasks: Task[] }> = {
       <h2 id="all">All runs</h2>
       <div class="tablewrap">
         <table>
-          <thead><tr><th>Task</th><th>Outcome</th><th class="hide-sm">Asked by</th><th class="num">Started</th></tr></thead>
+          <thead><tr><th>Task</th><th>Outcome</th><th>Asked by</th><th class="num">Started</th></tr></thead>
           <tbody>
             ${runs.map((run) => {
               const task = byId.get(run.taskId);
-              return html`<tr><td><a href="/r/${run.id}/">${task?.name ?? run.taskId}</a><span class="sub">${task?.environment ?? ""}</span></td><td>${outcome(run, task)}</td><td class="hide-sm">${run.kind === "watch" ? "Watch re-run" : "Coding agent"}</td><td class="num">${day(run.startedAt)}</td></tr>`;
+              return html`<tr><td><a href="/r/${run.id}/">${task?.name ?? run.taskId}</a><span class="sub">${task?.environment ?? ""}</span></td><td>${outcome(run, task)}</td><td>${run.kind === "watch" ? "Watch re-run" : "Coding agent"}</td><td class="num">${day(run.startedAt)}</td></tr>`;
             })}
           </tbody>
         </table>

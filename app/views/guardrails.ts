@@ -100,11 +100,11 @@ export const guardrailsView: View<Data> = {
       <form data-action="save">
         <div class="tablewrap">
           <table class="guardrails">
-            <thead><tr><th>Setting</th><th class="hide-sm">Kind</th><th>Set at this level</th><th>Effective</th><th>From</th></tr></thead>
+            <thead><tr><th>Setting</th><th>Kind</th><th>Set at this level</th><th>Effective</th><th>From</th></tr></thead>
             <tbody>
               ${keys.map((key) => html`<tr>
                 <td><label for="g-${key}">${labelOf(key)}</label><span class="sub"><code>${key}</code></span></td>
-                <td class="hide-sm"><span class="sub">${GUARDRAIL_KINDS[key] === "constraint" ? "Constraint · only narrows" : "Default · can be replaced"}</span></td>
+                <td><span class="sub">${GUARDRAIL_KINDS[key] === "constraint" ? "Constraint · only narrows" : "Default · can be replaced"}</span></td>
                 <td><input id="g-${key}" name="${key}" value="${editable(key, here.get(key))}" placeholder="${settings[key].hint ?? "Inherit"}" spellcheck="false"${locked ? html` disabled` : ""}></td>
                 <td>${show(key, effective[key])}</td>
                 <td>${from(guardrails.from[key], level)}</td>
@@ -115,7 +115,7 @@ export const guardrailsView: View<Data> = {
         <p class="form-error" role="alert" hidden></p>
         ${locked
           ? html`<p class="note">Only an admin of ${me.account.name} can change environment guardrails, from which every constraint starts.</p>`
-          : html`<p style="margin-top: 14px"><button class="btn primary" type="submit">Save ${level} guardrails</button></p>`}
+          : html`<p style="margin-top: 10px"><button class="btn primary" type="submit">Save ${level} guardrails</button></p>`}
       </form>
       <p class="note">Leave a value empty to inherit it from the level above. Lists are comma-separated; caps and budgets are in US dollars per job.</p>
     </section>`;

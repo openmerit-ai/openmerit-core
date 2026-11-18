@@ -35,7 +35,7 @@ function live(job: JobView): Html {
   }[job.status];
   return html`<div class="eyebrow"><a href="/">Runs</a><span>›</span><span>${job.jobId}</span><span>Started ${date(job.createdAt)}</span></div>
     <h1 class="title">${title(job)}</h1>
-    <div class="card${job.status === "failed" ? " notice bad" : ""}" style="margin-top: 28px"${job.status === "failed" ? html` role="alert"` : ""}>${body}</div>
+    <div class="card${job.status === "failed" ? " notice bad" : ""}" style="margin-top: 20px"${job.status === "failed" ? html` role="alert"` : ""}>${body}</div>
     ${job.provisional ? html`<section aria-labelledby="provisional"><h2 id="provisional">Provisional pick</h2><div class="card"><p>${model(job.provisional.model)} on ${endpointName(job.provisional.endpoint)}${job.provisional.estCostPerCallUsd !== null ? html` · about ${per1k(job.provisional.estCostPerCallUsd)} per 1,000 calls` : ""}</p><p class="note">${job.provisional.reason} Chosen from the catalogue before measuring.</p></div></section>` : ""}
     ${job.notices.length ? html`<section aria-labelledby="notes"><h2 id="notes">Notes</h2><div class="card">${job.notices.map((notice) => html`<p class="sub">${notice}</p>`)}</div></section>` : ""}`;
 }
@@ -102,13 +102,13 @@ function report(data: Report, accountName: string): Html {
       <h2 id="compare">How the models compared</h2>
       <div class="tablewrap">
         <table>
-          <thead><tr><th>Model</th><th class="num">Passed</th><th class="num">Per 1,000 calls</th><th class="num hide-sm">Latency</th><th>Result</th></tr></thead>
+          <thead><tr><th>Model</th><th class="num">Passed</th><th class="num">Per 1,000 calls</th><th class="num">Latency</th><th>Result</th></tr></thead>
           <tbody>
             ${models.map((item) => html`<tr class="${item.role === "baseline" ? "current" : item.model === pick ? "picked" : ""}">
               <td>${model(item.model)}<span class="sub">${endpointName(item.endpoint)}${item.funding === "customer" ? " · your key" : ""}${item.inCatalogue ? "" : " · placed by measurement only"}${item.note ? ` · ${item.note}` : ""}</span></td>
               <td class="num">${item.status === "unavailable" ? "–" : `${item.passes}/${item.total}`}</td>
               <td class="num">${per1k(item.costPerCallUsd)}${item.costIsEstimate && item.costPerCallUsd !== null ? html`<span class="sub">estimate</span>` : ""}</td>
-              <td class="num hide-sm">${seconds(item.latencyMs)}</td>
+              <td class="num">${seconds(item.latencyMs)}</td>
               <td>${verdict(item, pick)}</td>
             </tr>`)}
           </tbody>

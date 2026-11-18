@@ -39,14 +39,14 @@ export const connectionsView: View<Endpoint[]> = {
       <h2 id="agents">Coding agents</h2>
       <div class="card">
         <p>Add OpenMerit to a coding agent:</p>
-        <div style="margin-top: 12px">${install()}</div>
-        <div class="row" style="margin-top: 18px"><span>Disconnect every coding agent<span class="sub">Signs out every coding agent session for ${me.account.name}. Each one's next call opens sign-in again. Tasks and runs are kept.</span></span>${admin ? html`<button class="btn danger" type="button" data-action="disconnect">Disconnect</button>` : html`<span class="sub">Admins only</span>`}</div>
+        <div style="margin-top: 8px">${install()}</div>
+        <div class="row" style="margin-top: 10px"><span>Disconnect every coding agent<span class="sub">Signs out every coding agent session for ${me.account.name}. Each one's next call opens sign-in again. Tasks and runs are kept.</span></span>${admin ? html`<button class="btn danger" type="button" data-action="disconnect">Disconnect</button>` : html`<span class="sub">Admins only</span>`}</div>
       </div>
     </section>
 
     <section aria-labelledby="endpoints">
       <h2 id="endpoints">Measuring endpoints</h2>
-      <p class="note" style="margin: -4px 0 14px">Calls on your own endpoints use your key and bill your provider account. Add the endpoint your app calls so its current model is measured where it really runs.</p>
+      <p class="note" style="margin: -2px 0 8px">Calls on your own endpoints use your key and bill your provider account. Add the endpoint your app calls so its current model is measured where it really runs.</p>
       <div class="card">${builtIn}${own.map((endpoint) => endpointRow(endpoint, admin))}</div>
     </section>
 
