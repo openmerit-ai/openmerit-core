@@ -12,6 +12,8 @@ export interface Clerk {
   addListener(listener: (state: { user?: ClerkUser | null; session?: ClerkSession | null }) => void): unknown;
   openSignIn(options: Record<string, unknown>): void;
   signOut(options?: Record<string, unknown>): Promise<void>;
+  // Clerk's re-verify prompt, which its useReverification hook opens; ClerkJS has no public name for it.
+  __internal_openReverification?(props: { level?: string; afterVerification?: () => void; afterVerificationCancelled?: () => void }): void;
 }
 // ClerkJS and its UI register themselves on window.
 export const clerkGlobals = globalThis as unknown as { Clerk?: Clerk; __internal_ClerkUICtor?: unknown };

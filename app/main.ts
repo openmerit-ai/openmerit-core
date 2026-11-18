@@ -139,7 +139,11 @@ async function boot(): Promise<void> {
       if (!response.ok) throw new Error("Sign-in is temporarily unavailable. Please try again later.");
       const config = await response.json() as AppConfig;
       clerk = await loadClerk(config);
-      api = createApi(config.apiOrigin, async () => (await clerk?.session?.getToken()) ?? null);
+      const open = clerk.__internal_openReverification?.bind(clerk);
+      api = createApi(config.apiOrigin, async () => (await clerk?.session?.getToken()) ?? null, fetch, (level) => new Promise((resolve) => {
+        if (!open) { resolve(false); return; }
+        open({ ...(level ? { level } : {}), afterVerification: () => resolve(true), afterVerificationCancelled: () => resolve(false) });
+      }));
       let was = signedIn(clerk);
       clerk.addListener(() => {
         if (!clerk || signedIn(clerk) === was) return;
