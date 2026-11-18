@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { GuardrailsAt, JobView, Me, Report, Spend, Task } from "../api.ts";
+import { ApiError, createApi, type GuardrailsAt, type JobView, type Me, type Report, type Spend, type Task } from "../api.ts";
 import { createFakeApi } from "../dev/fake-api.ts";
 import type { Account } from "../view.ts";
 import { choices, guardrailsView, parse } from "../views/guardrails.ts";
@@ -92,4 +92,22 @@ test("spend is shown split into OpenMerit-paid and customer-paid, and only admin
   const member = planView.render(spend, page({ ...noPlan, role: "member" })).__html;
   assert.doesNotMatch(member, /data-action="(checkout|portal)"/);
   assert.match(member, /Ask an admin of Sahra Health to choose a plan/);
+});
+
+test("a delete that needs a recent sign-in opens Clerk's prompt and retries once, through the fake cloud app", async () => {
+  // The fake API, like the cloud app, takes a token's .v<seconds> suffix as its last verification.
+  let verifiedAt: number | null = null, prompts = 0;
+  const api = (allow: boolean) => createApi("https://api.test", async () => `preview-tonic${verifiedAt ? `.v${verifiedAt}` : ""}`, (input, init) => fake(new Request(input, init)), async (level) => {
+    prompts += 1;
+    assert.equal(level, "first_factor");
+    if (allow) verifiedAt = Math.floor(Date.now() / 1000);
+    return allow;
+  });
+  await assert.rejects(api(false).send("DELETE", "/api/tasks/rfp-reader"), (error: unknown) => error instanceof ApiError && error.status === 403 && error.code === "reverification");
+  assert.equal(prompts, 1);
+  assert.deepEqual(await api(true).send("DELETE", "/api/tasks/rfp-reader"), { deleted: true, jobs: 1 });
+  assert.equal(prompts, 2);
+  // A task with a run in progress cannot be deleted, and verifying again does not change that.
+  await assert.rejects(api(true).send("DELETE", "/api/tasks/booking-chat"), (error: unknown) => error instanceof ApiError && error.status === 409);
+  assert.equal(prompts, 2);
 });

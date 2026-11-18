@@ -1,16 +1,17 @@
-import type { Endpoint, Run, Task } from "../api.ts";
-import { html, plural } from "../html.ts";
+import type { DeletedTask, Endpoint, Run, Task } from "../api.ts";
+import { ago, html, plural } from "../html.ts";
 import type { View } from "../view.ts";
 import { header } from "./common.ts";
 
-interface Data { tasks: Task[]; runs: Run[]; endpoints: Endpoint[] }
+interface Data { tasks: Task[]; runs: Run[]; endpoints: Endpoint[]; deleted: DeletedTask[] }
 
 export const dataView: View<Data> = {
   async load({ api }) {
-    const [tasks, runs, endpoints] = await Promise.all([api.get<Task[]>("/api/tasks"), api.get<Run[]>("/api/runs"), api.get<Endpoint[]>("/api/endpoints")]);
-    return { tasks, runs, endpoints };
+    // The deletion log is extra: the page still shows without it.
+    const [tasks, runs, endpoints, deleted] = await Promise.all([api.get<Task[]>("/api/tasks"), api.get<Run[]>("/api/runs"), api.get<Endpoint[]>("/api/endpoints"), api.get<DeletedTask[]>("/api/tasks/deleted").catch((): DeletedTask[] => [])]);
+    return { tasks, runs, endpoints, deleted };
   },
-  render({ tasks, runs, endpoints }, { me }) {
+  render({ tasks, runs, endpoints, deleted }, { me }) {
     const keys = endpoints.filter((endpoint) => !endpoint.builtIn).length;
     const admin = me.role === "admin";
     const count = (id: string) => runs.filter((run) => run.taskId === id).length;
@@ -43,6 +44,12 @@ export const dataView: View<Data> = {
         ${tasks.map((task) => html`<div class="row"><span>${task.name}<span class="sub">${task.environment} · ${plural(count(task.id), "run")}${task.state === "retired" ? " · retired" : ""}</span></span>${admin ? html`<button class="btn danger" type="button" data-action="deleteTask" data-id="${task.id}" data-name="${task.name}" aria-label="Delete ${task.name}">Delete</button>` : html`<span class="sub">Admins only</span>`}</div>`)}
       </div>
       <p class="note">Deletes the task's context, test cases, runs and run pages. To stop OpenMerit using a task but keep its history, have your coding agent retire it instead. A coding agent that asks about the task again starts it afresh.</p>
+    </section>` : ""}
+    ${deleted.length ? html`<section aria-labelledby="deleted">
+      <h2 id="deleted">Deleted Tasks</h2>
+      <div class="card">
+        ${deleted.map((item) => html`<div class="row"><span>${item.name}<span class="sub">${item.environment} · ${plural(item.jobs, "run")} · by ${item.userId === me.user.id ? "you" : item.userId}</span></span><span class="sub">${ago(item.deletedAt)}</span></div>`)}
+      </div>
     </section>` : ""}`;
   },
   actions: {
@@ -55,7 +62,7 @@ export const dataView: View<Data> = {
       const { id = "", name = "" } = target.dataset;
       const ok = await confirm({
         title: `Delete ${name}?`,
-        body: "Its task context, test cases, runs and run pages are deleted and cannot be restored. Links to its runs stop loading.",
+        body: "Its task context, test cases, runs and run pages are deleted and cannot be restored. Links to its runs stop loading. Its spend still counts toward this period's evaluations and caps. You may be asked to confirm it's you.",
         confirm: "Delete task", danger: true, typeToConfirm: name,
       });
       if (!ok) return;

@@ -6,10 +6,10 @@
 // preview-error, preview-slow and preview-expired. Each scenario keeps its own in-memory
 // state, so actions change what later requests return. Every name and number is fictional.
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, type Guardrails, type Level } from "../../openmerit-core/src/engine/guardrails.ts";
-import type { Endpoint, JobView, LiveProgress, MeasuredModel, Me, Report, Run, Spend, Task } from "../api.ts";
+import type { DeletedTask, Endpoint, JobView, LiveProgress, MeasuredModel, Me, Report, Run, Spend, Task } from "../api.ts";
 import { tonicUltra } from "./tonic-ultra.ts";
 
-export interface State { me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number }
+export interface State { me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number; deleted: DeletedTask[] }
 
 const ENV = "sahra-health/claims";
 const measured = (model: string, endpoint: string, fields: Partial<MeasuredModel>): MeasuredModel => ({
@@ -85,7 +85,7 @@ function populated(): State {
       agent: { [`${ENV}:claim pipeline`]: { agentEvalRequired: "required", minAgentPassRate: 0.9 } },
       task: { "ticket-router": { latencyMs: 1000, allowedProviders: ["openai", "anthropic", "deepseek"] } },
     },
-    disconnected: 0,
+    disconnected: 0, deleted: [],
   };
 }
 
@@ -133,7 +133,12 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
   const since = Date.now();
   return async (request) => {
     const url = new URL(request.url), path = url.pathname, method = request.method;
-    const name = /^Bearer preview-([a-z]+)$/.exec(request.headers.get("authorization") ?? "")?.[1];
+    const bearer = /^Bearer preview-([a-z]+)(?:\.v(\d+))?$/.exec(request.headers.get("authorization") ?? "");
+    const name = bearer?.[1];
+    // As in the cloud app, deleting needs a first-factor verification in the last 10 minutes.
+    const unverified = Date.now() / 1000 - Number(bearer?.[2] ?? 0) > 600
+      ? json(403, { clerk_error: { type: "forbidden", reason: "reverification-error", metadata: { reverification: { level: "first_factor", afterMinutes: 10 } } } })
+      : null;
     if (!name || name === "expired") return error(401, "Sign in first.");
     if (name === "error") return error(500, "The cloud app is having trouble. Try again in a minute.");
     if (name === "slow") await new Promise((done) => setTimeout(done, 60_000));
@@ -227,15 +232,21 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
     if ((match = /^\/api\/tasks\/([\w-]+)$/.exec(path)) && method === "DELETE") {
       if (denied) return denied;
       const id = match[1] ?? "";
-      if (!state.tasks.some((task) => task.id === id)) return error(404, "No such task in this account.");
+      const task = state.tasks.find((item) => item.id === id);
+      if (!task) return error(404, "No such task in this account.");
+      if (unverified) return unverified;
+      if (state.runs.some((run) => run.taskId === id && (run.status === "queued" || run.status === "running"))) return error(409, "This task has a run in progress. Delete it once the run finishes.");
       const gone = state.runs.filter((run) => run.taskId === id);
       for (const run of gone) { delete state.reports[run.id]; delete state.jobs[run.id]; }
       state.tasks = state.tasks.filter((task) => task.id !== id);
       state.runs = state.runs.filter((run) => run.taskId !== id);
+      state.deleted.unshift({ taskId: id, name: task.name, environment: task.environment, userId: state.me.user.id, jobs: gone.length, deletedAt: new Date().toISOString() });
       return json(200, { deleted: true, jobs: gone.length });
     }
+    if (path === "/api/tasks/deleted" && method === "GET") return json(200, state.deleted);
     if (path === "/api/account" && method === "DELETE") {
       if (denied) return denied;
+      if (unverified) return unverified;
       const { tasks, runs } = state;
       states.set(name, emptyState(state.me));
       return json(200, { deleted: true, tasks: tasks.length, jobs: runs.length });

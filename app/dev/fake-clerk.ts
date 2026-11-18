@@ -11,13 +11,17 @@ if (chosen) localStorage.setItem(key, chosen);
 const scenario = localStorage.getItem(key) ?? "tonic";
 const tonic = scenario === "tonic";
 const active = scenario !== "signed-out";
+const verified = "om-preview-verified";
 
 const clerk: Clerk = {
   user: active ? (tonic ? { fullName: "Jordan Pike", primaryEmailAddress: { emailAddress: "jordan@tonicultra.example" } } : { fullName: "Amira Haddad", primaryEmailAddress: { emailAddress: "amira@sahra.example" } }) : null,
-  session: active ? { status: "active", getToken: async () => `preview-${scenario}` } : null,
+  // The token carries when the preview last verified, as a real session token's fva claim does.
+  session: active ? { status: "active", getToken: async () => `preview-${scenario}${localStorage.getItem(verified) ? `.v${localStorage.getItem(verified)}` : ""}` } : null,
   async load() {},
   addListener() {},
   openSignIn() { localStorage.setItem(key, "tonic"); location.reload(); },
+  // Clerk asks for a password or code here; the preview verifies at once.
+  __internal_openReverification({ afterVerification }) { localStorage.setItem(verified, String(Math.floor(Date.now() / 1000))); afterVerification?.(); },
   async signOut() { localStorage.setItem(key, "signed-out"); location.reload(); },
 };
 clerkGlobals.Clerk = clerk;

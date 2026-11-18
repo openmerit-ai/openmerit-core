@@ -140,6 +140,9 @@ export interface GuardrailsAt {
   rejected: { key: string; level: Level; reason: string }[];
 }
 
+// GET /api/tasks/deleted: who deleted which task, with no task content. The export includes it.
+export interface DeletedTask { taskId: string; name: string; environment: string; userId: string; jobs: number; deletedAt: string }
+
 export interface Spend { openmeritUsd: number; customerUsd: number; monthlyCapUsd: number; customerCapUsd: number; period: { start: string; end: string | null } }
 
 export class ApiError extends Error {
@@ -157,8 +160,15 @@ export interface Api {
   send<T>(method: "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T>;
 }
 
-export function createApi(origin: string, token: () => Promise<string | null>, fetcher: typeof fetch = fetch): Api {
-  async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+// Deleting needs a recent sign-in. The cloud app answers 403 with Clerk's reverification hint;
+// reverify opens Clerk's prompt and resolves true once the user verified, and the call is retried once.
+export type Reverify = (level: string | undefined) => Promise<boolean>;
+interface ReverificationHint { clerk_error: { reason: "reverification-error"; metadata?: { reverification?: { level?: string } } } }
+const isReverificationHint = (data: unknown): data is ReverificationHint =>
+  typeof data === "object" && data !== null && (data as Partial<ReverificationHint>).clerk_error?.reason === "reverification-error";
+
+export function createApi(origin: string, token: () => Promise<string | null>, fetcher: typeof fetch = fetch, reverify?: Reverify): Api {
+  async function call<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
     const bearer = await token();
     if (!bearer) throw new ApiError(401, "Sign in to continue.", "sign_in_required");
     let response: Response;
@@ -175,6 +185,10 @@ export function createApi(origin: string, token: () => Promise<string | null>, f
     const text = await response.text();
     let data: unknown = null;
     try { data = text ? JSON.parse(text) : null; } catch { /* a proxy's HTML error page */ }
+    if (response.status === 403 && isReverificationHint(data)) {
+      if (!retried && reverify && await reverify(data.clerk_error.metadata?.reverification?.level)) return call(method, path, body, true);
+      throw new ApiError(403, "Confirm it's you to continue: verify your sign-in, then try again.", "reverification");
+    }
     if (!response.ok) {
       const detail = typeof data === "object" && data !== null ? data as { error?: unknown; code?: unknown } : {};
       const message = typeof detail.error === "string" ? detail.error : `OpenMerit answered ${response.status}. Try again in a moment.`;
