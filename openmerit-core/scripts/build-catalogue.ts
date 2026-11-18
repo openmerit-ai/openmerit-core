@@ -4,9 +4,9 @@
 // installed package never downloads either: Scout reads only the file this script writes.
 import { readFile, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
-import { CATALOGUE_FORMAT, type Catalogue, type CatalogueModel } from "../src/catalogue/catalogue.ts";
+import { CATALOGUE_FORMAT, type Catalogue, type CatalogueModel } from "../src/engine/catalogue.ts";
 import { rankCandidates } from "../src/scout/candidates.ts";
-import { ECI_ATTRIBUTION, ECI_SCORES_URL, parseEciEstimates, parseEciScores } from "../src/scout/eci.ts";
+import { ECI_ATTRIBUTION, ECI_SCORES_URL, parseEciEstimates, parseEciScores } from "../src/engine/eci.ts";
 
 const OPENROUTER_MODELS = "https://openrouter.ai/api/v1/models";
 const { values } = parseArgs({ options: { openrouter: { type: "string" }, eci: { type: "string" }, out: { type: "string", default: new URL("../data/catalogue.json", import.meta.url).pathname } } });

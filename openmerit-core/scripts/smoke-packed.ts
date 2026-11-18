@@ -1,12 +1,13 @@
 // Packs this package, installs the tarball globally into a temporary prefix, and runs the
 // self-hosted flow with the installed `openmerit` binary: connect api, setup, scout (scan, map,
-// approve, binary search, compare), history and the MCP server's tools/list. The harness and the
+// approve, binary search, compare), history and the MCP server's tools/list. It also imports
+// `openmerit/engine` from a project that depends on the installed package. The harness and the
 // candidate endpoint are a local fake OpenAI server, so no model is called. CI runs it on Linux
 // x64 and arm64 and on macOS arm64 and x64; locally: `node scripts/smoke-packed.ts` from
 // openmerit-core/ after `npm ci`.
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -123,6 +124,17 @@ try {
   await run("npm", ["install", "-g", "--prefix", prefix, "--no-audit", "--no-fund", tarball], { cwd: work, env: { ...process.env, npm_config_cache: join(work, "npm-cache") }, maxBuffer: 16 << 20 });
   const [installMb, cacheMb] = (await run("du", ["-sk", prefix, join(work, "npm-cache")])).stdout.trim().split("\n").map(line => Math.round(Number(line.split("\t")[0]) / 1024));
   say(`installed ${process.platform}-${process.arch} in ${((Date.now() - installed) / 1000).toFixed(1)}s: ${installMb} MB installed, ${cacheMb} MB downloaded into the npm cache`);
+
+  // The library entry points resolve from a project that depends on the installed package.
+  const consumer = join(work, "consumer");
+  mkdirSync(join(consumer, "node_modules"), { recursive: true });
+  symlinkSync(join(prefix, "lib", "node_modules", "openmerit"), join(consumer, "node_modules", "openmerit"), "dir");
+  const exported = (await run(process.execPath, ["--input-type=module", "-e", `const engine = await import("openmerit/engine"); const root = await import("openmerit"); console.log(JSON.stringify({ engine: Object.keys(engine).sort(), redact: root.redact === engine.redact }));`], { cwd: consumer })).stdout;
+  const { engine, redact } = JSON.parse(exported) as { engine: string[]; redact: boolean };
+  for (const name of ["binarySearch", "challengers", "order", "ladder", "MemoryLedger", "resolveGuardrails", "checkAgent", "redact"]) assert.ok(engine.includes(name), `openmerit/engine exports ${name}`);
+  assert.ok(redact, "openmerit and openmerit/engine export the same redact");
+  assert.ok(existsSync(join(consumer, "node_modules", "openmerit", "dist", "engine", "index.d.ts")), "openmerit/engine ships its types");
+  say(`openmerit/engine exports ${engine.length} names`);
 
   cpSync(fixture, repo, { recursive: true });
   for (const args of [["init", "-q"], ["add", "-A"], ["-c", "user.email=smoke@example.com", "-c", "user.name=smoke", "commit", "-qm", "fixture"]]) await run("git", args, { cwd: repo });

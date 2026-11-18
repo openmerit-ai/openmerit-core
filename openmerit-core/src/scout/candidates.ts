@@ -1,4 +1,4 @@
-import type { EciEstimate, EciRow } from "./eci.ts";
+import type { EciEstimate, EciRow } from "../engine/eci.ts";
 
 /** A model the user's connections can run, placed on the ECI scale. */
 export interface Candidate {

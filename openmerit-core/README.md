@@ -270,6 +270,17 @@ The first client that finds no daemon starts it, so set `OPENMERIT_DAEMON_PORT` 
 - The local Rivet engine makes the install larger: about 300 MB on Linux and 160 MB on macOS. An empty engine store takes about 130 MB on disk.
 - Stopping the daemon (or `openmerit daemon stop`) while a step runs interrupts that run; it does not continue on its own.
 
+## Engine
+
+`openmerit/engine` exports the parts of Scout that do not depend on the CLI, for apps that run the same search, such as OpenMerit's cloud app. Not yet in a released version.
+
+- `binarySearch`, `challengers` and `order`: Scout Model Binary Search over any ladder, ordered weakest first. `order` sorts catalogue models by ECI; a vendor's named tiers can be passed in their own order. `ladder` sets apart options without an ECI, such as fine-tunes, and `challengers` measures every one of them.
+- The catalogue types, `catalogueIndex` and `requestPrice`, and the Epoch ECI parsers.
+- `Ledger`: reserve a model call's expected cost, then settle it with what it cost, or release it. Each call has a key, and repeating an operation on a key changes nothing. Spend is split into OpenMerit-paid and customer-paid. `MemoryLedger` implements it for tests; the CLI's SQLite history implements it behind the eval proxy.
+- `resolveGuardrails`: guardrails at the environment, agent and task levels. Constraints (allowed providers, models and endpoints, region, spend caps) can only be narrowed by a lower level; defaults (budget, repeats, pass rates, latency, watch, action policy, agent eval) can be replaced either way. It reports which level set each value, and rejects settings that would widen a constraint.
+- `checkAgent`: the agent-eval rule. It checks a task's pick against the whole agent's eval, then the next finalists, then all passing switches together, keeping the largest savings that pass together.
+- `redact`: the rules that replace key- and token-shaped text.
+
 ## Development
 
 ```sh

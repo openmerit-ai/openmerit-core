@@ -17,7 +17,7 @@
 import { workflow } from "@rivet-dev/workflows";
 import { queue, setup } from "rivetkit";
 import { localContext } from "../local.ts";
-import { redact } from "../scout/scan.ts";
+import { redact } from "../engine/redact.ts";
 import { advance, type Answers, type Step } from "../scout/workflow.ts";
 import { State } from "../state/db.ts";
 

@@ -1,7 +1,9 @@
-export { loadCatalogue, catalogueIndex, requestPrice, type Catalogue, type CatalogueModel } from "./catalogue/catalogue.ts";
+export { loadCatalogue } from "./catalogue/catalogue.ts";
+export { catalogueIndex, requestPrice, type Catalogue, type CatalogueModel } from "./engine/catalogue.ts";
 export { rankCandidates, rank, type Candidate, type CandidateFilter, type RunnableModel } from "./scout/candidates.ts";
-export { parseEciScores, parseEciEstimates, ECI_ATTRIBUTION, type EciRow, type EciEstimate } from "./scout/eci.ts";
-export { scanRepo, redact, type Usage, type ScanResult } from "./scout/scan.ts";
+export { parseEciScores, parseEciEstimates, ECI_ATTRIBUTION, type EciRow, type EciEstimate } from "./engine/eci.ts";
+export { scanRepo, type Usage, type ScanResult } from "./scout/scan.ts";
+export { redact } from "./engine/redact.ts";
 export { advance, eligibleCandidates, TASK_QUESTION, CONFIGURE_QUESTION, type Answers, type Question, type Step, type TaskComparison, type ModelResult } from "./scout/workflow.ts";
 export { localContext, missingSetup, startRun } from "./local.ts";
 export { createHarness, verifyHarness, detectAgents, type Harness } from "./harness/harness.ts";

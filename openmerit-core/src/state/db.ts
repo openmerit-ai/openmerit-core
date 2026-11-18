@@ -4,6 +4,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync as Database } from "node:sqlite";
+import type { Ledger } from "../engine/ledger.ts";
 import { openmeritHome, type Repo } from "./paths.ts";
 
 // node:sqlite prints an ExperimentalWarning on Node 22; keep it off the terminal (and MCP clients).
@@ -259,6 +260,44 @@ export class State {
   settle(id: number, cost: { actualUsd: number | null; estimatedUsd: number | null; latencyMs: number; failed?: boolean }) {
     this.db.prepare("UPDATE usage SET status = ?, actual_usd = ?, estimated_usd = ?, latency_ms = ?, settled_at = ? WHERE id = ?")
       .run(cost.failed ? "failed" : "settled", cost.actualUsd, cost.estimatedUsd, cost.latencyMs, now(), id);
+  }
+
+  /** Drops a reservation whose request was never sent. */
+  release(id: number) { this.db.prepare("DELETE FROM usage WHERE id = ? AND status = 'reserved'").run(id); }
+
+  /**
+   * The run's spend as a `Ledger`, recording requests under one eval unit. Every request is
+   * customer-paid: the CLI calls only the user's own endpoints. Keys are remembered by this ledger
+   * object, which lives as long as the unit's proxy token.
+   */
+  ledger(scope: { runId: string; unitId: string }): Ledger {
+    const rows = new Map<string, { id: number; open: boolean }>(), released = new Set<string>();
+    return {
+      reserve: async input => {
+        if (input.funding !== "customer") throw new Error("The local CLI records only customer-paid requests");
+        if (rows.has(input.key)) return { ok: true };
+        const reservation = this.reserve({ ...scope, model: input.model ?? "", endpoint: input.endpoint ?? "", expectedUsd: input.usd });
+        if (!reservation.ok) return { ok: false, reason: `$${reservation.spend.totalUsd.toFixed(4)} used or reserved of $${reservation.budgetUsd.toFixed(2)}`, neededUsd: input.usd };
+        rows.set(input.key, { id: reservation.id, open: true });
+        released.delete(input.key);
+        return { ok: true };
+      },
+      settle: async (key, cost) => {
+        const row = rows.get(key);
+        if (!row) { if (released.has(key)) return; throw new Error(`No reservation ${key} to settle`); }
+        if (!row.open) return;
+        row.open = false;
+        this.settle(row.id, { ...cost, latencyMs: cost.latencyMs ?? 0 });
+      },
+      release: async key => {
+        const row = rows.get(key);
+        if (!row?.open) return;
+        rows.delete(key);
+        released.add(key);
+        this.release(row.id);
+      },
+      spent: async () => ({ openmeritUsd: 0, customerUsd: this.spend(scope.runId).totalUsd }),
+    };
   }
 
   usage(runId: string, unitId: string): { requests: number; latencyMs: number; actualUsd: number; estimatedUsd: number; unknown: number } {
