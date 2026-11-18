@@ -1,13 +1,15 @@
 // A local fake of the cloud app's /api/* (cloud/src/api.ts) for the preview server and
 // tests, with the same paths, shapes, admin checks and validation messages. Guardrails
 // resolve with openmerit/engine's resolver, as in the cloud app. The bearer token picks a
-// scenario: preview-populated, preview-empty, preview-noplan, preview-member,
+// scenario: preview-tonic (the fully populated Tonic Ultra account in tonic-ultra.ts),
+// preview-populated, preview-empty, preview-noplan, preview-member,
 // preview-error, preview-slow and preview-expired. Each scenario keeps its own in-memory
 // state, so actions change what later requests return. Every name and number is fictional.
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, type Guardrails, type Level } from "../../openmerit-core/src/engine/guardrails.ts";
 import type { Endpoint, JobView, MeasuredModel, Me, Report, Run, Spend, Task } from "../api.ts";
+import { tonicUltra } from "./tonic-ultra.ts";
 
-interface State { me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number }
+export interface State { me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number }
 
 const ENV = "sahra-health/claims";
 const measured = (model: string, endpoint: string, fields: Partial<MeasuredModel>): MeasuredModel => ({
@@ -93,6 +95,7 @@ function emptyState(me: Me): State {
 }
 
 function scenario(name: string): State {
+  if (name === "tonic") return tonicUltra();
   const state = populated();
   if (name === "empty") return emptyState(state.me);
   if (name === "noplan") state.me.plan = { name: null, status: "none", periodEnd: null, includedEvals: 0, usedEvals: 0 };

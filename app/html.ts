@@ -36,6 +36,11 @@ export function providerLogo(model: string): string | null {
   if (/gpt|openai|(^|\/)o\d/.test(id)) return "openai";
   if (/gemini|google/.test(id)) return "gemini";
   if (/deepseek/.test(id)) return "deepseek";
+  if (/mistral|ministral|codestral/.test(id)) return "mistral";
+  if (/llama|meta-/.test(id)) return "meta";
+  if (/qwen/.test(id)) return "qwen";
+  if (/grok|x-ai|xai/.test(id)) return "xai";
+  if (/kimi|moonshot/.test(id)) return "kimi";
   return null;
 }
 
