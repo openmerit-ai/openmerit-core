@@ -1,0 +1,31 @@
+<!-- title: Reports | nav: reports | path: / -->
+    <div class="eyebrow"><span>Sahra Health</span><span>4 tasks · 6 reports</span></div>
+    <h1 class="title">Reports</h1>
+    <p class="lede">Each time a coding agent asks OpenMerit which model to use, the measured answer lands here with its evidence. Link a report in a pull request so reviewers can see why.</p>
+
+    <section aria-labelledby="summary">
+      <h2 id="summary">This month</h2>
+      <div class="grid3">
+        <div class="card"><span class="big">$412</span><span class="sub">estimated monthly saving from switches you applied</span></div>
+        <div class="card"><span class="big">6</span><span class="sub">reports · 2 switched, 1 kept, 1 cheaper fit waiting, 1 running</span></div>
+        <div class="card"><span class="big">38 / 100</span><span class="sub">evaluations used on the Cloud plan</span></div>
+      </div>
+    </section>
+
+    <section aria-labelledby="all">
+      <h2 id="all">All reports</h2>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Task</th><th>Outcome</th><th class="hide-sm">Based on</th><th class="hide-sm">Asked by</th><th class="num">Measured</th></tr></thead>
+          <tbody>
+            <tr><td><a href="/r/k7m2q9/">Ticket router</a><span class="sub">sahra-health/claims · src/triage.ts</span></td><td>Switch to Claude Haiku 5.5<span class="sub">from GPT-5 · saves 98%</span></td><td class="hide-sm">Context from agent</td><td class="hide-sm">Claude Code</td><td class="num">18 Nov</td></tr>
+            <tr><td><a href="/r/k7m2q9/">Bill and claim matcher</a><span class="sub">sahra-health/claims · src/agents/intake.ts</span></td><td><span class="pill good">Cheaper fit found</span><span class="sub">Gemini 3.5 Flash · not applied yet</span></td><td class="hide-sm">Context and code</td><td class="hide-sm">Watch re-run</td><td class="num">17 Nov</td></tr>
+            <tr><td><a href="/r/k7m2q9/">Fraud reviewer</a><span class="sub">sahra-health/claims · src/agents/fraud.ts</span></td><td>Keep Claude Sonnet 5.5<span class="sub">no cheaper model matched it</span></td><td class="hide-sm">Your own eval</td><td class="hide-sm">Codex</td><td class="num">16 Nov</td></tr>
+            <tr><td>Enrollment checker<span class="sub">sahra-health/enroll · src/eligibility.ts</span></td><td><span class="pill">Measuring · about 20 min</span><span class="sub">provisional pick: GPT-5 mini</span></td><td class="hide-sm">Context from agent</td><td class="hide-sm">Claude Code</td><td class="num">Running</td></tr>
+            <tr><td><a href="/r/k7m2q9/">Ticket router</a><span class="sub">sahra-health/claims · src/triage.ts</span></td><td>Keep GPT-5<span class="sub">superseded by 18 Nov</span></td><td class="hide-sm">Context from agent</td><td class="hide-sm">Claude Code</td><td class="num">2 Nov</td></tr>
+            <tr><td><a href="/r/k7m2q9/">Coding reviewer</a><span class="sub">sahra-health/claims · src/agents/coding.ts</span></td><td>Switch to Claude Haiku 5.5<span class="sub">from Claude Sonnet 5.5 · saves 95%</span></td><td class="hide-sm">Production traces</td><td class="hide-sm">Claude Code</td><td class="num">29 Oct</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Every report is also available as Markdown for agents at the same address with <code>.md</code>.</p>
+    </section>
