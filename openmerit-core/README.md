@@ -251,6 +251,7 @@ The first client that finds no daemon starts it, so set `OPENMERIT_DAEMON_PORT` 
 | The ChatGPT sign-in | Your machine, in `~/.openmerit/agent/auth.json` (mode 0600); pi refreshes it with OpenAI |
 | Eval inputs and prompts | The candidate endpoints you configured, during approved evals only |
 | Langfuse | OpenMerit reads per-item scores of the experiments your eval records, and aggregates, with a Viewer key. It never writes; your eval writes with your application's keys, as it does without OpenMerit |
+| Langfuse generations, through [trace sources](#trace-sources) | Read with GET requests into the process that calls `replay()`, which returns them redacted and stores nothing. `tasks()` reads aggregates only |
 | Run history | Your machine. SQLite keeps no keys and no dataset contents. Failed eval logs keep their last lines, redacted |
 | Daemon | Your machine. The Rivet engine listens on `127.0.0.1` only and keeps each run's progress and pending question under `~/.openmerit/rivet`, never keys or your environment |
 
@@ -280,6 +281,23 @@ The first client that finds no daemon starts it, so set `OPENMERIT_DAEMON_PORT` 
 - `resolveGuardrails`: guardrails at the environment, agent and task levels. Constraints (allowed providers, models and endpoints, region, spend caps) can only be narrowed by a lower level; defaults (budget, repeats, pass rates, latency, watch, action policy, agent eval) can be replaced either way. It reports which level set each value, and rejects settings that would widen a constraint.
 - `checkAgent`: the agent-eval rule. It checks a task's pick against the whole agent's eval, then the next finalists, then all passing switches together, keeping the largest savings that pass together.
 - `redact`: the rules that replace key- and token-shaped text.
+
+## Trace sources
+
+`openmerit/sources` finds tasks in a Langfuse project from the generations the project recorded, so it needs no access to the application's code. It sends GET requests only, so a **Viewer** key pair is enough. It is a library export the CLI does not use. Not yet in a released version.
+
+```ts
+import { connectionFromEnv, createLangfuseSource } from "openmerit/sources";
+
+const source = createLangfuseSource(connectionFromEnv(), { days: 30, environments: ["production"] });
+const { tasks } = await source.tasks();
+const { bundle, cases, samples, skipped } = await source.replay(tasks[0]);
+```
+
+- **`tasks()`** groups generations into tasks by trace name, by the Langfuse prompt they link or else their generation name, and by model. It ranks the tasks by recorded cost, then by volume, with each one's calls and cost per month and its share of the project's cost. It reads one aggregate query and no inputs or outputs.
+- **`replay(task)`** reads the input and output of the task's latest generations (200 by default) and returns up to 30 replay cases and a task bundle. Failed calls, generations with no input or output, and inputs that are not a chat message list are skipped, and `skipped` counts them by reason. A request recorded twice becomes one case. The sample takes an equal share from each stratum, by prompt version, turn depth (first turn, turns 2–3, turn 4 and later) and output kind (tool call or text), and spreads each stratum's picks over time. The same generations give the same sample.
+- **A case is one model call.** `input.messages` is the request the trace recorded, history and earlier tool results included, as OpenAI chat messages in JSON. `expected` is the assistant message the current model returned. Tools are never executed. Text in both is redacted like scan snippets.
+- **The bundle** has the task, the current model, the system prompt when every sample shares it, and the output kind. Its tools come from the definitions the trace recorded. When the trace recorded none, the tools are only the names seen in tool calls, with no parameter schema, and `toolDefinitions` is `"inferred"`.
 
 ## Development
 

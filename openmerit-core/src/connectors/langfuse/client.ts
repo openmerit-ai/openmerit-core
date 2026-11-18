@@ -132,6 +132,27 @@ export function createTransport(connection: LangfuseConnection, options: Transpo
   };
 }
 
+/** Every page of a cursor-paginated GET list, such as /api/public/v2/observations. */
+export async function* cursorPages(transport: Transport, path: string, query: Query): AsyncGenerator<unknown[]> {
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = (await transport.request<{ data?: unknown; meta?: { cursor?: unknown } }>("GET", path, { query: { ...query, cursor } })).data;
+    if (!page || !Array.isArray(page.data)) throw new LangfuseError(`Langfuse GET ${path} returned no data array.`);
+    yield page.data;
+    cursor = typeof page.meta?.cursor === "string" ? page.meta.cursor : undefined;
+    if (cursor && seen.has(cursor)) throw new LangfuseError(`Langfuse GET ${path} repeated a pagination cursor.`);
+    if (cursor) seen.add(cursor);
+  } while (cursor);
+}
+
+/** Rows of one GET /api/public/v2/metrics query. */
+export async function metricsRows(transport: Transport, query: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+  const data = (await transport.request<{ data?: unknown }>("GET", "/api/public/v2/metrics", { query: { query: JSON.stringify(query) } })).data;
+  if (!data || !Array.isArray(data.data)) throw new LangfuseError("Langfuse returned invalid aggregate metrics.");
+  return data.data.filter((row): row is Record<string, unknown> => !!row && typeof row === "object" && !Array.isArray(row));
+}
+
 async function readBounded(response: Response, label: string): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) return "";
