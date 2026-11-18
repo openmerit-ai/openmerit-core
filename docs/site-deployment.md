@@ -31,7 +31,7 @@ It runs the pinned Wrangler with `--strict`, which stops if someone changed the 
 | `scout-serving` | `openmerit-scout-alpha` | `wrangler.scout-alpha.jsonc` | Landing page, the Clerk sign-in at `/scout/`, `/playground/scout/` |
 | `playground-claims` | `playground-claims` | `playground/wrangler.jsonc` | Sahra Health's customer claims and enrollment workflows |
 | `site` | `openmerit-site` | `wrangler.jsonc` | Protected memo. Code-only release with asset-retention checks and no container rollout |
-| `app` | `openmerit-app` | `wrangler.app.jsonc` | `app.openmerit.ai`: a static mockup of the cloud plan's report and account pages, built from `app/` by `scripts/build-app.ts`. Fictional data, no sign-in or bindings. Its first deploy creates the `app.openmerit.ai` custom domain |
+| `app` | `openmerit-app` | `wrangler.app.jsonc` | `app.openmerit.ai`: a static mockup of the cloud plan's run and account pages, built from `app/` by `scripts/build-app.ts`. Fictional data, no sign-in or bindings. Its first deploy creates the `app.openmerit.ai` custom domain |
 
 Deploy `scout-serving` before `domain-router` when a change spans both, as the rebuild cutover did.
 
