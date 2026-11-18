@@ -1,18 +1,17 @@
 import type { Run, Task } from "../api.ts";
-import { day, html, model, plural, usd, type Html } from "../html.ts";
+import { day, html, model, per1k, plural, usd, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { empty, header } from "./common.ts";
 
-// A task's latest result, in the words the pages use. The cloud app records the job's result
-// status on the task, or the job's own status when it ended without one.
-export function result(task: Task, link: (text: Html | string) => Html = (text) => html`${text}`): Html {
-  switch (task.status) {
+// A result in the words the pages use: a task's latest one, or any finished run's.
+function describe(found: { status: string; pick: string | null; current: string; saving: string }, link: (text: Html | string) => Html): Html {
+  switch (found.status) {
     case "new": return html`<span class="sub">Not measured yet</span>`;
     case "running": return html`<span class="pill">Measuring</span>`;
-    case "picked": return task.pick
-      ? html`${link(html`Switch to ${model(task.pick)}`)}<span class="sub">from ${model(task.currentModel)}${task.monthlySavingUsd ? ` · saves about ${usd(task.monthlySavingUsd)} a month` : ""}</span>`
+    case "picked": return found.pick
+      ? html`${link(html`Switch to ${model(found.pick)}`)}<span class="sub">from ${model(found.current)}${found.saving ? ` · ${found.saving}` : ""}</span>`
       : link("Cheaper model found");
-    case "keep_current": return html`${link(html`Keep ${model(task.currentModel)}`)}<span class="sub">no cheaper model passed as many cases</span>`;
+    case "keep_current": return html`${link(html`Keep ${model(found.current)}`)}<span class="sub">no cheaper model passed as many cases</span>`;
     case "agent_eval_failed": return html`${link("Keep the current models")}<span class="sub">every cheaper switch failed the agent's eval</span>`;
     case "no_candidates": return html`${link("Keep the current model")}<span class="sub">no allowed model is cheaper</span>`;
     case "no_cases": return html`<span class="pill warn">No usable cases</span><span class="sub">${link("no case had a known answer")}</span>`;
@@ -22,6 +21,11 @@ export function result(task: Task, link: (text: Html | string) => Html = (text) 
   }
 }
 
+// A task's latest result. The cloud app records the job's result status on the task, or the
+// job's own status when it ended without one.
+export const result = (task: Task, link: (text: Html | string) => Html = (text) => html`${text}`): Html =>
+  describe({ status: task.status, pick: task.pick, current: task.currentModel, saving: task.monthlySavingUsd ? `saves about ${usd(task.monthlySavingUsd)} a month` : "" }, link);
+
 const jobStatus: Record<string, Html> = {
   queued: html`<span class="pill">Queued</span>`,
   running: html`<span class="pill">Measuring</span>`,
@@ -30,12 +34,15 @@ const jobStatus: Record<string, Html> = {
   stopped: html`<span class="pill">Stopped</span>`,
 };
 
-// The run list names only the task, so each run's outcome comes from its task: exact for the
-// task's latest run, and only "done" for older ones, whose report has the rest.
+// Each finished run says what its report found. The task's latest run also shows the monthly
+// saving, which the task estimates from its traffic; older runs show the saving per 1,000 calls.
 function outcome(run: Run, task: Task | undefined): Html {
   if (run.status !== "done") return jobStatus[run.status] ?? html`${run.status}`;
   if (task && task.lastJobId === run.id) return result(task);
-  return html`<span class="sub">Done · see the report</span>`;
+  const found = run.result;
+  if (!found) return html`<span class="sub">Done</span>`;
+  const saving = found.savingPerCallUsd ? `saves ${per1k(found.savingPerCallUsd)} per 1,000 calls` : "";
+  return describe({ status: found.status, pick: found.model, current: found.from ?? task?.currentModel ?? "", saving }, (text) => html`${text}`);
 }
 
 export const runsView: View<{ runs: Run[]; tasks: Task[] }> = {

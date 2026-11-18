@@ -42,7 +42,9 @@ export interface Task {
 
 export type JobStatus = "queued" | "running" | "needs_input" | "done" | "failed" | "stopped";
 
-export interface Run { id: string; taskId: string; kind: string; status: JobStatus | string; startedAt: string; finishedAt: string | null }
+// What a finished run's report found: its result status, the model it picked and the one in use then.
+export interface RunResult { status: string; model: string | null; from: string | null; savingPerCallUsd: number | null }
+export interface Run { id: string; taskId: string; kind: string; status: JobStatus | string; startedAt: string; finishedAt: string | null; result: RunResult | null }
 
 export interface MeasuredModel {
   model: string;
