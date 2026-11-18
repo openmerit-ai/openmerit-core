@@ -47,7 +47,7 @@ function outcome(run: Run, task: Task | undefined): Html {
 
 // Who started the run: the coding agent that asked, by the name its MCP client sent, or a watch.
 function askedBy(run: Run): Html {
-  if (run.kind === "watch") return html`<span class="sub">Watch re-run</span>`;
+  if (run.kind === "watch") return html`${logo("openmerit")}OpenMerit<span class="sub">watching this task</span>`;
   if (!run.askedBy) return html`Coding agent`;
   const found = harness(run.askedBy);
   return html`${logo(found.logo)}${found.name}${found.custom ? html`<span class="sub">custom harness</span>` : ""}`;
