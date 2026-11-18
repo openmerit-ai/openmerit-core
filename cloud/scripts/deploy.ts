@@ -7,18 +7,19 @@
 //   npm run deploy -- secrets [--yes]          copy the app's secrets from this environment to the cluster
 //   npm run deploy -- status                   read-only: receipts and what the origin answers
 //
-// RIVET_CLOUD_TOKEN (a cloud_api_… token) and RIVET_ORG authenticate the Rivet CLI; RIVET_CLUSTER
-// defaults to the cluster below.
+// RIVET_CLOUD_TOKEN (a rivet_cluster_… cluster token, or a cloud_api_… token with RIVET_ORG)
+// authenticates the Rivet CLI, which reads it from the environment. RIVET_CLUSTER is the cluster's
+// name, not its slug; the origin is on the slug.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 
-const CLUSTER = process.env.RIVET_CLUSTER ?? "openmeritdr2i";
-const ORIGIN = `https://${CLUSTER}.onrivet.dev`;
+const CLUSTER = process.env.RIVET_CLUSTER ?? "openmerit";
+const ORIGIN = (process.env.RIVET_ORIGIN ?? "https://openmeritdr2i.onrivet.dev").replace(/\/$/, "");
 /** CI jobs a commit needs before it is deployed. */
 const REQUIRED_CHECKS = ["verify", "cloud"];
-/** Cluster secrets the pool reads, each set from the variable of the same name. */
+/** Cluster secrets the pool reads, each set from the variable of the same name. The pool reads only those set on the cluster. */
 const SECRETS = ["CLERK_SECRET_KEY", "OPENROUTER_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "OPENMERIT_KEY_ENCRYPTION_KEY"];
 /** Plain pool variables, from this environment when set. */
 const SETTINGS = ["CLERK_PUBLISHABLE_KEY", "STRIPE_PRICE_ID", "STRIPE_METER_EVENT", "OPENMERIT_PUBLIC_URL", "OPENMERIT_APP_URL", "OPENMERIT_CASE_WRITER_MODEL", "OPENMERIT_JUDGE_MODEL"];
@@ -73,26 +74,39 @@ async function deploy(): Promise<void> {
 
 function deployArgs(commit: string, build: string | undefined): string[] {
   const settings = SETTINGS.filter(name => process.env[name]).flatMap(name => ["--env", `${name}=${process.env[name]}`]);
+  // A secret not yet on the cluster, such as the Stripe webhook secret before the webhook exists, is left out: the app runs without that feature.
+  const onCluster = clusterSecrets();
+  const secrets = SECRETS.filter(name => onCluster.has(name));
   return [
     "deploy", "--cluster", CLUSTER, ...(process.env.RIVET_ORG ? ["--org", process.env.RIVET_ORG] : []), "--yes",
     ...(build ? ["--build", build] : ["--dockerfile", "cloud/Dockerfile", "--build-context", ".", "--image", "openmerit-cloud", "--tag", commit.slice(0, 12)]),
     // One node: actors live on the cluster, so more nodes add capacity, not state.
     "--min-scale", "1", "--memory", "1Gi",
-    ...SECRETS.flatMap(name => ["--secret", name]), ...settings,
+    ...secrets.flatMap(name => ["--secret", name]), ...settings,
   ];
 }
 
-/** Copies each secret from this environment to the cluster, by name; values pass through the CLI's --from-env, never argv. */
+function clusterSecrets(): Set<string> {
+  const listed = JSON.parse(run(rivet, ["cluster", "secret", "list", "--cluster", CLUSTER, "--json", ...(process.env.RIVET_ORG ? ["--org", process.env.RIVET_ORG] : [])])) as ({ name?: string } | string)[];
+  return new Set(listed.map(item => (typeof item === "string" ? item : item.name ?? "")));
+}
+
+/**
+ * Copies each secret set in this environment to the cluster, by name; values pass through the CLI's
+ * --from-env, never argv. Secrets not set here are left as they are on the cluster.
+ */
 async function secrets(): Promise<void> {
   credentials();
+  const present = SECRETS.filter(name => process.env[name]);
   const missing = SECRETS.filter(name => !process.env[name]);
-  if (missing.length) fail(`Not set in this environment: ${missing.join(", ")}.`);
-  if (!flag("--yes")) await confirm(`Set ${SECRETS.length} secrets on ${CLUSTER}?`);
-  for (const name of SECRETS) {
+  if (!present.length) fail(`None of ${SECRETS.join(", ")} is set in this environment.`);
+  if (missing.length) console.log(`Not set in this environment, so left as they are on the cluster: ${missing.join(", ")}.`);
+  if (!flag("--yes")) await confirm(`Set ${present.length} secrets on ${CLUSTER}?`);
+  for (const name of present) {
     const result = spawnSync(rivet, ["cluster", "secret", "set", name, "--from-env", name, "--cluster", CLUSTER, ...(process.env.RIVET_ORG ? ["--org", process.env.RIVET_ORG] : []), "--yes"], { cwd: root, stdio: "inherit" });
     if (result.status !== 0) fail(`Setting ${name} failed.`);
   }
-  console.log(`Set ${SECRETS.join(", ")} on ${CLUSTER}.`);
+  console.log(`Set ${present.join(", ")} on ${CLUSTER}.`);
 }
 
 async function status(): Promise<void> {
@@ -122,7 +136,7 @@ function lastReceipt(): Receipt | null {
 }
 
 function credentials(): void {
-  if (!process.env.RIVET_CLOUD_TOKEN) fail("Set RIVET_CLOUD_TOKEN to a Rivet Cloud API token (cloud_api_…). The engine's admin token does not reach the Cloud API.");
+  if (!process.env.RIVET_CLOUD_TOKEN) fail("Set RIVET_CLOUD_TOKEN to the cluster's token (rivet_cluster_…). The engine's admin token does not reach the Cloud API.");
   try { readFileSync(rivet); } catch { fail("Run npm ci in cloud/ first: the deploy uses its pinned Rivet CLI."); }
 }
 
