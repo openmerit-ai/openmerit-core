@@ -10,10 +10,10 @@ const isLive = (data: Data): data is JobView => "report" in data && data.report 
 
 const verdicts: Record<Report["status"], string> = {
   picked: "",
-  keep_current: "No cheaper model passed as many cases, so the model in use today stays.",
-  baseline_failed: "The model in use today could not be measured or passed none of the cases, so there was nothing to compare against.",
+  keep_current: "No cheaper model passed as many cases, so the model in use now stays.",
+  baseline_failed: "The model in use now could not be measured or passed none of the cases, so there was nothing to compare against.",
   no_cases: "No case had a known correct answer, so nothing was measured.",
-  no_candidates: "No allowed model is cheaper than the one in use today.",
+  no_candidates: "No allowed model is cheaper than the one in use now.",
   agent_eval_failed: "Every cheaper switch failed the agent's eval, so none is proposed.",
 };
 
@@ -53,7 +53,7 @@ function live(job: JobView): Html {
 }
 
 function verdict(item: MeasuredModel, pick: string | null): Html {
-  if (item.role === "baseline") return html`<span class="pill tag">In use today</span>`;
+  if (item.role === "baseline") return html`<span class="pill tag">In use now</span>`;
   if (item.model === pick) return html`<span class="pill good">Picked</span>`;
   if (item.status === "unavailable") return html`<span class="pill warn">Unavailable</span>`;
   if (item.status === "screened_out") return html`<span class="pill">Screened out</span>`;
@@ -63,7 +63,7 @@ function verdict(item: MeasuredModel, pick: string | null): Html {
 function pickCard(report: Report): Html {
   const pick = report.pick, base = report.baseline;
   if (!pick) return base
-    ? html`<div class="card"><div class="pick-head"><span class="pick-model">${model(base.model)}</span><span class="pill tag">In use today</span></div><span class="sub">${endpointName(base.endpoint)}</span>
+    ? html`<div class="card"><div class="pick-head"><span class="pick-model">${model(base.model)}</span><span class="pill tag">In use now</span></div><span class="sub">${endpointName(base.endpoint)}</span>
         <div class="stats"><div class="stat"><b>${base.passes}/${base.total}</b><span>cases passed</span></div><div class="stat"><b>${per1k(base.costPerCallUsd)}</b><span>per 1,000 calls</span></div><div class="stat"><b>${seconds(base.latencyMs)}</b><span>mean latency</span></div></div></div>`
     : html`<div class="card"><p>${verdicts[report.status]}</p></div>`;
   const measured = report.candidates.find((item) => item.model === pick.model && item.endpoint === pick.endpoint);
@@ -82,7 +82,7 @@ function pickCard(report: Report): Html {
 
 function change(report: Report): Html {
   const { edits, instructions } = report.edit;
-  if (!edits.length && !instructions) return html`<div><h2>The change</h2><p class="note">No code change: keep the model in use today.</p></div>`;
+  if (!edits.length && !instructions) return html`<div><h2>The change</h2><p class="note">No code change: keep the model in use now.</p></div>`;
   return html`<div>
         <h2>The change</h2>
         ${edits.map((edit) => html`<div class="diff" role="img" aria-label="Code change in ${edit.file}" style="margin-bottom: 10px">
