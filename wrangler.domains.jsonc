@@ -8,6 +8,11 @@
   "build": {
     "command": "node --test demo/test/domain-migration.test.mjs && npm run check:docs"
   },
+  // The cloud app on Rivet Cloud, which serves /mcp, /.well-known/oauth-protected-resource
+  // and /api/*. Empty until its cluster exists: those paths return 503 until then.
+  "vars": {
+    "CLOUD_APP_ORIGIN": ""
+  },
   "services": [
     { "binding": "SCOUT", "service": "openmerit-scout-alpha" },
     { "binding": "SITE", "service": "openmerit-site" }
