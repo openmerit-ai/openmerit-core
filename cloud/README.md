@@ -1,6 +1,6 @@
 # OpenMerit cloud
 
-The Node.js app behind `claude mcp add --transport http openmerit https://openmerit.ai/mcp`. It runs as a Rivet Cloud hosted actor node on the cluster `openmeritdr2i`, served at `https://openmeritdr2i.onrivet.dev`. openmerit.ai's domain router (`demo/domain-router.mjs`) proxies `/mcp`, `/.well-known/oauth-protected-resource` and `/api/*` to it when `CLOUD_APP_ORIGIN` is set.
+The Node.js app behind `claude mcp add --transport http openmerit https://openmerit.ai/mcp`. It runs as a Rivet Cloud hosted actor node on the Rivet Cloud cluster `openmerit` (slug `openmeritdr2i`, region `us-east4`), served at `https://openmeritdr2i.onrivet.dev`. openmerit.ai's domain router (`demo/domain-router.mjs`) proxies `/mcp`, `/.well-known/oauth-protected-resource` and `/api/*` to it when `CLOUD_APP_ORIGIN` is set.
 
 Not released: nothing here is deployed until the deploy below runs.
 
@@ -51,10 +51,10 @@ The cluster sets `RIVET_ENDPOINT`, `RIVET_TOKEN` and `RIVET_POOL` on every deplo
 
 ## Deploying
 
-Every deploy and secret change needs the owner's approval. `npm run deploy` follows the repository's `scripts/deploy.ts` rules: a clean checkout whose HEAD is on `origin/main` and passed the `verify` and `cloud` CI jobs, then a receipt in `.deploys/cloud/` with the rollback command. It needs `RIVET_CLOUD_TOKEN` (a `cloud_api_…` Rivet Cloud token; the engine's admin token does not reach the Cloud API), `RIVET_ORG` when the token does not imply it, and Docker.
+Every deploy and secret change needs the owner's approval. `npm run deploy` follows the repository's `scripts/deploy.ts` rules: a clean checkout whose HEAD is on `origin/main` and passed the `verify` and `cloud` CI jobs, then a receipt in `.deploys/cloud/` with the rollback command. It needs `RIVET_CLOUD_TOKEN` (the cluster's `rivet_cluster_…` token, which selects its organization, so `RIVET_ORG` stays unset; the engine's admin token does not reach the Cloud API) and Docker. `RIVET_CLUSTER` is the cluster's name, `openmerit`; its slug `openmeritdr2i` is only in the origin. A secret that is not on the cluster yet, such as `STRIPE_WEBHOOK_SECRET` before the webhook is registered, is left out of the pool, and the feature that needs it answers 503.
 
 ```sh
-npm run deploy -- secrets          # copies the secrets above from this environment to the cluster, by name
+npm run deploy -- secrets          # copies the secrets above that this environment has to the cluster, by name
 npm run deploy -- --dry-run        # prints the rivet deploy command
 npm run deploy                     # builds cloud/Dockerfile, uploads it and rolls the pool onto it
 npm run deploy -- --build <id>     # rolls back to an earlier build, without rebuilding
