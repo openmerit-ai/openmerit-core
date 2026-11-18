@@ -15,7 +15,7 @@ export const dataView: View<Data> = {
     const admin = me.role === "admin";
     return html`${header(me, "Your data", "What OpenMerit keeps, where it goes, and how to take it back.")}
     <section aria-labelledby="keeps">
-      <h2 id="keeps">What OpenMerit keeps</h2>
+      <h2 id="keeps">What OpenMerit Keeps</h2>
       <div class="card">
         <div class="row"><span>Task context<span class="sub">The prompts, tool schemas, output shapes and examples your coding agents sent, with secrets redacted</span></span><span>${plural(tasks.length, "task")}</span></div>
         <div class="row"><span>Test cases and results<span class="sub">The cases OpenMerit wrote from that context, and each model's score per case</span></span><span>${plural(runs.length, "run")}</span></div>
@@ -24,13 +24,13 @@ export const dataView: View<Data> = {
       </div>
     </section>
     <section aria-labelledby="where">
-      <h2 id="where">Where it goes</h2>
+      <h2 id="where">Where It Goes</h2>
       <div class="card">
         <p>Test cases go to the models measured for each task: through OpenRouter to the providers it routes to, and to the endpoints you added. OpenMerit runs on Rivet, Cloudflare, Clerk and Stripe.</p>
       </div>
     </section>
     <section aria-labelledby="control">
-      <h2 id="control">Export or delete</h2>
+      <h2 id="control">Export or Delete</h2>
       <div class="card">
         <div class="row"><span>Export<span class="sub">Every task, test case, run and setting for ${me.account.name} as JSON. Keys are not included.</span></span><button class="btn" type="button" data-action="export">Export</button></div>
         <div class="row"><span>Delete everything<span class="sub">Deletes every task, test case, run, guardrail, endpoint and key for ${me.account.name}. Run pages and public links stop loading. This cannot be undone.</span></span>${admin ? html`<button class="btn danger" type="button" data-action="delete">Delete all data</button>` : html`<span class="sub">Admins only</span>`}</div>

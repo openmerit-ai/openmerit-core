@@ -80,7 +80,7 @@ function inProgress(all: JobView[], runs: Run[], byId: Map<string, Task>): Html 
   const runOf = new Map(runs.map((run) => [run.id, run]));
   const jobs = ordered(all, (job) => runOf.get(job.jobId)?.startedAt ?? job.createdAt);
   return html`<section aria-labelledby="progress">
-      <h2 id="progress">In progress <span class="count">${jobs.length}</span></h2>
+      <h2 id="progress">In Progress <span class="count">${jobs.length}</span></h2>
       <div class="tablewrap">
         <table class="running">
           <thead><tr><th>Task</th><th>Testing</th><th class="num">Cases</th><th class="num">Passed</th><th>So far</th><th class="num">Status</th></tr></thead>
@@ -120,12 +120,12 @@ export const runsView: View<{ runs: Run[]; tasks: Task[]; jobs: JobView[] }> = {
   },
   render({ runs, tasks, jobs }, { me }) {
     const top = header(me, "Runs", "Each time a coding agent asks which model to use, OpenMerit runs the task's tests on the candidates and the answer lands here with its evidence. Link a run in a pull request so reviewers can see why.", [plural(tasks.length, "task")]);
-    if (!runs.length) return html`${top}<section aria-labelledby="all"><h2 id="all">All runs</h2>${empty("No runs yet", "Add OpenMerit to a coding agent, then ask it which model a task should use. The run and its evidence appear here.")}</section>`;
+    if (!runs.length) return html`${top}<section aria-labelledby="all"><h2 id="all">All Runs</h2>${empty("No runs yet", "Add OpenMerit to a coding agent, then ask it which model a task should use. The run and its evidence appear here.")}</section>`;
     const byId = new Map(tasks.map((task) => [task.id, task]));
     return html`${top}
     ${inProgress(jobs, runs, byId)}
     <section aria-labelledby="all">
-      <h2 id="all">All runs <span class="count">${runs.length.toLocaleString("en-US")}</span></h2>
+      <h2 id="all">All Runs <span class="count">${runs.length.toLocaleString("en-US")}</span></h2>
       <div class="tablewrap">
         <table>
           <thead><tr><th>Task</th><th>Outcome</th><th>Asked by</th><th class="num">Last run</th></tr></thead>

@@ -37,7 +37,7 @@ export const connectionsView: View<Endpoint[]> = {
     return html`${header(me, "Connections", "Your coding agents are how OpenMerit gets its work. Your own endpoints are optional: OpenMerit measures on OpenRouter at its own cost.", [`${plural(own.length, "endpoint")} of yours`])}
 
     <section aria-labelledby="agents">
-      <h2 id="agents">Coding agents</h2>
+      <h2 id="agents">Coding Agents</h2>
       <div class="card">
         <p>Add OpenMerit to a coding agent:</p>
         <div style="margin-top: 8px">${install()}</div>
@@ -46,13 +46,13 @@ export const connectionsView: View<Endpoint[]> = {
     </section>
 
     <section aria-labelledby="endpoints">
-      <h2 id="endpoints">Measuring endpoints</h2>
+      <h2 id="endpoints">Measuring Endpoints</h2>
       <p class="note" style="margin: -2px 0 8px">Calls on your own endpoints use your key and bill your provider account. Add the endpoint your app calls so its current model is measured where it really runs.</p>
       <div class="card">${builtIn()}${own.map((endpoint) => endpointRow(endpoint, admin))}</div>
     </section>
 
     ${admin ? html`<section aria-labelledby="add">
-      <h2 id="add">Add an endpoint</h2>
+      <h2 id="add">Add an Endpoint</h2>
       <form class="card form" data-action="add" autocomplete="off">
         <label>Kind
           <select name="kind">${Object.entries(kinds).map(([kind, { label }]) => html`<option value="${kind}">${label}</option>`)}</select>
