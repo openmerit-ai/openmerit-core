@@ -16,6 +16,10 @@
       "types": "./dist/engine/index.d.ts",
       "default": "./dist/engine/index.js"
     },
+    "./sources": {
+      "types": "./dist/sources/index.d.ts",
+      "default": "./dist/sources/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

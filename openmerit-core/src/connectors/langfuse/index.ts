@@ -8,7 +8,7 @@
 // The only non-GET request is the Viewer check: a deliberately invalid dataset creation ({} has no
 // name). A Viewer key gets 403; any other answer means the key can write, so setup refuses it.
 
-import { createTransport, type LangfuseConnection, LangfuseError, type Query, type TransportOptions } from "./client.ts";
+import { createTransport, cursorPages, type LangfuseConnection, LangfuseError, metricsRows, type Query, type TransportOptions } from "./client.ts";
 
 export { connectionFromEnv, type LangfuseConnection, LangfuseError, normalizeBaseUrl, type TransportOptions } from "./client.ts";
 
@@ -123,31 +123,15 @@ export function createLangfuseConnector(connection: LangfuseConnection, options:
   const get = async <T>(path: string, query?: Query): Promise<T | null> => (await transport.request<T>("GET", path, query ? { query } : {})).data;
   const window = (days: number) => ({ from: new Date(Date.now() - days * DAY_MS).toISOString(), to: new Date().toISOString() });
 
-  async function* cursorPages(path: string, query: Query): AsyncGenerator<unknown[]> {
-    const seen = new Set<string>();
-    let cursor: string | undefined;
-    do {
-      const page = await get<{ data?: unknown; meta?: { cursor?: unknown } }>(path, { ...query, cursor });
-      if (!page || !Array.isArray(page.data)) throw new LangfuseError(`Langfuse GET ${path} returned no data array.`);
-      yield page.data;
-      cursor = str(page.meta?.cursor) ?? undefined;
-      if (cursor && seen.has(cursor)) throw new LangfuseError(`Langfuse GET ${path} repeated a pagination cursor.`);
-      if (cursor) seen.add(cursor);
-    } while (cursor);
-  }
-
-  const metrics = async (query: Record<string, unknown>) => {
-    const data = await get<{ data?: unknown }>("/api/public/v2/metrics", { query: JSON.stringify(query) });
-    if (!data || !Array.isArray(data.data)) throw new LangfuseError("Langfuse returned invalid aggregate metrics.");
-    return data.data.filter(isObject);
-  };
+  const pages = (path: string, query: Query) => cursorPages(transport, path, query);
+  const metrics = (query: Record<string, unknown>) => metricsRows(transport, query);
   const generation = { column: "type", operator: "=", value: "GENERATION", type: "string" };
 
   /** Latest score of one name per trace, from /api/public/v3/scores (trace- and observation-level). */
   async function scoresByTrace(traceIds: string[], name: string, since: string): Promise<Map<string, ScoreValue>> {
     const latest = new Map<string, { at: string; value: ScoreValue }>();
     for (let i = 0; i < traceIds.length; i += 40) {
-      for await (const page of cursorPages("/api/public/v3/scores", { traceId: traceIds.slice(i, i + 40).join(","), name, fields: "subject", limit: 100, fromTimestamp: since })) {
+      for await (const page of pages("/api/public/v3/scores", { traceId: traceIds.slice(i, i + 40).join(","), name, fields: "subject", limit: 100, fromTimestamp: since })) {
         for (const raw of page) {
           if (!isObject(raw) || !isObject(raw.subject)) continue;
           const traceId = raw.subject.kind === "trace" ? str(raw.subject.id) : str(raw.subject.traceId);
@@ -168,7 +152,7 @@ export function createLangfuseConnector(connection: LangfuseConnection, options:
     const latest = new Map<string, { raw: Record<string, unknown>; at: string }>();
     const experimentIds = new Set<string>();
     let datasetId: string | null = null;
-    for await (const page of cursorPages("/api/public/experiment-items", { fields: "core,scores", limit: 100, scoreLimit: 50, fromStartTime: query.since, experimentName: query.experimentName })) {
+    for await (const page of pages("/api/public/experiment-items", { fields: "core,scores", limit: 100, scoreLimit: 50, fromStartTime: query.since, experimentName: query.experimentName })) {
       for (const raw of page) {
         if (!isObject(raw) || !str(raw.experimentItemId) || !str(raw.traceId)) continue;
         experimentIds.add(str(raw.experimentId) ?? "");
