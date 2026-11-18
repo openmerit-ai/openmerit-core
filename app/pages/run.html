@@ -1,14 +1,14 @@
-<!-- title: Ticket router: switch to Claude Haiku 5.5 | nav: reports | path: r/k7m2q9 -->
+<!-- title: Ticket router: switch to Claude Haiku 5.5 | nav: runs | path: r/k7m2q9 -->
     <div class="eyebrow">
-      <a href="/">Reports</a><span>›</span><span>k7m2q9</span><span>Measured 18 Nov 2026, 14:20 GST</span><span>Requested by Claude Code in sahra-health/claims</span>
+      <a href="/">Runs</a><span>›</span><span>k7m2q9</span><span>Measured 18 Nov 2026, 14:20 GST</span><span>Requested by {{logo:claude-code}}Claude Code in sahra-health/claims</span>
     </div>
     <h1 class="title">Ticket router: switch to Claude Haiku 5.5</h1>
-    <p class="lede">It passed as many test runs as GPT-5, the model in use today, at under 2% of the cost and six times faster.</p>
+    <p class="lede">It passed as many tests as GPT-5, the model in use today, at under 2% of the cost and six times faster.</p>
 
     <div class="pick">
       <div class="card">
         <div class="pick-head">
-          <span class="pick-model">Claude Haiku 5.5</span>
+          <span class="pick-model">{{logo:claude}}Claude Haiku 5.5</span>
           <span class="pill good">Recommended</span>
         </div>
         <span class="sub">Anthropic API · <code>claude-haiku-5-5</code></span>
@@ -37,8 +37,8 @@
       <div class="basis">
         <div class="on"><b>Context from your agent</b>The prompt, the three labels and 8 example tickets</div>
         <div><b>Code</b>Not used</div>
-        <div><b>Production traces</b>Not connected</div>
-        <div><b>Your own eval</b>None found</div>
+        <div><b>Production traces</b>{{logo:langfuse}}None in Langfuse for this task</div>
+        <div><b>Your own eval</b>{{logo:braintrust}}None in Braintrust</div>
       </div>
       <p class="note">OpenMerit wrote 40 test tickets from that context. You confirmed 6 of them in Claude Code before the run. Pass rule: the answer must be exactly the expected label. Each model ran every ticket 3 times. Models were called on their own providers' APIs, the way your app calls them.</p>
     </section>
@@ -49,11 +49,11 @@
         <table>
           <thead><tr><th>Model</th><th class="num">Passed</th><th class="num">Per 1,000 calls</th><th class="num">Latency</th><th>Result</th></tr></thead>
           <tbody>
-            <tr class="current"><td>GPT-5<span class="sub">OpenAI · in use today</span></td><td class="num">117/120</td><td class="num">$4.75</td><td class="num">3.1 s</td><td><span class="pill">Baseline</span></td></tr>
-            <tr class="picked"><td>Claude Haiku 5.5<span class="sub">Anthropic</span></td><td class="num">118/120</td><td class="num">$0.07</td><td class="num">0.5 s</td><td><span class="pill good">Qualifies · cheapest</span></td></tr>
-            <tr><td>GPT-5 mini<span class="sub">OpenAI</span></td><td class="num">116/120</td><td class="num">$0.65</td><td class="num">1.8 s</td><td><span class="pill warn">1 run below baseline</span></td></tr>
-            <tr><td>GPT-5 nano<span class="sub">OpenAI</span></td><td class="num">109/120</td><td class="num">$0.15</td><td class="num">1.4 s</td><td><span class="pill bad">Below baseline</span></td></tr>
-            <tr class="outside"><td>DeepSeek V4 Flash<span class="sub">DeepSeek · outside your allowed providers</span></td><td class="num">118/120</td><td class="num">$0.06</td><td class="num">0.9 s</td><td><span class="pill">For reference</span></td></tr>
+            <tr class="current"><td>{{logo:openai}}GPT-5<span class="sub">OpenAI · in use today</span></td><td class="num">117/120</td><td class="num">$4.75</td><td class="num">3.1 s</td><td><span class="pill">Baseline</span></td></tr>
+            <tr class="picked"><td>{{logo:claude}}Claude Haiku 5.5<span class="sub">Anthropic</span></td><td class="num">118/120</td><td class="num">$0.07</td><td class="num">0.5 s</td><td><span class="pill good">Qualifies · cheapest</span></td></tr>
+            <tr><td>{{logo:openai}}GPT-5 mini<span class="sub">OpenAI</span></td><td class="num">116/120</td><td class="num">$0.65</td><td class="num">1.8 s</td><td><span class="pill warn">1 run below baseline</span></td></tr>
+            <tr><td>{{logo:openai}}GPT-5 nano<span class="sub">OpenAI</span></td><td class="num">109/120</td><td class="num">$0.15</td><td class="num">1.4 s</td><td><span class="pill bad">Below baseline</span></td></tr>
+            <tr class="outside"><td>{{logo:deepseek}}DeepSeek V4 Flash<span class="sub">DeepSeek · outside your allowed providers</span></td><td class="num">118/120</td><td class="num">$0.06</td><td class="num">0.9 s</td><td><span class="pill">For reference</span></td></tr>
           </tbody>
         </table>
       </div>
@@ -64,7 +64,7 @@
       <h2 id="items">The test tickets</h2>
       <div class="tablewrap">
         <table class="items">
-          <thead><tr><th>Ticket</th><th>Expected</th><th class="num">GPT-5</th><th class="num">Haiku 5.5</th><th class="num hide-sm">GPT-5 mini</th></tr></thead>
+          <thead><tr><th>Ticket</th><th>Expected</th><th class="num">{{logo:openai}}GPT-5</th><th class="num">{{logo:claude}}Haiku 5.5</th><th class="num hide-sm">{{logo:openai}}GPT-5 mini</th></tr></thead>
           <tbody>
             <tr><td>"I was charged twice for November, please refund one."<span class="sub">t01 · confirmed by you</span></td><td><span class="label-code">billing</span></td><td class="num ok">3/3</td><td class="num ok">3/3</td><td class="num ok hide-sm">3/3</td></tr>
             <tr><td>"The export button does nothing on Safari."<span class="sub">t02 · confirmed by you</span></td><td><span class="label-code">bug</span></td><td class="num ok">3/3</td><td class="num ok">3/3</td><td class="num ok hide-sm">3/3</td></tr>
@@ -84,10 +84,10 @@
     <section aria-labelledby="search">
       <h2 id="search">How OpenMerit searched</h2>
       <div class="path">
-        <span class="step">GPT-5 · 3 runs</span><span class="arrow">→</span>
-        <span class="step">Screen GPT-5 mini · pass</span><span class="arrow">→</span>
-        <span class="step">Screen GPT-5 nano · fail</span><span class="arrow">→</span>
-        <span class="step">Screen Claude Haiku 5.5 · pass</span><span class="arrow">→</span>
+        <span class="step">{{logo:openai}}GPT-5 · 3 runs</span><span class="arrow">→</span>
+        <span class="step">Screen {{logo:openai}}GPT-5 mini · pass</span><span class="arrow">→</span>
+        <span class="step">Screen {{logo:openai}}GPT-5 nano · fail</span><span class="arrow">→</span>
+        <span class="step">Screen {{logo:claude}}Claude Haiku 5.5 · pass</span><span class="arrow">→</span>
         <span class="step">Finalists · 3 runs each</span>
       </div>
       <p class="note">Screens used 5 tickets GPT-5 passed in every run. 14 models were eligible; 4 were screened. The run took 23 minutes. OpenMerit paid for every call.</p>
@@ -97,7 +97,7 @@
       <h2 id="watch">Watching</h2>
       <div class="card watch">
         <p>OpenMerit re-runs these 40 tickets when a new model could fit this task. Last checked 18 Nov 2026.</p>
-        <a class="btn" href="/watched/">Manage watched tasks</a>
+        <a class="btn" href="/tasks/">Manage tasks</a>
       </div>
     </section>
   

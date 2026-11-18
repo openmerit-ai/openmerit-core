@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // app.openmerit.ai: a static mockup of the cloud plan's report and account
+  // app.openmerit.ai: a static mockup of the cloud plan's run and account
   // pages, built from app/ by scripts/build-app.ts. Every name and number in
   // it is fictional; it has no sign-in, data or bindings.
   "name": "openmerit-app",

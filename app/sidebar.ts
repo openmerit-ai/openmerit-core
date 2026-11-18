@@ -1,40 +1,38 @@
-// Sidebar for the app.openmerit.ai mockup: Fixed (default), Collapsed (icons only)
-// or Expand on hover, saved in localStorage; an off-canvas drawer on narrow screens.
-type Mode = "fixed" | "collapsed" | "hover";
+// Sidebar for the app.openmerit.ai mockup: Fixed (default) or Expand on hover, toggled by
+// the icon beside the logo or Ctrl/⌘+B and saved in localStorage; an off-canvas drawer on
+// narrow screens. The profile button opens a menu upward with the account pages.
+type Mode = "fixed" | "hover";
 
-const labels: Readonly<Record<Mode, string>> = { fixed: "Fixed", collapsed: "Collapsed", hover: "Expand on hover" };
-const isMode = (value: string | null | undefined): value is Mode => value === "fixed" || value === "collapsed" || value === "hover";
 const root = document.documentElement;
-const modeButton = document.querySelector<HTMLButtonElement>(".mode-button");
-const menu = document.querySelector<HTMLElement>(".mode-menu");
-const current = document.querySelector<HTMLElement>(".mode-current");
+const toggle = document.querySelector<HTMLButtonElement>(".sidebar-toggle");
+const profile = document.querySelector<HTMLButtonElement>(".profile");
+const menu = document.querySelector<HTMLElement>(".profile-menu");
 const drawerButton = document.querySelector<HTMLButtonElement>(".menu-toggle");
 const scrim = document.querySelector<HTMLElement>(".scrim");
 
-const mode = (): Mode => (isMode(root.dataset.sidebar) ? root.dataset.sidebar : "fixed");
+const mode = (): Mode => (root.dataset.sidebar === "hover" ? "hover" : "fixed");
+const menuItems = (): HTMLElement[] => Array.from(menu?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? []);
 
 function sync(): void {
-  menu?.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((item) => item.setAttribute("aria-checked", String(item.dataset.mode === mode())));
-  if (current) current.textContent = labels[mode()];
+  const label = mode() === "fixed" ? "Collapse sidebar" : "Keep sidebar open";
+  toggle?.setAttribute("aria-label", label);
+  toggle?.setAttribute("title", `${label} (Ctrl or ⌘ + B)`);
 }
 
-function setMode(next: Mode): void {
+function switchMode(): void {
+  const next: Mode = mode() === "fixed" ? "hover" : "fixed";
   root.dataset.sidebar = next;
   try { localStorage.setItem("om-sidebar", next); } catch { /* private browsing: the choice lasts until reload */ }
   sync();
 }
 
-function openMenu(open: boolean): void {
-  if (!menu || !modeButton) return;
-  if (open) {
-    // Fixed position so the menu is not clipped by the collapsed rail.
-    const rect = modeButton.getBoundingClientRect();
-    menu.style.left = `${rect.left}px`;
-    menu.style.bottom = `${window.innerHeight - rect.top + 6}px`;
-  }
+function openMenu(open: boolean, focusFirst = false): void {
+  if (!menu || !profile) return;
+  // The class keeps an Expand-on-hover sidebar open while the menu is.
+  root.classList.toggle("profile-menu-open", open);
   menu.hidden = !open;
-  modeButton.setAttribute("aria-expanded", String(open));
-  root.classList.toggle("mode-menu-open", open);
+  profile.setAttribute("aria-expanded", String(open));
+  if (open && focusFirst) menuItems()[0]?.focus();
 }
 
 function openDrawer(open: boolean): void {
@@ -43,26 +41,28 @@ function openDrawer(open: boolean): void {
   if (scrim) scrim.hidden = !open;
 }
 
-modeButton?.addEventListener("click", () => openMenu(menu?.hidden ?? false));
-menu?.addEventListener("click", (event) => {
-  const item = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-mode]") : null;
-  if (!item || !isMode(item.dataset.mode)) return;
-  setMode(item.dataset.mode);
-  openMenu(false);
-  modeButton?.focus();
+toggle?.addEventListener("click", switchMode);
+profile?.addEventListener("click", (event) => openMenu(menu?.hidden ?? false, event.detail === 0));
+menu?.addEventListener("keydown", (event) => {
+  const items = menuItems();
+  const index = items.indexOf(document.activeElement as HTMLElement);
+  const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+  if (step === undefined) return;
+  event.preventDefault();
+  items[(index + step + items.length) % items.length]?.focus();
 });
 document.addEventListener("pointerdown", (event) => {
   if (menu?.hidden || !(event.target instanceof Node)) return;
-  if (!menu?.contains(event.target) && !modeButton?.contains(event.target)) openMenu(false);
+  if (!menu?.contains(event.target) && !profile?.contains(event.target)) openMenu(false);
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
-    if (menu && !menu.hidden) { openMenu(false); modeButton?.focus(); }
+    if (menu && !menu.hidden) { openMenu(false); profile?.focus(); return; }
     openDrawer(false);
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
     event.preventDefault();
-    setMode(mode() === "fixed" ? "collapsed" : "fixed");
+    switchMode();
   }
 });
 drawerButton?.addEventListener("click", () => openDrawer(!root.classList.contains("drawer-open")));
