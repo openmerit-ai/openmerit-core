@@ -82,9 +82,9 @@ function pickCard(report: Report): Html {
 
 function change(report: Report): Html {
   const { edits, instructions } = report.edit;
-  if (!edits.length && !instructions) return html`<div><h2>The change</h2><p class="note">No code change: keep the model in use now.</p></div>`;
+  if (!edits.length && !instructions) return html`<div><h2>Change</h2><p class="note">No code change: keep the model in use now.</p></div>`;
   return html`<div>
-        <h2>The change</h2>
+        <h2>Change</h2>
         ${edits.map((edit) => html`<div class="diff" role="img" aria-label="Code change in ${edit.file}" style="margin-bottom: 10px">
           <div class="file">${edit.file}:${edit.line}</div>
           <div class="del">- ${edit.before}</div>
@@ -104,7 +104,7 @@ function report(data: Report): Html {
     <div class="pick">${pickCard(data)}${change(data)}</div>
 
     ${models.length ? html`<section aria-labelledby="compare">
-      <h2 id="compare">How the models compared</h2>
+      <h2 id="compare">Models compared</h2>
       <div class="tablewrap">
         <table>
           <thead><tr><th>Model</th><th class="num">Passed</th><th class="num">Per 1,000 calls</th><th class="num">Latency</th><th>Result</th></tr></thead>
@@ -129,7 +129,7 @@ function report(data: Report): Html {
     </section>` : ""}
 
     ${from.length || data.guardrails.rejected.length ? html`<section aria-labelledby="rules">
-      <h2 id="rules">Guardrails this run used</h2>
+      <h2 id="rules">Guardrails</h2>
       <div class="card">
         ${from.map(([key, level]) => html`<div class="row"><span><span class="pill tag">${level}</span> <code>${key}</code></span><span>${show(key, (data.guardrails.effective as Record<string, unknown>)[key])}</span></div>`)}
         ${data.guardrails.rejected.map((item) => html`<p class="note">Not applied: <code>${item.key}</code> at the ${item.level} level, which ${item.reason}.</p>`)}

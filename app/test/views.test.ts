@@ -42,7 +42,7 @@ test("a run shows its saved report, or the job's live state until it has one", a
   assert.match(report, /sahra-triage-ft-2 ep_baseten · your key · placed by measurement only/);
   const waiting = text(runView.render(await get<JobView>("/api/runs/w8r3k1"), page(me)));
   assert.match(waiting, /Needs input/);
-  assert.doesNotMatch(waiting, /How the models compared/);
+  assert.doesNotMatch(waiting, /Models compared/);
   assert.match(text(runView.render(await get<JobView>("/api/runs/z1c7m4"), page(me))), /Coding reviewer: the run did not finish .*no known answers/);
 });
 
