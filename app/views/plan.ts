@@ -47,7 +47,7 @@ export const planView: View<Spend> = {
       <div class="plan-card">${planCard}</div>
     </section>
     <section aria-labelledby="spend">
-      <h2 id="spend">Model spend this period</h2>
+      <h2 id="spend">Model Spend This Period</h2>
       <div class="grid2">
         ${spendCard("Paid by OpenMerit", "included in your plan", spend.openmeritUsd, spend.monthlyCapUsd, html`Calls on OpenRouter with OpenMerit's key, within your plan's monthly cap.`)}
         ${spendCard("Paid by you", "billed to your keys by your providers", spend.customerUsd, spend.customerCapUsd, html`Calls on <a href="/connections/">your own endpoints</a>. Set a cap per job in <a href="/guardrails/">Guardrails</a>.`)}

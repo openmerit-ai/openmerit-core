@@ -48,7 +48,7 @@ function live(job: JobView): Html {
   return html`<div class="eyebrow" data-live="${job.jobId}" data-status="${job.status}"><a href="/">Runs</a><span>›</span><span>${job.jobId}</span><span>Started ${date(job.createdAt)}</span></div>
     <h1 class="title">${title(job)}</h1>
     <div class="card${job.status === "failed" ? " notice bad" : ""}" style="margin-top: 20px"${job.status === "failed" ? html` role="alert"` : ""}>${body}${job.notices.map((notice) => html`<p class="note">${notice}</p>`)}</div>
-    ${job.provisional ? html`<section aria-labelledby="provisional"><h2 id="provisional">Provisional pick</h2><div class="card"><p>${model(job.provisional.model)} on ${endpointName(job.provisional.endpoint)}${job.provisional.estCostPerCallUsd !== null ? html` · about ${per1k(job.provisional.estCostPerCallUsd)} per 1,000 calls` : ""}</p><p class="note">${job.provisional.reason} Chosen from the catalogue before measuring.</p></div></section>` : ""}
+    ${job.provisional ? html`<section aria-labelledby="provisional"><h2 id="provisional">Provisional Pick</h2><div class="card"><p>${model(job.provisional.model)} on ${endpointName(job.provisional.endpoint)}${job.provisional.estCostPerCallUsd !== null ? html` · about ${per1k(job.provisional.estCostPerCallUsd)} per 1,000 calls` : ""}</p><p class="note">${job.provisional.reason} Chosen from the catalogue before measuring.</p></div></section>` : ""}
 `;
 }
 
@@ -104,7 +104,7 @@ function report(data: Report): Html {
     <div class="pick">${pickCard(data)}${change(data)}</div>
 
     ${models.length ? html`<section aria-labelledby="compare">
-      <h2 id="compare">Models compared</h2>
+      <h2 id="compare">Models Compared</h2>
       <div class="tablewrap">
         <table>
           <thead><tr><th>Model</th><th class="num">Passed</th><th class="num">Per 1,000 calls</th><th class="num">Latency</th><th>Result</th></tr></thead>
@@ -122,7 +122,7 @@ function report(data: Report): Html {
     </section>` : ""}
 
     ${data.agentEval ? html`<section aria-labelledby="agent-eval">
-      <h2 id="agent-eval">Agent eval</h2>
+      <h2 id="agent-eval">Agent Eval</h2>
       <div class="card">${data.agentEval.status === "missing"
         ? html`<p>${data.agentEval.warning ?? "The agent has no eval, so the switch was not checked against it."}</p>`
         : html`<p>${data.agentEval.passed ? "Passed" : "Failed"}${data.agentEval.baseline ? `: with its current models the agent passed ${data.agentEval.baseline.passes}/${data.agentEval.baseline.total}` : ""}.</p>${data.agentEval.tried.map((item) => html`<p class="sub">${modelName(item.model)}: ${item.passes}/${item.total} · ${item.passed ? "passed" : "failed"}</p>`)}`}</div>

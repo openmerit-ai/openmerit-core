@@ -11,10 +11,10 @@ export const tasksView: View<Task[]> = {
   render(tasks, { me }) {
     const watching = tasks.filter((task) => task.watching).length;
     const top = header(me, "Tasks", "OpenMerit re-runs each watched task's tests when a new model could fit it or prices change, and tells you when a cheaper model matches the one you use.", [plural(tasks.length, "task"), `${watching} watched`]);
-    if (!tasks.length) return html`${top}<section aria-labelledby="tasks"><h2 id="tasks">All tasks</h2>${empty("No tasks yet", "A task appears the first time a coding agent asks OpenMerit which model it should use.")}</section>`;
+    if (!tasks.length) return html`${top}<section aria-labelledby="tasks"><h2 id="tasks">All Tasks</h2>${empty("No tasks yet", "A task appears the first time a coding agent asks OpenMerit which model it should use.")}</section>`;
     return html`${top}
     <section aria-labelledby="tasks">
-      <h2 id="tasks">All tasks</h2>
+      <h2 id="tasks">All Tasks</h2>
       <div class="tablewrap">
         <table>
           <thead><tr><th>Task</th><th>Model in use</th><th>Last run</th><th>Latest</th><th class="num">Watch</th></tr></thead>
