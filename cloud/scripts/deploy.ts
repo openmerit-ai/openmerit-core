@@ -83,8 +83,7 @@ function deployArgs(commit: string, build: string | undefined): string[] {
   return [
     "deploy", "--cluster", CLUSTER, ...(process.env.RIVET_ORG ? ["--org", process.env.RIVET_ORG] : []), "--yes",
     ...(build ? ["--build", build] : ["--dockerfile", "cloud/Dockerfile", "--build-context", ".", "--image", "openmerit-cloud", "--tag", commit.slice(0, 12)]),
-    // One node: actors live on the cluster, so more nodes add capacity, not state.
-    "--min-scale", "1", "--memory", "1Gi",
+    // The cluster's runner pool sets the node size and count (one e2-small node by default); `rivet deploy` refuses --memory and --min-scale on a cluster.
     ...secrets.flatMap(name => ["--secret", name]), ...settings,
   ];
 }
