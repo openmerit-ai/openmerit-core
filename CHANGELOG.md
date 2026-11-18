@@ -3,6 +3,7 @@
 ## Unreleased
 
 - CI no longer tests Intel Macs (macOS x64); the supported platforms list no longer includes them.
+- CI no longer tests Apple silicon Macs for now; the README lists them as supported but not currently tested in CI.
 - The package exports `openmerit/engine`: Scout's search over any ordered ladder, the catalogue types, a spend `Ledger` with reserve, settle and release by key, the guardrail resolver for environment, agent and task levels, the agent-eval rule and the `redact` rules. The CLI runs its search and eval budget through it; its behaviour does not change. See the README's Engine section.
 - The package exports `openmerit/ranking`: the task bundle and case types, clients for OpenRouter, OpenAI-compatible APIs and Anthropic's Messages API that meter every call in the engine's `Ledger`, a case writer with an optional label check, a single-call runner that mocks tool results and replays trace cases, graders (exact match, label, JSON schema, a judge model and trace parity) and `createMeasure`. The CLI does not use it yet. See the README's Ranking section.
 

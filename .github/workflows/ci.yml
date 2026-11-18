@@ -94,10 +94,10 @@ jobs:
       - run: npm run build
 
   # The packed openmerit tarball installed globally with an empty npm cache, as users get it, on
-  # every platform with a Rivet engine binary: connect, setup, scout, history and MCP against a
-  # local fake model endpoint. On Linux arm64 and Apple silicon also the daemon test, which SIGKILLs
-  # the daemon at every question: the openmerit-core job runs it on Linux x64. No model calls.
-  # Intel Macs are not tested. Keep these jobs on GitHub-hosted runners:
+  # Linux x64 and arm64: connect, setup, scout, history and MCP against a local fake model endpoint.
+  # On Linux arm64 also the daemon test, which SIGKILLs the daemon at every question: the
+  # openmerit-core job runs it on Linux x64. No model calls. Macs are not tested for now: GitHub's
+  # macOS runners stopped picking up jobs and blocked merges and deploys. Keep these jobs on GitHub-hosted runners:
   # the repository is public, so pull requests from forks run this workflow.
   openmerit-packed:
     name: openmerit-packed (${{ matrix.platform }})
@@ -109,9 +109,6 @@ jobs:
             runner: ubuntu-latest
           - platform: linux-arm64
             runner: ubuntu-24.04-arm
-            daemon: true
-          - platform: darwin-arm64
-            runner: macos-latest
             daemon: true
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
