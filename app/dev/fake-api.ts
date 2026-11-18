@@ -148,13 +148,6 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
 
     if (path === "/api/me" && method === "GET") return json(200, state.me);
     if (path === "/api/tasks" && method === "GET") return json(200, state.tasks);
-    if ((match = /^\/api\/tasks\/([\w-]+)\/watch$/.exec(path)) && method === "POST") {
-      const task = state.tasks.find((item) => item.id === match?.[1]);
-      if (!task) return error(404, "No such task in this account.");
-      if (typeof input?.on !== "boolean") return error(400, "Send {\"on\": true} or {\"on\": false}.");
-      task.watching = input.on;
-      return json(200, { watching: task.watching });
-    }
     if (path === "/api/runs" && method === "GET") {
       // As the cloud app does, each finished run carries what its report found.
       return json(200, state.runs.map((run): Run => {

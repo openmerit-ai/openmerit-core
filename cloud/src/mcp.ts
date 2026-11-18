@@ -60,9 +60,15 @@ export const TOOLS = [
   },
   {
     name: "openmerit_tasks", title: "OpenMerit: tasks",
-    description: "Lists the account's tasks and watches, and the results that finished since the last session.",
+    description: "Lists the account's tasks with their ids and whether each is watched, and the results that finished since the last session.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: "openmerit_watch", title: "OpenMerit: watch a task",
+    description: "Turns watching a task on or off. Every task is watched from its first run: OpenMerit re-runs its tests when the model catalogue changes and reports a cheaper model that passes as many cases. Turn it off only when the user asks, such as to freeze a model choice or because the code no longer makes this call; the task's runs are kept. Take the task id from openmerit_tasks.",
+    inputSchema: { type: "object", required: ["task_id", "on"], additionalProperties: false, properties: { task_id: string, on: { type: "boolean" } } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
 ];
 
@@ -164,10 +170,17 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
   if (name === "openmerit_tasks") {
     const [tasks, ready] = await Promise.all([account.tasks(), account.readySince(identity.userId)]);
     const text = tasks.length
-      ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} (${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.status}${item.watching ? ", watched" : ""}`),
+      ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} [${item.id}] (${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.status}${item.watching ? ", watched" : ""}`),
         ready.length ? `Ready since the last session: ${ready.map(item => `${item.id} (${item.status})`).join(", ")}. Call openmerit_result for each.` : "Nothing new since the last session."].join("\n")
       : "No tasks yet. Call openmerit_recommend with a task bundle to start one.";
     return { text, data: { tasks, readySinceLastSession: ready } };
+  }
+  if (name === "openmerit_watch") {
+    const row = typeof args.task_id === "string" ? await account.task(args.task_id) : null;
+    if (!row) return { text: `No task ${String(args.task_id)} in this account. openmerit_tasks lists the task ids.`, data: {}, isError: true };
+    if (typeof args.on !== "boolean") return { text: "on must be true or false.", data: {}, isError: true };
+    const { watching } = await client.task.get([identity.accountId, row.id]).setWatch(args.on);
+    return { text: watching ? `Watching ${row.name}: OpenMerit re-runs it when the model catalogue changes.` : `Stopped watching ${row.name}. Its runs are kept; turn watching on again at any time.`, data: { task_id: row.id, watching } };
   }
   return { text: `Unknown tool ${name}`, data: {}, isError: true };
 }
