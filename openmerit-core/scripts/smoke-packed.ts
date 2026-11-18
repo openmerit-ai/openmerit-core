@@ -1,7 +1,7 @@
 // Packs this package, installs the tarball globally into a temporary prefix, and runs the
 // self-hosted flow with the installed `openmerit` binary: connect api, setup, scout (scan, map,
 // approve, binary search, compare), history and the MCP server's tools/list. It also imports
-// `openmerit/engine` from a project that depends on the installed package. The harness and the
+// `openmerit/engine` and `openmerit/ranking` from a project that depends on the installed package. The harness and the
 // candidate endpoint are a local fake OpenAI server, so no model is called. CI runs it on Linux
 // x64 and arm64 and on macOS arm64 and x64; locally: `node scripts/smoke-packed.ts` from
 // openmerit-core/ after `npm ci`.
@@ -135,6 +135,10 @@ try {
   assert.ok(redact, "openmerit and openmerit/engine export the same redact");
   assert.ok(existsSync(join(consumer, "node_modules", "openmerit", "dist", "engine", "index.d.ts")), "openmerit/engine ships its types");
   say(`openmerit/engine exports ${engine.length} names`);
+  const ranking = JSON.parse((await run(process.execPath, ["--input-type=module", "-e", `console.log(JSON.stringify(Object.keys(await import("openmerit/ranking"))))`], { cwd: consumer })).stdout) as string[];
+  for (const name of ["createClient", "createMeasure", "writeCases", "runCase", "graderFor", "judge", "MemoryLedger"]) assert.ok(ranking.includes(name), `openmerit/ranking exports ${name}`);
+  assert.ok(existsSync(join(consumer, "node_modules", "openmerit", "dist", "ranking", "index.d.ts")), "openmerit/ranking ships its types");
+  say(`openmerit/ranking exports ${ranking.length} names`);
 
   cpSync(fixture, repo, { recursive: true });
   for (const args of [["init", "-q"], ["add", "-A"], ["-c", "user.email=smoke@example.com", "-c", "user.name=smoke", "commit", "-qm", "fixture"]]) await run("git", args, { cwd: repo });
