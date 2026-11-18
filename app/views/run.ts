@@ -99,9 +99,8 @@ function report(data: Report): Html {
   const models = [data.baseline, ...data.candidates].filter((item): item is MeasuredModel => item !== null);
   const pick = data.pick?.model ?? null;
   const from = Object.entries(data.guardrails.from);
-  return html`<div class="eyebrow"><a href="/">Runs</a><span>›</span><span>${data.jobId}</span><span>Measured ${date(data.createdAt)}</span><span>Catalogue ${data.catalogueVersion}</span></div>
+  return html`<div class="eyebrow"><a href="/">Runs</a><span>›</span><span>${data.jobId}</span><span>Measured ${date(data.createdAt)}</span></div>
     <h1 class="title">${title(data)}</h1>
-    ${data.status !== "picked" ? html`<p class="lede">${verdicts[data.status]}</p>` : ""}
     <div class="pick">${pickCard(data)}${change(data)}</div>
 
     ${models.length ? html`<section aria-labelledby="compare">
