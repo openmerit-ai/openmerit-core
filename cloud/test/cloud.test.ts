@@ -215,6 +215,32 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     assert.equal(back.isError, false, back.text);
     assert.equal((await taskView()).state, "watching");
     await waitFor(() => agent().tool("openmerit_result", { job_id: back.data.job_id }), value => value.data.status === "done");
+
+    // Deleting needs an admin who verified a first factor in the last 10 minutes, and erases the task, its runs and its reports.
+    await guardrail("task", taskRow.id, { budgetUsd: 2 });
+    const usedBefore = (await agent().api<{ plan: { usedEvals: number } }>("/api/me")).body.plan.usedEvals;
+    const remove = (token: string, id = taskRow.id) => caller(app, token).api<Data>(`/api/tasks/${id}`, { method: "DELETE" });
+    assert.equal((await remove("test:user_m:org_run")).status, 403, "a member cannot delete");
+    const stale = await remove("test:user_r:org_run:admin:11");
+    assert.equal(stale.status, 403);
+    assert.deepEqual(stale.body, { clerk_error: { type: "forbidden", reason: "reverification-error", metadata: { reverification: { level: "first_factor", afterMinutes: 10 } } } });
+    assert.equal((await remove("test:user_r:org_run:admin:9", "nope")).status, 404);
+    assert.deepEqual((await remove("test:user_r:org_run:admin:9")).body, { deleted: true, jobs: 3 });
+    assert.deepEqual((await agent().api<unknown[]>("/api/tasks")).body, []);
+    assert.deepEqual((await agent().api<unknown[]>("/api/runs")).body, []);
+    assert.equal((await agent().fetch(`/r/${jobId}.md`)).status, 404);
+    assert.equal((await agent().api(`/api/runs/${jobId}`)).status, 404);
+    assert.equal((await fetch(`${app.url}${publicPath}`)).status, 404, "the share link stops loading");
+    assert.equal((await agent().tool("openmerit_result", { job_id: jobId })).isError, true);
+    assert.deepEqual((await agent().api<{ settings: unknown[] }>(`/api/guardrails?level=task&id=${taskRow.id}`)).body.settings, []);
+    assert.equal((await agent().api<{ plan: { usedEvals: number } }>("/api/me")).body.plan.usedEvals, usedBefore, "deleting does not give evaluations back");
+    const [deletion] = (await agent().api<Data[]>("/api/tasks/deleted")).body;
+    assert.deepEqual([deletion!.taskId, deletion!.name, deletion!.userId, deletion!.jobs], [taskRow.id, "ticket classifier", "user_r", 3]);
+    // A later recommend call starts the task fresh: its labels and approved cases went with it, so it asks again.
+    const fresh = await agent().tool("openmerit_recommend", { bundle: bundle(), environment: "acme/support" });
+    const asked = await waitFor(() => agent().tool("openmerit_result", { job_id: fresh.data.job_id }), value => value.data.status === "needs_input");
+    assert.deepEqual((asked.data.questions as { id: string }[]).map(question => question.id), ["label_example-7", "label_check"]);
+    assert.equal((await caller(app, "test:user_q:org_run:admin:30").api("/api/account", { method: "DELETE" })).status, 403, "deleting the account needs a recent sign-in too");
   } finally { await stop(app); await models.close(); }
 });
 

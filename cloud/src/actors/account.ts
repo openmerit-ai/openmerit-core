@@ -23,11 +23,12 @@ const SCHEMA = [
     sealed_key TEXT NOT NULL, key_last4 TEXT NOT NULL, created_at INTEGER NOT NULL, verified_at INTEGER)`,
   `CREATE TABLE IF NOT EXISTS guardrails (level TEXT NOT NULL, scope TEXT NOT NULL, settings TEXT NOT NULL, PRIMARY KEY (level, scope))`,
   `CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL, started_at INTEGER NOT NULL,
-    finished_at INTEGER, budget_usd REAL, cap_openmerit_usd REAL, cap_customer_usd REAL, counted INTEGER NOT NULL DEFAULT 0, metered INTEGER NOT NULL DEFAULT 0, asked_by TEXT)`,
+    finished_at INTEGER, budget_usd REAL, cap_openmerit_usd REAL, cap_customer_usd REAL, counted INTEGER NOT NULL DEFAULT 0, metered INTEGER NOT NULL DEFAULT 0, asked_by TEXT, deleted_at INTEGER)`,
   `CREATE TABLE IF NOT EXISTS ledger (key TEXT PRIMARY KEY, job_id TEXT NOT NULL, funding TEXT NOT NULL, model TEXT, endpoint TEXT, status TEXT NOT NULL,
     reserved_usd REAL NOT NULL, actual_usd REAL, estimated_usd REAL, failed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, environment TEXT NOT NULL, agent TEXT, name TEXT NOT NULL, current_model TEXT NOT NULL,
     pick TEXT, status TEXT NOT NULL, last_run_at INTEGER, last_job_id TEXT, monthly_saving_usd REAL, retired INTEGER NOT NULL DEFAULT 0, last_recommend_at INTEGER)`,
+  `CREATE TABLE IF NOT EXISTS deletions (task_id TEXT NOT NULL, name TEXT NOT NULL, environment TEXT NOT NULL, user_id TEXT NOT NULL, jobs INTEGER NOT NULL, deleted_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS reports (job_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, created_at INTEGER NOT NULL, json TEXT NOT NULL, markdown TEXT NOT NULL, share_token TEXT UNIQUE)`,
 ];
 
@@ -93,6 +94,7 @@ export const account = actor({
     // Accounts created before jobs recorded the asking client.
     const columns = await database.execute(`PRAGMA table_info(jobs)`);
     if (!columns.some(column => column.name === "asked_by")) await database.execute(`ALTER TABLE jobs ADD COLUMN asked_by TEXT`);
+    if (!columns.some(column => column.name === "deleted_at")) await database.execute(`ALTER TABLE jobs ADD COLUMN deleted_at INTEGER`);
     // Accounts created before tasks could be retired or go idle. Their tasks become watched; a task's idle clock starts at its last recommend call.
     const taskColumns = await database.execute(`PRAGMA table_info(tasks)`);
     if (!taskColumns.some(column => column.name === "retired")) await database.execute(`ALTER TABLE tasks ADD COLUMN retired INTEGER NOT NULL DEFAULT 0`);
@@ -164,14 +166,14 @@ export const account = actor({
     },
 
     job: async (c, jobId: string): Promise<JobRow | null> => {
-      const [row] = await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id WHERE jobs.id = ?`, jobId);
+      const [row] = await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id WHERE jobs.id = ? AND jobs.deleted_at IS NULL`, jobId);
       return row ? jobRow(row) : null;
     },
 
     jobs: async (c, input: { taskId?: string; limit?: number } = {}): Promise<JobRow[]> => {
       const rows = input.taskId
-        ? await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id WHERE jobs.task_id = ? ORDER BY jobs.started_at DESC LIMIT ?`, input.taskId, input.limit ?? 50)
-        : await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id ORDER BY jobs.started_at DESC LIMIT ?`, input.limit ?? 50);
+        ? await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id WHERE jobs.task_id = ? AND jobs.deleted_at IS NULL ORDER BY jobs.started_at DESC LIMIT ?`, input.taskId, input.limit ?? 50)
+        : await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id WHERE jobs.deleted_at IS NULL ORDER BY jobs.started_at DESC LIMIT ?`, input.limit ?? 50);
       return rows.map(jobRow);
     },
 
@@ -313,6 +315,29 @@ export const account = actor({
       return row ? taskRow(row, (await watchGuardrails(c.db))(row)) : null;
     },
 
+    /**
+     * Erases a task's rows: the task, its reports (so run pages and share links stop loading) and its
+     * task-level guardrails. Its runs leave every listing, but each keeps a row without content, as
+     * its ledger rows do, so the plan's evaluation count and the spend caps still include them.
+     * Records who deleted which task, without its content.
+     */
+    deleteTask: async (c, input: { taskId: string; userId: string }): Promise<{ jobs: number }> => c.db.transaction(async tx => {
+      const [task] = await tx.execute(`SELECT name, environment FROM tasks WHERE id = ?`, input.taskId);
+      if (!task) return { jobs: 0 };
+      const [jobs] = await tx.execute(`SELECT count(*) AS n FROM jobs WHERE task_id = ? AND deleted_at IS NULL`, input.taskId);
+      const now = Date.now();
+      await tx.execute(`UPDATE jobs SET deleted_at = ?, asked_by = NULL WHERE task_id = ? AND deleted_at IS NULL`, now, input.taskId);
+      await tx.execute(`DELETE FROM reports WHERE task_id = ?`, input.taskId);
+      await tx.execute(`DELETE FROM guardrails WHERE level = 'task' AND scope = ?`, input.taskId);
+      await tx.execute(`DELETE FROM tasks WHERE id = ?`, input.taskId);
+      await tx.execute(`INSERT INTO deletions (task_id, name, environment, user_id, jobs, deleted_at) VALUES (?, ?, ?, ?, ?, ?)`, input.taskId, String(task.name), String(task.environment), input.userId, Number(jobs?.n ?? 0), now);
+      return { jobs: Number(jobs?.n ?? 0) };
+    }, { name: "delete_task" }),
+
+    /** Tasks deleted from this account: who, when, and the task's ID and name. */
+    deletions: async (c): Promise<{ taskId: string; name: string; environment: string; userId: string; jobs: number; deletedAt: string }[]> =>
+      (await c.db.execute(`SELECT * FROM deletions ORDER BY deleted_at DESC`)).map(row => ({ taskId: String(row.task_id), name: String(row.name), environment: String(row.environment), userId: String(row.user_id), jobs: Number(row.jobs), deletedAt: iso(row.deleted_at)! })),
+
     // Reports.
     saveReport: async (c, input: { jobId: string; taskId: string; json: unknown; markdown: string }): Promise<void> => {
       await c.db.execute(`INSERT INTO reports (job_id, task_id, created_at, json, markdown) VALUES (?, ?, ?, ?, ?) ON CONFLICT (job_id) DO UPDATE SET json = excluded.json, markdown = excluded.markdown`,
@@ -340,7 +365,7 @@ export const account = actor({
     readySince: async (c, userId: string): Promise<JobRow[]> => {
       const [member] = await c.db.execute(`SELECT last_session_at FROM members WHERE user_id = ?`, userId);
       const since = Number(member?.last_session_at ?? 0);
-      const rows = await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id WHERE jobs.finished_at > ? ORDER BY jobs.finished_at DESC LIMIT 20`, since);
+      const rows = await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id WHERE jobs.finished_at > ? AND jobs.deleted_at IS NULL ORDER BY jobs.finished_at DESC LIMIT 20`, since);
       await c.db.execute(`UPDATE members SET last_session_at = ? WHERE user_id = ?`, Date.now(), userId);
       return rows.map(jobRow);
     },
@@ -356,7 +381,7 @@ export const account = actor({
       return {
         account: c.key[0], exportedAt: new Date().toISOString(), plan: await plan(c.db), members: await all("members"), endpoints: await endpointViews(c.db),
         guardrails: (await all("guardrails")).map(row => ({ ...row, settings: JSON.parse(String(row.settings)) as unknown })), tasks: await (async () => { const watch = await watchGuardrails(c.db); return (await all("tasks")).map(row => taskRow(row, watch(row))); })(),
-        jobs: (await all("jobs")).map(jobRow), ledger: await all("ledger"), reports: (await all("reports")).map(row => ({ jobId: row.job_id, taskId: row.task_id, report: JSON.parse(String(row.json)) as unknown })),
+        jobs: (await c.db.execute(`SELECT * FROM jobs WHERE deleted_at IS NULL`)).map(jobRow), deletions: await all("deletions"), ledger: await all("ledger"), reports: (await all("reports")).map(row => ({ jobId: row.job_id, taskId: row.task_id, report: JSON.parse(String(row.json)) as unknown })),
       };
     },
 
