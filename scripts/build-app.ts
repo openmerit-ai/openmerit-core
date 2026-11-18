@@ -61,7 +61,7 @@ function page(title: string, active: string, body: string): string {
 <html lang="en" data-sidebar="fixed">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=1280">
   <meta name="color-scheme" content="light dark">
   <meta name="robots" content="noindex">
   <title>${title} · OpenMerit</title>
@@ -103,15 +103,11 @@ function page(title: string, active: string, body: string): string {
       </div>
     </aside>
     <div class="content">
-      <div class="topbar">
-        <button class="menu-toggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Open menu">${icon('<path d="M4 7h16M4 12h16M4 17h16"/>')}</button>
-      </div>
       <main id="main">
 ${body}
       </main>
     </div>
   </div>
-  <div class="scrim" hidden></div>
 </body>
 </html>
 `;

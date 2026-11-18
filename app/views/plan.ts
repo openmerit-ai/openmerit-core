@@ -31,13 +31,13 @@ export const planView: View<Spend> = {
           <div class="meter" aria-hidden="true"><i style="width: ${percent(plan.usedEvals, plan.includedEvals)}%"></i></div>
           <span class="sub">${plan.usedEvals} of ${plan.includedEvals} evaluations used this period${plan.periodEnd ? ` · renews ${date(plan.periodEnd)}` : ""}</span>
           ${plan.status === "past_due" ? html`<p class="note bad">Stripe could not take the last payment. Update the card to keep measuring new tasks.</p>` : ""}
-          <p style="margin-top: 18px">${admin ? html`<button class="btn" type="button" data-action="portal">Manage billing</button>` : html`<span class="sub">Ask an admin of ${me.account.name} to change billing.</span>`}</p>
+          <p style="margin-top: 10px">${admin ? html`<button class="btn" type="button" data-action="portal">Manage billing</button>` : html`<span class="sub">Ask an admin of ${me.account.name} to change billing.</span>`}</p>
           <p class="note">Cards, invoices and cancellation are in Stripe's billing portal.</p>
         </div>`
       : html`<div class="card">
           <div class="pick-head"><span class="pick-model">No plan</span>${me.plan.status === "canceled" ? html`<span class="pill">Canceled</span>` : ""}</div>
           <p class="sub" style="margin-top: 8px">A plan lets your coding agents' tasks be measured. OpenMerit pays for the model calls on OpenRouter; calls on your own endpoints bill your keys.</p>
-          <p style="margin-top: 18px">${admin ? html`<button class="btn primary" type="button" data-action="checkout">Choose a plan</button>` : html`<span class="sub">Ask an admin of ${me.account.name} to choose a plan.</span>`}</p>
+          <p style="margin-top: 10px">${admin ? html`<button class="btn primary" type="button" data-action="checkout">Choose a plan</button>` : html`<span class="sub">Ask an admin of ${me.account.name} to choose a plan.</span>`}</p>
           <p class="note">Checkout opens on Stripe.</p>
         </div>`;
     return html`${header(me, "Plan and usage", "OpenMerit pays for every model call on OpenRouter behind your evaluations. Calls on endpoints you add bill your own keys, and are counted apart.", [spend.period.end ? `${date(spend.period.start)} to ${date(spend.period.end)}` : `Since ${date(spend.period.start)}`])}

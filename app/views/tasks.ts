@@ -17,12 +17,12 @@ export const tasksView: View<Task[]> = {
       <h2 id="tasks">All tasks</h2>
       <div class="tablewrap">
         <table>
-          <thead><tr><th>Task</th><th>Model in use</th><th class="hide-sm">Last run</th><th>Latest</th><th class="num">Watch</th></tr></thead>
+          <thead><tr><th>Task</th><th>Model in use</th><th>Last run</th><th>Latest</th><th class="num">Watch</th></tr></thead>
           <tbody>
             ${tasks.map((task) => html`<tr>
               <td>${task.name}<span class="sub">${task.environment}${task.agent ? html` · agent ${guardrails("agent", `${task.environment}:${task.agent}`, task.agent)}` : ""} · ${guardrails("task", task.id, "Guardrails")}</span></td>
               <td>${model(task.currentModel)}</td>
-              <td class="hide-sm">${task.status === "running" ? "Running" : day(task.lastRunAt)}</td>
+              <td>${task.status === "running" ? "Running" : day(task.lastRunAt)}</td>
               <td>${result(task, (text) => (task.lastJobId ? html`<a href="/r/${task.lastJobId}/">${text}</a>` : html`${text}`))}</td>
               <td class="num">${task.watching
                 ? html`<button class="btn" type="button" data-action="watch" data-id="${task.id}" data-on="false" aria-label="Stop watching ${task.name}">Stop watching</button>`

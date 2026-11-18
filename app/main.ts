@@ -80,11 +80,11 @@ const message = (failure: unknown): string => (failure instanceof Error ? failur
 
 function showError(failure: unknown): void {
   if (failure instanceof ApiError && failure.status === 401) {
-    put(html`<h1 class="title">${pageTitle}</h1><div class="card notice bad" role="alert"><p>Your session could not be verified. Sign in again to continue.</p><p style="margin-top: 14px"><button class="btn primary" type="button" data-global="sign-in-again">Sign in again</button></p></div>`);
+    put(html`<h1 class="title">${pageTitle}</h1><div class="card notice bad" role="alert"><p>Your session could not be verified. Sign in again to continue.</p><p style="margin-top: 10px"><button class="btn primary" type="button" data-global="sign-in-again">Sign in again</button></p></div>`);
   } else if (failure instanceof ApiError && failure.status === 404 && runId) {
     put(html`<div class="eyebrow"><a href="/">Runs</a><span>›</span><span>${runId}</span></div><h1 class="title">Run not found</h1><p class="lede">It may have been deleted, or it belongs to another account. <a href="/">Back to runs</a></p>`);
   } else {
-    put(html`<h1 class="title">${pageTitle}</h1><div class="card notice bad" role="alert"><p>${pageTitle} could not load. ${message(failure)}</p><p style="margin-top: 14px"><button class="btn" type="button" data-global="retry">Try again</button></p></div>`);
+    put(html`<h1 class="title">${pageTitle}</h1><div class="card notice bad" role="alert"><p>${pageTitle} could not load. ${message(failure)}</p><p style="margin-top: 10px"><button class="btn" type="button" data-global="retry">Try again</button></p></div>`);
   }
 }
 
@@ -95,7 +95,7 @@ function showSignedOut(): void {
     <p class="lede">Runs, tasks, endpoints and billing for your coding agents' model choices.</p>
     <div class="card signin">
       <p><button class="btn primary" type="button" data-global="sign-in">Sign in</button></p>
-      <p class="sub" style="margin-top: 18px">New to OpenMerit? Add it to a coding agent; its first call signs you in.</p>
+      <p class="sub" style="margin-top: 10px">New to OpenMerit? Add it to a coding agent; its first call signs you in.</p>
       <div style="margin-top: 10px">${install()}</div>
     </div>`);
 }
