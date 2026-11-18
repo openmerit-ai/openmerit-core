@@ -1,11 +1,13 @@
 /* app.openmerit.ai mockup. Palette copied from site/styles.css. */
-@font-face { font-family: Inter; font-style: normal; font-weight: 400 600; font-display: swap; src: url('/assets/inter-latin.woff2') format('woff2'); }
+@font-face { font-family: 'Geist'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('/assets/geist-sans.woff2') format('woff2'); }
+@font-face { font-family: 'Geist Serif'; font-style: normal; font-weight: 400; font-display: swap; src: url('/assets/geist-serif.woff2') format('woff2'); }
+@font-face { font-family: 'Geist Mono'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('/assets/geist-mono.woff2') format('woff2'); }
 :root {
   color-scheme: light dark;
   --ease-out: cubic-bezier(.23, 1, .32, 1);
-  --sans: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --serif: Georgia, 'Times New Roman', serif;
-  --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --serif: 'Geist Serif', Georgia, 'Times New Roman', serif;
+  --mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
   --rail: 64px; --open: 248px;
   --paper: #f8f7f4; --ink: #30312d; --muted: #6b6d64; --line: #dedfd7; --green: #586847;
   --surface: #fdfcf9; --soft: #eceee5; --soft-ink: #46523b; --code-bg: #eff1e9; --code-ink: #455139;

@@ -10,7 +10,7 @@ function page(title, main, { script = false, sharingMetadata = '' } = {}) {
 <title>${escapeHtml(title)} · OpenMerit</title>
 ${sharingMetadata}
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="preload" href="/assets/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/geist-sans.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/memo.css"><link rel="stylesheet" href="/memo-access.css">
 ${script ? '<script src="/memo-access.js" defer></script>' : ''}
 </head><body class="memo-page memo-access-page">
