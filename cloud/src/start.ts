@@ -44,12 +44,12 @@ export function redactBundle<T>(value: T): T {
 
 export type StartResult = { ok: true; jobId: string; taskId: string; provisional: Provisional } | { ok: false; error: string };
 
-export async function startJob(client: AppClient, start: { accountId: string; environment: string; agent: string | null; bundle: TaskBundle; kind: "run" | "watch" }): Promise<StartResult> {
+export async function startJob(client: AppClient, start: { accountId: string; environment: string; agent: string | null; bundle: TaskBundle; kind: "run" | "watch"; askedBy?: string | null }): Promise<StartResult> {
   const input = { ...start, bundle: redactBundle(start.bundle) };
   const taskId = taskIdFor(input.environment, input.bundle.task);
   const jobId = newJobId();
   const account = client.account.getOrCreate([input.accountId]);
-  const started = await account.startJob({ jobId, taskId, kind: input.kind });
+  const started = await account.startJob({ jobId, taskId, kind: input.kind, askedBy: input.askedBy ?? null });
   if (!started.ok) return started;
   const task = client.task.getOrCreate([input.accountId, taskId], { createWithInput: { accountId: input.accountId, taskId, environment: input.environment, name: input.bundle.task } });
   const [catalogue, endpoints, guardrails, past] = await Promise.all([

@@ -128,6 +128,13 @@ const specs: Spec[] = [
     candidates: [], runs: [] },
 ];
 
+// The coding agents each repository's team works in, by the MCP client name each sends; the
+// reporting repository's runner is the agency's own harness.
+const AGENTS: Record<string, string[]> = {
+  [ENV.leads]: ["claude-code", "claude-code", "codex"], [ENV.ads]: ["codex", "cursor", "codex"], [ENV.reviews]: ["pi", "pi", "opencode"],
+  [ENV.reports]: ["tonic-ops-runner"], [ENV.hvac]: ["claude-code", "gemini-cli"], [ENV.clean]: ["amp"],
+};
+
 const LIVE = new Set<Outcome>(["running", "queued", "needs_input", "failed", "stopped"]);
 const guardrailsFor = (spec: Spec): Report["guardrails"] => resolveGuardrails({
   environment: environmentGuardrails[spec.env] ?? {},
@@ -218,7 +225,7 @@ export function tonicUltra(): State {
     const steps = spec.runs.map(([at, outcome, pick, kind], index) => ({ id: runId(), at, outcome, pick, kind: kind ?? "run", index }));
     for (const step of steps) {
       const done = !LIVE.has(step.outcome);
-      runs.push({ id: step.id, taskId: spec.id, kind: step.kind, status: done ? "done" : step.outcome, startedAt: step.at, finishedAt: done || step.outcome === "failed" || step.outcome === "stopped" ? step.at : null, result: null });
+      runs.push({ id: step.id, taskId: spec.id, kind: step.kind, status: done ? "done" : step.outcome, startedAt: step.at, finishedAt: done || step.outcome === "failed" || step.outcome === "stopped" ? step.at : null, askedBy: step.kind === "watch" ? null : AGENTS[spec.env]?.[step.index % (AGENTS[spec.env]?.length ?? 1)] ?? null, result: null });
       if (done) reports[step.id] = report(spec, step.id, step.at, step.outcome, step.pick, step.index);
       else jobs[step.id] = job(spec, step.id, step.at, step.outcome);
     }

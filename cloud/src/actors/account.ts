@@ -23,7 +23,7 @@ const SCHEMA = [
     sealed_key TEXT NOT NULL, key_last4 TEXT NOT NULL, created_at INTEGER NOT NULL, verified_at INTEGER)`,
   `CREATE TABLE IF NOT EXISTS guardrails (level TEXT NOT NULL, scope TEXT NOT NULL, settings TEXT NOT NULL, PRIMARY KEY (level, scope))`,
   `CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL, started_at INTEGER NOT NULL,
-    finished_at INTEGER, budget_usd REAL, cap_openmerit_usd REAL, cap_customer_usd REAL, counted INTEGER NOT NULL DEFAULT 0, metered INTEGER NOT NULL DEFAULT 0)`,
+    finished_at INTEGER, budget_usd REAL, cap_openmerit_usd REAL, cap_customer_usd REAL, counted INTEGER NOT NULL DEFAULT 0, metered INTEGER NOT NULL DEFAULT 0, asked_by TEXT)`,
   `CREATE TABLE IF NOT EXISTS ledger (key TEXT PRIMARY KEY, job_id TEXT NOT NULL, funding TEXT NOT NULL, model TEXT, endpoint TEXT, status TEXT NOT NULL,
     reserved_usd REAL NOT NULL, actual_usd REAL, estimated_usd REAL, failed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, environment TEXT NOT NULL, agent TEXT, name TEXT NOT NULL, current_model TEXT NOT NULL,
@@ -41,7 +41,8 @@ export interface EndpointView { id: string; kind: EndpointKind; baseUrl: string;
 export interface TaskRow { id: string; environment: string; agent: string | null; name: string; currentModel: string; pick: string | null; status: string; watching: boolean; lastRunAt: string | null; lastJobId: string | null; monthlySavingUsd: number | null }
 /** What a finished job's report found, so a list of runs can say it without loading each report. */
 export interface RunResult { status: string; model: string | null; from: string | null; savingPerCallUsd: number | null }
-export interface JobRow { id: string; taskId: string; kind: string; status: string; startedAt: string; finishedAt: string | null; result: RunResult | null }
+/** askedBy is the MCP client's name (clientInfo.name) for a run a coding agent started; null for a watch run or an unnamed client. */
+export interface JobRow { id: string; taskId: string; kind: string; status: string; startedAt: string; finishedAt: string | null; askedBy: string | null; result: RunResult | null }
 export interface GuardrailSetting { key: string; value: unknown; kind: "constraint" | "default" }
 export type Started = { ok: true } | { ok: false; error: string };
 
@@ -64,11 +65,16 @@ function runResult(json: unknown): RunResult | null {
 }
 const jobRow = (row: Row): JobRow => ({
   id: String(row.id), taskId: String(row.task_id), kind: String(row.kind), status: String(row.status), startedAt: iso(row.started_at)!, finishedAt: iso(row.finished_at),
-  result: runResult(row.report_json),
+  askedBy: (row.asked_by as string | null) ?? null, result: runResult(row.report_json),
 });
 
 export const account = actor({
-  db: db({ onMigrate: async database => { for (const statement of SCHEMA) await database.execute(statement); } }),
+  db: db({ onMigrate: async database => {
+    for (const statement of SCHEMA) await database.execute(statement);
+    // Accounts created before jobs recorded the asking client.
+    const columns = await database.execute(`PRAGMA table_info(jobs)`);
+    if (!columns.some(column => column.name === "asked_by")) await database.execute(`ALTER TABLE jobs ADD COLUMN asked_by TEXT`);
+  } }),
   actions: {
     /** Records the calling member and the account's name. */
     touch: async (c, input: { userId: string; role: "admin" | "member"; name: string | null }): Promise<void> => {
@@ -101,7 +107,7 @@ export const account = actor({
     }, { name: "apply_stripe" }),
 
     /** Checks the plan and the account's job limits, then records the job. */
-    startJob: async (c, input: { jobId: string; taskId: string; kind: "run" | "watch" }): Promise<Started> => c.db.transaction(async tx => {
+    startJob: async (c, input: { jobId: string; taskId: string; kind: "run" | "watch"; askedBy?: string | null }): Promise<Started> => c.db.transaction(async tx => {
       const { limits, appUrl } = services().config;
       const current = await plan(tx);
       if (!current || !ACTIVE_PLAN.has(current.status)) return { ok: false, error: `This account has no active OpenMerit plan${current ? ` (Stripe says ${current.status})` : ""}. Subscribe at ${appUrl}/plan/, then try again.` };
@@ -111,7 +117,7 @@ export const account = actor({
       if (Number(hour?.n) >= limits.jobsPerHour) return { ok: false, error: `This account started ${limits.jobsPerHour} jobs in the last hour, its limit. Try again later.` };
       const [running] = await tx.execute(`SELECT count(*) AS n FROM jobs WHERE status IN ('queued', 'running')`);
       if (Number(running?.n) >= limits.concurrentJobs) return { ok: false, error: `This account has ${limits.concurrentJobs} jobs running, its limit. Try again when one finishes.` };
-      await tx.execute(`INSERT INTO jobs (id, task_id, kind, status, started_at) VALUES (?, ?, ?, 'queued', ?)`, input.jobId, input.taskId, input.kind, now);
+      await tx.execute(`INSERT INTO jobs (id, task_id, kind, status, started_at, asked_by) VALUES (?, ?, ?, 'queued', ?, ?)`, input.jobId, input.taskId, input.kind, now, input.askedBy ?? null);
       return { ok: true };
     }, { name: "start_job" }),
 

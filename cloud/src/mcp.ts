@@ -1,6 +1,7 @@
 // MCP over streamable HTTP at /mcp, stateless per request: every call carries its Clerk access
 // token, and all state lives in the actors, so any node can answer. Responses are plain JSON, which
 // the streamable HTTP transport allows when a server sends no notifications.
+import { randomBytes } from "node:crypto";
 import { NO_ORGANIZATION, type Auth, type AuthResult, type Identity } from "./auth.ts";
 import type { Config } from "./config.ts";
 import type { Answers, JobView } from "./actors/job.ts";
@@ -102,7 +103,21 @@ const jobData = (view: JobView): Json => ({
   ...(view.result ? { result: { status: view.result.status, pick: view.result.pick, top: view.result.top, reportUrl: view.result.reportUrl, edit: view.result.edit, spend: view.result.spend } } : {}),
 });
 
-async function callTool(deps: McpDeps, identity: Identity, name: string, args: Json): Promise<ToolResult> {
+// The server keeps no sessions, so the session ID it returns on initialize carries the client's
+// name (clientInfo.name, such as claude-code or codex). Clients send it back on every request,
+// which lets a run record which coding agent asked. It labels runs only and grants nothing.
+const SESSION_PREFIX = "oms1.";
+export function sessionFor(clientInfo: unknown): string {
+  const name = clientInfo && typeof clientInfo === "object" && typeof (clientInfo as { name?: unknown }).name === "string" ? (clientInfo as { name: string }).name.trim().slice(0, 64) : "";
+  return `${SESSION_PREFIX}${Buffer.from(name).toString("base64url")}.${randomBytes(12).toString("hex")}`;
+}
+export function clientOf(session: string | null): string | null {
+  if (!session?.startsWith(SESSION_PREFIX)) return null;
+  const name = Buffer.from(session.slice(SESSION_PREFIX.length).split(".")[0] ?? "", "base64url").toString("utf8").trim();
+  return name && name.length <= 64 && !/[\u0000-\u001f]/.test(name) ? name : null;
+}
+
+async function callTool(deps: McpDeps, identity: Identity, name: string, args: Json, askedBy: string | null): Promise<ToolResult> {
   const { client } = deps;
   const account = client.account.getOrCreate([identity.accountId]);
   await account.touch({ userId: identity.userId, role: identity.role, name: identity.accountName });
@@ -117,7 +132,7 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     if (problem) return { text: `The task bundle is not usable: ${problem}.`, data: {}, isError: true };
     const environment = typeof args.environment === "string" && args.environment.trim() ? args.environment.trim().replaceAll(":", "-").slice(0, 200) : DEFAULT_ENVIRONMENT;
     const agent = typeof args.agent === "string" && args.agent.trim() ? args.agent.trim().slice(0, 200) : null;
-    const started = await startJob(client, { accountId: identity.accountId, environment, agent, bundle: args.bundle as TaskBundle, kind: "run" });
+    const started = await startJob(client, { accountId: identity.accountId, environment, agent, bundle: args.bundle as TaskBundle, kind: "run", askedBy });
     if (!started.ok) return { text: started.error, data: { status: "refused" }, isError: true };
     const { provisional } = started;
     return {
@@ -176,6 +191,8 @@ export async function handleMcp(request: Request, deps: McpDeps): Promise<Respon
   try { body = await request.json(); } catch { return json(400, rpc(null, { error: { code: -32700, message: "Parse error" } })); }
   const messages = Array.isArray(body) ? body : [body];
   const replies: unknown[] = [];
+  const askedBy = clientOf(request.headers.get("mcp-session-id"));
+  let session: string | null = null;
   for (const message of messages as Json[]) {
     if (!message || typeof message !== "object" || message.jsonrpc !== "2.0" || typeof message.method !== "string") {
       if (message && "id" in message) replies.push(rpc(message.id, { error: { code: -32600, message: "Invalid request" } }));
@@ -185,6 +202,7 @@ export async function handleMcp(request: Request, deps: McpDeps): Promise<Respon
     const params = (message.params ?? {}) as Json;
     if (id === undefined) continue; // A notification, such as notifications/initialized: nothing to answer.
     if (method === "initialize") {
+      session = sessionFor(params.clientInfo);
       const asked = String(params.protocolVersion ?? "");
       replies.push(rpc(id, { result: {
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0], capabilities: { tools: {} }, serverInfo: { name: "openmerit", title: "OpenMerit", version: VERSION },
@@ -196,12 +214,12 @@ export async function handleMcp(request: Request, deps: McpDeps): Promise<Respon
       let result: ToolResult;
       if (!identity) result = { text: auth.ok ? "" : auth.error || NO_ORGANIZATION, data: { status: "no_account" }, isError: true };
       else {
-        try { result = await callTool(deps, identity, String(params.name ?? ""), (params.arguments ?? {}) as Json); }
+        try { result = await callTool(deps, identity, String(params.name ?? ""), (params.arguments ?? {}) as Json, askedBy); }
         catch (error) { result = { text: `OpenMerit could not complete the call: ${error instanceof Error ? error.message : String(error)}`, data: {}, isError: true }; }
       }
       replies.push(rpc(id, { result: { content: [{ type: "text", text: result.text }], structuredContent: result.data, ...(result.isError ? { isError: true } : {}) } }));
     } else replies.push(rpc(id, { error: { code: -32601, message: `Method not found: ${method}` } }));
   }
   if (!replies.length) return new Response(null, { status: 202 });
-  return json(200, Array.isArray(body) ? replies : replies[0]);
+  return json(200, Array.isArray(body) ? replies : replies[0], session ? { "mcp-session-id": session } : {});
 }
