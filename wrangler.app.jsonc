@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // app.openmerit.ai: a static mockup of the cloud plan's report and account
+  // pages, built from app/ by scripts/build-app.ts. Every name and number in
+  // it is fictional; it has no sign-in, data or bindings.
+  "name": "openmerit-app",
+  "account_id": "1f505317550261331711b1274ec53c33",
+  "compatibility_date": "2026-11-18",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "app.openmerit.ai", "custom_domain": true }
+  ],
+  "assets": {
+    "directory": "./dist/app",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "build": {
+    "command": "node scripts/build-app.ts"
+  }
+}

@@ -13,6 +13,7 @@ const workers = [
   { config: "wrangler.jsonc", envInterface: "SiteEnv", output: "site.d.ts" },
   { config: "wrangler.domains.jsonc", envInterface: "DomainRouterEnv", output: "domain-router.d.ts" },
   { config: "wrangler.scout-alpha.jsonc", envInterface: "ScoutServingEnv", output: "scout-serving.d.ts" },
+  { config: "wrangler.app.jsonc", envInterface: "AppEnv", output: "app.d.ts" },
 ] as const;
 
 const wrangler = join(root, "node_modules", "wrangler", "bin", "wrangler.js");
