@@ -1,5 +1,5 @@
-import type { Run, Task } from "../api.ts";
-import { day, harness, html, logo, model, per1k, plural, usd, type Html } from "../html.ts";
+import type { Endpoint, JobView, Run, Task } from "../api.ts";
+import { ago, date, endpointName, harness, html, logo, setEndpoints, model, per1k, plural, usd, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { empty, header } from "./common.ts";
 
@@ -53,12 +53,50 @@ function askedBy(run: Run): Html {
   return html`${logo(found.logo)}${found.name}${found.custom ? html`<span class="sub">custom harness</span>` : ""}`;
 }
 
-export const runsView: View<{ runs: Run[]; tasks: Task[] }> = {
+const ACTIVE = new Set(["queued", "running", "needs_input"]);
+const when = (iso: string): Html => html`<span title="${date(iso)}">${ago(iso)}</span>`;
+
+// Runs still measuring, with their progress and the provisional pick their agent is using meanwhile.
+function inProgress(jobs: JobView[], runs: Run[], byId: Map<string, Task>): Html {
+  if (!jobs.length) return html``;
+  const runOf = new Map(runs.map((run) => [run.id, run]));
+  return html`<section aria-labelledby="progress">
+      <h2 id="progress">In progress</h2>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Task</th><th>Status</th><th>Progress</th><th>Meanwhile using</th><th class="num">Started</th></tr></thead>
+          <tbody>
+            ${jobs.map((job) => {
+              const run = runOf.get(job.jobId);
+              const task = byId.get(job.taskId);
+              const share = job.progress.planned ? Math.min(100, Math.round((job.progress.measured / job.progress.planned) * 100)) : 0;
+              return html`<tr>
+              <td><a href="/r/${job.jobId}/">${job.task}</a><span class="sub">${task?.environment ?? ""}</span></td>
+              <td>${jobStatus[job.status] ?? html`${job.status}`}${job.status === "running" ? html`<span class="sub">${job.phase.replace("_", " ")}</span>` : ""}</td>
+              <td>${job.progress.planned ? html`<div class="meter" aria-hidden="true"><i style="width: ${share}%"></i></div><span class="sub">${job.progress.measured} of about ${job.progress.planned} measurements</span>` : html`<span class="sub">${job.status === "needs_input" ? "paused for your answer" : "not started"}</span>`}</td>
+              <td>${job.provisional ? html`${model(job.provisional.model)}<span class="sub">on ${endpointName(job.provisional.endpoint)}</span>` : html`<span class="sub">–</span>`}</td>
+              <td class="num">${when(run?.startedAt ?? job.createdAt)}</td>
+            </tr>`;
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>`;
+}
+
+export const runsView: View<{ runs: Run[]; tasks: Task[]; jobs: JobView[] }> = {
   async load({ api }) {
     const [runs, tasks] = await Promise.all([api.get<Run[]>("/api/runs"), api.get<Task[]>("/api/tasks")]);
-    return { runs, tasks };
+    // A run still measuring returns its live state; a few at a time is the norm.
+    const active = runs.filter((run) => ACTIVE.has(run.status));
+    const [jobs, endpoints] = await Promise.all([
+      Promise.all(active.map((run) => api.get<JobView>(`/api/runs/${encodeURIComponent(run.id)}`).catch(() => null))),
+      active.length ? api.get<Endpoint[]>("/api/endpoints").catch((): Endpoint[] => []) : Promise.resolve([]),
+    ]);
+    setEndpoints(endpoints);
+    return { runs, tasks, jobs: jobs.filter((job): job is JobView => job !== null && "report" in job && job.report === null) };
   },
-  render({ runs, tasks }, { me }) {
+  render({ runs, tasks, jobs }, { me }) {
     const top = header(me, "Runs", "Each time a coding agent asks which model to use, OpenMerit runs the task's tests on the candidates and the answer lands here with its evidence. Link a run in a pull request so reviewers can see why.", [plural(tasks.length, "task"), plural(runs.length, "run")]);
     if (!runs.length) return html`${top}<section aria-labelledby="all"><h2 id="all">All runs</h2>${empty("No runs yet", "Add OpenMerit to a coding agent, then ask it which model a task should use. The run and its evidence appear here.")}</section>`;
     const byId = new Map(tasks.map((task) => [task.id, task]));
@@ -70,6 +108,7 @@ export const runsView: View<{ runs: Run[]; tasks: Task[] }> = {
       .filter(([count]) => count).map(([count, label]) => `${count} ${label}`).join(", ");
     const plan = me.plan;
     return html`${top}
+    ${inProgress(jobs, runs, byId)}
     <section aria-labelledby="summary">
       <h2 id="summary">This month</h2>
       <div class="grid3">
@@ -84,11 +123,11 @@ export const runsView: View<{ runs: Run[]; tasks: Task[] }> = {
       <h2 id="all">All runs</h2>
       <div class="tablewrap">
         <table>
-          <thead><tr><th>Task</th><th>Outcome</th><th>Asked by</th><th class="num">Started</th></tr></thead>
+          <thead><tr><th>Task</th><th>Outcome</th><th>Asked by</th><th class="num">Last run</th></tr></thead>
           <tbody>
             ${runs.map((run) => {
               const task = byId.get(run.taskId);
-              return html`<tr><td><a href="/r/${run.id}/">${task?.name ?? run.taskId}</a><span class="sub">${task?.environment ?? ""}</span></td><td>${outcome(run, task)}</td><td>${askedBy(run)}</td><td class="num">${day(run.startedAt)}</td></tr>`;
+              return html`<tr><td><a href="/r/${run.id}/">${task?.name ?? run.taskId}</a><span class="sub">${task?.environment ?? ""}</span></td><td>${outcome(run, task)}</td><td>${askedBy(run)}</td><td class="num">${when(run.startedAt)}</td></tr>`;
             })}
           </tbody>
         </table>

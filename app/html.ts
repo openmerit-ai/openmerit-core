@@ -95,6 +95,17 @@ export function usd(value: number | null | undefined): string {
 
 export const day = (iso: string | null): string => (iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "–");
 export const date = (iso: string | null): string => (iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "–");
+// How long ago, such as "40 sec ago", "12 min ago", "3 hr ago" or "6 days ago". Pages put the
+// full date in a title so it shows on hover.
+export function ago(iso: string | null, now = Date.now()): string {
+  if (!iso) return "–";
+  const secs = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
+  if (secs < 60) return `${secs} sec ago`;
+  if (secs < 3600) return `${Math.floor(secs / 60)} min ago`;
+  if (secs < 86_400) return `${Math.floor(secs / 3600)} hr ago`;
+  const days = Math.floor(secs / 86_400);
+  return `${days} ${days === 1 ? "day" : "days"} ago`;
+}
 export const seconds = (ms: number | null): string => (ms === null ? "–" : `${(ms / 1000).toFixed(1)} s`);
 // Per-call costs read better per 1,000 calls.
 export const per1k = (perCall: number | null): string => (perCall === null ? "–" : usd(perCall * 1000));

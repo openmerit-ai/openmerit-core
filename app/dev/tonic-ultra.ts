@@ -192,7 +192,7 @@ function job(spec: Spec, id: string, at: string, outcome: Outcome): JobView {
     progress: outcome === "running" ? { measured: spec.id === "booking-chat" ? 7 : 21, planned: spec.id === "booking-chat" ? 36 : 28 } : outcome === "stopped" ? { measured: 9, planned: 30 } : { measured: 0, planned: null },
     result: null,
     error: outcome === "failed" ? "The task's examples had no expected outputs, and no case could be written from them." : outcome === "stopped" ? "stopped by Jordan Pike from the coding agent" : null,
-    provisional: outcome === "running" && cheapest ? { model: cheapest, endpoint: endpointOf(cheapest), reason: "The cheapest catalogue model above the current one's capability index.", estCostPerCallUsd: MODELS[cheapest]?.cost ?? null } : null,
+    provisional: (outcome === "running" || outcome === "queued" || outcome === "needs_input") && cheapest ? { model: cheapest, endpoint: endpointOf(cheapest), reason: "The cheapest catalogue model above the current one's capability index.", estCostPerCallUsd: MODELS[cheapest]?.cost ?? null } : null,
     createdAt: at, report: null,
   };
 }
