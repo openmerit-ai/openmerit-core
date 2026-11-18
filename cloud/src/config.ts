@@ -52,6 +52,8 @@ export interface Config {
   models: { caseWriter: string; judge: string };
   /** How often a watched task checks the catalogue. */
   watchIntervalMs: number;
+  /** A task with no openmerit_recommend call for this long is idle: its watch pauses until the next call. */
+  idleAfterMs: number;
 }
 
 const number = (value: string | undefined, fallback: number) => (value && Number.isFinite(Number(value)) ? Number(value) : fallback);
@@ -97,5 +99,6 @@ export function loadConfig(env: Env = process.env): Config {
     },
     models: { caseWriter: env.OPENMERIT_CASE_WRITER_MODEL || "anthropic/claude-sonnet-5.5", judge: env.OPENMERIT_JUDGE_MODEL || "anthropic/claude-sonnet-5.5" },
     watchIntervalMs: number(env.OPENMERIT_WATCH_INTERVAL_MS, 24 * 60 * 60 * 1000),
+    idleAfterMs: number(env.OPENMERIT_IDLE_DAYS, 30) * 24 * 60 * 60 * 1000,
   };
 }

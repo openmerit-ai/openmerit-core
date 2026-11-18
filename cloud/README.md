@@ -8,7 +8,7 @@ Not released: nothing here is deployed until the deploy below runs.
 
 | Path | Does |
 | --- | --- |
-| `POST /mcp` | MCP over streamable HTTP, stateless per request, with the tools `openmerit_recommend`, `openmerit_result`, `openmerit_answer`, `openmerit_tasks` and `openmerit_watch`. Each call needs a Clerk OAuth access token whose audience is `https://openmerit.ai/mcp`; without one it answers 401 with `resource_metadata`, which starts the client's Clerk sign-in. No tool takes an API key |
+| `POST /mcp` | MCP over streamable HTTP, stateless per request, with the tools `openmerit_recommend`, `openmerit_result`, `openmerit_answer`, `openmerit_tasks` and `openmerit_retire`. Each call needs a Clerk OAuth access token whose audience is `https://openmerit.ai/mcp`; without one it answers 401 with `resource_metadata`, which starts the client's Clerk sign-in. No tool takes an API key |
 | `GET /.well-known/oauth-protected-resource` (and `/mcp` after it) | RFC 9728 metadata naming Clerk (`https://clerk.openmerit.ai`) as the authorization server |
 | `/api/*` | The account API for app.openmerit.ai, with Clerk session tokens: `me`, `tasks`, `runs`, `endpoints`, `guardrails`, `spend`, `billing/checkout`, `billing/portal`, `account/export`, `account` (DELETE), `disconnect`. The shared contract lists each |
 | `POST /api/stripe/webhook` | Stripe only, signature-verified. The source of truth for an account's plan |
@@ -19,7 +19,11 @@ The account is the token's Clerk organization (`org_id`). A token without one is
 ## Actors
 
 - `account` (key: Clerk organization ID), in SQLite: the plan from Stripe, members, endpoints with keys encrypted by `OPENMERIT_KEY_ENCRYPTION_KEY` (AES-256-GCM, the account ID as associated data), guardrails at the environment, agent (`environment:agent`) and task levels, the spend ledger, jobs, tasks and reports. It checks the plan, jobs per hour and concurrent jobs at every job start, and reserves spend against the job's budget, the guardrail caps and the monthly caps before every model call.
-- `task` (key: account and task ID): the latest bundle, the labels the user gave, the written cases the user approved, the last result and the watch schedule. Every task is watched from its first job until `openmerit_watch` turns it off. A watched task checks the catalogue on its schedule and when the catalogue changes, and starts a watch job when the catalogue version is newer than its last run's.
+- `task` (key: account and task ID): the latest bundle, the labels the user gave, the written cases the user approved, the last result and the watch schedule. Every task is watched: from its first job it checks the catalogue on its schedule and when the catalogue changes, and starts a watch job when the catalogue version is newer than its last run's and the task's state is `watching`. The account computes the state when it is read, from what it stores, so it is never stale:
+  - `frozen`: the `watch: false` guardrail, at the environment, agent or task level, keeps a validated model. A lower level can set `watch` either way.
+  - `idle`: no `openmerit_recommend` call for the task in `OPENMERIT_IDLE_DAYS` (default 30), so watch runs stop spending OpenMerit's money on unused tasks. `idleSince` says when. Watch runs do not keep a task active; the next recommend call does.
+  - `retired`: the coding agent called `openmerit_retire` after removing the model call from the code. It disarms the schedule and keeps the runs and reports; the next recommend call for the task brings it back.
+  - Retired is reported before frozen, and frozen before idle. `/api/tasks` returns `state`, `idleSince` and, for older clients, `watching` (`state` is `watching`). Deleting a task is separate from all of these.
 - `job` (key: job ID): the workflow Source ▶ Cases ▶ label check ▶ Models ▶ Ranking ▶ Agent eval ▶ Action.
   - **Cases** are the bundle's examples, then up to 12 cases that `openmerit/ranking`'s case writer writes on OpenMerit's OpenRouter key (`OPENMERIT_CASE_WRITER_MODEL`). Writing them is billed to the job. A task's later runs, such as watch jobs, reuse the written cases the user approved and write none.
   - **The label check** waits on the job's queue for `openmerit_answer`. It asks `label_<case>` for each example without an expected answer, and `label_check` (a multi-select) for the written cases: an unticked case is dropped.
@@ -45,6 +49,7 @@ To run it by hand against a local engine: `TEST_STORAGE=$(mktemp -d) TEST_ENGINE
 | `OPENMERIT_KEY_ENCRYPTION_KEY` | secret | 32 bytes, base64. Without it `/api/endpoints` refuses new endpoints |
 | `OPENMERIT_PUBLIC_URL`, `OPENMERIT_APP_URL` | setting | Default `https://openmerit.ai` and `https://app.openmerit.ai` |
 | `OPENMERIT_CASE_WRITER_MODEL`, `OPENMERIT_JUDGE_MODEL` | setting | Catalogue models on OpenRouter that write cases and judge text answers; both default to `anthropic/claude-sonnet-5.5` |
+| `OPENMERIT_WATCH_INTERVAL_MS`, `OPENMERIT_IDLE_DAYS` | setting | How often a watched task checks the catalogue (a day), and the days without a recommend call before a task is idle (30) |
 | `OPENMERIT_JOBS_PER_HOUR`, `OPENMERIT_CONCURRENT_JOBS`, `OPENMERIT_JOB_BUDGET_USD`, `OPENMERIT_MONTHLY_CAP_USD`, `OPENMERIT_CUSTOMER_CAP_USD` | setting | Limits: 20, 3, $5, $100 and $100 by default |
 
 The cluster sets `RIVET_ENDPOINT`, `RIVET_TOKEN` and `RIVET_POOL` on every deploy; do not set them.

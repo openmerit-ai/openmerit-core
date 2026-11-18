@@ -27,7 +27,7 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS ledger (key TEXT PRIMARY KEY, job_id TEXT NOT NULL, funding TEXT NOT NULL, model TEXT, endpoint TEXT, status TEXT NOT NULL,
     reserved_usd REAL NOT NULL, actual_usd REAL, estimated_usd REAL, failed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, environment TEXT NOT NULL, agent TEXT, name TEXT NOT NULL, current_model TEXT NOT NULL,
-    pick TEXT, status TEXT NOT NULL, watching INTEGER NOT NULL DEFAULT 0, last_run_at INTEGER, last_job_id TEXT, monthly_saving_usd REAL)`,
+    pick TEXT, status TEXT NOT NULL, last_run_at INTEGER, last_job_id TEXT, monthly_saving_usd REAL, retired INTEGER NOT NULL DEFAULT 0, last_recommend_at INTEGER)`,
   `CREATE TABLE IF NOT EXISTS reports (job_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, created_at INTEGER NOT NULL, json TEXT NOT NULL, markdown TEXT NOT NULL, share_token TEXT UNIQUE)`,
 ];
 
@@ -38,7 +38,14 @@ const ACTIVE_PLAN = new Set(["active", "trialing"]);
 
 export interface Plan { name: string; status: string; periodStart: number | null; periodEnd: number | null; includedEvals: number; usedEvals: number; overage: "metered" | "refuse"; customerId: string | null }
 export interface EndpointView { id: string; kind: EndpointKind; baseUrl: string; allowedModels: string[] | "all"; keyLast4: string; verifiedAt: string | null; builtIn: boolean }
-export interface TaskRow { id: string; environment: string; agent: string | null; name: string; currentModel: string; pick: string | null; status: string; watching: boolean; lastRunAt: string | null; lastJobId: string | null; monthlySavingUsd: number | null }
+/**
+ * Whether OpenMerit re-runs a task when the catalogue changes. Every task is watched; it stops when the
+ * `watch: false` guardrail freezes it, when no openmerit_recommend call came for `idleAfterMs` (idle),
+ * or when the coding agent retired it with openmerit_retire. A later recommend call ends idle and retired.
+ */
+export type WatchState = "watching" | "idle" | "frozen" | "retired";
+/** `watching` is `state === "watching"`, for clients that predate `state`. `idleSince` is set only while idle. */
+export interface TaskRow { id: string; environment: string; agent: string | null; name: string; currentModel: string; pick: string | null; status: string; state: WatchState; idleSince: string | null; watching: boolean; lastRunAt: string | null; lastJobId: string | null; monthlySavingUsd: number | null }
 /** What a finished job's report found, so a list of runs can say it without loading each report. */
 export interface RunResult { status: string; model: string | null; from: string | null; savingPerCallUsd: number | null }
 /** askedBy is the MCP client's name (clientInfo.name) for a run a coding agent started; null for a watch run or an unnamed client. */
@@ -51,11 +58,23 @@ const startOfMonth = (now: number) => { const date = new Date(now); return Date.
 const scopeKey = (level: Level, input: { environment: string; agent?: string | null; taskId?: string }) =>
   level === "environment" ? input.environment : level === "agent" ? `${input.environment}:${input.agent ?? ""}` : input.taskId ?? "";
 
-const taskRow = (row: Row): TaskRow => ({
-  id: String(row.id), environment: String(row.environment), agent: (row.agent as string | null) ?? null, name: String(row.name), currentModel: String(row.current_model),
-  pick: (row.pick as string | null) ?? null, status: String(row.status), watching: row.watching === 1, lastRunAt: iso(row.last_run_at), lastJobId: (row.last_job_id as string | null) ?? null,
-  monthlySavingUsd: (row.monthly_saving_usd as number | null) ?? null,
-});
+/** A task's watch state. Retired wins over frozen, and frozen over idle: each says why the watch stopped, most deliberate first. */
+export function watchState(input: { retired: boolean; watch: boolean | undefined; lastRecommendAt: number | null; now: number; idleAfterMs: number }): { state: WatchState; idleSince: string | null } {
+  if (input.retired) return { state: "retired", idleSince: null };
+  if (input.watch === false) return { state: "frozen", idleSince: null };
+  const idleAt = input.lastRecommendAt === null ? null : input.lastRecommendAt + input.idleAfterMs;
+  if (idleAt !== null && input.now >= idleAt) return { state: "idle", idleSince: new Date(idleAt).toISOString() };
+  return { state: "watching", idleSince: null };
+}
+
+const taskRow = (row: Row, watch: boolean | undefined): TaskRow => {
+  const { state, idleSince } = watchState({ retired: row.retired === 1, watch, lastRecommendAt: (row.last_recommend_at as number | null) ?? null, now: Date.now(), idleAfterMs: services().config.idleAfterMs });
+  return {
+    id: String(row.id), environment: String(row.environment), agent: (row.agent as string | null) ?? null, name: String(row.name), currentModel: String(row.current_model),
+    pick: (row.pick as string | null) ?? null, status: String(row.status), state, idleSince, watching: state === "watching", lastRunAt: iso(row.last_run_at), lastJobId: (row.last_job_id as string | null) ?? null,
+    monthlySavingUsd: (row.monthly_saving_usd as number | null) ?? null,
+  };
+};
 function runResult(json: unknown): RunResult | null {
   if (typeof json !== "string") return null;
   const report = JSON.parse(json) as { status?: unknown; pick?: { model?: unknown; savingPerCallUsd?: unknown } | null; baseline?: { model?: unknown } | null };
@@ -74,6 +93,13 @@ export const account = actor({
     // Accounts created before jobs recorded the asking client.
     const columns = await database.execute(`PRAGMA table_info(jobs)`);
     if (!columns.some(column => column.name === "asked_by")) await database.execute(`ALTER TABLE jobs ADD COLUMN asked_by TEXT`);
+    // Accounts created before tasks could be retired or go idle. Their tasks become watched; a task's idle clock starts at its last recommend call.
+    const taskColumns = await database.execute(`PRAGMA table_info(tasks)`);
+    if (!taskColumns.some(column => column.name === "retired")) await database.execute(`ALTER TABLE tasks ADD COLUMN retired INTEGER NOT NULL DEFAULT 0`);
+    if (!taskColumns.some(column => column.name === "last_recommend_at")) {
+      await database.execute(`ALTER TABLE tasks ADD COLUMN last_recommend_at INTEGER`);
+      await database.execute(`UPDATE tasks SET last_recommend_at = (SELECT max(started_at) FROM jobs WHERE jobs.task_id = tasks.id AND jobs.kind = 'run')`);
+    }
   } }),
   actions: {
     /** Records the calling member and the account's name. */
@@ -264,20 +290,27 @@ export const account = actor({
     },
 
     // The task index, which the task actors keep current.
-    upsertTask: async (c, row: Omit<TaskRow, "lastRunAt" | "watching" | "monthlySavingUsd" | "lastJobId"> & { lastRunAt?: number; lastJobId?: string; watching?: boolean; monthlySavingUsd?: number | null }): Promise<void> => {
-      await c.db.execute(`INSERT INTO tasks (id, environment, agent, name, current_model, pick, status, watching, last_run_at, last_job_id, monthly_saving_usd)
-        VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?, ?, ?) ON CONFLICT (id) DO UPDATE SET agent = excluded.agent, current_model = excluded.current_model,
-        pick = COALESCE(excluded.pick, tasks.pick), status = excluded.status, watching = COALESCE(?, tasks.watching), last_run_at = COALESCE(excluded.last_run_at, tasks.last_run_at),
-        last_job_id = COALESCE(excluded.last_job_id, tasks.last_job_id), monthly_saving_usd = COALESCE(excluded.monthly_saving_usd, tasks.monthly_saving_usd)`,
-      row.id, row.environment, row.agent, row.name, row.currentModel, row.pick, row.status, row.watching === undefined ? null : row.watching ? 1 : 0,
-      row.lastRunAt ?? null, row.lastJobId ?? null, row.monthlySavingUsd ?? null, row.watching === undefined ? null : row.watching ? 1 : 0);
+    // A recommend call (lastRecommendAt) brings a retired task back; retired is set only by openmerit_retire.
+    upsertTask: async (c, row: Pick<TaskRow, "id" | "environment" | "agent" | "name" | "currentModel" | "pick" | "status"> & { lastRunAt?: number; lastJobId?: string; lastRecommendAt?: number; retired?: boolean; monthlySavingUsd?: number | null }): Promise<void> => {
+      const retired = row.retired === undefined ? (row.lastRecommendAt === undefined ? null : 0) : row.retired ? 1 : 0;
+      await c.db.execute(`INSERT INTO tasks (id, environment, agent, name, current_model, pick, status, last_run_at, last_job_id, monthly_saving_usd, retired, last_recommend_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?) ON CONFLICT (id) DO UPDATE SET agent = excluded.agent, current_model = excluded.current_model,
+        pick = COALESCE(excluded.pick, tasks.pick), status = excluded.status, last_run_at = COALESCE(excluded.last_run_at, tasks.last_run_at),
+        last_job_id = COALESCE(excluded.last_job_id, tasks.last_job_id), monthly_saving_usd = COALESCE(excluded.monthly_saving_usd, tasks.monthly_saving_usd),
+        retired = COALESCE(?, tasks.retired), last_recommend_at = COALESCE(excluded.last_recommend_at, tasks.last_recommend_at)`,
+      row.id, row.environment, row.agent, row.name, row.currentModel, row.pick, row.status, row.lastRunAt ?? null, row.lastJobId ?? null, row.monthlySavingUsd ?? null,
+      retired, row.lastRecommendAt ?? null, retired);
     },
 
-    tasks: async (c): Promise<TaskRow[]> => (await c.db.execute(`SELECT * FROM tasks ORDER BY COALESCE(last_run_at, 0) DESC`)).map(taskRow),
+    tasks: async (c): Promise<TaskRow[]> => {
+      const rows = await c.db.execute(`SELECT * FROM tasks ORDER BY COALESCE(last_run_at, 0) DESC`);
+      const watch = await watchGuardrails(c.db);
+      return rows.map(row => taskRow(row, watch(row)));
+    },
 
     task: async (c, id: string): Promise<TaskRow | null> => {
       const [row] = await c.db.execute(`SELECT * FROM tasks WHERE id = ?`, id);
-      return row ? taskRow(row) : null;
+      return row ? taskRow(row, (await watchGuardrails(c.db))(row)) : null;
     },
 
     // Reports.
@@ -322,7 +355,7 @@ export const account = actor({
       const all = async (table: string) => c.db.execute(`SELECT * FROM ${table}`);
       return {
         account: c.key[0], exportedAt: new Date().toISOString(), plan: await plan(c.db), members: await all("members"), endpoints: await endpointViews(c.db),
-        guardrails: (await all("guardrails")).map(row => ({ ...row, settings: JSON.parse(String(row.settings)) as unknown })), tasks: (await all("tasks")).map(taskRow),
+        guardrails: (await all("guardrails")).map(row => ({ ...row, settings: JSON.parse(String(row.settings)) as unknown })), tasks: await (async () => { const watch = await watchGuardrails(c.db); return (await all("tasks")).map(row => taskRow(row, watch(row))); })(),
         jobs: (await all("jobs")).map(jobRow), ledger: await all("ledger"), reports: (await all("reports")).map(row => ({ jobId: row.job_id, taskId: row.task_id, report: JSON.parse(String(row.json)) as unknown })),
       };
     },
@@ -365,6 +398,17 @@ async function meter(database: Database, jobId: string): Promise<void> {
 async function levelSettings(database: Database, level: Level, scope: string): Promise<Guardrails> {
   const [row] = await database.execute(`SELECT settings FROM guardrails WHERE level = ? AND scope = ?`, level, scope);
   return row ? JSON.parse(String(row.settings)) as Guardrails : {};
+}
+
+/** Each task's effective `watch` guardrail, from one read of every level's settings. */
+async function watchGuardrails(database: Database): Promise<(row: Row) => boolean | undefined> {
+  const settings = new Map((await database.execute(`SELECT level, scope, settings FROM guardrails`)).map(item => [`${String(item.level)}\0${String(item.scope)}`, JSON.parse(String(item.settings)) as Guardrails]));
+  return row => {
+    const input = { environment: String(row.environment), agent: (row.agent as string | null) ?? null, taskId: String(row.id) };
+    const levels: Partial<Record<Level, Guardrails>> = {};
+    for (const level of LEVELS) if (level !== "agent" || input.agent) levels[level] = settings.get(`${level}\0${scopeKey(level, input)}`) ?? {};
+    return resolveGuardrails(levels).effective.watch;
+  };
 }
 
 async function endpointViews(database: Database): Promise<EndpointView[]> {
