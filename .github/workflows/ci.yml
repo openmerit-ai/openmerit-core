@@ -65,7 +65,12 @@ jobs:
         with:
           node-version: 22.19.0
           cache: npm
-          cache-dependency-path: cloud/package-lock.json
+          cache-dependency-path: |
+            cloud/package-lock.json
+            openmerit-core/package-lock.json
+      # The app imports openmerit-core's engine and ranking from source, which resolve their packages (such as ajv) there.
+      - run: npm ci
+        working-directory: openmerit-core
       - run: npm ci
       - run: npm run check
       - run: docker build -f cloud/Dockerfile -t openmerit-cloud:ci .

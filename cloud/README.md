@@ -31,7 +31,7 @@ The app imports `openmerit/engine` (through `src/engine.ts`) and `openmerit/rank
 
 ## Checks
 
-`npm run check` typechecks and runs `test/cloud.test.ts` (about 75 s on a 2-CPU orb). The tests start the app in a child process on a local Rivet engine, with test sign-in, fake Stripe and a fake OpenAI-compatible server for OpenRouter and customer endpoints: no credential and no paid call. They include a job that waits on its label check across a SIGKILL of the app, and a measure step replayed after a crash whose spend counts once. The `cloud` CI job also builds the image: `docker build -f cloud/Dockerfile .` from the repository root.
+`npm run check` typechecks and runs `test/cloud.test.ts` (about 75 s on a 2-CPU orb). The tests start the app in a child process on a local Rivet engine, with test sign-in, fake Stripe and a fake OpenAI-compatible server for OpenRouter and customer endpoints: no credential and no paid call. They include a job that waits on its label check across a SIGKILL of the app, and a measure step replayed after a crash whose spend counts once. The checks need openmerit-core's packages installed too (`npm ci` in `openmerit-core/`), since its sources resolve them there. The `cloud` CI job also builds the image: `docker build -f cloud/Dockerfile .` from the repository root.
 
 To run it by hand against a local engine: `TEST_STORAGE=$(mktemp -d) TEST_ENGINE_PORT=23400 node test/serve.ts`.
 
