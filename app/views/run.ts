@@ -1,4 +1,5 @@
 import type { Endpoint, JobView, MeasuredModel, Report } from "../api.ts";
+import { liveText } from "../live.ts";
 import { date, endpointName, html, setEndpoints, model, modelName, per1k, plural, seconds, usd, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { show } from "./guardrails.ts";
@@ -23,17 +24,28 @@ function title(data: Data): string {
   return `${data.task}: no switch`;
 }
 
+// A measuring run with live data: the candidate's pass rate so far as a Liveline chart against
+// the model in use today, with the numbers Torph morphs as each case finishes (app/live.ts).
+function measuring(job: JobView): Html {
+  const live = job.live!, text = liveText(job), id = job.jobId;
+  return html`<div class="pick-head"><span class="pick-model">${model(live.model)}</span><span class="pill" data-live="${id}" data-morph="status">${text.status}</span></div>
+      <span class="sub">on ${endpointName(live.endpoint)}${live.baseline ? html` · against ${model(live.baseline.model)}, which passed ${Math.round(live.baseline.rate)}%` : ""}</span>
+      <div class="live-chart" data-live="${id}" role="img" aria-label="Pass rate so far"></div>
+      <div class="stats"><div class="stat"><b data-live="${id}" data-morph="cases">${text.cases}</b><span>cases run</span></div><div class="stat"><b data-live="${id}" data-morph="rate">${text.rate}</b><span>passed so far</span></div></div>
+      <p class="note">Your coding agent gets the result on its next OpenMerit call, and this page shows the report.</p>`;
+}
+
 function live(job: JobView): Html {
   const progress = job.progress.planned ? `${job.progress.measured} of about ${job.progress.planned} measurements done` : `${plural(job.progress.measured, "measurement")} done`;
   const body = {
     queued: html`<span class="pill">Queued</span><p class="note">The run starts in a moment.</p>`,
-    running: html`<span class="pill">Measuring</span><span class="sub">${job.phase.replace("_", " ")} · ${progress}</span><p class="note">Your coding agent gets the result on its next OpenMerit call, and this page shows the report.</p>`,
+    running: job.live ? measuring(job) : html`<span class="pill">Measuring</span><span class="sub">${job.phase.replace("_", " ")} · ${progress}</span><p class="note">Your coding agent gets the result on its next OpenMerit call, and this page shows the report.</p>`,
     needs_input: html`<span class="pill warn">Waiting for your answer</span><p class="note">OpenMerit asked ${plural(job.questions.length, "question")} in your coding agent, such as a check of the test labels. The run continues once it answers.</p>`,
     failed: html`<p>${job.error ?? "The run stopped before it could recommend a model."}</p>`,
     stopped: html`<p>The run was stopped${job.error ? `: ${job.error}` : "."}</p>`,
     done: html`<p>The run finished; its report is being saved. Reload in a moment.</p>`,
   }[job.status];
-  return html`<div class="eyebrow"><a href="/">Runs</a><span>›</span><span>${job.jobId}</span><span>Started ${date(job.createdAt)}</span></div>
+  return html`<div class="eyebrow" data-live="${job.jobId}" data-status="${job.status}"><a href="/">Runs</a><span>›</span><span>${job.jobId}</span><span>Started ${date(job.createdAt)}</span></div>
     <h1 class="title">${title(job)}</h1>
     <div class="card${job.status === "failed" ? " notice bad" : ""}" style="margin-top: 20px"${job.status === "failed" ? html` role="alert"` : ""}>${body}</div>
     ${job.provisional ? html`<section aria-labelledby="provisional"><h2 id="provisional">Provisional pick</h2><div class="card"><p>${model(job.provisional.model)} on ${endpointName(job.provisional.endpoint)}${job.provisional.estCostPerCallUsd !== null ? html` · about ${per1k(job.provisional.estCostPerCallUsd)} per 1,000 calls` : ""}</p><p class="note">${job.provisional.reason} Chosen from the catalogue before measuring.</p></div></section>` : ""}

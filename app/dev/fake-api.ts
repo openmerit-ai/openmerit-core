@@ -6,7 +6,7 @@
 // preview-error, preview-slow and preview-expired. Each scenario keeps its own in-memory
 // state, so actions change what later requests return. Every name and number is fictional.
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, type Guardrails, type Level } from "../../openmerit-core/src/engine/guardrails.ts";
-import type { Endpoint, JobView, MeasuredModel, Me, Report, Run, Spend, Task } from "../api.ts";
+import type { Endpoint, JobView, LiveProgress, MeasuredModel, Me, Report, Run, Spend, Task } from "../api.ts";
 import { tonicUltra } from "./tonic-ultra.ts";
 
 export interface State { me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number }
@@ -106,9 +106,32 @@ function scenario(name: string): State {
 const json = (status: number, data: unknown): Response => Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
 const error = (status: number, message: string): Response => json(status, { error: message });
 
+// A measuring job advances one case every TICK_MS from when the fake API starts, so polling pages
+// move. Each job fails a fixed set of cases, and starts over once it has run them all.
+const TICK_MS = 2500;
+function advance(job: JobView, task: Task | undefined, since: number, now = Date.now()): JobView {
+  if (job.status !== "running" || !job.provisional) return job;
+  const total = job.progress.planned ?? 30, start = Math.min(job.progress.measured, total - 1);
+  const seed = [...job.jobId].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const fails = (i: number) => (i * 7 + seed) % 9 === 0 || (i + seed) % 13 === 0;
+  const done = start + (Math.floor((now - since) / TICK_MS) % (total - start + 1));
+  const history: LiveProgress["history"] = [];
+  let passes = 0;
+  for (let i = 1; i <= done; i += 1) {
+    passes += fails(i) ? 0 : 1;
+    history.push({ time: (now - (done - i) * TICK_MS) / 1000, rate: (passes / i) * 100 });
+  }
+  const live: LiveProgress = {
+    model: job.provisional.model, endpoint: job.provisional.endpoint, baseline: task ? { model: task.currentModel, rate: seed % 2 ? 90 : 95 } : null,
+    done, total, passes, history: history.slice(-60), minutesLeft: done < total ? Math.max(1, Math.ceil((total - done) * 0.6)) : null,
+  };
+  return { ...job, progress: { measured: done, planned: total }, live };
+}
+
 export function createFakeApi(options: { publicUrl?: string; appUrl?: string } = {}): (request: Request) => Promise<Response> {
   const publicUrl = options.publicUrl ?? "https://openmerit.ai";
   const states = new Map<string, State>();
+  const since = Date.now();
   return async (request) => {
     const url = new URL(request.url), path = url.pathname, method = request.method;
     const name = /^Bearer preview-([a-z]+)$/.exec(request.headers.get("authorization") ?? "")?.[1];
@@ -143,7 +166,8 @@ export function createFakeApi(options: { publicUrl?: string; appUrl?: string } =
     if ((match = /^\/api\/runs\/([\w-]+)$/.exec(path)) && method === "GET") {
       const id = match[1] ?? "";
       if (!state.runs.some((run) => run.id === id)) return error(404, "No such run in this account.");
-      const found = state.reports[id] ?? state.jobs[id];
+      const job = state.jobs[id];
+      const found = state.reports[id] ?? (job && advance(job, state.tasks.find((task) => task.id === job.taskId), since));
       return found ? json(200, found) : error(404, "No such run in this account.");
     }
     if ((match = /^\/api\/runs\/([\w-]+)\/share$/.exec(path)) && method === "POST") {

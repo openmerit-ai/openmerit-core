@@ -3,6 +3,7 @@
 import { ApiError, createApi, type Api, type Me } from "./api.ts";
 import { loadClerk, signedIn, unavailable, type AppConfig, type Clerk } from "./auth.ts";
 import { html, setLogos, type Html } from "./html.ts";
+import { startLive, stopLive } from "./live.ts";
 import { mount, type Account, type ConfirmOptions, type Ctx, type Mounted } from "./view.ts";
 import { install } from "./views/common.ts";
 import { connectionsView } from "./views/connections.ts";
@@ -31,6 +32,7 @@ let mounted: Mounted | null = null;
 
 const put = (content: Html): void => {
   if (!root) return;
+  stopLive();
   root.innerHTML = content.__html;
   root.removeAttribute("aria-busy");
 };
@@ -126,6 +128,7 @@ async function render(ctx: Ctx): Promise<void> {
   mounted = await view(ctx);
   put(mounted.html);
   mounted.bind(root);
+  startLive(root, ctx.api, ctx.refresh);
   document.title = `${mounted.title ?? pageTitle} · OpenMerit`;
 }
 

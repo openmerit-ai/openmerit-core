@@ -130,4 +130,5 @@ for (const file of ["app.css", "favicon.svg"]) cpSync(join(source, file), join(o
 const logos = Object.fromEntries(readdirSync(join(source, "logos")).filter((name) => name.endsWith(".svg")).map((name) => [name.slice(0, -4), readFileSync(join(source, "logos", name), "utf8").trim()]));
 const options = { absWorkingDir: root, format: "esm", platform: "browser", target: "es2022", minify: true, bundle: true } as const;
 await build({ ...options, entryPoints: ["app/sidebar.ts"], outfile: join(out, "sidebar.js") });
-await build({ ...options, entryPoints: ["app/main.ts"], outfile: join(out, "main.js"), define: { __LOGOS__: JSON.stringify(logos) } });
+// main.js loads React and Liveline as a separate chunk, only on pages that draw a live chart.
+await build({ ...options, entryPoints: ["app/main.ts"], outdir: out, splitting: true, chunkNames: "chunks/[name]-[hash]", define: { __LOGOS__: JSON.stringify(logos), "process.env.NODE_ENV": '"production"' } });
