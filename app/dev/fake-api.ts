@@ -24,7 +24,7 @@ function populated(): State {
   const tasks: Task[] = [
     task("ticket-router", "Ticket router", { pick: "anthropic/claude-haiku-5-5", status: "picked", monthlySavingUsd: 233.5, lastJobId: "k7m2q9" }),
     task("bill-matcher", "Bill and claim matcher", { agent: "claim pipeline", currentModel: "anthropic/claude-sonnet-5-5", status: "agent_eval_failed", lastRunAt: "2026-11-17T08:00:00Z", lastJobId: "p3x8d1" }),
-    task("fraud-reviewer", "Fraud reviewer", { agent: "claim pipeline", currentModel: "anthropic/claude-sonnet-5-5", watching: false, lastRunAt: "2026-11-16T12:00:00Z", lastJobId: "f9q2w7" }),
+    task("fraud-reviewer", "Fraud reviewer", { agent: "claim pipeline", currentModel: "anthropic/claude-sonnet-5-5", watching: false, state: "frozen", lastRunAt: "2026-11-16T12:00:00Z", lastJobId: "f9q2w7" }),
     task("enrollment-checker", "Enrollment checker", { environment: "sahra-health/enroll", currentModel: "openai/gpt-5-mini", status: "running", lastRunAt: "2026-11-18T11:40:00Z", lastJobId: "e4n6t0" }),
     task("coding-reviewer", "Coding reviewer", { currentModel: "anthropic/claude-sonnet-5-5", status: "failed", lastRunAt: "2026-11-12T10:00:00Z", lastJobId: "z1c7m4" }),
   ];

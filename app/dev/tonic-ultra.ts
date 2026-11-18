@@ -5,7 +5,7 @@
 // caps. The fake API's other scenarios keep the smaller Sahra Health account, which the tests
 // use. Every name, number and price is fictional.
 import { resolveGuardrails, type Guardrails, type Level } from "../../openmerit-core/src/engine/guardrails.ts";
-import type { Endpoint, JobView, MeasuredModel, Report, Run, Task } from "../api.ts";
+import type { Endpoint, JobView, MeasuredModel, Report, Run, Task, TaskState } from "../api.ts";
 import type { State } from "./fake-api.ts";
 
 // Per call, on the task's typical prompt. eci is the catalogue's capability index; null is a model
@@ -67,7 +67,7 @@ type Outcome = "picked" | "keep_current" | "agent_eval_failed" | "baseline_faile
 type Step = [at: string, outcome: Outcome, pick?: string | undefined, kind?: "watch"];
 interface Spec {
   id: string; name: string; env: string; agent?: string; model: string; callsPerMonth: number;
-  file: string; line: number; candidates: string[]; runs: Step[]; watching?: boolean;
+  file: string; line: number; candidates: string[]; runs: Step[]; state?: TaskState; idleSince?: string;
 }
 
 const ENV = { leads: "tonic-ultra/leadflow", ads: "tonic-ultra/adstudio", reviews: "tonic-ultra/reputation", reports: "tonic-ultra/reporting", hvac: "tonic-ultra/fixright-hvac", clean: "tonic-ultra/sparkclean-offices" } as const;
@@ -100,9 +100,9 @@ const specs: Spec[] = [
   { id: "seo-pages", name: "Local SEO page writer", env: ENV.ads, model: "openai/gpt-5", callsPerMonth: 150_000, file: "src/seo/pages.ts", line: 40,
     candidates: ["google/gemini-3-flash", "deepseek/deepseek-v4", "meta-llama/llama-4-maverick", "mistralai/mistral-medium-3-5", "openai/gpt-5-mini"],
     runs: [["2026-09-08T15:00:00Z", "baseline_failed"], ["2026-09-09T11:00:00Z", "picked", "deepseek/deepseek-v4"], ["2026-11-15T09:30:00Z", "picked", "google/gemini-3-flash", "watch"]] },
-  { id: "keyword-clusters", name: "Keyword clusterer", env: ENV.ads, model: "openai/gpt-5-nano", callsPerMonth: 22_000, file: "src/seo/keywords.ts", line: 8,
+  { id: "keyword-clusters", name: "Keyword clusterer", env: ENV.ads, model: "openai/gpt-5-nano", callsPerMonth: 22_000, file: "src/seo/keywords.ts", line: 8, state: "frozen",
     candidates: [], runs: [["2026-10-07T10:00:00Z", "no_candidates"], ["2026-11-07T10:00:00Z", "no_candidates", undefined, "watch"]] },
-  { id: "creative-brief", name: "Creative brief summarizer", env: ENV.ads, agent: "ads studio", model: "anthropic/claude-sonnet-5-5", callsPerMonth: 3_200, file: "src/briefs.ts", line: 11,
+  { id: "creative-brief", name: "Creative brief summarizer", env: ENV.ads, agent: "ads studio", model: "anthropic/claude-sonnet-5-5", callsPerMonth: 3_200, file: "src/briefs.ts", line: 11, state: "retired",
     candidates: ["anthropic/claude-haiku-5-5", "openai/gpt-5-mini"], runs: [["2026-11-10T17:20:00Z", "no_cases"]] },
   { id: "review-responder", name: "Google review responder", env: ENV.reviews, model: "openai/gpt-5", callsPerMonth: 27_000, file: "src/respond.ts", line: 33,
     candidates: ["moonshotai/kimi-k3", "anthropic/claude-haiku-5-5", "mistralai/mistral-medium-3-5", "openai/gpt-5-mini"],
@@ -121,7 +121,7 @@ const specs: Spec[] = [
   { id: "slot-extractor", name: "Appointment slot extractor", env: ENV.hvac, agent: "booking concierge", model: "openai/gpt-5-mini", callsPerMonth: 48_000, file: "src/chat/slots.ts", line: 21,
     candidates: ["x-ai/grok-4-1-fast", "openai/gpt-5-nano", "mistralai/ministral-8b"],
     runs: [["2026-10-23T10:20:00Z", "picked", "x-ai/grok-4-1-fast"]] },
-  { id: "rfp-reader", name: "Office cleaning RFP reader", env: ENV.clean, model: "anthropic/claude-sonnet-5-5", callsPerMonth: 600, file: "src/rfp.ts", line: 14, watching: false,
+  { id: "rfp-reader", name: "Office cleaning RFP reader", env: ENV.clean, model: "anthropic/claude-sonnet-5-5", callsPerMonth: 600, file: "src/rfp.ts", line: 14, state: "idle", idleSince: "2026-10-15T14:00:00Z",
     candidates: ["google/gemini-3-pro", "anthropic/claude-haiku-5-5", "deepseek/deepseek-v4"],
     runs: [["2026-09-15T14:00:00Z", "keep_current"]] },
   { id: "invoice-disputes", name: "Invoice dispute triage", env: ENV.clean, model: "openai/gpt-5", callsPerMonth: 1_800, file: "src/disputes.ts", line: 26,
@@ -234,7 +234,7 @@ export function tonicUltra(): State {
     const status = !shown ? "new" : shown.outcome === "queued" ? "running" : shown.outcome;
     const pick = status === "picked" ? shown?.pick ?? null : null;
     const saving = pick ? Math.round(((MODELS[spec.model]?.cost ?? 0) - (MODELS[pick]?.cost ?? 0)) * spec.callsPerMonth) : null;
-    tasks.push({ id: spec.id, environment: spec.env, agent: spec.agent ?? null, name: spec.name, currentModel: spec.model, pick, status, watching: spec.watching ?? true, lastRunAt: latest?.at ?? null, lastJobId: shown?.id ?? null, monthlySavingUsd: saving });
+    tasks.push({ id: spec.id, environment: spec.env, agent: spec.agent ?? null, name: spec.name, currentModel: spec.model, pick, status, watching: (spec.state ?? "watching") === "watching", state: spec.state ?? "watching", idleSince: spec.idleSince ?? null, lastRunAt: latest?.at ?? null, lastJobId: shown?.id ?? null, monthlySavingUsd: saving });
   }
   runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   const ordered = tasks.slice().sort((a, b) => (b.lastRunAt ?? "").localeCompare(a.lastRunAt ?? ""));

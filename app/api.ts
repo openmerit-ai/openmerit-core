@@ -35,10 +35,17 @@ export interface Task {
   // no_candidates, agent_eval_failed), or a job that ended early (failed, stopped).
   status: string;
   watching: boolean;
+  // Watching is automatic. Proposed for the cloud app, which does not send it yet; the preview's
+  // fake API does. idle: no coding agent call for 30 days, until the next one. frozen: a
+  // watch: false guardrail. retired: the coding agent retired it. Without it, watching decides.
+  state?: TaskState;
+  idleSince?: string | null;
   lastRunAt: string | null;
   lastJobId: string | null;
   monthlySavingUsd: number | null;
 }
+
+export type TaskState = "watching" | "idle" | "frozen" | "retired";
 
 export type JobStatus = "queued" | "running" | "needs_input" | "done" | "failed" | "stopped";
 
