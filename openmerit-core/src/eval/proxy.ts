@@ -1,15 +1,16 @@
 // The eval metering proxy: an OpenAI-compatible HTTP endpoint on 127.0.0.1 that exists only while
 // Scout runs approved evals. Each eval unit gets its own bearer token. For every request it:
 // 1. refuses models outside the repository's allowed pool for that endpoint;
-// 2. reserves the request's expected cost (prompt size + max output at list price) in SQLite and
-//    refuses it, before anything is sent, when that would pass the run's budget;
+// 2. reserves the request's expected cost (prompt size + max output at list price) in the run's
+//    ledger (SQLite) and refuses it, before anything is sent, when that would pass the run's budget;
 // 3. forwards it with the endpoint's key, then settles the reservation with the provider-reported
 //    cost (OpenRouter) or a list-price estimate from the reported tokens (OpenAI-style endpoints).
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
-import { requestPrice, type CatalogueModel } from "../catalogue/catalogue.ts";
+import { requestPrice, type CatalogueModel } from "../engine/catalogue.ts";
+import { expectedCost, readUsage, sizeEstimate, type Ledger, type Settlement } from "../engine/ledger.ts";
 import type { State } from "../state/db.ts";
 
 export interface ProxyUnit {
@@ -30,39 +31,6 @@ export interface UnitTally {
   cutOff: number;
   /** The largest request refused on the budget: what it needed, and the output tokens it allowed. */
   refusedLargest?: { usd: number; outputTokens: number };
-}
-
-/** Assumed output tokens when a request sets no maximum; reasoning models can use many. */
-export const DEFAULT_OUTPUT_TOKENS = 4096;
-/** Reservation for a request whose price is unknown. */
-export const UNKNOWN_PRICE_RESERVATION_USD = 0.05;
-
-export function expectedCost(model: CatalogueModel | null | undefined, body: Record<string, unknown>, bodyBytes: number): { usd: number; priced: boolean; outputTokens: number } {
-  const output = ([body.max_completion_tokens, body.max_tokens, body.max_output_tokens].find(value => typeof value === "number" && value > 0) as number | undefined) ?? DEFAULT_OUTPUT_TOKENS;
-  const price = requestPrice(model ?? null, Math.ceil(bodyBytes / 3), output);
-  return price === null ? { usd: UNKNOWN_PRICE_RESERVATION_USD, priced: false, outputTokens: output } : { usd: price, priced: true, outputTokens: output };
-}
-
-/**
- * A list-price estimate from the bytes sent and received, for an answer that reports no token usage (or was cut off):
- * about three bytes a token, which overcounts JSON and SSE framing. Null when the model has no price.
- */
-export const sizeEstimate = (model: CatalogueModel | null | undefined, sentBytes: number, receivedBytes: number) => requestPrice(model ?? null, Math.ceil(sentBytes / 3), Math.ceil(receivedBytes / 3));
-
-/** Token counts and provider cost from an OpenAI-style (or OpenRouter) response body or SSE stream. */
-export function readUsage(text: string): { input: number; output: number; costUsd: number | null } | null {
-  const candidates: string[] = text.trimStart().startsWith("{") ? [text] : text.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trim()).filter(line => line.startsWith("{"));
-  let found: { input: number; output: number; costUsd: number | null } | null = null;
-  for (const chunk of candidates) {
-    try {
-      const value = JSON.parse(chunk) as { usage?: Record<string, unknown>; response?: { usage?: Record<string, unknown> } };
-      const usage = value.usage ?? value.response?.usage;
-      if (!usage) continue;
-      const input = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0), output = Number(usage.completion_tokens ?? usage.output_tokens ?? 0);
-      found = { input, output, costUsd: typeof usage.cost === "number" ? usage.cost : null };
-    } catch { /* not JSON */ }
-  }
-  return found;
 }
 
 /** True when an OpenAI-style answer (body or SSE stream) stopped at its token limit without any text. */
@@ -106,7 +74,7 @@ const retryDelayMs = (retryAfter: string | null, attempt: number) => {
 
 export class EvalProxy {
   private server: Server | null = null;
-  private readonly units = new Map<string, { unit: ProxyUnit; tally: UnitTally }>();
+  private readonly units = new Map<string, { unit: ProxyUnit; tally: UnitTally; ledger: Ledger }>();
   private readonly state: State;
   private readonly fetcher: typeof fetch;
   constructor(state: State, fetcher: typeof fetch = fetch) { this.state = state; this.fetcher = fetcher; }
@@ -130,7 +98,7 @@ export class EvalProxy {
   open(unit: ProxyUnit): { token: string; tally: UnitTally } {
     const token = `om-eval-${randomBytes(18).toString("hex")}`;
     const tally: UnitTally = { requests: 0, refused: 0, budgetHit: false, poolViolations: [], upstreamErrors: [], cutOff: 0 };
-    this.units.set(token, { unit, tally });
+    this.units.set(token, { unit, tally, ledger: this.state.ledger({ runId: unit.runId, unitId: unit.unitId }) });
     return { token, tally };
   }
 
@@ -140,7 +108,7 @@ export class EvalProxy {
     const token = /^Bearer\s+(\S+)/i.exec(req.headers.authorization ?? "")?.[1] ?? (req.headers["x-api-key"] as string | undefined);
     const entry = token ? this.units.get(token) : undefined;
     if (!entry) return send(res, 401, "OpenMerit proxy: unknown or closed eval token.", "openmerit_auth");
-    const { unit, tally } = entry;
+    const { unit, tally, ledger } = entry;
     const path = (req.url ?? "/").replace(/^\/v1/, "");
     if (req.method === "GET" && path.startsWith("/models")) {
       res.writeHead(200, { "content-type": "application/json" });
@@ -160,17 +128,19 @@ export class EvalProxy {
     if (unit.baseUrl.includes("openrouter.ai")) parsed.usage = { include: true };
     const forwarded = Buffer.from(JSON.stringify(parsed));
     const expected = expectedCost(catalogue, parsed, forwarded.length);
-    const reservation = this.state.reserve({ runId: unit.runId, unitId: unit.unitId, model, endpoint: unit.endpointId, expectedUsd: expected.usd });
+    // The CLI calls only the user's own endpoints with their keys.
+    const key = randomUUID();
+    const reservation = await ledger.reserve({ key, usd: expected.usd, funding: "customer", model, endpoint: unit.endpointId });
     if (!reservation.ok) {
       tally.refused++; tally.budgetHit = true;
       if (!tally.refusedLargest || expected.usd > tally.refusedLargest.usd) tally.refusedLargest = { usd: expected.usd, outputTokens: expected.outputTokens };
-      return send(res, 402, `OpenMerit eval budget reached: $${reservation.spend.totalUsd.toFixed(4)} used or reserved of $${reservation.budgetUsd.toFixed(2)}; this request needs about $${expected.usd.toFixed(4)}. Paid evaluation is paused until the budget is raised.`, "openmerit_budget");
+      return send(res, 402, `OpenMerit eval budget reached: ${reservation.reason}; this request needs about $${reservation.neededUsd.toFixed(4)}. Paid evaluation is paused until the budget is raised.`, "openmerit_budget");
     }
     tally.requests++;
     const started = Date.now();
     // Every reservation is settled, even when the endpoint or the eval drops the connection part-way.
     let settled = false, received = 0;
-    const settle = (cost: Parameters<State["settle"]>[1]) => { settled = true; this.state.settle(reservation.id, cost); };
+    const settle = (cost: Settlement) => { settled = true; return ledger.settle(key, cost); };
     try {
       const forward = () => this.fetcher(`${unit.baseUrl.replace(/\/$/, "")}${path}`, {
         method: "POST", body: forwarded, redirect: "manual", signal: AbortSignal.timeout(600_000),
@@ -185,7 +155,7 @@ export class EvalProxy {
       }
       if (upstream instanceof Error) {
         tally.upstreamErrors.push(502);
-        settle({ actualUsd: 0, estimatedUsd: null, latencyMs: Date.now() - started, failed: true });
+        await settle({ actualUsd: 0, estimatedUsd: null, latencyMs: Date.now() - started, failed: true });
         return send(res, 502, `OpenMerit proxy: ${unit.endpointId} did not answer (${upstream.message}).`, "openmerit_upstream");
       }
       res.writeHead(upstream.status, { "content-type": upstream.headers.get("content-type") ?? "application/json" });
@@ -205,12 +175,12 @@ export class EvalProxy {
       const usage = readUsage(text);
       if (!upstream.ok) tally.upstreamErrors.push(upstream.status);
       else if (cutOffBeforeText(text)) tally.cutOff++;
-      if (!upstream.ok) settle({ actualUsd: usage?.costUsd ?? 0, estimatedUsd: null, latencyMs, failed: true });
+      if (!upstream.ok) await settle({ actualUsd: usage?.costUsd ?? 0, estimatedUsd: null, latencyMs, failed: true });
       // An answer without usage is estimated from its size, not counted at the request's maximum.
-      else settle({ actualUsd: usage?.costUsd ?? null, estimatedUsd: usage ? requestPrice(catalogue ?? null, usage.input, usage.output) : sizeEstimate(catalogue, forwarded.length, received), latencyMs });
+      else await settle({ actualUsd: usage?.costUsd ?? null, estimatedUsd: usage ? requestPrice(catalogue ?? null, usage.input, usage.output) : sizeEstimate(catalogue, forwarded.length, received), latencyMs });
     } finally {
       // Cut off part-way: what arrived is estimated by its size; nothing arrived, nothing is charged.
-      if (!settled) settle({ actualUsd: received ? null : 0, estimatedUsd: received ? sizeEstimate(catalogue, forwarded.length, received) : null, latencyMs: Date.now() - started, failed: true });
+      if (!settled) await settle({ actualUsd: received ? null : 0, estimatedUsd: received ? sizeEstimate(catalogue, forwarded.length, received) : null, latencyMs: Date.now() - started, failed: true });
     }
   }
 }

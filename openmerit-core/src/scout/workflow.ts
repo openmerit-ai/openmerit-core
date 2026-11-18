@@ -14,17 +14,19 @@
 import { createHash, randomInt } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
-import { catalogueIndex, type Catalogue, type CatalogueModel } from "../catalogue/catalogue.ts";
 import { createLangfuseConnector, type LangfuseConnector, type TaskEvidence } from "../connectors/langfuse/index.ts";
+import { catalogueIndex, type Catalogue, type CatalogueModel } from "../engine/catalogue.ts";
+import { blendedPrice, ladder } from "../engine/pool.ts";
+import { redact } from "../engine/redact.ts";
+import { binarySearch, CandidateUnavailable, CHALLENGERS, challengers, FINALISTS, order, SAMPLE_SIZE, type Stage } from "../engine/search.ts";
 import { EvalProxy, retryable } from "../eval/proxy.ts";
 import { runEval } from "../eval/runner.ts";
 import type { Harness, HarnessUsage } from "../harness/harness.ts";
 import { DEFAULT_BUDGET_USD, DEFAULT_REPEATS, readRepoConfig, resolveCredential, updateRepoConfig, type Endpoint, type EvalSpec, type RepoConfig } from "../state/config.ts";
 import type { RunStatus, Spend, State, UnitRow } from "../state/db.ts";
 import type { Repo } from "../state/paths.ts";
-import { allowedOn, baselineEndpoint, blendedPrice, pool, type PoolModel } from "./pool.ts";
-import { context, isExampleFile, isSupportFile, listFiles, redact, scanRepo, sourceFiles, type ScanResult, type Usage } from "./scan.ts";
-import { binarySearch, CandidateUnavailable, CHALLENGERS, challengers, FINALISTS, order, SAMPLE_SIZE, type Stage } from "./search.ts";
+import { allowedOn, baselineEndpoint, pool, type PoolModel } from "./pool.ts";
+import { context, isExampleFile, isSupportFile, listFiles, scanRepo, sourceFiles, type ScanResult, type Usage } from "./scan.ts";
 
 export type Answer = string | string[] | boolean | number;
 export type Answers = Record<string, Answer>;
@@ -413,9 +415,9 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
     for (const name of data.selected!) {
       const task = data.tasks!.find(item => item.name === name)!;
       const eligible = eligibleCandidates(ctx.catalogue, configured, baseline, task);
-      const ranked = order(eligible.filter(item => item.model.eci !== null).map(toEntry));
+      const { ranked, unplaced } = ladder(eligible.map(toEntry));
       data.pool[name] = ranked;
-      data.unranked[name] = eligible.length - ranked.length;
+      data.unranked[name] = unplaced.length;
       ctx.state.event(runId, "pool", `${name}: ${ranked.length} ECI-ranked candidates cheaper than ${baseline.id} in the allowed pool${data.unranked[name] ? ` (${data.unranked[name]} without an ECI left out)` : ""}.`);
     }
     return "discover";
@@ -754,7 +756,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
         throw error;
       }
     };
-    const searched = await binarySearch(candidates, screen, FINALISTS);
+    const searched = await binarySearch(order(candidates), screen, FINALISTS);
     summary.skipped.push(...searched.unavailable.map(item => ({ model: item.candidate.model, stage: item.stage, reason: item.reason })));
     summary.pick = searched.selected?.model ?? null;
     if (searched.shortfall) summary.shortfall = searched.shortfall;
@@ -765,7 +767,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
       .sort((a, b) => b.measured!.score - a.measured!.score || (a.measured!.cost ?? Infinity) - (b.measured!.cost ?? Infinity) || a.candidate.eci - b.candidate.eci)[0]?.candidate;
     if (leader) {
       const tried = new Set([...summary.trials.map(item => item.model), ...summary.skipped.map(item => item.model)]);
-      for (const candidate of challengers(candidates, leader, tried, CHALLENGERS)) {
+      for (const candidate of challengers(candidates, leader, tried, { count: CHALLENGERS, strength: item => item.eci })) {
         try {
           if (await screen(candidate, "challenger")) { summary.challengers.push(candidate.model); await runFinal(candidate); }
         } catch (error) {
@@ -909,7 +911,7 @@ function evalCwd(root: string, cwd: string | undefined): string | null {
   return path || null;
 }
 
-const toEntry = (item: PoolModel): PoolEntry => ({ key: item.model.id, model: item.model.id, endpoint: item.endpoint.id, endpointModel: item.endpointModel, eci: item.model.eci!, eciSource: item.model.eciSource, price: blendedPrice(item.model) });
+const toEntry = (item: PoolModel): Omit<PoolEntry, "eci"> & { eci: number | null } => ({ key: item.model.id, model: item.model.id, endpoint: item.endpoint.id, endpointModel: item.endpointModel, eci: item.model.eci, eciSource: item.model.eciSource, price: blendedPrice(item.model) });
 
 /**
  * Allowed-pool models a task could switch to: priced, cheaper than the current model, and able to do

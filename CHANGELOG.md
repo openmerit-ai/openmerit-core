@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The package exports `openmerit/engine`: Scout's search over any ordered ladder, the catalogue types, a spend `Ledger` with reserve, settle and release by key, the guardrail resolver for environment, agent and task levels, the agent-eval rule and the `redact` rules. The CLI runs its search and eval budget through it; its behaviour does not change. See the README's Engine section.
+
 ## 0.4.3 — 2026-11-15
 
 Fixes from running the self-hosted flow on 29 open-source repositories that call models, and from the 0.4.2 customer acceptance check.

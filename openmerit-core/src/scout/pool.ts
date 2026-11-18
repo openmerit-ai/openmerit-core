@@ -1,5 +1,6 @@
 // The repository's candidate pool: which catalogue models each configured endpoint may run.
-import { catalogueIndex, type Catalogue, type CatalogueModel } from "../catalogue/catalogue.ts";
+import { catalogueIndex, type Catalogue, type CatalogueModel } from "../engine/catalogue.ts";
+import { pool as preferFirst } from "../engine/pool.ts";
 import type { Endpoint } from "../state/config.ts";
 
 export interface PoolModel { endpoint: Endpoint; endpointModel: string; model: CatalogueModel }
@@ -29,10 +30,7 @@ export function endpointPool(endpoint: Endpoint, catalogue: Catalogue): PoolMode
   });
 }
 
-export function pool(endpoints: readonly Endpoint[], catalogue: Catalogue): PoolModel[] {
-  const seen = new Set<string>();
-  return endpoints.flatMap(endpoint => endpointPool(endpoint, catalogue)).filter(item => !seen.has(item.model.id) && seen.add(item.model.id));
-}
+export const pool = (endpoints: readonly Endpoint[], catalogue: Catalogue): PoolModel[] => preferFirst(endpoints, endpoint => endpointPool(endpoint, catalogue), item => item.model.id);
 
 /** The proxy's pool check for one endpoint: catalogue model, null for an allowed model without a catalogue entry, undefined when not allowed. */
 export function allowedOn(endpoint: Endpoint, catalogue: Catalogue): (endpointModel: string) => CatalogueModel | null | undefined {
@@ -55,5 +53,3 @@ export function baselineEndpoint(endpoints: readonly Endpoint[], catalogue: Cata
   }
   return null;
 }
-
-export const blendedPrice = (model: CatalogueModel) => (model.inputPerM === null || model.outputPerM === null ? null : model.inputPerM + model.outputPerM);
