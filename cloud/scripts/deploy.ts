@@ -17,7 +17,10 @@ import { createInterface } from "node:readline/promises";
 
 const CLUSTER = process.env.RIVET_CLUSTER ?? "openmerit";
 const ORIGIN = (process.env.RIVET_ORIGIN ?? "https://openmeritdr2i.onrivet.dev").replace(/\/$/, "");
-/** CI jobs a commit needs before it is deployed. */
+/**
+ * CI jobs a commit needs before it is deployed. Other jobs, such as the npm package's macOS runs,
+ * must not have failed, but one still queued, running or cancelled does not hold up the cloud app.
+ */
 const REQUIRED_CHECKS = ["verify", "cloud"];
 /** Cluster secrets the pool reads, each set from the variable of the same name. The pool reads only those set on the cluster. */
 const SECRETS = ["CLERK_SECRET_KEY", "OPENROUTER_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "OPENMERIT_KEY_ENCRYPTION_KEY"];
@@ -144,7 +147,12 @@ function requireGreenCI(commit: string): void {
   const repository = run("gh", ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).trim();
   const runs = (JSON.parse(run("gh", ["api", `repos/${repository}/commits/${commit}/check-runs?per_page=100`])) as { check_runs: { name: string; status: string; conclusion: string | null }[] }).check_runs;
   const missing = REQUIRED_CHECKS.filter(name => !runs.some(check => check.name === name));
-  const failing = runs.filter(check => check.status !== "completed" || !["success", "skipped", "neutral"].includes(check.conclusion ?? ""));
+  const passed = (check: { status: string; conclusion: string | null }) => check.status === "completed" && ["success", "skipped", "neutral"].includes(check.conclusion ?? "");
+  // Another job blocks only when it failed: one still queued or cancelled, such as a macOS run that found no runner, did not test the cloud app.
+  const unfinished = (check: { status: string; conclusion: string | null }) => check.status !== "completed" || check.conclusion === "cancelled";
+  const failing = runs.filter(check => (REQUIRED_CHECKS.includes(check.name) || !unfinished(check)) && !passed(check));
+  const pending = runs.filter(check => !REQUIRED_CHECKS.includes(check.name) && unfinished(check));
+  if (pending.length) console.log(`Not waiting for ${pending.map(check => `${check.name} (${check.conclusion ?? check.status})`).join(", ")}: the cloud app needs only ${REQUIRED_CHECKS.join(" and ")}.`);
   if (missing.length || failing.length) fail(`CI has not passed for ${commit.slice(0, 12)}: ${[...missing.map(name => `${name} missing`), ...failing.map(check => `${check.name} ${check.conclusion ?? check.status}`)].join(", ")}.`);
 }
 
