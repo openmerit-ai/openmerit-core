@@ -7,12 +7,12 @@ import { result } from "./runs.ts";
 const guardrails = (level: string, id: string, text: string) => html`<a href="/guardrails/?level=${level}&amp;id=${encodeURIComponent(id)}">${text}</a>`;
 
 // Watching is automatic; the cloud app reports why a task is not watched. Before it sends state,
-// a task that is not watching is taken as frozen by its watch guardrail.
+// a task that is not watching was turned off by a coding agent (openmerit_watch), so it is frozen.
 const stateOf = (task: Task): TaskState => task.state ?? (task.watching ? "watching" : "frozen");
 const states: Record<TaskState, (task: Task) => Html> = {
   watching: () => html`<span class="pill good">Watching</span>`,
   idle: (task) => html`<span class="pill">Idle</span><span class="sub">no call since ${day(task.idleSince ?? task.lastRunAt)}</span>`,
-  frozen: (task) => html`<span class="pill tag">Frozen</span><span class="sub">${guardrails("task", task.id, "watch guardrail off")}</span>`,
+  frozen: (task) => html`<span class="pill tag">Frozen</span><span class="sub">turned off by a coding agent</span>`,
   retired: () => html`<span class="pill tag">Retired</span>`,
 };
 
@@ -44,7 +44,7 @@ export const tasksView: View<Task[]> = {
     <section aria-labelledby="tasks">
       <h2 id="tasks">All Tasks</h2>
       ${table(tasks)}
-      <p class="note">A task goes idle after 30 days without a call from a coding agent, and its next call resumes the watch. A <code>watch</code> guardrail set to off freezes the model choice. Your coding agent retires a task when it removes the call; its runs are kept.</p>
+      <p class="note">A task goes idle after 30 days without a call from a coding agent, and its next call resumes the watch. A coding agent can freeze a task's model choice by turning its watch off. Your coding agent retires a task when it removes the call; its runs are kept.</p>
     </section>
     ${retired.length ? html`<section aria-labelledby="retired">
       <details><summary id="retired">${plural(retired.length, "retired task")}</summary>${table(retired)}</details>
