@@ -61,4 +61,6 @@ npm run deploy -- --build <id>     # rolls back to an earlier build, without reb
 npm run deploy -- status           # read-only: the last receipt and what the origin answers
 ```
 
+A cluster token cannot create the runner pool. The pool `default` (`us-east4`, one e2-small node on the free plan) was created on 18 November 2026 by one rollout signed in with `rivet login` as the cluster's owner; later deploys only roll it onto a new build and work with the token. If the pool is ever deleted, create it the same way, then `rivet logout`.
+
 After the first deploy, set `CLOUD_APP_ORIGIN` to `https://openmeritdr2i.onrivet.dev` in `wrangler.domains.jsonc` and deploy the router, and register the Stripe webhook endpoint for `https://openmerit.ai/api/stripe/webhook`.
