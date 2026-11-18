@@ -4,7 +4,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { redact } from "./engine.ts";
 import { buildPool, provisionalPick, type Provisional } from "./pool.ts";
-import type { TaskBundle } from "./ranking.ts";
+import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import type { AppClient } from "./registry.ts";
 
 export const DEFAULT_ENVIRONMENT = "default";

@@ -2,7 +2,7 @@
 // the coding agent through openmerit_result, to /api/runs/:id as JSON, and to /r/:id.md as Markdown.
 import type { ResolvedGuardrails } from "./engine.ts";
 import type { Option, Provisional } from "./pool.ts";
-import type { TaskBundle } from "./ranking.ts";
+import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 
 export interface MeasuredModel {
   model: string;

@@ -1,5 +1,5 @@
 # The OpenMerit cloud app as a Rivet Cloud actor node. Build from the repository root, since the app
-# imports openmerit-core's engine from source:
+# imports openmerit-core's engine and ranking from source:
 #   docker build -f cloud/Dockerfile .
 FROM node:22.19.0-bookworm-slim
 WORKDIR /app
@@ -11,7 +11,11 @@ RUN cd cloud && npm ci --omit=dev --ignore-scripts \
 # openmerit-core's package.json says its .ts files are ES modules.
 COPY openmerit-core/package.json openmerit-core/
 COPY openmerit-core/src/engine openmerit-core/src/engine
+COPY openmerit-core/src/ranking openmerit-core/src/ranking
+COPY openmerit-core/src/eval/proxy.ts openmerit-core/src/eval/
 COPY openmerit-core/src/catalogue openmerit-core/src/catalogue
+# openmerit-core's sources import their packages (ajv) from the nearest node_modules above them.
+RUN ln -s cloud/node_modules node_modules
 COPY openmerit-core/data/catalogue.json openmerit-core/data/
 COPY cloud/src cloud/src
 ENV NODE_ENV=production RIVET_LOG_LEVEL=warn

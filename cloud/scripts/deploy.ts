@@ -21,7 +21,7 @@ const REQUIRED_CHECKS = ["verify", "cloud"];
 /** Cluster secrets the pool reads, each set from the variable of the same name. */
 const SECRETS = ["CLERK_SECRET_KEY", "OPENROUTER_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "OPENMERIT_KEY_ENCRYPTION_KEY"];
 /** Plain pool variables, from this environment when set. */
-const SETTINGS = ["CLERK_PUBLISHABLE_KEY", "STRIPE_PRICE_ID", "STRIPE_METER_EVENT", "OPENMERIT_PUBLIC_URL", "OPENMERIT_APP_URL"];
+const SETTINGS = ["CLERK_PUBLISHABLE_KEY", "STRIPE_PRICE_ID", "STRIPE_METER_EVENT", "OPENMERIT_PUBLIC_URL", "OPENMERIT_APP_URL", "OPENMERIT_CASE_WRITER_MODEL", "OPENMERIT_JUDGE_MODEL"];
 
 const root = spawnSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).stdout.trim() || fail("Run this inside the repository.");
 const rivet = join(root, "cloud", "node_modules", ".bin", "rivet");

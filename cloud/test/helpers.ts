@@ -1,5 +1,5 @@
 // Test fixtures: the app in a child process on a local Rivet engine, a fake OpenAI-compatible model
-// server standing in for OpenRouter and customer endpoints, and signed Stripe events. No real
+// server standing in for OpenRouter and customer endpoints (and the case writer), and signed Stripe events. No real
 // credential reaches the child and no paid model is called.
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
@@ -17,6 +17,9 @@ export const TICKETS: Record<string, string> = {
   "I cannot reset my password": "account", "Export fails with error 500": "technical", "Please close my account": "account",
   "Where is my invoice for March?": "billing",
 };
+/** The tickets the fake case writer writes, with their queues. */
+export const WRITTEN: Record<string, string> = { "I was charged after I cancelled": "billing", "The dashboard shows a blank page": "technical" };
+const QUEUES = { ...TICKETS, ...WRITTEN };
 /** Models the fake answers wrongly: those the catalogue rates below this ECI, so the search has something to find. */
 export const WEAK_BELOW = 140;
 /** What the fake reports a call cost: 50 prompt and 2 output tokens at list price, or $0.0005 for a model outside the catalogue. */
@@ -25,6 +28,7 @@ export function costOf(model: string): number {
   return entry?.inputPerM != null && entry.outputPerM != null ? (50 * entry.inputPerM + 2 * entry.outputPerM) / 1e6 : 0.0005;
 }
 
+/** One call the fake answered. `ticket` is the ticket it classified, or `writer:<n>` for a request to write n cases. */
 export interface FakeModels { url: string; calls: { model: string; ticket: string; auth: string }[]; onCall: ((index: number) => Promise<void>) | null; close: () => Promise<void> }
 
 export async function fakeModels(): Promise<FakeModels> {
@@ -36,11 +40,14 @@ export async function fakeModels(): Promise<FakeModels> {
     req.on("end", async () => {
       const parsed = JSON.parse(body) as { model: string; messages: { role: string; content: string }[] };
       const text = parsed.messages.filter(message => message.role === "user").map(message => message.content).join("\n");
-      const ticket = Object.keys(TICKETS).find(item => text.includes(item)) ?? "";
+      // openmerit/ranking's case writer: the same two cases each time, so its second request adds nothing new.
+      const writer = parsed.messages[0]?.role === "system" && parsed.messages[0].content.startsWith("You write test cases");
+      const ticket = writer ? `writer:${/Write (\d+) cases/.exec(text)?.[1] ?? "?"}` : Object.keys(QUEUES).find(item => text.includes(item)) ?? "";
       const index = fake.calls.push({ model: parsed.model, ticket, auth: String(req.headers.authorization ?? "") }) - 1;
       if (fake.onCall) await fake.onCall(index);
       const weak = (eci.get(parsed.model) ?? 200) < WEAK_BELOW;
-      const answer = weak ? "other" : TICKETS[ticket] ?? "other";
+      const answer = writer ? JSON.stringify({ cases: Object.entries(WRITTEN).map(([written, queue]) => ({ input: { ticket: written }, expected: queue })) })
+        : weak ? "other" : QUEUES[ticket] ?? "other";
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: answer } }], usage: { prompt_tokens: 50, completion_tokens: 2, cost: costOf(parsed.model) } }));
     });
@@ -148,7 +155,7 @@ export async function subscribe(app: App, accountId: string, plan: { includedEva
   });
 }
 
-/** A label task: six examples with answers and one without, which the label check asks about. */
+/** A label task: six examples with answers and one without, which the label check asks about with the written cases. */
 export function bundle(task = "ticket classifier", unlabeled = true) {
   const entries = Object.entries(TICKETS);
   return {

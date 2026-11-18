@@ -7,13 +7,14 @@ import { createClient } from "rivetkit/client";
 import { NO_ORGANIZATION } from "../src/auth.ts";
 import { signStripePayload } from "../src/billing.ts";
 import type { Registry } from "../src/registry.ts";
-import { bundle, caller, costOf, crash, fakeModels, startApp, stop, subscribe, waitFor, WEAK_BELOW, catalogue, type App, type FakeModels } from "./helpers.ts";
+import { bundle, caller, costOf, crash, fakeModels, startApp, stop, subscribe, waitFor, WEAK_BELOW, WRITTEN, catalogue, type App, type FakeModels } from "./helpers.ts";
 
 const CLERK = { CLERK_SECRET_KEY: "sk_test_fake", CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from("clerk.openmerit.test$").toString("base64")}` };
 type Data = Record<string, unknown>;
 type Result = { status: string; pick: { model: string; passes: number; total: number } | null; edit: { edits: { before: string; after: string }[] }; reportUrl: string; spend: { openmeritUsd: number; customerUsd: number } };
 const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
 /** What the job should have paid: each distinct model call once, however often it was sent. */
+const writerCalls = (models: FakeModels) => models.calls.filter(call => call.ticket.startsWith("writer:"));
 const distinctCost = (models: FakeModels) => sum([...new Set(models.calls.map(call => `${call.model}\0${call.ticket}`))].map(key => costOf(key.split("\0")[0]!)));
 
 describe("the cloud app", () => {
@@ -48,7 +49,7 @@ describe("the cloud app", () => {
     const agent = caller(app, "test:user_c:org_unpaid:admin");
     const unpaid = await agent.tool("openmerit_recommend", { bundle: bundle() });
     assert.equal(unpaid.isError, true);
-    assert.match(unpaid.text, /no active OpenMerit plan.*app\.openmerit\.test\/billing/);
+    assert.match(unpaid.text, /no active OpenMerit plan.*app\.openmerit\.test\/plan\//);
     await subscribe(app, "org_unpaid");
     const keyArgument = await agent.tool("openmerit_recommend", { bundle: bundle(), apiKey: "sk-live-123456" });
     assert.equal(keyArgument.isError, true);
@@ -120,26 +121,34 @@ test("a job waits on its label check across a restart, then measures on OpenRout
 
     const result = () => agent().tool("openmerit_result", { job_id: jobId });
     const asking = await waitFor(result, value => value.data.status === "needs_input");
-    assert.deepEqual((asking.data.questions as { id: string }[]).map(question => question.id), ["label_ex7"]);
+    assert.deepEqual((asking.data.questions as { id: string }[]).map(question => question.id), ["label_example-7", "label_check"]);
     assert.match(asking.text, /Where is my invoice for March\?/);
-    assert.equal(models.calls.length, 0, "nothing is measured before the label check");
+    const check = (asking.data.questions as { id: string; options: { value: string; label: string }[] }[])[1]!;
+    assert.deepEqual(check.options.map(option => option.value), ["written-1", "written-2"]);
+    assert.match(check.options[1]!.label, /The dashboard shows a blank page → technical/);
+    // The writer asks for 12 cases, gets 2, and asks once more for the other 10.
+    assert.deepEqual(models.calls.map(call => call.ticket), ["writer:12", "writer:10"], "nothing is measured before the label check");
 
     await crash(app);
     app = await startApp({ models, env: app.env, storage: app.storage, enginePort: app.enginePort });
     const resumed = await waitFor(result, value => value.data.status === "needs_input", 90_000);
-    assert.deepEqual((resumed.data.questions as { id: string }[]).map(question => question.id), ["label_ex7"]);
+    assert.deepEqual((resumed.data.questions as { id: string }[]).map(question => question.id), ["label_example-7", "label_check"]);
 
-    const answered = await agent().tool("openmerit_answer", { job_id: jobId, answers: { label_ex7: "billing" } });
+    // Unticking written-2 drops that case.
+    const answered = await agent().tool("openmerit_answer", { job_id: jobId, answers: { "label_example-7": "billing", label_check: ["written-1"] } });
     assert.equal(answered.isError, false, answered.text);
     const done = await waitFor(result, value => value.data.status === "done" || value.data.status === "failed" || value.data.status === "stopped");
     assert.equal(done.data.status, "done", done.text);
     const measured = done.data.result as Result;
     assert.equal(measured.status, "picked");
-    assert.equal(measured.pick!.total, 7);
-    assert.equal(measured.pick!.passes, 7);
+    assert.equal(measured.pick!.total, 8);
+    assert.equal(measured.pick!.passes, 8);
     assert.ok((catalogue.models.find(model => model.id === measured.pick!.model)?.eci ?? 200) >= WEAK_BELOW, `${measured.pick!.model} answers wrongly in the fake`);
     assert.deepEqual(measured.edit.edits.map(edit => edit.before), ["gpt-5.4"]);
     assert.ok(models.calls.some(call => call.ticket === "Where is my invoice for March?"), "the labelled case is measured");
+    const [kept, dropped] = Object.keys(WRITTEN);
+    assert.ok(models.calls.some(call => call.ticket === kept) && !models.calls.some(call => call.ticket === dropped), "only the ticked written case is measured");
+    assert.equal(writerCalls(models).length, 2, "the restart writes no new cases");
 
     // OpenRouter calls carry OpenMerit's key; the customer's endpoint gets the customer's key, decrypted in memory.
     assert.ok(models.calls.filter(call => call.model !== "acme/fine-tune-1").every(call => call.auth === "Bearer or-test-key"));
@@ -159,7 +168,7 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     const me = await agent().api<{ plan: { usedEvals: number } }>("/api/me");
     assert.equal(me.body.plan.usedEvals, 1);
 
-    // Watching: a new catalogue version starts a watch job, which reuses the saved label and asks nothing.
+    // Watching: a new catalogue version starts a watch job, which reuses the saved label and written case and asks nothing.
     const [taskRow] = (await agent().api<{ id: string }[]>("/api/tasks")).body;
     assert.deepEqual((await agent().api(`/api/tasks/${taskRow!.id}/watch`, { method: "POST", body: JSON.stringify({ on: true }) })).body, { watching: true });
     const rivet = createClient<Registry>({ endpoint: `http://127.0.0.1:${app.enginePort}`, token: "test-token" });
@@ -167,6 +176,9 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     const runs = await waitFor(() => agent().api<{ id: string; kind: string; status: string }[]>("/api/runs"), value => value.body.some(run => run.kind === "watch" && run.status === "done"))
       .catch(async (error: Error) => { throw new Error(`${error.message}\nTask: ${JSON.stringify((await agent().api(`/api/tasks/${taskRow!.id}`)).body).slice(0, 1500)}`); });
     assert.equal(runs.body.filter(run => run.kind === "watch").length, 1);
+    assert.equal(writerCalls(models).length, 2, "the watch job writes no new cases");
+    const watched = await agent().api<{ pick: { total: number } }>(`/api/runs/${runs.body.find(run => run.kind === "watch")!.id}`);
+    assert.equal(watched.body.pick.total, 8);
     const tasks = await agent().tool("openmerit_tasks", {});
     assert.match(tasks.text, /ticket classifier \(acme\/support\): openai\/gpt-5\.4 → .*, picked, watched/);
   } finally { await stop(app); await models.close(); }
@@ -178,11 +190,15 @@ test("a measure step replayed after a crash does not count its spend twice", asy
   try {
     await subscribe(app, "org_replay");
     const agent = () => caller(app, "test:user_s:org_replay:admin");
-    // The fourth call is in the current model's measure step: three of its calls are settled, the fourth is reserved. Then the node dies.
-    let crashed: Promise<void> | null = null;
-    models.onCall = async index => { if (index === 3) { models.onCall = null; crashed = crash(app); await crashed; } };
     const started = await agent().tool("openmerit_recommend", { bundle: bundle("replayed classifier", false) });
     const jobId = started.data.job_id as string;
+    await waitFor(() => agent().tool("openmerit_result", { job_id: jobId }), value => value.data.status === "needs_input");
+    // The fourth measured call is in the current model's measure step, sent with three others, some of them settled. Then the node dies.
+    let crashed: Promise<void> | null = null;
+    const written = models.calls.length;
+    models.onCall = async index => { if (index === written + 3) { models.onCall = null; crashed = crash(app); await crashed; } };
+    // The answer reaches the job's queue before measuring starts, so the node may die before this call returns.
+    await agent().tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } }).catch(() => null);
     await waitFor(async () => crashed, value => value !== null, 60_000);
     await crashed;
     app = await startApp({ models, env: app.env, storage: app.storage, enginePort: app.enginePort });

@@ -2,7 +2,7 @@
 // filtered by the task's needs and guardrails, as a ladder for the search. The provisional pick
 // comes from the same pool, by catalogue evidence alone.
 import { blendedPrice, catalogueIndex, ladder, pool, type Catalogue, type CatalogueModel, type Funding, type Guardrails, type Ranked } from "./engine.ts";
-import type { EndpointKind, TaskBundle } from "./ranking.ts";
+import type { EndpointKind, TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 
 /** An endpoint as a job sees it, without its key. */
 export interface EndpointInfo { id: string; kind: EndpointKind; baseUrl: string; allowedModels: string[] | "all"; funding: Funding }

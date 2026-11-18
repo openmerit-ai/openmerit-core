@@ -8,7 +8,7 @@ import type { PlanUpdate } from "../billing.ts";
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, settledUsd, type Funding, type GuardrailKey, type Guardrails, type Level, type ReserveResult, type ResolvedGuardrails, type Settlement } from "../engine.ts";
 import { decryptKey, encryptKey, endpointUrlProblem } from "../keys.ts";
 import { OPENROUTER, type EndpointInfo } from "../pool.ts";
-import type { ClientEndpoint, EndpointKind } from "../ranking.ts";
+import type { EndpointConfig, EndpointKind } from "../../../openmerit-core/src/ranking/index.ts";
 import { services } from "../services.ts";
 
 type Row = Record<string, unknown>;
@@ -92,8 +92,8 @@ export const account = actor({
     startJob: async (c, input: { jobId: string; taskId: string; kind: "run" | "watch" }): Promise<Started> => c.db.transaction(async tx => {
       const { limits, appUrl } = services().config;
       const current = await plan(tx);
-      if (!current || !ACTIVE_PLAN.has(current.status)) return { ok: false, error: `This account has no active OpenMerit plan${current ? ` (Stripe says ${current.status})` : ""}. Subscribe at ${appUrl}/billing, then try again.` };
-      if (current.overage === "refuse" && current.usedEvals >= current.includedEvals) return { ok: false, error: `This month's ${current.includedEvals} evaluations are used. More start at ${current.periodEnd ? new Date(current.periodEnd * 1000).toISOString().slice(0, 10) : "the next period"}, or change the plan at ${appUrl}/billing.` };
+      if (!current || !ACTIVE_PLAN.has(current.status)) return { ok: false, error: `This account has no active OpenMerit plan${current ? ` (Stripe says ${current.status})` : ""}. Subscribe at ${appUrl}/plan/, then try again.` };
+      if (current.overage === "refuse" && current.usedEvals >= current.includedEvals) return { ok: false, error: `This month's ${current.includedEvals} evaluations are used. More start at ${current.periodEnd ? new Date(current.periodEnd * 1000).toISOString().slice(0, 10) : "the next period"}, or change the plan at ${appUrl}/plan/.` };
       const now = Date.now();
       const [hour] = await tx.execute(`SELECT count(*) AS n FROM jobs WHERE started_at > ?`, now - 3_600_000);
       if (Number(hour?.n) >= limits.jobsPerHour) return { ok: false, error: `This account started ${limits.jobsPerHour} jobs in the last hour, its limit. Try again later.` };
@@ -219,7 +219,7 @@ export const account = actor({
     endpointsForJob: async (c): Promise<EndpointInfo[]> => (await jobEndpoints(c.db, c.key[0]!, false)).map(({ apiKey: _key, ...info }) => info),
 
     /** The same endpoints with their keys, for the job's model client. Returned only to the job, held in its memory, never stored. */
-    endpointSecrets: async (c): Promise<ClientEndpoint[]> => jobEndpoints(c.db, c.key[0]!, true),
+    endpointSecrets: async (c): Promise<EndpointConfig[]> => jobEndpoints(c.db, c.key[0]!, true),
 
     // Guardrails, per level: environment (a name), agent (`environment:agent`; environment names hold no colon) and task (task ID).
     setGuardrails: async (c, input: { level: Level; scope: string; settings: Guardrails }): Promise<{ rejected: { key: string; reason: string }[] }> => {
@@ -354,9 +354,9 @@ async function endpointViews(database: Database): Promise<EndpointView[]> {
   return rows.map(row => ({ id: String(row.id), kind: row.kind as EndpointKind, baseUrl: String(row.base_url), allowedModels: JSON.parse(String(row.allowed_models)) as string[] | "all", keyLast4: String(row.key_last4), verifiedAt: iso(row.verified_at), builtIn: false }));
 }
 
-async function jobEndpoints(database: Database, accountId: string, withKeys: boolean): Promise<(ClientEndpoint & EndpointInfo)[]> {
+async function jobEndpoints(database: Database, accountId: string, withKeys: boolean): Promise<(EndpointConfig & EndpointInfo)[]> {
   const { openrouter, keyEncryptionKey } = services().config;
-  const out: (ClientEndpoint & EndpointInfo)[] = [];
+  const out: (EndpointConfig & EndpointInfo)[] = [];
   if (openrouter.apiKey) out.push({ id: OPENROUTER, kind: "openrouter", baseUrl: openrouter.baseUrl, allowedModels: "all", funding: "openmerit", apiKey: withKeys ? openrouter.apiKey : "" });
   const rows = await database.execute(`SELECT id, kind, base_url, allowed_models, sealed_key FROM endpoints ORDER BY created_at`);
   for (const row of rows) {

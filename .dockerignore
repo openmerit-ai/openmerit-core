@@ -5,5 +5,8 @@
 !cloud/src
 !openmerit-core/package.json
 !openmerit-core/src/engine
+!openmerit-core/src/ranking
+!openmerit-core/src/eval/proxy.ts
 !openmerit-core/src/catalogue
 !openmerit-core/data/catalogue.json
+**/*.test.ts
