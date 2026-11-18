@@ -224,6 +224,16 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       return json(200, { account: state.me.account.id, exportedAt: new Date().toISOString(), endpoints, guardrails, tasks, jobs: runs, reports: Object.values(reports) });
     }
     if (path === "/api/disconnect" && method === "POST") { if (denied) return denied; state.disconnected += 1; return json(200, { disconnected: true }); }
+    if ((match = /^\/api\/tasks\/([\w-]+)$/.exec(path)) && method === "DELETE") {
+      if (denied) return denied;
+      const id = match[1] ?? "";
+      if (!state.tasks.some((task) => task.id === id)) return error(404, "No such task in this account.");
+      const gone = state.runs.filter((run) => run.taskId === id);
+      for (const run of gone) { delete state.reports[run.id]; delete state.jobs[run.id]; }
+      state.tasks = state.tasks.filter((task) => task.id !== id);
+      state.runs = state.runs.filter((run) => run.taskId !== id);
+      return json(200, { deleted: true, jobs: gone.length });
+    }
     if (path === "/api/account" && method === "DELETE") {
       if (denied) return denied;
       const { tasks, runs } = state;

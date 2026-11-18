@@ -13,6 +13,7 @@ export const dataView: View<Data> = {
   render({ tasks, runs, endpoints }, { me }) {
     const keys = endpoints.filter((endpoint) => !endpoint.builtIn).length;
     const admin = me.role === "admin";
+    const count = (id: string) => runs.filter((run) => run.taskId === id).length;
     return html`${header(me, "Your data", "What OpenMerit keeps, where it goes, and how to take it back.")}
     <section aria-labelledby="keeps">
       <h2 id="keeps">What OpenMerit Keeps</h2>
@@ -35,13 +36,32 @@ export const dataView: View<Data> = {
         <div class="row"><span>Export<span class="sub">Every task, test case, run and setting for ${me.account.name} as JSON. Keys are not included.</span></span><button class="btn" type="button" data-action="export">Export</button></div>
         <div class="row"><span>Delete everything<span class="sub">Deletes every task, test case, run, guardrail, endpoint and key for ${me.account.name}. Run pages and public links stop loading. This cannot be undone.</span></span>${admin ? html`<button class="btn danger" type="button" data-action="delete">Delete all data</button>` : html`<span class="sub">Admins only</span>`}</div>
       </div>
-    </section>`;
+    </section>
+    ${tasks.length ? html`<section aria-labelledby="delete-task">
+      <h2 id="delete-task">Delete a Task</h2>
+      <div class="card">
+        ${tasks.map((task) => html`<div class="row"><span>${task.name}<span class="sub">${task.environment} · ${plural(count(task.id), "run")}${task.state === "retired" ? " · retired" : ""}</span></span>${admin ? html`<button class="btn danger" type="button" data-action="deleteTask" data-id="${task.id}" data-name="${task.name}" aria-label="Delete ${task.name}">Delete</button>` : html`<span class="sub">Admins only</span>`}</div>`)}
+      </div>
+      <p class="note">Deletes the task's context, test cases, runs and run pages. To stop OpenMerit using a task but keep its history, have your coding agent retire it instead. A coding agent that asks about the task again starts it afresh.</p>
+    </section>` : ""}`;
   },
   actions: {
     async export(_target, _data, { api, me, download, toast }) {
       const data = await api.send<unknown>("POST", "/api/account/export");
       download(`openmerit-${me.account.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${new Date().toISOString().slice(0, 10)}.json`, data);
       toast("Export downloaded.");
+    },
+    async deleteTask(target, _data, { api, confirm, refresh, toast }) {
+      const { id = "", name = "" } = target.dataset;
+      const ok = await confirm({
+        title: `Delete ${name}?`,
+        body: "Its task context, test cases, runs and run pages are deleted and cannot be restored. Links to its runs stop loading.",
+        confirm: "Delete task", danger: true, typeToConfirm: name,
+      });
+      if (!ok) return;
+      await api.send("DELETE", `/api/tasks/${encodeURIComponent(id)}`);
+      await refresh();
+      toast(`${name} deleted.`);
     },
     async delete(_target, _data, { api, me, confirm, go }) {
       const ok = await confirm({
