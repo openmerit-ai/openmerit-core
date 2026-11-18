@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
+import { traceRequest } from "../ranking/index.ts";
 import { createLangfuseSource, replayRequest, type TraceTask } from "./index.ts";
 
 const SYSTEM = "Classify the support ticket as billing, bug or other.";
@@ -106,6 +107,14 @@ test("replay samples unique generations across turn depth and output kind, sprea
       { role: "assistant", content: "", tool_calls: [{ id: "c1", type: "function", function: { name: "lookup_order", arguments: '{"order":"c1"}' } }] },
       { role: "tool", content: '{"status":"shipped"}', tool_call_id: "c1" },
     ]);
+    assert.deepEqual(traceRequest(afterTool!), {
+      system: SYSTEM,
+      messages: [
+        { role: "user", content: "Order 7 is late" },
+        { role: "assistant", content: "", toolCalls: [{ id: "c1", name: "lookup_order", arguments: '{"order":"c1"}' }] },
+        { role: "tool", toolCallId: "c1", content: '{"status":"shipped"}' },
+      ],
+    }, "the ranking runner reads the recorded request");
     assert.deepEqual(afterTool!.expected, { role: "assistant", content: "other" });
     assert.equal((toolCall!.expected as { tool_calls: { function: { name: string } }[] }).tool_calls[0]!.function.name, "lookup_order");
     assert.match(toolCall!.input.messages!, /my key is \[redacted\]/);
