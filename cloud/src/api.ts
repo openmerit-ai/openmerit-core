@@ -10,6 +10,14 @@ type Json = Record<string, unknown>;
 
 const json = (status: number, body: unknown, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store", ...headers } });
 const error = (status: number, message: string) => json(status, { error: message });
+/**
+ * Destructive actions need a first-factor verification in the last REVERIFY_MINUTES. Otherwise the
+ * 403 body is the one Clerk's reverification helpers (`useReverification`) recognize, so the app can
+ * open Clerk's prompt and retry. A token without `fva` fails closed.
+ */
+const REVERIFY_MINUTES = 10;
+const reverify = (who: Identity) => who.firstFactorAgeMinutes !== null && who.firstFactorAgeMinutes < REVERIFY_MINUTES ? null
+  : json(403, { clerk_error: { type: "forbidden", reason: "reverification-error", metadata: { reverification: { level: "first_factor", afterMinutes: REVERIFY_MINUTES } } } });
 const markdown = (text: string) => new Response(text, { status: 200, headers: { "content-type": "text/markdown; charset=utf-8", "cache-control": "no-store" } });
 
 /** A public report link names its account, so the app finds the report without a global index. */
@@ -63,6 +71,20 @@ export function apiRoutes(deps: AppDeps) {
     }
 
     if (path === "/api/tasks" && method === "GET") return json(200, await account.tasks());
+    if (path === "/api/tasks/deleted" && method === "GET") return json(200, await account.deletions());
+    if ((match = /^\/api\/tasks\/([\w-]+)$/.exec(path)) && method === "DELETE") {
+      const denied = admin() ?? reverify(who); if (denied) return denied;
+      const row = await account.task(match[1]!);
+      if (!row) return error(404, "No such task in this account.");
+      const jobs = await account.jobs({ taskId: row.id, limit: 100_000 });
+      // A job that is computing would write its result back after the delete; one that waits for answers can go.
+      if (jobs.some(job => job.status === "queued" || job.status === "running")) return error(409, "This task has a run in progress. Delete it when the run finishes.");
+      // The task first, so the catalogue stops telling it; then its jobs, which hold its bundle and cases; then its rows.
+      await client.task.get([who.accountId, row.id]).destroy().catch(() => null);
+      for (const job of jobs) await client.job.get([job.id]).destroy().catch(() => null);
+      const deleted = await account.deleteTask({ taskId: row.id, userId: who.userId });
+      return json(200, { deleted: true, jobs: deleted.jobs });
+    }
     if ((match = /^\/api\/tasks\/([\w-]+)$/.exec(path)) && method === "GET") {
       const row = await account.task(match[1]!);
       if (!row) return error(404, "No such task in this account.");
@@ -142,7 +164,7 @@ export function apiRoutes(deps: AppDeps) {
       return json(200, { disconnected: true });
     }
     if (path === "/api/account" && method === "DELETE") {
-      const denied = admin(); if (denied) return denied;
+      const denied = admin() ?? reverify(who); if (denied) return denied;
       const [tasks, jobs] = await Promise.all([account.tasks(), account.jobs({ limit: 100_000 })]);
       await client.catalogue.getOrCreate(["global"]).unsubscribe({ accountId: who.accountId });
       for (const job of jobs) await client.job.get([job.id]).destroy().catch(() => null);

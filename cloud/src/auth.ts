@@ -17,6 +17,8 @@ export interface Identity {
   role: Role;
   /** When the token was issued, in Unix seconds; null when it does not say. */
   issuedAt: number | null;
+  /** Minutes since the session last verified a first factor, from a Clerk session token's `fva` claim; null when it does not say or never did. */
+  firstFactorAgeMinutes: number | null;
 }
 
 export type AuthResult = { ok: true; identity: Identity } | { ok: false; status: 401 | 403; error: string };
@@ -49,7 +51,9 @@ function identity(userId: string | null, claims: Claims): AuthResult {
   if (!userId) return { ok: false, status: 401, error: "The token names no user." };
   const org = organization(claims);
   if (!org) return { ok: false, status: 403, error: NO_ORGANIZATION };
-  return { ok: true, identity: { userId, accountId: org.id, accountName: org.name, role: org.role, issuedAt: typeof claims.iat === "number" ? claims.iat : null } };
+  // fva is [first-factor age, second-factor age] in minutes, -1 for never.
+  const age = Array.isArray(claims.fva) && typeof claims.fva[0] === "number" && claims.fva[0] >= 0 ? claims.fva[0] : null;
+  return { ok: true, identity: { userId, accountId: org.id, accountName: org.name, role: org.role, issuedAt: typeof claims.iat === "number" ? claims.iat : null, firstFactorAgeMinutes: age } };
 }
 
 const unauthenticated = (error: string): AuthResult => ({ ok: false, status: 401, error });
@@ -82,15 +86,16 @@ export class ClerkAuth implements Auth {
 }
 
 /**
- * Authentication for tests: the token `test:<user>:<organization>[:admin]` names its caller, and
- * `test:<user>` names a user without an organization. Never used outside tests.
+ * Authentication for tests: the token `test:<user>:<organization>[:admin[:<minutes>]]` names its caller,
+ * with its first-factor verification that many minutes ago (default 0), and `test:<user>` names a user
+ * without an organization. Never used outside tests.
  */
 export class TestAuth implements Auth {
   private parse(request: Request): AuthResult {
     const token = bearer(request);
     if (!token?.startsWith("test:")) return unauthenticated("Sign in to OpenMerit: this request has no access token.");
-    const [, user, org, role] = token.split(":");
-    return identity(user ?? null, { ...(org ? { org_id: org, org_slug: org, org_role: role === "admin" ? "org:admin" : "org:member" } : {}), iat: Math.floor(Date.now() / 1000) });
+    const [, user, org, role, minutes] = token.split(":");
+    return identity(user ?? null, { ...(org ? { org_id: org, org_slug: org, org_role: role === "admin" ? "org:admin" : "org:member" } : {}), iat: Math.floor(Date.now() / 1000), fva: [Number(minutes ?? 0), -1] });
   }
   async mcp(request: Request) { return this.parse(request); }
   async api(request: Request) { return this.parse(request); }

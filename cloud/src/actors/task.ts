@@ -117,8 +117,12 @@ export const task = actor({
       return { started: started.jobId, reason: `catalogue ${version} is newer than ${previous ?? "the last run's"}` };
     },
 
-    /** For deleting an account. */
-    destroy: (c): void => { c.destroy(); },
+    /** For deleting the task or its account: stops the schedule and the catalogue's notices, which would otherwise recreate the task. */
+    destroy: async (c): Promise<void> => {
+      await c.cron.delete(WATCH).catch(() => undefined);
+      await c.client<Registry>().catalogue.getOrCreate(["global"]).unsubscribe({ accountId: c.state.accountId, taskId: c.state.taskId });
+      c.destroy();
+    },
   },
 });
 
