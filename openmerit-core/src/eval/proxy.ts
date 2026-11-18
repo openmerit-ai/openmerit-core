@@ -72,6 +72,20 @@ const retryDelayMs = (retryAfter: string | null, attempt: number) => {
   return retryAfter !== null && Number.isFinite(seconds) && seconds >= 0 ? Math.min(seconds, 30) * 1000 : 2000 * 2 ** attempt;
 };
 
+/**
+ * Sends a model call, and again up to MODEL_CALL_RETRIES times while it fails in a way that may pass.
+ * `forward` returns the response, or the error when nothing came back. Discarded answers are not charged.
+ */
+export async function withRetries(forward: () => Promise<Response | Error>, signal?: AbortSignal): Promise<Response | Error> {
+  let upstream = await forward();
+  for (let attempt = 0; attempt < MODEL_CALL_RETRIES && (upstream instanceof Error || retryable(upstream.status)); attempt++) {
+    if (!(upstream instanceof Error)) await upstream.body?.cancel();
+    await sleep(retryDelayMs(upstream instanceof Error ? null : upstream.headers.get("retry-after"), attempt), undefined, signal ? { signal } : {});
+    upstream = await forward();
+  }
+  return upstream;
+}
+
 export class EvalProxy {
   private server: Server | null = null;
   private readonly units = new Map<string, { unit: ProxyUnit; tally: UnitTally; ledger: Ledger }>();
@@ -147,12 +161,7 @@ export class EvalProxy {
         headers: { authorization: `Bearer ${unit.apiKey}`, "content-type": "application/json", accept: req.headers.accept ?? "application/json", ...(unit.baseUrl.includes("openrouter.ai") ? { "x-title": "OpenMerit Scout eval" } : {}) },
       }).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
       // A failed call that may pass is sent again, so the eval only sees failures that last; failed calls are not charged.
-      let upstream = await forward();
-      for (let attempt = 0; attempt < MODEL_CALL_RETRIES && (upstream instanceof Error || retryable(upstream.status)); attempt++) {
-        if (!(upstream instanceof Error)) await upstream.body?.cancel();
-        await sleep(retryDelayMs(upstream instanceof Error ? null : upstream.headers.get("retry-after"), attempt));
-        upstream = await forward();
-      }
+      const upstream = await withRetries(forward);
       if (upstream instanceof Error) {
         tally.upstreamErrors.push(502);
         await settle({ actualUsd: 0, estimatedUsd: null, latencyMs: Date.now() - started, failed: true });
