@@ -128,8 +128,7 @@ function advance(job: JobView, task: Task | undefined, since: number, now = Date
   return { ...job, progress: { measured: done, planned: total }, live };
 }
 
-export function createFakeApi(options: { publicUrl?: string; appUrl?: string } = {}): (request: Request) => Promise<Response> {
-  const publicUrl = options.publicUrl ?? "https://openmerit.ai";
+export function createFakeApi(options: { appUrl?: string } = {}): (request: Request) => Promise<Response> {
   const states = new Map<string, State>();
   const since = Date.now();
   return async (request) => {
@@ -169,10 +168,6 @@ export function createFakeApi(options: { publicUrl?: string; appUrl?: string } =
       const job = state.jobs[id];
       const found = state.reports[id] ?? (job && advance(job, state.tasks.find((task) => task.id === job.taskId), since));
       return found ? json(200, found) : error(404, "No such run in this account.");
-    }
-    if ((match = /^\/api\/runs\/([\w-]+)\/share$/.exec(path)) && method === "POST") {
-      if (!state.reports[match[1] ?? ""]) return error(404, "This run has no report yet.");
-      return json(200, { url: `${publicUrl}/api/share/${btoa(state.me.account.id).replace(/=+$/, "")}.pv${match[1]}.md` });
     }
     if (path === "/api/endpoints" && method === "GET") return json(200, state.endpoints);
     if (path === "/api/endpoints" && method === "POST") {
