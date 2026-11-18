@@ -8,7 +8,7 @@ if [[ "$(node --version)" != v22.* ]]; then
   echo "Expected Node.js 22 from .agents/setup, found $(node --version) at $(command -v node). Rerun .agents/setup." >&2
   exit 1
 fi
-for dir in . openmerit-core playground; do
+for dir in . openmerit-core playground cloud; do
   if [[ ! -d "$dir/node_modules" ]]; then
     echo "$dir/node_modules is missing. Rerun .agents/setup." >&2
     exit 1

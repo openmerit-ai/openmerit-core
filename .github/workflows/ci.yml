@@ -51,6 +51,26 @@ jobs:
       - run: npm ci
       - run: npm run check
 
+  # The cloud app behind openmerit.ai/mcp: its own lockfile, typecheck, and tests against a local
+  # Rivet engine with fake sign-in, billing and models (no paid calls), then its Docker image.
+  cloud:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: cloud
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: cloud/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: docker build -f cloud/Dockerfile -t openmerit-cloud:ci .
+        working-directory: .
+
   # The openmerit npm package: its own lockfile, typecheck, tests and build. No model calls.
   openmerit-core:
     runs-on: ubuntu-latest

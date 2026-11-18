@@ -1,0 +1,10 @@
+{
+  // The repository's strictness (tsconfig.base.json), plus the DOM library that openmerit-core's
+  // sources, which this app imports, compile with. Node.js 22.19 runs these .ts files by stripping types.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"]
+}
