@@ -40,7 +40,6 @@ test("a run shows its saved report, or the job's live state until it has one", a
   assert.match(report, /Ticket router: switch to claude-haiku-5-5/);
   assert.match(report, /claude-haiku-5-5 OpenRouter 40\/40 \$0\.07 0\.5 s Picked/);
   assert.match(report, /sahra-triage-ft-2 ep_baseten · your key · placed by measurement only/);
-  assert.match(report, /\$1\.84 on OpenMerit's account and \$0\.62 on your own endpoints' keys/);
   const waiting = text(runView.render(await get<JobView>("/api/runs/w8r3k1"), page(me)));
   assert.match(waiting, /Needs input/);
   assert.doesNotMatch(waiting, /How the models compared/);

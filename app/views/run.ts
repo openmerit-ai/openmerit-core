@@ -1,6 +1,6 @@
 import type { Endpoint, JobView, MeasuredModel, Report } from "../api.ts";
 import { liveText } from "../live.ts";
-import { date, endpointName, html, setEndpoints, model, modelName, per1k, plural, seconds, usd, type Html } from "../html.ts";
+import { date, endpointName, html, setEndpoints, model, modelName, per1k, plural, seconds, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { show } from "./guardrails.ts";
 
@@ -95,22 +95,14 @@ function change(report: Report): Html {
       </div>`;
 }
 
-const list = (items: string[]): string => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
-
 function report(data: Report): Html {
   const models = [data.baseline, ...data.candidates].filter((item): item is MeasuredModel => item !== null);
   const pick = data.pick?.model ?? null;
   const from = Object.entries(data.guardrails.from);
-  const { search } = data;
   return html`<div class="eyebrow"><a href="/">Runs</a><span>›</span><span>${data.jobId}</span><span>Measured ${date(data.createdAt)}</span><span>Catalogue ${data.catalogueVersion}</span></div>
     <h1 class="title">${title(data)}</h1>
     ${data.status !== "picked" ? html`<p class="lede">${verdicts[data.status]}</p>` : ""}
     <div class="pick">${pickCard(data)}${change(data)}</div>
-
-    <section aria-labelledby="basis">
-      <h2 id="basis">What this is based on</h2>
-      <div class="card"><p>${plural(data.cases.total, "test case")}: ${data.cases.fromExamples} from your coding agent's examples and ${data.cases.written} written by OpenMerit from the task it sent.</p></div>
-    </section>
 
     ${models.length ? html`<section aria-labelledby="compare">
       <h2 id="compare">How the models compared</h2>
@@ -128,22 +120,7 @@ function report(data: Report): Html {
           </tbody>
         </table>
       </div>
-      ${models.some((item) => !item.inCatalogue) ? html`<p class="note">Models outside the catalogue, such as a fine-tune on your own endpoint, have no capability index, so they were measured on every run rather than placed by the search.</p>` : ""}
     </section>` : ""}
-
-    <section aria-labelledby="search">
-      <h2 id="search">How OpenMerit searched</h2>
-      <div class="card">
-        <dl class="steps">
-          <dt>1 · Shortlist</dt><dd>${plural(search.pool, "model")} cheaper than ${data.baseline ? modelName(data.baseline.model) : "the model in use today"} that fit this task's guardrails, ordered by capability${search.unplaced ? `, plus ${search.unplaced} with no capability score, measured as ${search.unplaced === 1 ? "a challenger" : "challengers"}` : ""}.</dd>
-          <dt>2 · Screen</dt><dd>Tested the shortlist on ${plural(search.samples.length, "case")} the model in use today passes, halving it at each step, to find the cheapest models that pass them all.</dd>
-          <dt>3 · Measure</dt><dd>Ran ${list([...search.finalists.map(modelName), ...search.challengers.map(modelName)]) || "no model"} on all ${data.cases.total} cases${search.challengers.length ? html` (${list(search.challengers.map(modelName))} as ${search.challengers.length === 1 ? "a challenger" : "challengers"})` : ""}.</dd>
-          <dt>Cost</dt><dd>${usd(data.spend.openmeritUsd)} on OpenMerit's account${data.spend.customerUsd ? ` and ${usd(data.spend.customerUsd)} on your own endpoints' keys` : ""}.</dd>
-        </dl>
-        ${search.shortfall ? html`<p class="note">${search.shortfall}</p>` : ""}
-        ${data.notices.map((notice) => html`<p class="note">${notice}</p>`)}
-      </div>
-    </section>
 
     ${data.agentEval ? html`<section aria-labelledby="agent-eval">
       <h2 id="agent-eval">Agent eval</h2>
@@ -155,7 +132,7 @@ function report(data: Report): Html {
     ${from.length || data.guardrails.rejected.length ? html`<section aria-labelledby="rules">
       <h2 id="rules">Guardrails this run used</h2>
       <div class="card">
-        ${from.map(([key, level]) => html`<div class="row"><span><span class="pill tag level">${level}</span><code>${key}</code></span><span>${show(key, (data.guardrails.effective as Record<string, unknown>)[key])}</span></div>`)}
+        ${from.map(([key, level]) => html`<div class="row"><span><span class="pill tag">${level}</span> <code>${key}</code></span><span>${show(key, (data.guardrails.effective as Record<string, unknown>)[key])}</span></div>`)}
         ${data.guardrails.rejected.map((item) => html`<p class="note">Not applied: <code>${item.key}</code> at the ${item.level} level, which ${item.reason}.</p>`)}
       </div>
     </section>` : ""}`;
