@@ -1,4 +1,5 @@
 import type { Endpoint, JobView, Run, Task } from "../api.ts";
+import { liveText } from "../live.ts";
 import { ago, date, endpointName, harness, html, logo, setEndpoints, model, per1k, plural, usd, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { empty, header } from "./common.ts";
@@ -56,26 +57,30 @@ function askedBy(run: Run): Html {
 const ACTIVE = new Set(["queued", "running", "needs_input"]);
 const when = (iso: string): Html => html`<span title="${date(iso)}">${ago(iso)}</span>`;
 
-// Runs still measuring, with their progress and the provisional pick their agent is using meanwhile.
+// Runs still measuring. Each row polls its run (app/live.ts): Torph morphs the cases, pass rate
+// and status, and Liveline draws the pass rate so far against the model in use today. A run the
+// cloud reports no live data for shows its measurements and the provisional pick instead.
 function inProgress(jobs: JobView[], runs: Run[], byId: Map<string, Task>): Html {
   if (!jobs.length) return html``;
   const runOf = new Map(runs.map((run) => [run.id, run]));
   return html`<section aria-labelledby="progress">
       <h2 id="progress">In progress</h2>
       <div class="tablewrap">
-        <table>
-          <thead><tr><th>Task</th><th>Status</th><th>Progress</th><th>Meanwhile using</th><th class="num">Started</th></tr></thead>
+        <table class="running">
+          <thead><tr><th>Task</th><th>Testing</th><th class="num">Cases</th><th class="num">Passed</th><th>So far</th><th class="num">Status</th></tr></thead>
           <tbody>
             ${jobs.map((job) => {
               const run = runOf.get(job.jobId);
               const task = byId.get(job.taskId);
-              const share = job.progress.planned ? Math.min(100, Math.round((job.progress.measured / job.progress.planned) * 100)) : 0;
-              return html`<tr>
-              <td><a href="/r/${job.jobId}/">${job.task}</a><span class="sub">${task?.environment ?? ""}</span></td>
-              <td>${jobStatus[job.status] ?? html`${job.status}`}${job.status === "running" ? html`<span class="sub">${job.phase.replace("_", " ")}</span>` : ""}</td>
-              <td>${job.progress.planned ? html`<div class="meter" aria-hidden="true"><i style="width: ${share}%"></i></div><span class="sub">${job.progress.measured} of about ${job.progress.planned} measurements</span>` : html`<span class="sub">${job.status === "needs_input" ? "paused for your answer" : "not started"}</span>`}</td>
-              <td>${job.provisional ? html`${model(job.provisional.model)}<span class="sub">on ${endpointName(job.provisional.endpoint)}</span>` : html`<span class="sub">–</span>`}</td>
-              <td class="num">${when(run?.startedAt ?? job.createdAt)}</td>
+              const text = liveText(job), id = job.jobId, live = job.live;
+              const testing = live?.model ?? job.provisional?.model;
+              return html`<tr data-live="${id}" data-status="${job.status}">
+              <td><a href="/r/${id}/">${job.task}</a><span class="sub">${task?.environment ?? ""}${run ? html` · ${when(run.startedAt)}` : ""}</span></td>
+              <td>${testing ? model(testing) : html`<span class="sub">–</span>`}${live?.baseline ? html`<span class="sub">vs ${model(live.baseline.model)} · ${Math.round(live.baseline.rate)}%</span>` : job.provisional ? html`<span class="sub">on ${endpointName(job.provisional.endpoint)}</span>` : ""}</td>
+              <td class="num"><span data-live="${id}" data-morph="cases">${text.cases}</span></td>
+              <td class="num"><span data-live="${id}" data-morph="rate">${text.rate}</span></td>
+              <td>${live ? html`<div class="live-spark" data-live="${id}" role="img" aria-label="Pass rate so far"></div>` : job.progress.planned ? html`<div class="meter" data-live="${id}" aria-hidden="true"><i style="width: ${Math.round((job.progress.measured / job.progress.planned) * 100)}%"></i></div>` : ""}</td>
+              <td class="num"><span class="pill${job.status === "needs_input" ? " warn" : ""}" data-live="${id}" data-morph="status">${text.status}</span></td>
             </tr>`;
             })}
           </tbody>

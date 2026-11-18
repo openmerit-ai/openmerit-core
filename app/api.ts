@@ -102,6 +102,22 @@ export interface JobView {
   provisional: { model: string; endpoint: string; reason: string; estCostPerCallUsd: number | null } | null;
   createdAt: string;
   report: null;
+  // While a job measures: the candidate under test, its passes so far against the model in use
+  // today, and its pass rate over time. Proposed for the cloud app, which does not send it yet;
+  // the preview's fake API does. Pages fall back to progress without it.
+  live?: LiveProgress | null;
+}
+export interface LiveProgress {
+  model: string;
+  endpoint: string;
+  // The model in use today and its pass rate on the same cases, 0 to 100.
+  baseline: { model: string; rate: number } | null;
+  done: number;
+  total: number;
+  passes: number;
+  // Pass rate so far, 0 to 100, after each case; time is Unix seconds.
+  history: { time: number; rate: number }[];
+  minutesLeft: number | null;
 }
 
 export type EndpointKind = "openrouter" | "openai-compatible" | "anthropic";

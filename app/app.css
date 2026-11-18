@@ -135,6 +135,9 @@ details summary { cursor: pointer; font-size: 13.5px; color: var(--link); margin
 .row:first-child { padding-top: 0; }
 .row:last-child { border-bottom: 0; padding-bottom: 0; }
 .meter { height: 6px; background: var(--soft); border-radius: 99px; overflow: hidden; margin: 10px 0 4px; }
+.live-spark { width: 140px; height: 32px; }
+.live-chart { height: 150px; margin-top: 8px; }
+table.running td { vertical-align: middle; }
 .meter i { display: block; height: 100%; background: var(--green); border-radius: 99px; }
 .big { font-size: 24px; font-weight: 500; letter-spacing: -.02em; display: block; }
 .btn.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
