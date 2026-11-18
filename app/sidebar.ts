@@ -1,14 +1,12 @@
 // Sidebar for the app.openmerit.ai mockup: Fixed (default) or Expand on hover, toggled by
-// the icon beside the logo or Ctrl/⌘+B and saved in localStorage; an off-canvas drawer on
-// narrow screens. The profile button opens a menu upward with the account pages.
+// the icon beside the logo or Ctrl/⌘+B and saved in localStorage. The profile button opens
+// a menu upward with the account pages. The mockup has no narrow-screen layout.
 type Mode = "fixed" | "hover";
 
 const root = document.documentElement;
 const toggle = document.querySelector<HTMLButtonElement>(".sidebar-toggle");
 const profile = document.querySelector<HTMLButtonElement>(".profile");
 const menu = document.querySelector<HTMLElement>(".profile-menu");
-const drawerButton = document.querySelector<HTMLButtonElement>(".menu-toggle");
-const scrim = document.querySelector<HTMLElement>(".scrim");
 
 const mode = (): Mode => (root.dataset.sidebar === "hover" ? "hover" : "fixed");
 const menuItems = (): HTMLElement[] => Array.from(menu?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? []);
@@ -35,12 +33,6 @@ function openMenu(open: boolean, focusFirst = false): void {
   if (open && focusFirst) menuItems()[0]?.focus();
 }
 
-function openDrawer(open: boolean): void {
-  root.classList.toggle("drawer-open", open);
-  drawerButton?.setAttribute("aria-expanded", String(open));
-  if (scrim) scrim.hidden = !open;
-}
-
 toggle?.addEventListener("click", switchMode);
 profile?.addEventListener("click", (event) => openMenu(menu?.hidden ?? false, event.detail === 0));
 menu?.addEventListener("keydown", (event) => {
@@ -56,15 +48,10 @@ document.addEventListener("pointerdown", (event) => {
   if (!menu?.contains(event.target) && !profile?.contains(event.target)) openMenu(false);
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    if (menu && !menu.hidden) { openMenu(false); profile?.focus(); return; }
-    openDrawer(false);
-  }
+  if (event.key === "Escape" && menu && !menu.hidden) { openMenu(false); profile?.focus(); }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
     event.preventDefault();
     switchMode();
   }
 });
-drawerButton?.addEventListener("click", () => openDrawer(!root.classList.contains("drawer-open")));
-scrim?.addEventListener("click", () => openDrawer(false));
 sync();

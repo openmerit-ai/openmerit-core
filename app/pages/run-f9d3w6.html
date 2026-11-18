@@ -1,0 +1,31 @@
+<!-- title: Fraud reviewer: measuring Gemini 3.5 Flash | nav: runs | path: r/f9d3w6 -->
+    <div class="eyebrow">
+      <a href="/">Runs</a><span>›</span><span>f9d3w6</span><span>Started 18 Nov 2026, 15:12 GST</span><span>Started by a watch re-run: a new model could fit</span>
+    </div>
+    <h1 class="title">Fraud reviewer: measuring Gemini 3.5 Flash</h1>
+    <p class="lede">Gemini 3.5 Flash is new and cheaper, so OpenMerit is re-running this task's eval to see whether it passes as many cases as Claude Sonnet 5.5. This page updates as each case finishes.</p>
+
+    <div class="card live-run" style="margin-top: 20px">
+      <div class="split">
+        <p class="pick-model">{{logo:gemini}}Gemini 3.5 Flash<span class="sub">Google AI API · <code>gemini-3.5-flash</code></span></p>
+        <span class="pill" data-run="f9d3w6" data-morph="status">Measuring · about 16 min left</span>
+      </div>
+      <div class="stats">
+        <div class="stat"><b data-run="f9d3w6" data-morph="tickets">8 of 40</b><span>tickets run</span></div>
+        <div class="stat"><b data-run="f9d3w6" data-morph="rate">75%</b><span>passed so far</span></div>
+        <div class="stat"><b>97%</b><span>{{logo:claude}}Claude Sonnet 5.5, in use today</span></div>
+      </div>
+      <div class="live-chart" data-run="f9d3w6" role="img" aria-label="Gemini 3.5 Flash's pass rate so far, updated as each ticket finishes"></div>
+    </div>
+
+    <section aria-labelledby="basis">
+      <h2 id="basis">What this is based on</h2>
+      <div class="basis">
+        <div><b>Context from your agent</b>Not used</div>
+        <div><b>Code</b>Not used</div>
+        <div><b>Production traces</b>{{logo:langfuse}}None in Langfuse for this task</div>
+        <div class="on"><b>Your own eval</b>{{logo:braintrust}}40 cases and the scorer from the fraud project in Braintrust</div>
+      </div>
+      <p class="note">Pass rule: your Braintrust scorer's verdict. Models are called on their own providers' APIs. Google is not yet among this app's providers, so a switch would need a new provider account.</p>
+    </section>
+    <script src="/live.js" type="module"></script>

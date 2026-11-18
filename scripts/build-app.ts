@@ -39,7 +39,7 @@ function page(title: string, active: string, body: string): string {
 <html lang="en" data-sidebar="fixed">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=1280">
   <meta name="color-scheme" content="light dark">
   <meta name="robots" content="noindex">
   <title>${title} · OpenMerit</title>
@@ -59,6 +59,7 @@ function page(title: string, active: string, body: string): string {
             <svg class="brand-mark" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg>
             <span class="label">openmerit</span>
           </a>
+          <span class="fictional label" title="Every name, number and price here is fictional">Fictional</span>
           <button class="sidebar-toggle" type="button" aria-label="Collapse sidebar" title="Collapse sidebar (Ctrl or ⌘ + B)">${icon('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>')}</button>
         </div>
         <nav class="nav" aria-label="Sections">
@@ -80,16 +81,11 @@ function page(title: string, active: string, body: string): string {
       </div>
     </aside>
     <div class="content">
-      <div class="topbar">
-        <button class="menu-toggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Open menu">${icon('<path d="M4 7h16M4 12h16M4 17h16"/>')}</button>
-        <span class="mock-note">Mockup. Every name, number and price is fictional.</span>
-      </div>
       <main id="main">
 ${body}
       </main>
     </div>
   </div>
-  <div class="scrim" hidden></div>
 </body>
 </html>
 `;
@@ -119,4 +115,5 @@ for (const file of readdirSync(join(source, "pages")).filter((name) => name.ends
 }
 cpSync(join(source, "assets"), join(out, "assets"), { recursive: true });
 for (const file of ["app.css", "favicon.svg"]) cpSync(join(source, file), join(out, file));
-await build({ absWorkingDir: root, entryPoints: ["app/sidebar.ts"], outfile: join(out, "sidebar.js"), format: "esm", platform: "browser", target: "es2022", minify: true });
+// live.js loads React and Liveline as a separate chunk, only on pages that draw a chart.
+await build({ absWorkingDir: root, entryPoints: ["app/sidebar.ts", "app/live.ts"], outdir: out, bundle: true, splitting: true, chunkNames: "chunks/[name]-[hash]", format: "esm", platform: "browser", target: "es2022", minify: true, define: { "process.env.NODE_ENV": '"production"' } });

@@ -1,13 +1,26 @@
 <!-- title: Runs | nav: runs | path: / -->
-    <div class="eyebrow"><span>Sahra Health</span><span>4 tasks · 6 runs</span></div>
+    <div class="eyebrow"><span>Sahra Health</span><span>4 tasks · 7 runs</span></div>
     <h1 class="title">Runs</h1>
     <p class="lede">Each time a coding agent asks which model to use, OpenMerit runs the task's tests on the candidates and the answer lands here with its evidence. Link a run in a pull request so reviewers can see why.</p>
+
+    <section aria-labelledby="running">
+      <h2 id="running">Running now</h2>
+      <div class="tablewrap">
+        <table class="running">
+          <thead><tr><th>Task</th><th>Testing</th><th class="num">Tickets</th><th class="num">Passed</th><th>So far</th><th class="num">Status</th></tr></thead>
+          <tbody>
+            <tr><td><a href="/r/p4x8n2/">Enrollment checker</a><span class="sub">asked by {{logo:claude-code}}Claude Code</span></td><td>{{logo:openai}}GPT-5 mini<span class="sub">vs {{logo:openai}}GPT-5 · 95%</span></td><td class="num"><span data-run="p4x8n2" data-morph="tickets">14 of 40</span></td><td class="num"><span data-run="p4x8n2" data-morph="rate">93%</span></td><td><div class="live-spark" data-run="p4x8n2" role="img" aria-label="GPT-5 mini's pass rate so far"></div></td><td class="num"><span class="pill" data-run="p4x8n2" data-morph="status">Measuring · about 19 min left</span></td></tr>
+            <tr><td><a href="/r/f9d3w6/">Fraud reviewer</a><span class="sub">watch re-run</span></td><td>{{logo:gemini}}Gemini 3.5 Flash<span class="sub">vs {{logo:claude}}Claude Sonnet 5.5 · 97%</span></td><td class="num"><span data-run="f9d3w6" data-morph="tickets">8 of 40</span></td><td class="num"><span data-run="f9d3w6" data-morph="rate">75%</span></td><td><div class="live-spark" data-run="f9d3w6" role="img" aria-label="Gemini 3.5 Flash's pass rate so far"></div></td><td class="num"><span class="pill" data-run="f9d3w6" data-morph="status">Measuring · about 16 min left</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
     <section aria-labelledby="summary">
       <h2 id="summary">This month</h2>
       <div class="grid3">
         <div class="card"><span class="big">$412</span><span class="sub">estimated monthly saving from switches you applied</span></div>
-        <div class="card"><span class="big">6</span><span class="sub">runs · 2 switched, 1 kept, 1 cheaper fit waiting, 1 running</span></div>
+        <div class="card"><span class="big">7</span><span class="sub">runs · 2 switched, 1 kept, 1 cheaper fit waiting, 2 running</span></div>
         <div class="card"><span class="big">38 / 100</span><span class="sub">evaluations used on the Cloud plan</span></div>
       </div>
     </section>
@@ -16,16 +29,18 @@
       <h2 id="all">All runs</h2>
       <div class="tablewrap">
         <table>
-          <thead><tr><th>Task</th><th>Outcome</th><th class="hide-sm">Based on</th><th class="hide-sm">Asked by</th><th class="num">Measured</th></tr></thead>
+          <thead><tr><th>Task</th><th>Outcome</th><th>Based on</th><th>Asked by</th><th class="num">Measured</th></tr></thead>
           <tbody>
-            <tr><td><a href="/r/k7m2q9/">Ticket router</a><span class="sub">sahra-health/claims · src/triage.ts</span></td><td>Switch to {{logo:claude}}Claude Haiku 5.5<span class="sub">from {{logo:openai}}GPT-5 · saves 98%</span></td><td class="hide-sm">Context from agent</td><td class="hide-sm">{{logo:claude-code}}Claude Code</td><td class="num">18 Nov</td></tr>
-            <tr><td><a href="/r/k7m2q9/">Bill and claim matcher</a><span class="sub">sahra-health/claims · src/agents/intake.ts</span></td><td><span class="pill good">Cheaper fit found</span><span class="sub">{{logo:gemini}}Gemini 3.5 Flash · not applied yet</span></td><td class="hide-sm">Context and code</td><td class="hide-sm">Watch re-run</td><td class="num">17 Nov</td></tr>
-            <tr><td><a href="/r/k7m2q9/">Fraud reviewer</a><span class="sub">sahra-health/claims · src/agents/fraud.ts</span></td><td>Keep {{logo:claude}}Claude Sonnet 5.5<span class="sub">no cheaper model matched it</span></td><td class="hide-sm">{{logo:braintrust}}Braintrust eval</td><td class="hide-sm">{{logo:codex}}Codex</td><td class="num">16 Nov</td></tr>
-            <tr><td>Enrollment checker<span class="sub">sahra-health/enroll · src/eligibility.ts</span></td><td><span class="pill">Measuring · about 20 min</span><span class="sub">provisional pick: {{logo:openai}}GPT-5 mini</span></td><td class="hide-sm">Context from agent</td><td class="hide-sm">{{logo:claude-code}}Claude Code</td><td class="num">Running</td></tr>
-            <tr><td><a href="/r/k7m2q9/">Ticket router</a><span class="sub">sahra-health/claims · src/triage.ts</span></td><td>Keep {{logo:openai}}GPT-5<span class="sub">superseded by 18 Nov</span></td><td class="hide-sm">Context from agent</td><td class="hide-sm">{{logo:claude-code}}Claude Code</td><td class="num">2 Nov</td></tr>
-            <tr><td><a href="/r/k7m2q9/">Coding reviewer</a><span class="sub">sahra-health/claims · src/agents/coding.ts</span></td><td>Switch to {{logo:claude}}Claude Haiku 5.5<span class="sub">from {{logo:claude}}Claude Sonnet 5.5 · saves 95%</span></td><td class="hide-sm">{{logo:langfuse}}Langfuse traces</td><td class="hide-sm">{{logo:claude-code}}Claude Code</td><td class="num">29 Oct</td></tr>
+            <tr><td><a href="/r/f9d3w6/">Fraud reviewer</a><span class="sub">sahra-health/claims · src/agents/fraud.ts</span></td><td><span class="pill" data-run="f9d3w6" data-morph="status">Measuring · about 16 min left</span><span class="sub">testing {{logo:gemini}}Gemini 3.5 Flash</span></td><td>{{logo:braintrust}}Braintrust eval</td><td>Watch re-run</td><td class="num">Running</td></tr>
+            <tr><td><a href="/r/k7m2q9/">Ticket router</a><span class="sub">sahra-health/claims · src/triage.ts</span></td><td>Switch to {{logo:claude}}Claude Haiku 5.5<span class="sub">from {{logo:openai}}GPT-5 · saves 98%</span></td><td>Context from agent</td><td>{{logo:claude-code}}Claude Code</td><td class="num">18 Nov</td></tr>
+            <tr><td><a href="/r/k7m2q9/">Bill and claim matcher</a><span class="sub">sahra-health/claims · src/agents/intake.ts</span></td><td><span class="pill good">Cheaper fit found</span><span class="sub">{{logo:gemini}}Gemini 3.5 Flash · not applied yet</span></td><td>Context and code</td><td>Watch re-run</td><td class="num">17 Nov</td></tr>
+            <tr><td><a href="/r/k7m2q9/">Fraud reviewer</a><span class="sub">sahra-health/claims · src/agents/fraud.ts</span></td><td>Keep {{logo:claude}}Claude Sonnet 5.5<span class="sub">no cheaper model matched it</span></td><td>{{logo:braintrust}}Braintrust eval</td><td>{{logo:codex}}Codex</td><td class="num">16 Nov</td></tr>
+            <tr><td><a href="/r/p4x8n2/">Enrollment checker</a><span class="sub">sahra-health/enroll · src/eligibility.ts</span></td><td><span class="pill" data-run="p4x8n2" data-morph="status">Measuring · about 19 min left</span><span class="sub">testing {{logo:openai}}GPT-5 mini</span></td><td>Context from agent</td><td>{{logo:claude-code}}Claude Code</td><td class="num">Running</td></tr>
+            <tr><td><a href="/r/k7m2q9/">Ticket router</a><span class="sub">sahra-health/claims · src/triage.ts</span></td><td>Keep {{logo:openai}}GPT-5<span class="sub">superseded by 18 Nov</span></td><td>Context from agent</td><td>{{logo:claude-code}}Claude Code</td><td class="num">2 Nov</td></tr>
+            <tr><td><a href="/r/k7m2q9/">Coding reviewer</a><span class="sub">sahra-health/claims · src/agents/coding.ts</span></td><td>Switch to {{logo:claude}}Claude Haiku 5.5<span class="sub">from {{logo:claude}}Claude Sonnet 5.5 · saves 95%</span></td><td>{{logo:langfuse}}Langfuse traces</td><td>{{logo:claude-code}}Claude Code</td><td class="num">29 Oct</td></tr>
           </tbody>
         </table>
       </div>
       <p class="note">Every run is also available as Markdown for agents at the same address with <code>.md</code>.</p>
     </section>
+    <script src="/live.js" type="module"></script>
