@@ -1,17 +1,17 @@
-import type { Endpoint, RunSummary, Task } from "../api.ts";
+import type { Endpoint, Run, Task } from "../api.ts";
 import { html, plural } from "../html.ts";
 import type { View } from "../view.ts";
 import { header } from "./common.ts";
 
-interface Data { tasks: Task[]; runs: RunSummary[]; endpoints: Endpoint[] }
+interface Data { tasks: Task[]; runs: Run[]; endpoints: Endpoint[] }
 
 export const dataView: View<Data> = {
   async load({ api }) {
-    const [tasks, runs, endpoints] = await Promise.all([api.get<Task[]>("/api/tasks"), api.get<RunSummary[]>("/api/runs"), api.get<Endpoint[]>("/api/endpoints")]);
+    const [tasks, runs, endpoints] = await Promise.all([api.get<Task[]>("/api/tasks"), api.get<Run[]>("/api/runs"), api.get<Endpoint[]>("/api/endpoints")]);
     return { tasks, runs, endpoints };
   },
   render({ tasks, runs, endpoints }, { me }) {
-    const keys = endpoints.filter((endpoint) => endpoint.keyLast4 !== null).length;
+    const keys = endpoints.filter((endpoint) => !endpoint.builtIn).length;
     const admin = me.role === "admin";
     return html`${header(me, "Your data", "What OpenMerit keeps, where it goes, and how to take it back.")}
     <section aria-labelledby="keeps">

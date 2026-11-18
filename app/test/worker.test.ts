@@ -31,6 +31,8 @@ test("every run report is served by the one report page, at an address with a tr
   assert.equal(bare.status, 308);
   assert.equal(bare.headers.get("location"), "https://app.openmerit.ai/r/k7m2q9/?ref=pr");
   assert.equal((await get("/r/")).headers.get("location"), "https://app.openmerit.ai/");
+  // Stripe Checkout and the portal return to the cloud app's configured /billing.
+  assert.equal((await get("/billing?checkout=done")).headers.get("location"), "https://app.openmerit.ai/plan/?checkout=done");
   // Anything that is not a plain run ID goes to the assets as it is, which return their 404 page.
   for (const path of ["/r/k7m2q9/extra", "/r/a.b/", "/r/k7m2q9.md", "/tasks/"]) {
     seen.length = 0;

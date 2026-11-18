@@ -7,6 +7,7 @@ export interface ClerkUser { fullName?: string | null; primaryEmailAddress?: { e
 export interface Clerk {
   session?: ClerkSession | null;
   user?: ClerkUser | null;
+  organization?: { name: string } | null;
   load(options: Record<string, unknown>): Promise<void>;
   addListener(listener: (state: { user?: ClerkUser | null; session?: ClerkSession | null }) => void): unknown;
   openSignIn(options: Record<string, unknown>): void;

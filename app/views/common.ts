@@ -1,7 +1,7 @@
-import type { Me } from "../api.ts";
+import type { Account } from "../view.ts";
 import { html, installCommand, type Html } from "../html.ts";
 
-export function header(me: Me, title: string, lede: string, facts: (string | Html)[] = []): Html {
+export function header(me: Account, title: string, lede: string, facts: (string | Html)[] = []): Html {
   return html`<div class="eyebrow"><span>${me.account.name}</span>${facts.map((fact) => html`<span>${fact}</span>`)}</div>
     <h1 class="title">${title}</h1>
     <p class="lede">${lede}</p>`;

@@ -3,7 +3,7 @@
 import { ApiError, createApi, type Api, type Me } from "./api.ts";
 import { loadClerk, signedIn, unavailable, type AppConfig, type Clerk } from "./auth.ts";
 import { html, setLogos, type Html } from "./html.ts";
-import { mount, type ConfirmOptions, type Ctx, type Mounted } from "./view.ts";
+import { mount, type Account, type ConfirmOptions, type Ctx, type Mounted } from "./view.ts";
 import { install } from "./views/common.ts";
 import { connectionsView } from "./views/connections.ts";
 import { dataView } from "./views/data.ts";
@@ -100,9 +100,12 @@ function showSignedOut(): void {
     </div>`);
 }
 
-function fillProfile(me: Me | null): void {
-  const name = me ? me.user.name ?? me.user.email ?? "Signed in" : "Sign in";
-  const sub = me ? `${me.account.name} · ${me.plan && me.plan.status !== "none" ? `${me.plan.name} plan` : "No plan"}` : "OpenMerit";
+// /api/me names the account; Clerk, which the page already holds, names the person.
+function fillProfile(me: Account | null): void {
+  const user = clerk?.user;
+  const name = me ? user?.fullName || user?.primaryEmailAddress?.emailAddress || "Signed in" : "Sign in";
+  const email = user?.primaryEmailAddress?.emailAddress ?? null;
+  const sub = me ? `${me.account.name} · ${me.plan.status !== "none" && me.plan.status !== "canceled" ? `${me.plan.name ?? "OpenMerit"} plan` : "No plan"}` : "OpenMerit";
   const initial = (text: string): string => text.trim()[0]?.toUpperCase() ?? "?";
   const avatar = me ? html`${initial(name)}<span class="org-badge">${initial(me.account.name)}</span>` : html`?`;
   const profile = document.querySelector<HTMLElement>(".profile");
@@ -112,7 +115,7 @@ function fillProfile(me: Me | null): void {
     profile.querySelector(".label")!.innerHTML = html`${name}<span class="sub">${sub}</span>`.__html;
   }
   const who = document.querySelector<HTMLElement>(".menu-who");
-  if (who) who.innerHTML = html`<span class="avatar" aria-hidden="true">${avatar}</span><span>${name}<span class="sub">${me?.user.email ?? (me ? me.account.name : "Not signed in")}</span></span>`.__html;
+  if (who) who.innerHTML = html`<span class="avatar" aria-hidden="true">${avatar}</span><span>${name}<span class="sub">${me ? email ?? me.account.name : "Not signed in"}</span></span>`.__html;
   const session = document.querySelector<HTMLElement>("[data-global=sign-out]");
   if (session) session.lastChild!.textContent = me ? "Sign out" : "Sign in";
 }
@@ -147,7 +150,8 @@ async function boot(): Promise<void> {
   }
   if (!signedIn(clerk) || !api) return showSignedOut();
   try {
-    const me = await api.get<Me>("/api/me");
+    const found = await api.get<Me>("/api/me");
+    const me: Account = { ...found, account: { ...found.account, name: found.account.name ?? clerk.organization?.name ?? "Your organization" } };
     fillProfile(me);
     const ctx: Ctx = {
       api, me, params, id: runId, toast, confirm: confirmDialog, download,

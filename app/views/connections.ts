@@ -10,19 +10,20 @@ const kinds: Record<EndpointKind, { label: string; baseUrl: string }> = {
   openrouter: { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
 };
 const isKind = (value: string): value is EndpointKind => value in kinds;
-// OpenRouter on OpenMerit's key is the default endpoint; it has no key of the customer's to remove.
-const openmeritPays = (endpoint: Endpoint): boolean => endpoint.kind === "openrouter" && endpoint.keyLast4 === null;
 
-function endpointRow(endpoint: Endpoint): Html {
-  const models = endpoint.allowedModels.length ? endpoint.allowedModels.join(", ") : "Every model";
+// OpenRouter on OpenMerit's key is always there; /api/endpoints lists only the customer's own.
+const builtIn = html`<div class="row">
+          <span>OpenRouter<span class="sub">https://openrouter.ai/api/v1</span><span class="sub">Every model</span></span>
+          <span class="endpoint-meta"><span class="pill">OpenMerit's key · OpenMerit pays</span></span>
+          <span></span>
+        </div>`;
+
+function endpointRow(endpoint: Endpoint, admin: boolean): Html {
+  const models = endpoint.allowedModels === "all" ? "Every model" : endpoint.allowedModels.join(", ");
   return html`<div class="row">
           <span>${kinds[endpoint.kind]?.label ?? endpoint.kind}<span class="sub">${endpoint.baseUrl}</span><span class="sub">${models}</span></span>
-          <span class="endpoint-meta">
-            ${openmeritPays(endpoint)
-              ? html`<span class="pill">OpenMerit's key · OpenMerit pays</span>`
-              : html`<span class="pill">Key ending ${endpoint.keyLast4} · you pay</span><span class="sub">${endpoint.verifiedAt ? `Checked ${date(endpoint.verifiedAt)}` : "Not checked yet"}</span>`}
-          </span>
-          ${openmeritPays(endpoint) ? html`<span></span>` : html`<button class="btn danger" type="button" data-action="remove" data-id="${endpoint.id}" aria-label="Remove ${endpoint.baseUrl}">Remove</button>`}
+          <span class="endpoint-meta"><span class="pill">Key ending ${endpoint.keyLast4} · you pay</span><span class="sub">${endpoint.verifiedAt ? `Checked ${date(endpoint.verifiedAt)}` : "Not checked yet"}</span></span>
+          ${admin ? html`<button class="btn danger" type="button" data-action="remove" data-id="${endpoint.id}" aria-label="Remove ${endpoint.baseUrl}">Remove</button>` : html`<span></span>`}
         </div>`;
 }
 
@@ -30,25 +31,26 @@ export const connectionsView: View<Endpoint[]> = {
   load: ({ api }) => api.get<Endpoint[]>("/api/endpoints"),
   bind: bindKindSelect,
   render(endpoints, { me }) {
-    const own = endpoints.filter((endpoint) => !openmeritPays(endpoint)).length;
-    return html`${header(me, "Connections", "Your coding agents are how OpenMerit gets its work. Your own endpoints are optional: OpenMerit measures on OpenRouter at its own cost.", [plural(own, "endpoint") + " of yours"])}
+    const own = endpoints.filter((endpoint) => !endpoint.builtIn);
+    const admin = me.role === "admin";
+    return html`${header(me, "Connections", "Your coding agents are how OpenMerit gets its work. Your own endpoints are optional: OpenMerit measures on OpenRouter at its own cost.", [`${plural(own.length, "endpoint")} of yours`])}
 
     <section aria-labelledby="agents">
       <h2 id="agents">Coding agents</h2>
       <div class="card">
         <p>Add OpenMerit to a coding agent:</p>
         <div style="margin-top: 12px">${install()}</div>
-        <div class="row" style="margin-top: 18px"><span>Disconnect every coding agent<span class="sub">Signs out every coding agent session for ${me.account.name}. Each one's next call opens sign-in again. Tasks and runs are kept.</span></span><button class="btn danger" type="button" data-action="disconnect">Disconnect</button></div>
+        <div class="row" style="margin-top: 18px"><span>Disconnect every coding agent<span class="sub">Signs out every coding agent session for ${me.account.name}. Each one's next call opens sign-in again. Tasks and runs are kept.</span></span>${admin ? html`<button class="btn danger" type="button" data-action="disconnect">Disconnect</button>` : html`<span class="sub">Admins only</span>`}</div>
       </div>
     </section>
 
     <section aria-labelledby="endpoints">
       <h2 id="endpoints">Measuring endpoints</h2>
       <p class="note" style="margin: -4px 0 14px">Calls on your own endpoints use your key and bill your provider account. Add the endpoint your app calls so its current model is measured where it really runs.</p>
-      <div class="card">${endpoints.length ? endpoints.map(endpointRow) : html`<p class="sub">No endpoints.</p>`}</div>
+      <div class="card">${builtIn}${own.map((endpoint) => endpointRow(endpoint, admin))}</div>
     </section>
 
-    <section aria-labelledby="add">
+    ${admin ? html`<section aria-labelledby="add">
       <h2 id="add">Add an endpoint</h2>
       <form class="card form" data-action="add" autocomplete="off">
         <label>Kind
@@ -63,12 +65,12 @@ export const connectionsView: View<Endpoint[]> = {
         </label>
         <label>Allowed models
           <input name="allowedModels" type="text" spellcheck="false" placeholder="gpt-5-mini, gpt-5-nano">
-          <span class="sub">Comma-separated model IDs. Leave empty to allow every model the endpoint serves.</span>
+          <span class="sub">Comma-separated model IDs this endpoint may run. Only an OpenRouter endpoint may leave this empty to allow every model.</span>
         </label>
         <p class="form-error" role="alert" hidden></p>
         <p><button class="btn primary" type="submit">Add endpoint</button></p>
       </form>
-    </section>`;
+    </section>` : html`<p class="note">Only an admin of ${me.account.name} can add or remove endpoints.</p>`}`;
   },
   actions: {
     async add(form, _endpoints, { api, refresh, toast }) {
@@ -77,12 +79,13 @@ export const connectionsView: View<Endpoint[]> = {
       const kind = String(fields.get("kind"));
       const error = form.querySelector<HTMLElement>(".form-error");
       if (!isKind(kind)) return;
+      const models = String(fields.get("allowedModels")).split(",").map((name) => name.trim()).filter(Boolean);
       try {
         await api.send("POST", "/api/endpoints", {
           kind,
           baseUrl: String(fields.get("baseUrl")).trim(),
           apiKey: String(fields.get("apiKey")).trim(),
-          allowedModels: String(fields.get("allowedModels")).split(",").map((name) => name.trim()).filter(Boolean),
+          allowedModels: models.length ? models : "all",
         });
       } catch (failure) {
         if (!(failure instanceof ApiError) || failure.status !== 400 || !error) throw failure;

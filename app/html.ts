@@ -1,7 +1,5 @@
 // Escaping templates and formatting for the app's views. Views return Html built
 // with `html`, which escapes every interpolated value unless it is already Html.
-import type { ModelRef } from "./api.ts";
-
 export interface Html { readonly __html: string }
 
 export const raw = (value: string): Html => ({ __html: value });
@@ -41,17 +39,10 @@ export function providerLogo(model: string): string | null {
   return null;
 }
 
-export const model = (ref: ModelRef): Html => html`${logo(providerLogo(ref.model))}${ref.label ?? ref.model}`;
-
-const agents: Record<string, { name: string; logo: string | null }> = {
-  "claude-code": { name: "Claude Code", logo: "claude-code" },
-  codex: { name: "Codex", logo: "codex" },
-  watch: { name: "Watch re-run", logo: null },
-};
-export const agent = (id: string | null): Html => {
-  const known = id ? agents[id] : undefined;
-  return known ? html`${logo(known.logo)}${known.name}` : html`${id ?? "Unknown"}`;
-};
+// A model ID such as anthropic/claude-haiku-5-5, shown without its provider prefix.
+export const modelName = (id: string): string => id.split("/").at(-1) ?? id;
+export const model = (id: string): Html => html`${logo(providerLogo(id))}${modelName(id)}`;
+export const endpointName = (id: string): string => (id === "openrouter" ? "OpenRouter" : id);
 
 export function usd(value: number | null | undefined): string {
   if (value === null || value === undefined) return "–";
@@ -63,6 +54,8 @@ export function usd(value: number | null | undefined): string {
 export const day = (iso: string | null): string => (iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "–");
 export const date = (iso: string | null): string => (iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "–");
 export const seconds = (ms: number | null): string => (ms === null ? "–" : `${(ms / 1000).toFixed(1)} s`);
+// Per-call costs read better per 1,000 calls.
+export const per1k = (perCall: number | null): string => (perCall === null ? "–" : usd(perCall * 1000));
 export const plural = (count: number, one: string, many = `${one}s`): string => `${count.toLocaleString("en-US")} ${count === 1 ? one : many}`;
 
 export const installCommand = "claude mcp add --transport http openmerit https://openmerit.ai/mcp";

@@ -1,134 +1,168 @@
-import type { Basis, Report } from "../api.ts";
-import { agent, date, html, model, plural, seconds, usd, type Html } from "../html.ts";
+import type { JobView, MeasuredModel, Report } from "../api.ts";
+import { date, endpointName, html, model, modelName, per1k, plural, seconds, usd, type Html } from "../html.ts";
 import type { View } from "../view.ts";
-import { outcome } from "./runs.ts";
+import { show } from "./guardrails.ts";
 
-const title = (run: Report): string => {
-  const pick = run.pick?.label ?? run.pick?.model, current = run.current.label ?? run.current.model;
-  if (run.status === "running") return `${run.task}: measuring`;
-  if (run.status === "failed") return `${run.task}: the run did not finish`;
-  if (run.outcome === "switch" || run.outcome === "cheaper") return `${run.task}: switch to ${pick}`;
-  return `${run.task}: keep ${current}`;
+// GET /api/runs/:id returns the saved report once the job has one, and the job's live state before.
+type Data = Report | JobView;
+const isLive = (data: Data): data is JobView => "report" in data && data.report === null;
+
+const verdicts: Record<Report["status"], string> = {
+  picked: "",
+  keep_current: "No cheaper model passed as many cases, so the model in use today stays.",
+  baseline_failed: "The model in use today could not be measured or passed none of the cases, so there was nothing to compare against.",
+  no_cases: "No case had a known correct answer, so nothing was measured.",
+  no_candidates: "No allowed model is cheaper than the one in use today.",
+  agent_eval_failed: "Every cheaper switch failed the agent's eval, so none is proposed.",
 };
 
-const basisCells: [Basis, string, string, string][] = [
-  ["context", "Context from your agent", "The prompt, output shape and examples it sent", "Not used"],
-  ["code", "Code", "The code your agent sent", "Not used"],
-  ["traces", "Production traces", "Inputs from your traces", "None for this task"],
-  ["eval", "Your own eval", "Your eval's scores", "None"],
-];
+function title(data: Data): string {
+  if (isLive(data)) return data.status === "failed" ? `${data.task}: the run did not finish` : data.status === "stopped" ? `${data.task}: stopped` : data.status === "needs_input" ? `${data.task}: waiting for your answer` : `${data.task}: measuring`;
+  if (data.status === "picked" && data.pick) return `${data.task}: switch to ${modelName(data.pick.model)}`;
+  if (data.status === "keep_current" && data.baseline) return `${data.task}: keep ${modelName(data.baseline.model)}`;
+  return `${data.task}: no switch`;
+}
 
-function pickCard(run: Report): Html {
-  const pick = run.candidates.find((c) => c.role === "pick"), current = run.candidates.find((c) => c.role === "current");
-  if (!pick || !run.pick) return html``;
-  const vs = (value: string): Html => (current && current !== pick ? html`<br>${current.model.label ?? current.model.model}: ${value}` : html``);
+function live(job: JobView): Html {
+  const progress = job.progress.planned ? `${job.progress.measured} of about ${job.progress.planned} measurements done` : `${plural(job.progress.measured, "measurement")} done`;
+  const body = {
+    queued: html`<span class="pill">Queued</span><p class="note">The run starts in a moment.</p>`,
+    running: html`<span class="pill">Measuring</span><span class="sub">${job.phase.replace("_", " ")} · ${progress}</span><p class="note">Your coding agent gets the result on its next OpenMerit call, and this page shows the report.</p>`,
+    needs_input: html`<span class="pill warn">Waiting for your answer</span><p class="note">OpenMerit asked ${plural(job.questions.length, "question")} in your coding agent, such as a check of the test labels. The run continues once it answers.</p>`,
+    failed: html`<p>${job.error ?? "The run stopped before it could recommend a model."}</p>`,
+    stopped: html`<p>The run was stopped${job.error ? `: ${job.error}` : "."}</p>`,
+    done: html`<p>The run finished; its report is being saved. Reload in a moment.</p>`,
+  }[job.status];
+  return html`<div class="eyebrow"><a href="/">Runs</a><span>›</span><span>${job.jobId}</span><span>Started ${date(job.createdAt)}</span></div>
+    <h1 class="title">${title(job)}</h1>
+    <div class="card${job.status === "failed" ? " notice bad" : ""}" style="margin-top: 28px"${job.status === "failed" ? html` role="alert"` : ""}>${body}</div>
+    ${job.provisional ? html`<section aria-labelledby="provisional"><h2 id="provisional">Provisional pick</h2><div class="card"><p>${model(job.provisional.model)} on ${endpointName(job.provisional.endpoint)}${job.provisional.estCostPerCallUsd !== null ? html` · about ${per1k(job.provisional.estCostPerCallUsd)} per 1,000 calls` : ""}</p><p class="note">${job.provisional.reason} Chosen from the catalogue before measuring.</p></div></section>` : ""}
+    ${job.notices.length ? html`<section aria-labelledby="notes"><h2 id="notes">Notes</h2><div class="card">${job.notices.map((notice) => html`<p class="sub">${notice}</p>`)}</div></section>` : ""}`;
+}
+
+function verdict(item: MeasuredModel, pick: string | null): Html {
+  if (item.role === "baseline") return html`<span class="pill">In use today</span>`;
+  if (item.model === pick) return html`<span class="pill good">Picked</span>`;
+  if (item.status === "unavailable") return html`<span class="pill warn">Unavailable</span>`;
+  if (item.status === "screened_out") return html`<span class="pill">Screened out</span>`;
+  return item.qualified ? html`<span class="pill good">Qualifies</span>` : html`<span class="pill bad">Below the bar</span>`;
+}
+
+function pickCard(report: Report): Html {
+  const pick = report.pick, base = report.baseline;
+  if (!pick) return base
+    ? html`<div class="card"><div class="pick-head"><span class="pick-model">${model(base.model)}</span><span class="pill">In use today</span></div><span class="sub">${endpointName(base.endpoint)}</span>
+        <div class="stats"><div class="stat"><b>${base.passes}/${base.total}</b><span>cases passed</span></div><div class="stat"><b>${per1k(base.costPerCallUsd)}</b><span>per 1,000 calls</span></div><div class="stat"><b>${seconds(base.latencyMs)}</b><span>mean latency</span></div></div></div>`
+    : html`<div class="card"><p>${verdicts[report.status]}</p></div>`;
+  const measured = report.candidates.find((item) => item.model === pick.model && item.endpoint === pick.endpoint);
+  const vs = (value: string): Html => (base ? html`<br>${modelName(base.model)}: ${value}` : html``);
   return html`<div class="card">
-        <div class="pick-head"><span class="pick-model">${model(run.pick)}</span><span class="pill good">Recommended</span></div>
-        <span class="sub">${run.pick.endpoint} · <code>${run.pick.model}</code></span>
+        <div class="pick-head"><span class="pick-model">${model(pick.model)}</span><span class="pill good">Recommended</span></div>
+        <span class="sub">${endpointName(pick.endpoint)} · <code>${pick.endpointModel}</code></span>
         <div class="stats">
-          <div class="stat"><b>${pick.passed}/${pick.total}</b><span>test runs passed${vs(`${current?.passed}/${current?.total}`)}</span></div>
-          <div class="stat"><b>${usd(pick.costPer1kUsd)}</b><span>per 1,000 calls${vs(usd(current?.costPer1kUsd))}</span></div>
-          <div class="stat"><b>${seconds(pick.latencyMs)}</b><span>median latency${vs(seconds(current?.latencyMs ?? null))}</span></div>
+          <div class="stat"><b>${pick.passes}/${pick.total}</b><span>cases passed${vs(base ? `${base.passes}/${base.total}` : "–")}</span></div>
+          <div class="stat"><b>${per1k(pick.costPerCallUsd)}</b><span>per 1,000 calls${vs(per1k(base?.costPerCallUsd ?? null))}</span></div>
+          <div class="stat"><b>${seconds(measured?.latencyMs ?? null)}</b><span>mean latency${vs(seconds(base?.latencyMs ?? null))}</span></div>
         </div>
-        ${run.monthlyCalls && pick.costPer1kUsd !== null && current?.costPer1kUsd != null
-          ? html`<p class="note">At the ${run.monthlyCalls.toLocaleString("en-US")} calls a month your agent reported, about ${usd(current.costPer1kUsd * run.monthlyCalls / 1000)} a month becomes about ${usd(pick.costPer1kUsd * run.monthlyCalls / 1000)}.</p>` : ""}
+        ${pick.savingPerCallUsd ? html`<p class="note">It saves about ${per1k(pick.savingPerCallUsd)} per 1,000 calls.</p>` : ""}
       </div>`;
 }
 
-function change(run: Report): Html {
-  if (!run.edit) return html`<div><h2>The change</h2><p class="note">No code change: keep the model in use today.</p></div>`;
+function change(report: Report): Html {
+  const { edits, instructions } = report.edit;
+  if (!edits.length && !instructions) return html`<div><h2>The change</h2><p class="note">No code change: keep the model in use today.</p></div>`;
   return html`<div>
         <h2>The change</h2>
-        <div class="diff" role="img" aria-label="Code change in ${run.edit.file}">
-          <div class="file">${run.edit.file}</div>
-          <div class="del">- ${run.edit.before}</div>
-          <div class="add">+ ${run.edit.after}</div>
-        </div>
-        <p class="note">${run.edit.applied ? "Your coding agent applied it in your working tree; it is not committed." : "Your coding agent has not applied it yet."}</p>
+        ${edits.map((edit) => html`<div class="diff" role="img" aria-label="Code change in ${edit.file}" style="margin-bottom: 10px">
+          <div class="file">${edit.file}:${edit.line}</div>
+          <div class="del">- ${edit.before}</div>
+          <div class="add">+ ${edit.after}</div>
+        </div>`)}
+        ${instructions ? html`<p class="note">${instructions}</p>` : ""}
+        <p class="note">Your coding agent received this change with the result.</p>
       </div>`;
 }
 
-const rowClass = { current: "current", pick: "picked", candidate: "", outside: "outside" } as const;
-
-export const runView: View<Report> = {
-  load: ({ api, id }) => api.get<Report>(`/api/runs/${encodeURIComponent(id ?? "")}`),
-  title,
-  render(run, { me }) {
-    const shown = run.candidates.filter((c) => c.role !== "outside").slice(0, 3);
-    const approved = run.cases.filter((c) => c.approved).length;
-    const steps = run.search.map((step) => html`<span class="step">${step.step === "baseline" ? "" : `${step.step[0]?.toUpperCase()}${step.step.slice(1)} `}${model(step.model)}${step.pass === null ? "" : step.pass ? " · pass" : " · fail"}</span>`);
-    return html`<div class="eyebrow">
-      <a href="/">Runs</a><span>›</span><span>${run.id}</span><span>${run.measuredAt ? `Measured ${date(run.measuredAt)}` : `Started ${date(run.startedAt)}`}</span><span>Requested by ${agent(run.requestedBy)} in ${run.environment}</span>
-    </div>
-    <h1 class="title">${title(run)}</h1>
-    ${run.summary ? html`<p class="lede">${run.summary}</p>` : ""}
-    ${run.status === "running" ? html`<div class="card" style="margin-top: 28px">${outcome(run)}<p class="note">OpenMerit is measuring the candidates. Your coding agent gets the result on its next OpenMerit call, and this page fills in.</p></div>` : ""}
-    ${run.status === "failed" ? html`<div class="card notice bad" style="margin-top: 28px" role="alert"><p>${run.error ?? "The run stopped before it could recommend a model."}</p></div>` : ""}
-    ${run.status === "done" ? html`<div class="pick">${pickCard(run)}${change(run)}</div>` : ""}
+function report(data: Report, accountName: string): Html {
+  const models = [data.baseline, ...data.candidates].filter((item): item is MeasuredModel => item !== null);
+  const pick = data.pick?.model ?? null;
+  const from = Object.entries(data.guardrails.from);
+  const { search } = data;
+  return html`<div class="eyebrow"><a href="/">Runs</a><span>›</span><span>${data.jobId}</span><span>Measured ${date(data.createdAt)}</span><span>Catalogue ${data.catalogueVersion}</span></div>
+    <h1 class="title">${title(data)}</h1>
+    ${data.status !== "picked" ? html`<p class="lede">${verdicts[data.status]}</p>` : ""}
+    <div class="pick">${pickCard(data)}${change(data)}</div>
 
     <section aria-labelledby="basis">
       <h2 id="basis">What this is based on</h2>
-      <div class="basis">${basisCells.map(([key, label, on, off]) => html`<div class="${run.basis.includes(key) ? "on" : ""}"><b>${label}</b>${run.basis.includes(key) ? on : off}</div>`)}</div>
-      ${run.casesTotal ? html`<p class="note">OpenMerit used ${plural(run.casesTotal, "test case")}${approved ? `; you confirmed ${approved} of them before the run` : ""}.${run.passRule ? ` Pass rule: ${run.passRule}.` : ""} Each model ran every case ${plural(run.repeats, "time")}.</p>` : ""}
+      <div class="card"><p>${plural(data.cases.total, "test case")}: ${data.cases.fromExamples} from your coding agent's examples and ${data.cases.written} written by OpenMerit from the task it sent.</p></div>
     </section>
 
-    ${run.candidates.length ? html`<section aria-labelledby="compare">
+    ${models.length ? html`<section aria-labelledby="compare">
       <h2 id="compare">How the models compared</h2>
       <div class="tablewrap">
         <table>
-          <thead><tr><th>Model</th><th class="num">Passed</th><th class="num">Per 1,000 calls</th><th class="num">Latency</th><th>Result</th></tr></thead>
+          <thead><tr><th>Model</th><th class="num">Passed</th><th class="num">Per 1,000 calls</th><th class="num hide-sm">Latency</th><th>Result</th></tr></thead>
           <tbody>
-            ${run.candidates.map((c) => html`<tr class="${rowClass[c.role]}"><td>${model(c.model)}<span class="sub">${c.model.endpoint}${c.role === "current" ? " · in use today" : ""}${c.measuredOnly ? " · placed by measurement only" : ""}${c.funding === "customer" ? " · your key" : ""}</span></td><td class="num">${c.passed}/${c.total}</td><td class="num">${usd(c.costPer1kUsd)}</td><td class="num">${seconds(c.latencyMs)}</td><td><span class="pill${c.role === "pick" ? " good" : ""}">${c.verdict}</span></td></tr>`)}
+            ${models.map((item) => html`<tr class="${item.role === "baseline" ? "current" : item.model === pick ? "picked" : ""}">
+              <td>${model(item.model)}<span class="sub">${endpointName(item.endpoint)}${item.funding === "customer" ? " · your key" : ""}${item.inCatalogue ? "" : " · placed by measurement only"}${item.note ? ` · ${item.note}` : ""}</span></td>
+              <td class="num">${item.status === "unavailable" ? "–" : `${item.passes}/${item.total}`}</td>
+              <td class="num">${per1k(item.costPerCallUsd)}${item.costIsEstimate && item.costPerCallUsd !== null ? html`<span class="sub">estimate</span>` : ""}</td>
+              <td class="num hide-sm">${seconds(item.latencyMs)}</td>
+              <td>${verdict(item, pick)}</td>
+            </tr>`)}
           </tbody>
         </table>
       </div>
-      ${run.candidates.some((c) => c.measuredOnly) ? html`<p class="note">Models outside the catalogue, such as a fine-tune on your own endpoint, have no capability index, so they were measured on every run rather than placed by the search.</p>` : ""}
+      ${models.some((item) => !item.inCatalogue) ? html`<p class="note">Models outside the catalogue, such as a fine-tune on your own endpoint, have no capability index, so they were measured on every run rather than placed by the search.</p>` : ""}
     </section>` : ""}
 
-    ${run.cases.length ? html`<section aria-labelledby="items">
-      <h2 id="items">The test cases</h2>
-      <div class="tablewrap">
-        <table class="items">
-          <thead><tr><th>Case</th><th>Expected</th>${shown.map((c, i) => html`<th class="num${i > 1 ? " hide-sm" : ""}">${model(c.model)}</th>`)}</tr></thead>
-          <tbody>
-            ${run.cases.map((item) => html`<tr><td>${item.input}<span class="sub">${item.id}${item.approved ? " · confirmed by you" : ""}</span></td><td><span class="label-code">${item.expected}</span></td>${shown.map((c, i) => {
-              const result = item.results.find((r) => r.model === c.model.model);
-              return html`<td class="num ${result ? (result.passed === result.runs ? "ok" : "no") : ""}${i > 1 ? " hide-sm" : ""}">${result ? `${result.passed}/${result.runs}` : "–"}</td>`;
-            })}</tr>`)}
-          </tbody>
-        </table>
-      </div>
-      ${run.casesTotal > run.cases.length ? html`<p class="note">Showing ${run.cases.length} of ${run.casesTotal} cases.</p>` : ""}
-    </section>` : ""}
-
-    ${steps.length ? html`<section aria-labelledby="search">
+    <section aria-labelledby="search">
       <h2 id="search">How OpenMerit searched</h2>
-      <div class="path">${steps.map((step, i) => html`${i ? html`<span class="arrow">→</span>` : ""}${step}`)}</div>
-      <p class="note">This run cost ${usd(run.spend.openmeritUsd)} on OpenMerit's account${run.spend.customerUsd ? ` and ${usd(run.spend.customerUsd)} on your own endpoints' keys` : ""}.</p>
+      <div class="card">
+        <p>Searched ${plural(search.pool, "ranked model")}${search.unplaced ? ` and ${search.unplaced} placed by measurement only` : ""} on ${plural(search.samples.length, "sample case")}, then measured ${plural(search.finalists.length, "finalist")}${search.challengers.length ? ` and ${plural(search.challengers.length, "challenger")}` : ""} on every case.</p>
+        ${search.shortfall ? html`<p class="note">${search.shortfall}</p>` : ""}
+        <p class="note">This run cost ${usd(data.spend.openmeritUsd)} on OpenMerit's account${data.spend.customerUsd ? ` and ${usd(data.spend.customerUsd)} on your own endpoints' keys` : ""}.</p>
+      </div>
+    </section>
+
+    ${data.agentEval ? html`<section aria-labelledby="agent-eval">
+      <h2 id="agent-eval">Agent eval</h2>
+      <div class="card">${data.agentEval.status === "missing"
+        ? html`<p>${data.agentEval.warning ?? "The agent has no eval, so the switch was not checked against it."}</p>`
+        : html`<p>${data.agentEval.passed ? "Passed" : "Failed"}${data.agentEval.baseline ? `: with its current models the agent passed ${data.agentEval.baseline.passes}/${data.agentEval.baseline.total}` : ""}.</p>${data.agentEval.tried.map((item) => html`<p class="sub">${modelName(item.model)}: ${item.passes}/${item.total} · ${item.passed ? "passed" : "failed"}</p>`)}`}</div>
     </section>` : ""}
 
-    ${run.status === "done" ? html`<section aria-labelledby="share">
+    ${from.length || data.guardrails.rejected.length ? html`<section aria-labelledby="rules">
+      <h2 id="rules">Guardrails this run used</h2>
+      <div class="card">
+        ${from.map(([key, level]) => html`<div class="row"><span><code>${key}</code></span><span>${show(key, (data.guardrails.effective as Record<string, unknown>)[key])} <span class="pill">${level}</span></span></div>`)}
+        ${data.guardrails.rejected.map((item) => html`<p class="note">Not applied: <code>${item.key}</code> at the ${item.level} level, which ${item.reason}.</p>`)}
+      </div>
+    </section>` : ""}
+
+    ${data.notices.length ? html`<section aria-labelledby="notes"><h2 id="notes">Notes</h2><div class="card">${data.notices.map((notice) => html`<p class="sub">${notice}</p>`)}</div></section>` : ""}
+
+    <section aria-labelledby="share">
       <h2 id="share">Share</h2>
       <div class="card split">
-        ${run.shareUrl
-          ? html`<p>Anyone with this link can read the report: <a href="${run.shareUrl}">${run.shareUrl}</a></p>`
-          : html`<p>Only members of ${me.account.name} can open this page. A public link lets pull request reviewers read it.</p><button class="btn" type="button" data-action="share">Create public link</button>`}
-      </div>
-    </section>` : ""}
-
-    <section aria-labelledby="watch">
-      <h2 id="watch">Watching</h2>
-      <div class="card split">
-        <p>OpenMerit re-runs these cases when a new model could fit this task.</p>
-        <a class="btn" href="/tasks/">Manage tasks</a>
+        <p>Only members of ${accountName} can open this page. A public link to the report as Markdown lets pull request reviewers read it.</p>
+        <button class="btn" type="button" data-action="share">Get public link</button>
       </div>
     </section>`;
-  },
+}
+
+export const runView: View<Data> = {
+  load: ({ api, id }) => api.get<Data>(`/api/runs/${encodeURIComponent(id ?? "")}`),
+  title,
+  render: (data, { me }) => (isLive(data) ? live(data) : report(data, me.account.name)),
   actions: {
-    async share(_target, run, { api, refresh, toast }) {
-      await api.send<{ url: string }>("POST", `/api/runs/${encodeURIComponent(run.id)}/share`);
-      await refresh();
-      toast("Public link created.");
+    // The link is the same on every call, and the report does not carry it, so ask for it here.
+    async share(target, data, { api, toast }) {
+      const { url } = await api.send<{ url: string }>("POST", `/api/runs/${encodeURIComponent(isLive(data) ? data.jobId : data.jobId)}/share`);
+      const card = target.closest(".card");
+      if (card) card.innerHTML = html`<p>Anyone with this link can read the report: <a href="${url}">${url}</a></p>`.__html;
+      toast("Public link ready.");
     },
   },
 };

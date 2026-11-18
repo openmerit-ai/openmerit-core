@@ -1,18 +1,10 @@
 import type { Task } from "../api.ts";
-import { day, html, model, plural, usd, type Html } from "../html.ts";
+import { day, html, model, plural } from "../html.ts";
 import type { View } from "../view.ts";
 import { empty, header } from "./common.ts";
+import { result } from "./runs.ts";
 
-function latest(task: Task): Html {
-  const run = (text: Html | string): Html => (task.latestRunId ? html`<a href="/r/${task.latestRunId}/">${text}</a>` : html`${text}`);
-  switch (task.status) {
-    case "measuring": return html`<span class="pill">Measuring</span>`;
-    case "switched": return run(task.monthlySavingUsd ? `Switched · saves ${usd(task.monthlySavingUsd)} a month` : "Switched");
-    case "cheaper-fit": return html`<span class="pill good">Cheaper fit found</span><span class="sub">${run("View run")}</span>`;
-    case "failed": return html`<span class="pill bad">Last run did not finish</span><span class="sub">${run("View run")}</span>`;
-    default: return run("Keep current model");
-  }
-}
+const guardrails = (level: string, id: string, text: string) => html`<a href="/guardrails/?level=${level}&amp;id=${encodeURIComponent(id)}">${text}</a>`;
 
 export const tasksView: View<Task[]> = {
   load: ({ api }) => api.get<Task[]>("/api/tasks"),
@@ -25,13 +17,13 @@ export const tasksView: View<Task[]> = {
       <h2 id="tasks">All tasks</h2>
       <div class="tablewrap">
         <table>
-          <thead><tr><th>Task</th><th>Model</th><th class="hide-sm">Last checked</th><th>Latest</th><th class="num">Watch</th></tr></thead>
+          <thead><tr><th>Task</th><th>Model in use</th><th class="hide-sm">Last run</th><th>Latest</th><th class="num">Watch</th></tr></thead>
           <tbody>
             ${tasks.map((task) => html`<tr>
-              <td>${task.name}<span class="sub">${task.environment}${task.codeRef ? ` · ${task.codeRef}` : ""} · <a href="/guardrails/?level=task&amp;id=${encodeURIComponent(task.id)}">Guardrails</a></span></td>
-              <td>${model(task.pick && task.status === "switched" ? task.pick : task.currentModel)}${task.status === "switched" && task.pick ? html`<span class="sub">was ${model(task.currentModel)}</span>` : ""}</td>
-              <td class="hide-sm">${task.status === "measuring" ? "Running" : day(task.lastRunAt)}</td>
-              <td>${latest(task)}</td>
+              <td>${task.name}<span class="sub">${task.environment}${task.agent ? html` · agent ${guardrails("agent", `${task.environment}:${task.agent}`, task.agent)}` : ""} · ${guardrails("task", task.id, "Guardrails")}</span></td>
+              <td>${model(task.currentModel)}</td>
+              <td class="hide-sm">${task.status === "running" ? "Running" : day(task.lastRunAt)}</td>
+              <td>${result(task, (text) => (task.lastJobId ? html`<a href="/r/${task.lastJobId}/">${text}</a>` : html`${text}`))}</td>
               <td class="num">${task.watching
                 ? html`<button class="btn" type="button" data-action="watch" data-id="${task.id}" data-on="false" aria-label="Stop watching ${task.name}">Stop watching</button>`
                 : html`<span class="sub">Not watched</span><button class="btn" type="button" data-action="watch" data-id="${task.id}" data-on="true" aria-label="Watch ${task.name}">Watch</button>`}</td>

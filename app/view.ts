@@ -5,9 +5,12 @@ import type { Html } from "./html.ts";
 
 export interface ConfirmOptions { title: string; body: string; confirm: string; danger?: boolean; typeToConfirm?: string }
 
+// The signed-in member, with the organization's name filled in when Clerk has none.
+export type Account = Me & { account: { id: string; name: string } };
+
 export interface Ctx {
   api: Api;
-  me: Me;
+  me: Account;
   // The query string, and the run ID on /r/<id>/.
   params: URLSearchParams;
   id: string | null;

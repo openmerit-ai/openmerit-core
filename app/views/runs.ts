@@ -1,45 +1,67 @@
-import type { RunSummary, Task } from "../api.ts";
-import { agent, day, html, model, plural, usd, type Html } from "../html.ts";
+import type { Run, Task } from "../api.ts";
+import { day, html, model, plural, usd, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { empty, header } from "./common.ts";
 
-export function outcome(run: RunSummary): Html {
-  if (run.status === "running") return html`<span class="pill">Measuring</span>${run.provisional ? html`<span class="sub">provisional pick: ${model(run.provisional)}</span>` : ""}`;
-  if (run.status === "failed") return html`<span class="pill bad">Did not finish</span><span class="sub">no recommendation</span>`;
-  if (run.outcome === "switch" && run.pick) return html`Switch to ${model(run.pick)}<span class="sub">from ${model(run.current)}${run.savingPct !== null ? ` · saves ${Math.round(run.savingPct)}%` : ""}</span>`;
-  if (run.outcome === "cheaper" && run.pick) return html`<span class="pill good">Cheaper fit found</span><span class="sub">${model(run.pick)} · not applied yet</span>`;
-  return html`Keep ${model(run.current)}<span class="sub">no cheaper model matched it</span>`;
+// A task's latest result, in the words the pages use. The cloud app records the job's result
+// status on the task, or the job's own status when it ended without one.
+export function result(task: Task, link: (text: Html | string) => Html = (text) => html`${text}`): Html {
+  switch (task.status) {
+    case "new": return html`<span class="sub">Not measured yet</span>`;
+    case "running": return html`<span class="pill">Measuring</span>`;
+    case "picked": return task.pick
+      ? html`${link(html`Switch to ${model(task.pick)}`)}<span class="sub">from ${model(task.currentModel)}${task.monthlySavingUsd ? ` · saves about ${usd(task.monthlySavingUsd)} a month` : ""}</span>`
+      : link("Cheaper model found");
+    case "keep_current": return html`${link(html`Keep ${model(task.currentModel)}`)}<span class="sub">no cheaper model passed as many cases</span>`;
+    case "agent_eval_failed": return html`${link("Keep the current models")}<span class="sub">every cheaper switch failed the agent's eval</span>`;
+    case "no_candidates": return html`${link("Keep the current model")}<span class="sub">no allowed model is cheaper</span>`;
+    case "no_cases": return html`<span class="pill warn">No usable cases</span><span class="sub">${link("no case had a known answer")}</span>`;
+    case "baseline_failed": return html`<span class="pill warn">Current model not measured</span><span class="sub">${link("nothing to compare against")}</span>`;
+    case "stopped": return html`<span class="pill">Stopped</span><span class="sub">${link("View run")}</span>`;
+    default: return html`<span class="pill bad">Did not finish</span><span class="sub">${link("View run")}</span>`;
+  }
 }
 
-const basisLabels: Record<string, string> = { context: "Context from agent", code: "Code", traces: "Production traces", eval: "Your eval" };
-const basis = (run: RunSummary): string => run.basis.map((item) => basisLabels[item] ?? item).join(", ") || "–";
+const jobStatus: Record<string, Html> = {
+  queued: html`<span class="pill">Queued</span>`,
+  running: html`<span class="pill">Measuring</span>`,
+  needs_input: html`<span class="pill warn">Waiting for your answer</span><span class="sub">in your coding agent</span>`,
+  failed: html`<span class="pill bad">Did not finish</span>`,
+  stopped: html`<span class="pill">Stopped</span>`,
+};
 
-export const runsView: View<{ runs: RunSummary[]; tasks: Task[] }> = {
+// The run list names only the task, so each run's outcome comes from its task: exact for the
+// task's latest run, and only "done" for older ones, whose report has the rest.
+function outcome(run: Run, task: Task | undefined): Html {
+  if (run.status !== "done") return jobStatus[run.status] ?? html`${run.status}`;
+  if (task && task.lastJobId === run.id) return result(task);
+  return html`<span class="sub">Done · see the report</span>`;
+}
+
+export const runsView: View<{ runs: Run[]; tasks: Task[] }> = {
   async load({ api }) {
-    const [runs, tasks] = await Promise.all([api.get<RunSummary[]>("/api/runs"), api.get<Task[]>("/api/tasks")]);
+    const [runs, tasks] = await Promise.all([api.get<Run[]>("/api/runs"), api.get<Task[]>("/api/tasks")]);
     return { runs, tasks };
   },
   render({ runs, tasks }, { me }) {
     const top = header(me, "Runs", "Each time a coding agent asks which model to use, OpenMerit runs the task's tests on the candidates and the answer lands here with its evidence. Link a run in a pull request so reviewers can see why.", [plural(tasks.length, "task"), plural(runs.length, "run")]);
     if (!runs.length) return html`${top}<section aria-labelledby="all"><h2 id="all">All runs</h2>${empty("No runs yet", "Add OpenMerit to a coding agent, then ask it which model a task should use. The run and its evidence appear here.")}</section>`;
-    const saving = tasks.reduce((sum, task) => sum + (task.status === "switched" ? task.monthlySavingUsd ?? 0 : 0), 0);
+    const byId = new Map(tasks.map((task) => [task.id, task]));
+    const saving = tasks.reduce((sum, task) => sum + (task.status === "picked" ? task.monthlySavingUsd ?? 0 : 0), 0);
     const month = new Date().toISOString().slice(0, 7);
-    const recent = runs.filter((run) => (run.measuredAt ?? run.startedAt).startsWith(month));
-    const count = (test: (run: RunSummary) => boolean): number => recent.filter(test).length;
-    const breakdown = [
-      [count((run) => run.outcome === "switch"), "switched"], [count((run) => run.outcome === "keep"), "kept"],
-      [count((run) => run.outcome === "cheaper"), "cheaper fit waiting"], [count((run) => run.status === "running"), "running"],
-      [count((run) => run.status === "failed"), "did not finish"],
-    ].filter(([n]) => n).map(([n, label]) => `${n} ${label}`).join(", ");
+    const recent = runs.filter((run) => run.startedAt.startsWith(month));
+    const breakdown = (["done", "running", "needs_input", "failed"] as const)
+      .map((status) => [recent.filter((run) => run.status === status || (status === "running" && run.status === "queued")).length, { done: "done", running: "measuring", needs_input: "waiting for an answer", failed: "did not finish" }[status]] as const)
+      .filter(([count]) => count).map(([count, label]) => `${count} ${label}`).join(", ");
     const plan = me.plan;
     return html`${top}
     <section aria-labelledby="summary">
       <h2 id="summary">This month</h2>
       <div class="grid3">
-        <div class="card"><span class="big">${usd(saving)}</span><span class="sub">estimated monthly saving from switches you applied</span></div>
+        <div class="card"><span class="big">${usd(saving)}</span><span class="sub">estimated monthly saving from the cheaper models OpenMerit found</span></div>
         <div class="card"><span class="big">${recent.length}</span><span class="sub">${recent.length === 1 ? "run" : "runs"}${breakdown ? ` · ${breakdown}` : ""}</span></div>
-        <div class="card">${plan && plan.status !== "none"
-          ? html`<span class="big">${plan.usedEvals} / ${plan.includedEvals}</span><span class="sub">evaluations used on the ${plan.name} plan</span>`
+        <div class="card">${plan.status !== "none" && plan.status !== "canceled"
+          ? html`<span class="big">${plan.usedEvals} / ${plan.includedEvals}</span><span class="sub">evaluations used${plan.name ? ` on the ${plan.name} plan` : ""}</span>`
           : html`<span class="big">No plan</span><span class="sub"><a href="/plan/">Choose a plan</a> to measure new tasks</span>`}</div>
       </div>
     </section>
@@ -47,12 +69,16 @@ export const runsView: View<{ runs: RunSummary[]; tasks: Task[] }> = {
       <h2 id="all">All runs</h2>
       <div class="tablewrap">
         <table>
-          <thead><tr><th>Task</th><th>Outcome</th><th class="hide-sm">Based on</th><th class="hide-sm">Asked by</th><th class="num">Measured</th></tr></thead>
+          <thead><tr><th>Task</th><th>Outcome</th><th class="hide-sm">Asked by</th><th class="num">Started</th></tr></thead>
           <tbody>
-            ${runs.map((run) => html`<tr><td><a href="/r/${run.id}/">${run.task}</a><span class="sub">${run.environment}</span></td><td>${outcome(run)}</td><td class="hide-sm">${basis(run)}</td><td class="hide-sm">${agent(run.requestedBy)}</td><td class="num">${run.status === "running" ? "Running" : day(run.measuredAt)}</td></tr>`)}
+            ${runs.map((run) => {
+              const task = byId.get(run.taskId);
+              return html`<tr><td><a href="/r/${run.id}/">${task?.name ?? run.taskId}</a><span class="sub">${task?.environment ?? ""}</span></td><td>${outcome(run, task)}</td><td class="hide-sm">${run.kind === "watch" ? "Watch re-run" : "Coding agent"}</td><td class="num">${day(run.startedAt)}</td></tr>`;
+            })}
           </tbody>
         </table>
       </div>
+      <p class="note">Agents read each report as Markdown at <code>https://openmerit.ai/api/r/&lt;run&gt;.md</code>.</p>
     </section>`;
   },
 };

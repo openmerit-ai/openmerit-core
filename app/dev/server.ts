@@ -53,5 +53,5 @@ const preview = createServer(async (incoming, outgoing) => {
   outgoing.writeHead(response.status, headers);
   outgoing.end(Buffer.from(await response.arrayBuffer()));
 });
-const api = createFakeApi({ origin: `http://localhost:${port}` });
+const api = createFakeApi({ appUrl: `http://localhost:${port}` });
 preview.listen(port, () => console.log(`app.openmerit.ai preview on http://localhost:${port}/ (fake API and sign-in; ?preview=populated|empty|noplan|member|error|slow|expired|signed-out)`));
