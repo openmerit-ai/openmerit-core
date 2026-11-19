@@ -40,6 +40,13 @@ test("a run shows its saved report, or the job's live state until it has one", a
   assert.match(report, /Ticket router: switch to claude-haiku-5-5/);
   assert.match(report, /claude-haiku-5-5 OpenRouter 40\/40 \$0\.07 0\.5 s Picked/);
   assert.match(report, /sahra-triage-ft-2 ep_baseten · your key · placed by measurement only/);
+  // The fallback instruction and the near misses the cloud app returns beside the pick.
+  assert.match(report, /production's model comes from elsewhere \(for example an environment variable\)\. Set it to anthropic\/claude-haiku-5-5 \./);
+  assert.match(report, /gpt-5-mini ep_openai · your key · 1 case below the current model 38\/40 \$0\.65 1\.8 s Near miss/);
+  assert.match(report, /Near Misses 1 model missed gpt-5's 39\/40 by at most one case per run.* gpt-5-mini ep_openai · 38\/40 passed · \$0\.65 per 1,000 calls · cheaper than now/);
+  // A report saved before near misses existed still renders.
+  const { nearMisses: _added, ...older } = await get<Report>("/api/runs/k7m2q9");
+  assert.doesNotMatch(text(runView.render(older, page(me))), /Near miss/);
   const waiting = text(runView.render(await get<JobView>("/api/runs/w8r3k1"), page(me)));
   assert.match(waiting, /Needs input/);
   assert.doesNotMatch(waiting, /Models Compared/);

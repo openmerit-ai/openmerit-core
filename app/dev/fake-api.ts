@@ -45,6 +45,7 @@ function populated(): State {
     status: "picked",
     pick: { model: haiku.model, endpoint: "openrouter", endpointModel: "anthropic/claude-haiku-5-5", passes: 40, total: 40, costPerCallUsd: 0.00007, savingPerCallUsd: 0.00468 },
     top: [haiku], baseline,
+    nearMisses: [{ ...measured("openai/gpt-5-mini", "ep_openai", { funding: "customer", endpointModel: "gpt-5-mini", passes: 38, costPerCallUsd: 0.00065, latencyMs: 1800, note: "1 case below the current model" }), cheaperThanCurrent: true }],
     candidates: [
       haiku,
       measured("openai/gpt-5-mini", "ep_openai", { funding: "customer", endpointModel: "gpt-5-mini", passes: 38, costPerCallUsd: 0.00065, latencyMs: 1800, note: "1 case below the current model" }),
@@ -54,13 +55,13 @@ function populated(): State {
     ],
     search: { pool: 14, unplaced: 1, samples: ["c01", "c02", "c07", "c13", "c18"], finalists: [haiku.model, "openai/gpt-5-mini"], challengers: ["sahra-triage-ft-2"], shortfall: null },
     agentEval: null,
-    edit: { edits: [{ file: "src/triage.ts", line: 14, before: "gpt-5", after: "claude-haiku-5-5" }], instructions: "Call it on OpenRouter (https://openrouter.ai/api/v1) instead of ep_openai." },
+    edit: { edits: [{ file: "src/triage.ts", line: 14, before: 'process.env.TRIAGE_MODEL ?? "gpt-5"', after: 'process.env.TRIAGE_MODEL ?? "anthropic/claude-haiku-5-5"' }], instructions: "The code's literal is a fallback; production's model comes from elsewhere (for example an environment variable). Set it to `anthropic/claude-haiku-5-5`. Call it on OpenRouter (https://openrouter.ai/api/v1) instead of ep_openai." },
     spend: { openmeritUsd: 1.84, customerUsd: 0.62 },
     guardrails: resolveGuardrails({ environment: { allowedProviders: ["openai", "anthropic"], repeats: 3, minPassRate: 0.95 }, task: { latencyMs: 1000, allowedProviders: ["openai", "anthropic", "deepseek"] } }),
     notices: ["Model calls were sent through OpenRouter; your app calls OpenAI directly, so latency there may differ."],
     reportUrl: "https://openmerit.ai/api/r/k7m2q9.md", catalogueVersion: "2026-11-18", cases: { total: 40, fromExamples: 8, written: 32 },
   };
-  const keep: Report = { ...report, jobId: "f9q2w7", task: "Fraud reviewer", createdAt: "2026-11-16T12:00:00Z", status: "keep_current", pick: null, top: [], baseline: { ...baseline, model: "anthropic/claude-sonnet-5-5" }, candidates: report.candidates.slice(1, 3), edit: { edits: [], instructions: null }, notices: [], spend: { openmeritUsd: 0.92, customerUsd: 0 } };
+  const keep: Report = { ...report, jobId: "f9q2w7", task: "Fraud reviewer", createdAt: "2026-11-16T12:00:00Z", status: "keep_current", pick: null, top: [], baseline: { ...baseline, model: "anthropic/claude-sonnet-5-5" }, candidates: report.candidates.slice(1, 3), nearMisses: [], edit: { edits: [], instructions: null }, notices: [], spend: { openmeritUsd: 0.92, customerUsd: 0 } };
   const failedEval: Report = { ...keep, jobId: "p3x8d1", task: "Bill and claim matcher", createdAt: "2026-11-17T08:00:00Z", status: "agent_eval_failed", agentEval: { status: "checked", passed: false, warning: null, baseline: { passes: 18, total: 20 }, tried: [{ model: "google/gemini-3.5-flash", passes: 15, total: 20, passed: false }] } };
   const job = (jobId: string, taskId: string, name: string, fields: Partial<JobView>): JobView => ({
     jobId, taskId, task: name, status: "running", phase: "ranking", questions: [], notices: [], progress: { measured: 12, planned: 30 }, result: null, error: null,

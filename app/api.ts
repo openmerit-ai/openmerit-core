@@ -78,6 +78,8 @@ export interface JobResult {
   status: "picked" | "keep_current" | "baseline_failed" | "no_cases" | "no_candidates" | "agent_eval_failed" | "stopped" | "failed";
   pick: { model: string; endpoint: string; endpointModel: string; passes: number; total: number; costPerCallUsd: number | null; savingPerCallUsd: number | null } | null;
   top: MeasuredModel[];
+  // Measured models within one case per run of the current model's passes, with whether each costs less per call. Absent from reports saved before 19 Nov 2026.
+  nearMisses?: (MeasuredModel & { cheaperThanCurrent: boolean | null })[];
   baseline: MeasuredModel | null;
   candidates: MeasuredModel[];
   search: { pool: number; unplaced: number; samples: string[]; finalists: string[]; challengers: string[]; shortfall: string | null };
