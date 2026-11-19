@@ -97,8 +97,10 @@ export function describeJob(view: JobView): string {
     lines.push("Ask the user before applying the edit.");
   } else if (result) lines.push(`No switch proposed (${result.status}).`);
   if (result) lines.push(`Report: ${result.reportUrl}`);
-  else if (view.status === "running" || view.status === "queued") lines.push(`Provisional pick while it runs: ${view.provisional.model}. ${view.provisional.reason} Measured ${view.progress.measured} so far; call openmerit_result again later.`);
-  if (view.notices.length) lines.push(...view.notices.map(notice => `Note: ${notice}`));
+  else if (view.status === "running" || view.status === "queued") lines.push(`Provisional pick while it runs: ${view.provisional.model}. ${view.provisional.reason} Measured ${view.progress.measured}${view.progress.planned ? ` of about ${view.progress.planned}` : ""} candidate runs so far (updated ${view.updatedAt}); call openmerit_result again later.`);
+  // A result's notices include the job's and those of its last stages, such as challengers left out.
+  const notices = result?.notices ?? view.notices;
+  if (notices.length) lines.push(...notices.map(notice => `Note: ${notice}`));
   if (view.error) lines.push(`Error: ${view.error}`);
   return lines.join("\n");
 }

@@ -284,3 +284,29 @@ test("a measure step replayed after a crash does not count its spend twice", asy
     assert.ok(Math.abs(period.body.openmeritUsd - spend.openmeritUsd) < 1e-9);
   } finally { await stop(app); await models.close(); }
 });
+
+test("a challenger the budget refuses ends the challengers, and the job still reports the finalists' pick", async () => {
+  const models = await fakeModels();
+  const app = await startApp({ models, env: CLERK });
+  try {
+    await subscribe(app, "org_capped");
+    const agent = caller(app, "test:user_t:org_capped:admin");
+    // The customer's fine-tune is the only customer-paid model, and a challenger: the customer cap refuses it before anything is sent.
+    await agent.api("/api/endpoints", { method: "POST", body: JSON.stringify({ kind: "openai-compatible", baseUrl: `${models.url}/v1`, apiKey: "sk-customer-capped-1234", allowedModels: ["acme/fine-tune-1"] }) });
+    await agent.api("/api/guardrails", { method: "PUT", body: JSON.stringify({ level: "environment", id: "acme/capped", settings: { customerSpendCapUsd: 0.000001 } }) });
+    const started = await agent.tool("openmerit_recommend", { bundle: bundle("capped classifier", false), environment: "acme/capped" });
+    const jobId = started.data.job_id as string;
+    await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => value.data.status === "needs_input");
+    await agent.tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
+    const done = await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 180_000);
+    assert.equal(done.data.status, "done", done.text);
+    const result = (await agent.api<Result & { top: unknown[]; notices: string[] }>(`/api/runs/${jobId}`)).body;
+    assert.equal(result.status, "picked");
+    assert.ok(result.pick && result.top.length > 0);
+    assert.ok(result.notices.some(notice => /^Challengers? not measured: .*acme\/fine-tune-1.*Stopped while measuring acme\/fine-tune-1/.test(notice)), result.notices.join("\n"));
+    assert.match(done.text, /Note: Challengers? not measured/);
+    assert.equal(models.calls.filter(call => call.model === "acme/fine-tune-1").length, 0, "nothing is sent to a refused challenger");
+    const progress = done.data.progress as { measured: number; planned: number };
+    assert.ok(progress.planned >= progress.measured && progress.planned <= progress.measured + 4, JSON.stringify(progress));
+  } finally { await stop(app); await models.close(); }
+});

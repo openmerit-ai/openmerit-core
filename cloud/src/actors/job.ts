@@ -333,7 +333,8 @@ export const job = workflow({
       return entry;
     };
     const stopFor = (result: Measured, what: string): JobStop => result.kind === "refused"
-      ? new JobStop("stopped", null, `Stopped while measuring ${what}: ${result.reason}. Raise the budget in the task's guardrails at app.openmerit.ai to continue.`)
+      // The report keeps what was measured before the budget ran out.
+      ? new JobStop("stopped", "stopped", `Stopped while measuring ${what}: ${result.reason}. Raise the budget in the task's guardrails at app.openmerit.ai to continue.`)
       : new JobStop("failed", null, `Measuring ${what} failed: ${"reason" in result ? result.reason : "unknown error"}`);
 
     try {
@@ -387,9 +388,18 @@ export const job = workflow({
         ? challengers(pool.ranked, leader, tried, { strength: item => item.eci ?? -Infinity, unplaced: pool.unplaced })
         : pool.unplaced.filter(item => !tried.has(item.key));
       plannedTotal = counter + challenging.length;
-      for (const challenger of challenging) {
-        const entry = await full(challenger, "challenger", null);
-        if (entry.status === "unavailable") entry.qualified = false;
+      const notices: string[] = [];
+      for (const [index, challenger] of challenging.entries()) {
+        // The finalists are measured, so a challenger the budget refuses, or one that fails, ends the challengers only.
+        try {
+          const entry = await full(challenger, "challenger", null);
+          if (entry.status === "unavailable") entry.qualified = false;
+        } catch (error) {
+          if (!(error instanceof JobStop)) throw error;
+          const left = challenging.slice(index).map(item => item.model);
+          notices.push(`${left.length === 1 ? "Challenger" : "Challengers"} not measured: ${left.join(", ")}. ${error.message}`);
+          break;
+        }
       }
 
       const candidates = [...measuredModels.values()].filter(item => item.role === "candidate");
@@ -401,7 +411,6 @@ export const job = workflow({
       // 5. Agent eval: when the task belongs to an agent, the engine's rule checks the pick with every other task unchanged.
       let chosen = cheaper[0] ?? null;
       let agentEval: AgentEvalSummary | null = null;
-      const notices: string[] = [];
       if (chosen && input.agent !== null) {
         await ctx.step("agent-eval-start", async s => { s.state.phase = "agent_eval"; s.state.updatedAt = now(); });
         const agentMeasure = services().agentEval({ accountId: input.accountId, environment: input.environment, agent: input.agent });
