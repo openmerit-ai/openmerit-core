@@ -14,6 +14,8 @@ COPY openmerit-core/src/engine openmerit-core/src/engine
 COPY openmerit-core/src/ranking openmerit-core/src/ranking
 COPY openmerit-core/src/eval/proxy.ts openmerit-core/src/eval/
 COPY openmerit-core/src/catalogue openmerit-core/src/catalogue
+COPY openmerit-core/src/connectors/agent-bundle.ts openmerit-core/src/connectors/
+COPY openmerit-core/src/connectors/viktor openmerit-core/src/connectors/viktor
 # openmerit-core's sources import their packages (ajv) from the nearest node_modules above them.
 RUN ln -s cloud/node_modules node_modules
 COPY openmerit-core/data/catalogue.json openmerit-core/data/
