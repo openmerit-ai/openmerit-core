@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { NO_ORGANIZATION, type Auth, type AuthResult, type Identity } from "./auth.ts";
 import type { Config } from "./config.ts";
 import type { Answers, JobView } from "./actors/job.ts";
-import { reasonFor, type JobResult } from "./report.ts";
+import { explain, reasonFor, type JobResult } from "./report.ts";
 import type { AppClient } from "./registry.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { bundleProblem, DEFAULT_ENVIRONMENT, startJob } from "./start.ts";
@@ -36,7 +36,7 @@ const BUNDLE_SCHEMA = {
     },
     examples: { type: "array", description: "Real inputs from the code or its tests, with the correct answer when known. These become the first test cases.", items: { type: "object", required: ["input"], properties: { input: { type: "object", additionalProperties: string }, expected: {} } } },
     constraints: { type: "object", properties: { maxLatencyMs: { type: "number" }, needsVision: { type: "boolean" } } },
-    codeRefs: { type: "array", description: "Where the code names the model, so the result can include the edit", items: { type: "object", required: ["file", "line", "spelling"], properties: { file: string, line: { type: "number" }, spelling: string } } },
+    codeRefs: { type: "array", description: "Where the code names the model, so the result can include the edit. spelling is the exact string literal that holds the model ID as the code writes it, with its quotes, such as '\"gpt-4.1-mini\"', or the expression around it, such as 'process.env.CLASSIFIER_MODEL ?? \"gpt-4.1-mini\"'; only that literal is edited. A config file or environment value that holds the model belongs in a ref of its own, at the line that sets it", items: { type: "object", required: ["file", "line", "spelling"], properties: { file: string, line: { type: "number" }, spelling: string } } },
   },
 };
 
@@ -116,10 +116,11 @@ const jobData = (view: JobView): Json => ({
 /** The result for the agent: the verdict and why, the current model's figures, and whether each top model is cheaper than it. */
 function resultData(result: JobResult): Json {
   const baseline = result.baseline;
+  const { reason, top } = explain(result);
   return {
-    status: result.status, reason: reasonFor(result, baseline?.model ?? "the current model"), pick: result.pick,
+    status: result.status, reason, pick: result.pick,
     baseline: baseline ? { model: baseline.model, endpoint: baseline.endpoint, passes: baseline.passes, total: baseline.total, costPerCallUsd: baseline.costPerCallUsd, latencyMs: baseline.latencyMs } : null,
-    top: result.top.map(item => ({ ...item, cheaperThanCurrent: baseline?.costPerCallUsd == null || item.costPerCallUsd === null ? null : item.costPerCallUsd < baseline.costPerCallUsd })),
+    top,
     reportUrl: result.reportUrl, edit: result.edit, spend: result.spend,
   };
 }

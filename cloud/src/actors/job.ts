@@ -481,12 +481,13 @@ export const job = workflow({
             const client = s.client<Registry>();
             const account = client.account.getOrCreate([input.accountId]);
             const spent = await account.spent({ jobId });
+            const index = catalogueIndex(await client.catalogue.getOrCreate(["global"]).get());
             const status: JobResult["status"] = chosen ? "picked" : agentEval && cheaper.length ? "agent_eval_failed" : !pool.ranked.length && !pool.unplaced.length ? "no_candidates" : "keep_current";
             const result: JobResult = {
               status, top, baseline, candidates,
               pick: chosen ? { model: chosen.model, endpoint: chosen.endpoint, endpointModel: chosen.endpointModel, passes: chosen.passes, total: chosen.total, costPerCallUsd: chosen.costPerCallUsd, savingPerCallUsd: baseline.costPerCallUsd !== null && chosen.costPerCallUsd !== null ? baseline.costPerCallUsd - chosen.costPerCallUsd : null } : null,
               search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples, finalists: search.finalists.map(item => item.model), challengers: challenging.map(item => item.model), shortfall: search.shortfall ?? null },
-              agentEval, edit: chosen ? proposeEdit(bundle, optionOf(chosen), pool.baseline!.endpoint) : { edits: [], instructions: null },
+              agentEval, edit: chosen ? proposeEdit(bundle, optionOf(chosen), pool.baseline!.endpoint, index.find) : { edits: [], instructions: null },
               spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices: [...s.state.notices, ...notices],
               reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts,
             };
