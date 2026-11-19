@@ -2,7 +2,7 @@
 
 ## Current routing — unreleased source, 3 November 2026
 
-The domain router serves `openmerit.ai` and `www.openmerit.ai`. `openmerit.site` and `www.openmerit.site` keep only their HTTP 308 redirect to the same path and query on `openmerit.ai`; the old `.site` memo sign-in and API exceptions are removed. The `dash.openmerit.ai` and `dash.openmerit.site` hosts are no longer routed, and the hosted terminal sample Worker and its configuration are removed from the repository. Releasing this needs an approved `domain-router` deploy; DNS, custom-domain and mail configuration are unchanged by the source change. The dated records below describe earlier routing, including the dashboard hosts and `.site` exceptions.
+The domain router serves `openmerit.ai` and `www.openmerit.ai`. `openmerit.site` and `www.openmerit.site` keep only their HTTP 308 redirect to the same path and query on `openmerit.ai`; the old `.site` memo sign-in and API exceptions are removed. The `dash.openmerit.ai` and `dash.openmerit.site` hosts are no longer routed, and the hosted terminal sample Worker and its configuration are removed from the repository. Releasing this needs an approved `domain-router` deploy; DNS, custom-domain and mail configuration are unchanged by the source change. The router also sends a cookieless, anonymous PostHog `$pageview` for successful HTML page requests on `openmerit.ai`; see [website pageviews](site-deployment.md#deploying) in the deployment runbook. The dated records below describe earlier routing, including the dashboard hosts and `.site` exceptions.
 
 ## Memo source reconciliation — local only, 29 October 2026
 

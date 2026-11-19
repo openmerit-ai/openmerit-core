@@ -2,6 +2,7 @@
 // token, and all state lives in the actors, so any node can answer. Responses are plain JSON, which
 // the streamable HTTP transport allows when a server sends no notifications.
 import { randomBytes } from "node:crypto";
+import { capture } from "./analytics.ts";
 import { NO_ORGANIZATION, type Auth, type AuthResult, type Identity } from "./auth.ts";
 import type { Config } from "./config.ts";
 import type { Answers, JobView } from "./actors/job.ts";
@@ -72,6 +73,7 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
 ];
+const TOOL_NAMES = new Set(TOOLS.map(tool => tool.name));
 
 type Json = Record<string, unknown>;
 interface ToolResult { text: string; data: Json; isError?: boolean }
@@ -159,7 +161,7 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     if (problem) return { text: `The task bundle is not usable: ${problem}.`, data: {}, isError: true };
     const environment = typeof args.environment === "string" && args.environment.trim() ? args.environment.trim().replaceAll(":", "-").slice(0, 200) : DEFAULT_ENVIRONMENT;
     const agent = typeof args.agent === "string" && args.agent.trim() ? args.agent.trim().slice(0, 200) : null;
-    const started = await startJob(client, { accountId: identity.accountId, environment, agent, bundle: args.bundle as TaskBundle, kind: "run", askedBy });
+    const started = await startJob(client, { accountId: identity.accountId, environment, agent, bundle: args.bundle as TaskBundle, kind: "run", trigger: "mcp", userId: identity.userId, askedBy });
     if (!started.ok) return { text: started.error, data: { status: "refused" }, isError: true };
     const { provisional } = started;
     return {
@@ -247,8 +249,14 @@ export async function handleMcp(request: Request, deps: McpDeps): Promise<Respon
       let result: ToolResult;
       if (!identity) result = { text: auth.ok ? "" : auth.error || NO_ORGANIZATION, data: { status: "no_account" }, isError: true };
       else {
-        try { result = await callTool(deps, identity, String(params.name ?? ""), (params.arguments ?? {}) as Json, askedBy); }
+        const tool = String(params.name ?? "");
+        const startedAt = Date.now();
+        try { result = await callTool(deps, identity, tool, (params.arguments ?? {}) as Json, askedBy); }
         catch (error) { result = { text: `OpenMerit could not complete the call: ${error instanceof Error ? error.message : String(error)}`, data: {}, isError: true }; }
+        // The tool's name is the client's to choose, so an unknown one is sent as such. Never its arguments or result.
+        void capture(deps.config.posthog, "mcp_tool_called", identity.userId, {
+          interface: "mcp", tool: TOOL_NAMES.has(tool) ? tool : "unknown", ...(askedBy ? { client: askedBy } : {}), ok: !result.isError, duration_ms: Date.now() - startedAt, account_id: identity.accountId,
+        });
       }
       replies.push(rpc(id, { result: { content: [{ type: "text", text: result.text }], structuredContent: result.data, ...(result.isError ? { isError: true } : {}) } }));
     } else replies.push(rpc(id, { error: { code: -32601, message: `Method not found: ${method}` } }));

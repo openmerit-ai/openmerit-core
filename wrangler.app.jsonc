@@ -18,7 +18,11 @@
     // this origin by CORS.
     "API_ORIGIN": "https://openmerit.ai",
     // Public: the same key ClerkJS reads in every signed-in page.
-    "CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsub3Blbm1lcml0LmFpJA"
+    "CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsub3Blbm1lcml0LmFpJA",
+    // Public: the production PostHog project's token, which /ingest/e/ adds to the
+    // pages' events. `npm run app` uses the environment's token or none instead.
+    "POSTHOG_PROJECT_TOKEN": "phc_uGqGVy96bhXQsq59dsx4Wt5N7zSG2zYs3xBT2jqY4KKB",
+    "POSTHOG_HOST": "https://us.i.posthog.com"
   },
   "assets": {
     "directory": "./dist/app",

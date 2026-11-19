@@ -42,10 +42,12 @@ function harnessContent(messages: { role: string; content: unknown }[]): string 
   return JSON.stringify({ status: "OPENMERIT_READY", harness: "fake" });
 }
 let endpointRequests = 0;
+const telemetry: { api_key: string; properties: { command: string; surface: string } }[] = [];
 const server = createServer((req, res) => {
   let body = "";
   req.on("data", chunk => { body += chunk; });
   req.on("end", () => {
+    if (req.url === "/i/v0/e/") { telemetry.push(JSON.parse(body) as typeof telemetry[number]); res.writeHead(200, { "content-type": "application/json" }); res.end("{\"status\":\"Ok\"}"); return; }
     if (req.method === "GET") { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ data: [] })); return; }
     const parsed = JSON.parse(body) as { model: string; messages: { role: string; content: unknown }[] };
     if (req.url?.startsWith("/harness/")) {
@@ -71,6 +73,8 @@ const bin = join(prefix, "bin", "openmerit");
 const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(LANGFUSE_|OPENMERIT_)|^(ANTHROPIC|OPENAI|OPENROUTER|GEMINI|GOOGLE)_API_KEY$/.test(key)));
 const env: Record<string, string | undefined> = {
   ...inherited, PATH: `${join(prefix, "bin")}:${process.env.PATH}`, OPENMERIT_HOME: home, OPENMERIT_NO_UPDATE_CHECK: "1",
+  // The installed package would send telemetry to the production project.
+  OPENMERIT_TELEMETRY: "0", DO_NOT_TRACK: "1",
   OPENMERIT_DAEMON_PORT: String(21000 + Math.floor(Math.random() * 8000)), FAKE_KEY: "sk-fake",
 };
 
@@ -181,6 +185,12 @@ try {
 
   const { tools } = await mcpToolsList();
   assert.deepEqual(tools.map(tool => tool.name).sort(), ["openmerit_history", "openmerit_scout", "openmerit_status"]);
+  // Telemetry is off above. The installed package sends to the production project; here only to this fake.
+  assert.equal(telemetry.length, 0, "the opted-out commands sent no telemetry");
+  const tracking = { ...Object.fromEntries(Object.entries(env).filter(([key]) => !["CI", "DO_NOT_TRACK", "OPENMERIT_TELEMETRY"].includes(key))), OPENMERIT_POSTHOG_HOST: base };
+  say("openmerit history --json, with telemetry on");
+  await run(bin, ["history", "--json"], { cwd: repo, env: tracking });
+  assert.deepEqual(telemetry.map(event => [event.api_key, event.properties.command, event.properties.surface]), [["phc_uGqGVy96bhXQsq59dsx4Wt5N7zSG2zYs3xBT2jqY4KKB", "history", "cli"]], "the installed package uses the production token");
   say(`passed: run ${runId} picked ${task.search.pick}; top ${task.top.map(model => model.model).join(", ")}; ${endpointRequests} endpoint requests`);
 } catch (error) {
   failed = true;

@@ -36,6 +36,9 @@ export interface Limits {
   customerCapUsd: number;
 }
 
+/** Where analytics events go (analytics.ts). */
+export interface PostHogConfig { token: string; host: string }
+
 export interface Config {
   port: number;
   /** Where openmerit.ai's router sends /mcp and /api: the base of every URL the app writes. */
@@ -56,6 +59,8 @@ export interface Config {
   watchIntervalMs: number;
   /** A task with no openmerit_recommend call for this long is idle: its watch pauses until the next call. */
   idleAfterMs: number;
+  /** Null without POSTHOG_PROJECT_TOKEN: no event is sent. */
+  posthog: PostHogConfig | null;
 }
 
 const number = (value: string | undefined, fallback: number) => (value && Number.isFinite(Number(value)) ? Number(value) : fallback);
@@ -103,5 +108,6 @@ export function loadConfig(env: Env = process.env): Config {
     models: { caseWriter: env.OPENMERIT_CASE_WRITER_MODEL || "anthropic/claude-sonnet-5.5", judge: env.OPENMERIT_JUDGE_MODEL || "anthropic/claude-sonnet-5.5" },
     watchIntervalMs: number(env.OPENMERIT_WATCH_INTERVAL_MS, 24 * 60 * 60 * 1000),
     idleAfterMs: number(env.OPENMERIT_IDLE_DAYS, 30) * 24 * 60 * 60 * 1000,
+    posthog: env.POSTHOG_PROJECT_TOKEN ? { token: env.POSTHOG_PROJECT_TOKEN, host: (env.POSTHOG_HOST || "https://us.i.posthog.com").replace(/\/$/, "") } : null,
   };
 }

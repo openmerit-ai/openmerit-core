@@ -36,6 +36,7 @@ const triageModel = triageFlag?.slice("openrouter/".length) ?? TRIAGE_MODEL.id ?
 const models = parseModelFlag(values.model);
 const runModels = effectiveModels(models);
 const runId = `run-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+const startedAt = Date.now();
 const deadline = Date.now() + Number(values["timeout-minutes"]) * 60_000;
 const claims = CLAIM_FIXTURES.filter((fixture) => !values.only || fixture.name === values.only);
 const enrollments = ENROLLMENT_FIXTURES.filter((fixture) => !values.only || fixture.name === values.only);
@@ -295,3 +296,19 @@ const count = (pick: (item: (typeof outcomes)[number]) => boolean | null): numbe
 const totalErrorCost = outcomes.reduce((sum, item) => sum + item.errorCostAed, 0);
 console.log(`\nClaims correct ${count((item) => item.claimCorrect)}/${claims.length} · payment correct ${count((item) => item.paymentCorrect)}/${claims.length} · review load ${count((item) => item.reviewLoad)} · error cost AED ${totalErrorCost.toFixed(2)}`);
 console.log(`${correct}/${total} checks passed. Run ID ${runId}; claims now await approval: npm run approve -- <claim-id> --run ${runId}`);
+
+// One event per run for the team's internal PostHog project, when POSTHOG_PROJECT_TOKEN is set.
+// Sahra is a test customer, so its runs must never reach OpenMerit's production project.
+const posthogToken = process.env.POSTHOG_PROJECT_TOKEN;
+if (posthogToken && posthogToken !== "phc_uGqGVy96bhXQsq59dsx4Wt5N7zSG2zYs3xBT2jqY4KKB") {
+  const properties = {
+    interface: "playground", $process_person_profile: false, claims: claims.length, enrollments: enrollments.length,
+    checks_passed: correct, checks_total: total, models_overridden: Object.keys(models).length > 0, duration_ms: Date.now() - startedAt,
+  };
+  try {
+    await fetch(`${(process.env.POSTHOG_HOST ?? "https://us.i.posthog.com").replace(/\/$/, "")}/i/v0/e/`, {
+      method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(2000),
+      body: JSON.stringify({ api_key: posthogToken, event: "playground_scenario_run", distinct_id: "sahra-playground", uuid: crypto.randomUUID(), timestamp: new Date().toISOString(), properties }),
+    });
+  } catch { /* analytics never fails a run */ }
+}

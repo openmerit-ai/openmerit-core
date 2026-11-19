@@ -107,7 +107,7 @@ export const task = actor({
       const previous = c.state.catalogueVersion;
       c.state.catalogueVersion = version;
       await save(c);
-      const started = await startJob(client, { accountId: c.state.accountId, environment: c.state.environment, agent: c.state.agent, bundle: c.state.bundle, kind: "watch" });
+      const started = await startJob(client, { accountId: c.state.accountId, environment: c.state.environment, agent: c.state.agent, bundle: c.state.bundle, kind: "watch", trigger: "watch", userId: null });
       if (!started.ok) {
         c.state.catalogueVersion = previous;
         c.state.notices = [`${new Date().toISOString()}: watch job not started: ${started.error}`, ...c.state.notices].slice(0, 20);

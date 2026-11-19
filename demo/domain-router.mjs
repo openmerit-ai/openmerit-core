@@ -1,4 +1,5 @@
 import { withPrimaryDomain } from './domain-migration.mjs';
+import { capturePageview } from './pageview.ts';
 import { publicSiteResponse } from './public-site.ts';
 
 const siteHosts = new Set(['openmerit.ai', 'www.openmerit.ai', 'openmerit.site', 'www.openmerit.site']);
@@ -31,8 +32,10 @@ const site = withPrimaryDomain({ fetch: (request, env) => {
 } });
 
 export default {
-  fetch(request, env, ctx) {
-    if (siteHosts.has(new URL(request.url).hostname)) return site.fetch(request, env, ctx);
-    return new Response('Not found.', { status: 404 });
+  async fetch(request, env, ctx) {
+    if (!siteHosts.has(new URL(request.url).hostname)) return new Response('Not found.', { status: 404 });
+    const response = await site.fetch(request, env, ctx);
+    capturePageview(request, response, env, ctx);
+    return response;
   },
 };

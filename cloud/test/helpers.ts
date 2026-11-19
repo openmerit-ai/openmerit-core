@@ -59,6 +59,22 @@ export async function fakeModels(): Promise<FakeModels> {
   return fake;
 }
 
+/** A fake PostHog capture endpoint: the events the app posted, in order. Point POSTHOG_HOST at `url`. */
+export interface CapturedEvent { event: string; distinct_id: string; uuid: string; timestamp: string; properties: Record<string, unknown>; api_key: string }
+export async function fakeCapture(): Promise<{ url: string; events: CapturedEvent[]; close: () => Promise<void> }> {
+  const events: CapturedEvent[] = [];
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", chunk => { body += chunk; });
+    req.on("end", () => {
+      if (req.method === "POST" && req.url === "/i/v0/e/") events.push(JSON.parse(body) as CapturedEvent);
+      res.writeHead(200, { "content-type": "application/json" }).end("{\"status\":\"Ok\"}");
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, events, close: () => new Promise(resolve => { server.closeAllConnections(); server.close(() => resolve()); }) };
+}
+
 export interface App { url: string; child: ChildProcess; storage: string; enginePort: number; env: Record<string, string> }
 
 const free = (port: number) => new Promise<boolean>(resolve => {

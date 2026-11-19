@@ -8,7 +8,7 @@ export interface ClerkSession {
   // Starts a re-verification and lists the factors Clerk can check; empty for a Google-only account.
   startVerification?(params: { level: string }): Promise<{ supportedFirstFactors?: unknown[] | null }>;
 }
-export interface ClerkUser { fullName?: string | null; primaryEmailAddress?: { emailAddress: string } | null }
+export interface ClerkUser { id?: string; fullName?: string | null; primaryEmailAddress?: { emailAddress: string } | null }
 export interface Clerk {
   session?: ClerkSession | null;
   user?: ClerkUser | null;

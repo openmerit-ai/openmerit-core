@@ -10,8 +10,12 @@
   },
   // The cloud app on Rivet Cloud, which serves /mcp, /.well-known/oauth-protected-resource
   // and /api/*. Empty makes those paths return 503.
+  // POSTHOG_*: the website's cookieless $pageview (demo/pageview.ts) goes to the production
+  // PostHog project; the token is public. An empty token sends nothing.
   "vars": {
-    "CLOUD_APP_ORIGIN": "https://openmeritdr2i.onrivet.dev"
+    "CLOUD_APP_ORIGIN": "https://openmeritdr2i.onrivet.dev",
+    "POSTHOG_PROJECT_TOKEN": "phc_uGqGVy96bhXQsq59dsx4Wt5N7zSG2zYs3xBT2jqY4KKB",
+    "POSTHOG_HOST": "https://us.i.posthog.com"
   },
   "services": [
     { "binding": "SCOUT", "service": "openmerit-scout-alpha" },

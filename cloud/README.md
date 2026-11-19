@@ -53,6 +53,7 @@ To run it by hand against a local engine: `TEST_STORAGE=$(mktemp -d) TEST_ENGINE
 | `OPENMERIT_CASE_WRITER_MODEL`, `OPENMERIT_JUDGE_MODEL` | setting | Catalogue models on OpenRouter that write cases and judge text answers; both default to `anthropic/claude-sonnet-5.5` |
 | `OPENMERIT_WATCH_INTERVAL_MS`, `OPENMERIT_IDLE_DAYS` | setting | How often a watched task checks the catalogue (a day), and the days without a recommend call before a task is idle (30) |
 | `OPENMERIT_JOBS_PER_HOUR`, `OPENMERIT_CONCURRENT_JOBS`, `OPENMERIT_JOB_BUDGET_USD`, `OPENMERIT_MONTHLY_CAP_USD`, `OPENMERIT_CUSTOMER_CAP_USD` | setting | Limits: 20, 3, $5, $100 and $100 by default |
+| `POSTHOG_PROJECT_TOKEN`, `POSTHOG_HOST` | fixed setting, setting | PostHog analytics (`src/analytics.ts`): `mcp_tool_called` for each MCP tool call, from the MCP handler, and `run_completed` once per job when it ends, from the job actor, with the trigger (`app`, `mcp` or `watch`). Events carry the Clerk user and organization IDs, the tool or status, `ok` and durations: never arguments, results, bundles or error text. Without a token nothing is sent. `npm run deploy` always sets the production OpenMerit project's public token, written in `scripts/deploy.ts`, and never copies this environment's token, which is the Internal project's. `POSTHOG_HOST` defaults to `https://us.i.posthog.com`; the deploy does not set it, and the tests point it at a local fake |
 
 The cluster sets `RIVET_ENDPOINT`, `RIVET_TOKEN` and `RIVET_POOL` on every deploy; do not set them.
 

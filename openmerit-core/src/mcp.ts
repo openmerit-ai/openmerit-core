@@ -7,6 +7,7 @@ import { renderRun, renderStep } from "./cli/render.ts";
 import { localContext, missingSetup, startRun } from "./local.ts";
 import { advanceInDaemon } from "./daemon/daemon.ts";
 import { step, type Answers } from "./scout/workflow.ts";
+import { sendCommandRun } from "./telemetry.ts";
 import { checkForUpdate, packageVersion, updateNotice, type UpdateInfo } from "./update.ts";
 
 const PROTOCOL = "2025-06-18";
@@ -51,6 +52,7 @@ export async function serveMcp(input: NodeJS.ReadableStream = process.stdin, out
   let update: UpdateInfo | null = null;
   const updateCheck = checkForUpdate(env).then(info => { update = info; return info; });
   const running = new Set<string>();
+  const telemetry = new Set<Promise<void>>();
 
   const call = async (name: string, args: Json): Promise<{ text: string; data: Json; isError?: boolean }> => {
     const cwd = typeof args.cwd === "string" && args.cwd ? args.cwd : process.cwd();
@@ -116,7 +118,16 @@ export async function serveMcp(input: NodeJS.ReadableStream = process.stdin, out
       if (method === "tools/list") return void send({ id, result: { tools: TOOLS } });
       if (method === "tools/call") {
         const params = (message.params ?? {}) as { name?: string; arguments?: Json };
-        const result = await call(params.name ?? "", params.arguments ?? {});
+        const started = Date.now();
+        // One telemetry event per tool call, with the tool's name only; not awaited, so the reply never waits for it.
+        const report = (ok: boolean) => {
+          const sending = sendCommandRun({ command: TOOLS.some(tool => tool.name === params.name) ? params.name! : "unknown", surface: "mcp", ok, durationMs: Date.now() - started }, env, log);
+          telemetry.add(sending);
+          void sending.finally(() => telemetry.delete(sending));
+        };
+        let result: Awaited<ReturnType<typeof call>>;
+        try { result = await call(params.name ?? "", params.arguments ?? {}); } catch (error) { report(false); throw error; }
+        report(!result.isError);
         return void send({ id, result: { content: [{ type: "text", text: result.text }], structuredContent: result.data, ...(result.isError ? { isError: true } : {}) } });
       }
       if (method === "logging/setLevel") return void send({ id, result: {} });
@@ -136,4 +147,5 @@ export async function serveMcp(input: NodeJS.ReadableStream = process.stdin, out
     pending.add(work);
   }
   await Promise.all(pending);
+  await Promise.all(telemetry);
 }

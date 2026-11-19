@@ -2,10 +2,46 @@
 // by scripts/build-app.ts, the report page at /r/<id>/, and /config.json, which
 // tells the pages the Clerk publishable key and the cloud app's origin. The
 // pages hold no data; they fetch it from the cloud app's /api/* after sign-in.
+// /ingest/e/ relays the pages' PostHog events.
 export interface AppWorkerEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
   CLERK_PUBLISHABLE_KEY?: string;
   API_ORIGIN?: string;
+  // PostHog, for app/analytics.ts through /ingest/e/. No token: the proxy sends nothing.
+  POSTHOG_PROJECT_TOKEN?: string;
+  POSTHOG_HOST?: string;
+}
+interface WaitUntil { waitUntil(promise: Promise<unknown>): void }
+
+const ingestLimit = 32 * 1024;
+
+function withClientIp(event: Record<string, unknown>, ip: string | null, token: string): Record<string, unknown> {
+  const properties = event.properties && typeof event.properties === "object" ? event.properties : {};
+  return { ...event, api_key: token, properties: { ...properties, ...(ip ? { $ip: ip } : {}) } };
+}
+
+// The pages' one analytics path, first-party so ad blockers leave it alone. It
+// adds the project token, forwards one capture to PostHog and answers 204 whatever
+// PostHog says; it forwards nothing else.
+async function ingest(request: Request, env: AppWorkerEnv, ctx?: WaitUntil): Promise<Response> {
+  if (request.method !== "POST") return new Response(null, { status: 405, headers: { Allow: "POST" } });
+  if (Number(request.headers.get("content-length") ?? 0) > ingestLimit) return new Response(null, { status: 413 });
+  const body = await request.arrayBuffer();
+  if (body.byteLength > ingestLimit) return new Response(null, { status: 413 });
+  let event: unknown;
+  try { event = JSON.parse(new TextDecoder().decode(body)); } catch { return new Response(null, { status: 400 }); }
+  if (!event || typeof event !== "object" || Array.isArray(event)) return new Response(null, { status: 400 });
+  const token = env.POSTHOG_PROJECT_TOKEN;
+  if (token) {
+    const host = (env.POSTHOG_HOST || "https://us.i.posthog.com").replace(/\/+$/, "");
+    const sent = fetch(`${host}/i/v0/e/`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      // The browser's IP, as the website's pageviews send it, so PostHog locates the user and not Cloudflare.
+      body: JSON.stringify(withClientIp(event as Record<string, unknown>, request.headers.get("cf-connecting-ip"), token)), signal: AbortSignal.timeout(2000),
+    }).then(() => undefined, () => undefined);
+    if (ctx) ctx.waitUntil(sent); else await sent;
+  }
+  return new Response(null, { status: 204 });
 }
 
 const json = (data: unknown, status = 200): Response => new Response(JSON.stringify(data), {
@@ -43,9 +79,10 @@ const secure = (response: Response): Response => {
 };
 
 export default {
-  async fetch(request: Request, env: AppWorkerEnv): Promise<Response> {
+  async fetch(request: Request, env: AppWorkerEnv, ctx?: WaitUntil): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/config.json") return secure(config(env));
+    if (url.pathname === "/ingest/e/") return secure(await ingest(request, env, ctx));
     if (url.pathname === "/r" || url.pathname === "/r/") return Response.redirect(`${url.origin}/`, 308);
     // The cloud app returns Stripe Checkout and the billing portal to /billing.
     if (url.pathname === "/billing" || url.pathname === "/billing/") return Response.redirect(`${url.origin}/plan/${url.search}`, 302);

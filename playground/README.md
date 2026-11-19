@@ -97,7 +97,7 @@ npm run approve -- FICT-CLM-1001 approve --by "<your name>"
 npm run scenarios -- --model intake=openrouter/anthropic/claude-haiku-5.5,coding=openrouter/anthropic/claude-haiku-5.5
 ```
 
-The runner sends the overrides as `models` (agent → `{ provider, id }`) on `POST /claims` and `POST /enrollments`. Without Langfuse keys in its environment it still checks the run but sends no scores, dataset or experiment. Each run seeds and uses its own ledger, named by its run ID, so runs can go in parallel, for example one per candidate model. Requests without a run ID, such as real submissions, use the `sahra` ledger. To approve a claim from a scenario run, pass its run ID: `npm run approve -- <claim-id> approve --by <name> --run <run-id>` (the runner prints it).
+The runner sends the overrides as `models` (agent → `{ provider, id }`) on `POST /claims` and `POST /enrollments`. Without Langfuse keys in its environment it still checks the run but sends no scores, dataset or experiment. When `POSTHOG_PROJECT_TOKEN` is set (in an Amp orb it holds the team's internal project), the runner also sends one `playground_scenario_run` event with counts, checks passed and duration, never fixture content; it refuses OpenMerit's production token. Each run seeds and uses its own ledger, named by its run ID, so runs can go in parallel, for example one per candidate model. Requests without a run ID, such as real submissions, use the `sahra` ledger. To approve a claim from a scenario run, pass its run ID: `npm run approve -- <claim-id> approve --by <name> --run <run-id>` (the runner prints it).
 
 **Delayed cost ingestion:** after scoring, the runner waits up to two minutes for
 each agent root's declared generation count and every generation's cost. Missing

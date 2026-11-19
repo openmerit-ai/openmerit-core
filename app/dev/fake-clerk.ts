@@ -17,7 +17,7 @@ const flag = new URLSearchParams(location.search).get("oauth-only");
 if (flag) { if (flag === "1") localStorage.setItem(oauthOnly, "1"); else localStorage.removeItem(oauthOnly); }
 
 const clerk: Clerk = {
-  user: active ? (tonic ? { fullName: "Jordan Pike", primaryEmailAddress: { emailAddress: "jordan@tonicultra.example" } } : { fullName: "Amira Haddad", primaryEmailAddress: { emailAddress: "amira@sahra.example" } }) : null,
+  user: active ? (tonic ? { id: "user_previewTonicUltra", fullName: "Jordan Pike", primaryEmailAddress: { emailAddress: "jordan@tonicultra.example" } } : { id: "user_previewSahraHealth", fullName: "Amira Haddad", primaryEmailAddress: { emailAddress: "amira@sahra.example" } }) : null,
   // The token carries when the preview last verified, as a real session token's fva claim does.
   session: active ? {
     status: "active",
