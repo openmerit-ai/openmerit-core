@@ -1,8 +1,10 @@
 // A task's candidate models: the catalogue over OpenRouter and the account's own endpoints,
 // filtered by the task's needs and guardrails, as a ladder for the search. The provisional pick
 // comes from the same pool, by catalogue evidence alone.
-import { blendedPrice, catalogueIndex, ladder, pool, type Catalogue, type CatalogueModel, type Funding, type Guardrails, type Ranked } from "./engine.ts";
-import type { EndpointKind, TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
+import { blendedPrice, catalogueIndex, eligible, ladder, pool, provisionalPick as pickFromCatalogue, type Catalogue, type CatalogueModel, type Funding, type Guardrails, type Provisional, type Ranked } from "./engine.ts";
+import { callCost, type EndpointKind, type TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
+
+export type { Provisional };
 
 /** An endpoint as a job sees it, without its key. */
 export interface EndpointInfo { id: string; kind: EndpointKind; baseUrl: string; allowedModels: string[] | "all"; funding: Funding }
@@ -77,15 +79,11 @@ export function buildPool(input: { catalogue: Catalogue; endpoints: readonly End
   const fits = (option: Option) => {
     if (option.key === baseline?.key) return false;
     if (models && !models.has(option.model.toLowerCase()) && !models.has(option.endpointModel.toLowerCase())) return false;
+    // openmerit/engine's rule, as the CLI applies it; a model outside the catalogue is placed by measurement only.
     const model = option.inCatalogue ? index.find(option.model) : null;
-    if (model) {
-      if (bundle.tools?.length && !model.tools) return false;
-      if (bundle.constraints?.needsVision && !model.vision) return false;
-      if (bundle.output.kind === "json" && !model.structuredOutputs) return false;
-    }
-    // Only cheaper models are candidates, when both prices are known.
-    return option.price === null || baseline?.price == null || option.price < baseline.price;
+    return !model || eligible(model, current, needs);
   };
+  const needs = { tools: !!bundle.tools?.length, vision: !!bundle.constraints?.needsVision, structuredOutput: bundle.output.kind === "json" };
   const endpoints = allowedEndpoints(input.endpoints, guardrails, notices);
   const options = pool(endpoints, endpoint => offered(endpoint, catalogue), option => option.key).filter(fits);
   if (endpoints.some(item => item.kind === "openrouter" && item.allowedModels === "all")) {
@@ -97,30 +95,8 @@ export function buildPool(input: { catalogue: Catalogue; endpoints: readonly End
   return { baseline, ranked, unplaced, notices };
 }
 
-export interface Provisional { model: string; endpoint: string; reason: string; estCostPerCallUsd: number | null }
-
-/** Rough tokens of one call: the prompt's characters over four, and a short answer. */
-export function callTokens(bundle: TaskBundle): { input: number; output: number } {
-  const prompt = `${bundle.prompt.system ?? ""}${bundle.prompt.messages.map(item => item.content).join("")}${JSON.stringify(bundle.tools ?? [])}`;
-  return { input: Math.ceil(prompt.length / 4) + 50, output: bundle.output.kind === "label" ? 10 : 300 };
-}
-
-export function callCost(model: CatalogueModel | null, bundle: TaskBundle): number | null {
-  if (!model || model.inputPerM === null || model.outputPerM === null) return null;
-  const tokens = callTokens(bundle);
-  return (tokens.input * model.inputPerM + tokens.output * model.outputPerM) / 1e6;
-}
-
-/** The cheapest model in the pool that the catalogue rates at least as capable as the current one; else the current model. */
+/** The cheapest pool model the catalogue rates at least as capable as the current one; else the current model. openmerit/engine's rule. */
 export function provisionalPick(catalogue: Catalogue, candidates: Pool, bundle: TaskBundle): Provisional {
   const index = catalogueIndex(catalogue);
-  const baseline = candidates.baseline;
-  const keep = (reason: string): Provisional => ({ model: bundle.current.model, endpoint: baseline?.endpoint ?? OPENROUTER, reason, estCostPerCallUsd: callCost(index.find(bundle.current.model), bundle) });
-  if (!baseline || baseline.eci === null) return keep("The catalogue has no capability index for the current model, so only measurement can find a cheaper one. Keep it for now.");
-  const pick = candidates.ranked.filter(item => item.eci >= baseline.eci! && item.price !== null).sort((a, b) => a.price! - b.price! || b.eci - a.eci)[0];
-  if (!pick) return keep("No cheaper allowed model rates as capable as the current one in the catalogue. Keep it for now.");
-  return {
-    model: pick.model, endpoint: pick.endpoint, estCostPerCallUsd: callCost(index.find(pick.model), bundle),
-    reason: `Catalogue estimate, not yet measured: ECI ${pick.eci} against ${baseline.eci} for ${bundle.current.model}, at $${pick.price!.toFixed(2)} against $${baseline.price?.toFixed(2) ?? "?"} per million input and output tokens. The measured result replaces it.`,
-  };
+  return pickFromCatalogue({ current: bundle.current.model, baseline: candidates.baseline, ranked: candidates.ranked, defaultEndpoint: OPENROUTER, costPerCall: model => callCost(index.find(model), bundle) });
 }

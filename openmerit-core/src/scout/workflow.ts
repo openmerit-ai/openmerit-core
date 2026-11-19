@@ -16,9 +16,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { createLangfuseConnector, type LangfuseConnector, type TaskEvidence } from "../connectors/langfuse/index.ts";
 import { catalogueIndex, type Catalogue, type CatalogueModel } from "../engine/catalogue.ts";
-import { blendedPrice, ladder } from "../engine/pool.ts";
+import { blendedPrice, eligible, ladder } from "../engine/pool.ts";
 import { redact } from "../engine/redact.ts";
 import { evaluateTask as runPolicy, rankTop, shortfall } from "../engine/evaluate.ts";
+import { proposeEdit, respell } from "../engine/change.ts";
+import { qualificationNote } from "../engine/result.ts";
 import { CandidateUnavailable, CHALLENGERS, FINALISTS, order, SAMPLE_SIZE, type Stage } from "../engine/search.ts";
 import { EvalProxy, retryable } from "../eval/proxy.ts";
 import { runEval } from "../eval/runner.ts";
@@ -903,16 +905,8 @@ const toEntry = (item: PoolModel): Omit<PoolEntry, "eci"> & { eci: number | null
  * what the task needs (tools, images, structured output). The binary search ranks them by ECI.
  */
 export function eligibleCandidates(catalogue: Catalogue, configured: readonly Endpoint[], baseline: CatalogueModel, task: Pick<Task, "usesTools" | "needsVision" | "structuredOutput">): PoolModel[] {
-  const ceiling = blendedPrice(baseline);
-  return pool(configured, catalogue).filter(({ model }) => {
-    const price = blendedPrice(model);
-    if (model.id === baseline.id || price === null || price <= 0) return false;
-    if (ceiling !== null && price >= ceiling) return false;
-    if (task.usesTools && !model.tools) return false;
-    if (task.needsVision && !model.vision) return false;
-    if (task.structuredOutput && !model.structuredOutputs) return false;
-    return true;
-  });
+  const needs = { tools: task.usesTools, vision: task.needsVision, structuredOutput: task.structuredOutput };
+  return pool(configured, catalogue).filter(({ model }) => eligible(model, baseline, needs));
 }
 
 /** Measured eval cost of some units from the proxy ledger, or null when a request had no price. */
@@ -985,8 +979,7 @@ function rank(comparison: TaskComparison, accepted: boolean): Pick<TaskCompariso
   const candidates = comparison.candidates.map(item => {
     if (item.status !== "measured" || item.score === null) return { ...item, qualified: false };
     const missed = shortfall({ measured: true, score: item.score, latencyMs: item.meanLatencyMs }, baseline.score!, { threshold });
-    const why = missed === "score" ? `passed ${item.passes}/${item.total} vs the current model's ${baseline.passes}/${baseline.total}` : missed === "threshold" ? `below the eval's required pass rate ${threshold}` : item.costPerItemUsd === null ? "qualifies; cost not measured" : "";
-    return { ...item, qualified: missed === null, note: item.note || why };
+    return { ...item, qualified: missed === null, note: item.note || qualificationNote({ ...item, shortfall: missed }, baseline, { threshold }) };
   });
   const top = rankTop(candidates.filter(item => item.qualified), item => item.eci ?? 0);
   const failed = candidates.filter(item => item.status !== "measured").length;
@@ -1010,20 +1003,21 @@ function planEdit(ctx: Context, data: RunState, comparison: TaskComparison, winn
     const fileEndpoints = endpointUsages.filter(item => item.file === usage.file);
     const sameEndpoint = (fileEndpoints.length ? fileEndpoints : endpointUsages).some(item => item.value.includes(host)) || (!endpointUsages.length && endpoint.kind === "openai");
     const style = usage.value.includes("/") ? "openrouter" : "openai";
-    // SDKs that name the provider in the model string (`openai:gpt-4.1`) need it kept.
-    const target = `${/^[a-z][a-z_-]*:(?!\/)/i.exec(usage.value)?.[0] ?? ""}${style === "openrouter" ? winner.model : winner.endpointModel}`;
     if (usage.dynamic && !usage.catalogueId) { manual.push(`${ref(usage)} reads ${usage.envVar ?? usage.value} at run time: set it to ${winner.endpointModel} where that environment is configured (OpenMerit cannot change your shell's environment).`); continue; }
     if (!sameEndpoint || (style === "openrouter") !== (endpoint.kind === "openrouter")) { manual.push(`${ref(usage)} calls a different endpoint than ${endpoint.id}: switching needs an endpoint change too. Point it at ${endpoint.baseUrl} and use model ${winner.endpointModel}.`); continue; }
+    // openmerit/engine's proposeEdit rewrites the literal; the checks around it need the repository, which only the CLI reads.
+    const pick = { model: winner.model, endpoint: winner.endpoint, endpointModel: winner.endpointModel, onOpenRouter: endpoint.kind === "openrouter" };
+    const target = respell(usage.value, pick);
     const lines = readFileSync(join(ctx.repo.root, usage.file), "utf8").split("\n");
     const raw = lines[usage.line - 1] ?? "";
-    const quoted = new RegExp(`(["'\`])${usage.value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\1`);
-    if (!quoted.test(raw)) { manual.push(`${ref(usage)}: change ${usage.value} to ${target} by hand.`); continue; }
+    const [edit] = proposeEdit({ task: task.name, current: data.model!, refs: [{ file: usage.file, line: usage.line, spelling: raw, literal: usage.value }], pick, baselineEndpoint: null, find: catalogueIndex(ctx.catalogue).find }).edits;
+    if (!edit) { manual.push(`${ref(usage)}: change ${usage.value} to ${target} by hand.`); continue; }
     // Never switch code Scout did not evaluate for this task: a line other tasks use, or a module-level setting used in several places.
     const others = data.tasks!.filter(other => other.name !== task.name && other.usageIds.includes(usage.id)).map(other => other.name);
     if (others.length) { manual.push(`${ref(usage)} also serves ${others.join(", ")}: editing it would switch ${others.length === 1 ? "that task" : "those tasks"} too, which Scout did not evaluate. Give ${task.name} its own model setting of ${target}, or change it by hand if all of them should switch.`); continue; }
     const shared = sharedDefinition(ctx, usage, lines);
     if (shared) { manual.push(`${ref(usage)} sets ${shared.name}, which ${shared.uses.length} other places use (${shared.uses.slice(0, 3).join(", ")}${shared.uses.length > 3 ? ", …" : ""}): editing it would switch all of them, not only ${task.name}. Give ${task.name} its own model setting of ${target}, or change ${shared.name} by hand if every use should switch.`); continue; }
-    edits.push({ file: usage.file, line: usage.line, before: redact(raw), after: redact(raw.replace(quoted, `$1${target}$1`)), hash: hash(raw), from: usage.value, to: target });
+    edits.push({ file: usage.file, line: usage.line, before: redact(raw), after: redact(edit.after), hash: hash(raw), from: usage.value, to: edit.to });
     if (usage.envVar) manual.push(`${ref(usage)}: ${usage.envVar} overrides this default when it is set; update it too if your environment sets it.`);
   }
   return { edits, manual };

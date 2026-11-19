@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Result, pool, provisional pick and edit in the shared core — unreleased, 19 November 2026
+
+Reviewed the homepage against the change that moves the task result, the pool rule, the provisional pick and the proposed edit into `openmerit/engine` for both the CLI and the cloud app. `site/index.html` has no FAQ block and makes no claim about which models are candidates or how an edit is written. No homepage copy change is needed; the openmerit README's Engine section and the cloud README describe them.
+
 ## One evaluation policy for the CLI and the cloud — unreleased, 19 November 2026
 
 Reviewed the homepage against the change that moves Scout's task evaluation into `openmerit/engine`'s `evaluateTask`, so the CLI and the cloud app reach the same verdict, with the cloud now running every case three times, drawing samples at random, screening challengers first and listing near misses. `site/index.html` has no FAQ block and makes no claim about repeats, samples, challengers or how many times a case runs. No homepage copy change is needed; the openmerit README's step 6 and the cloud README describe the policy.
