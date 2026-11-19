@@ -161,7 +161,7 @@ function scenario(name: string): State {
 }
 
 const json = (status: number, data: unknown): Response => Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
-const error = (status: number, message: string, extra: Record<string, unknown> = {}): Response => json(status, { error: message, ...extra });
+const error = (status: number, message: string): Response => json(status, { error: message });
 
 // A measuring job advances one case every TICK_MS from when the fake API starts, so polling pages
 // move. Each job fails a fixed set of cases, and starts over once it has run them all.
@@ -187,8 +187,6 @@ function advance(job: JobView, task: Task | undefined, since: number, now = Date
 
 export function createFakeApi(options: { appUrl?: string } = {}): (request: Request) => Promise<Response> {
   const states = new Map<string, State>();
-  // When each Viktor task started evaluating, by task ID.
-  const evaluating = new Map<string, number>();
   const since = Date.now();
   return async (request) => {
     const url = new URL(request.url), path = url.pathname, method = request.method;
@@ -205,7 +203,7 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
     let state = states.get(name);
     if (!state) states.set(name, state = scenario(name));
     let input: Record<string, unknown> | null = null;
-    if (method === "POST" || method === "PUT" || method === "PATCH") {
+    if (method === "POST" || method === "PUT") {
       try { const value = await request.json() as unknown; input = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; } catch { input = null; }
     }
     const denied = state.me.role === "admin" ? null : error(403, "Only an organization admin can do this.");
@@ -248,43 +246,16 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       return json(201, { jobId, taskId: task.id });
     }
     // The Viktor connection, as cloud/src/api.ts serves it: the key is checked, never stored or returned.
-    // An evaluation finishes 25 seconds after it starts here (about 2.5 minutes in the cloud), so the page's polling shows.
-    if (path === "/api/connections/viktor" && method === "GET") {
-      for (const task of state.viktor?.tasks ?? []) {
-        const started = evaluating.get(task.id);
-        if (task.status !== "evaluating" || started === undefined || Date.now() - started < 25_000) continue;
-        evaluating.delete(task.id);
-        const spent = Math.round((task.estimatedCredits ?? 300) * 0.87);
-        Object.assign(task, task.id === "claims_digest" ? viktorTasks(true).find((item) => item.id === task.id) : { status: "done", jobId: task.jobId ?? "v5t8c2", result: { status: "kept", change: null, link: null, approval: null } });
-        if (state.viktor) Object.assign(state.viktor, { creditsUsed: (state.viktor.creditsUsed ?? 0) + spent, creditsReserved: Math.max(0, (state.viktor.creditsReserved ?? 0) - (task.estimatedCredits ?? 0)) });
-      }
-      return json(200, state.viktor ?? { connected: false, tasks: [] });
-    }
+    if (path === "/api/connections/viktor" && method === "GET") return json(200, state.viktor ?? { connected: false, tasks: [] });
     if (path === "/api/connections/viktor" && method === "POST") {
       if (denied) return denied;
       const apiKey = typeof input?.apiKey === "string" ? input.apiKey.trim() : "";
       if (apiKey.length < 12) return error(400, "Paste the Viktor API key from Settings → API Keys.");
-      // Connecting checks the key, lists the tasks and starts evaluating, about 20 seconds in the cloud.
-      await new Promise((done) => setTimeout(done, 2500));
-      // A key named ..._noscope_... lacks two scopes, as cloud/src/viktor.ts reports them.
-      if (apiKey.includes("noscope")) return error(400, "This key is missing the scopes scripts:execute, messages:create. Edit the key in Viktor's Settings → API Keys to add them, then connect again.", { missingScopes: ["scripts:execute", "messages:create"] });
-      // A key named ..._approval_... is from a workspace whose tools wait for approval in chat.
-      if (apiKey.includes("approval")) return error(400, "Viktor saved OpenMerit's calls to get_usage_threads, list_crons as drafts that wait for approval, so they did not run.", { needsApproval: ["get_usage_threads", "list_crons"] });
       if (!apiKey.startsWith("zt_live_sk_")) return error(400, "Viktor did not accept this key. Check that it is a current key from Settings → API Keys; Viktor gives API keys only to workspaces on a paid or Enterprise plan.");
       const cap = typeof input?.creditCap === "number" ? input.creditCap : 2000;
       if (cap < 100 || cap > 100_000) return error(400, "The credit cap must be between 100 and 100,000 credits.");
       state.viktor = { ...viktorConnected(false), keyLast4: apiKey.slice(-4), creditCap: cap, connectedAt: new Date().toISOString(), connectedBy: state.me.user.id };
-      for (const task of state.viktor.tasks) if (task.status === "evaluating") evaluating.set(task.id, Date.now());
       return json(201, state.viktor);
-    }
-    // PATCH changes only the cap; the credits used, results and connection time stay.
-    if (path === "/api/connections/viktor" && method === "PATCH") {
-      if (denied) return denied;
-      if (!state.viktor) return error(404, "Viktor is not connected.");
-      const cap = input?.creditCap;
-      if (typeof cap !== "number" || cap < 100 || cap > 100_000) return error(400, "The credit cap must be between 100 and 100,000 credits.");
-      state.viktor.creditCap = cap;
-      return json(200, state.viktor);
     }
     if (path === "/api/connections/viktor" && method === "DELETE") {
       if (denied) return denied;
@@ -298,7 +269,6 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       const task = state.viktor?.tasks.find((item) => item.id === match?.[1] && (item.status === "waiting" || item.status === "failed"));
       if (!task) return error(409, "This task cannot be evaluated, or is being evaluated now.");
       Object.assign(task, { status: "evaluating", reason: null });
-      evaluating.set(task.id, Date.now());
       return json(201, { started: [task.id] });
     }
     // Approve change records who approved and when; the first approval stands.

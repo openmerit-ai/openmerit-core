@@ -3,7 +3,7 @@
 // which can be evaluated, what an evaluation costs and what it proposes are openmerit-core's Viktor
 // connection; this module checks the account's limits and starts the jobs.
 import { randomBytes } from "node:crypto";
-import { CLEANUP, COPY_PATH, DEFAULT_CREDIT_CAP, estimateCredits, keyProblem, LIST, NeedsApproval, readTasks, viktorClient, type ViktorTask } from "../../openmerit-core/src/connectors/viktor/index.ts";
+import { CLEANUP, COPY_PATH, DEFAULT_CREDIT_CAP, estimateCredits, keyProblem, LIST, readTasks, viktorClient, type ViktorTask } from "../../openmerit-core/src/connectors/viktor/index.ts";
 import { approve, DEFAULT_REPEATS, redact } from "./engine.ts";
 import type { ConnectionResult, JobResult } from "./report.ts";
 import { services } from "./services.ts";
@@ -40,55 +40,29 @@ type Account = ReturnType<AppClient["account"]["getOrCreate"]>;
 const apiFor = (apiKey: string) => viktorClient({ apiKey, baseUrl: services().config.viktor.baseUrl, fetch: services().fetch });
 
 /** Checks the key's scopes, stores it encrypted, lists the tasks and starts evaluating them. */
-const capProblem = (cap: number): string | null => (Number.isFinite(cap) && cap >= 100 && cap <= MAX_CREDIT_CAP ? null : `The credit cap must be between 100 and ${MAX_CREDIT_CAP.toLocaleString("en-US")} credits.`);
-
-/**
- * `missingScopes` lists the required scopes a refused key lacks, and `needsApproval` the tools the
- * workspace saved as drafts for approval instead of running, so the app can name them. The tasks are
- * listed before the key is stored, so a workspace whose tools wait for approval is refused.
- */
-export async function connectViktor(client: AppClient, input: { accountId: string; userId: string; apiKey: string; creditCap?: number }): Promise<{ ok: true; view: ViktorView } | { ok: false; status: number; error: string; missingScopes?: string[]; needsApproval?: string[] }> {
+export async function connectViktor(client: AppClient, input: { accountId: string; userId: string; apiKey: string; creditCap?: number }): Promise<{ ok: true; view: ViktorView } | { ok: false; status: number; error: string }> {
   const apiKey = input.apiKey.trim();
   if (apiKey.length < 12) return { ok: false, status: 400, error: "Paste the Viktor API key from Settings → API Keys." };
   const cap = input.creditCap ?? DEFAULT_CREDIT_CAP;
-  const badCap = capProblem(cap);
-  if (badCap) return { ok: false, status: 400, error: badCap };
+  if (!Number.isFinite(cap) || cap < 100 || cap > MAX_CREDIT_CAP) return { ok: false, status: 400, error: `The credit cap must be between 100 and ${MAX_CREDIT_CAP.toLocaleString("en-US")} credits.` };
   const checked = await keyProblem(apiFor(apiKey));
-  if ("problem" in checked) return { ok: false, status: 400, error: checked.problem, ...(checked.missingScopes ? { missingScopes: checked.missingScopes } : {}) };
-  let listed: string | undefined;
-  try { listed = await apiFor(apiKey).runScript(LIST, [], 180); readTasks(listed); } catch (error) {
-    if (error instanceof NeedsApproval) return { ok: false, status: 400, error: error.message, needsApproval: error.tools };
-    // Any other listing failure still connects, with the error shown and Refresh to try again.
-    listed = undefined;
-  }
+  if ("problem" in checked) return { ok: false, status: 400, error: checked.problem };
   const account = client.account.getOrCreate([input.accountId]);
   const stored = await account.saveConnection({ kind: VIKTOR, apiKey, keyType: checked.key.keyType, teamId: checked.key.teamId, creditCap: cap, userId: input.userId });
   if (!stored.ok) return { ok: false, status: 503, error: stored.error };
-  await refreshViktor(client, input.accountId, listed);
+  await refreshViktor(client, input.accountId);
   await startViktorTasks(client, { accountId: input.accountId, userId: null });
   return { ok: true, view: await viktorView(client, input.accountId) };
 }
 
-/**
- * Changes only the credit cap: the key, the listing, the credits used and the results stay, which
- * connecting again would reset. It starts nothing; a waiting task starts with its Start button.
- */
-export async function setViktorCap(client: AppClient, input: { accountId: string; creditCap: number }): Promise<{ ok: true; view: ViktorView } | { ok: false; status: number; error: string }> {
-  const badCap = capProblem(input.creditCap);
-  if (badCap) return { ok: false, status: 400, error: badCap };
-  if (!(await client.account.getOrCreate([input.accountId]).setConnectionCap({ kind: VIKTOR, creditCap: input.creditCap }))) return { ok: false, status: 404, error: "Viktor is not connected." };
-  return { ok: true, view: await viktorView(client, input.accountId) };
-}
-
 /** Lists the workspace's tasks again, and deletes OpenMerit's leftover copies when no job is running. */
-/** Lists the tasks again; `listed` is LIST's output when the caller has just run it. */
-export async function refreshViktor(client: AppClient, accountId: string, listed?: string): Promise<void> {
+export async function refreshViktor(client: AppClient, accountId: string): Promise<void> {
   const account = client.account.getOrCreate([accountId]);
   const apiKey = await account.connectionKey(VIKTOR);
   if (!apiKey) return;
   try {
     const api = apiFor(apiKey);
-    const { tasks, leftovers } = readTasks(listed ?? await api.runScript(LIST, [], 180));
+    const { tasks, leftovers } = readTasks(await api.runScript(LIST, [], 180));
     await account.saveListing({ kind: VIKTOR, listing: tasks, error: null });
     const running = (await account.connectionJobs({ kind: VIKTOR, since: 0 })).some(job => job.status === "queued" || job.status === "running");
     if (leftovers.length && !running) await api.runScript(CLEANUP, [COPY_PATH], 120);

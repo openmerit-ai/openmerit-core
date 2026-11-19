@@ -197,58 +197,10 @@ table.guardrails input, table.guardrails select { min-width: 140px; padding: 5px
 .dialog { width: min(400px, calc(100vw - 32px)); margin: 14vh auto auto; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); box-shadow: 0 20px 60px var(--shadow); }
 .dialog::backdrop { background: #0000004d; }
 .dialog form { display: grid; gap: 10px; padding: 28px 28px 0; }
-.dialog .form-error { color: var(--error); font-size: 13.5px; }
 .dialog-title { font-family: var(--serif); font-size: 22px; font-weight: 400; line-height: 1.15; letter-spacing: -.02em; text-transform: none; color: var(--ink); margin: 0; }
 .dialog p { color: var(--prose); font-size: 14px; }
 .dialog label { margin-top: 8px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin: 14px -28px 0; padding: 14px 28px; border-top: 1px solid var(--line); }
-.btn.link { height: auto; padding: 0; border: 0; background: none; box-shadow: none; color: var(--link); font-weight: 400; }
-.btn.link:hover { background: none; text-decoration: underline; }
-
-/* Apps on Connections: a tile per app, then its connection. */
-.app-tile { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 14px; }
-.app-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; background: var(--paper); box-shadow: inset 0 0 0 1px var(--line); }
-.app-mark .logo { width: 24px; height: 24px; margin: 0; }
-.app-name { font-weight: 500; }
-.app-name .sub { font-weight: 400; font-size: 13px; max-width: 620px; margin-top: 1px; }
-.viktor-meta { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 360px); gap: 24px; align-items: start; margin: 14px 0 0; padding-top: 14px; border-top: 1px solid var(--line); }
-.viktor-meta .facts { font-weight: 500; font-variant-numeric: tabular-nums; }
-.credit-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13.5px; font-variant-numeric: tabular-nums; }
-.sub.inline { display: inline; }
-.meter.split { display: flex; margin: 7px 0 5px; }
-.meter.split i { border-radius: 0; flex: none; transition: width .4s var(--ease-out); }
-.meter.split i.reserved { background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--green) 45%, transparent) 0 3px, transparent 3px 6px); }
-.viktor-actions { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
-.viktor-actions .spacer { flex: 1; }
-.viktor-card .notice { margin-top: 12px; }
-table.viktor-tasks td { vertical-align: middle; }
-table.viktor-tasks td:first-child { width: 38%; }
-table.viktor-tasks .pill + .sub { margin-top: 3px; }
-details.skipped summary { font-size: 13px; }
-
-/* The connect dialog: three numbered steps, then what OpenMerit does in the workspace. */
-.dialog.connect-dialog { width: min(560px, calc(100vw - 32px)); margin-top: 8vh; }
-.connect-head { display: flex; gap: 14px; align-items: flex-start; }
-.connect-head p { font-size: 13.5px; color: var(--muted); margin-top: 4px; }
-.steps { list-style: none; counter-reset: step; display: grid; gap: 16px; margin: 10px 0 2px; padding: 0; }
-.steps > li { counter-increment: step; position: relative; display: grid; gap: 7px; padding-left: 32px; font-size: 14px; }
-.steps > li::before { content: counter(step); position: absolute; left: 0; top: -1px; width: 21px; height: 21px; border-radius: 50%; background: var(--soft); color: var(--soft-ink); font-size: 12px; font-weight: 600; line-height: 21px; text-align: center; font-variant-numeric: tabular-nums; }
-.steps > li > p { font-size: 13.5px; color: var(--muted); }
-.scope-chips { display: flex; flex-wrap: wrap; gap: 5px; }
-.scope { font-size: 12px; padding: 2px 7px; border-radius: 5px; background: var(--code-bg); color: var(--code-ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--code-ink) 12%, transparent); transition: background-color .2s var(--ease-out), color .2s var(--ease-out); }
-.scope.missing { background: color-mix(in srgb, var(--error) 10%, var(--surface)); color: var(--error); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--error) 40%, transparent); }
-.step-links { display: flex; align-items: center; gap: 14px; margin-top: 2px; }
-.cap-choices { display: grid; grid-template-columns: repeat(3, 1fr) 1.4fr; gap: 6px; }
-.dialog .cap-choice { position: relative; display: grid; gap: 1px; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); cursor: pointer; font-variant-numeric: tabular-nums; transition: border-color .15s var(--ease-out), box-shadow .15s var(--ease-out); }
-.cap-choice > input[type=radio] { position: absolute; opacity: 0; pointer-events: none; }
-.cap-choice b { font-size: 14px; font-weight: 500; }
-.cap-choice span { font-size: 12px; font-weight: 400; color: var(--muted); }
-.cap-choice:has(input[type=radio]:checked) { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); background: var(--surface); }
-.cap-choice:has(input[type=radio]:focus-visible) { outline: 2px solid var(--green); outline-offset: 1px; }
-.cap-choice.custom input[type=number] { padding: 2px 6px; font-size: 13px; background: var(--surface); }
-.disclosure { border-top: 1px solid var(--line); padding-top: 4px; }
-.disclosure summary { font-size: 13px; }
-.dialog .disclosure p { font-size: 13px; color: var(--muted); margin-top: 6px; }
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 60; max-width: min(520px, calc(100vw - 32px)); padding: 10px 18px; border-radius: 8px; background: var(--ink); color: var(--paper); font-size: 14px; box-shadow: 0 10px 30px var(--shadow); }
 .toast.bad { background: var(--error); }
 .toast[hidden] { display: none; }

@@ -6,7 +6,7 @@ import type { AuthResult, Identity } from "./auth.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
 import { explain, type JobResult } from "./report.ts";
 import { rerunJob } from "./start.ts";
-import { approveChange, connectViktor, refreshViktor, setViktorCap, startViktorTasks, VIKTOR, viktorView } from "./viktor.ts";
+import { approveChange, connectViktor, refreshViktor, startViktorTasks, VIKTOR, viktorView } from "./viktor.ts";
 import type { EndpointKind } from "../../openmerit-core/src/ranking/index.ts";
 
 type Json = Record<string, unknown>;
@@ -153,15 +153,7 @@ export function apiRoutes(deps: AppDeps) {
       if (!input || typeof input.apiKey !== "string") return error(400, "Send the connection as JSON: {apiKey, creditCap}.");
       if (input.creditCap !== undefined && typeof input.creditCap !== "number") return error(400, "creditCap must be a number of Viktor credits.");
       const connected = await connectViktor(client, { accountId: who.accountId, userId: who.userId, apiKey: input.apiKey, ...(typeof input.creditCap === "number" ? { creditCap: input.creditCap } : {}) });
-      return connected.ok ? json(201, connected.view) : json(connected.status, { error: connected.error, ...(connected.missingScopes ? { missingScopes: connected.missingScopes } : {}), ...(connected.needsApproval ? { needsApproval: connected.needsApproval } : {}) });
-    }
-    // The credit cap alone; connecting again would reset the credits used and the results.
-    if (path === "/api/connections/viktor" && method === "PATCH") {
-      const denied = admin(); if (denied) return denied;
-      const input = await body(request);
-      if (typeof input?.creditCap !== "number") return error(400, "Send {creditCap}, a number of Viktor credits.");
-      const updated = await setViktorCap(client, { accountId: who.accountId, creditCap: input.creditCap });
-      return updated.ok ? json(200, updated.view) : error(updated.status, updated.error);
+      return connected.ok ? json(201, connected.view) : error(connected.status, connected.error);
     }
     if (path === "/api/connections/viktor" && method === "DELETE") {
       const denied = admin(); if (denied) return denied;
@@ -246,7 +238,7 @@ export function apiRoutes(deps: AppDeps) {
     const headers = cors(request, deps);
     const withCors = (response: Response) => { for (const [name, value] of Object.entries(headers)) response.headers.set(name, value); return response; };
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: { ...headers, "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE", "access-control-allow-headers": "authorization, content-type", "access-control-max-age": "600" } });
+      return new Response(null, { status: 204, headers: { ...headers, "access-control-allow-methods": "GET, POST, PUT, DELETE", "access-control-allow-headers": "authorization, content-type", "access-control-max-age": "600" } });
     }
     if (share && request.method === "GET") {
       const parsed = parseShare(share[1]!);

@@ -1,6 +1,6 @@
 The SVGs in this directory are from Lobe Icons (https://github.com/lobehub/lobe-icons),
 @lobehub/icons-static-svg 1.103.0, under the MIT licence below, except braintrust.svg,
-which is from Simple Icons (https://simpleicons.org), simple-icons 16.38.0, under CC0 1.0, openmerit.svg, OpenMerit's own mark, and viktor.svg, drawn after Viktor's app icon.
+which is from Simple Icons (https://simpleicons.org), simple-icons 16.38.0, under CC0 1.0, and openmerit.svg, OpenMerit's own mark.
 Size, style, role and title attributes were removed, and langsmith.svg uses the text colour. The logos are trademarks of their owners.
 
 MIT License

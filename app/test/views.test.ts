@@ -151,18 +151,13 @@ test("a Viktor connection lists its tasks with why some are skipped, and Approve
   const me = await account();
   const viktor = await get<ViktorConnection>("/api/connections/viktor");
   const listed = text(connectionsView.render({ endpoints: [], viktor }, page(me)));
-  assert.match(listed, /7 tasks · 1 ready to approve · 1 waiting/);
-  // A change to approve comes first, then the waiting task, then the ones OpenMerit cannot evaluate, with why.
-  assert.match(listed, /Claims digest \/claims_digest smart 410 Set Claims digest to cheap Review and approve Weekly payer report .* Waiting About 160 credits Start 5 tasks OpenMerit cannot evaluate/);
-  assert.match(listed, /Inbox sync \/inbox_sync Workspace default 0 script task, no model/);
-  assert.match(listed, /322 of 2,000 credits/);
+  assert.match(listed, /Claims digest \/claims_digest smart 410 Set Claims digest to cheap/);
+  assert.match(listed, /Inbox sync \/inbox_sync workspace default 0 Skipped script task, no model/);
+  assert.match(listed, /Heartbeat \/heartbeat workspace default 0 Skipped Viktor's own task: it cannot be edited/);
   const disconnected = connectionsView.render({ endpoints: [], viktor: { connected: false, tasks: [] } }, page(me)).__html;
   assert.match(disconnected, /data-action="connect-viktor"/);
-  // A member sees the connection but none of its controls.
-  const asMember = (viktor: ViktorConnection) => connectionsView.render({ endpoints: [], viktor }, page({ ...me, role: "member" })).__html.split('id="endpoints"')[0] ?? "";
-  assert.doesNotMatch(asMember({ connected: false, tasks: [] }), /data-action=/);
-  assert.doesNotMatch(asMember(viktor), /data-action=/);
-  assert.match(text({ __html: asMember(viktor) }), /7 tasks · 1 ready to approve/);
+  assert.match(disconnected, /titled "OpenMerit: &lt;task title&gt;"/);
+  assert.doesNotMatch(connectionsView.render({ endpoints: [], viktor: { connected: false, tasks: [] } }, page({ ...me, role: "member" })).__html, /data-action="connect-viktor"/);
 
   const result = await get<Report>("/api/runs/v5t8c2");
   const shown = runView.render(result, page(me)).__html;
