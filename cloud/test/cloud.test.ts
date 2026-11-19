@@ -144,6 +144,7 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     assert.equal(done.data.status, "done", done.text);
     const measured = done.data.result as Result;
     assert.equal(measured.status, "picked");
+    assert.equal(new URL(measured.reportUrl).pathname, `/r/${jobId}/`, "the app serves reports at /r/<id>/");
     assert.equal(measured.pick!.total, 8);
     assert.equal(measured.pick!.passes, 8);
     assert.ok((catalogue.models.find(model => model.id === measured.pick!.model)?.eci ?? 200) >= WEAK_BELOW, `${measured.pick!.model} answers wrongly in the fake`);
@@ -162,9 +163,9 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     assert.ok(Math.abs(report.body.spend.customerUsd - fineTune.length * costOf("acme/fine-tune-1")) < 1e-9);
     assert.ok(Math.abs(report.body.spend.openmeritUsd + report.body.spend.customerUsd - distinctCost(models)) < 1e-9);
 
-    const markdown = await agent().fetch(`/r/${jobId}.md`);
+    const markdown = await agent().fetch(`/api/r/${jobId}.md`);
     assert.match(await markdown.text(), /^# OpenMerit report: ticket classifier[\s\S]*acme\/fine-tune-1` \(measured only\)/);
-    assert.equal((await caller(app, "test:user_z:org_other:admin").fetch(`/r/${jobId}.md`)).status, 404, "another account cannot read the report");
+    assert.equal((await caller(app, "test:user_z:org_other:admin").fetch(`/api/r/${jobId}.md`)).status, 404, "another account cannot read the report");
     const share = await agent().api<{ url: string }>(`/api/runs/${jobId}/share`, { method: "POST" });
     const publicPath = new URL(share.body.url).pathname;
     assert.equal((await fetch(`${app.url}${publicPath}`)).status, 200);
@@ -208,7 +209,7 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     assert.deepEqual((await agent().tool("openmerit_retire", { task_id: taskRow.id })).data, { task_id: taskRow.id, state: "retired" });
     assert.equal((await taskView()).state, "retired");
     assert.deepEqual(await tick(), { started: null, reason: "not watching" });
-    assert.equal((await agent().fetch(`/r/${jobId}.md`)).status, 200);
+    assert.equal((await agent().fetch(`/api/r/${jobId}.md`)).status, 200);
     assert.equal((await agent().api<unknown[]>("/api/runs")).body.length, 2);
     assert.equal((await agent().tool("openmerit_retire", { task_id: "nope" })).isError, true);
     const back = await agent().tool("openmerit_recommend", { bundle: bundle(), environment: "acme/support" });
@@ -228,7 +229,7 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     assert.deepEqual((await remove("test:user_r:org_run:admin:9")).body, { deleted: true, jobs: 3 });
     assert.deepEqual((await agent().api<unknown[]>("/api/tasks")).body, []);
     assert.deepEqual((await agent().api<unknown[]>("/api/runs")).body, []);
-    assert.equal((await agent().fetch(`/r/${jobId}.md`)).status, 404);
+    assert.equal((await agent().fetch(`/api/r/${jobId}.md`)).status, 404);
     assert.equal((await agent().api(`/api/runs/${jobId}`)).status, 404);
     assert.equal((await fetch(`${app.url}${publicPath}`)).status, 404, "the share link stops loading");
     assert.equal((await agent().tool("openmerit_result", { job_id: jobId })).isError, true);
@@ -308,5 +309,47 @@ test("a challenger the budget refuses ends the challengers, and the job still re
     assert.equal(models.calls.filter(call => call.model === "acme/fine-tune-1").length, 0, "nothing is sent to a refused challenger");
     const progress = done.data.progress as { measured: number; planned: number };
     assert.ok(progress.planned >= progress.measured && progress.planned <= progress.measured + 4, JSON.stringify(progress));
+  } finally { await stop(app); await models.close(); }
+});
+
+test("when no measured model is cheaper per call than the current one, the job measures the provisional pick before keeping it, and says why", async () => {
+  const models = await fakeModels();
+  const app = await startApp({ models, env: CLERK });
+  try {
+    await subscribe(app, "org_provisional");
+    const agent = caller(app, "test:user_p:org_provisional:admin");
+    const run = async (task: string, cheap: (model: string, provisional: string) => boolean) => {
+      const started = await agent.tool("openmerit_recommend", { bundle: bundle(task, false), environment: "acme/provisional" });
+      const jobId = started.data.job_id as string;
+      const provisional = (started.data.provisional as { model: string }).model;
+      // Measured per call, every model the search reaches costs more than the current one.
+      models.cost = model => (cheap(model, provisional) ? undefined : 0.01);
+      await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => value.data.status === "needs_input");
+      await agent.tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
+      const done = await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 180_000);
+      assert.equal(done.data.status, "done", done.text);
+      type Top = { model: string; cheaperThanCurrent: boolean | null };
+      const result = done.data.result as Result & { reason: string; baseline: { passes: number; total: number; costPerCallUsd: number; latencyMs: number | null }; top: Top[] };
+      const notices = (await agent.api<{ notices: string[] }>(`/api/runs/${jobId}`)).body.notices;
+      return { jobId, provisional, done, result, notices };
+    };
+
+    const switched = await run("provisional classifier", (model, provisional) => model === "openai/gpt-5.4" || model === provisional);
+    assert.equal(switched.result.status, "picked", switched.done.text);
+    assert.equal(switched.result.pick!.model, switched.provisional);
+    assert.ok(switched.notices.some(notice => notice.includes(`the provisional pick ${switched.provisional} was measured on every case`)), switched.notices.join("\n"));
+    assert.match(switched.result.reason, new RegExp(`^Switch from \`openai/gpt-5.4\` to \`${switched.provisional}\``));
+    assert.deepEqual([switched.result.baseline.passes, switched.result.baseline.total], [8, 8]);
+    assert.ok(switched.result.baseline.costPerCallUsd > 0);
+    assert.deepEqual(switched.result.top.map(item => item.cheaperThanCurrent), [true, false, false]);
+    assert.equal(new URL(switched.result.reportUrl).pathname, `/r/${switched.jobId}/`);
+    assert.match(switched.done.text, /Current model openai\/gpt-5\.4: 8\/8 cases passed, \$0\.000\d+ per call/);
+
+    // When the provisional pick costs more too, the job keeps the current model and says which model came closest.
+    const kept = await run("costly classifier", model => model === "openai/gpt-5.4");
+    assert.equal(kept.result.status, "keep_current", kept.done.text);
+    assert.match(kept.result.reason, /^Keep `openai\/gpt-5\.4`: \S+ passed 8\/8 but costs \$0\.0100 per call against \$0\.000\d+, and no measured model was both as accurate and cheaper\.$/);
+    assert.ok(kept.result.top.length > 0 && kept.result.top.every(item => item.cheaperThanCurrent === false));
+    assert.match(kept.done.text, /No switch proposed \(keep_current\)\. Keep `openai\/gpt-5\.4`/);
   } finally { await stop(app); await models.close(); }
 });

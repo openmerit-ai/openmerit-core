@@ -175,11 +175,13 @@ export const job = workflow({
         await account.jobUpdate({ jobId, status: "running", budgetUsd: effective.budgetUsd ?? services().config.limits.defaultJobBudgetUsd, capOpenmeritUsd: effective.spendCapUsd ?? null, capCustomerUsd: effective.customerSpendCapUsd ?? null });
         s.state.status = "running"; s.state.phase = "cases"; s.state.updatedAt = now();
         if (effective.repeats && effective.repeats > 1) s.state.notices.push(`The repeats guardrail (${effective.repeats}) is not supported by the cloud runner yet: each case runs once.`);
-        return { bundle, guardrails, accountId: input.accountId, environment: input.environment, agent: input.agent };
+        return { bundle, guardrails, accountId: input.accountId, environment: input.environment, agent: input.agent, provisional: input.provisional };
       },
     });
     const { bundle, guardrails } = source as { bundle: TaskBundle; guardrails: ResolvedGuardrails };
     const input = { accountId: source.accountId, environment: source.environment, agent: source.agent };
+    // A job recorded before this step returned its provisional pick has none here.
+    const told = (source as { provisional?: Provisional }).provisional ?? null;
 
     // 2. Cases: the bundle's examples first, with labels the user gave in earlier runs, then cases a
     // model writes on OpenMerit's OpenRouter key; then the label check. A task's later runs reuse the
@@ -402,10 +404,28 @@ export const job = workflow({
         }
       }
 
-      const candidates = [...measuredModels.values()].filter(item => item.role === "candidate");
-      const top = candidates.filter(item => item.qualified && item.costPerCallUsd !== null)
-        .sort((a, b) => a.costPerCallUsd! - b.costPerCallUsd! || b.passes - a.passes).slice(0, 3);
-      const cheaper = top.filter(item => baseline.costPerCallUsd === null || item.costPerCallUsd! < baseline.costPerCallUsd);
+      const rank = () => {
+        const measured = [...measuredModels.values()].filter(item => item.role === "candidate");
+        const qualified = measured.filter(item => item.qualified && item.costPerCallUsd !== null)
+          .sort((a, b) => a.costPerCallUsd! - b.costPerCallUsd! || b.passes - a.passes).slice(0, 3);
+        return { measured, qualified, cheaperOnes: qualified.filter(item => baseline.costPerCallUsd === null || item.costPerCallUsd! < baseline.costPerCallUsd) };
+      };
+      let { measured: candidates, qualified: top, cheaperOnes: cheaper } = rank();
+      // The agent was told the provisional pick: when no measured model beats the current one per call, measure it before keeping the current model.
+      const provisional = told && [...pool.ranked, ...pool.unplaced].find(item => item.model === told.model && item.endpoint === told.endpoint);
+      if (!cheaper.length && provisional && !measuredModels.has(`candidate:${provisional.key}`)) {
+        plannedTotal = counter + 1;
+        challenging.push(provisional);
+        try {
+          const entry = await full(provisional, "challenger", null);
+          if (entry.status === "unavailable") entry.qualified = false;
+          notices.push(`No measured model that qualified was cheaper per call than ${pool.baseline.model}, so the provisional pick ${provisional.model} was measured on every case too.`);
+        } catch (error) {
+          if (!(error instanceof JobStop)) throw error;
+          notices.push(`The provisional pick ${provisional.model} was not measured. ${error.message}`);
+        }
+        ({ measured: candidates, qualified: top, cheaperOnes: cheaper } = rank());
+      }
       const optionOf = (item: MeasuredModel) => [...pool.ranked, ...pool.unplaced].find(option => option.model === item.model && option.endpoint === item.endpoint)!;
 
       // 5. Agent eval: when the task belongs to an agent, the engine's rule checks the pick with every other task unchanged.
@@ -446,7 +466,7 @@ export const job = workflow({
             search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples, finalists: search.finalists.map(item => item.model), challengers: challenging.map(item => item.model), shortfall: search.shortfall ?? null },
             agentEval, edit: chosen ? proposeEdit(bundle, optionOf(chosen), pool.baseline!.endpoint) : { edits: [], instructions: null },
             spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices: [...s.state.notices, ...notices],
-            reportUrl: `${services().config.appUrl}/runs/${jobId}`, catalogueVersion: models.catalogueVersion, cases: counts,
+            reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts,
           };
           await finish(s, client, jobId, "done", result, null);
         },
@@ -461,7 +481,7 @@ export const job = workflow({
           status: stop.resultStatus, pick: null, top: [], baseline: [...measuredModels.values()].find(item => item.role === "baseline") ?? null, candidates: [...measuredModels.values()].filter(item => item.role === "candidate"),
           search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: [], finalists: [], challengers: [], shortfall: null }, agentEval: null, edit: { edits: [], instructions: null },
           spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices: [...s.state.notices, stop.message],
-          reportUrl: `${services().config.appUrl}/runs/${jobId}`, catalogueVersion: models.catalogueVersion, cases: counts,
+          reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts,
         } : null;
         await finish(s, client, jobId, stop.status, result, stop.status === "failed" ? stop.message : null, stop.message);
       });
