@@ -176,4 +176,8 @@ test("a Viktor connection lists its tasks with why some are skipped, and Approve
   assert.doesNotMatch(runView.render(approved, page(me)).__html, /data-action="approve"/);
   const row = (await get<ViktorConnection>("/api/connections/viktor")).tasks.find((task) => task.id === "claims_digest");
   assert.equal(row?.model, "smart", "approving changes nothing in Viktor");
+  // A Viktor evaluation that did not finish is started again through the connection, not rerun on a bundle.
+  const failed = { ...await get<JobView>("/api/runs/z1c7m4"), status: "failed" as const, error: "The test runs did not finish." };
+  assert.match(text(runView.render({ ...failed, connection: "viktor" }, page(me))), /Start again/);
+  assert.match(text(runView.render(failed, page(me))), /Run again/);
 });

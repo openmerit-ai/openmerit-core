@@ -39,7 +39,11 @@ function fakeViktor() {
   const answer = (path: string, method: string, body: Record<string, unknown> | null): { status?: number; body: unknown } => {
     if (path === "/api/public/v1/me") return { body: { key_type: "personal", team_id: "team_fake", key_preview: "zt_live_sk_…1234", scopes: state.scopes } };
     if (path === "/api/public/v1/scripts/runs" && method === "POST") {
-      const code = String(body!.code), args = (body!.args as string[]) ?? [], kind = /^# openmerit:(\w+)/.exec(code)?.[1] ?? "?";
+      // Viktor refuses an argument over 2,000 characters; the connection sends its arguments in the code.
+      if (((body!.args as string[]) ?? []).some(arg => arg.length > 2000)) return { status: 422, body: { detail: [{ type: "value_error", loc: ["body", "args"], msg: "Value error, each arg may be at most 2000 characters" }] } };
+      const code = String(body!.code), kind = /^# openmerit:(\w+)/.exec(code)?.[1] ?? "?";
+      const inCode = /^import sys as _sys, json as _json; _sys\.argv\[1:\] = _json\.loads\((".*")\)$/m.exec(code)?.[1];
+      const args = inCode ? JSON.parse(JSON.parse(inCode) as string) as string[] : (body!.args as string[]) ?? [];
       state.scripts.push(kind);
       let stdout = "";
       if (kind === "list") stdout = JSON.stringify({ tasks: crons.filter(cron => !cron.deleted), usage: [{ credits: 140, path: "/agent_runs/crons/ticket_triage_test/2026-11-18T09-00-00" }, { credits: 536, path: "/agent_runs/crons/workflow_discovery/2026-11-19T10-56-20" }] });
@@ -180,6 +184,10 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     assert.equal((await admin.api("/api/connections/viktor", { method: "DELETE" })).status, 200);
     assert.deepEqual((await admin.api<{ connected: boolean }>("/api/connections/viktor")).body.connected, false);
     assert.equal((await admin.api<{ approved: { by: string } }>(`/api/runs/${jobId}`)).body.approved.by, "user_v");
+    // Run again on a Viktor result evaluates the task again through the connection, not a bundle: admins only.
+    assert.equal((await member.api(`/api/runs/${jobId}/rerun`, { method: "POST" })).status, 403);
+    const rerun = await admin.api<{ error: string }>(`/api/runs/${jobId}/rerun`, { method: "POST" });
+    assert.deepEqual([rerun.status, rerun.body.error], [409, "Viktor is not connected."]);
   } finally {
     await stop(app); await judge.close();
     await new Promise<void>(resolve => { viktor.server.closeAllConnections(); viktor.server.close(() => resolve()); });

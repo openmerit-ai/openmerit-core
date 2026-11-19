@@ -114,6 +114,13 @@ export function apiRoutes(deps: AppDeps) {
     }
     // A fix from a run's notes: run its task again, optionally with a higher budget per job.
     if ((match = /^\/api\/runs\/([\w-]+)\/rerun$/.exec(path)) && method === "POST") {
+      // A Viktor task has no bundle: run again evaluates it again, as Start again on Connections does.
+      const job = await account.job(match[1]!);
+      if (job?.kind === VIKTOR) {
+        const denied = admin(); if (denied) return denied;
+        const started = await startViktorTasks(client, { accountId: who.accountId, userId: who.userId, taskIds: [job.taskId.replace(/^viktor_/, "")] });
+        return started.jobIds[0] ? json(201, { jobId: started.jobIds[0], taskId: job.taskId }) : error(409, started.refused ?? "This task cannot be evaluated now, or is being evaluated.");
+      }
       const input = await body(request) ?? {};
       if (input.budgetUsd !== undefined && input.budgetUsd !== null && typeof input.budgetUsd !== "number") return error(400, "budgetUsd must be a number of US dollars.");
       const started = await rerunJob(client, { accountId: who.accountId, userId: who.userId, jobId: match[1]!, budgetUsd: typeof input.budgetUsd === "number" ? input.budgetUsd : null, trigger: "app" });

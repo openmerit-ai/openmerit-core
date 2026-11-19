@@ -2,10 +2,11 @@
 // script-run polling, and the evaluation of a task's presets from graded test runs. Expected numbers
 // are worked out by hand in the comments; no request leaves the process.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import type { Measurement } from "../src/engine/evaluate.ts";
 import {
-  batchMeasure, batchSpec, judgeChecks, CREDIT_USD, estimateCredits, evaluateViktor, gradeRun, keyProblem, proposeChange, readTasks, REQUIRED_SCOPES, viktor, viktorClient,
+  batchMeasure, batchSpec, judgeChecks, CREDIT_USD, estimateCredits, evaluateViktor, gradeRun, keyProblem, proposeChange, readTasks, REQUIRED_SCOPES, viktor, viktorClient, withArgs,
   type BatchRun, type Check,
 } from "../src/connectors/viktor/index.ts";
 
@@ -53,10 +54,21 @@ test("a script run is polled until it ends, and a failed one throws with its las
   const client = viktorClient({ apiKey: "k", fetch: fake.fetcher, sleep: async () => {} });
   assert.equal(await client.runScript("print(1)", ["a"], 60), "{\"ok\": true}\n");
   assert.deepEqual(fake.requests.map(request => `${request.method} ${request.path}`), ["POST /api/public/v1/scripts/runs", "GET /api/public/v1/scripts/runs/run_1", "GET /api/public/v1/scripts/runs/run_1"]);
-  assert.deepEqual(fake.requests[0]!.body, { code: "print(1)", args: ["a"], timeout_seconds: 60, wait_seconds: 30 });
+  assert.deepEqual(fake.requests[0]!.body, { code: withArgs("print(1)", ["a"]), args: [], timeout_seconds: 60, wait_seconds: 30 });
 
   const failing = fakeViktor({ "/api/public/v1/scripts/runs": () => ({ body: { id: "run_2", status: "completed", result: { exit_code: 1, stdout: "", stderr: "Traceback\n  line 3\nValueError: no such cron" } } }) });
   await assert.rejects(viktorClient({ apiKey: "k", fetch: failing.fetcher }).runScript("x"), /run_2 completed: Traceback +line 3 ValueError: no such cron/);
+});
+
+test("script arguments travel in the code, since Viktor refuses one over 2,000 characters, and reach sys.argv unchanged", (t) => {
+  const args = ["/work/temp/openmerit/job_1", `# openmerit:batch\nprint("it's \\ \"quoted\"")\n${"x".repeat(5000)}`, JSON.stringify({ description: "Classify — tickets 🎫 \u2028 then post to #check-this-out" })];
+  const code = withArgs("# openmerit:read\nimport json, sys\nprint(json.dumps(sys.argv[1:]))\n", args);
+  assert.match(code, /^# openmerit:read\n/, "the tag stays the first line");
+  const python = spawnSync("python3", ["-I", "-c", code], { encoding: "utf8" });
+  if (python.error) return t.skip("python3 is not installed");
+  assert.equal(python.status, 0, python.stderr);
+  assert.deepEqual(JSON.parse(python.stdout), args);
+  assert.equal(withArgs("print(1)", []), "print(1)");
 });
 
 test("the listing keeps every task, says why the system, script and default-model tasks are not evaluated, and puts the most credits first", () => {
