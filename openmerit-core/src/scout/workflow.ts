@@ -19,7 +19,10 @@ import { catalogueIndex, type Catalogue, type CatalogueModel } from "../engine/c
 import { blendedPrice, eligible, ladder } from "../engine/pool.ts";
 import { redact } from "../engine/redact.ts";
 import { evaluateTask as runPolicy, rankTop, shortfall } from "../engine/evaluate.ts";
-import { proposeEdit, respell } from "../engine/change.ts";
+import { APPROVAL_PROMPT, approvalQuestion as configureQuestion } from "../engine/connector.ts";
+import { chosenTask, repoScan } from "../connectors/repo-scan.ts";
+import { evalCommand, evalEvidence } from "../connectors/eval-command.ts";
+import { basedOn, mergeEvidence, strongest } from "../engine/evidence.ts";
 import { qualificationNote } from "../engine/result.ts";
 import { CandidateUnavailable, CHALLENGERS, FINALISTS, order, SAMPLE_SIZE, type Stage } from "../engine/search.ts";
 import { EvalProxy, retryable } from "../eval/proxy.ts";
@@ -29,7 +32,7 @@ import { DEFAULT_BUDGET_USD, DEFAULT_REPEATS, readRepoConfig, resolveCredential,
 import type { RunStatus, Spend, State, UnitRow } from "../state/db.ts";
 import type { Repo } from "../state/paths.ts";
 import { allowedOn, baselineEndpoint, pool, type PoolModel } from "./pool.ts";
-import { context, isExampleFile, isSupportFile, listFiles, scanRepo, sourceFiles, type ScanResult, type Usage } from "./scan.ts";
+import { context, isExampleFile, isSupportFile, listFiles, scanRepo, type ScanResult, type Usage } from "./scan.ts";
 
 export type Answer = string | string[] | boolean | number;
 export type Answers = Record<string, Answer>;
@@ -112,6 +115,8 @@ export interface TaskComparison {
   status: "ranked" | "no_qualified" | "no_passing_model" | "stopped" | "baseline_failed" | "no_eval" | "non_discriminating" | "incomplete";
   note: string;
   search?: SearchSummary;
+  /** The evidence each decision used, strongest first by openmerit/engine's quality rule. */
+  basedOn?: string[];
   langfuse?: TaskEvidence | { error: string };
 }
 
@@ -180,7 +185,7 @@ const MAP_USAGES = 120;
 const UNMAPPED_SUPPORT = "unmapped: tests, fixtures and docs";
 const NO_EVAL_NEXT = "To review it, add an eval that follows the eval contract in OpenMerit's README (it runs once per model and reports pass or fail per item), then run `openmerit scout` again and give its command.";
 export const TASK_QUESTION = "Select which Agents/Tasks do you want OpenMerit to review?";
-export const CONFIGURE_QUESTION = "Should OpenMerit configure this? Yes / No.";
+export const CONFIGURE_QUESTION = APPROVAL_PROMPT;
 /** Provider answers that mean the model cannot run at all: skipped as untested, not failed. */
 const UNAVAILABLE_STATUSES = [400, 402, 404, 413, 422];
 
@@ -555,9 +560,14 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
           ctx.state.decision(runId, "configure", "no", { task: comparison.task, model: winner.model });
           continue;
         }
-        if (!yes(answer)) throw new NeedsInput([{ id: `configure_${key}`, kind: "confirm", default: false, prompt: CONFIGURE_QUESTION, detail: `${comparison.task}: ${data.model} → ${winner.model} (${winner.endpoint})` }]);
+        if (!yes(answer)) throw new NeedsInput([configureQuestion(comparison.task, data.model!, winner)]);
         current.decision = "yes";
-        Object.assign(current, planEdit(ctx, data, comparison, winner));
+        // The repository connector's Change port: openmerit/engine's proposeEdit, with the checks only the repository can answer.
+        const { edits, manual } = repoScan({
+          root: ctx.repo.root, exclude: repoConfig(ctx).scan?.exclude ?? [], catalogue: ctx.catalogue, usages: data.scan!.usages, tasks: data.tasks!, reviewed: reviewed(data),
+          currentModel: data.model!, endpoint: id => endpoints(ctx).find(item => item.id === id)!,
+        }).change.propose(comparison.task, { model: winner.model, endpoint: winner.endpoint, endpointModel: winner.endpointModel, onOpenRouter: false });
+        Object.assign(current, { edits, manual });
         if (!current.edits?.length) { ctx.state.decision(runId, "configure", "manual", { task: comparison.task, model: winner.model, manual: current.manual }); continue; }
       }
       const answer = answers[`apply_${key}`];
@@ -724,10 +734,10 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     // openmerit/engine's evaluateTask runs the policy; each of its measure calls is one eval run, replayed from SQLite once done.
     const baselineRuns: UnitResult[] = [];
     const currentModel = ctx.catalogue.models.find(model => model.id === base.model);
-    const evaluated = await runPolicy({
-      ladder: order(candidates), strength: item => item.eci, items: null, repeats, rules: { threshold: plan.threshold ?? null },
-      baselinePrice: currentModel ? blendedPrice(currentModel) : null,
-      measure: async (option, items, call) => {
+    // The repository's eval is the connection that measures: each of its runs is one eval run, replayed from SQLite once done.
+    const evals = evalCommand<PoolEntry>({
+      command: plan.command,
+      run: async (option, items, call) => {
         const entry: ModelRef = option ?? base;
         let result: UnitResult;
         try {
@@ -752,6 +762,10 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
         summary.sampleIds = data.samples![task]!;
         return data.samples![task]!;
       },
+    });
+    const evaluated = await runPolicy({
+      ladder: order(candidates), strength: item => item.eci, items: null, repeats, rules: { threshold: plan.threshold ?? null },
+      baselinePrice: currentModel ? blendedPrice(currentModel) : null, ...evals.measure,
       on: {
         trial: trial => summary.trials.push({ stage: trial.stage, model: trial.option.model, eci: trial.option.eci, passes: Object.values(trial.measurement.items).filter(Boolean).length, total: Object.keys(trial.measurement.items).length, accepted: trial.accepted }),
         skipped: skipped => summary.skipped.push({ model: skipped.option.model, stage: skipped.stage, reason: skipped.reason }),
@@ -958,6 +972,7 @@ function compareTask(ctx: Context, runId: string, data: RunState, name: string, 
   const comparison: TaskComparison = {
     task: name, eval: { command: redact(plan.command), source: plan.source, threshold: plan.threshold ?? null, langfuse: plan.langfuse ? `score ${plan.langfuse.score} on dataset ${plan.langfuse.dataset}` : null },
     baseline, candidates, top: [], status: "incomplete", note: "", ...(summary ? { search: summary } : {}),
+    basedOn: basedOn(strongest(mergeEvidence(name, base.model, [chosenTask, evalEvidence({ command: redact(plan.command), ...(plan.langfuse ? { scoredBy: `score ${plan.langfuse.score} in Langfuse` } : {}), items: baseline.runs ? baseline.total / baseline.runs : null })]))),
   };
   if (baseline.status !== "measured") return { ...comparison, status: "baseline_failed", note: `The current model's eval did not complete (${baseline.note}), so no candidate can be compared. Fix the eval, then run \`openmerit scout\` again: it reuses the eval you approved.` };
   // A stopped search recommends nothing, but the finalists it measured keep their real comparison with the current model.
@@ -987,67 +1002,6 @@ function rank(comparison: TaskComparison, accepted: boolean): Pick<TaskCompariso
     candidates, top, status: top.length ? "ranked" : "no_qualified",
     note: `${candidates.filter(item => item.qualified).length} of ${candidates.length} finalists performed at least as well as ${baseline.model}${top.length ? `; the ${top.length} cheapest are shown` : ""}${failed ? `; ${failed} could not be measured` : ""}.${accepted ? " Accepted by the user although the eval did not separate the models." : ""}${top.some(item => baseline.costPerItemUsd !== null && item.costPerItemUsd !== null && item.costPerItemUsd >= baseline.costPerItemUsd) ? " Some qualifying finalists cost no less than the current model on this workload." : ""}`,
   };
-}
-
-/** The narrow edit for a configure "Yes": the task's literal model IDs, when the app already calls the winner's endpoint. */
-function planEdit(ctx: Context, data: RunState, comparison: TaskComparison, winner: ModelResult): Pick<ConfigureState, "edits" | "manual"> {
-  const usages = usageById(data);
-  const task = data.tasks!.find(item => item.name === comparison.task)!;
-  const endpoint = endpoints(ctx).find(item => item.id === winner.endpoint)!;
-  const endpointUsages = data.scan!.usages.filter(usage => usage.kind === "endpoint");
-  // The application calls the provider, not OpenMerit's eval route: match OpenAI and OpenRouter by their public hosts.
-  const host = endpoint.kind === "openai" ? "api.openai.com" : endpoint.kind === "openrouter" ? "openrouter.ai" : new URL(endpoint.baseUrl).host;
-  const edits: NonNullable<ConfigureState["edits"]> = [];
-  const manual: string[] = [];
-  for (const usage of task.usageIds.map(id => usages.get(id)).filter(reviewed(data))) {
-    const fileEndpoints = endpointUsages.filter(item => item.file === usage.file);
-    const sameEndpoint = (fileEndpoints.length ? fileEndpoints : endpointUsages).some(item => item.value.includes(host)) || (!endpointUsages.length && endpoint.kind === "openai");
-    const style = usage.value.includes("/") ? "openrouter" : "openai";
-    if (usage.dynamic && !usage.catalogueId) { manual.push(`${ref(usage)} reads ${usage.envVar ?? usage.value} at run time: set it to ${winner.endpointModel} where that environment is configured (OpenMerit cannot change your shell's environment).`); continue; }
-    if (!sameEndpoint || (style === "openrouter") !== (endpoint.kind === "openrouter")) { manual.push(`${ref(usage)} calls a different endpoint than ${endpoint.id}: switching needs an endpoint change too. Point it at ${endpoint.baseUrl} and use model ${winner.endpointModel}.`); continue; }
-    // openmerit/engine's proposeEdit rewrites the literal; the checks around it need the repository, which only the CLI reads.
-    const pick = { model: winner.model, endpoint: winner.endpoint, endpointModel: winner.endpointModel, onOpenRouter: endpoint.kind === "openrouter" };
-    const target = respell(usage.value, pick);
-    const lines = readFileSync(join(ctx.repo.root, usage.file), "utf8").split("\n");
-    const raw = lines[usage.line - 1] ?? "";
-    const [edit] = proposeEdit({ task: task.name, current: data.model!, refs: [{ file: usage.file, line: usage.line, spelling: raw, literal: usage.value }], pick, baselineEndpoint: null, find: catalogueIndex(ctx.catalogue).find }).edits;
-    if (!edit) { manual.push(`${ref(usage)}: change ${usage.value} to ${target} by hand.`); continue; }
-    // Never switch code Scout did not evaluate for this task: a line other tasks use, or a module-level setting used in several places.
-    const others = data.tasks!.filter(other => other.name !== task.name && other.usageIds.includes(usage.id)).map(other => other.name);
-    if (others.length) { manual.push(`${ref(usage)} also serves ${others.join(", ")}: editing it would switch ${others.length === 1 ? "that task" : "those tasks"} too, which Scout did not evaluate. Give ${task.name} its own model setting of ${target}, or change it by hand if all of them should switch.`); continue; }
-    const shared = sharedDefinition(ctx, usage, lines);
-    if (shared) { manual.push(`${ref(usage)} sets ${shared.name}, which ${shared.uses.length} other places use (${shared.uses.slice(0, 3).join(", ")}${shared.uses.length > 3 ? ", …" : ""}): editing it would switch all of them, not only ${task.name}. Give ${task.name} its own model setting of ${target}, or change ${shared.name} by hand if every use should switch.`); continue; }
-    edits.push({ file: usage.file, line: usage.line, before: redact(raw), after: redact(edit.after), hash: hash(raw), from: usage.value, to: edit.to });
-    if (usage.envVar) manual.push(`${ref(usage)}: ${usage.envVar} overrides this default when it is set; update it too if your environment sets it.`);
-  }
-  return { edits, manual };
-}
-
-/**
- * When the model literal is part of a module-level setting (`const SONNET = { id: "…" }`, `MODEL = "…"`) used in more
- * than one other place, its name and those places: editing it would switch every one of them. Null otherwise, including
- * literals inside a function or call, which only that code uses.
- */
-function sharedDefinition(ctx: Context, usage: Usage, lines: readonly string[]): { name: string; uses: string[] } | null {
-  // The top-level statement the literal belongs to: the nearest line at or above it that is not indented.
-  let start = usage.line - 1;
-  while (start > 0 && start > usage.line - 60 && /^\s/.test(lines[start] ?? "")) start--;
-  const declared = /^(?:export\s+)?(?:(?:const|let|var|final|static|val)\s+)?([A-Za-z_$][\w$]*)\s*(?::[^=]*)?=(?![=>])/.exec(lines[start] ?? "");
-  const name = declared?.[1];
-  if (!name || /^(?:if|for|while|return|module)$/.test(name)) return null;
-  const pattern = new RegExp(`(?<![\\w$.])${name.replace(/\$/g, "\\$")}(?![\\w$])`, "g");
-  const uses: string[] = [];
-  for (const file of sourceFiles(ctx.repo.root, repoConfig(ctx).scan?.exclude ?? [])) {
-    let text: string;
-    try { text = readFileSync(join(ctx.repo.root, file), "utf8"); } catch { continue; }
-    if (text.length > 512_000 || !text.includes(name)) continue;
-    text.split("\n").forEach((line, index) => {
-      // The declaration itself, from its first line to the literal, is not a use.
-      if (file === usage.file && index >= start && index <= usage.line - 1) return;
-      for (const _ of line.matchAll(pattern)) uses.push(`${file}:${index + 1}`);
-    });
-  }
-  return uses.length > 1 ? { name, uses } : null;
 }
 
 const diff = (edits: NonNullable<ConfigureState["edits"]>) => edits.map(edit => `--- a/${edit.file}\n+++ b/${edit.file}\n@@ line ${edit.line} @@\n-${edit.before}\n+${edit.after}`).join("\n");

@@ -101,11 +101,12 @@ export function describeJob(view: JobView): string {
     lines.push(`Measured pick: ${result.pick.model} on ${result.pick.endpoint}, ${result.pick.passes}/${result.pick.total} cases passed${result.baseline ? ` (current model ${result.baseline.passes}/${result.baseline.total})` : ""}.`);
     if (result.edit.edits.length) lines.push("Edits:", ...result.edit.edits.map(edit => `- ${edit.file}:${edit.line}: ${edit.before} → ${edit.after}`));
     if (result.edit.instructions) lines.push(result.edit.instructions);
-    lines.push("Ask the user before applying the edit.");
+    lines.push(`Ask the user before applying the edit${result.approval ? `: "${result.approval.prompt}"` : ""}.`);
   } else if (result) lines.push(`No switch proposed (${result.status}). ${reasonFor(result, result.baseline?.model ?? "the current model")}`);
   if (result?.baseline) lines.push(`Current model ${result.baseline.model}: ${result.baseline.passes}/${result.baseline.total} cases passed, ${perCall(result.baseline.costPerCallUsd)} per call, ${result.baseline.latencyMs === null ? "latency unknown" : `${result.baseline.latencyMs} ms`}.`);
   const misses = result && nearMissLine(result);
   if (misses) lines.push(misses);
+  if (result?.basedOn?.length) lines.push(`Based on: ${result.basedOn.join(" ")}`);
   if (result) lines.push(`Report: ${result.reportUrl}`);
   else if (view.status === "running" || view.status === "queued") lines.push(`Provisional pick while it runs: ${view.provisional.model}. ${view.provisional.reason} Measured ${view.progress.measured}${view.progress.planned ? ` of about ${view.progress.planned}` : ""} candidate runs so far (updated ${view.updatedAt}); call openmerit_result again later.`);
   // A result's notices include the job's and those of its last stages, such as challengers left out.
@@ -145,7 +146,7 @@ function resultData(result: JobResult): Json {
     baseline: baseline ? { model: baseline.model, endpoint: baseline.endpoint, passes: baseline.passes, total: baseline.total, costPerCallUsd: baseline.costPerCallUsd, latencyMs: baseline.latencyMs } : null,
     top,
     nearMisses: nearMisses.map(item => ({ model: item.model, endpoint: item.endpoint, passes: item.passes, total: item.total, costPerCallUsd: item.costPerCallUsd, cheaperThanCurrent: item.cheaperThanCurrent })),
-    reportUrl: result.reportUrl, edit: result.edit, spend: result.spend, fixes: result.fixes ?? [],
+    reportUrl: result.reportUrl, edit: result.edit, spend: result.spend, fixes: result.fixes ?? [], basedOn: result.basedOn ?? [], approval: result.approval ?? null,
   };
 }
 const perCall = (value: number | null) => (value === null ? "unknown cost" : `$${value.toFixed(5)}`);
