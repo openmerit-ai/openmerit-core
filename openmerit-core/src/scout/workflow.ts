@@ -18,7 +18,8 @@ import { createLangfuseConnector, type LangfuseConnector, type TaskEvidence } fr
 import { catalogueIndex, type Catalogue, type CatalogueModel } from "../engine/catalogue.ts";
 import { blendedPrice, ladder } from "../engine/pool.ts";
 import { redact } from "../engine/redact.ts";
-import { binarySearch, CandidateUnavailable, CHALLENGERS, challengers, FINALISTS, order, SAMPLE_SIZE, type Stage } from "../engine/search.ts";
+import { evaluateTask as runPolicy, rankTop, shortfall } from "../engine/evaluate.ts";
+import { CandidateUnavailable, CHALLENGERS, FINALISTS, order, SAMPLE_SIZE, type Stage } from "../engine/search.ts";
 import { EvalProxy, retryable } from "../eval/proxy.ts";
 import { runEval } from "../eval/runner.ts";
 import type { Harness, HarnessUsage } from "../harness/harness.ts";
@@ -623,7 +624,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
 
   /** One eval run: replayed from SQLite when finished, otherwise run through the proxy and read back. */
   const runUnit = async (task: string, plan: PlannedEval, kind: UnitRow["role"], entry: ModelRef, repeat: number, items: readonly string[] | null): Promise<UnitResult> => {
-    const id = `${runId}|${slug(task)}|${kind}|${entry.endpoint}|${entry.model}|r${repeat}`;
+    const id = unitId(runId, task, kind, entry, repeat);
     const unit = state.ensureUnit({ id, runId, task, model: entry.model, endpoint: entry.endpoint, role: kind, repeat });
     const label = `${kind === "baseline" ? "current" : kind} ${entry.model}${kind === "screen" ? "" : ` ${repeat}/${repeats}`}`;
     if (unit.status === "done") return unit.result as unknown as UnitResult;
@@ -718,81 +719,57 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
       save();
     }
     if (plan.langfuse && data.datasetItems![task]!.length < SAMPLE_SIZE) throw new StopTask(`The Langfuse dataset ${plan.langfuse.dataset} has ${data.datasetItems![task]!.length} item(s); Scout screens candidates on ${SAMPLE_SIZE} items the current model passes, so nothing was run. Add labelled items.`);
-    // Screens draw from items the current model passes in every run, so a 5/5 screen asks whether a candidate keeps up with it.
-    const baseline: UnitResult[] = [];
-    const reliableItems = () => Object.keys(baseline[0]!.items).filter(item => baseline.every(run => run.items[item] === true));
-    for (let repeat = 1; repeat <= repeats; repeat++) {
-      baseline.push(await runUnit(task, plan, "baseline", base, repeat, null));
-      // Another run can only shrink that set, so stop paying for runs once it is too small to screen on.
-      if (!data.samples![task] && reliableItems().length < SAMPLE_SIZE) break;
-    }
-    if (!data.samples![task]) {
-      const reliable = reliableItems();
-      if (reliable.length < SAMPLE_SIZE) {
-        // A reasoning default on the endpoint can use up a small token limit before any answer: say so, since it is not the model's quality.
-        const cutOff = baseline.reduce((sum, run) => sum + (run.cutOff ?? 0), 0), requests = baseline.reduce((sum, run) => sum + run.requests, 0);
-        const why = cutOff ? ` ${cutOff} of its ${requests} answers stopped at the request's output token limit before any text, as when ${base.endpoint} has the model reason first; production may call it elsewhere, where it does not. Raise the eval's token limit, or add the endpoint your application calls with \`openmerit setup\`.` : " Add labelled items the current model gets right.";
-        throw new StopTask(`The current model passes only ${reliable.length} items in ${baseline.length === 1 ? "its first run" : `every one of its ${baseline.length} runs`}; Scout screens candidates on ${SAMPLE_SIZE} items it passes.${why}`);
-      }
-      const pool = [...reliable], picked: string[] = [];
-      for (let count = 0; count < SAMPLE_SIZE; count++) picked.push(pool.splice(randomInt(pool.length), 1)[0]!);
-      data.samples![task] = picked;
-      save();
-    }
-    const samples = data.samples![task]!;
-    summary.sampleIds = samples;
-    const screen = async (candidate: PoolEntry, stage: Stage) => {
-      const result = await runUnit(task, plan, "screen", candidate, 1, samples);
-      const accepted = samples.every(item => result.items[item] === true);
-      summary.trials.push({ stage, model: candidate.model, eci: candidate.eci, passes: result.passes, total: result.total, accepted });
-      return accepted;
-    };
-    const runFinal = async (candidate: PoolEntry) => {
-      try {
-        for (let repeat = 1; repeat <= repeats; repeat++) await runUnit(task, plan, "final", candidate, repeat, null);
-      } catch (error) {
-        if (error instanceof CandidateUnavailable) { summary.skipped.push({ model: candidate.model, stage: "final", reason: error.message }); return; }
-        if (error instanceof StopTask) return; // A declined failed final is listed as unmeasured.
-        throw error;
-      }
-    };
-    const searched = await binarySearch(order(candidates), screen, FINALISTS);
-    summary.skipped.push(...searched.unavailable.map(item => ({ model: item.candidate.model, stage: item.stage, reason: item.reason })));
-    summary.pick = searched.selected?.model ?? null;
-    if (searched.shortfall) summary.shortfall = searched.shortfall;
-    if (!searched.selected) { summary.status = "no_passing_model"; save(); return; }
-    summary.finalists = searched.finalists.map(item => item.model);
-    for (const candidate of searched.finalists) await runFinal(candidate);
-    const finals = searched.finalists.map(candidate => ({ candidate, measured: finalMeasure(task, "final", candidate.model) }))
-      .filter((item): item is { candidate: PoolEntry; measured: NonNullable<typeof item.measured> } => item.measured !== null);
-    const leader = [...finals].sort((a, b) => b.measured.score - a.measured.score || (a.measured.cost ?? Infinity) - (b.measured.cost ?? Infinity) || a.candidate.eci - b.candidate.eci)[0]?.candidate;
-    if (leader) {
-      const tried = new Set([...summary.trials.map(item => item.model), ...summary.skipped.map(item => item.model)]);
-      // As rank() qualifies them: when no qualified finalist costs less per item than the current model, a stronger
-      // model priced up to the current model's list price may still, so challengers are capped there instead of at the leader's.
-      const current = finalMeasure(task, "baseline", base.model);
-      const cheaper = !current || current.cost === null || finals.some(({ measured }) => measured.score >= current.score
-        && (plan.threshold === undefined || measured.score >= plan.threshold) && measured.cost !== null && measured.cost < current.cost!);
-      const currentModel = ctx.catalogue.models.find(model => model.id === base.model);
-      const ceiling = cheaper || !currentModel ? {} : { maxPrice: blendedPrice(currentModel) };
-      for (const candidate of challengers(candidates, leader, tried, { count: CHALLENGERS, strength: item => item.eci, ...ceiling })) {
+    // openmerit/engine's evaluateTask runs the policy; each of its measure calls is one eval run, replayed from SQLite once done.
+    const baselineRuns: UnitResult[] = [];
+    const currentModel = ctx.catalogue.models.find(model => model.id === base.model);
+    const evaluated = await runPolicy({
+      ladder: order(candidates), strength: item => item.eci, items: null, repeats, rules: { threshold: plan.threshold ?? null },
+      baselinePrice: currentModel ? blendedPrice(currentModel) : null,
+      measure: async (option, items, call) => {
+        const entry: ModelRef = option ?? base;
+        let result: UnitResult;
         try {
-          if (await screen(candidate, "challenger")) { summary.challengers.push(candidate.model); await runFinal(candidate); }
+          // Screens run on the samples; the current model and finals on every item the eval runs.
+          result = await runUnit(task, plan, call.role, entry, call.repeat, call.role === "screen" ? items : null);
         } catch (error) {
-          if (!(error instanceof CandidateUnavailable)) throw error;
-          summary.skipped.push({ model: candidate.model, stage: "challenger", reason: error.message });
+          if (call.role === "final" && error instanceof StopTask) return null; // A declined failed final is listed as unmeasured.
+          throw error;
         }
-      }
+        if (call.role === "baseline") baselineRuns.push(result);
+        const id = unitId(runId, task, call.role, entry, call.repeat);
+        return { items: result.items, costUsd: unitCost(ctx, runId, state.units(runId).filter(unit => unit.id === id))?.cost ?? null };
+      },
+      sample: reliable => {
+        // Screens draw from items the current model passes in every run, so a 5/5 screen asks whether a candidate keeps up with it.
+        if (!data.samples![task]) {
+          const pool = [...reliable], picked: string[] = [];
+          for (let count = 0; count < SAMPLE_SIZE; count++) picked.push(pool.splice(randomInt(pool.length), 1)[0]!);
+          data.samples![task] = picked;
+          save();
+        }
+        summary.sampleIds = data.samples![task]!;
+        return data.samples![task]!;
+      },
+      on: {
+        trial: trial => summary.trials.push({ stage: trial.stage, model: trial.option.model, eci: trial.option.eci, passes: Object.values(trial.measurement.items).filter(Boolean).length, total: Object.keys(trial.measurement.items).length, accepted: trial.accepted }),
+        skipped: skipped => summary.skipped.push({ model: skipped.option.model, stage: skipped.stage, reason: skipped.reason }),
+        searched: searched => {
+          summary.pick = searched.selected?.model ?? null;
+          if (searched.shortfall) summary.shortfall = searched.shortfall;
+          summary.finalists = searched.finalists.map(item => item.model);
+        },
+        challenger: option => summary.challengers.push(option.model),
+      },
+    });
+    if (evaluated.status === "too_few_reliable") {
+      // A reasoning default on the endpoint can use up a small token limit before any answer: say so, since it is not the model's quality.
+      const cutOff = baselineRuns.reduce((sum, run) => sum + (run.cutOff ?? 0), 0), requests = baselineRuns.reduce((sum, run) => sum + run.requests, 0);
+      const why = cutOff ? ` ${cutOff} of its ${requests} answers stopped at the request's output token limit before any text, as when ${base.endpoint} has the model reason first; production may call it elsewhere, where it does not. Raise the eval's token limit, or add the endpoint your application calls with \`openmerit setup\`.` : " Add labelled items the current model gets right.";
+      throw new StopTask(`The current model passes only ${evaluated.reliable.length} items in ${evaluated.baseline.runs.length === 1 ? "its first run" : `every one of its ${evaluated.baseline.runs.length} runs`}; Scout screens candidates on ${SAMPLE_SIZE} items it passes.${why}`);
     }
+    if (evaluated.status === "no_passing_model") { summary.status = "no_passing_model"; save(); return; }
     summary.status = "selected";
     save();
-  };
-  const finalMeasure = (task: string, role: "final" | "baseline", model: string) => {
-    const units = state.units(runId).filter(unit => unit.task === task && unit.role === role && unit.model === model);
-    if (units.length < repeats || units.some(unit => unit.status !== "done")) return null;
-    const results = units.map(unit => unit.result as unknown as UnitResult);
-    const total = results.reduce((sum, item) => sum + item.total, 0);
-    return { score: results.reduce((sum, item) => sum + item.passes, 0) / total, cost: unitCost(ctx, runId, units)?.perItem(total) ?? null };
   };
 
   try {
@@ -939,6 +916,8 @@ export function eligibleCandidates(catalogue: Catalogue, configured: readonly En
 }
 
 /** Measured eval cost of some units from the proxy ledger, or null when a request had no price. */
+const unitId = (runId: string, task: string, kind: UnitRow["role"], entry: ModelRef, repeat: number) => `${runId}|${slug(task)}|${kind}|${entry.endpoint}|${entry.model}|r${repeat}`;
+
 function unitCost(ctx: Context, runId: string, units: UnitRow[]) {
   const usage = units.map(unit => ctx.state.usage(runId, unit.id));
   const requests = usage.reduce((sum, item) => sum + item.requests, 0);
@@ -1005,12 +984,11 @@ function rank(comparison: TaskComparison, accepted: boolean): Pick<TaskCompariso
   const threshold = comparison.eval.threshold;
   const candidates = comparison.candidates.map(item => {
     if (item.status !== "measured" || item.score === null) return { ...item, qualified: false };
-    const asGood = item.score >= baseline.score!;
-    const meets = threshold === null || item.score >= threshold;
-    const why = !asGood ? `passed ${item.passes}/${item.total} vs the current model's ${baseline.passes}/${baseline.total}` : !meets ? `below the eval's required pass rate ${threshold}` : item.costPerItemUsd === null ? "qualifies; cost not measured" : "";
-    return { ...item, qualified: asGood && meets, note: item.note || why };
+    const missed = shortfall({ measured: true, score: item.score, latencyMs: item.meanLatencyMs }, baseline.score!, { threshold });
+    const why = missed === "score" ? `passed ${item.passes}/${item.total} vs the current model's ${baseline.passes}/${baseline.total}` : missed === "threshold" ? `below the eval's required pass rate ${threshold}` : item.costPerItemUsd === null ? "qualifies; cost not measured" : "";
+    return { ...item, qualified: missed === null, note: item.note || why };
   });
-  const top = candidates.filter(item => item.qualified).sort((a, b) => (a.costPerItemUsd ?? Infinity) - (b.costPerItemUsd ?? Infinity) || b.score! - a.score! || (a.eci ?? 0) - (b.eci ?? 0)).slice(0, TOP);
+  const top = rankTop(candidates.filter(item => item.qualified), item => item.eci ?? 0);
   const failed = candidates.filter(item => item.status !== "measured").length;
   return {
     candidates, top, status: top.length ? "ranked" : "no_qualified",

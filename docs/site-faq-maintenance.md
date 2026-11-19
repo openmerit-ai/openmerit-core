@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## One evaluation policy for the CLI and the cloud — unreleased, 19 November 2026
+
+Reviewed the homepage against the change that moves Scout's task evaluation into `openmerit/engine`'s `evaluateTask`, so the CLI and the cloud app reach the same verdict, with the cloud now running every case three times, drawing samples at random, screening challengers first and listing near misses. `site/index.html` has no FAQ block and makes no claim about repeats, samples, challengers or how many times a case runs. No homepage copy change is needed; the openmerit README's step 6 and the cloud README describe the policy.
+
 ## Challengers up to the current model's price — unreleased, 19 November 2026
 
 Reviewed the homepage against Scout's challengers listing up to the current model's price when no qualifying finalist costs less per item than the current model. `site/index.html` has no FAQ block and makes no claim about how challengers are chosen or priced. No homepage copy change is needed; the openmerit README's Scout Model Binary Search step describes the rule.

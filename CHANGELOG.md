@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `openmerit/engine` exports `evaluateTask`, Scout's task evaluation: the current model's repeated runs, the samples, the search, the finalists' runs, the challengers and the Top 3. The CLI and the cloud app now both run it, so a task gets the same verdict from either. The CLI's behaviour does not change. The cloud app used to run each case once, take the first five cases the current model passed as samples, lead with the cheapest qualifier and run challengers on every case without a screen; it now runs every case three times (the `repeats` guardrail), draws the samples at random, and screens challengers first, as the CLI does. A run that put a model at 22/22 had put it at 21/22 in the run before.
+- The cloud app's result lists near misses: models within one case per run of the current model's pass count, with their passes and cost per call.
 - Scout's challengers can now list up to the current model's price when no qualifying finalist costs less per item than the current model. Challengers used to be capped at the leading finalist's list price, so when the finalists were cheap by list price but answered at length, a stronger model priced between the two was never tried, and the result offered no saving. The cap stays at the leading finalist's price whenever a qualifying finalist is already cheaper, and challengers must still be stronger than it, untried, and at most three. `openmerit/engine`'s `challengers()` takes the ceiling as `maxPrice`; the cloud app applies the same rule.
 - CI no longer tests Intel Macs (macOS x64); the supported platforms list no longer includes them.
 - CI no longer tests Apple silicon Macs for now; the README lists them as supported but not currently tested in CI.
