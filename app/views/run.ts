@@ -54,8 +54,9 @@ function live(job: JobView): Html {
 `;
 }
 
-function verdict(item: MeasuredModel, pick: string | null): Html {
+function verdict(item: MeasuredModel, pick: string | null, near: boolean): Html {
   if (item.role === "baseline") return html`<span class="pill tag">In use now</span>`;
+  if (near) return html`<span class="pill warn">Near miss</span>`;
   if (item.model === pick) return html`<span class="pill good">Picked</span>`;
   if (item.status === "unavailable") return html`<span class="pill warn">Unavailable</span>`;
   if (item.status === "screened_out") return html`<span class="pill">Screened out</span>`;
@@ -82,6 +83,9 @@ function pickCard(report: Report): Html {
       </div>`;
 }
 
+/** The cloud app's sentences mark model IDs and code with backticks, as in its Markdown report. */
+const prose = (text: string): Html[] => text.split("`").map((part, index) => (index % 2 ? html`<code>${part}</code>` : html`${part}`));
+
 function change(report: Report): Html {
   const { edits, instructions } = report.edit;
   if (!edits.length && !instructions) return html`<div><h2>Change</h2><p class="note">No code change: keep the model in use now.</p></div>`;
@@ -92,7 +96,7 @@ function change(report: Report): Html {
           <div class="del">- ${edit.before}</div>
           <div class="add">+ ${edit.after}</div>
         </div>`)}
-        ${instructions ? html`<p class="note">${instructions}</p>` : ""}
+        ${instructions ? html`<div class="card notice"><p>${prose(instructions)}</p></div>` : ""}
         <p class="note">Your coding agent received this change with the result.</p>
       </div>`;
 }
@@ -101,6 +105,8 @@ function report(data: Report): Html {
   const models = [data.baseline, ...data.candidates].filter((item): item is MeasuredModel => item !== null);
   const pick = data.pick?.model ?? null;
   const from = Object.entries(data.guardrails.from);
+  const misses = data.nearMisses ?? [];
+  const near = (item: MeasuredModel) => item.role === "candidate" && misses.some((miss) => miss.model === item.model && miss.endpoint === item.endpoint);
   return html`<div class="eyebrow"><a href="/">Runs</a><span>›</span><span>${data.jobId}</span><span>Measured ${date(data.createdAt)}</span></div>
     <h1 class="title">${title(data)}</h1>
     <div class="pick">${pickCard(data)}${change(data)}</div>
@@ -116,10 +122,18 @@ function report(data: Report): Html {
               <td class="num">${item.status === "unavailable" ? "–" : `${item.passes}/${item.total}`}</td>
               <td class="num">${per1k(item.costPerCallUsd)}${item.costIsEstimate && item.costPerCallUsd !== null ? html`<span class="sub">estimate</span>` : ""}</td>
               <td class="num">${seconds(item.latencyMs)}</td>
-              <td>${verdict(item, pick)}</td>
+              <td>${verdict(item, pick, near(item))}</td>
             </tr>`)}
           </tbody>
         </table>
+      </div>
+    </section>` : ""}
+
+    ${misses.length && data.baseline ? html`<section aria-labelledby="near-misses">
+      <h2 id="near-misses">Near Misses</h2>
+      <div class="card">
+        <p>${plural(misses.length, "model")} missed ${modelName(data.baseline.model)}'s ${data.baseline.passes}/${data.baseline.total} by at most one case per run, so ${misses.length === 1 ? "it does" : "they do"} not qualify. A rerun may place ${misses.length === 1 ? "it" : "them"} either side of the bar.</p>
+        ${misses.map((item) => html`<div class="row"><span>${model(item.model)}<span class="sub">${endpointName(item.endpoint)} · ${item.passes}/${item.total} passed · ${per1k(item.costPerCallUsd)} per 1,000 calls${item.cheaperThanCurrent === true ? " · cheaper than now" : item.cheaperThanCurrent === false ? " · not cheaper than now" : ""}</span></span></div>`)}
       </div>
     </section>` : ""}
 
