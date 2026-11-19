@@ -128,6 +128,8 @@ export interface Report extends JobResult { jobId: string; task: string; created
 // GET /api/runs/:id before then: the job's live state, with report null.
 export interface JobView {
   jobId: string;
+  /** Set for a connected app's evaluation, such as "viktor". */
+  connection?: string;
   taskId: string;
   task: string;
   status: JobStatus;

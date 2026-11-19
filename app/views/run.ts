@@ -37,7 +37,7 @@ function measuring(job: JobView): Html {
       <p class="note">Your coding agent gets the result on its next OpenMerit call, and this page shows the report.</p>`;
 }
 
-const again = html`<p style="margin-top: 10px"><button class="btn" type="button" data-action="rerun">Run again</button></p>`;
+const again = (job: JobView) => html`<p style="margin-top: 10px"><button class="btn" type="button" data-action="rerun">${job.connection ? "Start again" : "Run again"}</button></p>`;
 
 function live(job: JobView): Html {
   const progress = job.progress.planned ? `${job.progress.measured} of about ${job.progress.planned} measurements done` : `${plural(job.progress.measured, "measurement")} done`;
@@ -45,8 +45,8 @@ function live(job: JobView): Html {
     queued: html`<span class="pill">Queued</span><p class="note">The run starts in a moment.</p>`,
     running: job.live ? measuring(job) : html`<span class="pill live">Evaluating</span><span class="sub">${job.phase.replace("_", " ")} · ${progress}</span><p class="note">Your coding agent gets the result on its next OpenMerit call, and this page shows the report.</p>`,
     needs_input: html`<span class="pill warn">Needs input</span><p class="note">OpenMerit asked ${plural(job.questions.length, "question")} in your coding agent, such as a check of the test labels. The run continues once it answers.</p>`,
-    failed: html`<p>${job.error ?? "The run stopped before it could recommend a model."}</p>${again}`,
-    stopped: html`<p>The run was stopped${job.error ? `: ${job.error}` : "."}</p>${again}`,
+    failed: html`<p>${job.error ?? "The run stopped before it could recommend a model."}</p>${again(job)}`,
+    stopped: html`<p>The run was stopped${job.error ? `: ${job.error}` : "."}</p>${again(job)}`,
     done: html`<p>The run finished; its report is being saved. Reload in a moment.</p>`,
   }[job.status];
   return html`<div class="eyebrow" data-live="${job.jobId}" data-status="${job.status}"><a href="/">Runs</a><span>›</span><span>${job.jobId}</span><span>Started ${date(job.createdAt)}</span></div>
@@ -266,7 +266,9 @@ export const runView: View<Data> = {
 
 async function rerun(data: Data, budgetUsd: number | null, ctx: Ctx): Promise<void> {
   const now = isLive(data) ? undefined : data.guardrails.effective.budgetUsd;
-  const ok = await ctx.confirm(budgetUsd === null
+  const ok = await ctx.confirm(isLive(data) && data.connection
+    ? { title: "Start again", body: `Evaluates ${data.task} again on paused copies in Viktor's test mode, using credits from your Viktor workspace within the connection's cap. It counts as one evaluation on your plan.`, confirm: "Start again" }
+    : budgetUsd === null
     ? { title: "Run again", body: `Runs ${data.task} again on the bundle its coding agent last sent. It counts as one evaluation on your plan.`, confirm: "Run again" }
     : { title: "Raise the budget and run again", body: `Sets ${data.task}'s budget per job to ${usd(budgetUsd)}${now === undefined ? "" : `, up from ${usd(now)}`}, then runs it again. The run spends up to ${usd(budgetUsd)} on model calls and counts as one evaluation on your plan.`, confirm: "Raise and run again" });
   if (!ok) return;

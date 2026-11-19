@@ -260,7 +260,7 @@ export const viktorJob = workflow({
         await ctx.step({ name: "stop", timeout: 300_000, maxRetries: INTERRUPTIONS, run: async s => {
           const client = s.client<Registry>();
           const left = await cleanupQuietly(client, s.state, jobId, task, directory);
-          await finish(s, client, jobId, stop.status, null, stop.message, null, left);
+          await finish(s, client, jobId, stop.status, null, stop.message, spentBefore(s.state), left);
         } });
       }
     } catch (error) {
@@ -269,7 +269,7 @@ export const viktorJob = workflow({
       await ctx.step({ name: "failed", timeout: 300_000, maxRetries: INTERRUPTIONS, run: async s => {
         const client = s.client<Registry>();
         const left = await cleanupQuietly(client, s.state, jobId, task, directory);
-        await finish(s, client, jobId, "failed", null, `The job failed: ${message}`, null, left);
+        await finish(s, client, jobId, "failed", null, `The job failed: ${message}`, spentBefore(s.state), left);
       } });
     }
   },
@@ -303,6 +303,9 @@ async function cleanupQuietly(client: AppClient, state: ViktorJobState, jobId: s
 }
 
 type StepState = { state: ViktorJobState };
+
+/** A job that ends before its Viktor thread started spent no credits; after that, its estimate stands in for what it used. */
+const spentBefore = (state: { thread: unknown }): number | null => (state.thread ? null : 0);
 
 async function finish(s: StepState, client: AppClient, jobId: string, status: "done" | "stopped" | "failed", result: JobResult | null, error: string | null, credits: number | null, left: string[] = []): Promise<void> {
   const { input } = s.state;

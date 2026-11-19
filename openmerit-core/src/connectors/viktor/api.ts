@@ -48,6 +48,18 @@ const describe = (status: number, body: unknown): { code: string | null; message
   return { code: null, message: Array.isArray(detail) ? JSON.stringify(detail).slice(0, 300) : `HTTP ${status}` };
 };
 
+/**
+ * Viktor refuses a script argument over 2,000 characters, and a task's instructions or a batch script
+ * are longer, so the arguments travel in the code: a line after the script's first line, its
+ * `# openmerit:<kind>` tag, sets `sys.argv`. A JSON string literal is also a Python string literal.
+ */
+export function withArgs(code: string, args: readonly string[]): string {
+  if (!args.length) return code;
+  const newline = code.indexOf("\n");
+  const head = newline < 0 ? code : code.slice(0, newline), rest = newline < 0 ? "" : code.slice(newline + 1);
+  return `${head}\nimport sys as _sys, json as _json; _sys.argv[1:] = _json.loads(${JSON.stringify(JSON.stringify(args))})\n${rest}`;
+}
+
 export function viktorClient(options: ViktorClientOptions): ViktorClient {
   const base = (options.baseUrl ?? VIKTOR_API).replace(/\/+$/, "");
   const fetcher = options.fetch ?? fetch;
@@ -74,7 +86,7 @@ export function viktorClient(options: ViktorClientOptions): ViktorClient {
       return { total: Number(body.total_credits ?? 0), monthly: typeof body.monthly_credits === "number" ? body.monthly_credits : null };
     },
     async runScript(code, args = [], timeoutSeconds = 120) {
-      let run = await call<Awaited<ReturnType<typeof scriptRun>>>("POST", "/api/public/v1/scripts/runs", { code, args, timeout_seconds: timeoutSeconds, wait_seconds: Math.min(timeoutSeconds, 30) });
+      let run = await call<Awaited<ReturnType<typeof scriptRun>>>("POST", "/api/public/v1/scripts/runs", { code: withArgs(code, args), args: [], timeout_seconds: timeoutSeconds, wait_seconds: Math.min(timeoutSeconds, 30) });
       const deadline = Date.now() + (timeoutSeconds + 60) * 1000;
       while (PENDING.has(run.status) && Date.now() < deadline) { await sleep(2000); run = await scriptRun(run.id); }
       if (run.status !== "completed" || (run.result?.exit_code ?? 0) !== 0) {

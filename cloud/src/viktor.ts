@@ -77,27 +77,27 @@ export async function refreshViktor(client: AppClient, accountId: string): Promi
  * starts past the credit cap, counting what running jobs expect to use. Returns why the first one
  * that could not start did not.
  */
-export async function startViktorTasks(client: AppClient, input: { accountId: string; userId: string | null; taskIds?: readonly string[] }): Promise<{ started: string[]; refused: string | null }> {
+export async function startViktorTasks(client: AppClient, input: { accountId: string; userId: string | null; taskIds?: readonly string[] }): Promise<{ started: string[]; jobIds: string[]; refused: string | null }> {
   const account = client.account.getOrCreate([input.accountId]);
   const connection = await account.connection(VIKTOR);
-  if (!connection) return { started: [], refused: "Viktor is not connected." };
+  if (!connection) return { started: [], jobIds: [], refused: "Viktor is not connected." };
   const tasks = (connection.listing as ViktorTask[] | null) ?? [];
   const jobs = await account.connectionJobs({ kind: VIKTOR, since: Date.parse(connection.connectedAt) });
   const evaluated = new Set(jobs.map(job => job.taskId));
   let committed = jobs.reduce((sum, job) => sum + (job.credits ?? 0), 0);
   const wanted = tasks.filter(task => !task.skipped && (input.taskIds ? input.taskIds.includes(task.id) : !evaluated.has(viktorTaskId(task))));
-  const started: string[] = [];
+  const started: string[] = [], jobIds: string[] = [];
   for (const task of wanted) {
     if (jobs.some(job => job.taskId === viktorTaskId(task) && (job.status === "queued" || job.status === "running"))) continue;
     const credits = estimateCredits(task, DEFAULT_REPEATS);
-    if (committed + credits > connection.creditCap) return { started, refused: `Evaluating ${task.title} needs about ${credits} credits, and ${Math.round(committed)} of the ${connection.creditCap}-credit cap are used or expected. Raise the cap to start it.` };
+    if (committed + credits > connection.creditCap) return { started, jobIds, refused: `Evaluating ${task.title} needs about ${credits} credits, and ${Math.round(committed)} of the ${connection.creditCap}-credit cap are used or expected. Raise the cap to start it.` };
     const jobId = newJobId();
     const ok = await account.startJob({ jobId, taskId: viktorTaskId(task), kind: "viktor", askedBy: null, credits });
-    if (!ok.ok) return { started, refused: ok.error };
+    if (!ok.ok) return { started, jobIds, refused: ok.error };
     await client.viktorJob.create([jobId], { input: { accountId: input.accountId, taskId: viktorTaskId(task), task, repeats: DEFAULT_REPEATS, userId: input.userId, createdAt: new Date().toISOString() } });
-    committed += credits; started.push(task.id);
+    committed += credits; started.push(task.id); jobIds.push(jobId);
   }
-  return { started, refused: null };
+  return { started, jobIds, refused: null };
 }
 
 /** The connection and its task table: each task's latest evaluation, or why it waits or is skipped. */
