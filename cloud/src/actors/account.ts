@@ -104,9 +104,9 @@ export const account = actor({
     }
   } }),
   actions: {
-    /** Records the calling member and the account's name. */
-    touch: async (c, input: { userId: string; role: "admin" | "member"; name: string | null }): Promise<void> => {
-      await c.db.execute(`INSERT INTO members (user_id, role) VALUES (?, ?) ON CONFLICT (user_id) DO UPDATE SET role = excluded.role`, input.userId, input.role);
+    /** Records the calling member and the account's name. A null role, from a token that names none, keeps the recorded one. */
+    touch: async (c, input: { userId: string; role: "admin" | "member" | null; name: string | null }): Promise<void> => {
+      await c.db.execute(`INSERT INTO members (user_id, role) VALUES (?, COALESCE(?, 'member')) ON CONFLICT (user_id) DO UPDATE SET role = COALESCE(?, members.role)`, input.userId, input.role, input.role);
       await c.db.execute(`INSERT INTO account (id, name) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET name = COALESCE(excluded.name, account.name)`, input.name);
     },
 

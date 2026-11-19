@@ -78,9 +78,11 @@ export class ClerkAuth implements Auth {
   async api(request: Request): Promise<AuthResult> {
     const token = bearer(request);
     if (!token) return unauthenticated("Sign in to OpenMerit: this request has no session token.");
-    const verified = await verifyToken(token, { secretKey: this.config.secretKey, authorizedParties: this.config.authorizedParties }).catch(() => null);
-    if (!verified || verified.errors) return unauthenticated("The session token was refused.");
-    const claims = verified.data as unknown as Claims;
+    // verifyToken returns the token's claims and throws when it refuses the token: a bad signature, an expired token or another `azp`.
+    let claims: Claims;
+    try {
+      claims = await verifyToken(token, { secretKey: this.config.secretKey, authorizedParties: this.config.authorizedParties, ...(this.config.jwtKey ? { jwtKey: this.config.jwtKey } : {}) });
+    } catch { return unauthenticated("The session token was refused."); }
     return identity(text(claims.sub), claims);
   }
 }

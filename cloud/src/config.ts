@@ -11,6 +11,8 @@ export interface ClerkConfig {
   audience: string;
   /** Origins whose Clerk session tokens /api accepts. */
   authorizedParties: string[];
+  /** Clerk's PEM public key, which verifies session tokens without fetching the JWKS. */
+  jwtKey?: string;
 }
 
 export interface StripeConfig {
@@ -75,6 +77,7 @@ export function loadConfig(env: Env = process.env): Config {
     issuer: clerkIssuer(env.CLERK_PUBLISHABLE_KEY),
     audience: env.OPENMERIT_MCP_AUDIENCE || `${publicUrl}/mcp`,
     authorizedParties: [appUrl, ...(env.OPENMERIT_EXTRA_ORIGINS?.split(",").map(item => item.trim()).filter(Boolean) ?? [])],
+    ...(env.CLERK_JWT_KEY ? { jwtKey: env.CLERK_JWT_KEY } : {}),
   } : null;
   const stripe = env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET && env.STRIPE_PRICE_ID ? {
     secretKey: env.STRIPE_SECRET_KEY,

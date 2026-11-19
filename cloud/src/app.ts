@@ -3,7 +3,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createClient } from "rivetkit/client";
-import { apiRoutes } from "./api.ts";
+import { apiRoutes, cors } from "./api.ts";
 import type { Auth } from "./auth.ts";
 import { planUpdate, type Billing } from "./billing.ts";
 import type { Config } from "./config.ts";
@@ -55,7 +55,8 @@ export function createHandler(deps: AppDeps): Handler {
       return (await api(request, url)) ?? json(404, { error: "Not found" });
     } catch (error) {
       console.error(`${request.method} ${path} failed:`, error);
-      return json(500, { error: "OpenMerit hit an internal error. Try again." });
+      // The web app must be able to read the error, or the browser reports only that the request failed.
+      return json(500, { error: "OpenMerit hit an internal error. Try again." }, path.startsWith("/api/") ? cors(request, deps) : {});
     }
   };
 }
