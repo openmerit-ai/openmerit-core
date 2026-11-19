@@ -83,6 +83,12 @@ function pickCard(report: Report): Html {
       </div>`;
 }
 
+// The cloud app's notices that only describe the search's routine bookkeeping. Every other
+// notice, such as a budget stop, challengers left unmeasured or an agent-eval warning, changes
+// how to read the result and is shown under Notes.
+const routine = [/catalogue models? without an ECI left out/, /no capability index, so .* measured as challengers/];
+export const notes = (notices: string[]): string[] => notices.filter((notice) => !routine.some((pattern) => pattern.test(notice)));
+
 /** The cloud app's sentences mark model IDs and code with backticks, as in its Markdown report. */
 const prose = (text: string): Html[] => text.split("`").map((part, index) => (index % 2 ? html`<code>${part}</code>` : html`${part}`));
 
@@ -106,6 +112,7 @@ function report(data: Report): Html {
   const pick = data.pick?.model ?? null;
   const from = Object.entries(data.guardrails.from);
   const misses = data.nearMisses ?? [];
+  const shown = notes(data.notices);
   const near = (item: MeasuredModel) => item.role === "candidate" && misses.some((miss) => miss.model === item.model && miss.endpoint === item.endpoint);
   return html`<div class="eyebrow"><a href="/">Runs</a><span>›</span><span>${data.jobId}</span><span>Measured ${date(data.createdAt)}</span></div>
     <h1 class="title">${title(data)}</h1>
@@ -150,6 +157,11 @@ function report(data: Report): Html {
         ${from.map(([key, level]) => html`<div class="row"><span><span class="pill tag">${level}</span> <code>${key}</code></span><span>${show(key, (data.guardrails.effective as Record<string, unknown>)[key])}</span></div>`)}
         ${data.guardrails.rejected.map((item) => html`<p class="note">Not applied: <code>${item.key}</code> at the ${item.level} level, which ${item.reason}.</p>`)}
       </div>
+    </section>` : ""}
+
+    ${shown.length ? html`<section aria-labelledby="notes">
+      <h2 id="notes">Notes</h2>
+      <div class="card">${shown.map((notice) => html`<div class="row"><span>${prose(notice)}</span></div>`)}</div>
     </section>` : ""}`;
 }
 

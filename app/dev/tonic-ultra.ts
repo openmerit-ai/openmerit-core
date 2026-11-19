@@ -176,6 +176,8 @@ function report(spec: Spec, id: string, at: string, outcome: Outcome, pick: stri
     spend: { openmeritUsd: Math.round(openmerit * 100) / 100, customerUsd: Math.round(customer * 100) / 100 },
     guardrails: guardrailsFor(spec),
     notices: [
+      "118 catalogue models without an ECI left out: the search places models by their capability index.",
+      ...(status === "picked" && index % 3 === 0 ? ["Challengers not measured: `x-ai/grok-4.6`. The job's budget of $6.00 refused it; the result ranks the finalists only."] : []),
       ...(status === "baseline_failed" ? [`${short(spec.model)} passed ${baseline.passes} of ${total} cases, below this environment's 90% minimum, so nothing was compared against it.`] : []),
     ],
     reportUrl: `https://openmerit.ai/api/r/${id}.md`, catalogueVersion: at.slice(0, 10), cases: { total, fromExamples: 6 + (index % 4) * 2, written: total - 6 - (index % 4) * 2 },
