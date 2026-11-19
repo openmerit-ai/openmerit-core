@@ -30,8 +30,8 @@ export interface Edit { file: string; line: number; before: string; after: strin
 export interface AgentEvalSummary { status: "checked" | "missing"; passed: boolean; warning: string | null; baseline: { passes: number; total: number } | null; tried: { model: string; passes: number; total: number; passed: boolean }[] }
 
 export interface JobResult {
-  /** `stopped`: the budget ran out before the finalists were measured; the report has what was measured until then. */
-  status: "picked" | "keep_current" | "baseline_failed" | "no_cases" | "no_candidates" | "agent_eval_failed" | "stopped";
+  /** `stopped`: the budget ran out before the finalists were measured; `failed`: a step failed for good. The report has what was measured until then. */
+  status: "picked" | "keep_current" | "baseline_failed" | "no_cases" | "no_candidates" | "agent_eval_failed" | "stopped" | "failed";
   pick: { model: string; endpoint: string; endpointModel: string; passes: number; total: number; costPerCallUsd: number | null; savingPerCallUsd: number | null } | null;
   /** Up to three qualified models, cheapest measured cost first. */
   top: MeasuredModel[];
@@ -83,6 +83,7 @@ export function reasonFor(result: JobResult, current: string): string {
     no_candidates: "No allowed model is cheaper than the current one.",
     agent_eval_failed: "Every qualified switch failed the agent's eval, so none is proposed.",
     stopped: "The run stopped at its budget before the finalists were measured, so it proposes no switch. The models below are what it measured until then.",
+    failed: "The run failed before it finished, so it proposes no switch. The models below are what it measured until then.",
     picked: "",
   }[result.status];
 }
