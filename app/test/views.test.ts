@@ -180,4 +180,9 @@ test("a Viktor connection lists its tasks with why some are skipped, and Approve
   const failed = { ...await get<JobView>("/api/runs/z1c7m4"), status: "failed" as const, error: "The test runs did not finish." };
   assert.match(text(runView.render({ ...failed, connection: "viktor" }, page(me))), /Start again/);
   assert.match(text(runView.render(failed, page(me))), /Run again/);
+  const running = { ...failed, status: "running" as const, connection: "viktor" };
+  assert.match(text(runView.render(running, page(me))), /testing the task's presets on paused copies in Viktor's test mode/);
+  assert.doesNotMatch(text(runView.render(running, page(me))), /coding agent/);
+  const oneCredit = { ...result, pick: { ...result.pick!, costPerCallUsd: 0.0025 } };
+  assert.match(text(runView.render(oneCredit, page(me))), /1 credit per test run/);
 });
