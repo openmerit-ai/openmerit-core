@@ -42,6 +42,8 @@ export function createMeasure(input: {
   /** The job's idempotency prefix, such as its ID. */
   key: string;
   signal?: AbortSignal; maxTokens?: number; concurrency?: number;
+  /** Called as each case finishes, in the order they finish, such as to show progress. */
+  onCase?: (result: CaseResult) => void;
 }): Measure {
   const byId = new Map(input.cases.map(item => [item.id, item]));
   return async (candidate, caseIds, options = {}) => {
@@ -49,7 +51,9 @@ export function createMeasure(input: {
     const unknown = ids.filter(id => !byId.has(id));
     if (unknown.length) throw new Error(`Unknown case IDs: ${unknown.join(", ")}`);
     const run = options.run ?? "0";
-    const outcomes = new Array<{ result: CaseResult; costUsd: number; costIsEstimate: boolean; latencyMs: number | null; graderCostUsd: number; rejected?: string }>(ids.length);
+    type Outcome = { result: CaseResult; costUsd: number; costIsEstimate: boolean; latencyMs: number | null; graderCostUsd: number; rejected?: string };
+    const outcomes = new Array<Outcome>(ids.length);
+    const settle = (index: number, outcome: Outcome) => { outcomes[index] = outcome; input.onCase?.(outcome.result); };
     let next = 0;
     // Once a call gets no answer at all, the candidate takes no new case: each would wait out the same timeout.
     let silent: string | null = null;
@@ -63,7 +67,7 @@ export function createMeasure(input: {
         input.signal?.throwIfAborted();
         const caseItem = byId.get(ids[index]!)!;
         if (silent !== null) {
-          outcomes[index] = { result: { caseId: caseItem.id, pass: false, failure: "error" }, costUsd: 0, costIsEstimate: false, latencyMs: null, graderCostUsd: 0, rejected: silent };
+          settle(index, { result: { caseId: caseItem.id, pass: false, failure: "error" }, costUsd: 0, costIsEstimate: false, latencyMs: null, graderCostUsd: 0, rejected: silent });
           continue;
         }
         const key = `${input.key}/${run}/${candidate.endpoint}/${candidate.model}/${caseItem.id}`;
@@ -72,11 +76,11 @@ export function createMeasure(input: {
         if (ran.failure === "error" && (ran.status ?? 0) === 0) silent ??= ran.error ?? "it did not answer";
         const base = { costUsd: ran.costUsd, costIsEstimate: ran.costIsEstimate, latencyMs: answered ? ran.latencyMs : null };
         if (ran.output === null) {
-          outcomes[index] = { ...base, result: { caseId: caseItem.id, pass: false, failure: ran.failure ?? "error" }, graderCostUsd: 0, ...(ran.failure === "error" && rejects(ran.status ?? 0) ? { rejected: ran.error ?? `HTTP ${ran.status}` } : {}) };
+          settle(index, { ...base, result: { caseId: caseItem.id, pass: false, failure: ran.failure ?? "error" }, graderCostUsd: 0, ...(ran.failure === "error" && rejects(ran.status ?? 0) ? { rejected: ran.error ?? `HTTP ${ran.status}` } : {}) });
           continue;
         }
         const grade = await input.grader.grade({ bundle: input.bundle, caseItem, output: ran.output, toolCalls: ran.toolCalls, ledger: input.ledger, key, ...(input.signal ? { signal: input.signal } : {}) });
-        outcomes[index] = { ...base, result: { caseId: caseItem.id, pass: grade.pass }, graderCostUsd: grade.costUsd };
+        settle(index, { ...base, result: { caseId: caseItem.id, pass: grade.pass }, graderCostUsd: grade.costUsd });
       }
     };
     await Promise.all(Array.from({ length: Math.min(input.concurrency ?? CASE_CONCURRENCY, ids.length) }, worker));

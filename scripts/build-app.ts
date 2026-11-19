@@ -97,6 +97,7 @@ function page(title: string, active: string, body: string): string {
             <div class="menu-who"><span class="avatar" aria-hidden="true"></span><span>…</span></div>
             ${menuLinks}
             <hr>
+            <a role="menuitem" href="#" data-global="organizations">${icon('<path d="M7 16 3 12l4-4M17 8l4 4-4 4M3 12h18"/>')}<span>Switch organization</span></a>
             <a role="menuitem" href="#" data-global="sign-out">${icon('<path d="M9 4H5v16h4M14 8l4 4-4 4M18 12H9"/>')}<span>Sign out</span></a>
           </div>
         </div>

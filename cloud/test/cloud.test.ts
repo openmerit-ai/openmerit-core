@@ -456,6 +456,44 @@ test("a job whose actor a deploy's drain stops in the middle of a measure step r
   }
 });
 
+test("a measuring job shows the app the candidate under test, case by case, against the current model", async () => {
+  const models = await fakeModels();
+  const app = await startApp({ models, env: CLERK });
+  let release = () => {};
+  try {
+    await subscribe(app, "org_live");
+    const agent = () => caller(app, "test:user_l:org_live:admin");
+    const started = await agent().tool("openmerit_recommend", { bundle: bundle("live classifier", false), environment: "acme/live" });
+    const jobId = started.data.job_id as string;
+    await waitFor(() => agent().tool("openmerit_result", { job_id: jobId }), value => value.data.status === "needs_input");
+    // Hold the thirtieth model call: the current model's three runs of 8 cases are done, and a candidate's screen of 5 is under way.
+    let held = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    models.onCall = async () => {
+      if (held || models.calls.filter(call => !call.ticket.startsWith("writer:")).length < 30) return;
+      held = true; await gate;
+    };
+    await agent().tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
+    type Live = { model: string; baseline: { model: string; rate: number } | null; done: number; total: number; passes: number; history: { rate: number }[]; minutesLeft: number | null };
+    const view = await waitFor(() => agent().api<{ status: string; live: Live | null }>(`/api/runs/${jobId}`), value => (value.body.live?.done ?? 0) >= 1 && held);
+    const live = view.body.live!;
+    assert.equal(view.body.status, "running");
+    assert.notEqual(live.model, "openai/gpt-5.4", "a candidate, not the current model");
+    assert.deepEqual(live.baseline, { model: "openai/gpt-5.4", rate: 100 });
+    assert.equal(live.total, 5, "a screen runs the sample cases");
+    assert.ok(live.done < live.total, "the held case is not done");
+    assert.equal(live.history.length, live.done);
+    assert.equal(live.history.at(-1)!.rate, live.passes / live.done * 100);
+    assert.ok(live.minutesLeft !== null && live.minutesLeft >= 1);
+    release();
+    const done = await waitFor(() => agent().tool("openmerit_result", { job_id: jobId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 180_000);
+    assert.equal(done.data.status, "done", done.text);
+  } finally {
+    release();
+    await stop(app); await models.close();
+  }
+});
+
 test("a job whose step fails for good ends failed with a report of what it measured, is not charged, and no longer says running", async () => {
   const models = await fakeModels();
   const app = await startApp({ models, env: { ...CLERK, TEST_AGENT_EVAL: "broken" } });

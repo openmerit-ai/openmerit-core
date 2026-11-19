@@ -2,7 +2,7 @@
 // #view[data-view] from the cloud app's /api/* with the session token.
 import { trackPageview } from "./analytics.ts";
 import { ApiError, createApi, type Api, type Me } from "./api.ts";
-import { loadClerk, signedIn, unavailable, type AppConfig, type Clerk } from "./auth.ts";
+import { loadClerk, needsOrganization, signedIn, unavailable, type AppConfig, type Clerk } from "./auth.ts";
 import { html, setLogos, type Html } from "./html.ts";
 import { startLive, stopLive } from "./live.ts";
 import { mount, type Account, type ConfirmOptions, type Ctx, type Mounted } from "./view.ts";
@@ -27,6 +27,7 @@ const root = document.querySelector<HTMLElement>("#view");
 const pageTitle = root?.dataset.title ?? "OpenMerit";
 const params = new URLSearchParams(location.search);
 const runId = /^\/r\/([\w-]+)\/?$/.exec(location.pathname)?.[1] ?? null;
+const brand = html`<a class="brand" href="/" aria-label="OpenMerit"><svg class="brand-mark" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span class="label">openmerit</span></a>`;
 let clerk: Clerk | null = null;
 let api: Api | null = null;
 let mounted: Mounted | null = null;
@@ -100,6 +101,8 @@ function download(name: string, data: unknown): void {
 const message = (failure: unknown): string => (failure instanceof Error ? failure.message : "Something went wrong. Try again.");
 
 function showError(failure: unknown): void {
+  // The cloud app's answer to a token without an organization, should Clerk's state and the token disagree.
+  if (failure instanceof ApiError && failure.status === 403 && /names no Clerk organization/.test(failure.message)) return showOrganization();
   if (failure instanceof ApiError && failure.status === 401) {
     put(html`<h1 class="title">${pageTitle}</h1><div class="card notice bad" role="alert"><p>Your session could not be verified. Sign in again to continue.</p><p style="margin-top: 10px"><button class="btn primary" type="button" data-global="sign-in-again">Sign in again</button></p></div>`);
   } else if (failure instanceof ApiError && failure.status === 404 && runId) {
@@ -113,10 +116,10 @@ function showError(failure: unknown): void {
 // card) mounted in the page rather than as a modal over an empty app.
 function showSignedOut(): void {
   fillProfile(null);
-  document.body.classList.add("signed-out");
+  document.body.classList.add("standalone");
   document.title = "Sign in · OpenMerit";
   put(html`<div class="signin-page">
-    <a class="brand" href="/" aria-label="OpenMerit"><svg class="brand-mark" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span class="label">openmerit</span></a>
+    ${brand}
     <div class="signin-mount"></div>
     <div class="signin-note"><p class="sub">New to OpenMerit? Add it to a coding agent; its first call signs you in.</p>${install()}</div>
   </div>`);
@@ -128,9 +131,71 @@ function showSignedOut(): void {
 }
 
 let signInMount: HTMLDivElement | null = null;
-function leaveSignedOut(): void {
-  document.body.classList.remove("signed-out");
+function leaveStandalone(): void {
+  document.body.classList.remove("standalone");
   if (signInMount) { clerk?.unmountSignIn?.(signInMount); signInMount = null; }
+}
+
+const initial = (text: string): string => text.trim()[0]?.toUpperCase() ?? "?";
+
+// An OpenMerit account is a Clerk organization. Signed in without one, this is the whole page: pick
+// one of the user's organizations or create one. From the profile menu, it switches between them.
+function showOrganization(switching = false): void {
+  const user = clerk?.user;
+  if (!clerk || !user) return showSignedOut();
+  leaveStandalone();
+  document.body.classList.add("standalone");
+  const memberships = user.organizationMemberships ?? [];
+  const current = clerk.organization?.id ?? null;
+  const first = user.firstName?.trim() || user.fullName?.trim().split(/\s+/)[0] || "";
+  const email = user.primaryEmailAddress?.emailAddress ?? user.fullName ?? "";
+  document.title = `${memberships.length ? "Choose an organization" : "Create your organization"} · OpenMerit`;
+  put(html`<div class="signin-page org-page">
+    ${brand}
+    <div class="org-card">
+      <div class="org-head">
+        <h1 class="dialog-title">${memberships.length ? "Choose an organization" : "Create your organization"}</h1>
+        <p>${memberships.length ? "Runs, endpoints, guardrails and the plan belong to an organization. Pick one, or create another." : "Runs, endpoints, guardrails and the plan belong to an organization. Name yours; teammates can join it later."}</p>
+      </div>
+      ${memberships.length ? html`<ul class="org-list" aria-label="Your organizations">${memberships.map(({ organization, role }) => html`<li><button type="button" class="org-choice" data-org="${organization.id}"${organization.id === current ? html` aria-current="true"` : ""}>
+        <span class="org-mark" aria-hidden="true">${initial(organization.name)}</span>
+        <span class="org-name">${organization.name}<span class="sub">${role === "org:admin" ? "Admin" : "Member"}</span></span>
+        ${organization.id === current ? html`<span class="pill tag good">Current</span>` : html`<svg class="org-go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>`}
+      </button></li>`)}</ul>` : ""}
+      <form class="org-create">
+        <label><span>${memberships.length ? "New organization" : "Organization name"}</span><input name="name" required maxlength="64" autocomplete="organization" spellcheck="false" placeholder="${first ? `${first}'s team` : "Acme"}" value="${memberships.length || !first ? "" : `${first}'s team`}"></label>
+        <p class="form-error" role="alert" hidden></p>
+        <button class="btn primary" type="submit">Create organization</button>
+      </form>
+    </div>
+    <p class="sub org-foot">${switching ? html`<a href="${location.pathname}${location.search}">Back</a> · ` : ""}Signed in as ${email} · <a href="#" data-global="sign-out">Sign out</a></p>
+  </div>`);
+  const page = root?.querySelector<HTMLElement>(".org-page");
+  const error = page?.querySelector<HTMLElement>(".form-error");
+  const fail = (failure: unknown): void => {
+    const text = (failure as { errors?: { longMessage?: string; message?: string }[] })?.errors?.[0];
+    if (error) { error.textContent = text?.longMessage ?? text?.message ?? message(failure); error.hidden = false; }
+  };
+  // Setting it active completes Clerk's choose-organization task; the reload starts on fresh tokens.
+  const choose = async (id: string): Promise<void> => {
+    if (id === current) return location.reload();
+    await clerk?.setActive?.({ organization: id });
+    location.reload();
+  };
+  const busy = (button: HTMLButtonElement | null | undefined, on: boolean): void => { if (button) { button.disabled = on; button.toggleAttribute("aria-busy", on); } };
+  page?.querySelectorAll<HTMLButtonElement>(".org-choice").forEach((button) => button.addEventListener("click", () => {
+    busy(button, true);
+    choose(button.dataset.org ?? "").catch((failure) => { busy(button, false); fail(failure); });
+  }));
+  page?.querySelector<HTMLFormElement>(".org-create")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.currentTarget as HTMLFormElement, submit = form.querySelector<HTMLButtonElement>("button[type=submit]");
+    const name = String(new FormData(form).get("name") ?? "").trim();
+    if (!name || !clerk?.createOrganization) return;
+    busy(submit, true);
+    clerk.createOrganization({ name }).then((created) => choose(created.id)).catch((failure) => { busy(submit, false); fail(failure); });
+  });
+  if (!memberships.length) page?.querySelector<HTMLInputElement>("input[name=name]")?.focus();
 }
 
 // /api/me names the account; Clerk, which the page already holds, names the person.
@@ -139,7 +204,6 @@ function fillProfile(me: Account | null): void {
   const name = me ? user?.fullName || user?.primaryEmailAddress?.emailAddress || "Signed in" : "Sign in";
   const email = user?.primaryEmailAddress?.emailAddress ?? null;
   const sub = me ? `${me.account.name} · ${me.plan.status !== "none" && me.plan.status !== "canceled" ? `${me.plan.name ?? "OpenMerit"} plan` : "No plan"}` : "OpenMerit";
-  const initial = (text: string): string => text.trim()[0]?.toUpperCase() ?? "?";
   const avatar = me ? html`${initial(name)}<span class="org-badge">${initial(me.account.name)}</span>` : html`?`;
   const profile = document.querySelector<HTMLElement>(".profile");
   if (profile) {
@@ -171,10 +235,12 @@ async function boot(): Promise<void> {
       const config = await response.json() as AppConfig;
       clerk = await loadClerk(config);
       api = createApi(config.apiOrigin, async () => (await clerk?.session?.getToken()) ?? null, fetch, reverify);
-      let was = signedIn(clerk);
+      // Boots again when the user signs in or out, or their session gains or loses an organization.
+      const state = (found: Clerk): string => (signedIn(found) ? `in:${found.organization?.id ?? ""}` : needsOrganization(found) ? "organization" : "out");
+      let was = state(clerk);
       clerk.addListener(() => {
-        if (!clerk || signedIn(clerk) === was) return;
-        was = signedIn(clerk);
+        if (!clerk || state(clerk) === was) return;
+        was = state(clerk);
         void boot();
       });
     }
@@ -182,8 +248,9 @@ async function boot(): Promise<void> {
     fillProfile(null);
     return showError(new Error(failure instanceof Error ? failure.message : unavailable));
   }
+  if (needsOrganization(clerk)) return showOrganization();
   if (!signedIn(clerk) || !api) return showSignedOut();
-  leaveSignedOut();
+  leaveStandalone();
   trackPageview(clerk.user?.id);
   try {
     const found = await api.get<Me>("/api/me");
@@ -217,6 +284,7 @@ async function global(name: string): Promise<void> {
   if (name === "sign-out" && !signedIn(clerk)) return clerk.openSignIn({ forceRedirectUrl: location.href });
   if (name === "sign-out") return clerk.signOut();
   if (name === "sign-in-again") { await clerk.signOut({ redirectUrl: location.href }); }
+  if (name === "organizations") showOrganization(true);
 }
 
 document.addEventListener("click", (event) => {
