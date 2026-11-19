@@ -6,7 +6,7 @@ import { capture } from "./analytics.ts";
 import { NO_ORGANIZATION, type Auth, type AuthResult, type Identity } from "./auth.ts";
 import type { Config } from "./config.ts";
 import type { Answers, JobView } from "./actors/job.ts";
-import { explain, nearMissLine, reasonFor, type Fix, type JobResult } from "./report.ts";
+import { credits, explain, nearMissLine, reasonFor, type Fix, type JobResult } from "./report.ts";
 import type { AppClient } from "./registry.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { bundleProblem, DEFAULT_ENVIRONMENT, rerunJob, startJob } from "./start.ts";
@@ -92,7 +92,7 @@ const json = (status: number, body: unknown, headers: Record<string, string> = {
 export const resourceMetadataUrl = (config: Config) => `${config.publicUrl}/.well-known/oauth-protected-resource/mcp`;
 
 /** Why the job's state stands where it does, for the coding agent. */
-export function describeJob(view: JobView | ViktorJobView): string {
+export function describeJob(view: JobView | ViktorJobView, appUrl: string): string {
   const lines = [`Job ${view.jobId} for ${view.task}: ${view.status} (${view.phase}).`];
   if (view.questions.length) {
     lines.push(`It needs the user. Ask them, then call openmerit_answer with job_id "${view.jobId}" and answers keyed by question id:`);
@@ -102,7 +102,7 @@ export function describeJob(view: JobView | ViktorJobView): string {
   if (result?.connection) {
     // A connected app's task: the change is made there by a person; OpenMerit changes nothing.
     const change = result.connection.change;
-    lines.push(change ? `Proposed change: ${change.text}. It passed ${result.pick?.passes}/${result.pick?.total} checks${result.baseline ? `, as ${result.baseline.model} passed ${result.baseline.passes}/${result.baseline.total}` : ""}, for fewer Viktor credits per run. A person approves it with Approve change at ${result.reportUrl}, then makes it in Viktor (${change.link}); OpenMerit does not change the task.` : `Keep ${result.connection.currentModel}: no cheaper preset passed every check it passed.`);
+    lines.push(change ? `Proposed change: ${change.text}. It passed ${result.pick?.passes}/${result.pick?.total} checks${result.baseline ? `, as ${result.baseline.model} passed ${result.baseline.passes}/${result.baseline.total}` : ""}, for ${credits(result.pick?.costPerCallUsd ?? null)} per test run instead of ${credits(result.baseline?.costPerCallUsd ?? null)}. A person approves it with Approve change at ${result.reportUrl}, then makes it in Viktor (${change.link}); OpenMerit does not change the task.` : `Keep ${result.connection.currentModel}: no cheaper preset passed every check it passed.`);
     lines.push(`Viktor credits used: ${result.connection.creditsUsed}.`);
   } else if (result?.pick) {
     lines.push(`Measured pick: ${result.pick.model} on ${result.pick.endpoint}, ${result.pick.passes}/${result.pick.total} cases passed${result.baseline ? ` (current model ${result.baseline.passes}/${result.baseline.total})` : ""}.`);
@@ -110,7 +110,8 @@ export function describeJob(view: JobView | ViktorJobView): string {
     if (result.edit.instructions) lines.push(result.edit.instructions);
     lines.push(`Ask the user before applying the edit${result.approval ? `: "${result.approval.prompt}"` : ""}.`);
   } else if (result) lines.push(`No switch proposed (${result.status}). ${reasonFor(result, result.baseline?.model ?? "the current model")}`);
-  if (result?.baseline) lines.push(`Current model ${result.baseline.model}: ${result.baseline.passes}/${result.baseline.total} cases passed, ${perCall(result.baseline.costPerCallUsd)} per call, ${result.baseline.latencyMs === null ? "latency unknown" : `${result.baseline.latencyMs} ms`}.`);
+  if (result?.baseline && result.connection) lines.push(`Current preset ${result.baseline.model}: ${result.baseline.passes}/${result.baseline.total} checks passed, ${credits(result.baseline.costPerCallUsd)} per test run.`);
+  else if (result?.baseline) lines.push(`Current model ${result.baseline.model}: ${result.baseline.passes}/${result.baseline.total} cases passed, ${perCall(result.baseline.costPerCallUsd)} per call, ${result.baseline.latencyMs === null ? "latency unknown" : `${result.baseline.latencyMs} ms`}.`);
   const misses = result && nearMissLine(result);
   if (misses) lines.push(misses);
   if (result?.basedOn?.length) lines.push(`Based on: ${result.basedOn.join(" ")}`);
@@ -124,7 +125,8 @@ export function describeJob(view: JobView | ViktorJobView): string {
     const fix = result?.fixes?.find(item => item.notice === notice);
     if (fix) lines.push(`Fix: ${fixLine(fix, view.jobId, new URL(result!.reportUrl).origin)}`);
   }
-  if (view.status === "failed" && !result) lines.push(`Fix: ask the user, then call openmerit_recommend with job_id "${view.jobId}" to run the task again.`);
+  // A Viktor task has no bundle to rerun, and starting it again spends the workspace's Viktor credits: an admin does it in the app.
+  if (view.status === "failed" && !result) lines.push("connection" in view ? `Fix: tell the user an admin can start it again with Start again at ${appUrl}/r/${view.jobId}/; it uses Viktor credits within the connection's cap.` : `Fix: ask the user, then call openmerit_recommend with job_id "${view.jobId}" to run the task again.`);
   if (view.error) lines.push(`Error: ${view.error}`);
   return lines.join("\n");
 }
@@ -213,15 +215,15 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
   }
   if (name === "openmerit_result") {
     const view = await jobView(args.job_id);
-    return "jobId" in view ? { text: describeJob(view), data: jobData(view), ...(view.status === "failed" ? { isError: true } : {}) } : view;
+    return "jobId" in view ? { text: describeJob(view, deps.config.appUrl), data: jobData(view), ...(view.status === "failed" ? { isError: true } : {}) } : view;
   }
   if (name === "openmerit_answer") {
     const view = await jobView(args.job_id);
     if (!("jobId" in view)) return view;
-    if ("connection" in view) return { text: `Job ${view.jobId} evaluates a Viktor task and asks no questions.\n${describeJob(view)}`, data: jobData(view) };
+    if ("connection" in view) return { text: `Job ${view.jobId} evaluates a Viktor task and asks no questions.\n${describeJob(view, deps.config.appUrl)}`, data: jobData(view) };
     const answers = args.answers;
     if (!answers || typeof answers !== "object" || Array.isArray(answers)) return { text: "answers must be an object keyed by question id.", data: {}, isError: true };
-    if (!view.questions.length) return { text: `Job ${view.jobId} has no open questions.\n${describeJob(view)}`, data: jobData(view) };
+    if (!view.questions.length) return { text: `Job ${view.jobId} has no open questions.\n${describeJob(view, deps.config.appUrl)}`, data: jobData(view) };
     const handle = client.job.get([view.jobId]);
     await handle.send("answers", { answers: answers as Answers });
     // The job applies the answers in a moment; return the state once it has, or as it stands after a few seconds.
@@ -231,7 +233,7 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
       next = await handle.status();
       if (next.updatedAt !== view.updatedAt) break;
     }
-    return { text: describeJob(next), data: jobData(next) };
+    return { text: describeJob(next, deps.config.appUrl), data: jobData(next) };
   }
   if (name === "openmerit_tasks") {
     const [tasks, ready, connected] = await Promise.all([account.tasks(), account.readySince(identity.userId), viktorView(client, identity.accountId)]);

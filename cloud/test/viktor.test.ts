@@ -143,7 +143,11 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     // The evaluation: smart against balanced and cheap, three test runs each, in one API thread.
     const done = await waitFor(() => admin.tool("openmerit_result", { job_id: jobId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 60_000);
     assert.equal(done.data.status, "done", done.text);
-    assert.match(done.text, /Proposed change: Set Ticket triage test to cheap\. It passed 15\/15 checks, as smart passed 15\/15/);
+    assert.match(done.text, /Proposed change: Set Ticket triage test to cheap\. It passed 15\/15 checks, as smart passed 15\/15, for 4 credits per test run instead of 70 credits\./);
+    // A Viktor result is priced in credits per test run, never in dollars per call.
+    assert.match(done.text, /Current preset smart: 15\/15 checks passed, 70 credits per test run\./);
+    assert.match(done.text, /`balanced` passed 14\/15 at 20 credits a test run/);
+    assert.doesNotMatch(done.text, /per call|a call/);
     assert.equal(viktor.state.threads.length, 1, "every test run shares one thread");
     type Row = { model: string; passes: number; total: number; costPerCallUsd: number | null };
     const report = (await admin.api<{ status: string; pick: Row; baseline: Row; nearMisses: Row[]; edit: { instructions: string }; notices: string[]; connection: { change: { text: string; link: string }; creditsUsed: number; copiesLeft: string[] }; approved: unknown }>(`/api/runs/${jobId}`)).body;
@@ -188,6 +192,10 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     assert.equal((await member.api(`/api/runs/${jobId}/rerun`, { method: "POST" })).status, 403);
     const rerun = await admin.api<{ error: string }>(`/api/runs/${jobId}/rerun`, { method: "POST" });
     assert.deepEqual([rerun.status, rerun.body.error], [409, "Viktor is not connected."]);
+    // The coding agent cannot rerun a Viktor task: it has no bundle, and an admin spends the workspace's credits in the app.
+    const recommend = await admin.tool("openmerit_recommend", { job_id: jobId });
+    assert.equal(recommend.isError, true);
+    assert.match(recommend.text, /evaluated a Viktor task, which has no bundle to run again\. An admin starts it again with Start again/);
   } finally {
     await stop(app); await judge.close();
     await new Promise<void>(resolve => { viktor.server.closeAllConnections(); viktor.server.close(() => resolve()); });

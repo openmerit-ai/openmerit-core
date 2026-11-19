@@ -82,6 +82,7 @@ export async function rerunJob(client: AppClient, input: { accountId: string; us
   const account = client.account.getOrCreate([input.accountId]);
   const job = await account.job(input.jobId);
   if (!job) return { ok: false, error: `No run ${input.jobId} in this account.` };
+  if (job.kind === "viktor") return { ok: false, error: `${input.jobId} evaluated a Viktor task, which has no bundle to run again. An admin starts it again with Start again on the run's page in the OpenMerit app; it uses Viktor credits within the connection's cap.` };
   const row = await account.task(job.taskId);
   const bundle = row ? (await client.task.get([input.accountId, row.id]).info()).bundle : null;
   if (!row || !bundle) return { ok: false, error: "This run's task no longer has a bundle to run again: send one with openmerit_recommend." };
