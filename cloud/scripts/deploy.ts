@@ -11,7 +11,7 @@
 // authenticates the Rivet CLI, which reads it from the environment. RIVET_CLUSTER is the cluster's
 // name, not its slug; the origin is on the slug.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 
@@ -63,16 +63,23 @@ async function deploy(): Promise<void> {
     console.log(`Would run: rivet ${deployArgs(commit, build).join(" ")}`);
     return;
   }
+  // The commit the origin must report once the rollout is serving: a new build's own, or the receipt's for an uploaded build.
+  const expected = build ? receiptFor(build)?.commit ?? null : commit;
   if (!flag("--yes")) await confirm(`Deploy to ${CLUSTER}?`);
+  // The image carries its commit in src/build.json (gitignored), which /health reports.
+  const stamp = join(root, "cloud", "src", "build.json");
+  if (!build) writeFileSync(stamp, `${JSON.stringify({ commit })}\n`);
   const result = spawnSync(rivet, deployArgs(commit, build), { cwd: root, encoding: "utf8", stdio: ["inherit", "pipe", "inherit"] });
+  rmSync(stamp, { force: true });
   if (result.error) throw result.error;
   process.stdout.write(result.stdout);
   if (result.status !== 0) fail(`rivet deploy exited with ${result.status}.`);
   // The CLI logs `build_id=<uuid>` while it uploads and prints the build ID alone on its last line.
   const deployed = build ?? /\bbuild_id=([\w-]{8,})/.exec(result.stdout)?.[1] ?? /^([0-9a-f-]{36})\s*$/m.exec(result.stdout)?.[1] ?? null;
+  const serving = await servingCommit(expected);
   const health = await answers();
   const receipt = {
-    cluster: CLUSTER, origin: ORIGIN, commit, subject, build: deployed, deployedAt: new Date().toISOString(), previous: previous ? { build: previous.build, commit: previous.commit } : null, health,
+    cluster: CLUSTER, origin: ORIGIN, commit: build ? expected ?? commit : commit, subject, build: deployed, deployedAt: new Date().toISOString(), previous: previous ? { build: previous.build, commit: previous.commit } : null, serving, health,
     rollback: previous?.build ? `npm run deploy --prefix cloud -- --build ${previous.build}` : undefined,
   };
   mkdirSync(receipts, { recursive: true });
@@ -80,6 +87,28 @@ async function deploy(): Promise<void> {
   writeFileSync(file, `${JSON.stringify(receipt, null, 2)}\n`);
   console.log(`Build: ${deployed ?? "see the output above"}\n${health}\nReceipt: ${file}`);
   if (receipt.rollback) console.log(`Rollback: ${receipt.rollback}`);
+  if (!expected) fail(`No receipt names build ${build}, so its commit is unknown: check what ${ORIGIN}/health reports by hand.`);
+  if (serving !== expected) fail(`The origin still reports ${serving ? `commit ${serving.slice(0, 12)}` : "no commit"} after ${SERVING_WAIT_MS / 60_000} minutes, not ${expected.slice(0, 12)}: the new build is not serving. Builds deployed before /health reported its commit report none. Check the pool before calling this deploy done.`);
+  console.log(`The origin serves ${expected.slice(0, 12)}.`);
+}
+
+const SERVING_WAIT_MS = 5 * 60_000;
+/** Waits until /health reports the expected commit three times in a row, and returns the last commit it reported. */
+async function servingCommit(expected: string | null): Promise<string | null> {
+  let last: string | null = null, streak = 0;
+  for (const until = Date.now() + (expected ? SERVING_WAIT_MS : 0); ;) {
+    last = await reportedCommit();
+    streak = expected && last === expected ? streak + 1 : 0;
+    if (streak >= 3 || Date.now() >= until) return last;
+    await new Promise(resolve => setTimeout(resolve, 10_000));
+  }
+}
+
+async function reportedCommit(): Promise<string | null> {
+  try {
+    const response = await fetch(`${ORIGIN}/health`, { signal: AbortSignal.timeout(15_000) });
+    return response.ok ? ((await response.json()) as { commit?: string | null }).commit ?? null : null;
+  } catch { return null; }
 }
 
 function deployArgs(commit: string, build: string | undefined): string[] {
@@ -121,6 +150,8 @@ async function secrets(): Promise<void> {
 async function status(): Promise<void> {
   const previous = lastReceipt();
   console.log(previous ? `Last deploy from this checkout: build ${previous.build ?? "unknown"} at ${previous.commit.slice(0, 12)}, ${previous.deployedAt}.` : "No deploy receipts in this checkout.");
+  const serving = await reportedCommit();
+  console.log(`The origin serves ${serving ? serving.slice(0, 12) : "a build that does not report its commit"}.`);
   console.log(await answers());
 }
 
@@ -137,6 +168,12 @@ async function answers(): Promise<string> {
 }
 
 interface Receipt { commit: string; build: string | null; deployedAt: string }
+function receiptFor(build: string): Receipt | null {
+  try {
+    return readdirSync(receipts).filter(name => name.endsWith(".json")).sort().reverse().map(name => JSON.parse(readFileSync(join(receipts, name), "utf8")) as Receipt).find(receipt => receipt.build === build) ?? null;
+  } catch { return null; }
+}
+
 function lastReceipt(): Receipt | null {
   try {
     const latest = readdirSync(receipts).filter(name => name.endsWith(".json")).sort().at(-1);

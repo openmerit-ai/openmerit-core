@@ -1,5 +1,6 @@
 // The app's HTTP surface and its startup. openmerit.ai's domain router proxies /mcp, the OAuth
 // protected-resource metadata and /api/* here.
+import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createClient } from "rivetkit/client";
@@ -40,13 +41,19 @@ async function stripeWebhook(request: Request, deps: AppDeps): Promise<Response>
   return json(200, { received: true, applied: applied.applied });
 }
 
+// The commit this image was built from: cloud/scripts/deploy.ts writes src/build.json before it builds
+// the image, and checks that /health reports it, so a deploy proves the new build is the one serving.
+const builtFrom = ((): string | null => {
+  try { return (JSON.parse(readFileSync(new URL("./build.json", import.meta.url), "utf8")) as { commit?: string }).commit ?? null; } catch { return null; }
+})();
+
 export function createHandler(deps: AppDeps): Handler {
   const api = apiRoutes(deps);
   return async request => {
     const url = new URL(request.url);
     const path = url.pathname;
     try {
-      if (path === "/health") return json(200, { ok: true });
+      if (path === "/health") return json(200, { ok: true, commit: builtFrom });
       if (path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-protected-resource/mcp") {
         return json(200, protectedResource(deps.config), { "cache-control": "public, max-age=300", "access-control-allow-origin": "*" });
       }

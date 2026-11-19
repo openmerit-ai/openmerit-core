@@ -29,3 +29,5 @@ coverage/
 
 # Local deployment receipts from scripts/deploy.ts
 .deploys/
+# Written by cloud/scripts/deploy.ts into the image: the commit /health reports.
+cloud/src/build.json
