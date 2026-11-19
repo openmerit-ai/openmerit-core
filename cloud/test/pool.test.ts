@@ -25,10 +25,11 @@ test("OpenRouter's whole catalogue leaves models without an ECI out, and a model
   assert.deepEqual(listed.unplaced.map(item => item.model), [unranked[0]!.id]);
 });
 
-test("a job's planned steps: the current model, about log₂ of the ladder in screens, the finalists and the challengers", () => {
-  // 100 ranked: 7 probes + 6 screens, 5 finalists, 3 challengers, 1 baseline; and the unplaced on top.
-  assert.equal(plannedSteps(100, 0), 1 + 13 + 5 + 3);
-  assert.equal(plannedSteps(100, 2), 24);
-  assert.equal(plannedSteps(2, 0), 1 + 2 + 2 + 2);
-  assert.equal(plannedSteps(0, 1), 2);
+test("a job's planned steps: the current model's runs, about log₂ of the ladder in screens, the finalists' runs and the challengers", () => {
+  // 100 ranked, 3 repeats: 3 baseline runs, 7 probes + 6 screens, 5 finalists × 3 runs, 3 challengers × (1 screen + 3 runs); the unplaced on top.
+  assert.equal(plannedSteps(100, 0, 3), 3 + 13 + 15 + 12);
+  assert.equal(plannedSteps(100, 2, 3), 43 + 2 * 4);
+  assert.equal(plannedSteps(100, 0, 1), 1 + 13 + 5 + 3 * 2);
+  assert.equal(plannedSteps(2, 0, 3), 3 + 2 + 2 * 3 + 2 * 4);
+  assert.equal(plannedSteps(0, 1, 3), 3 + 4);
 });

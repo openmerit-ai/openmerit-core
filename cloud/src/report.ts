@@ -35,6 +35,8 @@ export interface JobResult {
   pick: { model: string; endpoint: string; endpointModel: string; passes: number; total: number; costPerCallUsd: number | null; savingPerCallUsd: number | null } | null;
   /** Up to three qualified models, cheapest measured cost first. */
   top: MeasuredModel[];
+  /** Measured models that missed the current model's pass rate by at most one case per run. Absent from reports saved before it was added. */
+  nearMisses?: MeasuredModel[];
   baseline: MeasuredModel | null;
   candidates: MeasuredModel[];
   search: { pool: number; unplaced: number; samples: string[]; finalists: string[]; challengers: string[]; shortfall: string | null };
@@ -88,12 +90,17 @@ export function proposeEdit(bundle: TaskBundle, pick: Option, baselineEndpoint: 
 }
 
 /** What the coding agent and the app read beside a result: the one-line reason, and whether each top model is cheaper per call than the current one. */
-export function explain(result: JobResult): { reason: string; top: (MeasuredModel & { cheaperThanCurrent: boolean | null })[] } {
+export function explain(result: JobResult): { reason: string; top: (MeasuredModel & { cheaperThanCurrent: boolean | null })[]; nearMisses: (MeasuredModel & { cheaperThanCurrent: boolean | null })[] } {
   const baseline = result.baseline;
-  return {
-    reason: reasonFor(result, baseline?.model ?? "the current model"),
-    top: result.top.map(item => ({ ...item, cheaperThanCurrent: baseline?.costPerCallUsd == null || item.costPerCallUsd === null ? null : item.costPerCallUsd < baseline.costPerCallUsd })),
-  };
+  const cheaper = (item: MeasuredModel) => ({ ...item, cheaperThanCurrent: baseline?.costPerCallUsd == null || item.costPerCallUsd === null ? null : item.costPerCallUsd < baseline.costPerCallUsd });
+  return { reason: reasonFor(result, baseline?.model ?? "the current model"), top: result.top.map(cheaper), nearMisses: (result.nearMisses ?? []).map(cheaper) };
+}
+
+/** The near misses in one sentence, or null when there are none. */
+export function nearMissLine(result: JobResult): string | null {
+  const misses = result.nearMisses ?? [];
+  if (!misses.length || !result.baseline) return null;
+  return `Near misses, within one case per run of the current model's ${result.baseline.passes}/${result.baseline.total}: ${misses.map(item => `\`${item.model}\` passed ${item.passes}/${item.total} at ${usd(item.costPerCallUsd)} a call`).join("; ")}.`;
 }
 
 const usd = (value: number | null) => (value === null ? "unknown" : value < 0.01 ? `$${value.toFixed(5)}` : `$${value.toFixed(4)}`);
@@ -136,6 +143,8 @@ export function renderMarkdown(input: { jobId: string; bundle: TaskBundle; resul
     lines.push(`| \`${item.model}\`${item.inCatalogue ? "" : " (measured only)"} | ${item.endpoint} | ${item.funding === "openmerit" ? "OpenMerit" : "you"} | ${item.stage} | ${item.status === "unavailable" ? "unavailable" : rate(item.passes, item.total)} | ${usd(item.costPerCallUsd)}${item.costIsEstimate ? " (estimate)" : ""} | ${item.latencyMs === null ? "–" : `${item.latencyMs} ms`} | ${item.role === "baseline" ? "current" : item.qualified ? "yes" : "no"} |`);
   }
   lines.push("", `Searched ${result.search.pool} ranked models${result.search.unplaced ? ` and ${result.search.unplaced} placed by measurement only` : ""} on ${result.search.samples.length} sample cases, then finalists and challengers on all ${result.cases.total} cases (${result.cases.fromExamples} from your examples, ${result.cases.written} written).`);
+  const misses = nearMissLine(result);
+  if (misses) lines.push("", misses);
   if (result.search.shortfall) lines.push("", result.search.shortfall);
   if (result.agentEval) lines.push("", "## Agent eval", "", result.agentEval.status === "missing" ? result.agentEval.warning ?? "The agent has no eval." : `${result.agentEval.passed ? "Passed" : "Failed"}: the agent passed ${result.agentEval.baseline ? rate(result.agentEval.baseline.passes, result.agentEval.baseline.total) : "?"} with its current models.`);
   lines.push("", "## Spend", "", `OpenMerit-paid ${usd(result.spend.openmeritUsd)}, paid on your endpoints ${usd(result.spend.customerUsd)}.`);

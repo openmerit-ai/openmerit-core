@@ -8,15 +8,40 @@ import { NO_ORGANIZATION } from "../src/auth.ts";
 import { signStripePayload } from "../src/billing.ts";
 import type { Registry } from "../src/registry.ts";
 import { watchState } from "../src/actors/account.ts";
-import { bundle, caller, costOf, crash, fakeModels, startApp, stop, subscribe, waitFor, WEAK_BELOW, WRITTEN, catalogue, type App, type FakeModels } from "./helpers.ts";
+import { evaluateTask } from "../src/engine.ts";
+import { buildPool } from "../src/pool.ts";
+import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
+import { bundle, caller, costOf, crash, fakeModels, startApp, stop, subscribe, waitFor, WEAK_BELOW, WRITTEN, TICKETS, catalogue, type App, type FakeModels } from "./helpers.ts";
 
 const CLERK = { CLERK_SECRET_KEY: "sk_test_fake", CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from("clerk.openmerit.test$").toString("base64")}` };
 type Data = Record<string, unknown>;
 type Result = { status: string; pick: { model: string; passes: number; total: number } | null; edit: { edits: { before: string; after: string }[] }; reportUrl: string; spend: { openmeritUsd: number; customerUsd: number } };
 const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
-/** What the job should have paid: each distinct model call once, however often it was sent. */
+/** What every call the fake answered cost, for a job none of whose steps ran twice. */
+const sentCost = (models: FakeModels) => sum(models.calls.map(call => costOf(call.model)));
+/**
+ * What the CLI's policy does with the fake's answers: openmerit/engine's evaluateTask over the pool the
+ * job builds, three runs of the bundle's six labelled examples and both written cases, with a measure
+ * that passes a model on every case unless the fake answers it wrongly. Returns the model calls it
+ * makes, what they cost, and its Top 3, which the job must match.
+ */
+async function cliPolicy(task: string) {
+  const pool = buildPool({ catalogue, endpoints: [{ id: "openrouter", kind: "openrouter", baseUrl: "https://openrouter.test/v1", allowedModels: "all", funding: "openmerit" }], bundle: bundle(task, false) as TaskBundle, guardrails: {} });
+  const cases = [...Object.keys(TICKETS).slice(0, 6), ...Object.keys(WRITTEN)];
+  let calls = 0, spend = 0;
+  const evaluated = await evaluateTask({
+    ladder: pool.ranked, unplaced: pool.unplaced, strength: item => item.eci ?? -Infinity, items: cases, repeats: 3, baselinePrice: pool.baseline!.price,
+    measure: async (option, items) => {
+      const model = (option ?? pool.baseline!).model, ids = items ?? cases;
+      calls += ids.length; spend += ids.length * costOf(model);
+      const strong = (catalogue.models.find(item => item.id === model)?.eci ?? 200) >= WEAK_BELOW;
+      return { items: Object.fromEntries(ids.map(id => [id, strong])), costUsd: ids.length * costOf(model) };
+    },
+    sample: reliable => reliable.slice(0, 5),
+  });
+  return { calls, spend, top: evaluated.top.map(item => [item.option.model, item.passes, item.total]) };
+}
 const writerCalls = (models: FakeModels) => models.calls.filter(call => call.ticket.startsWith("writer:"));
-const distinctCost = (models: FakeModels) => sum([...new Set(models.calls.map(call => `${call.model}\0${call.ticket}`))].map(key => costOf(key.split("\0")[0]!)));
 
 describe("the cloud app", () => {
   let models: FakeModels;
@@ -145,8 +170,9 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     const measured = done.data.result as Result;
     assert.equal(measured.status, "picked");
     assert.equal(new URL(measured.reportUrl).pathname, `/r/${jobId}/`, "the app serves reports at /r/<id>/");
-    assert.equal(measured.pick!.total, 8);
-    assert.equal(measured.pick!.passes, 8);
+    // Every case, three times.
+    assert.equal(measured.pick!.total, 24);
+    assert.equal(measured.pick!.passes, 24);
     assert.ok((catalogue.models.find(model => model.id === measured.pick!.model)?.eci ?? 200) >= WEAK_BELOW, `${measured.pick!.model} answers wrongly in the fake`);
     assert.deepEqual(measured.edit.edits.map(edit => [edit.before, edit.after]), [['const MODEL = "gpt-5.4";', `const MODEL = "${measured.pick!.model}";`]]);
     assert.ok(models.calls.some(call => call.ticket === "Where is my invoice for March?"), "the labelled case is measured");
@@ -161,7 +187,7 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     const report = await agent().api<{ candidates: { model: string; inCatalogue: boolean; funding: string; stage: string }[]; spend: Result["spend"] }>(`/api/runs/${jobId}`);
     assert.deepEqual(report.body.candidates.filter(item => item.model === "acme/fine-tune-1").map(item => [item.inCatalogue, item.funding, item.stage]), [[false, "customer", "challenger"]]);
     assert.ok(Math.abs(report.body.spend.customerUsd - fineTune.length * costOf("acme/fine-tune-1")) < 1e-9);
-    assert.ok(Math.abs(report.body.spend.openmeritUsd + report.body.spend.customerUsd - distinctCost(models)) < 1e-9);
+    assert.ok(Math.abs(report.body.spend.openmeritUsd + report.body.spend.customerUsd - sentCost(models)) < 1e-9);
 
     const markdown = await agent().fetch(`/api/r/${jobId}.md`);
     assert.match(await markdown.text(), /^# OpenMerit report: ticket classifier[\s\S]*acme\/fine-tune-1` \(measured only\)/);
@@ -189,7 +215,7 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     assert.deepEqual([first?.askedBy, listed.find(run => run.kind === "watch")?.askedBy], ["claude-code", null]);
     assert.equal(writerCalls(models).length, 2, "the watch job writes no new cases");
     const watched = await agent().api<{ pick: { total: number } }>(`/api/runs/${runs.body.find(run => run.kind === "watch")!.id}`);
-    assert.equal(watched.body.pick.total, 8);
+    assert.equal(watched.body.pick.total, 24);
     const tasks = await agent().tool("openmerit_tasks", {});
     assert.match(tasks.text, /ticket classifier \[[\w-]+\] \(acme\/support\): openai\/gpt-5\.4 → .*, picked, watching/);
 
@@ -276,11 +302,20 @@ test("a measure step replayed after a crash does not count its spend twice", asy
     const done = await waitFor(() => agent().tool("openmerit_result", { job_id: jobId }), value => value.data.status === "done" || value.data.status === "failed", 180_000);
     assert.equal(done.data.status, "done", done.text);
 
-    const sent = models.calls.length;
-    const distinct = new Set(models.calls.map(call => `${call.model}\0${call.ticket}`)).size;
-    assert.ok(sent > distinct, `the step must have been replayed: ${sent} calls sent, ${distinct} distinct`);
+    const expected = await cliPolicy("replayed classifier");
+    const measuring = models.calls.filter(call => !call.ticket.startsWith("writer:")).length;
+    assert.ok(measuring > expected.calls, `the step must have been replayed: ${measuring} calls sent, ${expected.calls} in the policy`);
+    type Row = { key: string; job_id: string; model: string };
+    const ledger = (await agent().api<{ ledger: Row[] }>("/api/account/export", { method: "POST" })).body.ledger.filter(row => row.job_id === jobId && !row.key.startsWith(`${jobId}/cases/`));
+    assert.equal(ledger.length, expected.calls, "one ledger row per call the policy makes: the replayed step reused its keys");
+    // The current model ran every case three times, each run its own step with its own keys.
+    const report = (await agent().api<{ baseline: { passes: number; total: number }; top: { model: string; passes: number; total: number }[] }>(`/api/runs/${jobId}`)).body;
+    assert.deepEqual([report.baseline.passes, report.baseline.total], [24, 24]);
+    assert.equal(new Set(ledger.filter(row => row.model === "openai/gpt-5.4").map(row => row.key.split("/")[1])).size, 3);
     const spend = (done.data.result as Result).spend;
-    assert.ok(Math.abs(spend.openmeritUsd - distinctCost(models)) < 1e-9, `spend ${spend.openmeritUsd} counts each of the ${distinct} calls once (${distinctCost(models)})`);
+    const writing = sum(writerCalls(models).map(call => costOf(call.model)));
+    assert.ok(Math.abs(spend.openmeritUsd - (expected.spend + writing)) < 1e-9, `spend ${spend.openmeritUsd} counts each of the ${expected.calls} calls once (${expected.spend + writing})`);
+    assert.deepEqual(report.top.map(item => [item.model, item.passes, item.total]), expected.top, "the job's Top 3 is the one the CLI's policy gives for the same answers");
     const period = await agent().api<{ openmeritUsd: number }>("/api/spend");
     assert.ok(Math.abs(period.body.openmeritUsd - spend.openmeritUsd) < 1e-9);
   } finally { await stop(app); await models.close(); }
@@ -343,16 +378,16 @@ test("when no measured model is cheaper per call than the current one, the job m
     assert.equal(switched.result.pick!.model, switched.provisional);
     assert.ok(switched.notices.some(notice => notice.includes(`the provisional pick ${switched.provisional} was measured on every case`)), switched.notices.join("\n"));
     assert.match(switched.result.reason, new RegExp(`^Switch from \`openai/gpt-5.4\` to \`${switched.provisional}\``));
-    assert.deepEqual([switched.result.baseline.passes, switched.result.baseline.total], [8, 8]);
+    assert.deepEqual([switched.result.baseline.passes, switched.result.baseline.total], [24, 24]);
     assert.ok(switched.result.baseline.costPerCallUsd > 0);
     assert.deepEqual(switched.result.top.map(item => item.cheaperThanCurrent), [true, false, false]);
     assert.equal(new URL(switched.result.reportUrl).pathname, `/r/${switched.jobId}/`);
-    assert.match(switched.done.text, /Current model openai\/gpt-5\.4: 8\/8 cases passed, \$0\.000\d+ per call/);
+    assert.match(switched.done.text, /Current model openai\/gpt-5\.4: 24\/24 cases passed, \$0\.000\d+ per call/);
 
     // When the provisional pick costs more too, the job keeps the current model and says which model came closest.
     const kept = await run("costly classifier", model => model === "openai/gpt-5.4");
     assert.equal(kept.result.status, "keep_current", kept.done.text);
-    assert.match(kept.result.reason, /^Keep `openai\/gpt-5\.4`: \S+ passed 8\/8 but costs \$0\.0100 per call against \$0\.000\d+, and no measured model was both as accurate and cheaper\.$/);
+    assert.match(kept.result.reason, /^Keep `openai\/gpt-5\.4`: \S+ passed 24\/24 but costs \$0\.0100 per call against \$0\.000\d+, and no measured model was both as accurate and cheaper\.$/);
     assert.ok(kept.result.top.length > 0 && kept.result.top.every(item => item.cheaperThanCurrent === false));
     assert.match(kept.done.text, /No switch proposed \(keep_current\)\. Keep `openai\/gpt-5\.4`/);
   } finally { await stop(app); await models.close(); }
@@ -371,12 +406,12 @@ test("a job whose actor a deploy's drain stops in the middle of a measure step r
     const jobId = started.data.job_id as string;
     const result = () => agent().tool("openmerit_result", { job_id: jobId });
     await waitFor(result, value => value.data.status === "needs_input");
-    // Hold the twelfth model call, past the current model's step, until the new version has taken the job.
+    // Hold the thirtieth model call, past the current model's three runs of 8 cases, until the new version has taken the job.
     let held = false, reached!: () => void;
     const reachedHold = new Promise<void>(resolve => { reached = resolve; });
     const gate = new Promise<void>(resolve => { release = resolve; });
     models.onCall = async () => {
-      if (held || models.calls.filter(call => !call.ticket.startsWith("writer:")).length < 12) return;
+      if (held || models.calls.filter(call => !call.ticket.startsWith("writer:")).length < 30) return;
       held = true; reached(); await gate;
     };
     await agent().tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
@@ -386,18 +421,18 @@ test("a job whose actor a deploy's drain stops in the middle of a measure step r
     release();
     assert.equal(done.data.status, "done", done.text);
     assert.equal((done.data.result as Result).status, "picked");
+    const expected = await cliPolicy("drained classifier");
     const sent = models.calls.filter(call => !call.ticket.startsWith("writer:")).length;
-    const distinct = new Set(models.calls.filter(call => !call.ticket.startsWith("writer:")).map(call => `${call.model}\0${call.ticket}`)).size;
-    assert.ok(sent > distinct, `the interrupted step must have run again: ${sent} calls sent, ${distinct} distinct`);
-    // One ledger row per distinct call: the step that ran again reused its keys. A call the drain cut off counts at its
+    assert.ok(sent > expected.calls, `the interrupted step must have run again: ${sent} calls sent, ${expected.calls} in the policy`);
+    // One ledger row per call the policy makes: the step that ran again reused its keys. A call the drain cut off counts at its
     // reservation (the provider may have billed it), and every other call at what it cost.
-    const ledger = (await agent().api<{ ledger: { job_id: string; model: string; status: string; reserved_usd: number; actual_usd: number | null; failed: number }[] }>("/api/account/export", { method: "POST" })).body.ledger.filter(row => row.job_id === jobId);
-    assert.equal(ledger.length, new Set(models.calls.map(call => `${call.model}\0${call.ticket}`)).size);
+    const ledger = (await agent().api<{ ledger: { key: string; job_id: string; model: string; status: string; reserved_usd: number; actual_usd: number | null; failed: number }[] }>("/api/account/export", { method: "POST" })).body.ledger.filter(row => row.job_id === jobId);
+    assert.equal(ledger.length, expected.calls + writerCalls(models).length);
     const cutOff = ledger.filter(row => row.failed && row.actual_usd === null);
     assert.ok(cutOff.length >= 1 && cutOff.length <= 4, `the held call and at most the others in flight with it: ${cutOff.length}`);
-    const expected = distinctCost(models) + cutOff.reduce((sum, row) => sum + row.reserved_usd - costOf(row.model), 0);
+    const counted = expected.spend + sum(writerCalls(models).map(call => costOf(call.model))) + cutOff.reduce((total, row) => total + row.reserved_usd - costOf(row.model), 0);
     const spend = (done.data.result as Result).spend;
-    assert.ok(Math.abs(spend.openmeritUsd - expected) < 1e-9, `spend ${spend.openmeritUsd} counts each call once (${expected})`);
+    assert.ok(Math.abs(spend.openmeritUsd - counted) < 1e-9, `spend ${spend.openmeritUsd} counts each call once (${counted})`);
   } finally {
     release();
     if (first !== app) first.child.kill("SIGKILL");

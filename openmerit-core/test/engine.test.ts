@@ -5,7 +5,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { binarySearch, challengers, checkAgent, MemoryLedger, resolveGuardrails, type AgentRun, type Ledger, type Rung } from "../src/engine/index.ts";
+import { binarySearch, challengers, checkAgent, evaluateTask, MemoryLedger, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
 import { State } from "../src/state/db.ts";
 
 test("the search keeps a ladder's own order, and unplaced options are always challengers", async () => {
@@ -27,6 +27,33 @@ test("challengers are capped at the leader's list price, or at the ceiling the c
   assert.deepEqual(challengers(ladder, leader, tried).map(item => item.key), ["cheap-strong"]);
   assert.deepEqual(challengers(ladder, leader, tried, { maxPrice: 4 }).map(item => item.key), ["cheap-strong", "between"]);
   assert.deepEqual(challengers(ladder, leader, tried, { maxPrice: 4, count: 1 }).map(item => item.key), ["cheap-strong"], "still cheapest first, and at most count");
+});
+
+test("three repeats keep a verdict that one run leaves to chance, when the current model and a candidate are both flaky on one item", async () => {
+  // Ten items. The current model and the candidate each fail item i10 in one of every three runs; `seed` sets which run.
+  // One run: seed 1 fails only the candidate (10/10 against 9/10), seed 2 only the current model (9/10 against 10/10), and
+  // seed 0 neither. Three runs: each fails i10 exactly once, 29/30 against 29/30, whatever the seed.
+  const items = Array.from({ length: 10 }, (_, index) => `i${index + 1}`);
+  const cheap: Rung = { key: "cheap", price: 1 };
+  const evaluate = (repeats: number, seed: number) => evaluateTask({
+    ladder: [cheap], strength: () => 1, items, repeats, baselinePrice: 10,
+    sample: reliable => reliable.slice(0, 5),
+    measure: async (option: Rung | null, ids: readonly string[] | null, call: MeasureCall) => {
+      const fails = call.role !== "screen" && (call.repeat + seed + (option ? 1 : 0)) % 3 === 0;
+      return { items: Object.fromEntries(ids!.map(id => [id, !(fails && id === "i10")])), costUsd: ids!.length * (option ? 0.001 : 0.01) };
+    },
+  });
+  const once = [await evaluate(1, 0), await evaluate(1, 1), await evaluate(1, 2)];
+  assert.deepEqual(once.map(result => [result.baseline.passes, result.candidates[0]!.passes, result.status]), [[10, 10, "ranked"], [10, 9, "no_qualified"], [9, 10, "ranked"]]);
+  assert.deepEqual(once[1]!.nearMisses.map(item => [item.option.key, item.passes, item.total]), [["cheap", 9, 10]], "one item short of the bar is a near miss");
+  for (const seed of [0, 1, 2]) {
+    const thrice = await evaluate(3, seed);
+    assert.deepEqual([thrice.baseline.passes, thrice.baseline.total, thrice.candidates[0]!.passes, thrice.candidates[0]!.total, thrice.status], [29, 30, 29, 30, "ranked"], `seed ${seed}`);
+    assert.deepEqual(thrice.cheaper.map(item => item.option.key), ["cheap"]);
+    assert.ok(Math.abs(thrice.cheaper[0]!.costPerItemUsd! - 0.001) < 1e-12);
+    // i10 failed in one of the current model's runs, so it is never a screening item.
+    assert.deepEqual(thrice.reliable, items.slice(0, 9));
+  }
 });
 
 async function ledgerContract(ledger: Ledger) {
