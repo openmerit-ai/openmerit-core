@@ -179,7 +179,7 @@ export function apiRoutes(deps: AppDeps) {
 
   return async (request: Request, url: URL): Promise<Response | null> => {
     const path = url.pathname;
-    const report = /^\/(?:r|api\/r)\/([\w-]+)\.md$/.exec(path);
+    const report = /^\/api\/r\/([\w-]+)\.md$/.exec(path);
     const share = /^\/api\/share\/([\w-]+\.[\w-]+)\.md$/.exec(path);
     if (!path.startsWith("/api/") && !report) return null;
     const headers = cors(request, deps);

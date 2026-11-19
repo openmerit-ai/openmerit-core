@@ -29,11 +29,12 @@ export function costOf(model: string): number {
 }
 
 /** One call the fake answered. `ticket` is the ticket it classified, or `writer:<n>` for a request to write n cases. */
-export interface FakeModels { url: string; calls: { model: string; ticket: string; auth: string }[]; onCall: ((index: number) => Promise<void>) | null; close: () => Promise<void> }
+/** `cost`, when set, overrides what a call to that model reports it cost. */
+export interface FakeModels { url: string; calls: { model: string; ticket: string; auth: string }[]; onCall: ((index: number) => Promise<void>) | null; cost: ((model: string) => number | undefined) | null; close: () => Promise<void> }
 
 export async function fakeModels(): Promise<FakeModels> {
   const eci = new Map(catalogue.models.map(model => [model.id, model.eci]));
-  const fake: FakeModels = { url: "", calls: [], onCall: null, close: async () => {} };
+  const fake: FakeModels = { url: "", calls: [], onCall: null, cost: null, close: async () => {} };
   const server: Server = createServer((req, res) => {
     let body = "";
     req.on("data", chunk => { body += chunk; });
@@ -49,7 +50,7 @@ export async function fakeModels(): Promise<FakeModels> {
       const answer = writer ? JSON.stringify({ cases: Object.entries(WRITTEN).map(([written, queue]) => ({ input: { ticket: written }, expected: queue })) })
         : weak ? "other" : QUEUES[ticket] ?? "other";
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: answer } }], usage: { prompt_tokens: 50, completion_tokens: 2, cost: costOf(parsed.model) } }));
+      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: answer } }], usage: { prompt_tokens: 50, completion_tokens: 2, cost: fake.cost?.(parsed.model) ?? costOf(parsed.model) } }));
     });
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));

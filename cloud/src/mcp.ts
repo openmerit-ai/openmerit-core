@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { NO_ORGANIZATION, type Auth, type AuthResult, type Identity } from "./auth.ts";
 import type { Config } from "./config.ts";
 import type { Answers, JobView } from "./actors/job.ts";
+import { reasonFor, type JobResult } from "./report.ts";
 import type { AppClient } from "./registry.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { bundleProblem, DEFAULT_ENVIRONMENT, startJob } from "./start.ts";
@@ -95,7 +96,8 @@ export function describeJob(view: JobView): string {
     if (result.edit.edits.length) lines.push("Edits:", ...result.edit.edits.map(edit => `- ${edit.file}:${edit.line}: ${edit.before} → ${edit.after}`));
     if (result.edit.instructions) lines.push(result.edit.instructions);
     lines.push("Ask the user before applying the edit.");
-  } else if (result) lines.push(`No switch proposed (${result.status}).`);
+  } else if (result) lines.push(`No switch proposed (${result.status}). ${reasonFor(result, result.baseline?.model ?? "the current model")}`);
+  if (result?.baseline) lines.push(`Current model ${result.baseline.model}: ${result.baseline.passes}/${result.baseline.total} cases passed, ${perCall(result.baseline.costPerCallUsd)} per call, ${result.baseline.latencyMs === null ? "latency unknown" : `${result.baseline.latencyMs} ms`}.`);
   if (result) lines.push(`Report: ${result.reportUrl}`);
   else if (view.status === "running" || view.status === "queued") lines.push(`Provisional pick while it runs: ${view.provisional.model}. ${view.provisional.reason} Measured ${view.progress.measured}${view.progress.planned ? ` of about ${view.progress.planned}` : ""} candidate runs so far (updated ${view.updatedAt}); call openmerit_result again later.`);
   // A result's notices include the job's and those of its last stages, such as challengers left out.
@@ -108,8 +110,20 @@ export function describeJob(view: JobView): string {
 const jobData = (view: JobView): Json => ({
   job_id: view.jobId, task: view.task, status: view.status, phase: view.phase, questions: view.questions, notices: view.notices, progress: view.progress,
   provisional: view.provisional, ...(view.error ? { error: view.error } : {}),
-  ...(view.result ? { result: { status: view.result.status, pick: view.result.pick, top: view.result.top, reportUrl: view.result.reportUrl, edit: view.result.edit, spend: view.result.spend } } : {}),
+  ...(view.result ? { result: resultData(view.result) } : {}),
 });
+
+/** The result for the agent: the verdict and why, the current model's figures, and whether each top model is cheaper than it. */
+function resultData(result: JobResult): Json {
+  const baseline = result.baseline;
+  return {
+    status: result.status, reason: reasonFor(result, baseline?.model ?? "the current model"), pick: result.pick,
+    baseline: baseline ? { model: baseline.model, endpoint: baseline.endpoint, passes: baseline.passes, total: baseline.total, costPerCallUsd: baseline.costPerCallUsd, latencyMs: baseline.latencyMs } : null,
+    top: result.top.map(item => ({ ...item, cheaperThanCurrent: baseline?.costPerCallUsd == null || item.costPerCallUsd === null ? null : item.costPerCallUsd < baseline.costPerCallUsd })),
+    reportUrl: result.reportUrl, edit: result.edit, spend: result.spend,
+  };
+}
+const perCall = (value: number | null) => (value === null ? "unknown cost" : `$${value.toFixed(5)}`);
 
 // The server keeps no sessions, so the session ID it returns on initialize carries the client's
 // name (clientInfo.name, such as claude-code or codex). Clients send it back on every request,

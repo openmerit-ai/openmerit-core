@@ -1,5 +1,5 @@
 // A job's result and its report: scores and picks, never raw model outputs. The same result goes to
-// the coding agent through openmerit_result, to /api/runs/:id as JSON, and to /r/:id.md as Markdown.
+// the coding agent through openmerit_result, to /api/runs/:id as JSON, and to /api/r/:id.md as Markdown.
 import type { ResolvedGuardrails } from "./engine.ts";
 import type { Option, Provisional } from "./pool.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
@@ -66,6 +66,27 @@ export function proposeEdit(bundle: TaskBundle, pick: Option, baselineEndpoint: 
 const usd = (value: number | null) => (value === null ? "unknown" : value < 0.01 ? `$${value.toFixed(5)}` : `$${value.toFixed(4)}`);
 const rate = (passes: number, total: number) => (total ? `${passes}/${total} (${Math.round((passes / total) * 100)}%)` : "none");
 
+/** One line saying what the run concluded and why, for the report and for the coding agent. */
+export function reasonFor(result: JobResult, current: string): string {
+  const pick = result.pick;
+  if (pick) return `Switch from \`${current}\` to \`${pick.model}\` on ${pick.endpoint}: it passed ${rate(pick.passes, pick.total)} of the cases at ${usd(pick.costPerCallUsd)} a call${pick.savingPerCallUsd !== null ? `, ${usd(pick.savingPerCallUsd)} less than now` : ""}.`;
+  if (result.status === "keep_current") {
+    const best = result.top[0];
+    const baseline = result.baseline;
+    return best && baseline
+      ? `Keep \`${current}\`: ${best.model} passed ${best.passes}/${best.total} but costs ${usd(best.costPerCallUsd)} per call against ${usd(baseline.costPerCallUsd)}, and no measured model was both as accurate and cheaper.`
+      : `Keep \`${current}\`: no cheaper model passed as many cases${baseline ? ` as its ${baseline.passes}/${baseline.total}` : ""}.`;
+  }
+  return {
+    baseline_failed: `\`${current}\` could not be measured or passed none of the cases, so there is nothing to compare against.`,
+    no_cases: "No case has a known correct answer, so nothing was measured.",
+    no_candidates: "No allowed model is cheaper than the current one.",
+    agent_eval_failed: "Every qualified switch failed the agent's eval, so none is proposed.",
+    stopped: "The run stopped at its budget before the finalists were measured, so it proposes no switch. The models below are what it measured until then.",
+    picked: "",
+  }[result.status];
+}
+
 export function renderMarkdown(input: { jobId: string; bundle: TaskBundle; result: JobResult; provisional: Provisional | null; createdAt: string }): string {
   const { result, bundle } = input;
   const lines = [
@@ -73,16 +94,7 @@ export function renderMarkdown(input: { jobId: string; bundle: TaskBundle; resul
     `Job \`${input.jobId}\`, ${input.createdAt}. Catalogue ${result.catalogueVersion}.`, "",
     "## Result", "",
   ];
-  if (result.pick) lines.push(`Switch from \`${bundle.current.model}\` to \`${result.pick.model}\` on ${result.pick.endpoint}: it passed ${rate(result.pick.passes, result.pick.total)} of the cases at ${usd(result.pick.costPerCallUsd)} a call${result.pick.savingPerCallUsd !== null ? `, ${usd(result.pick.savingPerCallUsd)} less than now` : ""}.`);
-  else lines.push({
-    keep_current: `Keep \`${bundle.current.model}\`: no cheaper model passed as many cases.`,
-    baseline_failed: `\`${bundle.current.model}\` could not be measured or passed none of the cases, so there is nothing to compare against.`,
-    no_cases: "No case has a known correct answer, so nothing was measured.",
-    no_candidates: "No allowed model is cheaper than the current one.",
-    agent_eval_failed: "Every qualified switch failed the agent's eval, so none is proposed.",
-    stopped: "The run stopped at its budget before the finalists were measured, so it proposes no switch. The models below are what it measured until then.",
-    picked: "",
-  }[result.status]);
+  lines.push(reasonFor(result, bundle.current.model));
   if (result.edit.edits.length) lines.push("", "Edits:", ...result.edit.edits.map(edit => `- \`${edit.file}:${edit.line}\`: \`${edit.before}\` → \`${edit.after}\``));
   if (result.edit.instructions) lines.push("", result.edit.instructions);
   lines.push("", "## Models", "", "| Model | Endpoint | Paid by | Stage | Passed | Cost per call | Latency | Qualified |", "| --- | --- | --- | --- | --- | --- | --- | --- |");
