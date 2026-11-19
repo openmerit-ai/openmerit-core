@@ -40,33 +40,18 @@ type Account = ReturnType<AppClient["account"]["getOrCreate"]>;
 const apiFor = (apiKey: string) => viktorClient({ apiKey, baseUrl: services().config.viktor.baseUrl, fetch: services().fetch });
 
 /** Checks the key's scopes, stores it encrypted, lists the tasks and starts evaluating them. */
-const capProblem = (cap: number): string | null => (Number.isFinite(cap) && cap >= 100 && cap <= MAX_CREDIT_CAP ? null : `The credit cap must be between 100 and ${MAX_CREDIT_CAP.toLocaleString("en-US")} credits.`);
-
-/** `missingScopes` lists the required scopes a refused key lacks, so the app can name them. */
-export async function connectViktor(client: AppClient, input: { accountId: string; userId: string; apiKey: string; creditCap?: number }): Promise<{ ok: true; view: ViktorView } | { ok: false; status: number; error: string; missingScopes?: string[] }> {
+export async function connectViktor(client: AppClient, input: { accountId: string; userId: string; apiKey: string; creditCap?: number }): Promise<{ ok: true; view: ViktorView } | { ok: false; status: number; error: string }> {
   const apiKey = input.apiKey.trim();
   if (apiKey.length < 12) return { ok: false, status: 400, error: "Paste the Viktor API key from Settings → API Keys." };
   const cap = input.creditCap ?? DEFAULT_CREDIT_CAP;
-  const badCap = capProblem(cap);
-  if (badCap) return { ok: false, status: 400, error: badCap };
+  if (!Number.isFinite(cap) || cap < 100 || cap > MAX_CREDIT_CAP) return { ok: false, status: 400, error: `The credit cap must be between 100 and ${MAX_CREDIT_CAP.toLocaleString("en-US")} credits.` };
   const checked = await keyProblem(apiFor(apiKey));
-  if ("problem" in checked) return { ok: false, status: 400, error: checked.problem, ...(checked.missingScopes ? { missingScopes: checked.missingScopes } : {}) };
+  if ("problem" in checked) return { ok: false, status: 400, error: checked.problem };
   const account = client.account.getOrCreate([input.accountId]);
   const stored = await account.saveConnection({ kind: VIKTOR, apiKey, keyType: checked.key.keyType, teamId: checked.key.teamId, creditCap: cap, userId: input.userId });
   if (!stored.ok) return { ok: false, status: 503, error: stored.error };
   await refreshViktor(client, input.accountId);
   await startViktorTasks(client, { accountId: input.accountId, userId: null });
-  return { ok: true, view: await viktorView(client, input.accountId) };
-}
-
-/**
- * Changes only the credit cap: the key, the listing, the credits used and the results stay, which
- * connecting again would reset. It starts nothing; a waiting task starts with its Start button.
- */
-export async function setViktorCap(client: AppClient, input: { accountId: string; creditCap: number }): Promise<{ ok: true; view: ViktorView } | { ok: false; status: number; error: string }> {
-  const badCap = capProblem(input.creditCap);
-  if (badCap) return { ok: false, status: 400, error: badCap };
-  if (!(await client.account.getOrCreate([input.accountId]).setConnectionCap({ kind: VIKTOR, creditCap: input.creditCap }))) return { ok: false, status: 404, error: "Viktor is not connected." };
   return { ok: true, view: await viktorView(client, input.accountId) };
 }
 
