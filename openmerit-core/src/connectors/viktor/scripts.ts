@@ -9,39 +9,14 @@ export const COPY_TITLE = "OpenMerit: ";
 /** Each job's files in the sandbox. */
 export const WORK_DIR = "/work/temp/openmerit";
 
-/**
- * The SDK tools the scripts call. A workspace can make any tool wait for approval in chat, and then
- * the call comes back as a draft and runs nothing, which a script run through the API can never get
- * approved. They must run without approval for the connection to work.
- */
-export const TOOLS = ["list_crons", "get_path_info", "get_usage_threads", "create_agent_cron", "pause_cron", "test_cron_as_subagent", "delete_cron"] as const;
-
-/**
- * Records the tools Viktor's gateway saved as drafts instead of running, in DRAFTED. The SDK reports
- * each draft through \`_echo_draft_notice\`; the call itself returns the draft receipt, which fails
- * the tool's response model or leaves its fields empty.
- */
-const DRAFTS = String.raw`import sdk.internal.client as _gate
-DRAFTED = set()
-_echo_draft = _gate._echo_draft_notice
-def _drafted(role, draft_id):
-    DRAFTED.add(role)
-    _echo_draft(role, draft_id)
-_gate._echo_draft_notice = _drafted`;
-
 /** Every task with its full instructions, credits per task over 30 days from the usage threads, and leftover copies. */
 export const LIST = String.raw`# openmerit:list
 import asyncio, json
-${DRAFTS}
 from sdk.tools.scheduled_crons import list_crons
 from sdk.tools.thread_orchestration_tools import get_path_info
 from sdk.tools.account_tools import get_usage_threads
 async def main():
-    try:
-        crons = (await list_crons()).crons
-    except Exception:
-        if not DRAFTED: raise
-        crons = []
+    crons = (await list_crons()).crons
     tasks = []
     for c in crons:
         d = c.model_dump()
@@ -60,9 +35,6 @@ async def main():
         rows = r.threads if isinstance(r.threads, list) else []
         usage += [{"credits": t.get("credits"), "path": t.get("agent_runs_path"), "title": t.get("title")} for t in rows if isinstance(t, dict)]
         if len(rows) < 50: break
-    if DRAFTED:
-        print(json.dumps({"approval": sorted(DRAFTED)}))
-        return
     print(json.dumps({"tasks": tasks, "usage": usage}, default=str))
 asyncio.run(main())
 `;
@@ -84,7 +56,6 @@ print(json.dumps({"ok": True}))
  */
 export const BATCH = String.raw`# openmerit:batch
 import asyncio, json, os, sys, time, traceback
-${DRAFTS}
 from sdk.tools.scheduled_crons import create_agent_cron, pause_cron, delete_cron, test_cron_as_subagent
 from sdk.tools.thread_orchestration_tools import get_path_info
 SPEC = json.load(open(sys.argv[1]))
@@ -127,9 +98,6 @@ async def main():
         for path in state["copies"]:
             try: await delete_cron(path=path)
             except Exception as e: state.setdefault("cleanupErrors", []).append(f"{path}: {e}")
-        if DRAFTED:
-            state["status"] = "failed"
-            state["error"] = "Viktor saved OpenMerit's calls to " + ", ".join(sorted(DRAFTED)) + " as drafts that wait for approval, so they did not run. Let these tools run without approval in Viktor, then start the task again."
         state["finished"] = time.time()
         save(state)
 asyncio.run(main())

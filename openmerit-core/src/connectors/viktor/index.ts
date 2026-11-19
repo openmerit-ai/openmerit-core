@@ -19,9 +19,9 @@ import type { EvidencePart } from "../../engine/evidence.ts";
 import { CandidateUnavailable, SAMPLE_SIZE, type Rung } from "../../engine/search.ts";
 import { readJson } from "../../ranking/graders.ts";
 import type { Complete } from "../../ranking/cases.ts";
-import { COPY_PATH, COPY_TITLE, TOOLS, WORK_DIR } from "./scripts.ts";
+import { COPY_PATH, COPY_TITLE, WORK_DIR } from "./scripts.ts";
 
-export { BATCH, CLEANUP, CREDITS, LIST, PUT, READ, COPY_PATH, COPY_TITLE, TOOLS, WORK_DIR } from "./scripts.ts";
+export { BATCH, CLEANUP, CREDITS, LIST, PUT, READ, COPY_PATH, COPY_TITLE, WORK_DIR } from "./scripts.ts";
 export { keyProblem, REQUIRED_SCOPES, VIKTOR_API, ViktorError, viktorClient, withArgs, PENDING, type ViktorClient, type ViktorKey } from "./api.ts";
 
 /** Viktor's presets, weakest first. Pinned models and the writing presets are not compared yet. */
@@ -80,20 +80,9 @@ export function skipReason(task: Pick<ViktorTask, "path" | "title" | "model" | "
   return null;
 }
 
-/** The workspace makes some of OpenMerit's tools wait for approval, so LIST could not list the tasks. */
-export class NeedsApproval extends Error {
-  override readonly name = "NeedsApproval";
-  readonly tools: string[];
-  constructor(drafted: readonly string[]) {
-    super(`Viktor saved OpenMerit's calls to ${drafted.join(", ")} as drafts that wait for approval, so they did not run. In Viktor, let these tools run without approval: ${TOOLS.join(", ")}. Then connect again.`);
-    this.tools = [...drafted];
-  }
-}
-
 /** LIST's output: every task with its skip reason and spend, highest credits first, and OpenMerit's leftover copies. */
 export function readTasks(stdout: string): { tasks: ViktorTask[]; leftovers: string[] } {
-  const parsed = JSON.parse(stdout.trim().split("\n").at(-1) ?? "{}") as { tasks?: Record<string, unknown>[]; usage?: { credits?: unknown; path?: unknown }[]; approval?: string[] };
-  if (parsed.approval?.length) throw new NeedsApproval(parsed.approval);
+  const parsed = JSON.parse(stdout.trim().split("\n").at(-1) ?? "{}") as { tasks?: Record<string, unknown>[]; usage?: { credits?: unknown; path?: unknown }[] };
   const usage = parsed.usage ?? [];
   const all = (parsed.tasks ?? []).filter(row => row.deleted !== true).map((row): ViktorTask & { copy: boolean } => {
     const path = String(row.path), title = String(row.title ?? path);

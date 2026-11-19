@@ -268,8 +268,6 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       await new Promise((done) => setTimeout(done, 2500));
       // A key named ..._noscope_... lacks two scopes, as cloud/src/viktor.ts reports them.
       if (apiKey.includes("noscope")) return error(400, "This key is missing the scopes scripts:execute, messages:create. Edit the key in Viktor's Settings → API Keys to add them, then connect again.", { missingScopes: ["scripts:execute", "messages:create"] });
-      // A key named ..._approval_... is from a workspace whose tools wait for approval in chat.
-      if (apiKey.includes("approval")) return error(400, "Viktor saved OpenMerit's calls to get_usage_threads, list_crons as drafts that wait for approval, so they did not run.", { needsApproval: ["get_usage_threads", "list_crons"] });
       if (!apiKey.startsWith("zt_live_sk_")) return error(400, "Viktor did not accept this key. Check that it is a current key from Settings → API Keys; Viktor gives API keys only to workspaces on a paid or Enterprise plan.");
       const cap = typeof input?.creditCap === "number" ? input.creditCap : 2000;
       if (cap < 100 || cap > 100_000) return error(400, "The credit cap must be between 100 and 100,000 credits.");

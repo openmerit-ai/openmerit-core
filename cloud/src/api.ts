@@ -153,7 +153,7 @@ export function apiRoutes(deps: AppDeps) {
       if (!input || typeof input.apiKey !== "string") return error(400, "Send the connection as JSON: {apiKey, creditCap}.");
       if (input.creditCap !== undefined && typeof input.creditCap !== "number") return error(400, "creditCap must be a number of Viktor credits.");
       const connected = await connectViktor(client, { accountId: who.accountId, userId: who.userId, apiKey: input.apiKey, ...(typeof input.creditCap === "number" ? { creditCap: input.creditCap } : {}) });
-      return connected.ok ? json(201, connected.view) : json(connected.status, { error: connected.error, ...(connected.missingScopes ? { missingScopes: connected.missingScopes } : {}), ...(connected.needsApproval ? { needsApproval: connected.needsApproval } : {}) });
+      return connected.ok ? json(201, connected.view) : json(connected.status, { error: connected.error, ...(connected.missingScopes ? { missingScopes: connected.missingScopes } : {}) });
     }
     // The credit cap alone; connecting again would reset the credits used and the results.
     if (path === "/api/connections/viktor" && method === "PATCH") {

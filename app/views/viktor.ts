@@ -9,9 +9,6 @@ const VIKTOR_TASKS = "https://app.viktor.com/scheduled-tasks";
 const VIKTOR_KEYS = "https://app.viktor.com/settings/api-keys";
 // openmerit-core/src/connectors/viktor/api.ts's REQUIRED_SCOPES.
 export const SCOPES = ["scripts:execute", "usage:read", "threads:create", "threads:read", "runs:create", "runs:read", "messages:create", "messages:read"];
-// openmerit-core/src/connectors/viktor/scripts.ts's TOOLS: they must run without approval in the workspace.
-export const TOOLS = ["list_crons", "get_path_info", "get_usage_threads", "create_agent_cron", "pause_cron", "test_cron_as_subagent", "delete_cron"];
-const ASK = `Set these tools to run automatically, without approval, so OpenMerit's API scripts can list and test my scheduled tasks: ${TOOLS.join(", ")}.`;
 const PRESETS = [1000, 2000, 5000];
 // Viktor sells credits at $2.50 per 1,000.
 const dollars = (credits: number): string => `$${(credits * 0.0025).toFixed(credits * 0.0025 % 1 ? 2 : 0)}`;
@@ -158,11 +155,6 @@ export function openConnect(ctx: Ctx): void {
         <div class="scope-chips">${SCOPES.map((scope) => html`<code class="scope" data-scope="${scope}">${scope}</code>`)}</div>
         <p class="step-links"><a class="btn" href="${VIKTOR_KEYS}" target="_blank" rel="noopener">Open Viktor's API keys</a><button class="btn link" type="button" data-copy-scopes>Copy scopes</button></p>
       </li>
-      <li><b>Let OpenMerit's tools run</b>
-        <p>Viktor can make a tool wait for approval in chat, which an API script never gets. Ask Viktor to let these run automatically; it shows you an approval card.</p>
-        <div class="scope-chips">${TOOLS.map((tool) => html`<code class="scope" data-tool="${tool}">${tool}</code>`)}</div>
-        <p class="step-links"><button class="btn" type="button" data-copy-ask>Copy the message for Viktor</button></p>
-      </li>
       <li><b>Paste the key</b>
         <input name="apiKey" type="password" required autocomplete="off" spellcheck="false" placeholder="zt_live_sk_…" aria-label="Viktor API key">
         <span class="sub">Stored encrypted. Only its last four characters are shown again.</span>
@@ -186,9 +178,6 @@ export function openConnect(ctx: Ctx): void {
   form.querySelector("[data-copy-scopes]")?.addEventListener("click", (event) => {
     void navigator.clipboard.writeText(SCOPES.join(" ")).then(() => { (event.target as HTMLElement).textContent = "Copied"; });
   });
-  form.querySelector("[data-copy-ask]")?.addEventListener("click", (event) => {
-    void navigator.clipboard.writeText(ASK).then(() => { (event.target as HTMLElement).textContent = "Copied: paste it in a Viktor chat"; });
-  });
   form.querySelector<HTMLInputElement>("input[name=apiKey]")?.focus();
   form.addEventListener("submit", (event) => {
     if ((event.submitter as HTMLButtonElement | null)?.value !== "connect") return;
@@ -211,14 +200,10 @@ export function openConnect(ctx: Ctx): void {
       form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button").forEach((input) => { input.disabled = false; });
       submit.removeAttribute("aria-busy");
       submit.textContent = "Connect Viktor";
-      const data = failure instanceof ApiError ? failure.data as { missingScopes?: unknown; needsApproval?: unknown } | null : null;
-      const missing = Array.isArray(data?.missingScopes) ? data.missingScopes.map(String) : [], gated = Array.isArray(data?.needsApproval) ? data.needsApproval.map(String) : [];
-      for (const scope of missing) form.querySelector(`.scope[data-scope="${scope}"]`)?.classList.add("missing");
-      for (const tool of gated) form.querySelector(`.scope[data-tool="${tool}"]`)?.classList.add("missing");
-      error.textContent = missing.length
+      const missing = failure instanceof ApiError ? (failure.data as { missingScopes?: unknown } | null)?.missingScopes : undefined;
+      if (Array.isArray(missing)) for (const scope of missing) form.querySelector(`.scope[data-scope="${String(scope)}"]`)?.classList.add("missing");
+      error.textContent = Array.isArray(missing) && missing.length
         ? `This key is missing ${missing.length === 1 ? "the scope marked above" : `the ${missing.length} scopes marked above`}. Edit the key in Viktor to add ${missing.length === 1 ? "it" : "them"}, then connect again.`
-        : gated.length
-        ? `Viktor saved OpenMerit's calls to ${gated.join(" and ")} as drafts waiting for approval, so they did not run. Send Viktor the message in step 2, approve its card, then connect again. Dismiss the drafts these calls left.`
         : failure instanceof Error ? failure.message : "Viktor could not be connected. Try again.";
       error.hidden = false;
       form.querySelector<HTMLInputElement>("input[name=apiKey]")?.focus();
