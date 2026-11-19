@@ -1,7 +1,7 @@
-import type { Endpoint, JobView, MeasuredModel, Report } from "../api.ts";
+import type { Endpoint, Fix, JobView, MeasuredModel, Report } from "../api.ts";
 import { liveText } from "../live.ts";
-import { date, endpointName, html, setEndpoints, model, modelName, per1k, plural, seconds, type Html } from "../html.ts";
-import type { View } from "../view.ts";
+import { date, endpointName, html, setEndpoints, model, modelName, per1k, plural, seconds, usd, type Html } from "../html.ts";
+import type { Ctx, View } from "../view.ts";
 import { show } from "./guardrails.ts";
 
 // GET /api/runs/:id returns the saved report once the job has one, and the job's live state before.
@@ -37,14 +37,16 @@ function measuring(job: JobView): Html {
       <p class="note">Your coding agent gets the result on its next OpenMerit call, and this page shows the report.</p>`;
 }
 
+const again = html`<p style="margin-top: 10px"><button class="btn" type="button" data-action="rerun">Run again</button></p>`;
+
 function live(job: JobView): Html {
   const progress = job.progress.planned ? `${job.progress.measured} of about ${job.progress.planned} measurements done` : `${plural(job.progress.measured, "measurement")} done`;
   const body = {
     queued: html`<span class="pill">Queued</span><p class="note">The run starts in a moment.</p>`,
     running: job.live ? measuring(job) : html`<span class="pill live">Evaluating</span><span class="sub">${job.phase.replace("_", " ")} · ${progress}</span><p class="note">Your coding agent gets the result on its next OpenMerit call, and this page shows the report.</p>`,
     needs_input: html`<span class="pill warn">Needs input</span><p class="note">OpenMerit asked ${plural(job.questions.length, "question")} in your coding agent, such as a check of the test labels. The run continues once it answers.</p>`,
-    failed: html`<p>${job.error ?? "The run stopped before it could recommend a model."}</p>`,
-    stopped: html`<p>The run was stopped${job.error ? `: ${job.error}` : "."}</p>`,
+    failed: html`<p>${job.error ?? "The run stopped before it could recommend a model."}</p>${again}`,
+    stopped: html`<p>The run was stopped${job.error ? `: ${job.error}` : "."}</p>${again}`,
     done: html`<p>The run finished; its report is being saved. Reload in a moment.</p>`,
   }[job.status];
   return html`<div class="eyebrow" data-live="${job.jobId}" data-status="${job.status}"><a href="/">Runs</a><span>›</span><span>${job.jobId}</span><span>Started ${date(job.createdAt)}</span></div>
@@ -81,6 +83,17 @@ function pickCard(report: Report): Html {
         </div>
         ${pick.savingPerCallUsd ? html`<p class="note">It saves about ${per1k(pick.savingPerCallUsd)} per 1,000 calls.</p>` : ""}
       </div>`;
+}
+
+// The button that fixes a notice: rerun, raise the budget and rerun, open the page that fixes it, or copy
+// what the coding agent should do, for the fixes only it can make. data-fix is the fix's index.
+function fixButton(fix: Fix, index: number): Html {
+  switch (fix.kind) {
+    case "raise_budget": return html`<button class="btn" type="button" data-action="fix" data-fix="${String(index)}">Raise budget to ${usd(fix.budgetUsd)} and rerun</button>`;
+    case "rerun": return html`<button class="btn" type="button" data-action="fix" data-fix="${String(index)}">Run again</button>`;
+    case "open": return html`<a class="btn" href="${fix.path}">${fix.label}</a>`;
+    case "ask_agent": return html`<button class="btn" type="button" data-action="fix" data-fix="${String(index)}">Copy prompt for your agent</button>`;
+  }
 }
 
 // The cloud app's notices that only describe the search's routine bookkeeping. Every other
@@ -161,7 +174,10 @@ function report(data: Report): Html {
 
     ${shown.length ? html`<section aria-labelledby="notes">
       <h2 id="notes">Notes</h2>
-      <div class="card">${shown.map((notice) => html`<div class="row"><span>${prose(notice)}</span></div>`)}</div>
+      <div class="card">${shown.map((notice) => {
+        const index = (data.fixes ?? []).findIndex((fix) => fix.notice === notice);
+        return html`<div class="row note-row"><span>${prose(notice)}</span>${index >= 0 ? fixButton(data.fixes![index]!, index) : ""}</div>`;
+      })}</div>
     </section>` : ""}`;
 }
 
@@ -174,4 +190,29 @@ export const runView: View<Data> = {
   },
   title,
   render: (data) => (isLive(data) ? live(data) : report(data)),
+  actions: {
+    // Run again, or raise the task's budget per job and run again: both spend, so both confirm first.
+    async rerun(_target, data, ctx) {
+      await rerun(data, null, ctx);
+    },
+    async fix(target, data, ctx) {
+      const fix = isLive(data) ? undefined : data.fixes?.[Number(target.dataset.fix)];
+      if (!fix) return;
+      if (fix.kind === "ask_agent") {
+        await navigator.clipboard.writeText(fix.prompt);
+        return ctx.toast("Copied. Paste it into your coding agent.");
+      }
+      if (fix.kind === "raise_budget" || fix.kind === "rerun") await rerun(data, fix.kind === "raise_budget" ? fix.budgetUsd : null, ctx);
+    },
+  },
 };
+
+async function rerun(data: Data, budgetUsd: number | null, ctx: Ctx): Promise<void> {
+  const now = isLive(data) ? undefined : data.guardrails.effective.budgetUsd;
+  const ok = await ctx.confirm(budgetUsd === null
+    ? { title: "Run again", body: `Runs ${data.task} again on the bundle its coding agent last sent. It counts as one evaluation on your plan.`, confirm: "Run again" }
+    : { title: "Raise the budget and run again", body: `Sets ${data.task}'s budget per job to ${usd(budgetUsd)}${now === undefined ? "" : `, up from ${usd(now)}`}, then runs it again. The run spends up to ${usd(budgetUsd)} on model calls and counts as one evaluation on your plan.`, confirm: "Raise and run again" });
+  if (!ok) return;
+  const started = await ctx.api.send<{ jobId: string }>("POST", `/api/runs/${encodeURIComponent(data.jobId)}/rerun`, budgetUsd === null ? {} : { budgetUsd });
+  ctx.go(`/r/${started.jobId}/`);
+}

@@ -154,6 +154,10 @@ function report(spec: Spec, id: string, at: string, outcome: Outcome, pick: stri
   });
   const picked = candidates.find((item) => item.qualified) ?? null;
   const status = outcome as Report["status"];
+  // The notices the cloud app sends with these outcomes, and their fixes.
+  const rails = guardrailsFor(spec), budget = rails.effective.budgetUsd ?? 5;
+  const challengers = status === "picked" && index % 3 === 0 ? `Challengers not measured: \`x-ai/grok-4.6\`. Stopped while measuring x-ai/grok-4.6: $${budget.toFixed(4)} used or reserved of the $${budget.toFixed(2)} budget for this job.` : null;
+  const labels = status === "baseline_failed" ? `${short(spec.model)} passed ${baseline.passes} of ${total} cases, below this environment's 90% minimum, so nothing was compared against it.` : null;
   const saving = picked?.costPerCallUsd != null && baseline.costPerCallUsd != null ? baseline.costPerCallUsd - picked.costPerCallUsd : null;
   const best = candidates.filter((item) => item.status === "measured").sort((a, b) => b.passes - a.passes)[0];
   const openmerit = candidates.concat(baseline).filter((item) => item.funding === "openmerit").length * 0.31 + total * 0.004;
@@ -174,11 +178,11 @@ function report(spec: Spec, id: string, at: string, outcome: Outcome, pick: stri
       ? { edits: [{ file: spec.file, line: spec.line, before: short(spec.model), after: short(picked.model) }], instructions: picked.endpoint === "openrouter" ? "Call it on OpenRouter (https://openrouter.ai/api/v1) with your own OpenRouter key." : `Call it on ${picked.endpoint}, which this account already uses.` }
       : { edits: [], instructions: null },
     spend: { openmeritUsd: Math.round(openmerit * 100) / 100, customerUsd: Math.round(customer * 100) / 100 },
-    guardrails: guardrailsFor(spec),
-    notices: [
-      "118 catalogue models without an ECI left out: the search places models by their capability index.",
-      ...(status === "picked" && index % 3 === 0 ? ["Challengers not measured: `x-ai/grok-4.6`. The job's budget of $6.00 refused it; the result ranks the finalists only."] : []),
-      ...(status === "baseline_failed" ? [`${short(spec.model)} passed ${baseline.passes} of ${total} cases, below this environment's 90% minimum, so nothing was compared against it.`] : []),
+    guardrails: rails,
+    notices: ["118 catalogue models without an ECI left out: the search places models by their capability index.", ...(challengers ? [challengers] : []), ...(labels ? [labels] : [])],
+    fixes: [
+      ...(challengers ? [{ kind: "raise_budget" as const, notice: challengers, budgetUsd: Math.ceil(budget * 2) }] : []),
+      ...(labels ? [{ kind: "ask_agent" as const, notice: labels, prompt: `${spec.model}, the model the task "${spec.name}" uses now, failed most of OpenMerit's test cases, so their expected answers may be wrong. Show the user the expected answers in the task bundle's examples, correct the wrong ones with them, and add examples the current model gets right; then call openmerit_recommend again.` }] : []),
     ],
     reportUrl: `https://openmerit.ai/api/r/${id}.md`, catalogueVersion: at.slice(0, 10), cases: { total, fromExamples: 6 + (index % 4) * 2, written: total - 6 - (index % 4) * 2 },
   };

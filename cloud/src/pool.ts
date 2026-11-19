@@ -52,6 +52,8 @@ function offered(endpoint: EndpointInfo, catalogue: Catalogue): Option[] {
 
 const lower = (items: readonly string[]) => new Set(items.map(item => item.toLowerCase()));
 
+export const regionNotice = (region: string) => `The ${region} data-region guardrail leaves OpenRouter out: only your own endpoints are measured.`;
+
 /** Endpoints the guardrails let this task call. */
 export function allowedEndpoints(endpoints: readonly EndpointInfo[], guardrails: Guardrails, notices: string[]): EndpointInfo[] {
   let allowed = [...endpoints];
@@ -60,7 +62,7 @@ export function allowedEndpoints(endpoints: readonly EndpointInfo[], guardrails:
   if (guardrails.region && allowed.some(item => item.id === OPENROUTER)) {
     // OpenRouter routes to providers in many regions, so it cannot promise one.
     allowed = allowed.filter(item => item.id !== OPENROUTER);
-    notices.push(`The ${guardrails.region} data-region guardrail leaves OpenRouter out: only your own endpoints are measured.`);
+    notices.push(regionNotice(guardrails.region));
   }
   return allowed;
 }

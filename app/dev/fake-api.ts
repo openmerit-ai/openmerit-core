@@ -172,6 +172,26 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       const found = state.reports[id] ?? (job && advance(job, state.tasks.find((task) => task.id === job.taskId), since));
       return found ? json(200, found) : error(404, "No such run in this account.");
     }
+    // As the cloud app does: run the task again, after setting its budget per job when budgetUsd is given.
+    if ((match = /^\/api\/runs\/([\w-]+)\/rerun$/.exec(path)) && method === "POST") {
+      const run = state.runs.find((item) => item.id === match?.[1]);
+      const task = run && state.tasks.find((item) => item.id === run.taskId);
+      if (!run || !task) return error(404, `No run ${match[1]} in this account.`);
+      const budgetUsd = input?.budgetUsd;
+      if (budgetUsd !== undefined && budgetUsd !== null) {
+        if (typeof budgetUsd !== "number" || budgetUsd <= 0 || budgetUsd > 1000) return error(409, "The budget must be more than $0 and at most $1000.");
+        state.guardrails.task[task.id] = { ...state.guardrails.task[task.id], budgetUsd };
+      }
+      const jobId = `rr${Date.now().toString(36).slice(-4)}`, startedAt = new Date().toISOString();
+      const pick = state.reports[run.id]?.candidates.find((item) => item.status === "measured")?.model ?? "openai/gpt-5-mini";
+      state.runs.unshift({ id: jobId, taskId: task.id, kind: "run", status: "running", startedAt, finishedAt: null, askedBy: null, result: null });
+      state.jobs[jobId] = {
+        jobId, taskId: task.id, task: task.name, status: "running", phase: "ranking", questions: [], notices: [], progress: { measured: 0, planned: 30 }, result: null, error: null,
+        provisional: { model: pick, endpoint: "openrouter", reason: "Measured for this task before; this run measures it again.", estCostPerCallUsd: null }, createdAt: startedAt, report: null,
+      };
+      Object.assign(task, { status: "running", lastJobId: jobId, lastRunAt: startedAt });
+      return json(201, { jobId, taskId: task.id });
+    }
     if (path === "/api/endpoints" && method === "GET") return json(200, state.endpoints);
     if (path === "/api/endpoints" && method === "POST") {
       if (denied) return denied;

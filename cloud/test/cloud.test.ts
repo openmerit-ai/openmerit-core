@@ -357,9 +357,58 @@ test("a challenger the budget refuses ends the challengers, and the job still re
     assert.ok(result.pick && result.top.length > 0);
     assert.ok(result.notices.some(notice => /^Challengers? not measured: .*acme\/fine-tune-1.*Stopped while measuring acme\/fine-tune-1/.test(notice)), result.notices.join("\n"));
     assert.match(done.text, /Note: Challengers? not measured/);
+    // A cap for the job is a guardrail to review, not a budget to raise.
+    const fixes = (result as { fixes?: { kind: string; notice: string; path?: string }[] }).fixes ?? [];
+    const capped = fixes.find(fix => /^Challengers? not measured/.test(fix.notice));
+    assert.equal(capped?.kind, "open", JSON.stringify(fixes));
+    assert.match(capped!.path!, /^\/guardrails\/\?level=task&id=t_/);
     assert.equal(models.calls.filter(call => call.model === "acme/fine-tune-1").length, 0, "nothing is sent to a refused challenger");
     const progress = done.data.progress as { measured: number; planned: number };
     assert.ok(progress.planned >= progress.measured && progress.planned <= progress.measured + 4, JSON.stringify(progress));
+  } finally { await stop(app); await models.close(); }
+});
+
+test("a job its budget stops offers to raise the budget, and the rerun it asks for runs the task again under the new budget", async () => {
+  const models = await fakeModels();
+  const app = await startApp({ models, env: CLERK });
+  try {
+    await subscribe(app, "org_rerun");
+    const agent = caller(app, "test:user_u:org_rerun:admin");
+    await agent.api("/api/guardrails", { method: "PUT", body: JSON.stringify({ level: "environment", id: "acme/rerun", settings: { repeats: 1, budgetUsd: 0.00001 } }) });
+    const started = await agent.tool("openmerit_recommend", { bundle: bundle("rerun classifier", false), environment: "acme/rerun" });
+    const jobId = started.data.job_id as string;
+    const taskId = (await agent.api<{ id: string; name: string }[]>("/api/tasks")).body.find(task => task.name === "rerun classifier")!.id;
+    const settle = async (id: string) => {
+      const asked = await waitFor(() => agent.tool("openmerit_result", { job_id: id }), value => ["needs_input", "done", "failed", "stopped"].includes(value.data.status as string), 180_000);
+      if (asked.data.status === "needs_input") await agent.tool("openmerit_answer", { job_id: id, answers: { label_check: ["written-1", "written-2"] } });
+      return waitFor(() => agent.tool("openmerit_result", { job_id: id }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 180_000);
+    };
+    const stopped = await settle(jobId);
+    assert.equal(stopped.data.status, "stopped", stopped.text);
+    type Fix = { kind: string; notice: string; budgetUsd?: number };
+    const fixes = (stopped.data.result as { fixes: Fix[] }).fixes;
+    const raise = fixes.find(fix => fix.kind === "raise_budget");
+    assert.ok(raise && /Stopped while measuring/.test(raise.notice), JSON.stringify(fixes));
+    assert.equal(raise.budgetUsd, 1, "twice the budget, rounded up to whole dollars");
+    assert.match(stopped.text, new RegExp(`Fix: ask the user to raise this task's budget per job to \\$1, then call openmerit_recommend with job_id "${jobId}" and budget_usd 1\\.`));
+
+    await agent.api("/api/guardrails", { method: "PUT", body: JSON.stringify({ level: "task", id: taskId, settings: { minPassRate: 0.5 } }) });
+    assert.equal((await agent.tool("openmerit_recommend", { job_id: jobId, bundle: bundle("rerun classifier", false) })).isError, true, "a rerun takes no bundle");
+    const rerun = await agent.tool("openmerit_recommend", { job_id: jobId, budget_usd: raise.budgetUsd });
+    assert.equal(rerun.isError, false, rerun.text);
+    const task = (await agent.api<{ settings: { key: string; value: unknown }[] }>(`/api/guardrails?level=task&id=${taskId}`)).body;
+    assert.deepEqual(Object.fromEntries(task.settings.map(item => [item.key, item.value])), { minPassRate: 0.5, budgetUsd: 1 }, "the budget is raised and the task's other settings kept");
+    const done = await settle(rerun.data.job_id as string);
+    assert.equal(done.data.status, "done", done.text);
+    assert.equal((done.data.result as Result).status, "picked");
+
+    // The app's Run again starts the same task from the run page.
+    const again = await agent.api<{ jobId: string; taskId: string }>(`/api/runs/${jobId}/rerun`, { method: "POST", body: "{}" });
+    assert.equal(again.status, 201);
+    assert.equal(again.body.taskId, taskId);
+    assert.equal((await agent.api(`/api/runs/job_nope/rerun`, { method: "POST", body: "{}" })).status, 404);
+    assert.equal((await agent.api(`/api/runs/${jobId}/rerun`, { method: "POST", body: JSON.stringify({ budgetUsd: -1 }) })).status, 409);
+    await settle(again.body.jobId);
   } finally { await stop(app); await models.close(); }
 });
 
