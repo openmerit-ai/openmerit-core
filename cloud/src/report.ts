@@ -2,6 +2,7 @@
 // the coding agent through openmerit_result, to /api/runs/:id as JSON, and to /api/r/:id.md as Markdown.
 import type { CatalogueModel, ResolvedGuardrails } from "./engine.ts";
 import { agentBundle } from "../../openmerit-core/src/connectors/agent-bundle.ts";
+import { CREDIT_USD } from "../../openmerit-core/src/connectors/viktor/index.ts";
 import { OPENROUTER, type Option, type Provisional } from "./pool.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 
@@ -103,8 +104,15 @@ export function explain(result: JobResult): { reason: string; top: (MeasuredMode
 export function nearMissLine(result: JobResult): string | null {
   const misses = result.nearMisses ?? [];
   if (!misses.length || !result.baseline) return null;
-  return `Near misses, within one case per run of the current model's ${result.baseline.passes}/${result.baseline.total}: ${misses.map(item => `\`${item.model}\` passed ${item.passes}/${item.total} at ${usd(item.costPerCallUsd)} a call`).join("; ")}.`;
+  return `Near misses, within one case per run of the current model's ${result.baseline.passes}/${result.baseline.total}: ${misses.map(item => `\`${item.model}\` passed ${item.passes}/${item.total} at ${result.connection ? `${credits(item.costPerCallUsd)} a test run` : `${usd(item.costPerCallUsd)} a call`}`).join("; ")}.`;
 }
+
+/** A connected app's cost per test run in its own credits: Viktor credits are $2.50 per 1,000. */
+export const credits = (usdPerRun: number | null) => {
+  if (usdPerRun === null) return "unknown credits";
+  const count = Math.round(usdPerRun / CREDIT_USD);
+  return `${count} credit${count === 1 ? "" : "s"}`;
+};
 
 const usd = (value: number | null) => (value === null ? "unknown" : value < 0.01 ? `$${value.toFixed(5)}` : `$${value.toFixed(4)}`);
 const rate = (passes: number, total: number) => (total ? `${passes}/${total} (${Math.round((passes / total) * 100)}%)` : "none");
