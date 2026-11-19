@@ -16,6 +16,8 @@ export interface Clerk {
   load(options: Record<string, unknown>): Promise<void>;
   addListener(listener: (state: { user?: ClerkUser | null; session?: ClerkSession | null }) => void): unknown;
   openSignIn(options: Record<string, unknown>): void;
+  mountSignIn?(node: HTMLDivElement, props: Record<string, unknown>): void;
+  unmountSignIn?(node: HTMLDivElement): void;
   signOut(options?: Record<string, unknown>): Promise<void>;
   // Clerk's re-verify prompt, which its useReverification hook opens; ClerkJS has no public name for it.
   __internal_openReverification?(props: { level?: string; afterVerification?: () => void; afterVerificationCancelled?: () => void }): void;
@@ -101,7 +103,7 @@ export async function loadClerk(config: AppConfig): Promise<Clerk> {
     signInForceRedirectUrl: here, signUpForceRedirectUrl: here, afterSignOutUrl: `${location.origin}/`,
     appearance: appearance(),
     localization: {
-      signIn: { start: { title: "Sign in to OpenMerit", subtitle: "Use the GitHub or Google account your team signs in with." } },
+      signIn: { start: { title: "Sign in to OpenMerit", subtitle: "Use the GitHub or Google account your team signs in with.", titleCombined: "Sign in to OpenMerit", subtitleCombined: "New or returning, use the GitHub or Google account your team signs in with." } },
       signUp: { start: { title: "Create your OpenMerit account", subtitle: "Sign up with GitHub or Google." } },
     },
   }), "Sign-in took too long. Please reload to try again.");
