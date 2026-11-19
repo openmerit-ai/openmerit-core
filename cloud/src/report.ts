@@ -29,6 +29,17 @@ export interface Edit { file: string; line: number; before: string; after: strin
 
 export interface AgentEvalSummary { status: "checked" | "missing"; passed: boolean; warning: string | null; baseline: { passes: number; total: number } | null; tried: { model: string; passes: number; total: number; passed: boolean }[] }
 
+/**
+ * What fixes one of a result's notices, which it names by its exact text. raise_budget sets the task's
+ * budget per job and runs again; rerun runs again; open is a page at app.openmerit.ai, such as
+ * Connections; ask_agent is an instruction for the coding agent, which only it can carry out.
+ */
+export type Fix =
+  | { kind: "raise_budget"; notice: string; budgetUsd: number }
+  | { kind: "rerun"; notice: string }
+  | { kind: "open"; notice: string; label: string; path: string }
+  | { kind: "ask_agent"; notice: string; prompt: string };
+
 export interface JobResult {
   /** `stopped`: the budget ran out before the finalists were measured; `failed`: a step failed for good. The report has what was measured until then. */
   status: "picked" | "keep_current" | "baseline_failed" | "no_cases" | "no_candidates" | "agent_eval_failed" | "stopped" | "failed";
@@ -45,6 +56,8 @@ export interface JobResult {
   spend: { openmeritUsd: number; customerUsd: number };
   guardrails: ResolvedGuardrails;
   notices: string[];
+  /** Fixes for some of the notices. Absent from reports saved before they were added. */
+  fixes?: Fix[];
   reportUrl: string;
   catalogueVersion: string;
   cases: { total: number; fromExamples: number; written: number };

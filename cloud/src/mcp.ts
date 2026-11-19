@@ -6,10 +6,10 @@ import { capture } from "./analytics.ts";
 import { NO_ORGANIZATION, type Auth, type AuthResult, type Identity } from "./auth.ts";
 import type { Config } from "./config.ts";
 import type { Answers, JobView } from "./actors/job.ts";
-import { explain, nearMissLine, reasonFor, type JobResult } from "./report.ts";
+import { explain, nearMissLine, reasonFor, type Fix, type JobResult } from "./report.ts";
 import type { AppClient } from "./registry.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
-import { bundleProblem, DEFAULT_ENVIRONMENT, startJob } from "./start.ts";
+import { bundleProblem, DEFAULT_ENVIRONMENT, rerunJob, startJob } from "./start.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const VERSION = "0.1.0";
@@ -44,8 +44,12 @@ const BUNDLE_SCHEMA = {
 export const TOOLS = [
   {
     name: "openmerit_recommend", title: "OpenMerit: recommend a model",
-    description: "Starts measuring cheaper models for one model call in the user's code. Send a task bundle: the task, the current model, the prompt, tools, output shape, examples and where the code names the model. Returns a provisional pick from the catalogue at once, and a job_id; call openmerit_result with it later for the measured pick. Measuring makes paid model calls within the account's plan and budget.",
-    inputSchema: { type: "object", required: ["bundle"], additionalProperties: false, properties: { bundle: BUNDLE_SCHEMA, environment: { type: "string", description: "The repository or workspace, such as owner/repo. Default: default" }, agent: { type: "string", description: "The agent this task belongs to, when the code groups calls into agents" } } },
+    description: "Starts measuring cheaper models for one model call in the user's code. Send a task bundle: the task, the current model, the prompt, tools, output shape, examples and where the code names the model. Or, to run a past job's task again on the bundle OpenMerit saved, as a result's Fix line says, send its job_id instead, with budget_usd to raise the task's budget per job first. Returns a provisional pick from the catalogue at once, and a job_id; call openmerit_result with it later for the measured pick. Measuring makes paid model calls within the account's plan and budget: ask the user before a rerun or a higher budget.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      bundle: BUNDLE_SCHEMA, environment: { type: "string", description: "The repository or workspace, such as owner/repo. Default: default" }, agent: { type: "string", description: "The agent this task belongs to, when the code groups calls into agents" },
+      job_id: { type: "string", description: "Instead of a bundle: a past job whose task runs again on its saved bundle, environment and agent" },
+      budget_usd: { type: "number", description: "With job_id: the task's new budget per job in US dollars, set before the run starts" },
+    } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
   {
@@ -106,9 +110,24 @@ export function describeJob(view: JobView): string {
   else if (view.status === "running" || view.status === "queued") lines.push(`Provisional pick while it runs: ${view.provisional.model}. ${view.provisional.reason} Measured ${view.progress.measured}${view.progress.planned ? ` of about ${view.progress.planned}` : ""} candidate runs so far (updated ${view.updatedAt}); call openmerit_result again later.`);
   // A result's notices include the job's and those of its last stages, such as challengers left out.
   const notices = result?.notices ?? view.notices;
-  if (notices.length) lines.push(...notices.map(notice => `Note: ${notice}`));
+  for (const notice of notices) {
+    lines.push(`Note: ${notice}`);
+    const fix = result?.fixes?.find(item => item.notice === notice);
+    if (fix) lines.push(`Fix: ${fixLine(fix, view.jobId, new URL(result!.reportUrl).origin)}`);
+  }
+  if (view.status === "failed" && !result) lines.push(`Fix: ask the user, then call openmerit_recommend with job_id "${view.jobId}" to run the task again.`);
   if (view.error) lines.push(`Error: ${view.error}`);
   return lines.join("\n");
+}
+
+/** What the coding agent does about a notice. */
+function fixLine(fix: Fix, jobId: string, appOrigin: string): string {
+  switch (fix.kind) {
+    case "raise_budget": return `ask the user to raise this task's budget per job to $${fix.budgetUsd}, then call openmerit_recommend with job_id "${jobId}" and budget_usd ${fix.budgetUsd}.`;
+    case "rerun": return `ask the user, then call openmerit_recommend with job_id "${jobId}" to run the task again.`;
+    case "open": return `the user can do this at ${appOrigin}${fix.path} (${fix.label}).`;
+    case "ask_agent": return fix.prompt;
+  }
 }
 
 const jobData = (view: JobView): Json => ({
@@ -126,7 +145,7 @@ function resultData(result: JobResult): Json {
     baseline: baseline ? { model: baseline.model, endpoint: baseline.endpoint, passes: baseline.passes, total: baseline.total, costPerCallUsd: baseline.costPerCallUsd, latencyMs: baseline.latencyMs } : null,
     top,
     nearMisses: nearMisses.map(item => ({ model: item.model, endpoint: item.endpoint, passes: item.passes, total: item.total, costPerCallUsd: item.costPerCallUsd, cheaperThanCurrent: item.cheaperThanCurrent })),
-    reportUrl: result.reportUrl, edit: result.edit, spend: result.spend,
+    reportUrl: result.reportUrl, edit: result.edit, spend: result.spend, fixes: result.fixes ?? [],
   };
 }
 const perCall = (value: number | null) => (value === null ? "unknown cost" : `$${value.toFixed(5)}`);
@@ -155,13 +174,21 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     return client.job.get([jobId]).status();
   };
   if (name === "openmerit_recommend") {
-    const unknown = Object.keys(args).filter(key => !["bundle", "environment", "agent"].includes(key));
+    const unknown = Object.keys(args).filter(key => !["bundle", "environment", "agent", "job_id", "budget_usd"].includes(key));
     if (unknown.length) return { text: `Unknown argument ${unknown.join(", ")}. No tool takes keys: the user adds endpoint keys at ${deps.config.appUrl}.`, data: {}, isError: true };
-    const problem = bundleProblem(args.bundle);
-    if (problem) return { text: `The task bundle is not usable: ${problem}.`, data: {}, isError: true };
-    const environment = typeof args.environment === "string" && args.environment.trim() ? args.environment.trim().replaceAll(":", "-").slice(0, 200) : DEFAULT_ENVIRONMENT;
-    const agent = typeof args.agent === "string" && args.agent.trim() ? args.agent.trim().slice(0, 200) : null;
-    const started = await startJob(client, { accountId: identity.accountId, environment, agent, bundle: args.bundle as TaskBundle, kind: "run", trigger: "mcp", userId: identity.userId, askedBy });
+    let started;
+    if (args.job_id !== undefined) {
+      if (args.bundle !== undefined || args.environment !== undefined || args.agent !== undefined) return { text: "Send either a bundle, or the job_id of a past job to run its task again, not both: a rerun keeps the job's environment and agent.", data: {}, isError: true };
+      if (args.budget_usd !== undefined && typeof args.budget_usd !== "number") return { text: "budget_usd must be a number of US dollars.", data: {}, isError: true };
+      started = await rerunJob(client, { accountId: identity.accountId, userId: identity.userId, jobId: String(args.job_id), budgetUsd: typeof args.budget_usd === "number" ? args.budget_usd : null, trigger: "mcp", askedBy });
+    } else {
+      if (args.budget_usd !== undefined) return { text: "budget_usd goes with job_id. For a new bundle, the task's budget is a guardrail at app.openmerit.ai.", data: {}, isError: true };
+      const problem = bundleProblem(args.bundle);
+      if (problem) return { text: `The task bundle is not usable: ${problem}.`, data: {}, isError: true };
+      const environment = typeof args.environment === "string" && args.environment.trim() ? args.environment.trim().replaceAll(":", "-").slice(0, 200) : DEFAULT_ENVIRONMENT;
+      const agent = typeof args.agent === "string" && args.agent.trim() ? args.agent.trim().slice(0, 200) : null;
+      started = await startJob(client, { accountId: identity.accountId, environment, agent, bundle: args.bundle as TaskBundle, kind: "run", trigger: "mcp", userId: identity.userId, askedBy });
+    }
     if (!started.ok) return { text: started.error, data: { status: "refused" }, isError: true };
     const { provisional } = started;
     return {

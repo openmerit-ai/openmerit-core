@@ -251,3 +251,6 @@ body.standalone main { min-height: 100vh; display: grid; place-items: start cent
 .org-foot { text-align: center; font-size: 13px; }
 .org-foot a { color: var(--muted); }
 .org-create input:focus-visible { outline: none; border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+/* A run's notes: the notice, and the button that fixes it on the right. */
+.note-row > span { flex: 1; min-width: 0; }
+.note-row > .btn { flex: none; }

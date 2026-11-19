@@ -5,6 +5,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { redact } from "./engine.ts";
 import { buildPool, provisionalPick, type Provisional } from "./pool.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
+import type { Guardrails } from "./engine.ts";
 import type { AppClient } from "./registry.ts";
 import type { JobTrigger } from "./actors/job.ts";
 
@@ -43,6 +44,9 @@ export function redactBundle<T>(value: T): T {
   return value;
 }
 
+/** The highest budget per job a rerun sets; the spend caps still apply. */
+export const MAX_RERUN_BUDGET_USD = 1000;
+
 export type StartResult = { ok: true; jobId: string; taskId: string; provisional: Provisional } | { ok: false; error: string };
 
 /**
@@ -68,4 +72,23 @@ export async function startJob(client: AppClient, start: { accountId: string; en
   await task.recordJob({ jobId, bundle: input.bundle, agent: input.agent, kind: input.kind });
   await client.job.create([jobId], { input: { accountId: input.accountId, taskId, environment: input.environment, agent: input.agent, bundle: input.bundle, kind: input.kind, trigger: input.trigger, userId: input.userId, provisional, createdAt: new Date().toISOString() } });
   return { ok: true, jobId, taskId, provisional };
+}
+
+/**
+ * Runs a past run's task again, on the bundle the task last ran on, for a fix in the app or the
+ * coding agent. With `budgetUsd`, it first sets the task's budget per job, a task-level guardrail.
+ */
+export async function rerunJob(client: AppClient, input: { accountId: string; userId: string; jobId: string; budgetUsd?: number | null; trigger: JobTrigger; askedBy?: string | null }): Promise<StartResult> {
+  const account = client.account.getOrCreate([input.accountId]);
+  const job = await account.job(input.jobId);
+  if (!job) return { ok: false, error: `No run ${input.jobId} in this account.` };
+  const row = await account.task(job.taskId);
+  const bundle = row ? (await client.task.get([input.accountId, row.id]).info()).bundle : null;
+  if (!row || !bundle) return { ok: false, error: "This run's task no longer has a bundle to run again: send one with openmerit_recommend." };
+  if (input.budgetUsd !== undefined && input.budgetUsd !== null) {
+    if (!Number.isFinite(input.budgetUsd) || input.budgetUsd <= 0 || input.budgetUsd > MAX_RERUN_BUDGET_USD) return { ok: false, error: `The budget must be more than $0 and at most $${MAX_RERUN_BUDGET_USD}.` };
+    const settings = Object.fromEntries((await account.guardrails({ level: "task", scope: row.id })).map(item => [item.key, item.value])) as Guardrails;
+    await account.setGuardrails({ level: "task", scope: row.id, settings: { ...settings, budgetUsd: input.budgetUsd } });
+  }
+  return startJob(client, { accountId: input.accountId, environment: row.environment, agent: row.agent, bundle, kind: "run", trigger: input.trigger, userId: input.userId, askedBy: input.askedBy ?? null });
 }

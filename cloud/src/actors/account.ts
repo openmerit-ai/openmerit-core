@@ -50,6 +50,9 @@ export interface TaskRow { id: string; environment: string; agent: string | null
 /** What a finished job's report found, so a list of runs can say it without loading each report. */
 export interface RunResult { status: string; model: string | null; from: string | null; savingPerCallUsd: number | null }
 /** askedBy is the MCP client's name (clientInfo.name) for a run a coding agent started; null for a watch run or an unnamed client. */
+/** The end of a ledger refusal's reason when the job's own budget refused it, which raising the task's budget fixes. */
+export const JOB_BUDGET = "budget for this job";
+
 export interface JobRow { id: string; taskId: string; kind: string; status: string; startedAt: string; finishedAt: string | null; askedBy: string | null; result: RunResult | null }
 export interface GuardrailSetting { key: string; value: unknown; kind: "constraint" | "default" }
 export type Started = { ok: true } | { ok: false; error: string };
@@ -189,7 +192,7 @@ export const account = actor({
       const refuse = (used: number, cap: number, what: string): ReserveResult => ({ ok: false, reason: `$${used.toFixed(4)} used or reserved of the $${cap.toFixed(2)} ${what}`, neededUsd: input.usd });
       const budget = (job.budget_usd as number | null) ?? limits.defaultJobBudgetUsd;
       const jobUsed = await sum(`job_id = ?`, input.jobId);
-      if (jobUsed + input.usd > budget + 1e-9) return refuse(jobUsed, budget, "budget for this job");
+      if (jobUsed + input.usd > budget + 1e-9) return refuse(jobUsed, budget, JOB_BUDGET);
       const jobCap = input.funding === "openmerit" ? job.cap_openmerit_usd : job.cap_customer_usd;
       if (typeof jobCap === "number") {
         const used = await sum(`job_id = ? AND funding = ?`, input.jobId, input.funding);

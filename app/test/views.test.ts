@@ -43,6 +43,22 @@ test("a finished run lists the notices that change how to read it, without the s
   assert.match(shown, /Challengers not measured: <code>x-ai\/grok-4.6<\/code>/);
   assert.doesNotMatch(shown, /without an ECI|no capability index/);
   assert.doesNotMatch(runView.render({ ...base, notices: notices.slice(0, 2) }, page(me)).__html, /id="notes"/, "no Notes section for routine notices alone");
+  // A fix shows beside the notice it names, and only there.
+  const fixed = text(runView.render({ ...base, notices, fixes: [{ kind: "raise_budget", notice: notices[2]!, budgetUsd: 12 }, { kind: "open", notice: notices[0]!, label: "Add an endpoint", path: "/connections/" }] }, page(me)));
+  assert.match(fixed, /The budget refused it\. Raise budget to \$12 and rerun/);
+  assert.doesNotMatch(fixed, /Add an endpoint/, "a routine notice stays hidden with its fix");
+});
+
+test("a rerun with a higher budget sets the task's budget and starts a new run of the same task", async () => {
+  const send = (path: string, body: unknown) => fake(new Request(`https://openmerit.ai${path}`, { method: "POST", headers: { authorization: "Bearer preview-populated", "content-type": "application/json" }, body: JSON.stringify(body) }));
+  const started = await send("/api/runs/k7m2q9/rerun", { budgetUsd: 12 });
+  assert.equal(started.status, 201);
+  const { jobId, taskId } = await started.json() as { jobId: string; taskId: string };
+  assert.equal(taskId, "ticket-router");
+  assert.equal((await get<JobView>(`/api/runs/${jobId}`)).status, "running");
+  const rails = await get<{ settings: { key: string; value: unknown }[] }>("/api/guardrails?level=task&id=ticket-router");
+  assert.deepEqual(rails.settings.find((item) => item.key === "budgetUsd")?.value, 12);
+  assert.equal((await send("/api/runs/k7m2q9/rerun", { budgetUsd: -1 })).status, 409);
 });
 
 test("a run shows its saved report, or the job's live state until it has one", async () => {

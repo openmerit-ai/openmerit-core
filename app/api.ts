@@ -74,6 +74,13 @@ export interface MeasuredModel {
   note: string;
 }
 
+// What fixes one of a result's notices, which it names by its exact text (cloud/src/report.ts).
+export type Fix =
+  | { kind: "raise_budget"; notice: string; budgetUsd: number }
+  | { kind: "rerun"; notice: string }
+  | { kind: "open"; notice: string; label: string; path: string }
+  | { kind: "ask_agent"; notice: string; prompt: string };
+
 export interface JobResult {
   status: "picked" | "keep_current" | "baseline_failed" | "no_cases" | "no_candidates" | "agent_eval_failed" | "stopped" | "failed";
   pick: { model: string; endpoint: string; endpointModel: string; passes: number; total: number; costPerCallUsd: number | null; savingPerCallUsd: number | null } | null;
@@ -88,6 +95,8 @@ export interface JobResult {
   spend: { openmeritUsd: number; customerUsd: number };
   guardrails: { effective: Guardrails; from: Partial<Record<GuardrailKey, Level>>; rejected: { key: string; level: Level; reason: string }[] };
   notices: string[];
+  // Absent from reports saved before fixes were added.
+  fixes?: Fix[];
   reportUrl: string;
   catalogueVersion: string;
   cases: { total: number; fromExamples: number; written: number };

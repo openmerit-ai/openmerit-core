@@ -16,11 +16,12 @@ import { CriticalError, Loop, StepExhaustedError, workflow } from "@rivet-dev/wo
 import { queue } from "rivetkit";
 import { applyLabelCheck, BudgetRefused, completeWith, createClient, createMeasure, graderFor, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
 import { baselineResult, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, FINALISTS, modelResult, newProgress, redact, SAMPLE_SIZE, score, taskResult, type CatalogueModel, type Ledger, type ModelResult, type ResolvedGuardrails } from "../engine.ts";
-import { buildPool, OPENROUTER, type Option, type Pool, type Provisional } from "../pool.ts";
-import { proposeEdit, renderMarkdown, type AgentEvalSummary, type JobResult, type MeasuredModel } from "../report.ts";
+import { buildPool, OPENROUTER, regionNotice, type Option, type Pool, type Provisional } from "../pool.ts";
+import { JOB_BUDGET } from "./account.ts";
+import { proposeEdit, renderMarkdown, type AgentEvalSummary, type Fix, type JobResult, type MeasuredModel } from "../report.ts";
 import { capture } from "../analytics.ts";
 import { services } from "../services.ts";
-import { redactBundle } from "../start.ts";
+import { redactBundle, taskIdFor } from "../start.ts";
 import type { AppClient, Registry } from "../registry.ts";
 
 /** The `questions` and `answers` shape openmerit_scout uses. */
@@ -62,6 +63,8 @@ export interface JobState {
   phase: "source" | "cases" | "label_check" | "models" | "ranking" | "agent_eval" | "action" | "done";
   questions: Question[];
   notices: string[];
+  /** Fixes for notices recorded in steps; the result adds those of its last stages. Absent from jobs started before them. */
+  fixes?: Fix[];
   progress: { measured: number; planned: number | null };
   /** The measure step running now, case by case, for the app's live view; null between steps and once the job ends. Absent from jobs started before it. */
   live?: LiveProgress | null;
@@ -99,11 +102,15 @@ type Measured = ({ kind: "ok" } & MeasureResult) | { kind: "unavailable" | "refu
  */
 const INTERRUPTIONS = 5;
 
-/** Ends the job early; caught by the workflow, which records why. */
+/** A fix before it is tied to its notice's text. */
+type FixFor = Fix extends infer F ? F extends Fix ? Omit<F, "notice"> : never : never;
+
+/** Ends the job early; caught by the workflow, which records why and what fixes it. */
 class JobStop extends Error {
   readonly status: "stopped" | "failed";
   readonly resultStatus: JobResult["status"] | null;
-  constructor(status: "stopped" | "failed", resultStatus: JobResult["status"] | null, message: string) { super(message); this.status = status; this.resultStatus = resultStatus; }
+  readonly fix: FixFor | null;
+  constructor(status: "stopped" | "failed", resultStatus: JobResult["status"] | null, message: string, fix: FixFor | null = null) { super(message); this.status = status; this.resultStatus = resultStatus; this.fix = fix; }
 }
 
 /** Endpoints with their keys, by job, in this process only. */
@@ -198,7 +205,7 @@ export const job = workflow({
   run: async ctx => {
     const jobId = ctx.key[0]!;
     /** The report of what was measured so far, once the pool is known; a stopped or failed job saves it. */
-    let partial: ((status: JobResult["status"], notices: string[], spent: { openmeritUsd: number; customerUsd: number }) => JobResult) | null = null;
+    let partial: ((status: JobResult["status"], notices: string[], fixes: Fix[], spent: { openmeritUsd: number; customerUsd: number }) => JobResult) | null = null;
     try {
 
       // 1. Source: redact the bundle, resolve the task's guardrails, set the job's spend limits.
@@ -217,6 +224,12 @@ export const job = workflow({
       });
       const { bundle, guardrails } = source as { bundle: TaskBundle; guardrails: ResolvedGuardrails };
       const input = { accountId: source.accountId, environment: source.environment, agent: source.agent };
+      const taskId = taskIdFor(input.environment, bundle.task);
+      const budgetUsd = guardrails.effective.budgetUsd ?? services().config.limits.defaultJobBudgetUsd;
+      /** What fixes a refused spend: the job's budget is the task's to raise, a cap for the job is a guardrail, and a monthly cap waits for next month. */
+      const refusalFix = (reason: string): FixFor | null => reason.includes(JOB_BUDGET) ? { kind: "raise_budget", budgetUsd: Math.ceil(budgetUsd * 2) }
+        : reason.includes("cap for this job") ? { kind: "open", label: "Review guardrails", path: `/guardrails/?level=task&id=${encodeURIComponent(taskId)}` } : null;
+      const tie = (fix: FixFor | null, notice: string): Fix[] => (fix ? [{ ...fix, notice } as Fix] : []);
       // A job recorded before this step returned its provisional pick has none here.
       const told = (source as { provisional?: Provisional }).provisional ?? null;
 
@@ -246,7 +259,9 @@ export const job = workflow({
             made = await writeCases({ bundle, complete, count });
           } catch (error) {
             if (s.abortSignal.aborted) throw error;
-            s.state.notices.push(`No cases were written (${redact(error instanceof Error ? error.message : String(error)).slice(0, 300)}): the job measures on the bundle's examples only.`);
+            const notice = `No cases were written (${redact(error instanceof Error ? error.message : String(error)).slice(0, 300)}): the job measures on the bundle's examples only.`;
+            s.state.notices.push(notice);
+            s.state.fixes = [...(s.state.fixes ?? []), { kind: "rerun", notice }];
             made = await writeCases({ bundle, complete, count: 0 });
           }
           const examples = made.cases.filter(item => item.origin === "example").map(item => {
@@ -303,6 +318,8 @@ export const job = workflow({
           const judgeModel = index.find(services().config.models.judge);
           if (judgeModel) priced[services().config.models.judge] = judgeModel;
           s.state.phase = "ranking"; s.state.notices.push(...built.notices); s.state.updatedAt = now();
+          const region = guardrails.effective.region ? regionNotice(guardrails.effective.region) : null;
+          if (region && built.notices.includes(region)) s.state.fixes = [...(s.state.fixes ?? []), { kind: "open", notice: region, label: "Add an endpoint", path: "/connections/" }];
           s.state.progress.planned = plannedSteps(built.ranked.length, built.unplaced.length, Math.max(1, guardrails.effective.repeats ?? DEFAULT_REPEATS));
           return { pool: built, priced, catalogueVersion: catalogue.version };
         },
@@ -330,10 +347,10 @@ export const job = workflow({
       // A model that passed its screen but whose full runs did not finish is left out.
       const listed = (items: readonly ModelResult[]) => items.filter(item => item.status !== "unmeasured").map(measuredModel);
       const baselineOf = () => (pool.baseline && progress.baseline.length ? measuredModel(baselineResult(score(progress.baseline), describe(pool.baseline))) : null);
-      partial = (status, notices, spent) => ({
+      partial = (status, notices, fixes, spent) => ({
         status, pick: null, top: [], nearMisses: [], baseline: baselineOf(), candidates: listed([...progress.tried.values()].map(item => modelResult(item, describe(item.option), score(progress.baseline), rules))),
         search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: [], finalists: [], challengers: [], shortfall: null }, agentEval: null, edit: { edits: [], instructions: null },
-        spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices,
+        spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices, fixes,
         reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts,
       });
       let counter = 0;
@@ -399,13 +416,16 @@ export const job = workflow({
       };
       const stopFor = (result: Measured, what: string): JobStop => result.kind === "refused"
         // The report keeps what was measured before the budget ran out.
-        ? new JobStop("stopped", "stopped", `Stopped while measuring ${what}: ${result.reason}. Raise the budget in the task's guardrails at app.openmerit.ai to continue.`)
-        : new JobStop("failed", "failed", `Measuring ${what} failed: ${"reason" in result ? result.reason : "unknown error"}`);
+        ? new JobStop("stopped", "stopped", `Stopped while measuring ${what}: ${result.reason}. Raise the budget in the task's guardrails at app.openmerit.ai to continue.`, refusalFix(result.reason))
+        : new JobStop("failed", "failed", `Measuring ${what} failed: ${"reason" in result ? result.reason : "unknown error"}`, { kind: "rerun" });
+      /** What fixes the end of the challengers, when one ended them. */
+      let endedFix: FixFor | null = null;
 
       try {
-        if (policy === 1) throw new JobStop("failed", "failed", "The job started measuring before a deploy changed how OpenMerit measures, so it cannot resume. Nothing is charged for it; call openmerit_recommend again to rerun it.");
-        if (!usable.length) throw new JobStop("stopped", "no_cases", "No case has a known correct answer. Add examples with expected answers to the bundle, or answer the label check.");
-        if (!pool.baseline) throw new JobStop("failed", "baseline_failed", "No endpoint can run the current model: OpenMerit's OpenRouter key is not configured, and no endpoint of yours serves it.");
+        if (policy === 1) throw new JobStop("failed", "failed", "The job started measuring before a deploy changed how OpenMerit measures, so it cannot resume. Nothing is charged for it; call openmerit_recommend again to rerun it.", { kind: "rerun" });
+        if (!usable.length) throw new JobStop("stopped", "no_cases", "No case has a known correct answer. Add examples with expected answers to the bundle, or answer the label check.",
+          { kind: "ask_agent", prompt: `OpenMerit found no test case with a known correct answer for the task "${bundle.task}". Add examples with their expected answers to its task bundle, taken from the code's tests or fixtures, then call openmerit_recommend again.` });
+        if (!pool.baseline) throw new JobStop("failed", "baseline_failed", "No endpoint can run the current model: OpenMerit's OpenRouter key is not configured, and no endpoint of yours serves it.", { kind: "open", label: "Add an endpoint", path: "/connections/" });
         const current = pool.baseline;
 
         // 4. Ranking: openmerit/engine's evaluateTask, the policy the CLI runs too. Each of its measure calls is one step.
@@ -420,13 +440,14 @@ export const job = workflow({
             if (call.provisional && call.role === "screen") plannedTotal = counter + 1 + repeats;
             const result = await measure(target, [...(items ?? caseIds)]);
             if (result.kind === "unavailable") {
-              if (!option) throw new JobStop("stopped", "baseline_failed", `${current.model} could not run: ${result.reason}`);
+              if (!option) throw new JobStop("stopped", "baseline_failed", `${current.model} could not run: ${result.reason}`, { kind: "rerun" });
               throw new CandidateUnavailable(result.reason);
             }
             if (result.kind !== "ok") {
               const stop = stopFor(result, option ? target.model : `the current model ${current.model}`);
               // The finalists are measured, so a challenger the budget refuses, or one that fails, ends the challengers only.
-              throw call.stage === "challenger" ? new EndChallengers(stop.message) : stop;
+              if (call.stage === "challenger") { endedFix = stop.fix; throw new EndChallengers(stop.message); }
+              throw stop;
             }
             return { items: Object.fromEntries(result.results.map(item => [item.caseId, item.pass])), costUsd: result.costUsd, costIsEstimate: result.costIsEstimate, latencyMs: result.latencyMs };
           },
@@ -447,18 +468,23 @@ export const job = workflow({
           const runs = evaluated.baseline.runs.length;
           throw new JobStop("stopped", "baseline_failed", !evaluated.baseline.passes
             ? `${current.model} passed none of the ${caseIds.length} cases, so there is nothing to compare against. Check the labels.`
-            : `${current.model} passed only ${evaluated.reliable.length} of the ${caseIds.length} cases in ${runs === 1 ? "its first run" : `every one of its ${runs} runs`}; OpenMerit screens candidates on ${SAMPLE_SIZE} cases it passes. Check the labels, or add examples it gets right.`);
+            : `${current.model} passed only ${evaluated.reliable.length} of the ${caseIds.length} cases in ${runs === 1 ? "its first run" : `every one of its ${runs} runs`}; OpenMerit screens candidates on ${SAMPLE_SIZE} cases it passes. Check the labels, or add examples it gets right.`,
+          { kind: "ask_agent", prompt: `${current.model}, the model the task "${bundle.task}" uses now, failed most of OpenMerit's test cases, so their expected answers may be wrong. Show the user the expected answers in the task bundle's examples, correct the wrong ones with them, and add examples the current model gets right; then call openmerit_recommend again.` });
         }
         // The result, the Top 3, the near misses and the pick are openmerit/engine's, as the CLI's are.
         const result = taskResult(evaluated, describe, describe(current), rules);
         const baseline = measuredModel(result.baseline);
         const candidates = listed(result.candidates);
         const top = result.top.map(measuredModel), cheaper = result.cheaper.map(measuredModel), nearMisses = result.nearMisses.map(measuredModel);
-        const notices: string[] = [];
+        const notices: string[] = [], fixes: Fix[] = [];
         const { ended } = evaluated;
-        if (ended && !ended.provisional) notices.push(`${ended.left.length === 1 ? "Challenger" : "Challengers"} not measured: ${ended.left.map(item => item.model).join(", ")}. ${ended.reason}`);
+        if (ended && !ended.provisional) {
+          const notice = `${ended.left.length === 1 ? "Challenger" : "Challengers"} not measured: ${ended.left.map(item => item.model).join(", ")}. ${ended.reason}`;
+          notices.push(notice); fixes.push(...tie(endedFix, notice));
+        }
         if (provisional && evaluated.provisionalTried) {
           const tried = evaluated.candidates.find(item => item.option.key === provisional.key);
+          if (ended?.provisional) fixes.push(...tie(endedFix, `The provisional pick ${provisional.model} was not measured. ${ended.reason}`));
           notices.push(ended?.provisional ? `The provisional pick ${provisional.model} was not measured. ${ended.reason}`
             : tried?.status === "screened_out" ? `No measured model that qualified was cheaper per call than ${current.model}, so the provisional pick ${provisional.model} was screened too, and failed the ${evaluated.samples.length} sample cases.`
             : `No measured model that qualified was cheaper per call than ${current.model}, so the provisional pick ${provisional.model} was measured on every case too.`);
@@ -487,6 +513,10 @@ export const job = workflow({
             tried: checked.tasks.flatMap(item => item.tried.map(attempt => ({ model: attempt.option.item.model, passes: attempt.score.passes, total: attempt.score.total, passed: attempt.passed }))),
           };
           if (checked.warning) notices.push(checked.warning);
+          // Without an agent eval, a required one blocks every switch; the agent's guardrail can allow switches with a warning instead.
+          if (checked.warning && checked.status === "missing" && guardrails.effective.agentEvalRequired === "required") {
+            fixes.push({ kind: "open", notice: checked.warning, label: "Review guardrails", path: `/guardrails/?level=agent&id=${encodeURIComponent(`${input.environment}:${input.agent}`)}` });
+          }
         }
 
         // 6. Action: the edit and the report.
@@ -503,7 +533,7 @@ export const job = workflow({
               pick: chosen ? { model: chosen.model, endpoint: chosen.endpoint, endpointModel: chosen.endpointModel, passes: chosen.passes, total: chosen.total, costPerCallUsd: chosen.costPerCallUsd, savingPerCallUsd: baseline.costPerCallUsd !== null && chosen.costPerCallUsd !== null ? baseline.costPerCallUsd - chosen.costPerCallUsd : null } : null,
               search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: result.samples, finalists: result.finalists, challengers: challenging.map(item => item.model), shortfall: result.searchShortfall },
               agentEval, edit: chosen ? proposeEdit(bundle, optionOf(chosen), pool.baseline!.endpoint, index.find) : { edits: [], instructions: null },
-              spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices: [...s.state.notices, ...notices],
+              spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices: [...s.state.notices, ...notices], fixes: [...(s.state.fixes ?? []), ...fixes],
               reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts,
             };
             await finish(s, client, jobId, "done", report, null);
@@ -515,7 +545,7 @@ export const job = workflow({
         await ctx.step("stop", async s => {
           const client = s.client<Registry>();
           const spent = await client.account.getOrCreate([s.state.input.accountId]).spent({ jobId });
-          const result = stop.resultStatus ? partial!(stop.resultStatus, [...s.state.notices, stop.message], spent) : null;
+          const result = stop.resultStatus ? partial!(stop.resultStatus, [...s.state.notices, stop.message], [...(s.state.fixes ?? []), ...tie(stop.fix, stop.message)], spent) : null;
           await finish(s, client, jobId, stop.status, result, stop.status === "failed" ? stop.message : null, stop.message);
         });
       }
@@ -527,7 +557,7 @@ export const job = workflow({
         const client = s.client<Registry>();
         const spent = await client.account.getOrCreate([s.state.input.accountId]).spent({ jobId });
         const notice = `The job failed and stopped measuring: ${message}. Nothing is charged for it; call openmerit_recommend again to retry.`;
-        await finish(s, client, jobId, "failed", partial?.("failed", [...s.state.notices, notice], spent) ?? null, message, notice);
+        await finish(s, client, jobId, "failed", partial?.("failed", [...s.state.notices, notice], [...(s.state.fixes ?? []), { kind: "rerun", notice }], spent) ?? null, message, notice);
       });
     }
   },

@@ -5,6 +5,7 @@ import type { AppDeps } from "./app.ts";
 import type { AuthResult, Identity } from "./auth.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
 import { explain, type JobResult } from "./report.ts";
+import { rerunJob } from "./start.ts";
 import type { EndpointKind } from "../../openmerit-core/src/ranking/index.ts";
 
 type Json = Record<string, unknown>;
@@ -100,6 +101,13 @@ export function apiRoutes(deps: AppDeps) {
       const report = await account.report({ jobId });
       // The saved report, with the same reason and cheaperThanCurrent the coding agent gets.
       return json(200, report ? { ...(report.json as JobResult), ...explain(report.json as JobResult) } : { ...(await client.job.get([jobId]).status()), report: null });
+    }
+    // A fix from a run's notes: run its task again, optionally with a higher budget per job.
+    if ((match = /^\/api\/runs\/([\w-]+)\/rerun$/.exec(path)) && method === "POST") {
+      const input = await body(request) ?? {};
+      if (input.budgetUsd !== undefined && input.budgetUsd !== null && typeof input.budgetUsd !== "number") return error(400, "budgetUsd must be a number of US dollars.");
+      const started = await rerunJob(client, { accountId: who.accountId, userId: who.userId, jobId: match[1]!, budgetUsd: typeof input.budgetUsd === "number" ? input.budgetUsd : null, trigger: "app" });
+      return started.ok ? json(201, { jobId: started.jobId, taskId: started.taskId }) : error(/^No run /.test(started.error) ? 404 : 409, started.error);
     }
     if ((match = /^\/api\/runs\/([\w-]+)\/share$/.exec(path)) && method === "POST") {
       const secret = await account.share(match[1]!);
