@@ -148,7 +148,7 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     assert.equal(measured.pick!.total, 8);
     assert.equal(measured.pick!.passes, 8);
     assert.ok((catalogue.models.find(model => model.id === measured.pick!.model)?.eci ?? 200) >= WEAK_BELOW, `${measured.pick!.model} answers wrongly in the fake`);
-    assert.deepEqual(measured.edit.edits.map(edit => edit.before), ["gpt-5.4"]);
+    assert.deepEqual(measured.edit.edits.map(edit => [edit.before, edit.after]), [['const MODEL = "gpt-5.4";', `const MODEL = "${measured.pick!.model}";`]]);
     assert.ok(models.calls.some(call => call.ticket === "Where is my invoice for March?"), "the labelled case is measured");
     const [kept, dropped] = Object.keys(WRITTEN);
     assert.ok(models.calls.some(call => call.ticket === kept) && !models.calls.some(call => call.ticket === dropped), "only the ticked written case is measured");
@@ -330,7 +330,11 @@ test("when no measured model is cheaper per call than the current one, the job m
       assert.equal(done.data.status, "done", done.text);
       type Top = { model: string; cheaperThanCurrent: boolean | null };
       const result = done.data.result as Result & { reason: string; baseline: { passes: number; total: number; costPerCallUsd: number; latencyMs: number | null }; top: Top[] };
-      const notices = (await agent.api<{ notices: string[] }>(`/api/runs/${jobId}`)).body.notices;
+      const report = (await agent.api<{ notices: string[]; reason: string; top: Top[] }>(`/api/runs/${jobId}`)).body;
+      // The app's report JSON explains the result as openmerit_result does.
+      assert.equal(report.reason, result.reason);
+      assert.deepEqual(report.top.map(item => item.cheaperThanCurrent), result.top.map(item => item.cheaperThanCurrent));
+      const notices = report.notices;
       return { jobId, provisional, done, result, notices };
     };
 

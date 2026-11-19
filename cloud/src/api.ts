@@ -4,6 +4,7 @@
 import type { AppDeps } from "./app.ts";
 import type { AuthResult, Identity } from "./auth.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
+import { explain, type JobResult } from "./report.ts";
 import type { EndpointKind } from "../../openmerit-core/src/ranking/index.ts";
 
 type Json = Record<string, unknown>;
@@ -97,7 +98,8 @@ export function apiRoutes(deps: AppDeps) {
       const jobId = match[1]!;
       if (!(await account.job(jobId))) return error(404, "No such run in this account.");
       const report = await account.report({ jobId });
-      return json(200, report ? report.json : { ...(await client.job.get([jobId]).status()), report: null });
+      // The saved report, with the same reason and cheaperThanCurrent the coding agent gets.
+      return json(200, report ? { ...(report.json as JobResult), ...explain(report.json as JobResult) } : { ...(await client.job.get([jobId]).status()), report: null });
     }
     if ((match = /^\/api\/runs\/([\w-]+)\/share$/.exec(path)) && method === "POST") {
       const secret = await account.share(match[1]!);

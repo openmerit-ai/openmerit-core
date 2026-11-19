@@ -164,7 +164,7 @@ export function bundle(task = "ticket classifier", unlabeled = true) {
     prompt: { system: "You route support tickets.", messages: [{ role: "user", content: "Ticket: {{ticket}}" }] },
     output: { kind: "label", labels: ["billing", "technical", "account"] },
     examples: [...entries.slice(0, 6).map(([ticket, queue]) => ({ input: { ticket }, expected: queue })), ...(unlabeled ? [{ input: { ticket: entries[6]![0] } }] : [])],
-    codeRefs: [{ file: "src/classify.ts", line: 12, spelling: "gpt-5.4" }],
+    codeRefs: [{ file: "src/classify.ts", line: 12, spelling: 'const MODEL = "gpt-5.4";' }],
   };
 }
 
