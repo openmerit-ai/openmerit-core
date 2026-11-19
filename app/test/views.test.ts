@@ -34,6 +34,17 @@ test("names from the cloud app are shown as text, never as markup", async () => 
   }
 });
 
+test("a finished run lists the notices that change how to read it, without the search's routine ones", async () => {
+  const me = await account();
+  const base = await get<Report>("/api/runs/k7m2q9");
+  const notices = ["118 catalogue models without an ECI left out: the search places models by their capability index.", "2 models have no capability index, so they are measured as challengers and placed by measurement only.", "Challengers not measured: `x-ai/grok-4.6`. The budget refused it."];
+  const shown = runView.render({ ...base, notices }, page(me)).__html;
+  assert.match(shown, /<h2 id="notes">Notes<\/h2>/);
+  assert.match(shown, /Challengers not measured: <code>x-ai\/grok-4.6<\/code>/);
+  assert.doesNotMatch(shown, /without an ECI|no capability index/);
+  assert.doesNotMatch(runView.render({ ...base, notices: notices.slice(0, 2) }, page(me)).__html, /id="notes"/, "no Notes section for routine notices alone");
+});
+
 test("a run shows its saved report, or the job's live state until it has one", async () => {
   const me = await account();
   const report = text(runView.render(await get<Report>("/api/runs/k7m2q9"), page(me)));
