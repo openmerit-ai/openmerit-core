@@ -26,11 +26,18 @@ const ALLOWED = ["gpt-5-nano", "gpt-4.1-nano", "gpt-6-luna", "gpt-4o-mini", "gpt
 
 // Fake OpenAI. Right answers by default; gpt-4o-mini always says "other"; gpt-4.1-nano does not exist
 // (HTTP 404); gpt-5.6-luna answers its first five requests (one screen) and then fails with HTTP 500.
+// A test can change which models answer wrongly, at length, or fail after five requests.
 const requests: string[] = [];
 /** The fake endpoint answers HTTP 429 to `model`'s next `remaining` requests. */
 const rateLimit = { model: "", remaining: 0 };
 /** The fake endpoint stops `model`'s answers at their token limit before any text, as a model that reasons first does. */
 const cutOff = { model: "" };
+/** Models the fake endpoint answers wrongly. */
+const wrong = new Set(["gpt-4o-mini"]);
+/** Models whose answers report 2,000 output tokens, so they cost more per item than their list price suggests. */
+const verbose = new Set<string>();
+/** The model whose requests after its fifth fail with HTTP 500. */
+const flaky = { model: "gpt-5.6-luna" };
 let server: Server;
 let baseUrl = "";
 before(async () => {
@@ -46,11 +53,11 @@ before(async () => {
       if (parsed.model === rateLimit.model && rateLimit.remaining-- > 0) { res.writeHead(429, { "content-type": "application/json", "retry-after": "0" }); return res.end(JSON.stringify({ error: { message: "rate-limited upstream" } })); }
       if (parsed.model === cutOff.model) { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: null }, finish_reason: "length" }], usage: { prompt_tokens: 100, completion_tokens: 2000 } })); }
       if (parsed.model === "gpt-4.1-nano") return fail(404, "The model `gpt-4.1-nano` does not exist or you do not have access to it.");
-      if (parsed.model === "gpt-5.6-luna" && requests.filter(model => model === "gpt-5.6-luna").length > 5) return fail(500, "upstream overloaded");
+      if (parsed.model === flaky.model && requests.filter(model => model === flaky.model).length > 5) return fail(500, "upstream overloaded");
       const ticket = parsed.messages.find(message => message.role === "user")!.content;
-      const answer = parsed.model === "gpt-4o-mini" ? "other" : tickets.get(ticket) ?? "other";
+      const answer = wrong.has(parsed.model) ? "other" : tickets.get(ticket) ?? "other";
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: answer } }], usage: { prompt_tokens: 100, completion_tokens: 5 } }));
+      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: answer } }], usage: { prompt_tokens: 100, completion_tokens: verbose.has(parsed.model) ? 2000 : 5 } }));
     });
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -348,6 +355,35 @@ test("Scout Model Binary Search screens the ECI-ranked pool, runs finalists on e
   const reopened = new State(ctx.env);
   assert.equal(reopened.listRuns(ctx.repo.id)[0]!.status, "done");
   assert.equal(reopened.listRuns(findRepo(repo()).id).length, 0);
+});
+
+test("when every qualified finalist costs more per item than the current model, challengers are priced up to its list price", async () => {
+  // By ECI: gpt-4o-mini 123.9 and gpt-4o-mini-2024-07-18 128.6 answer wrongly; the search selects gpt-oss-20b 135.0 and takes
+  // gpt-5-nano, gpt-oss-120b, gpt-5.4-nano and gpt-6-luna as finalists, which leaves gpt-5.6-luna (156.7, $1.40) untried.
+  const pool = ["gpt-4o-mini", "gpt-4o-mini-2024-07-18", "gpt-oss-20b", "gpt-5-nano", "gpt-oss-120b", "gpt-5.4-nano", "gpt-6-luna", "gpt-5.6-luna"];
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  updateRepoConfig(root, { endpoints: [{ id: "openai", kind: "openai", baseUrl, apiKey: { env: "FAKE_ENDPOINT_KEY" }, allowedModels: pool }] });
+  const ctx = context(root, home);
+  const runId = startRun(ctx);
+  requests.length = 0;
+  // The finalists answer at length, so each costs more per item than the current model ($2.00 by list price), although
+  // the leader, gpt-oss-20b, lists at $0.16: no challenger is priced at or below it.
+  wrong.add("gpt-4o-mini-2024-07-18");
+  for (const model of ["gpt-oss-20b", "gpt-5-nano", "gpt-oss-120b", "gpt-5.4-nano", "gpt-6-luna"]) verbose.add(model);
+  flaky.model = "";
+  try {
+    const { step } = await drive(ctx, runId);
+    assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
+    const task = step.result!.tasks[0]!;
+    assert.deepEqual(task.search!.finalists, ["openai/gpt-oss-20b", "openai/gpt-5-nano", "openai/gpt-oss-120b", "openai/gpt-5.4-nano", "openai/gpt-6-luna"]);
+    assert.ok(task.top.every(item => item.model === "openai/gpt-5.6-luna" || item.costPerItemUsd! > task.baseline!.costPerItemUsd!), "every finalist costs more per item than the current model");
+    assert.deepEqual(task.search!.trials.filter(trial => trial.stage === "challenger").map(trial => [trial.model, trial.accepted]), [["openai/gpt-5.6-luna", true]]);
+    assert.deepEqual(task.search!.challengers, ["openai/gpt-5.6-luna"]);
+    assert.equal(task.top[0]!.model, "openai/gpt-5.6-luna");
+    assert.ok(task.top[0]!.costPerItemUsd! < task.baseline!.costPerItemUsd!);
+  } finally {
+    wrong.delete("gpt-4o-mini-2024-07-18"); verbose.clear(); flaky.model = "gpt-5.6-luna";
+  }
 });
 
 test("with a Langfuse eval, the eval records each run with the app's keys and Scout reads the results back with GETs only", async () => {

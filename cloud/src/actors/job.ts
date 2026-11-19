@@ -404,8 +404,12 @@ export const job = workflow({
         const leaderModel = finals.filter(item => item.qualified).sort((a, b) => (a.costPerCallUsd ?? Infinity) - (b.costPerCallUsd ?? Infinity))[0];
         const leader = (leaderModel && pool.ranked.find(item => item.key === leaderModel.model)) ?? search.selected;
         const tried = new Set(screens.keys());
+        // When no qualified finalist costs less per call than the current model, a stronger model priced up to the current
+        // model's list price may still: challengers are capped there instead of at the leader's list price.
+        const cheaperFinal = baseline.costPerCallUsd === null || finals.some(item => item.qualified && item.costPerCallUsd !== null && item.costPerCallUsd < baseline.costPerCallUsd!);
+        const ceiling = cheaperFinal || pool.baseline.price === null ? {} : { maxPrice: pool.baseline.price };
         const challenging = leader
-          ? challengers(pool.ranked, leader, tried, { strength: item => item.eci ?? -Infinity, unplaced: pool.unplaced })
+          ? challengers(pool.ranked, leader, tried, { strength: item => item.eci ?? -Infinity, unplaced: pool.unplaced, ...ceiling })
           : pool.unplaced.filter(item => !tried.has(item.key));
         plannedTotal = counter + challenging.length;
         const notices: string[] = [];
