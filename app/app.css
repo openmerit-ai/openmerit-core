@@ -191,12 +191,15 @@ table.guardrails td { vertical-align: middle; }
 table.guardrails input { min-width: 140px; padding: 5px 8px; font-size: 13.5px; }
 .plan-card { max-width: 640px; }
 .endpoint-meta { text-align: right; margin-left: auto; }
-.dialog { max-width: min(460px, calc(100vw - 32px)); padding: 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); box-shadow: 0 20px 60px var(--shadow); }
+/* Dialogs share their card with Clerk's sign-in (app/auth.ts appearance): 400px, 12px corners,
+   a serif title and the actions on a hairline footer. */
+.dialog { width: min(400px, calc(100vw - 32px)); margin: 14vh auto auto; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); box-shadow: 0 20px 60px var(--shadow); }
 .dialog::backdrop { background: #0000004d; }
-.dialog form { display: grid; gap: 14px; }
-.dialog-title { font-size: 18px; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--ink); margin: 0; }
+.dialog form { display: grid; gap: 10px; padding: 28px 28px 0; }
+.dialog-title { font-family: var(--serif); font-size: 22px; font-weight: 400; line-height: 1.15; letter-spacing: -.02em; text-transform: none; color: var(--ink); margin: 0; }
 .dialog p { color: var(--prose); font-size: 14px; }
-.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+.dialog label { margin-top: 8px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin: 14px -28px 0; padding: 14px 28px; border-top: 1px solid var(--line); }
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 60; max-width: min(520px, calc(100vw - 32px)); padding: 10px 18px; border-radius: 8px; background: var(--ink); color: var(--paper); font-size: 14px; box-shadow: 0 10px 30px var(--shadow); }
 .toast.bad { background: var(--error); }
 .toast[hidden] { display: none; }
