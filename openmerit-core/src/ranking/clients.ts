@@ -36,7 +36,8 @@ export interface ModelClient {
 
 const DEFAULT_BASE_URL: Partial<Record<EndpointKind, string>> = { openrouter: "https://openrouter.ai/api/v1", anthropic: "https://api.anthropic.com/v1" };
 const ANTHROPIC_VERSION = "2023-06-01";
-const CALL_TIMEOUT_MS = 600_000;
+/** How long one attempt may wait for an answer. A ranking call's answer is short, so a model that says nothing for this long is not going to. */
+export const CALL_TIMEOUT_MS = 120_000;
 
 type Json = Record<string, unknown>;
 
@@ -117,8 +118,9 @@ function errorMessage(value: Json): string | null {
  * A client for these endpoints. `model` finds a model's list prices for estimates and reservations;
  * the default looks it up in the bundled catalogue by ID or alias.
  */
-export function createClient(endpoints: readonly EndpointConfig[], options: { fetch?: typeof fetch; model?: (endpointModel: string) => CatalogueModel | null } = {}): ModelClient {
+export function createClient(endpoints: readonly EndpointConfig[], options: { fetch?: typeof fetch; model?: (endpointModel: string) => CatalogueModel | null; timeoutMs?: number } = {}): ModelClient {
   const fetcher = options.fetch ?? fetch;
+  const timeoutMs = options.timeoutMs ?? CALL_TIMEOUT_MS;
   let index: ReturnType<typeof catalogueIndex> | undefined;
   const priced = options.model ?? ((model: string) => (index ??= catalogueIndex(loadCatalogue())).find(model));
   const byId = new Map(endpoints.map(endpoint => [endpoint.id, endpoint]));
@@ -143,20 +145,41 @@ export function createClient(endpoints: readonly EndpointConfig[], options: { fe
       const headers: Record<string, string> = anthropic
         ? { "x-api-key": endpoint.apiKey, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json" }
         : { authorization: `Bearer ${endpoint.apiKey}`, "content-type": "application/json", ...(endpoint.kind === "openrouter" ? { "x-title": "OpenMerit Ranking" } : {}) };
-      const signal = meter.signal ? AbortSignal.any([meter.signal, AbortSignal.timeout(CALL_TIMEOUT_MS)]) : AbortSignal.timeout(CALL_TIMEOUT_MS);
       const started = Date.now();
       let settled = false;
       const settle = async (cost: Settlement) => { settled = true; await meter.ledger.settle(meter.key, { ...cost, latencyMs: Date.now() - started }); };
       try {
         // Only the last attempt is charged: providers do not bill the rate limits and errors a retry discards.
-        const upstream = await withRetries(() => fetcher(`${baseUrl}${anthropic ? "/messages" : "/chat/completions"}`, { method: "POST", headers, body: sent, signal })
-          .catch((error: unknown) => (error instanceof Error ? error : new Error(String(error)))), meter.signal);
+        // Each attempt has its own timeout, which also covers reading the answer. An attempt that timed out is not retried.
+        let attemptSignal: AbortSignal | undefined;
+        const silent = () => new Error(`no answer in ${Math.round(timeoutMs / 1000)} s`);
+        let upstream: Response | Error;
+        try {
+          upstream = await withRetries(() => {
+            const attempt = AbortSignal.timeout(timeoutMs);
+            attemptSignal = meter.signal ? AbortSignal.any([meter.signal, attempt]) : attempt;
+            return fetcher(`${baseUrl}${anthropic ? "/messages" : "/chat/completions"}`, { method: "POST", headers, body: sent, signal: attemptSignal })
+              .catch((error: unknown) => {
+                if (attempt.aborted && !meter.signal?.aborted) throw silent();
+                return error instanceof Error ? error : new Error(String(error));
+              });
+          }, meter.signal);
+        } catch (error) {
+          meter.signal?.throwIfAborted();
+          upstream = error instanceof Error ? error : new Error(String(error));
+        }
         if (upstream instanceof Error) {
           meter.signal?.throwIfAborted();
           await settle({ actualUsd: 0, estimatedUsd: null, failed: true });
           return failed(0, `${endpoint.id} did not answer (${redact(upstream.message).slice(0, 200)})`, Date.now() - started);
         }
-        const text = await upstream.text();
+        let text: string;
+        try { text = await upstream.text(); } catch (error) {
+          meter.signal?.throwIfAborted();
+          // Cut off while answering: what was sent may have been billed, so the reservation stands as an estimate.
+          await settle({ actualUsd: null, estimatedUsd: null, failed: true });
+          return failed(0, `${endpoint.id} did not answer (${attemptSignal?.aborted ? silent().message : redact(error instanceof Error ? error.message : String(error)).slice(0, 200)})`, Date.now() - started);
+        }
         const latencyMs = Date.now() - started;
         const usage = readUsage(text);
         let value: Json = {};

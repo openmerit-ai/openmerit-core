@@ -2,7 +2,7 @@
 // coding agent; /api takes Clerk session tokens from app.openmerit.ai. Either maps to a user and a
 // Clerk organization, and the organization is the account. A token without an organization is
 // refused with a clear error: the app never guesses an account.
-import { verifyToken } from "@clerk/backend";
+import { createClerkClient, verifyToken } from "@clerk/backend";
 import { verifyMachineAuthToken } from "@clerk/backend/internal";
 import { decodeJwt } from "@clerk/backend/jwt";
 import type { ClerkConfig } from "./config.ts";
@@ -26,6 +26,8 @@ export type AuthResult = { ok: true; identity: Identity } | { ok: false; status:
 export interface Auth {
   mcp(request: Request): Promise<AuthResult>;
   api(request: Request): Promise<AuthResult>;
+  /** The user's primary email address, which no token carries; null when it cannot be found. */
+  email(userId: string): Promise<string | null>;
 }
 
 export const NO_ORGANIZATION = "This token names no Clerk organization. OpenMerit accounts are organizations: sign in again and choose an organization, or create one at app.openmerit.ai.";
@@ -75,6 +77,13 @@ export class ClerkAuth implements Auth {
     return identity(verified.data && "subject" in verified.data ? verified.data.subject : null, claims);
   }
 
+  async email(userId: string): Promise<string | null> {
+    try {
+      const user = await createClerkClient({ secretKey: this.config.secretKey }).users.getUser(userId);
+      return user.primaryEmailAddress?.emailAddress ?? null;
+    } catch { return null; }
+  }
+
   async api(request: Request): Promise<AuthResult> {
     const token = bearer(request);
     if (!token) return unauthenticated("Sign in to OpenMerit: this request has no session token.");
@@ -101,4 +110,5 @@ export class TestAuth implements Auth {
   }
   async mcp(request: Request) { return this.parse(request); }
   async api(request: Request) { return this.parse(request); }
+  async email(): Promise<string | null> { return null; }
 }

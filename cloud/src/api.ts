@@ -147,7 +147,9 @@ export function apiRoutes(deps: AppDeps) {
       const denied = admin(); if (denied) return denied;
       if (!deps.billing) return error(503, "Billing is not configured on this server.");
       const info = await account.info();
-      return json(200, await deps.billing.checkout({ accountId: who.accountId, customerId: info.plan?.customerId ?? null, email: null, successUrl: `${config.appUrl}/plan/?checkout=done`, cancelUrl: `${config.appUrl}/plan/` }));
+      return json(200, await deps.billing.checkout({ accountId: who.accountId, customerId: info.plan?.customerId ?? null,
+        // Stripe uses the email only for a new customer: an existing one keeps theirs.
+        email: info.plan?.customerId || !deps.auth ? null : await deps.auth.email(who.userId), successUrl: `${config.appUrl}/plan/?checkout=done`, cancelUrl: `${config.appUrl}/plan/` }));
     }
     if (path === "/api/billing/portal" && method === "POST") {
       const denied = admin(); if (denied) return denied;

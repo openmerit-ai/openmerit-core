@@ -30,7 +30,8 @@ export interface Edit { file: string; line: number; before: string; after: strin
 export interface AgentEvalSummary { status: "checked" | "missing"; passed: boolean; warning: string | null; baseline: { passes: number; total: number } | null; tried: { model: string; passes: number; total: number; passed: boolean }[] }
 
 export interface JobResult {
-  status: "picked" | "keep_current" | "baseline_failed" | "no_cases" | "no_candidates" | "agent_eval_failed";
+  /** `stopped`: the budget ran out before the finalists were measured; the report has what was measured until then. */
+  status: "picked" | "keep_current" | "baseline_failed" | "no_cases" | "no_candidates" | "agent_eval_failed" | "stopped";
   pick: { model: string; endpoint: string; endpointModel: string; passes: number; total: number; costPerCallUsd: number | null; savingPerCallUsd: number | null } | null;
   /** Up to three qualified models, cheapest measured cost first. */
   top: MeasuredModel[];
@@ -79,6 +80,7 @@ export function renderMarkdown(input: { jobId: string; bundle: TaskBundle; resul
     no_cases: "No case has a known correct answer, so nothing was measured.",
     no_candidates: "No allowed model is cheaper than the current one.",
     agent_eval_failed: "Every qualified switch failed the agent's eval, so none is proposed.",
+    stopped: "The run stopped at its budget before the finalists were measured, so it proposes no switch. The models below are what it measured until then.",
     picked: "",
   }[result.status]);
   if (result.edit.edits.length) lines.push("", "Edits:", ...result.edit.edits.map(edit => `- \`${edit.file}:${edit.line}\`: \`${edit.before}\` → \`${edit.after}\``));

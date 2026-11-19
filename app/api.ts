@@ -75,7 +75,7 @@ export interface MeasuredModel {
 }
 
 export interface JobResult {
-  status: "picked" | "keep_current" | "baseline_failed" | "no_cases" | "no_candidates" | "agent_eval_failed";
+  status: "picked" | "keep_current" | "baseline_failed" | "no_cases" | "no_candidates" | "agent_eval_failed" | "stopped";
   pick: { model: string; endpoint: string; endpointModel: string; passes: number; total: number; costPerCallUsd: number | null; savingPerCallUsd: number | null } | null;
   top: MeasuredModel[];
   baseline: MeasuredModel | null;

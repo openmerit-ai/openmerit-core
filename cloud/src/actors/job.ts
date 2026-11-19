@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { Loop, workflow } from "@rivet-dev/workflows";
 import { queue } from "rivetkit";
 import { applyLabelCheck, BudgetRefused, completeWith, createClient, createMeasure, graderFor, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
-import { binarySearch, CandidateUnavailable, catalogueIndex, challengers, checkAgent, redact, SAMPLE_SIZE, type CatalogueModel, type Ledger, type Ranked, type ResolvedGuardrails, type Stage } from "../engine.ts";
+import { binarySearch, CandidateUnavailable, catalogueIndex, CHALLENGERS, challengers, checkAgent, FINALISTS, redact, SAMPLE_SIZE, type CatalogueModel, type Ledger, type Ranked, type ResolvedGuardrails, type Stage } from "../engine.ts";
 import { buildPool, OPENROUTER, type Option, type Pool, type Provisional } from "../pool.ts";
 import { proposeEdit, renderMarkdown, type AgentEvalSummary, type JobResult, type MeasuredModel } from "../report.ts";
 import { services } from "../services.ts";
@@ -145,6 +145,16 @@ export function applyAnswers(bundle: TaskBundle, cases: readonly Case[], answers
 
 const now = () => new Date().toISOString();
 
+/**
+ * About how many measure steps a job takes, as the CLI estimates its runs: the current model, the
+ * search's screens (about log₂ of the ladder, then the finalists' neighbours), the finalists on the
+ * other cases, and the challengers, every unplaced model among them.
+ */
+export function plannedSteps(ranked: number, unplaced: number): number {
+  const screens = Math.min(Math.ceil(Math.log2(ranked + 1)) + FINALISTS + 1, ranked);
+  return 1 + screens + Math.min(FINALISTS, ranked) + Math.min(CHALLENGERS, ranked) + unplaced;
+}
+
 export const job = workflow({
   createState: (_c, input: JobInput): JobState => ({
     input, status: "queued", phase: "source", questions: [], notices: [], progress: { measured: 0, planned: null }, result: null, error: null, updatedAt: now(),
@@ -187,7 +197,8 @@ export const job = workflow({
         if (approved === null && config.openrouter.apiKey) {
           const index = catalogueIndex(await client.catalogue.getOrCreate(["global"]).get());
           const account = client.account.getOrCreate([accountId]);
-          const models = createClient(await keysFor(jobId, account), { fetch, model: model => index.find(model) });
+          // The writer answers with all its cases at once, so it gets longer than a ranking call to answer.
+          const models = createClient(await keysFor(jobId, account), { fetch, model: model => index.find(model), timeoutMs: 600_000 });
           complete = completeWith(models, { endpoint: OPENROUTER, model: config.models.caseWriter }, jobLedger(account, jobId), `${jobId}/cases`, s.abortSignal);
           count = WRITTEN_CASES;
         }
@@ -253,6 +264,7 @@ export const job = workflow({
         const judgeModel = index.find(services().config.models.judge);
         if (judgeModel) priced[services().config.models.judge] = judgeModel;
         s.state.phase = "ranking"; s.state.notices.push(...built.notices); s.state.updatedAt = now();
+        s.state.progress.planned = plannedSteps(built.ranked.length, built.unplaced.length);
         return { pool: built, priced, catalogueVersion: catalogue.version };
       },
     });
@@ -260,6 +272,8 @@ export const job = workflow({
 
     const measuredModels = new Map<string, MeasuredModel>();
     let counter = 0;
+    /** How many measure steps the job takes in all, once the search knows its size. Set outside steps, from the step count, so a replay sets the same. */
+    let plannedTotal: number | null = null;
     /**
      * One measure call as one workflow step. Its ledger keys start with the job and the step, so a replay
      * reuses them; a retry after an error is a deliberate repeat, with its own keys.
@@ -269,6 +283,7 @@ export const job = workflow({
       return ctx.step({
         name, timeout: 0, maxRetries: 0,
         run: async s => {
+          if (plannedTotal !== null) s.state.progress.planned = Math.max(plannedTotal, s.state.progress.measured);
           const account = s.client<Registry>().account.getOrCreate([s.state.input.accountId]);
           const { config, fetch } = services();
           const client = createClient(await keysFor(jobId, account), { fetch, model: model => models.priced[model] ?? null });
@@ -281,13 +296,13 @@ export const job = workflow({
           for (let attempt = 1; ; attempt++) {
             try {
               const result = await run({ model: option.endpointModel, endpoint: option.endpoint }, ids, { run: String(attempt - 1) });
-              s.state.progress.measured += 1; s.state.updatedAt = now();
+              done(s);
               return { kind: "ok" as const, ...result };
             } catch (error) {
               // An actor that is stopping aborts its calls: leave the step unrecorded so it runs again.
               if (s.abortSignal.aborted) throw error;
               const reason = redact(error instanceof Error ? error.message : String(error));
-              if (error instanceof CandidateUnavailable) return { kind: "unavailable" as const, reason };
+              if (error instanceof CandidateUnavailable) { done(s); return { kind: "unavailable" as const, reason }; }
               if (error instanceof BudgetRefused) return { kind: "refused" as const, reason };
               if (attempt >= 3) return { kind: "error" as const, reason };
               await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
@@ -295,6 +310,11 @@ export const job = workflow({
           }
         },
       }) as Promise<Measured>;
+    };
+    const done = (s: { state: JobState }) => {
+      s.state.progress.measured += 1;
+      s.state.progress.planned = Math.max(s.state.progress.planned ?? 0, s.state.progress.measured);
+      s.state.updatedAt = now();
     };
     const record = (option: Option, stage: MeasuredModel["stage"], role: MeasuredModel["role"], results: Measured[], ids: number): MeasuredModel => {
       const ok = results.filter((item): item is Extract<Measured, { kind: "ok" }> => item.kind === "ok");
@@ -313,7 +333,8 @@ export const job = workflow({
       return entry;
     };
     const stopFor = (result: Measured, what: string): JobStop => result.kind === "refused"
-      ? new JobStop("stopped", null, `Stopped while measuring ${what}: ${result.reason}. Raise the budget in the task's guardrails at app.openmerit.ai to continue.`)
+      // The report keeps what was measured before the budget ran out.
+      ? new JobStop("stopped", "stopped", `Stopped while measuring ${what}: ${result.reason}. Raise the budget in the task's guardrails at app.openmerit.ai to continue.`)
       : new JobStop("failed", null, `Measuring ${what} failed: ${"reason" in result ? result.reason : "unknown error"}`);
 
     try {
@@ -356,6 +377,8 @@ export const job = workflow({
         entry.qualified = qualifies(entry);
         return entry;
       };
+      // The search is done: the finalists on the other cases and the challengers are left.
+      plannedTotal = counter + (rest.length ? search.finalists.length : 0) + Math.min(CHALLENGERS, pool.ranked.length) + pool.unplaced.length;
       const finals: MeasuredModel[] = [];
       for (const finalist of search.finalists) finals.push(await full(finalist, stageOf.get(finalist.key) ?? "search", screens.get(finalist.key) ?? null));
       const leaderModel = finals.filter(item => item.qualified).sort((a, b) => (a.costPerCallUsd ?? Infinity) - (b.costPerCallUsd ?? Infinity))[0];
@@ -364,9 +387,19 @@ export const job = workflow({
       const challenging = leader
         ? challengers(pool.ranked, leader, tried, { strength: item => item.eci ?? -Infinity, unplaced: pool.unplaced })
         : pool.unplaced.filter(item => !tried.has(item.key));
-      for (const challenger of challenging) {
-        const entry = await full(challenger, "challenger", null);
-        if (entry.status === "unavailable") entry.qualified = false;
+      plannedTotal = counter + challenging.length;
+      const notices: string[] = [];
+      for (const [index, challenger] of challenging.entries()) {
+        // The finalists are measured, so a challenger the budget refuses, or one that fails, ends the challengers only.
+        try {
+          const entry = await full(challenger, "challenger", null);
+          if (entry.status === "unavailable") entry.qualified = false;
+        } catch (error) {
+          if (!(error instanceof JobStop)) throw error;
+          const left = challenging.slice(index).map(item => item.model);
+          notices.push(`${left.length === 1 ? "Challenger" : "Challengers"} not measured: ${left.join(", ")}. ${error.message}`);
+          break;
+        }
       }
 
       const candidates = [...measuredModels.values()].filter(item => item.role === "candidate");
@@ -378,7 +411,6 @@ export const job = workflow({
       // 5. Agent eval: when the task belongs to an agent, the engine's rule checks the pick with every other task unchanged.
       let chosen = cheaper[0] ?? null;
       let agentEval: AgentEvalSummary | null = null;
-      const notices: string[] = [];
       if (chosen && input.agent !== null) {
         await ctx.step("agent-eval-start", async s => { s.state.phase = "agent_eval"; s.state.updatedAt = now(); });
         const agentMeasure = services().agentEval({ accountId: input.accountId, environment: input.environment, agent: input.agent });

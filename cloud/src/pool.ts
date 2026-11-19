@@ -32,11 +32,16 @@ function optionFor(endpoint: EndpointInfo, model: CatalogueModel | null, endpoin
   };
 }
 
-/** Every model an endpoint offers. OpenRouter serves the whole catalogue; other endpoints serve the models the customer listed. */
+/**
+ * Every model an endpoint offers. OpenRouter serves the whole catalogue's ranked models: one without
+ * an ECI has no place in the search, so it is left out, as the CLI leaves it out. A model the
+ * customer lists by name, on their own endpoint or in an OpenRouter list, is offered either way and
+ * is measured as a challenger when it has no ECI.
+ */
 function offered(endpoint: EndpointInfo, catalogue: Catalogue): Option[] {
   const index = catalogueIndex(catalogue);
   if (endpoint.kind === "openrouter") {
-    const models = endpoint.allowedModels === "all" ? catalogue.models : endpoint.allowedModels.map(id => index.find(id)).filter((item): item is CatalogueModel => item !== null);
+    const models = endpoint.allowedModels === "all" ? catalogue.models.filter(model => model.eci !== null) : endpoint.allowedModels.map(id => index.find(id)).filter((item): item is CatalogueModel => item !== null);
     return models.map(model => optionFor(endpoint, model, model.id));
   }
   if (endpoint.allowedModels === "all") return [];
@@ -81,7 +86,12 @@ export function buildPool(input: { catalogue: Catalogue; endpoints: readonly End
     // Only cheaper models are candidates, when both prices are known.
     return option.price === null || baseline?.price == null || option.price < baseline.price;
   };
-  const options = pool(allowedEndpoints(input.endpoints, guardrails, notices), endpoint => offered(endpoint, catalogue), option => option.key).filter(fits);
+  const endpoints = allowedEndpoints(input.endpoints, guardrails, notices);
+  const options = pool(endpoints, endpoint => offered(endpoint, catalogue), option => option.key).filter(fits);
+  if (endpoints.some(item => item.kind === "openrouter" && item.allowedModels === "all")) {
+    const unranked = catalogue.models.filter(model => model.eci === null && model.id !== current?.id).length;
+    if (unranked) notices.push(`${unranked} catalogue model${unranked === 1 ? "" : "s"} without an ECI left out: the search places models by their capability index.`);
+  }
   const { ranked, unplaced } = ladder(options);
   if (unplaced.length) notices.push(`${unplaced.length} model${unplaced.length === 1 ? " has" : "s have"} no capability index, so ${unplaced.length === 1 ? "it is" : "they are"} measured as challengers and placed by measurement only.`);
   return { baseline, ranked, unplaced, notices };
