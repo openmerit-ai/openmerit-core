@@ -5,7 +5,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { binarySearch, challengers, checkAgent, evaluateTask, MemoryLedger, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
+import { binarySearch, challengers, checkAgent, evaluateTask, MemoryLedger, proposeEdit, taskResult, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
 import { State } from "../src/state/db.ts";
 
 test("the search keeps a ladder's own order, and unplaced options are always challengers", async () => {
@@ -54,6 +54,34 @@ test("three repeats keep a verdict that one run leaves to chance, when the curre
     // i10 failed in one of the current model's runs, so it is never a screening item.
     assert.deepEqual(thrice.reliable, items.slice(0, 9));
   }
+});
+
+test("a task's result picks the cheapest qualifier that costs less than the current model, and keeps it when none does", async () => {
+  // Two placed candidates that both pass every item: "mid" costs $0.002 per item, "low" $0.02. The current model costs `current` per item.
+  const ladder: Rung[] = [{ key: "low", price: 1 }, { key: "mid", price: 2 }];
+  const cost: Record<string, number> = { low: 0.02, mid: 0.002 };
+  const items = Array.from({ length: 6 }, (_, index) => `i${index + 1}`);
+  const run = async (current: number) => taskResult(await evaluateTask({
+    ladder, strength: option => ladder.indexOf(option), items, repeats: 1, baselinePrice: 10, sample: reliable => reliable.slice(0, 5),
+    measure: async (option, ids) => ({ items: Object.fromEntries(ids!.map(id => [id, true])), costUsd: ids!.length * (option ? cost[option.key]! : current) }),
+  }), option => ({ model: option.key, endpoint: "e", endpointModel: option.key, eci: null }), { model: "now", endpoint: "e", endpointModel: "now", eci: null });
+  // Ranked by measured cost, not list price: "mid" first.
+  const cheaper = await run(0.01);
+  assert.deepEqual([cheaper.top.map(item => item.model), cheaper.pick?.model], [["mid", "low"], "mid"]);
+  // Dearer than both: the Top 3 still shows them, and nothing is picked.
+  const dearer = await run(0.001);
+  assert.deepEqual([dearer.top.map(item => item.model), dearer.cheaper, dearer.pick], [["mid", "low"], [], null]);
+});
+
+test("a proposed edit replaces only the model literal, keeps an SDK's provider prefix, and says when the literal is a fallback", () => {
+  const known = new Set(["openai/gpt-5", "openai/gpt-5-nano"]);
+  const find = (id: string) => (known.has(id) ? { id } as CatalogueModel : known.has(`openai/${id.replace(/^openai:/, "")}`) ? { id: `openai/${id.replace(/^openai:/, "")}` } as CatalogueModel : null);
+  const pick = { model: "openai/gpt-5-nano", endpoint: "openai", endpointModel: "gpt-5-nano", onOpenRouter: false };
+  const sdk = proposeEdit({ task: "t", current: "openai/gpt-5", refs: [{ file: "a.py", line: 1, spelling: 'init_chat_model("openai:gpt-5")' }], pick, baselineEndpoint: "openai", find });
+  assert.deepEqual([sdk.edits.map(edit => edit.after), sdk.instructions], [['init_chat_model("openai:gpt-5-nano")'], null]);
+  const fallback = proposeEdit({ task: "t", current: "openai/gpt-5", refs: [{ file: "a.ts", line: 2, spelling: "env.MODEL ?? 'gpt-5-nano'" }], pick: { ...pick, model: "openai/gpt-5", endpointModel: "gpt-5" }, baselineEndpoint: "openai", find });
+  assert.deepEqual(fallback.edits.map(edit => edit.after), ["env.MODEL ?? 'gpt-5'"]);
+  assert.match(fallback.instructions ?? "", /The code's literal is a fallback/);
 });
 
 async function ledgerContract(ledger: Ledger) {

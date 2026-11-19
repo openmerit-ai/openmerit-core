@@ -1,7 +1,7 @@
 // A job's result and its report: scores and picks, never raw model outputs. The same result goes to
 // the coding agent through openmerit_result, to /api/runs/:id as JSON, and to /api/r/:id.md as Markdown.
-import type { CatalogueModel, ResolvedGuardrails } from "./engine.ts";
-import type { Option, Provisional } from "./pool.ts";
+import { proposeEdit as proposeChange, type CatalogueModel, type ResolvedGuardrails } from "./engine.ts";
+import { OPENROUTER, type Option, type Provisional } from "./pool.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 
 export interface MeasuredModel {
@@ -50,43 +50,10 @@ export interface JobResult {
   cases: { total: number; fromExamples: number; written: number };
 }
 
-/** A quoted string in code: double, single or backtick quotes, with escapes. */
-const LITERAL = /(["'`])((?:\\.|(?!\1)[^\\])*)\1/g;
-
-/**
- * The change that applies the pick. Each code ref's `spelling` is the code as written; only the string
- * literal in it that names a model is replaced, keeping its quotes and the code around it, such as an
- * environment variable it falls back from. A ref with no such literal gets an instruction instead.
- * OpenRouter needs the full catalogue ID; another endpoint gets the name it calls the model by.
- */
+/** The change that applies the pick: openmerit/engine's `proposeEdit`, which the CLI's Configure step uses too, for the bundle's code refs. */
 export function proposeEdit(bundle: TaskBundle, pick: Option, baselineEndpoint: string | null, find: (id: string) => CatalogueModel | null): JobResult["edit"] {
-  const id = pick.endpoint === "openrouter" ? pick.model : pick.endpointModel;
-  const current = find(bundle.current.model)?.id ?? bundle.current.model;
-  const names = (text: string) => find(text)?.id ?? (text.toLowerCase() === bundle.current.model.toLowerCase() ? current : null);
-  const edits: Edit[] = [];
-  const notes: string[] = [];
-  let fallback = false;
-  for (const ref of bundle.codeRefs ?? []) {
-    // An older client sends the model ID alone, without its quotes: that is the literal's text.
-    const unquoted = !/["'`]/.test(ref.spelling) && names(ref.spelling.trim()) !== null;
-    const literal = unquoted ? null : [...ref.spelling.matchAll(LITERAL)].find(match => names(match[2]!) !== null);
-    if (!unquoted && !literal) {
-      notes.push(`\`${ref.file}:${ref.line}\` (\`${ref.spelling}\`) holds no model ID string, so it is not edited: set the model it gives ${bundle.task} to \`${id}\` where that value comes from.`);
-      continue;
-    }
-    const text = unquoted ? ref.spelling.trim() : literal![2]!;
-    if (names(text) !== current) fallback = true;
-    const after = unquoted ? ref.spelling.replace(text, id) : `${ref.spelling.slice(0, literal!.index)}${literal![1]}${id}${literal![1]}${ref.spelling.slice(literal!.index + literal![0].length)}`;
-    if (after !== ref.spelling) edits.push({ file: ref.file, line: ref.line, before: ref.spelling, after });
-  }
-  const moves = baselineEndpoint !== null && pick.endpoint !== baselineEndpoint;
-  const parts = [
-    !edits.length && !notes.length ? `Set the model for ${bundle.task} to \`${id}\`.` : null,
-    ...notes,
-    fallback ? `The code's literal is a fallback; production's model comes from elsewhere (for example an environment variable). Set it to \`${id}\`.` : null,
-    moves ? `Call it on ${pick.endpoint === "openrouter" ? "OpenRouter (https://openrouter.ai/api/v1)" : `your endpoint ${pick.endpoint}`} instead of ${baselineEndpoint}.` : null,
-  ].filter(Boolean);
-  return { edits, instructions: parts.length ? parts.join(" ") : null };
+  const change = proposeChange({ task: bundle.task, current: bundle.current.model, refs: bundle.codeRefs ?? [], pick: { model: pick.model, endpoint: pick.endpoint, endpointModel: pick.endpointModel, onOpenRouter: pick.endpoint === OPENROUTER }, baselineEndpoint, find });
+  return { edits: change.edits.map(({ file, line, before, after }) => ({ file, line, before, after })), instructions: change.instructions };
 }
 
 /** What the coding agent and the app read beside a result: the one-line reason, and whether each top model is cheaper per call than the current one. */

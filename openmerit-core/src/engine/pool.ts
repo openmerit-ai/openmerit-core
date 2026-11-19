@@ -17,5 +17,25 @@ export function ladder<T extends Rung & { eci: number | null }>(options: readonl
   return { ranked: order(options.filter(placed)), unplaced: options.filter(option => !placed(option)) };
 }
 
+/** What a task needs from a model. */
+export interface Needs { tools?: boolean; vision?: boolean; structuredOutput?: boolean }
+
+/**
+ * Whether a catalogue model may replace the current one: it is another model, has a list price above
+ * zero (free tiers are rate limited and may train on prompts), costs less than the current model when
+ * that price is known, and supports what the task needs. A model outside the catalogue, such as a
+ * customer's fine-tune, is not judged here: only measurement can place it.
+ */
+export function eligible(model: CatalogueModel, current: Pick<CatalogueModel, "id" | "inputPerM" | "outputPerM"> | null, needs: Needs): boolean {
+  const price = blendedPrice(model);
+  if (model.id === current?.id || price === null || price <= 0) return false;
+  const ceiling = current ? blendedPrice(current) : null;
+  if (ceiling !== null && price >= ceiling) return false;
+  if (needs.tools && !model.tools) return false;
+  if (needs.vision && !model.vision) return false;
+  if (needs.structuredOutput && !model.structuredOutputs) return false;
+  return true;
+}
+
 /** List price in USD per million input plus output tokens; null when either is unknown. */
 export const blendedPrice = (model: Pick<CatalogueModel, "inputPerM" | "outputPerM">) => (model.inputPerM === null || model.outputPerM === null ? null : model.inputPerM + model.outputPerM);

@@ -4,11 +4,24 @@
 // A trace case is different: it carries its recorded request in `input.messages`, which is sent as
 // it is, with the bundle's tools, in one call. Its answer, tool calls included, is what is graded.
 import type { Meter, ModelClient } from "./clients.ts";
-import type { Ledger } from "../engine/index.ts";
+import type { CatalogueModel, Ledger } from "../engine/index.ts";
 import type { Case, Message, TaskBundle, ToolCall } from "./types.ts";
 
 /** Tool results the runner sends back before it gives up on a case. */
 export const MAX_TOOL_ROUNDS = 4;
+
+/** Rough tokens of one call of a task: the prompt's characters over four, and a short answer. */
+export function callTokens(bundle: TaskBundle): { input: number; output: number } {
+  const prompt = `${bundle.prompt.system ?? ""}${bundle.prompt.messages.map(item => item.content).join("")}${JSON.stringify(bundle.tools ?? [])}`;
+  return { input: Math.ceil(prompt.length / 4) + 50, output: bundle.output.kind === "label" ? 10 : 300 };
+}
+
+/** One call's estimated cost at list price, or null when the price is unknown. */
+export function callCost(model: Pick<CatalogueModel, "inputPerM" | "outputPerM"> | null, bundle: TaskBundle): number | null {
+  if (!model || model.inputPerM === null || model.outputPerM === null) return null;
+  const tokens = callTokens(bundle);
+  return (tokens.input * model.inputPerM + tokens.output * model.outputPerM) / 1e6;
+}
 
 const PLACEHOLDER = /\{\{\s*([\w.-]+)\s*\}\}/g;
 

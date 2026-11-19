@@ -15,7 +15,7 @@ import { createHash, randomInt } from "node:crypto";
 import { CriticalError, Loop, StepExhaustedError, workflow } from "@rivet-dev/workflows";
 import { queue } from "rivetkit";
 import { applyLabelCheck, BudgetRefused, completeWith, createClient, createMeasure, graderFor, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
-import { CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, FINALISTS, newProgress, redact, SAMPLE_SIZE, score, type CatalogueModel, type Evaluated, type Ledger, type ResolvedGuardrails, type Score } from "../engine.ts";
+import { baselineResult, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, FINALISTS, modelResult, newProgress, redact, SAMPLE_SIZE, score, taskResult, type CatalogueModel, type Ledger, type ModelResult, type ResolvedGuardrails } from "../engine.ts";
 import { buildPool, OPENROUTER, type Option, type Pool, type Provisional } from "../pool.ts";
 import { proposeEdit, renderMarkdown, type AgentEvalSummary, type JobResult, type MeasuredModel } from "../report.ts";
 import { capture } from "../analytics.ts";
@@ -313,23 +313,25 @@ export const job = workflow({
       const policy = await ctx.getVersion("ranking-policy", 2);
       const repeats = Math.max(1, guardrails.effective.repeats ?? DEFAULT_REPEATS);
       const progress = newProgress<Option>();
-      const asModel = (option: Option, figures: Score, extra: Pick<MeasuredModel, "role" | "stage" | "status" | "qualified" | "note">): MeasuredModel => ({
-        model: option.model, endpoint: option.endpoint, endpointModel: option.endpointModel, eci: option.eci, inCatalogue: option.inCatalogue, funding: option.funding,
-        passes: figures.passes, total: figures.total, costPerCallUsd: figures.costPerItemUsd, costIsEstimate: figures.costIsEstimate,
-        latencyMs: figures.latencyMs === null ? null : Math.round(figures.latencyMs), ...extra,
-      });
-      const entries = new Map<Evaluated<Option>, MeasuredModel>();
-      /** One case is one call, so the engine's cost per item is the cost per call. A model that passed its screen but whose full runs did not finish is left out. */
-      const modelOf = (item: Evaluated<Option>): MeasuredModel => {
-        let found = entries.get(item);
-        if (!found) { found = asModel(item.option, item, { role: "candidate", stage: item.stage, status: item.status === "measured" ? "measured" : item.status === "unavailable" ? "unavailable" : "screened_out", qualified: false, note: item.reason ?? "" }); entries.set(item, found); }
-        found.qualified = item.qualified;
-        return found;
+      const minPassRate = guardrails.effective.minPassRate ?? 0;
+      const maxLatency = Math.min(guardrails.effective.latencyMs ?? Infinity, bundle.constraints?.maxLatencyMs ?? Infinity);
+      const rules = { threshold: minPassRate ? minPassRate - 1e-9 : null, maxLatencyMs: Number.isFinite(maxLatency) ? maxLatency : null };
+      const describe = (option: Option) => ({ model: option.model, endpoint: option.endpoint, endpointModel: option.endpointModel, eci: option.eci });
+      const optionOf = (item: { model: string; endpoint: string }) => [...(pool.baseline ? [pool.baseline] : []), ...pool.ranked, ...pool.unplaced].find(option => option.model === item.model && option.endpoint === item.endpoint)!;
+      /** openmerit/engine's result for a model, in the report's names: one case is one call, so the cost per item is the cost per call. */
+      const measuredModel = (item: ModelResult): MeasuredModel => {
+        const option = optionOf(item);
+        return {
+          model: item.model, endpoint: item.endpoint, endpointModel: item.endpointModel, role: item.role, stage: item.stage, eci: item.eci, inCatalogue: option.inCatalogue, funding: option.funding,
+          status: item.status === "unmeasured" ? "screened_out" : item.status, passes: item.passes, total: item.total, costPerCallUsd: item.costPerItemUsd, costIsEstimate: item.costIsEstimate,
+          latencyMs: item.latencyMs === null ? null : Math.round(item.latencyMs), qualified: item.qualified, note: item.note,
+        };
       };
-      const listed = (items: Iterable<Evaluated<Option>>) => [...items].filter(item => item.status !== "unmeasured").map(modelOf);
-      const baselineOf = () => (pool.baseline && progress.baseline.length ? asModel(pool.baseline, score(progress.baseline), { role: "baseline", stage: "baseline", status: "measured", qualified: false, note: "" }) : null);
+      // A model that passed its screen but whose full runs did not finish is left out.
+      const listed = (items: readonly ModelResult[]) => items.filter(item => item.status !== "unmeasured").map(measuredModel);
+      const baselineOf = () => (pool.baseline && progress.baseline.length ? measuredModel(baselineResult(score(progress.baseline), describe(pool.baseline))) : null);
       partial = (status, notices, spent) => ({
-        status, pick: null, top: [], nearMisses: [], baseline: baselineOf(), candidates: listed(progress.tried.values()),
+        status, pick: null, top: [], nearMisses: [], baseline: baselineOf(), candidates: listed([...progress.tried.values()].map(item => modelResult(item, describe(item.option), score(progress.baseline), rules))),
         search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: [], finalists: [], challengers: [], shortfall: null }, agentEval: null, edit: { edits: [], instructions: null },
         spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices,
         reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts,
@@ -407,13 +409,11 @@ export const job = workflow({
         const current = pool.baseline;
 
         // 4. Ranking: openmerit/engine's evaluateTask, the policy the CLI runs too. Each of its measure calls is one step.
-        const minPassRate = guardrails.effective.minPassRate ?? 0;
-        const maxLatency = Math.min(guardrails.effective.latencyMs ?? Infinity, bundle.constraints?.maxLatencyMs ?? Infinity);
         // The agent was told the provisional pick: when no measured model beats the current one per call, it is measured before keeping the current model.
         const provisional = (told && [...pool.ranked, ...pool.unplaced].find(item => item.model === told.model && item.endpoint === told.endpoint)) || null;
         const evaluated = await evaluateTask<Option>({
           ladder: pool.ranked, unplaced: pool.unplaced, strength: item => item.eci ?? -Infinity, items: caseIds, repeats, provisional,
-          rules: { threshold: minPassRate ? minPassRate - 1e-9 : null, maxLatencyMs: Number.isFinite(maxLatency) ? maxLatency : null },
+          rules,
           baselinePrice: current.price, progress,
           measure: async (option, items, call) => {
             const target = option ?? current;
@@ -442,15 +442,18 @@ export const job = workflow({
             challengers: options => { plannedTotal = counter + options.length * (1 + repeats); },
           },
         });
-        const baseline = baselineOf()!;
+
         if (evaluated.status === "too_few_reliable") {
           const runs = evaluated.baseline.runs.length;
           throw new JobStop("stopped", "baseline_failed", !evaluated.baseline.passes
             ? `${current.model} passed none of the ${caseIds.length} cases, so there is nothing to compare against. Check the labels.`
             : `${current.model} passed only ${evaluated.reliable.length} of the ${caseIds.length} cases in ${runs === 1 ? "its first run" : `every one of its ${runs} runs`}; OpenMerit screens candidates on ${SAMPLE_SIZE} cases it passes. Check the labels, or add examples it gets right.`);
         }
-        const candidates = listed(evaluated.candidates);
-        const top = evaluated.top.map(modelOf), cheaper = evaluated.cheaper.map(modelOf), nearMisses = evaluated.nearMisses.map(modelOf);
+        // The result, the Top 3, the near misses and the pick are openmerit/engine's, as the CLI's are.
+        const result = taskResult(evaluated, describe, describe(current), rules);
+        const baseline = measuredModel(result.baseline);
+        const candidates = listed(result.candidates);
+        const top = result.top.map(measuredModel), cheaper = result.cheaper.map(measuredModel), nearMisses = result.nearMisses.map(measuredModel);
         const notices: string[] = [];
         const { ended } = evaluated;
         if (ended && !ended.provisional) notices.push(`${ended.left.length === 1 ? "Challenger" : "Challengers"} not measured: ${ended.left.map(item => item.model).join(", ")}. ${ended.reason}`);
@@ -460,12 +463,10 @@ export const job = workflow({
             : tried?.status === "screened_out" ? `No measured model that qualified was cheaper per call than ${current.model}, so the provisional pick ${provisional.model} was screened too, and failed the ${evaluated.samples.length} sample cases.`
             : `No measured model that qualified was cheaper per call than ${current.model}, so the provisional pick ${provisional.model} was measured on every case too.`);
         }
-        const search = evaluated.search!;
         const challenging = [...evaluated.challenged, ...(provisional && evaluated.provisionalTried ? [provisional] : [])];
-        const optionOf = (item: MeasuredModel) => [...pool.ranked, ...pool.unplaced].find(option => option.model === item.model && option.endpoint === item.endpoint)!;
 
         // 5. Agent eval: when the task belongs to an agent, the engine's rule checks the pick with every other task unchanged.
-        let chosen = cheaper[0] ?? null;
+        let chosen = result.pick ? measuredModel(result.pick) : null;
         let agentEval: AgentEvalSummary | null = null;
         if (chosen && input.agent !== null) {
           await ctx.step("agent-eval-start", async s => { s.state.phase = "agent_eval"; s.state.live = null; s.state.updatedAt = now(); });
@@ -496,16 +497,16 @@ export const job = workflow({
             const account = client.account.getOrCreate([input.accountId]);
             const spent = await account.spent({ jobId });
             const index = catalogueIndex(await client.catalogue.getOrCreate(["global"]).get());
-            const status: JobResult["status"] = chosen ? "picked" : agentEval && cheaper.length ? "agent_eval_failed" : !pool.ranked.length && !pool.unplaced.length ? "no_candidates" : "keep_current";
-            const result: JobResult = {
-              status, top, nearMisses, baseline, candidates,
+            const jobStatus: JobResult["status"] = chosen ? "picked" : agentEval && cheaper.length ? "agent_eval_failed" : !pool.ranked.length && !pool.unplaced.length ? "no_candidates" : "keep_current";
+            const report: JobResult = {
+              status: jobStatus, top, nearMisses, baseline, candidates,
               pick: chosen ? { model: chosen.model, endpoint: chosen.endpoint, endpointModel: chosen.endpointModel, passes: chosen.passes, total: chosen.total, costPerCallUsd: chosen.costPerCallUsd, savingPerCallUsd: baseline.costPerCallUsd !== null && chosen.costPerCallUsd !== null ? baseline.costPerCallUsd - chosen.costPerCallUsd : null } : null,
-              search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: evaluated.samples, finalists: search.finalists.map(item => item.model), challengers: challenging.map(item => item.model), shortfall: search.shortfall ?? null },
+              search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: result.samples, finalists: result.finalists, challengers: challenging.map(item => item.model), shortfall: result.searchShortfall },
               agentEval, edit: chosen ? proposeEdit(bundle, optionOf(chosen), pool.baseline!.endpoint, index.find) : { edits: [], instructions: null },
               spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices: [...s.state.notices, ...notices],
               reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts,
             };
-            await finish(s, client, jobId, "done", result, null);
+            await finish(s, client, jobId, "done", report, null);
           },
         });
       } catch (error) {
