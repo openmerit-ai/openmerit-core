@@ -12,7 +12,7 @@
 // Endpoint keys reach the job from the account actor and stay in this process's memory; they are
 // never in step results or actor state, which are on disk.
 import { createHash } from "node:crypto";
-import { Loop, workflow } from "@rivet-dev/workflows";
+import { CriticalError, Loop, StepExhaustedError, workflow } from "@rivet-dev/workflows";
 import { queue } from "rivetkit";
 import { applyLabelCheck, BudgetRefused, completeWith, createClient, createMeasure, graderFor, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
 import { binarySearch, CandidateUnavailable, catalogueIndex, CHALLENGERS, challengers, checkAgent, FINALISTS, redact, SAMPLE_SIZE, type CatalogueModel, type Ledger, type Ranked, type ResolvedGuardrails, type Stage } from "../engine.ts";
@@ -63,6 +63,15 @@ export interface JobState {
 export interface JobView extends Omit<JobState, "input"> { jobId: string; taskId: string; task: string; provisional: Provisional; createdAt: string }
 
 type Measured = ({ kind: "ok" } & MeasureResult) | { kind: "unavailable" | "refused" | "error"; reason: string };
+
+/**
+ * Retries for the steps that call models. @rivet-dev/workflows counts a step that the actor's stop
+ * aborts, as on a deploy's drain, as a failed attempt; with no retries that one abort exhausts the
+ * step and the workflow stays failed. These steps return their own failures as values, so a thrown
+ * error is almost always an interruption, and the step runs again where the actor moves, reusing its
+ * `<job>/<step>` ledger keys.
+ */
+const INTERRUPTIONS = 5;
 
 /** Ends the job early; caught by the workflow, which records why. */
 class JobStop extends Error {
@@ -162,328 +171,343 @@ export const job = workflow({
   queues: { answers: queue<{ answers: Answers }>() },
   run: async ctx => {
     const jobId = ctx.key[0]!;
-
-    // 1. Source: redact the bundle, resolve the task's guardrails, set the job's spend limits.
-    const source = await ctx.step({
-      name: "source", timeout: 60_000,
-      run: async s => {
-        const { input } = s.state;
-        const bundle = redactBundle(input.bundle);
-        const account = s.client<Registry>().account.getOrCreate([input.accountId]);
-        const guardrails = await account.resolveGuardrails({ environment: input.environment, agent: input.agent, taskId: input.taskId });
-        const { effective } = guardrails;
-        await account.jobUpdate({ jobId, status: "running", budgetUsd: effective.budgetUsd ?? services().config.limits.defaultJobBudgetUsd, capOpenmeritUsd: effective.spendCapUsd ?? null, capCustomerUsd: effective.customerSpendCapUsd ?? null });
-        s.state.status = "running"; s.state.phase = "cases"; s.state.updatedAt = now();
-        if (effective.repeats && effective.repeats > 1) s.state.notices.push(`The repeats guardrail (${effective.repeats}) is not supported by the cloud runner yet: each case runs once.`);
-        return { bundle, guardrails, accountId: input.accountId, environment: input.environment, agent: input.agent, provisional: input.provisional };
-      },
-    });
-    const { bundle, guardrails } = source as { bundle: TaskBundle; guardrails: ResolvedGuardrails };
-    const input = { accountId: source.accountId, environment: source.environment, agent: source.agent };
-    // A job recorded before this step returned its provisional pick has none here.
-    const told = (source as { provisional?: Provisional }).provisional ?? null;
-
-    // 2. Cases: the bundle's examples first, with labels the user gave in earlier runs, then cases a
-    // model writes on OpenMerit's OpenRouter key; then the label check. A task's later runs reuse the
-    // written cases the user approved, so a watch job asks nothing and its results stay comparable.
-    const written = await ctx.step({
-      name: "cases", timeout: 0, maxRetries: 0,
-      run: async s => {
-        const { accountId, taskId } = s.state.input;
-        const client = s.client<Registry>();
-        const task = client.task.getOrCreate([accountId, taskId]);
-        const [saved, approved] = await Promise.all([task.labels(), task.written()]);
-        const { config, fetch } = services();
-        let complete: Complete = async () => "";
-        let count = 0;
-        if (approved === null && config.openrouter.apiKey) {
-          const index = catalogueIndex(await client.catalogue.getOrCreate(["global"]).get());
-          const account = client.account.getOrCreate([accountId]);
-          // The writer answers with all its cases at once, so it gets longer than a ranking call to answer.
-          const models = createClient(await keysFor(jobId, account), { fetch, model: model => index.find(model), timeoutMs: 600_000 });
-          complete = completeWith(models, { endpoint: OPENROUTER, model: config.models.caseWriter }, jobLedger(account, jobId), `${jobId}/cases`, s.abortSignal);
-          count = WRITTEN_CASES;
-        }
-        let made;
-        try {
-          made = await writeCases({ bundle, complete, count });
-        } catch (error) {
-          if (s.abortSignal.aborted) throw error;
-          s.state.notices.push(`No cases were written (${redact(error instanceof Error ? error.message : String(error)).slice(0, 300)}): the job measures on the bundle's examples only.`);
-          made = await writeCases({ bundle, complete, count: 0 });
-        }
-        const examples = made.cases.filter(item => item.origin === "example").map(item => {
-          const label = saved[caseKey(item.input)];
-          return item.expected === undefined && label ? { ...item, expected: label.expected, approved: label.approved } : item;
-        });
-        return [...examples, ...(approved ?? made.cases.filter(item => item.origin === "written"))];
-      },
-    });
-    const cases = await ctx.loop({
-      name: "label-check", state: written,
-      run: async (loop, current) => {
-        const questions = labelQuestions(bundle, current);
-        if (!questions.length) return Loop.break(current);
-        await loop.step("ask", async s => {
-          s.state.status = "needs_input"; s.state.phase = "label_check"; s.state.questions = questions; s.state.updatedAt = now();
-          await s.client<Registry>().account.getOrCreate([s.state.input.accountId]).jobUpdate({ jobId, status: "needs_input" });
-        });
-        const message = await loop.queue.next("answer", { names: ["answers"] });
-        const next = await loop.step("apply", async s => {
-          const applied = applyAnswers(bundle, current, message.body.answers);
-          s.state.questions = []; s.state.status = "running"; s.state.phase = "cases"; s.state.updatedAt = now();
-          s.state.notices = [...s.state.notices.filter(notice => !notice.startsWith("Answer not used: ")), ...applied.problems.map(problem => `Answer not used: ${problem}`)];
-          const labels = Object.fromEntries(applied.cases.filter(item => item.origin === "example" && (item.expected !== undefined || item.approved === false)).map(item => [caseKey(item.input), { expected: item.expected, approved: item.approved !== false }]));
-          const task = s.client<Registry>().task.getOrCreate([s.state.input.accountId, s.state.input.taskId]);
-          await task.saveLabels(labels);
-          const kept = applied.cases.filter(item => item.origin === "written" && item.approved === true);
-          if (message.body.answers[LABEL_CHECK_QUESTION] !== undefined && kept.length) await task.saveWritten(kept);
-          await s.client<Registry>().account.getOrCreate([s.state.input.accountId]).jobUpdate({ jobId, status: "running" });
-          return applied.cases;
-        });
-        return Loop.continue(next);
-      },
-    });
-    const usable = cases.filter(labeled);
-    const caseIds = usable.map(item => item.id);
-    const counts = { total: usable.length, fromExamples: usable.filter(item => item.origin === "example").length, written: usable.filter(item => item.origin !== "example").length };
-
-    // 3. Models: the ECI-ordered pool over every allowed endpoint.
-    const models = await ctx.step({
-      name: "models", timeout: 60_000,
-      run: async s => {
-        const client = s.client<Registry>();
-        const catalogue = await client.catalogue.getOrCreate(["global"]).get();
-        const endpoints = await client.account.getOrCreate([s.state.input.accountId]).endpointsForJob();
-        const built = buildPool({ catalogue, endpoints, bundle, guardrails: guardrails.effective });
-        // The catalogue entries the job's calls are priced by, by the name each endpoint calls the model, so every step prices on this version.
-        const index = catalogueIndex(catalogue);
-        const priced: Record<string, CatalogueModel> = {};
-        for (const option of [built.baseline, ...built.ranked, ...built.unplaced]) {
-          const model = option?.inCatalogue ? index.find(option.model) : null;
-          if (option && model) priced[option.endpointModel] = model;
-        }
-        const judgeModel = index.find(services().config.models.judge);
-        if (judgeModel) priced[services().config.models.judge] = judgeModel;
-        s.state.phase = "ranking"; s.state.notices.push(...built.notices); s.state.updatedAt = now();
-        s.state.progress.planned = plannedSteps(built.ranked.length, built.unplaced.length);
-        return { pool: built, priced, catalogueVersion: catalogue.version };
-      },
-    });
-    const pool = models.pool as Pool;
-
-    const measuredModels = new Map<string, MeasuredModel>();
-    let counter = 0;
-    /** How many measure steps the job takes in all, once the search knows its size. Set outside steps, from the step count, so a replay sets the same. */
-    let plannedTotal: number | null = null;
-    /**
-     * One measure call as one workflow step. Its ledger keys start with the job and the step, so a replay
-     * reuses them; a retry after an error is a deliberate repeat, with its own keys.
-     */
-    const measure = (option: Option, ids: string[]): Promise<Measured> => {
-      const name = `measure-${++counter}`;
-      return ctx.step({
-        name, timeout: 0, maxRetries: 0,
-        run: async s => {
-          if (plannedTotal !== null) s.state.progress.planned = Math.max(plannedTotal, s.state.progress.measured);
-          const account = s.client<Registry>().account.getOrCreate([s.state.input.accountId]);
-          const { config, fetch } = services();
-          const client = createClient(await keysFor(jobId, account), { fetch, model: model => models.priced[model] ?? null });
-          // Text answers go to a fixed judge on OpenMerit's key. Its calls count in the job's spend but not in the candidate's cost per call.
-          const judge = bundle.output.kind === "text" && config.openrouter.apiKey ? {
-            client, endpoint: OPENROUTER, model: config.models.judge,
-            rubric: bundle.description ? `The answer does this task well: ${bundle.description}` : "The answer does what the prompt asks and agrees with the reference answer.",
-          } : undefined;
-          const run = createMeasure({ bundle, cases: usable, client, grader: graderFor(bundle, judge ? { judge } : {}), ledger: jobLedger(account, jobId), key: `${jobId}/${name}`, signal: s.abortSignal });
-          for (let attempt = 1; ; attempt++) {
-            try {
-              const result = await run({ model: option.endpointModel, endpoint: option.endpoint }, ids, { run: String(attempt - 1) });
-              done(s);
-              return { kind: "ok" as const, ...result };
-            } catch (error) {
-              // An actor that is stopping aborts its calls: leave the step unrecorded so it runs again.
-              if (s.abortSignal.aborted) throw error;
-              const reason = redact(error instanceof Error ? error.message : String(error));
-              if (error instanceof CandidateUnavailable) { done(s); return { kind: "unavailable" as const, reason }; }
-              if (error instanceof BudgetRefused) return { kind: "refused" as const, reason };
-              if (attempt >= 3) return { kind: "error" as const, reason };
-              await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-            }
-          }
-        },
-      }) as Promise<Measured>;
-    };
-    const done = (s: { state: JobState }) => {
-      s.state.progress.measured += 1;
-      s.state.progress.planned = Math.max(s.state.progress.planned ?? 0, s.state.progress.measured);
-      s.state.updatedAt = now();
-    };
-    const record = (option: Option, stage: MeasuredModel["stage"], role: MeasuredModel["role"], results: Measured[], ids: number): MeasuredModel => {
-      const ok = results.filter((item): item is Extract<Measured, { kind: "ok" }> => item.kind === "ok");
-      const unavailable = results.find(item => item.kind === "unavailable");
-      const passes = ok.reduce((sum, item) => sum + item.results.filter(result => result.pass).length, 0);
-      const total = ok.reduce((sum, item) => sum + item.results.length, 0);
-      const cost = ok.reduce((sum, item) => sum + item.costUsd, 0);
-      const latencies = ok.map(item => item.latencyMs).filter((value): value is number => value !== null);
-      const entry: MeasuredModel = {
-        model: option.model, endpoint: option.endpoint, endpointModel: option.endpointModel, role, stage, eci: option.eci, inCatalogue: option.inCatalogue, funding: option.funding,
-        status: unavailable ? "unavailable" : total < ids ? "screened_out" : "measured", passes, total, costPerCallUsd: total ? cost / total : null,
-        costIsEstimate: ok.some(item => item.costIsEstimate), latencyMs: latencies.length ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null,
-        qualified: false, note: unavailable && "reason" in unavailable ? unavailable.reason : "",
-      };
-      measuredModels.set(`${role}:${option.key}`, entry);
-      return entry;
-    };
-    const stopFor = (result: Measured, what: string): JobStop => result.kind === "refused"
-      // The report keeps what was measured before the budget ran out.
-      ? new JobStop("stopped", "stopped", `Stopped while measuring ${what}: ${result.reason}. Raise the budget in the task's guardrails at app.openmerit.ai to continue.`)
-      : new JobStop("failed", null, `Measuring ${what} failed: ${"reason" in result ? result.reason : "unknown error"}`);
-
+    /** The report of what was measured so far, once the pool is known; a stopped or failed job saves it. */
+    let partial: ((status: JobResult["status"], notices: string[], spent: { openmeritUsd: number; customerUsd: number }) => JobResult) | null = null;
     try {
-      if (!usable.length) throw new JobStop("stopped", "no_cases", "No case has a known correct answer. Add examples with expected answers to the bundle, or answer the label check.");
-      if (!pool.baseline) throw new JobStop("failed", "baseline_failed", "No endpoint can run the current model: OpenMerit's OpenRouter key is not configured, and no endpoint of yours serves it.");
 
-      // 4. Ranking: the current model on every case, Scout Model Binary Search on samples it passes, then finalists and challengers on every case.
-      const baselineRun = await measure(pool.baseline, caseIds);
-      if (baselineRun.kind === "refused" || baselineRun.kind === "error") throw stopFor(baselineRun, `the current model ${pool.baseline.model}`);
-      const baseline = record(pool.baseline, "baseline", "baseline", [baselineRun], caseIds.length);
-      if (baselineRun.kind !== "ok" || !baseline.passes) throw new JobStop("stopped", "baseline_failed", baselineRun.kind === "ok" ? `${pool.baseline.model} passed none of the ${caseIds.length} cases, so there is nothing to compare against. Check the labels.` : `${pool.baseline.model} could not run: ${baselineRun.reason}`);
-      const samples = baselineRun.results.filter(item => item.pass).map(item => item.caseId).slice(0, SAMPLE_SIZE);
-      const rest = caseIds.filter(id => !samples.includes(id));
-
-      const screens = new Map<string, Measured>();
-      const screen = async (option: Option & Ranked, _stage: Stage) => {
-        const result = await measure(option, samples);
-        screens.set(option.key, result);
-        if (result.kind === "unavailable") throw new CandidateUnavailable(result.reason);
-        if (result.kind !== "ok") throw stopFor(result, option.model);
-        return result.results.every(item => item.pass);
-      };
-      const search = await binarySearch(pool.ranked, screen);
-      const stageOf = new Map(search.trials.map(trial => [trial.candidate.key, trial.stage]));
-      for (const trial of search.trials) if (!trial.accepted) record(trial.candidate, trial.stage, "candidate", [screens.get(trial.candidate.key)!], caseIds.length);
-      for (const skipped of search.unavailable) record(skipped.candidate, skipped.stage, "candidate", [screens.get(skipped.candidate.key)!], caseIds.length);
-
-      const minPassRate = guardrails.effective.minPassRate ?? 0;
-      const maxLatency = Math.min(guardrails.effective.latencyMs ?? Infinity, bundle.constraints?.maxLatencyMs ?? Infinity);
-      const qualifies = (item: MeasuredModel) => item.status === "measured" && item.passes >= baseline.passes && item.passes / item.total >= minPassRate - 1e-9 && (item.latencyMs === null || item.latencyMs <= maxLatency);
-      const full = async (option: Option, stage: MeasuredModel["stage"], prior: Measured | null) => {
-        const runs = prior ? [prior] : [];
-        const ids = prior ? rest : caseIds;
-        if (ids.length) {
-          const result = await measure(option, ids);
-          if (result.kind === "refused" || result.kind === "error") throw stopFor(result, option.model);
-          runs.push(result);
-        }
-        const entry = record(option, stage, "candidate", runs, caseIds.length);
-        entry.qualified = qualifies(entry);
-        return entry;
-      };
-      // The search is done: the finalists on the other cases and the challengers are left.
-      plannedTotal = counter + (rest.length ? search.finalists.length : 0) + Math.min(CHALLENGERS, pool.ranked.length) + pool.unplaced.length;
-      const finals: MeasuredModel[] = [];
-      for (const finalist of search.finalists) finals.push(await full(finalist, stageOf.get(finalist.key) ?? "search", screens.get(finalist.key) ?? null));
-      const leaderModel = finals.filter(item => item.qualified).sort((a, b) => (a.costPerCallUsd ?? Infinity) - (b.costPerCallUsd ?? Infinity))[0];
-      const leader = (leaderModel && pool.ranked.find(item => item.key === leaderModel.model)) ?? search.selected;
-      const tried = new Set(screens.keys());
-      const challenging = leader
-        ? challengers(pool.ranked, leader, tried, { strength: item => item.eci ?? -Infinity, unplaced: pool.unplaced })
-        : pool.unplaced.filter(item => !tried.has(item.key));
-      plannedTotal = counter + challenging.length;
-      const notices: string[] = [];
-      for (const [index, challenger] of challenging.entries()) {
-        // The finalists are measured, so a challenger the budget refuses, or one that fails, ends the challengers only.
-        try {
-          const entry = await full(challenger, "challenger", null);
-          if (entry.status === "unavailable") entry.qualified = false;
-        } catch (error) {
-          if (!(error instanceof JobStop)) throw error;
-          const left = challenging.slice(index).map(item => item.model);
-          notices.push(`${left.length === 1 ? "Challenger" : "Challengers"} not measured: ${left.join(", ")}. ${error.message}`);
-          break;
-        }
-      }
-
-      const rank = () => {
-        const measured = [...measuredModels.values()].filter(item => item.role === "candidate");
-        const qualified = measured.filter(item => item.qualified && item.costPerCallUsd !== null)
-          .sort((a, b) => a.costPerCallUsd! - b.costPerCallUsd! || b.passes - a.passes).slice(0, 3);
-        return { measured, qualified, cheaperOnes: qualified.filter(item => baseline.costPerCallUsd === null || item.costPerCallUsd! < baseline.costPerCallUsd) };
-      };
-      let { measured: candidates, qualified: top, cheaperOnes: cheaper } = rank();
-      // The agent was told the provisional pick: when no measured model beats the current one per call, measure it before keeping the current model.
-      const provisional = told && [...pool.ranked, ...pool.unplaced].find(item => item.model === told.model && item.endpoint === told.endpoint);
-      if (!cheaper.length && provisional && !measuredModels.has(`candidate:${provisional.key}`)) {
-        plannedTotal = counter + 1;
-        challenging.push(provisional);
-        try {
-          const entry = await full(provisional, "challenger", null);
-          if (entry.status === "unavailable") entry.qualified = false;
-          notices.push(`No measured model that qualified was cheaper per call than ${pool.baseline.model}, so the provisional pick ${provisional.model} was measured on every case too.`);
-        } catch (error) {
-          if (!(error instanceof JobStop)) throw error;
-          notices.push(`The provisional pick ${provisional.model} was not measured. ${error.message}`);
-        }
-        ({ measured: candidates, qualified: top, cheaperOnes: cheaper } = rank());
-      }
-      const optionOf = (item: MeasuredModel) => [...pool.ranked, ...pool.unplaced].find(option => option.model === item.model && option.endpoint === item.endpoint)!;
-
-      // 5. Agent eval: when the task belongs to an agent, the engine's rule checks the pick with every other task unchanged.
-      let chosen = cheaper[0] ?? null;
-      let agentEval: AgentEvalSummary | null = null;
-      if (chosen && input.agent !== null) {
-        await ctx.step("agent-eval-start", async s => { s.state.phase = "agent_eval"; s.state.updatedAt = now(); });
-        const agentMeasure = services().agentEval({ accountId: input.accountId, environment: input.environment, agent: input.agent });
-        let agentCounter = 0;
-        const checked = await checkAgent({
-          tasks: [{ task: bundle.task, options: cheaper.map(item => ({ key: `${item.endpoint} ${item.model}`, savingUsd: (baseline.costPerCallUsd ?? 0) - (item.costPerCallUsd ?? 0), item })) }],
-          measure: agentMeasure ? assignment => ctx.step({
-            name: `agent-${++agentCounter}`, timeout: 0, maxRetries: 0,
-            run: async () => agentMeasure(new Map([...assignment].map(([task, option]) => [task, { model: option.item.endpointModel, endpoint: option.item.endpoint }]))),
-          }) : null,
-          ...(guardrails.effective.minAgentPassRate !== undefined ? { minPassRate: guardrails.effective.minAgentPassRate } : {}),
-          ...(guardrails.effective.agentEvalRequired ? { required: guardrails.effective.agentEvalRequired } : {}),
-        });
-        chosen = checked.proposed[0]?.option.item ?? null;
-        agentEval = {
-          status: checked.status, passed: chosen !== null, warning: checked.warning ?? null, baseline: checked.baseline ? { passes: checked.baseline.passes, total: checked.baseline.total } : null,
-          tried: checked.tasks.flatMap(item => item.tried.map(attempt => ({ model: attempt.option.item.model, passes: attempt.score.passes, total: attempt.score.total, passed: attempt.passed }))),
-        };
-        if (checked.warning) notices.push(checked.warning);
-      }
-
-      // 6. Action: the edit and the report.
-      await ctx.step({
-        name: "action", timeout: 60_000,
+      // 1. Source: redact the bundle, resolve the task's guardrails, set the job's spend limits.
+      const source = await ctx.step({
+        name: "source", timeout: 60_000,
         run: async s => {
-          const client = s.client<Registry>();
-          const account = client.account.getOrCreate([input.accountId]);
-          const spent = await account.spent({ jobId });
-          const status: JobResult["status"] = chosen ? "picked" : agentEval && cheaper.length ? "agent_eval_failed" : !pool.ranked.length && !pool.unplaced.length ? "no_candidates" : "keep_current";
-          const result: JobResult = {
-            status, top, baseline, candidates,
-            pick: chosen ? { model: chosen.model, endpoint: chosen.endpoint, endpointModel: chosen.endpointModel, passes: chosen.passes, total: chosen.total, costPerCallUsd: chosen.costPerCallUsd, savingPerCallUsd: baseline.costPerCallUsd !== null && chosen.costPerCallUsd !== null ? baseline.costPerCallUsd - chosen.costPerCallUsd : null } : null,
-            search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples, finalists: search.finalists.map(item => item.model), challengers: challenging.map(item => item.model), shortfall: search.shortfall ?? null },
-            agentEval, edit: chosen ? proposeEdit(bundle, optionOf(chosen), pool.baseline!.endpoint) : { edits: [], instructions: null },
-            spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices: [...s.state.notices, ...notices],
-            reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts,
-          };
-          await finish(s, client, jobId, "done", result, null);
+          const { input } = s.state;
+          const bundle = redactBundle(input.bundle);
+          const account = s.client<Registry>().account.getOrCreate([input.accountId]);
+          const guardrails = await account.resolveGuardrails({ environment: input.environment, agent: input.agent, taskId: input.taskId });
+          const { effective } = guardrails;
+          await account.jobUpdate({ jobId, status: "running", budgetUsd: effective.budgetUsd ?? services().config.limits.defaultJobBudgetUsd, capOpenmeritUsd: effective.spendCapUsd ?? null, capCustomerUsd: effective.customerSpendCapUsd ?? null });
+          s.state.status = "running"; s.state.phase = "cases"; s.state.updatedAt = now();
+          if (effective.repeats && effective.repeats > 1) s.state.notices.push(`The repeats guardrail (${effective.repeats}) is not supported by the cloud runner yet: each case runs once.`);
+          return { bundle, guardrails, accountId: input.accountId, environment: input.environment, agent: input.agent, provisional: input.provisional };
         },
       });
+      const { bundle, guardrails } = source as { bundle: TaskBundle; guardrails: ResolvedGuardrails };
+      const input = { accountId: source.accountId, environment: source.environment, agent: source.agent };
+      // A job recorded before this step returned its provisional pick has none here.
+      const told = (source as { provisional?: Provisional }).provisional ?? null;
+
+      // 2. Cases: the bundle's examples first, with labels the user gave in earlier runs, then cases a
+      // model writes on OpenMerit's OpenRouter key; then the label check. A task's later runs reuse the
+      // written cases the user approved, so a watch job asks nothing and its results stay comparable.
+      const written = await ctx.step({
+        name: "cases", timeout: 0, maxRetries: INTERRUPTIONS,
+        run: async s => {
+          const { accountId, taskId } = s.state.input;
+          const client = s.client<Registry>();
+          const task = client.task.getOrCreate([accountId, taskId]);
+          const [saved, approved] = await Promise.all([task.labels(), task.written()]);
+          const { config, fetch } = services();
+          let complete: Complete = async () => "";
+          let count = 0;
+          if (approved === null && config.openrouter.apiKey) {
+            const index = catalogueIndex(await client.catalogue.getOrCreate(["global"]).get());
+            const account = client.account.getOrCreate([accountId]);
+            // The writer answers with all its cases at once, so it gets longer than a ranking call to answer.
+            const models = createClient(await keysFor(jobId, account), { fetch, model: model => index.find(model), timeoutMs: 600_000 });
+            complete = completeWith(models, { endpoint: OPENROUTER, model: config.models.caseWriter }, jobLedger(account, jobId), `${jobId}/cases`, s.abortSignal);
+            count = WRITTEN_CASES;
+          }
+          let made;
+          try {
+            made = await writeCases({ bundle, complete, count });
+          } catch (error) {
+            if (s.abortSignal.aborted) throw error;
+            s.state.notices.push(`No cases were written (${redact(error instanceof Error ? error.message : String(error)).slice(0, 300)}): the job measures on the bundle's examples only.`);
+            made = await writeCases({ bundle, complete, count: 0 });
+          }
+          const examples = made.cases.filter(item => item.origin === "example").map(item => {
+            const label = saved[caseKey(item.input)];
+            return item.expected === undefined && label ? { ...item, expected: label.expected, approved: label.approved } : item;
+          });
+          return [...examples, ...(approved ?? made.cases.filter(item => item.origin === "written"))];
+        },
+      });
+      const cases = await ctx.loop({
+        name: "label-check", state: written,
+        run: async (loop, current) => {
+          const questions = labelQuestions(bundle, current);
+          if (!questions.length) return Loop.break(current);
+          await loop.step("ask", async s => {
+            s.state.status = "needs_input"; s.state.phase = "label_check"; s.state.questions = questions; s.state.updatedAt = now();
+            await s.client<Registry>().account.getOrCreate([s.state.input.accountId]).jobUpdate({ jobId, status: "needs_input" });
+          });
+          const message = await loop.queue.next("answer", { names: ["answers"] });
+          const next = await loop.step("apply", async s => {
+            const applied = applyAnswers(bundle, current, message.body.answers);
+            s.state.questions = []; s.state.status = "running"; s.state.phase = "cases"; s.state.updatedAt = now();
+            s.state.notices = [...s.state.notices.filter(notice => !notice.startsWith("Answer not used: ")), ...applied.problems.map(problem => `Answer not used: ${problem}`)];
+            const labels = Object.fromEntries(applied.cases.filter(item => item.origin === "example" && (item.expected !== undefined || item.approved === false)).map(item => [caseKey(item.input), { expected: item.expected, approved: item.approved !== false }]));
+            const task = s.client<Registry>().task.getOrCreate([s.state.input.accountId, s.state.input.taskId]);
+            await task.saveLabels(labels);
+            const kept = applied.cases.filter(item => item.origin === "written" && item.approved === true);
+            if (message.body.answers[LABEL_CHECK_QUESTION] !== undefined && kept.length) await task.saveWritten(kept);
+            await s.client<Registry>().account.getOrCreate([s.state.input.accountId]).jobUpdate({ jobId, status: "running" });
+            return applied.cases;
+          });
+          return Loop.continue(next);
+        },
+      });
+      const usable = cases.filter(labeled);
+      const caseIds = usable.map(item => item.id);
+      const counts = { total: usable.length, fromExamples: usable.filter(item => item.origin === "example").length, written: usable.filter(item => item.origin !== "example").length };
+
+      // 3. Models: the ECI-ordered pool over every allowed endpoint.
+      const models = await ctx.step({
+        name: "models", timeout: 60_000,
+        run: async s => {
+          const client = s.client<Registry>();
+          const catalogue = await client.catalogue.getOrCreate(["global"]).get();
+          const endpoints = await client.account.getOrCreate([s.state.input.accountId]).endpointsForJob();
+          const built = buildPool({ catalogue, endpoints, bundle, guardrails: guardrails.effective });
+          // The catalogue entries the job's calls are priced by, by the name each endpoint calls the model, so every step prices on this version.
+          const index = catalogueIndex(catalogue);
+          const priced: Record<string, CatalogueModel> = {};
+          for (const option of [built.baseline, ...built.ranked, ...built.unplaced]) {
+            const model = option?.inCatalogue ? index.find(option.model) : null;
+            if (option && model) priced[option.endpointModel] = model;
+          }
+          const judgeModel = index.find(services().config.models.judge);
+          if (judgeModel) priced[services().config.models.judge] = judgeModel;
+          s.state.phase = "ranking"; s.state.notices.push(...built.notices); s.state.updatedAt = now();
+          s.state.progress.planned = plannedSteps(built.ranked.length, built.unplaced.length);
+          return { pool: built, priced, catalogueVersion: catalogue.version };
+        },
+      });
+      const pool = models.pool as Pool;
+
+      const measuredModels = new Map<string, MeasuredModel>();
+      partial = (status, notices, spent) => ({
+        status, pick: null, top: [], baseline: [...measuredModels.values()].find(item => item.role === "baseline") ?? null, candidates: [...measuredModels.values()].filter(item => item.role === "candidate"),
+        search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: [], finalists: [], challengers: [], shortfall: null }, agentEval: null, edit: { edits: [], instructions: null },
+        spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices,
+        reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts,
+      });
+      let counter = 0;
+      /** How many measure steps the job takes in all, once the search knows its size. Set outside steps, from the step count, so a replay sets the same. */
+      let plannedTotal: number | null = null;
+      /**
+       * One measure call as one workflow step. Its ledger keys start with the job and the step, so a replay
+       * reuses them; a retry after an error is a deliberate repeat, with its own keys.
+       */
+      const measure = (option: Option, ids: string[]): Promise<Measured> => {
+        const name = `measure-${++counter}`;
+        return ctx.step({
+          name, timeout: 0, maxRetries: INTERRUPTIONS,
+          run: async s => {
+            if (plannedTotal !== null) s.state.progress.planned = Math.max(plannedTotal, s.state.progress.measured);
+            const account = s.client<Registry>().account.getOrCreate([s.state.input.accountId]);
+            const { config, fetch } = services();
+            const client = createClient(await keysFor(jobId, account), { fetch, model: model => models.priced[model] ?? null });
+            // Text answers go to a fixed judge on OpenMerit's key. Its calls count in the job's spend but not in the candidate's cost per call.
+            const judge = bundle.output.kind === "text" && config.openrouter.apiKey ? {
+              client, endpoint: OPENROUTER, model: config.models.judge,
+              rubric: bundle.description ? `The answer does this task well: ${bundle.description}` : "The answer does what the prompt asks and agrees with the reference answer.",
+            } : undefined;
+            const run = createMeasure({ bundle, cases: usable, client, grader: graderFor(bundle, judge ? { judge } : {}), ledger: jobLedger(account, jobId), key: `${jobId}/${name}`, signal: s.abortSignal });
+            for (let attempt = 1; ; attempt++) {
+              try {
+                const result = await run({ model: option.endpointModel, endpoint: option.endpoint }, ids, { run: String(attempt - 1) });
+                done(s);
+                return { kind: "ok" as const, ...result };
+              } catch (error) {
+                // An actor that is stopping aborts its calls: leave the step unrecorded so it runs again.
+                if (s.abortSignal.aborted) throw error;
+                const reason = redact(error instanceof Error ? error.message : String(error));
+                if (error instanceof CandidateUnavailable) { done(s); return { kind: "unavailable" as const, reason }; }
+                if (error instanceof BudgetRefused) return { kind: "refused" as const, reason };
+                if (attempt >= 3) return { kind: "error" as const, reason };
+                await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+              }
+            }
+          },
+        }) as Promise<Measured>;
+      };
+      const done = (s: { state: JobState }) => {
+        s.state.progress.measured += 1;
+        s.state.progress.planned = Math.max(s.state.progress.planned ?? 0, s.state.progress.measured);
+        s.state.updatedAt = now();
+      };
+      const record = (option: Option, stage: MeasuredModel["stage"], role: MeasuredModel["role"], results: Measured[], ids: number): MeasuredModel => {
+        const ok = results.filter((item): item is Extract<Measured, { kind: "ok" }> => item.kind === "ok");
+        const unavailable = results.find(item => item.kind === "unavailable");
+        const passes = ok.reduce((sum, item) => sum + item.results.filter(result => result.pass).length, 0);
+        const total = ok.reduce((sum, item) => sum + item.results.length, 0);
+        const cost = ok.reduce((sum, item) => sum + item.costUsd, 0);
+        const latencies = ok.map(item => item.latencyMs).filter((value): value is number => value !== null);
+        const entry: MeasuredModel = {
+          model: option.model, endpoint: option.endpoint, endpointModel: option.endpointModel, role, stage, eci: option.eci, inCatalogue: option.inCatalogue, funding: option.funding,
+          status: unavailable ? "unavailable" : total < ids ? "screened_out" : "measured", passes, total, costPerCallUsd: total ? cost / total : null,
+          costIsEstimate: ok.some(item => item.costIsEstimate), latencyMs: latencies.length ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null,
+          qualified: false, note: unavailable && "reason" in unavailable ? unavailable.reason : "",
+        };
+        measuredModels.set(`${role}:${option.key}`, entry);
+        return entry;
+      };
+      const stopFor = (result: Measured, what: string): JobStop => result.kind === "refused"
+        // The report keeps what was measured before the budget ran out.
+        ? new JobStop("stopped", "stopped", `Stopped while measuring ${what}: ${result.reason}. Raise the budget in the task's guardrails at app.openmerit.ai to continue.`)
+        : new JobStop("failed", "failed", `Measuring ${what} failed: ${"reason" in result ? result.reason : "unknown error"}`);
+
+      try {
+        if (!usable.length) throw new JobStop("stopped", "no_cases", "No case has a known correct answer. Add examples with expected answers to the bundle, or answer the label check.");
+        if (!pool.baseline) throw new JobStop("failed", "baseline_failed", "No endpoint can run the current model: OpenMerit's OpenRouter key is not configured, and no endpoint of yours serves it.");
+
+        // 4. Ranking: the current model on every case, Scout Model Binary Search on samples it passes, then finalists and challengers on every case.
+        const baselineRun = await measure(pool.baseline, caseIds);
+        if (baselineRun.kind === "refused" || baselineRun.kind === "error") throw stopFor(baselineRun, `the current model ${pool.baseline.model}`);
+        const baseline = record(pool.baseline, "baseline", "baseline", [baselineRun], caseIds.length);
+        if (baselineRun.kind !== "ok" || !baseline.passes) throw new JobStop("stopped", "baseline_failed", baselineRun.kind === "ok" ? `${pool.baseline.model} passed none of the ${caseIds.length} cases, so there is nothing to compare against. Check the labels.` : `${pool.baseline.model} could not run: ${baselineRun.reason}`);
+        const samples = baselineRun.results.filter(item => item.pass).map(item => item.caseId).slice(0, SAMPLE_SIZE);
+        const rest = caseIds.filter(id => !samples.includes(id));
+
+        const screens = new Map<string, Measured>();
+        const screen = async (option: Option & Ranked, _stage: Stage) => {
+          const result = await measure(option, samples);
+          screens.set(option.key, result);
+          if (result.kind === "unavailable") throw new CandidateUnavailable(result.reason);
+          if (result.kind !== "ok") throw stopFor(result, option.model);
+          return result.results.every(item => item.pass);
+        };
+        const search = await binarySearch(pool.ranked, screen);
+        const stageOf = new Map(search.trials.map(trial => [trial.candidate.key, trial.stage]));
+        for (const trial of search.trials) if (!trial.accepted) record(trial.candidate, trial.stage, "candidate", [screens.get(trial.candidate.key)!], caseIds.length);
+        for (const skipped of search.unavailable) record(skipped.candidate, skipped.stage, "candidate", [screens.get(skipped.candidate.key)!], caseIds.length);
+
+        const minPassRate = guardrails.effective.minPassRate ?? 0;
+        const maxLatency = Math.min(guardrails.effective.latencyMs ?? Infinity, bundle.constraints?.maxLatencyMs ?? Infinity);
+        const qualifies = (item: MeasuredModel) => item.status === "measured" && item.passes >= baseline.passes && item.passes / item.total >= minPassRate - 1e-9 && (item.latencyMs === null || item.latencyMs <= maxLatency);
+        const full = async (option: Option, stage: MeasuredModel["stage"], prior: Measured | null) => {
+          const runs = prior ? [prior] : [];
+          const ids = prior ? rest : caseIds;
+          if (ids.length) {
+            const result = await measure(option, ids);
+            if (result.kind === "refused" || result.kind === "error") throw stopFor(result, option.model);
+            runs.push(result);
+          }
+          const entry = record(option, stage, "candidate", runs, caseIds.length);
+          entry.qualified = qualifies(entry);
+          return entry;
+        };
+        // The search is done: the finalists on the other cases and the challengers are left.
+        plannedTotal = counter + (rest.length ? search.finalists.length : 0) + Math.min(CHALLENGERS, pool.ranked.length) + pool.unplaced.length;
+        const finals: MeasuredModel[] = [];
+        for (const finalist of search.finalists) finals.push(await full(finalist, stageOf.get(finalist.key) ?? "search", screens.get(finalist.key) ?? null));
+        const leaderModel = finals.filter(item => item.qualified).sort((a, b) => (a.costPerCallUsd ?? Infinity) - (b.costPerCallUsd ?? Infinity))[0];
+        const leader = (leaderModel && pool.ranked.find(item => item.key === leaderModel.model)) ?? search.selected;
+        const tried = new Set(screens.keys());
+        const challenging = leader
+          ? challengers(pool.ranked, leader, tried, { strength: item => item.eci ?? -Infinity, unplaced: pool.unplaced })
+          : pool.unplaced.filter(item => !tried.has(item.key));
+        plannedTotal = counter + challenging.length;
+        const notices: string[] = [];
+        for (const [index, challenger] of challenging.entries()) {
+          // The finalists are measured, so a challenger the budget refuses, or one that fails, ends the challengers only.
+          try {
+            const entry = await full(challenger, "challenger", null);
+            if (entry.status === "unavailable") entry.qualified = false;
+          } catch (error) {
+            if (!(error instanceof JobStop)) throw error;
+            const left = challenging.slice(index).map(item => item.model);
+            notices.push(`${left.length === 1 ? "Challenger" : "Challengers"} not measured: ${left.join(", ")}. ${error.message}`);
+            break;
+          }
+        }
+
+        const rank = () => {
+          const measured = [...measuredModels.values()].filter(item => item.role === "candidate");
+          const qualified = measured.filter(item => item.qualified && item.costPerCallUsd !== null)
+            .sort((a, b) => a.costPerCallUsd! - b.costPerCallUsd! || b.passes - a.passes).slice(0, 3);
+          return { measured, qualified, cheaperOnes: qualified.filter(item => baseline.costPerCallUsd === null || item.costPerCallUsd! < baseline.costPerCallUsd) };
+        };
+        let { measured: candidates, qualified: top, cheaperOnes: cheaper } = rank();
+        // The agent was told the provisional pick: when no measured model beats the current one per call, measure it before keeping the current model.
+        const provisional = told && [...pool.ranked, ...pool.unplaced].find(item => item.model === told.model && item.endpoint === told.endpoint);
+        if (!cheaper.length && provisional && !measuredModels.has(`candidate:${provisional.key}`)) {
+          plannedTotal = counter + 1;
+          challenging.push(provisional);
+          try {
+            const entry = await full(provisional, "challenger", null);
+            if (entry.status === "unavailable") entry.qualified = false;
+            notices.push(`No measured model that qualified was cheaper per call than ${pool.baseline.model}, so the provisional pick ${provisional.model} was measured on every case too.`);
+          } catch (error) {
+            if (!(error instanceof JobStop)) throw error;
+            notices.push(`The provisional pick ${provisional.model} was not measured. ${error.message}`);
+          }
+          ({ measured: candidates, qualified: top, cheaperOnes: cheaper } = rank());
+        }
+        const optionOf = (item: MeasuredModel) => [...pool.ranked, ...pool.unplaced].find(option => option.model === item.model && option.endpoint === item.endpoint)!;
+
+        // 5. Agent eval: when the task belongs to an agent, the engine's rule checks the pick with every other task unchanged.
+        let chosen = cheaper[0] ?? null;
+        let agentEval: AgentEvalSummary | null = null;
+        if (chosen && input.agent !== null) {
+          await ctx.step("agent-eval-start", async s => { s.state.phase = "agent_eval"; s.state.updatedAt = now(); });
+          const agentMeasure = services().agentEval({ accountId: input.accountId, environment: input.environment, agent: input.agent });
+          let agentCounter = 0;
+          const checked = await checkAgent({
+            tasks: [{ task: bundle.task, options: cheaper.map(item => ({ key: `${item.endpoint} ${item.model}`, savingUsd: (baseline.costPerCallUsd ?? 0) - (item.costPerCallUsd ?? 0), item })) }],
+            measure: agentMeasure ? assignment => ctx.step({
+              name: `agent-${++agentCounter}`, timeout: 0, maxRetries: INTERRUPTIONS,
+              run: async () => agentMeasure(new Map([...assignment].map(([task, option]) => [task, { model: option.item.endpointModel, endpoint: option.item.endpoint }]))),
+            }) : null,
+            ...(guardrails.effective.minAgentPassRate !== undefined ? { minPassRate: guardrails.effective.minAgentPassRate } : {}),
+            ...(guardrails.effective.agentEvalRequired ? { required: guardrails.effective.agentEvalRequired } : {}),
+          });
+          chosen = checked.proposed[0]?.option.item ?? null;
+          agentEval = {
+            status: checked.status, passed: chosen !== null, warning: checked.warning ?? null, baseline: checked.baseline ? { passes: checked.baseline.passes, total: checked.baseline.total } : null,
+            tried: checked.tasks.flatMap(item => item.tried.map(attempt => ({ model: attempt.option.item.model, passes: attempt.score.passes, total: attempt.score.total, passed: attempt.passed }))),
+          };
+          if (checked.warning) notices.push(checked.warning);
+        }
+
+        // 6. Action: the edit and the report.
+        await ctx.step({
+          name: "action", timeout: 60_000,
+          run: async s => {
+            const client = s.client<Registry>();
+            const account = client.account.getOrCreate([input.accountId]);
+            const spent = await account.spent({ jobId });
+            const status: JobResult["status"] = chosen ? "picked" : agentEval && cheaper.length ? "agent_eval_failed" : !pool.ranked.length && !pool.unplaced.length ? "no_candidates" : "keep_current";
+            const result: JobResult = {
+              status, top, baseline, candidates,
+              pick: chosen ? { model: chosen.model, endpoint: chosen.endpoint, endpointModel: chosen.endpointModel, passes: chosen.passes, total: chosen.total, costPerCallUsd: chosen.costPerCallUsd, savingPerCallUsd: baseline.costPerCallUsd !== null && chosen.costPerCallUsd !== null ? baseline.costPerCallUsd - chosen.costPerCallUsd : null } : null,
+              search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples, finalists: search.finalists.map(item => item.model), challengers: challenging.map(item => item.model), shortfall: search.shortfall ?? null },
+              agentEval, edit: chosen ? proposeEdit(bundle, optionOf(chosen), pool.baseline!.endpoint) : { edits: [], instructions: null },
+              spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices: [...s.state.notices, ...notices],
+              reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts,
+            };
+            await finish(s, client, jobId, "done", result, null);
+          },
+        });
+      } catch (error) {
+        if (!(error instanceof JobStop)) throw error;
+        const stop = error;
+        await ctx.step("stop", async s => {
+          const client = s.client<Registry>();
+          const spent = await client.account.getOrCreate([s.state.input.accountId]).spent({ jobId });
+          const result = stop.resultStatus ? partial!(stop.resultStatus, [...s.state.notices, stop.message], spent) : null;
+          await finish(s, client, jobId, stop.status, result, stop.status === "failed" ? stop.message : null, stop.message);
+        });
+      }
     } catch (error) {
-      if (!(error instanceof JobStop)) throw error;
-      const stop = error;
-      await ctx.step("stop", async s => {
+      // A step that failed for good: record the job as failed instead of leaving it running. A later wake replays to here and changes nothing.
+      if (!(error instanceof StepExhaustedError || error instanceof CriticalError)) throw error;
+      const message = redact(error.message).slice(0, 500);
+      await ctx.step("failed", async s => {
         const client = s.client<Registry>();
         const spent = await client.account.getOrCreate([s.state.input.accountId]).spent({ jobId });
-        const result: JobResult | null = stop.resultStatus ? {
-          status: stop.resultStatus, pick: null, top: [], baseline: [...measuredModels.values()].find(item => item.role === "baseline") ?? null, candidates: [...measuredModels.values()].filter(item => item.role === "candidate"),
-          search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: [], finalists: [], challengers: [], shortfall: null }, agentEval: null, edit: { edits: [], instructions: null },
-          spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices: [...s.state.notices, stop.message],
-          reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts,
-        } : null;
-        await finish(s, client, jobId, stop.status, result, stop.status === "failed" ? stop.message : null, stop.message);
+        const notice = `The job failed and stopped measuring: ${message}. Nothing is charged for it; call openmerit_recommend again to retry.`;
+        await finish(s, client, jobId, "failed", partial?.("failed", [...s.state.notices, notice], spent) ?? null, message, notice);
       });
     }
   },

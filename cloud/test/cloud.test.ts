@@ -353,3 +353,75 @@ test("when no measured model is cheaper per call than the current one, the job m
     assert.match(kept.done.text, /No switch proposed \(keep_current\)\. Keep `openai\/gpt-5\.4`/);
   } finally { await stop(app); await models.close(); }
 });
+
+test("a job whose actor a deploy's drain stops in the middle of a measure step resumes on the new version, and counts each call once", async () => {
+  const models = await fakeModels();
+  // A deploy starts the new version next to the old one; the engine drains the old one and moves its actors.
+  const first = await startApp({ models, env: { ...CLERK, RIVET_NODE_VERSION: "1" } });
+  let app = first;
+  let release = () => {};
+  try {
+    await subscribe(app, "org_drain");
+    const agent = () => caller(app, "test:user_d:org_drain:admin");
+    const started = await agent().tool("openmerit_recommend", { bundle: bundle("drained classifier", false), environment: "acme/drain" });
+    const jobId = started.data.job_id as string;
+    const result = () => agent().tool("openmerit_result", { job_id: jobId });
+    await waitFor(result, value => value.data.status === "needs_input");
+    // Hold the twelfth model call, past the current model's step, until the new version has taken the job.
+    let held = false, reached!: () => void;
+    const reachedHold = new Promise<void>(resolve => { reached = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    models.onCall = async () => {
+      if (held || models.calls.filter(call => !call.ticket.startsWith("writer:")).length < 12) return;
+      held = true; reached(); await gate;
+    };
+    await agent().tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
+    await reachedHold;
+    app = await startApp({ models, env: { ...first.env, RIVET_NODE_VERSION: "2" }, storage: first.storage, enginePort: first.enginePort });
+    const done = await waitFor(result, value => ["done", "failed", "stopped"].includes(value.data.status as string), 180_000);
+    release();
+    assert.equal(done.data.status, "done", done.text);
+    assert.equal((done.data.result as Result).status, "picked");
+    const sent = models.calls.filter(call => !call.ticket.startsWith("writer:")).length;
+    const distinct = new Set(models.calls.filter(call => !call.ticket.startsWith("writer:")).map(call => `${call.model}\0${call.ticket}`)).size;
+    assert.ok(sent > distinct, `the interrupted step must have run again: ${sent} calls sent, ${distinct} distinct`);
+    // One ledger row per distinct call: the step that ran again reused its keys. A call the drain cut off counts at its
+    // reservation (the provider may have billed it), and every other call at what it cost.
+    const ledger = (await agent().api<{ ledger: { job_id: string; model: string; status: string; reserved_usd: number; actual_usd: number | null; failed: number }[] }>("/api/account/export", { method: "POST" })).body.ledger.filter(row => row.job_id === jobId);
+    assert.equal(ledger.length, new Set(models.calls.map(call => `${call.model}\0${call.ticket}`)).size);
+    const cutOff = ledger.filter(row => row.failed && row.actual_usd === null);
+    assert.ok(cutOff.length >= 1 && cutOff.length <= 4, `the held call and at most the others in flight with it: ${cutOff.length}`);
+    const expected = distinctCost(models) + cutOff.reduce((sum, row) => sum + row.reserved_usd - costOf(row.model), 0);
+    const spend = (done.data.result as Result).spend;
+    assert.ok(Math.abs(spend.openmeritUsd - expected) < 1e-9, `spend ${spend.openmeritUsd} counts each call once (${expected})`);
+  } finally {
+    release();
+    if (first !== app) first.child.kill("SIGKILL");
+    await stop(app); await models.close();
+  }
+});
+
+test("a job whose step fails for good ends failed with a report of what it measured, is not charged, and no longer says running", async () => {
+  const models = await fakeModels();
+  const app = await startApp({ models, env: { ...CLERK, TEST_AGENT_EVAL: "broken" } });
+  try {
+    await subscribe(app, "org_broken");
+    const agent = caller(app, "test:user_b:org_broken:admin");
+    const started = await agent.tool("openmerit_recommend", { bundle: bundle("broken agent classifier", false), environment: "acme/broken", agent: "support-bot" });
+    const jobId = started.data.job_id as string;
+    await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => value.data.status === "needs_input");
+    await agent.tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
+    const ended = await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => value.data.status !== "running" && value.data.status !== "queued", 180_000);
+    assert.equal(ended.data.status, "failed", ended.text);
+    assert.equal(ended.isError, true);
+    assert.match(String(ended.data.error), /agent-1.*the agent's eval harness is unreachable/);
+    assert.doesNotMatch(ended.text, /call openmerit_result again later/);
+    const report = (await agent.api<{ status: string; baseline: { passes: number } | null; candidates: unknown[]; notices: string[] }>(`/api/runs/${jobId}`)).body;
+    assert.equal(report.status, "failed");
+    assert.ok(report.baseline && report.candidates.length > 0, "the report keeps the measurements so far");
+    assert.ok(report.notices.some(notice => notice.startsWith("The job failed and stopped measuring")), report.notices.join("\n"));
+    assert.equal((await agent.fetch(`/api/r/${jobId}.md`)).status, 200);
+    const me = (await agent.api<{ plan: { usedEvals: number } }>("/api/me")).body;
+    assert.equal(me.plan.usedEvals, 0, "a failed job is not charged an evaluation");
+  } finally { await stop(app); await models.close(); }
+});

@@ -16,6 +16,7 @@ const verdicts: Record<Report["status"], string> = {
   no_candidates: "No allowed model is cheaper than the one in use now.",
   agent_eval_failed: "Every cheaper switch failed the agent's eval, so none is proposed.",
   stopped: "The run stopped at its budget before the finalists were measured, so it proposes no switch. These are the measurements so far.",
+  failed: "The run failed before it finished, so it proposes no switch. These are the measurements so far.",
 };
 
 function title(data: Data): string {
