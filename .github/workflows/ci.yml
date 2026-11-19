@@ -75,6 +75,9 @@ jobs:
       - run: npm run check
       - run: docker build -f cloud/Dockerfile -t openmerit-cloud:ci .
         working-directory: .
+      # The image holds only the openmerit-core sources the app imports: load every module it serves from.
+      - run: docker run --rm openmerit-cloud:ci node --input-type=module -e "await import('./src/app.ts')"
+        working-directory: .
 
   # The openmerit npm package: its own lockfile, typecheck, tests and build. No model calls.
   openmerit-core:

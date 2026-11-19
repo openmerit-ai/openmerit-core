@@ -8,5 +8,7 @@
 !openmerit-core/src/ranking
 !openmerit-core/src/eval/proxy.ts
 !openmerit-core/src/catalogue
+!openmerit-core/src/connectors/agent-bundle.ts
+!openmerit-core/src/connectors/viktor
 !openmerit-core/data/catalogue.json
 **/*.test.ts
