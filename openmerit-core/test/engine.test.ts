@@ -1,11 +1,12 @@
 // The shared engine's contract (`openmerit/engine`): the search over a ladder without ECI, ledger
-// idempotency on both implementations, the guardrail resolver and the agent-eval rule.
+// idempotency on both implementations, the guardrail resolver, the agent-eval rule, the quality rule
+// over a task's evidence and the approval record.
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { binarySearch, challengers, checkAgent, evaluateTask, MemoryLedger, proposeEdit, taskResult, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
+import { approve, basedOn, binarySearch, challengers, checkAgent, evaluateTask, mergeEvidence, MemoryLedger, proposeEdit, strongest, taskResult, type EvidencePart, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
 import { State } from "../src/state/db.ts";
 
 test("the search keeps a ladder's own order, and unplaced options are always challengers", async () => {
@@ -234,4 +235,48 @@ test("agent eval: without an agent eval the guardrail decides", async () => {
   assert.deepEqual(required.proposed, []);
   const empty = await checkAgent({ tasks, measure: async () => ({ results: [], costUsd: 0 }), required: "required" });
   assert.equal(empty.status, "missing");
+});
+
+test("the quality rule takes the strongest grader, real cases and recorded spend, whatever order the connections came in", () => {
+  // The agent's bundle comes first and offers the weakest of each; the eval platform's evidence comes second.
+  const agent: EvidencePart = {
+    graders: [{ value: { kind: "judge", description: "a judge model" }, source: { connector: "agent-bundle", detail: "" } }],
+    cases: [{ value: { kind: "written", count: 12, description: "12 written cases" }, source: { connector: "agent-bundle", detail: "" } }],
+    priority: [{ value: { kind: "request" }, source: { connector: "agent-bundle", detail: "" } }],
+  };
+  const platform: EvidencePart = {
+    graders: [
+      { value: { kind: "confirmed_label", description: "labels you confirmed" }, source: { connector: "langfuse", detail: "" } },
+      { value: { kind: "expected_output", description: "expected outputs" }, source: { connector: "langfuse", detail: "support-tickets" } },
+    ],
+    cases: [{ value: { kind: "real", count: 4, description: "4 dataset items" }, source: { connector: "langfuse", detail: "support-tickets" } }],
+    priority: [{ value: { kind: "spend", usdPerMonth: 41.5 }, source: { connector: "langfuse", detail: "" } }],
+  };
+  const evidence = mergeEvidence("ticket classifier", "openai/gpt-5.4", [agent, platform]);
+  const chosen = strongest(evidence);
+  assert.equal(chosen.grader?.value.kind, "expected_output");
+  assert.deepEqual(chosen.cases.map(item => item.value.description), ["4 dataset items"]);
+  assert.equal(chosen.priority?.value.kind, "spend");
+  assert.deepEqual(basedOn(chosen), [
+    "Grader: expected outputs, from langfuse (support-tickets).",
+    "Cases: 4 dataset items from langfuse (support-tickets).",
+    "Priority: $41.50 a month of recorded spend, from langfuse.",
+  ]);
+  // Fewer real cases than the run needs: the written ones join them; exactly enough, they do not.
+  assert.deepEqual(strongest(evidence, 5).cases.map(item => item.value.kind), ["real", "written"]);
+  assert.deepEqual(strongest(evidence, 4).cases.map(item => item.value.kind), ["real"]);
+  // With the agent's evidence alone, the weakest is what there is.
+  assert.deepEqual(basedOn(strongest(mergeEvidence("ticket classifier", "openai/gpt-5.4", [agent]))), [
+    "Grader: a judge model, from agent-bundle.", "Cases: 12 written cases from agent-bundle.", "Priority: you asked about this task, from agent-bundle.",
+  ]);
+});
+
+test("an approval records who approved and when, and refuses one without either", () => {
+  const change = { edits: [], instructions: null };
+  const target = { model: "openai/gpt-5-nano", endpoint: "openrouter", endpointModel: "openai/gpt-5-nano", onOpenRouter: true };
+  const approved = approve(change, target, { by: " praveen@openmerit.ai ", at: "2026-11-19T14:00:00+01:00" });
+  assert.deepEqual(approved.approval, { by: "praveen@openmerit.ai", at: "2026-11-19T13:00:00.000Z" });
+  assert.equal(approved.target, target);
+  assert.throws(() => approve(change, target, { by: "  ", at: "2026-11-19T13:00:00Z" }), /person who approved/);
+  assert.throws(() => approve(change, target, { by: "praveen@openmerit.ai", at: "yesterday" }), /time it was given/);
 });

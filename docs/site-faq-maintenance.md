@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Evidence, connections and approval in the shared core — unreleased, 19 November 2026
+
+Reviewed the homepage against the change that adds the evidence record, the quality rule, the connector interface and the approval record to `openmerit/engine`, with the CLI's repo scan and eval command and the cloud app's agent bundle as the first connections. `site/index.html` has no FAQ block and makes no claim about connections, graders, evidence or approvals; no new connection (Langfuse, Viktor, GitHub) is released. No homepage copy change is needed; the openmerit README's Engine section and the cloud README describe them.
+
 ## Result, pool, provisional pick and edit in the shared core — unreleased, 19 November 2026
 
 Reviewed the homepage against the change that moves the task result, the pool rule, the provisional pick and the proposed edit into `openmerit/engine` for both the CLI and the cloud app. `site/index.html` has no FAQ block and makes no claim about which models are candidates or how an edit is written. No homepage copy change is needed; the openmerit README's Engine section and the cloud README describe them.

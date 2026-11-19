@@ -1,6 +1,7 @@
 // A job's result and its report: scores and picks, never raw model outputs. The same result goes to
 // the coding agent through openmerit_result, to /api/runs/:id as JSON, and to /api/r/:id.md as Markdown.
-import { proposeEdit as proposeChange, type CatalogueModel, type ResolvedGuardrails } from "./engine.ts";
+import type { CatalogueModel, ResolvedGuardrails } from "./engine.ts";
+import { agentBundle } from "../../openmerit-core/src/connectors/agent-bundle.ts";
 import { OPENROUTER, type Option, type Provisional } from "./pool.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 
@@ -61,11 +62,15 @@ export interface JobResult {
   reportUrl: string;
   catalogueVersion: string;
   cases: { total: number; fromExamples: number; written: number };
+  /** The evidence each decision used, by openmerit/engine's quality rule, such as "Grader: the expected labels of your examples, from agent-bundle". Absent from reports saved before it was added. */
+  basedOn?: string[];
+  /** The question that asks a person to approve the switch, as the CLI asks it; null with no pick. Absent from older reports. */
+  approval?: { id: string; kind: "confirm"; default: false; prompt: string; detail: string } | null;
 }
 
-/** The change that applies the pick: openmerit/engine's `proposeEdit`, which the CLI's Configure step uses too, for the bundle's code refs. */
+/** The change that applies the pick: the agent bundle connector's Change port, openmerit/engine's `proposeEdit` on the bundle's code refs, which the CLI's Configure step uses too. */
 export function proposeEdit(bundle: TaskBundle, pick: Option, baselineEndpoint: string | null, find: (id: string) => CatalogueModel | null): JobResult["edit"] {
-  const change = proposeChange({ task: bundle.task, current: bundle.current.model, refs: bundle.codeRefs ?? [], pick: { model: pick.model, endpoint: pick.endpoint, endpointModel: pick.endpointModel, onOpenRouter: pick.endpoint === OPENROUTER }, baselineEndpoint, find });
+  const change = agentBundle({ bundle, baselineEndpoint, find }).change.propose(bundle.task, { model: pick.model, endpoint: pick.endpoint, endpointModel: pick.endpointModel, onOpenRouter: pick.endpoint === OPENROUTER });
   return { edits: change.edits.map(({ file, line, before, after }) => ({ file, line, before, after })), instructions: change.instructions };
 }
 
@@ -126,6 +131,7 @@ export function renderMarkdown(input: { jobId: string; bundle: TaskBundle; resul
   const misses = nearMissLine(result);
   if (misses) lines.push("", misses);
   if (result.search.shortfall) lines.push("", result.search.shortfall);
+  if (result.basedOn?.length) lines.push("", "Based on:", ...result.basedOn.map(line => `- ${line}`));
   if (result.agentEval) lines.push("", "## Agent eval", "", result.agentEval.status === "missing" ? result.agentEval.warning ?? "The agent has no eval." : `${result.agentEval.passed ? "Passed" : "Failed"}: the agent passed ${result.agentEval.baseline ? rate(result.agentEval.baseline.passes, result.agentEval.baseline.total) : "?"} with its current models.`);
   lines.push("", "## Spend", "", `OpenMerit-paid ${usd(result.spend.openmeritUsd)}, paid on your endpoints ${usd(result.spend.customerUsd)}.`);
   const from = Object.entries(result.guardrails.from);
