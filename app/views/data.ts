@@ -1,5 +1,6 @@
 import type { DeletedTask, Endpoint, Run, Task } from "../api.ts";
 import { ago, html, plural } from "../html.ts";
+import posthog, { isPostHogInitialized } from "../posthog.ts";
 import type { View } from "../view.ts";
 import { header } from "./common.ts";
 
@@ -55,6 +56,7 @@ export const dataView: View<Data> = {
   actions: {
     async export(_target, _data, { api, me, download, toast }) {
       const data = await api.send<unknown>("POST", "/api/account/export");
+      if (isPostHogInitialized()) posthog.capture("data_exported");
       download(`openmerit-${me.account.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${new Date().toISOString().slice(0, 10)}.json`, data);
       toast("Export downloaded.");
     },
@@ -67,6 +69,7 @@ export const dataView: View<Data> = {
       });
       if (!ok) return;
       await api.send("DELETE", `/api/tasks/${encodeURIComponent(id)}`);
+      if (isPostHogInitialized()) posthog.capture("task_deleted");
       await refresh();
       toast(`${name} deleted.`);
     },
@@ -78,6 +81,7 @@ export const dataView: View<Data> = {
       });
       if (!ok) return;
       await api.send("DELETE", "/api/account");
+      if (isPostHogInitialized()) posthog.capture("account_data_deleted");
       go("/?deleted=1");
     },
   },

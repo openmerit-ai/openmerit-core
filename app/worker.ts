@@ -6,6 +6,8 @@ export interface AppWorkerEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
   CLERK_PUBLISHABLE_KEY?: string;
   API_ORIGIN?: string;
+  POSTHOG_KEY?: string;
+  POSTHOG_HOST?: string;
 }
 
 const json = (data: unknown, status = 200): Response => new Response(JSON.stringify(data), {
@@ -30,7 +32,12 @@ function config(env: AppWorkerEnv): Response {
   let apiOrigin: string | null = null;
   try { apiOrigin = env.API_ORIGIN ? new URL(env.API_ORIGIN).origin : null; } catch { /* invalid */ }
   if (!host || !apiOrigin) return json({ error: "Sign-in is not configured." }, 503);
-  return json({ publishableKey, frontendApi: host, apiOrigin });
+  return json({
+    publishableKey,
+    frontendApi: host,
+    apiOrigin,
+    ...(env.POSTHOG_KEY && env.POSTHOG_HOST ? { posthogKey: env.POSTHOG_KEY, posthogHost: env.POSTHOG_HOST } : {}),
+  });
 }
 
 const secure = (response: Response): Response => {

@@ -25,7 +25,13 @@ export interface Clerk {
 // ClerkJS and its UI register themselves on window.
 export const clerkGlobals = globalThis as unknown as { Clerk?: Clerk; __internal_ClerkUICtor?: unknown };
 
-export interface AppConfig { publishableKey: string; frontendApi: string; apiOrigin: string }
+export interface AppConfig {
+  publishableKey: string;
+  frontendApi: string;
+  apiOrigin: string;
+  posthogKey?: string;
+  posthogHost?: string;
+}
 
 export const unavailable = "Sign-in could not load. Check your connection and reload this page to try again.";
 

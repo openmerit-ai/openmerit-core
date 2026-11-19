@@ -1,5 +1,6 @@
 import type { Spend } from "../api.ts";
 import { date, html, usd, type Html } from "../html.ts";
+import posthog, { isPostHogInitialized } from "../posthog.ts";
 import type { View } from "../view.ts";
 import { header } from "./common.ts";
 
@@ -56,10 +57,14 @@ export const planView: View<Spend> = {
   },
   actions: {
     async checkout(_target, _spend, { api, go }) {
-      go((await api.send<{ url: string }>("POST", "/api/billing/checkout")).url);
+      const { url } = await api.send<{ url: string }>("POST", "/api/billing/checkout");
+      if (isPostHogInitialized()) posthog.capture("checkout_started");
+      go(url);
     },
     async portal(_target, _spend, { api, go }) {
-      go((await api.send<{ url: string }>("POST", "/api/billing/portal")).url);
+      const { url } = await api.send<{ url: string }>("POST", "/api/billing/portal");
+      if (isPostHogInitialized()) posthog.capture("billing_portal_opened");
+      go(url);
     },
   },
 };
