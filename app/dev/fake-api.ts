@@ -2,8 +2,8 @@
 // tests, with the same paths, shapes, admin checks and validation messages. Guardrails
 // resolve with openmerit/engine's resolver, as in the cloud app. The bearer token picks a
 // scenario: preview-tonic (the fully populated Tonic Ultra account in tonic-ultra.ts),
-// preview-populated, preview-empty, preview-noplan, preview-member,
-// preview-error, preview-slow and preview-expired. Each scenario keeps its own in-memory
+// preview-populated, preview-empty, preview-noplan, preview-member, preview-neworg (an organization
+// just created), preview-noorg (a token without an organization), preview-error, preview-slow and preview-expired. Each scenario keeps its own in-memory
 // state, so actions change what later requests return. Every name and number is fictional.
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, type Guardrails, type Level } from "../../openmerit-core/src/engine/guardrails.ts";
 import type { DeletedTask, Endpoint, JobView, LiveProgress, MeasuredModel, Me, Report, Run, Spend, Task } from "../api.ts";
@@ -99,6 +99,9 @@ function scenario(name: string): State {
   if (name === "tonic") return tonicUltra();
   const state = populated();
   if (name === "empty") return emptyState(state.me);
+  // An organization the preview just created: nothing in it yet, no plan, and no name in the token
+  // (the instance has organization slugs off), so the app names it from Clerk.
+  if (name === "neworg") return emptyState({ user: { id: "user_jordan" }, account: { id: "org_new", name: null }, role: "admin", plan: { name: null, status: "none", periodEnd: null, includedEvals: 0, usedEvals: 0 } });
   if (name === "noplan") state.me.plan = { name: null, status: "none", periodEnd: null, includedEvals: 0, usedEvals: 0 };
   if (name === "member") state.me.role = "member";
   return state;
@@ -141,6 +144,7 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       ? json(403, { clerk_error: { type: "forbidden", reason: "reverification-error", metadata: { reverification: { level: "first_factor", afterMinutes: 10 } } } })
       : null;
     if (!name || name === "expired") return error(401, "Sign in first.");
+    if (name === "noorg") return error(403, "This token names no Clerk organization. OpenMerit accounts are organizations: sign in again and choose an organization, or create one at app.openmerit.ai.");
     if (name === "error") return error(500, "The cloud app is having trouble. Try again in a minute.");
     if (name === "slow") await new Promise((done) => setTimeout(done, 60_000));
     let state = states.get(name);

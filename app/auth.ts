@@ -3,16 +3,28 @@
 // each session token it receives. A page that already defines clerkGlobals.Clerk,
 // as the local preview does, uses it instead.
 export interface ClerkSession {
+  // pending until its task is done, such as choose-organization while force organization selection is on.
   status: string;
+  currentTask?: { key: string } | null;
   getToken(): Promise<string | null>;
   // Starts a re-verification and lists the factors Clerk can check; empty for a Google-only account.
   startVerification?(params: { level: string }): Promise<{ supportedFirstFactors?: unknown[] | null }>;
 }
-export interface ClerkUser { id?: string; fullName?: string | null; primaryEmailAddress?: { emailAddress: string } | null }
+export interface ClerkOrganization { id: string; name: string }
+export interface ClerkUser {
+  id?: string;
+  fullName?: string | null;
+  firstName?: string | null;
+  primaryEmailAddress?: { emailAddress: string } | null;
+  organizationMemberships?: { organization: ClerkOrganization; role: string }[];
+}
 export interface Clerk {
   session?: ClerkSession | null;
   user?: ClerkUser | null;
-  organization?: { name: string } | null;
+  organization?: ClerkOrganization | null;
+  createOrganization?(params: { name: string }): Promise<ClerkOrganization>;
+  // Makes the organization the session's active one, which also completes a choose-organization task.
+  setActive?(params: { organization: string }): Promise<void>;
   load(options: Record<string, unknown>): Promise<void>;
   addListener(listener: (state: { user?: ClerkUser | null; session?: ClerkSession | null }) => void): unknown;
   openSignIn(options: Record<string, unknown>): void;
@@ -101,6 +113,8 @@ export async function loadClerk(config: AppConfig): Promise<Clerk> {
     ui: { ClerkUI: clerkGlobals.__internal_ClerkUICtor },
     telemetry: false,
     signInForceRedirectUrl: here, signUpForceRedirectUrl: here, afterSignOutUrl: `${location.origin}/`,
+    // A session without an organization comes back here, where the app's own page picks or creates one.
+    taskUrls: { "choose-organization": here },
     appearance: appearance(),
     localization: {
       signIn: { start: { title: "Sign in to OpenMerit", subtitle: "Use the GitHub or Google account your team signs in with.", titleCombined: "Sign in to OpenMerit", subtitleCombined: "New or returning, use the GitHub or Google account your team signs in with." } },
@@ -111,3 +125,10 @@ export async function loadClerk(config: AppConfig): Promise<Clerk> {
 }
 
 export const signedIn = (clerk: Clerk): boolean => clerk.session?.status === "active" && !!clerk.user;
+
+// OpenMerit accounts are Clerk organizations, and the cloud app refuses a token without one. With
+// force organization selection on, Clerk leaves a new session pending on its choose-organization
+// task; a session that predates it can be active with no organization.
+export const needsOrganization = (clerk: Clerk): boolean => !!clerk.user && (
+  (clerk.session?.status === "pending" && clerk.session.currentTask?.key === "choose-organization")
+  || (clerk.session?.status === "active" && !clerk.organization));

@@ -6,7 +6,7 @@ import { empty, header } from "./common.ts";
 const levels: { level: Level; label: string }[] = [{ level: "environment", label: "Environment" }, { level: "agent", label: "Agent" }, { level: "task", label: "Task" }];
 const isLevel = (value: string | null): value is Level => levels.some((item) => item.level === value);
 
-type Shape = "list" | "number" | "whole" | "usd" | "percent" | "boolean" | "text";
+type Shape = "list" | "number" | "whole" | "usd" | "percent" | "boolean" | "text" | "policy";
 const settings: Record<GuardrailKey, { label: string; shape: Shape; hint?: string }> = {
   allowedProviders: { label: "Allowed providers", shape: "list" },
   allowedModels: { label: "Allowed models", shape: "list" },
@@ -19,17 +19,26 @@ const settings: Record<GuardrailKey, { label: string; shape: Shape; hint?: strin
   minPassRate: { label: "Minimum pass rate", shape: "percent" },
   latencyMs: { label: "Latency limit (ms)", shape: "number" },
   watch: { label: "Watch for new models", shape: "boolean" },
-  actionPolicy: { label: "What the agent may do with a pick", shape: "text", hint: "open_pr, ask_first or instructions_only" },
+  actionPolicy: { label: "What the agent may do with a pick", shape: "policy" },
   agentEvalRequired: { label: "Agent eval", shape: "text", hint: "warn or required" },
   minAgentPassRate: { label: "Minimum agent pass rate", shape: "percent" },
 };
+// open_pr is a valid guardrail, but nothing opens pull requests yet: it is shown as launching soon
+// and offered only where it is already set.
+const policies: { value: string; label: string; soon?: string }[] = [
+  { value: "ask_first", label: "Ask first" },
+  { value: "instructions_only", label: "Instructions only" },
+  { value: "open_pr", label: "Open a pull request", soon: "Open a PR (soon)" },
+];
 const keys = Object.keys(GUARDRAIL_KINDS) as GuardrailKey[];
 const shapeOf = (key: string): Shape => settings[key as GuardrailKey]?.shape ?? "text";
 const labelOf = (key: string): string => settings[key as GuardrailKey]?.label ?? key;
 
-export function show(key: string, value: unknown): string {
+export function show(key: string, value: unknown): string | Html {
   if (value === null || value === undefined) return "–";
   const shape = shapeOf(key);
+  const policy = shape === "policy" ? policies.find((item) => item.value === value) : undefined;
+  if (policy) return policy.soon ? html`${policy.label} <span class="pill tag soon">Launching soon</span>` : policy.label;
   if (Array.isArray(value)) return value.length ? value.join(", ") : "None";
   if (shape === "boolean" || typeof value === "boolean") return value ? "On" : "Off";
   if (shape === "usd" && typeof value === "number") return usd(value);
@@ -105,7 +114,9 @@ export const guardrailsView: View<Data> = {
               ${keys.map((key) => html`<tr>
                 <td><label for="g-${key}">${labelOf(key)}</label><span class="sub"><code>${key}</code></span></td>
                 <td><span class="sub">${GUARDRAIL_KINDS[key] === "constraint" ? "Constraint · only narrows" : "Default · can be replaced"}</span></td>
-                <td><input id="g-${key}" name="${key}" value="${editable(key, here.get(key))}" placeholder="${settings[key].hint ?? "Inherit"}" spellcheck="false"${locked ? html` disabled` : ""}></td>
+                <td>${shapeOf(key) === "policy"
+                  ? html`<select id="g-${key}" name="${key}"${locked ? html` disabled` : ""}><option value="">Inherit</option>${policies.map((item) => html`<option value="${item.value}"${here.get(key) === item.value ? html` selected` : item.soon ? html` disabled` : ""}>${item.soon ?? item.label}</option>`)}</select>`
+                  : html`<input id="g-${key}" name="${key}" value="${editable(key, here.get(key))}" placeholder="${settings[key].hint ?? "Inherit"}" spellcheck="false"${locked ? html` disabled` : ""}>`}</td>
                 <td>${show(key, effective[key])}</td>
                 <td>${from(guardrails.from[key], level)}</td>
               </tr>`)}

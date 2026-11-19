@@ -111,9 +111,9 @@ export interface JobView {
   provisional: { model: string; endpoint: string; reason: string; estCostPerCallUsd: number | null } | null;
   createdAt: string;
   report: null;
-  // While a job measures: the candidate under test, its passes so far against the model in use
-  // today, and its pass rate over time. Proposed for the cloud app, which does not send it yet;
-  // the preview's fake API does. Pages fall back to progress without it.
+  // While a measure step runs: the candidate under test, its passes so far against the model in
+  // use today, and its pass rate after each case (cloud/src/actors/job.ts). Null between steps and
+  // absent from jobs that started before it; pages fall back to progress then.
   live?: LiveProgress | null;
 }
 export interface LiveProgress {

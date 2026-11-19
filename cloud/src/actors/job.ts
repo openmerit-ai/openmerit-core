@@ -63,12 +63,30 @@ export interface JobState {
   questions: Question[];
   notices: string[];
   progress: { measured: number; planned: number | null };
+  /** The measure step running now, case by case, for the app's live view; null between steps and once the job ends. Absent from jobs started before it. */
+  live?: LiveProgress | null;
+  /** When the first measure step started, to estimate the time left. */
+  measuringSince?: string | null;
   result: JobResult | null;
   error: string | null;
   updatedAt: string;
 }
 
 export interface JobView extends Omit<JobState, "input"> { jobId: string; taskId: string; task: string; provisional: Provisional; createdAt: string }
+
+/** The candidate a measure step runs, its pass rate after each case so far, and the current model's pass rate on the same cases. */
+export interface LiveProgress {
+  model: string;
+  endpoint: string;
+  /** The current model and its pass rate, 0 to 100, over its runs so far; null while it is the one measured. */
+  baseline: { model: string; rate: number } | null;
+  done: number;
+  total: number;
+  passes: number;
+  /** Pass rate so far, 0 to 100, after each case; time is Unix seconds. */
+  history: { time: number; rate: number }[];
+  minutesLeft: number | null;
+}
 
 type Measured = ({ kind: "ok" } & MeasureResult) | { kind: "unavailable" | "refused" | "error"; reason: string };
 
@@ -244,7 +262,7 @@ export const job = workflow({
           const questions = labelQuestions(bundle, current);
           if (!questions.length) return Loop.break(current);
           await loop.step("ask", async s => {
-            s.state.status = "needs_input"; s.state.phase = "label_check"; s.state.questions = questions; s.state.updatedAt = now();
+            s.state.status = "needs_input"; s.state.phase = "label_check"; s.state.questions = questions; s.state.live = null; s.state.updatedAt = now();
             await s.client<Registry>().account.getOrCreate([s.state.input.accountId]).jobUpdate({ jobId, status: "needs_input" });
           });
           const message = await loop.queue.next("answer", { names: ["answers"] });
@@ -326,10 +344,20 @@ export const job = workflow({
        */
       const measure = (option: Option, ids: string[]): Promise<Measured> => {
         const name = `measure-${++counter}`;
+        const against = option !== pool.baseline && progress.baseline.length ? score(progress.baseline).score : null;
         return ctx.step({
           name, timeout: 0, maxRetries: INTERRUPTIONS,
           run: async s => {
             if (plannedTotal !== null) s.state.progress.planned = Math.max(plannedTotal, s.state.progress.measured);
+            // Live progress: the steps left at the pace of the steps done so far.
+            s.state.measuringSince ??= now();
+            const elapsed = Date.now() - Date.parse(s.state.measuringSince), stepsDone = s.state.progress.measured;
+            const left = stepsDone && s.state.progress.planned ? Math.max(1, Math.ceil(elapsed / stepsDone * (s.state.progress.planned - stepsDone) / 60_000)) : null;
+            const live: LiveProgress = {
+              model: option.model, endpoint: option.endpoint, baseline: against === null || !pool.baseline ? null : { model: pool.baseline.model, rate: against * 100 },
+              done: 0, total: ids.length, passes: 0, history: [], minutesLeft: left,
+            };
+            s.state.live = live;
             const account = s.client<Registry>().account.getOrCreate([s.state.input.accountId]);
             const { config, fetch } = services();
             const client = createClient(await keysFor(jobId, account), { fetch, model: model => models.priced[model] ?? null });
@@ -338,8 +366,13 @@ export const job = workflow({
               client, endpoint: OPENROUTER, model: config.models.judge,
               rubric: bundle.description ? `The answer does this task well: ${bundle.description}` : "The answer does what the prompt asks and agrees with the reference answer.",
             } : undefined;
-            const run = createMeasure({ bundle, cases: usable, client, grader: graderFor(bundle, judge ? { judge } : {}), ledger: jobLedger(account, jobId), key: `${jobId}/${name}`, signal: s.abortSignal });
+            const onCase = (result: { pass: boolean }) => {
+              live.done += 1; live.passes += result.pass ? 1 : 0;
+              live.history = [...live.history, { time: Date.now() / 1000, rate: live.passes / live.done * 100 }].slice(-60);
+            };
+            const run = createMeasure({ bundle, cases: usable, client, grader: graderFor(bundle, judge ? { judge } : {}), ledger: jobLedger(account, jobId), key: `${jobId}/${name}`, signal: s.abortSignal, onCase });
             for (let attempt = 1; ; attempt++) {
+              live.done = 0; live.passes = 0; live.history = [];
               try {
                 const result = await run({ model: option.endpointModel, endpoint: option.endpoint }, ids, { run: String(attempt - 1) });
                 done(s);
@@ -435,7 +468,7 @@ export const job = workflow({
         let chosen = cheaper[0] ?? null;
         let agentEval: AgentEvalSummary | null = null;
         if (chosen && input.agent !== null) {
-          await ctx.step("agent-eval-start", async s => { s.state.phase = "agent_eval"; s.state.updatedAt = now(); });
+          await ctx.step("agent-eval-start", async s => { s.state.phase = "agent_eval"; s.state.live = null; s.state.updatedAt = now(); });
           const agentMeasure = services().agentEval({ accountId: input.accountId, environment: input.environment, agent: input.agent });
           let agentCounter = 0;
           const checked = await checkAgent({
@@ -499,8 +532,8 @@ export const job = workflow({
   },
   actions: {
     status: (c): JobView => {
-      const { input, ...rest } = c.state;
-      return { ...rest, jobId: c.key[0]!, taskId: input.taskId, task: input.bundle.task, provisional: input.provisional, createdAt: input.createdAt };
+      const { input, measuringSince: _since, ...rest } = c.state;
+      return { ...rest, live: rest.live ?? null, jobId: c.key[0]!, taskId: input.taskId, task: input.bundle.task, provisional: input.provisional, createdAt: input.createdAt };
     },
     /** For deleting an account. */
     destroy: (c): void => { endpointKeys.delete(c.key[0]!); c.destroy(); },
@@ -524,7 +557,7 @@ async function finish(s: StepState, client: AppClient, jobId: string, status: "d
   await client.task.getOrCreate([input.accountId, input.taskId]).recordResult({ jobId, status, result });
   await client.account.getOrCreate([input.accountId]).jobUpdate({ jobId, status, measured: status === "done" });
   const ended = TERMINAL.has(s.state.status);
-  s.state.status = status; s.state.phase = "done"; s.state.result = result; s.state.error = error; s.state.questions = []; s.state.updatedAt = now();
+  s.state.status = status; s.state.phase = "done"; s.state.result = result; s.state.error = error; s.state.questions = []; s.state.live = null; s.state.updatedAt = now();
   if (notice && !result) s.state.notices.push(notice);
   endpointKeys.delete(jobId);
   if (!ended) {
