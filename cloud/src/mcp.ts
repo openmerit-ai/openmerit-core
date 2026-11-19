@@ -126,7 +126,8 @@ export function clientOf(session: string | null): string | null {
 async function callTool(deps: McpDeps, identity: Identity, name: string, args: Json, askedBy: string | null): Promise<ToolResult> {
   const { client } = deps;
   const account = client.account.getOrCreate([identity.accountId]);
-  await account.touch({ userId: identity.userId, role: identity.role, name: identity.accountName });
+  // Clerk's OAuth access tokens carry org_id but no role or slug, so the member's recorded role and the account's name stay as the web app last saw them. No MCP tool depends on the role.
+  await account.touch({ userId: identity.userId, role: null, name: null });
   const jobView = async (jobId: unknown): Promise<JobView | ToolResult> => {
     if (typeof jobId !== "string" || !(await account.job(jobId))) return { text: `No job ${String(jobId)} in this account.`, data: {}, isError: true };
     return client.job.get([jobId]).status();

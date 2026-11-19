@@ -14,7 +14,7 @@ Not released: nothing here is deployed until the deploy below runs.
 | `POST /api/stripe/webhook` | Stripe only, signature-verified. The source of truth for an account's plan |
 | `GET /r/<job>.md` | A report as Markdown, for the account's members and for agents with their MCP token. `POST /api/runs/<job>/share` makes a public link |
 
-The account is the token's Clerk organization (`org_id`). A token without one is refused with an error that tells the user to create or choose an organization; the app never guesses an account.
+The account is the token's Clerk organization (`org_id`). Clerk's OAuth access tokens for `/mcp` carry no role, so no MCP tool depends on one, and an MCP call keeps the member's role as the web app's session token last recorded it. A token without one is refused with an error that tells the user to create or choose an organization; the app never guesses an account.
 
 ## Actors
 
@@ -44,6 +44,7 @@ To run it by hand against a local engine: `TEST_STORAGE=$(mktemp -d) TEST_ENGINE
 | Variable | Kind | For |
 | --- | --- | --- |
 | `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY` | secret, setting | Token verification. The publishable key names the issuer |
+| `CLERK_JWT_KEY` | setting, optional | Clerk's PEM public key: verifies `/api` session tokens without fetching Clerk's JWKS. The tests use it with a local key |
 | `OPENROUTER_API_KEY` | secret | OpenMerit-paid measuring on OpenRouter |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_ID` | secret, secret, setting | Checkout, the portal, webhooks and metered usage (`STRIPE_METER_EVENT`, default `openmerit_evaluation`). A price's metadata sets `included_evals` and `overage` (`metered` or `refuse`) |
 | `OPENMERIT_KEY_ENCRYPTION_KEY` | secret | 32 bytes, base64. Without it `/api/endpoints` refuses new endpoints |
