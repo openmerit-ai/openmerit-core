@@ -43,7 +43,7 @@ function live(job: JobView): Html {
   const progress = job.progress.planned ? `${job.progress.measured} of about ${job.progress.planned} measurements done` : `${plural(job.progress.measured, "measurement")} done`;
   const body = {
     queued: html`<span class="pill">Queued</span><p class="note">The run starts in a moment.</p>`,
-    running: job.live ? measuring(job) : html`<span class="pill live">Evaluating</span><span class="sub">${job.phase.replace("_", " ")} · ${progress}</span><p class="note">Your coding agent gets the result on its next OpenMerit call, and this page shows the report.</p>`,
+    running: job.live ? measuring(job) : html`<span class="pill live">Evaluating</span><span class="sub">${job.phase.replace("_", " ")} · ${progress}</span><p class="note">${job.connection ? "OpenMerit is testing the task's presets on paused copies in Viktor's test mode. This page shows the result when it finishes." : "Your coding agent gets the result on its next OpenMerit call, and this page shows the report."}</p>`,
     needs_input: html`<span class="pill warn">Needs input</span><p class="note">OpenMerit asked ${plural(job.questions.length, "question")} in your coding agent, such as a check of the test labels. The run continues once it answers.</p>`,
     failed: html`<p>${job.error ?? "The run stopped before it could recommend a model."}</p>${again(job)}`,
     stopped: html`<p>The run was stopped${job.error ? `: ${job.error}` : "."}</p>${again(job)}`,
@@ -107,7 +107,7 @@ const prose = (text: string): Html[] => text.split("`").map((part, index) => (in
 
 // Viktor credits cost $2.50 per 1,000; a connection result's cost per call is per test run.
 const CREDIT_USD = 0.0025;
-const perRun = (usdPerRun: number | null): string => (usdPerRun === null ? "–" : `${Math.round(usdPerRun / CREDIT_USD).toLocaleString("en-US")} credits`);
+const perRun = (usdPerRun: number | null): string => (usdPerRun === null ? "–" : plural(Math.round(usdPerRun / CREDIT_USD), "credit"));
 
 // A connected app's result: the change to make there, and Approve change, which records who approved it and when.
 function connectionChange(report: Report, admin: boolean): Html {
