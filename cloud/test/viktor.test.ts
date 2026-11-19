@@ -23,7 +23,7 @@ function fakeViktor() {
     { id: "Cut8kTVZ", path: "/ticket_triage_test", title: "Ticket triage test", model: "smart", execution_type: "agent", description: "Classify these 6 support tickets, then post the result to #check-this-out.", cron: "0 9 * * 1", paused: true, deleted: false },
   ];
   const files = new Map<string, string>();
-  const state = { scopes: [...REQUIRED_SCOPES] as string[], created: [] as string[], deleted: [] as string[], threads: [] as { id: string; message: string }[], scripts: [] as string[], auth: new Set<string>() };
+  const state = { drafted: [] as string[], scopes: [...REQUIRED_SCOPES] as string[], created: [] as string[], deleted: [] as string[], threads: [] as { id: string; message: string }[], scripts: [] as string[], auth: new Set<string>() };
   const runBatch = (spec: { source: string; models: string[]; repeats: number; copyPath: string; copyTitle: string; out: string }) => {
     const runs = [];
     for (const model of spec.models) { state.created.push(spec.copyPath + model); crons.push({ ...crons.find(cron => cron.path === spec.source)!, id: `copy_${model}`, path: spec.copyPath + model, title: spec.copyTitle, model, paused: true }); }
@@ -46,7 +46,9 @@ function fakeViktor() {
       const args = inCode ? JSON.parse(JSON.parse(inCode) as string) as string[] : (body!.args as string[]) ?? [];
       state.scripts.push(kind);
       let stdout = "";
-      if (kind === "list") stdout = JSON.stringify({ tasks: crons.filter(cron => !cron.deleted), usage: [{ credits: 140, path: "/agent_runs/crons/ticket_triage_test/2026-11-18T09-00-00" }, { credits: 536, path: "/agent_runs/crons/workflow_discovery/2026-11-19T10-56-20" }] });
+      // A workspace whose tools wait for approval: the gateway saves the calls as drafts, and LIST names them.
+      if (kind === "list" && state.drafted.length) stdout = JSON.stringify({ approval: state.drafted });
+      else if (kind === "list") stdout = JSON.stringify({ tasks: crons.filter(cron => !cron.deleted), usage: [{ credits: 140, path: "/agent_runs/crons/ticket_triage_test/2026-11-18T09-00-00" }, { credits: 536, path: "/agent_runs/crons/workflow_discovery/2026-11-19T10-56-20" }] });
       if (kind === "put") { files.set(`${args[0]}/spec.json`, args[2]!); stdout = "{\"ok\": true}"; }
       if (kind === "read") stdout = files.get(args[0]!) ?? "{\"status\": \"missing\"}";
       if (kind === "credits") stdout = JSON.stringify({ credits: Object.fromEntries((JSON.parse(args[0]!) as string[]).map(id => [id, id.startsWith("run_") ? RUN[id.split("_")[1]!]! : THREAD])) });
@@ -129,6 +131,14 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     assert.deepEqual(partial.body.missingScopes, ["runs:read"], "the app can name the missing scopes");
     assert.deepEqual(viktor.state.scripts, [], "no script ran for a refused key");
     viktor.state.scopes = [...REQUIRED_SCOPES];
+    viktor.state.drafted = ["get_usage_threads", "list_crons"];
+    const gated = await connect(admin, { apiKey: KEY });
+    assert.equal(gated.status, 400);
+    assert.deepEqual((gated.body as { needsApproval?: string[] }).needsApproval, ["get_usage_threads", "list_crons"], "the app can name the tools that wait for approval");
+    assert.match(gated.body.error!, /let these tools run without approval: list_crons, get_path_info, get_usage_threads, create_agent_cron/);
+    assert.equal((await admin.api<{ connected: boolean }>("/api/connections/viktor")).body.connected, false, "a workspace whose tools wait for approval is not connected");
+    viktor.state.drafted = [];
+    viktor.state.scripts.length = 0;
 
     // Connecting lists the five tasks and starts the one that can be evaluated; the system tasks are skipped with why.
     const connected = await connect(admin, { apiKey: KEY, creditCap: 2000 });
