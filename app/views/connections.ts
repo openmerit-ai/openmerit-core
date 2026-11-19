@@ -1,6 +1,7 @@
 import type { Endpoint, EndpointKind } from "../api.ts";
 import { ApiError } from "../api.ts";
 import { date, html, logo, plural, provider, type Html } from "../html.ts";
+import posthog, { isPostHogInitialized } from "../posthog.ts";
 import type { View } from "../view.ts";
 import { header, install } from "./common.ts";
 
@@ -95,6 +96,11 @@ export const connectionsView: View<Endpoint[]> = {
         return;
       }
       // The key leaves the page with the form; the list shows only its last four characters.
+      if (isPostHogInitialized()) posthog.capture("endpoint_added", {
+        endpoint_kind: kind,
+        allowed_model_count: models.length,
+        allows_all_models: models.length === 0,
+      });
       form.reset();
       await refresh();
       toast("Endpoint added. Its key will not be shown again.");
@@ -103,12 +109,14 @@ export const connectionsView: View<Endpoint[]> = {
       const endpoint = endpoints.find((item) => item.id === target.dataset.id);
       if (!endpoint || !await confirm({ title: "Remove this endpoint?", body: `OpenMerit deletes the key ending ${endpoint.keyLast4} and stops measuring on ${endpoint.baseUrl}. Past runs keep their results.`, confirm: "Remove endpoint", danger: true })) return;
       await api.send("DELETE", `/api/endpoints/${encodeURIComponent(endpoint.id)}`);
+      if (isPostHogInitialized()) posthog.capture("endpoint_removed", { endpoint_kind: endpoint.kind });
       await refresh();
       toast("Endpoint removed.");
     },
     async disconnect(_target, _endpoints, { api, toast, confirm, me }) {
       if (!await confirm({ title: "Disconnect every coding agent?", body: `Every coding agent signed in to ${me.account.name} loses access to OpenMerit's tools until it signs in again. Tasks, runs and watches are kept.`, confirm: "Disconnect", danger: true })) return;
       await api.send("POST", "/api/disconnect");
+      if (isPostHogInitialized()) posthog.capture("coding_agents_disconnected");
       toast("Coding agents disconnected. Their next call opens sign-in.");
     },
   },

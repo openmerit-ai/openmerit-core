@@ -2,6 +2,7 @@
 // #view[data-view] from the cloud app's /api/* with the session token.
 import { ApiError, createApi, type Api, type Me } from "./api.ts";
 import { loadClerk, signedIn, unavailable, type AppConfig, type Clerk } from "./auth.ts";
+import posthog, { initializePostHog, isPostHogInitialized, logPostHog } from "./posthog.ts";
 import { html, setLogos, type Html } from "./html.ts";
 import { startLive, stopLive } from "./live.ts";
 import { mount, type Account, type ConfirmOptions, type Ctx, type Mounted } from "./view.ts";
@@ -160,6 +161,7 @@ async function render(ctx: Ctx): Promise<void> {
   mounted.bind(root);
   startLive(root, ctx.api, ctx.refresh);
   document.title = `${mounted.title ?? pageTitle} · OpenMerit`;
+  logPostHog("app_view_rendered", { view: root.dataset.view ?? "unknown" });
 }
 
 async function boot(): Promise<void> {
@@ -168,12 +170,14 @@ async function boot(): Promise<void> {
       const response = await fetch("/config.json", { signal: AbortSignal.timeout(15_000) });
       if (!response.ok) throw new Error("Sign-in is temporarily unavailable. Please try again later.");
       const config = await response.json() as AppConfig;
+      initializePostHog(config);
       clerk = await loadClerk(config);
       api = createApi(config.apiOrigin, async () => (await clerk?.session?.getToken()) ?? null, fetch, reverify);
       let was = signedIn(clerk);
       clerk.addListener(() => {
         if (!clerk || signedIn(clerk) === was) return;
         was = signedIn(clerk);
+        if (!was && isPostHogInitialized()) posthog.reset();
         void boot();
       });
     }
@@ -186,6 +190,17 @@ async function boot(): Promise<void> {
   try {
     const found = await api.get<Me>("/api/me");
     const me: Account = { ...found, account: { ...found.account, name: found.account.name ?? clerk.organization?.name ?? "Your organization" } };
+    if (isPostHogInitialized()) {
+      const user = clerk.user;
+      posthog.identify(me.user.id, {
+        ...(user?.fullName ? { name: user.fullName } : {}),
+        ...(user?.primaryEmailAddress?.emailAddress ? { email: user.primaryEmailAddress.emailAddress } : {}),
+        role: me.role,
+        account_id: me.account.id,
+        account_name: me.account.name,
+        plan: me.plan.name ?? "none",
+      });
+    }
     fillProfile(me);
     const ctx: Ctx = {
       api, me, params, id: runId, toast, confirm: confirmDialog, download,

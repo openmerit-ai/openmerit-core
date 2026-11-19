@@ -102,6 +102,8 @@ export async function runCase(input: {
       const tool = bundle.tools?.find(item => item.name === call.name);
       const content = !tool ? JSON.stringify({ error: `There is no tool named ${call.name}.` })
         : tool.mockResult === undefined ? JSON.stringify({ error: `${call.name} is not available.` }) : mocked(tool.mockResult);
+      try { input.client.captureToolSpan?.({ name: call.name, input: call.arguments, output: content }); }
+      catch { /* Analytics must never affect a model call. */ }
       messages.push({ role: "tool", toolCallId: call.id, name: call.name, content });
     }
   }

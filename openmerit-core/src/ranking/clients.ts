@@ -29,9 +29,23 @@ export interface EndpointConfig {
 /** How each call is metered: the ledger, the call's idempotency key, and the caller's signal. */
 export interface Meter { ledger: Ledger; key: string; signal?: AbortSignal }
 
+export interface GenerationCaptureInput {
+  request: CompletionRequest;
+  endpoint: EndpointConfig;
+  baseUrl: string;
+  completion: Completion;
+}
+
+/** AI Observability is injected by production hosts; the ranking primitive has no PostHog dependency. */
+export type GenerationCapture = (input: GenerationCaptureInput) => void;
+export interface ToolSpanCaptureInput { name: string; input: string; output: string }
+export type ToolSpanCapture = (input: ToolSpanCaptureInput) => void;
+
 export interface ModelClient {
   /** Throws BudgetRefused, before sending, when the ledger refuses the reservation. */
   complete(request: CompletionRequest, meter: Meter): Promise<Completion>;
+  /** Records a dispatched tool run when the host configured AI Observability. */
+  captureToolSpan?: ToolSpanCapture;
 }
 
 const DEFAULT_BASE_URL: Partial<Record<EndpointKind, string>> = { openrouter: "https://openrouter.ai/api/v1", anthropic: "https://api.anthropic.com/v1" };
@@ -118,7 +132,7 @@ function errorMessage(value: Json): string | null {
  * A client for these endpoints. `model` finds a model's list prices for estimates and reservations;
  * the default looks it up in the bundled catalogue by ID or alias.
  */
-export function createClient(endpoints: readonly EndpointConfig[], options: { fetch?: typeof fetch; model?: (endpointModel: string) => CatalogueModel | null; timeoutMs?: number } = {}): ModelClient {
+export function createClient(endpoints: readonly EndpointConfig[], options: { fetch?: typeof fetch; model?: (endpointModel: string) => CatalogueModel | null; timeoutMs?: number; captureGeneration?: GenerationCapture; captureToolSpan?: ToolSpanCapture } = {}): ModelClient {
   const fetcher = options.fetch ?? fetch;
   const timeoutMs = options.timeoutMs ?? CALL_TIMEOUT_MS;
   let index: ReturnType<typeof catalogueIndex> | undefined;
@@ -132,6 +146,10 @@ export function createClient(endpoints: readonly EndpointConfig[], options: { fe
       if (!baseUrl) throw new Error(`Endpoint ${endpoint.id} needs a base URL`);
       const failed = (status: number, error: string, latencyMs = 0, costUsd = 0): Completion => ({ ok: false, status, text: "", toolCalls: [], truncated: false, usage: null, costUsd, costIsEstimate: false, latencyMs, error });
       if (Array.isArray(endpoint.allowedModels) && !endpoint.allowedModels.includes(request.model)) return failed(403, `${request.model} is not in ${endpoint.id}'s allowed models`);
+      const capture = (completion: Completion): Completion => {
+        try { options.captureGeneration?.({ request, endpoint, baseUrl, completion }); } catch { /* Analytics must never affect a model call. */ }
+        return completion;
+      };
 
       const anthropic = endpoint.kind === "anthropic";
       const body = anthropic ? anthropicBody(request) : openaiBody(endpoint, baseUrl, request);
@@ -171,14 +189,14 @@ export function createClient(endpoints: readonly EndpointConfig[], options: { fe
         if (upstream instanceof Error) {
           meter.signal?.throwIfAborted();
           await settle({ actualUsd: 0, estimatedUsd: null, failed: true });
-          return failed(0, `${endpoint.id} did not answer (${redact(upstream.message).slice(0, 200)})`, Date.now() - started);
+          return capture(failed(0, `${endpoint.id} did not answer (${redact(upstream.message).slice(0, 200)})`, Date.now() - started));
         }
         let text: string;
         try { text = await upstream.text(); } catch (error) {
           meter.signal?.throwIfAborted();
           // Cut off while answering: what was sent may have been billed, so the reservation stands as an estimate.
           await settle({ actualUsd: null, estimatedUsd: null, failed: true });
-          return failed(0, `${endpoint.id} did not answer (${attemptSignal?.aborted ? silent().message : redact(error instanceof Error ? error.message : String(error)).slice(0, 200)})`, Date.now() - started);
+          return capture(failed(0, `${endpoint.id} did not answer (${attemptSignal?.aborted ? silent().message : redact(error instanceof Error ? error.message : String(error)).slice(0, 200)})`, Date.now() - started));
         }
         const latencyMs = Date.now() - started;
         const usage = readUsage(text);
@@ -186,7 +204,7 @@ export function createClient(endpoints: readonly EndpointConfig[], options: { fe
         try { value = JSON.parse(text) as Json; } catch { /* not JSON */ }
         if (!upstream.ok) {
           await settle({ actualUsd: usage?.costUsd ?? 0, estimatedUsd: null, failed: true });
-          return failed(upstream.status, errorMessage(value) ?? `HTTP ${upstream.status}`, latencyMs, usage?.costUsd ?? 0);
+          return capture(failed(upstream.status, errorMessage(value) ?? `HTTP ${upstream.status}`, latencyMs, usage?.costUsd ?? 0));
         }
         // An answer without usage is estimated from its size; a model without a price keeps its reservation.
         const cost: Settlement = { actualUsd: usage?.costUsd ?? null, estimatedUsd: usage ? requestPrice(model, usage.input, usage.output) : sizeEstimate(model, sentBytes, Buffer.byteLength(text)) };
@@ -194,11 +212,12 @@ export function createClient(endpoints: readonly EndpointConfig[], options: { fe
         const costUsd = settledUsd(expected.usd, cost), costIsEstimate = cost.actualUsd === null;
         const parsed = anthropic ? parseAnthropic(value) : parseOpenai(value);
         const base = { usage: usage ? { input: usage.input, output: usage.output } : null, costUsd, costIsEstimate, latencyMs, status: upstream.status, text: parsed.text, toolCalls: parsed.toolCalls, truncated: parsed.truncated };
-        return parsed.error ? { ...base, ok: false, error: parsed.error } : { ...base, ok: true };
+        return capture(parsed.error ? { ...base, ok: false, error: parsed.error } : { ...base, ok: true });
       } finally {
         // Cut off part-way, such as by the caller's signal: what was sent may have been billed, so the reservation stands as an estimate.
         if (!settled) await meter.ledger.settle(meter.key, { actualUsd: null, estimatedUsd: null, latencyMs: Date.now() - started, failed: true });
       }
     },
+    ...(options.captureToolSpan ? { captureToolSpan: options.captureToolSpan } : {}),
   };
 }

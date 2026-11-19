@@ -1,5 +1,6 @@
 import { ApiError, GUARDRAIL_KINDS, type GuardrailKey, type GuardrailsAt, type Level, type Task } from "../api.ts";
 import { html, usd, type Html } from "../html.ts";
+import posthog, { isPostHogInitialized } from "../posthog.ts";
 import type { View } from "../view.ts";
 import { empty, header } from "./common.ts";
 
@@ -141,6 +142,11 @@ export const guardrailsView: View<Data> = {
         error.hidden = false;
         return;
       }
+      if (isPostHogInitialized()) posthog.capture("guardrails_saved", {
+        level,
+        requested_setting_count: Object.keys(changes).length,
+        rejected_setting_count: saved.rejected.length,
+      });
       await refresh();
       toast(saved.rejected.length ? `Saved, except ${saved.rejected.map((item) => item.key).join(", ")}: not a guardrail.` : "Guardrails saved.");
     },

@@ -16,6 +16,7 @@ import { CriticalError, Loop, StepExhaustedError, workflow } from "@rivet-dev/wo
 import { queue } from "rivetkit";
 import { applyLabelCheck, BudgetRefused, completeWith, createClient, createMeasure, graderFor, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
 import { binarySearch, CandidateUnavailable, catalogueIndex, CHALLENGERS, challengers, checkAgent, FINALISTS, redact, SAMPLE_SIZE, type CatalogueModel, type Ledger, type Ranked, type ResolvedGuardrails, type Stage } from "../engine.ts";
+import { aiObservability } from "../ai-observability.ts";
 import { buildPool, OPENROUTER, type Option, type Pool, type Provisional } from "../pool.ts";
 import { proposeEdit, renderMarkdown, type AgentEvalSummary, type JobResult, type MeasuredModel } from "../report.ts";
 import { services } from "../services.ts";
@@ -212,7 +213,8 @@ export const job = workflow({
             const index = catalogueIndex(await client.catalogue.getOrCreate(["global"]).get());
             const account = client.account.getOrCreate([accountId]);
             // The writer answers with all its cases at once, so it gets longer than a ranking call to answer.
-            const models = createClient(await keysFor(jobId, account), { fetch, model: model => index.find(model), timeoutMs: 600_000 });
+            const observability = aiObservability(jobId, `${jobId}:cases`);
+            const models = createClient(await keysFor(jobId, account), { fetch, model: model => index.find(model), timeoutMs: 600_000, ...observability });
             complete = completeWith(models, { endpoint: OPENROUTER, model: config.models.caseWriter }, jobLedger(account, jobId), `${jobId}/cases`, s.abortSignal);
             count = WRITTEN_CASES;
           }
@@ -306,7 +308,8 @@ export const job = workflow({
             if (plannedTotal !== null) s.state.progress.planned = Math.max(plannedTotal, s.state.progress.measured);
             const account = s.client<Registry>().account.getOrCreate([s.state.input.accountId]);
             const { config, fetch } = services();
-            const client = createClient(await keysFor(jobId, account), { fetch, model: model => models.priced[model] ?? null });
+            const observability = aiObservability(jobId, `${jobId}:${name}`);
+            const client = createClient(await keysFor(jobId, account), { fetch, model: model => models.priced[model] ?? null, ...observability });
             // Text answers go to a fixed judge on OpenMerit's key. Its calls count in the job's spend but not in the candidate's cost per call.
             const judge = bundle.output.kind === "text" && config.openrouter.apiKey ? {
               client, endpoint: OPENROUTER, model: config.models.judge,
