@@ -18,6 +18,7 @@ import { applyLabelCheck, BudgetRefused, completeWith, createClient, createMeasu
 import { CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, FINALISTS, newProgress, redact, SAMPLE_SIZE, score, type CatalogueModel, type Evaluated, type Ledger, type ResolvedGuardrails, type Score } from "../engine.ts";
 import { buildPool, OPENROUTER, type Option, type Pool, type Provisional } from "../pool.ts";
 import { proposeEdit, renderMarkdown, type AgentEvalSummary, type JobResult, type MeasuredModel } from "../report.ts";
+import { capture } from "../analytics.ts";
 import { services } from "../services.ts";
 import { redactBundle } from "../start.ts";
 import type { AppClient, Registry } from "../registry.ts";
@@ -35,6 +36,9 @@ export interface Question {
   hint?: string;
 }
 
+/** Where a job was started: app.openmerit.ai, an MCP tool call, or a task's watch. */
+export type JobTrigger = "app" | "mcp" | "watch";
+
 export interface JobInput {
   accountId: string;
   taskId: string;
@@ -42,6 +46,10 @@ export interface JobInput {
   agent: string | null;
   bundle: TaskBundle;
   kind: "run" | "watch";
+  /** Absent on jobs started before it was recorded: those are watch jobs or MCP runs, by kind. */
+  trigger?: JobTrigger;
+  /** The Clerk user who started the job; null for a watch job, and absent on jobs started before it was recorded. */
+  userId?: string | null;
   provisional: Provisional;
   createdAt: string;
 }
@@ -499,9 +507,14 @@ export const job = workflow({
   },
 });
 
-type StepState = { state: JobState };
+type StepState = { state: JobState; waitUntil: (promise: Promise<void>) => void };
 
-/** Records the job's end in its state, the account (which counts the evaluation) and the task. */
+/**
+ * Records the job's end in its state, the account (which counts the evaluation) and the task, and
+ * sends run_completed. It is sent only on the transition from a live status to a terminal one, after
+ * every write above succeeded: a step that runs again after a failed write sends it then, and one
+ * replayed after its state was saved finds the job already ended and sends nothing.
+ */
 async function finish(s: StepState, client: AppClient, jobId: string, status: "done" | "stopped" | "failed", result: JobResult | null, error: string | null, notice?: string): Promise<void> {
   const { input } = s.state;
   if (result) {
@@ -510,7 +523,18 @@ async function finish(s: StepState, client: AppClient, jobId: string, status: "d
   }
   await client.task.getOrCreate([input.accountId, input.taskId]).recordResult({ jobId, status, result });
   await client.account.getOrCreate([input.accountId]).jobUpdate({ jobId, status, measured: status === "done" });
+  const ended = TERMINAL.has(s.state.status);
   s.state.status = status; s.state.phase = "done"; s.state.result = result; s.state.error = error; s.state.questions = []; s.state.updatedAt = now();
   if (notice && !result) s.state.notices.push(notice);
   endpointKeys.delete(jobId);
+  if (!ended) {
+    const userId = input.userId ?? null;
+    // A watch job has no user: it is the account's, with no person profile.
+    s.waitUntil(capture(services().config.posthog, "run_completed", userId ?? input.accountId, {
+      interface: "cloud", status, trigger: input.trigger ?? (input.kind === "watch" ? "watch" : "mcp"), duration_ms: Date.now() - Date.parse(input.createdAt), account_id: input.accountId,
+      ...(userId ? {} : { $process_person_profile: false }),
+    }));
+  }
 }
+
+const TERMINAL: ReadonlySet<JobStatus> = new Set(["done", "stopped", "failed"]);

@@ -1,5 +1,6 @@
 // The app.openmerit.ai pages: signs in with Clerk, then fills the page named by
 // #view[data-view] from the cloud app's /api/* with the session token.
+import { trackPageview } from "./analytics.ts";
 import { ApiError, createApi, type Api, type Me } from "./api.ts";
 import { loadClerk, signedIn, unavailable, type AppConfig, type Clerk } from "./auth.ts";
 import { html, setLogos, type Html } from "./html.ts";
@@ -183,6 +184,7 @@ async function boot(): Promise<void> {
   }
   if (!signedIn(clerk) || !api) return showSignedOut();
   leaveSignedOut();
+  trackPageview(clerk.user?.id);
   try {
     const found = await api.get<Me>("/api/me");
     const me: Account = { ...found, account: { ...found.account, name: found.account.name ?? clerk.organization?.name ?? "Your organization" } };

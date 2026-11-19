@@ -48,6 +48,7 @@ Settings live in two places:
 | `~/.openmerit/state.db` | SQLite run history for every repository |
 | `~/.openmerit/rivet/` | The daemon's Rivet engine data: each run's workflow and its pending question |
 | `~/.openmerit/daemon.json` (mode 0600), `daemon.log` | The running daemon's pid, port and access token, and its log |
+| `~/.openmerit/telemetry.json` | The random install ID [telemetry](#telemetry) sends, and when its notice was shown |
 
 ### Projects in a subdirectory
 
@@ -205,6 +206,16 @@ Every `setup`, `scout` and `history` checks npm for a newer `openmerit`:
 
 Updating the package refreshes the bundled catalogue; history stays intact. Set `OPENMERIT_NO_UPDATE_CHECK=1` to skip the check.
 
+## Telemetry
+
+OpenMerit sends anonymous usage data to OpenMerit's PostHog project: one `cli_command_run` event for each command you run and each tool call to the local MCP server. The first command that sends one prints a notice to stderr; OpenMerit never asks. Not yet in a released version.
+
+- **What is sent:** the command or tool name (such as `scout` or `openmerit_status`), whether it ran in the CLI or the MCP server, whether it succeeded, how long it took, and the OpenMerit version, OS, CPU architecture and Node.js version. The ID is a random install ID kept in `~/.openmerit/telemetry.json`; it is not linked to you or to an account.
+- **What never is:** arguments, answers, code, file paths, repository names, model IDs, endpoint or Langfuse details, keys, error messages and output.
+- **Turning it off:** set `OPENMERIT_TELEMETRY=0` (or `false` or `off`) or `DO_NOT_TRACK=1`. It is always off when `CI` is set. For the MCP server, set it in the environment your client starts `openmerit mcp` in.
+
+Sending never changes a command's output or exit code. It gives up after about 1 s, so an offline machine waits at most that long when a command ends.
+
 ## Uninstall
 
 ```sh
@@ -253,6 +264,7 @@ The first client that finds no daemon starts it, so set `OPENMERIT_DAEMON_PORT` 
 | Langfuse generations, through [trace sources](#trace-sources) | Read with GET requests into the process that calls `replay()`, which returns them redacted and stores nothing. `tasks()` reads aggregates only |
 | Run history | Your machine. SQLite keeps no keys and no dataset contents. Failed eval logs keep their last lines, redacted |
 | Daemon | Your machine. The Rivet engine listens on `127.0.0.1` only and keeps each run's progress and pending question under `~/.openmerit/rivet`, never keys or your environment |
+| Usage data | OpenMerit's PostHog project: command and tool names, success, duration and versions, with a random install ID, unless you turn it off. See [Telemetry](#telemetry) |
 
 ## Limitations
 

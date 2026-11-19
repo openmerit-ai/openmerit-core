@@ -6,6 +6,7 @@ import { redact } from "./engine.ts";
 import { buildPool, provisionalPick, type Provisional } from "./pool.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import type { AppClient } from "./registry.ts";
+import type { JobTrigger } from "./actors/job.ts";
 
 export const DEFAULT_ENVIRONMENT = "default";
 
@@ -44,7 +45,11 @@ export function redactBundle<T>(value: T): T {
 
 export type StartResult = { ok: true; jobId: string; taskId: string; provisional: Provisional } | { ok: false; error: string };
 
-export async function startJob(client: AppClient, start: { accountId: string; environment: string; agent: string | null; bundle: TaskBundle; kind: "run" | "watch"; askedBy?: string | null }): Promise<StartResult> {
+/**
+ * `trigger` is where the job was started: app.openmerit.ai, an MCP tool call or a task's watch.
+ * `userId` is the Clerk user who started it; a watch job has none.
+ */
+export async function startJob(client: AppClient, start: { accountId: string; environment: string; agent: string | null; bundle: TaskBundle; kind: "run" | "watch"; trigger: JobTrigger; userId: string | null; askedBy?: string | null }): Promise<StartResult> {
   const input = { ...start, bundle: redactBundle(start.bundle) };
   const taskId = taskIdFor(input.environment, input.bundle.task);
   const jobId = newJobId();
@@ -61,6 +66,6 @@ export async function startJob(client: AppClient, start: { accountId: string; en
     ? { model: measured.pick!, endpoint: measured.endpoint ?? "openrouter", reason: `Measured for this task on ${measured.finishedAt.slice(0, 10)} (job ${measured.jobId}); this job measures it again.`, estCostPerCallUsd: null }
     : provisionalPick(catalogue, buildPool({ catalogue, endpoints, bundle: input.bundle, guardrails: guardrails.effective }), input.bundle);
   await task.recordJob({ jobId, bundle: input.bundle, agent: input.agent, kind: input.kind });
-  await client.job.create([jobId], { input: { accountId: input.accountId, taskId, environment: input.environment, agent: input.agent, bundle: input.bundle, kind: input.kind, provisional, createdAt: new Date().toISOString() } });
+  await client.job.create([jobId], { input: { accountId: input.accountId, taskId, environment: input.environment, agent: input.agent, bundle: input.bundle, kind: input.kind, trigger: input.trigger, userId: input.userId, provisional, createdAt: new Date().toISOString() } });
   return { ok: true, jobId, taskId, provisional };
 }

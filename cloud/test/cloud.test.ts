@@ -11,7 +11,7 @@ import { watchState } from "../src/actors/account.ts";
 import { evaluateTask } from "../src/engine.ts";
 import { buildPool } from "../src/pool.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
-import { bundle, caller, costOf, crash, fakeModels, startApp, stop, subscribe, waitFor, WEAK_BELOW, WRITTEN, TICKETS, catalogue, type App, type FakeModels } from "./helpers.ts";
+import { bundle, caller, costOf, crash, fakeCapture, fakeModels, startApp, stop, subscribe, waitFor, WEAK_BELOW, WRITTEN, TICKETS, catalogue, type App, type FakeModels } from "./helpers.ts";
 
 const CLERK = { CLERK_SECRET_KEY: "sk_test_fake", CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from("clerk.openmerit.test$").toString("base64")}` };
 type Data = Record<string, unknown>;
@@ -132,7 +132,9 @@ describe("the cloud app", () => {
 
 test("a job waits on its label check across a restart, then measures on OpenRouter and the customer's endpoint, and a watch re-runs it", async () => {
   const models = await fakeModels();
-  let app = await startApp({ models, env: { ...CLERK, TEST_CATALOGUE_VERSION: "next" } });
+  const posthog = await fakeCapture();
+  const events = (name: string) => posthog.events.filter(event => event.event === name);
+  let app = await startApp({ models, env: { ...CLERK, TEST_CATALOGUE_VERSION: "next", POSTHOG_PROJECT_TOKEN: "phc_test", POSTHOG_HOST: posthog.url } });
   try {
     await subscribe(app, "org_run");
     const customerKey = "sk-customer-key-9876";
@@ -146,6 +148,11 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     const provisional = started.data.provisional as { model: string; reason: string };
     assert.notEqual(provisional.model, "openai/gpt-5.4");
     assert.match(provisional.reason, /Catalogue estimate, not yet measured/);
+    // One mcp_tool_called per tool call, as the signed-in user, with no arguments or result.
+    const [called, ...more] = (await waitFor(async () => events("mcp_tool_called"), found => found.length > 0, 10_000));
+    assert.equal(more.length, 0);
+    assert.deepEqual([called!.distinct_id, called!.api_key], ["user_r", "phc_test"]);
+    assert.deepEqual({ ...called!.properties, duration_ms: typeof called!.properties.duration_ms }, { interface: "mcp", tool: "openmerit_recommend", client: "claude-code", ok: true, duration_ms: "number", account_id: "org_run" });
 
     const result = () => agent().tool("openmerit_result", { job_id: jobId });
     const asking = await waitFor(result, value => value.data.status === "needs_input");
@@ -208,6 +215,11 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     const runs = await waitFor(() => agent().api<{ id: string; kind: string; status: string }[]>("/api/runs"), value => value.body.some(run => run.kind === "watch" && run.status === "done"))
       .catch(async (error: Error) => { throw new Error(`${error.message}\nTask: ${JSON.stringify((await agent().api(`/api/tasks/${taskRow!.id}`)).body).slice(0, 1500)}`); });
     assert.equal(runs.body.filter(run => run.kind === "watch").length, 1);
+    // run_completed once per job, from the job actor, across the restart: the MCP run as its user, the watch run as the account with no person profile.
+    const completed = await waitFor(async () => events("run_completed"), found => found.length >= 2, 10_000);
+    assert.deepEqual(completed.map(event => [event.distinct_id, event.properties.trigger, event.properties.status, event.properties.account_id, event.properties.$process_person_profile]),
+      [["user_r", "mcp", "done", "org_run", undefined], ["org_run", "watch", "done", "org_run", false]]);
+    assert.ok(completed.every(event => event.properties.interface === "cloud" && typeof event.properties.duration_ms === "number" && event.properties.duration_ms >= 0));
     // The first run is no longer the task's latest, and the list still says what it found.
     const listed = (await agent().api<{ id: string; kind: string; askedBy: string | null; result: { status: string; model: string | null; from: string | null } | null }[]>("/api/runs")).body;
     const first = listed.find(run => run.id === jobId);
@@ -242,6 +254,9 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     assert.equal(back.isError, false, back.text);
     assert.equal((await taskView()).state, "watching");
     await waitFor(() => agent().tool("openmerit_result", { job_id: back.data.job_id }), value => value.data.status === "done");
+    await waitFor(async () => events("run_completed"), found => found.length >= 3, 10_000);
+    assert.deepEqual(events("run_completed").map(event => event.properties.trigger), ["mcp", "watch", "mcp"]);
+    assert.ok(posthog.events.every(event => !JSON.stringify(event).includes("ticket")), "no bundle content reaches analytics");
 
     // Deleting needs an admin who verified a first factor in the last 10 minutes, and erases the task, its runs and its reports.
     await guardrail("task", taskRow.id, { budgetUsd: 2 });
@@ -268,7 +283,8 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     const asked = await waitFor(() => agent().tool("openmerit_result", { job_id: fresh.data.job_id }), value => value.data.status === "needs_input");
     assert.deepEqual((asked.data.questions as { id: string }[]).map(question => question.id), ["label_example-7", "label_check"]);
     assert.equal((await caller(app, "test:user_q:org_run:admin:30").api("/api/account", { method: "DELETE" })).status, 403, "deleting the account needs a recent sign-in too");
-  } finally { await stop(app); await models.close(); }
+    assert.equal(events("run_completed").length, 3, "each job sent run_completed once");
+  } finally { await stop(app); await models.close(); await posthog.close(); }
 });
 
 test("a task goes idle once no recommend call came for the idle period, and retired and frozen say why it stopped first", () => {

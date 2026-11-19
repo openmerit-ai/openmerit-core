@@ -26,6 +26,12 @@ const REQUIRED_CHECKS = ["verify", "cloud"];
 const SECRETS = ["CLERK_SECRET_KEY", "OPENROUTER_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "OPENMERIT_KEY_ENCRYPTION_KEY"];
 /** Plain pool variables, from this environment when set. */
 const SETTINGS = ["CLERK_PUBLISHABLE_KEY", "STRIPE_PRICE_ID", "STRIPE_METER_EVENT", "OPENMERIT_PUBLIC_URL", "OPENMERIT_APP_URL", "OPENMERIT_CASE_WRITER_MODEL", "OPENMERIT_JUDGE_MODEL"];
+/**
+ * Plain pool variables with a fixed production value, never read from this environment: the orb's
+ * POSTHOG_PROJECT_TOKEN is the Internal project's. The token is PostHog's public project token for
+ * the OpenMerit project.
+ */
+const FIXED_SETTINGS: Record<string, string> = { POSTHOG_PROJECT_TOKEN: "phc_uGqGVy96bhXQsq59dsx4Wt5N7zSG2zYs3xBT2jqY4KKB" };
 
 const root = spawnSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).stdout.trim() || fail("Run this inside the repository.");
 const rivet = join(root, "cloud", "node_modules", ".bin", "rivet");
@@ -77,7 +83,7 @@ async function deploy(): Promise<void> {
 }
 
 function deployArgs(commit: string, build: string | undefined): string[] {
-  const settings = SETTINGS.filter(name => process.env[name]).flatMap(name => ["--env", `${name}=${process.env[name]}`]);
+  const settings = [...SETTINGS.filter(name => process.env[name]).map(name => `${name}=${process.env[name]}`), ...Object.entries(FIXED_SETTINGS).map(([name, value]) => `${name}=${value}`)].flatMap(pair => ["--env", pair]);
   // A secret not yet on the cluster, such as the Stripe webhook secret before the webhook exists, is left out: the app runs without that feature.
   const onCluster = clusterSecrets();
   const secrets = SECRETS.filter(name => onCluster.has(name));

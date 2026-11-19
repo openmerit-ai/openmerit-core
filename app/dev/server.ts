@@ -44,7 +44,16 @@ const preview = createServer(async (incoming, outgoing) => {
   if (path.startsWith("/api/")) response = await api(request);
   else if (path === "/__preview-stripe") response = new Response(`<!DOCTYPE html><meta charset="utf-8"><title>Preview Stripe</title><body style="font:16px system-ui;padding:40px"><h1>Stripe ${new URL(request.url).search.slice(1)} (preview)</h1><p>The real app opens Stripe here.</p><p><a href="/plan/">Back to Plan and usage</a></p>`, { headers: { "Content-Type": "text/html; charset=utf-8" } });
   else {
-    response = await worker.fetch(request, { ASSETS: assets, API_ORIGIN: origin, CLERK_PUBLISHABLE_KEY: `pk_test_${btoa("preview.clerk.invalid$")}` });
+    // PostHog: only the environment's token (the orb's is the Internal project), never wrangler.app.jsonc's production one.
+    const { POSTHOG_PROJECT_TOKEN, POSTHOG_HOST } = process.env;
+    if (path === "/ingest/e/") {
+      const event = await request.clone().json().then((body: { event?: string; properties?: { $pathname?: string } }) => `${body.event} ${body.properties?.$pathname ?? ""}`, () => "unreadable");
+      console.log(`${method} /ingest/e/ ${event} → ${POSTHOG_PROJECT_TOKEN ? `forwarded to ${POSTHOG_HOST || "PostHog"}` : "dropped (no POSTHOG_PROJECT_TOKEN)"}`);
+    }
+    response = await worker.fetch(request, {
+      ASSETS: assets, API_ORIGIN: origin, CLERK_PUBLISHABLE_KEY: `pk_test_${btoa("preview.clerk.invalid$")}`,
+      ...(POSTHOG_PROJECT_TOKEN ? { POSTHOG_PROJECT_TOKEN } : {}), ...(POSTHOG_HOST ? { POSTHOG_HOST } : {}),
+    }, { waitUntil: () => {} });
     if (response.headers.get("content-type")?.startsWith("text/html")) {
       const page = (await response.text()).replace("<head>", `<head>\n  <script>${fakeClerk}</script>`);
       response = new Response(page, { status: response.status, headers: response.headers });

@@ -40,8 +40,16 @@ Setup options (for scripts; interactive setup asks instead):
   --langfuse-url <url> --langfuse-public-key-env <VAR> --langfuse-secret-key-env <VAR>
   --yes                 Accept defaults; never prompt`;
 
+const started = Date.now();
 const [command = "help", ...rest] = process.argv.slice(2);
 const log = (line: string) => process.stderr.write(`${line}\n`);
+const isHelp = command === "help" || command === "--help" || command === "-h" || rest.includes("--help") || rest.includes("-h");
+const isVersion = command === "--version" || command === "-v" || command === "version";
+// The command's name for telemetry, never its arguments. `mcp` reports each tool call instead, and the
+// daemon that scout and mcp start in the background is not a command someone ran.
+const tracked = isHelp ? "help" : isVersion ? "version" : command === "mcp" || (command === "daemon" && !rest[0]) ? null
+  : ["setup", "connect", "scout", "history", "daemon"].includes(command) ? command : "unknown";
+let handedOver = false;
 
 async function update(json: boolean): Promise<number | null> {
   const { checkForUpdate, offerUpdate } = await import("./update.ts");
@@ -199,13 +207,14 @@ async function daemon(args: string[]) {
 }
 
 async function main() {
-  if (command === "help" || command === "--help" || command === "-h" || rest.includes("--help") || rest.includes("-h")) return void process.stdout.write(`${HELP}\n`);
-  if (command === "--version" || command === "-v" || command === "version") return void process.stdout.write(`${(await import("./update.ts")).packageVersion()}\n`);
+  if (isHelp) return void process.stdout.write(`${HELP}\n`);
+  if (isVersion) return void process.stdout.write(`${(await import("./update.ts")).packageVersion()}\n`);
   if (command === "mcp") return (await import("./mcp.ts")).serveMcp();
   if (command === "daemon") return daemon(rest);
   if (!["setup", "connect", "scout", "history"].includes(command)) throw new Error(`Unknown command "${command}". Run \`openmerit help\`.`);
   const took = await update(rest.includes("--json"));
-  if (took !== null) { process.exitCode = took; return; }
+  // The updated version ran the command and reported it.
+  if (took !== null) { process.exitCode = took; handedOver = true; return; }
   if (command === "setup") return setup(rest);
   if (command === "connect") return connectCommand(rest);
   if (command === "scout") return scout(rest);
@@ -215,4 +224,10 @@ async function main() {
 main().catch((error: unknown) => {
   process.stderr.write(`openmerit: ${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;
+}).then(async () => {
+  if (!tracked || handedOver) return;
+  try {
+    const { sendCommandRun } = await import("./telemetry.ts");
+    await sendCommandRun({ command: tracked, surface: "cli", ok: !process.exitCode, durationMs: Date.now() - started });
+  } catch { /* telemetry never affects the command */ }
 });

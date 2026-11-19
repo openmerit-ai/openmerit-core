@@ -148,3 +148,80 @@ test('cloud paths fail closed until the cloud app origin is configured', async (
     globalThis.fetch = realFetch;
   }
 });
+
+test('a page GET queues one cookieless $pageview; API, asset, non-GET, bot and legacy requests queue none', async () => {
+  const { default: router } = await import('../domain-router.mjs');
+  const page = () => new Response('<h1>OpenMerit</h1>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+  const env = {
+    POSTHOG_PROJECT_TOKEN: 'phc_test', POSTHOG_HOST: 'https://posthog.example', CLOUD_APP_ORIGIN: 'https://cloud.example',
+    SCOUT: { fetch: request => new URL(request.url).pathname.startsWith('/assets/') ? new Response('x', { headers: { 'Content-Type': 'font/woff2' } }) : page() },
+  };
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const request = new Request(url, init);
+    if (request.url.startsWith('https://posthog.example/')) sent.push({ url: request.url, cookie: request.headers.get('cookie'), body: await request.json() });
+    return new Response('{}', { headers: { 'Content-Type': 'text/html' } });
+  };
+  const headers = { 'User-Agent': 'Mozilla/5.0 Firefox/130', 'CF-Connecting-IP': '203.0.113.7', Referer: 'https://news.example/item?id=1', Cookie: 'session=secret' };
+  const visit = async (url, init = {}) => {
+    const waits = [];
+    const result = await router.fetch(new Request(url, { headers, ...init }), env, { waitUntil: promise => waits.push(promise) });
+    await Promise.all(waits);
+    return result;
+  };
+  try {
+    const result = await visit('https://openmerit.ai/?utm_source=hn&utm_medium=social&utm_campaign=launch&secret=1');
+    assert.equal(await result.text(), '<h1>OpenMerit</h1>');
+    assert.equal(result.headers.get('set-cookie'), null);
+    assert.equal(sent.length, 1);
+    const [{ url, cookie, body }] = sent;
+    assert.equal(url, 'https://posthog.example/i/v0/e/');
+    assert.equal(cookie, null);
+    assert.equal(body.api_key, 'phc_test');
+    assert.equal(body.event, '$pageview');
+    assert.match(body.distinct_id, /^[0-9a-f]{64}$/);
+    assert.match(body.uuid, /^[0-9a-f-]{36}$/);
+    assert.ok(!Number.isNaN(Date.parse(body.timestamp)));
+    assert.deepEqual(body.properties, {
+      interface: 'website', $process_person_profile: false, $current_url: 'https://openmerit.ai/', $pathname: '/', $host: 'openmerit.ai',
+      $raw_user_agent: 'Mozilla/5.0 Firefox/130', $ip: '203.0.113.7', $referrer: 'https://news.example', utm_source: 'hn', utm_medium: 'social', utm_campaign: 'launch',
+    });
+    assert.doesNotMatch(JSON.stringify(body), /secret/);
+    sent.length = 0;
+    await visit('https://openmerit.ai/playground/scout/');
+    assert.equal(sent[0]?.body.distinct_id, body.distinct_id, 'same visitor, same day, same ID');
+    sent.length = 0;
+    await visit('https://openmerit.ai/api/me');
+    await visit('https://openmerit.ai/mcp', { method: 'POST', body: '{}' });
+    await visit('https://openmerit.ai/assets/geist-sans.woff2');
+    await visit('https://openmerit.ai/', { method: 'HEAD' });
+    await visit('https://openmerit.ai/', { method: 'POST', body: '{}' });
+    await visit('https://openmerit.ai/missing');
+    await visit('https://openmerit.site/');
+    await visit('https://www.openmerit.ai/');
+    await visit('https://openmerit.ai/', { headers: { ...headers, 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)' } });
+    await visit('https://openmerit.ai/', { headers: { ...headers, 'User-Agent': 'HeadlessChrome/130' } });
+    assert.deepEqual(sent, []);
+    await router.fetch(new Request('https://openmerit.ai/', { headers }), { ...env, POSTHOG_PROJECT_TOKEN: '' }, { waitUntil: () => assert.fail('No token, no capture') });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('a failing PostHog endpoint never changes the page', async () => {
+  const { default: router } = await import('../domain-router.mjs');
+  const env = { POSTHOG_PROJECT_TOKEN: 'phc_test', POSTHOG_HOST: 'https://posthog.example', SCOUT: { fetch: () => new Response('<p>ok</p>', { headers: { 'Content-Type': 'text/html' } }) } };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.reject(new Error('offline'));
+  try {
+    const waits = [];
+    const result = await router.fetch(new Request('https://openmerit.ai/'), env, { waitUntil: promise => waits.push(promise) });
+    assert.equal(result.status, 200);
+    assert.equal(await result.text(), '<p>ok</p>');
+    assert.equal(waits.length, 1);
+    await Promise.all(waits);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
