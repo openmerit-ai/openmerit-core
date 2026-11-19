@@ -71,6 +71,24 @@ function confirmDialog(options: ConfirmOptions): Promise<boolean> {
   return new Promise((resolve) => dialog.addEventListener("close", () => { resolve(dialog.returnValue === "ok"); dialog.remove(); }));
 }
 
+// A deletion needs a sign-in in the last 10 minutes. Clerk's prompt checks a password, code or
+// passkey; an account that signs in only with Google has none, so it signs in again instead, and
+// the fresh sign-in counts. The user then repeats the action.
+async function reverify(level: string | undefined): Promise<boolean> {
+  const open = clerk?.__internal_openReverification?.bind(clerk);
+  const factors = await clerk?.session?.startVerification?.({ level: level ?? "first_factor" }).then((found) => found.supportedFirstFactors ?? [], () => null);
+  if (open && factors?.length !== 0) {
+    return new Promise((resolve) => open({ ...(level ? { level } : {}), afterVerification: () => resolve(true), afterVerificationCancelled: () => resolve(false) }));
+  }
+  const ok = await confirmDialog({
+    title: "Sign in again to continue",
+    body: "Deleting needs a sign-in from the last 10 minutes. Sign in again with Google, then repeat the delete.",
+    confirm: "Sign in again",
+  });
+  if (ok) await clerk?.signOut({ redirectUrl: location.href });
+  return false;
+}
+
 function download(name: string, data: unknown): void {
   const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
   const link = Object.assign(document.createElement("a"), { href: url, download: name });
@@ -139,11 +157,7 @@ async function boot(): Promise<void> {
       if (!response.ok) throw new Error("Sign-in is temporarily unavailable. Please try again later.");
       const config = await response.json() as AppConfig;
       clerk = await loadClerk(config);
-      const open = clerk.__internal_openReverification?.bind(clerk);
-      api = createApi(config.apiOrigin, async () => (await clerk?.session?.getToken()) ?? null, fetch, (level) => new Promise((resolve) => {
-        if (!open) { resolve(false); return; }
-        open({ ...(level ? { level } : {}), afterVerification: () => resolve(true), afterVerificationCancelled: () => resolve(false) });
-      }));
+      api = createApi(config.apiOrigin, async () => (await clerk?.session?.getToken()) ?? null, fetch, reverify);
       let was = signedIn(clerk);
       clerk.addListener(() => {
         if (!clerk || signedIn(clerk) === was) return;
