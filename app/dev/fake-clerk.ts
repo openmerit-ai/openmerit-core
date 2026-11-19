@@ -25,6 +25,12 @@ const clerk: Clerk = {
     startVerification: async () => ({ supportedFirstFactors: localStorage.getItem(oauthOnly) ? [] : [{ strategy: "email_code" }] }),
     getToken: async () => `preview-${scenario}${localStorage.getItem(verified) ? `.v${localStorage.getItem(verified)}` : ""}` } : null,
   async load() {},
+  // Stands in for Clerk's embedded sign-in card.
+  mountSignIn(node) {
+    node.innerHTML = `<div class="preview-signin"><p class="dialog-title">Sign in to OpenMerit</p><p class="sub">Preview: sign-in is simulated.</p><button class="btn" type="button" data-preview-sign-in>Continue with GitHub</button><button class="btn" type="button" data-preview-sign-in>Continue with Google</button></div>`;
+    node.querySelectorAll("[data-preview-sign-in]").forEach((button) => button.addEventListener("click", () => clerk.openSignIn({})));
+  },
+  unmountSignIn(node) { node.innerHTML = ""; },
   addListener() {},
   // A fresh sign-in counts as a recent verification, as it does in Clerk.
   openSignIn() { localStorage.setItem(key, "tonic"); localStorage.setItem(verified, String(Math.floor(Date.now() / 1000))); location.reload(); },

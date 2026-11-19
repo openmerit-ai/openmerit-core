@@ -108,16 +108,28 @@ function showError(failure: unknown): void {
   }
 }
 
+// Signed out, the page is only sign-in: no sidebar, and Clerk's sign-in (with sign-up in the same
+// card) mounted in the page rather than as a modal over an empty app.
 function showSignedOut(): void {
   fillProfile(null);
-  put(html`<div class="eyebrow"><span>OpenMerit</span></div>
-    <h1 class="title">Sign in to OpenMerit</h1>
-    <p class="lede">Runs, tasks, endpoints and billing for your coding agents' model choices.</p>
-    <div class="card signin">
-      <p><button class="btn primary" type="button" data-global="sign-in">Sign in</button></p>
-      <p class="sub" style="margin-top: 10px">New to OpenMerit? Add it to a coding agent; its first call signs you in.</p>
-      <div style="margin-top: 10px">${install()}</div>
-    </div>`);
+  document.body.classList.add("signed-out");
+  document.title = "Sign in · OpenMerit";
+  put(html`<div class="signin-page">
+    <a class="brand" href="/" aria-label="OpenMerit"><svg class="brand-mark" viewBox="0 0 28 30" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M3 27V13a11 11 0 0 1 22 0v14M8 27V13a6 6 0 0 1 12 0v14M14 16v11"/></svg><span class="label">openmerit</span></a>
+    <div class="signin-mount"></div>
+    <div class="signin-note"><p class="sub">New to OpenMerit? Add it to a coding agent; its first call signs you in.</p>${install()}</div>
+  </div>`);
+  const mount = root?.querySelector<HTMLDivElement>(".signin-mount");
+  if (mount && clerk?.mountSignIn) {
+    clerk.mountSignIn(mount, { withSignUp: true, forceRedirectUrl: location.href, signUpForceRedirectUrl: location.href });
+    signInMount = mount;
+  }
+}
+
+let signInMount: HTMLDivElement | null = null;
+function leaveSignedOut(): void {
+  document.body.classList.remove("signed-out");
+  if (signInMount) { clerk?.unmountSignIn?.(signInMount); signInMount = null; }
 }
 
 // /api/me names the account; Clerk, which the page already holds, names the person.
@@ -170,6 +182,7 @@ async function boot(): Promise<void> {
     return showError(new Error(failure instanceof Error ? failure.message : unavailable));
   }
   if (!signedIn(clerk) || !api) return showSignedOut();
+  leaveSignedOut();
   try {
     const found = await api.get<Me>("/api/me");
     const me: Account = { ...found, account: { ...found.account, name: found.account.name ?? clerk.organization?.name ?? "Your organization" } };
