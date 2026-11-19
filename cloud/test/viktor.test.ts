@@ -116,7 +116,7 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
   try {
     await subscribe(app, "org_viktor");
     const admin = caller(app, "test:user_v:org_viktor:admin"), member = caller(app, "test:user_m:org_viktor:member");
-    const connect = (agent: typeof admin, body: unknown) => agent.api<{ error?: string; tasks?: { title: string; status: string; reason: string | null; jobId: string | null }[] }>("/api/connections/viktor", { method: "POST", body: JSON.stringify(body) });
+    const connect = (agent: typeof admin, body: unknown) => agent.api<{ error?: string; missingScopes?: string[]; tasks?: { title: string; status: string; reason: string | null; jobId: string | null }[] }>("/api/connections/viktor", { method: "POST", body: JSON.stringify(body) });
 
     // Refusals: a member, a bad key, and a key missing scopes. None stores a key or lists anything.
     assert.equal((await connect(member, { apiKey: KEY })).status, 403);
@@ -126,6 +126,7 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     viktor.state.scopes = REQUIRED_SCOPES.filter(scope => scope !== "runs:read");
     const partial = await connect(admin, { apiKey: KEY });
     assert.match(partial.body.error!, /missing the scope runs:read\./);
+    assert.deepEqual(partial.body.missingScopes, ["runs:read"], "the app can name the missing scopes");
     assert.deepEqual(viktor.state.scripts, [], "no script ran for a refused key");
     viktor.state.scopes = [...REQUIRED_SCOPES];
 
@@ -166,20 +167,31 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     assert.ok(viktor.state.created.every(path => path.startsWith("/openmerit/ticket-triage-test-")));
     assert.equal(report.approved, null);
 
+    // Changing the cap keeps the connection, its credits used and its result; a member cannot.
+    const cap = (agent: typeof admin, creditCap: unknown) => agent.api<{ creditCap: number; creditsUsed: number; connectedAt: string; tasks: { title: string; status: string }[]; error?: string }>("/api/connections/viktor", { method: "PATCH", body: JSON.stringify({ creditCap }) });
+    assert.equal((await cap(member, 5000)).status, 403);
+    assert.equal((await cap(admin, 50)).status, 400);
+    const before = (await admin.api<{ connectedAt: string }>("/api/connections/viktor")).body;
+    const raised = await cap(admin, 5000);
+    assert.equal(raised.status, 200, JSON.stringify(raised.body));
+    assert.deepEqual([raised.body.creditCap, raised.body.creditsUsed, raised.body.connectedAt], [5000, 322, before.connectedAt]);
+    assert.equal(raised.body.tasks.find(row => row.title === "Ticket triage test")!.status, "done", "the result stays");
+    assert.equal(viktor.state.threads.length, 1, "changing the cap starts nothing");
+
     // Approve change: admins only; it records who and when, and the real task stays on smart.
     assert.equal((await member.api(`/api/runs/${jobId}/approve`, { method: "POST" })).status, 403);
-    const before = Date.now();
+    const approvedAfter = Date.now();
     const approved = await admin.api<{ change: string; by: string; at: string }>(`/api/runs/${jobId}/approve`, { method: "POST" });
     assert.equal(approved.status, 200);
     assert.deepEqual([approved.body.change, approved.body.by], ["Set Ticket triage test to cheap", "user_v"]);
-    assert.ok(Date.parse(approved.body.at) >= before - 1000);
+    assert.ok(Date.parse(approved.body.at) >= approvedAfter - 1000);
     assert.equal(viktor.crons.find(cron => cron.path === "/ticket_triage_test")!.model, "smart");
     const again = await admin.api<{ by: string; at: string }>(`/api/runs/${jobId}/approve`, { method: "POST" });
     assert.equal(again.body.at, approved.body.at, "the first approval stands");
 
     // openmerit_tasks lists the connection's tasks with the verdict and the approval.
     const tasks = await admin.tool("openmerit_tasks", {});
-    assert.match(tasks.text, /Viktor \(322 of 2000 credits used\): 5 scheduled tasks/);
+    assert.match(tasks.text, /Viktor \(322 of 5000 credits used\): 5 scheduled tasks/);
     assert.match(tasks.text, /Ticket triage test \(smart, 140 credits in 30 days\): Set Ticket triage test to cheap, approved by user_v at /);
     assert.match(tasks.text, /heartbeat \(default model, 0 credits in 30 days\): skipped: Viktor's own task/);
     assert.equal(viktor.state.auth.size, 2, "only the stored key and the one refused key reached Viktor");

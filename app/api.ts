@@ -173,6 +173,7 @@ export interface ViktorTask {
   jobId: string | null;
   result: { status: string; change: string | null; link: string | null; approval: { by: string; at: string } | null } | null;
 }
+// A refused key's missing scopes come with the 400 from POST /api/connections/viktor; PATCH changes only creditCap.
 export interface ViktorConnection {
   connected: boolean;
   keyLast4?: string; keyType?: string | null; creditCap?: number; connectedAt?: string; connectedBy?: string;
@@ -198,16 +199,19 @@ export interface Spend { openmeritUsd: number; customerUsd: number; monthlyCapUs
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string | null;
-  constructor(status: number, message: string, code: string | null = null) {
+  // The error's JSON body, for fields beside its message, such as a Viktor key's missingScopes.
+  readonly data: unknown;
+  constructor(status: number, message: string, code: string | null = null, data: unknown = null) {
     super(message);
     this.status = status;
     this.code = code;
+    this.data = data;
   }
 }
 
 export interface Api {
   get<T>(path: string): Promise<T>;
-  send<T>(method: "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T>;
+  send<T>(method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T>;
 }
 
 // Deleting needs a recent sign-in. The cloud app answers 403 with Clerk's reverification hint;
@@ -242,7 +246,7 @@ export function createApi(origin: string, token: () => Promise<string | null>, f
     if (!response.ok) {
       const detail = typeof data === "object" && data !== null ? data as { error?: unknown; code?: unknown } : {};
       const message = typeof detail.error === "string" ? detail.error : `OpenMerit answered ${response.status}. Try again in a moment.`;
-      throw new ApiError(response.status, message, typeof detail.code === "string" ? detail.code : null);
+      throw new ApiError(response.status, message, typeof detail.code === "string" ? detail.code : null, data);
     }
     return data as T;
   }

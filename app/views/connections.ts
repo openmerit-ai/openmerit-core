@@ -1,8 +1,9 @@
-import type { Endpoint, EndpointKind, ViktorConnection, ViktorTask } from "../api.ts";
+import type { Endpoint, EndpointKind, ViktorConnection } from "../api.ts";
 import { ApiError } from "../api.ts";
 import { date, html, logo, plural, provider, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { header, install } from "./common.ts";
+import { credits, openCap, openConnect, pollViktor, viktorSection } from "./viktor.ts";
 
 const kinds: Record<EndpointKind, { label: string; baseUrl: string }> = {
   "openai-compatible": { label: "OpenAI-compatible", baseUrl: "https://api.openai.com/v1" },
@@ -28,57 +29,6 @@ function endpointRow(endpoint: Endpoint, admin: boolean): Html {
         </div>`;
 }
 
-// The Viktor connection: OpenMerit tests a task's cheaper presets on paused copies in Viktor's test mode, and proposes the change.
-const VIKTOR_TASKS = "https://app.viktor.com/scheduled-tasks";
-const credits = (value: number | null | undefined): string => (value === null || value === undefined ? "–" : Math.round(value).toLocaleString("en-US"));
-
-function taskStatus(task: ViktorTask, admin: boolean): Html {
-  switch (task.status) {
-    case "skipped": return html`<span class="pill">Skipped</span><span class="sub">${task.reason ?? ""}</span>`;
-    case "evaluating": return html`<span class="pill live">Evaluating</span>${task.jobId ? html`<span class="sub"><a href="/r/${task.jobId}/">Open the run</a></span>` : ""}`;
-    case "failed": return html`<span class="pill bad">Did not finish</span><span class="sub">${task.reason ?? ""}</span>${admin ? html` <button class="btn" type="button" data-action="start" data-id="${task.id}">Start again</button>` : ""}`;
-    case "waiting": return html`<span class="pill warn">Waiting</span><span class="sub">About ${credits(task.estimatedCredits)} credits. ${task.reason ?? ""}</span>${admin ? html` <button class="btn" type="button" data-action="start" data-id="${task.id}">Start</button>` : ""}`;
-    case "done": {
-      const result = task.result;
-      const approved = result?.approval ? html`<span class="sub">Approved by ${result.approval.by} on ${date(result.approval.at)}</span>` : "";
-      return html`${result?.change ? html`<span class="pill good">${result.change}</span>` : html`<span class="pill tag">Keep ${task.model ?? "its model"}</span>`}${approved}<span class="sub"><a href="/r/${task.jobId}/">${result?.change && !result.approval ? "Review and approve" : "Open the result"}</a></span>`;
-    }
-  }
-}
-
-function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
-  if (!viktor.connected) return html`<div class="card">
-        <div class="row"><span>Viktor<span class="sub">Scheduled AI tasks in your Viktor workspace. Not connected.</span></span><span></span></div>
-        ${admin ? html`<form class="form" data-action="connect-viktor" autocomplete="off" style="margin-top: 10px">
-          <label>Viktor API key
-            <input name="apiKey" type="password" required autocomplete="off" spellcheck="false" placeholder="zt_live_sk_…">
-            <span class="sub">From Viktor's Settings → API Keys, on a paid or Enterprise plan. It needs the scopes scripts:execute, usage:read, threads:create, threads:read, runs:create, runs:read, messages:create and messages:read. OpenMerit stores it encrypted and shows only its last four characters.</span>
-          </label>
-          <label>Credit cap
-            <input name="creditCap" type="number" min="100" max="100000" step="100" value="2000" required>
-            <span class="sub">The most Viktor credits OpenMerit's test runs may use from your workspace, about $5 per 2,000. Tasks past it wait with a Start button.</span>
-          </label>
-          <p class="note">To measure a task, OpenMerit makes temporary copies of it in your workspace: personal, paused, each set to a cheaper preset and titled "OpenMerit: &lt;task title&gt;". It runs each copy in Viktor's test mode, which captures Slack posts and other outside actions instead of sending them, then deletes the copies. It never changes your tasks: a result proposes the change, and you make it in Viktor after you approve it.</p>
-          <p class="form-error" role="alert" hidden></p>
-          <p><button class="btn primary" type="submit">Connect Viktor</button></p>
-        </form>` : html`<p class="note">Only an admin can connect Viktor.</p>`}
-      </div>`;
-  return html`<div class="card">
-        <div class="row"><span>Viktor<span class="sub">Key ending ${viktor.keyLast4 ?? ""} · ${viktor.keyType ?? "API"} key · connected ${date(viktor.connectedAt ?? null)}</span><span class="sub">${credits(viktor.creditsUsed)} of ${credits(viktor.creditCap)} credits used${viktor.creditsReserved ? `, ${credits(viktor.creditsReserved)} expected by running evaluations` : ""}</span></span>
-          ${admin ? html`<span class="endpoint-meta"><button class="btn" type="button" data-action="refresh-viktor">Refresh</button><button class="btn danger" type="button" data-action="disconnect-viktor">Disconnect</button></span>` : html`<span></span>`}</div>
-        ${viktor.listingError ? html`<p class="note bad" role="alert">The last listing failed: ${viktor.listingError}</p>` : ""}
-      </div>
-      <div class="tablewrap" style="margin-top: 10px">
-        <table>
-          <thead><tr><th>Task</th><th>Model</th><th class="num">Credits, 30 days</th><th>Status</th></tr></thead>
-          <tbody>
-            ${viktor.tasks.map((task) => html`<tr><td>${task.title}<span class="sub">${task.path}${task.paused ? " · paused" : ""}</span></td><td>${task.model ? html`<code>${task.model}</code>` : html`<span class="sub">workspace default</span>`}</td><td class="num">${credits(task.credits30d)}</td><td>${taskStatus(task, admin)}</td></tr>`)}
-          </tbody>
-        </table>
-      </div>
-      <p class="note">Changes are made in <a href="${VIKTOR_TASKS}" target="_blank" rel="noopener">Viktor's scheduled tasks</a>; OpenMerit does not change a task.</p>`;
-}
-
 type Data = { endpoints: Endpoint[]; viktor: ViktorConnection };
 
 export const connectionsView: View<Data> = {
@@ -86,7 +36,7 @@ export const connectionsView: View<Data> = {
     const [endpoints, viktor] = await Promise.all([api.get<Endpoint[]>("/api/endpoints"), api.get<ViktorConnection>("/api/connections/viktor").catch((): ViktorConnection => ({ connected: false, tasks: [] }))]);
     return { endpoints, viktor };
   },
-  bind: bindKindSelect,
+  bind(root, _data, ctx) { bindKindSelect(root); pollViktor(root, ctx); },
   render({ endpoints, viktor }, { me }) {
     const own = endpoints.filter((endpoint) => !endpoint.builtIn);
     const admin = me.role === "admin";
@@ -136,22 +86,8 @@ export const connectionsView: View<Data> = {
     </section>` : html`<p class="note">Only an admin of ${me.account.name} can add or remove endpoints.</p>`}`;
   },
   actions: {
-    async "connect-viktor"(form, _data, { api, refresh, toast }) {
-      if (!(form instanceof HTMLFormElement)) return;
-      const fields = new FormData(form);
-      const error = form.querySelector<HTMLElement>(".form-error");
-      try {
-        await api.send("POST", "/api/connections/viktor", { apiKey: String(fields.get("apiKey")).trim(), creditCap: Number(fields.get("creditCap")) });
-      } catch (failure) {
-        if (!(failure instanceof ApiError) || failure.status !== 400 || !error) throw failure;
-        error.textContent = failure.message;
-        error.hidden = false;
-        return;
-      }
-      form.reset();
-      await refresh();
-      toast("Viktor connected. OpenMerit is evaluating the tasks it can.");
-    },
+    async "connect-viktor"(_target, _data, ctx) { openConnect(ctx); },
+    async "viktor-cap"(_target, { viktor }, ctx) { openCap(viktor, ctx); },
     async "refresh-viktor"(_target, _data, { api, refresh, toast }) {
       const listed = await api.send<{ refused: string | null; started: string[] }>("POST", "/api/connections/viktor/refresh");
       await refresh();

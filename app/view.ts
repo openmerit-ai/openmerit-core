@@ -25,8 +25,8 @@ export interface View<D> {
   load(ctx: Ctx): Promise<D>;
   render(data: D, ctx: Pick<Ctx, "me" | "params" | "id">): Html;
   title?(data: D): string;
-  // Wires up what data-action cannot, after each render.
-  bind?(root: HTMLElement): void;
+  // Wires up what data-action cannot, after each render, such as polling while something changes.
+  bind?(root: HTMLElement, data: D, ctx: Ctx): void;
   actions?: Record<string, (target: HTMLElement, data: D, ctx: Ctx) => Promise<void>>;
 }
 
@@ -35,6 +35,6 @@ export interface Mounted { html: Html; title: string | null; bind(root: HTMLElem
 export function mount<D>(view: View<D>): (ctx: Ctx) => Promise<Mounted> {
   return async (ctx) => {
     const data = await view.load(ctx);
-    return { html: view.render(data, ctx), title: view.title?.(data) ?? null, bind: (root) => view.bind?.(root), act: (name, target) => view.actions?.[name]?.(target, data, ctx) };
+    return { html: view.render(data, ctx), title: view.title?.(data) ?? null, bind: (root) => view.bind?.(root, data, ctx), act: (name, target) => view.actions?.[name]?.(target, data, ctx) };
   };
 }

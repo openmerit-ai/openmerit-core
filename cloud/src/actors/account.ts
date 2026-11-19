@@ -418,6 +418,13 @@ export const account = actor({
       if (input.error) await c.db.execute(`UPDATE connections SET listing_error = ? WHERE kind = ?`, input.error, input.kind);
       else await c.db.execute(`UPDATE connections SET listing = ?, listed_at = ?, listing_error = NULL WHERE kind = ?`, JSON.stringify(input.listing), Date.now(), input.kind);
     },
+    /** Changes a connection's credit cap and nothing else. False when there is no such connection. */
+    setConnectionCap: async (c, input: { kind: string; creditCap: number }): Promise<boolean> => {
+      const before = await c.db.execute(`SELECT kind FROM connections WHERE kind = ?`, input.kind);
+      if (!before.length) return false;
+      await c.db.execute(`UPDATE connections SET credit_cap = ? WHERE kind = ?`, Math.round(input.creditCap), input.kind);
+      return true;
+    },
     /** Deletes the key and the listing. Runs, reports and approvals stay. */
     removeConnection: async (c, kind: string): Promise<boolean> => {
       const before = await c.db.execute(`SELECT kind FROM connections WHERE kind = ?`, kind);

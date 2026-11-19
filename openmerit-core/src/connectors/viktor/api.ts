@@ -111,13 +111,13 @@ export function viktorClient(options: ViktorClientOptions): ViktorClient {
  * Why a key cannot connect, or null. A 401 or 403 is an invalid key or a workspace without a paid
  * plan, since Viktor gives API keys only to paid and Enterprise plans.
  */
-export async function keyProblem(client: ViktorClient): Promise<{ problem: string } | { key: ViktorKey }> {
+export async function keyProblem(client: ViktorClient): Promise<{ problem: string; missingScopes?: string[] } | { key: ViktorKey }> {
   let key: ViktorKey;
   try { key = await client.me(); } catch (error) {
     if (error instanceof ViktorError && (error.status === 401 || error.status === 403)) return { problem: "Viktor did not accept this key. Check that it is a current key from Settings → API Keys; Viktor gives API keys only to workspaces on a paid or Enterprise plan." };
     return { problem: `Viktor could not be reached to check the key: ${error instanceof Error ? error.message : String(error)}` };
   }
   const missing = REQUIRED_SCOPES.filter(scope => !key.scopes.includes(scope));
-  if (missing.length) return { problem: `This key is missing the scope${missing.length === 1 ? "" : "s"} ${missing.join(", ")}. Edit the key in Viktor's Settings → API Keys to add ${missing.length === 1 ? "it" : "them"}, then connect again.` };
+  if (missing.length) return { missingScopes: missing, problem: `This key is missing the scope${missing.length === 1 ? "" : "s"} ${missing.join(", ")}. Edit the key in Viktor's Settings → API Keys to add ${missing.length === 1 ? "it" : "them"}, then connect again.` };
   return { key };
 }
