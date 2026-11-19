@@ -62,7 +62,8 @@ async function deploy(): Promise<void> {
   if (result.error) throw result.error;
   process.stdout.write(result.stdout);
   if (result.status !== 0) fail(`rivet deploy exited with ${result.status}.`);
-  const deployed = build ?? /\b(?:build(?:\s+id)?[:\s]+)([\w-]{8,})/i.exec(result.stdout)?.[1] ?? null;
+  // The CLI logs `build_id=<uuid>` while it uploads and prints the build ID alone on its last line.
+  const deployed = build ?? /\bbuild_id=([\w-]{8,})/.exec(result.stdout)?.[1] ?? /^([0-9a-f-]{36})\s*$/m.exec(result.stdout)?.[1] ?? null;
   const health = await answers();
   const receipt = {
     cluster: CLUSTER, origin: ORIGIN, commit, subject, build: deployed, deployedAt: new Date().toISOString(), previous: previous ? { build: previous.build, commit: previous.commit } : null, health,
