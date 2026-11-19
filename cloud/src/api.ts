@@ -6,6 +6,7 @@ import type { AuthResult, Identity } from "./auth.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
 import { explain, type JobResult } from "./report.ts";
 import { rerunJob } from "./start.ts";
+import { approveChange, connectViktor, refreshViktor, startViktorTasks, VIKTOR, viktorView } from "./viktor.ts";
 import type { EndpointKind } from "../../openmerit-core/src/ranking/index.ts";
 
 type Json = Record<string, unknown>;
@@ -97,10 +98,19 @@ export function apiRoutes(deps: AppDeps) {
     if (path === "/api/runs" && method === "GET") return json(200, await account.jobs({ limit: Math.min(200, Number(url.searchParams.get("limit") ?? 50) || 50) }));
     if ((match = /^\/api\/runs\/([\w-]+)$/.exec(path)) && method === "GET") {
       const jobId = match[1]!;
-      if (!(await account.job(jobId))) return error(404, "No such run in this account.");
+      const row = await account.job(jobId);
+      if (!row) return error(404, "No such run in this account.");
       const report = await account.report({ jobId });
-      // The saved report, with the same reason and cheaperThanCurrent the coding agent gets.
-      return json(200, report ? { ...(report.json as JobResult), ...explain(report.json as JobResult) } : { ...(await client.job.get([jobId]).status()), report: null });
+      // The saved report, with the same reason and cheaperThanCurrent the coding agent gets, and a connection result's approval.
+      if (report) return json(200, { ...(report.json as JobResult), ...explain(report.json as JobResult), approved: await account.approval(jobId) });
+      return json(200, { ...(row.kind === VIKTOR ? await client.viktorJob.get([jobId]).status() : await client.job.get([jobId]).status()), report: null });
+    }
+    // Approve change: records who approved a connection result's change, and when. It changes nothing in the connected app.
+    if ((match = /^\/api\/runs\/([\w-]+)\/approve$/.exec(path)) && method === "POST") {
+      const denied = admin(); if (denied) return denied;
+      if (!(await account.job(match[1]!))) return error(404, "No such run in this account.");
+      const approved = await approveChange(client, { accountId: who.accountId, userId: who.userId, jobId: match[1]! });
+      return approved.ok ? json(200, approved.approval) : error(approved.status, approved.error);
     }
     // A fix from a run's notes: run its task again, optionally with a higher budget per job.
     if ((match = /^\/api\/runs\/([\w-]+)\/rerun$/.exec(path)) && method === "POST") {
@@ -126,6 +136,32 @@ export function apiRoutes(deps: AppDeps) {
     if ((match = /^\/api\/endpoints\/([\w-]+)$/.exec(path)) && method === "DELETE") {
       const denied = admin(); if (denied) return denied;
       return (await account.removeEndpoint(match[1]!)) ? json(200, { deleted: true }) : error(404, "No such endpoint.");
+    }
+
+    // App connections: Viktor, with an API key. Connecting checks the key's scopes, lists the tasks and starts evaluating them.
+    if (path === "/api/connections/viktor" && method === "GET") return json(200, await viktorView(client, who.accountId));
+    if (path === "/api/connections/viktor" && method === "POST") {
+      const denied = admin(); if (denied) return denied;
+      const input = await body(request);
+      if (!input || typeof input.apiKey !== "string") return error(400, "Send the connection as JSON: {apiKey, creditCap}.");
+      if (input.creditCap !== undefined && typeof input.creditCap !== "number") return error(400, "creditCap must be a number of Viktor credits.");
+      const connected = await connectViktor(client, { accountId: who.accountId, userId: who.userId, apiKey: input.apiKey, ...(typeof input.creditCap === "number" ? { creditCap: input.creditCap } : {}) });
+      return connected.ok ? json(201, connected.view) : error(connected.status, connected.error);
+    }
+    if (path === "/api/connections/viktor" && method === "DELETE") {
+      const denied = admin(); if (denied) return denied;
+      return (await account.removeConnection(VIKTOR)) ? json(200, { deleted: true }) : error(404, "Viktor is not connected.");
+    }
+    if (path === "/api/connections/viktor/refresh" && method === "POST") {
+      const denied = admin(); if (denied) return denied;
+      await refreshViktor(client, who.accountId);
+      const started = await startViktorTasks(client, { accountId: who.accountId, userId: null });
+      return json(200, { ...await viktorView(client, who.accountId), started: started.started, refused: started.refused });
+    }
+    if ((match = /^\/api\/connections\/viktor\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
+      const denied = admin(); if (denied) return denied;
+      const started = await startViktorTasks(client, { accountId: who.accountId, userId: who.userId, taskIds: [match[1]!] });
+      return started.started.length ? json(201, { started: started.started }) : error(409, started.refused ?? "This task cannot be evaluated, or is being evaluated now.");
     }
 
     if (path === "/api/guardrails" && method === "GET") {
@@ -179,7 +215,7 @@ export function apiRoutes(deps: AppDeps) {
       const denied = admin() ?? reverify(who); if (denied) return denied;
       const [tasks, jobs] = await Promise.all([account.tasks(), account.jobs({ limit: 100_000 })]);
       await client.catalogue.getOrCreate(["global"]).unsubscribe({ accountId: who.accountId });
-      for (const job of jobs) await client.job.get([job.id]).destroy().catch(() => null);
+      for (const job of jobs) await (job.kind === VIKTOR ? client.viktorJob.get([job.id]) : client.job.get([job.id])).destroy().catch(() => null);
       for (const task of tasks) await client.task.get([who.accountId, task.id]).destroy().catch(() => null);
       await account.destroy();
       return json(200, { deleted: true, tasks: tasks.length, jobs: jobs.length });

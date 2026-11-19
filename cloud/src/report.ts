@@ -66,6 +66,24 @@ export interface JobResult {
   basedOn?: string[];
   /** The question that asks a person to approve the switch, as the CLI asks it; null with no pick. Absent from older reports. */
   approval?: { id: string; kind: "confirm"; default: false; prompt: string; detail: string } | null;
+  /** A connection's result, such as a Viktor task's: the change to make there and what the evaluation used. Absent for an agent's task. */
+  connection?: ConnectionResult;
+}
+
+/**
+ * A connection task's result. Its cases are the checks a judge wrote from the task's instructions,
+ * and a model's cost per call is per test run. `change` is null when the task keeps its model.
+ */
+export interface ConnectionResult {
+  kind: "viktor";
+  taskId: string;
+  taskTitle: string;
+  currentModel: string;
+  change: { text: string; link: string; model: string } | null;
+  creditsUsed: number;
+  checks: { id: string; check: string }[];
+  runs: { model: string; repeat: number; status: string; actions: string[]; credits: number | null }[];
+  copiesLeft: string[];
 }
 
 /** The change that applies the pick: the agent bundle connector's Change port, openmerit/engine's `proposeEdit` on the bundle's code refs, which the CLI's Configure step uses too. */

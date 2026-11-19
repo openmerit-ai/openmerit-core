@@ -1,0 +1,187 @@
+// The Viktor connection end to end on the cloud app, against a fake Viktor and a fake judge: connect
+// with a key, list the workspace's tasks, evaluate the one that can be evaluated without being asked,
+// and approve its change. The fake Viktor runs the scripts the connection sends by their first line,
+// as the real sandbox would run them, and keeps the workspace's scheduled tasks in memory.
+import assert from "node:assert/strict";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { test } from "node:test";
+import { REQUIRED_SCOPES } from "../../openmerit-core/src/connectors/viktor/index.ts";
+import { caller, costOf, startApp, stop, subscribe, waitFor, type FakeModels } from "./helpers.ts";
+
+const KEY = "zt_live_sk_fake_owner_key_1234";
+const SLACK = "T1 · billing · Duplicate November charge";
+type Cron = { id: string; path: string; title: string; model: string | null; execution_type: string; description: string; cron: string; paused: boolean; deleted: boolean };
+
+/** Credits Viktor reports for each test run, by preset, and for the API thread that starts them. */
+const RUN = { smart: 70, balanced: 20, cheap: 4 } as Record<string, number>;
+const THREAD = 40;
+
+function fakeViktor() {
+  const crons: Cron[] = [
+    ...["heartbeat", "memory_dreaming", "skill_refining", "workflow_discovery"].map(name => ({ id: `sys_${name}`, path: `/${name}`, title: name, model: null, execution_type: "agent", description: "system", cron: "0 9 * * *", paused: false, deleted: false })),
+    { id: "Cut8kTVZ", path: "/ticket_triage_test", title: "Ticket triage test", model: "smart", execution_type: "agent", description: "Classify these 6 support tickets, then post the result to #check-this-out.", cron: "0 9 * * 1", paused: true, deleted: false },
+  ];
+  const files = new Map<string, string>();
+  const state = { scopes: [...REQUIRED_SCOPES] as string[], created: [] as string[], deleted: [] as string[], threads: [] as { id: string; message: string }[], scripts: [] as string[], auth: new Set<string>() };
+  const runBatch = (spec: { source: string; models: string[]; repeats: number; copyPath: string; copyTitle: string; out: string }) => {
+    const runs = [];
+    for (const model of spec.models) { state.created.push(spec.copyPath + model); crons.push({ ...crons.find(cron => cron.path === spec.source)!, id: `copy_${model}`, path: spec.copyPath + model, title: spec.copyTitle, model, paused: true }); }
+    for (let repeat = 1; repeat <= spec.repeats; repeat++) for (const model of spec.models) {
+      // balanced posts the wrong category once; the rest post the right one each time.
+      const text = model === "balanced" && repeat === 2 ? "T1 · bug · Duplicate November charge" : SLACK;
+      runs.push({ model, repeat, status: "success", error: null, report: `Classified the tickets on ${model}.`, runModel: model, threadId: `run_${model}_${repeat}`, actions: [{ summary: "Captured Slack message to C0CAZCERFCM; no Slack message was sent", channel_id: "C0CAZCERFCM", text }], seconds: 12 });
+    }
+    // The batch deletes its copies at the end, as BATCH does.
+    for (const model of spec.models) { const index = crons.findIndex(cron => cron.path === spec.copyPath + model); crons.splice(index, 1); state.deleted.push(spec.copyPath + model); }
+    files.set(spec.out, JSON.stringify({ status: "done", runs, copies: spec.models.map(model => spec.copyPath + model) }));
+  };
+  const answer = (path: string, method: string, body: Record<string, unknown> | null): { status?: number; body: unknown } => {
+    if (path === "/api/public/v1/me") return { body: { key_type: "personal", team_id: "team_fake", key_preview: "zt_live_sk_…1234", scopes: state.scopes } };
+    if (path === "/api/public/v1/scripts/runs" && method === "POST") {
+      const code = String(body!.code), args = (body!.args as string[]) ?? [], kind = /^# openmerit:(\w+)/.exec(code)?.[1] ?? "?";
+      state.scripts.push(kind);
+      let stdout = "";
+      if (kind === "list") stdout = JSON.stringify({ tasks: crons.filter(cron => !cron.deleted), usage: [{ credits: 140, path: "/agent_runs/crons/ticket_triage_test/2026-11-18T09-00-00" }, { credits: 536, path: "/agent_runs/crons/workflow_discovery/2026-11-19T10-56-20" }] });
+      if (kind === "put") { files.set(`${args[0]}/spec.json`, args[2]!); stdout = "{\"ok\": true}"; }
+      if (kind === "read") stdout = files.get(args[0]!) ?? "{\"status\": \"missing\"}";
+      if (kind === "credits") stdout = JSON.stringify({ credits: Object.fromEntries((JSON.parse(args[0]!) as string[]).map(id => [id, id.startsWith("run_") ? RUN[id.split("_")[1]!]! : THREAD])) });
+      if (kind === "cleanup") {
+        const left = crons.filter(cron => cron.path.startsWith(args[0]!) && cron.title.startsWith("OpenMerit: "));
+        for (const cron of left) { crons.splice(crons.indexOf(cron), 1); state.deleted.push(cron.path); }
+        stdout = JSON.stringify({ deleted: left.map(cron => cron.path), errors: [] });
+      }
+      return { body: { id: `script_${state.scripts.length}`, status: "completed", result: { exit_code: 0, stdout, stderr: "" } } };
+    }
+    if (path === "/api/public/v1/threads" && method === "POST") {
+      const message = String(body!.message), directory = /uv run python (\S+)\/batch\.py/.exec(message)?.[1];
+      state.threads.push({ id: `thread_${state.threads.length + 1}`, message });
+      if (directory) runBatch(JSON.parse(files.get(`${directory}/spec.json`)!) as Parameters<typeof runBatch>[0]);
+      return { status: 202, body: { thread: { id: `thread_${state.threads.length}` }, run: { id: `agentrun_${state.threads.length}`, status: "queued" } } };
+    }
+    const run = /^\/api\/public\/v1\/runs\/([\w]+)$/.exec(path);
+    if (run) return { body: { id: run[1], thread_id: "thread_1", status: "completed", error: null } };
+    return { status: 404, body: { detail: { error: "not_found", message: path } } };
+  };
+  const server: Server = createServer((req, res) => {
+    let raw = "";
+    req.on("data", chunk => { raw += chunk; });
+    req.on("end", () => {
+      state.auth.add(String(req.headers.authorization));
+      const reply = req.headers.authorization === `Bearer ${KEY}` ? answer(new URL(req.url!, "http://x").pathname, req.method!, raw ? JSON.parse(raw) as Record<string, unknown> : null) : { status: 401, body: { detail: { error: "invalid_api_key", message: "Missing or invalid API key" } } };
+      res.writeHead(reply.status ?? 200, { "content-type": "application/json" }); res.end(JSON.stringify(reply.body));
+    });
+  });
+  return { crons, state, server, url: "" };
+}
+
+/** The judge on OpenMerit's OpenRouter key: five checks, and a run passes every one unless its Slack post files T1 as a bug. */
+async function fakeJudge(): Promise<FakeModels> {
+  const fake: FakeModels = { url: "", calls: [], onCall: null, cost: null, close: async () => {} };
+  const server = createServer((req, res) => {
+    let raw = "";
+    req.on("data", chunk => { raw += chunk; });
+    req.on("end", () => {
+      const parsed = JSON.parse(raw) as { model: string; messages: { role: string; content: string }[] };
+      const system = parsed.messages.find(message => message.role === "system")?.content ?? "", prompt = parsed.messages.find(message => message.role === "user")?.content ?? "";
+      fake.calls.push({ model: parsed.model, ticket: system.slice(0, 20), auth: "" });
+      const ids = ["check-1", "check-2", "check-3", "check-4", "check-5"];
+      const graded = prompt.split("Run to grade:")[1] ?? "";
+      const content = system.startsWith("You write the checklist")
+        ? JSON.stringify({ checks: ["Every ticket has a category", "T1 is billing", "Each line has a summary", "One Slack message", "Lines use the T<n> · <category> · <summary> format"] })
+        : JSON.stringify(Object.fromEntries(ids.map(id => [id, !(id === "check-2" && graded.includes("T1 · bug"))])));
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content } }], usage: { prompt_tokens: 500, completion_tokens: 50, cost: costOf(parsed.model) } }));
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  fake.url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  fake.close = () => new Promise(resolve => { server.closeAllConnections(); server.close(() => resolve()); });
+  return fake;
+}
+
+test("Viktor: a key connects only with every scope, the tasks are listed, the one that can be is evaluated in test mode, and Approve records who and when without changing it", async () => {
+  const viktor = fakeViktor();
+  await new Promise<void>(resolve => viktor.server.listen(0, "127.0.0.1", resolve));
+  viktor.url = `http://127.0.0.1:${(viktor.server.address() as AddressInfo).port}`;
+  const judge = await fakeJudge();
+  const app = await startApp({ models: judge, env: {
+    CLERK_SECRET_KEY: "sk_test_fake", CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from("clerk.openmerit.test$").toString("base64")}`,
+    OPENMERIT_VIKTOR_URL: viktor.url, OPENMERIT_VIKTOR_POLL_MS: "200",
+  } });
+  try {
+    await subscribe(app, "org_viktor");
+    const admin = caller(app, "test:user_v:org_viktor:admin"), member = caller(app, "test:user_m:org_viktor:member");
+    const connect = (agent: typeof admin, body: unknown) => agent.api<{ error?: string; tasks?: { title: string; status: string; reason: string | null; jobId: string | null }[] }>("/api/connections/viktor", { method: "POST", body: JSON.stringify(body) });
+
+    // Refusals: a member, a bad key, and a key missing scopes. None stores a key or lists anything.
+    assert.equal((await connect(member, { apiKey: KEY })).status, 403);
+    const bad = await connect(admin, { apiKey: "zt_live_sk_wrong_key_000" });
+    assert.equal(bad.status, 400);
+    assert.match(bad.body.error!, /paid or Enterprise plan/);
+    viktor.state.scopes = REQUIRED_SCOPES.filter(scope => scope !== "runs:read");
+    const partial = await connect(admin, { apiKey: KEY });
+    assert.match(partial.body.error!, /missing the scope runs:read\./);
+    assert.deepEqual(viktor.state.scripts, [], "no script ran for a refused key");
+    viktor.state.scopes = [...REQUIRED_SCOPES];
+
+    // Connecting lists the five tasks and starts the one that can be evaluated; the system tasks are skipped with why.
+    const connected = await connect(admin, { apiKey: KEY, creditCap: 2000 });
+    assert.equal(connected.status, 201, JSON.stringify(connected.body));
+    const rows = connected.body.tasks!;
+    assert.deepEqual(rows.map(row => [row.title, row.status]), [["workflow_discovery", "skipped"], ["Ticket triage test", "evaluating"], ["heartbeat", "skipped"], ["memory_dreaming", "skipped"], ["skill_refining", "skipped"]]);
+    assert.ok(rows.filter(row => row.status === "skipped").every(row => row.reason === "Viktor's own task: it cannot be edited"));
+    const jobId = rows.find(row => row.title === "Ticket triage test")!.jobId!;
+    const shown = await admin.api<{ keyLast4: string }>("/api/connections/viktor");
+    assert.equal(shown.body.keyLast4, "1234");
+    assert.doesNotMatch(JSON.stringify(shown.body), new RegExp(KEY), "the key is never returned");
+
+    // The evaluation: smart against balanced and cheap, three test runs each, in one API thread.
+    const done = await waitFor(() => admin.tool("openmerit_result", { job_id: jobId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 60_000);
+    assert.equal(done.data.status, "done", done.text);
+    assert.match(done.text, /Proposed change: Set Ticket triage test to cheap\. It passed 15\/15 checks, as smart passed 15\/15/);
+    assert.equal(viktor.state.threads.length, 1, "every test run shares one thread");
+    type Row = { model: string; passes: number; total: number; costPerCallUsd: number | null };
+    const report = (await admin.api<{ status: string; pick: Row; baseline: Row; nearMisses: Row[]; edit: { instructions: string }; notices: string[]; connection: { change: { text: string; link: string }; creditsUsed: number; copiesLeft: string[] }; approved: unknown }>(`/api/runs/${jobId}`)).body;
+    assert.equal(report.status, "picked");
+    assert.deepEqual([report.pick.model, report.pick.passes, report.pick.total], ["cheap", 15, 15]);
+    // Per test run: cheap 4 credits and smart 70, at $2.50 per 1,000 credits.
+    assert.ok(Math.abs(report.pick.costPerCallUsd! - 0.01) < 1e-9 && Math.abs(report.baseline.costPerCallUsd! - 0.175) < 1e-9);
+    // balanced filed T1 as a bug once: 14 of 15, within one check per run of the bar.
+    assert.deepEqual(report.nearMisses.map(item => [item.model, item.passes, item.total]), [["balanced", 14, 15]]);
+    assert.equal(report.connection.change.link, "https://app.viktor.com/scheduled-tasks");
+    // The thread and 3 runs on each preset: 40 + 3 × (70 + 20 + 4).
+    assert.equal(report.connection.creditsUsed, 322);
+    assert.ok(report.notices.some(notice => /Test mode captured 9 outside actions/.test(notice)));
+    assert.deepEqual(report.connection.copiesLeft, []);
+    assert.deepEqual([...viktor.state.created].sort(), [...viktor.state.deleted].sort(), "every copy OpenMerit made is deleted");
+    assert.ok(viktor.state.created.every(path => path.startsWith("/openmerit/ticket-triage-test-")));
+    assert.equal(report.approved, null);
+
+    // Approve change: admins only; it records who and when, and the real task stays on smart.
+    assert.equal((await member.api(`/api/runs/${jobId}/approve`, { method: "POST" })).status, 403);
+    const before = Date.now();
+    const approved = await admin.api<{ change: string; by: string; at: string }>(`/api/runs/${jobId}/approve`, { method: "POST" });
+    assert.equal(approved.status, 200);
+    assert.deepEqual([approved.body.change, approved.body.by], ["Set Ticket triage test to cheap", "user_v"]);
+    assert.ok(Date.parse(approved.body.at) >= before - 1000);
+    assert.equal(viktor.crons.find(cron => cron.path === "/ticket_triage_test")!.model, "smart");
+    const again = await admin.api<{ by: string; at: string }>(`/api/runs/${jobId}/approve`, { method: "POST" });
+    assert.equal(again.body.at, approved.body.at, "the first approval stands");
+
+    // openmerit_tasks lists the connection's tasks with the verdict and the approval.
+    const tasks = await admin.tool("openmerit_tasks", {});
+    assert.match(tasks.text, /Viktor \(322 of 2000 credits used\): 5 scheduled tasks/);
+    assert.match(tasks.text, /Ticket triage test \(smart, 140 credits in 30 days\): Set Ticket triage test to cheap, approved by user_v at /);
+    assert.match(tasks.text, /heartbeat \(default model, 0 credits in 30 days\): skipped: Viktor's own task/);
+    assert.equal(viktor.state.auth.size, 2, "only the stored key and the one refused key reached Viktor");
+
+    // Removing the connection deletes the key; the run and its approval stay.
+    assert.equal((await admin.api("/api/connections/viktor", { method: "DELETE" })).status, 200);
+    assert.deepEqual((await admin.api<{ connected: boolean }>("/api/connections/viktor")).body.connected, false);
+    assert.equal((await admin.api<{ approved: { by: string } }>(`/api/runs/${jobId}`)).body.approved.by, "user_v");
+  } finally {
+    await stop(app); await judge.close();
+    await new Promise<void>(resolve => { viktor.server.closeAllConnections(); viktor.server.close(() => resolve()); });
+  }
+});

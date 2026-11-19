@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## The Viktor connection in the cloud app — unreleased, 19 November 2026
+
+Reviewed the homepage against the cloud app connecting a Viktor workspace with an API key: it lists the workspace's scheduled tasks, evaluates cheaper presets on temporary paused copies in Viktor's test mode within a credit cap, and records an approval without changing the task. `site/index.html` has no FAQ block and makes no claim about Viktor, connected apps, credits or approvals. No homepage copy change is needed; the cloud README's Viktor section and the openmerit README's Engine section describe it.
+
 ## Evidence, connections and approval in the shared core — unreleased, 19 November 2026
 
 Reviewed the homepage against the change that adds the evidence record, the quality rule, the connector interface and the approval record to `openmerit/engine`, with the CLI's repo scan and eval command and the cloud app's agent bundle as the first connections. `site/index.html` has no FAQ block and makes no claim about connections, graders, evidence or approvals; no new connection (Langfuse, Viktor, GitHub) is released. No homepage copy change is needed; the openmerit README's Engine section and the cloud README describe them.

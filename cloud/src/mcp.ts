@@ -10,6 +10,8 @@ import { explain, nearMissLine, reasonFor, type Fix, type JobResult } from "./re
 import type { AppClient } from "./registry.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { bundleProblem, DEFAULT_ENVIRONMENT, rerunJob, startJob } from "./start.ts";
+import { VIKTOR, viktorView, type ViktorView } from "./viktor.ts";
+import type { ViktorJobView } from "./actors/viktor-job.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const VERSION = "0.1.0";
@@ -90,14 +92,19 @@ const json = (status: number, body: unknown, headers: Record<string, string> = {
 export const resourceMetadataUrl = (config: Config) => `${config.publicUrl}/.well-known/oauth-protected-resource/mcp`;
 
 /** Why the job's state stands where it does, for the coding agent. */
-export function describeJob(view: JobView): string {
+export function describeJob(view: JobView | ViktorJobView): string {
   const lines = [`Job ${view.jobId} for ${view.task}: ${view.status} (${view.phase}).`];
   if (view.questions.length) {
     lines.push(`It needs the user. Ask them, then call openmerit_answer with job_id "${view.jobId}" and answers keyed by question id:`);
     for (const question of view.questions) lines.push(`- [${question.id}] (${question.kind}) ${question.prompt}${question.options ? `\n  Options: ${question.options.map(option => option.value).join(" | ")}` : ""}${question.detail ? `\n  ${question.detail.split("\n").join("\n  ")}` : ""}${question.hint ? `\n  ${question.hint}` : ""}`);
   }
   const result = view.result;
-  if (result?.pick) {
+  if (result?.connection) {
+    // A connected app's task: the change is made there by a person; OpenMerit changes nothing.
+    const change = result.connection.change;
+    lines.push(change ? `Proposed change: ${change.text}. It passed ${result.pick?.passes}/${result.pick?.total} checks${result.baseline ? `, as ${result.baseline.model} passed ${result.baseline.passes}/${result.baseline.total}` : ""}, for fewer Viktor credits per run. A person approves it with Approve change at ${result.reportUrl}, then makes it in Viktor (${change.link}); OpenMerit does not change the task.` : `Keep ${result.connection.currentModel}: no cheaper preset passed every check it passed.`);
+    lines.push(`Viktor credits used: ${result.connection.creditsUsed}.`);
+  } else if (result?.pick) {
     lines.push(`Measured pick: ${result.pick.model} on ${result.pick.endpoint}, ${result.pick.passes}/${result.pick.total} cases passed${result.baseline ? ` (current model ${result.baseline.passes}/${result.baseline.total})` : ""}.`);
     if (result.edit.edits.length) lines.push("Edits:", ...result.edit.edits.map(edit => `- ${edit.file}:${edit.line}: ${edit.before} → ${edit.after}`));
     if (result.edit.instructions) lines.push(result.edit.instructions);
@@ -108,7 +115,8 @@ export function describeJob(view: JobView): string {
   if (misses) lines.push(misses);
   if (result?.basedOn?.length) lines.push(`Based on: ${result.basedOn.join(" ")}`);
   if (result) lines.push(`Report: ${result.reportUrl}`);
-  else if (view.status === "running" || view.status === "queued") lines.push(`Provisional pick while it runs: ${view.provisional.model}. ${view.provisional.reason} Measured ${view.progress.measured}${view.progress.planned ? ` of about ${view.progress.planned}` : ""} candidate runs so far (updated ${view.updatedAt}); call openmerit_result again later.`);
+  else if ((view.status === "running" || view.status === "queued") && !view.provisional) lines.push(`Testing in Viktor's test mode: ${view.progress.measured} of ${view.progress.planned ?? "?"} test runs finished (updated ${view.updatedAt}); call openmerit_result again later.`);
+  else if (view.status === "running" || view.status === "queued") lines.push(`Provisional pick while it runs: ${view.provisional!.model}. ${view.provisional!.reason} Measured ${view.progress.measured}${view.progress.planned ? ` of about ${view.progress.planned}` : ""} candidate runs so far (updated ${view.updatedAt}); call openmerit_result again later.`);
   // A result's notices include the job's and those of its last stages, such as challengers left out.
   const notices = result?.notices ?? view.notices;
   for (const notice of notices) {
@@ -131,7 +139,7 @@ function fixLine(fix: Fix, jobId: string, appOrigin: string): string {
   }
 }
 
-const jobData = (view: JobView): Json => ({
+const jobData = (view: JobView | ViktorJobView): Json => ({
   job_id: view.jobId, task: view.task, status: view.status, phase: view.phase, questions: view.questions, notices: view.notices, progress: view.progress,
   provisional: view.provisional, ...(view.error ? { error: view.error } : {}),
   ...(view.result ? { result: resultData(view.result) } : {}),
@@ -147,6 +155,7 @@ function resultData(result: JobResult): Json {
     top,
     nearMisses: nearMisses.map(item => ({ model: item.model, endpoint: item.endpoint, passes: item.passes, total: item.total, costPerCallUsd: item.costPerCallUsd, cheaperThanCurrent: item.cheaperThanCurrent })),
     reportUrl: result.reportUrl, edit: result.edit, spend: result.spend, fixes: result.fixes ?? [], basedOn: result.basedOn ?? [], approval: result.approval ?? null,
+    ...(result.connection ? { connection: { kind: result.connection.kind, task: result.connection.taskTitle, currentModel: result.connection.currentModel, change: result.connection.change, creditsUsed: result.connection.creditsUsed } } : {}),
   };
 }
 const perCall = (value: number | null) => (value === null ? "unknown cost" : `$${value.toFixed(5)}`);
@@ -170,9 +179,14 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
   const account = client.account.getOrCreate([identity.accountId]);
   // Clerk's OAuth access tokens carry org_id but no role or slug, so the member's recorded role and the account's name stay as the web app last saw them. No MCP tool depends on the role.
   await account.touch({ userId: identity.userId, role: null, name: null });
-  const jobView = async (jobId: unknown): Promise<JobView | ToolResult> => {
-    if (typeof jobId !== "string" || !(await account.job(jobId))) return { text: `No job ${String(jobId)} in this account.`, data: {}, isError: true };
-    return client.job.get([jobId]).status();
+  const jobView = async (jobId: unknown): Promise<JobView | ViktorJobView | ToolResult> => {
+    const row = typeof jobId === "string" ? await account.job(jobId) : null;
+    if (!row) return { text: `No job ${String(jobId)} in this account.`, data: {}, isError: true };
+    if (row.kind !== VIKTOR) return client.job.get([row.id]).status();
+    // A Viktor job's actor keeps its state; its saved report is the one the app shows.
+    const view = await client.viktorJob.get([row.id]).status();
+    const report = view.result ? null : await account.report({ jobId: row.id });
+    return report ? { ...view, result: report.json as JobResult } : view;
   };
   if (name === "openmerit_recommend") {
     const unknown = Object.keys(args).filter(key => !["bundle", "environment", "agent", "job_id", "budget_usd"].includes(key));
@@ -204,6 +218,7 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
   if (name === "openmerit_answer") {
     const view = await jobView(args.job_id);
     if (!("jobId" in view)) return view;
+    if ("connection" in view) return { text: `Job ${view.jobId} evaluates a Viktor task and asks no questions.\n${describeJob(view)}`, data: jobData(view) };
     const answers = args.answers;
     if (!answers || typeof answers !== "object" || Array.isArray(answers)) return { text: "answers must be an object keyed by question id.", data: {}, isError: true };
     if (!view.questions.length) return { text: `Job ${view.jobId} has no open questions.\n${describeJob(view)}`, data: jobData(view) };
@@ -219,12 +234,13 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     return { text: describeJob(next), data: jobData(next) };
   }
   if (name === "openmerit_tasks") {
-    const [tasks, ready] = await Promise.all([account.tasks(), account.readySince(identity.userId)]);
-    const text = tasks.length
+    const [tasks, ready, connected] = await Promise.all([account.tasks(), account.readySince(identity.userId), viktorView(client, identity.accountId)]);
+    const apps = viktorLines(connected);
+    const text = (tasks.length
       ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} [${item.id}] (${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.status}, ${item.state}${item.idleSince ? ` since ${item.idleSince.slice(0, 10)}` : ""}`),
         ready.length ? `Ready since the last session: ${ready.map(item => `${item.id} (${item.status})`).join(", ")}. Call openmerit_result for each.` : "Nothing new since the last session."].join("\n")
-      : "No tasks yet. Call openmerit_recommend with a task bundle to start one.";
-    return { text, data: { tasks, readySinceLastSession: ready } };
+      : "No tasks yet. Call openmerit_recommend with a task bundle to start one.") + (apps.length ? `\n${apps.join("\n")}` : "");
+    return { text, data: { tasks, readySinceLastSession: ready, ...(connected.connected ? { viktor: { creditCap: connected.creditCap, creditsUsed: connected.creditsUsed, tasks: connected.tasks } } : {}) } };
   }
   if (name === "openmerit_retire") {
     const row = typeof args.task_id === "string" ? await account.task(args.task_id) : null;
@@ -233,6 +249,14 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     return { text: `Retired ${row.name}: OpenMerit no longer re-runs it. Its runs and reports are kept; openmerit_recommend for the same task brings it back.`, data: { task_id: row.id, state: "retired" } };
   }
   return { text: `Unknown tool ${name}`, data: {}, isError: true };
+}
+
+/** The Viktor connection's tasks, for openmerit_tasks. */
+function viktorLines(view: ViktorView): string[] {
+  if (!view.connected) return [];
+  return [`Viktor (${view.creditsUsed ?? 0} of ${view.creditCap} credits used): ${view.tasks.length} scheduled task${view.tasks.length === 1 ? "" : "s"}:`, ...view.tasks.map(task => `- ${task.title} (${task.model ?? "default model"}, ${task.credits30d} credits in 30 days): ${
+    task.status === "done" ? `${task.result?.change ?? "keep its model"}${task.result?.approval ? `, approved by ${task.result.approval.by} at ${task.result.approval.at}` : ""}; openmerit_result with job_id "${task.jobId}"`
+    : task.status === "evaluating" ? `evaluating, job_id "${task.jobId}"` : `${task.status}: ${task.reason}`}`)];
 }
 
 /** /mcp. A missing or invalid token gets 401 with the protected-resource metadata, which starts the client's Clerk sign-in. */

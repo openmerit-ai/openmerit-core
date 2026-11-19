@@ -1,4 +1,4 @@
-import type { Endpoint, Fix, JobView, MeasuredModel, Report } from "../api.ts";
+import type { Approval, Endpoint, Fix, JobView, MeasuredModel, Report } from "../api.ts";
 import { liveText } from "../live.ts";
 import { date, endpointName, html, setEndpoints, model, modelName, per1k, plural, seconds, usd, type Html } from "../html.ts";
 import type { Ctx, View } from "../view.ts";
@@ -105,6 +105,42 @@ export const notes = (notices: string[]): string[] => notices.filter((notice) =>
 /** The cloud app's sentences mark model IDs and code with backticks, as in its Markdown report. */
 const prose = (text: string): Html[] => text.split("`").map((part, index) => (index % 2 ? html`<code>${part}</code>` : html`${part}`));
 
+// Viktor credits cost $2.50 per 1,000; a connection result's cost per call is per test run.
+const CREDIT_USD = 0.0025;
+const perRun = (usdPerRun: number | null): string => (usdPerRun === null ? "–" : `${Math.round(usdPerRun / CREDIT_USD).toLocaleString("en-US")} credits`);
+
+// A connected app's result: the change to make there, and Approve change, which records who approved it and when.
+function connectionChange(report: Report, admin: boolean): Html {
+  const connection = report.connection!, change = connection.change;
+  if (!change) return html`<div><h2>Change</h2><p class="note">No change: ${connection.taskTitle} keeps <code>${connection.currentModel}</code>.</p></div>`;
+  const approved = report.approved;
+  return html`<div>
+        <h2>Change</h2>
+        <div class="card">
+          <p><b>${change.text}</b></p>
+          <p class="note">Make it in <a href="${change.link}" target="_blank" rel="noopener">Viktor's scheduled tasks</a>: open ${connection.taskTitle} and set its model to <code>${change.model}</code>. OpenMerit does not change the task.</p>
+          ${approved ? html`<p><span class="pill good">Approved</span> <span class="sub">by ${approved.by} on ${date(approved.at)} at ${new Date(approved.at).toISOString().slice(11, 16)} UTC</span></p>`
+            : admin ? html`<p style="margin-top: 12px"><button class="btn primary" type="button" data-action="approve">Approve change</button></p><p class="note">Approving records who approved the change and when. You then make the change in Viktor yourself.</p>`
+            : html`<p class="note">An admin approves this change.</p>`}
+        </div>
+      </div>`;
+}
+
+function connectionPick(report: Report): Html {
+  const pick = report.pick, base = report.baseline, connection = report.connection!;
+  const head = pick ?? base;
+  if (!head) return html`<div class="card"><p>${verdicts[report.status]}</p></div>`;
+  return html`<div class="card">
+        <div class="pick-head"><span class="pick-model"><code>${head.model}</code></span>${pick ? html`<span class="pill good">Recommended</span>` : html`<span class="pill tag">In use now</span>`}</div>
+        <span class="sub">Viktor preset for ${connection.taskTitle}</span>
+        <div class="stats">
+          <div class="stat"><b>${head.passes}/${head.total}</b><span>checks passed${pick && base ? html`<br><code>${base.model}</code>: ${base.passes}/${base.total}` : ""}</span></div>
+          <div class="stat"><b>${perRun(head.costPerCallUsd)}</b><span>per test run${pick && base ? html`<br><code>${base.model}</code>: ${perRun(base.costPerCallUsd)}` : ""}</span></div>
+          <div class="stat"><b>${connection.creditsUsed.toLocaleString("en-US")}</b><span>credits this evaluation used</span></div>
+        </div>
+      </div>`;
+}
+
 function change(report: Report): Html {
   const { edits, instructions } = report.edit;
   if (!edits.length && !instructions) return html`<div><h2>Change</h2><p class="note">No code change: keep the model in use now.</p></div>`;
@@ -120,7 +156,7 @@ function change(report: Report): Html {
       </div>`;
 }
 
-function report(data: Report): Html {
+function report(data: Report, admin: boolean): Html {
   const models = [data.baseline, ...data.candidates].filter((item): item is MeasuredModel => item !== null);
   const pick = data.pick?.model ?? null;
   const from = Object.entries(data.guardrails.from);
@@ -129,18 +165,18 @@ function report(data: Report): Html {
   const near = (item: MeasuredModel) => item.role === "candidate" && misses.some((miss) => miss.model === item.model && miss.endpoint === item.endpoint);
   return html`<div class="eyebrow"><a href="/">Runs</a><span>›</span><span>${data.jobId}</span><span>Measured ${date(data.createdAt)}</span></div>
     <h1 class="title">${title(data)}</h1>
-    <div class="pick">${pickCard(data)}${change(data)}</div>
+    <div class="pick">${data.connection ? html`${connectionPick(data)}${connectionChange(data, admin)}` : html`${pickCard(data)}${change(data)}`}</div>
 
     ${models.length ? html`<section aria-labelledby="compare">
       <h2 id="compare">Models Compared</h2>
       <div class="tablewrap">
         <table>
-          <thead><tr><th>Model</th><th class="num">Passed</th><th class="num">Per 1,000 calls</th><th class="num">Latency</th><th>Result</th></tr></thead>
+          <thead><tr><th>Model</th><th class="num">Passed</th><th class="num">${data.connection ? "Per test run" : "Per 1,000 calls"}</th><th class="num">${data.connection ? "Run time" : "Latency"}</th><th>Result</th></tr></thead>
           <tbody>
             ${models.map((item) => html`<tr class="${item.role === "baseline" ? "current" : item.model === pick ? "picked" : ""}">
-              <td>${model(item.model)}<span class="sub">${endpointName(item.endpoint)}${item.funding === "customer" ? " · your key" : ""}${item.inCatalogue ? "" : " · placed by measurement only"}${item.note ? ` · ${item.note}` : ""}</span></td>
+              <td>${model(item.model)}<span class="sub">${endpointName(item.endpoint)}${item.funding === "customer" ? " · your key" : ""}${item.inCatalogue || data.connection ? "" : " · placed by measurement only"}${item.note ? ` · ${item.note}` : ""}</span></td>
               <td class="num">${item.status === "unavailable" ? "–" : `${item.passes}/${item.total}`}</td>
-              <td class="num">${per1k(item.costPerCallUsd)}${item.costIsEstimate && item.costPerCallUsd !== null ? html`<span class="sub">estimate</span>` : ""}</td>
+              <td class="num">${data.connection ? perRun(item.costPerCallUsd) : per1k(item.costPerCallUsd)}${item.costIsEstimate && item.costPerCallUsd !== null ? html`<span class="sub">estimate</span>` : ""}</td>
               <td class="num">${seconds(item.latencyMs)}</td>
               <td>${verdict(item, pick, near(item))}</td>
             </tr>`)}
@@ -153,8 +189,21 @@ function report(data: Report): Html {
       <h2 id="near-misses">Near Misses</h2>
       <div class="card">
         <p>${plural(misses.length, "model")} missed ${modelName(data.baseline.model)}'s ${data.baseline.passes}/${data.baseline.total} by at most one case per run, so ${misses.length === 1 ? "it does" : "they do"} not qualify. A rerun may place ${misses.length === 1 ? "it" : "them"} either side of the bar.</p>
-        ${misses.map((item) => html`<div class="row"><span>${model(item.model)}<span class="sub">${endpointName(item.endpoint)} · ${item.passes}/${item.total} passed · ${per1k(item.costPerCallUsd)} per 1,000 calls${item.cheaperThanCurrent === true ? " · cheaper than now" : item.cheaperThanCurrent === false ? " · not cheaper than now" : ""}</span></span></div>`)}
+        ${misses.map((item) => html`<div class="row"><span>${model(item.model)}<span class="sub">${endpointName(item.endpoint)} · ${item.passes}/${item.total} passed · ${data.connection ? `${perRun(item.costPerCallUsd)} per test run` : `${per1k(item.costPerCallUsd)} per 1,000 calls`}${item.cheaperThanCurrent === true ? " · cheaper than now" : item.cheaperThanCurrent === false ? " · not cheaper than now" : ""}</span></span></div>`)}
       </div>
+    </section>` : ""}
+
+    ${data.connection ? html`<section aria-labelledby="checks">
+      <h2 id="checks">Checks</h2>
+      <div class="card">
+        <p class="note">A judge wrote these from ${data.connection.taskTitle}'s instructions and graded every test run on them. Test mode captured each run's Slack posts and other outside actions instead of sending them.</p>
+        ${data.connection.checks.map((check) => html`<div class="row"><span><code>${check.id}</code> ${check.check}</span></div>`)}
+      </div>
+    </section>` : ""}
+
+    ${data.basedOn?.length ? html`<section aria-labelledby="based-on">
+      <h2 id="based-on">Based On</h2>
+      <div class="card">${data.basedOn.map((line) => html`<p class="note">${prose(line)}</p>`)}</div>
     </section>` : ""}
 
     ${data.agentEval ? html`<section aria-labelledby="agent-eval">
@@ -189,8 +238,16 @@ export const runView: View<Data> = {
     return data;
   },
   title,
-  render: (data) => (isLive(data) ? live(data) : report(data)),
+  render: (data, { me }) => (isLive(data) ? live(data) : report(data, me.role === "admin")),
   actions: {
+    // Approve change records who approved and when; it changes nothing in the connected app.
+    async approve(_target, data, { api, refresh, toast, confirm }) {
+      if (isLive(data) || !data.connection?.change) return;
+      if (!await confirm({ title: "Approve this change?", body: `${data.connection.change.text}. OpenMerit records that you approved it, and when. It does not change the task: you make the change in Viktor.`, confirm: "Approve change" })) return;
+      await api.send<Approval>("POST", `/api/runs/${encodeURIComponent(data.jobId)}/approve`);
+      await refresh();
+      toast("Approved. Make the change in Viktor's scheduled tasks.");
+    },
     // Run again, or raise the task's budget per job and run again: both spend, so both confirm first.
     async rerun(_target, data, ctx) {
       await rerun(data, null, ctx);

@@ -6,10 +6,11 @@
 // just created), preview-noorg (a token without an organization), preview-error, preview-slow and preview-expired. Each scenario keeps its own in-memory
 // state, so actions change what later requests return. Every name and number is fictional.
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, type Guardrails, type Level } from "../../openmerit-core/src/engine/guardrails.ts";
-import type { DeletedTask, Endpoint, JobView, LiveProgress, MeasuredModel, Me, Report, Run, Spend, Task } from "../api.ts";
+import type { DeletedTask, Endpoint, JobView, LiveProgress, MeasuredModel, Me, Report, Run, Spend, Task, ViktorConnection, ViktorTask } from "../api.ts";
 import { tonicUltra } from "./tonic-ultra.ts";
 
-export interface State { me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number; deleted: DeletedTask[] }
+// viktor: the Viktor connection; absent means not connected.
+export interface State { viktor?: ViktorConnection; me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number; deleted: DeletedTask[] }
 
 const ENV = "sahra-health/claims";
 const measured = (model: string, endpoint: string, fields: Partial<MeasuredModel>): MeasuredModel => ({
@@ -37,6 +38,7 @@ function populated(): State {
     run("f9q2w7", "fraud-reviewer", "done", "2026-11-16T12:00:00Z", "run", "codex"),
     run("z1c7m4", "coding-reviewer", "failed", "2026-11-12T10:00:00Z"),
     run("b2v5h3", "ticket-router", "done", "2026-10-30T10:00:00Z"),
+    run("v5t8c2", "viktor_claims_digest", "done", "2026-11-18T09:00:10Z", "viktor", null),
   ];
   const baseline = measured("openai/gpt-5", "openrouter", { role: "baseline", stage: "baseline", passes: 39, total: 40, costPerCallUsd: 0.00475, latencyMs: 3100 });
   const haiku = measured("anthropic/claude-haiku-5-5", "openrouter", { passes: 40, total: 40, costPerCallUsd: 0.00007, latencyMs: 500, qualified: true });
@@ -70,7 +72,8 @@ function populated(): State {
   return {
     me: { user: { id: "user_amira" }, account: { id: "org_sahra", name: "Sahra Health" }, role: "admin", plan: { name: "Cloud", status: "active", periodEnd: "2026-12-01T00:00:00Z", includedEvals: 100, usedEvals: 38 } },
     tasks, runs,
-    reports: { k7m2q9: report, f9q2w7: keep, p3x8d1: failedEval },
+    reports: { k7m2q9: report, f9q2w7: keep, p3x8d1: failedEval, v5t8c2: viktorReport() },
+    viktor: viktorConnected(true),
     jobs: {
       e4n6t0: job("e4n6t0", "enrollment-checker", "Enrollment checker", {}),
       w8r3k1: job("w8r3k1", "ticket-router", "Ticket router", { status: "needs_input", phase: "label_check", questions: [{ id: "labels" }], progress: { measured: 0, planned: null }, createdAt: "2026-11-18T11:20:00Z" }),
@@ -90,9 +93,59 @@ function populated(): State {
   };
 }
 
+// A connected Viktor workspace (fictional): its four system tasks, skipped, and one task evaluated, with a change to approve.
+const SYSTEM = "Viktor's own task: it cannot be edited";
+function viktorTasks(evaluated: boolean): ViktorTask[] {
+  const task = (title: string, path: string, model: string | null, credits30d: number, fields: Partial<ViktorTask>): ViktorTask => ({ id: path.slice(1), title, path, model, credits30d, paused: false, status: "skipped", reason: SYSTEM, estimatedCredits: null, jobId: null, result: null, ...fields });
+  return [
+    task("Workflow Discovery", "/workflow_discovery", null, 536, {}),
+    task("Claims digest", "/claims_digest", "smart", 410, evaluated
+      ? { status: "done", reason: null, estimatedCredits: 372, jobId: "v5t8c2", result: { status: "picked", change: "Set Claims digest to cheap", link: "https://app.viktor.com/scheduled-tasks", approval: null } }
+      : { status: "evaluating", reason: null, estimatedCredits: 372, jobId: "v5t8c2" }),
+    task("Weekly payer report", "/weekly_payer_report", "balanced", 120, { status: "waiting", reason: "Not started: past the credit cap or the plan's evaluations.", estimatedCredits: 160 }),
+    task("Inbox sync", "/inbox_sync", null, 0, { reason: "script task, no model" }),
+    task("Heartbeat", "/heartbeat", null, 0, {}),
+    task("Memory Dreaming", "/memory_dreaming", "gpt-6-luna#ReasoningLevel:high", 0, {}),
+    task("Skill Refining", "/skill_refining", "gpt-6.1-sol#ReasoningLevel:low", 0, {}),
+  ];
+}
+const viktorConnected = (evaluated: boolean): ViktorConnection => ({
+  connected: true, keyLast4: "eZnk", keyType: "personal", creditCap: 2000, connectedAt: "2026-11-18T09:00:00Z", connectedBy: "user_amira",
+  creditsUsed: evaluated ? 322 : 0, creditsReserved: evaluated ? 0 : 372, listedAt: "2026-11-18T09:00:05Z", listingError: null, tasks: viktorTasks(evaluated),
+});
+
+function viktorReport(): Report {
+  const preset = (name: string, fields: Partial<MeasuredModel>): MeasuredModel => ({
+    model: name, endpoint: "viktor", endpointModel: name, role: "candidate", stage: "search", eci: null, inCatalogue: false, funding: "customer", status: "measured",
+    passes: 18, total: 18, costPerCallUsd: 0.01, costIsEstimate: false, latencyMs: 24_000, qualified: true, note: "", ...fields,
+  });
+  const smart = preset("smart", { role: "baseline", stage: "baseline", costPerCallUsd: 0.175, latencyMs: 61_000, qualified: false });
+  const cheap = preset("cheap", {});
+  const balanced = preset("balanced", { passes: 17, costPerCallUsd: 0.05, latencyMs: 38_000, qualified: false, note: "passed 17/18 vs the current model's 18/18" });
+  const checks = ["Every ticket gets exactly one of the four categories", "C1 is filed as billing", "Each ticket has a one-line summary", "One Slack message to #claims-ops", "Each line reads C<n> · <category> · <summary>", "No ticket is left out"].map((check, index) => ({ id: `check-${index + 1}`, check }));
+  return {
+    jobId: "v5t8c2", task: "Claims digest", createdAt: "2026-11-18T09:12:00Z", status: "picked",
+    pick: { model: "cheap", endpoint: "viktor", endpointModel: "cheap", passes: 18, total: 18, costPerCallUsd: 0.01, savingPerCallUsd: 0.165 },
+    top: [cheap], baseline: smart, candidates: [balanced, cheap], nearMisses: [{ ...balanced, cheaperThanCurrent: true }],
+    search: { pool: 2, unplaced: 0, samples: checks.slice(0, 5).map((check) => check.id), finalists: ["cheap", "balanced"], challengers: [], shortfall: null },
+    agentEval: null, edit: { edits: [], instructions: "Set Claims digest to cheap in Viktor's scheduled tasks (https://app.viktor.com/scheduled-tasks): open the task and change its model to cheap. OpenMerit does not change it." },
+    spend: { openmeritUsd: 0.21, customerUsd: 0.805 }, guardrails: { effective: {}, from: {}, rejected: [] },
+    notices: ["Test mode captured 9 outside actions, such as Slack posts, instead of sending them."], fixes: [],
+    reportUrl: "https://openmerit.ai/api/r/v5t8c2.md", catalogueVersion: "viktor-presets", cases: { total: 6, fromExamples: 0, written: 6 },
+    basedOn: ["Grader: a judge grading each test run on a checklist from the task's instructions, against the current model's runs, from viktor (/claims_digest).", "Cases: the task itself, run in Viktor's test mode from viktor (/claims_digest).", "Priority: $1.03 a month of recorded spend, from viktor (410 credits in the last 30 days)."],
+    connection: {
+      kind: "viktor", taskId: "claims_digest", taskTitle: "Claims digest", currentModel: "smart", change: { text: "Set Claims digest to cheap", link: "https://app.viktor.com/scheduled-tasks", model: "cheap" },
+      creditsUsed: 322, checks, copiesLeft: [],
+      runs: ["smart", "balanced", "cheap"].flatMap((model) => [1, 2, 3].map((repeat) => ({ model, repeat, status: "success", actions: ["Captured Slack message to C0CLAIMS; no Slack message was sent"], credits: { smart: 70, balanced: 20, cheap: 4 }[model] ?? null }))),
+    },
+    approved: null,
+  };
+}
+
 function emptyState(me: Me): State {
   const state = populated();
-  return { ...state, me: { ...me, plan: { ...me.plan, usedEvals: 0 } }, tasks: [], runs: [], reports: {}, jobs: {}, endpoints: [], spend: { ...state.spend, openmeritUsd: 0, customerUsd: 0 }, guardrails: { environment: {}, agent: {}, task: {} } };
+  const { viktor: _viktor, ...rest } = state;
+  return { ...rest, me: { ...me, plan: { ...me.plan, usedEvals: 0 } }, tasks: [], runs: [], reports: {}, jobs: {}, endpoints: [], spend: { ...state.spend, openmeritUsd: 0, customerUsd: 0 }, guardrails: { environment: {}, agent: {}, task: {} } };
 }
 
 function scenario(name: string): State {
@@ -191,6 +244,44 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       };
       Object.assign(task, { status: "running", lastJobId: jobId, lastRunAt: startedAt });
       return json(201, { jobId, taskId: task.id });
+    }
+    // The Viktor connection, as cloud/src/api.ts serves it: the key is checked, never stored or returned.
+    if (path === "/api/connections/viktor" && method === "GET") return json(200, state.viktor ?? { connected: false, tasks: [] });
+    if (path === "/api/connections/viktor" && method === "POST") {
+      if (denied) return denied;
+      const apiKey = typeof input?.apiKey === "string" ? input.apiKey.trim() : "";
+      if (apiKey.length < 12) return error(400, "Paste the Viktor API key from Settings → API Keys.");
+      if (!apiKey.startsWith("zt_live_sk_")) return error(400, "Viktor did not accept this key. Check that it is a current key from Settings → API Keys; Viktor gives API keys only to workspaces on a paid or Enterprise plan.");
+      const cap = typeof input?.creditCap === "number" ? input.creditCap : 2000;
+      if (cap < 100 || cap > 100_000) return error(400, "The credit cap must be between 100 and 100,000 credits.");
+      state.viktor = { ...viktorConnected(false), keyLast4: apiKey.slice(-4), creditCap: cap, connectedAt: new Date().toISOString(), connectedBy: state.me.user.id };
+      return json(201, state.viktor);
+    }
+    if (path === "/api/connections/viktor" && method === "DELETE") {
+      if (denied) return denied;
+      if (!state.viktor) return error(404, "Viktor is not connected.");
+      delete state.viktor;
+      return json(200, { deleted: true });
+    }
+    if (path === "/api/connections/viktor/refresh" && method === "POST") { if (denied) return denied; return json(200, { ...(state.viktor ?? { connected: false, tasks: [] }), started: [], refused: null }); }
+    if ((match = /^\/api\/connections\/viktor\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
+      if (denied) return denied;
+      const task = state.viktor?.tasks.find((item) => item.id === match?.[1] && (item.status === "waiting" || item.status === "failed"));
+      if (!task) return error(409, "This task cannot be evaluated, or is being evaluated now.");
+      Object.assign(task, { status: "evaluating", reason: null });
+      return json(201, { started: [task.id] });
+    }
+    // Approve change records who approved and when; the first approval stands.
+    if ((match = /^\/api\/runs\/([\w-]+)\/approve$/.exec(path)) && method === "POST") {
+      if (denied) return denied;
+      const found = state.reports[match[1] ?? ""];
+      if (!found) return error(404, "This run has no result yet.");
+      const change = found.connection?.change;
+      if (!change || !found.pick) return error(409, "This result proposes no change to approve.");
+      found.approved ??= { jobId: found.jobId, change: change.text, link: change.link, by: state.me.user.id, at: new Date().toISOString() };
+      const row = state.viktor?.tasks.find((item) => item.jobId === found.jobId);
+      if (row?.result) row.result.approval = { by: found.approved.by, at: found.approved.at };
+      return json(200, found.approved);
     }
     if (path === "/api/endpoints" && method === "GET") return json(200, state.endpoints);
     if (path === "/api/endpoints" && method === "POST") {
