@@ -2,7 +2,12 @@
 // instance's frontend API, as on openmerit.ai/scout/; the cloud app verifies
 // each session token it receives. A page that already defines clerkGlobals.Clerk,
 // as the local preview does, uses it instead.
-export interface ClerkSession { status: string; getToken(): Promise<string | null> }
+export interface ClerkSession {
+  status: string;
+  getToken(): Promise<string | null>;
+  // Starts a re-verification and lists the factors Clerk can check; empty for a Google-only account.
+  startVerification?(params: { level: string }): Promise<{ supportedFirstFactors?: unknown[] | null }>;
+}
 export interface ClerkUser { fullName?: string | null; primaryEmailAddress?: { emailAddress: string } | null }
 export interface Clerk {
   session?: ClerkSession | null;

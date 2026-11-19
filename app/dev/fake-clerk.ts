@@ -12,14 +12,22 @@ const scenario = localStorage.getItem(key) ?? "tonic";
 const tonic = scenario === "tonic";
 const active = scenario !== "signed-out";
 const verified = "om-preview-verified";
+const oauthOnly = "om-preview-oauth-only";
+const flag = new URLSearchParams(location.search).get("oauth-only");
+if (flag) { if (flag === "1") localStorage.setItem(oauthOnly, "1"); else localStorage.removeItem(oauthOnly); }
 
 const clerk: Clerk = {
   user: active ? (tonic ? { fullName: "Jordan Pike", primaryEmailAddress: { emailAddress: "jordan@tonicultra.example" } } : { fullName: "Amira Haddad", primaryEmailAddress: { emailAddress: "amira@sahra.example" } }) : null,
   // The token carries when the preview last verified, as a real session token's fva claim does.
-  session: active ? { status: "active", getToken: async () => `preview-${scenario}${localStorage.getItem(verified) ? `.v${localStorage.getItem(verified)}` : ""}` } : null,
+  session: active ? {
+    status: "active",
+    // ?oauth-only=1 previews a Google-only account, which Clerk's prompt cannot verify.
+    startVerification: async () => ({ supportedFirstFactors: localStorage.getItem(oauthOnly) ? [] : [{ strategy: "email_code" }] }),
+    getToken: async () => `preview-${scenario}${localStorage.getItem(verified) ? `.v${localStorage.getItem(verified)}` : ""}` } : null,
   async load() {},
   addListener() {},
-  openSignIn() { localStorage.setItem(key, "tonic"); location.reload(); },
+  // A fresh sign-in counts as a recent verification, as it does in Clerk.
+  openSignIn() { localStorage.setItem(key, "tonic"); localStorage.setItem(verified, String(Math.floor(Date.now() / 1000))); location.reload(); },
   // Clerk asks for a password or code here; the preview verifies at once.
   __internal_openReverification({ afterVerification }) { localStorage.setItem(verified, String(Math.floor(Date.now() / 1000))); afterVerification?.(); },
   async signOut() { localStorage.setItem(key, "signed-out"); location.reload(); },
