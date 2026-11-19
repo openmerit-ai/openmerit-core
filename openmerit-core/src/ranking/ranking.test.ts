@@ -87,6 +87,8 @@ before(async () => {
       const limited = rateLimits.get(model) ?? 0;
       if (limited > 0) { rateLimits.set(model, limited - 1); return json(429, { error: { message: "slow down" } }, { "retry-after": "0" }); }
       if (model === costlyFailure) { costlyFailure = ""; return json(500, { error: { message: "overloaded" }, usage: { prompt_tokens: 10, completion_tokens: 0, cost: 0.5 } }, { "retry-after": "0" }); }
+      // A model that takes the request and never answers.
+      if (model === "silent") return;
       if (model === "missing") return json(404, { error: { message: `The model ${model} does not exist` } });
       const anthropic = path.endsWith("/messages");
       const answer = script(model, body, anthropic);
@@ -107,7 +109,7 @@ before(async () => {
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
-after(() => { server.close(); });
+after(() => { server.closeAllConnections(); server.close(); });
 beforeEach(() => { seen.length = 0; rateLimits.clear(); costlyFailure = ""; });
 
 const endpoints = (): EndpointConfig[] => [
@@ -229,6 +231,24 @@ test("a candidate the endpoint refuses on every case is unavailable; a refused b
   // 4096 output tokens at $10 a million reserve about $0.041, past the $0.01 cap.
   await assert.rejects(capped({ model: "good", endpoint: "openrouter" }, ["c1"]), BudgetRefused);
   assert.equal(seen.length, 0);
+});
+
+test("a candidate that never answers ends its measure within one call timeout, without retries, and other candidates are unaffected", async () => {
+  const ledger = memoryLedger();
+  const timeoutMs = 400;
+  const quick = createClient(endpoints(), { model: () => priced, timeoutMs });
+  // One case at a time: after the first silent call, the other cases are not sent.
+  const measure = createMeasure({ bundle, cases, client: quick, grader: labelMatch(), ledger, key: "job-1", concurrency: 1 });
+  const started = Date.now();
+  const [silent, good] = await Promise.allSettled([measure({ model: "silent", endpoint: "openrouter" }, ids), measure({ model: "good", endpoint: "openrouter" }, ids)]);
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < timeoutMs + 1000, `took ${elapsed} ms`);
+  assert.equal(silent.status, "rejected");
+  assert.ok(silent.status === "rejected" && silent.reason instanceof CandidateUnavailable);
+  assert.match(String((silent as PromiseRejectedResult).reason.message), /^silent on openrouter: openrouter did not answer \(no answer in 0 s\)/);
+  assert.equal(seen.filter(item => item.body.model === "silent").length, 1, "a timed-out call is not retried, and no further case is sent");
+  assert.deepEqual(good.status === "fulfilled" && good.value.results.map(item => item.pass), [true, true, true]);
+  near((await ledger.spent()).openmeritUsd, 0.003);
 });
 
 test("results carry pass or fail only, never the candidate's output", async () => {

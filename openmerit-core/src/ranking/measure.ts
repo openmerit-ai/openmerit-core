@@ -51,6 +51,8 @@ export function createMeasure(input: {
     const run = options.run ?? "0";
     const outcomes = new Array<{ result: CaseResult; costUsd: number; costIsEstimate: boolean; latencyMs: number | null; graderCostUsd: number; rejected?: string }>(ids.length);
     let next = 0;
+    // Once a call gets no answer at all, the candidate takes no new case: each would wait out the same timeout.
+    let silent: string | null = null;
     // When a case throws, such as a refused budget, the other workers take no new case.
     const worker = async () => {
       try { await work(); } catch (error) { next = ids.length; throw error; }
@@ -60,9 +62,14 @@ export function createMeasure(input: {
         const index = next++;
         input.signal?.throwIfAborted();
         const caseItem = byId.get(ids[index]!)!;
+        if (silent !== null) {
+          outcomes[index] = { result: { caseId: caseItem.id, pass: false, failure: "error" }, costUsd: 0, costIsEstimate: false, latencyMs: null, graderCostUsd: 0, rejected: silent };
+          continue;
+        }
         const key = `${input.key}/${run}/${candidate.endpoint}/${candidate.model}/${caseItem.id}`;
         const ran = await runCase({ bundle: input.bundle, caseItem, client: input.client, candidate, ledger: input.ledger, key, ...(input.signal ? { signal: input.signal } : {}), ...(input.maxTokens ? { maxTokens: input.maxTokens } : {}) });
         const answered = ran.failure !== "error";
+        if (ran.failure === "error" && (ran.status ?? 0) === 0) silent ??= ran.error ?? "it did not answer";
         const base = { costUsd: ran.costUsd, costIsEstimate: ran.costIsEstimate, latencyMs: answered ? ran.latencyMs : null };
         if (ran.output === null) {
           outcomes[index] = { ...base, result: { caseId: caseItem.id, pass: false, failure: ran.failure ?? "error" }, graderCostUsd: 0, ...(ran.failure === "error" && rejects(ran.status ?? 0) ? { rejected: ran.error ?? `HTTP ${ran.status}` } : {}) };
