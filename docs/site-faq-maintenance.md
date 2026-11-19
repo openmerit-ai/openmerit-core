@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Challengers up to the current model's price — unreleased, 19 November 2026
+
+Reviewed the homepage against Scout's challengers listing up to the current model's price when no qualifying finalist costs less per item than the current model. `site/index.html` has no FAQ block and makes no claim about how challengers are chosen or priced. No homepage copy change is needed; the openmerit README's Scout Model Binary Search step describes the rule.
+
 ## Acceptance fixes and real-repository fixes — npm 0.4.3 release preparation, 15 November 2026
 
 Reviewed the homepage against the 0.4.3 changes: a project in a subdirectory of its Git repository is its own project, an eval that sends no request through the metering proxy stops after one run, too-small evals are caught before spending where possible, a budget-paused run can continue at the same budget, Configure gives an instruction instead of editing a model setting other code shares, hidden key prompts no longer echo, `--help` works on every command, and Scout recognizes more model ID forms and file types. `site/index.html` still has no FAQ block and makes no claim about any of these, including the budget guarantee, which the approval text now limits to requests sent through the proxy. No homepage copy changes. The limits noted for 0.4.2 below still apply, and npm's `latest` stays 0.4.1 until a promotion.

@@ -763,11 +763,19 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     if (!searched.selected) { summary.status = "no_passing_model"; save(); return; }
     summary.finalists = searched.finalists.map(item => item.model);
     for (const candidate of searched.finalists) await runFinal(candidate);
-    const leader = searched.finalists.map(candidate => ({ candidate, measured: finalMeasure(task, candidate.model) })).filter(item => item.measured)
-      .sort((a, b) => b.measured!.score - a.measured!.score || (a.measured!.cost ?? Infinity) - (b.measured!.cost ?? Infinity) || a.candidate.eci - b.candidate.eci)[0]?.candidate;
+    const finals = searched.finalists.map(candidate => ({ candidate, measured: finalMeasure(task, "final", candidate.model) }))
+      .filter((item): item is { candidate: PoolEntry; measured: NonNullable<typeof item.measured> } => item.measured !== null);
+    const leader = [...finals].sort((a, b) => b.measured.score - a.measured.score || (a.measured.cost ?? Infinity) - (b.measured.cost ?? Infinity) || a.candidate.eci - b.candidate.eci)[0]?.candidate;
     if (leader) {
       const tried = new Set([...summary.trials.map(item => item.model), ...summary.skipped.map(item => item.model)]);
-      for (const candidate of challengers(candidates, leader, tried, { count: CHALLENGERS, strength: item => item.eci })) {
+      // As rank() qualifies them: when no qualified finalist costs less per item than the current model, a stronger
+      // model priced up to the current model's list price may still, so challengers are capped there instead of at the leader's.
+      const current = finalMeasure(task, "baseline", base.model);
+      const cheaper = !current || current.cost === null || finals.some(({ measured }) => measured.score >= current.score
+        && (plan.threshold === undefined || measured.score >= plan.threshold) && measured.cost !== null && measured.cost < current.cost!);
+      const currentModel = ctx.catalogue.models.find(model => model.id === base.model);
+      const ceiling = cheaper || !currentModel ? {} : { maxPrice: blendedPrice(currentModel) };
+      for (const candidate of challengers(candidates, leader, tried, { count: CHALLENGERS, strength: item => item.eci, ...ceiling })) {
         try {
           if (await screen(candidate, "challenger")) { summary.challengers.push(candidate.model); await runFinal(candidate); }
         } catch (error) {
@@ -779,8 +787,8 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     summary.status = "selected";
     save();
   };
-  const finalMeasure = (task: string, model: string) => {
-    const units = state.units(runId).filter(unit => unit.task === task && unit.role === "final" && unit.model === model);
+  const finalMeasure = (task: string, role: "final" | "baseline", model: string) => {
+    const units = state.units(runId).filter(unit => unit.task === task && unit.role === role && unit.model === model);
     if (units.length < repeats || units.some(unit => unit.status !== "done")) return null;
     const results = units.map(unit => unit.result as unknown as UnitResult);
     const total = results.reduce((sum, item) => sum + item.total, 0);

@@ -20,6 +20,15 @@ test("the search keeps a ladder's own order, and unplaced options are always cha
   assert.deepEqual(challengers(tiers, { key: "unpriced", price: null }, tried, { unplaced: [fineTune] }).map(item => item.key), ["acme/fraud-ft"]);
 });
 
+test("challengers are capped at the leader's list price, or at the ceiling the caller passes", () => {
+  // Weakest first. The leader is cheap by list price; "between" is stronger and priced between the leader and the current model.
+  const ladder: Rung[] = [{ key: "leader", price: 1 }, { key: "cheap-strong", price: 0.5 }, { key: "between", price: 3 }, { key: "dear", price: 6 }];
+  const leader = ladder[0]!, tried = new Set(["leader"]);
+  assert.deepEqual(challengers(ladder, leader, tried).map(item => item.key), ["cheap-strong"]);
+  assert.deepEqual(challengers(ladder, leader, tried, { maxPrice: 4 }).map(item => item.key), ["cheap-strong", "between"]);
+  assert.deepEqual(challengers(ladder, leader, tried, { maxPrice: 4, count: 1 }).map(item => item.key), ["cheap-strong"], "still cheapest first, and at most count");
+});
+
 async function ledgerContract(ledger: Ledger) {
   const customer = async () => (await ledger.spent()).customerUsd;
   const near = async (expected: number) => assert.ok(Math.abs(await customer() - expected) < 1e-9, `spent ${await customer()}, expected ${expected}`);

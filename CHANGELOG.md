@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Scout's challengers can now list up to the current model's price when no qualifying finalist costs less per item than the current model. Challengers used to be capped at the leading finalist's list price, so when the finalists were cheap by list price but answered at length, a stronger model priced between the two was never tried, and the result offered no saving. The cap stays at the leading finalist's price whenever a qualifying finalist is already cheaper, and challengers must still be stronger than it, untried, and at most three. `openmerit/engine`'s `challengers()` takes the ceiling as `maxPrice`; the cloud app applies the same rule.
 - CI no longer tests Intel Macs (macOS x64); the supported platforms list no longer includes them.
 - CI no longer tests Apple silicon Macs for now; the README lists them as supported but not currently tested in CI.
 - The package exports `openmerit/engine`: Scout's search over any ordered ladder, the catalogue types, a spend `Ledger` with reserve, settle and release by key, the guardrail resolver for environment, agent and task levels, the agent-eval rule and the `redact` rules. The CLI runs its search and eval budget through it; its behaviour does not change. See the README's Engine section.

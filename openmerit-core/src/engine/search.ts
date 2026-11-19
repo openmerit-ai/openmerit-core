@@ -118,15 +118,22 @@ export interface ChallengerOptions<T extends Rung> {
   strength?: (option: T) => number;
   /** Options the ladder cannot place, such as fine-tunes without an ECI: every untried one is a challenger, after the placed ones. */
   unplaced?: readonly T[];
+  /**
+   * The highest list price a challenger may have. Defaults to the leader's. A caller whose measured
+   * finalists all cost more per call than the current model passes the current model's list price,
+   * since a stronger model priced between the two may still be cheaper in use.
+   */
+  maxPrice?: number | null;
 }
 
-/** Untried options stronger than the leader and no dearer by list price, cheapest first, then every untried unplaced option. */
+/** Untried options stronger than the leader and no dearer by list price than `maxPrice` (the leader's), cheapest first, then every untried unplaced option. */
 export function challengers<T extends Rung>(ladder: readonly T[], leader: T, tried: ReadonlySet<string>, options: ChallengerOptions<T> = {}): T[] {
   const position = new Map(ladder.map((item, index) => [item.key, index]));
   const strength = options.strength ?? ((item: T) => position.get(item.key)!);
   const unplaced = (options.unplaced ?? []).filter(item => !tried.has(item.key));
-  if (leader.price === null) return unplaced;
-  const placed = ladder.filter(item => strength(item) > strength(leader) && item.price !== null && item.price <= leader.price! && !tried.has(item.key))
+  const ceiling = options.maxPrice === undefined ? leader.price : options.maxPrice;
+  if (ceiling === null) return unplaced;
+  const placed = ladder.filter(item => strength(item) > strength(leader) && item.price !== null && item.price <= ceiling && !tried.has(item.key))
     .sort((a, b) => a.price! - b.price! || strength(b) - strength(a)).slice(0, options.count ?? CHALLENGERS);
   return [...placed, ...unplaced];
 }
