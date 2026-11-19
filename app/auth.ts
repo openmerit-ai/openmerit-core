@@ -46,6 +46,47 @@ function loadScript(src: string, publishableKey?: string): Promise<void> {
   }), unavailable);
 }
 
+// Clerk's sign-in and verify screens in the app's own look: the dialog's card, the page titles'
+// serif, left-aligned headers and the app's buttons and inputs, from the same CSS variables.
+export function appearance(): Record<string, unknown> {
+  const button = { height: "32px", borderRadius: "7px", fontSize: "13.5px", fontWeight: 500, letterSpacing: "-.005em", textTransform: "none", boxShadow: "none" };
+  return {
+    variables: { fontFamily: "var(--sans)", fontSize: "14px", colorPrimary: "var(--ink)", colorPrimaryForeground: "var(--paper)", colorBackground: "var(--surface)", colorForeground: "var(--ink)", colorMutedForeground: "var(--muted)", colorInputForeground: "var(--ink)", colorInput: "var(--paper)", colorBorder: "var(--line)", colorDanger: "var(--error)", colorSuccess: "var(--good)", colorShadow: "var(--shadow)", borderRadius: "7px" },
+    layout: { socialButtonsVariant: "blockButton", socialButtonsPlacement: "top" },
+    elements: {
+      modalContent: { outline: "none" },
+      modalBackdrop: { background: "#0000004d", alignItems: "flex-start", paddingTop: "14vh" },
+      cardBox: { width: "400px", maxWidth: "calc(100vw - 32px)", borderRadius: "12px", border: "1px solid var(--line)", boxShadow: "0 20px 60px var(--shadow)", background: "var(--surface)" },
+      card: { background: "var(--surface)", boxShadow: "none", border: "0", borderRadius: "0", padding: "28px 28px 24px", gap: "22px" },
+      header: { alignItems: "flex-start", textAlign: "left", gap: "6px" },
+      headerTitle: { fontFamily: "var(--serif)", fontSize: "26px", fontWeight: 400, lineHeight: 1.15, letterSpacing: "-.02em", color: "var(--ink)" },
+      headerSubtitle: { fontSize: "14px", color: "var(--prose)" },
+      socialButtons: { display: "grid", gridTemplateColumns: "1fr", gap: "8px" },
+      socialButtonsBlockButton: { ...button, height: "36px", border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)",
+        "&:hover": { background: "color-mix(in srgb, var(--ink) 3%, var(--surface))", borderColor: "color-mix(in srgb, var(--ink) 16%, var(--line))" } },
+      socialButtonsBlockButtonText: { fontWeight: 500, color: "var(--ink)" },
+      dividerLine: { background: "var(--line)" },
+      dividerText: { color: "var(--muted)", fontSize: "12px" },
+      formFieldLabel: { fontSize: "13.5px", fontWeight: 500, color: "var(--ink)" },
+      formFieldInput: { height: "34px", borderRadius: "7px", border: "1px solid var(--line)", background: "var(--paper)", boxShadow: "none", fontSize: "14px",
+        "&:focus": { borderColor: "var(--green)", boxShadow: "0 0 0 1px var(--green)" } },
+      otpCodeFieldInput: { borderRadius: "7px", border: "1px solid var(--line)", background: "var(--paper)", boxShadow: "none" },
+      formButtonPrimary: { ...button, background: "var(--ink)", color: "var(--paper)", boxShadow: "inset 0 1px 0 color-mix(in srgb, var(--paper) 16%, transparent), 0 1px 2px var(--shadow)",
+        "&:hover": { background: "color-mix(in srgb, var(--ink) 88%, var(--paper))" }, "&::after": { display: "none" } },
+      formButtonReset: { ...button, color: "var(--ink)" },
+      alternativeMethodsBlockButton: { ...button, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" },
+      footer: { background: "var(--surface)", borderTop: "1px solid var(--line)", "& > div": { background: "transparent" } },
+      footerAction: { justifyContent: "flex-start", padding: "14px 28px" },
+      footerActionText: { color: "var(--muted)", fontSize: "13.5px" },
+      footerActionLink: { color: "var(--link)", fontWeight: 500, textDecoration: "underline", textDecorationColor: "var(--link-line)", textUnderlineOffset: "3px" },
+      identityPreview: { border: "1px solid var(--line)", borderRadius: "7px", background: "var(--paper)" },
+      identityPreviewEditButton: { color: "var(--link)" },
+      modalCloseButton: { color: "var(--muted)", top: "20px", right: "20px", borderRadius: "6px" },
+      alert: { borderRadius: "7px", border: "1px solid color-mix(in srgb, var(--error) 30%, var(--line))", background: "color-mix(in srgb, var(--error) 6%, var(--surface))", color: "var(--error)" },
+    },
+  };
+}
+
 export async function loadClerk(config: AppConfig): Promise<Clerk> {
   await Promise.all([
     clerkGlobals.__internal_ClerkUICtor || loadScript(`https://${config.frontendApi}/npm/@clerk/ui@1/dist/ui.browser.js`),
@@ -58,9 +99,10 @@ export async function loadClerk(config: AppConfig): Promise<Clerk> {
     ui: { ClerkUI: clerkGlobals.__internal_ClerkUICtor },
     telemetry: false,
     signInForceRedirectUrl: here, signUpForceRedirectUrl: here, afterSignOutUrl: `${location.origin}/`,
-    appearance: {
-      variables: { fontFamily: "var(--sans)", colorPrimary: "var(--ink)", colorPrimaryForeground: "var(--paper)", colorBackground: "var(--surface)", colorForeground: "var(--ink)", colorMutedForeground: "var(--muted)", colorInputForeground: "var(--ink)", colorBorder: "var(--line)", borderRadius: "6px" },
-      layout: { socialButtonsVariant: "blockButton", socialButtonsPlacement: "top" },
+    appearance: appearance(),
+    localization: {
+      signIn: { start: { title: "Sign in to OpenMerit", subtitle: "Use the GitHub or Google account your team signs in with." } },
+      signUp: { start: { title: "Create your OpenMerit account", subtitle: "Sign up with GitHub or Google." } },
     },
   }), "Sign-in took too long. Please reload to try again.");
   return clerk;
