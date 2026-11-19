@@ -100,10 +100,30 @@ export interface JobResult {
   reportUrl: string;
   catalogueVersion: string;
   cases: { total: number; fromExamples: number; written: number };
+  // The evidence each decision used, such as "Grader: the expected labels of your examples, from agent-bundle". Absent from older reports.
+  basedOn?: string[];
+  // A connected app's task, such as a Viktor scheduled task: its cases are checks a judge wrote, and a cost per call is per test run.
+  connection?: ConnectionResult;
 }
 
-// GET /api/runs/:id: the saved report once the job has one.
-export interface Report extends JobResult { jobId: string; task: string; createdAt: string }
+export interface ConnectionResult {
+  kind: "viktor";
+  taskId: string;
+  taskTitle: string;
+  currentModel: string;
+  // "Set <task> to cheap" and where to make it; null when the task keeps its model.
+  change: { text: string; link: string; model: string } | null;
+  creditsUsed: number;
+  checks: { id: string; check: string }[];
+  runs: { model: string; repeat: number; status: string; actions: string[]; credits: number | null }[];
+  copiesLeft: string[];
+}
+
+// Who approved a result's change, and when (POST /api/runs/:id/approve). It changes nothing in the connected app.
+export interface Approval { jobId?: string; change: string; link: string | null; by: string; at: string }
+
+// GET /api/runs/:id: the saved report once the job has one, with its approval.
+export interface Report extends JobResult { jobId: string; task: string; createdAt: string; approved?: Approval | null }
 
 // GET /api/runs/:id before then: the job's live state, with report null.
 export interface JobView {
@@ -140,6 +160,23 @@ export interface LiveProgress {
 
 export type EndpointKind = "openrouter" | "openai-compatible" | "anthropic";
 export interface Endpoint { id: string; kind: EndpointKind; baseUrl: string; allowedModels: string[] | "all"; keyLast4: string; verifiedAt: string | null; builtIn: boolean }
+
+// GET /api/connections/viktor: the Viktor connection, without its key, and the workspace's scheduled tasks.
+export type ViktorTaskStatus = "skipped" | "waiting" | "evaluating" | "done" | "failed";
+export interface ViktorTask {
+  id: string; title: string; path: string; model: string | null; credits30d: number; paused: boolean;
+  status: ViktorTaskStatus;
+  reason: string | null;
+  estimatedCredits: number | null;
+  jobId: string | null;
+  result: { status: string; change: string | null; link: string | null; approval: { by: string; at: string } | null } | null;
+}
+export interface ViktorConnection {
+  connected: boolean;
+  keyLast4?: string; keyType?: string | null; creditCap?: number; connectedAt?: string; connectedBy?: string;
+  creditsUsed?: number; creditsReserved?: number; listedAt?: string | null; listingError?: string | null;
+  tasks: ViktorTask[];
+}
 
 export interface GuardrailsAt {
   level: Level;

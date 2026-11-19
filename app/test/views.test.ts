@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApiError, createApi, type GuardrailsAt, type JobView, type Me, type Report, type Spend, type Task } from "../api.ts";
+import { ApiError, createApi, type GuardrailsAt, type JobView, type Me, type Report, type Spend, type Task, type ViktorConnection } from "../api.ts";
 import { createFakeApi } from "../dev/fake-api.ts";
 import type { Account } from "../view.ts";
+import { connectionsView } from "../views/connections.ts";
 import { choices, guardrailsView, parse } from "../views/guardrails.ts";
 import { planView } from "../views/plan.ts";
 import { runView } from "../views/run.ts";
@@ -144,4 +145,35 @@ test("a delete that needs a recent sign-in opens Clerk's prompt and retries once
   // A task with a run in progress cannot be deleted, and verifying again does not change that.
   await assert.rejects(api(true).send("DELETE", "/api/tasks/booking-chat"), (error: unknown) => error instanceof ApiError && error.status === 409);
   assert.equal(prompts, 2);
+});
+
+test("a Viktor connection lists its tasks with why some are skipped, and Approve change records the approval without changing the task", async () => {
+  const me = await account();
+  const viktor = await get<ViktorConnection>("/api/connections/viktor");
+  const listed = text(connectionsView.render({ endpoints: [], viktor }, page(me)));
+  assert.match(listed, /Claims digest \/claims_digest smart 410 Set Claims digest to cheap/);
+  assert.match(listed, /Inbox sync \/inbox_sync workspace default 0 Skipped script task, no model/);
+  assert.match(listed, /Heartbeat \/heartbeat workspace default 0 Skipped Viktor's own task: it cannot be edited/);
+  const disconnected = connectionsView.render({ endpoints: [], viktor: { connected: false, tasks: [] } }, page(me)).__html;
+  assert.match(disconnected, /data-action="connect-viktor"/);
+  assert.match(disconnected, /titled "OpenMerit: &lt;task title&gt;"/);
+  assert.doesNotMatch(connectionsView.render({ endpoints: [], viktor: { connected: false, tasks: [] } }, page({ ...me, role: "member" })).__html, /data-action="connect-viktor"/);
+
+  const result = await get<Report>("/api/runs/v5t8c2");
+  const shown = runView.render(result, page(me)).__html;
+  assert.match(text({ __html: shown }), /Set Claims digest to cheap/);
+  assert.match(shown, /data-action="approve"/);
+  assert.match(shown, /href="https:\/\/app\.viktor\.com\/scheduled-tasks"/);
+  assert.doesNotMatch(runView.render(result, page({ ...me, role: "member" })).__html, /data-action="approve"/, "only an admin approves");
+
+  const approve = () => fake(new Request("https://openmerit.ai/api/runs/v5t8c2/approve", { method: "POST", headers: { authorization: "Bearer preview-populated" } }));
+  const first = await approve();
+  assert.equal(first.status, 200);
+  const approved = await get<Report>("/api/runs/v5t8c2");
+  assert.equal(approved.approved?.by, "user_amira");
+  const after = text(runView.render(approved, page(me)));
+  assert.match(after, /Approved by user_amira on/);
+  assert.doesNotMatch(runView.render(approved, page(me)).__html, /data-action="approve"/);
+  const row = (await get<ViktorConnection>("/api/connections/viktor")).tasks.find((task) => task.id === "claims_digest");
+  assert.equal(row?.model, "smart", "approving changes nothing in Viktor");
 });

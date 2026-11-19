@@ -61,6 +61,8 @@ export interface Config {
   idleAfterMs: number;
   /** Null without POSTHOG_PROJECT_TOKEN: no event is sent. */
   posthog: PostHogConfig | null;
+  /** Viktor's API, and how often a Viktor job reads its test runs' progress. Tests point it at a fake. */
+  viktor: { baseUrl: string; pollMs: number };
 }
 
 const number = (value: string | undefined, fallback: number) => (value && Number.isFinite(Number(value)) ? Number(value) : fallback);
@@ -108,6 +110,7 @@ export function loadConfig(env: Env = process.env): Config {
     models: { caseWriter: env.OPENMERIT_CASE_WRITER_MODEL || "anthropic/claude-sonnet-5.5", judge: env.OPENMERIT_JUDGE_MODEL || "anthropic/claude-sonnet-5.5" },
     watchIntervalMs: number(env.OPENMERIT_WATCH_INTERVAL_MS, 24 * 60 * 60 * 1000),
     idleAfterMs: number(env.OPENMERIT_IDLE_DAYS, 30) * 24 * 60 * 60 * 1000,
+    viktor: { baseUrl: (env.OPENMERIT_VIKTOR_URL || "https://api.viktor.com").replace(/\/$/, ""), pollMs: number(env.OPENMERIT_VIKTOR_POLL_MS, 20_000) },
     posthog: env.POSTHOG_PROJECT_TOKEN ? { token: env.POSTHOG_PROJECT_TOKEN, host: (env.POSTHOG_HOST || "https://us.i.posthog.com").replace(/\/$/, "") } : null,
   };
 }
