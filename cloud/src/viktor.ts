@@ -68,7 +68,7 @@ export async function refreshViktor(client: AppClient, accountId: string): Promi
   if (!apiKey) return;
   try {
     const api = apiFor(apiKey);
-    const { tasks, leftovers } = readTasks(await api.runScript(LIST, [], 180));
+    const { tasks, leftovers } = readTasks(await api.runScriptPaged(LIST, [], 180));
     await account.saveListing({ kind: VIKTOR, listing: tasks, error: null });
     const running = (await account.connectionJobs({ kind: VIKTOR, since: 0 })).some(job => job.status === "queued" || job.status === "running");
     if (leftovers.length && !running) await api.runScript(CLEANUP, [COPY_PATH], 120);
