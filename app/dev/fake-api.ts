@@ -158,7 +158,8 @@ function langfuseConnected(): LangfuseConnection {
 }
 
 function langfuseReport(base: Report): Report {
-  const half = <T extends MeasuredModel>(item: T): T => ({ ...item, passes: Math.round(item.passes / 2), total: item.total / 2 });
+  // A screened-out model ran only the screen's samples, so it keeps its own counts.
+  const half = <T extends MeasuredModel>(item: T): T => (item.status === "screened_out" ? item : { ...item, passes: Math.round(item.passes / 2), total: item.total / 2 });
   const change = { text: "Set adjudicate-claim-generate to `anthropic/claude-haiku-5-5`", link: null, model: "anthropic/claude-haiku-5-5", instructions: "Where your application makes the \"adjudicate-claim-generate\" call in \"adjudicate-claim\", set the model to anthropic/claude-haiku-5-5. OpenMerit does not change it." };
   return {
     ...base, jobId: "l2f9a4", task: "adjudicate-claim › adjudicate-claim-generate", createdAt: "2026-11-18T08:45:00Z",
