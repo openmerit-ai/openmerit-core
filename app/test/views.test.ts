@@ -155,11 +155,11 @@ test("a Viktor connection lists its tasks with why some are skipped, and Approve
   const viktor = await get<ViktorConnection>("/api/connections/viktor");
   const listed = text(connectionsView.render({ endpoints: [], viktor, langfuse: NONE }, page(me)));
   assert.match(listed, /Claims digest \/claims_digest smart 410 Set Claims digest to cheap/);
-  assert.match(listed, /Inbox sync \/inbox_sync workspace default 0 Skipped script task, no model/);
-  assert.match(listed, /Heartbeat \/heartbeat workspace default 0 Skipped Viktor's own task: it cannot be edited/);
+  assert.match(listed, /Inbox sync \/inbox_sync Team default \(smart\) 0 Skipped script task, no model/);
+  assert.match(listed, /Heartbeat \/heartbeat Team default \(smart\) 0 Skipped Viktor's own task: it cannot be edited/);
   const disconnected = connectionsView.render({ endpoints: [], viktor: { connected: false, tasks: [] }, langfuse: NONE }, page(me)).__html;
   assert.match(disconnected, /data-action="connect-viktor"/);
-  assert.match(disconnected, /titled "OpenMerit: &lt;task title&gt;"/);
+  assert.match(disconnected, /titled "\[OpenMerit\]: &lt;task title&gt;"/);
   assert.doesNotMatch(connectionsView.render({ endpoints: [], viktor: { connected: false, tasks: [] }, langfuse: NONE }, page({ ...me, role: "member" })).__html, /data-action="connect-viktor"/);
 
   const result = await get<Report>("/api/runs/v5t8c2");

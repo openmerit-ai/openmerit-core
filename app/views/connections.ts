@@ -30,6 +30,8 @@ function endpointRow(endpoint: Endpoint, admin: boolean): Html {
 
 // The Viktor connection: OpenMerit tests a task's cheaper presets on paused copies in Viktor's test mode, and proposes the change.
 const VIKTOR_TASKS = "https://app.viktor.com/scheduled-tasks";
+/** A task with no model of its own runs the workspace's default, as "Team default (smart)". */
+const teamDefault = (task: Pick<ViktorTask, "defaultModel">): string => (task.defaultModel ? `Team default (${task.defaultModel})` : "Team default");
 const credits = (value: number | null | undefined): string => (value === null || value === undefined ? "–" : Math.round(value).toLocaleString("en-US"));
 
 // Evaluate and Start again: only a person starts an evaluation. Off, with the reason, when the credit cap or the plan would refuse it.
@@ -51,7 +53,7 @@ function taskStatus(task: ViktorTask, admin: boolean): Html {
     case "done": {
       const result = task.result;
       const approved = result?.approval ? html`<span class="sub">Approved by ${result.approval.name ?? result.approval.by} on ${date(result.approval.at)}</span>` : "";
-      return html`${result?.change ? html`<span class="pill good">${result.change}</span>` : html`<span class="pill tag">Keep ${task.model ?? "its model"}</span>`}${approved}<span class="sub"><a href="/r/${task.jobId}/">${result?.change && !result.approval ? "Review and approve" : "Open the result"}</a></span>`;
+      return html`${result?.change ? html`<span class="pill good">${result.change}</span>` : html`<span class="pill tag">Keep ${task.model ?? teamDefault(task)}</span>`}${approved}<span class="sub"><a href="/r/${task.jobId}/">${result?.change && !result.approval ? "Review and approve" : "Open the result"}</a></span>`;
     }
   }
 }
@@ -76,7 +78,7 @@ function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
             <input name="creditCap" type="number" min="100" max="100000" step="100" value="2000" required>
             <span class="sub">The most Viktor credits OpenMerit's test runs may use from your workspace, about $5 per 2,000. Evaluate is off for a task whose estimate would pass it.</span>
           </label>
-          <p class="note">To measure a task, OpenMerit makes temporary copies of it in your workspace: personal, paused, each set to a cheaper preset and titled "OpenMerit: &lt;task title&gt;". It runs each copy in Viktor's test mode, which captures Slack posts and other outside actions instead of sending them, then deletes the copies. It never changes your tasks: a result proposes the change, and you make it in Viktor after you approve it.</p>
+          <p class="note">To measure a task, OpenMerit makes temporary copies of it in your workspace: personal, paused, each set to a cheaper preset and titled "[OpenMerit]: &lt;task title&gt;". It runs each copy in Viktor's test mode, which captures Slack posts and other outside actions instead of sending them, then deletes the copies. It never changes your tasks: a result proposes the change, and you make it in Viktor after you approve it.</p>
           <p class="form-error" role="alert" hidden></p>
           <p><button class="btn primary" type="submit">Connect Viktor</button></p>
         </form>` : html`<p class="note">Only an admin can connect Viktor.</p>`}
@@ -91,7 +93,7 @@ function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
         <table>
           <thead><tr><th>Task</th><th>Model</th><th class="num">Credits, 30 days</th><th>Status</th></tr></thead>
           <tbody>
-            ${viktor.tasks.map((task) => html`<tr><td>${taskName("viktor", task.id, task.title, task.isNew)}<span class="sub">${task.path}${task.paused ? " · paused" : ""}</span></td><td>${task.model ? html`<code>${task.model}</code>` : html`<span class="sub">workspace default</span>`}</td><td class="num">${credits(task.credits30d)}</td><td>${taskStatus(task, admin)}</td></tr>`)}
+            ${viktor.tasks.map((task) => html`<tr><td>${taskName("viktor", task.id, task.title, task.isNew)}<span class="sub">${task.path}${task.paused ? " · paused" : ""}</span></td><td>${task.model ? html`<code>${task.model}</code>` : html`<span class="sub">${teamDefault(task)}</span>`}</td><td class="num">${credits(task.credits30d)}</td><td>${taskStatus(task, admin)}</td></tr>`)}
           </tbody>
         </table>
       </div>

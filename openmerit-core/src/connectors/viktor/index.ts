@@ -3,7 +3,7 @@
 // credits each used in the last 30 days, and leaves those it cannot evaluate in the list with why.
 //
 // Measuring a task makes personal, paused copies of it, one per model and each titled
-// "OpenMerit: <task title>", runs each copy `repeats` times in Viktor's test mode, which captures the
+// "[OpenMerit]: <task title>", runs each copy `repeats` times in Viktor's test mode, which captures the
 // task's Slack posts and other outside actions instead of sending them, then deletes the copies. One
 // API thread runs all of it, since each thread costs credits of its own. A judge writes a checklist
 // from the task's instructions and the current model's first test run, and grades every run on it;
@@ -19,15 +19,26 @@ import type { EvidencePart } from "../../engine/evidence.ts";
 import { CandidateUnavailable, SAMPLE_SIZE, type Rung } from "../../engine/search.ts";
 import { readJson } from "../../ranking/graders.ts";
 import type { Complete } from "../../ranking/cases.ts";
-import { COPY_PATH, COPY_TITLE, WORK_DIR } from "./scripts.ts";
+import { COPY_PATH, COPY_TITLE, COPY_TITLES, WORK_DIR } from "./scripts.ts";
 
-export { BATCH, CLEANUP, CREDITS, DESCRIBE, LIST, PAGE, PUT, READ, COPY_PATH, COPY_TITLE, WORK_DIR } from "./scripts.ts";
+export { BATCH, CLEANUP, CREDITS, DESCRIBE, LIST, PAGE, PUT, READ, COPY_PATH, COPY_TITLE, COPY_TITLES, WORK_DIR } from "./scripts.ts";
 export { keyProblem, REQUIRED_SCOPES, VIKTOR_API, ViktorError, viktorClient, withArgs, toFile, STDOUT_LIMIT, PAGE_BYTES, draftedTools, viktorErrorSentence, PENDING, type ViktorClient, type ViktorKey } from "./api.ts";
 
-/** Viktor's presets, weakest first. Pinned models and the writing presets are not compared yet. */
-export const PRESETS = ["cheap", "balanced", "smart", "ultra"] as const;
+/** Viktor's presets, weakest first: the strength `evaluateTask` ranks them by. Pinned models are not compared. */
+export const PRESETS = ["cheap", "balanced", "balanced-writing", "smart", "smart-writing", "ultra"] as const;
 export type Preset = (typeof PRESETS)[number];
-export const isPreset = (value: string | null): value is Preset => value !== null && (PRESETS as readonly string[]).includes(value);
+export const isPreset = (value: string | null | undefined): value is Preset => typeof value === "string" && (PRESETS as readonly string[]).includes(value);
+/** The presets for writing that people outside the organization read. */
+export const WRITING_PRESETS: ReadonlySet<Preset> = new Set(["balanced-writing", "smart-writing"]);
+
+/**
+ * The presets each preset is compared against, weakest first. A writing task is compared against the
+ * plain presets too, and the judge decides whether they write well enough. Only the presets cheaper
+ * per test run than the current one are tried (`cheaperPresets`).
+ */
+export const LADDERS: Readonly<Record<Preset, readonly Preset[]>> = {
+  cheap: [], balanced: ["cheap"], "balanced-writing": ["cheap", "balanced"], smart: ["cheap", "balanced"], "smart-writing": ["cheap", "balanced", "balanced-writing"], ultra: ["cheap", "balanced", "smart"],
+};
 
 /** Viktor's own tasks, which a workspace cannot edit: listed, never evaluated. */
 export const SYSTEM_TASKS: ReadonlySet<string> = new Set(["/heartbeat", "/memory_dreaming", "/skill_refining", "/workflow_discovery"]);
@@ -37,11 +48,12 @@ export const CREDIT_USD = 0.0025;
 export const DEFAULT_CREDIT_CAP = 2000;
 export const SCHEDULED_TASKS_URL = "https://app.viktor.com/scheduled-tasks";
 /**
- * Credits for one test run on each preset, to estimate a job before it starts: cheap and smart as
- * measured on 19 Nov 2026 (about 4 and 70); balanced and ultra are rough guesses until measured. The
- * job charges what each run reports, not these.
+ * Credits for one test run on each preset, to estimate a job before it starts and to choose which
+ * presets are cheaper: cheap and smart as measured on 19 Nov 2026 (about 4 and 70); balanced (25 and
+ * 12), balanced-writing (29 and 20) and smart-writing (89 and 72) as measured on a writing task on
+ * 20 Nov 2026; ultra is a rough guess until measured. The job charges what each run reports, not these.
  */
-export const RUN_CREDITS: Readonly<Record<Preset, number>> = { cheap: 4, balanced: 20, smart: 70, ultra: 250 };
+export const RUN_CREDITS: Readonly<Record<Preset, number>> = { cheap: 4, balanced: 19, "balanced-writing": 25, smart: 70, "smart-writing": 81, ultra: 250 };
 /** The API thread that starts the test runs. */
 export const THREAD_CREDITS = 90;
 /** Test runs at once in one batch. */
@@ -55,6 +67,10 @@ export interface ViktorTask {
   title: string;
   /** null: the workspace's default model. */
   model: string | null;
+  /** The workspace's default model when the task was listed, which a task without a model runs; null when unknown. */
+  defaultModel: string | null;
+  /** Whether a condition script decides if a scheduled run happens. Test mode ignores it. */
+  conditionScript: boolean;
   executionType: string;
   cron: string;
   timezone: string | null;
@@ -71,31 +87,42 @@ export interface ViktorTask {
   skipped: string | null;
 }
 
+/** Whether a task is one of OpenMerit's temporary copies: under COPY_PATH, titled with the copy prefix or the one before it. */
+export const isCopy = (task: Pick<ViktorTask, "path" | "title">) => task.path.startsWith(COPY_PATH) && COPY_TITLES.some(prefix => task.title.startsWith(prefix));
+
+/** The model a task runs on: its own, or the workspace's default when it has none. */
+export const runsOn = (task: Pick<ViktorTask, "model"> & { defaultModel?: string | null }): string | null => task.model ?? task.defaultModel ?? null;
+/** The model as the table shows it, such as "smart" or "Team default (smart)". */
+export const modelLabel = (task: Pick<ViktorTask, "model"> & { defaultModel?: string | null }): string => task.model ?? (task.defaultModel ? `Team default (${task.defaultModel})` : "Team default");
+
 /** Why a task is listed but not evaluated, or null. */
-export function skipReason(task: Pick<ViktorTask, "path" | "title" | "model" | "executionType"> & { scriptPath?: string | null; preRunScriptPath?: string | null; conditionScriptPath?: string | null }): string | null {
+export function skipReason(task: Pick<ViktorTask, "path" | "title" | "model" | "executionType"> & { defaultModel?: string | null; scriptPath?: string | null; preRunScriptPath?: string | null }): string | null {
   if (SYSTEM_TASKS.has(task.path)) return "Viktor's own task: it cannot be edited";
-  if (task.path.startsWith(COPY_PATH) && task.title.startsWith(COPY_TITLE)) return "OpenMerit's temporary copy";
+  if (isCopy(task)) return "OpenMerit's temporary copy";
   if (task.executionType !== "agent") return "script task, no model";
-  if (task.preRunScriptPath || task.conditionScriptPath) return "runs a script of its own before each run, which test mode does not capture";
-  if (task.model === null) return "uses the workspace's default model: set a preset on it in Viktor to evaluate it";
-  if (!isPreset(task.model)) return `uses ${task.model}; only Viktor's presets (${PRESETS.join(", ")}) are compared for now`;
-  if (task.model === PRESETS[0]) return `already on ${PRESETS[0]}, the cheapest preset`;
+  // A condition script only decides whether a run happens; a pre-run script's output becomes the agent's context.
+  if (task.preRunScriptPath) return "runs a pre-run script whose output the agent reads, which test mode does not capture";
+  const model = runsOn(task);
+  if (model === null) return "uses the workspace's default model, which OpenMerit could not read";
+  if (!isPreset(model)) return task.model === null ? `uses the workspace's default model, ${model}, which is not one of Viktor's presets` : `uses ${model}; only Viktor's presets (${PRESETS.join(", ")}) are compared for now`;
+  if (!cheaperPresets(model).length) return `already on ${model}, the cheapest preset`;
   return null;
 }
 
 /** LIST's output: every task with its skip reason and spend, highest credits first, and OpenMerit's leftover copies. */
 export function readTasks(stdout: string): { tasks: ViktorTask[]; leftovers: string[] } {
-  const parsed = JSON.parse(stdout.trim().split("\n").at(-1) ?? "{}") as { tasks?: Record<string, unknown>[]; usage?: { credits?: unknown; path?: unknown }[] };
+  const parsed = JSON.parse(stdout.trim().split("\n").at(-1) ?? "{}") as { tasks?: Record<string, unknown>[]; usage?: { credits?: unknown; path?: unknown }[]; defaultModel?: unknown };
   const usage = parsed.usage ?? [];
+  const defaultModel = typeof parsed.defaultModel === "string" && parsed.defaultModel ? parsed.defaultModel : null;
   const all = (parsed.tasks ?? []).filter(row => row.deleted !== true).map((row): ViktorTask & { copy: boolean } => {
     const path = String(row.path), title = String(row.title ?? path);
     const runs = usage.filter(item => typeof item.path === "string" && item.path.startsWith(`/agent_runs/crons${path}/`));
-    const base = { path, title, model: (row.model as string | null) ?? null, executionType: String(row.execution_type ?? "agent") };
+    const base = { path, title, model: (row.model as string | null) || null, defaultModel, executionType: String(row.execution_type ?? "agent") };
     return {
       ...base, id: String(row.id), cron: String(row.cron ?? ""), timezone: (row.timezone as string | null) ?? null, paused: row.paused === true, lastRunOutcome: (row.last_run_outcome as string | null) ?? null,
-      description: String(row.description ?? ""), credits30d: runs.reduce((sum, item) => sum + (Number(item.credits) || 0), 0), runs30d: runs.length,
-      skipped: skipReason({ ...base, scriptPath: row.script_path as string | null, preRunScriptPath: row.pre_run_script_path as string | null, conditionScriptPath: row.condition_script_path as string | null }),
-      copy: path.startsWith(COPY_PATH) && title.startsWith(COPY_TITLE),
+      description: String(row.description ?? ""), credits30d: runs.reduce((sum, item) => sum + (Number(item.credits) || 0), 0), runs30d: runs.length, conditionScript: !!row.condition_script_path,
+      skipped: skipReason({ ...base, scriptPath: row.script_path as string | null, preRunScriptPath: row.pre_run_script_path as string | null }),
+      copy: isCopy(base),
     };
   });
   return {
@@ -104,32 +131,44 @@ export function readTasks(stdout: string): { tasks: ViktorTask[]; leftovers: str
   };
 }
 
-/** The presets cheaper than `current`, weakest first: the ladder a task is evaluated on. */
-export const cheaperPresets = (current: Preset): Preset[] => PRESETS.slice(0, PRESETS.indexOf(current));
+/** The presets a task on `current` is evaluated on, weakest first: its ladder, cheaper per test run than `current`. */
+export const cheaperPresets = (current: Preset): Preset[] => LADDERS[current].filter(preset => RUN_CREDITS[preset] < RUN_CREDITS[current]);
+
+/** The preset a task runs on, or null when it does not run on one. */
+export function currentPreset(task: Pick<ViktorTask, "model"> & { defaultModel?: string | null }): Preset | null {
+  const model = runsOn(task);
+  return isPreset(model) ? model : null;
+}
 
 /** What a task's evaluation should cost in credits: every model's runs, at the task's own credits per run for the current model when known. */
-export function estimateCredits(task: Pick<ViktorTask, "model" | "credits30d" | "runs30d">, repeats: number): number {
-  if (!isPreset(task.model)) return 0;
-  const current = task.runs30d ? task.credits30d / task.runs30d : RUN_CREDITS[task.model];
-  const scale = current / RUN_CREDITS[task.model];
-  const perRun = [task.model, ...cheaperPresets(task.model)].reduce((sum, preset) => sum + RUN_CREDITS[preset] * scale, 0);
+export function estimateCredits(task: Pick<ViktorTask, "model" | "credits30d" | "runs30d"> & { defaultModel?: string | null }, repeats: number): number {
+  const preset = currentPreset(task);
+  if (!preset) return 0;
+  const current = task.runs30d ? task.credits30d / task.runs30d : RUN_CREDITS[preset];
+  const scale = current / RUN_CREDITS[preset];
+  const perRun = [preset, ...cheaperPresets(preset)].reduce((sum, item) => sum + RUN_CREDITS[item] * scale, 0);
   return Math.ceil(THREAD_CREDITS + repeats * perRun);
 }
 
 /** A slug for paths: lowercase letters, digits and dashes. */
 export const pathSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "task";
 
-export interface BatchSpec { source: string; models: Preset[]; repeats: number; parallel: number; timeoutMinutes: number; copyPath: string; copyTitle: string; out: string }
+export interface BatchSpec {
+  source: string; models: Preset[]; repeats: number; parallel: number; timeoutMinutes: number; copyPath: string; copyTitle: string; out: string;
+  /** The current model's copy keeps its model unset, as the task has none, so it runs what the task runs. */
+  inherit: boolean;
+}
 
 /** The batch a job runs: the current model first, then each cheaper preset, in copies under the job's own path. */
-export function batchSpec(jobId: string, task: Pick<ViktorTask, "path" | "title" | "model">, repeats: number): { directory: string; spec: BatchSpec } {
-  if (!isPreset(task.model)) throw new Error(`${task.title} does not use a preset`);
+export function batchSpec(jobId: string, task: Pick<ViktorTask, "path" | "title" | "model"> & { defaultModel?: string | null }, repeats: number): { directory: string; spec: BatchSpec } {
+  const preset = currentPreset(task);
+  if (!preset) throw new Error(`${task.title} does not use a preset`);
   const directory = `${WORK_DIR}/${jobId}`;
   return {
     directory,
     spec: {
-      source: task.path, models: [task.model, ...cheaperPresets(task.model).reverse()], repeats, parallel: PARALLEL, timeoutMinutes: TEST_TIMEOUT_MINUTES,
-      copyPath: copyPrefix(jobId, task), copyTitle: `${COPY_TITLE}${task.title}`.slice(0, 200), out: `${directory}/result.json`,
+      source: task.path, models: [preset, ...cheaperPresets(preset).reverse()], repeats, parallel: PARALLEL, timeoutMinutes: TEST_TIMEOUT_MINUTES,
+      copyPath: copyPrefix(jobId, task), copyTitle: `${COPY_TITLE}${task.title}`.slice(0, 200), out: `${directory}/result.json`, inherit: task.model === null,
     },
   };
 }
@@ -175,10 +214,18 @@ const CHECKS_SYSTEM = [
   "Cover what the task must produce and the format of anything it posts. Where the instructions leave a choice open, do not require the reference run's choice.",
   "Write between 5 and 10 checks. Reply with JSON only: {\"checks\": [\"…\", \"…\"]}.",
 ].join("\n");
+/** Added for a task on a writing preset, so the judge can catch a plain preset that writes worse. */
+export const WRITING_CHECKS = [
+  "The task runs on a writing preset: what it writes is read by people outside the organization.",
+  "Add a check for each thing the instructions say about the audience, the tone, the voice and the format of that writing, one requirement each.",
+  "Check only what the instructions state: do not invent a brand voice, a style or a length they do not give.",
+].join("\n");
 
-/** The checklist, from the task's instructions and the current model's first test run as a reference. */
-export async function writeChecks(complete: Complete, task: Pick<ViktorTask, "title" | "description">, reference: BatchRun): Promise<Check[]> {
-  const text = await complete({ system: CHECKS_SYSTEM, prompt: `Task: ${task.title}\n\nInstructions:\n${task.description}\n\nA test run of the task on its current model, for reference:\n${runText(reference)}` });
+/** The checklist, from the task's instructions and the current model's first test run as a reference; with writing checks for a task on a writing preset. */
+export async function writeChecks(complete: Complete, task: Pick<ViktorTask, "title" | "description"> & { model?: string | null; defaultModel?: string | null }, reference: BatchRun): Promise<Check[]> {
+  const preset = currentPreset({ model: task.model ?? null, defaultModel: task.defaultModel ?? null });
+  const system = preset && WRITING_PRESETS.has(preset) ? `${CHECKS_SYSTEM}\n${WRITING_CHECKS}` : CHECKS_SYSTEM;
+  const text = await complete({ system, prompt: `Task: ${task.title}\n\nInstructions:\n${task.description}\n\nA test run of the task on its current model, for reference:\n${runText(reference)}` });
   const parsed = readJson(text);
   const checks = parsed.ok && parsed.value && typeof parsed.value === "object" ? (parsed.value as { checks?: unknown }).checks : null;
   const list = Array.isArray(checks) ? checks.map(item => (typeof item === "string" ? item : item && typeof item === "object" ? String((item as { check?: unknown }).check ?? "") : "")).map(item => item.trim()).filter(Boolean).slice(0, 10) : [];
@@ -246,11 +293,11 @@ const describe = (preset: string) => ({ model: preset, endpoint: "viktor", endpo
  * screens reuse each candidate's first run, so the batch's runs are all there is to measure.
  */
 export async function evaluateViktor(input: {
-  task: Pick<ViktorTask, "model">; checks: readonly Check[]; graded: ReadonlyMap<string, readonly Measurement[]>; runs: readonly BatchRun[]; repeats: number;
+  task: Pick<ViktorTask, "model"> & { defaultModel?: string | null }; checks: readonly Check[]; graded: ReadonlyMap<string, readonly Measurement[]>; runs: readonly BatchRun[]; repeats: number;
   sample: (reliable: readonly string[], count: number) => readonly string[] | Promise<readonly string[]>;
 }): Promise<{ evaluated: EvaluateResult<PresetOption>; result: TaskResult }> {
-  if (!isPreset(input.task.model)) throw new Error("The task does not use a preset.");
-  const current = input.task.model;
+  const current = currentPreset(input.task);
+  if (!current) throw new Error("The task does not use a preset.");
   const evaluated = await evaluateTask<PresetOption>({
     ladder: cheaperPresets(current).map(option), strength: item => PRESETS.indexOf(item.key), items: input.checks.map(check => check.id), repeats: input.repeats,
     baselinePrice: RUN_CREDITS[current], sampleSize: Math.min(SAMPLE_SIZE, input.checks.length),
@@ -259,9 +306,9 @@ export async function evaluateViktor(input: {
   return { evaluated, result: taskResult(evaluated, item => describe(item.model), describe(current)) };
 }
 
-/** The change that applies a pick: set the task's model in Viktor, by hand for now. */
-export function proposeChange(task: Pick<ViktorTask, "title">, target: Pick<EditTarget, "model">): ProposedChange & { change: string; link: string } {
-  const change = `Set ${task.title} to ${target.model}`;
+/** The change that applies a pick: set the task's model in Viktor, by hand for now. A task on the workspace's default says which it is, as "Team default (smart)". */
+export function proposeChange(task: Pick<ViktorTask, "title"> & { model?: string | null; defaultModel?: string | null }, target: Pick<EditTarget, "model">): ProposedChange & { change: string; link: string } {
+  const change = task.model === null && task.defaultModel ? `Set ${task.title} from ${modelLabel({ model: null, defaultModel: task.defaultModel })} to ${target.model}` : `Set ${task.title} to ${target.model}`;
   return { edits: [], instructions: `${change} in Viktor's scheduled tasks (${SCHEDULED_TASKS_URL}): open the task and change its model to ${target.model}. OpenMerit does not change it.`, change, link: SCHEDULED_TASKS_URL };
 }
 
@@ -272,7 +319,7 @@ export function viktor(input: { tasks: readonly ViktorTask[] }): Omit<Connector,
   const find = (id: string) => input.tasks.find(task => task.id === id || task.title === id);
   return {
     id: "viktor", capabilities: ["list", "evidence", "measure", "change"], writes: false,
-    list: () => input.tasks.map(task => ({ name: task.title, currentModel: task.model, ...(task.skipped ? { skipped: task.skipped } : {}) })),
+    list: () => input.tasks.map(task => ({ name: task.title, currentModel: runsOn(task), ...(task.skipped ? { skipped: task.skipped } : {}) })),
     evidence: taskId => {
       const task = find(taskId);
       if (!task) return {};

@@ -15,7 +15,7 @@ import { completeWith, createClient } from "../../../openmerit-core/src/ranking/
 import { viktorErrorSentence } from "../../../openmerit-core/src/connectors/viktor/api.ts";
 import {
   BATCH, batchMessage, batchSpec, CLEANUP, copyPrefix, CREDIT_USD, CREDITS, DESCRIBE, evaluateViktor, gradeRun, judgeChecks, PUT, proposeChange, READ, readBatch, RUN_CREDITS, isPreset,
-  viktor, viktorClient, writeChecks, type Batch, type BatchRun, type Check, type ViktorClient, type ViktorTask,
+  currentPreset, modelLabel, runsOn, viktor, viktorClient, writeChecks, type Batch, type BatchRun, type Check, type ViktorClient, type ViktorTask,
 } from "../../../openmerit-core/src/connectors/viktor/index.ts";
 import { approvalQuestion, basedOn, catalogueIndex, mergeEvidence, redact, strongest, type Ledger, type Measurement, type ModelResult } from "../engine.ts";
 import { OPENROUTER } from "../pool.ts";
@@ -127,6 +127,8 @@ export const viktorJob = workflow({
     const { directory, spec } = batchSpec(jobId, listed, repeats);
     // The listing has only the start of the instructions; the judge reads the full text, fetched below.
     let task = listed;
+    // The preset it runs on: its own, or the workspace's default, which its copy keeps unset.
+    const current = currentPreset(listed)!;
     try {
       try {
         // 0. The task's full instructions, read once and recorded.
@@ -185,8 +187,8 @@ export const viktorJob = workflow({
             return Loop.continue({ polls: state.polls + 1, missing });
           },
         });
-        const reference = batch.runs.filter(run => run.model === task.model && run.status === "success" && run.report).sort((a, b) => a.repeat - b.repeat)[0];
-        if (batch.status === "failed" || !reference) throw new JobStop("failed", `The test runs did not finish: ${redact(batch.error ?? batch.runs.find(run => run.model === task.model)?.error ?? "no run of the current preset finished").slice(0, 500)}`);
+        const reference = batch.runs.filter(run => run.model === current && run.status === "success" && run.report).sort((a, b) => a.repeat - b.repeat)[0];
+        if (batch.status === "failed" || !reference) throw new JobStop("failed", `The test runs did not finish: ${redact(batch.error ?? batch.runs.find(run => run.model === current)?.error ?? "no run of the current preset finished").slice(0, 500)}`);
 
         // 4. Credits per test run, and for the thread that started them.
         const credits = await ctx.step({
@@ -238,7 +240,7 @@ export const viktorJob = workflow({
             return picked;
           }),
         });
-        if (evaluated.status === "too_few_reliable") throw new JobStop("stopped", `${task.model} passed only ${evaluated.reliable.length} of the ${graded.checks.length} checks in every run, so there is nothing reliable to compare the cheaper presets against.`);
+        if (evaluated.status === "too_few_reliable") throw new JobStop("stopped", `${modelLabel(task)} passed only ${evaluated.reliable.length} of the ${graded.checks.length} checks in every run, so there is nothing reliable to compare the cheaper presets against.`);
 
         // 7. Action: the report, then the copies are deleted.
         await ctx.step({
@@ -254,11 +256,12 @@ export const viktorJob = workflow({
             const usedCredits = Math.round(Object.values(credits).reduce<number>((sum, value) => sum + (typeof value === "number" ? value : 0), 0));
             const baseline = measuredModel(result.baseline, count);
             const connection: ConnectionResult = {
-              kind: "viktor", taskId: task.id, taskTitle: task.title, currentModel: task.model!, change: change && pick ? { text: change.change, link: change.link, model: pick.model } : null,
+              kind: "viktor", taskId: task.id, taskTitle: task.title, currentModel: modelLabel(task), change: change && pick ? { text: change.change, link: change.link, model: pick.model } : null,
               creditsUsed: usedCredits, checks: graded.checks, copiesLeft: left,
               runs: batch.runs.map(run => ({ model: run.model, repeat: run.repeat, status: run.status, actions: run.actions.map(action => action.summary ?? "an action"), credits: run.threadId && typeof credits[run.threadId] === "number" ? credits[run.threadId]! : null })),
             };
             const notices = [
+              ...(task.conditionScript ? [`${task.title} has a condition script, which decides whether a scheduled run happens. Test mode runs the task whatever it decides, so these runs show what the task does when it runs.`] : []),
               ...(batch.runs.some(run => run.actions.length) ? [`Test mode captured ${batch.runs.reduce((sum, run) => sum + run.actions.length, 0)} outside actions, such as Slack posts, instead of sending them.`] : []),
               ...batch.runs.filter(run => run.status !== "success").map(run => `The ${run.model} test run ${run.repeat} did not finish (${redact(run.error ?? run.status).slice(0, 200)}), so it failed every check.`),
               ...(left.length ? [`OpenMerit could not delete its copies ${left.join(", ")}: delete them in Viktor's scheduled tasks.`] : []),
@@ -269,8 +272,8 @@ export const viktorJob = workflow({
               pick: pick ? { model: pick.model, endpoint: "viktor", endpointModel: pick.endpointModel, passes: pick.passes, total: pick.total, costPerCallUsd: measuredModel(pick, count).costPerCallUsd, savingPerCallUsd: baseline.costPerCallUsd !== null && pick.costPerItemUsd !== null ? baseline.costPerCallUsd - pick.costPerItemUsd * count : null } : null,
               search: { pool: spec.models.length - 1, unplaced: 0, samples: result.samples, finalists: result.finalists, challengers: result.challengers, shortfall: result.searchShortfall },
               agentEval: null, edit: { edits: [], instructions: change?.instructions ?? null },
-              basedOn: basedOn(strongest(mergeEvidence(task.title, task.model!, [viktor({ tasks: [task] }).evidence(task.id)]))),
-              approval: pick ? approvalQuestion(task.title, task.model!, { model: pick.model, endpoint: "viktor" }) : null,
+              basedOn: basedOn(strongest(mergeEvidence(task.title, runsOn(task)!, [viktor({ tasks: [task] }).evidence(task.id)]))),
+              approval: pick ? approvalQuestion(task.title, modelLabel(task), { model: pick.model, endpoint: "viktor" }) : null,
               spend: { openmeritUsd: spent.openmeritUsd, customerUsd: usedCredits * CREDIT_USD }, guardrails: { effective: {}, from: {}, rejected: [] }, notices, fixes: [],
               reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: "viktor-presets", cases: { total: count, fromExamples: 0, written: count },
               connection,

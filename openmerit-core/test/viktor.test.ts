@@ -3,14 +3,14 @@
 // are worked out by hand in the comments; no request leaves the process.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Measurement } from "../src/engine/evaluate.ts";
 import {
-  batchMeasure, batchSpec, draftedTools, viktorErrorSentence, judgeChecks, CREDIT_USD, estimateCredits, evaluateViktor, gradeRun, keyProblem, proposeChange, readTasks, REQUIRED_SCOPES, viktor, viktorClient, withArgs, WORK_DIR,
-  type BatchRun, type Check,
+  batchMeasure, batchSpec, cheaperPresets, CLEANUP, draftedTools, viktorErrorSentence, judgeChecks, CREDIT_USD, estimateCredits, evaluateViktor, gradeRun, keyProblem, LIST, proposeChange, readTasks, REQUIRED_SCOPES, viktor, viktorClient,
+  withArgs, writeChecks, WORK_DIR, WRITING_CHECKS, type BatchRun, type Check,
 } from "../src/connectors/viktor/index.ts";
 
 /** A fake Viktor API: answers by path, and records every request. */
@@ -118,7 +118,7 @@ test("script arguments travel in the code, since Viktor refuses one over 2,000 c
   assert.equal(withArgs("print(1)", []), "print(1)");
 });
 
-test("the listing keeps every task, says why the system, script and default-model tasks are not evaluated, and puts the most credits first", () => {
+test("the listing keeps every task, says why the system, script, pre-run and pinned tasks are not evaluated, and puts the most credits first", () => {
   const cron = (path: string, title: string, model: string | null, extra: Record<string, unknown> = {}) => ({ id: `id${path}`, path, title, model, execution_type: "agent", cron: "0 9 * * 1", paused: false, description: `${title} instructions`, deleted: false, ...extra });
   const stdout = JSON.stringify({
     tasks: [
@@ -126,8 +126,14 @@ test("the listing keeps every task, says why the system, script and default-mode
       cron("/daily_brief", "Daily brief", "smart"), cron("/ticket_triage", "Ticket triage", "balanced"),
       cron("/sync", "Sync", null, { execution_type: "script", script_path: "/work/sync.py" }), cron("/digest", "Digest", null),
       cron("/pinned", "Pinned", "claude-sonnet-5-5"), cron("/tiny", "Tiny", "cheap"), cron("/gone", "Gone", "smart", { deleted: true }),
-      cron("/openmerit/daily-brief-abc-cheap", "OpenMerit: Daily brief", "cheap"),
+      // A condition script only decides whether a run happens: evaluated. A pre-run script feeds the agent: skipped.
+      cron("/cond", "Cond", "balanced", { condition_script_path: "/work/crons/cond/check.py" }), cron("/prerun", "Prerun", "smart", { pre_run_script_path: "/work/crons/prerun/gather.py" }),
+      // OpenMerit's copies, with today's prefix and the one before 20 Nov 2026, under /openmerit/ only.
+      cron("/openmerit/daily-brief-abc-cheap", "OpenMerit: Daily brief", "cheap"), cron("/openmerit/daily-brief-def-balanced", "[OpenMerit]: Daily brief", "balanced"),
+      // A person's own tasks: titled like a copy but elsewhere, or under /openmerit/ with another title.
+      cron("/u0cb2f8emqc/projects/zip/blog_review", "OpenMerit: Blog review", "smart-writing"), cron("/openmerit/notes", "Team notes", "balanced-writing"),
     ],
+    defaultModel: "smart",
     usage: [
       { credits: 70, path: "/agent_runs/crons/daily_brief/2026-11-18T09-00-00" }, { credits: 66, path: "/agent_runs/crons/daily_brief/2026-11-17T09-00-00" },
       { credits: 300, path: "/agent_runs/crons/ticket_triage/2026-11-18T09-00-00" }, { credits: 536, path: "/agent_runs/crons/heartbeat/2026-11-18T09-00-00" },
@@ -136,27 +142,46 @@ test("the listing keeps every task, says why the system, script and default-mode
     ],
   });
   const { tasks, leftovers } = readTasks(`some log line\n${stdout}\n`);
-  assert.deepEqual(leftovers, ["/openmerit/daily-brief-abc-cheap"]);
+  assert.deepEqual(leftovers, ["/openmerit/daily-brief-abc-cheap", "/openmerit/daily-brief-def-balanced"]);
   assert.deepEqual(tasks.map(task => [task.title, task.credits30d, task.skipped]), [
     ["Heartbeat", 536, "Viktor's own task: it cannot be edited"],
     ["Ticket triage", 300, null],
     ["Daily brief", 136, null],
-    ["Digest", 0, "uses the workspace's default model: set a preset on it in Viktor to evaluate it"],
+    ["Cond", 0, null],
+    ["Digest", 0, null],
     ["Memory Dreaming", 0, "Viktor's own task: it cannot be edited"],
-    ["Pinned", 0, "uses claude-sonnet-5-5; only Viktor's presets (cheap, balanced, smart, ultra) are compared for now"],
+    ["OpenMerit: Blog review", 0, null],
+    ["Pinned", 0, "uses claude-sonnet-5-5; only Viktor's presets (cheap, balanced, balanced-writing, smart, smart-writing, ultra) are compared for now"],
+    ["Prerun", 0, "runs a pre-run script whose output the agent reads, which test mode does not capture"],
     ["Sync", 0, "script task, no model"],
+    ["Team notes", 0, null],
     ["Tiny", 0, "already on cheap, the cheapest preset"],
   ]);
+  assert.deepEqual(tasks.filter(task => task.conditionScript).map(task => task.title), ["Cond"]);
   const brief = tasks.find(task => task.title === "Daily brief")!;
   assert.equal(brief.runs30d, 2);
-  // 68 credits per run on smart, against 70 assumed: a scale of 68/70. smart + balanced + cheap = 70 + 20 + 4 = 94 assumed credits per round,
-  // so 94 × 68/70 = 91.31 per round, × 3 repeats = 273.94, + 90 for the thread = 363.94, rounded up.
-  assert.equal(estimateCredits(brief, 3), 364);
+  // 68 credits per run on smart, against 70 measured: a scale of 68/70. smart + balanced + cheap = 70 + 19 + 4 = 93 credits per round,
+  // so 93 × 68/70 = 90.34 per round, × 3 repeats = 271.03, + 90 for the thread = 361.03, rounded up.
+  assert.equal(estimateCredits(brief, 3), 362);
 
   const { spec } = batchSpec("job_20261119_abcdef123456", brief, 3);
-  assert.deepEqual(spec.models, ["smart", "balanced", "cheap"]);
-  assert.equal(spec.copyTitle, "OpenMerit: Daily brief");
+  assert.deepEqual([spec.models, spec.inherit], [["smart", "balanced", "cheap"], false]);
+  // Copies always get today's prefix, even of a task whose own title starts with the old one.
+  assert.equal(spec.copyTitle, "[OpenMerit]: Daily brief");
+  assert.equal(batchSpec("job_1", tasks.find(task => task.title === "OpenMerit: Blog review")!, 3).spec.copyTitle, "[OpenMerit]: OpenMerit: Blog review");
   assert.equal(spec.copyPath, "/openmerit/daily-brief-ef123456-");
+
+  // A task with no model runs the workspace's default, smart: the smart ladder, with its baseline copy's model left unset.
+  const digest = tasks.find(task => task.title === "Digest")!;
+  assert.deepEqual([digest.model, digest.defaultModel], [null, "smart"]);
+  assert.deepEqual([batchSpec("job_1", digest, 3).spec.models, batchSpec("job_1", digest, 3).spec.inherit], [["smart", "balanced", "cheap"], true]);
+  assert.equal(proposeChange(digest, { model: "cheap" }).change, "Set Digest from Team default (smart) to cheap");
+  assert.equal(proposeChange(brief, { model: "cheap" }).change, "Set Daily brief to cheap");
+  // A default OpenMerit could not read, or one that is not a preset, skips the task with why.
+  const unread = readTasks(JSON.stringify({ tasks: [cron("/digest", "Digest", null)], usage: [] })).tasks[0]!;
+  assert.equal(unread.skipped, "uses the workspace's default model, which OpenMerit could not read");
+  const pinned = readTasks(JSON.stringify({ tasks: [cron("/digest", "Digest", null)], usage: [], defaultModel: "gpt-6-luna" })).tasks[0]!;
+  assert.equal(pinned.skipped, "uses the workspace's default model, gpt-6-luna, which is not one of Viktor's presets");
 
   const connection = viktor({ tasks });
   assert.deepEqual(connection.capabilities, ["list", "evidence", "measure", "change"]);
@@ -219,4 +244,93 @@ test("a run that did not finish fails every check without asking the judge", asy
   // The judge must grade every check; one it leaves out fails the run's grading instead of passing or failing silently.
   const judged = judgeChecks(async () => '{"c1": true, "c2": false, "c3": true, "c4": true}', { title: "Daily brief", description: "…" }, run("smart", 1));
   await assert.rejects(judged(checks, run("cheap", 1)), /left c5 ungraded for cheap run 1/);
+});
+
+test("a writing task is compared against the cheaper writing preset and the plain presets, and its estimate counts every one", () => {
+  assert.deepEqual(cheaperPresets("smart-writing"), ["cheap", "balanced", "balanced-writing"]);
+  assert.deepEqual(cheaperPresets("balanced-writing"), ["cheap", "balanced"]);
+  assert.deepEqual(cheaperPresets("smart"), ["cheap", "balanced"]);
+  const blog = { path: "/u0cb2f8emqc/projects/zip/blog_review", title: "OpenMerit: Blog review", model: "smart-writing", credits30d: 0, runs30d: 0 };
+  const { spec } = batchSpec("job_20261120_abcdef123456", blog, 3);
+  assert.deepEqual(spec.models, ["smart-writing", "balanced-writing", "balanced", "cheap"]);
+  // 4 presets × 3 runs = 12 test runs: 3 × (81 + 25 + 19 + 4) = 387, + 90 for the thread = 477.
+  assert.equal(spec.models.length * spec.repeats, 12);
+  assert.equal(estimateCredits(blog, 3), 477);
+  // balanced-writing: 3 × (25 + 19 + 4) = 144, + 90 = 234.
+  assert.equal(estimateCredits({ ...blog, model: "balanced-writing" }, 3), 234);
+});
+
+test("the judge adds writing checks for a task on a writing preset, and only then", async () => {
+  const systems: string[] = [];
+  const complete = async (request: { system?: string }) => { systems.push(request.system ?? ""); return JSON.stringify({ checks: ["a", "b", "c"] }); };
+  const reference = run("smart-writing", 1);
+  await writeChecks(complete, { title: "Blog review", description: "Write for customers in a warm tone.", model: "smart-writing" }, reference);
+  await writeChecks(complete, { title: "Digest", description: "…", model: null, defaultModel: "smart" }, reference);
+  await writeChecks(complete, { title: "Notes", description: "…", model: "balanced-writing" }, reference);
+  assert.deepEqual(systems.map(system => system.includes(WRITING_CHECKS)), [true, false, true]);
+  assert.match(WRITING_CHECKS, /audience, the tone, the voice and the format/);
+  assert.match(WRITING_CHECKS, /do not invent a brand voice/);
+});
+
+test("a smart-writing task can move to a plain preset when the judge passes it on every check", async () => {
+  const models = ["smart-writing", "balanced-writing", "balanced", "cheap"];
+  const runs = models.flatMap(model => [1, 2, 3].map(repeat => run(model, repeat)));
+  // cheap misses the tone check (c3) every run; balanced passes everything for 19 credits a run; balanced-writing does too, for 25.
+  const { result } = await evaluateViktor({
+    task: { model: "smart-writing" }, checks, runs, repeats: 3, sample,
+    graded: new Map([["smart-writing", [graded(81), graded(81), graded(81)]], ["balanced-writing", [graded(25), graded(25), graded(25)]], ["balanced", [graded(19), graded(19), graded(19)]], ["cheap", [graded(4, ["c3"]), graded(4, ["c3"]), graded(4, ["c3"])]]]),
+  });
+  assert.equal(result.pick?.model, "balanced");
+  assert.equal(result.candidates.find(item => item.model === "cheap")?.qualified, false);
+});
+
+/** Runs one of the connection's Python scripts against a fake Viktor SDK holding `crons`; returns its output and the crons it deleted. */
+function runPython(t: { skip: (message: string) => void }, code: string, args: string[], crons: { path: string; title: string; model?: string | null }[]) {
+  const root = mkdtempSync(join(tmpdir(), "viktor-sdk-"));
+  try {
+    mkdirSync(join(root, "sdk", "tools"), { recursive: true });
+    writeFileSync(join(root, "sdk", "__init__.py"), "");
+    writeFileSync(join(root, "sdk", "tools", "__init__.py"), "");
+    writeFileSync(join(root, "sdk", "tools", "scheduled_crons.py"), [
+      "import json, os", "from types import SimpleNamespace",
+      `CRONS = json.loads(${JSON.stringify(JSON.stringify(crons))})`,
+      "class Cron(SimpleNamespace):", "    def model_dump(self): return dict(vars(self))",
+      "async def list_crons(**kw): return SimpleNamespace(crons=[Cron(**c) for c in CRONS])",
+      "async def delete_cron(path): open(os.environ['DELETED'], 'a').write(path + '\\n')",
+    ].join("\n"));
+    writeFileSync(join(root, "sdk", "tools", "account_tools.py"), [
+      "from types import SimpleNamespace",
+      "async def get_usage_threads(**kw): return SimpleNamespace(threads=[])",
+      "async def get_workspace_settings(): return SimpleNamespace(model_dump=lambda: {'default_agent_model': 'smart', 'fast_model_option': 'balanced'})",
+    ].join("\n"));
+    const deleted = join(root, "deleted.txt");
+    writeFileSync(deleted, "");
+    const python = spawnSync("python3", ["-c", withArgs(code, args)], { encoding: "utf8", cwd: root, env: { ...process.env, PYTHONPATH: root, DELETED: deleted } });
+    if (python.error) { t.skip("python3 is not installed"); return null; }
+    assert.equal(python.status, 0, python.stderr);
+    return { stdout: python.stdout, deleted: readFileSync(deleted, "utf8").split("\n").filter(Boolean) };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("CLEANUP deletes OpenMerit's copies with either prefix under /openmerit/, and never a person's task titled like one", (t) => {
+  const crons = [
+    { path: "/openmerit/brief-abc-cheap", title: "[OpenMerit]: Daily brief" }, { path: "/openmerit/brief-def-cheap", title: "OpenMerit: Daily brief" },
+    { path: "/openmerit/notes", title: "Team notes" },
+    { path: "/u0cb2f8emqc/projects/zip/blog_review", title: "OpenMerit: Blog review" }, { path: "/u0cb2f8emqc/projects/zip/intake", title: "[OpenMerit]: Content intake" },
+  ];
+  const out = runPython(t, CLEANUP, ["/openmerit/"], crons);
+  if (!out) return;
+  assert.deepEqual(out.deleted, ["/openmerit/brief-abc-cheap", "/openmerit/brief-def-cheap"]);
+  assert.deepEqual(JSON.parse(out.stdout).deleted, out.deleted);
+  // A job's own prefix deletes only that job's copies.
+  assert.deepEqual(runPython(t, CLEANUP, ["/openmerit/brief-def-"], crons)?.deleted, ["/openmerit/brief-def-cheap"]);
+});
+
+test("LIST reads the workspace's default model once, so a task with none shows it", (t) => {
+  const out = runPython(t, LIST, [], [{ path: "/digest", title: "Digest", model: null }]);
+  if (!out) return;
+  const digest = readTasks(out.stdout).tasks[0]!;
+  assert.deepEqual([digest.model, digest.defaultModel, digest.skipped], [null, "smart", null]);
 });

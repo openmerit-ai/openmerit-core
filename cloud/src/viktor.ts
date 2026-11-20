@@ -19,6 +19,8 @@ export type TaskStatus = "skipped" | "not_evaluated" | "evaluating" | "done" | "
 
 export interface ViktorTaskView {
   id: string; title: string; path: string; model: string | null; credits30d: number; paused: boolean;
+  /** The workspace's default model, which a task with no model of its own runs; null when unknown. */
+  defaultModel: string | null;
   status: TaskStatus;
   /** Why it is skipped or failed; null otherwise. */
   reason: string | null;
@@ -245,7 +247,7 @@ export async function viktorView(client: AppClient, accountId: string, people: P
     const latest = jobs.find(job => job.taskId === viktorTaskId(task)) ?? null;
     const estimatedCredits = task.skipped ? null : estimateCredits(task, DEFAULT_REPEATS);
     const blocked = estimatedCredits === null || (latest && active(latest)) ? null : viktorBlock(estimatedCredits, used + reserved, connection.creditCap, refusal);
-    const base = { id: task.id, title: task.title, path: task.path, model: task.model, credits30d: task.credits30d, paused: task.paused, jobId: latest?.id ?? null, estimatedCredits, blocked, isNew: !task.skipped && isNew(task, connection.connectedAt, !!latest), result: null };
+    const base = { id: task.id, title: task.title, path: task.path, model: task.model, defaultModel: task.defaultModel ?? null, credits30d: task.credits30d, paused: task.paused, jobId: latest?.id ?? null, estimatedCredits, blocked, isNew: !task.skipped && isNew(task, connection.connectedAt, !!latest), result: null };
     if (task.skipped) return { ...base, status: "skipped", reason: task.skipped };
     if (!latest) return { ...base, status: "not_evaluated", reason: null };
     if (active(latest)) return { ...base, status: "evaluating", reason: null };

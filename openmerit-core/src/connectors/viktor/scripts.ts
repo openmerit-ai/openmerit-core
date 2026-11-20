@@ -5,21 +5,28 @@
 // stdout, so a script whose output grows with the workspace (LIST, READ, DESCRIBE) runs through the
 // client's `runScriptPaged`, which writes its stdout to a file and reads it back in PAGE-sized pieces.
 
-/** Where OpenMerit's temporary copies live, and the title each starts with. CLEANUP deletes only tasks that match both. */
+/**
+ * Where OpenMerit's temporary copies live, and the title each starts with. CLEANUP deletes only tasks
+ * that match both; it also knows the prefix copies had before 20 Nov 2026, so those are still found.
+ */
 export const COPY_PATH = "/openmerit/";
-export const COPY_TITLE = "OpenMerit: ";
+export const COPY_TITLE = "[OpenMerit]: ";
+export const COPY_TITLES: readonly string[] = [COPY_TITLE, "OpenMerit: "];
 /** Each job's files in the sandbox. */
 export const WORK_DIR = "/work/temp/openmerit";
 
 /**
  * Every task with the start of its instructions (list_crons' preview, not the full text: an evaluation
- * reads that with DESCRIBE), credits per task over 30 days from the usage threads, and leftover copies.
+ * reads that with DESCRIBE), credits per task over 30 days from the usage threads, leftover copies, and
+ * the workspace's default model, which a task without a model runs (null when it cannot be read).
  */
 export const LIST = String.raw`# openmerit:list
 import asyncio, json
 from sdk.tools.scheduled_crons import list_crons
-from sdk.tools.account_tools import get_usage_threads
+from sdk.tools.account_tools import get_usage_threads, get_workspace_settings
 async def main():
+    try: default = (await get_workspace_settings()).model_dump().get("default_agent_model")
+    except Exception: default = None
     crons = (await list_crons()).crons
     tasks = []
     for c in crons:
@@ -32,7 +39,7 @@ async def main():
         rows = r.threads if isinstance(r.threads, list) else []
         usage += [{"credits": t.get("credits"), "path": t.get("agent_runs_path"), "title": t.get("title")} for t in rows if isinstance(t, dict)]
         if len(rows) < 50: break
-    print(json.dumps({"tasks": tasks, "usage": usage}, default=str))
+    print(json.dumps({"tasks": tasks, "usage": usage, "defaultModel": default}, default=str))
 asyncio.run(main())
 `;
 
@@ -104,7 +111,9 @@ async def main():
         cron = info.cron if isinstance(info.cron, dict) else info.cron.model_dump()
         for model in SPEC["models"]:
             path = SPEC["copyPath"] + model
-            await create_agent_cron(path=path, title=SPEC["copyTitle"], description=cron["description"], cron=cron["cron"], model=model, personal=True,
+            # A task on the workspace's default keeps its copy's model unset, so the copy runs what the task runs.
+            own = None if SPEC.get("inherit") and model == SPEC["models"][0] else model
+            await create_agent_cron(path=path, title=SPEC["copyTitle"], description=cron["description"], cron=cron["cron"], model=own, personal=True,
                 timezone=cron.get("timezone"), expected_output_channel_ids=cron.get("expected_output_channel_ids") or None)
             state["copies"].append(path)
             await pause_cron(path=path)
@@ -150,17 +159,17 @@ asyncio.run(main())
 
 /**
  * Deletes OpenMerit's copies whose path starts with argv[1] (always under COPY_PATH) and whose title
- * starts with COPY_TITLE, and the directory argv[2] when given. Nothing else is touched.
+ * starts with one of COPY_TITLES, and the directory argv[2] when given. Nothing else is touched.
  */
 export const CLEANUP = String.raw`# openmerit:cleanup
 import asyncio, json, os, shutil, sys
 from sdk.tools.scheduled_crons import list_crons, delete_cron
-PREFIX, TITLE = sys.argv[1], "${COPY_TITLE}"
+PREFIX, TITLES = sys.argv[1], tuple(json.loads(${JSON.stringify(JSON.stringify(COPY_TITLES))}))
 async def main():
     assert PREFIX.startswith("${COPY_PATH}")
     deleted, errors = [], []
     for c in (await list_crons()).crons:
-        if c.path.startswith(PREFIX) and (c.title or "").startswith(TITLE):
+        if c.path.startswith(PREFIX) and (c.title or "").startswith(TITLES):
             try:
                 await delete_cron(path=c.path); deleted.append(c.path)
             except Exception as e:
