@@ -3,7 +3,7 @@ import { liveText } from "../live.ts";
 import { date, endpointName, html, setEndpoints, model, modelName, per1k, plural, seconds, usd, type Html } from "../html.ts";
 import type { Ctx, View } from "../view.ts";
 import { show } from "./guardrails.ts";
-import { retried } from "./connections.ts";
+import { retried, viktorEstimate } from "./connections.ts";
 
 // GET /api/runs/:id returns the saved report once the job has one, and the job's live state before.
 type Data = Report | JobView;
@@ -39,12 +39,12 @@ function measuring(job: JobView): Html {
 }
 
 // Start again or Evaluate again on a connected app's run, the task's own page: only an admin starts one, and the button is
-// off, with why, when the credit cap or the plan would refuse it. The connection's task list has the same button.
+// off, with why, when the plan has no evaluations left. The connection's task list has the same button.
 function evaluateAgain(data: Data, admin: boolean, label: string): Html {
   const next = data.evaluate;
   if (!next) return html`<p class="note">The connection no longer lists this task, so it cannot be evaluated again.</p>`;
   if (next.evaluating) return html`<p class="note">This task is being evaluated now. <a href="/connections/">See Connections</a>.</p>`;
-  const cost = next.estimatedCredits !== null ? `About ${next.estimatedCredits.toLocaleString("en-US")} Viktor credits, within the connection's cap` : next.budgetUsd !== null ? `Up to ${usd(next.budgetUsd)} of model calls` : "";
+  const cost = next.estimatedCredits !== null ? `About ${next.estimatedCredits.toLocaleString("en-US")} Viktor credits from your workspace` : next.budgetUsd !== null ? `Up to ${usd(next.budgetUsd)} of model calls` : "";
   if (!admin) return html`<p class="note">An admin can evaluate this task again. ${cost}.</p>`;
   return html`<p class="evaluate" style="margin-top: 10px"><button class="btn" type="button" data-action="rerun"${next.blocked ? html` disabled aria-describedby="why-again"` : ""}>${label}</button><span class="sub">${cost}. It counts as one evaluation on your plan.</span>${next.blocked ? html`<span class="sub" id="why-again">${next.blocked}</span>` : ""}</p>`;
 }
@@ -305,7 +305,7 @@ async function rerun(data: Data, budgetUsd: number | null, ctx: Ctx): Promise<vo
   const ok = await ctx.confirm(fromLangfuse
     ? { title: label, body: `Evaluates ${data.task} again on its recorded calls and dataset items from Langfuse. It counts as one evaluation on your plan.`, confirm: label }
     : fromViktor
-    ? { title: label, body: `Evaluates ${data.task} again on paused copies in Viktor's test mode, using credits from your Viktor workspace within the connection's cap. It counts as one evaluation on your plan.`, confirm: label }
+    ? { title: label, body: `Evaluates ${data.task} again on paused copies in Viktor's test mode. ${viktorEstimate(data.evaluate?.estimatedCredits)} It counts as one evaluation on your plan.`, confirm: label }
     : budgetUsd === null
     ? { title: "Run again", body: `Runs ${data.task} again on the bundle its coding agent last sent. It counts as one evaluation on your plan.`, confirm: "Run again" }
     : { title: "Raise the budget and run again", body: `Sets ${data.task}'s budget per job to ${usd(budgetUsd)}${now === undefined ? "" : `, up from ${usd(now)}`}, then runs it again. The run spends up to ${usd(budgetUsd)} on model calls and counts as one evaluation on your plan.`, confirm: "Raise and run again" });

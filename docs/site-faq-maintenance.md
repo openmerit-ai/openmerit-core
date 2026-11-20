@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Viktor connections without a credit cap — unreleased, 20 November 2026
+
+Reviewed the homepage against the cloud app dropping the Viktor connection's credit cap: evaluations start only on a click that confirms the estimate in credits, and a job stops past twice its estimate. `site/index.html` makes no claim about Viktor, credit caps or what an evaluation costs in a connected app. No homepage copy change is needed.
+
 ## Viktor tasks on the Tasks page — unreleased, 20 November 2026
 
 Reviewed the homepage against the cloud app's Tasks page listing a connected Viktor workspace's tasks in their own section, with Evaluate. `site/index.html` makes no claim about the app's Tasks page or connected apps. No homepage copy change is needed.

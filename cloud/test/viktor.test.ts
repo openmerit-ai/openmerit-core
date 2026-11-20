@@ -32,7 +32,7 @@ function fakeViktor(extra: Cron[] = []) {
     ...extra,
   ];
   const files = new Map<string, string>();
-  const state = { scopes: [...REQUIRED_SCOPES] as string[], created: [] as string[], deleted: [] as string[], threads: [] as { id: string; message: string }[], scripts: [] as string[], auth: new Set<string>(), draft: null as string | null, refuse: null as string | null, hold: false, slowListMs: 0, pending: null as Parameters<typeof runBatch>[0] | null, specs: [] as { models: string[]; copyTitle: string; inherit?: boolean }[] };
+  const state = { scopes: [...REQUIRED_SCOPES] as string[], created: [] as string[], deleted: [] as string[], threads: [] as { id: string; message: string }[], scripts: [] as string[], auth: new Set<string>(), draft: null as string | null, refuse: null as string | null, hold: false, partial: false, creditScale: 1, slowListMs: 0, pending: null as Parameters<typeof runBatch>[0] | null, specs: [] as { models: string[]; copyTitle: string; inherit?: boolean }[] };
   const runBatch = (spec: { source: string; models: string[]; repeats: number; copyPath: string; copyTitle: string; out: string; inherit?: boolean }) => {
     state.specs.push(spec);
     const runs = [];
@@ -78,7 +78,7 @@ function fakeViktor(extra: Cron[] = []) {
       if (toFile) { files.set(JSON.parse(toFile) as string, stdout); stdout = ""; }
       // Viktor returns at most 64,000 characters of stdout: the end of it, flagged.
       if (stdout.length > 64_000) return { body: { id: `script_${state.scripts.length}`, status: "completed", result: { exit_code: 0, stdout: stdout.slice(-64_000), stdout_truncated: true, stderr: "" } } };
-      if (kind === "credits") stdout = JSON.stringify({ credits: Object.fromEntries((JSON.parse(args[0]!) as string[]).map(id => [id, id.startsWith("run_") ? RUN[id.split("_")[1]!]! : THREAD])) });
+      if (kind === "credits") stdout = JSON.stringify({ credits: Object.fromEntries((JSON.parse(args[0]!) as string[]).map(id => [id, (id.startsWith("run_") ? RUN[id.split("_")[1]!]! : THREAD) * state.creditScale])) });
       if (kind === "cleanup") {
         const left = crons.filter(cron => cron.path.startsWith(args[0]!) && (cron.title.startsWith("[OpenMerit]: ") || cron.title.startsWith("OpenMerit: ")));
         for (const cron of left) { crons.splice(crons.indexOf(cron), 1); state.deleted.push(cron.path); }
@@ -91,11 +91,16 @@ function fakeViktor(extra: Cron[] = []) {
       state.threads.push({ id: `thread_${state.threads.length + 1}`, message });
       const spec = directory ? JSON.parse(files.get(`${directory}/spec.json`)!) as Parameters<typeof runBatch>[0] : null;
       // A held batch keeps running until the test releases it.
-      if (spec && state.hold) state.pending = spec; else if (spec) runBatch(spec);
+      if (spec && state.partial) {
+        // A batch still running: its copies exist, and the first round of runs has finished.
+        for (const model of spec.models) { state.created.push(spec.copyPath + model); crons.push({ ...crons.find(cron => cron.path === spec.source)!, id: `copy_${model}`, path: spec.copyPath + model, title: spec.copyTitle, model, paused: true }); }
+        const runs = spec.models.map(model => ({ model, repeat: 1, status: "success", error: null, report: `Classified the tickets on ${model}.`, runModel: model, threadId: `run_${model}_1`, actions: [], seconds: 12 }));
+        files.set(spec.out, JSON.stringify({ status: "running", runs, copies: spec.models.map(model => spec.copyPath + model) }));
+      } else if (spec && state.hold) state.pending = spec; else if (spec) runBatch(spec);
       return { status: 202, body: { thread: { id: `thread_${state.threads.length}` }, run: { id: `agentrun_${state.threads.length}`, status: "queued" } } };
     }
     const run = /^\/api\/public\/v1\/runs\/([\w]+)$/.exec(path);
-    if (run) return { body: { id: run[1], thread_id: "thread_1", status: state.hold ? "running" : "completed", error: null } };
+    if (run) return { body: { id: run[1], thread_id: "thread_1", status: state.hold || state.partial ? "running" : "completed", error: null } };
     return { status: 404, body: { detail: { error: "not_found", message: path } } };
   };
   const server: Server = createServer((req, res) => {
@@ -245,7 +250,7 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
 
     // openmerit_tasks lists the connection's tasks with the verdict and the approval.
     const tasks = await admin.tool("openmerit_tasks", {});
-    assert.match(tasks.text, /Viktor \(322 of 2000 credits used\): 5 scheduled tasks/);
+    assert.match(tasks.text, /Viktor \(322 Viktor credits used by OpenMerit's tests\): 5 scheduled tasks/);
     assert.match(tasks.text, /Ticket triage test \(smart, 140 credits in 30 days\): Set Ticket triage test to cheap, approved by User V on \d{4}-\d{2}-\d{2}; /);
     assert.match(tasks.text, /heartbeat \(Team default \(smart\), 0 credits in 30 days\): skipped: Viktor's own task/);
     assert.equal(viktor.state.auth.size, 2, "only the stored key and the one refused key reached Viktor");
@@ -342,10 +347,10 @@ test("Viktor: a workspace whose instructions pass Viktor's 64,000-character stdo
     assert.equal(connected.body.listingError, null);
     assert.equal(connected.body.tasks.length, 11);
     // Each has a condition script, which test mode ignores, so all 7 can be evaluated; titled "OpenMerit: …" outside /openmerit/, none is a copy.
-    // Connecting starts none, and Evaluate is off on each: its estimate passes the 100-credit cap.
+    // Connecting starts none. There is no credit cap: a creditCap an older client sends is ignored, and Evaluate is on for each, with its estimate.
     const rows = connected.body.tasks.filter(task => task.title.startsWith("OpenMerit: Project"));
     assert.deepEqual(rows.map(task => task.status), Array(7).fill("not_evaluated"));
-    assert.ok(rows.every(task => task.estimatedCredits! > 100 && /cap/.test(task.blocked ?? "")), JSON.stringify(rows.map(task => task.blocked)));
+    assert.ok(rows.every(task => task.estimatedCredits! > 100 && task.blocked === null), JSON.stringify(rows.map(task => task.blocked)));
     assert.deepEqual([viktor.state.created, viktor.state.deleted, viktor.state.threads.length], [[], [], 0]);
     assert.ok(!viktor.state.scripts.includes("cleanup"), "no task of the person's is cleaned up as a copy");
     assert.deepEqual(viktor.state.scripts.slice(0, 2), ["list", "page"]);
@@ -432,6 +437,37 @@ test("Viktor: a task on the workspace's default model is evaluated against the p
     const report = (await admin.api<{ connection: { currentModel: string; change: { text: string } } }>(`/api/runs/${jobId}`)).body;
     assert.deepEqual([report.connection.currentModel, report.connection.change.text], ["Team default (smart)", "Set Digest from Team default (smart) to cheap"]);
     assert.deepEqual([...viktor.state.created].sort(), [...viktor.state.deleted].sort());
+  } finally {
+    await stop(app); await judge.close();
+    await new Promise<void>(resolve => { viktor.server.closeAllConnections(); viktor.server.close(() => resolve()); });
+  }
+});
+
+test("Viktor: a job whose test runs pass twice its estimate stops them, deletes its copies and says so", async () => {
+  const viktor = fakeViktor();
+  await new Promise<void>(resolve => viktor.server.listen(0, "127.0.0.1", resolve));
+  viktor.url = `http://127.0.0.1:${(viktor.server.address() as AddressInfo).port}`;
+  const judge = await fakeJudge();
+  const app = await startApp({ models: judge, env: { OPENMERIT_VIKTOR_URL: viktor.url, OPENMERIT_VIKTOR_POLL_MS: "200" } });
+  try {
+    await subscribe(app, "org_guard");
+    const admin = caller(app, "test:user_g:org_guard:admin");
+    const connected = await admin.api<{ tasks: { id: string; estimatedCredits: number | null }[] }>("/api/connections/viktor", { method: "POST", body: JSON.stringify({ apiKey: KEY }) });
+    assert.equal(connected.status, 201, JSON.stringify(connected.body));
+    const estimate = connected.body.tasks.find(task => task.id === "Cut8kTVZ")!.estimatedCredits!;
+    // The first round of runs costs 20 times what Viktor usually reports: (70 + 20 + 4) × 20 + 40 × 20 = 2,680 credits, past twice the estimate.
+    viktor.state.partial = true; viktor.state.creditScale = 20;
+    assert.ok(2_680 > 2 * estimate, `estimate ${estimate}`);
+    const started = await admin.api<{ jobIds: string[] }>("/api/connections/viktor/tasks/Cut8kTVZ/start", { method: "POST" });
+    assert.equal(started.status, 201, JSON.stringify(started.body));
+    const jobId = started.body.jobIds[0]!;
+    const stopped = await waitFor(() => admin.api<{ status: string; error: string | null }>(`/api/runs/${jobId}`), view => ["done", "failed", "stopped"].includes(view.body.status), 60_000);
+    assert.equal(stopped.body.status, "stopped", JSON.stringify(stopped.body));
+    assert.equal(stopped.body.error, `OpenMerit stopped this evaluation: its test runs had used 2,680 Viktor credits, more than 2 times its estimate of about ${estimate.toLocaleString("en-US")}. It stopped the test runs and deleted its copies of the task.`);
+    // Its copies are gone, and the credits it used are recorded, not its estimate.
+    assert.ok(viktor.state.created.length === 3 && viktor.state.created.every(path => viktor.state.deleted.includes(path)));
+    assert.equal(viktor.crons.filter(cron => cron.path.startsWith("/openmerit/")).length, 0);
+    assert.equal((await admin.api<{ creditsUsed: number }>("/api/connections/viktor")).body.creditsUsed, 2_680);
   } finally {
     await stop(app); await judge.close();
     await new Promise<void>(resolve => { viktor.server.closeAllConnections(); viktor.server.close(() => resolve()); });

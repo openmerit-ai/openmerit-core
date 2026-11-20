@@ -161,9 +161,9 @@ export function apiRoutes(deps: AppDeps) {
     if (path === "/api/connections/viktor" && method === "POST") {
       const denied = admin(); if (denied) return denied;
       const input = await body(request);
-      if (!input || typeof input.apiKey !== "string") return error(400, "Send the connection as JSON: {apiKey, creditCap}.");
-      if (input.creditCap !== undefined && typeof input.creditCap !== "number") return error(400, "creditCap must be a number of Viktor credits.");
-      const connected = await connectViktor(client, { accountId: who.accountId, userId: who.userId, apiKey: input.apiKey, ...(typeof input.creditCap === "number" ? { creditCap: input.creditCap } : {}) });
+      // An older client may still send creditCap; there is no cap any more, so it is ignored.
+      if (!input || typeof input.apiKey !== "string") return error(400, "Send the connection as JSON: {apiKey}.");
+      const connected = await connectViktor(client, { accountId: who.accountId, userId: who.userId, apiKey: input.apiKey });
       return connected.ok ? json(201, connected.view) : error(connected.status, connected.error);
     }
     if (path === "/api/connections/viktor" && method === "DELETE") {

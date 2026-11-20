@@ -45,7 +45,6 @@ export const SYSTEM_TASKS: ReadonlySet<string> = new Set(["/heartbeat", "/memory
 
 /** What a credit costs: $2.50 per 1,000. */
 export const CREDIT_USD = 0.0025;
-export const DEFAULT_CREDIT_CAP = 2000;
 export const SCHEDULED_TASKS_URL = "https://app.viktor.com/scheduled-tasks";
 /**
  * Credits for one test run on each preset, to estimate a job before it starts and to choose which

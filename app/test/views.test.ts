@@ -3,7 +3,7 @@ import test from "node:test";
 import { ApiError, createApi, type GuardrailsAt, type JobView, type Me, type Report, type Run, type Spend, type Task, type LangfuseConnection, type ViktorConnection } from "../api.ts";
 import { createFakeApi } from "../dev/fake-api.ts";
 import type { Account } from "../view.ts";
-import { connectionsView, retried } from "../views/connections.ts";
+import { connectionsView, retried, viktorActions } from "../views/connections.ts";
 import { choices, guardrailsView, parse } from "../views/guardrails.ts";
 import { planView } from "../views/plan.ts";
 import { runView } from "../views/run.ts";
@@ -235,23 +235,28 @@ test("Runs labels a Viktor run by its task's title and says who started it, and 
   const shown = runView.render(failed, page(me)).__html;
   assert.equal(text({ __html: shown }).split("Viktor refused the request: each script argument may be at most 2,000 characters.").length, 2, "the sentence once");
   assert.match(shown, /<details><summary>Show details<\/summary><pre class="error-detail">The job failed: Step &quot;put&quot;[^<]*# openmerit:batch\nimport asyncio/);
-  // The connection's cap would refuse it, so Start again is off and says why.
-  assert.match(shown, /data-action="rerun" disabled aria-describedby="why-again">Start again<\/button>[^]*It needs about 1,720 credits, and 322 of the 2,000-credit cap are used or expected\./);
+  // There is no credit cap: Start again is on, with its estimate from the workspace's credits.
+  assert.match(shown, /data-action="rerun">Start again<\/button><span class="sub">About 1,720 Viktor credits from your workspace\. It counts as one evaluation on your plan\./);
+  assert.doesNotMatch(shown, /cap/);
 });
 
-test("only a person starts a connection's evaluation: Evaluate on the task list and on the run page, off with why when the cap or the plan would refuse it", async () => {
+test("only a person starts a connection's evaluation: Evaluate with its estimate on the task list and on the run page, off with why only when the plan would refuse it", async () => {
   const me = await account();
   const [viktor, langfuse] = await Promise.all([get<ViktorConnection>("/api/connections/viktor"), get<LangfuseConnection>("/api/connections/langfuse")]);
   const html = connectionsView.render({ endpoints: [], viktor, langfuse }, page(me)).__html;
-  assert.match(text({ __html: html }), /Denial letters New \/denial_letters smart 260 Not evaluated Evaluate About 290 credits/);
-  assert.match(html, /<button class="btn primary" type="button" data-action="start" data-id="denial_letters">Evaluate<\/button>/, "on, when the estimate fits under the cap");
-  assert.match(html, /data-action="start" data-id="weekly_payer_report" disabled aria-describedby="why-weekly_payer_report">Start again/);
+  assert.match(text({ __html: html }), /Denial letters New \/denial_letters smart 260 Not evaluated Evaluate · about 290 Viktor credits/);
+  assert.match(html, /<button class="btn primary" type="button" data-action="start" data-id="denial_letters">Evaluate · about 290 Viktor credits<\/button>/);
+  // No credit cap: a large estimate is not refused, and nothing on the page mentions a cap or a Start button that waits.
+  assert.match(html, /data-action="start" data-id="weekly_payer_report">Start again · about 1,720 Viktor credits<\/button>/);
+  assert.doesNotMatch(text({ __html: html }), /credit cap|Credit cap|past the cap|of 2,000|wait with a Start button|on their own|highest spend first|OpenMerit: &lt;|"OpenMerit: /);
+  assert.doesNotMatch(html, /name="creditCap"/);
+  assert.match(text({ __html: html }), /322 Viktor credits used by OpenMerit's tests/);
   assert.match(text({ __html: html }), /extract-claim › extract-claim-generate anthropic\/claude-sonnet-5\.5 2,203 \$5\.68 Not evaluated Evaluate Up to \$5 of model calls/);
   assert.doesNotMatch(html, /Waiting|without being asked/);
   // A member sees the estimate, not the button.
   const member = connectionsView.render({ endpoints: [], viktor, langfuse }, page({ ...me, role: "member" })).__html;
   assert.doesNotMatch(member, /data-action="start/);
-  assert.match(text({ __html: member }), /About 290 credits\. An admin can evaluate it\./);
+  assert.match(text({ __html: member }), /About 290 Viktor credits\. An admin can evaluate it\./);
 
   // The run page is the task's own page in the app: a finished result offers Evaluate again.
   const done = runView.render(await get<Report>("/api/runs/l2f9a4"), page(me)).__html;
@@ -313,4 +318,19 @@ test("Tasks lists a connected Viktor workspace's tasks in their own section, wit
   assert.match(text(tasksView.render({ tasks: [], viktor: { connected: false, unavailable: true, tasks: [] } }, page(me))), /Viktor's tasks could not load/);
   // With no coding-agent tasks yet, the Viktor section still shows.
   assert.match(tasksView.render({ tasks: [], viktor }, page(me)).__html, /id="viktor"/);
+});
+
+test("Evaluate's confirmation states the estimate in Viktor credits, from the workspace's credits", async () => {
+  const me = await account();
+  const viktor = await get<ViktorConnection>("/api/connections/viktor");
+  let asked: { title: string; body: string } | null = null;
+  const sent: string[] = [];
+  const ctx = { me, params: new URLSearchParams(), id: null, api: { send: async (method: string, path: string) => { sent.push(`${method} ${path}`); return {}; } }, refresh: async () => {}, toast: () => {}, go: () => {}, download: () => {},
+    confirm: async (options: { title: string; body: string }) => { asked = options; return false; } } as unknown as Parameters<typeof viktorActions.start>[2];
+  const button = { dataset: { id: "denial_letters" } } as unknown as HTMLElement;
+  await viktorActions.start(button, viktor, ctx);
+  assert.equal(asked!.title, "Evaluate Denial letters?");
+  assert.match(asked!.body, /about 290 Viktor credits, taken from your workspace, not from OpenMerit\. If its test runs pass twice that, OpenMerit stops them\./);
+  assert.doesNotMatch(asked!.body, /\$/, "the estimate is in credits only");
+  assert.deepEqual(sent, [], "a cancelled confirmation starts nothing");
 });
