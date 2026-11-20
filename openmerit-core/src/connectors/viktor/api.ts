@@ -1,7 +1,15 @@
 // Viktor's Public API (api.viktor.com/api/public/v1) with a personal or team API key: the key's
 // scopes, the credit balance, Python script runs in the workspace sandbox, and API threads, whose
 // agent runs a script that `test_cron_as_subagent` needs a parent thread for.
+import { randomUUID } from "node:crypto";
+import { PAGE, WORK_DIR } from "./scripts.ts";
+
 export const VIKTOR_API = "https://api.viktor.com";
+
+/** Viktor returns at most this many characters of a script run's stdout, keeping the end. */
+export const STDOUT_LIMIT = 64_000;
+/** Bytes per PAGE run: their base64 is 58,668 characters, under the limit. */
+export const PAGE_BYTES = 44_000;
 
 /** The scopes the connection needs: scripts and usage to list and price tasks, threads, runs and messages to test them. */
 export const REQUIRED_SCOPES = ["scripts:execute", "usage:read", "threads:create", "threads:read", "runs:create", "runs:read", "messages:create", "messages:read"] as const;
@@ -31,8 +39,10 @@ export interface ViktorClientOptions {
 export interface ViktorClient {
   me(): Promise<ViktorKey>;
   credits(): Promise<Credits>;
-  /** Runs `code` with `args` as sys.argv[1:] and returns its stdout. Throws when the script fails. */
+  /** Runs `code` with `args` as sys.argv[1:] and returns its stdout. Throws when the script fails, or when Viktor cut its stdout at 64,000 characters. */
   runScript(code: string, args?: readonly string[], timeoutSeconds?: number): Promise<string>;
+  /** As `runScript`, for a script whose output can pass 64,000 characters: it writes its stdout to a file in the sandbox, read back in pages. */
+  runScriptPaged(code: string, args?: readonly string[], timeoutSeconds?: number): Promise<string>;
   /** Starts an API thread whose agent gets `message`; the idempotency key makes a retry return the same run. */
   startThread(message: string, idempotencyKey: string): Promise<{ threadId: string; runId: string }>;
   run(runId: string): Promise<RunStatus>;
@@ -59,6 +69,16 @@ export function withArgs(code: string, args: readonly string[]): string {
   const head = newline < 0 ? code : code.slice(0, newline), rest = newline < 0 ? "" : code.slice(newline + 1);
   return `${head}\nimport sys as _sys, json as _json; _sys.argv[1:] = _json.loads(${JSON.stringify(JSON.stringify(args))})\n${rest}`;
 }
+
+/** `code` with its stdout sent to `path` in the sandbox instead: a line after the script's tag opens the file. */
+export function toFile(code: string, path: string): string {
+  const newline = code.indexOf("\n");
+  const head = newline < 0 ? code : code.slice(0, newline), rest = newline < 0 ? "" : code.slice(newline + 1);
+  return `${head}\nimport os as _os, sys as _osys, atexit as _atexit; _os.makedirs(${JSON.stringify(path.slice(0, path.lastIndexOf("/")))}, exist_ok=True); _out = open(${JSON.stringify(path)}, "w", encoding="utf-8"); _osys.stdout = _out; _atexit.register(_out.close)\n${rest}`;
+}
+
+/** What a script's output is, by its `# openmerit:<kind>` tag, for the error when Viktor cuts it. */
+const OUTPUTS: Record<string, string> = { list: "the listing's output", read: "the test runs' progress", describe: "the task's instructions", credits: "the test runs' credits", page: "a page of output", cleanup: "the cleanup's output", put: "the batch setup's output" };
 
 /**
  * The tools Viktor's tool gateway saved as drafts instead of running: a workspace can make a tool wait
@@ -101,7 +121,24 @@ export function viktorClient(options: ViktorClientOptions): ViktorClient {
     if (!response.ok) { const { code, message } = describe(response.status, parsed); throw new ViktorError(response.status, code, `Viktor ${method} ${path}: ${message}`); }
     return parsed as T;
   };
-  const scriptRun = (id: string) => call<{ id: string; status: string; error: unknown; result: { exit_code?: number; stdout?: string; stderr?: string } | null }>("GET", `/api/public/v1/scripts/runs/${encodeURIComponent(id)}`);
+  const scriptRun = (id: string) => call<{ id: string; status: string; error: unknown; result: { exit_code?: number; stdout?: string; stderr?: string; stdout_truncated?: boolean } | null }>("GET", `/api/public/v1/scripts/runs/${encodeURIComponent(id)}`);
+  const runScript = async (code: string, args: readonly string[] = [], timeoutSeconds = 120): Promise<string> => {
+    let run = await call<Awaited<ReturnType<typeof scriptRun>>>("POST", "/api/public/v1/scripts/runs", { code: withArgs(code, args), args: [], timeout_seconds: timeoutSeconds, wait_seconds: Math.min(timeoutSeconds, 30) });
+    const deadline = Date.now() + (timeoutSeconds + 60) * 1000;
+    while (PENDING.has(run.status) && Date.now() < deadline) { await sleep(2000); run = await scriptRun(run.id); }
+    const drafted = draftedTools(run.result?.stderr ?? "");
+    if (drafted.length) throw new ViktorError(0, "needs_approval", `Viktor saved OpenMerit's call${drafted.length === 1 ? "" : "s"} to ${drafted.join(", ")} as ${drafted.length === 1 ? "a draft that waits" : "drafts that wait"} for approval in chat, so ${drafted.length === 1 ? "it" : "they"} did not run. In Viktor, let ${drafted.length === 1 ? "this tool" : "these tools"} run without approval, then press Refresh.`);
+    if (run.status !== "completed" || (run.result?.exit_code ?? 0) !== 0) {
+      const why = run.result?.stderr?.trim().split("\n").slice(-3).join(" ") || (run.error ? JSON.stringify(run.error) : run.status);
+      throw new ViktorError(0, "script_failed", `Viktor script run ${run.id} ${run.status}: ${why.slice(0, 500)}`);
+    }
+    // Viktor keeps only the end of a longer stdout: never hand back part of it.
+    if (run.result?.stdout_truncated) {
+      const kind = /^# openmerit:(\w+)/.exec(code)?.[1] ?? "";
+      throw new ViktorError(0, "stdout_truncated", `Viktor cut ${OUTPUTS[kind] ?? "a script's output"} at ${STDOUT_LIMIT.toLocaleString("en-US")} characters (script run ${run.id}), so OpenMerit did not read it.`);
+    }
+    return run.result?.stdout ?? "";
+  };
   return {
     async me() {
       const body = await call<{ key_type?: string; team_id?: string; scopes?: string[]; key_preview?: string }>("GET", "/api/public/v1/me");
@@ -111,17 +148,20 @@ export function viktorClient(options: ViktorClientOptions): ViktorClient {
       const body = await call<{ total_credits?: number; monthly_credits?: number }>("GET", "/api/public/v1/credits");
       return { total: Number(body.total_credits ?? 0), monthly: typeof body.monthly_credits === "number" ? body.monthly_credits : null };
     },
-    async runScript(code, args = [], timeoutSeconds = 120) {
-      let run = await call<Awaited<ReturnType<typeof scriptRun>>>("POST", "/api/public/v1/scripts/runs", { code: withArgs(code, args), args: [], timeout_seconds: timeoutSeconds, wait_seconds: Math.min(timeoutSeconds, 30) });
-      const deadline = Date.now() + (timeoutSeconds + 60) * 1000;
-      while (PENDING.has(run.status) && Date.now() < deadline) { await sleep(2000); run = await scriptRun(run.id); }
-      const drafted = draftedTools(run.result?.stderr ?? "");
-      if (drafted.length) throw new ViktorError(0, "needs_approval", `Viktor saved OpenMerit's call${drafted.length === 1 ? "" : "s"} to ${drafted.join(", ")} as ${drafted.length === 1 ? "a draft that waits" : "drafts that wait"} for approval in chat, so ${drafted.length === 1 ? "it" : "they"} did not run. In Viktor, let ${drafted.length === 1 ? "this tool" : "these tools"} run without approval, then press Refresh.`);
-      if (run.status !== "completed" || (run.result?.exit_code ?? 0) !== 0) {
-        const why = run.result?.stderr?.trim().split("\n").slice(-3).join(" ") || (run.error ? JSON.stringify(run.error) : run.status);
-        throw new ViktorError(0, "script_failed", `Viktor script run ${run.id} ${run.status}: ${why.slice(0, 500)}`);
+    runScript,
+    async runScriptPaged(code, args = [], timeoutSeconds = 120) {
+      const path = `${WORK_DIR}/out/${randomUUID()}.txt`;
+      await runScript(toFile(code, path), args, timeoutSeconds);
+      // PAGE prints the file's size, then a page in base64; it deletes the file after the last one.
+      const pages: Buffer[] = [];
+      for (let offset = 0, size = 1; offset < size; offset += PAGE_BYTES) {
+        const page = await runScript(PAGE, [path, String(offset), String(PAGE_BYTES)], 60);
+        const newline = page.indexOf("\n");
+        size = Number(page.slice(0, newline));
+        if (!Number.isFinite(size)) throw new ViktorError(0, "script_failed", `Viktor returned an unreadable page of a script's output (offset ${offset}).`);
+        pages.push(Buffer.from(page.slice(newline + 1).trim(), "base64"));
       }
-      return run.result?.stdout ?? "";
+      return Buffer.concat(pages).toString("utf8");
     },
     async startThread(message, idempotencyKey) {
       const body = await call<{ thread: { id: string }; run: { id: string } }>("POST", "/api/public/v1/threads", { message, speed: "faster" }, { "idempotency-key": idempotencyKey });

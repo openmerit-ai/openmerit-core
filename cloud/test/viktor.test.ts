@@ -11,16 +11,23 @@ import { caller, costOf, startApp, stop, subscribe, waitFor, type FakeModels } f
 
 const KEY = "zt_live_sk_fake_owner_key_1234";
 const SLACK = "T1 · billing · Duplicate November charge";
-type Cron = { id: string; path: string; title: string; model: string | null; execution_type: string; description: string; cron: string; paused: boolean; deleted: boolean };
+type Cron = { id: string; path: string; title: string; model: string | null; execution_type: string; description: string; cron: string; paused: boolean; deleted: boolean; condition_script_path?: string };
 
 /** Credits Viktor reports for each test run, by preset, and for the API thread that starts them. */
 const RUN = { smart: 70, balanced: 20, cheap: 4 } as Record<string, number>;
 const THREAD = 40;
 
-function fakeViktor() {
+/** The test task's instructions, longer than list_crons' 240-character preview: the judge must get all of it. */
+const TRIAGE = `Classify these 6 support tickets, then post the result to #check-this-out. ${"Use the categories billing, bug, account and other, one line per ticket. ".repeat(6)}End of instructions.`;
+
+/** Every prompt the fake judge got. */
+const judged: string[] = [];
+
+function fakeViktor(extra: Cron[] = []) {
   const crons: Cron[] = [
     ...["heartbeat", "memory_dreaming", "skill_refining", "workflow_discovery"].map(name => ({ id: `sys_${name}`, path: `/${name}`, title: name, model: null, execution_type: "agent", description: "system", cron: "0 9 * * *", paused: false, deleted: false })),
-    { id: "Cut8kTVZ", path: "/ticket_triage_test", title: "Ticket triage test", model: "smart", execution_type: "agent", description: "Classify these 6 support tickets, then post the result to #check-this-out.", cron: "0 9 * * 1", paused: true, deleted: false },
+    { id: "Cut8kTVZ", path: "/ticket_triage_test", title: "Ticket triage test", model: "smart", execution_type: "agent", description: TRIAGE, cron: "0 9 * * 1", paused: true, deleted: false },
+    ...extra,
   ];
   const files = new Map<string, string>();
   const state = { scopes: [...REQUIRED_SCOPES] as string[], created: [] as string[], deleted: [] as string[], threads: [] as { id: string; message: string }[], scripts: [] as string[], auth: new Set<string>(), draft: null as string | null, refuse: null as string | null };
@@ -30,7 +37,8 @@ function fakeViktor() {
     for (let repeat = 1; repeat <= spec.repeats; repeat++) for (const model of spec.models) {
       // balanced posts the wrong category once; the rest post the right one each time.
       const text = model === "balanced" && repeat === 2 ? "T1 · bug · Duplicate November charge" : SLACK;
-      runs.push({ model, repeat, status: "success", error: null, report: `Classified the tickets on ${model}.`, runModel: model, threadId: `run_${model}_${repeat}`, actions: [{ summary: "Captured Slack message to C0CAZCERFCM; no Slack message was sent", channel_id: "C0CAZCERFCM", text }], seconds: 12 });
+      // Reports long enough that the progress file passes Viktor's 64,000-character stdout, as 4 presets × 3 runs can.
+      runs.push({ model, repeat, status: "success", error: null, report: `Classified the tickets on ${model}. ${"Ticket notes. ".repeat(600)}`, runModel: model, threadId: `run_${model}_${repeat}`, actions: [{ summary: "Captured Slack message to C0CAZCERFCM; no Slack message was sent", channel_id: "C0CAZCERFCM", text }], seconds: 12 });
     }
     // The batch deletes its copies at the end, as BATCH does.
     for (const model of spec.models) { const index = crons.findIndex(cron => cron.path === spec.copyPath + model); crons.splice(index, 1); state.deleted.push(spec.copyPath + model); }
@@ -50,9 +58,23 @@ function fakeViktor() {
       // A workspace that makes a tool wait for approval: the gateway saves the call as a draft, and the script fails on the draft receipt.
       if (kind === state.draft) return { body: { id: `script_${state.scripts.length}`, status: "completed", result: { exit_code: 1, stdout: "", stderr: `[tool-gateway] ${kind}_tool: draft created, not executed\npydantic_core._pydantic_core.ValidationError: 1 validation error for Response` } } };
       let stdout = "";
-      if (kind === "list") stdout = JSON.stringify({ tasks: crons.filter(cron => !cron.deleted), usage: [{ credits: 140, path: "/agent_runs/crons/ticket_triage_test/2026-11-18T09-00-00" }, { credits: 536, path: "/agent_runs/crons/workflow_discovery/2026-11-19T10-56-20" }] });
+      // list_crons gives the first 240 characters of the instructions; get_path_info, which the listing used to call for each task, all of them.
+      const full = code.includes("get_path_info");
+      if (kind === "list") stdout = JSON.stringify({ tasks: crons.filter(cron => !cron.deleted).map(cron => ({ ...cron, description: full ? cron.description : cron.description.slice(0, 240) })), usage: [{ credits: 140, path: "/agent_runs/crons/ticket_triage_test/2026-11-18T09-00-00" }, { credits: 536, path: "/agent_runs/crons/workflow_discovery/2026-11-19T10-56-20" }] });
       if (kind === "put") { files.set(`${args[0]}/spec.json`, args[2]!); stdout = "{\"ok\": true}"; }
       if (kind === "read") stdout = files.get(args[0]!) ?? "{\"status\": \"missing\"}";
+      if (kind === "describe") stdout = JSON.stringify({ description: crons.find(cron => cron.path === args[0])!.description });
+      // PAGE: the output file's size in bytes, then a piece of it in base64; the last piece deletes the file.
+      if (kind === "page") {
+        const bytes = Buffer.from(files.get(args[0]!) ?? "", "utf8"), offset = Number(args[1]), size = Number(args[2]);
+        stdout = `${bytes.length}\n${bytes.subarray(offset, offset + size).toString("base64")}`;
+        if (offset + size >= bytes.length) files.delete(args[0]!);
+      }
+      // A script whose stdout goes to a file prints nothing itself.
+      const toFile = /^import os as _os, sys as _osys, atexit as _atexit; .*_out = open\(("[^"]+"), "w"/m.exec(code)?.[1];
+      if (toFile) { files.set(JSON.parse(toFile) as string, stdout); stdout = ""; }
+      // Viktor returns at most 64,000 characters of stdout: the end of it, flagged.
+      if (stdout.length > 64_000) return { body: { id: `script_${state.scripts.length}`, status: "completed", result: { exit_code: 0, stdout: stdout.slice(-64_000), stdout_truncated: true, stderr: "" } } };
       if (kind === "credits") stdout = JSON.stringify({ credits: Object.fromEntries((JSON.parse(args[0]!) as string[]).map(id => [id, id.startsWith("run_") ? RUN[id.split("_")[1]!]! : THREAD])) });
       if (kind === "cleanup") {
         const left = crons.filter(cron => cron.path.startsWith(args[0]!) && cron.title.startsWith("OpenMerit: "));
@@ -92,6 +114,7 @@ async function fakeJudge(): Promise<FakeModels> {
     req.on("end", () => {
       const parsed = JSON.parse(raw) as { model: string; messages: { role: string; content: string }[] };
       const system = parsed.messages.find(message => message.role === "system")?.content ?? "", prompt = parsed.messages.find(message => message.role === "user")?.content ?? "";
+      judged.push(prompt);
       fake.calls.push({ model: parsed.model, ticket: system.slice(0, 20), auth: "" });
       const ids = ["check-1", "check-2", "check-3", "check-4", "check-5"];
       const graded = prompt.split("Run to grade:")[1] ?? "";
@@ -164,6 +187,9 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     assert.equal(report.connection.change.link, "https://app.viktor.com/scheduled-tasks");
     // The thread and 3 runs on each preset: 40 + 3 × (70 + 20 + 4).
     assert.equal(report.connection.creditsUsed, 322);
+    // The listing kept only the start of the instructions; the judge got all of them, read once by the job.
+    assert.ok(judged.length > 0 && judged.filter(prompt => prompt.includes("Instructions:")).every(prompt => prompt.includes(TRIAGE)));
+    assert.equal(viktor.state.scripts.filter(kind => kind === "describe").length, 1);
     assert.ok(report.notices.some(notice => /Test mode captured 9 outside actions/.test(notice)));
     assert.deepEqual(report.connection.copiesLeft, []);
     assert.deepEqual([...viktor.state.created].sort(), [...viktor.state.deleted].sort(), "every copy OpenMerit made is deleted");
@@ -252,6 +278,35 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     const recommend = await admin.tool("openmerit_recommend", { job_id: jobId });
     assert.equal(recommend.isError, true);
     assert.match(recommend.text, /evaluated a Viktor task, which has no bundle to run again\. An admin starts it again with Start again/);
+  } finally {
+    await stop(app); await judge.close();
+    await new Promise<void>(resolve => { viktor.server.closeAllConnections(); viktor.server.close(() => resolve()); });
+  }
+});
+
+test("Viktor: a workspace whose instructions pass Viktor's 64,000-character stdout lists in full", async () => {
+  // Seven project tasks with long instructions, about 73,000 characters in all, as in Praveen's workspace.
+  const lengths = [1_317, 4_200, 6_800, 9_100, 11_500, 14_877, 25_206];
+  const project = lengths.map((length, index): Cron => ({
+    id: `proj_${index}`, path: `/u0cb2f8emqc/projects/prompts/task_${index}`, title: `OpenMerit: Project task ${index + 1}`, model: index % 2 ? "balanced" : "smart-writing", execution_type: "agent",
+    description: `Task ${index + 1}: ${"Review the drafts, raw packets and facts JSON against the style guide. ".repeat(length / 72 + 1)}`.slice(0, length), cron: "0 9 * * *", paused: index === 6, deleted: false, condition_script_path: `/u0cb2f8emqc/projects/prompts/check_${index}.py`,
+  }));
+  const viktor = fakeViktor(project);
+  // As in Praveen's workspace: the 4 system tasks and the 7 project tasks; the test task was deleted.
+  viktor.crons.find(cron => cron.path === "/ticket_triage_test")!.deleted = true;
+  await new Promise<void>(resolve => viktor.server.listen(0, "127.0.0.1", resolve));
+  viktor.url = `http://127.0.0.1:${(viktor.server.address() as AddressInfo).port}`;
+  const judge = await fakeJudge();
+  const app = await startApp({ models: judge, env: { OPENMERIT_VIKTOR_URL: viktor.url, OPENMERIT_VIKTOR_POLL_MS: "200" } });
+  try {
+    await subscribe(app, "org_long");
+    const admin = caller(app, "test:user_l:org_long:admin");
+    const connected = await admin.api<{ listingError: string | null; tasks: { title: string; status: string; reason: string | null }[] }>("/api/connections/viktor", { method: "POST", body: JSON.stringify({ apiKey: KEY, creditCap: 100 }) });
+    assert.equal(connected.status, 201, JSON.stringify(connected.body));
+    assert.equal(connected.body.listingError, null);
+    assert.equal(connected.body.tasks.length, 11);
+    assert.deepEqual(connected.body.tasks.filter(task => task.title.startsWith("OpenMerit: Project")).map(task => task.status), Array(7).fill("skipped"));
+    assert.deepEqual(viktor.state.scripts.slice(0, 2), ["list", "page"]);
   } finally {
     await stop(app); await judge.close();
     await new Promise<void>(resolve => { viktor.server.closeAllConnections(); viktor.server.close(() => resolve()); });

@@ -3,10 +3,13 @@
 // are worked out by hand in the comments; no request leaves the process.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { Measurement } from "../src/engine/evaluate.ts";
 import {
-  batchMeasure, batchSpec, draftedTools, viktorErrorSentence, judgeChecks, CREDIT_USD, estimateCredits, evaluateViktor, gradeRun, keyProblem, proposeChange, readTasks, REQUIRED_SCOPES, viktor, viktorClient, withArgs,
+  batchMeasure, batchSpec, draftedTools, viktorErrorSentence, judgeChecks, CREDIT_USD, estimateCredits, evaluateViktor, gradeRun, keyProblem, proposeChange, readTasks, REQUIRED_SCOPES, viktor, viktorClient, withArgs, WORK_DIR,
   type BatchRun, type Check,
 } from "../src/connectors/viktor/index.ts";
 
@@ -43,6 +46,37 @@ test("a key connects only with every scope the connection needs, and a refused k
   const unpaid = await keyProblem(viktorClient({ apiKey: "k", fetch: refused.fetcher }));
   assert.ok("problem" in unpaid);
   assert.match(unpaid.problem, /paid or Enterprise plan/);
+});
+
+test("Viktor keeps only the last 64,000 characters of a script's stdout: runScript refuses cut output, and runScriptPaged reads all of it through a file", async () => {
+  // A sandbox that runs the code it is sent with this machine's Python, under a temporary WORK_DIR,
+  // and returns stdout as Viktor does: the end of it, flagged, when it passes 64,000 characters.
+  const sandbox = mkdtempSync(join(tmpdir(), "viktor-sandbox-"));
+  try {
+    const fake = fakeViktor({ "/api/public/v1/scripts/runs": body => {
+      const code = String((body as { code: string }).code).replaceAll(WORK_DIR, sandbox);
+      const run = spawnSync("python3", ["-I", "-c", code], { encoding: "utf8", maxBuffer: 1 << 26 });
+      const cut = run.stdout.length > 64_000;
+      return { body: { id: "run_p", status: "completed", result: { exit_code: run.status, stdout: cut ? run.stdout.slice(-64_000) : run.stdout, stdout_truncated: cut, stderr: run.stderr } } };
+    } });
+    const client = viktorClient({ apiKey: "k", fetch: fake.fetcher, sleep: async () => {} });
+    // A listing past the limit, with characters of 1 to 4 bytes so pages split inside one, printed after a log line.
+    const listing = `# openmerit:list\nimport json, sys\nprint("listing")\nprint(json.dumps({"tasks": [{"id": str(i), "description": "Résumé € 🎫 " * 3000} for i in range(4)]}, ensure_ascii=False))\n`;
+    await assert.rejects(client.runScript(listing), { code: "stdout_truncated", message: /^Viktor cut the listing's output at 64,000 characters \(script run run_p\), so OpenMerit did not read it\.$/ });
+    const full = await client.runScriptPaged(listing, ["unused"], 60);
+    const parsed = JSON.parse(full.trim().split("\n").at(-1)!) as { tasks: { id: string; description: string }[] };
+    assert.equal(full.split("\n")[0], "listing");
+    assert.deepEqual(parsed.tasks.map(task => [task.id, task.description.length]), [0, 1, 2, 3].map(i => [String(i), "Résumé € 🎫 ".length * 3000]));
+    assert.ok(Buffer.byteLength(full) > 3 * 44_000, "the output took more than three pages");
+    // Each page fits under the limit, and the last one deleted the output file.
+    assert.ok(fake.requests.length >= 5);
+    assert.deepEqual(readdirSync(join(sandbox, "out")), []);
+    // An output of nothing reads as nothing.
+    assert.equal(await client.runScriptPaged("# openmerit:read\nimport sys\n"), "");
+    assert.ok(existsSync(join(sandbox, "out")));
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true });
+  }
 });
 
 test("a script run is polled until it ends, and a failed one throws with its last stderr lines", async () => {

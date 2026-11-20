@@ -21,8 +21,8 @@ import { readJson } from "../../ranking/graders.ts";
 import type { Complete } from "../../ranking/cases.ts";
 import { COPY_PATH, COPY_TITLE, WORK_DIR } from "./scripts.ts";
 
-export { BATCH, CLEANUP, CREDITS, LIST, PUT, READ, COPY_PATH, COPY_TITLE, WORK_DIR } from "./scripts.ts";
-export { keyProblem, REQUIRED_SCOPES, VIKTOR_API, ViktorError, viktorClient, withArgs, draftedTools, viktorErrorSentence, PENDING, type ViktorClient, type ViktorKey } from "./api.ts";
+export { BATCH, CLEANUP, CREDITS, DESCRIBE, LIST, PAGE, PUT, READ, COPY_PATH, COPY_TITLE, WORK_DIR } from "./scripts.ts";
+export { keyProblem, REQUIRED_SCOPES, VIKTOR_API, ViktorError, viktorClient, withArgs, toFile, STDOUT_LIMIT, PAGE_BYTES, draftedTools, viktorErrorSentence, PENDING, type ViktorClient, type ViktorKey } from "./api.ts";
 
 /** Viktor's presets, weakest first. Pinned models and the writing presets are not compared yet. */
 export const PRESETS = ["cheap", "balanced", "smart", "ultra"] as const;
@@ -60,7 +60,10 @@ export interface ViktorTask {
   timezone: string | null;
   paused: boolean;
   lastRunOutcome: string | null;
-  /** The task's full instructions; empty for a script task. */
+  /**
+   * The task's instructions. A listing has the first 240 characters (list_crons' preview); an
+   * evaluation reads the full text with DESCRIBE before the judge uses it. Empty for a script task.
+   */
   description: string;
   credits30d: number;
   runs30d: number;

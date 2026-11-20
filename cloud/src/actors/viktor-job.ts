@@ -14,7 +14,7 @@ import { CriticalError, Loop, StepExhaustedError, workflow } from "@rivet-dev/wo
 import { completeWith, createClient } from "../../../openmerit-core/src/ranking/index.ts";
 import { viktorErrorSentence } from "../../../openmerit-core/src/connectors/viktor/api.ts";
 import {
-  BATCH, batchMessage, batchSpec, CLEANUP, copyPrefix, CREDIT_USD, CREDITS, evaluateViktor, gradeRun, judgeChecks, PUT, proposeChange, READ, readBatch, RUN_CREDITS, isPreset,
+  BATCH, batchMessage, batchSpec, CLEANUP, copyPrefix, CREDIT_USD, CREDITS, DESCRIBE, evaluateViktor, gradeRun, judgeChecks, PUT, proposeChange, READ, readBatch, RUN_CREDITS, isPreset,
   viktor, viktorClient, writeChecks, type Batch, type BatchRun, type Check, type ViktorClient, type ViktorTask,
 } from "../../../openmerit-core/src/connectors/viktor/index.ts";
 import { approvalQuestion, basedOn, catalogueIndex, mergeEvidence, redact, strongest, type Ledger, type Measurement, type ModelResult } from "../engine.ts";
@@ -123,10 +123,23 @@ export const viktorJob = workflow({
   }),
   run: async ctx => {
     const jobId = ctx.key[0]!;
-    const { task, repeats } = await ctx.step("input", async s => ({ task: s.state.input.task, repeats: s.state.input.repeats }));
-    const { directory, spec } = batchSpec(jobId, task, repeats);
+    const { task: listed, repeats } = await ctx.step("input", async s => ({ task: s.state.input.task, repeats: s.state.input.repeats }));
+    const { directory, spec } = batchSpec(jobId, listed, repeats);
+    // The listing has only the start of the instructions; the judge reads the full text, fetched below.
+    let task = listed;
     try {
       try {
+        // 0. The task's full instructions, read once and recorded.
+        const description = await ctx.step({
+          name: "instructions", timeout: 300_000, maxRetries: INTERRUPTIONS,
+          run: async s => {
+            const viktorApi = await viktorFor(s.client<Registry>().account.getOrCreate([s.state.input.accountId]));
+            const parsed = JSON.parse((await viktorApi.runScriptPaged(DESCRIBE, [listed.path], 120)).trim().split("\n").at(-1) ?? "{}") as { description?: unknown };
+            return typeof parsed.description === "string" && parsed.description ? parsed.description : listed.description;
+          },
+        });
+        task = { ...listed, description };
+
         // 1. Start: the job's spend limit for the judge, and the batch's script and spec in the sandbox.
         await ctx.step({
           name: "put", timeout: 300_000, maxRetries: INTERRUPTIONS,
@@ -159,7 +172,7 @@ export const viktorJob = workflow({
               name: "read", timeout: 180_000, maxRetries: INTERRUPTIONS,
               run: async s => {
                 const viktorApi = await viktorFor(s.client<Registry>().account.getOrCreate([s.state.input.accountId]));
-                const current = readBatch(await viktorApi.runScript(READ, [spec.out], 60));
+                const current = readBatch(await viktorApi.runScriptPaged(READ, [spec.out], 60));
                 const run = await viktorApi.run(thread.runId);
                 s.state.progress.measured = current.runs.length; s.state.updatedAt = now();
                 return { batch: current.status === "done" || current.status === "failed" ? current : null, status: current.status, run: run.status, runError: run.error };
