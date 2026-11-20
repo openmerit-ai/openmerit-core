@@ -278,9 +278,9 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       if (!found) return error(404, "This run has no result yet.");
       const change = found.connection?.change;
       if (!change || !found.pick) return error(409, "This result proposes no change to approve.");
-      found.approved ??= { jobId: found.jobId, change: change.text, link: change.link, by: state.me.user.id, at: new Date().toISOString() };
+      found.approved ??= { jobId: found.jobId, change: change.text, link: change.link, by: state.me.user.id, name: "Amira Haddad", email: null, at: new Date().toISOString() };
       const row = state.viktor?.tasks.find((item) => item.jobId === found.jobId);
-      if (row?.result) row.result.approval = { by: found.approved.by, at: found.approved.at };
+      if (row?.result) row.result.approval = { by: found.approved.by, name: found.approved.name ?? null, at: found.approved.at };
       return json(200, found.approved);
     }
     if (path === "/api/endpoints" && method === "GET") return json(200, state.endpoints);

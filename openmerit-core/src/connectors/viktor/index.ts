@@ -22,7 +22,7 @@ import type { Complete } from "../../ranking/cases.ts";
 import { COPY_PATH, COPY_TITLE, WORK_DIR } from "./scripts.ts";
 
 export { BATCH, CLEANUP, CREDITS, LIST, PUT, READ, COPY_PATH, COPY_TITLE, WORK_DIR } from "./scripts.ts";
-export { keyProblem, REQUIRED_SCOPES, VIKTOR_API, ViktorError, viktorClient, withArgs, PENDING, type ViktorClient, type ViktorKey } from "./api.ts";
+export { keyProblem, REQUIRED_SCOPES, VIKTOR_API, ViktorError, viktorClient, withArgs, draftedTools, PENDING, type ViktorClient, type ViktorKey } from "./api.ts";
 
 /** Viktor's presets, weakest first. Pinned models and the writing presets are not compared yet. */
 export const PRESETS = ["cheap", "balanced", "smart", "ultra"] as const;

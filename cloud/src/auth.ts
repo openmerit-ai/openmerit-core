@@ -28,6 +28,8 @@ export interface Auth {
   api(request: Request): Promise<AuthResult>;
   /** The user's primary email address, which no token carries; null when it cannot be found. */
   email(userId: string): Promise<string | null>;
+  /** The user's name and primary email address, which no token carries; null when Clerk cannot be reached or has no such user. */
+  person(userId: string): Promise<{ name: string | null; email: string | null } | null>;
 }
 
 export const NO_ORGANIZATION = "This token names no Clerk organization. OpenMerit accounts are organizations: sign in again and choose an organization, or create one at app.openmerit.ai.";
@@ -78,9 +80,13 @@ export class ClerkAuth implements Auth {
   }
 
   async email(userId: string): Promise<string | null> {
+    return (await this.person(userId))?.email ?? null;
+  }
+
+  async person(userId: string): Promise<{ name: string | null; email: string | null } | null> {
     try {
       const user = await createClerkClient({ secretKey: this.config.secretKey }).users.getUser(userId);
-      return user.primaryEmailAddress?.emailAddress ?? null;
+      return { name: user.fullName || user.username || null, email: user.primaryEmailAddress?.emailAddress ?? null };
     } catch { return null; }
   }
 
@@ -111,4 +117,9 @@ export class TestAuth implements Auth {
   async mcp(request: Request) { return this.parse(request); }
   async api(request: Request) { return this.parse(request); }
   async email(): Promise<string | null> { return null; }
+  /** Users named `user_<x>` are "User <x>"; Clerk has no other user. */
+  async person(userId: string): Promise<{ name: string | null; email: string | null } | null> {
+    const name = /^user_(\w+)$/.exec(userId)?.[1];
+    return name ? { name: `User ${name.toUpperCase()}`, email: `${name}@example.test` } : null;
+  }
 }

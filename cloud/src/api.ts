@@ -6,7 +6,7 @@ import type { AuthResult, Identity } from "./auth.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
 import { explain, type JobResult } from "./report.ts";
 import { rerunJob } from "./start.ts";
-import { approveChange, connectViktor, refreshViktor, startViktorTasks, VIKTOR, viktorView } from "./viktor.ts";
+import { approveChange, connectViktor, currentViktorView, namedApproval, refreshViktor, startViktorTasks, VIKTOR, viktorView } from "./viktor.ts";
 import type { EndpointKind } from "../../openmerit-core/src/ranking/index.ts";
 
 type Json = Record<string, unknown>;
@@ -102,14 +102,14 @@ export function apiRoutes(deps: AppDeps) {
       if (!row) return error(404, "No such run in this account.");
       const report = await account.report({ jobId });
       // The saved report, with the same reason and cheaperThanCurrent the coding agent gets, and a connection result's approval.
-      if (report) return json(200, { ...(report.json as JobResult), ...explain(report.json as JobResult), approved: await account.approval(jobId) });
+      if (report) return json(200, { ...(report.json as JobResult), ...explain(report.json as JobResult), approved: await namedApproval(client, deps.auth, who.accountId, jobId) });
       return json(200, { ...(row.kind === VIKTOR ? await client.viktorJob.get([jobId]).status() : await client.job.get([jobId]).status()), report: null });
     }
     // Approve change: records who approved a connection result's change, and when. It changes nothing in the connected app.
     if ((match = /^\/api\/runs\/([\w-]+)\/approve$/.exec(path)) && method === "POST") {
       const denied = admin(); if (denied) return denied;
       if (!(await account.job(match[1]!))) return error(404, "No such run in this account.");
-      const approved = await approveChange(client, { accountId: who.accountId, userId: who.userId, jobId: match[1]! });
+      const approved = await approveChange(client, deps.auth, { accountId: who.accountId, userId: who.userId, jobId: match[1]! });
       return approved.ok ? json(200, approved.approval) : error(approved.status, approved.error);
     }
     // A fix from a run's notes: run its task again, optionally with a higher budget per job.
@@ -146,7 +146,7 @@ export function apiRoutes(deps: AppDeps) {
     }
 
     // App connections: Viktor, with an API key. Connecting checks the key's scopes, lists the tasks and starts evaluating them.
-    if (path === "/api/connections/viktor" && method === "GET") return json(200, await viktorView(client, who.accountId));
+    if (path === "/api/connections/viktor" && method === "GET") return json(200, await currentViktorView(client, who.accountId, deps.auth));
     if (path === "/api/connections/viktor" && method === "POST") {
       const denied = admin(); if (denied) return denied;
       const input = await body(request);
@@ -163,7 +163,7 @@ export function apiRoutes(deps: AppDeps) {
       const denied = admin(); if (denied) return denied;
       await refreshViktor(client, who.accountId);
       const started = await startViktorTasks(client, { accountId: who.accountId, userId: null });
-      return json(200, { ...await viktorView(client, who.accountId), started: started.started, refused: started.refused });
+      return json(200, { ...await viktorView(client, who.accountId, deps.auth), started: started.started, refused: started.refused });
     }
     if ((match = /^\/api\/connections\/viktor\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
       const denied = admin(); if (denied) return denied;

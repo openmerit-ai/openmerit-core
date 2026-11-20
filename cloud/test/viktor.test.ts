@@ -23,7 +23,7 @@ function fakeViktor() {
     { id: "Cut8kTVZ", path: "/ticket_triage_test", title: "Ticket triage test", model: "smart", execution_type: "agent", description: "Classify these 6 support tickets, then post the result to #check-this-out.", cron: "0 9 * * 1", paused: true, deleted: false },
   ];
   const files = new Map<string, string>();
-  const state = { scopes: [...REQUIRED_SCOPES] as string[], created: [] as string[], deleted: [] as string[], threads: [] as { id: string; message: string }[], scripts: [] as string[], auth: new Set<string>() };
+  const state = { scopes: [...REQUIRED_SCOPES] as string[], created: [] as string[], deleted: [] as string[], threads: [] as { id: string; message: string }[], scripts: [] as string[], auth: new Set<string>(), draft: null as string | null };
   const runBatch = (spec: { source: string; models: string[]; repeats: number; copyPath: string; copyTitle: string; out: string }) => {
     const runs = [];
     for (const model of spec.models) { state.created.push(spec.copyPath + model); crons.push({ ...crons.find(cron => cron.path === spec.source)!, id: `copy_${model}`, path: spec.copyPath + model, title: spec.copyTitle, model, paused: true }); }
@@ -45,6 +45,8 @@ function fakeViktor() {
       const inCode = /^import sys as _sys, json as _json; _sys\.argv\[1:\] = _json\.loads\((".*")\)$/m.exec(code)?.[1];
       const args = inCode ? JSON.parse(JSON.parse(inCode) as string) as string[] : (body!.args as string[]) ?? [];
       state.scripts.push(kind);
+      // A workspace that makes a tool wait for approval: the gateway saves the call as a draft, and the script fails on the draft receipt.
+      if (kind === state.draft) return { body: { id: `script_${state.scripts.length}`, status: "completed", result: { exit_code: 1, stdout: "", stderr: `[tool-gateway] ${kind}_tool: draft created, not executed\npydantic_core._pydantic_core.ValidationError: 1 validation error for Response` } } };
       let stdout = "";
       if (kind === "list") stdout = JSON.stringify({ tasks: crons.filter(cron => !cron.deleted), usage: [{ credits: 140, path: "/agent_runs/crons/ticket_triage_test/2026-11-18T09-00-00" }, { credits: 536, path: "/agent_runs/crons/workflow_discovery/2026-11-19T10-56-20" }] });
       if (kind === "put") { files.set(`${args[0]}/spec.json`, args[2]!); stdout = "{\"ok\": true}"; }
@@ -111,7 +113,7 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
   const judge = await fakeJudge();
   const app = await startApp({ models: judge, env: {
     CLERK_SECRET_KEY: "sk_test_fake", CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from("clerk.openmerit.test$").toString("base64")}`,
-    OPENMERIT_VIKTOR_URL: viktor.url, OPENMERIT_VIKTOR_POLL_MS: "200",
+    OPENMERIT_VIKTOR_URL: viktor.url, OPENMERIT_VIKTOR_POLL_MS: "200", OPENMERIT_VIKTOR_STALE_MS: "1500",
   } });
   try {
     await subscribe(app, "org_viktor");
@@ -169,9 +171,10 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     // Approve change: admins only; it records who and when, and the real task stays on smart.
     assert.equal((await member.api(`/api/runs/${jobId}/approve`, { method: "POST" })).status, 403);
     const before = Date.now();
-    const approved = await admin.api<{ change: string; by: string; at: string }>(`/api/runs/${jobId}/approve`, { method: "POST" });
+    const approved = await admin.api<{ change: string; by: string; name: string; email: string; at: string }>(`/api/runs/${jobId}/approve`, { method: "POST" });
     assert.equal(approved.status, 200);
-    assert.deepEqual([approved.body.change, approved.body.by], ["Set Ticket triage test to cheap", "user_v"]);
+    // The approver's name and email come from Clerk (TestAuth here) and are kept with the approval.
+    assert.deepEqual([approved.body.change, approved.body.by, approved.body.name, approved.body.email], ["Set Ticket triage test to cheap", "user_v", "User V", "v@example.test"]);
     assert.ok(Date.parse(approved.body.at) >= before - 1000);
     assert.equal(viktor.crons.find(cron => cron.path === "/ticket_triage_test")!.model, "smart");
     const again = await admin.api<{ by: string; at: string }>(`/api/runs/${jobId}/approve`, { method: "POST" });
@@ -180,9 +183,42 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     // openmerit_tasks lists the connection's tasks with the verdict and the approval.
     const tasks = await admin.tool("openmerit_tasks", {});
     assert.match(tasks.text, /Viktor \(322 of 2000 credits used\): 5 scheduled tasks/);
-    assert.match(tasks.text, /Ticket triage test \(smart, 140 credits in 30 days\): Set Ticket triage test to cheap, approved by user_v at /);
+    assert.match(tasks.text, /Ticket triage test \(smart, 140 credits in 30 days\): Set Ticket triage test to cheap, approved by User V on \d{4}-\d{2}-\d{2}; /);
     assert.match(tasks.text, /heartbeat \(default model, 0 credits in 30 days\): skipped: Viktor's own task/);
     assert.equal(viktor.state.auth.size, 2, "only the stored key and the one refused key reached Viktor");
+
+    // A task deleted in Viktor leaves the table once the listing is stale; its result stays in Runs under its name.
+    const view = () => admin.api<{ creditsUsed: number; listingError: string | null; tasks: { title: string }[] }>("/api/connections/viktor");
+    viktor.crons.find(cron => cron.path === "/ticket_triage_test")!.deleted = true;
+    await new Promise(resolve => setTimeout(resolve, 1600));
+    assert.deepEqual((await view()).body.tasks.map(task => task.title), ["workflow_discovery", "heartbeat", "memory_dreaming", "skill_refining"]);
+    assert.doesNotMatch((await admin.tool("openmerit_tasks", {})).text, /Ticket triage test/);
+    const runs = (await admin.api<{ id: string; result: { task: string | null } | null }[]>("/api/runs")).body;
+    assert.equal(runs.find(run => run.id === jobId)!.result!.task, "Ticket triage test");
+
+    // A listing whose tool call Viktor saved as a draft says so on the connection, and keeps the last listing.
+    viktor.state.draft = "list";
+    const drafted = await admin.api<{ listingError: string; tasks: unknown[] }>("/api/connections/viktor/refresh", { method: "POST" });
+    assert.match(drafted.body.listingError, /Viktor saved OpenMerit's call to list_tool as a draft that waits for approval in chat, so it did not run\./);
+    assert.equal(drafted.body.tasks.length, 4);
+    viktor.state.draft = null;
+    viktor.crons.find(cron => cron.path === "/ticket_triage_test")!.deleted = false;
+    assert.equal((await admin.api<{ tasks: unknown[] }>("/api/connections/viktor/refresh", { method: "POST" })).body.tasks.length, 5);
+
+    // A job that fails before its Viktor thread starts spends no credits, and says why once.
+    viktor.state.draft = "put";
+    const restarted = await admin.api<{ started: string[] }>("/api/connections/viktor/tasks/Cut8kTVZ/start", { method: "POST" });
+    assert.equal(restarted.status, 201, JSON.stringify(restarted.body));
+    const failedId = (await admin.api<{ id: string }[]>("/api/runs")).body[0]!.id;
+    assert.notEqual(failedId, jobId);
+    const failed = await waitFor(() => admin.tool("openmerit_result", { job_id: failedId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 60_000);
+    assert.equal(failed.data.status, "failed", failed.text);
+    assert.equal(failed.text.match(/draft that waits for approval/g)?.length, 1, failed.text);
+    const failedView = (await admin.api<{ error: string; notices: string[] }>(`/api/runs/${failedId}`)).body;
+    assert.match(failedView.error, /^The job failed: .*put_tool as a draft/);
+    assert.deepEqual(failedView.notices, []);
+    assert.equal((await view()).body.creditsUsed, 322, "the failed job counts 0 credits");
+    viktor.state.draft = null;
 
     // Removing the connection deletes the key; the run and its approval stay.
     assert.equal((await admin.api("/api/connections/viktor", { method: "DELETE" })).status, 200);

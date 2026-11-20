@@ -50,7 +50,7 @@ export type TaskState = "watching" | "idle" | "frozen" | "retired";
 export type JobStatus = "queued" | "running" | "needs_input" | "done" | "failed" | "stopped";
 
 // What a finished run's report found: its result status, the model it picked and the one in use then.
-export interface RunResult { status: string; model: string | null; from: string | null; savingPerCallUsd: number | null }
+export interface RunResult { status: string; task?: string | null; model: string | null; from: string | null; savingPerCallUsd: number | null }
 // askedBy is the name the asking coding agent's MCP client sent, such as claude-code; null for a watch run or an unnamed client.
 export interface Run { id: string; taskId: string; kind: string; status: JobStatus | string; startedAt: string; finishedAt: string | null; askedBy: string | null; result: RunResult | null }
 
@@ -120,7 +120,8 @@ export interface ConnectionResult {
 }
 
 // Who approved a result's change, and when (POST /api/runs/:id/approve). It changes nothing in the connected app.
-export interface Approval { jobId?: string; change: string; link: string | null; by: string; at: string }
+// by is the approver's user ID; name is their name in Clerk, null when the lookup failed.
+export interface Approval { jobId?: string; change: string; link: string | null; by: string; name?: string | null; email?: string | null; at: string }
 
 // GET /api/runs/:id: the saved report once the job has one, with its approval.
 export interface Report extends JobResult { jobId: string; task: string; createdAt: string; approved?: Approval | null }
@@ -171,7 +172,7 @@ export interface ViktorTask {
   reason: string | null;
   estimatedCredits: number | null;
   jobId: string | null;
-  result: { status: string; change: string | null; link: string | null; approval: { by: string; at: string } | null } | null;
+  result: { status: string; change: string | null; link: string | null; approval: { by: string; name?: string | null; at: string } | null } | null;
 }
 export interface ViktorConnection {
   connected: boolean;

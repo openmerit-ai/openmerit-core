@@ -51,7 +51,7 @@ function live(job: JobView): Html {
   }[job.status];
   return html`<div class="eyebrow" data-live="${job.jobId}" data-status="${job.status}"><a href="/">Runs</a><span>›</span><span>${job.jobId}</span><span>Started ${date(job.createdAt)}</span></div>
     <h1 class="title">${title(job)}</h1>
-    <div class="card${job.status === "failed" ? " notice bad" : ""}" style="margin-top: 20px"${job.status === "failed" ? html` role="alert"` : ""}>${body}${job.notices.map((notice) => html`<p class="note">${notice}</p>`)}</div>
+    <div class="card${job.status === "failed" ? " notice bad" : ""}" style="margin-top: 20px"${job.status === "failed" ? html` role="alert"` : ""}>${body}${job.notices.filter((notice) => notice !== job.error).map((notice) => html`<p class="note">${notice}</p>`)}</div>
     ${job.provisional ? html`<section aria-labelledby="provisional"><h2 id="provisional">Provisional Pick</h2><div class="card"><p>${model(job.provisional.model)} on ${endpointName(job.provisional.endpoint)}${job.provisional.estCostPerCallUsd !== null ? html` · about ${per1k(job.provisional.estCostPerCallUsd)} per 1,000 calls` : ""}</p><p class="note">${job.provisional.reason} Chosen from the catalogue before measuring.</p></div></section>` : ""}
 `;
 }
@@ -119,7 +119,7 @@ function connectionChange(report: Report, admin: boolean): Html {
         <div class="card">
           <p><b>${change.text}</b></p>
           <p class="note">Make it in <a href="${change.link}" target="_blank" rel="noopener">Viktor's scheduled tasks</a>: open ${connection.taskTitle} and set its model to <code>${change.model}</code>. OpenMerit does not change the task.</p>
-          ${approved ? html`<p><span class="pill good">Approved</span> <span class="sub">by ${approved.by} on ${date(approved.at)} at ${new Date(approved.at).toISOString().slice(11, 16)} UTC</span></p>`
+          ${approved ? html`<p><span class="pill good">Approved</span> <span class="sub">by ${approved.name ?? approved.by} on ${date(approved.at)} at ${new Date(approved.at).toISOString().slice(11, 16)} UTC</span></p>`
             : admin ? html`<p style="margin-top: 12px"><button class="btn primary" type="button" data-action="approve">Approve change</button></p><p class="note">Approving records who approved the change and when. You then make the change in Viktor yourself.</p>`
             : html`<p class="note">An admin approves this change.</p>`}
         </div>

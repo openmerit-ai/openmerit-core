@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Viktor listing, approver names and credits in the cloud app — unreleased, 20 November 2026
+
+Reviewed the homepage against the Viktor connection relisting stale task lists, showing approvers by name, counting only spent credits, and reporting a drafted tool call as an error. `site/index.html` still makes no claim about Viktor, credits or approvals. No homepage copy change is needed; the cloud README's Viktor section describes it.
+
 ## The Viktor connection in the cloud app — unreleased, 19 November 2026
 
 Reviewed the homepage against the cloud app connecting a Viktor workspace with an API key: it lists the workspace's scheduled tasks, evaluates cheaper presets on temporary paused copies in Viktor's test mode within a credit cap, and records an approval without changing the task. `site/index.html` has no FAQ block and makes no claim about Viktor, connected apps, credits or approvals. No homepage copy change is needed; the cloud README's Viktor section and the openmerit README's Engine section describe it.

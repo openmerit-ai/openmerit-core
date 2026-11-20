@@ -40,7 +40,7 @@ function taskStatus(task: ViktorTask, admin: boolean): Html {
     case "waiting": return html`<span class="pill warn">Waiting</span><span class="sub">About ${credits(task.estimatedCredits)} credits. ${task.reason ?? ""}</span>${admin ? html` <button class="btn" type="button" data-action="start" data-id="${task.id}">Start</button>` : ""}`;
     case "done": {
       const result = task.result;
-      const approved = result?.approval ? html`<span class="sub">Approved by ${result.approval.by} on ${date(result.approval.at)}</span>` : "";
+      const approved = result?.approval ? html`<span class="sub">Approved by ${result.approval.name ?? result.approval.by} on ${date(result.approval.at)}</span>` : "";
       return html`${result?.change ? html`<span class="pill good">${result.change}</span>` : html`<span class="pill tag">Keep ${task.model ?? "its model"}</span>`}${approved}<span class="sub"><a href="/r/${task.jobId}/">${result?.change && !result.approval ? "Review and approve" : "Open the result"}</a></span>`;
     }
   }

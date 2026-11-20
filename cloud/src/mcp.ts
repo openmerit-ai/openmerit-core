@@ -10,7 +10,7 @@ import { credits, explain, nearMissLine, reasonFor, type Fix, type JobResult } f
 import type { AppClient } from "./registry.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { bundleProblem, DEFAULT_ENVIRONMENT, rerunJob, startJob } from "./start.ts";
-import { VIKTOR, viktorView, type ViktorView } from "./viktor.ts";
+import { currentViktorView, VIKTOR, type ViktorView } from "./viktor.ts";
 import type { ViktorJobView } from "./actors/viktor-job.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -119,7 +119,8 @@ export function describeJob(view: JobView | ViktorJobView, appUrl: string): stri
   else if ((view.status === "running" || view.status === "queued") && !view.provisional) lines.push(`Testing in Viktor's test mode: ${view.progress.measured} of ${view.progress.planned ?? "?"} test runs finished (updated ${view.updatedAt}); call openmerit_result again later.`);
   else if (view.status === "running" || view.status === "queued") lines.push(`Provisional pick while it runs: ${view.provisional!.model}. ${view.provisional!.reason} Measured ${view.progress.measured}${view.progress.planned ? ` of about ${view.progress.planned}` : ""} candidate runs so far (updated ${view.updatedAt}); call openmerit_result again later.`);
   // A result's notices include the job's and those of its last stages, such as challengers left out.
-  const notices = result?.notices ?? view.notices;
+  // A failed job's error is its own line; jobs that ended before that also kept it as a notice.
+  const notices = (result?.notices ?? view.notices).filter(notice => notice !== view.error);
   for (const notice of notices) {
     lines.push(`Note: ${notice}`);
     const fix = result?.fixes?.find(item => item.notice === notice);
@@ -236,7 +237,7 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     return { text: describeJob(next, deps.config.appUrl), data: jobData(next) };
   }
   if (name === "openmerit_tasks") {
-    const [tasks, ready, connected] = await Promise.all([account.tasks(), account.readySince(identity.userId), viktorView(client, identity.accountId)]);
+    const [tasks, ready, connected] = await Promise.all([account.tasks(), account.readySince(identity.userId), currentViktorView(client, identity.accountId, deps.auth)]);
     const apps = viktorLines(connected);
     const text = (tasks.length
       ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} [${item.id}] (${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.status}, ${item.state}${item.idleSince ? ` since ${item.idleSince.slice(0, 10)}` : ""}`),
@@ -257,7 +258,7 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
 function viktorLines(view: ViktorView): string[] {
   if (!view.connected) return [];
   return [`Viktor (${view.creditsUsed ?? 0} of ${view.creditCap} credits used): ${view.tasks.length} scheduled task${view.tasks.length === 1 ? "" : "s"}:`, ...view.tasks.map(task => `- ${task.title} (${task.model ?? "default model"}, ${task.credits30d} credits in 30 days): ${
-    task.status === "done" ? `${task.result?.change ?? "keep its model"}${task.result?.approval ? `, approved by ${task.result.approval.by} at ${task.result.approval.at}` : ""}; openmerit_result with job_id "${task.jobId}"`
+    task.status === "done" ? `${task.result?.change ?? "keep its model"}${task.result?.approval ? `, approved by ${task.result.approval.name ?? task.result.approval.by} on ${task.result.approval.at.slice(0, 10)}` : ""}; openmerit_result with job_id "${task.jobId}"`
     : task.status === "evaluating" ? `evaluating, job_id "${task.jobId}"` : `${task.status}: ${task.reason}`}`)];
 }
 
