@@ -129,7 +129,9 @@ test("Langfuse: only a Viewer key connects, tasks are listed by spend, the top o
     assert.equal(unnamed!.reason, "generations without a name");
     assert.deepEqual([listedTop!.jobId, listedTop!.blocked, listedTop!.budgetUsd], [null, null, 5]);
     // Refresh lists again and starts nothing.
-    assert.deepEqual((await admin.api<{ tasks: Row[] }>("/api/connections/langfuse/refresh", { method: "POST" })).body.tasks.map(row => row.status), ["not_evaluated", "not_evaluated", "skipped"]);
+    assert.equal((await admin.api("/api/connections/langfuse/refresh", { method: "POST" })).status, 202);
+    const relisted = await waitFor(() => admin.api<{ listing: boolean; tasks: Row[] }>("/api/connections/langfuse"), view => !view.body.listing, 30_000);
+    assert.deepEqual(relisted.body.tasks.map(row => row.status), ["not_evaluated", "not_evaluated", "skipped"]);
     assert.deepEqual((await admin.api<unknown[]>("/api/runs")).body, []);
     // Evaluate: admins only.
     assert.equal((await member.api(`/api/connections/langfuse/tasks/${listedTop!.id}/start`, { method: "POST" })).status, 403);

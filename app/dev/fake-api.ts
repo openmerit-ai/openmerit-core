@@ -112,7 +112,8 @@ function viktorTasks(evaluated: boolean): ViktorTask[] {
       ? { status: "done", reason: null, estimatedCredits: 372, jobId: "v5t8c2", result: { status: "picked", change: "Set Claims digest to cheap", link: "https://app.viktor.com/scheduled-tasks", approval: null } }
       : { status: "not_evaluated", reason: null, estimatedCredits: 372 }),
     // Nothing starts on its own: a task waits for Evaluate, which is off when its estimate would pass the cap.
-    task("Denial letters", "/denial_letters", "smart", 260, { status: "not_evaluated", reason: null, estimatedCredits: 290 }),
+    // Listed after the first listing: New until someone opens its row or evaluates it.
+    task("Denial letters", "/denial_letters", "smart", 260, { status: "not_evaluated", reason: null, estimatedCredits: 290, isNew: evaluated }),
     task("Weekly payer report", "/weekly_payer_report", "balanced", 120, evaluated
       ? { status: "failed", reason: "Viktor refused the request: each script argument may be at most 2,000 characters.", estimatedCredits: 1720, jobId: "v9k3r1", blocked: "It needs about 1,720 credits, and 322 of the 2,000-credit cap are used or expected." }
       : { status: "not_evaluated", reason: null, estimatedCredits: 1720 }),
@@ -231,6 +232,8 @@ function advance(job: JobView, task: Task | undefined, since: number, now = Date
 export function createFakeApi(options: { appUrl?: string } = {}): (request: Request) => Promise<Response> {
   const states = new Map<string, State>();
   const since = Date.now();
+  // When each connection's pretend listing ends.
+  const listingUntil = new Map<string, number>();
   return async (request) => {
     const url = new URL(request.url), path = url.pathname, method = request.method;
     const bearer = /^Bearer preview-([a-z]+)(?:\.v(\d+))?$/.exec(request.headers.get("authorization") ?? "");
@@ -293,7 +296,10 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       return json(201, { jobId, taskId: task.id });
     }
     // The Viktor connection, as cloud/src/api.ts serves it: the key is checked, never stored or returned.
-    if (path === "/api/connections/langfuse" && method === "GET") return json(200, state.langfuse ?? { connected: false, tasks: [] });
+    // As the cloud app does: Refresh starts a listing and returns; the connection says listing until it ends, here 3 seconds later.
+    const listing = (kind: string) => (listingUntil.get(kind) ?? 0) > Date.now();
+    const relist = (kind: string) => { if (!listing(kind)) listingUntil.set(kind, Date.now() + 3000); };
+    if (path === "/api/connections/langfuse" && method === "GET") return json(200, state.langfuse ? { ...state.langfuse, listing: listing("langfuse") } : { connected: false, tasks: [] });
     if (path === "/api/connections/langfuse" && method === "POST") {
       if (denied) return denied;
       const publicKey = typeof input?.publicKey === "string" ? input.publicKey.trim() : "", secretKey = typeof input?.secretKey === "string" ? input.secretKey.trim() : "";
@@ -309,7 +315,7 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       delete state.langfuse;
       return json(200, { deleted: true });
     }
-    if (path === "/api/connections/langfuse/refresh" && method === "POST") { if (denied) return denied; return json(200, state.langfuse ?? { connected: false, tasks: [] }); }
+    if (path === "/api/connections/langfuse/refresh" && method === "POST") { if (denied) return denied; relist("langfuse"); return json(202, { ...(state.langfuse ?? { connected: false, tasks: [] }), listing: true }); }
     if ((match = /^\/api\/connections\/langfuse\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
       if (denied) return denied;
       const task = state.langfuse?.tasks.find((item) => item.id === match?.[1] && (item.status === "not_evaluated" || item.status === "failed") && !item.blocked);
@@ -317,7 +323,7 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       Object.assign(task, { status: "evaluating", reason: null });
       return json(201, { started: [task.id] });
     }
-    if (path === "/api/connections/viktor" && method === "GET") return json(200, state.viktor ?? { connected: false, tasks: [] });
+    if (path === "/api/connections/viktor" && method === "GET") return json(200, state.viktor ? { ...state.viktor, listing: listing("viktor") } : { connected: false, tasks: [] });
     if (path === "/api/connections/viktor" && method === "POST") {
       if (denied) return denied;
       const apiKey = typeof input?.apiKey === "string" ? input.apiKey.trim() : "";
@@ -334,7 +340,14 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       delete state.viktor;
       return json(200, { deleted: true });
     }
-    if (path === "/api/connections/viktor/refresh" && method === "POST") { if (denied) return denied; return json(200, state.viktor ?? { connected: false, tasks: [] }); }
+    if (path === "/api/connections/viktor/refresh" && method === "POST") { if (denied) return denied; relist("viktor"); return json(202, { ...(state.viktor ?? { connected: false, tasks: [] }), listing: true }); }
+    if ((match = /^\/api\/connections\/(viktor|langfuse)\/tasks\/([\w-]+)\/seen$/.exec(path)) && method === "POST") {
+      const tasks: { id: string; isNew?: boolean }[] = (match[1] === "viktor" ? state.viktor?.tasks : state.langfuse?.tasks) ?? [];
+      const task = tasks.find((item) => item.id === match?.[2]);
+      if (!task) return error(404, "No such task in this connection's listing.");
+      task.isNew = false;
+      return json(200, { seen: true });
+    }
     if ((match = /^\/api\/connections\/viktor\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
       if (denied) return denied;
       const task = state.viktor?.tasks.find((item) => item.id === match?.[1] && (item.status === "not_evaluated" || item.status === "failed") && !item.blocked);

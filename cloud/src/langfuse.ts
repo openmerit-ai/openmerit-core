@@ -14,7 +14,7 @@ import type { AppClient } from "./registry.ts";
 import type { JobResult } from "./report.ts";
 import { services } from "./services.ts";
 import { newJobId } from "./start.ts";
-import { namedApproval, type TaskStatus } from "./viktor.ts";
+import { armRelist, isListing, isNew, namedApproval, type Seen, type TaskStatus } from "./viktor.ts";
 
 export const LANGFUSE = "langfuse";
 export const DEFAULT_BASE_URL = "https://cloud.langfuse.com";
@@ -28,6 +28,8 @@ export interface LangfuseTaskView {
   budgetUsd: number | null;
   /** Why Evaluate or Start again cannot start it now: the plan. Null when it can, or while it is evaluating. */
   blocked: string | null;
+  /** First listed after the connection's first listing, and not yet opened or evaluated. */
+  isNew: boolean;
   jobId: string | null;
   /** A finished evaluation's verdict. */
   result: { status: string; change: string | null; link: string | null; approval: { by: string; name: string | null; at: string } | null } | null;
@@ -37,6 +39,8 @@ export interface LangfuseView {
   connected: boolean;
   baseUrl?: string; projectName?: string; keyLast4?: string; connectedAt?: string; connectedBy?: string;
   listedAt?: string | null; listingError?: string | null;
+  /** A listing is running: the page polls until it ends. */
+  listing?: boolean;
   /** The listing reached Langfuse's row limit, so the cheapest tasks may be missing. */
   truncated?: boolean;
   tasks: LangfuseTaskView[];
@@ -77,19 +81,23 @@ export async function connectLangfuse(client: AppClient, input: { accountId: str
   const stored = await account.saveConnection({ kind: LANGFUSE, apiKey: JSON.stringify(connection), keyLast4: publicKey.slice(-4), keyType: project.projectName, teamId: project.projectId, creditCap: 0, userId: input.userId });
   if (!stored.ok) return { ok: false, status: 503, error: stored.error };
   await refreshLangfuse(client, input.accountId);
+  await armRelist(client, input.accountId, LANGFUSE, true);
   return { ok: true, view: await langfuseView(client, input.accountId) };
 }
 
-/** Lists the project's tasks again; a failure is kept on the connection, and the last listing stays. */
-export async function refreshLangfuse(client: AppClient, accountId: string): Promise<void> {
+/** Lists the project's tasks again, with GETs only; a failure is kept on the connection, and the last listing stays. Returns that error, or null. */
+export async function refreshLangfuse(client: AppClient, accountId: string): Promise<string | null> {
   const account = client.account.getOrCreate([accountId]);
   const connection = await credentials(account);
-  if (!connection) return;
+  if (!connection) return null;
   try {
     const listing: Listing = { ...await listTasks(connection, options()), baseUrl: connection.baseUrl };
     await account.saveListing({ kind: LANGFUSE, listing, error: null });
+    return null;
   } catch (error) {
-    await account.saveListing({ kind: LANGFUSE, listing: null, error: redact(error instanceof Error ? error.message : String(error)).slice(0, 500) });
+    const message = redact(error instanceof Error ? error.message : String(error)).slice(0, 500);
+    await account.saveListing({ kind: LANGFUSE, listing: null, error: message });
+    return message;
   }
 }
 
@@ -140,10 +148,11 @@ export async function langfuseView(client: AppClient, accountId: string, people:
   const listing = connection.listing as Listing | null;
   const jobs = await account.connectionJobs({ kind: LANGFUSE, since: Date.parse(connection.connectedAt) });
   const refusal = await account.evaluationRefusal(LANGFUSE);
-  const tasks = await Promise.all((listing?.tasks ?? []).map(async (task): Promise<LangfuseTaskView> => {
+  await armRelist(client, accountId, LANGFUSE);
+  const tasks = await Promise.all((listing?.tasks as (LangfuseTask & Seen)[] | undefined ?? []).map(async (task): Promise<LangfuseTaskView> => {
     const latest = jobs.find(job => job.taskId === langfuseTaskId(task));
     const blocked = task.skipped || (latest && active(latest)) ? null : refusal;
-    const base = { id: task.id, name: task.name, model: task.model, generations: task.generations, costUsd: task.costUsd, models: task.models.length, budgetUsd: task.skipped ? null : await budgetFor(account, task), blocked, jobId: latest?.id ?? null, result: null };
+    const base = { id: task.id, name: task.name, model: task.model, generations: task.generations, costUsd: task.costUsd, models: task.models.length, budgetUsd: task.skipped ? null : await budgetFor(account, task), blocked, isNew: !task.skipped && isNew(task, connection.connectedAt, !!latest), jobId: latest?.id ?? null, result: null };
     if (task.skipped) return { ...base, status: "skipped", reason: task.skipped };
     if (!latest) return { ...base, status: "not_evaluated", reason: null };
     if (active(latest)) return { ...base, status: "evaluating", reason: null };
@@ -156,6 +165,6 @@ export async function langfuseView(client: AppClient, accountId: string, people:
   return {
     connected: true, ...(baseUrl ? { baseUrl } : {}), ...(connection.keyType ? { projectName: connection.keyType } : {}),
     keyLast4: connection.keyLast4, connectedAt: connection.connectedAt, connectedBy: connection.connectedBy,
-    listedAt: connection.listedAt, listingError: connection.listingError, truncated: listing?.truncated ?? false, tasks,
+    listedAt: connection.listedAt, listingError: connection.listingError, listing: await isListing(client, accountId, LANGFUSE), truncated: listing?.truncated ?? false, tasks,
   };
 }

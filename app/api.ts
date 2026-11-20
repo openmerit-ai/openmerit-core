@@ -181,6 +181,8 @@ export interface ViktorTask {
   estimatedCredits: number | null;
   // Why Evaluate or Start again cannot start it now (the credit cap or the plan); null when it can.
   blocked: string | null;
+  // Listed after the connection's first listing, and not yet opened or evaluated: shown as New.
+  isNew?: boolean;
   jobId: string | null;
   result: { status: string; change: string | null; link: string | null; approval: { by: string; name?: string | null; at: string } | null } | null;
 }
@@ -188,6 +190,10 @@ export interface ViktorConnection {
   connected: boolean;
   keyLast4?: string; keyType?: string | null; creditCap?: number; connectedAt?: string; connectedBy?: string;
   creditsUsed?: number; creditsReserved?: number; listedAt?: string | null; listingError?: string | null;
+  // A listing is running (Refresh, a stale listing, or the schedule): the page polls until it ends.
+  listing?: boolean;
+  // The page could not load the connection, after retrying; not the same as not connected.
+  unavailable?: boolean;
   tasks: ViktorTask[];
 }
 
@@ -199,6 +205,7 @@ export interface LangfuseTask {
   // The most an evaluation may spend on model calls, and why Evaluate cannot start it now.
   budgetUsd: number | null;
   blocked: string | null;
+  isNew?: boolean;
   jobId: string | null;
   result: { status: string; change: string | null; link: string | null; approval: { by: string; name?: string | null; at: string } | null } | null;
 }
@@ -206,6 +213,8 @@ export interface LangfuseConnection {
   connected: boolean;
   baseUrl?: string; projectName?: string; keyLast4?: string; connectedAt?: string; connectedBy?: string;
   listedAt?: string | null; listingError?: string | null; truncated?: boolean;
+  listing?: boolean;
+  unavailable?: boolean;
   tasks: LangfuseTask[];
 }
 // A Langfuse result's change, made where the application or the prompt sets the model.

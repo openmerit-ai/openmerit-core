@@ -6,8 +6,8 @@ import type { AuthResult, Identity } from "./auth.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
 import { explain, type JobResult } from "./report.ts";
 import { rerunJob } from "./start.ts";
-import { connectLangfuse, LANGFUSE, langfuseTaskId, langfuseView, refreshLangfuse, startLangfuseTasks } from "./langfuse.ts";
-import { approveChange, labelRuns, connectViktor, currentViktorView, namedApproval, refreshViktor, startViktorTasks, VIKTOR, viktorTaskId, viktorView } from "./viktor.ts";
+import { connectLangfuse, LANGFUSE, langfuseTaskId, langfuseView, startLangfuseTasks } from "./langfuse.ts";
+import { approveChange, disarmRelist, labelRuns, connectViktor, currentViktorView, namedApproval, startRelist, startViktorTasks, VIKTOR, viktorTaskId, viktorView } from "./viktor.ts";
 import type { EndpointKind } from "../../openmerit-core/src/ranking/index.ts";
 
 type Json = Record<string, unknown>;
@@ -168,12 +168,19 @@ export function apiRoutes(deps: AppDeps) {
     }
     if (path === "/api/connections/viktor" && method === "DELETE") {
       const denied = admin(); if (denied) return denied;
-      return (await account.removeConnection(VIKTOR)) ? json(200, { deleted: true }) : error(404, "Viktor is not connected.");
+      if (!(await account.removeConnection(VIKTOR))) return error(404, "Viktor is not connected.");
+      await disarmRelist(client, who.accountId, VIKTOR);
+      return json(200, { deleted: true });
     }
     if (path === "/api/connections/viktor/refresh" && method === "POST") {
       const denied = admin(); if (denied) return denied;
-      await refreshViktor(client, who.accountId);
-      return json(200, await viktorView(client, who.accountId, deps.auth));
+      // Returns once the listing has started, or at once when one is running: the page polls `listing`.
+      const { started } = await startRelist(client, who.accountId, VIKTOR);
+      return json(202, { ...await viktorView(client, who.accountId, deps.auth), started });
+    }
+    // Someone opened a listed task's row, Viktor's or Langfuse's: it is no longer marked New.
+    if ((match = /^\/api\/connections\/(viktor|langfuse)\/tasks\/([\w-]+)\/seen$/.exec(path)) && method === "POST") {
+      return (await account.markSeen({ kind: match[1]!, taskId: match[2]! })) ? json(200, { seen: true }) : error(404, "No such task in this connection's listing.");
     }
     if ((match = /^\/api\/connections\/viktor\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
       const denied = admin(); if (denied) return denied;
@@ -192,12 +199,14 @@ export function apiRoutes(deps: AppDeps) {
     }
     if (path === "/api/connections/langfuse" && method === "DELETE") {
       const denied = admin(); if (denied) return denied;
-      return (await account.removeConnection(LANGFUSE)) ? json(200, { deleted: true }) : error(404, "Langfuse is not connected.");
+      if (!(await account.removeConnection(LANGFUSE))) return error(404, "Langfuse is not connected.");
+      await disarmRelist(client, who.accountId, LANGFUSE);
+      return json(200, { deleted: true });
     }
     if (path === "/api/connections/langfuse/refresh" && method === "POST") {
       const denied = admin(); if (denied) return denied;
-      await refreshLangfuse(client, who.accountId);
-      return json(200, await langfuseView(client, who.accountId, deps.auth));
+      const { started } = await startRelist(client, who.accountId, LANGFUSE);
+      return json(202, { ...await langfuseView(client, who.accountId, deps.auth), started });
     }
     if ((match = /^\/api\/connections\/langfuse\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
       const denied = admin(); if (denied) return denied;

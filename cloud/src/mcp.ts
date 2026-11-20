@@ -244,7 +244,7 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     return { text: describeJob(next, deps.config.appUrl), data: jobData(next) };
   }
   if (name === "openmerit_tasks") {
-    const [tasks, ready, connected, traced] = await Promise.all([account.tasks(), account.readySince(identity.userId), currentViktorView(client, identity.accountId, deps.auth), langfuseView(client, identity.accountId, deps.auth)]);
+    const [tasks, ready, connected, traced] = await Promise.all([account.tasks(), account.readySince(identity.userId), currentViktorView(client, identity.accountId, deps.auth, true), langfuseView(client, identity.accountId, deps.auth)]);
     const apps = [...viktorLines(connected, deps.config.appUrl), ...langfuseLines(traced, deps.config.appUrl)];
     const text = (tasks.length
       ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} [${item.id}] (${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.status}, ${item.state}${item.idleSince ? ` since ${item.idleSince.slice(0, 10)}` : ""}`),
