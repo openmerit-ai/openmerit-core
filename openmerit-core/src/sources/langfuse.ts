@@ -205,7 +205,7 @@ export function createLangfuseSource(connection: LangfuseConnection, options: La
   return { baseUrl: transport.baseUrl, tasks, replay };
 }
 
-interface Generation {
+export interface Generation {
   id: string;
   traceId: string;
   startTime: string;
@@ -218,8 +218,8 @@ interface Generation {
   latencyMs: number | null;
 }
 
-/** A usable generation, or why it is not. */
-function readGeneration(observation: Json): Generation | string {
+/** A usable generation, or why it is not. Its request and answer are redacted. */
+export function readGeneration(observation: Json): Generation | string {
   const id = str(observation.id), traceId = str(observation.traceId), startTime = str(observation.startTime);
   if (!id || !traceId || !startTime) return "missing ID or start time";
   if (observation.level === "ERROR") return "the call failed";

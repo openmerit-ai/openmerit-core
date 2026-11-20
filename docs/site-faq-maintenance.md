@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## The Langfuse connection in the cloud app — unreleased, 20 November 2026
+
+Reviewed the homepage against the cloud app connecting a Langfuse project with a Viewer key, listing its generations as tasks, evaluating them on replayed dataset items and recorded calls, and recording an approval without writing to Langfuse. `site/index.html` has no FAQ block and makes no claim about Langfuse, connected apps or what OpenMerit reads from them. No homepage copy change is needed; the cloud README's Langfuse section describes it, including what it reads.
+
 ## Viktor listing, approver names and credits in the cloud app — unreleased, 20 November 2026
 
 Reviewed the homepage against the Viktor connection relisting stale task lists, showing approvers by name, counting only spent credits, and reporting a drafted tool call as an error. `site/index.html` still makes no claim about Viktor, credits or approvals. No homepage copy change is needed; the cloud README's Viktor section describes it.

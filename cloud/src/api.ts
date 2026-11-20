@@ -6,6 +6,7 @@ import type { AuthResult, Identity } from "./auth.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
 import { explain, type JobResult } from "./report.ts";
 import { rerunJob } from "./start.ts";
+import { connectLangfuse, LANGFUSE, langfuseView, refreshLangfuse, startLangfuseTasks } from "./langfuse.ts";
 import { approveChange, connectViktor, currentViktorView, namedApproval, refreshViktor, startViktorTasks, VIKTOR, viktorView } from "./viktor.ts";
 import type { EndpointKind } from "../../openmerit-core/src/ranking/index.ts";
 
@@ -121,6 +122,12 @@ export function apiRoutes(deps: AppDeps) {
         const started = await startViktorTasks(client, { accountId: who.accountId, userId: who.userId, taskIds: [job.taskId.replace(/^viktor_/, "")] });
         return started.jobIds[0] ? json(201, { jobId: started.jobIds[0], taskId: job.taskId }) : error(409, started.refused ?? "This task cannot be evaluated now, or is being evaluated.");
       }
+      // A Langfuse task reads its cases from Langfuse again: run again evaluates it through the connection.
+      if (job?.kind === LANGFUSE) {
+        const denied = admin(); if (denied) return denied;
+        const started = await startLangfuseTasks(client, { accountId: who.accountId, userId: who.userId, taskIds: [job.taskId.replace(/^langfuse_/, "")] });
+        return started.jobIds[0] ? json(201, { jobId: started.jobIds[0], taskId: job.taskId }) : error(409, started.refused ?? "This task cannot be evaluated now, or is being evaluated.");
+      }
       const input = await body(request) ?? {};
       if (input.budgetUsd !== undefined && input.budgetUsd !== null && typeof input.budgetUsd !== "number") return error(400, "budgetUsd must be a number of US dollars.");
       const started = await rerunJob(client, { accountId: who.accountId, userId: who.userId, jobId: match[1]!, budgetUsd: typeof input.budgetUsd === "number" ? input.budgetUsd : null, trigger: "app" });
@@ -169,6 +176,31 @@ export function apiRoutes(deps: AppDeps) {
       const denied = admin(); if (denied) return denied;
       const started = await startViktorTasks(client, { accountId: who.accountId, userId: who.userId, taskIds: [match[1]!] });
       return started.started.length ? json(201, { started: started.started }) : error(409, started.refused ?? "This task cannot be evaluated, or is being evaluated now.");
+    }
+
+    // Langfuse, with a Viewer key pair: connecting refuses a key that can write, lists the tasks and starts evaluating them.
+    if (path === "/api/connections/langfuse" && method === "GET") return json(200, await langfuseView(client, who.accountId, deps.auth));
+    if (path === "/api/connections/langfuse" && method === "POST") {
+      const denied = admin(); if (denied) return denied;
+      const input = await body(request);
+      if (!input || typeof input.publicKey !== "string" || typeof input.secretKey !== "string" || (input.baseUrl !== undefined && typeof input.baseUrl !== "string")) return error(400, "Send the connection as JSON: {baseUrl, publicKey, secretKey}.");
+      const connected = await connectLangfuse(client, { accountId: who.accountId, userId: who.userId, publicKey: input.publicKey, secretKey: input.secretKey, ...(typeof input.baseUrl === "string" ? { baseUrl: input.baseUrl } : {}) });
+      return connected.ok ? json(201, connected.view) : error(connected.status, connected.error);
+    }
+    if (path === "/api/connections/langfuse" && method === "DELETE") {
+      const denied = admin(); if (denied) return denied;
+      return (await account.removeConnection(LANGFUSE)) ? json(200, { deleted: true }) : error(404, "Langfuse is not connected.");
+    }
+    if (path === "/api/connections/langfuse/refresh" && method === "POST") {
+      const denied = admin(); if (denied) return denied;
+      await refreshLangfuse(client, who.accountId);
+      const started = await startLangfuseTasks(client, { accountId: who.accountId, userId: null });
+      return json(200, { ...await langfuseView(client, who.accountId, deps.auth), started: started.started, refused: started.refused });
+    }
+    if ((match = /^\/api\/connections\/langfuse\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
+      const denied = admin(); if (denied) return denied;
+      const started = await startLangfuseTasks(client, { accountId: who.accountId, userId: who.userId, taskIds: [match[1]!] });
+      return started.started.length ? json(201, { started: started.started, jobIds: started.jobIds }) : error(409, started.refused ?? "This task cannot be evaluated, or is being evaluated now.");
     }
 
     if (path === "/api/guardrails" && method === "GET") {

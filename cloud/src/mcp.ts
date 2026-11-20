@@ -10,6 +10,7 @@ import { credits, explain, nearMissLine, reasonFor, type Fix, type JobResult } f
 import type { AppClient } from "./registry.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { bundleProblem, DEFAULT_ENVIRONMENT, rerunJob, startJob } from "./start.ts";
+import { langfuseView, type LangfuseView } from "./langfuse.ts";
 import { currentViktorView, VIKTOR, type ViktorView } from "./viktor.ts";
 import type { ViktorJobView } from "./actors/viktor-job.ts";
 
@@ -104,6 +105,10 @@ export function describeJob(view: JobView | ViktorJobView, appUrl: string): stri
     const change = result.connection.change;
     lines.push(change ? `Proposed change: ${change.text}. It passed ${result.pick?.passes}/${result.pick?.total} checks${result.baseline ? `, as ${result.baseline.model} passed ${result.baseline.passes}/${result.baseline.total}` : ""}, for ${credits(result.pick?.costPerCallUsd ?? null)} per test run instead of ${credits(result.baseline?.costPerCallUsd ?? null)}. A person approves it with Approve change at ${result.reportUrl}, then makes it in Viktor (${change.link}); OpenMerit does not change the task.` : `Keep ${result.connection.currentModel}: no cheaper preset passed every check it passed.`);
     lines.push(`Viktor credits used: ${result.connection.creditsUsed}.`);
+  } else if (result?.langfuse && result.pick) {
+    // A Langfuse task: the change is made where the application or the prompt sets the model; OpenMerit writes nothing to Langfuse.
+    const change = result.langfuse.change;
+    lines.push(change ? `Proposed change: ${change.text.replaceAll("`", "")}, ${result.pick.passes}/${result.pick.total} cases passed${result.baseline ? ` (current model ${result.baseline.passes}/${result.baseline.total})` : ""}. A person approves it with Approve change at ${result.reportUrl}, then makes it: ${change.instructions}` : `Keep ${result.langfuse.currentModel}.`);
   } else if (result?.pick) {
     lines.push(`Measured pick: ${result.pick.model} on ${result.pick.endpoint}, ${result.pick.passes}/${result.pick.total} cases passed${result.baseline ? ` (current model ${result.baseline.passes}/${result.baseline.total})` : ""}.`);
     if (result.edit.edits.length) lines.push("Edits:", ...result.edit.edits.map(edit => `- ${edit.file}:${edit.line}: ${edit.before} → ${edit.after}`));
@@ -127,7 +132,7 @@ export function describeJob(view: JobView | ViktorJobView, appUrl: string): stri
     if (fix) lines.push(`Fix: ${fixLine(fix, view.jobId, new URL(result!.reportUrl).origin)}`);
   }
   // A Viktor task has no bundle to rerun, and starting it again spends the workspace's Viktor credits: an admin does it in the app.
-  if (view.status === "failed" && !result) lines.push("connection" in view ? `Fix: tell the user an admin can start it again with Start again at ${appUrl}/r/${view.jobId}/; it uses Viktor credits within the connection's cap.` : `Fix: ask the user, then call openmerit_recommend with job_id "${view.jobId}" to run the task again.`);
+  if (view.status === "failed" && !result) lines.push("connection" in view && view.connection ? `Fix: tell the user an admin can start it again with Start again at ${appUrl}/r/${view.jobId}/${view.connection === "viktor" ? "; it uses Viktor credits within the connection's cap" : ""}.` : `Fix: ask the user, then call openmerit_recommend with job_id "${view.jobId}" to run the task again.`);
   if (view.error) lines.push(`Error: ${view.error}`);
   return lines.join("\n");
 }
@@ -221,7 +226,7 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
   if (name === "openmerit_answer") {
     const view = await jobView(args.job_id);
     if (!("jobId" in view)) return view;
-    if ("connection" in view) return { text: `Job ${view.jobId} evaluates a Viktor task and asks no questions.\n${describeJob(view, deps.config.appUrl)}`, data: jobData(view) };
+    if ("connection" in view && view.connection === "viktor") return { text: `Job ${view.jobId} evaluates a Viktor task and asks no questions.\n${describeJob(view, deps.config.appUrl)}`, data: jobData(view) };
     const answers = args.answers;
     if (!answers || typeof answers !== "object" || Array.isArray(answers)) return { text: "answers must be an object keyed by question id.", data: {}, isError: true };
     if (!view.questions.length) return { text: `Job ${view.jobId} has no open questions.\n${describeJob(view, deps.config.appUrl)}`, data: jobData(view) };
@@ -237,13 +242,13 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     return { text: describeJob(next, deps.config.appUrl), data: jobData(next) };
   }
   if (name === "openmerit_tasks") {
-    const [tasks, ready, connected] = await Promise.all([account.tasks(), account.readySince(identity.userId), currentViktorView(client, identity.accountId, deps.auth)]);
-    const apps = viktorLines(connected);
+    const [tasks, ready, connected, traced] = await Promise.all([account.tasks(), account.readySince(identity.userId), currentViktorView(client, identity.accountId, deps.auth), langfuseView(client, identity.accountId, deps.auth)]);
+    const apps = [...viktorLines(connected), ...langfuseLines(traced)];
     const text = (tasks.length
       ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} [${item.id}] (${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.status}, ${item.state}${item.idleSince ? ` since ${item.idleSince.slice(0, 10)}` : ""}`),
         ready.length ? `Ready since the last session: ${ready.map(item => `${item.id} (${item.status})`).join(", ")}. Call openmerit_result for each.` : "Nothing new since the last session."].join("\n")
       : "No tasks yet. Call openmerit_recommend with a task bundle to start one.") + (apps.length ? `\n${apps.join("\n")}` : "");
-    return { text, data: { tasks, readySinceLastSession: ready, ...(connected.connected ? { viktor: { creditCap: connected.creditCap, creditsUsed: connected.creditsUsed, tasks: connected.tasks } } : {}) } };
+    return { text, data: { tasks, readySinceLastSession: ready, ...(connected.connected ? { viktor: { creditCap: connected.creditCap, creditsUsed: connected.creditsUsed, tasks: connected.tasks } } : {}), ...(traced.connected ? { langfuse: { project: traced.projectName ?? null, tasks: traced.tasks } } : {}) } };
   }
   if (name === "openmerit_retire") {
     const row = typeof args.task_id === "string" ? await account.task(args.task_id) : null;
@@ -260,6 +265,14 @@ function viktorLines(view: ViktorView): string[] {
   return [`Viktor (${view.creditsUsed ?? 0} of ${view.creditCap} credits used): ${view.tasks.length} scheduled task${view.tasks.length === 1 ? "" : "s"}:`, ...view.tasks.map(task => `- ${task.title} (${task.model ?? "default model"}, ${task.credits30d} credits in 30 days): ${
     task.status === "done" ? `${task.result?.change ?? "keep its model"}${task.result?.approval ? `, approved by ${task.result.approval.name ?? task.result.approval.by} on ${task.result.approval.at.slice(0, 10)}` : ""}; openmerit_result with job_id "${task.jobId}"`
     : task.status === "evaluating" ? `evaluating, job_id "${task.jobId}"` : `${task.status}: ${task.reason}`}`)];
+}
+
+/** The Langfuse connection's tasks, for openmerit_tasks: most recorded spend first. */
+function langfuseLines(view: LangfuseView): string[] {
+  if (!view.connected) return [];
+  return [`Langfuse (project ${view.projectName ?? "?"}): ${view.tasks.length} task${view.tasks.length === 1 ? "" : "s"} over the last 30 days${view.listingError ? ` (listing failed: ${view.listingError})` : ""}:`, ...view.tasks.map(task => `- ${task.name} (${task.model || "no model"}, ${task.generations} calls, ${task.costUsd === null ? "no recorded cost" : `$${task.costUsd.toFixed(2)}`} in 30 days): ${
+    task.status === "done" ? `${task.result?.change?.replaceAll("`", "") ?? "keep its model"}${task.result?.approval ? `, approved by ${task.result.approval.name ?? task.result.approval.by} on ${task.result.approval.at.slice(0, 10)}` : ""}; openmerit_result with job_id "${task.jobId}"`
+    : task.status === "evaluating" ? `evaluating, job_id "${task.jobId}"` : `${task.status}: ${task.reason}${task.jobId ? ` (job_id "${task.jobId}")` : ""}`}`)];
 }
 
 /** /mcp. A missing or invalid token gets 401 with the protected-resource metadata, which starts the client's Clerk sign-in. */

@@ -1,6 +1,6 @@
-import type { Endpoint, EndpointKind, ViktorConnection, ViktorTask } from "../api.ts";
+import type { Endpoint, EndpointKind, LangfuseConnection, LangfuseTask, ViktorConnection, ViktorTask } from "../api.ts";
 import { ApiError } from "../api.ts";
-import { date, html, logo, plural, provider, type Html } from "../html.ts";
+import { date, html, logo, plural, provider, usd, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { header, install } from "./common.ts";
 
@@ -79,15 +79,70 @@ function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
       <p class="note">Changes are made in <a href="${VIKTOR_TASKS}" target="_blank" rel="noopener">Viktor's scheduled tasks</a>; OpenMerit does not change a task.</p>`;
 }
 
-type Data = { endpoints: Endpoint[]; viktor: ViktorConnection };
+// The Langfuse connection: OpenMerit replays a task's recorded calls on cheaper models, and proposes the change.
+function langfuseStatus(task: LangfuseTask, admin: boolean): Html {
+  switch (task.status) {
+    case "skipped": return html`<span class="pill">Skipped</span><span class="sub">${task.reason ?? ""}</span>`;
+    case "evaluating": return html`<span class="pill live">Evaluating</span>${task.jobId ? html`<span class="sub"><a href="/r/${task.jobId}/">Open the run</a></span>` : ""}`;
+    case "failed": return html`<span class="pill bad">Did not finish</span><span class="sub">${task.reason ?? ""}${task.jobId ? html` <a href="/r/${task.jobId}/">Why</a>` : ""}</span>${admin ? html` <button class="btn" type="button" data-action="start-langfuse" data-id="${task.id}">Start again</button>` : ""}`;
+    case "waiting": return html`<span class="pill warn">Waiting</span><span class="sub">${task.reason ?? ""}</span>${admin ? html` <button class="btn" type="button" data-action="start-langfuse" data-id="${task.id}">Start</button>` : ""}`;
+    case "done": {
+      const result = task.result;
+      const approved = result?.approval ? html`<span class="sub">Approved by ${result.approval.name ?? result.approval.by} on ${date(result.approval.at)}</span>` : "";
+      return html`${result?.change ? html`<span class="pill good">${result.change.replaceAll("`", "")}</span>` : html`<span class="pill tag">Keep ${task.model}</span>`}${approved}<span class="sub"><a href="/r/${task.jobId}/">${result?.change && !result.approval ? "Review and approve" : "Open the result"}</a></span>`;
+    }
+  }
+}
+
+function langfuseSection(langfuse: LangfuseConnection, admin: boolean): Html {
+  if (!langfuse.connected) return html`<div class="card" style="margin-top: 10px">
+        <div class="row"><span>Langfuse<span class="sub">The AI calls your application traces in a Langfuse project. Not connected.</span></span><span></span></div>
+        ${admin ? html`<form class="form" data-action="connect-langfuse" autocomplete="off" style="margin-top: 10px">
+          <label>Base URL
+            <input name="baseUrl" type="url" required value="https://cloud.langfuse.com" spellcheck="false">
+            <span class="sub">Langfuse Cloud EU, https://us.cloud.langfuse.com for the US region, or your own Langfuse.</span>
+          </label>
+          <label>Public key
+            <input name="publicKey" type="text" required autocomplete="off" spellcheck="false" placeholder="pk-lf-…">
+          </label>
+          <label>Secret key
+            <input name="secretKey" type="password" required autocomplete="off" spellcheck="false" placeholder="sk-lf-…">
+            <span class="sub">A Viewer key pair from Project Settings → API Keys: OpenMerit refuses a key that can write. It stores both keys encrypted and shows only the public key's last four characters.</span>
+          </label>
+          <p class="note">OpenMerit lists your project's generations over the last 30 days as tasks, by name or managed prompt, with their model, calls and cost, and evaluates them without being asked, highest spend first, one of your plan's evaluations each. To build a task's cases it reads at most 20 of its dataset items and recorded calls, inputs and outputs included, redacts them and replays them on cheaper models; it keeps them only in the evaluation. It never writes to Langfuse: a result proposes the change, and you make it after you approve it.</p>
+          <p class="form-error" role="alert" hidden></p>
+          <p><button class="btn primary" type="submit">Connect Langfuse</button></p>
+        </form>` : html`<p class="note">Only an admin can connect Langfuse.</p>`}
+      </div>`;
+  return html`<div class="card" style="margin-top: 10px">
+        <div class="row"><span>Langfuse<span class="sub">Project ${langfuse.projectName ?? ""} on ${langfuse.baseUrl ? new URL(langfuse.baseUrl).host : "Langfuse"} · public key ending ${langfuse.keyLast4 ?? ""} · connected ${date(langfuse.connectedAt ?? null)}</span><span class="sub">${plural(langfuse.tasks.length, "task")} over the last 30 days${langfuse.listedAt ? `, listed ${date(langfuse.listedAt)}` : ""}</span></span>
+          ${admin ? html`<span class="endpoint-meta"><button class="btn" type="button" data-action="refresh-langfuse">Refresh</button><button class="btn danger" type="button" data-action="disconnect-langfuse">Disconnect</button></span>` : html`<span></span>`}</div>
+        ${langfuse.listingError ? html`<p class="note bad" role="alert">The last listing failed: ${langfuse.listingError}</p>` : ""}
+      </div>
+      <div class="tablewrap" style="margin-top: 10px">
+        <table>
+          <thead><tr><th>Task</th><th>Model</th><th class="num">Calls, 30 days</th><th class="num">Spend, 30 days</th><th>Status</th></tr></thead>
+          <tbody>
+            ${langfuse.tasks.map((task) => html`<tr><td>${task.name}${task.models > 1 ? html`<span class="sub">${plural(task.models, "model")} recorded</span>` : ""}</td><td>${task.model ? html`<code>${task.model}</code>` : html`<span class="sub">none recorded</span>`}</td><td class="num">${task.generations.toLocaleString("en-US")}</td><td class="num">${task.costUsd === null ? "–" : usd(task.costUsd)}</td><td>${langfuseStatus(task, admin)}</td></tr>`)}
+          </tbody>
+        </table>
+      </div>
+      <p class="note">${langfuse.truncated ? "Langfuse returned its row limit, so the cheapest tasks may be missing. " : ""}OpenMerit reads this project only; you make each change where your application or the prompt sets the model.</p>`;
+}
+
+type Data = { endpoints: Endpoint[]; viktor: ViktorConnection; langfuse: LangfuseConnection };
 
 export const connectionsView: View<Data> = {
   async load({ api }) {
-    const [endpoints, viktor] = await Promise.all([api.get<Endpoint[]>("/api/endpoints"), api.get<ViktorConnection>("/api/connections/viktor").catch((): ViktorConnection => ({ connected: false, tasks: [] }))]);
-    return { endpoints, viktor };
+    const [endpoints, viktor, langfuse] = await Promise.all([
+      api.get<Endpoint[]>("/api/endpoints"),
+      api.get<ViktorConnection>("/api/connections/viktor").catch((): ViktorConnection => ({ connected: false, tasks: [] })),
+      api.get<LangfuseConnection>("/api/connections/langfuse").catch((): LangfuseConnection => ({ connected: false, tasks: [] })),
+    ]);
+    return { endpoints, viktor, langfuse };
   },
   bind: bindKindSelect,
-  render({ endpoints, viktor }, { me }) {
+  render({ endpoints, viktor, langfuse }, { me }) {
     const own = endpoints.filter((endpoint) => !endpoint.builtIn);
     const admin = me.role === "admin";
     return html`${header(me, "Connections", "Your coding agents are how OpenMerit gets its work. Your own endpoints are optional: OpenMerit measures on OpenRouter at its own cost.", [`${plural(own.length, "endpoint")} of yours`])}
@@ -105,6 +160,7 @@ export const connectionsView: View<Data> = {
       <h2 id="apps">Apps</h2>
       <p class="note" style="margin: -2px 0 8px">Apps whose AI tasks OpenMerit evaluates on their own: it lists the tasks, evaluates the ones it can, highest spend first, and proposes a cheaper model for you to approve.</p>
       ${viktorSection(viktor, admin)}
+      ${langfuseSection(langfuse, admin)}
     </section>
 
     <section aria-labelledby="endpoints">
@@ -169,6 +225,40 @@ export const connectionsView: View<Data> = {
       await api.send("DELETE", "/api/connections/viktor");
       await refresh();
       toast("Viktor disconnected.");
+    },
+    async "connect-langfuse"(form, _data, { api, refresh, toast }) {
+      if (!(form instanceof HTMLFormElement)) return;
+      const fields = new FormData(form);
+      const error = form.querySelector<HTMLElement>(".form-error");
+      try {
+        await api.send("POST", "/api/connections/langfuse", { baseUrl: String(fields.get("baseUrl")).trim(), publicKey: String(fields.get("publicKey")).trim(), secretKey: String(fields.get("secretKey")).trim() });
+      } catch (failure) {
+        if (!(failure instanceof ApiError) || failure.status !== 400 || !error) throw failure;
+        error.textContent = failure.message;
+        error.hidden = false;
+        return;
+      }
+      form.reset();
+      await refresh();
+      toast("Langfuse connected. OpenMerit is evaluating the tasks with the most spend.");
+    },
+    async "refresh-langfuse"(_target, _data, { api, refresh, toast }) {
+      const listed = await api.send<{ refused: string | null; started: string[] }>("POST", "/api/connections/langfuse/refresh");
+      await refresh();
+      toast(listed.refused ?? (listed.started.length ? `Started ${plural(listed.started.length, "evaluation")}.` : "Tasks listed again."));
+    },
+    async "start-langfuse"(target, data, { api, refresh, toast, confirm }) {
+      const task = data.langfuse.tasks.find((item) => item.id === target.dataset.id);
+      if (!task || !await confirm({ title: `Evaluate ${task.name}?`, body: `OpenMerit replays up to 20 of ${task.name}'s recorded calls or dataset items on cheaper models than ${task.model}. It counts as one evaluation on your plan.`, confirm: "Start" })) return;
+      await api.send("POST", `/api/connections/langfuse/tasks/${encodeURIComponent(task.id)}/start`);
+      await refresh();
+      toast(`Evaluating ${task.name}.`);
+    },
+    async "disconnect-langfuse"(_target, _data, { api, refresh, toast, confirm }) {
+      if (!await confirm({ title: "Disconnect Langfuse?", body: "OpenMerit deletes the keys and stops listing and evaluating your Langfuse tasks. Past results and approvals are kept.", confirm: "Disconnect", danger: true })) return;
+      await api.send("DELETE", "/api/connections/langfuse");
+      await refresh();
+      toast("Langfuse disconnected.");
     },
     async add(form, _data, { api, refresh, toast }) {
       if (!(form instanceof HTMLFormElement)) return;

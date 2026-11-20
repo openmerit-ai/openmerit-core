@@ -43,7 +43,7 @@ function live(job: JobView): Html {
   const progress = job.progress.planned ? `${job.progress.measured} of about ${job.progress.planned} measurements done` : `${plural(job.progress.measured, "measurement")} done`;
   const body = {
     queued: html`<span class="pill">Queued</span><p class="note">The run starts in a moment.</p>`,
-    running: job.live ? measuring(job) : html`<span class="pill live">Evaluating</span><span class="sub">${job.phase.replace("_", " ")} · ${progress}</span><p class="note">${job.connection ? "OpenMerit is testing the task's presets on paused copies in Viktor's test mode. This page shows the result when it finishes." : "Your coding agent gets the result on its next OpenMerit call, and this page shows the report."}</p>`,
+    running: job.live ? measuring(job) : html`<span class="pill live">Evaluating</span><span class="sub">${job.phase.replace("_", " ")} · ${progress}</span><p class="note">${job.connection === "langfuse" ? "OpenMerit is replaying the task's recorded calls from Langfuse on cheaper models. This page shows the result when it finishes." : job.connection ? "OpenMerit is testing the task's presets on paused copies in Viktor's test mode. This page shows the result when it finishes." : "Your coding agent gets the result on its next OpenMerit call, and this page shows the report."}</p>`,
     needs_input: html`<span class="pill warn">Needs input</span><p class="note">OpenMerit asked ${plural(job.questions.length, "question")} in your coding agent, such as a check of the test labels. The run continues once it answers.</p>`,
     failed: html`<p>${job.error ?? "The run stopped before it could recommend a model."}</p>${again(job)}`,
     stopped: html`<p>The run was stopped${job.error ? `: ${job.error}` : "."}</p>${again(job)}`,
@@ -141,6 +141,23 @@ function connectionPick(report: Report): Html {
       </div>`;
 }
 
+// A Langfuse result: the change to make where the application or the prompt sets the model, and Approve change.
+function langfuseChange(report: Report, admin: boolean): Html {
+  const langfuse = report.langfuse!, change = langfuse.change;
+  if (!change) return html`<div><h2>Change</h2><p class="note">No change: ${langfuse.taskName} keeps <code>${langfuse.currentModel}</code>.</p></div>`;
+  const approved = report.approved;
+  return html`<div>
+        <h2>Change</h2>
+        <div class="card">
+          <p><b>${prose(change.text)}</b></p>
+          <p class="note">${change.instructions}${change.link ? html` <a href="${change.link}" target="_blank" rel="noopener">Open the prompt in Langfuse</a>.` : ""}</p>
+          ${approved ? html`<p><span class="pill good">Approved</span> <span class="sub">by ${approved.name ?? approved.by} on ${date(approved.at)} at ${new Date(approved.at).toISOString().slice(11, 16)} UTC</span></p>`
+            : admin ? html`<p style="margin-top: 12px"><button class="btn primary" type="button" data-action="approve">Approve change</button></p><p class="note">Approving records who approved the change and when. OpenMerit writes nothing to Langfuse: you make the change yourself.</p>`
+            : html`<p class="note">An admin approves this change.</p>`}
+        </div>
+      </div>`;
+}
+
 function change(report: Report): Html {
   const { edits, instructions } = report.edit;
   if (!edits.length && !instructions) return html`<div><h2>Change</h2><p class="note">No code change: keep the model in use now.</p></div>`;
@@ -165,7 +182,7 @@ function report(data: Report, admin: boolean): Html {
   const near = (item: MeasuredModel) => item.role === "candidate" && misses.some((miss) => miss.model === item.model && miss.endpoint === item.endpoint);
   return html`<div class="eyebrow"><a href="/">Runs</a><span>›</span><span>${data.jobId}</span><span>Measured ${date(data.createdAt)}</span></div>
     <h1 class="title">${title(data)}</h1>
-    <div class="pick">${data.connection ? html`${connectionPick(data)}${connectionChange(data, admin)}` : html`${pickCard(data)}${change(data)}`}</div>
+    <div class="pick">${data.connection ? html`${connectionPick(data)}${connectionChange(data, admin)}` : data.langfuse ? html`${pickCard(data)}${langfuseChange(data, admin)}` : html`${pickCard(data)}${change(data)}`}</div>
 
     ${models.length ? html`<section aria-labelledby="compare">
       <h2 id="compare">Models Compared</h2>
@@ -242,11 +259,13 @@ export const runView: View<Data> = {
   actions: {
     // Approve change records who approved and when; it changes nothing in the connected app.
     async approve(_target, data, { api, refresh, toast, confirm }) {
-      if (isLive(data) || !data.connection?.change) return;
-      if (!await confirm({ title: "Approve this change?", body: `${data.connection.change.text}. OpenMerit records that you approved it, and when. It does not change the task: you make the change in Viktor.`, confirm: "Approve change" })) return;
+      const change = isLive(data) ? null : data.connection?.change ?? data.langfuse?.change ?? null;
+      if (isLive(data) || !change) return;
+      const where = data.langfuse ? "where your application or the prompt sets the model; OpenMerit writes nothing to Langfuse" : "in Viktor";
+      if (!await confirm({ title: "Approve this change?", body: `${change.text.replaceAll("`", "")}. OpenMerit records that you approved it, and when. It does not make the change: you make it ${where}.`, confirm: "Approve change" })) return;
       await api.send<Approval>("POST", `/api/runs/${encodeURIComponent(data.jobId)}/approve`);
       await refresh();
-      toast("Approved. Make the change in Viktor's scheduled tasks.");
+      toast(data.langfuse ? "Approved. Make the change where your application sets the model." : "Approved. Make the change in Viktor's scheduled tasks.");
     },
     // Run again, or raise the task's budget per job and run again: both spend, so both confirm first.
     async rerun(_target, data, ctx) {
@@ -266,7 +285,10 @@ export const runView: View<Data> = {
 
 async function rerun(data: Data, budgetUsd: number | null, ctx: Ctx): Promise<void> {
   const now = isLive(data) ? undefined : data.guardrails.effective.budgetUsd;
-  const ok = await ctx.confirm(isLive(data) && data.connection
+  const fromLangfuse = isLive(data) ? data.connection === "langfuse" : !!data.langfuse;
+  const ok = await ctx.confirm(fromLangfuse
+    ? { title: "Run again", body: `Evaluates ${data.task} again on its recorded calls and dataset items from Langfuse. It counts as one evaluation on your plan.`, confirm: "Run again" }
+    : isLive(data) && data.connection
     ? { title: "Start again", body: `Evaluates ${data.task} again on paused copies in Viktor's test mode, using credits from your Viktor workspace within the connection's cap. It counts as one evaluation on your plan.`, confirm: "Start again" }
     : budgetUsd === null
     ? { title: "Run again", body: `Runs ${data.task} again on the bundle its coding agent last sent. It counts as one evaluation on your plan.`, confirm: "Run again" }

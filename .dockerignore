@@ -10,5 +10,8 @@
 !openmerit-core/src/catalogue
 !openmerit-core/src/connectors/agent-bundle.ts
 !openmerit-core/src/connectors/viktor
+!openmerit-core/src/connectors/langfuse
+!openmerit-core/src/sources/langfuse.ts
+!openmerit-core/src/sources/contract.ts
 !openmerit-core/data/catalogue.json
 **/*.test.ts

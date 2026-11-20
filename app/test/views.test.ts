@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApiError, createApi, type GuardrailsAt, type JobView, type Me, type Report, type Spend, type Task, type ViktorConnection } from "../api.ts";
+import { ApiError, createApi, type GuardrailsAt, type JobView, type Me, type Report, type Spend, type Task, type LangfuseConnection, type ViktorConnection } from "../api.ts";
 import { createFakeApi } from "../dev/fake-api.ts";
 import type { Account } from "../view.ts";
 import { connectionsView } from "../views/connections.ts";
@@ -20,6 +20,8 @@ const account = async (scenario = "populated"): Promise<Account> => {
   const me = await get<Me>("/api/me", scenario);
   return { ...me, account: { ...me.account, name: me.account.name ?? "Sahra Health" } };
 };
+/** A Langfuse connection that is not connected, for pages about other connections. */
+const NONE: LangfuseConnection = { connected: false, tasks: [] };
 const page = (me: Account, params = "", id: string | null = null) => ({ me, params: new URLSearchParams(params), id });
 const text = (html: { __html: string }): string => html.__html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").replaceAll("&#39;", "'").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
 
@@ -150,14 +152,14 @@ test("a delete that needs a recent sign-in opens Clerk's prompt and retries once
 test("a Viktor connection lists its tasks with why some are skipped, and Approve change records the approval without changing the task", async () => {
   const me = await account();
   const viktor = await get<ViktorConnection>("/api/connections/viktor");
-  const listed = text(connectionsView.render({ endpoints: [], viktor }, page(me)));
+  const listed = text(connectionsView.render({ endpoints: [], viktor, langfuse: NONE }, page(me)));
   assert.match(listed, /Claims digest \/claims_digest smart 410 Set Claims digest to cheap/);
   assert.match(listed, /Inbox sync \/inbox_sync workspace default 0 Skipped script task, no model/);
   assert.match(listed, /Heartbeat \/heartbeat workspace default 0 Skipped Viktor's own task: it cannot be edited/);
-  const disconnected = connectionsView.render({ endpoints: [], viktor: { connected: false, tasks: [] } }, page(me)).__html;
+  const disconnected = connectionsView.render({ endpoints: [], viktor: { connected: false, tasks: [] }, langfuse: NONE }, page(me)).__html;
   assert.match(disconnected, /data-action="connect-viktor"/);
   assert.match(disconnected, /titled "OpenMerit: &lt;task title&gt;"/);
-  assert.doesNotMatch(connectionsView.render({ endpoints: [], viktor: { connected: false, tasks: [] } }, page({ ...me, role: "member" })).__html, /data-action="connect-viktor"/);
+  assert.doesNotMatch(connectionsView.render({ endpoints: [], viktor: { connected: false, tasks: [] }, langfuse: NONE }, page({ ...me, role: "member" })).__html, /data-action="connect-viktor"/);
 
   const result = await get<Report>("/api/runs/v5t8c2");
   const shown = runView.render(result, page(me)).__html;
@@ -175,7 +177,7 @@ test("a Viktor connection lists its tasks with why some are skipped, and Approve
   // The approver by name; an approval whose name Clerk did not have shows the user ID.
   assert.match(after, /Approved by Amira Haddad on/);
   assert.match(text(runView.render({ ...approved, approved: { ...approved.approved!, name: null } }, page(me))), /Approved by user_amira on/);
-  assert.match(text(connectionsView.render({ endpoints: [], viktor: await get<ViktorConnection>("/api/connections/viktor") }, page(me))), /Approved by Amira Haddad on/);
+  assert.match(text(connectionsView.render({ endpoints: [], viktor: await get<ViktorConnection>("/api/connections/viktor"), langfuse: NONE }, page(me))), /Approved by Amira Haddad on/);
   assert.doesNotMatch(runView.render(approved, page(me)).__html, /data-action="approve"/);
   const row = (await get<ViktorConnection>("/api/connections/viktor")).tasks.find((task) => task.id === "claims_digest");
   assert.equal(row?.model, "smart", "approving changes nothing in Viktor");
@@ -190,4 +192,32 @@ test("a Viktor connection lists its tasks with why some are skipped, and Approve
   assert.doesNotMatch(text(runView.render(running, page(me))), /coding agent/);
   const oneCredit = { ...result, pick: { ...result.pick!, costPerCallUsd: 0.0025 } };
   assert.match(text(runView.render(oneCredit, page(me))), /1 credit per test run/);
+});
+
+test("a Langfuse connection lists its tasks by spend, and a result's change is approved in the app without writing to Langfuse", async () => {
+  const me = await account();
+  const [viktor, langfuse] = await Promise.all([get<ViktorConnection>("/api/connections/viktor"), get<LangfuseConnection>("/api/connections/langfuse")]);
+  const listed = text(connectionsView.render({ endpoints: [], viktor, langfuse }, page(me)));
+  assert.match(listed, /Project sahra-claims on cloud\.langfuse\.com · public key ending 9f2c/);
+  assert.match(listed, /adjudicate-claim › adjudicate-claim-generate 3 models recorded anthropic\/claude-sonnet-5\.5 2,513 \$10\.44 Set adjudicate-claim-generate to anthropic\/claude-haiku-5-5 Review and approve/);
+  assert.match(listed, /\(no trace name\) › \(no name\) openai\/gpt-5-mini 12 \$0\.02 Skipped generations without a name/);
+  const disconnected = { connected: false, tasks: [] };
+  assert.match(connectionsView.render({ endpoints: [], viktor, langfuse: disconnected }, page(me)).__html, /data-action="connect-langfuse"/);
+  assert.match(text(connectionsView.render({ endpoints: [], viktor, langfuse: disconnected }, page(me))), /refuses a key that can write/);
+  assert.doesNotMatch(connectionsView.render({ endpoints: [], viktor, langfuse: disconnected }, page({ ...me, role: "member" })).__html, /data-action="connect-langfuse"/);
+
+  // A key pair that can write is refused with why.
+  const refused = await fake(new Request("https://openmerit.ai/api/connections/langfuse", { method: "POST", headers: { authorization: "Bearer preview-populated", "content-type": "application/json" }, body: JSON.stringify({ baseUrl: "https://cloud.langfuse.com", publicKey: "pk-lf-1", secretKey: "sk-lf-write" }) }));
+  assert.equal(refused.status, 400);
+  assert.match((await refused.json() as { error: string }).error, /can write to Langfuse/);
+
+  const result = await get<Report>("/api/runs/l2f9a4");
+  const shown = runView.render(result, page(me)).__html;
+  assert.match(text({ __html: shown }), /Set adjudicate-claim-generate to anthropic\/claude-haiku-5-5 Where your application makes the "adjudicate-claim-generate" call in "adjudicate-claim", set the model to anthropic\/claude-haiku-5-5\./);
+  assert.match(shown, /data-action="approve"/);
+  assert.doesNotMatch(runView.render(result, page({ ...me, role: "member" })).__html, /data-action="approve"/, "only an admin approves");
+  assert.equal((await fake(new Request("https://openmerit.ai/api/runs/l2f9a4/approve", { method: "POST", headers: { authorization: "Bearer preview-populated" } }))).status, 200);
+  const approved = await get<Report>("/api/runs/l2f9a4");
+  assert.match(text(runView.render(approved, page(me))), /Approved by Amira Haddad on/);
+  assert.match(text(connectionsView.render({ endpoints: [], viktor, langfuse: await get<LangfuseConnection>("/api/connections/langfuse") }, page(me))), /Approved by Amira Haddad on/);
 });
