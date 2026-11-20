@@ -32,7 +32,7 @@ test("names from the cloud app are shown as text, never as markup", async () => 
   const tasks = (await get<Task[]>("/api/tasks")).map((task) => ({ ...task, name: hostile, environment: hostile }));
   const report = { ...await get<Report>("/api/runs/k7m2q9"), task: hostile, notices: [hostile] };
   const job = { ...await get<JobView>("/api/runs/z1c7m4"), error: hostile };
-  for (const html of [tasksView.render(tasks, page({ ...me, account: { ...me.account, name: hostile } })), runView.render(report, page(me)), runView.render(job, page(me))]) {
+  for (const html of [tasksView.render({ tasks, viktor: { connected: false, tasks: [] } }, page({ ...me, account: { ...me.account, name: hostile } })), runView.render(report, page(me)), runView.render(job, page(me))]) {
     assert.doesNotMatch(html.__html, /<img/);
     assert.match(html.__html, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
   }
@@ -293,4 +293,24 @@ test("a task listed after the first listing is New until someone opens its row; 
   calls = 0;
   await assert.rejects(retried(() => { calls += 1; return Promise.reject(new ApiError(403, "no")); }, [0, 0]), /no/);
   assert.equal(calls, 1);
+});
+
+test("Tasks lists a connected Viktor workspace's tasks in their own section, with Evaluate for an admin, and none when Viktor is not connected", async () => {
+  const me = await account();
+  const tasks = await get<Task[]>("/api/tasks");
+  const viktor = await get<ViktorConnection>("/api/connections/viktor");
+  const shown = tasksView.render({ tasks, viktor }, page(me)).__html;
+  assert.match(shown, /<h2 id="viktor">Viktor<\/h2>/);
+  // The same rows as Connections: every task, with Evaluate on one not yet evaluated, and the skipped ones with why.
+  for (const task of viktor.tasks) assert.match(text({ __html: shown }), new RegExp(task.title));
+  assert.match(shown, /data-action="start" data-id="weekly_payer_report"/);
+  assert.match(text({ __html: shown }), /Skipped Viktor's own task: it cannot be edited/);
+  assert.match(text({ __html: shown }), new RegExp(`${viktor.tasks.length} Viktor tasks`));
+  // A member sees the estimate, not the button.
+  assert.doesNotMatch(tasksView.render({ tasks, viktor }, page({ ...me, role: "member" })).__html, /data-action="start"/);
+  // Not connected: no section; could not load: says so, never an empty table.
+  assert.doesNotMatch(tasksView.render({ tasks, viktor: { connected: false, tasks: [] } }, page(me)).__html, /id="viktor"/);
+  assert.match(text(tasksView.render({ tasks: [], viktor: { connected: false, unavailable: true, tasks: [] } }, page(me))), /Viktor's tasks could not load/);
+  // With no coding-agent tasks yet, the Viktor section still shows.
+  assert.match(tasksView.render({ tasks: [], viktor }, page(me)).__html, /id="viktor"/);
 });
