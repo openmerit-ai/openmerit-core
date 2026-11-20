@@ -44,7 +44,7 @@ test("ClerkAuth maps a valid session token to its user, organization and role, a
 });
 
 test("an internal error on /api carries the web app's CORS headers", async () => {
-  const failing: Auth = { mcp: () => Promise.reject(new Error("boom")), api: () => Promise.reject(new Error("boom")), email: async () => null };
+  const failing: Auth = { mcp: () => Promise.reject(new Error("boom")), api: () => Promise.reject(new Error("boom")), email: async () => null, person: async () => null };
   const config = loadConfig({ OPENMERIT_APP_URL: APP });
   const handler = createHandler({ client: {} as unknown as AppClient, auth: failing, billing: null, config });
   const response = await handler(new Request("https://openmerit.test/api/me", { headers: { origin: APP, authorization: "Bearer x" } }));

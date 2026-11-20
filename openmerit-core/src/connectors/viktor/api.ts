@@ -60,6 +60,16 @@ export function withArgs(code: string, args: readonly string[]): string {
   return `${head}\nimport sys as _sys, json as _json; _sys.argv[1:] = _json.loads(${JSON.stringify(JSON.stringify(args))})\n${rest}`;
 }
 
+/**
+ * The tools Viktor's tool gateway saved as drafts instead of running: a workspace can make a tool wait
+ * for approval in chat, which a script run through the API never gets. The SDK prints
+ * "[tool-gateway] <tool>: draft created, not executed" to stderr for each, and the call returns a
+ * draft receipt, which may fail the tool's response model or look like an empty result.
+ */
+export function draftedTools(stderr: string): string[] {
+  return [...new Set([...stderr.matchAll(/\[tool-gateway\] ([\w.-]+): draft created, not executed/g)].map(match => match[1]!))];
+}
+
 export function viktorClient(options: ViktorClientOptions): ViktorClient {
   const base = (options.baseUrl ?? VIKTOR_API).replace(/\/+$/, "");
   const fetcher = options.fetch ?? fetch;
@@ -89,6 +99,8 @@ export function viktorClient(options: ViktorClientOptions): ViktorClient {
       let run = await call<Awaited<ReturnType<typeof scriptRun>>>("POST", "/api/public/v1/scripts/runs", { code: withArgs(code, args), args: [], timeout_seconds: timeoutSeconds, wait_seconds: Math.min(timeoutSeconds, 30) });
       const deadline = Date.now() + (timeoutSeconds + 60) * 1000;
       while (PENDING.has(run.status) && Date.now() < deadline) { await sleep(2000); run = await scriptRun(run.id); }
+      const drafted = draftedTools(run.result?.stderr ?? "");
+      if (drafted.length) throw new ViktorError(0, "needs_approval", `Viktor saved OpenMerit's call${drafted.length === 1 ? "" : "s"} to ${drafted.join(", ")} as ${drafted.length === 1 ? "a draft that waits" : "drafts that wait"} for approval in chat, so ${drafted.length === 1 ? "it" : "they"} did not run. In Viktor, let ${drafted.length === 1 ? "this tool" : "these tools"} run without approval, then press Refresh.`);
       if (run.status !== "completed" || (run.result?.exit_code ?? 0) !== 0) {
         const why = run.result?.stderr?.trim().split("\n").slice(-3).join(" ") || (run.error ? JSON.stringify(run.error) : run.status);
         throw new ViktorError(0, "script_failed", `Viktor script run ${run.id} ${run.status}: ${why.slice(0, 500)}`);

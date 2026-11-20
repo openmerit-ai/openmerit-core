@@ -172,7 +172,10 @@ test("a Viktor connection lists its tasks with why some are skipped, and Approve
   const approved = await get<Report>("/api/runs/v5t8c2");
   assert.equal(approved.approved?.by, "user_amira");
   const after = text(runView.render(approved, page(me)));
-  assert.match(after, /Approved by user_amira on/);
+  // The approver by name; an approval whose name Clerk did not have shows the user ID.
+  assert.match(after, /Approved by Amira Haddad on/);
+  assert.match(text(runView.render({ ...approved, approved: { ...approved.approved!, name: null } }, page(me))), /Approved by user_amira on/);
+  assert.match(text(connectionsView.render({ endpoints: [], viktor: await get<ViktorConnection>("/api/connections/viktor") }, page(me))), /Approved by Amira Haddad on/);
   assert.doesNotMatch(runView.render(approved, page(me)).__html, /data-action="approve"/);
   const row = (await get<ViktorConnection>("/api/connections/viktor")).tasks.find((task) => task.id === "claims_digest");
   assert.equal(row?.model, "smart", "approving changes nothing in Viktor");
@@ -180,6 +183,8 @@ test("a Viktor connection lists its tasks with why some are skipped, and Approve
   const failed = { ...await get<JobView>("/api/runs/z1c7m4"), status: "failed" as const, error: "The test runs did not finish." };
   assert.match(text(runView.render({ ...failed, connection: "viktor" }, page(me))), /Start again/);
   assert.match(text(runView.render(failed, page(me))), /Run again/);
+  // Jobs that failed before the error stopped being a notice too kept it in both: it shows once.
+  assert.equal(text(runView.render({ ...failed, notices: [failed.error] }, page(me))).split("The test runs did not finish.").length, 2);
   const running = { ...failed, status: "running" as const, connection: "viktor" };
   assert.match(text(runView.render(running, page(me))), /testing the task's presets on paused copies in Viktor's test mode/);
   assert.doesNotMatch(text(runView.render(running, page(me))), /coding agent/);

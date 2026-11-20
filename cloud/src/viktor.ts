@@ -4,6 +4,8 @@
 // connection; this module checks the account's limits and starts the jobs.
 import { randomBytes } from "node:crypto";
 import { CLEANUP, COPY_PATH, DEFAULT_CREDIT_CAP, estimateCredits, keyProblem, LIST, readTasks, viktorClient, type ViktorTask } from "../../openmerit-core/src/connectors/viktor/index.ts";
+import type { Approval } from "./actors/account.ts";
+import type { Auth } from "./auth.ts";
 import { approve, DEFAULT_REPEATS, redact } from "./engine.ts";
 import type { ConnectionResult, JobResult } from "./report.ts";
 import { services } from "./services.ts";
@@ -23,7 +25,7 @@ export interface ViktorTaskView {
   estimatedCredits: number | null;
   jobId: string | null;
   /** A finished evaluation's verdict. */
-  result: { status: string; change: string | null; link: string | null; approval: { by: string; at: string } | null } | null;
+  result: { status: string; change: string | null; link: string | null; approval: { by: string; name: string | null; at: string } | null } | null;
 }
 
 export interface ViktorView {
@@ -37,6 +39,10 @@ export const viktorTaskId = (task: Pick<ViktorTask, "id">) => `viktor_${task.id}
 const newJobId = () => `job_${new Date().toISOString().slice(0, 10).replaceAll("-", "")}_${randomBytes(6).toString("hex")}`;
 
 type Account = ReturnType<AppClient["account"]["getOrCreate"]>;
+/** Looks up approvers' names; null where the server has no sign-in. */
+type People = Pick<Auth, "person"> | null;
+type JobWithCredits = Awaited<ReturnType<Account["connectionJobs"]>>[number];
+const active = (job: { status: string }) => job.status === "queued" || job.status === "running";
 const apiFor = (apiKey: string) => viktorClient({ apiKey, baseUrl: services().config.viktor.baseUrl, fetch: services().fetch });
 
 /** Checks the key's scopes, stores it encrypted, lists the tasks and starts evaluating them. */
@@ -82,7 +88,7 @@ export async function startViktorTasks(client: AppClient, input: { accountId: st
   const connection = await account.connection(VIKTOR);
   if (!connection) return { started: [], jobIds: [], refused: "Viktor is not connected." };
   const tasks = (connection.listing as ViktorTask[] | null) ?? [];
-  const jobs = await account.connectionJobs({ kind: VIKTOR, since: Date.parse(connection.connectedAt) });
+  const jobs = await connectionJobs(client, account, Date.parse(connection.connectedAt));
   const evaluated = new Set(jobs.map(job => job.taskId));
   let committed = jobs.reduce((sum, job) => sum + (job.credits ?? 0), 0);
   const wanted = tasks.filter(task => !task.skipped && (input.taskIds ? input.taskIds.includes(task.id) : !evaluated.has(viktorTaskId(task))));
@@ -100,14 +106,57 @@ export async function startViktorTasks(client: AppClient, input: { accountId: st
   return { started, jobIds, refused: null };
 }
 
+/**
+ * The connection's jobs with the credits each spent, or expects to while it runs. A job that ended
+ * before its Viktor thread started spent nothing; jobs that ended that way before they recorded 0
+ * kept their estimate, which is corrected here once.
+ */
+async function connectionJobs(client: AppClient, account: Account, since: number): Promise<JobWithCredits[]> {
+  return Promise.all((await account.connectionJobs({ kind: VIKTOR, since })).map(async job => {
+    if (active(job) || job.status === "done" || !job.credits) return job;
+    if (await client.viktorJob.get([job.id]).threadStarted().catch(() => true)) return job;
+    await account.setJobCredits({ jobId: job.id, credits: 0 });
+    return { ...job, credits: 0 };
+  }));
+}
+
+/** How old a listing may be before a read lists the tasks again, and each account's last relisting. */
+const relistings = new Map<string, { at: number; done: Promise<void> }>();
+
+/**
+ * The connection as `viktorView` gives it, listing the tasks again first when the listing is older
+ * than `OPENMERIT_VIKTOR_STALE_MS` (10 minutes), so a task deleted in Viktor leaves the table. It
+ * lists at most once in that time per account, even when listing fails, and starts no evaluation:
+ * Refresh does.
+ */
+export async function currentViktorView(client: AppClient, accountId: string, people: People): Promise<ViktorView> {
+  const connection = await client.account.getOrCreate([accountId]).connection(VIKTOR);
+  if (connection) {
+    const staleMs = services().config.viktor.staleMs, listed = connection.listedAt ? Date.parse(connection.listedAt) : 0;
+    let last = relistings.get(accountId);
+    if (Date.now() - listed > staleMs && (!last || Date.now() - last.at > staleMs)) relistings.set(accountId, last = { at: Date.now(), done: refreshViktor(client, accountId) });
+    if (last && Date.now() - last.at <= staleMs) await last.done;
+  }
+  return viktorView(client, accountId, people);
+}
+
+/** An approval with its approver's name, looked up in Clerk and kept when the approval has none yet. */
+export async function namedApproval(client: AppClient, people: People, accountId: string, jobId: string): Promise<Approval | null> {
+  const account = client.account.getOrCreate([accountId]);
+  const approval = await account.approval(jobId);
+  if (!approval || approval.name || !people) return approval;
+  const person = await people.person(approval.by);
+  return person?.name ? await account.nameApproval({ jobId, name: person.name, email: person.email }) ?? approval : approval;
+}
+
 /** The connection and its task table: each task's latest evaluation, or why it waits or is skipped. */
-export async function viktorView(client: AppClient, accountId: string): Promise<ViktorView> {
+export async function viktorView(client: AppClient, accountId: string, people: People = null): Promise<ViktorView> {
   const account = client.account.getOrCreate([accountId]);
   const connection = await account.connection(VIKTOR);
   if (!connection) return { connected: false, tasks: [] };
-  const jobs = await account.connectionJobs({ kind: VIKTOR, since: Date.parse(connection.connectedAt) });
-  const used = jobs.filter(job => !(job.status === "queued" || job.status === "running")).reduce((sum, job) => sum + (job.credits ?? 0), 0);
-  const reserved = jobs.filter(job => job.status === "queued" || job.status === "running").reduce((sum, job) => sum + (job.credits ?? 0), 0);
+  const jobs = await connectionJobs(client, account, Date.parse(connection.connectedAt));
+  const used = jobs.filter(job => !active(job)).reduce((sum, job) => sum + (job.credits ?? 0), 0);
+  const reserved = jobs.filter(active).reduce((sum, job) => sum + (job.credits ?? 0), 0);
   const tasks = await Promise.all(((connection.listing as ViktorTask[] | null) ?? []).map(async (task): Promise<ViktorTaskView> => {
     const latest = jobs.find(job => job.taskId === viktorTaskId(task)) ?? null;
     const base = { id: task.id, title: task.title, path: task.path, model: task.model, credits30d: task.credits30d, paused: task.paused, jobId: latest?.id ?? null, estimatedCredits: task.skipped ? null : estimateCredits(task, DEFAULT_REPEATS), result: null };
@@ -116,8 +165,8 @@ export async function viktorView(client: AppClient, accountId: string): Promise<
     if (latest.status === "queued" || latest.status === "running") return { ...base, status: "evaluating", reason: null };
     if (latest.status !== "done") return { ...base, status: "failed", reason: (await client.viktorJob.get([latest.id]).status().catch(() => null))?.error ?? latest.status };
     const report = (await account.report({ jobId: latest.id }))?.json as (JobResult & { connection?: ConnectionResult }) | undefined;
-    const approval = await account.approval(latest.id);
-    return { ...base, status: "done", reason: null, result: { status: report?.status ?? "done", change: report?.connection?.change?.text ?? null, link: report?.connection?.change?.link ?? null, approval: approval ? { by: approval.by, at: approval.at } : null } };
+    const approval = await namedApproval(client, people, accountId, latest.id);
+    return { ...base, status: "done", reason: null, result: { status: report?.status ?? "done", change: report?.connection?.change?.text ?? null, link: report?.connection?.change?.link ?? null, approval: approval ? { by: approval.by, name: approval.name, at: approval.at } : null } };
   }));
   return {
     connected: true, keyLast4: connection.keyLast4, keyType: connection.keyType, creditCap: connection.creditCap, connectedAt: connection.connectedAt, connectedBy: connection.connectedBy,
@@ -126,13 +175,15 @@ export async function viktorView(client: AppClient, accountId: string): Promise<
 }
 
 /** Records who approved a finished result's change, and when. It changes nothing in Viktor (decision 9). */
-export async function approveChange(client: AppClient, input: { accountId: string; userId: string; jobId: string }): Promise<{ ok: true; approval: { change: string; link: string | null; by: string; at: string } } | { ok: false; status: number; error: string }> {
+export async function approveChange(client: AppClient, people: People, input: { accountId: string; userId: string; jobId: string }): Promise<{ ok: true; approval: Approval } | { ok: false; status: number; error: string }> {
   const account = client.account.getOrCreate([input.accountId]);
   const report = (await account.report({ jobId: input.jobId }))?.json as (JobResult & { connection?: ConnectionResult }) | undefined;
   if (!report) return { ok: false, status: 404, error: "This run has no result yet." };
   const change = report.connection?.change;
   if (!change || !report.pick) return { ok: false, status: 409, error: "This result proposes no change to approve." };
   const approved = approve({ edits: [], instructions: report.edit.instructions }, { model: change.model, endpoint: "viktor", endpointModel: change.model, onOpenRouter: false }, { by: input.userId, at: new Date().toISOString() });
-  const saved = await account.approve({ jobId: input.jobId, change: change.text, link: change.link, by: approved.approval.by, at: approved.approval.at });
-  return { ok: true, approval: { change: saved.change, link: saved.link, by: saved.by, at: saved.at } };
+  const person = await people?.person(input.userId) ?? null;
+  await account.approve({ jobId: input.jobId, change: change.text, link: change.link, by: approved.approval.by, name: person?.name ?? null, email: person?.email ?? null, at: approved.approval.at });
+  // The first approval stands; an earlier one recorded without a name gets one now.
+  return { ok: true, approval: (await namedApproval(client, people, input.accountId, input.jobId))! };
 }

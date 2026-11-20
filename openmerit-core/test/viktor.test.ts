@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import type { Measurement } from "../src/engine/evaluate.ts";
 import {
-  batchMeasure, batchSpec, judgeChecks, CREDIT_USD, estimateCredits, evaluateViktor, gradeRun, keyProblem, proposeChange, readTasks, REQUIRED_SCOPES, viktor, viktorClient, withArgs,
+  batchMeasure, batchSpec, draftedTools, judgeChecks, CREDIT_USD, estimateCredits, evaluateViktor, gradeRun, keyProblem, proposeChange, readTasks, REQUIRED_SCOPES, viktor, viktorClient, withArgs,
   type BatchRun, type Check,
 } from "../src/connectors/viktor/index.ts";
 
@@ -58,6 +58,14 @@ test("a script run is polled until it ends, and a failed one throws with its las
 
   const failing = fakeViktor({ "/api/public/v1/scripts/runs": () => ({ body: { id: "run_2", status: "completed", result: { exit_code: 1, stdout: "", stderr: "Traceback\n  line 3\nValueError: no such cron" } } }) });
   await assert.rejects(viktorClient({ apiKey: "k", fetch: failing.fetcher }).runScript("x"), /run_2 completed: Traceback +line 3 ValueError: no such cron/);
+
+  // A workspace that makes tools wait for approval: the gateway saves each call as a draft, and the
+  // script fails on the draft receipt. The error names the tools, whether or not the script failed.
+  const stderr = "[tool-gateway] list_crons: draft created, not executed\n[tool-gateway] read_file: draft created, not executed\n[tool-gateway] list_crons: draft created, not executed\npydantic_core.ValidationError: 1 validation error";
+  assert.deepEqual(draftedTools(stderr), ["list_crons", "read_file"]);
+  assert.deepEqual(draftedTools("[tool-gateway] list_crons: executed"), []);
+  const drafted = fakeViktor({ "/api/public/v1/scripts/runs": () => ({ body: { id: "run_3", status: "completed", result: { exit_code: 1, stdout: "", stderr } } }) });
+  await assert.rejects(viktorClient({ apiKey: "k", fetch: drafted.fetcher }).runScript("x"), { code: "needs_approval", message: /calls to list_crons, read_file as drafts that wait for approval in chat, so they did not run/ });
 });
 
 test("script arguments travel in the code, since Viktor refuses one over 2,000 characters, and reach sys.argv unchanged", (t) => {

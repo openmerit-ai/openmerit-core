@@ -132,7 +132,7 @@ export const runsView: View<{ runs: Run[]; tasks: Task[]; jobs: JobView[] }> = {
           <tbody>
             ${runs.map((run) => {
               const task = byId.get(run.taskId);
-              return html`<tr><td><a href="/r/${run.id}/">${task?.name ?? run.taskId}</a><span class="sub">${task?.environment ?? ""}</span></td><td>${outcome(run, task)}</td><td>${askedBy(run)}</td><td class="num">${when(run.startedAt)}</td></tr>`;
+              return html`<tr><td><a href="/r/${run.id}/">${task?.name ?? run.result?.task ?? run.taskId}</a><span class="sub">${task?.environment ?? ""}</span></td><td>${outcome(run, task)}</td><td>${askedBy(run)}</td><td class="num">${when(run.startedAt)}</td></tr>`;
             })}
           </tbody>
         </table>

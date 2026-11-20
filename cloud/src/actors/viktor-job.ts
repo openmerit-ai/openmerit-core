@@ -278,6 +278,8 @@ export const viktorJob = workflow({
       const { input, thread: _thread, ...rest } = c.state;
       return { ...rest, questions: [], provisional: null, live: null, connection: "viktor", jobId: c.key[0]!, taskId: input.taskId, task: input.task.title, createdAt: input.createdAt };
     },
+    /** Whether the job started its Viktor thread, after which it spends credits. */
+    threadStarted: (c): boolean => c.state.thread !== null,
     destroy: (c): void => { c.destroy(); },
   },
 });
@@ -313,7 +315,6 @@ async function finish(s: StepState, client: AppClient, jobId: string, status: "d
   if (result) await account.saveReport({ jobId, taskId: input.taskId, json: { jobId, task: input.task.title, createdAt: input.createdAt, ...result }, markdown: renderViktorMarkdown({ jobId, createdAt: input.createdAt, result }) });
   await account.jobUpdate({ jobId, status, measured: status === "done", ...(credits === null ? {} : { credits }) });
   s.state.status = status; s.state.phase = "done"; s.state.result = result; s.state.error = error; s.state.updatedAt = now();
-  if (error) s.state.notices.push(error);
   if (left.length) s.state.notices.push(`OpenMerit could not delete its copies ${left.join(", ")}: delete them in Viktor's scheduled tasks.`);
 }
 
