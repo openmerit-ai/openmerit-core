@@ -52,7 +52,8 @@ export type JobStatus = "queued" | "running" | "needs_input" | "done" | "failed"
 // What a finished run's report found: its result status, the model it picked and the one in use then.
 export interface RunResult { status: string; task?: string | null; model: string | null; from: string | null; savingPerCallUsd: number | null }
 // askedBy is the name the asking coding agent's MCP client sent, such as claude-code; null for a watch run or an unnamed client.
-export interface Run { id: string; taskId: string; kind: string; status: JobStatus | string; startedAt: string; finishedAt: string | null; askedBy: string | null; result: RunResult | null }
+// title: a connection task's name, such as a Viktor task's title. startedBy: who pressed Start or Start again for a connection's job; null when it started on its own.
+export interface Run { id: string; taskId: string; kind: string; status: JobStatus | string; startedAt: string; finishedAt: string | null; askedBy: string | null; title?: string | null; startedBy?: string | null; startedByName?: string | null; result: RunResult | null }
 
 export interface MeasuredModel {
   model: string;
@@ -141,6 +142,8 @@ export interface JobView {
   progress: { measured: number; planned: number | null };
   result: JobResult | null;
   error: string | null;
+  // The error as recorded, with its line breaks, when `error` is a sentence about it (a connected app's job).
+  errorDetail?: string | null;
   provisional: { model: string; endpoint: string; reason: string; estCostPerCallUsd: number | null } | null;
   createdAt: string;
   report: null;

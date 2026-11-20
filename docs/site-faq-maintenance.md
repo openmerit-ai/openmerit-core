@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Viktor run labels and readable errors in the cloud app — unreleased, 20 November 2026
+
+Reviewed the homepage against Runs naming Viktor runs by their task and who started them, and failed Viktor jobs showing a sentence with the full error behind Show details. `site/index.html` makes no claim about runs, Viktor or error messages. No homepage copy change is needed; the cloud README's Viktor section describes it.
+
 ## The Langfuse connection in the cloud app — unreleased, 20 November 2026
 
 Reviewed the homepage against the cloud app connecting a Langfuse project with a Viewer key, listing its generations as tasks, evaluating them on replayed dataset items and recorded calls, and recording an approval without writing to Langfuse. `site/index.html` has no FAQ block and makes no claim about Langfuse, connected apps or what OpenMerit reads from them. No homepage copy change is needed; the cloud README's Langfuse section describes it, including what it reads.

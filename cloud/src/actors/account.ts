@@ -67,7 +67,11 @@ export interface RunResult { status: string; task: string | null; model: string 
 /** The end of a ledger refusal's reason when the job's own budget refused it, which raising the task's budget fixes. */
 export const JOB_BUDGET = "budget for this job";
 
-export interface JobRow { id: string; taskId: string; kind: string; status: string; startedAt: string; finishedAt: string | null; askedBy: string | null; result: RunResult | null }
+/**
+ * title is a connection task's name, such as a Viktor task's title, kept so a run is labelled without its report.
+ * startedBy is the user who pressed Start or Start again for a connection's job; null when it started on its own, or for an agent's run.
+ */
+export interface JobRow { id: string; taskId: string; kind: string; status: string; startedAt: string; finishedAt: string | null; askedBy: string | null; title: string | null; startedBy: string | null; result: RunResult | null }
 export interface GuardrailSetting { key: string; value: unknown; kind: "constraint" | "default" }
 export type Started = { ok: true } | { ok: false; error: string };
 
@@ -102,7 +106,7 @@ function runResult(json: unknown): RunResult | null {
 }
 const jobRow = (row: Row): JobRow => ({
   id: String(row.id), taskId: String(row.task_id), kind: String(row.kind), status: String(row.status), startedAt: iso(row.started_at)!, finishedAt: iso(row.finished_at),
-  askedBy: (row.asked_by as string | null) ?? null, result: runResult(row.report_json),
+  askedBy: (row.asked_by as string | null) ?? null, title: (row.title as string | null) ?? null, startedBy: (row.started_by as string | null) ?? null, result: runResult(row.report_json),
 });
 
 export const account = actor({
@@ -114,6 +118,11 @@ export const account = actor({
     if (!columns.some(column => column.name === "deleted_at")) await database.execute(`ALTER TABLE jobs ADD COLUMN deleted_at INTEGER`);
     // Accounts created before connections: a connection's job records the credits it used or expects to use.
     if (!columns.some(column => column.name === "credits")) await database.execute(`ALTER TABLE jobs ADD COLUMN credits REAL`);
+    // Accounts created before a connection's job kept its task's title and who started it.
+    if (!columns.some(column => column.name === "title")) {
+      await database.execute(`ALTER TABLE jobs ADD COLUMN title TEXT`);
+      await database.execute(`ALTER TABLE jobs ADD COLUMN started_by TEXT`);
+    }
     // Approvals recorded before they kept the approver's name and email.
     const approvalColumns = await database.execute(`PRAGMA table_info(approvals)`);
     if (!approvalColumns.some(column => column.name === "approved_by_name")) {
@@ -160,7 +169,7 @@ export const account = actor({
     }, { name: "apply_stripe" }),
 
     /** Checks the plan and the account's job limits, then records the job. */
-    startJob: async (c, input: { jobId: string; taskId: string; kind: "run" | "watch" | "viktor" | "langfuse"; askedBy?: string | null; credits?: number | null }): Promise<Started> => c.db.transaction(async tx => {
+    startJob: async (c, input: { jobId: string; taskId: string; kind: "run" | "watch" | "viktor" | "langfuse"; askedBy?: string | null; credits?: number | null; title?: string | null; startedBy?: string | null }): Promise<Started> => c.db.transaction(async tx => {
       const { limits, appUrl } = services().config;
       const current = await plan(tx);
       if (!current || !ACTIVE_PLAN.has(current.status)) return { ok: false, error: `This account has no active OpenMerit plan${current ? ` (Stripe says ${current.status})` : ""}. Subscribe at ${appUrl}/plan/, then try again.` };
@@ -170,7 +179,7 @@ export const account = actor({
       if (Number(hour?.n) >= limits.jobsPerHour) return { ok: false, error: `This account started ${limits.jobsPerHour} jobs in the last hour, its limit. Try again later.` };
       const [running] = await tx.execute(`SELECT count(*) AS n FROM jobs WHERE status IN ('queued', 'running')`);
       if (Number(running?.n) >= limits.concurrentJobs) return { ok: false, error: `This account has ${limits.concurrentJobs} jobs running, its limit. Try again when one finishes.` };
-      await tx.execute(`INSERT INTO jobs (id, task_id, kind, status, started_at, asked_by, credits) VALUES (?, ?, ?, 'queued', ?, ?, ?)`, input.jobId, input.taskId, input.kind, now, input.askedBy ?? null, input.credits ?? null);
+      await tx.execute(`INSERT INTO jobs (id, task_id, kind, status, started_at, asked_by, credits, title, started_by) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)`, input.jobId, input.taskId, input.kind, now, input.askedBy ?? null, input.credits ?? null, input.title ?? null, input.startedBy ?? null);
       return { ok: true };
     }, { name: "start_job" }),
 
@@ -449,6 +458,10 @@ export const account = actor({
     nameApproval: async (c, input: { jobId: string; name: string; email: string | null }): Promise<Approval | null> => {
       await c.db.execute(`UPDATE approvals SET approved_by_name = ?, approved_by_email = COALESCE(approved_by_email, ?) WHERE job_id = ? AND approved_by_name IS NULL`, input.name, input.email, input.jobId);
       return approvalOf(c.db, input.jobId);
+    },
+    /** Records the title and starter of a connection's job recorded before the account kept them; once. */
+    setJobOrigin: async (c, input: { jobId: string; title: string; startedBy: string | null }): Promise<void> => {
+      await c.db.execute(`UPDATE jobs SET title = ?, started_by = ? WHERE id = ? AND title IS NULL`, input.title, input.startedBy, input.jobId);
     },
     /** Corrects the credits a connection's job recorded, such as an estimate kept by a job that spent none. */
     setJobCredits: async (c, input: { jobId: string; credits: number }): Promise<void> => {

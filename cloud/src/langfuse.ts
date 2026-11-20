@@ -119,7 +119,7 @@ export async function startLangfuseTasks(client: AppClient, input: { accountId: 
   for (const task of wanted) {
     if (left < per) return { started, jobIds, refused: `${task.name} waits: the plan has no evaluations left this period. Start it from the table, or change the plan.` };
     const jobId = newJobId();
-    const ok = await account.startJob({ jobId, taskId: langfuseTaskId(task), kind: LANGFUSE, askedBy: null });
+    const ok = await account.startJob({ jobId, taskId: langfuseTaskId(task), kind: LANGFUSE, askedBy: null, title: task.name, startedBy: input.userId });
     if (!ok.ok) return { started, jobIds, refused: ok.error };
     // The job reads the bundle from Langfuse; until then the pool and provisional pick go by the current model.
     const bundle: TaskBundle = { task: task.name, current: { model: task.model }, prompt: { messages: [] }, output: { kind: "text" } };

@@ -70,6 +70,22 @@ export function draftedTools(stderr: string): string[] {
   return [...new Set([...stderr.matchAll(/\[tool-gateway\] ([\w.-]+): draft created, not executed/g)].map(match => match[1]!))];
 }
 
+/**
+ * A short sentence for an error Viktor's API gave as a request validation error, such as
+ * "Viktor refused the request: each script argument may be at most 2,000 characters."; null for any
+ * other error. It reads the `loc` and `msg` of the first item, so it works on a message cut short.
+ */
+export function viktorErrorSentence(message: string): string | null {
+  const found = /"loc":\[([^\]]*)\],"msg":"((?:[^"\\]|\\.)*)"/.exec(message);
+  if (!found) return null;
+  const loc = found[1]!, what = loc.includes('"args"') ? "script argument" : null;
+  let text = found[2]!.replace(/\\"/g, '"').replace(/^Value error,\s*/i, "").trim();
+  if (what) text = text.replace(/\barg\b/, what);
+  text = text.replace(/\b\d{4,}\b/g, digits => Number(digits).toLocaleString("en-US"));
+  const field = what ? "" : `${/"(\w+)"\s*$/.exec(loc)?.[1] ?? "a field"}: `;
+  return text ? `Viktor refused the request: ${field}${text.charAt(0).toLowerCase()}${text.slice(1).replace(/\.?$/, ".")}` : null;
+}
+
 export function viktorClient(options: ViktorClientOptions): ViktorClient {
   const base = (options.baseUrl ?? VIKTOR_API).replace(/\/+$/, "");
   const fetcher = options.fetch ?? fetch;

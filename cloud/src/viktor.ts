@@ -4,7 +4,7 @@
 // connection; this module checks the account's limits and starts the jobs.
 import { randomBytes } from "node:crypto";
 import { CLEANUP, COPY_PATH, DEFAULT_CREDIT_CAP, estimateCredits, keyProblem, LIST, readTasks, viktorClient, type ViktorTask } from "../../openmerit-core/src/connectors/viktor/index.ts";
-import type { Approval } from "./actors/account.ts";
+import type { Approval, JobRow } from "./actors/account.ts";
 import type { Auth } from "./auth.ts";
 import { approve, DEFAULT_REPEATS, redact } from "./engine.ts";
 import type { ConnectionResult, JobResult } from "./report.ts";
@@ -98,7 +98,7 @@ export async function startViktorTasks(client: AppClient, input: { accountId: st
     const credits = estimateCredits(task, DEFAULT_REPEATS);
     if (committed + credits > connection.creditCap) return { started, jobIds, refused: `Evaluating ${task.title} needs about ${credits} credits, and ${Math.round(committed)} of the ${connection.creditCap}-credit cap are used or expected. Raise the cap to start it.` };
     const jobId = newJobId();
-    const ok = await account.startJob({ jobId, taskId: viktorTaskId(task), kind: "viktor", askedBy: null, credits });
+    const ok = await account.startJob({ jobId, taskId: viktorTaskId(task), kind: "viktor", askedBy: null, credits, title: task.title, startedBy: input.userId });
     if (!ok.ok) return { started, jobIds, refused: ok.error };
     await client.viktorJob.create([jobId], { input: { accountId: input.accountId, taskId: viktorTaskId(task), task, repeats: DEFAULT_REPEATS, userId: input.userId, createdAt: new Date().toISOString() } });
     committed += credits; started.push(task.id); jobIds.push(jobId);
@@ -138,6 +138,32 @@ export async function currentViktorView(client: AppClient, accountId: string, pe
     if (last && Date.now() - last.at <= staleMs) await last.done;
   }
   return viktorView(client, accountId, people);
+}
+
+/** A run as Runs lists it: a connection job's title, never its ID, and the name of whoever started it. */
+export type LabelledRun = JobRow & { startedByName: string | null };
+
+/**
+ * Labels runs for Runs. A Viktor job recorded before the account kept its title and starter gets
+ * them once from the job's own input; when that is gone, the title in the connection's listing,
+ * else the task's path, else "Viktor task". Starters' names come from Clerk, the user ID when it has none.
+ */
+export async function labelRuns(client: AppClient, people: People, accountId: string, rows: readonly JobRow[]): Promise<LabelledRun[]> {
+  const account = client.account.getOrCreate([accountId]);
+  let listing: ViktorTask[] | null | undefined;
+  const labelled = await Promise.all(rows.map(async (row): Promise<JobRow> => {
+    if (row.kind !== VIKTOR || row.title) return row;
+    const origin = await client.viktorJob.get([row.id]).origin().catch(() => null);
+    listing ??= ((await account.connection(VIKTOR))?.listing as ViktorTask[] | null) ?? null;
+    const listed = listing?.find(task => viktorTaskId(task) === row.taskId);
+    const title = origin?.title || listed?.title || origin?.path || listed?.path || "Viktor task";
+    const startedBy = origin?.userId ?? null;
+    if (origin) await account.setJobOrigin({ jobId: row.id, title, startedBy });
+    return { ...row, title, startedBy };
+  }));
+  const ids = [...new Set(labelled.map(row => row.startedBy).filter((id): id is string => !!id))];
+  const names = new Map(await Promise.all(ids.map(async id => [id, (await people?.person(id).catch(() => null))?.name ?? null] as const)));
+  return labelled.map(row => ({ ...row, startedByName: row.startedBy ? names.get(row.startedBy) ?? null : null }));
 }
 
 /** An approval with its approver's name, looked up in Clerk and kept when the approval has none yet. */

@@ -45,7 +45,7 @@ function live(job: JobView): Html {
     queued: html`<span class="pill">Queued</span><p class="note">The run starts in a moment.</p>`,
     running: job.live ? measuring(job) : html`<span class="pill live">Evaluating</span><span class="sub">${job.phase.replace("_", " ")} · ${progress}</span><p class="note">${job.connection === "langfuse" ? "OpenMerit is replaying the task's recorded calls from Langfuse on cheaper models. This page shows the result when it finishes." : job.connection ? "OpenMerit is testing the task's presets on paused copies in Viktor's test mode. This page shows the result when it finishes." : "Your coding agent gets the result on its next OpenMerit call, and this page shows the report."}</p>`,
     needs_input: html`<span class="pill warn">Needs input</span><p class="note">OpenMerit asked ${plural(job.questions.length, "question")} in your coding agent, such as a check of the test labels. The run continues once it answers.</p>`,
-    failed: html`<p>${job.error ?? "The run stopped before it could recommend a model."}</p>${again(job)}`,
+    failed: html`<p>${job.error ?? "The run stopped before it could recommend a model."}</p>${job.errorDetail ? html`<details><summary>Show details</summary><pre class="error-detail">${job.errorDetail}</pre></details>` : ""}${again(job)}`,
     stopped: html`<p>The run was stopped${job.error ? `: ${job.error}` : "."}</p>${again(job)}`,
     done: html`<p>The run finished; its report is being saved. Reload in a moment.</p>`,
   }[job.status];

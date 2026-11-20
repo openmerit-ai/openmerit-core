@@ -23,7 +23,7 @@ function fakeViktor() {
     { id: "Cut8kTVZ", path: "/ticket_triage_test", title: "Ticket triage test", model: "smart", execution_type: "agent", description: "Classify these 6 support tickets, then post the result to #check-this-out.", cron: "0 9 * * 1", paused: true, deleted: false },
   ];
   const files = new Map<string, string>();
-  const state = { scopes: [...REQUIRED_SCOPES] as string[], created: [] as string[], deleted: [] as string[], threads: [] as { id: string; message: string }[], scripts: [] as string[], auth: new Set<string>(), draft: null as string | null };
+  const state = { scopes: [...REQUIRED_SCOPES] as string[], created: [] as string[], deleted: [] as string[], threads: [] as { id: string; message: string }[], scripts: [] as string[], auth: new Set<string>(), draft: null as string | null, refuse: null as string | null };
   const runBatch = (spec: { source: string; models: string[]; repeats: number; copyPath: string; copyTitle: string; out: string }) => {
     const runs = [];
     for (const model of spec.models) { state.created.push(spec.copyPath + model); crons.push({ ...crons.find(cron => cron.path === spec.source)!, id: `copy_${model}`, path: spec.copyPath + model, title: spec.copyTitle, model, paused: true }); }
@@ -45,6 +45,8 @@ function fakeViktor() {
       const inCode = /^import sys as _sys, json as _json; _sys\.argv\[1:\] = _json\.loads\((".*")\)$/m.exec(code)?.[1];
       const args = inCode ? JSON.parse(JSON.parse(inCode) as string) as string[] : (body!.args as string[]) ?? [];
       state.scripts.push(kind);
+      // Viktor's request validation, as it refused an argument over 2,000 characters before the arguments moved into the code.
+      if (kind === state.refuse) return { status: 422, body: { detail: [{ type: "value_error", loc: ["body", "args"], msg: "Value error, each arg may be at most 2000 characters", input: ["/work/temp/openmerit/x", "# openmerit:batch\nimport asyncio, json"] }] } };
       // A workspace that makes a tool wait for approval: the gateway saves the call as a draft, and the script fails on the draft receipt.
       if (kind === state.draft) return { body: { id: `script_${state.scripts.length}`, status: "completed", result: { exit_code: 1, stdout: "", stderr: `[tool-gateway] ${kind}_tool: draft created, not executed\npydantic_core._pydantic_core.ValidationError: 1 validation error for Response` } } };
       let stdout = "";
@@ -219,6 +221,24 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     assert.deepEqual(failedView.notices, []);
     assert.equal((await view()).body.creditsUsed, 322, "the failed job counts 0 credits");
     viktor.state.draft = null;
+
+    // A request Viktor refuses reads as one sentence, with the error as recorded, line breaks kept, behind it.
+    viktor.state.refuse = "put";
+    assert.equal((await admin.api("/api/connections/viktor/tasks/Cut8kTVZ/start", { method: "POST" })).status, 201);
+    const refusedId = (await admin.api<{ id: string }[]>("/api/runs")).body[0]!.id;
+    const refused = await waitFor(() => admin.tool("openmerit_result", { job_id: refusedId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 60_000);
+    const sentence = "Viktor refused the request: each script argument may be at most 2,000 characters.";
+    assert.match(refused.text, new RegExp(`\\nError: ${sentence.replaceAll(".", "\\.")}\\nDetails:\\nThe job failed: Step "put" exhausted retries: ViktorError: Viktor POST /api/public/v1/scripts/runs: \\[\\{"type":"value_error"`), refused.text);
+    const refusedView = (await admin.api<{ error: string; errorDetail: string }>(`/api/runs/${refusedId}`)).body;
+    assert.equal(refusedView.error, sentence);
+    assert.match(refusedView.errorDetail, /"# openmerit:batch\nimport asyncio, json"/, "the detail has real line breaks, not \\n");
+    viktor.state.refuse = null;
+
+    // Runs labels each Viktor run by its task's title, and says who started it: the connection on its own, or a person from the app.
+    type RunRow = { id: string; title: string | null; startedBy: string | null; startedByName: string | null };
+    const labelled = new Map((await admin.api<RunRow[]>("/api/runs")).body.map(run => [run.id, run]));
+    assert.deepEqual(labelled.get(jobId), { ...labelled.get(jobId), title: "Ticket triage test", startedBy: null, startedByName: null });
+    for (const id of [failedId, refusedId]) assert.deepEqual(labelled.get(id), { ...labelled.get(id), title: "Ticket triage test", startedBy: "user_v", startedByName: "User V" });
 
     // Removing the connection deletes the key; the run and its approval stay.
     assert.equal((await admin.api("/api/connections/viktor", { method: "DELETE" })).status, 200);

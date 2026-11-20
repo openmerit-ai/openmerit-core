@@ -12,6 +12,7 @@
 import { randomInt } from "node:crypto";
 import { CriticalError, Loop, StepExhaustedError, workflow } from "@rivet-dev/workflows";
 import { completeWith, createClient } from "../../../openmerit-core/src/ranking/index.ts";
+import { viktorErrorSentence } from "../../../openmerit-core/src/connectors/viktor/api.ts";
 import {
   BATCH, batchMessage, batchSpec, CLEANUP, copyPrefix, CREDIT_USD, CREDITS, evaluateViktor, gradeRun, judgeChecks, PUT, proposeChange, READ, readBatch, RUN_CREDITS, isPreset,
   viktor, viktorClient, writeChecks, type Batch, type BatchRun, type Check, type ViktorClient, type ViktorTask,
@@ -49,7 +50,17 @@ export interface ViktorJobState {
 /** What /api/runs/<job> and openmerit_result show while the job runs, in the shape of an agent's job. */
 export interface ViktorJobView {
   jobId: string; taskId: string; task: string; status: JobStatus; phase: string; questions: never[]; notices: string[]; progress: { measured: number; planned: number | null };
-  result: JobResult | null; error: string | null; provisional: null; createdAt: string; updatedAt: string; live: null; connection: "viktor";
+  result: JobResult | null; provisional: null; createdAt: string; updatedAt: string; live: null; connection: "viktor";
+  /** A short sentence when OpenMerit can read the failure, such as Viktor refusing a request; else the error as recorded. */
+  error: string | null;
+  /** The error as recorded, with its line breaks, when `error` is a sentence about it; null otherwise. */
+  errorDetail: string | null;
+}
+
+/** The view's error: a sentence for the failure Viktor's API gave, and the recorded error, with real line breaks, as its detail. */
+export function readableError(error: string | null): { error: string | null; errorDetail: string | null } {
+  const sentence = error ? viktorErrorSentence(error) : null;
+  return sentence ? { error: sentence, errorDetail: error!.replaceAll("\\n", "\n") } : { error, errorDetail: null };
 }
 
 const now = () => new Date().toISOString();
@@ -265,7 +276,8 @@ export const viktorJob = workflow({
       }
     } catch (error) {
       if (!(error instanceof StepExhaustedError || error instanceof CriticalError)) throw error;
-      const message = redact(error.message).slice(0, 500);
+      // The view shows a sentence when it can, and this as its detail.
+      const message = redact(error.message).slice(0, 4000);
       await ctx.step({ name: "failed", timeout: 300_000, maxRetries: INTERRUPTIONS, run: async s => {
         const client = s.client<Registry>();
         const left = await cleanupQuietly(client, s.state, jobId, task, directory);
@@ -276,8 +288,11 @@ export const viktorJob = workflow({
   actions: {
     status: (c): ViktorJobView => {
       const { input, thread: _thread, ...rest } = c.state;
-      return { ...rest, questions: [], provisional: null, live: null, connection: "viktor", jobId: c.key[0]!, taskId: input.taskId, task: input.task.title, createdAt: input.createdAt };
+      // Jobs that failed before the error stopped being a notice too kept it in both.
+      return { ...rest, notices: rest.notices.filter(notice => notice !== rest.error), ...readableError(rest.error), questions: [], provisional: null, live: null, connection: "viktor", jobId: c.key[0]!, taskId: input.taskId, task: input.task.title, createdAt: input.createdAt };
     },
+    /** The task and who started the job, for runs recorded before the account kept them: userId is null when it started on its own. */
+    origin: (c): { title: string; path: string; userId: string | null } => ({ title: c.state.input.task.title, path: c.state.input.task.path, userId: c.state.input.userId }),
     /** Whether the job started its Viktor thread, after which it spends credits. */
     threadStarted: (c): boolean => c.state.thread !== null,
     destroy: (c): void => { c.destroy(); },
