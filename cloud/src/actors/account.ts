@@ -168,6 +168,21 @@ export const account = actor({
       return { applied: true };
     }, { name: "apply_stripe" }),
 
+    /**
+     * Why the plan would refuse one more evaluation of this kind now, counting the jobs still running
+     * as used, or null. A connected app's Evaluate button shows it, and starting checks it first.
+     */
+    evaluationRefusal: async (c, kind: string): Promise<string | null> => {
+      const appUrl = services().config.appUrl;
+      const current = await plan(c.db);
+      if (!current || !ACTIVE_PLAN.has(current.status)) return `This account has no active OpenMerit plan. Subscribe at ${appUrl}/plan/.`;
+      if (current.overage !== "refuse") return null;
+      const running = await c.db.execute(`SELECT kind FROM jobs WHERE status IN ('queued', 'running')`);
+      const left = current.includedEvals - current.usedEvals - running.reduce((sum, row) => sum + (EVALUATIONS_PER_JOB[String(row.kind)] ?? 1), 0);
+      if (left >= (EVALUATIONS_PER_JOB[kind] ?? 1)) return null;
+      return `The plan has no evaluations left this period. More start ${current.periodEnd ? `on ${new Date(current.periodEnd * 1000).toISOString().slice(0, 10)}` : "next period"}, or change the plan at ${appUrl}/plan/.`;
+    },
+
     /** Checks the plan and the account's job limits, then records the job. */
     startJob: async (c, input: { jobId: string; taskId: string; kind: "run" | "watch" | "viktor" | "langfuse"; askedBy?: string | null; credits?: number | null; title?: string | null; startedBy?: string | null }): Promise<Started> => c.db.transaction(async tx => {
       const { limits, appUrl } = services().config;

@@ -1,12 +1,11 @@
 // The Langfuse connection in the cloud app: connect with a Viewer key pair, list the project's tasks
-// from its generations, evaluate them without being asked, highest spend first, within the plan's
-// evaluations, and record an approval. What a task is, where its cases come from and what change
+// from its generations, evaluate the ones a person picks, within the plan's evaluations, and record
+// an approval. What a task is, where its cases come from and what change
 // it proposes are openmerit-core's Langfuse connection; each evaluation is an agent `job` that
 // reads its bundle and cases from Langfuse (`JobInput.connection`).
 import { checkKey, LangfuseError, listTasks, type LangfuseConnection, type LangfuseListing, type LangfuseTask } from "../../openmerit-core/src/connectors/langfuse/connection.ts";
 import { normalizeBaseUrl } from "../../openmerit-core/src/connectors/langfuse/client.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
-import { EVALUATIONS_PER_JOB } from "./actors/account.ts";
 import type { Auth } from "./auth.ts";
 import { redact } from "./engine.ts";
 import { endpointUrlProblem } from "./keys.ts";
@@ -23,8 +22,12 @@ export const DEFAULT_BASE_URL = "https://cloud.langfuse.com";
 export interface LangfuseTaskView {
   id: string; name: string; model: string; generations: number; costUsd: number | null; models: number;
   status: TaskStatus;
-  /** Why it is skipped, waiting or failed; null otherwise. */
+  /** Why it is skipped or failed; null otherwise. */
   reason: string | null;
+  /** The most an evaluation may spend on model calls: the task's budget per job. Null when skipped. */
+  budgetUsd: number | null;
+  /** Why Evaluate or Start again cannot start it now: the plan. Null when it can, or while it is evaluating. */
+  blocked: string | null;
   jobId: string | null;
   /** A finished evaluation's verdict. */
   result: { status: string; change: string | null; link: string | null; approval: { by: string; name: string | null; at: string } | null } | null;
@@ -53,8 +56,8 @@ async function credentials(account: Account): Promise<LangfuseConnection | null>
 }
 
 /**
- * Checks the key pair, refusing one that can write; stores it encrypted, lists the tasks and starts
- * evaluating them. The connection reads the project's generations and dataset items; it never writes.
+ * Checks the key pair, refusing one that can write; stores it encrypted and lists the tasks. It starts
+ * no evaluation: a person picks which to evaluate. The connection reads the project's generations and dataset items; it never writes.
  */
 export async function connectLangfuse(client: AppClient, input: { accountId: string; userId: string; baseUrl?: string; publicKey: string; secretKey: string }): Promise<{ ok: true; view: LangfuseView } | { ok: false; status: number; error: string }> {
   const publicKey = input.publicKey.trim(), secretKey = input.secretKey.trim();
@@ -74,7 +77,6 @@ export async function connectLangfuse(client: AppClient, input: { accountId: str
   const stored = await account.saveConnection({ kind: LANGFUSE, apiKey: JSON.stringify(connection), keyLast4: publicKey.slice(-4), keyType: project.projectName, teamId: project.projectId, creditCap: 0, userId: input.userId });
   if (!stored.ok) return { ok: false, status: 503, error: stored.error };
   await refreshLangfuse(client, input.accountId);
-  await startLangfuseTasks(client, { accountId: input.accountId, userId: null });
   return { ok: true, view: await langfuseView(client, input.accountId) };
 }
 
@@ -91,33 +93,29 @@ export async function refreshLangfuse(client: AppClient, accountId: string): Pro
   }
 }
 
-/** Evaluations the plan has left this period, after the jobs that are running. */
-async function evaluationsLeft(account: Account): Promise<number> {
-  const plan = (await account.info()).plan;
-  if (!plan) return 0;
-  const running = (await account.jobs({ limit: 200 })).filter(active).length;
-  return plan.includedEvals - plan.usedEvals - running;
+/** The most a task's evaluation may spend on model calls: its budget per job, as the job resolves it. */
+async function budgetFor(account: Account, task: LangfuseTask): Promise<number> {
+  const { effective } = await account.resolveGuardrails({ environment: LANGFUSE, agent: null, taskId: langfuseTaskId(task) });
+  return effective.budgetUsd ?? services().config.limits.defaultJobBudgetUsd;
 }
 
 /**
- * Starts evaluations, highest spend first: every task that can be evaluated and has none yet, while
- * the plan has evaluations left, or only `taskIds` when a person pressed Start, which the account's
- * own limits still check. Each counts `EVALUATIONS_PER_JOB.langfuse` evaluations. Returns why the
- * first task that could not start did not.
+ * Starts evaluating `taskIds`, which a signed-in admin picked with Evaluate or Start again; nothing
+ * starts one on its own. Each counts `EVALUATIONS_PER_JOB.langfuse` evaluations, and the plan and the
+ * account's job limits check it. Returns why the first task that could not start did not.
  */
-export async function startLangfuseTasks(client: AppClient, input: { accountId: string; userId: string | null; taskIds?: readonly string[] }): Promise<{ started: string[]; jobIds: string[]; refused: string | null }> {
+export async function startLangfuseTasks(client: AppClient, input: { accountId: string; userId: string; taskIds: readonly string[] }): Promise<{ started: string[]; jobIds: string[]; refused: string | null }> {
   const account = client.account.getOrCreate([input.accountId]);
   const connection = await account.connection(LANGFUSE);
   if (!connection) return { started: [], jobIds: [], refused: "Langfuse is not connected." };
   const listing = connection.listing as Listing | null;
   const jobs = await account.connectionJobs({ kind: LANGFUSE, since: Date.parse(connection.connectedAt) });
-  const evaluated = new Set(jobs.map(job => job.taskId)), running = new Set(jobs.filter(active).map(job => job.taskId));
-  const wanted = (listing?.tasks ?? []).filter(task => !task.skipped && !running.has(langfuseTaskId(task)) && (input.taskIds ? input.taskIds.includes(task.id) : !evaluated.has(langfuseTaskId(task))));
-  const per = EVALUATIONS_PER_JOB[LANGFUSE] ?? 1;
-  let left = input.taskIds ? Infinity : await evaluationsLeft(account);
+  const running = new Set(jobs.filter(active).map(job => job.taskId));
+  const wanted = (listing?.tasks ?? []).filter(task => !task.skipped && !running.has(langfuseTaskId(task)) && input.taskIds.includes(task.id));
   const started: string[] = [], jobIds: string[] = [];
   for (const task of wanted) {
-    if (left < per) return { started, jobIds, refused: `${task.name} waits: the plan has no evaluations left this period. Start it from the table, or change the plan.` };
+    const refusal = await account.evaluationRefusal(LANGFUSE);
+    if (refusal) return { started, jobIds, refused: `${task.name} cannot start: ${refusal}` };
     const jobId = newJobId();
     const ok = await account.startJob({ jobId, taskId: langfuseTaskId(task), kind: LANGFUSE, askedBy: null, title: task.name, startedBy: input.userId });
     if (!ok.ok) return { started, jobIds, refused: ok.error };
@@ -129,23 +127,25 @@ export async function startLangfuseTasks(client: AppClient, input: { accountId: 
       accountId: input.accountId, taskId: langfuseTaskId(task), environment: LANGFUSE, agent: null, bundle, kind: "run", trigger: "app", userId: input.userId,
       provisional, createdAt: new Date().toISOString(), connection: { kind: "langfuse", task, links: { baseUrl: listing!.baseUrl, projectId: listing!.projectId } },
     } });
-    left -= per; started.push(task.id); jobIds.push(jobId);
+    started.push(task.id); jobIds.push(jobId);
   }
   return { started, jobIds, refused: null };
 }
 
-/** The connection and its task table: each task's latest evaluation, or why it waits or is skipped. */
+/** The connection and its task table: each task's latest evaluation, why it is skipped, and whether Evaluate can start it now. */
 export async function langfuseView(client: AppClient, accountId: string, people: People = null): Promise<LangfuseView> {
   const account = client.account.getOrCreate([accountId]);
   const connection = await account.connection(LANGFUSE);
   if (!connection) return { connected: false, tasks: [] };
   const listing = connection.listing as Listing | null;
   const jobs = await account.connectionJobs({ kind: LANGFUSE, since: Date.parse(connection.connectedAt) });
+  const refusal = await account.evaluationRefusal(LANGFUSE);
   const tasks = await Promise.all((listing?.tasks ?? []).map(async (task): Promise<LangfuseTaskView> => {
     const latest = jobs.find(job => job.taskId === langfuseTaskId(task));
-    const base = { id: task.id, name: task.name, model: task.model, generations: task.generations, costUsd: task.costUsd, models: task.models.length, jobId: latest?.id ?? null, result: null };
+    const blocked = task.skipped || (latest && active(latest)) ? null : refusal;
+    const base = { id: task.id, name: task.name, model: task.model, generations: task.generations, costUsd: task.costUsd, models: task.models.length, budgetUsd: task.skipped ? null : await budgetFor(account, task), blocked, jobId: latest?.id ?? null, result: null };
     if (task.skipped) return { ...base, status: "skipped", reason: task.skipped };
-    if (!latest) return { ...base, status: "waiting", reason: "Not evaluated yet." };
+    if (!latest) return { ...base, status: "not_evaluated", reason: null };
     if (active(latest)) return { ...base, status: "evaluating", reason: null };
     const report = (await account.report({ jobId: latest.id }))?.json as JobResult | undefined;
     if (latest.status !== "done" || !report) return { ...base, status: "failed", reason: latest.status === "stopped" ? "The evaluation was stopped." : "The evaluation did not finish." };

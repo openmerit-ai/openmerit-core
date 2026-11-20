@@ -41,7 +41,7 @@ function populated(): State {
     { ...run("v5t8c2", "viktor_claims_digest", "done", "2026-11-18T09:00:10Z", "viktor", null), title: "Claims digest" },
     // A Viktor evaluation an admin started again from the app, which Viktor refused before it had a report.
     { ...run("v9k3r1", "viktor_weekly_payer_report", "failed", "2026-11-18T08:10:00Z", "viktor", null), title: "Weekly payer report", startedBy: "user_amira", startedByName: "Amira Haddad" },
-    { ...run("l2f9a4", "langfuse_lf_3a91c0de55aa", "done", "2026-11-18T08:30:00Z", "langfuse", null), title: "adjudicate-claim › adjudicate-claim-generate" },
+    { ...run("l2f9a4", "langfuse_3a91c0de55aa", "done", "2026-11-18T08:30:00Z", "langfuse", null), title: "adjudicate-claim › adjudicate-claim-generate" },
   ];
   const baseline = measured("openai/gpt-5", "openrouter", { role: "baseline", stage: "baseline", passes: 39, total: 40, costPerCallUsd: 0.00475, latencyMs: 3100 });
   const haiku = measured("anthropic/claude-haiku-5-5", "openrouter", { passes: 40, total: 40, costPerCallUsd: 0.00007, latencyMs: 500, qualified: true });
@@ -105,13 +105,17 @@ function populated(): State {
 // A connected Viktor workspace (fictional): its four system tasks, skipped, and one task evaluated, with a change to approve.
 const SYSTEM = "Viktor's own task: it cannot be edited";
 function viktorTasks(evaluated: boolean): ViktorTask[] {
-  const task = (title: string, path: string, model: string | null, credits30d: number, fields: Partial<ViktorTask>): ViktorTask => ({ id: path.slice(1), title, path, model, credits30d, paused: false, status: "skipped", reason: SYSTEM, estimatedCredits: null, jobId: null, result: null, ...fields });
+  const task = (title: string, path: string, model: string | null, credits30d: number, fields: Partial<ViktorTask>): ViktorTask => ({ id: path.slice(1), title, path, model, credits30d, paused: false, status: "skipped", reason: SYSTEM, estimatedCredits: null, blocked: null, jobId: null, result: null, ...fields });
   return [
     task("Workflow Discovery", "/workflow_discovery", null, 536, {}),
     task("Claims digest", "/claims_digest", "smart", 410, evaluated
       ? { status: "done", reason: null, estimatedCredits: 372, jobId: "v5t8c2", result: { status: "picked", change: "Set Claims digest to cheap", link: "https://app.viktor.com/scheduled-tasks", approval: null } }
-      : { status: "evaluating", reason: null, estimatedCredits: 372, jobId: "v5t8c2" }),
-    task("Weekly payer report", "/weekly_payer_report", "balanced", 120, { status: "waiting", reason: "Not started: past the credit cap or the plan's evaluations.", estimatedCredits: 160 }),
+      : { status: "not_evaluated", reason: null, estimatedCredits: 372 }),
+    // Nothing starts on its own: a task waits for Evaluate, which is off when its estimate would pass the cap.
+    task("Denial letters", "/denial_letters", "smart", 260, { status: "not_evaluated", reason: null, estimatedCredits: 290 }),
+    task("Weekly payer report", "/weekly_payer_report", "balanced", 120, evaluated
+      ? { status: "failed", reason: "Viktor refused the request: each script argument may be at most 2,000 characters.", estimatedCredits: 1720, jobId: "v9k3r1", blocked: "It needs about 1,720 credits, and 322 of the 2,000-credit cap are used or expected." }
+      : { status: "not_evaluated", reason: null, estimatedCredits: 1720 }),
     task("Inbox sync", "/inbox_sync", null, 0, { reason: "script task, no model" }),
     task("Heartbeat", "/heartbeat", null, 0, {}),
     task("Memory Dreaming", "/memory_dreaming", "gpt-6-luna#ReasoningLevel:high", 0, {}),
@@ -120,7 +124,7 @@ function viktorTasks(evaluated: boolean): ViktorTask[] {
 }
 const viktorConnected = (evaluated: boolean): ViktorConnection => ({
   connected: true, keyLast4: "eZnk", keyType: "personal", creditCap: 2000, connectedAt: "2026-11-18T09:00:00Z", connectedBy: "user_amira",
-  creditsUsed: evaluated ? 322 : 0, creditsReserved: evaluated ? 0 : 372, listedAt: "2026-11-18T09:00:05Z", listingError: null, tasks: viktorTasks(evaluated),
+  creditsUsed: evaluated ? 322 : 0, creditsReserved: 0, listedAt: "2026-11-18T09:00:05Z", listingError: null, tasks: viktorTasks(evaluated),
 });
 
 function viktorReport(): Report {
@@ -153,13 +157,13 @@ function viktorReport(): Report {
 
 // A connected Langfuse project (fictional): three tasks by spend, the top one evaluated with a change to approve.
 function langfuseConnected(): LangfuseConnection {
-  const task = (id: string, name: string, model: string, generations: number, costUsd: number | null, fields: Partial<LangfuseTask>): LangfuseTask => ({ id, name, model, generations, costUsd, models: 1, status: "waiting", reason: "Not evaluated yet.", jobId: null, result: null, ...fields });
+  const task = (id: string, name: string, model: string, generations: number, costUsd: number | null, fields: Partial<LangfuseTask>): LangfuseTask => ({ id, name, model, generations, costUsd, models: 1, status: "not_evaluated", reason: null, budgetUsd: 5, blocked: null, jobId: null, result: null, ...fields });
   return {
     connected: true, baseUrl: "https://cloud.langfuse.com", projectName: "sahra-claims", keyLast4: "9f2c", connectedAt: "2026-11-18T08:20:00Z", connectedBy: "user_amira", listedAt: "2026-11-18T08:20:04Z", listingError: null, truncated: false,
     tasks: [
       task("3a91c0de55aa", "adjudicate-claim › adjudicate-claim-generate", "anthropic/claude-sonnet-5.5", 2513, 10.44, { models: 3, status: "done", reason: null, jobId: "l2f9a4", result: { status: "picked", change: "Set adjudicate-claim-generate to `anthropic/claude-haiku-5-5`", link: null, approval: null } }),
-      task("b7e2d4410c19", "extract-claim › extract-claim-generate", "anthropic/claude-sonnet-5.5", 2203, 5.68, { reason: "Not evaluated yet. The plan has no evaluations left this period." }),
-      task("0c5f8a2b91e3", "(no trace name) › (no name)", "openai/gpt-5-mini", 12, 0.02, { status: "skipped", reason: "generations without a name" }),
+      task("b7e2d4410c19", "extract-claim › extract-claim-generate", "anthropic/claude-sonnet-5.5", 2203, 5.68, {}),
+      task("0c5f8a2b91e3", "(no trace name) › (no name)", "openai/gpt-5-mini", 12, 0.02, { status: "skipped", reason: "generations without a name", budgetUsd: null }),
     ],
   };
 }
@@ -262,7 +266,11 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       if (!state.runs.some((run) => run.id === id)) return error(404, "No such run in this account.");
       const job = state.jobs[id];
       const found = state.reports[id] ?? (job && advance(job, state.tasks.find((task) => task.id === job.taskId), since));
-      return found ? json(200, found) : error(404, "No such run in this account.");
+      // As the cloud app does: a connection run's task as the connection lists it now, for Evaluate again.
+      const run = state.runs.find((item) => item.id === id)!;
+      const listed = run.kind === "viktor" ? state.viktor?.tasks.find((task) => `viktor_${task.id}` === run.taskId) : run.kind === "langfuse" ? state.langfuse?.tasks.find((task) => `langfuse_${task.id}` === run.taskId) : undefined;
+      const evaluate = listed ? { evaluating: listed.status === "evaluating", blocked: listed.blocked, estimatedCredits: "estimatedCredits" in listed ? listed.estimatedCredits : null, budgetUsd: "budgetUsd" in listed ? listed.budgetUsd : null } : null;
+      return found ? json(200, { ...found, evaluate }) : error(404, "No such run in this account.");
     }
     // As the cloud app does: run the task again, after setting its budget per job when budgetUsd is given.
     if ((match = /^\/api\/runs\/([\w-]+)\/rerun$/.exec(path)) && method === "POST") {
@@ -301,10 +309,10 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       delete state.langfuse;
       return json(200, { deleted: true });
     }
-    if (path === "/api/connections/langfuse/refresh" && method === "POST") { if (denied) return denied; return json(200, { ...(state.langfuse ?? { connected: false, tasks: [] }), started: [], refused: null }); }
+    if (path === "/api/connections/langfuse/refresh" && method === "POST") { if (denied) return denied; return json(200, state.langfuse ?? { connected: false, tasks: [] }); }
     if ((match = /^\/api\/connections\/langfuse\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
       if (denied) return denied;
-      const task = state.langfuse?.tasks.find((item) => item.id === match?.[1] && (item.status === "waiting" || item.status === "failed"));
+      const task = state.langfuse?.tasks.find((item) => item.id === match?.[1] && (item.status === "not_evaluated" || item.status === "failed") && !item.blocked);
       if (!task) return error(409, "This task cannot be evaluated, or is being evaluated now.");
       Object.assign(task, { status: "evaluating", reason: null });
       return json(201, { started: [task.id] });
@@ -326,10 +334,10 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       delete state.viktor;
       return json(200, { deleted: true });
     }
-    if (path === "/api/connections/viktor/refresh" && method === "POST") { if (denied) return denied; return json(200, { ...(state.viktor ?? { connected: false, tasks: [] }), started: [], refused: null }); }
+    if (path === "/api/connections/viktor/refresh" && method === "POST") { if (denied) return denied; return json(200, state.viktor ?? { connected: false, tasks: [] }); }
     if ((match = /^\/api\/connections\/viktor\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
       if (denied) return denied;
-      const task = state.viktor?.tasks.find((item) => item.id === match?.[1] && (item.status === "waiting" || item.status === "failed"));
+      const task = state.viktor?.tasks.find((item) => item.id === match?.[1] && (item.status === "not_evaluated" || item.status === "failed") && !item.blocked);
       if (!task) return error(409, "This task cannot be evaluated, or is being evaluated now.");
       Object.assign(task, { status: "evaluating", reason: null });
       return json(201, { started: [task.id] });

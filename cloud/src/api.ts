@@ -6,8 +6,8 @@ import type { AuthResult, Identity } from "./auth.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
 import { explain, type JobResult } from "./report.ts";
 import { rerunJob } from "./start.ts";
-import { connectLangfuse, LANGFUSE, langfuseView, refreshLangfuse, startLangfuseTasks } from "./langfuse.ts";
-import { approveChange, labelRuns, connectViktor, currentViktorView, namedApproval, refreshViktor, startViktorTasks, VIKTOR, viktorView } from "./viktor.ts";
+import { connectLangfuse, LANGFUSE, langfuseTaskId, langfuseView, refreshLangfuse, startLangfuseTasks } from "./langfuse.ts";
+import { approveChange, labelRuns, connectViktor, currentViktorView, namedApproval, refreshViktor, startViktorTasks, VIKTOR, viktorTaskId, viktorView } from "./viktor.ts";
 import type { EndpointKind } from "../../openmerit-core/src/ranking/index.ts";
 
 type Json = Record<string, unknown>;
@@ -102,9 +102,13 @@ export function apiRoutes(deps: AppDeps) {
       const row = await account.job(jobId);
       if (!row) return error(404, "No such run in this account.");
       const report = await account.report({ jobId });
+      // A connected app's task as its connection lists it now, for the run page's Evaluate again: its estimate, and why it cannot start now.
+      const listed = row.kind === VIKTOR ? (await viktorView(client, who.accountId)).tasks.find(task => viktorTaskId(task) === row.taskId)
+        : row.kind === LANGFUSE ? (await langfuseView(client, who.accountId)).tasks.find(task => langfuseTaskId(task) === row.taskId) : undefined;
+      const evaluate = listed && listed.status !== "skipped" ? { evaluating: listed.status === "evaluating", blocked: listed.blocked, estimatedCredits: "estimatedCredits" in listed ? listed.estimatedCredits : null, budgetUsd: "budgetUsd" in listed ? listed.budgetUsd : null } : null;
       // The saved report, with the same reason and cheaperThanCurrent the coding agent gets, and a connection result's approval.
-      if (report) return json(200, { ...(report.json as JobResult), ...explain(report.json as JobResult), approved: await namedApproval(client, deps.auth, who.accountId, jobId) });
-      return json(200, { ...(row.kind === VIKTOR ? await client.viktorJob.get([jobId]).status() : await client.job.get([jobId]).status()), report: null });
+      if (report) return json(200, { ...(report.json as JobResult), ...explain(report.json as JobResult), approved: await namedApproval(client, deps.auth, who.accountId, jobId), evaluate });
+      return json(200, { ...(row.kind === VIKTOR ? await client.viktorJob.get([jobId]).status() : await client.job.get([jobId]).status()), report: null, evaluate });
     }
     // Approve change: records who approved a connection result's change, and when. It changes nothing in the connected app.
     if ((match = /^\/api\/runs\/([\w-]+)\/approve$/.exec(path)) && method === "POST") {
@@ -152,7 +156,7 @@ export function apiRoutes(deps: AppDeps) {
       return (await account.removeEndpoint(match[1]!)) ? json(200, { deleted: true }) : error(404, "No such endpoint.");
     }
 
-    // App connections: Viktor, with an API key. Connecting checks the key's scopes, lists the tasks and starts evaluating them.
+    // App connections: Viktor, with an API key. Connecting checks the key's scopes and lists the tasks; an admin picks which to evaluate.
     if (path === "/api/connections/viktor" && method === "GET") return json(200, await currentViktorView(client, who.accountId, deps.auth));
     if (path === "/api/connections/viktor" && method === "POST") {
       const denied = admin(); if (denied) return denied;
@@ -169,16 +173,15 @@ export function apiRoutes(deps: AppDeps) {
     if (path === "/api/connections/viktor/refresh" && method === "POST") {
       const denied = admin(); if (denied) return denied;
       await refreshViktor(client, who.accountId);
-      const started = await startViktorTasks(client, { accountId: who.accountId, userId: null });
-      return json(200, { ...await viktorView(client, who.accountId, deps.auth), started: started.started, refused: started.refused });
+      return json(200, await viktorView(client, who.accountId, deps.auth));
     }
     if ((match = /^\/api\/connections\/viktor\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
       const denied = admin(); if (denied) return denied;
       const started = await startViktorTasks(client, { accountId: who.accountId, userId: who.userId, taskIds: [match[1]!] });
-      return started.started.length ? json(201, { started: started.started }) : error(409, started.refused ?? "This task cannot be evaluated, or is being evaluated now.");
+      return started.started.length ? json(201, { started: started.started, jobIds: started.jobIds }) : error(409, started.refused ?? "This task cannot be evaluated, or is being evaluated now.");
     }
 
-    // Langfuse, with a Viewer key pair: connecting refuses a key that can write, lists the tasks and starts evaluating them.
+    // Langfuse, with a Viewer key pair: connecting refuses a key that can write and lists the tasks; an admin picks which to evaluate.
     if (path === "/api/connections/langfuse" && method === "GET") return json(200, await langfuseView(client, who.accountId, deps.auth));
     if (path === "/api/connections/langfuse" && method === "POST") {
       const denied = admin(); if (denied) return denied;
@@ -194,8 +197,7 @@ export function apiRoutes(deps: AppDeps) {
     if (path === "/api/connections/langfuse/refresh" && method === "POST") {
       const denied = admin(); if (denied) return denied;
       await refreshLangfuse(client, who.accountId);
-      const started = await startLangfuseTasks(client, { accountId: who.accountId, userId: null });
-      return json(200, { ...await langfuseView(client, who.accountId, deps.auth), started: started.started, refused: started.refused });
+      return json(200, await langfuseView(client, who.accountId, deps.auth));
     }
     if ((match = /^\/api\/connections\/langfuse\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
       const denied = admin(); if (denied) return denied;

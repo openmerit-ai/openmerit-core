@@ -143,7 +143,7 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
   try {
     await subscribe(app, "org_viktor");
     const admin = caller(app, "test:user_v:org_viktor:admin"), member = caller(app, "test:user_m:org_viktor:member");
-    const connect = (agent: typeof admin, body: unknown) => agent.api<{ error?: string; tasks?: { title: string; status: string; reason: string | null; jobId: string | null }[] }>("/api/connections/viktor", { method: "POST", body: JSON.stringify(body) });
+    const connect = (agent: typeof admin, body: unknown) => agent.api<{ error?: string; tasks?: { title: string; status: string; reason: string | null; jobId: string | null; estimatedCredits: number | null; blocked: string | null }[] }>("/api/connections/viktor", { method: "POST", body: JSON.stringify(body) });
 
     // Refusals: a member, a bad key, and a key missing scopes. None stores a key or lists anything.
     assert.equal((await connect(member, { apiKey: KEY })).status, 403);
@@ -156,13 +156,24 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     assert.deepEqual(viktor.state.scripts, [], "no script ran for a refused key");
     viktor.state.scopes = [...REQUIRED_SCOPES];
 
-    // Connecting lists the five tasks and starts the one that can be evaluated; the system tasks are skipped with why.
+    // Connecting lists the five tasks and starts nothing; the system tasks are skipped with why.
     const connected = await connect(admin, { apiKey: KEY, creditCap: 2000 });
     assert.equal(connected.status, 201, JSON.stringify(connected.body));
     const rows = connected.body.tasks!;
-    assert.deepEqual(rows.map(row => [row.title, row.status]), [["workflow_discovery", "skipped"], ["Ticket triage test", "evaluating"], ["heartbeat", "skipped"], ["memory_dreaming", "skipped"], ["skill_refining", "skipped"]]);
+    assert.deepEqual(rows.map(row => [row.title, row.status]), [["workflow_discovery", "skipped"], ["Ticket triage test", "not_evaluated"], ["heartbeat", "skipped"], ["memory_dreaming", "skipped"], ["skill_refining", "skipped"]]);
     assert.ok(rows.filter(row => row.status === "skipped").every(row => row.reason === "Viktor's own task: it cannot be edited"));
-    const jobId = rows.find(row => row.title === "Ticket triage test")!.jobId!;
+    const triage = rows.find(row => row.title === "Ticket triage test")!;
+    assert.deepEqual([triage.jobId, triage.blocked], [null, null]);
+    assert.ok(triage.estimatedCredits! > 0);
+    // Refresh lists again and starts nothing either; the coding agent sees the task waiting for a person.
+    assert.equal((await admin.api<{ tasks: { status: string }[] }>("/api/connections/viktor/refresh", { method: "POST" })).body.tasks[1]!.status, "not_evaluated");
+    assert.deepEqual((await admin.api<unknown[]>("/api/runs")).body, []);
+    assert.match((await admin.tool("openmerit_tasks", {})).text, new RegExp(`Ticket triage test \\(smart, 140 credits in 30 days\\): not evaluated; an admin can evaluate it with Evaluate at https://app\\.openmerit\\.test/connections/ \\(about ${triage.estimatedCredits} Viktor credits\\)`));
+    // Evaluate: an admin starts it, and the job records who.
+    assert.equal((await member.api("/api/connections/viktor/tasks/Cut8kTVZ/start", { method: "POST" })).status, 403);
+    const evaluate = await admin.api<{ jobIds: string[] }>("/api/connections/viktor/tasks/Cut8kTVZ/start", { method: "POST" });
+    assert.equal(evaluate.status, 201, JSON.stringify(evaluate.body));
+    const jobId = evaluate.body.jobIds[0]!;
     const shown = await admin.api<{ keyLast4: string }>("/api/connections/viktor");
     assert.equal(shown.body.keyLast4, "1234");
     assert.doesNotMatch(JSON.stringify(shown.body), new RegExp(KEY), "the key is never returned");
@@ -260,11 +271,10 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     assert.match(refusedView.errorDetail, /"# openmerit:batch\nimport asyncio, json"/, "the detail has real line breaks, not \\n");
     viktor.state.refuse = null;
 
-    // Runs labels each Viktor run by its task's title, and says who started it: the connection on its own, or a person from the app.
+    // Runs labels each Viktor run by its task's title, and says who started it from the app.
     type RunRow = { id: string; title: string | null; startedBy: string | null; startedByName: string | null };
     const labelled = new Map((await admin.api<RunRow[]>("/api/runs")).body.map(run => [run.id, run]));
-    assert.deepEqual(labelled.get(jobId), { ...labelled.get(jobId), title: "Ticket triage test", startedBy: null, startedByName: null });
-    for (const id of [failedId, refusedId]) assert.deepEqual(labelled.get(id), { ...labelled.get(id), title: "Ticket triage test", startedBy: "user_v", startedByName: "User V" });
+    for (const id of [jobId, failedId, refusedId]) assert.deepEqual(labelled.get(id), { ...labelled.get(id), title: "Ticket triage test", startedBy: "user_v", startedByName: "User V" });
 
     // Removing the connection deletes the key; the run and its approval stay.
     assert.equal((await admin.api("/api/connections/viktor", { method: "DELETE" })).status, 200);

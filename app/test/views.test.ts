@@ -184,7 +184,7 @@ test("a Viktor connection lists its tasks with why some are skipped, and Approve
   assert.equal(row?.model, "smart", "approving changes nothing in Viktor");
   // A Viktor evaluation that did not finish is started again through the connection, not rerun on a bundle.
   const failed = { ...await get<JobView>("/api/runs/z1c7m4"), status: "failed" as const, error: "The test runs did not finish." };
-  assert.match(text(runView.render({ ...failed, connection: "viktor" }, page(me))), /Start again/);
+  assert.match(text(runView.render({ ...failed, connection: "viktor", evaluate: { evaluating: false, blocked: null, estimatedCredits: 372, budgetUsd: null } }, page(me))), /Start again About 372 Viktor credits/);
   assert.match(text(runView.render(failed, page(me))), /Run again/);
   // Jobs that failed before the error stopped being a notice too kept it in both: it shows once.
   assert.equal(text(runView.render({ ...failed, notices: [failed.error] }, page(me))).split("The test runs did not finish.").length, 2);
@@ -235,5 +235,28 @@ test("Runs labels a Viktor run by its task's title and says who started it, and 
   const shown = runView.render(failed, page(me)).__html;
   assert.equal(text({ __html: shown }).split("Viktor refused the request: each script argument may be at most 2,000 characters.").length, 2, "the sentence once");
   assert.match(shown, /<details><summary>Show details<\/summary><pre class="error-detail">The job failed: Step &quot;put&quot;[^<]*# openmerit:batch\nimport asyncio/);
-  assert.match(shown, /data-action="rerun">Start again/);
+  // The connection's cap would refuse it, so Start again is off and says why.
+  assert.match(shown, /data-action="rerun" disabled aria-describedby="why-again">Start again<\/button>[^]*It needs about 1,720 credits, and 322 of the 2,000-credit cap are used or expected\./);
+});
+
+test("only a person starts a connection's evaluation: Evaluate on the task list and on the run page, off with why when the cap or the plan would refuse it", async () => {
+  const me = await account();
+  const [viktor, langfuse] = await Promise.all([get<ViktorConnection>("/api/connections/viktor"), get<LangfuseConnection>("/api/connections/langfuse")]);
+  const html = connectionsView.render({ endpoints: [], viktor, langfuse }, page(me)).__html;
+  assert.match(text({ __html: html }), /Denial letters \/denial_letters smart 260 Not evaluated Evaluate About 290 credits/);
+  assert.match(html, /<button class="btn primary" type="button" data-action="start" data-id="denial_letters">Evaluate<\/button>/, "on, when the estimate fits under the cap");
+  assert.match(html, /data-action="start" data-id="weekly_payer_report" disabled aria-describedby="why-weekly_payer_report">Start again/);
+  assert.match(text({ __html: html }), /extract-claim › extract-claim-generate anthropic\/claude-sonnet-5\.5 2,203 \$5\.68 Not evaluated Evaluate Up to \$5 of model calls/);
+  assert.doesNotMatch(html, /Waiting|without being asked/);
+  // A member sees the estimate, not the button.
+  const member = connectionsView.render({ endpoints: [], viktor, langfuse }, page({ ...me, role: "member" })).__html;
+  assert.doesNotMatch(member, /data-action="start/);
+  assert.match(text({ __html: member }), /About 290 credits\. An admin can evaluate it\./);
+
+  // The run page is the task's own page in the app: a finished result offers Evaluate again.
+  const done = runView.render(await get<Report>("/api/runs/l2f9a4"), page(me)).__html;
+  assert.match(done, /data-action="rerun">Evaluate again<\/button><span class="sub">Up to \$5 of model calls\. It counts as one evaluation on your plan\./);
+  assert.doesNotMatch(runView.render(await get<Report>("/api/runs/l2f9a4"), page({ ...me, role: "member" })).__html, /data-action="rerun"/);
+  const plan = "The plan has no evaluations left this period.";
+  assert.match(runView.render({ ...await get<Report>("/api/runs/v5t8c2"), evaluate: { evaluating: false, blocked: plan, estimatedCredits: 372, budgetUsd: null } }, page(me)).__html, /disabled aria-describedby="why-again">Evaluate again[^]*The plan has no evaluations left this period\./);
 });

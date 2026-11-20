@@ -126,7 +126,10 @@ export interface ConnectionResult {
 export interface Approval { jobId?: string; change: string; link: string | null; by: string; name?: string | null; email?: string | null; at: string }
 
 // GET /api/runs/:id: the saved report once the job has one, with its approval.
-export interface Report extends JobResult { jobId: string; task: string; createdAt: string; approved?: Approval | null }
+export interface Report extends JobResult { jobId: string; task: string; createdAt: string; approved?: Approval | null; evaluate?: Evaluate | null }
+
+// A connected app's run: its task as the connection lists it now, for Evaluate again. Null when the task is no longer listed.
+export interface Evaluate { evaluating: boolean; blocked: string | null; estimatedCredits: number | null; budgetUsd: number | null }
 
 // GET /api/runs/:id before then: the job's live state, with report null.
 export interface JobView {
@@ -151,6 +154,7 @@ export interface JobView {
   // use today, and its pass rate after each case (cloud/src/actors/job.ts). Null between steps and
   // absent from jobs that started before it; pages fall back to progress then.
   live?: LiveProgress | null;
+  evaluate?: Evaluate | null;
 }
 export interface LiveProgress {
   model: string;
@@ -169,12 +173,14 @@ export type EndpointKind = "openrouter" | "openai-compatible" | "anthropic";
 export interface Endpoint { id: string; kind: EndpointKind; baseUrl: string; allowedModels: string[] | "all"; keyLast4: string; verifiedAt: string | null; builtIn: boolean }
 
 // GET /api/connections/viktor: the Viktor connection, without its key, and the workspace's scheduled tasks.
-export type ViktorTaskStatus = "skipped" | "waiting" | "evaluating" | "done" | "failed";
+export type ViktorTaskStatus = "skipped" | "not_evaluated" | "evaluating" | "done" | "failed";
 export interface ViktorTask {
   id: string; title: string; path: string; model: string | null; credits30d: number; paused: boolean;
   status: ViktorTaskStatus;
   reason: string | null;
   estimatedCredits: number | null;
+  // Why Evaluate or Start again cannot start it now (the credit cap or the plan); null when it can.
+  blocked: string | null;
   jobId: string | null;
   result: { status: string; change: string | null; link: string | null; approval: { by: string; name?: string | null; at: string } | null } | null;
 }
@@ -190,6 +196,9 @@ export interface LangfuseTask {
   id: string; name: string; model: string; generations: number; costUsd: number | null; models: number;
   status: ViktorTaskStatus;
   reason: string | null;
+  // The most an evaluation may spend on model calls, and why Evaluate cannot start it now.
+  budgetUsd: number | null;
+  blocked: string | null;
   jobId: string | null;
   result: { status: string; change: string | null; link: string | null; approval: { by: string; name?: string | null; at: string } | null } | null;
 }

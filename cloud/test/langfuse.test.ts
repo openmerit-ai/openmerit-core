@@ -102,10 +102,10 @@ test("Langfuse: only a Viewer key connects, tasks are listed by spend, the top o
   const models = await fakeRouters();
   const app = await startApp({ models });
   try {
-    // One evaluation on the plan: the top task starts, the next waits.
+    // One evaluation on the plan: an admin evaluates the top task, and Evaluate is then off for the next.
     await subscribe(app, "org_lf", { includedEvals: 1 });
     const admin = caller(app, "test:user_l:org_lf:admin"), member = caller(app, "test:user_m:org_lf:member");
-    type Row = { id: string; name: string; model: string; generations: number; costUsd: number | null; status: string; reason: string | null; jobId: string | null };
+    type Row = { id: string; name: string; model: string; generations: number; costUsd: number | null; status: string; reason: string | null; jobId: string | null; budgetUsd: number | null; blocked: string | null };
     const connect = (agent: typeof admin, keys: typeof VIEWER) => agent.api<{ error?: string; tasks?: Row[]; projectName?: string; keyLast4?: string }>("/api/connections/langfuse", { method: "POST", body: JSON.stringify({ baseUrl: langfuse.url, ...keys }) });
 
     // Refusals: a member, and a key pair that can write. Neither stores anything.
@@ -121,13 +121,21 @@ test("Langfuse: only a Viewer key connects, tasks are listed by spend, the top o
     assert.doesNotMatch(JSON.stringify(connected.body), /sk-lf-/, "the secret key is never returned");
     // One task per generation name, its current model the one with the most calls, by spend.
     assert.deepEqual(connected.body.tasks!.map(row => [row.name, row.model, row.generations, row.status]), [
-      ["triage › classify", CURRENT, 940, "evaluating"],
-      ["support-chat › summarize", CURRENT, 100, "waiting"],
+      ["triage › classify", CURRENT, 940, "not_evaluated"],
+      ["support-chat › summarize", CURRENT, 100, "not_evaluated"],
       ["(no trace name) › (no name)", CURRENT, 5, "skipped"],
     ]);
-    const [top, next, unnamed] = connected.body.tasks!;
+    const [listedTop, next, unnamed] = connected.body.tasks!;
     assert.equal(unnamed!.reason, "generations without a name");
-    assert.match(next!.reason!, /Not evaluated yet/);
+    assert.deepEqual([listedTop!.jobId, listedTop!.blocked, listedTop!.budgetUsd], [null, null, 5]);
+    // Refresh lists again and starts nothing.
+    assert.deepEqual((await admin.api<{ tasks: Row[] }>("/api/connections/langfuse/refresh", { method: "POST" })).body.tasks.map(row => row.status), ["not_evaluated", "not_evaluated", "skipped"]);
+    assert.deepEqual((await admin.api<unknown[]>("/api/runs")).body, []);
+    // Evaluate: admins only.
+    assert.equal((await member.api(`/api/connections/langfuse/tasks/${listedTop!.id}/start`, { method: "POST" })).status, 403);
+    const evaluate = await admin.api<{ jobIds: string[] }>(`/api/connections/langfuse/tasks/${listedTop!.id}/start`, { method: "POST" });
+    assert.equal(evaluate.status, 201, JSON.stringify(evaluate.body));
+    const top = { ...listedTop!, jobId: evaluate.body.jobIds[0]! };
 
     const done = await waitFor(() => admin.tool("openmerit_result", { job_id: top!.jobId! }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 120_000);
     assert.equal(done.data.status, "done", done.text);
@@ -147,16 +155,18 @@ test("Langfuse: only a Viewer key connects, tasks are listed by spend, the top o
     assert.equal(approved.status, 200, JSON.stringify(approved.body));
     assert.deepEqual([approved.body.by, approved.body.name], ["user_l", "User L"]);
 
-    // The plan's one evaluation is used, so pressing Start on the waiting task is refused.
+    // The plan's one evaluation is used, so Evaluate is off for the next task, with why, and starting it is refused.
+    const after = (await admin.api<{ tasks: Row[] }>("/api/connections/langfuse")).body.tasks.find(row => row.id === next!.id)!;
+    assert.deepEqual([after.status, after.blocked?.startsWith("The plan has no evaluations left this period.")], ["not_evaluated", true]);
     const refused = await admin.api<{ error: string }>(`/api/connections/langfuse/tasks/${next!.id}/start`, { method: "POST" });
     assert.equal(refused.status, 409);
-    assert.match(refused.body.error, /This month's 1 evaluations are used/);
+    assert.match(refused.body.error, /^support-chat › summarize cannot start: The plan has no evaluations left this period\./);
 
     // openmerit_tasks lists the connection's tasks with the verdict and the approval.
     const tasks = await admin.tool("openmerit_tasks", {});
     assert.match(tasks.text, /Langfuse \(project support\): 3 tasks over the last 30 days:/);
     assert.match(tasks.text, /- triage › classify \(openai\/gpt-5\.4, 940 calls, \$9\.05 in 30 days\): Set classify to [\w./-]+, approved by User L on \d{4}-\d{2}-\d{2}; openmerit_result with job_id/);
-    assert.match(tasks.text, /- support-chat › summarize \(openai\/gpt-5\.4, 100 calls, \$1\.00 in 30 days\): waiting: Not evaluated yet\./);
+    assert.match(tasks.text, /- support-chat › summarize \(openai\/gpt-5\.4, 100 calls, \$1\.00 in 30 days\): not evaluated; an admin can evaluate it with Evaluate at https:\/\/app\.openmerit\.test\/connections\/ \(up to \$5 of model calls\), which is unavailable now: The plan has no evaluations left/);
 
     // Read-only: apart from the Viewer check's invalid dataset creation, one per key pair, every request was a GET.
     assert.deepEqual(langfuse.requests.filter(request => request.method !== "GET").map(request => `${request.method} ${request.path}`), ["POST /api/public/v2/datasets", "POST /api/public/v2/datasets"]);

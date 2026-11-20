@@ -32,12 +32,17 @@ function endpointRow(endpoint: Endpoint, admin: boolean): Html {
 const VIKTOR_TASKS = "https://app.viktor.com/scheduled-tasks";
 const credits = (value: number | null | undefined): string => (value === null || value === undefined ? "–" : Math.round(value).toLocaleString("en-US"));
 
+// Evaluate and Start again: only a person starts an evaluation. Off, with the reason, when the credit cap or the plan would refuse it.
+export function evaluateButton(action: string, id: string, label: string, cost: string, blocked: string | null): Html {
+  return html`<button class="btn${label === "Evaluate" ? " primary" : ""}" type="button" data-action="${action}" data-id="${id}"${blocked ? html` disabled aria-describedby="why-${id}"` : ""}>${label}</button><span class="sub">${cost}</span>${blocked ? html`<span class="sub" id="why-${id}">${blocked}</span>` : ""}`;
+}
+
 function taskStatus(task: ViktorTask, admin: boolean): Html {
   switch (task.status) {
     case "skipped": return html`<span class="pill">Skipped</span><span class="sub">${task.reason ?? ""}</span>`;
     case "evaluating": return html`<span class="pill live">Evaluating</span>${task.jobId ? html`<span class="sub"><a href="/r/${task.jobId}/">Open the run</a></span>` : ""}`;
-    case "failed": return html`<span class="pill bad">Did not finish</span><span class="sub">${task.reason ?? ""}</span>${admin ? html` <button class="btn" type="button" data-action="start" data-id="${task.id}">Start again</button>` : ""}`;
-    case "waiting": return html`<span class="pill warn">Waiting</span><span class="sub">About ${credits(task.estimatedCredits)} credits. ${task.reason ?? ""}</span>${admin ? html` <button class="btn" type="button" data-action="start" data-id="${task.id}">Start</button>` : ""}`;
+    case "failed": return html`<span class="pill bad">Did not finish</span><span class="sub">${task.reason ?? ""}</span>${admin ? html` ${evaluateButton("start", task.id, "Start again", `About ${credits(task.estimatedCredits)} credits`, task.blocked)}` : ""}`;
+    case "not_evaluated": return html`<span class="pill">Not evaluated</span>${admin ? html` ${evaluateButton("start", task.id, "Evaluate", `About ${credits(task.estimatedCredits)} credits`, task.blocked)}` : html`<span class="sub">About ${credits(task.estimatedCredits)} credits. An admin can evaluate it.</span>`}`;
     case "done": {
       const result = task.result;
       const approved = result?.approval ? html`<span class="sub">Approved by ${result.approval.name ?? result.approval.by} on ${date(result.approval.at)}</span>` : "";
@@ -56,7 +61,7 @@ function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
           </label>
           <label>Credit cap
             <input name="creditCap" type="number" min="100" max="100000" step="100" value="2000" required>
-            <span class="sub">The most Viktor credits OpenMerit's test runs may use from your workspace, about $5 per 2,000. Tasks past it wait with a Start button.</span>
+            <span class="sub">The most Viktor credits OpenMerit's test runs may use from your workspace, about $5 per 2,000. Evaluate is off for a task whose estimate would pass it.</span>
           </label>
           <p class="note">To measure a task, OpenMerit makes temporary copies of it in your workspace: personal, paused, each set to a cheaper preset and titled "OpenMerit: &lt;task title&gt;". It runs each copy in Viktor's test mode, which captures Slack posts and other outside actions instead of sending them, then deletes the copies. It never changes your tasks: a result proposes the change, and you make it in Viktor after you approve it.</p>
           <p class="form-error" role="alert" hidden></p>
@@ -80,12 +85,13 @@ function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
 }
 
 // The Langfuse connection: OpenMerit replays a task's recorded calls on cheaper models, and proposes the change.
+export const modelSpend = (budgetUsd: number | null): string => (budgetUsd === null ? "" : `Up to ${usd(budgetUsd)} of model calls`);
 function langfuseStatus(task: LangfuseTask, admin: boolean): Html {
   switch (task.status) {
     case "skipped": return html`<span class="pill">Skipped</span><span class="sub">${task.reason ?? ""}</span>`;
     case "evaluating": return html`<span class="pill live">Evaluating</span>${task.jobId ? html`<span class="sub"><a href="/r/${task.jobId}/">Open the run</a></span>` : ""}`;
-    case "failed": return html`<span class="pill bad">Did not finish</span><span class="sub">${task.reason ?? ""}${task.jobId ? html` <a href="/r/${task.jobId}/">Why</a>` : ""}</span>${admin ? html` <button class="btn" type="button" data-action="start-langfuse" data-id="${task.id}">Start again</button>` : ""}`;
-    case "waiting": return html`<span class="pill warn">Waiting</span><span class="sub">${task.reason ?? ""}</span>${admin ? html` <button class="btn" type="button" data-action="start-langfuse" data-id="${task.id}">Start</button>` : ""}`;
+    case "failed": return html`<span class="pill bad">Did not finish</span><span class="sub">${task.reason ?? ""}${task.jobId ? html` <a href="/r/${task.jobId}/">Why</a>` : ""}</span>${admin ? html` ${evaluateButton("start-langfuse", task.id, "Start again", modelSpend(task.budgetUsd), task.blocked)}` : ""}`;
+    case "not_evaluated": return html`<span class="pill">Not evaluated</span>${admin ? html` ${evaluateButton("start-langfuse", task.id, "Evaluate", modelSpend(task.budgetUsd), task.blocked)}` : html`<span class="sub">${modelSpend(task.budgetUsd)}. An admin can evaluate it.</span>`}`;
     case "done": {
       const result = task.result;
       const approved = result?.approval ? html`<span class="sub">Approved by ${result.approval.name ?? result.approval.by} on ${date(result.approval.at)}</span>` : "";
@@ -109,7 +115,7 @@ function langfuseSection(langfuse: LangfuseConnection, admin: boolean): Html {
             <input name="secretKey" type="password" required autocomplete="off" spellcheck="false" placeholder="sk-lf-…">
             <span class="sub">A Viewer key pair from Project Settings → API Keys: OpenMerit refuses a key that can write. It stores both keys encrypted and shows only the public key's last four characters.</span>
           </label>
-          <p class="note">OpenMerit lists your project's generations over the last 30 days as tasks, by name or managed prompt, with their model, calls and cost, and evaluates them without being asked, highest spend first, one of your plan's evaluations each. To build a task's cases it reads at most 20 of its dataset items and recorded calls, inputs and outputs included, redacts them and replays them on cheaper models; it keeps them only in the evaluation. It never writes to Langfuse: a result proposes the change, and you make it after you approve it.</p>
+          <p class="note">OpenMerit lists your project's generations over the last 30 days as tasks, by name or managed prompt, with their model, calls and cost, and you pick which to evaluate, one of your plan's evaluations each. To build a task's cases it reads at most 20 of its dataset items and recorded calls, inputs and outputs included, redacts them and replays them on cheaper models; it keeps them only in the evaluation. It never writes to Langfuse: a result proposes the change, and you make it after you approve it.</p>
           <p class="form-error" role="alert" hidden></p>
           <p><button class="btn primary" type="submit">Connect Langfuse</button></p>
         </form>` : html`<p class="note">Only an admin can connect Langfuse.</p>`}
@@ -158,7 +164,7 @@ export const connectionsView: View<Data> = {
 
     <section aria-labelledby="apps">
       <h2 id="apps">Apps</h2>
-      <p class="note" style="margin: -2px 0 8px">Apps whose AI tasks OpenMerit evaluates on their own: it lists the tasks, evaluates the ones it can, highest spend first, and proposes a cheaper model for you to approve.</p>
+      <p class="note" style="margin: -2px 0 8px">Apps whose AI tasks OpenMerit lists, most spend first. You pick which to evaluate with Evaluate; OpenMerit proposes a cheaper model for you to approve.</p>
       ${viktorSection(viktor, admin)}
       ${langfuseSection(langfuse, admin)}
     </section>
@@ -206,16 +212,16 @@ export const connectionsView: View<Data> = {
       }
       form.reset();
       await refresh();
-      toast("Viktor connected. OpenMerit is evaluating the tasks it can.");
+      toast("Viktor connected. Pick which tasks to evaluate.");
     },
     async "refresh-viktor"(_target, _data, { api, refresh, toast }) {
-      const listed = await api.send<{ refused: string | null; started: string[] }>("POST", "/api/connections/viktor/refresh");
+      await api.send("POST", "/api/connections/viktor/refresh");
       await refresh();
-      toast(listed.refused ?? (listed.started.length ? `Started ${plural(listed.started.length, "evaluation")}.` : "Tasks listed again."));
+      toast("Tasks listed again.");
     },
     async start(target, data, { api, refresh, toast, confirm }) {
       const task = data.viktor.tasks.find((item) => item.id === target.dataset.id);
-      if (!task || !await confirm({ title: `Evaluate ${task.title}?`, body: `OpenMerit tests ${task.title}'s cheaper presets on paused copies in Viktor's test mode, for about ${credits(task.estimatedCredits)} credits from your workspace. It counts as one evaluation on your plan.`, confirm: "Start" })) return;
+      if (!task || !await confirm({ title: `Evaluate ${task.title}?`, body: `OpenMerit tests ${task.title}'s cheaper presets on paused copies in Viktor's test mode, for about ${credits(task.estimatedCredits)} credits from your workspace. It counts as one evaluation on your plan.`, confirm: "Evaluate" })) return;
       await api.send("POST", `/api/connections/viktor/tasks/${encodeURIComponent(task.id)}/start`);
       await refresh();
       toast(`Evaluating ${task.title}.`);
@@ -240,16 +246,16 @@ export const connectionsView: View<Data> = {
       }
       form.reset();
       await refresh();
-      toast("Langfuse connected. OpenMerit is evaluating the tasks with the most spend.");
+      toast("Langfuse connected. Pick which tasks to evaluate.");
     },
     async "refresh-langfuse"(_target, _data, { api, refresh, toast }) {
-      const listed = await api.send<{ refused: string | null; started: string[] }>("POST", "/api/connections/langfuse/refresh");
+      await api.send("POST", "/api/connections/langfuse/refresh");
       await refresh();
-      toast(listed.refused ?? (listed.started.length ? `Started ${plural(listed.started.length, "evaluation")}.` : "Tasks listed again."));
+      toast("Tasks listed again.");
     },
     async "start-langfuse"(target, data, { api, refresh, toast, confirm }) {
       const task = data.langfuse.tasks.find((item) => item.id === target.dataset.id);
-      if (!task || !await confirm({ title: `Evaluate ${task.name}?`, body: `OpenMerit replays up to 20 of ${task.name}'s recorded calls or dataset items on cheaper models than ${task.model}. It counts as one evaluation on your plan.`, confirm: "Start" })) return;
+      if (!task || !await confirm({ title: `Evaluate ${task.name}?`, body: `OpenMerit replays up to 20 of ${task.name}'s recorded calls or dataset items on cheaper models than ${task.model}, for ${modelSpend(task.budgetUsd).toLowerCase() || "model calls"}. It counts as one evaluation on your plan.`, confirm: "Evaluate" })) return;
       await api.send("POST", `/api/connections/langfuse/tasks/${encodeURIComponent(task.id)}/start`);
       await refresh();
       toast(`Evaluating ${task.name}.`);
