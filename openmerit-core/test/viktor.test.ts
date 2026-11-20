@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import type { Measurement } from "../src/engine/evaluate.ts";
 import {
-  batchMeasure, batchSpec, draftedTools, judgeChecks, CREDIT_USD, estimateCredits, evaluateViktor, gradeRun, keyProblem, proposeChange, readTasks, REQUIRED_SCOPES, viktor, viktorClient, withArgs,
+  batchMeasure, batchSpec, draftedTools, viktorErrorSentence, judgeChecks, CREDIT_USD, estimateCredits, evaluateViktor, gradeRun, keyProblem, proposeChange, readTasks, REQUIRED_SCOPES, viktor, viktorClient, withArgs,
   type BatchRun, type Check,
 } from "../src/connectors/viktor/index.ts";
 
@@ -65,6 +65,11 @@ test("a script run is polled until it ends, and a failed one throws with its las
   assert.deepEqual(draftedTools(stderr), ["list_crons", "read_file"]);
   assert.deepEqual(draftedTools("[tool-gateway] list_crons: executed"), []);
   const drafted = fakeViktor({ "/api/public/v1/scripts/runs": () => ({ body: { id: "run_3", status: "completed", result: { exit_code: 1, stdout: "", stderr } } }) });
+  // A request validation error reads as a sentence, even cut short as a job records it; other errors have none.
+  const refused = 'The job failed: Step "put" exhausted retries: ViktorError: Viktor POST /api/public/v1/scripts/runs: [{"type":"value_error","loc":["body","args"],"msg":"Value error, each arg may be at most 2000 characters","input":["/work","# openmerit:batch\\nimport asyn';
+  assert.equal(viktorErrorSentence(refused), "Viktor refused the request: each script argument may be at most 2,000 characters.");
+  assert.equal(viktorErrorSentence('[{"type":"missing","loc":["body","code"],"msg":"Field required"}]'), "Viktor refused the request: code: field required.");
+  assert.equal(viktorErrorSentence("Viktor script run run_2 completed: ValueError: no such cron"), null);
   await assert.rejects(viktorClient({ apiKey: "k", fetch: drafted.fetcher }).runScript("x"), { code: "needs_approval", message: /calls to list_crons, read_file as drafts that wait for approval in chat, so they did not run/ });
 });
 

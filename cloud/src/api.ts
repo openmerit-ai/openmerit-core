@@ -7,7 +7,7 @@ import { LEVELS, type Guardrails, type Level } from "./engine.ts";
 import { explain, type JobResult } from "./report.ts";
 import { rerunJob } from "./start.ts";
 import { connectLangfuse, LANGFUSE, langfuseView, refreshLangfuse, startLangfuseTasks } from "./langfuse.ts";
-import { approveChange, connectViktor, currentViktorView, namedApproval, refreshViktor, startViktorTasks, VIKTOR, viktorView } from "./viktor.ts";
+import { approveChange, labelRuns, connectViktor, currentViktorView, namedApproval, refreshViktor, startViktorTasks, VIKTOR, viktorView } from "./viktor.ts";
 import type { EndpointKind } from "../../openmerit-core/src/ranking/index.ts";
 
 type Json = Record<string, unknown>;
@@ -96,7 +96,7 @@ export function apiRoutes(deps: AppDeps) {
       return json(200, { ...row, bundle: info.bundle, lastResult: info.lastResult, notices: info.notices, jobs: await account.jobs({ taskId: row.id, limit: 20 }), guardrails: await account.resolveGuardrails({ environment: row.environment, agent: row.agent, taskId: row.id }) });
     }
 
-    if (path === "/api/runs" && method === "GET") return json(200, await account.jobs({ limit: Math.min(200, Number(url.searchParams.get("limit") ?? 50) || 50) }));
+    if (path === "/api/runs" && method === "GET") return json(200, await labelRuns(client, deps.auth, who.accountId, await account.jobs({ limit: Math.min(200, Number(url.searchParams.get("limit") ?? 50) || 50) })));
     if ((match = /^\/api\/runs\/([\w-]+)$/.exec(path)) && method === "GET") {
       const jobId = match[1]!;
       const row = await account.job(jobId);

@@ -134,6 +134,8 @@ export function describeJob(view: JobView | ViktorJobView, appUrl: string): stri
   // A Viktor task has no bundle to rerun, and starting it again spends the workspace's Viktor credits: an admin does it in the app.
   if (view.status === "failed" && !result) lines.push("connection" in view && view.connection ? `Fix: tell the user an admin can start it again with Start again at ${appUrl}/r/${view.jobId}/${view.connection === "viktor" ? "; it uses Viktor credits within the connection's cap" : ""}.` : `Fix: ask the user, then call openmerit_recommend with job_id "${view.jobId}" to run the task again.`);
   if (view.error) lines.push(`Error: ${view.error}`);
+  // The sentence first, then the error as recorded.
+  if ("errorDetail" in view && view.errorDetail) lines.push("Details:", view.errorDetail);
   return lines.join("\n");
 }
 

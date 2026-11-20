@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApiError, createApi, type GuardrailsAt, type JobView, type Me, type Report, type Spend, type Task, type LangfuseConnection, type ViktorConnection } from "../api.ts";
+import { ApiError, createApi, type GuardrailsAt, type JobView, type Me, type Report, type Run, type Spend, type Task, type LangfuseConnection, type ViktorConnection } from "../api.ts";
 import { createFakeApi } from "../dev/fake-api.ts";
 import type { Account } from "../view.ts";
 import { connectionsView } from "../views/connections.ts";
 import { choices, guardrailsView, parse } from "../views/guardrails.ts";
 import { planView } from "../views/plan.ts";
 import { runView } from "../views/run.ts";
+import { runsView } from "../views/runs.ts";
 import { tasksView } from "../views/tasks.ts";
 
 // The pages render what the cloud app returns, as served by the local fake of its /api/*.
@@ -220,4 +221,19 @@ test("a Langfuse connection lists its tasks by spend, and a result's change is a
   const approved = await get<Report>("/api/runs/l2f9a4");
   assert.match(text(runView.render(approved, page(me))), /Approved by Amira Haddad on/);
   assert.match(text(connectionsView.render({ endpoints: [], viktor, langfuse: await get<LangfuseConnection>("/api/connections/langfuse") }, page(me))), /Approved by Amira Haddad on/);
+});
+
+test("Runs labels a Viktor run by its task's title and says who started it, and a refused request reads as a sentence with the error behind Show details", async () => {
+  const me = await account();
+  const [runs, tasks] = await Promise.all([get<Run[]>("/api/runs"), get<Task[]>("/api/tasks")]);
+  const listed = text(runsView.render({ runs, tasks, jobs: [] }, page(me)));
+  assert.match(listed, /Claims digest Switch to cheap[^]*?Viktor connection \(automatic\)/);
+  assert.match(listed, /Weekly payer report Did not finish Started from the app by Amira Haddad/);
+  assert.doesNotMatch(listed, /viktor_/, "never a raw task or job ID");
+
+  const failed = await get<JobView>("/api/runs/v9k3r1");
+  const shown = runView.render(failed, page(me)).__html;
+  assert.equal(text({ __html: shown }).split("Viktor refused the request: each script argument may be at most 2,000 characters.").length, 2, "the sentence once");
+  assert.match(shown, /<details><summary>Show details<\/summary><pre class="error-detail">The job failed: Step &quot;put&quot;[^<]*# openmerit:batch\nimport asyncio/);
+  assert.match(shown, /data-action="rerun">Start again/);
 });

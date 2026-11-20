@@ -46,8 +46,13 @@ function outcome(run: Run, task: Task | undefined): Html {
   return describe({ status: found.status, pick: found.model, current: found.from ?? task?.currentModel ?? "", saving }, (text) => html`${text}`);
 }
 
-// Who started the run: the coding agent that asked, by the name its MCP client sent, or a watch.
+// A connected app's runs, by the job's kind.
+const CONNECTIONS: Record<string, string> = { viktor: "Viktor", langfuse: "Langfuse" };
+
+// Who started the run: the coding agent that asked, by the name its MCP client sent, a watch, or a connection, on its own or from the app.
 function askedBy(run: Run): Html {
+  const app = CONNECTIONS[run.kind];
+  if (app) return run.startedBy ? html`Started from the app by ${run.startedByName ?? run.startedBy}` : html`${app} connection (automatic)`;
   if (run.kind === "watch") return html`${logo("openmerit")}OpenMerit<span class="sub">watching this task</span>`;
   if (!run.askedBy) return html`Coding agent`;
   const found = harness(run.askedBy);
@@ -132,7 +137,7 @@ export const runsView: View<{ runs: Run[]; tasks: Task[]; jobs: JobView[] }> = {
           <tbody>
             ${runs.map((run) => {
               const task = byId.get(run.taskId);
-              return html`<tr><td><a href="/r/${run.id}/">${task?.name ?? run.result?.task ?? run.taskId}</a><span class="sub">${task?.environment ?? ""}</span></td><td>${outcome(run, task)}</td><td>${askedBy(run)}</td><td class="num">${when(run.startedAt)}</td></tr>`;
+              return html`<tr><td><a href="/r/${run.id}/">${task?.name ?? run.title ?? run.result?.task ?? run.taskId}</a><span class="sub">${task?.environment ?? ""}</span></td><td>${outcome(run, task)}</td><td>${askedBy(run)}</td><td class="num">${when(run.startedAt)}</td></tr>`;
             })}
           </tbody>
         </table>

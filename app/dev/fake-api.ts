@@ -38,8 +38,10 @@ function populated(): State {
     run("f9q2w7", "fraud-reviewer", "done", "2026-11-16T12:00:00Z", "run", "codex"),
     run("z1c7m4", "coding-reviewer", "failed", "2026-11-12T10:00:00Z"),
     run("b2v5h3", "ticket-router", "done", "2026-10-30T10:00:00Z"),
-    run("v5t8c2", "viktor_claims_digest", "done", "2026-11-18T09:00:10Z", "viktor", null),
-    run("l2f9a4", "langfuse_lf_3a91c0de55aa", "done", "2026-11-18T08:30:00Z", "langfuse", null),
+    { ...run("v5t8c2", "viktor_claims_digest", "done", "2026-11-18T09:00:10Z", "viktor", null), title: "Claims digest" },
+    // A Viktor evaluation an admin started again from the app, which Viktor refused before it had a report.
+    { ...run("v9k3r1", "viktor_weekly_payer_report", "failed", "2026-11-18T08:10:00Z", "viktor", null), title: "Weekly payer report", startedBy: "user_amira", startedByName: "Amira Haddad" },
+    { ...run("l2f9a4", "langfuse_lf_3a91c0de55aa", "done", "2026-11-18T08:30:00Z", "langfuse", null), title: "adjudicate-claim › adjudicate-claim-generate" },
   ];
   const baseline = measured("openai/gpt-5", "openrouter", { role: "baseline", stage: "baseline", passes: 39, total: 40, costPerCallUsd: 0.00475, latencyMs: 3100 });
   const haiku = measured("anthropic/claude-haiku-5-5", "openrouter", { passes: 40, total: 40, costPerCallUsd: 0.00007, latencyMs: 500, qualified: true });
@@ -79,6 +81,11 @@ function populated(): State {
     jobs: {
       e4n6t0: job("e4n6t0", "enrollment-checker", "Enrollment checker", {}),
       w8r3k1: job("w8r3k1", "ticket-router", "Ticket router", { status: "needs_input", phase: "label_check", questions: [{ id: "labels" }], progress: { measured: 0, planned: null }, createdAt: "2026-11-18T11:20:00Z" }),
+      v9k3r1: job("v9k3r1", "viktor_weekly_payer_report", "Weekly payer report", {
+        status: "failed", phase: "done", connection: "viktor", provisional: null, createdAt: "2026-11-18T08:10:00Z", progress: { measured: 0, planned: 0 },
+        error: "Viktor refused the request: each script argument may be at most 2,000 characters.",
+        errorDetail: 'The job failed: Step "put" exhausted retries: ViktorError: Viktor POST /api/public/v1/scripts/runs: [{"type":"value_error","loc":["body","args"],"msg":"Value error, each arg may be at most 2000 characters","input":["/work/temp/openmerit/v9k3r1","# openmerit:batch\nimport asyncio, json, os, sys\nfrom sdk.tools.scheduled_crons import create_agent_cron"]}]',
+      }),
       z1c7m4: job("z1c7m4", "coding-reviewer", "Coding reviewer", { status: "failed", phase: "cases", error: "The task's examples had no known answers, and no case could be written from it.", provisional: null, createdAt: "2026-11-12T10:00:00Z" }),
     },
     endpoints: [
