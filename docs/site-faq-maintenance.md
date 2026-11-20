@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Viktor tasks on the Tasks page — unreleased, 20 November 2026
+
+Reviewed the homepage against the cloud app's Tasks page listing a connected Viktor workspace's tasks in their own section, with Evaluate. `site/index.html` makes no claim about the app's Tasks page or connected apps. No homepage copy change is needed.
+
 ## More Viktor tasks evaluated in the cloud app — unreleased, 20 November 2026
 
 Reviewed the homepage against the cloud app's Viktor connection evaluating tasks on the workspace's default model, tasks with a condition script and tasks on Viktor's writing presets, and titling its temporary copies `[OpenMerit]: <task title>`. `site/index.html` makes no claim about Viktor, its presets or which tasks a connection evaluates. No homepage copy change is needed; the cloud README's Viktor section describes the ladders and what is skipped.

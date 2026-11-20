@@ -65,6 +65,33 @@ const unavailable = (name: string): Html => html`<div class="card"><div class="r
 const listingNote = (on: boolean | undefined): Html => (on ? html`<p class="note" role="status">Listing the tasks again…</p>` : html``);
 const refreshButton = (action: string, on: boolean | undefined): Html => html`<button class="btn" type="button" data-action="${action}"${on ? " disabled" : ""}>${on ? "Listing…" : "Refresh"}</button>`;
 
+/** The Viktor task table, with Evaluate: on Connections and in its own section on Tasks. Its buttons call `viktorActions`. */
+export function viktorTasks(viktor: ViktorConnection, admin: boolean): Html {
+  return html`<div class="tablewrap" style="margin-top: 10px">
+        <table>
+          <thead><tr><th>Task</th><th>Model</th><th class="num">Credits, 30 days</th><th>Status</th></tr></thead>
+          <tbody>
+            ${viktor.tasks.map((task) => html`<tr><td>${taskName("viktor", task.id, task.title, task.isNew)}<span class="sub">${task.path}${task.paused ? " · paused" : ""}</span></td><td>${task.model ? html`<code>${task.model}</code>` : html`<span class="sub">${teamDefault(task)}</span>`}</td><td class="num">${credits(task.credits30d)}</td><td>${taskStatus(task, admin)}</td></tr>`)}
+          </tbody>
+        </table>
+      </div>`;
+}
+
+/** Evaluate (or Start again) on a Viktor task, and opening a New task's row, wherever `viktorTasks` is shown. */
+export const viktorActions = {
+  async start(target: HTMLElement, viktor: ViktorConnection, { api, refresh, toast, confirm }: Ctx): Promise<void> {
+    const task = viktor.tasks.find((item) => item.id === target.dataset.id);
+    if (!task || !await confirm({ title: `Evaluate ${task.title}?`, body: `OpenMerit tests ${task.title}'s cheaper presets on paused copies in Viktor's test mode, for about ${credits(task.estimatedCredits)} credits from your workspace. It counts as one evaluation on your plan.`, confirm: "Evaluate" })) return;
+    await api.send("POST", `/api/connections/viktor/tasks/${encodeURIComponent(task.id)}/start`);
+    await refresh();
+    toast(`Evaluating ${task.title}.`);
+  },
+  async seen(target: HTMLElement, { api, refresh }: Ctx): Promise<void> {
+    await api.send("POST", `/api/connections/${target.dataset.kind === "langfuse" ? "langfuse" : "viktor"}/tasks/${encodeURIComponent(target.dataset.id ?? "")}/seen`);
+    await refresh();
+  },
+};
+
 function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
   if (viktor.unavailable) return unavailable("Viktor");
   if (!viktor.connected) return html`<div class="card">
@@ -89,14 +116,7 @@ function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
         ${listingNote(viktor.listing)}
         ${viktor.listingError ? html`<p class="note bad" role="alert">The last listing failed: ${viktor.listingError}</p>` : ""}
       </div>
-      <div class="tablewrap" style="margin-top: 10px">
-        <table>
-          <thead><tr><th>Task</th><th>Model</th><th class="num">Credits, 30 days</th><th>Status</th></tr></thead>
-          <tbody>
-            ${viktor.tasks.map((task) => html`<tr><td>${taskName("viktor", task.id, task.title, task.isNew)}<span class="sub">${task.path}${task.paused ? " · paused" : ""}</span></td><td>${task.model ? html`<code>${task.model}</code>` : html`<span class="sub">${teamDefault(task)}</span>`}</td><td class="num">${credits(task.credits30d)}</td><td>${taskStatus(task, admin)}</td></tr>`)}
-          </tbody>
-        </table>
-      </div>
+      ${viktorTasks(viktor, admin)}
       <p class="note">Changes are made in <a href="${VIKTOR_TASKS}" target="_blank" rel="noopener">Viktor's scheduled tasks</a>; OpenMerit does not change a task.</p>`;
 }
 
@@ -276,17 +296,8 @@ export const connectionsView: View<Data> = {
       announce = true;
       await refresh();
     },
-    async start(target, data, { api, refresh, toast, confirm }) {
-      const task = data.viktor.tasks.find((item) => item.id === target.dataset.id);
-      if (!task || !await confirm({ title: `Evaluate ${task.title}?`, body: `OpenMerit tests ${task.title}'s cheaper presets on paused copies in Viktor's test mode, for about ${credits(task.estimatedCredits)} credits from your workspace. It counts as one evaluation on your plan.`, confirm: "Evaluate" })) return;
-      await api.send("POST", `/api/connections/viktor/tasks/${encodeURIComponent(task.id)}/start`);
-      await refresh();
-      toast(`Evaluating ${task.title}.`);
-    },
-    async seen(target, _data, { api, refresh }) {
-      await api.send("POST", `/api/connections/${target.dataset.kind === "langfuse" ? "langfuse" : "viktor"}/tasks/${encodeURIComponent(target.dataset.id ?? "")}/seen`);
-      await refresh();
-    },
+    start: (target, data, ctx) => viktorActions.start(target, data.viktor, ctx),
+    seen: (target, _data, ctx) => viktorActions.seen(target, ctx),
     async "disconnect-viktor"(_target, _data, { api, refresh, toast, confirm }) {
       if (!await confirm({ title: "Disconnect Viktor?", body: "OpenMerit deletes the key and stops listing and evaluating your Viktor tasks. Past results and approvals are kept.", confirm: "Disconnect", danger: true })) return;
       await api.send("DELETE", "/api/connections/viktor");

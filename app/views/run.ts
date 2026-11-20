@@ -3,6 +3,7 @@ import { liveText } from "../live.ts";
 import { date, endpointName, html, setEndpoints, model, modelName, per1k, plural, seconds, usd, type Html } from "../html.ts";
 import type { Ctx, View } from "../view.ts";
 import { show } from "./guardrails.ts";
+import { retried } from "./connections.ts";
 
 // GET /api/runs/:id returns the saved report once the job has one, and the job's live state before.
 type Data = Report | JobView;
@@ -261,8 +262,9 @@ function report(data: Report, admin: boolean): Html {
 
 export const runView: View<Data> = {
   async load({ api, id }) {
-    // The endpoints name each endpoint ID's provider; the report still shows without them.
-    const [data, endpoints] = await Promise.all([api.get<Data>(`/api/runs/${encodeURIComponent(id ?? "")}`), api.get<Endpoint[]>("/api/endpoints").catch((): Endpoint[] => [])]);
+    // The endpoints name each endpoint ID's provider; the report still shows without them. A run is
+    // asked for again while the cloud app wakes after a deploy, as Connections does.
+    const [data, endpoints] = await Promise.all([retried(() => api.get<Data>(`/api/runs/${encodeURIComponent(id ?? "")}`)), api.get<Endpoint[]>("/api/endpoints").catch((): Endpoint[] => [])]);
     setEndpoints(endpoints);
     return data;
   },
