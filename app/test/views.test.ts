@@ -330,7 +330,7 @@ test("Evaluate's confirmation states the estimate in Viktor credits, from the wo
   const button = { dataset: { id: "denial_letters" } } as unknown as HTMLElement;
   await viktorActions.start(button, viktor, ctx);
   assert.equal(asked!.title, "Evaluate Denial letters?");
-  assert.match(asked!.body, /about 290 Viktor credits, taken from your workspace, not from OpenMerit\. If its test runs pass twice that, OpenMerit stops them\./);
+  assert.match(asked!.body, /about 290 Viktor credits, taken from your workspace, not from OpenMerit\. It counts as one evaluation on your plan\./);
   assert.doesNotMatch(asked!.body, /\$/, "the estimate is in credits only");
   assert.deepEqual(sent, [], "a cancelled confirmation starts nothing");
 });

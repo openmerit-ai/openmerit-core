@@ -33,7 +33,7 @@ const VIKTOR_TASKS = "https://app.viktor.com/scheduled-tasks";
 /** A task with no model of its own runs the workspace's default, as "Team default (smart)". */
 const teamDefault = (task: Pick<ViktorTask, "defaultModel">): string => (task.defaultModel ? `Team default (${task.defaultModel})` : "Team default");
 /** What an evaluation is expected to cost, for the confirmation: its estimate in credits, from the workspace's Viktor credits. */
-export const viktorEstimate = (estimate: number | null | undefined): string => (estimate ? `It should use about ${credits(estimate)} Viktor credits, taken from your workspace, not from OpenMerit. If its test runs pass twice that, OpenMerit stops them.` : "It uses Viktor credits from your workspace.");
+export const viktorEstimate = (estimate: number | null | undefined): string => (estimate ? `It should use about ${credits(estimate)} Viktor credits, taken from your workspace, not from OpenMerit.` : "It uses Viktor credits from your workspace.");
 const credits = (value: number | null | undefined): string => (value === null || value === undefined ? "–" : Math.round(value).toLocaleString("en-US"));
 
 // Evaluate and Start again: only a person starts an evaluation, after confirming its estimate. Off, with the reason, when the plan has no evaluations left.
