@@ -6,11 +6,11 @@
 // just created), preview-noorg (a token without an organization), preview-error, preview-slow and preview-expired. Each scenario keeps its own in-memory
 // state, so actions change what later requests return. Every name and number is fictional.
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, type Guardrails, type Level } from "../../openmerit-core/src/engine/guardrails.ts";
-import type { DeletedTask, Endpoint, JobView, LiveProgress, MeasuredModel, Me, Report, Run, Spend, Task, ViktorConnection, ViktorTask } from "../api.ts";
+import type { DeletedTask, Endpoint, JobView, LangfuseConnection, LangfuseTask, LiveProgress, MeasuredModel, Me, Report, Run, Spend, Task, ViktorConnection, ViktorTask } from "../api.ts";
 import { tonicUltra } from "./tonic-ultra.ts";
 
-// viktor: the Viktor connection; absent means not connected.
-export interface State { viktor?: ViktorConnection; me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number; deleted: DeletedTask[] }
+// viktor and langfuse: the app connections; absent means not connected.
+export interface State { viktor?: ViktorConnection; langfuse?: LangfuseConnection; me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number; deleted: DeletedTask[] }
 
 const ENV = "sahra-health/claims";
 const measured = (model: string, endpoint: string, fields: Partial<MeasuredModel>): MeasuredModel => ({
@@ -39,6 +39,7 @@ function populated(): State {
     run("z1c7m4", "coding-reviewer", "failed", "2026-11-12T10:00:00Z"),
     run("b2v5h3", "ticket-router", "done", "2026-10-30T10:00:00Z"),
     run("v5t8c2", "viktor_claims_digest", "done", "2026-11-18T09:00:10Z", "viktor", null),
+    run("l2f9a4", "langfuse_lf_3a91c0de55aa", "done", "2026-11-18T08:30:00Z", "langfuse", null),
   ];
   const baseline = measured("openai/gpt-5", "openrouter", { role: "baseline", stage: "baseline", passes: 39, total: 40, costPerCallUsd: 0.00475, latencyMs: 3100 });
   const haiku = measured("anthropic/claude-haiku-5-5", "openrouter", { passes: 40, total: 40, costPerCallUsd: 0.00007, latencyMs: 500, qualified: true });
@@ -72,8 +73,9 @@ function populated(): State {
   return {
     me: { user: { id: "user_amira" }, account: { id: "org_sahra", name: "Sahra Health" }, role: "admin", plan: { name: "Cloud", status: "active", periodEnd: "2026-12-01T00:00:00Z", includedEvals: 100, usedEvals: 38 } },
     tasks, runs,
-    reports: { k7m2q9: report, f9q2w7: keep, p3x8d1: failedEval, v5t8c2: viktorReport() },
+    reports: { k7m2q9: report, f9q2w7: keep, p3x8d1: failedEval, v5t8c2: viktorReport(), l2f9a4: langfuseReport(report) },
     viktor: viktorConnected(true),
+    langfuse: langfuseConnected(),
     jobs: {
       e4n6t0: job("e4n6t0", "enrollment-checker", "Enrollment checker", {}),
       w8r3k1: job("w8r3k1", "ticket-router", "Ticket router", { status: "needs_input", phase: "label_check", questions: [{ id: "labels" }], progress: { measured: 0, planned: null }, createdAt: "2026-11-18T11:20:00Z" }),
@@ -142,9 +144,38 @@ function viktorReport(): Report {
   };
 }
 
+// A connected Langfuse project (fictional): three tasks by spend, the top one evaluated with a change to approve.
+function langfuseConnected(): LangfuseConnection {
+  const task = (id: string, name: string, model: string, generations: number, costUsd: number | null, fields: Partial<LangfuseTask>): LangfuseTask => ({ id, name, model, generations, costUsd, models: 1, status: "waiting", reason: "Not evaluated yet.", jobId: null, result: null, ...fields });
+  return {
+    connected: true, baseUrl: "https://cloud.langfuse.com", projectName: "sahra-claims", keyLast4: "9f2c", connectedAt: "2026-11-18T08:20:00Z", connectedBy: "user_amira", listedAt: "2026-11-18T08:20:04Z", listingError: null, truncated: false,
+    tasks: [
+      task("3a91c0de55aa", "adjudicate-claim › adjudicate-claim-generate", "anthropic/claude-sonnet-5.5", 2513, 10.44, { models: 3, status: "done", reason: null, jobId: "l2f9a4", result: { status: "picked", change: "Set adjudicate-claim-generate to `anthropic/claude-haiku-5-5`", link: null, approval: null } }),
+      task("b7e2d4410c19", "extract-claim › extract-claim-generate", "anthropic/claude-sonnet-5.5", 2203, 5.68, { reason: "Not evaluated yet. The plan has no evaluations left this period." }),
+      task("0c5f8a2b91e3", "(no trace name) › (no name)", "openai/gpt-5-mini", 12, 0.02, { status: "skipped", reason: "generations without a name" }),
+    ],
+  };
+}
+
+function langfuseReport(base: Report): Report {
+  const half = <T extends MeasuredModel>(item: T): T => ({ ...item, passes: Math.round(item.passes / 2), total: item.total / 2 });
+  const change = { text: "Set adjudicate-claim-generate to `anthropic/claude-haiku-5-5`", link: null, model: "anthropic/claude-haiku-5-5", instructions: "Where your application makes the \"adjudicate-claim-generate\" call in \"adjudicate-claim\", set the model to anthropic/claude-haiku-5-5. OpenMerit does not change it." };
+  return {
+    ...base, jobId: "l2f9a4", task: "adjudicate-claim › adjudicate-claim-generate", createdAt: "2026-11-18T08:45:00Z",
+    // The same models on 20 replayed calls instead of 40 cases.
+    baseline: { ...base.baseline!, model: "anthropic/claude-sonnet-5.5", passes: 20, total: 20 }, pick: { ...base.pick!, passes: 20, total: 20 },
+    top: base.top.map(half), candidates: base.candidates.map(half), nearMisses: (base.nearMisses ?? []).map(half),
+    edit: { edits: [], instructions: change.instructions }, notices: [], fixes: [],
+    cases: { total: 20, fromExamples: 20, written: 0 },
+    basedOn: ["Grader: parity with the answers anthropic/claude-sonnet-5.5 recorded, compared by a judge, from langfuse (adjudicate-claim › adjudicate-claim-generate).", "Cases: 20 recorded production calls, replayed from langfuse (adjudicate-claim › adjudicate-claim-generate).", "Priority: $10.44 a month of recorded spend, from langfuse ($10.44 of recorded cost in the last 30 days)."],
+    langfuse: { taskId: "3a91c0de55aa", taskName: "adjudicate-claim › adjudicate-claim-generate", currentModel: "anthropic/claude-sonnet-5.5", change, dataset: null, replayed: 20 },
+    approved: null,
+  };
+}
+
 function emptyState(me: Me): State {
   const state = populated();
-  const { viktor: _viktor, ...rest } = state;
+  const { viktor: _viktor, langfuse: _langfuse, ...rest } = state;
   return { ...rest, me: { ...me, plan: { ...me.plan, usedEvals: 0 } }, tasks: [], runs: [], reports: {}, jobs: {}, endpoints: [], spend: { ...state.spend, openmeritUsd: 0, customerUsd: 0 }, guardrails: { environment: {}, agent: {}, task: {} } };
 }
 
@@ -246,6 +277,30 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       return json(201, { jobId, taskId: task.id });
     }
     // The Viktor connection, as cloud/src/api.ts serves it: the key is checked, never stored or returned.
+    if (path === "/api/connections/langfuse" && method === "GET") return json(200, state.langfuse ?? { connected: false, tasks: [] });
+    if (path === "/api/connections/langfuse" && method === "POST") {
+      if (denied) return denied;
+      const publicKey = typeof input?.publicKey === "string" ? input.publicKey.trim() : "", secretKey = typeof input?.secretKey === "string" ? input.secretKey.trim() : "";
+      if (!publicKey.startsWith("pk-lf-") || !secretKey.startsWith("sk-lf-")) return error(400, "Paste a Langfuse public key (pk-lf-…) and secret key (sk-lf-…) from Project Settings → API Keys.");
+      // The preview's stand-in for the Viewer check: a secret key containing "write" can write.
+      if (secretKey.includes("write")) return error(400, "This key pair can write to Langfuse. Create a separate Viewer key in Langfuse Project Settings → API Keys; OpenMerit only reads and keeps your tracing keys untouched.");
+      state.langfuse = { ...langfuseConnected(), keyLast4: publicKey.slice(-4), connectedAt: new Date().toISOString(), connectedBy: state.me.user.id };
+      return json(201, state.langfuse);
+    }
+    if (path === "/api/connections/langfuse" && method === "DELETE") {
+      if (denied) return denied;
+      if (!state.langfuse) return error(404, "Langfuse is not connected.");
+      delete state.langfuse;
+      return json(200, { deleted: true });
+    }
+    if (path === "/api/connections/langfuse/refresh" && method === "POST") { if (denied) return denied; return json(200, { ...(state.langfuse ?? { connected: false, tasks: [] }), started: [], refused: null }); }
+    if ((match = /^\/api\/connections\/langfuse\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
+      if (denied) return denied;
+      const task = state.langfuse?.tasks.find((item) => item.id === match?.[1] && (item.status === "waiting" || item.status === "failed"));
+      if (!task) return error(409, "This task cannot be evaluated, or is being evaluated now.");
+      Object.assign(task, { status: "evaluating", reason: null });
+      return json(201, { started: [task.id] });
+    }
     if (path === "/api/connections/viktor" && method === "GET") return json(200, state.viktor ?? { connected: false, tasks: [] });
     if (path === "/api/connections/viktor" && method === "POST") {
       if (denied) return denied;
@@ -276,10 +331,10 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       if (denied) return denied;
       const found = state.reports[match[1] ?? ""];
       if (!found) return error(404, "This run has no result yet.");
-      const change = found.connection?.change;
+      const change = found.connection?.change ?? found.langfuse?.change;
       if (!change || !found.pick) return error(409, "This result proposes no change to approve.");
       found.approved ??= { jobId: found.jobId, change: change.text, link: change.link, by: state.me.user.id, name: "Amira Haddad", email: null, at: new Date().toISOString() };
-      const row = state.viktor?.tasks.find((item) => item.jobId === found.jobId);
+      const row = state.viktor?.tasks.find((item) => item.jobId === found.jobId) ?? state.langfuse?.tasks.find((item) => item.jobId === found.jobId);
       if (row?.result) row.result.approval = { by: found.approved.by, name: found.approved.name ?? null, at: found.approved.at };
       return json(200, found.approved);
     }

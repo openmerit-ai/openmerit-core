@@ -104,6 +104,7 @@ export interface JobResult {
   basedOn?: string[];
   // A connected app's task, such as a Viktor scheduled task: its cases are checks a judge wrote, and a cost per call is per test run.
   connection?: ConnectionResult;
+  langfuse?: LangfuseResult;
 }
 
 export interface ConnectionResult {
@@ -179,6 +180,28 @@ export interface ViktorConnection {
   keyLast4?: string; keyType?: string | null; creditCap?: number; connectedAt?: string; connectedBy?: string;
   creditsUsed?: number; creditsReserved?: number; listedAt?: string | null; listingError?: string | null;
   tasks: ViktorTask[];
+}
+
+// GET /api/connections/langfuse: the Langfuse connection, without its keys, and the project's tasks over 30 days.
+export interface LangfuseTask {
+  id: string; name: string; model: string; generations: number; costUsd: number | null; models: number;
+  status: ViktorTaskStatus;
+  reason: string | null;
+  jobId: string | null;
+  result: { status: string; change: string | null; link: string | null; approval: { by: string; name?: string | null; at: string } | null } | null;
+}
+export interface LangfuseConnection {
+  connected: boolean;
+  baseUrl?: string; projectName?: string; keyLast4?: string; connectedAt?: string; connectedBy?: string;
+  listedAt?: string | null; listingError?: string | null; truncated?: boolean;
+  tasks: LangfuseTask[];
+}
+// A Langfuse result's change, made where the application or the prompt sets the model.
+export interface LangfuseResult {
+  taskId: string; taskName: string; currentModel: string;
+  change: { text: string; link: string | null; instructions: string; model: string } | null;
+  dataset: { experiment: string; items: number } | null;
+  replayed: number;
 }
 
 export interface GuardrailsAt {

@@ -44,7 +44,7 @@ const ACTIVE_PLAN = new Set(["active", "trialing"]);
  * How many of the plan's evaluations a finished job counts: one per task, as an agent's run counts
  * (decision 8 for connections is still open, so this is the one place to change it).
  */
-export const EVALUATIONS_PER_JOB: Readonly<Record<string, number>> = { run: 1, watch: 1, viktor: 1 };
+export const EVALUATIONS_PER_JOB: Readonly<Record<string, number>> = { run: 1, watch: 1, viktor: 1, langfuse: 1 };
 
 export interface ConnectionRow { kind: string; keyLast4: string; keyType: string | null; teamId: string | null; creditCap: number; connectedBy: string; connectedAt: string; listing: unknown; listedAt: string | null; listingError: string | null }
 /** by is the approver's Clerk user ID; name and email are what Clerk had for them, null when the lookup failed. */
@@ -160,7 +160,7 @@ export const account = actor({
     }, { name: "apply_stripe" }),
 
     /** Checks the plan and the account's job limits, then records the job. */
-    startJob: async (c, input: { jobId: string; taskId: string; kind: "run" | "watch" | "viktor"; askedBy?: string | null; credits?: number | null }): Promise<Started> => c.db.transaction(async tx => {
+    startJob: async (c, input: { jobId: string; taskId: string; kind: "run" | "watch" | "viktor" | "langfuse"; askedBy?: string | null; credits?: number | null }): Promise<Started> => c.db.transaction(async tx => {
       const { limits, appUrl } = services().config;
       const current = await plan(tx);
       if (!current || !ACTIVE_PLAN.has(current.status)) return { ok: false, error: `This account has no active OpenMerit plan${current ? ` (Stripe says ${current.status})` : ""}. Subscribe at ${appUrl}/plan/, then try again.` };
@@ -401,14 +401,15 @@ export const account = actor({
     },
 
     // App connections, such as Viktor. The key arrives only through /api/connections/<kind>, checked, and is stored encrypted.
-    saveConnection: async (c, input: { kind: string; apiKey: string; keyType: string; teamId: string; creditCap: number; userId: string }): Promise<{ ok: true } | { ok: false; error: string }> => {
+    /** `keyLast4` is what the app shows of the key; by default the key's own last four characters. */
+    saveConnection: async (c, input: { kind: string; apiKey: string; keyLast4?: string; keyType: string; teamId: string; creditCap: number; userId: string }): Promise<{ ok: true } | { ok: false; error: string }> => {
       const { keyEncryptionKey } = services().config;
       if (!keyEncryptionKey) return { ok: false, error: "Connections are not available yet: the app has no key-encryption key." };
       const key = input.apiKey.trim();
       await c.db.execute(`INSERT INTO connections (kind, sealed_key, key_last4, key_type, team_id, credit_cap, connected_by, connected_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (kind) DO UPDATE SET sealed_key = excluded.sealed_key, key_last4 = excluded.key_last4, key_type = excluded.key_type, team_id = excluded.team_id,
         credit_cap = excluded.credit_cap, connected_by = excluded.connected_by, connected_at = excluded.connected_at`,
-      input.kind, encryptKey(keyEncryptionKey, `${c.key[0]!}:${input.kind}`, key), key.slice(-4), input.keyType, input.teamId, Math.round(input.creditCap), input.userId, Date.now());
+      input.kind, encryptKey(keyEncryptionKey, `${c.key[0]!}:${input.kind}`, key), input.keyLast4 ?? key.slice(-4), input.keyType, input.teamId, Math.round(input.creditCap), input.userId, Date.now());
       return { ok: true };
     },
     connection: async (c, kind: string): Promise<ConnectionRow | null> => {

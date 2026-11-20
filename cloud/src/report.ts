@@ -69,6 +69,18 @@ export interface JobResult {
   approval?: { id: string; kind: "confirm"; default: false; prompt: string; detail: string } | null;
   /** A connection's result, such as a Viktor task's: the change to make there and what the evaluation used. Absent for an agent's task. */
   connection?: ConnectionResult;
+  /** A Langfuse task's result: the change a person makes for it, and where its cases came from. Absent for other tasks. */
+  langfuse?: LangfuseResult;
+}
+
+/** `change` is null when the task keeps its model; `link` is the managed prompt in Langfuse, when there is one. */
+export interface LangfuseResult {
+  taskId: string;
+  taskName: string;
+  currentModel: string;
+  change: { text: string; link: string | null; instructions: string; model: string } | null;
+  dataset: { experiment: string; items: number } | null;
+  replayed: number;
 }
 
 /**

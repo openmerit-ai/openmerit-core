@@ -179,9 +179,10 @@ export async function approveChange(client: AppClient, people: People, input: { 
   const account = client.account.getOrCreate([input.accountId]);
   const report = (await account.report({ jobId: input.jobId }))?.json as (JobResult & { connection?: ConnectionResult }) | undefined;
   if (!report) return { ok: false, status: 404, error: "This run has no result yet." };
-  const change = report.connection?.change;
+  // A connected app's change: a Viktor task's preset, or a Langfuse task's model.
+  const change = report.connection?.change ?? report.langfuse?.change;
   if (!change || !report.pick) return { ok: false, status: 409, error: "This result proposes no change to approve." };
-  const approved = approve({ edits: [], instructions: report.edit.instructions }, { model: change.model, endpoint: "viktor", endpointModel: change.model, onOpenRouter: false }, { by: input.userId, at: new Date().toISOString() });
+  const approved = approve({ edits: [], instructions: report.edit.instructions }, { model: change.model, endpoint: report.langfuse ? "langfuse" : "viktor", endpointModel: change.model, onOpenRouter: false }, { by: input.userId, at: new Date().toISOString() });
   const person = await people?.person(input.userId) ?? null;
   await account.approve({ jobId: input.jobId, change: change.text, link: change.link, by: approved.approval.by, name: person?.name ?? null, email: person?.email ?? null, at: approved.approval.at });
   // The first approval stands; an earlier one recorded without a name gets one now.
