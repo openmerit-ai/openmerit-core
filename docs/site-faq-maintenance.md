@@ -1,5 +1,12 @@
 # Website FAQ maintenance
 
+## Background re-listing of connected apps — unreleased, 20 November 2026
+
+Reviewed the homepage against the cloud app listing a connected Viktor or Langfuse app's tasks again every 15 minutes, marking new tasks New, and Refresh returning before the listing finishes. `site/index.html` makes no claim about connected apps, how often they are read or how Refresh behaves. No homepage copy change is needed; the cloud README describes the schedule and its limits.
+
+## Connection evaluations start only on a click — unreleased, 20 November 2026
+
+Reviewed the homepage against the cloud app evaluating a Viktor or Langfuse task only when a person clicks Evaluate, instead of on connect and Refresh. `site/index.html` makes no claim about connections starting evaluations or about Viktor or Langfuse. No homepage copy change is needed; the cloud README's Viktor and Langfuse sections describe it.
 ## Viktor listings past Viktor's 64,000-character output — unreleased, 20 November 2026
 
 Reviewed the homepage against the cloud app's fix for Viktor workspaces whose task instructions pass Viktor's 64,000-character script output. `site/index.html` makes no claim about Viktor or about listing limits. No homepage copy change is needed; the cloud README's Viktor section describes it.

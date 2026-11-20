@@ -6,7 +6,9 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
+import { createClient } from "rivetkit/client";
 import { REQUIRED_SCOPES } from "../../openmerit-core/src/connectors/viktor/index.ts";
+import type { Registry } from "../src/registry.ts";
 import { caller, costOf, startApp, stop, subscribe, waitFor, type FakeModels } from "./helpers.ts";
 
 const KEY = "zt_live_sk_fake_owner_key_1234";
@@ -30,7 +32,7 @@ function fakeViktor(extra: Cron[] = []) {
     ...extra,
   ];
   const files = new Map<string, string>();
-  const state = { scopes: [...REQUIRED_SCOPES] as string[], created: [] as string[], deleted: [] as string[], threads: [] as { id: string; message: string }[], scripts: [] as string[], auth: new Set<string>(), draft: null as string | null, refuse: null as string | null };
+  const state = { scopes: [...REQUIRED_SCOPES] as string[], created: [] as string[], deleted: [] as string[], threads: [] as { id: string; message: string }[], scripts: [] as string[], auth: new Set<string>(), draft: null as string | null, refuse: null as string | null, hold: false, slowListMs: 0, pending: null as Parameters<typeof runBatch>[0] | null };
   const runBatch = (spec: { source: string; models: string[]; repeats: number; copyPath: string; copyTitle: string; out: string }) => {
     const runs = [];
     for (const model of spec.models) { state.created.push(spec.copyPath + model); crons.push({ ...crons.find(cron => cron.path === spec.source)!, id: `copy_${model}`, path: spec.copyPath + model, title: spec.copyTitle, model, paused: true }); }
@@ -86,11 +88,13 @@ function fakeViktor(extra: Cron[] = []) {
     if (path === "/api/public/v1/threads" && method === "POST") {
       const message = String(body!.message), directory = /uv run python (\S+)\/batch\.py/.exec(message)?.[1];
       state.threads.push({ id: `thread_${state.threads.length + 1}`, message });
-      if (directory) runBatch(JSON.parse(files.get(`${directory}/spec.json`)!) as Parameters<typeof runBatch>[0]);
+      const spec = directory ? JSON.parse(files.get(`${directory}/spec.json`)!) as Parameters<typeof runBatch>[0] : null;
+      // A held batch keeps running until the test releases it.
+      if (spec && state.hold) state.pending = spec; else if (spec) runBatch(spec);
       return { status: 202, body: { thread: { id: `thread_${state.threads.length}` }, run: { id: `agentrun_${state.threads.length}`, status: "queued" } } };
     }
     const run = /^\/api\/public\/v1\/runs\/([\w]+)$/.exec(path);
-    if (run) return { body: { id: run[1], thread_id: "thread_1", status: "completed", error: null } };
+    if (run) return { body: { id: run[1], thread_id: "thread_1", status: state.hold ? "running" : "completed", error: null } };
     return { status: 404, body: { detail: { error: "not_found", message: path } } };
   };
   const server: Server = createServer((req, res) => {
@@ -99,10 +103,13 @@ function fakeViktor(extra: Cron[] = []) {
     req.on("end", () => {
       state.auth.add(String(req.headers.authorization));
       const reply = req.headers.authorization === `Bearer ${KEY}` ? answer(new URL(req.url!, "http://x").pathname, req.method!, raw ? JSON.parse(raw) as Record<string, unknown> : null) : { status: 401, body: { detail: { error: "invalid_api_key", message: "Missing or invalid API key" } } };
-      res.writeHead(reply.status ?? 200, { "content-type": "application/json" }); res.end(JSON.stringify(reply.body));
+      // A slow Viktor: the listing's script run answers after `slowListMs`.
+      const delay = raw.includes("# openmerit:list") ? state.slowListMs : 0;
+      setTimeout(() => { res.writeHead(reply.status ?? 200, { "content-type": "application/json" }); res.end(JSON.stringify(reply.body)); }, delay);
     });
   });
-  return { crons, state, server, url: "" };
+  const release = () => { state.hold = false; if (state.pending) runBatch(state.pending); state.pending = null; };
+  return { crons, state, server, url: "", release };
 }
 
 /** The judge on OpenMerit's OpenRouter key: five checks, and a run passes every one unless its Slack post files T1 as a bug. */
@@ -143,7 +150,7 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
   try {
     await subscribe(app, "org_viktor");
     const admin = caller(app, "test:user_v:org_viktor:admin"), member = caller(app, "test:user_m:org_viktor:member");
-    const connect = (agent: typeof admin, body: unknown) => agent.api<{ error?: string; tasks?: { title: string; status: string; reason: string | null; jobId: string | null }[] }>("/api/connections/viktor", { method: "POST", body: JSON.stringify(body) });
+    const connect = (agent: typeof admin, body: unknown) => agent.api<{ error?: string; tasks?: { title: string; status: string; reason: string | null; jobId: string | null; estimatedCredits: number | null; blocked: string | null }[] }>("/api/connections/viktor", { method: "POST", body: JSON.stringify(body) });
 
     // Refusals: a member, a bad key, and a key missing scopes. None stores a key or lists anything.
     assert.equal((await connect(member, { apiKey: KEY })).status, 403);
@@ -156,13 +163,40 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     assert.deepEqual(viktor.state.scripts, [], "no script ran for a refused key");
     viktor.state.scopes = [...REQUIRED_SCOPES];
 
-    // Connecting lists the five tasks and starts the one that can be evaluated; the system tasks are skipped with why.
+    // Connecting lists the five tasks and starts nothing; the system tasks are skipped with why.
     const connected = await connect(admin, { apiKey: KEY, creditCap: 2000 });
     assert.equal(connected.status, 201, JSON.stringify(connected.body));
     const rows = connected.body.tasks!;
-    assert.deepEqual(rows.map(row => [row.title, row.status]), [["workflow_discovery", "skipped"], ["Ticket triage test", "evaluating"], ["heartbeat", "skipped"], ["memory_dreaming", "skipped"], ["skill_refining", "skipped"]]);
+    assert.deepEqual(rows.map(row => [row.title, row.status]), [["workflow_discovery", "skipped"], ["Ticket triage test", "not_evaluated"], ["heartbeat", "skipped"], ["memory_dreaming", "skipped"], ["skill_refining", "skipped"]]);
     assert.ok(rows.filter(row => row.status === "skipped").every(row => row.reason === "Viktor's own task: it cannot be edited"));
-    const jobId = rows.find(row => row.title === "Ticket triage test")!.jobId!;
+    const triage = rows.find(row => row.title === "Ticket triage test")!;
+    assert.deepEqual([triage.jobId, triage.blocked], [null, null]);
+    assert.ok(triage.estimatedCredits! > 0);
+    // Refresh lists again and starts nothing either; the coding agent sees the task waiting for a person.
+    // Refresh returns once the listing started; a second press while it runs starts no other listing, and the page polls `listing`.
+    type Listed = { listing: boolean; listingError: string | null; tasks: { title: string; status: string; isNew: boolean }[] };
+    const refresh = async () => {
+      const pressed = await admin.api<Listed & { started: boolean }>("/api/connections/viktor/refresh", { method: "POST" });
+      assert.equal(pressed.status, 202);
+      return { pressed: pressed.body, done: (await waitFor(() => admin.api<Listed>("/api/connections/viktor"), view => !view.body.listing, 30_000)).body };
+    };
+    const lists = () => viktor.state.scripts.filter(kind => kind === "list").length;
+    const listsBefore = lists();
+    viktor.state.slowListMs = 1500;
+    const first = await admin.api<{ started: boolean }>("/api/connections/viktor/refresh", { method: "POST" });
+    const second = await admin.api<{ started: boolean }>("/api/connections/viktor/refresh", { method: "POST" });
+    assert.deepEqual([first.body.started, second.body.started], [true, false]);
+    const relisted = (await waitFor(() => admin.api<Listed>("/api/connections/viktor"), view => !view.body.listing, 30_000)).body;
+    assert.equal(lists(), listsBefore + 1, "one listing for two presses");
+    viktor.state.slowListMs = 0;
+    assert.equal(relisted.tasks[1]!.status, "not_evaluated");
+    assert.deepEqual((await admin.api<unknown[]>("/api/runs")).body, []);
+    assert.match((await admin.tool("openmerit_tasks", {})).text, new RegExp(`Ticket triage test \\(smart, 140 credits in 30 days\\): not evaluated; an admin can evaluate it with Evaluate at https://app\\.openmerit\\.test/connections/ \\(about ${triage.estimatedCredits} Viktor credits\\)`));
+    // Evaluate: an admin starts it, and the job records who.
+    assert.equal((await member.api("/api/connections/viktor/tasks/Cut8kTVZ/start", { method: "POST" })).status, 403);
+    const evaluate = await admin.api<{ jobIds: string[] }>("/api/connections/viktor/tasks/Cut8kTVZ/start", { method: "POST" });
+    assert.equal(evaluate.status, 201, JSON.stringify(evaluate.body));
+    const jobId = evaluate.body.jobIds[0]!;
     const shown = await admin.api<{ keyLast4: string }>("/api/connections/viktor");
     assert.equal(shown.body.keyLast4, "1234");
     assert.doesNotMatch(JSON.stringify(shown.body), new RegExp(KEY), "the key is never returned");
@@ -219,19 +253,21 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     const view = () => admin.api<{ creditsUsed: number; listingError: string | null; tasks: { title: string }[] }>("/api/connections/viktor");
     viktor.crons.find(cron => cron.path === "/ticket_triage_test")!.deleted = true;
     await new Promise(resolve => setTimeout(resolve, 1600));
-    assert.deepEqual((await view()).body.tasks.map(task => task.title), ["workflow_discovery", "heartbeat", "memory_dreaming", "skill_refining"]);
+    // The read starts the listing and returns the last one; the page polls until it is done.
+    const relistedView = await waitFor(() => view(), value => value.body.tasks.length === 4, 30_000);
+    assert.deepEqual(relistedView.body.tasks.map(task => task.title), ["workflow_discovery", "heartbeat", "memory_dreaming", "skill_refining"]);
     assert.doesNotMatch((await admin.tool("openmerit_tasks", {})).text, /Ticket triage test/);
     const runs = (await admin.api<{ id: string; result: { task: string | null } | null }[]>("/api/runs")).body;
     assert.equal(runs.find(run => run.id === jobId)!.result!.task, "Ticket triage test");
 
     // A listing whose tool call Viktor saved as a draft says so on the connection, and keeps the last listing.
     viktor.state.draft = "list";
-    const drafted = await admin.api<{ listingError: string; tasks: unknown[] }>("/api/connections/viktor/refresh", { method: "POST" });
-    assert.match(drafted.body.listingError, /Viktor saved OpenMerit's call to list_tool as a draft that waits for approval in chat, so it did not run\./);
+    const drafted = { body: (await refresh()).done };
+    assert.match(drafted.body.listingError!, /Viktor saved OpenMerit's call to list_tool as a draft that waits for approval in chat, so it did not run\./);
     assert.equal(drafted.body.tasks.length, 4);
     viktor.state.draft = null;
     viktor.crons.find(cron => cron.path === "/ticket_triage_test")!.deleted = false;
-    assert.equal((await admin.api<{ tasks: unknown[] }>("/api/connections/viktor/refresh", { method: "POST" })).body.tasks.length, 5);
+    assert.equal((await refresh()).done.tasks.length, 5);
 
     // A job that fails before its Viktor thread starts spends no credits, and says why once.
     viktor.state.draft = "put";
@@ -260,11 +296,10 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     assert.match(refusedView.errorDetail, /"# openmerit:batch\nimport asyncio, json"/, "the detail has real line breaks, not \\n");
     viktor.state.refuse = null;
 
-    // Runs labels each Viktor run by its task's title, and says who started it: the connection on its own, or a person from the app.
+    // Runs labels each Viktor run by its task's title, and says who started it from the app.
     type RunRow = { id: string; title: string | null; startedBy: string | null; startedByName: string | null };
     const labelled = new Map((await admin.api<RunRow[]>("/api/runs")).body.map(run => [run.id, run]));
-    assert.deepEqual(labelled.get(jobId), { ...labelled.get(jobId), title: "Ticket triage test", startedBy: null, startedByName: null });
-    for (const id of [failedId, refusedId]) assert.deepEqual(labelled.get(id), { ...labelled.get(id), title: "Ticket triage test", startedBy: "user_v", startedByName: "User V" });
+    for (const id of [jobId, failedId, refusedId]) assert.deepEqual(labelled.get(id), { ...labelled.get(id), title: "Ticket triage test", startedBy: "user_v", startedByName: "User V" });
 
     // Removing the connection deletes the key; the run and its approval stay.
     assert.equal((await admin.api("/api/connections/viktor", { method: "DELETE" })).status, 200);
@@ -307,6 +342,55 @@ test("Viktor: a workspace whose instructions pass Viktor's 64,000-character stdo
     assert.equal(connected.body.tasks.length, 11);
     assert.deepEqual(connected.body.tasks.filter(task => task.title.startsWith("OpenMerit: Project")).map(task => task.status), Array(7).fill("skipped"));
     assert.deepEqual(viktor.state.scripts.slice(0, 2), ["list", "page"]);
+  } finally {
+    await stop(app); await judge.close();
+    await new Promise<void>(resolve => { viktor.server.closeAllConnections(); viktor.server.close(() => resolve()); });
+  }
+});
+
+test("Viktor: the background re-list finds a new task without Refresh and marks it New, starts nothing, waits while a job runs, and stops on disconnect", async () => {
+  const viktor = fakeViktor();
+  await new Promise<void>(resolve => viktor.server.listen(0, "127.0.0.1", resolve));
+  viktor.url = `http://127.0.0.1:${(viktor.server.address() as AddressInfo).port}`;
+  const judge = await fakeJudge();
+  // A 5-second schedule, and a stale time no read reaches, so only the schedule lists again.
+  const app = await startApp({ models: judge, env: { OPENMERIT_VIKTOR_URL: viktor.url, OPENMERIT_VIKTOR_POLL_MS: "200", OPENMERIT_RELIST_MS: "5000", OPENMERIT_VIKTOR_STALE_MS: "3600000" } });
+  try {
+    await subscribe(app, "org_relist");
+    const admin = caller(app, "test:user_r:org_relist:admin");
+    type Row = { id: string; title: string; status: string; isNew: boolean };
+    const view = () => admin.api<{ tasks: Row[] }>("/api/connections/viktor");
+    assert.equal((await admin.api("/api/connections/viktor", { method: "POST", body: JSON.stringify({ apiKey: KEY, creditCap: 2000 }) })).status, 201);
+    // The first listing's tasks are not New.
+    assert.ok((await view()).body.tasks.every(task => !task.isNew));
+
+    // A task added in Viktor appears, marked New, without anyone pressing Refresh, and nothing is evaluated.
+    viktor.crons.push({ id: "Wk1", path: "/weekly_report", title: "Weekly report", model: "balanced", execution_type: "agent", description: "Write the weekly report.", cron: "0 9 * * 1", paused: true, deleted: false });
+    const found = await waitFor(() => view(), value => value.body.tasks.some(task => task.title === "Weekly report"), 30_000);
+    assert.deepEqual(found.body.tasks.filter(task => task.isNew).map(task => [task.title, task.status]), [["Weekly report", "not_evaluated"]]);
+    assert.deepEqual([(await admin.api<unknown[]>("/api/runs")).body, viktor.state.threads.length], [[], 0]);
+    // Opening its row clears New.
+    assert.equal((await admin.api("/api/connections/viktor/tasks/Wk1/seen", { method: "POST" })).status, 200);
+    assert.equal((await view()).body.tasks.find(task => task.title === "Weekly report")!.isNew, false);
+
+    // While one of the connection's jobs runs, the schedule does not list, so cleanup cannot race the batch.
+    const rivet = createClient<Registry>({ endpoint: `http://127.0.0.1:${app.enginePort}`, token: "test-token" });
+    const relist = rivet.connectionRelist.getOrCreate(["org_relist", "viktor"], { createWithInput: { accountId: "org_relist", kind: "viktor" } });
+    viktor.state.hold = true;
+    const started = await admin.api<{ jobIds: string[] }>("/api/connections/viktor/tasks/Cut8kTVZ/start", { method: "POST" });
+    assert.equal(started.status, 201, JSON.stringify(started.body));
+    await waitFor(async () => viktor.state.pending, pending => pending !== null, 30_000);
+    assert.deepEqual(await relist.tick(), { listed: false, reason: "a job is running" });
+    viktor.release();
+    await waitFor(() => admin.tool("openmerit_result", { job_id: started.body.jobIds[0]! }), value => value.data.status === "done", 60_000);
+    assert.deepEqual(await waitFor(() => relist.tick(), tick => tick.listed, 15_000), { listed: true });
+
+    // Removing the connection stops the schedule and removes its actor.
+    assert.equal((await admin.api("/api/connections/viktor", { method: "DELETE" })).status, 200);
+    await assert.rejects(rivet.connectionRelist.get(["org_relist", "viktor"]).info());
+    const lists = viktor.state.scripts.filter(kind => kind === "list").length;
+    await new Promise(resolve => setTimeout(resolve, 6000));
+    assert.equal(viktor.state.scripts.filter(kind => kind === "list").length, lists, "no listing after the connection is removed");
   } finally {
     await stop(app); await judge.close();
     await new Promise<void>(resolve => { viktor.server.closeAllConnections(); viktor.server.close(() => resolve()); });

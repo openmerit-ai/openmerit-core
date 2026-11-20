@@ -37,16 +37,27 @@ function measuring(job: JobView): Html {
       <p class="note">Your coding agent gets the result on its next OpenMerit call, and this page shows the report.</p>`;
 }
 
-const again = (job: JobView) => html`<p style="margin-top: 10px"><button class="btn" type="button" data-action="rerun">${job.connection ? "Start again" : "Run again"}</button></p>`;
+// Start again or Evaluate again on a connected app's run, the task's own page: only an admin starts one, and the button is
+// off, with why, when the credit cap or the plan would refuse it. The connection's task list has the same button.
+function evaluateAgain(data: Data, admin: boolean, label: string): Html {
+  const next = data.evaluate;
+  if (!next) return html`<p class="note">The connection no longer lists this task, so it cannot be evaluated again.</p>`;
+  if (next.evaluating) return html`<p class="note">This task is being evaluated now. <a href="/connections/">See Connections</a>.</p>`;
+  const cost = next.estimatedCredits !== null ? `About ${next.estimatedCredits.toLocaleString("en-US")} Viktor credits, within the connection's cap` : next.budgetUsd !== null ? `Up to ${usd(next.budgetUsd)} of model calls` : "";
+  if (!admin) return html`<p class="note">An admin can evaluate this task again. ${cost}.</p>`;
+  return html`<p class="evaluate" style="margin-top: 10px"><button class="btn" type="button" data-action="rerun"${next.blocked ? html` disabled aria-describedby="why-again"` : ""}>${label}</button><span class="sub">${cost}. It counts as one evaluation on your plan.</span>${next.blocked ? html`<span class="sub" id="why-again">${next.blocked}</span>` : ""}</p>`;
+}
 
-function live(job: JobView): Html {
+const again = (job: JobView, admin: boolean) => (job.connection ? evaluateAgain(job, admin, "Start again") : html`<p style="margin-top: 10px"><button class="btn" type="button" data-action="rerun">Run again</button></p>`);
+
+function live(job: JobView, admin: boolean): Html {
   const progress = job.progress.planned ? `${job.progress.measured} of about ${job.progress.planned} measurements done` : `${plural(job.progress.measured, "measurement")} done`;
   const body = {
     queued: html`<span class="pill">Queued</span><p class="note">The run starts in a moment.</p>`,
     running: job.live ? measuring(job) : html`<span class="pill live">Evaluating</span><span class="sub">${job.phase.replace("_", " ")} · ${progress}</span><p class="note">${job.connection === "langfuse" ? "OpenMerit is replaying the task's recorded calls from Langfuse on cheaper models. This page shows the result when it finishes." : job.connection ? "OpenMerit is testing the task's presets on paused copies in Viktor's test mode. This page shows the result when it finishes." : "Your coding agent gets the result on its next OpenMerit call, and this page shows the report."}</p>`,
     needs_input: html`<span class="pill warn">Needs input</span><p class="note">OpenMerit asked ${plural(job.questions.length, "question")} in your coding agent, such as a check of the test labels. The run continues once it answers.</p>`,
-    failed: html`<p>${job.error ?? "The run stopped before it could recommend a model."}</p>${job.errorDetail ? html`<details><summary>Show details</summary><pre class="error-detail">${job.errorDetail}</pre></details>` : ""}${again(job)}`,
-    stopped: html`<p>The run was stopped${job.error ? `: ${job.error}` : "."}</p>${again(job)}`,
+    failed: html`<p>${job.error ?? "The run stopped before it could recommend a model."}</p>${job.errorDetail ? html`<details><summary>Show details</summary><pre class="error-detail">${job.errorDetail}</pre></details>` : ""}${again(job, admin)}`,
+    stopped: html`<p>The run was stopped${job.error ? `: ${job.error}` : "."}</p>${again(job, admin)}`,
     done: html`<p>The run finished; its report is being saved. Reload in a moment.</p>`,
   }[job.status];
   return html`<div class="eyebrow" data-live="${job.jobId}" data-status="${job.status}"><a href="/">Runs</a><span>›</span><span>${job.jobId}</span><span>Started ${date(job.createdAt)}</span></div>
@@ -183,6 +194,7 @@ function report(data: Report, admin: boolean): Html {
   return html`<div class="eyebrow"><a href="/">Runs</a><span>›</span><span>${data.jobId}</span><span>Measured ${date(data.createdAt)}</span></div>
     <h1 class="title">${title(data)}</h1>
     <div class="pick">${data.connection ? html`${connectionPick(data)}${connectionChange(data, admin)}` : data.langfuse ? html`${pickCard(data)}${langfuseChange(data, admin)}` : html`${pickCard(data)}${change(data)}`}</div>
+    ${data.connection || data.langfuse ? html`<div class="card" style="margin-top: 16px">${evaluateAgain(data, admin, "Evaluate again")}</div>` : ""}
 
     ${models.length ? html`<section aria-labelledby="compare">
       <h2 id="compare">Models Compared</h2>
@@ -255,7 +267,7 @@ export const runView: View<Data> = {
     return data;
   },
   title,
-  render: (data, { me }) => (isLive(data) ? live(data) : report(data, me.role === "admin")),
+  render: (data, { me }) => (isLive(data) ? live(data, me.role === "admin") : report(data, me.role === "admin")),
   actions: {
     // Approve change records who approved and when; it changes nothing in the connected app.
     async approve(_target, data, { api, refresh, toast, confirm }) {
@@ -286,10 +298,12 @@ export const runView: View<Data> = {
 async function rerun(data: Data, budgetUsd: number | null, ctx: Ctx): Promise<void> {
   const now = isLive(data) ? undefined : data.guardrails.effective.budgetUsd;
   const fromLangfuse = isLive(data) ? data.connection === "langfuse" : !!data.langfuse;
+  const fromViktor = isLive(data) ? data.connection === "viktor" : !!data.connection;
+  const label = isLive(data) ? "Start again" : "Evaluate again";
   const ok = await ctx.confirm(fromLangfuse
-    ? { title: "Run again", body: `Evaluates ${data.task} again on its recorded calls and dataset items from Langfuse. It counts as one evaluation on your plan.`, confirm: "Run again" }
-    : isLive(data) && data.connection
-    ? { title: "Start again", body: `Evaluates ${data.task} again on paused copies in Viktor's test mode, using credits from your Viktor workspace within the connection's cap. It counts as one evaluation on your plan.`, confirm: "Start again" }
+    ? { title: label, body: `Evaluates ${data.task} again on its recorded calls and dataset items from Langfuse. It counts as one evaluation on your plan.`, confirm: label }
+    : fromViktor
+    ? { title: label, body: `Evaluates ${data.task} again on paused copies in Viktor's test mode, using credits from your Viktor workspace within the connection's cap. It counts as one evaluation on your plan.`, confirm: label }
     : budgetUsd === null
     ? { title: "Run again", body: `Runs ${data.task} again on the bundle its coding agent last sent. It counts as one evaluation on your plan.`, confirm: "Run again" }
     : { title: "Raise the budget and run again", body: `Sets ${data.task}'s budget per job to ${usd(budgetUsd)}${now === undefined ? "" : `, up from ${usd(now)}`}, then runs it again. The run spends up to ${usd(budgetUsd)} on model calls and counts as one evaluation on your plan.`, confirm: "Raise and run again" });

@@ -1,7 +1,7 @@
 import type { Endpoint, EndpointKind, LangfuseConnection, LangfuseTask, ViktorConnection, ViktorTask } from "../api.ts";
 import { ApiError } from "../api.ts";
 import { date, html, logo, plural, provider, usd, type Html } from "../html.ts";
-import type { View } from "../view.ts";
+import type { Ctx, View } from "../view.ts";
 import { header, install } from "./common.ts";
 
 const kinds: Record<EndpointKind, { label: string; baseUrl: string }> = {
@@ -32,12 +32,22 @@ function endpointRow(endpoint: Endpoint, admin: boolean): Html {
 const VIKTOR_TASKS = "https://app.viktor.com/scheduled-tasks";
 const credits = (value: number | null | undefined): string => (value === null || value === undefined ? "–" : Math.round(value).toLocaleString("en-US"));
 
+// Evaluate and Start again: only a person starts an evaluation. Off, with the reason, when the credit cap or the plan would refuse it.
+// A task listed after the connection's first listing is New until someone opens its row, by its name, or evaluates it.
+function taskName(kind: "viktor" | "langfuse", id: string, name: string, isNew: boolean | undefined): Html {
+  return isNew ? html`<button class="task-open" type="button" data-action="seen" data-kind="${kind}" data-id="${id}">${name}</button> <span class="pill good">New</span>` : html`${name}`;
+}
+
+export function evaluateButton(action: string, id: string, label: string, cost: string, blocked: string | null): Html {
+  return html`<button class="btn${label === "Evaluate" ? " primary" : ""}" type="button" data-action="${action}" data-id="${id}"${blocked ? html` disabled aria-describedby="why-${id}"` : ""}>${label}</button><span class="sub">${cost}</span>${blocked ? html`<span class="sub" id="why-${id}">${blocked}</span>` : ""}`;
+}
+
 function taskStatus(task: ViktorTask, admin: boolean): Html {
   switch (task.status) {
     case "skipped": return html`<span class="pill">Skipped</span><span class="sub">${task.reason ?? ""}</span>`;
     case "evaluating": return html`<span class="pill live">Evaluating</span>${task.jobId ? html`<span class="sub"><a href="/r/${task.jobId}/">Open the run</a></span>` : ""}`;
-    case "failed": return html`<span class="pill bad">Did not finish</span><span class="sub">${task.reason ?? ""}</span>${admin ? html` <button class="btn" type="button" data-action="start" data-id="${task.id}">Start again</button>` : ""}`;
-    case "waiting": return html`<span class="pill warn">Waiting</span><span class="sub">About ${credits(task.estimatedCredits)} credits. ${task.reason ?? ""}</span>${admin ? html` <button class="btn" type="button" data-action="start" data-id="${task.id}">Start</button>` : ""}`;
+    case "failed": return html`<span class="pill bad">Did not finish</span><span class="sub">${task.reason ?? ""}</span>${admin ? html` ${evaluateButton("start", task.id, "Start again", `About ${credits(task.estimatedCredits)} credits`, task.blocked)}` : ""}`;
+    case "not_evaluated": return html`<span class="pill">Not evaluated</span>${admin ? html` ${evaluateButton("start", task.id, "Evaluate", `About ${credits(task.estimatedCredits)} credits`, task.blocked)}` : html`<span class="sub">About ${credits(task.estimatedCredits)} credits. An admin can evaluate it.</span>`}`;
     case "done": {
       const result = task.result;
       const approved = result?.approval ? html`<span class="sub">Approved by ${result.approval.name ?? result.approval.by} on ${date(result.approval.at)}</span>` : "";
@@ -46,7 +56,15 @@ function taskStatus(task: ViktorTask, admin: boolean): Html {
   }
 }
 
+// A connection the page could not read after retrying, such as while the cloud app starts after a deploy: never shown as not connected.
+const unavailable = (name: string): Html => html`<div class="card"><div class="row"><span>${name}<span class="sub">${name} could not load: OpenMerit did not answer in time. Reload the page to try again.</span></span><span></span></div></div>`;
+
+// A listing in progress: the page polls until it ends, and Refresh waits for it.
+const listingNote = (on: boolean | undefined): Html => (on ? html`<p class="note" role="status">Listing the tasks again…</p>` : html``);
+const refreshButton = (action: string, on: boolean | undefined): Html => html`<button class="btn" type="button" data-action="${action}"${on ? " disabled" : ""}>${on ? "Listing…" : "Refresh"}</button>`;
+
 function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
+  if (viktor.unavailable) return unavailable("Viktor");
   if (!viktor.connected) return html`<div class="card">
         <div class="row"><span>Viktor<span class="sub">Scheduled AI tasks in your Viktor workspace. Not connected.</span></span><span></span></div>
         ${admin ? html`<form class="form" data-action="connect-viktor" autocomplete="off" style="margin-top: 10px">
@@ -56,7 +74,7 @@ function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
           </label>
           <label>Credit cap
             <input name="creditCap" type="number" min="100" max="100000" step="100" value="2000" required>
-            <span class="sub">The most Viktor credits OpenMerit's test runs may use from your workspace, about $5 per 2,000. Tasks past it wait with a Start button.</span>
+            <span class="sub">The most Viktor credits OpenMerit's test runs may use from your workspace, about $5 per 2,000. Evaluate is off for a task whose estimate would pass it.</span>
           </label>
           <p class="note">To measure a task, OpenMerit makes temporary copies of it in your workspace: personal, paused, each set to a cheaper preset and titled "OpenMerit: &lt;task title&gt;". It runs each copy in Viktor's test mode, which captures Slack posts and other outside actions instead of sending them, then deletes the copies. It never changes your tasks: a result proposes the change, and you make it in Viktor after you approve it.</p>
           <p class="form-error" role="alert" hidden></p>
@@ -65,14 +83,15 @@ function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
       </div>`;
   return html`<div class="card">
         <div class="row"><span>Viktor<span class="sub">Key ending ${viktor.keyLast4 ?? ""} · ${viktor.keyType ?? "API"} key · connected ${date(viktor.connectedAt ?? null)}</span><span class="sub">${credits(viktor.creditsUsed)} of ${credits(viktor.creditCap)} credits used${viktor.creditsReserved ? `, ${credits(viktor.creditsReserved)} expected by running evaluations` : ""}</span></span>
-          ${admin ? html`<span class="endpoint-meta"><button class="btn" type="button" data-action="refresh-viktor">Refresh</button><button class="btn danger" type="button" data-action="disconnect-viktor">Disconnect</button></span>` : html`<span></span>`}</div>
+          ${admin ? html`<span class="endpoint-meta">${refreshButton("refresh-viktor", viktor.listing)}<button class="btn danger" type="button" data-action="disconnect-viktor">Disconnect</button></span>` : html`<span></span>`}</div>
+        ${listingNote(viktor.listing)}
         ${viktor.listingError ? html`<p class="note bad" role="alert">The last listing failed: ${viktor.listingError}</p>` : ""}
       </div>
       <div class="tablewrap" style="margin-top: 10px">
         <table>
           <thead><tr><th>Task</th><th>Model</th><th class="num">Credits, 30 days</th><th>Status</th></tr></thead>
           <tbody>
-            ${viktor.tasks.map((task) => html`<tr><td>${task.title}<span class="sub">${task.path}${task.paused ? " · paused" : ""}</span></td><td>${task.model ? html`<code>${task.model}</code>` : html`<span class="sub">workspace default</span>`}</td><td class="num">${credits(task.credits30d)}</td><td>${taskStatus(task, admin)}</td></tr>`)}
+            ${viktor.tasks.map((task) => html`<tr><td>${taskName("viktor", task.id, task.title, task.isNew)}<span class="sub">${task.path}${task.paused ? " · paused" : ""}</span></td><td>${task.model ? html`<code>${task.model}</code>` : html`<span class="sub">workspace default</span>`}</td><td class="num">${credits(task.credits30d)}</td><td>${taskStatus(task, admin)}</td></tr>`)}
           </tbody>
         </table>
       </div>
@@ -80,12 +99,13 @@ function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
 }
 
 // The Langfuse connection: OpenMerit replays a task's recorded calls on cheaper models, and proposes the change.
+export const modelSpend = (budgetUsd: number | null): string => (budgetUsd === null ? "" : `Up to ${usd(budgetUsd)} of model calls`);
 function langfuseStatus(task: LangfuseTask, admin: boolean): Html {
   switch (task.status) {
     case "skipped": return html`<span class="pill">Skipped</span><span class="sub">${task.reason ?? ""}</span>`;
     case "evaluating": return html`<span class="pill live">Evaluating</span>${task.jobId ? html`<span class="sub"><a href="/r/${task.jobId}/">Open the run</a></span>` : ""}`;
-    case "failed": return html`<span class="pill bad">Did not finish</span><span class="sub">${task.reason ?? ""}${task.jobId ? html` <a href="/r/${task.jobId}/">Why</a>` : ""}</span>${admin ? html` <button class="btn" type="button" data-action="start-langfuse" data-id="${task.id}">Start again</button>` : ""}`;
-    case "waiting": return html`<span class="pill warn">Waiting</span><span class="sub">${task.reason ?? ""}</span>${admin ? html` <button class="btn" type="button" data-action="start-langfuse" data-id="${task.id}">Start</button>` : ""}`;
+    case "failed": return html`<span class="pill bad">Did not finish</span><span class="sub">${task.reason ?? ""}${task.jobId ? html` <a href="/r/${task.jobId}/">Why</a>` : ""}</span>${admin ? html` ${evaluateButton("start-langfuse", task.id, "Start again", modelSpend(task.budgetUsd), task.blocked)}` : ""}`;
+    case "not_evaluated": return html`<span class="pill">Not evaluated</span>${admin ? html` ${evaluateButton("start-langfuse", task.id, "Evaluate", modelSpend(task.budgetUsd), task.blocked)}` : html`<span class="sub">${modelSpend(task.budgetUsd)}. An admin can evaluate it.</span>`}`;
     case "done": {
       const result = task.result;
       const approved = result?.approval ? html`<span class="sub">Approved by ${result.approval.name ?? result.approval.by} on ${date(result.approval.at)}</span>` : "";
@@ -95,6 +115,7 @@ function langfuseStatus(task: LangfuseTask, admin: boolean): Html {
 }
 
 function langfuseSection(langfuse: LangfuseConnection, admin: boolean): Html {
+  if (langfuse.unavailable) return html`<div style="margin-top: 10px">${unavailable("Langfuse")}</div>`;
   if (!langfuse.connected) return html`<div class="card" style="margin-top: 10px">
         <div class="row"><span>Langfuse<span class="sub">The AI calls your application traces in a Langfuse project. Not connected.</span></span><span></span></div>
         ${admin ? html`<form class="form" data-action="connect-langfuse" autocomplete="off" style="margin-top: 10px">
@@ -109,21 +130,22 @@ function langfuseSection(langfuse: LangfuseConnection, admin: boolean): Html {
             <input name="secretKey" type="password" required autocomplete="off" spellcheck="false" placeholder="sk-lf-…">
             <span class="sub">A Viewer key pair from Project Settings → API Keys: OpenMerit refuses a key that can write. It stores both keys encrypted and shows only the public key's last four characters.</span>
           </label>
-          <p class="note">OpenMerit lists your project's generations over the last 30 days as tasks, by name or managed prompt, with their model, calls and cost, and evaluates them without being asked, highest spend first, one of your plan's evaluations each. To build a task's cases it reads at most 20 of its dataset items and recorded calls, inputs and outputs included, redacts them and replays them on cheaper models; it keeps them only in the evaluation. It never writes to Langfuse: a result proposes the change, and you make it after you approve it.</p>
+          <p class="note">OpenMerit lists your project's generations over the last 30 days as tasks, by name or managed prompt, with their model, calls and cost, and you pick which to evaluate, one of your plan's evaluations each. To build a task's cases it reads at most 20 of its dataset items and recorded calls, inputs and outputs included, redacts them and replays them on cheaper models; it keeps them only in the evaluation. It never writes to Langfuse: a result proposes the change, and you make it after you approve it.</p>
           <p class="form-error" role="alert" hidden></p>
           <p><button class="btn primary" type="submit">Connect Langfuse</button></p>
         </form>` : html`<p class="note">Only an admin can connect Langfuse.</p>`}
       </div>`;
   return html`<div class="card" style="margin-top: 10px">
         <div class="row"><span>Langfuse<span class="sub">Project ${langfuse.projectName ?? ""} on ${langfuse.baseUrl ? new URL(langfuse.baseUrl).host : "Langfuse"} · public key ending ${langfuse.keyLast4 ?? ""} · connected ${date(langfuse.connectedAt ?? null)}</span><span class="sub">${plural(langfuse.tasks.length, "task")} over the last 30 days${langfuse.listedAt ? `, listed ${date(langfuse.listedAt)}` : ""}</span></span>
-          ${admin ? html`<span class="endpoint-meta"><button class="btn" type="button" data-action="refresh-langfuse">Refresh</button><button class="btn danger" type="button" data-action="disconnect-langfuse">Disconnect</button></span>` : html`<span></span>`}</div>
+          ${admin ? html`<span class="endpoint-meta">${refreshButton("refresh-langfuse", langfuse.listing)}<button class="btn danger" type="button" data-action="disconnect-langfuse">Disconnect</button></span>` : html`<span></span>`}</div>
+        ${listingNote(langfuse.listing)}
         ${langfuse.listingError ? html`<p class="note bad" role="alert">The last listing failed: ${langfuse.listingError}</p>` : ""}
       </div>
       <div class="tablewrap" style="margin-top: 10px">
         <table>
           <thead><tr><th>Task</th><th>Model</th><th class="num">Calls, 30 days</th><th class="num">Spend, 30 days</th><th>Status</th></tr></thead>
           <tbody>
-            ${langfuse.tasks.map((task) => html`<tr><td>${task.name}${task.models > 1 ? html`<span class="sub">${plural(task.models, "model")} recorded</span>` : ""}</td><td>${task.model ? html`<code>${task.model}</code>` : html`<span class="sub">none recorded</span>`}</td><td class="num">${task.generations.toLocaleString("en-US")}</td><td class="num">${task.costUsd === null ? "–" : usd(task.costUsd)}</td><td>${langfuseStatus(task, admin)}</td></tr>`)}
+            ${langfuse.tasks.map((task) => html`<tr><td>${taskName("langfuse", task.id, task.name, task.isNew)}${task.models > 1 ? html`<span class="sub">${plural(task.models, "model")} recorded</span>` : ""}</td><td>${task.model ? html`<code>${task.model}</code>` : html`<span class="sub">none recorded</span>`}</td><td class="num">${task.generations.toLocaleString("en-US")}</td><td class="num">${task.costUsd === null ? "–" : usd(task.costUsd)}</td><td>${langfuseStatus(task, admin)}</td></tr>`)}
           </tbody>
         </table>
       </div>
@@ -132,16 +154,54 @@ function langfuseSection(langfuse: LangfuseConnection, admin: boolean): Html {
 
 type Data = { endpoints: Endpoint[]; viktor: ViktorConnection; langfuse: LangfuseConnection };
 
+// The cloud app can take a while to answer the first requests after a deploy, while it starts the
+// account. A request that timed out or failed on the server is tried again before the page gives up.
+export const RETRY_DELAYS_MS = [1000, 3000];
+export async function retried<T>(load: () => Promise<T>, delays: readonly number[] = RETRY_DELAYS_MS): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await load(); } catch (failure) {
+      const transient = failure instanceof ApiError && (failure.status === 0 || failure.status >= 500);
+      if (!transient || attempt >= delays.length) throw failure;
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+    }
+  }
+}
+
+// While a listing runs, the page asks again every few seconds and renders once it ends.
+const LISTING_POLL_MS = 2000;
+let listingPoll: ReturnType<typeof setTimeout> | undefined;
+let announce = false;
+function pollListing(root: HTMLElement, ctx: Ctx, data: Data): void {
+  clearTimeout(listingPoll);
+  if (!data.viktor.listing && !data.langfuse.listing) {
+    if (announce) { announce = false; ctx.toast("Tasks listed again."); }
+    return;
+  }
+  listingPoll = setTimeout(async () => {
+    if (!root.isConnected) return;
+    const [viktor, langfuse] = await Promise.all([
+      data.viktor.listing ? ctx.api.get<ViktorConnection>("/api/connections/viktor").catch(() => data.viktor) : data.viktor,
+      data.langfuse.listing ? ctx.api.get<LangfuseConnection>("/api/connections/langfuse").catch(() => data.langfuse) : data.langfuse,
+    ]);
+    if (!root.isConnected) return;
+    if (viktor.listing || langfuse.listing) pollListing(root, ctx, { ...data, viktor, langfuse });
+    else await ctx.refresh();
+  }, LISTING_POLL_MS);
+}
+
 export const connectionsView: View<Data> = {
   async load({ api }) {
     const [endpoints, viktor, langfuse] = await Promise.all([
-      api.get<Endpoint[]>("/api/endpoints"),
-      api.get<ViktorConnection>("/api/connections/viktor").catch((): ViktorConnection => ({ connected: false, tasks: [] })),
-      api.get<LangfuseConnection>("/api/connections/langfuse").catch((): LangfuseConnection => ({ connected: false, tasks: [] })),
+      retried(() => api.get<Endpoint[]>("/api/endpoints")),
+      retried(() => api.get<ViktorConnection>("/api/connections/viktor")).catch((): ViktorConnection => ({ connected: false, unavailable: true, tasks: [] })),
+      retried(() => api.get<LangfuseConnection>("/api/connections/langfuse")).catch((): LangfuseConnection => ({ connected: false, unavailable: true, tasks: [] })),
     ]);
     return { endpoints, viktor, langfuse };
   },
-  bind: bindKindSelect,
+  bind(root, ctx, data) {
+    bindKindSelect(root);
+    pollListing(root, ctx, data);
+  },
   render({ endpoints, viktor, langfuse }, { me }) {
     const own = endpoints.filter((endpoint) => !endpoint.builtIn);
     const admin = me.role === "admin";
@@ -158,7 +218,7 @@ export const connectionsView: View<Data> = {
 
     <section aria-labelledby="apps">
       <h2 id="apps">Apps</h2>
-      <p class="note" style="margin: -2px 0 8px">Apps whose AI tasks OpenMerit evaluates on their own: it lists the tasks, evaluates the ones it can, highest spend first, and proposes a cheaper model for you to approve.</p>
+      <p class="note" style="margin: -2px 0 8px">Apps whose AI tasks OpenMerit lists, most spend first. You pick which to evaluate with Evaluate; OpenMerit proposes a cheaper model for you to approve.</p>
       ${viktorSection(viktor, admin)}
       ${langfuseSection(langfuse, admin)}
     </section>
@@ -206,19 +266,24 @@ export const connectionsView: View<Data> = {
       }
       form.reset();
       await refresh();
-      toast("Viktor connected. OpenMerit is evaluating the tasks it can.");
+      toast("Viktor connected. Pick which tasks to evaluate.");
     },
-    async "refresh-viktor"(_target, _data, { api, refresh, toast }) {
-      const listed = await api.send<{ refused: string | null; started: string[] }>("POST", "/api/connections/viktor/refresh");
+    // Refresh returns once the listing has started; the page polls until it ends, then says so.
+    async "refresh-viktor"(_target, _data, { api, refresh }) {
+      await api.send("POST", "/api/connections/viktor/refresh");
+      announce = true;
       await refresh();
-      toast(listed.refused ?? (listed.started.length ? `Started ${plural(listed.started.length, "evaluation")}.` : "Tasks listed again."));
     },
     async start(target, data, { api, refresh, toast, confirm }) {
       const task = data.viktor.tasks.find((item) => item.id === target.dataset.id);
-      if (!task || !await confirm({ title: `Evaluate ${task.title}?`, body: `OpenMerit tests ${task.title}'s cheaper presets on paused copies in Viktor's test mode, for about ${credits(task.estimatedCredits)} credits from your workspace. It counts as one evaluation on your plan.`, confirm: "Start" })) return;
+      if (!task || !await confirm({ title: `Evaluate ${task.title}?`, body: `OpenMerit tests ${task.title}'s cheaper presets on paused copies in Viktor's test mode, for about ${credits(task.estimatedCredits)} credits from your workspace. It counts as one evaluation on your plan.`, confirm: "Evaluate" })) return;
       await api.send("POST", `/api/connections/viktor/tasks/${encodeURIComponent(task.id)}/start`);
       await refresh();
       toast(`Evaluating ${task.title}.`);
+    },
+    async seen(target, _data, { api, refresh }) {
+      await api.send("POST", `/api/connections/${target.dataset.kind === "langfuse" ? "langfuse" : "viktor"}/tasks/${encodeURIComponent(target.dataset.id ?? "")}/seen`);
+      await refresh();
     },
     async "disconnect-viktor"(_target, _data, { api, refresh, toast, confirm }) {
       if (!await confirm({ title: "Disconnect Viktor?", body: "OpenMerit deletes the key and stops listing and evaluating your Viktor tasks. Past results and approvals are kept.", confirm: "Disconnect", danger: true })) return;
@@ -240,16 +305,16 @@ export const connectionsView: View<Data> = {
       }
       form.reset();
       await refresh();
-      toast("Langfuse connected. OpenMerit is evaluating the tasks with the most spend.");
+      toast("Langfuse connected. Pick which tasks to evaluate.");
     },
-    async "refresh-langfuse"(_target, _data, { api, refresh, toast }) {
-      const listed = await api.send<{ refused: string | null; started: string[] }>("POST", "/api/connections/langfuse/refresh");
+    async "refresh-langfuse"(_target, _data, { api, refresh }) {
+      await api.send("POST", "/api/connections/langfuse/refresh");
+      announce = true;
       await refresh();
-      toast(listed.refused ?? (listed.started.length ? `Started ${plural(listed.started.length, "evaluation")}.` : "Tasks listed again."));
     },
     async "start-langfuse"(target, data, { api, refresh, toast, confirm }) {
       const task = data.langfuse.tasks.find((item) => item.id === target.dataset.id);
-      if (!task || !await confirm({ title: `Evaluate ${task.name}?`, body: `OpenMerit replays up to 20 of ${task.name}'s recorded calls or dataset items on cheaper models than ${task.model}. It counts as one evaluation on your plan.`, confirm: "Start" })) return;
+      if (!task || !await confirm({ title: `Evaluate ${task.name}?`, body: `OpenMerit replays up to 20 of ${task.name}'s recorded calls or dataset items on cheaper models than ${task.model}, for ${modelSpend(task.budgetUsd).toLowerCase() || "model calls"}. It counts as one evaluation on your plan.`, confirm: "Evaluate" })) return;
       await api.send("POST", `/api/connections/langfuse/tasks/${encodeURIComponent(task.id)}/start`);
       await refresh();
       toast(`Evaluating ${task.name}.`);

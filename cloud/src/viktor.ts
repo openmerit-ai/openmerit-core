@@ -1,5 +1,5 @@
-// The Viktor connection in the cloud app: connect with a key, list the workspace's tasks, start
-// evaluating them without being asked, highest spend first, and record an approval. What a task is,
+// The Viktor connection in the cloud app: connect with a key, list the workspace's tasks, evaluate
+// the ones a person picks, and record an approval. What a task is,
 // which can be evaluated, what an evaluation costs and what it proposes are openmerit-core's Viktor
 // connection; this module checks the account's limits and starts the jobs.
 import { randomBytes } from "node:crypto";
@@ -15,14 +15,18 @@ export const VIKTOR = "viktor";
 export const MAX_CREDIT_CAP = 100_000;
 
 /** A task's place in the connection's table. */
-export type TaskStatus = "skipped" | "waiting" | "evaluating" | "done" | "failed";
+export type TaskStatus = "skipped" | "not_evaluated" | "evaluating" | "done" | "failed";
 
 export interface ViktorTaskView {
   id: string; title: string; path: string; model: string | null; credits30d: number; paused: boolean;
   status: TaskStatus;
-  /** Why it is skipped, waiting or failed; null otherwise. */
+  /** Why it is skipped or failed; null otherwise. */
   reason: string | null;
   estimatedCredits: number | null;
+  /** Why Evaluate or Start again cannot start it now: the credit cap or the plan. Null when it can, or while it is evaluating. */
+  blocked: string | null;
+  /** First listed after the connection's first listing, and not yet opened or evaluated. */
+  isNew: boolean;
   jobId: string | null;
   /** A finished evaluation's verdict. */
   result: { status: string; change: string | null; link: string | null; approval: { by: string; name: string | null; at: string } | null } | null;
@@ -32,6 +36,8 @@ export interface ViktorView {
   connected: boolean;
   keyLast4?: string; keyType?: string | null; creditCap?: number; connectedAt?: string; connectedBy?: string;
   creditsUsed?: number; creditsReserved?: number; listedAt?: string | null; listingError?: string | null;
+  /** A listing is running: the page polls until it ends. */
+  listing?: boolean;
   tasks: ViktorTaskView[];
 }
 
@@ -45,7 +51,7 @@ type JobWithCredits = Awaited<ReturnType<Account["connectionJobs"]>>[number];
 const active = (job: { status: string }) => job.status === "queued" || job.status === "running";
 const apiFor = (apiKey: string) => viktorClient({ apiKey, baseUrl: services().config.viktor.baseUrl, fetch: services().fetch });
 
-/** Checks the key's scopes, stores it encrypted, lists the tasks and starts evaluating them. */
+/** Checks the key's scopes, stores it encrypted and lists the tasks. It starts no evaluation: a person picks which to evaluate. */
 export async function connectViktor(client: AppClient, input: { accountId: string; userId: string; apiKey: string; creditCap?: number }): Promise<{ ok: true; view: ViktorView } | { ok: false; status: number; error: string }> {
   const apiKey = input.apiKey.trim();
   if (apiKey.length < 12) return { ok: false, status: 400, error: "Paste the Viktor API key from Settings → API Keys." };
@@ -57,46 +63,92 @@ export async function connectViktor(client: AppClient, input: { accountId: strin
   const stored = await account.saveConnection({ kind: VIKTOR, apiKey, keyType: checked.key.keyType, teamId: checked.key.teamId, creditCap: cap, userId: input.userId });
   if (!stored.ok) return { ok: false, status: 503, error: stored.error };
   await refreshViktor(client, input.accountId);
-  await startViktorTasks(client, { accountId: input.accountId, userId: null });
+  await armRelist(client, input.accountId, VIKTOR, true);
   return { ok: true, view: await viktorView(client, input.accountId) };
 }
 
-/** Lists the workspace's tasks again, and deletes OpenMerit's leftover copies when no job is running. */
-export async function refreshViktor(client: AppClient, accountId: string): Promise<void> {
+/**
+ * Lists the workspace's tasks again, and deletes OpenMerit's leftover copies when no job is running.
+ * Listing runs a script through `run_script`, which costs no Viktor credits. Returns the error kept on
+ * the connection, or null.
+ */
+export async function refreshViktor(client: AppClient, accountId: string): Promise<string | null> {
   const account = client.account.getOrCreate([accountId]);
   const apiKey = await account.connectionKey(VIKTOR);
-  if (!apiKey) return;
+  if (!apiKey) return null;
   try {
     const api = apiFor(apiKey);
     const { tasks, leftovers } = readTasks(await api.runScriptPaged(LIST, [], 180));
     await account.saveListing({ kind: VIKTOR, listing: tasks, error: null });
     const running = (await account.connectionJobs({ kind: VIKTOR, since: 0 })).some(job => job.status === "queued" || job.status === "running");
     if (leftovers.length && !running) await api.runScript(CLEANUP, [COPY_PATH], 120);
+    return null;
   } catch (error) {
-    await account.saveListing({ kind: VIKTOR, listing: null, error: redact(error instanceof Error ? error.message : String(error)).slice(0, 500) });
+    const message = redact(error instanceof Error ? error.message : String(error)).slice(0, 500);
+    await account.saveListing({ kind: VIKTOR, listing: null, error: message });
+    return message;
   }
 }
 
+/** When a listed task was first listed, and when someone opened its row: kept across listings by the account. */
+export interface Seen { firstSeenAt?: string | null; seenAt?: string | null }
+
+/** Starts the connection's background re-list (`connectionRelist`), once per process for each account and kind. */
+const armed = new Set<string>();
+export async function armRelist(client: AppClient, accountId: string, kind: string, force = false): Promise<void> {
+  if (armed.has(`${accountId}:${kind}`) && !force) return;
+  await client.connectionRelist.getOrCreate([accountId, kind], { createWithInput: { accountId, kind } }).arm();
+  armed.add(`${accountId}:${kind}`);
+}
+const relister = (client: AppClient, accountId: string, kind: string) => client.connectionRelist.getOrCreate([accountId, kind], { createWithInput: { accountId, kind } });
+/** Refresh: starts a listing through the connection's actor unless one is running, and returns at once. */
+export async function startRelist(client: AppClient, accountId: string, kind: string): Promise<{ started: boolean }> {
+  return relister(client, accountId, kind).relist();
+}
+/** Whether a listing is running, for the page to poll; `wait` waits for it, at most a minute. */
+export async function isListing(client: AppClient, accountId: string, kind: string, wait = false): Promise<boolean> {
+  const handle = relister(client, accountId, kind);
+  for (const until = Date.now() + 60_000; ; await new Promise(resolve => setTimeout(resolve, 500))) {
+    const running = await handle.listing().catch(() => false);
+    if (!running || !wait || Date.now() > until) return running;
+  }
+}
+/** Stops it, for removing the connection. */
+export async function disarmRelist(client: AppClient, accountId: string, kind: string): Promise<void> {
+  armed.delete(`${accountId}:${kind}`);
+  await client.connectionRelist.getOrCreate([accountId, kind], { createWithInput: { accountId, kind } }).disarm();
+}
+
 /**
- * Starts evaluations, highest credits first: every task that can be evaluated and has none yet, or
- * only `taskIds` when a person pressed Start. Each counts one of the plan's evaluations, and none
- * starts past the credit cap, counting what running jobs expect to use. Returns why the first one
- * that could not start did not.
+ * A task first seen after the connection's first listing is new until someone opens its row or it
+ * has an evaluation. `firstSeenAt` is kept with each task in the listing (account `saveListing`).
  */
-export async function startViktorTasks(client: AppClient, input: { accountId: string; userId: string | null; taskIds?: readonly string[] }): Promise<{ started: string[]; jobIds: string[]; refused: string | null }> {
+export const isNew = (task: { firstSeenAt?: string | null; seenAt?: string | null }, connectedAt: string, evaluated: boolean): boolean =>
+  !evaluated && !task.seenAt && !!task.firstSeenAt && Date.parse(task.firstSeenAt) > Date.parse(connectedAt);
+
+/** Why a task cannot start now: the plan's refusal, else its estimate passing the cap with what is used or expected. */
+const viktorBlock = (estimate: number, committed: number, cap: number, refusal: string | null): string | null => refusal
+  ?? (committed + estimate > cap ? `It needs about ${estimate.toLocaleString("en-US")} credits, and ${Math.round(committed).toLocaleString("en-US")} of the ${cap.toLocaleString("en-US")}-credit cap are used or expected.` : null);
+
+/**
+ * Starts evaluating `taskIds`, which a signed-in admin picked with Evaluate or Start again; nothing
+ * starts one on its own. Each counts one of the plan's evaluations, and none starts past the credit
+ * cap, counting what running jobs expect to use. Returns why the first one that could not start did not.
+ */
+export async function startViktorTasks(client: AppClient, input: { accountId: string; userId: string; taskIds: readonly string[] }): Promise<{ started: string[]; jobIds: string[]; refused: string | null }> {
   const account = client.account.getOrCreate([input.accountId]);
   const connection = await account.connection(VIKTOR);
   if (!connection) return { started: [], jobIds: [], refused: "Viktor is not connected." };
   const tasks = (connection.listing as ViktorTask[] | null) ?? [];
   const jobs = await connectionJobs(client, account, Date.parse(connection.connectedAt));
-  const evaluated = new Set(jobs.map(job => job.taskId));
   let committed = jobs.reduce((sum, job) => sum + (job.credits ?? 0), 0);
-  const wanted = tasks.filter(task => !task.skipped && (input.taskIds ? input.taskIds.includes(task.id) : !evaluated.has(viktorTaskId(task))));
+  const wanted = tasks.filter(task => !task.skipped && input.taskIds.includes(task.id));
   const started: string[] = [], jobIds: string[] = [];
   for (const task of wanted) {
-    if (jobs.some(job => job.taskId === viktorTaskId(task) && (job.status === "queued" || job.status === "running"))) continue;
+    if (jobs.some(job => job.taskId === viktorTaskId(task) && active(job))) continue;
     const credits = estimateCredits(task, DEFAULT_REPEATS);
-    if (committed + credits > connection.creditCap) return { started, jobIds, refused: `Evaluating ${task.title} needs about ${credits} credits, and ${Math.round(committed)} of the ${connection.creditCap}-credit cap are used or expected. Raise the cap to start it.` };
+    const blocked = viktorBlock(credits, committed, connection.creditCap, await account.evaluationRefusal(VIKTOR));
+    if (blocked) return { started, jobIds, refused: `${task.title} cannot start: ${blocked}` };
     const jobId = newJobId();
     const ok = await account.startJob({ jobId, taskId: viktorTaskId(task), kind: "viktor", askedBy: null, credits, title: task.title, startedBy: input.userId });
     if (!ok.ok) return { started, jobIds, refused: ok.error };
@@ -120,22 +172,27 @@ async function connectionJobs(client: AppClient, account: Account, since: number
   }));
 }
 
-/** How old a listing may be before a read lists the tasks again, and each account's last relisting. */
-const relistings = new Map<string, { at: number; done: Promise<void> }>();
+/** When this process last started a listing for a stale read, by account. */
+const staleStarts = new Map<string, number>();
 
 /**
- * The connection as `viktorView` gives it, listing the tasks again first when the listing is older
- * than `OPENMERIT_VIKTOR_STALE_MS` (10 minutes), so a task deleted in Viktor leaves the table. It
- * lists at most once in that time per account, even when listing fails, and starts no evaluation:
- * Refresh does.
+ * The connection as `viktorView` gives it. When the listing is older than `OPENMERIT_VIKTOR_STALE_MS`
+ * (2 minutes) it starts listing again, at most once in that time per account even when listing fails,
+ * so a task deleted in Viktor leaves the table. The view says `listing` while it runs and the page
+ * polls; `wait` (openmerit_tasks) waits for it instead. Listing never starts an evaluation.
  */
-export async function currentViktorView(client: AppClient, accountId: string, people: People): Promise<ViktorView> {
+export async function currentViktorView(client: AppClient, accountId: string, people: People, wait = false): Promise<ViktorView> {
   const connection = await client.account.getOrCreate([accountId]).connection(VIKTOR);
   if (connection) {
+    // A connection made before the background re-list starts it the first time it is read.
+    await armRelist(client, accountId, VIKTOR);
     const staleMs = services().config.viktor.staleMs, listed = connection.listedAt ? Date.parse(connection.listedAt) : 0;
-    let last = relistings.get(accountId);
-    if (Date.now() - listed > staleMs && (!last || Date.now() - last.at > staleMs)) relistings.set(accountId, last = { at: Date.now(), done: refreshViktor(client, accountId) });
-    if (last && Date.now() - last.at <= staleMs) await last.done;
+    const last = staleStarts.get(accountId) ?? 0;
+    if (Date.now() - listed > staleMs && Date.now() - last > staleMs) {
+      staleStarts.set(accountId, Date.now());
+      await startRelist(client, accountId, VIKTOR);
+    }
+    if (wait) await isListing(client, accountId, VIKTOR, true);
   }
   return viktorView(client, accountId, people);
 }
@@ -175,7 +232,7 @@ export async function namedApproval(client: AppClient, people: People, accountId
   return person?.name ? await account.nameApproval({ jobId, name: person.name, email: person.email }) ?? approval : approval;
 }
 
-/** The connection and its task table: each task's latest evaluation, or why it waits or is skipped. */
+/** The connection and its task table: each task's latest evaluation, why it is skipped, and whether Evaluate can start it now. */
 export async function viktorView(client: AppClient, accountId: string, people: People = null): Promise<ViktorView> {
   const account = client.account.getOrCreate([accountId]);
   const connection = await account.connection(VIKTOR);
@@ -183,12 +240,15 @@ export async function viktorView(client: AppClient, accountId: string, people: P
   const jobs = await connectionJobs(client, account, Date.parse(connection.connectedAt));
   const used = jobs.filter(job => !active(job)).reduce((sum, job) => sum + (job.credits ?? 0), 0);
   const reserved = jobs.filter(active).reduce((sum, job) => sum + (job.credits ?? 0), 0);
-  const tasks = await Promise.all(((connection.listing as ViktorTask[] | null) ?? []).map(async (task): Promise<ViktorTaskView> => {
+  const refusal = await account.evaluationRefusal(VIKTOR);
+  const tasks = await Promise.all(((connection.listing as (ViktorTask & Seen)[] | null) ?? []).map(async (task): Promise<ViktorTaskView> => {
     const latest = jobs.find(job => job.taskId === viktorTaskId(task)) ?? null;
-    const base = { id: task.id, title: task.title, path: task.path, model: task.model, credits30d: task.credits30d, paused: task.paused, jobId: latest?.id ?? null, estimatedCredits: task.skipped ? null : estimateCredits(task, DEFAULT_REPEATS), result: null };
+    const estimatedCredits = task.skipped ? null : estimateCredits(task, DEFAULT_REPEATS);
+    const blocked = estimatedCredits === null || (latest && active(latest)) ? null : viktorBlock(estimatedCredits, used + reserved, connection.creditCap, refusal);
+    const base = { id: task.id, title: task.title, path: task.path, model: task.model, credits30d: task.credits30d, paused: task.paused, jobId: latest?.id ?? null, estimatedCredits, blocked, isNew: !task.skipped && isNew(task, connection.connectedAt, !!latest), result: null };
     if (task.skipped) return { ...base, status: "skipped", reason: task.skipped };
-    if (!latest) return { ...base, status: "waiting", reason: "Not started: past the credit cap or the plan's evaluations." };
-    if (latest.status === "queued" || latest.status === "running") return { ...base, status: "evaluating", reason: null };
+    if (!latest) return { ...base, status: "not_evaluated", reason: null };
+    if (active(latest)) return { ...base, status: "evaluating", reason: null };
     if (latest.status !== "done") return { ...base, status: "failed", reason: (await client.viktorJob.get([latest.id]).status().catch(() => null))?.error ?? latest.status };
     const report = (await account.report({ jobId: latest.id }))?.json as (JobResult & { connection?: ConnectionResult }) | undefined;
     const approval = await namedApproval(client, people, accountId, latest.id);
@@ -196,7 +256,7 @@ export async function viktorView(client: AppClient, accountId: string, people: P
   }));
   return {
     connected: true, keyLast4: connection.keyLast4, keyType: connection.keyType, creditCap: connection.creditCap, connectedAt: connection.connectedAt, connectedBy: connection.connectedBy,
-    creditsUsed: Math.round(used), creditsReserved: Math.round(reserved), listedAt: connection.listedAt, listingError: connection.listingError, tasks,
+    creditsUsed: Math.round(used), creditsReserved: Math.round(reserved), listedAt: connection.listedAt, listingError: connection.listingError, listing: await isListing(client, accountId, VIKTOR), tasks,
   };
 }
 

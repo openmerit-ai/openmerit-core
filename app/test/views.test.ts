@@ -3,7 +3,7 @@ import test from "node:test";
 import { ApiError, createApi, type GuardrailsAt, type JobView, type Me, type Report, type Run, type Spend, type Task, type LangfuseConnection, type ViktorConnection } from "../api.ts";
 import { createFakeApi } from "../dev/fake-api.ts";
 import type { Account } from "../view.ts";
-import { connectionsView } from "../views/connections.ts";
+import { connectionsView, retried } from "../views/connections.ts";
 import { choices, guardrailsView, parse } from "../views/guardrails.ts";
 import { planView } from "../views/plan.ts";
 import { runView } from "../views/run.ts";
@@ -184,7 +184,7 @@ test("a Viktor connection lists its tasks with why some are skipped, and Approve
   assert.equal(row?.model, "smart", "approving changes nothing in Viktor");
   // A Viktor evaluation that did not finish is started again through the connection, not rerun on a bundle.
   const failed = { ...await get<JobView>("/api/runs/z1c7m4"), status: "failed" as const, error: "The test runs did not finish." };
-  assert.match(text(runView.render({ ...failed, connection: "viktor" }, page(me))), /Start again/);
+  assert.match(text(runView.render({ ...failed, connection: "viktor", evaluate: { evaluating: false, blocked: null, estimatedCredits: 372, budgetUsd: null } }, page(me))), /Start again About 372 Viktor credits/);
   assert.match(text(runView.render(failed, page(me))), /Run again/);
   // Jobs that failed before the error stopped being a notice too kept it in both: it shows once.
   assert.equal(text(runView.render({ ...failed, notices: [failed.error] }, page(me))).split("The test runs did not finish.").length, 2);
@@ -235,5 +235,62 @@ test("Runs labels a Viktor run by its task's title and says who started it, and 
   const shown = runView.render(failed, page(me)).__html;
   assert.equal(text({ __html: shown }).split("Viktor refused the request: each script argument may be at most 2,000 characters.").length, 2, "the sentence once");
   assert.match(shown, /<details><summary>Show details<\/summary><pre class="error-detail">The job failed: Step &quot;put&quot;[^<]*# openmerit:batch\nimport asyncio/);
-  assert.match(shown, /data-action="rerun">Start again/);
+  // The connection's cap would refuse it, so Start again is off and says why.
+  assert.match(shown, /data-action="rerun" disabled aria-describedby="why-again">Start again<\/button>[^]*It needs about 1,720 credits, and 322 of the 2,000-credit cap are used or expected\./);
+});
+
+test("only a person starts a connection's evaluation: Evaluate on the task list and on the run page, off with why when the cap or the plan would refuse it", async () => {
+  const me = await account();
+  const [viktor, langfuse] = await Promise.all([get<ViktorConnection>("/api/connections/viktor"), get<LangfuseConnection>("/api/connections/langfuse")]);
+  const html = connectionsView.render({ endpoints: [], viktor, langfuse }, page(me)).__html;
+  assert.match(text({ __html: html }), /Denial letters New \/denial_letters smart 260 Not evaluated Evaluate About 290 credits/);
+  assert.match(html, /<button class="btn primary" type="button" data-action="start" data-id="denial_letters">Evaluate<\/button>/, "on, when the estimate fits under the cap");
+  assert.match(html, /data-action="start" data-id="weekly_payer_report" disabled aria-describedby="why-weekly_payer_report">Start again/);
+  assert.match(text({ __html: html }), /extract-claim › extract-claim-generate anthropic\/claude-sonnet-5\.5 2,203 \$5\.68 Not evaluated Evaluate Up to \$5 of model calls/);
+  assert.doesNotMatch(html, /Waiting|without being asked/);
+  // A member sees the estimate, not the button.
+  const member = connectionsView.render({ endpoints: [], viktor, langfuse }, page({ ...me, role: "member" })).__html;
+  assert.doesNotMatch(member, /data-action="start/);
+  assert.match(text({ __html: member }), /About 290 credits\. An admin can evaluate it\./);
+
+  // The run page is the task's own page in the app: a finished result offers Evaluate again.
+  const done = runView.render(await get<Report>("/api/runs/l2f9a4"), page(me)).__html;
+  assert.match(done, /data-action="rerun">Evaluate again<\/button><span class="sub">Up to \$5 of model calls\. It counts as one evaluation on your plan\./);
+  assert.doesNotMatch(runView.render(await get<Report>("/api/runs/l2f9a4"), page({ ...me, role: "member" })).__html, /data-action="rerun"/);
+  const plan = "The plan has no evaluations left this period.";
+  assert.match(runView.render({ ...await get<Report>("/api/runs/v5t8c2"), evaluate: { evaluating: false, blocked: plan, estimatedCredits: 372, budgetUsd: null } }, page(me)).__html, /disabled aria-describedby="why-again">Evaluate again[^]*The plan has no evaluations left this period\./);
+});
+
+test("a task listed after the first listing is New until someone opens its row; Refresh polls while the listing runs; a page that cannot load a connection never says it is not connected", async () => {
+  const me = await account();
+  const viktor = await get<ViktorConnection>("/api/connections/viktor");
+  const html = connectionsView.render({ endpoints: [], viktor, langfuse: NONE }, page(me)).__html;
+  // Only Denial letters came after the first listing; the first listing's tasks and an evaluated one are not New.
+  assert.equal(html.match(/>New<\/span>/g)?.length, 1);
+  assert.match(html, /<button class="task-open" type="button" data-action="seen" data-kind="viktor" data-id="denial_letters">Denial letters<\/button> <span class="pill good">New<\/span>/);
+  assert.equal((await fake(new Request("https://openmerit.ai/api/connections/viktor/tasks/denial_letters/seen", { method: "POST", headers: { authorization: "Bearer preview-populated" } }))).status, 200);
+  assert.doesNotMatch(connectionsView.render({ endpoints: [], viktor: await get<ViktorConnection>("/api/connections/viktor"), langfuse: NONE }, page(me)).__html, />New</);
+
+  // Refresh returns once the listing has started; the page shows it and turns Refresh off until it ends.
+  const refreshed = await fake(new Request("https://openmerit.ai/api/connections/viktor/refresh", { method: "POST", headers: { authorization: "Bearer preview-populated" } }));
+  assert.equal(refreshed.status, 202);
+  const listing = await get<ViktorConnection>("/api/connections/viktor");
+  assert.equal(listing.listing, true);
+  const busy = connectionsView.render({ endpoints: [], viktor: listing, langfuse: NONE }, page(me)).__html;
+  assert.match(busy, /data-action="refresh-viktor" disabled>Listing…<\/button>/);
+  assert.match(text({ __html: busy }), /Listing the tasks again…/);
+
+  // A connection the page could not read says so, and offers no connect form.
+  const down = connectionsView.render({ endpoints: [], viktor: { connected: false, unavailable: true, tasks: [] }, langfuse: NONE }, page(me)).__html;
+  assert.match(text({ __html: down }), /Viktor could not load: OpenMerit did not answer in time\. Reload the page to try again\./);
+  assert.doesNotMatch(down, /data-action="connect-viktor"|Viktor workspace\. Not connected/);
+
+  // A request that timed out or failed on the server is tried again; a refusal is not.
+  let calls = 0;
+  const flaky = () => { calls += 1; return calls < 3 ? Promise.reject(new ApiError(calls === 1 ? 0 : 503, "slow")) : Promise.resolve("ok"); };
+  assert.equal(await retried(flaky, [0, 0]), "ok");
+  assert.equal(calls, 3);
+  calls = 0;
+  await assert.rejects(retried(() => { calls += 1; return Promise.reject(new ApiError(403, "no")); }, [0, 0]), /no/);
+  assert.equal(calls, 1);
 });

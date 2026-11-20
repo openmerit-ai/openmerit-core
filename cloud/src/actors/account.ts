@@ -75,6 +75,12 @@ export interface JobRow { id: string; taskId: string; kind: string; status: stri
 export interface GuardrailSetting { key: string; value: unknown; kind: "constraint" | "default" }
 export type Started = { ok: true } | { ok: false; error: string };
 
+/** A connection listing's tasks: Viktor's listing is the tasks, Langfuse's has them under `tasks`. */
+type ListedTask = { id: string; firstSeenAt?: string | null; seenAt?: string | null };
+const listedTasks = (listing: unknown): ListedTask[] => {
+  const tasks = Array.isArray(listing) ? listing : listing && typeof listing === "object" && Array.isArray((listing as { tasks?: unknown }).tasks) ? (listing as { tasks: unknown[] }).tasks : [];
+  return tasks.filter((task): task is ListedTask => !!task && typeof task === "object" && typeof (task as { id?: unknown }).id === "string");
+};
 const iso = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toISOString() : null);
 const startOfMonth = (now: number) => { const date = new Date(now); return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1); };
 const scopeKey = (level: Level, input: { environment: string; agent?: string | null; taskId?: string }) =>
@@ -167,6 +173,21 @@ export const account = actor({
       update.name, update.status, update.customerId, update.subscriptionId, update.periodStart, update.periodEnd, update.includedEvals, update.overage, update.eventCreated);
       return { applied: true };
     }, { name: "apply_stripe" }),
+
+    /**
+     * Why the plan would refuse one more evaluation of this kind now, counting the jobs still running
+     * as used, or null. A connected app's Evaluate button shows it, and starting checks it first.
+     */
+    evaluationRefusal: async (c, kind: string): Promise<string | null> => {
+      const appUrl = services().config.appUrl;
+      const current = await plan(c.db);
+      if (!current || !ACTIVE_PLAN.has(current.status)) return `This account has no active OpenMerit plan. Subscribe at ${appUrl}/plan/.`;
+      if (current.overage !== "refuse") return null;
+      const running = await c.db.execute(`SELECT kind FROM jobs WHERE status IN ('queued', 'running')`);
+      const left = current.includedEvals - current.usedEvals - running.reduce((sum, row) => sum + (EVALUATIONS_PER_JOB[String(row.kind)] ?? 1), 0);
+      if (left >= (EVALUATIONS_PER_JOB[kind] ?? 1)) return null;
+      return `The plan has no evaluations left this period. More start ${current.periodEnd ? `on ${new Date(current.periodEnd * 1000).toISOString().slice(0, 10)}` : "next period"}, or change the plan at ${appUrl}/plan/.`;
+    },
 
     /** Checks the plan and the account's job limits, then records the job. */
     startJob: async (c, input: { jobId: string; taskId: string; kind: "run" | "watch" | "viktor" | "langfuse"; askedBy?: string | null; credits?: number | null; title?: string | null; startedBy?: string | null }): Promise<Started> => c.db.transaction(async tx => {
@@ -432,9 +453,33 @@ export const account = actor({
       if (!row || !keyEncryptionKey) return null;
       try { return decryptKey(keyEncryptionKey, `${c.key[0]!}:${kind}`, String(row.sealed_key)); } catch { return null; }
     },
+    /**
+     * Keeps a listing, or a listing's error with the last listing. Each task keeps when it was first
+     * listed (`firstSeenAt`) and when someone opened its row (`seenAt`): the first listing's tasks, and
+     * tasks from listings made before `firstSeenAt` was kept, count as seen when the connection was made.
+     */
     saveListing: async (c, input: { kind: string; listing: unknown; error: string | null }): Promise<void> => {
-      if (input.error) await c.db.execute(`UPDATE connections SET listing_error = ? WHERE kind = ?`, input.error, input.kind);
-      else await c.db.execute(`UPDATE connections SET listing = ?, listed_at = ?, listing_error = NULL WHERE kind = ?`, JSON.stringify(input.listing), Date.now(), input.kind);
+      if (input.error) return void await c.db.execute(`UPDATE connections SET listing_error = ? WHERE kind = ?`, input.error, input.kind);
+      const [row] = await c.db.execute(`SELECT listing, connected_at FROM connections WHERE kind = ?`, input.kind);
+      if (!row) return;
+      const before = new Map(listedTasks(row.listing ? JSON.parse(String(row.listing)) : null).map(task => [task.id, task]));
+      const now = new Date().toISOString(), connectedAt = iso(row.connected_at)!;
+      for (const task of listedTasks(input.listing)) {
+        const known = before.get(task.id);
+        task.firstSeenAt = known ? known.firstSeenAt ?? connectedAt : row.listing ? now : connectedAt;
+        task.seenAt = known?.seenAt ?? null;
+      }
+      await c.db.execute(`UPDATE connections SET listing = ?, listed_at = ?, listing_error = NULL WHERE kind = ?`, JSON.stringify(input.listing), Date.now(), input.kind);
+    },
+    /** Someone opened a listed task's row: it is no longer new. */
+    markSeen: async (c, input: { kind: string; taskId: string }): Promise<boolean> => {
+      const [row] = await c.db.execute(`SELECT listing FROM connections WHERE kind = ?`, input.kind);
+      const listing = row?.listing ? JSON.parse(String(row.listing)) as unknown : null;
+      const task = listedTasks(listing).find(item => item.id === input.taskId);
+      if (!task) return false;
+      task.seenAt ??= new Date().toISOString();
+      await c.db.execute(`UPDATE connections SET listing = ? WHERE kind = ?`, JSON.stringify(listing), input.kind);
+      return true;
     },
     /** Deletes the key and the listing. Runs, reports and approvals stay. */
     removeConnection: async (c, kind: string): Promise<boolean> => {

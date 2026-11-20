@@ -244,8 +244,8 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     return { text: describeJob(next, deps.config.appUrl), data: jobData(next) };
   }
   if (name === "openmerit_tasks") {
-    const [tasks, ready, connected, traced] = await Promise.all([account.tasks(), account.readySince(identity.userId), currentViktorView(client, identity.accountId, deps.auth), langfuseView(client, identity.accountId, deps.auth)]);
-    const apps = [...viktorLines(connected), ...langfuseLines(traced)];
+    const [tasks, ready, connected, traced] = await Promise.all([account.tasks(), account.readySince(identity.userId), currentViktorView(client, identity.accountId, deps.auth, true), langfuseView(client, identity.accountId, deps.auth)]);
+    const apps = [...viktorLines(connected, deps.config.appUrl), ...langfuseLines(traced, deps.config.appUrl)];
     const text = (tasks.length
       ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} [${item.id}] (${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.status}, ${item.state}${item.idleSince ? ` since ${item.idleSince.slice(0, 10)}` : ""}`),
         ready.length ? `Ready since the last session: ${ready.map(item => `${item.id} (${item.status})`).join(", ")}. Call openmerit_result for each.` : "Nothing new since the last session."].join("\n")
@@ -261,20 +261,25 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
   return { text: `Unknown tool ${name}`, data: {}, isError: true };
 }
 
+/** A task no one has evaluated: only a person starts it, with Evaluate in the app; MCP never does. */
+const notEvaluated = (cost: string, blocked: string | null, appUrl: string) => `not evaluated; an admin can evaluate it with Evaluate at ${appUrl}/connections/ (${cost})${blocked ? `, which is unavailable now: ${blocked}` : ""}`;
+
 /** The Viktor connection's tasks, for openmerit_tasks. */
-function viktorLines(view: ViktorView): string[] {
+function viktorLines(view: ViktorView, appUrl: string): string[] {
   if (!view.connected) return [];
   return [`Viktor (${view.creditsUsed ?? 0} of ${view.creditCap} credits used): ${view.tasks.length} scheduled task${view.tasks.length === 1 ? "" : "s"}:`, ...view.tasks.map(task => `- ${task.title} (${task.model ?? "default model"}, ${task.credits30d} credits in 30 days): ${
     task.status === "done" ? `${task.result?.change ?? "keep its model"}${task.result?.approval ? `, approved by ${task.result.approval.name ?? task.result.approval.by} on ${task.result.approval.at.slice(0, 10)}` : ""}; openmerit_result with job_id "${task.jobId}"`
-    : task.status === "evaluating" ? `evaluating, job_id "${task.jobId}"` : `${task.status}: ${task.reason}`}`)];
+    : task.status === "evaluating" ? `evaluating, job_id "${task.jobId}"`
+    : task.status === "not_evaluated" ? notEvaluated(`about ${task.estimatedCredits} Viktor credits`, task.blocked, appUrl) : `${task.status}: ${task.reason}`}`)];
 }
 
 /** The Langfuse connection's tasks, for openmerit_tasks: most recorded spend first. */
-function langfuseLines(view: LangfuseView): string[] {
+function langfuseLines(view: LangfuseView, appUrl: string): string[] {
   if (!view.connected) return [];
   return [`Langfuse (project ${view.projectName ?? "?"}): ${view.tasks.length} task${view.tasks.length === 1 ? "" : "s"} over the last 30 days${view.listingError ? ` (listing failed: ${view.listingError})` : ""}:`, ...view.tasks.map(task => `- ${task.name} (${task.model || "no model"}, ${task.generations} calls, ${task.costUsd === null ? "no recorded cost" : `$${task.costUsd.toFixed(2)}`} in 30 days): ${
     task.status === "done" ? `${task.result?.change?.replaceAll("`", "") ?? "keep its model"}${task.result?.approval ? `, approved by ${task.result.approval.name ?? task.result.approval.by} on ${task.result.approval.at.slice(0, 10)}` : ""}; openmerit_result with job_id "${task.jobId}"`
-    : task.status === "evaluating" ? `evaluating, job_id "${task.jobId}"` : `${task.status}: ${task.reason}${task.jobId ? ` (job_id "${task.jobId}")` : ""}`}`)];
+    : task.status === "evaluating" ? `evaluating, job_id "${task.jobId}"`
+    : task.status === "not_evaluated" ? notEvaluated(`up to $${task.budgetUsd} of model calls`, task.blocked, appUrl) : `${task.status}: ${task.reason}${task.jobId ? ` (job_id "${task.jobId}")` : ""}`}`)];
 }
 
 /** /mcp. A missing or invalid token gets 401 with the protected-resource metadata, which starts the client's Clerk sign-in. */
