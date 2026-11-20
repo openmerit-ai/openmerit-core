@@ -32,24 +32,26 @@ function endpointRow(endpoint: Endpoint, admin: boolean): Html {
 const VIKTOR_TASKS = "https://app.viktor.com/scheduled-tasks";
 /** A task with no model of its own runs the workspace's default, as "Team default (smart)". */
 const teamDefault = (task: Pick<ViktorTask, "defaultModel">): string => (task.defaultModel ? `Team default (${task.defaultModel})` : "Team default");
+/** What an evaluation is expected to cost, for the confirmation: its estimate in credits, from the workspace's Viktor credits. */
+export const viktorEstimate = (estimate: number | null | undefined): string => (estimate ? `It should use about ${credits(estimate)} Viktor credits, taken from your workspace, not from OpenMerit. If its test runs pass twice that, OpenMerit stops them.` : "It uses Viktor credits from your workspace.");
 const credits = (value: number | null | undefined): string => (value === null || value === undefined ? "–" : Math.round(value).toLocaleString("en-US"));
 
-// Evaluate and Start again: only a person starts an evaluation. Off, with the reason, when the credit cap or the plan would refuse it.
+// Evaluate and Start again: only a person starts an evaluation, after confirming its estimate. Off, with the reason, when the plan has no evaluations left.
 // A task listed after the connection's first listing is New until someone opens its row, by its name, or evaluates it.
 function taskName(kind: "viktor" | "langfuse", id: string, name: string, isNew: boolean | undefined): Html {
   return isNew ? html`<button class="task-open" type="button" data-action="seen" data-kind="${kind}" data-id="${id}">${name}</button> <span class="pill good">New</span>` : html`${name}`;
 }
 
 export function evaluateButton(action: string, id: string, label: string, cost: string, blocked: string | null): Html {
-  return html`<button class="btn${label === "Evaluate" ? " primary" : ""}" type="button" data-action="${action}" data-id="${id}"${blocked ? html` disabled aria-describedby="why-${id}"` : ""}>${label}</button><span class="sub">${cost}</span>${blocked ? html`<span class="sub" id="why-${id}">${blocked}</span>` : ""}`;
+  return html`<button class="btn${label.startsWith("Evaluate") ? " primary" : ""}" type="button" data-action="${action}" data-id="${id}"${blocked ? html` disabled aria-describedby="why-${id}"` : ""}>${label}</button>${cost ? html`<span class="sub">${cost}</span>` : ""}${blocked ? html`<span class="sub" id="why-${id}">${blocked}</span>` : ""}`;
 }
 
 function taskStatus(task: ViktorTask, admin: boolean): Html {
   switch (task.status) {
     case "skipped": return html`<span class="pill">Skipped</span><span class="sub">${task.reason ?? ""}</span>`;
     case "evaluating": return html`<span class="pill live">Evaluating</span>${task.jobId ? html`<span class="sub"><a href="/r/${task.jobId}/">Open the run</a></span>` : ""}`;
-    case "failed": return html`<span class="pill bad">Did not finish</span><span class="sub">${task.reason ?? ""}</span>${admin ? html` ${evaluateButton("start", task.id, "Start again", `About ${credits(task.estimatedCredits)} credits`, task.blocked)}` : ""}`;
-    case "not_evaluated": return html`<span class="pill">Not evaluated</span>${admin ? html` ${evaluateButton("start", task.id, "Evaluate", `About ${credits(task.estimatedCredits)} credits`, task.blocked)}` : html`<span class="sub">About ${credits(task.estimatedCredits)} credits. An admin can evaluate it.</span>`}`;
+    case "failed": return html`<span class="pill bad">Did not finish</span><span class="sub">${task.reason ?? ""}</span>${admin ? html` ${evaluateButton("start", task.id, `Start again · about ${credits(task.estimatedCredits)} Viktor credits`, "", task.blocked)}` : ""}`;
+    case "not_evaluated": return html`<span class="pill">Not evaluated</span>${admin ? html` ${evaluateButton("start", task.id, `Evaluate · about ${credits(task.estimatedCredits)} Viktor credits`, "", task.blocked)}` : html`<span class="sub">About ${credits(task.estimatedCredits)} Viktor credits. An admin can evaluate it.</span>`}`;
     case "done": {
       const result = task.result;
       const approved = result?.approval ? html`<span class="sub">Approved by ${result.approval.name ?? result.approval.by} on ${date(result.approval.at)}</span>` : "";
@@ -81,7 +83,7 @@ export function viktorTasks(viktor: ViktorConnection, admin: boolean): Html {
 export const viktorActions = {
   async start(target: HTMLElement, viktor: ViktorConnection, { api, refresh, toast, confirm }: Ctx): Promise<void> {
     const task = viktor.tasks.find((item) => item.id === target.dataset.id);
-    if (!task || !await confirm({ title: `Evaluate ${task.title}?`, body: `OpenMerit tests ${task.title}'s cheaper presets on paused copies in Viktor's test mode, for about ${credits(task.estimatedCredits)} credits from your workspace. It counts as one evaluation on your plan.`, confirm: "Evaluate" })) return;
+    if (!task || !await confirm({ title: `Evaluate ${task.title}?`, body: `OpenMerit tests ${task.title}'s cheaper presets on paused copies in Viktor's test mode. ${viktorEstimate(task.estimatedCredits)} It counts as one evaluation on your plan.`, confirm: "Evaluate" })) return;
     await api.send("POST", `/api/connections/viktor/tasks/${encodeURIComponent(task.id)}/start`);
     await refresh();
     toast(`Evaluating ${task.title}.`);
@@ -101,17 +103,13 @@ function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
             <input name="apiKey" type="password" required autocomplete="off" spellcheck="false" placeholder="zt_live_sk_…">
             <span class="sub">From Viktor's Settings → API Keys, on a paid or Enterprise plan. It needs the scopes scripts:execute, usage:read, threads:create, threads:read, runs:create, runs:read, messages:create and messages:read. OpenMerit stores it encrypted and shows only its last four characters.</span>
           </label>
-          <label>Credit cap
-            <input name="creditCap" type="number" min="100" max="100000" step="100" value="2000" required>
-            <span class="sub">The most Viktor credits OpenMerit's test runs may use from your workspace, about $5 per 2,000. Evaluate is off for a task whose estimate would pass it.</span>
-          </label>
           <p class="note">To measure a task, OpenMerit makes temporary copies of it in your workspace: personal, paused, each set to a cheaper preset and titled "[OpenMerit]: &lt;task title&gt;". It runs each copy in Viktor's test mode, which captures Slack posts and other outside actions instead of sending them, then deletes the copies. It never changes your tasks: a result proposes the change, and you make it in Viktor after you approve it.</p>
           <p class="form-error" role="alert" hidden></p>
           <p><button class="btn primary" type="submit">Connect Viktor</button></p>
         </form>` : html`<p class="note">Only an admin can connect Viktor.</p>`}
       </div>`;
   return html`<div class="card">
-        <div class="row"><span>Viktor<span class="sub">Key ending ${viktor.keyLast4 ?? ""} · ${viktor.keyType ?? "API"} key · connected ${date(viktor.connectedAt ?? null)}</span><span class="sub">${credits(viktor.creditsUsed)} of ${credits(viktor.creditCap)} credits used${viktor.creditsReserved ? `, ${credits(viktor.creditsReserved)} expected by running evaluations` : ""}</span></span>
+        <div class="row"><span>Viktor<span class="sub">Key ending ${viktor.keyLast4 ?? ""} · ${viktor.keyType ?? "API"} key · connected ${date(viktor.connectedAt ?? null)}</span><span class="sub">${credits(viktor.creditsUsed)} Viktor credits used by OpenMerit's tests${viktor.creditsReserved ? `, about ${credits(viktor.creditsReserved)} more expected by running evaluations` : ""}</span></span>
           ${admin ? html`<span class="endpoint-meta">${refreshButton("refresh-viktor", viktor.listing)}<button class="btn danger" type="button" data-action="disconnect-viktor">Disconnect</button></span>` : html`<span></span>`}</div>
         ${listingNote(viktor.listing)}
         ${viktor.listingError ? html`<p class="note bad" role="alert">The last listing failed: ${viktor.listingError}</p>` : ""}
@@ -279,7 +277,7 @@ export const connectionsView: View<Data> = {
       const fields = new FormData(form);
       const error = form.querySelector<HTMLElement>(".form-error");
       try {
-        await api.send("POST", "/api/connections/viktor", { apiKey: String(fields.get("apiKey")).trim(), creditCap: Number(fields.get("creditCap")) });
+        await api.send("POST", "/api/connections/viktor", { apiKey: String(fields.get("apiKey")).trim() });
       } catch (failure) {
         if (!(failure instanceof ApiError) || failure.status !== 400 || !error) throw failure;
         error.textContent = failure.message;

@@ -42,7 +42,7 @@ function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
   if (!viktor.connected) return html``;
   return html`<section aria-labelledby="viktor">
       <h2 id="viktor">Viktor</h2>
-      <p class="note" style="margin: -2px 0 8px">Scheduled tasks in your Viktor workspace, most credits first. You pick which to evaluate; <a href="/connections/">Connections</a> has the key, the credit cap and Refresh.</p>
+      <p class="note" style="margin: -2px 0 8px">Scheduled tasks in your Viktor workspace, most credits first. You pick which to evaluate; <a href="/connections/">Connections</a> has the key and Refresh.</p>
       ${viktorTasks(viktor, admin)}
     </section>`;
 }

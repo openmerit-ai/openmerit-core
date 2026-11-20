@@ -133,7 +133,7 @@ export function describeJob(view: JobView | ViktorJobView, appUrl: string): stri
     if (fix) lines.push(`Fix: ${fixLine(fix, view.jobId, new URL(result!.reportUrl).origin)}`);
   }
   // A Viktor task has no bundle to rerun, and starting it again spends the workspace's Viktor credits: an admin does it in the app.
-  if (view.status === "failed" && !result) lines.push("connection" in view && view.connection ? `Fix: tell the user an admin can start it again with Start again at ${appUrl}/r/${view.jobId}/${view.connection === "viktor" ? "; it uses Viktor credits within the connection's cap" : ""}.` : `Fix: ask the user, then call openmerit_recommend with job_id "${view.jobId}" to run the task again.`);
+  if (view.status === "failed" && !result) lines.push("connection" in view && view.connection ? `Fix: tell the user an admin can start it again with Start again at ${appUrl}/r/${view.jobId}/${view.connection === "viktor" ? "; it uses Viktor credits from the workspace" : ""}.` : `Fix: ask the user, then call openmerit_recommend with job_id "${view.jobId}" to run the task again.`);
   if (view.error) lines.push(`Error: ${view.error}`);
   // The sentence first, then the error as recorded.
   if ("errorDetail" in view && view.errorDetail) lines.push("Details:", view.errorDetail);
@@ -251,7 +251,7 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
       ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} [${item.id}] (${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.status}, ${item.state}${item.idleSince ? ` since ${item.idleSince.slice(0, 10)}` : ""}`),
         ready.length ? `Ready since the last session: ${ready.map(item => `${item.id} (${item.status})`).join(", ")}. Call openmerit_result for each.` : "Nothing new since the last session."].join("\n")
       : "No tasks yet. Call openmerit_recommend with a task bundle to start one.") + (apps.length ? `\n${apps.join("\n")}` : "");
-    return { text, data: { tasks, readySinceLastSession: ready, ...(connected.connected ? { viktor: { creditCap: connected.creditCap, creditsUsed: connected.creditsUsed, tasks: connected.tasks } } : {}), ...(traced.connected ? { langfuse: { project: traced.projectName ?? null, tasks: traced.tasks } } : {}) } };
+    return { text, data: { tasks, readySinceLastSession: ready, ...(connected.connected ? { viktor: { creditsUsed: connected.creditsUsed, tasks: connected.tasks } } : {}), ...(traced.connected ? { langfuse: { project: traced.projectName ?? null, tasks: traced.tasks } } : {}) } };
   }
   if (name === "openmerit_retire") {
     const row = typeof args.task_id === "string" ? await account.task(args.task_id) : null;
@@ -268,7 +268,7 @@ const notEvaluated = (cost: string, blocked: string | null, appUrl: string) => `
 /** The Viktor connection's tasks, for openmerit_tasks. */
 function viktorLines(view: ViktorView, appUrl: string): string[] {
   if (!view.connected) return [];
-  return [`Viktor (${view.creditsUsed ?? 0} of ${view.creditCap} credits used): ${view.tasks.length} scheduled task${view.tasks.length === 1 ? "" : "s"}:`, ...view.tasks.map(task => `- ${task.title} (${modelLabel(task)}, ${task.credits30d} credits in 30 days): ${
+  return [`Viktor (${view.creditsUsed ?? 0} Viktor credits used by OpenMerit's tests): ${view.tasks.length} scheduled task${view.tasks.length === 1 ? "" : "s"}:`, ...view.tasks.map(task => `- ${task.title} (${modelLabel(task)}, ${task.credits30d} credits in 30 days): ${
     task.status === "done" ? `${task.result?.change ?? "keep its model"}${task.result?.approval ? `, approved by ${task.result.approval.name ?? task.result.approval.by} on ${task.result.approval.at.slice(0, 10)}` : ""}; openmerit_result with job_id "${task.jobId}"`
     : task.status === "evaluating" ? `evaluating, job_id "${task.jobId}"`
     : task.status === "not_evaluated" ? notEvaluated(`about ${task.estimatedCredits} Viktor credits`, task.blocked, appUrl) : `${task.status}: ${task.reason}`}`)];

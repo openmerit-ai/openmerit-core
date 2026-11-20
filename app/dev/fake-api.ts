@@ -111,11 +111,11 @@ function viktorTasks(evaluated: boolean): ViktorTask[] {
     task("Claims digest", "/claims_digest", "smart", 410, evaluated
       ? { status: "done", reason: null, estimatedCredits: 372, jobId: "v5t8c2", result: { status: "picked", change: "Set Claims digest to cheap", link: "https://app.viktor.com/scheduled-tasks", approval: null } }
       : { status: "not_evaluated", reason: null, estimatedCredits: 372 }),
-    // Nothing starts on its own: a task waits for Evaluate, which is off when its estimate would pass the cap.
+    // Nothing starts on its own: a task waits for a person to press Evaluate and confirm its estimate.
     // Listed after the first listing: New until someone opens its row or evaluates it.
     task("Denial letters", "/denial_letters", "smart", 260, { status: "not_evaluated", reason: null, estimatedCredits: 290, isNew: evaluated }),
     task("Weekly payer report", "/weekly_payer_report", "balanced", 120, evaluated
-      ? { status: "failed", reason: "Viktor refused the request: each script argument may be at most 2,000 characters.", estimatedCredits: 1720, jobId: "v9k3r1", blocked: "It needs about 1,720 credits, and 322 of the 2,000-credit cap are used or expected." }
+      ? { status: "failed", reason: "Viktor refused the request: each script argument may be at most 2,000 characters.", estimatedCredits: 1720, jobId: "v9k3r1" }
       : { status: "not_evaluated", reason: null, estimatedCredits: 1720 }),
     task("Inbox sync", "/inbox_sync", null, 0, { reason: "script task, no model" }),
     task("Heartbeat", "/heartbeat", null, 0, {}),
@@ -124,7 +124,7 @@ function viktorTasks(evaluated: boolean): ViktorTask[] {
   ];
 }
 const viktorConnected = (evaluated: boolean): ViktorConnection => ({
-  connected: true, keyLast4: "eZnk", keyType: "personal", creditCap: 2000, connectedAt: "2026-11-18T09:00:00Z", connectedBy: "user_amira",
+  connected: true, keyLast4: "eZnk", keyType: "personal", connectedAt: "2026-11-18T09:00:00Z", connectedBy: "user_amira",
   creditsUsed: evaluated ? 322 : 0, creditsReserved: 0, listedAt: "2026-11-18T09:00:05Z", listingError: null, tasks: viktorTasks(evaluated),
 });
 
@@ -329,9 +329,8 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       const apiKey = typeof input?.apiKey === "string" ? input.apiKey.trim() : "";
       if (apiKey.length < 12) return error(400, "Paste the Viktor API key from Settings → API Keys.");
       if (!apiKey.startsWith("zt_live_sk_")) return error(400, "Viktor did not accept this key. Check that it is a current key from Settings → API Keys; Viktor gives API keys only to workspaces on a paid or Enterprise plan.");
-      const cap = typeof input?.creditCap === "number" ? input.creditCap : 2000;
-      if (cap < 100 || cap > 100_000) return error(400, "The credit cap must be between 100 and 100,000 credits.");
-      state.viktor = { ...viktorConnected(false), keyLast4: apiKey.slice(-4), creditCap: cap, connectedAt: new Date().toISOString(), connectedBy: state.me.user.id };
+      // An older page may still send creditCap: there is no cap, so it is ignored.
+      state.viktor = { ...viktorConnected(false), keyLast4: apiKey.slice(-4), connectedAt: new Date().toISOString(), connectedBy: state.me.user.id };
       return json(201, state.viktor);
     }
     if (path === "/api/connections/viktor" && method === "DELETE") {

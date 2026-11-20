@@ -14,7 +14,7 @@ import { CriticalError, Loop, StepExhaustedError, workflow } from "@rivet-dev/wo
 import { completeWith, createClient } from "../../../openmerit-core/src/ranking/index.ts";
 import { viktorErrorSentence } from "../../../openmerit-core/src/connectors/viktor/api.ts";
 import {
-  BATCH, batchMessage, batchSpec, CLEANUP, copyPrefix, CREDIT_USD, CREDITS, DESCRIBE, evaluateViktor, gradeRun, judgeChecks, PUT, proposeChange, READ, readBatch, RUN_CREDITS, isPreset,
+  BATCH, batchMessage, batchSpec, CLEANUP, copyPrefix, CREDIT_USD, CREDITS, DESCRIBE, estimateCredits, evaluateViktor, gradeRun, judgeChecks, PUT, proposeChange, READ, readBatch, RUN_CREDITS, isPreset,
   currentPreset, modelLabel, runsOn, viktor, viktorClient, writeChecks, type Batch, type BatchRun, type Check, type ViktorClient, type ViktorTask,
 } from "../../../openmerit-core/src/connectors/viktor/index.ts";
 import { approvalQuestion, basedOn, catalogueIndex, mergeEvidence, redact, strongest, type Ledger, type Measurement, type ModelResult } from "../engine.ts";
@@ -30,6 +30,8 @@ export interface ViktorJobInput {
   taskId: string;
   task: ViktorTask;
   repeats: number;
+  /** The credits the person confirmed when starting it; the job stops past CREDIT_GUARD times this. Missing on jobs started before it was kept. */
+  estimatedCredits?: number;
   /** Who started it: null when it started on its own after connecting. */
   userId: string | null;
   createdAt: string;
@@ -73,8 +75,13 @@ const ENDED = new Set(["completed", "requires_action", "failed", "cancelled", "t
 
 class JobStop extends Error {
   readonly status: "stopped" | "failed";
-  constructor(status: "stopped" | "failed", message: string) { super(message); this.status = status; }
+  /** The Viktor credits the job used, when it knows them. */
+  readonly credits: number | null;
+  constructor(status: "stopped" | "failed", message: string, credits: number | null = null) { super(message); this.status = status; this.credits = credits; }
 }
+
+/** A job stops its test runs once their recorded credits pass this many times its estimate: a safety net, not a setting. */
+export const CREDIT_GUARD = 2;
 
 type AccountHandle = ReturnType<AppClient["account"]["getOrCreate"]>;
 async function viktorFor(account: AccountHandle): Promise<ViktorClient> {
@@ -123,7 +130,7 @@ export const viktorJob = workflow({
   }),
   run: async ctx => {
     const jobId = ctx.key[0]!;
-    const { task: listed, repeats } = await ctx.step("input", async s => ({ task: s.state.input.task, repeats: s.state.input.repeats }));
+    const { task: listed, repeats, estimatedCredits } = await ctx.step("input", async s => ({ task: s.state.input.task, repeats: s.state.input.repeats, estimatedCredits: s.state.input.estimatedCredits }));
     const { directory, spec } = batchSpec(jobId, listed, repeats);
     // The listing has only the start of the instructions; the judge reads the full text, fetched below.
     let task = listed;
@@ -165,10 +172,13 @@ export const viktorJob = workflow({
         });
 
         // 3. Wait for the batch: its progress file says which runs finished; it deletes its copies when it ends.
+        // Each time more runs finish, their credits so far are read: past CREDIT_GUARD times the estimate, the job stops.
         const startedAt = Date.now();
+        const estimate = estimatedCredits ?? estimateCredits(listed, repeats);
+        type Polled = { polls: number; missing: number; counted?: number };
         const batch = await ctx.loop({
-          name: "testing", state: { polls: 0, missing: 0 },
-          run: async (loop, state): Promise<ReturnType<typeof Loop.break<Batch>> | ReturnType<typeof Loop.continue<{ polls: number; missing: number }>>> => {
+          name: "testing", state: { polls: 0, missing: 0, counted: 0 } as Polled,
+          run: async (loop, state): Promise<ReturnType<typeof Loop.break<Batch>> | ReturnType<typeof Loop.continue<Polled>>> => {
             await loop.sleep("wait", services().config.viktor.pollMs);
             const read = await loop.step({
               name: "read", timeout: 180_000, maxRetries: INTERRUPTIONS,
@@ -177,14 +187,23 @@ export const viktorJob = workflow({
                 const current = readBatch(await viktorApi.runScriptPaged(READ, [spec.out], 60));
                 const run = await viktorApi.run(thread.runId);
                 s.state.progress.measured = current.runs.length; s.state.updatedAt = now();
-                return { batch: current.status === "done" || current.status === "failed" ? current : null, status: current.status, run: run.status, runError: run.error };
+                const ids = current.runs.map(item => item.threadId).filter((id): id is string => !!id);
+                let used: number | null = null;
+                if (current.runs.length > (state.counted ?? 0) && !(current.status === "done" || current.status === "failed")) {
+                  const parsed = JSON.parse((await viktorApi.runScript(CREDITS, [JSON.stringify([thread.threadId, ...ids])], 120)).trim().split("\n").at(-1) ?? "{}") as { credits?: Record<string, number | null> };
+                  used = Math.round(Object.values(parsed.credits ?? {}).reduce<number>((sum, value) => sum + (typeof value === "number" ? value : 0), 0));
+                }
+                return { batch: current.status === "done" || current.status === "failed" ? current : null, status: current.status, run: run.status, runError: run.error, runs: current.runs.length, used };
               },
             });
             if (read.batch) return Loop.break(read.batch);
+            if (read.used !== null && read.used > CREDIT_GUARD * estimate) {
+              throw new JobStop("stopped", `OpenMerit stopped this evaluation: its test runs had used ${read.used.toLocaleString("en-US")} Viktor credits, more than ${CREDIT_GUARD} times its estimate of about ${estimate.toLocaleString("en-US")}. It stopped the test runs and deleted its copies of the task.`, read.used);
+            }
             const missing = read.status === "missing" && ENDED.has(read.run) ? state.missing + 1 : 0;
             if (missing >= MISSING_POLLS) return Loop.break({ status: "failed", runs: [], copies: [], error: `Viktor's thread ended (${read.run}${read.runError ? `: ${read.runError}` : ""}) without running the tests.` });
             if (Date.now() - startedAt > TESTING_LIMIT_MS) return Loop.break({ status: "failed", runs: [], copies: [], error: `The test runs had not finished after ${TESTING_LIMIT_MS / 60_000} minutes.` });
-            return Loop.continue({ polls: state.polls + 1, missing });
+            return Loop.continue({ polls: state.polls + 1, missing, counted: read.runs });
           },
         });
         const reference = batch.runs.filter(run => run.model === current && run.status === "success" && run.report).sort((a, b) => a.repeat - b.repeat)[0];
@@ -287,7 +306,7 @@ export const viktorJob = workflow({
         await ctx.step({ name: "stop", timeout: 300_000, maxRetries: INTERRUPTIONS, run: async s => {
           const client = s.client<Registry>();
           const left = await cleanupQuietly(client, s.state, jobId, task, directory);
-          await finish(s, client, jobId, stop.status, null, stop.message, spentBefore(s.state), left);
+          await finish(s, client, jobId, stop.status, null, stop.message, stop.credits ?? spentBefore(s.state), left);
         } });
       }
     } catch (error) {

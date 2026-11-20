@@ -179,7 +179,7 @@ export interface ViktorTask {
   status: ViktorTaskStatus;
   reason: string | null;
   estimatedCredits: number | null;
-  // Why Evaluate or Start again cannot start it now (the credit cap or the plan); null when it can.
+  // Why Evaluate or Start again cannot start it now (the plan has no evaluations left); null when it can.
   blocked: string | null;
   // Listed after the connection's first listing, and not yet opened or evaluated: shown as New.
   isNew?: boolean;
@@ -188,7 +188,7 @@ export interface ViktorTask {
 }
 export interface ViktorConnection {
   connected: boolean;
-  keyLast4?: string; keyType?: string | null; creditCap?: number; connectedAt?: string; connectedBy?: string;
+  keyLast4?: string; keyType?: string | null; connectedAt?: string; connectedBy?: string;
   creditsUsed?: number; creditsReserved?: number; listedAt?: string | null; listingError?: string | null;
   // A listing is running (Refresh, a stale listing, or the schedule): the page polls until it ends.
   listing?: boolean;
