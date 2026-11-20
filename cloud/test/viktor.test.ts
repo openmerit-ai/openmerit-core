@@ -32,8 +32,9 @@ function fakeViktor(extra: Cron[] = []) {
     ...extra,
   ];
   const files = new Map<string, string>();
-  const state = { scopes: [...REQUIRED_SCOPES] as string[], created: [] as string[], deleted: [] as string[], threads: [] as { id: string; message: string }[], scripts: [] as string[], auth: new Set<string>(), draft: null as string | null, refuse: null as string | null, hold: false, slowListMs: 0, pending: null as Parameters<typeof runBatch>[0] | null };
-  const runBatch = (spec: { source: string; models: string[]; repeats: number; copyPath: string; copyTitle: string; out: string }) => {
+  const state = { scopes: [...REQUIRED_SCOPES] as string[], created: [] as string[], deleted: [] as string[], threads: [] as { id: string; message: string }[], scripts: [] as string[], auth: new Set<string>(), draft: null as string | null, refuse: null as string | null, hold: false, slowListMs: 0, pending: null as Parameters<typeof runBatch>[0] | null, specs: [] as { models: string[]; copyTitle: string; inherit?: boolean }[] };
+  const runBatch = (spec: { source: string; models: string[]; repeats: number; copyPath: string; copyTitle: string; out: string; inherit?: boolean }) => {
+    state.specs.push(spec);
     const runs = [];
     for (const model of spec.models) { state.created.push(spec.copyPath + model); crons.push({ ...crons.find(cron => cron.path === spec.source)!, id: `copy_${model}`, path: spec.copyPath + model, title: spec.copyTitle, model, paused: true }); }
     for (let repeat = 1; repeat <= spec.repeats; repeat++) for (const model of spec.models) {
@@ -62,7 +63,7 @@ function fakeViktor(extra: Cron[] = []) {
       let stdout = "";
       // list_crons gives the first 240 characters of the instructions; get_path_info, which the listing used to call for each task, all of them.
       const full = code.includes("get_path_info");
-      if (kind === "list") stdout = JSON.stringify({ tasks: crons.filter(cron => !cron.deleted).map(cron => ({ ...cron, description: full ? cron.description : cron.description.slice(0, 240) })), usage: [{ credits: 140, path: "/agent_runs/crons/ticket_triage_test/2026-11-18T09-00-00" }, { credits: 536, path: "/agent_runs/crons/workflow_discovery/2026-11-19T10-56-20" }] });
+      if (kind === "list") stdout = JSON.stringify({ tasks: crons.filter(cron => !cron.deleted).map(cron => ({ ...cron, description: full ? cron.description : cron.description.slice(0, 240) })), usage: [{ credits: 140, path: "/agent_runs/crons/ticket_triage_test/2026-11-18T09-00-00" }, { credits: 536, path: "/agent_runs/crons/workflow_discovery/2026-11-19T10-56-20" }], ...(code.includes("get_workspace_settings") ? { defaultModel: "smart" } : {}) });
       if (kind === "put") { files.set(`${args[0]}/spec.json`, args[2]!); stdout = "{\"ok\": true}"; }
       if (kind === "read") stdout = files.get(args[0]!) ?? "{\"status\": \"missing\"}";
       if (kind === "describe") stdout = JSON.stringify({ description: crons.find(cron => cron.path === args[0])!.description });
@@ -79,7 +80,7 @@ function fakeViktor(extra: Cron[] = []) {
       if (stdout.length > 64_000) return { body: { id: `script_${state.scripts.length}`, status: "completed", result: { exit_code: 0, stdout: stdout.slice(-64_000), stdout_truncated: true, stderr: "" } } };
       if (kind === "credits") stdout = JSON.stringify({ credits: Object.fromEntries((JSON.parse(args[0]!) as string[]).map(id => [id, id.startsWith("run_") ? RUN[id.split("_")[1]!]! : THREAD])) });
       if (kind === "cleanup") {
-        const left = crons.filter(cron => cron.path.startsWith(args[0]!) && cron.title.startsWith("OpenMerit: "));
+        const left = crons.filter(cron => cron.path.startsWith(args[0]!) && (cron.title.startsWith("[OpenMerit]: ") || cron.title.startsWith("OpenMerit: ")));
         for (const cron of left) { crons.splice(crons.indexOf(cron), 1); state.deleted.push(cron.path); }
         stdout = JSON.stringify({ deleted: left.map(cron => cron.path), errors: [] });
       }
@@ -246,7 +247,7 @@ test("Viktor: a key connects only with every scope, the tasks are listed, the on
     const tasks = await admin.tool("openmerit_tasks", {});
     assert.match(tasks.text, /Viktor \(322 of 2000 credits used\): 5 scheduled tasks/);
     assert.match(tasks.text, /Ticket triage test \(smart, 140 credits in 30 days\): Set Ticket triage test to cheap, approved by User V on \d{4}-\d{2}-\d{2}; /);
-    assert.match(tasks.text, /heartbeat \(default model, 0 credits in 30 days\): skipped: Viktor's own task/);
+    assert.match(tasks.text, /heartbeat \(Team default \(smart\), 0 credits in 30 days\): skipped: Viktor's own task/);
     assert.equal(viktor.state.auth.size, 2, "only the stored key and the one refused key reached Viktor");
 
     // A task deleted in Viktor leaves the table once the listing is stale; its result stays in Runs under its name.
@@ -336,11 +337,17 @@ test("Viktor: a workspace whose instructions pass Viktor's 64,000-character stdo
   try {
     await subscribe(app, "org_long");
     const admin = caller(app, "test:user_l:org_long:admin");
-    const connected = await admin.api<{ listingError: string | null; tasks: { title: string; status: string; reason: string | null }[] }>("/api/connections/viktor", { method: "POST", body: JSON.stringify({ apiKey: KEY, creditCap: 100 }) });
+    const connected = await admin.api<{ listingError: string | null; tasks: { title: string; status: string; reason: string | null; blocked: string | null; estimatedCredits: number | null }[] }>("/api/connections/viktor", { method: "POST", body: JSON.stringify({ apiKey: KEY, creditCap: 100 }) });
     assert.equal(connected.status, 201, JSON.stringify(connected.body));
     assert.equal(connected.body.listingError, null);
     assert.equal(connected.body.tasks.length, 11);
-    assert.deepEqual(connected.body.tasks.filter(task => task.title.startsWith("OpenMerit: Project")).map(task => task.status), Array(7).fill("skipped"));
+    // Each has a condition script, which test mode ignores, so all 7 can be evaluated; titled "OpenMerit: …" outside /openmerit/, none is a copy.
+    // Connecting starts none, and Evaluate is off on each: its estimate passes the 100-credit cap.
+    const rows = connected.body.tasks.filter(task => task.title.startsWith("OpenMerit: Project"));
+    assert.deepEqual(rows.map(task => task.status), Array(7).fill("not_evaluated"));
+    assert.ok(rows.every(task => task.estimatedCredits! > 100 && /cap/.test(task.blocked ?? "")), JSON.stringify(rows.map(task => task.blocked)));
+    assert.deepEqual([viktor.state.created, viktor.state.deleted, viktor.state.threads.length], [[], [], 0]);
+    assert.ok(!viktor.state.scripts.includes("cleanup"), "no task of the person's is cleaned up as a copy");
     assert.deepEqual(viktor.state.scripts.slice(0, 2), ["list", "page"]);
   } finally {
     await stop(app); await judge.close();
@@ -391,6 +398,40 @@ test("Viktor: the background re-list finds a new task without Refresh and marks 
     const lists = viktor.state.scripts.filter(kind => kind === "list").length;
     await new Promise(resolve => setTimeout(resolve, 6000));
     assert.equal(viktor.state.scripts.filter(kind => kind === "list").length, lists, "no listing after the connection is removed");
+  } finally {
+    await stop(app); await judge.close();
+    await new Promise<void>(resolve => { viktor.server.closeAllConnections(); viktor.server.close(() => resolve()); });
+  }
+});
+
+test("Viktor: a task on the workspace's default model is evaluated against the presets cheaper than that default, its baseline left on the default", async () => {
+  const viktor = fakeViktor([{ id: "Dg1", path: "/digest", title: "Digest", model: null, execution_type: "agent", description: TRIAGE, cron: "0 9 * * 1", paused: true, deleted: false }]);
+  viktor.crons.find(cron => cron.path === "/ticket_triage_test")!.deleted = true;
+  await new Promise<void>(resolve => viktor.server.listen(0, "127.0.0.1", resolve));
+  viktor.url = `http://127.0.0.1:${(viktor.server.address() as AddressInfo).port}`;
+  const judge = await fakeJudge();
+  const app = await startApp({ models: judge, env: { OPENMERIT_VIKTOR_URL: viktor.url, OPENMERIT_VIKTOR_POLL_MS: "200" } });
+  try {
+    await subscribe(app, "org_default");
+    const admin = caller(app, "test:user_d:org_default:admin");
+    const connected = await admin.api<{ tasks: { title: string; model: string | null; defaultModel: string | null; status: string; estimatedCredits: number | null }[] }>("/api/connections/viktor", { method: "POST", body: JSON.stringify({ apiKey: KEY, creditCap: 2000 }) });
+    assert.equal(connected.status, 201, JSON.stringify(connected.body));
+    const digest = connected.body.tasks.find(task => task.title === "Digest")!;
+    assert.deepEqual([digest.model, digest.defaultModel], [null, "smart"]);
+    assert.ok(digest.estimatedCredits! > 0);
+    const heartbeat = connected.body.tasks.find(task => task.title === "heartbeat")!;
+    assert.deepEqual([heartbeat.defaultModel, heartbeat.status], ["smart", "skipped"]);
+    assert.equal(digest.status, "not_evaluated");
+    const evaluate = await admin.api<{ jobIds: string[] }>("/api/connections/viktor/tasks/Dg1/start", { method: "POST" });
+    assert.equal(evaluate.status, 201, JSON.stringify(evaluate.body));
+    const jobId = evaluate.body.jobIds[0]!;
+    const done = await waitFor(() => admin.tool("openmerit_result", { job_id: jobId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 60_000);
+    assert.equal(done.data.status, "done", done.text);
+    // The smart ladder; the baseline copy keeps its model unset, so it runs what the task runs.
+    assert.deepEqual([viktor.state.specs[0]!.models, viktor.state.specs[0]!.inherit, viktor.state.specs[0]!.copyTitle], [["smart", "balanced", "cheap"], true, "[OpenMerit]: Digest"]);
+    const report = (await admin.api<{ connection: { currentModel: string; change: { text: string } } }>(`/api/runs/${jobId}`)).body;
+    assert.deepEqual([report.connection.currentModel, report.connection.change.text], ["Team default (smart)", "Set Digest from Team default (smart) to cheap"]);
+    assert.deepEqual([...viktor.state.created].sort(), [...viktor.state.deleted].sort());
   } finally {
     await stop(app); await judge.close();
     await new Promise<void>(resolve => { viktor.server.closeAllConnections(); viktor.server.close(() => resolve()); });

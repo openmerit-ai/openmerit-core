@@ -105,7 +105,7 @@ function populated(): State {
 // A connected Viktor workspace (fictional): its four system tasks, skipped, and one task evaluated, with a change to approve.
 const SYSTEM = "Viktor's own task: it cannot be edited";
 function viktorTasks(evaluated: boolean): ViktorTask[] {
-  const task = (title: string, path: string, model: string | null, credits30d: number, fields: Partial<ViktorTask>): ViktorTask => ({ id: path.slice(1), title, path, model, credits30d, paused: false, status: "skipped", reason: SYSTEM, estimatedCredits: null, blocked: null, jobId: null, result: null, ...fields });
+  const task = (title: string, path: string, model: string | null, credits30d: number, fields: Partial<ViktorTask>): ViktorTask => ({ id: path.slice(1), title, path, model, defaultModel: "smart", credits30d, paused: false, status: "skipped", reason: SYSTEM, estimatedCredits: null, blocked: null, jobId: null, result: null, ...fields });
   return [
     task("Workflow Discovery", "/workflow_discovery", null, 536, {}),
     task("Claims digest", "/claims_digest", "smart", 410, evaluated

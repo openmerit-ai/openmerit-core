@@ -175,7 +175,7 @@ export interface Endpoint { id: string; kind: EndpointKind; baseUrl: string; all
 // GET /api/connections/viktor: the Viktor connection, without its key, and the workspace's scheduled tasks.
 export type ViktorTaskStatus = "skipped" | "not_evaluated" | "evaluating" | "done" | "failed";
 export interface ViktorTask {
-  id: string; title: string; path: string; model: string | null; credits30d: number; paused: boolean;
+  id: string; title: string; path: string; model: string | null; defaultModel?: string | null; credits30d: number; paused: boolean;
   status: ViktorTaskStatus;
   reason: string | null;
   estimatedCredits: number | null;

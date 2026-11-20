@@ -12,6 +12,7 @@ import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { bundleProblem, DEFAULT_ENVIRONMENT, rerunJob, startJob } from "./start.ts";
 import { langfuseView, type LangfuseView } from "./langfuse.ts";
 import { currentViktorView, VIKTOR, type ViktorView } from "./viktor.ts";
+import { modelLabel } from "../../openmerit-core/src/connectors/viktor/index.ts";
 import type { ViktorJobView } from "./actors/viktor-job.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -267,7 +268,7 @@ const notEvaluated = (cost: string, blocked: string | null, appUrl: string) => `
 /** The Viktor connection's tasks, for openmerit_tasks. */
 function viktorLines(view: ViktorView, appUrl: string): string[] {
   if (!view.connected) return [];
-  return [`Viktor (${view.creditsUsed ?? 0} of ${view.creditCap} credits used): ${view.tasks.length} scheduled task${view.tasks.length === 1 ? "" : "s"}:`, ...view.tasks.map(task => `- ${task.title} (${task.model ?? "default model"}, ${task.credits30d} credits in 30 days): ${
+  return [`Viktor (${view.creditsUsed ?? 0} of ${view.creditCap} credits used): ${view.tasks.length} scheduled task${view.tasks.length === 1 ? "" : "s"}:`, ...view.tasks.map(task => `- ${task.title} (${modelLabel(task)}, ${task.credits30d} credits in 30 days): ${
     task.status === "done" ? `${task.result?.change ?? "keep its model"}${task.result?.approval ? `, approved by ${task.result.approval.name ?? task.result.approval.by} on ${task.result.approval.at.slice(0, 10)}` : ""}; openmerit_result with job_id "${task.jobId}"`
     : task.status === "evaluating" ? `evaluating, job_id "${task.jobId}"`
     : task.status === "not_evaluated" ? notEvaluated(`about ${task.estimatedCredits} Viktor credits`, task.blocked, appUrl) : `${task.status}: ${task.reason}`}`)];
