@@ -74,7 +74,7 @@ To run it by hand against a local engine: `TEST_STORAGE=$(mktemp -d) TEST_ENGINE
 | --- | --- | --- |
 | `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY` | secret, setting | Token verification. The publishable key names the issuer |
 | `CLERK_JWT_KEY` | setting, optional | Clerk's PEM public key: verifies `/api` session tokens without fetching Clerk's JWKS. The tests use it with a local key |
-| `OPENROUTER_API_KEY` | secret | OpenMerit-paid measuring on OpenRouter |
+| `OPENROUTER_API_KEY` | secret | OpenMerit-paid measuring on OpenRouter, and the judge. Before any job starts (`startJob`, `startViktorTasks`, `startLangfuseTasks`), `modelKeyRefusal` in `src/services.ts` checks it with OpenRouter's free `GET /key`, trusting a working key for a minute; a 401 or 403 refuses the job with "OpenMerit's model key is not working, so this evaluation did not start", before any Viktor call, ledger entry or counted evaluation. An unreachable OpenRouter does not refuse. A run whose current model could not run at all reads on app.openmerit.ai as "the run did not finish", with why and Start again, not as a verdict |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_ID` | secret, secret, setting | Checkout, the portal, webhooks and metered usage (`STRIPE_METER_EVENT`, default `openmerit_evaluation`). A price's metadata sets `included_evals` and `overage` (`metered` or `refuse`) |
 | `OPENMERIT_KEY_ENCRYPTION_KEY` | secret | 32 bytes, base64. Without it `/api/endpoints` refuses new endpoints |
 | `OPENMERIT_PUBLIC_URL`, `OPENMERIT_APP_URL` | setting | Default `https://openmerit.ai` and `https://app.openmerit.ai` |

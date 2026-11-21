@@ -20,7 +20,14 @@ const verdicts: Record<Report["status"], string> = {
   failed: "The run failed before it finished, so it proposes no switch. These are the measurements so far.",
 };
 
+/**
+ * A run whose current model never ran, such as when a model key stopped working: it failed, so it is no
+ * verdict on the model. A current model that ran and passed too few cases is measured, and stays "no switch".
+ */
+const notRun = (data: Report): boolean => data.status === "baseline_failed" && !data.baseline;
+
 function title(data: Data): string {
+  if (!isLive(data) && notRun(data)) return `${data.task}: the run did not finish`;
   if (isLive(data)) return data.status === "failed" ? `${data.task}: the run did not finish` : data.status === "stopped" ? `${data.task}: stopped` : data.status === "needs_input" ? `${data.task}: needs input` : `${data.task}: evaluating`;
   if (data.status === "picked" && data.pick) return `${data.task}: switch to ${modelName(data.pick.model)}`;
   if (data.status === "keep_current" && data.baseline) return `${data.task}: keep ${modelName(data.baseline.model)}`;
@@ -185,7 +192,21 @@ function change(report: Report): Html {
       </div>`;
 }
 
+// The failed run's card: why the current model could not run, and the button that starts the task again.
+function failedRun(data: Report, admin: boolean): Html {
+  const why = (data.fixes ?? []).find((fix) => fix.kind === "rerun")?.notice ?? notes(data.notices).at(-1) ?? verdicts.baseline_failed;
+  const button = data.connection || data.langfuse || data.evaluate ? evaluateAgain(data, admin, "Start again") : admin ? html`<p style="margin-top: 10px"><button class="btn" type="button" data-action="rerun">Run again</button></p>` : "";
+  return html`<div class="card notice bad" role="alert" style="margin-top: 20px"><p>The run did not finish: ${prose(why)}</p><p class="note">Nothing was compared, so this is no verdict on the model in use now.</p>${button}</div>`;
+}
+
 function report(data: Report, admin: boolean): Html {
+  if (notRun(data)) {
+    const shown = notes(data.notices).filter((notice) => !(data.fixes ?? []).some((fix) => fix.kind === "rerun" && fix.notice === notice));
+    return html`<div class="eyebrow"><a href="/">Runs</a><span>›</span><span>${data.jobId}</span><span>Started ${date(data.createdAt)}</span></div>
+    <h1 class="title">${title(data)}</h1>
+    ${failedRun(data, admin)}
+    ${shown.length ? html`<section aria-labelledby="notes"><h2 id="notes">Notes</h2><div class="card">${shown.map((notice) => html`<div class="row note-row"><span>${prose(notice)}</span></div>`)}</div></section>` : ""}`;
+  }
   const models = [data.baseline, ...data.candidates].filter((item): item is MeasuredModel => item !== null);
   const pick = data.pick?.model ?? null;
   const from = Object.entries(data.guardrails.from);
@@ -299,9 +320,10 @@ export const runView: View<Data> = {
 
 async function rerun(data: Data, budgetUsd: number | null, ctx: Ctx): Promise<void> {
   const now = isLive(data) ? undefined : data.guardrails.effective.budgetUsd;
-  const fromLangfuse = isLive(data) ? data.connection === "langfuse" : !!data.langfuse;
-  const fromViktor = isLive(data) ? data.connection === "viktor" : !!data.connection;
-  const label = isLive(data) ? "Start again" : "Evaluate again";
+  // A connection run that failed before it read its task has no connection fields: its `evaluate` says which app it is.
+  const fromLangfuse = isLive(data) ? data.connection === "langfuse" : !!data.langfuse || (!data.connection && !!data.evaluate && data.evaluate.estimatedCredits === null);
+  const fromViktor = isLive(data) ? data.connection === "viktor" : !!data.connection || (!!data.evaluate && data.evaluate.estimatedCredits !== null);
+  const label = isLive(data) || notRun(data) ? "Start again" : "Evaluate again";
   const ok = await ctx.confirm(fromLangfuse
     ? { title: label, body: `Evaluates ${data.task} again on its recorded calls and dataset items from Langfuse. It counts as one evaluation on your plan.`, confirm: label }
     : fromViktor

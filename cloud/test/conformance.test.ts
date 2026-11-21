@@ -46,6 +46,8 @@ async function fakeServer(): Promise<FakeModels & { newHost: () => void }> {
     let body = "";
     req.on("data", chunk => { body += chunk; });
     req.on("end", () => {
+      // OpenMerit checks its model key with OpenRouter's free GET /key before a job starts.
+      if (req.url === "/key") { res.writeHead(fake.keyStatus ?? 200, { "content-type": "application/json" }); res.end(JSON.stringify(fake.keyStatus ? { error: { code: fake.keyStatus, message: "API key expired" } } : { data: { label: "test" } })); return; }
       const parsed = JSON.parse(body) as { model: string; messages: { role: string; content: string }[] };
       const writer = parsed.messages[0]?.role === "system" && parsed.messages[0].content.startsWith("You write test cases");
       const text = parsed.messages.filter(message => message.role === "user").map(message => message.content).join("\n");

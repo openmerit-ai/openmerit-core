@@ -30,7 +30,8 @@ export function costOf(model: string): number {
 
 /** One call the fake answered. `ticket` is the ticket it classified, or `writer:<n>` for a request to write n cases. */
 /** `cost`, when set, overrides what a call to that model reports it cost. */
-export interface FakeModels { url: string; calls: { model: string; ticket: string; auth: string }[]; onCall: ((index: number) => Promise<void>) | null; cost: ((model: string) => number | undefined) | null; close: () => Promise<void> }
+/** `keyStatus`, when set, is what GET /key answers instead of 200, such as 401 for an expired key. */
+export interface FakeModels { url: string; calls: { model: string; ticket: string; auth: string }[]; onCall: ((index: number) => Promise<void>) | null; cost: ((model: string) => number | undefined) | null; keyStatus?: number; close: () => Promise<void> }
 
 export async function fakeModels(): Promise<FakeModels> {
   const eci = new Map(catalogue.models.map(model => [model.id, model.eci]));
@@ -39,6 +40,8 @@ export async function fakeModels(): Promise<FakeModels> {
     let body = "";
     req.on("data", chunk => { body += chunk; });
     req.on("end", async () => {
+      // OpenMerit checks its model key with OpenRouter's free GET /key before a job starts.
+      if (req.url === "/key") { res.writeHead(fake.keyStatus ?? 200, { "content-type": "application/json" }); res.end(JSON.stringify(fake.keyStatus ? { error: { code: fake.keyStatus, message: "API key expired" } } : { data: { label: "test" } })); return; }
       const parsed = JSON.parse(body) as { model: string; messages: { role: string; content: string }[] };
       const text = parsed.messages.filter(message => message.role === "user").map(message => message.content).join("\n");
       // openmerit/ranking's case writer: the same two cases each time, so its second request adds nothing new.

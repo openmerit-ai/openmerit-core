@@ -125,6 +125,8 @@ async function fakeJudge(): Promise<FakeModels> {
     let raw = "";
     req.on("data", chunk => { raw += chunk; });
     req.on("end", () => {
+      // OpenMerit checks its model key with OpenRouter's free GET /key before a job starts.
+      if (req.url === "/key") { res.writeHead(fake.keyStatus ?? 200, { "content-type": "application/json" }); res.end(JSON.stringify(fake.keyStatus ? { error: { code: fake.keyStatus, message: "API key expired" } } : { data: { label: "test" } })); return; }
       const parsed = JSON.parse(raw) as { model: string; messages: { role: string; content: string }[] };
       const system = parsed.messages.find(message => message.role === "system")?.content ?? "", prompt = parsed.messages.find(message => message.role === "user")?.content ?? "";
       judged.push(prompt);
@@ -468,6 +470,36 @@ test("Viktor: a job whose test runs pass twice its estimate stops them, deletes 
     assert.ok(viktor.state.created.length === 3 && viktor.state.created.every(path => viktor.state.deleted.includes(path)));
     assert.equal(viktor.crons.filter(cron => cron.path.startsWith("/openmerit/")).length, 0);
     assert.equal((await admin.api<{ creditsUsed: number }>("/api/connections/viktor")).body.creditsUsed, 2_680);
+  } finally {
+    await stop(app); await judge.close();
+    await new Promise<void>(resolve => { viktor.server.closeAllConnections(); viktor.server.close(() => resolve()); });
+  }
+});
+
+test("Viktor: when OpenMerit's model key stops working, Evaluate is refused before any Viktor call, and nothing is spent or counted", async () => {
+  const viktor = fakeViktor();
+  await new Promise<void>(resolve => viktor.server.listen(0, "127.0.0.1", resolve));
+  viktor.url = `http://127.0.0.1:${(viktor.server.address() as AddressInfo).port}`;
+  const judge = await fakeJudge();
+  // No read relists while the test runs, so every Viktor call after connecting would come from the start.
+  const app = await startApp({ models: judge, env: { OPENMERIT_VIKTOR_URL: viktor.url, OPENMERIT_VIKTOR_POLL_MS: "200", OPENMERIT_VIKTOR_STALE_MS: "3600000", OPENMERIT_RELIST_MS: "3600000" } });
+  try {
+    await subscribe(app, "org_key");
+    const admin = caller(app, "test:user_k:org_key:admin");
+    assert.equal((await admin.api("/api/connections/viktor", { method: "POST", body: JSON.stringify({ apiKey: KEY }) })).status, 201);
+    const used = (await admin.api<{ plan: { usedEvals: number } }>("/api/me")).body.plan.usedEvals;
+    const calls = { scripts: viktor.state.scripts.length, threads: viktor.state.threads.length };
+    // OpenRouter refuses the key, as it did on 21 Nov 2026 when it expired.
+    judge.keyStatus = 401;
+    const refused = await admin.api<{ error: string }>("/api/connections/viktor/tasks/Cut8kTVZ/start", { method: "POST" });
+    assert.equal(refused.status, 409, JSON.stringify(refused.body));
+    assert.equal(refused.body.error, "OpenMerit's model key is not working, so this evaluation did not start. Nothing was spent, and it does not count as an evaluation.");
+    assert.deepEqual({ scripts: viktor.state.scripts.length, threads: viktor.state.threads.length }, calls, "no Viktor script or thread for a refused job");
+    assert.deepEqual([viktor.state.created, (await admin.api<unknown[]>("/api/runs")).body], [[], []]);
+    assert.equal((await admin.api<{ plan: { usedEvals: number } }>("/api/me")).body.plan.usedEvals, used, "a refused job counts no evaluation");
+    // A key that works again lets the job start.
+    delete judge.keyStatus;
+    assert.equal((await admin.api("/api/connections/viktor/tasks/Cut8kTVZ/start", { method: "POST" })).status, 201);
   } finally {
     await stop(app); await judge.close();
     await new Promise<void>(resolve => { viktor.server.closeAllConnections(); viktor.server.close(() => resolve()); });
