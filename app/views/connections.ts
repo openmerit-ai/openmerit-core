@@ -101,7 +101,7 @@ function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
         ${admin ? html`<form class="form" data-action="connect-viktor" autocomplete="off" style="margin-top: 10px">
           <label>Viktor API key
             <input name="apiKey" type="password" required autocomplete="off" spellcheck="false" placeholder="zt_live_sk_…">
-            <span class="sub">From Viktor's Settings → API Keys, on a paid or Enterprise plan. It needs the scopes scripts:execute, usage:read, threads:create, threads:read, runs:create, runs:read, messages:create and messages:read. OpenMerit stores it encrypted and shows only its last four characters.</span>
+            <span class="sub">From Viktor's Settings → API Keys, on a paid or Enterprise plan. It needs the scopes scripts:execute, usage:read, threads:create, runs:create and runs:read, and no others. OpenMerit stores it encrypted and shows only its last four characters.</span>
           </label>
           <p class="note">To measure a task, OpenMerit makes temporary copies of it in your workspace: personal, paused, each set to a cheaper preset and titled "[OpenMerit]: &lt;task title&gt;". It runs each copy in Viktor's test mode, which captures Slack posts and other outside actions instead of sending them, then deletes the copies. It never changes your tasks: a result proposes the change, and you make it in Viktor after you approve it.</p>
           <p class="form-error" role="alert" hidden></p>
