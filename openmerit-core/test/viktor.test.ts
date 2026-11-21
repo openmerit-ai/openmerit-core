@@ -37,6 +37,10 @@ test("a key connects only with every scope the connection needs, and a refused k
   assert.ok("key" in ok && ok.key.teamId === "team_1");
   assert.equal(all.requests[0]!.auth, "Bearer zt_live_sk_test");
 
+  // A restricted key with exactly these five scopes, and no thread or message reads, connects.
+  const restricted = fakeViktor({ "/api/public/v1/me": () => ({ body: { key_type: "personal", team_id: "team_1", scopes: ["scripts:execute", "threads:create", "runs:create", "runs:read", "usage:read"] } }) });
+  assert.ok("key" in await keyProblem(viktorClient({ apiKey: "k", fetch: restricted.fetcher })));
+
   const partial = fakeViktor({ "/api/public/v1/me": () => ({ body: { scopes: REQUIRED_SCOPES.filter(scope => scope !== "scripts:execute" && scope !== "runs:read") } }) });
   const missing = await keyProblem(viktorClient({ apiKey: "k", fetch: partial.fetcher }));
   assert.ok("problem" in missing);

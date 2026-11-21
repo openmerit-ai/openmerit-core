@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Fewer Viktor key scopes — unreleased, 21 November 2026
+
+Reviewed the homepage against the cloud app's Viktor connection requiring only the scopes `scripts:execute`, `usage:read`, `threads:create`, `runs:create` and `runs:read`. `site/index.html` makes no claim about Viktor or the scopes a key needs. No homepage copy change is needed; the cloud README's Viktor section lists the scopes.
+
 ## Model-key check before a job starts — unreleased, 21 November 2026
 
 Reviewed the homepage against the cloud app refusing a job when OpenMerit's own model key does not work, and showing a run whose current model could not run as failed instead of as a verdict. `site/index.html` makes no claim about OpenMerit's model key, refused runs or how a failed run reads. No homepage copy change is needed.

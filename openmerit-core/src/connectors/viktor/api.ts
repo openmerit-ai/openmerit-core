@@ -11,8 +11,12 @@ export const STDOUT_LIMIT = 64_000;
 /** Bytes per PAGE run: their base64 is 58,668 characters, under the limit. */
 export const PAGE_BYTES = 44_000;
 
-/** The scopes the connection needs: scripts and usage to list and price tasks, threads, runs and messages to test them. */
-export const REQUIRED_SCOPES = ["scripts:execute", "usage:read", "threads:create", "threads:read", "runs:create", "runs:read", "messages:create", "messages:read"] as const;
+/**
+ * The scopes the connection needs, per Viktor's endpoint reference: scripts:execute to list, copy and run
+ * tasks; usage:read for the credit balance; threads:create and runs:create to start the judge's thread
+ * (runs:create also cancels a run); runs:read to poll it. It never reads or continues a thread's messages.
+ */
+export const REQUIRED_SCOPES = ["scripts:execute", "usage:read", "threads:create", "runs:create", "runs:read"] as const;
 
 export class ViktorError extends Error {
   override readonly name = "ViktorError";
