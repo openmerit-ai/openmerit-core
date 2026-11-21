@@ -8,7 +8,7 @@ import type { Approval, JobRow } from "./actors/account.ts";
 import type { Auth } from "./auth.ts";
 import { approve, DEFAULT_REPEATS, redact } from "./engine.ts";
 import type { ConnectionResult, JobResult } from "./report.ts";
-import { services } from "./services.ts";
+import { modelKeyRefusal, services } from "./services.ts";
 import type { AppClient } from "./registry.ts";
 
 export const VIKTOR = "viktor";
@@ -138,6 +138,9 @@ export async function startViktorTasks(client: AppClient, input: { accountId: st
   const tasks = (connection.listing as ViktorTask[] | null) ?? [];
   const jobs = await connectionJobs(client, account, Date.parse(connection.connectedAt));
   const wanted = tasks.filter(task => !task.skipped && input.taskIds.includes(task.id));
+  // Before any job: the judge grades only after the test runs have spent the workspace's credits.
+  const keyRefusal = wanted.length ? await modelKeyRefusal() : null;
+  if (keyRefusal) return { started: [], jobIds: [], refused: keyRefusal };
   const started: string[] = [], jobIds: string[] = [];
   for (const task of wanted) {
     if (jobs.some(job => job.taskId === viktorTaskId(task) && active(job))) continue;

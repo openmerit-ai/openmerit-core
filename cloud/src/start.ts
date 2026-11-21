@@ -4,6 +4,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { redact } from "./engine.ts";
 import { buildPool, provisionalPick, type Provisional } from "./pool.ts";
+import { modelKeyRefusal } from "./services.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import type { Guardrails } from "./engine.ts";
 import type { AppClient } from "./registry.ts";
@@ -58,6 +59,8 @@ export async function startJob(client: AppClient, start: { accountId: string; en
   const taskId = taskIdFor(input.environment, input.bundle.task);
   const jobId = newJobId();
   const account = client.account.getOrCreate([input.accountId]);
+  const keyRefusal = await modelKeyRefusal();
+  if (keyRefusal) return { ok: false, error: keyRefusal };
   const started = await account.startJob({ jobId, taskId, kind: input.kind, askedBy: input.askedBy ?? null });
   if (!started.ok) return started;
   const task = client.task.getOrCreate([input.accountId, taskId], { createWithInput: { accountId: input.accountId, taskId, environment: input.environment, name: input.bundle.task } });

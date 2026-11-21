@@ -12,7 +12,7 @@ import { endpointUrlProblem } from "./keys.ts";
 import { buildPool, provisionalPick } from "./pool.ts";
 import type { AppClient } from "./registry.ts";
 import type { JobResult } from "./report.ts";
-import { services } from "./services.ts";
+import { modelKeyRefusal, services } from "./services.ts";
 import { newJobId } from "./start.ts";
 import { armRelist, isListing, isNew, namedApproval, type Seen, type TaskStatus } from "./viktor.ts";
 
@@ -120,6 +120,8 @@ export async function startLangfuseTasks(client: AppClient, input: { accountId: 
   const jobs = await account.connectionJobs({ kind: LANGFUSE, since: Date.parse(connection.connectedAt) });
   const running = new Set(jobs.filter(active).map(job => job.taskId));
   const wanted = (listing?.tasks ?? []).filter(task => !task.skipped && !running.has(langfuseTaskId(task)) && input.taskIds.includes(task.id));
+  const keyRefusal = wanted.length ? await modelKeyRefusal() : null;
+  if (keyRefusal) return { started: [], jobIds: [], refused: keyRefusal };
   const started: string[] = [], jobIds: string[] = [];
   for (const task of wanted) {
     const refusal = await account.evaluationRefusal(LANGFUSE);

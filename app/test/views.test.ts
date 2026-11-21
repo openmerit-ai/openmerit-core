@@ -334,3 +334,23 @@ test("Evaluate's confirmation states the estimate in Viktor credits, from the wo
   assert.doesNotMatch(asked!.body, /\$/, "the estimate is in credits only");
   assert.deepEqual(sent, [], "a cancelled confirmation starts nothing");
 });
+
+test("a run whose current model could not run reads as failed, offers Start again and never says to keep the model; a measured one still says no switch", async () => {
+  const me = await account();
+  const base = await get<Report>("/api/runs/k7m2q9");
+  const why = "anthropic/claude-sonnet-5.5 could not run: anthropic/claude-sonnet-5.5 on openrouter: API key expired.";
+  // As the Langfuse run of 21 Nov 2026 saved it: no baseline, no connection fields, and the task's evaluate from the connection.
+  const { langfuse: _langfuse, connection: _connection, ...rest } = base;
+  const failed: Report = { ...rest, task: "assess-enrollment", status: "baseline_failed", pick: null, top: [], nearMisses: [], baseline: null, candidates: [],
+    edit: { edits: [], instructions: null }, notices: ["118 catalogue models without an ECI left out: the search places models by their capability index.", why], fixes: [{ kind: "rerun", notice: why }],
+    evaluate: { evaluating: false, blocked: null, estimatedCredits: null, budgetUsd: 5 } };
+  const shown = text(runView.render(failed, page(me)));
+  assert.match(shown, /assess-enrollment: the run did not finish/);
+  assert.match(shown, /The run did not finish: anthropic\/claude-sonnet-5\.5 could not run: .*API key expired\./);
+  assert.match(shown, /Start again/);
+  assert.doesNotMatch(shown, /no switch|keep the model in use now/);
+  assert.equal(runView.title?.(failed), "assess-enrollment: the run did not finish");
+  // A current model that ran and passed too few cases was measured: that stays a verdict.
+  const measured = text(runView.render({ ...failed, baseline: base.baseline, fixes: [] }, page(me)));
+  assert.match(measured, /assess-enrollment: no switch/);
+});

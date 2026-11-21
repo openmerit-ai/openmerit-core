@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Model-key check before a job starts — unreleased, 21 November 2026
+
+Reviewed the homepage against the cloud app refusing a job when OpenMerit's own model key does not work, and showing a run whose current model could not run as failed instead of as a verdict. `site/index.html` makes no claim about OpenMerit's model key, refused runs or how a failed run reads. No homepage copy change is needed.
+
 ## Viktor connections without a credit cap — unreleased, 20 November 2026
 
 Reviewed the homepage against the cloud app dropping the Viktor connection's credit cap: evaluations start only on a click that confirms the estimate in credits, and a job stops past twice its estimate. `site/index.html` makes no claim about Viktor, credit caps or what an evaluation costs in a connected app. No homepage copy change is needed.
