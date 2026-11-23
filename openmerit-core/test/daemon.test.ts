@@ -34,7 +34,7 @@ function harnessReply(body: { messages: { role: string; content: unknown }[] }, 
     }
     return { content: JSON.stringify({ tasks: [...tasks].map(([name, usageIds]) => ({ name, description: `the ${name}`, usageIds, usesTools: false, needsVision: false, structuredOutput: false })) }) };
   }
-  return { content: JSON.stringify({ found: true, command: "node evals/classify.eval.ts", cwd: ".", env: [{ name: "CLASSIFIER_MODEL", value: "{{model}}" }], threshold: null, langfuseDataset: "", passScore: "", passMin: null, helpers: [], explanation: "npm run eval:classify", missing: "" }) };
+  return { content: JSON.stringify({ found: true, command: "node evals/classify.eval.ts", cwd: ".", env: [{ name: "CLASSIFIER_MODEL", value: "{{model}}" }], threshold: null, helpers: [], explanation: "npm run eval:classify", missing: "" }) };
 }
 
 const sse = (chunks: object[]) => `${chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`;
@@ -80,8 +80,7 @@ test("a run survives a SIGKILL of the daemon at every question, and the harness 
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
   git("init", "-q"); git("add", "-A"); git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "fixture");
   const home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
-  const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("LANGFUSE_")));
-  const env = { ...inherited, OPENMERIT_HOME: home, OPENMERIT_DAEMON_PORT: String(21000 + Math.floor(Math.random() * 8000)), OPENMERIT_NO_UPDATE_CHECK: "1", FAKE_ENDPOINT_KEY: "sk-fake" };
+  const env = { ...process.env, OPENMERIT_HOME: home, OPENMERIT_DAEMON_PORT: String(21000 + Math.floor(Math.random() * 8000)), OPENMERIT_NO_UPDATE_CHECK: "1", FAKE_ENDPOINT_KEY: "sk-fake" };
   const base = `http://127.0.0.1:${(endpoint.address() as AddressInfo).port}`;
   mkdirSync(join(home, "agent"), { recursive: true });
   writeFileSync(join(home, "agent", "models.json"), JSON.stringify({ providers: { fake: { baseUrl: `${base}/harness/v1`, api: "openai-completions", apiKey: "sk-fake", models: [{ id: "harness" }] } } }));
@@ -91,7 +90,6 @@ test("a run survives a SIGKILL of the daemon at every question, and the harness 
   const runId = startRun(ctx);
   ctx.state.close();
   // The CLI passes process.env itself, which is not a plain object; the test does the same.
-  for (const key of Object.keys(process.env)) if (key.startsWith("LANGFUSE_")) delete process.env[key];
   Object.assign(process.env, env);
   const advance = (answers: Record<string, Answer>) => advanceInDaemon({ runId, cwd: root, env: process.env, answers, log: () => {} });
 

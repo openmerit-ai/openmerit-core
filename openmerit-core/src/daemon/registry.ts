@@ -10,7 +10,7 @@
 // unit that was running when the process died is marked interrupted and asked about before it runs
 // again. Nothing is paid twice without a Yes.
 //
-// The client's environment (the user's shell: endpoint keys, the app's Langfuse keys, PATH) reaches
+// The client's environment (the user's shell: endpoint keys, the app's own keys, PATH) reaches
 // a run through the `attach` action and stays in this process's memory. It is never written to actor
 // state or queue messages, which are on disk. A step that resumes after a restart without an attached
 // client marks the run interrupted, and the next `openmerit scout --resume` continues it.

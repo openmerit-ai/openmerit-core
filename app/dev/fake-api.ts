@@ -6,11 +6,10 @@
 // just created), preview-noorg (a token without an organization), preview-error, preview-slow and preview-expired. Each scenario keeps its own in-memory
 // state, so actions change what later requests return. Every name and number is fictional.
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, type Guardrails, type Level } from "../../openmerit-core/src/engine/guardrails.ts";
-import type { DeletedTask, Endpoint, JobView, LangfuseConnection, LangfuseTask, LiveProgress, MeasuredModel, Me, Report, Run, Spend, Task, ViktorConnection, ViktorTask } from "../api.ts";
+import type { Decision, DeletedTask, Endpoint, JobView, LiveProgress, MeasuredModel, Me, Report, Run, Spend, Task } from "../api.ts";
 import { tonicUltra } from "./tonic-ultra.ts";
 
-// viktor and langfuse: the app connections; absent means not connected.
-export interface State { viktor?: ViktorConnection; langfuse?: LangfuseConnection; me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number; deleted: DeletedTask[] }
+export interface State { me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number; deleted: DeletedTask[] }
 
 const ENV = "sahra-health/claims";
 const measured = (model: string, endpoint: string, fields: Partial<MeasuredModel>): MeasuredModel => ({
@@ -22,11 +21,17 @@ function populated(): State {
   const task = (id: string, name: string, fields: Partial<Task>): Task => ({
     id, environment: ENV, agent: null, name, currentModel: "openai/gpt-5", pick: null, status: "keep_current", watching: true, lastRunAt: "2026-11-18T10:03:00Z", lastJobId: null, monthlySavingUsd: null, ...fields,
   });
+  // The user's decisions in their coding agent: they declined the ticket router's earlier switch, and approved the latest.
+  const decision = (jobId: string, value: Decision["decision"], at: string, change: string): Decision => ({ jobId, taskId: "ticket-router", decision: value, change, by: "user_amira", name: "Amira Haddad", email: null, at });
+  const approved = decision("k7m2q9", "approved", "2026-11-18T10:12:00Z", "openai/gpt-5 → anthropic/claude-haiku-5-5 (openrouter)");
+  const declined = decision("b2v5h3", "declined", "2026-10-30T10:30:00Z", "openai/gpt-5 → openai/gpt-5-mini (ep_openai)");
   const tasks: Task[] = [
-    task("ticket-router", "Ticket router", { pick: "anthropic/claude-haiku-5-5", status: "picked", monthlySavingUsd: 233.5, lastJobId: "k7m2q9" }),
+    // Approving the pick made it the task's current model.
+    task("ticket-router", "Ticket router", { currentModel: "anthropic/claude-haiku-5-5", status: "switched", monthlySavingUsd: 233.5, lastJobId: "k7m2q9", decision: approved }),
     task("bill-matcher", "Bill and claim matcher", { agent: "claim pipeline", currentModel: "anthropic/claude-sonnet-5-5", status: "agent_eval_failed", lastRunAt: "2026-11-17T08:00:00Z", lastJobId: "p3x8d1" }),
     task("fraud-reviewer", "Fraud reviewer", { agent: "claim pipeline", currentModel: "anthropic/claude-sonnet-5-5", watching: false, state: "frozen", lastRunAt: "2026-11-16T12:00:00Z", lastJobId: "f9q2w7" }),
     task("enrollment-checker", "Enrollment checker", { environment: "sahra-health/enroll", currentModel: "openai/gpt-5-mini", status: "running", lastRunAt: "2026-11-18T11:40:00Z", lastJobId: "e4n6t0" }),
+    task("reply-drafter", "Reply drafter", { pick: "anthropic/claude-haiku-5-5", status: "picked", monthlySavingUsd: 96.4, lastRunAt: "2026-11-18T08:30:00Z", lastJobId: "m5d8q2" }),
     task("coding-reviewer", "Coding reviewer", { currentModel: "anthropic/claude-sonnet-5-5", status: "failed", lastRunAt: "2026-11-12T10:00:00Z", lastJobId: "z1c7m4" }),
   ];
   const run = (id: string, taskId: string, status: string, startedAt: string, kind = "run", askedBy: string | null = kind === "watch" ? null : "claude-code"): Run => ({ id, taskId, kind, status, startedAt, finishedAt: status === "done" || status === "failed" ? startedAt : null, askedBy, result: null });
@@ -36,12 +41,9 @@ function populated(): State {
     run("k7m2q9", "ticket-router", "done", "2026-11-18T09:40:00Z"),
     run("p3x8d1", "bill-matcher", "done", "2026-11-17T08:00:00Z", "watch"),
     run("f9q2w7", "fraud-reviewer", "done", "2026-11-16T12:00:00Z", "run", "codex"),
+    run("m5d8q2", "reply-drafter", "done", "2026-11-18T08:30:00Z"),
     run("z1c7m4", "coding-reviewer", "failed", "2026-11-12T10:00:00Z"),
     run("b2v5h3", "ticket-router", "done", "2026-10-30T10:00:00Z"),
-    { ...run("v5t8c2", "viktor_claims_digest", "done", "2026-11-18T09:00:10Z", "viktor", null), title: "Claims digest" },
-    // A Viktor evaluation an admin started again from the app, which Viktor refused before it had a report.
-    { ...run("v9k3r1", "viktor_weekly_payer_report", "failed", "2026-11-18T08:10:00Z", "viktor", null), title: "Weekly payer report", startedBy: "user_amira", startedByName: "Amira Haddad" },
-    { ...run("l2f9a4", "langfuse_3a91c0de55aa", "done", "2026-11-18T08:30:00Z", "langfuse", null), title: "adjudicate-claim › adjudicate-claim-generate" },
   ];
   const baseline = measured("openai/gpt-5", "openrouter", { role: "baseline", stage: "baseline", passes: 39, total: 40, costPerCallUsd: 0.00475, latencyMs: 3100 });
   const haiku = measured("anthropic/claude-haiku-5-5", "openrouter", { passes: 40, total: 40, costPerCallUsd: 0.00007, latencyMs: 500, qualified: true });
@@ -75,17 +77,16 @@ function populated(): State {
   return {
     me: { user: { id: "user_amira" }, account: { id: "org_sahra", name: "Sahra Health" }, role: "admin", plan: { name: "Cloud", status: "active", periodEnd: "2026-12-01T00:00:00Z", includedEvals: 100, usedEvals: 38 } },
     tasks, runs,
-    reports: { k7m2q9: report, f9q2w7: keep, p3x8d1: failedEval, v5t8c2: viktorReport(), l2f9a4: langfuseReport(report) },
-    viktor: viktorConnected(true),
-    langfuse: langfuseConnected(),
+    reports: {
+      k7m2q9: { ...report, decision: approved },
+      // Picked, and the coding agent has not sent the user's answer yet.
+      m5d8q2: { ...report, jobId: "m5d8q2", task: "Reply drafter", createdAt: "2026-11-18T08:50:00Z", decision: null }, f9q2w7: keep, p3x8d1: failedEval,
+      b2v5h3: { ...report, jobId: "b2v5h3", createdAt: "2026-10-30T10:20:00Z", pick: { ...report.pick!, model: "openai/gpt-5-mini", endpoint: "ep_openai", endpointModel: "gpt-5-mini", passes: 39, costPerCallUsd: 0.00065, savingPerCallUsd: 0.0041 }, top: [], nearMisses: [], decision: declined,
+        edit: { edits: [{ file: "src/triage.ts", line: 14, before: 'process.env.TRIAGE_MODEL ?? "gpt-5"', after: 'process.env.TRIAGE_MODEL ?? "gpt-5-mini"' }], instructions: null } },
+    },
     jobs: {
       e4n6t0: job("e4n6t0", "enrollment-checker", "Enrollment checker", {}),
       w8r3k1: job("w8r3k1", "ticket-router", "Ticket router", { status: "needs_input", phase: "label_check", questions: [{ id: "labels" }], progress: { measured: 0, planned: null }, createdAt: "2026-11-18T11:20:00Z" }),
-      v9k3r1: job("v9k3r1", "viktor_weekly_payer_report", "Weekly payer report", {
-        status: "failed", phase: "done", connection: "viktor", provisional: null, createdAt: "2026-11-18T08:10:00Z", progress: { measured: 0, planned: 0 },
-        error: "Viktor refused the request: each script argument may be at most 2,000 characters.",
-        errorDetail: 'The job failed: Step "put" exhausted retries: ViktorError: Viktor POST /api/public/v1/scripts/runs: [{"type":"value_error","loc":["body","args"],"msg":"Value error, each arg may be at most 2000 characters","input":["/work/temp/openmerit/v9k3r1","# openmerit:batch\nimport asyncio, json, os, sys\nfrom sdk.tools.scheduled_crons import create_agent_cron"]}]',
-      }),
       z1c7m4: job("z1c7m4", "coding-reviewer", "Coding reviewer", { status: "failed", phase: "cases", error: "The task's examples had no known answers, and no case could be written from it.", provisional: null, createdAt: "2026-11-12T10:00:00Z" }),
     },
     endpoints: [
@@ -102,94 +103,9 @@ function populated(): State {
   };
 }
 
-// A connected Viktor workspace (fictional): its four system tasks, skipped, and one task evaluated, with a change to approve.
-const SYSTEM = "Viktor's own task: it cannot be edited";
-function viktorTasks(evaluated: boolean): ViktorTask[] {
-  const task = (title: string, path: string, model: string | null, credits30d: number, fields: Partial<ViktorTask>): ViktorTask => ({ id: path.slice(1), title, path, model, defaultModel: "smart", credits30d, paused: false, status: "skipped", reason: SYSTEM, estimatedCredits: null, blocked: null, jobId: null, result: null, ...fields });
-  return [
-    task("Workflow Discovery", "/workflow_discovery", null, 536, {}),
-    task("Claims digest", "/claims_digest", "smart", 410, evaluated
-      ? { status: "done", reason: null, estimatedCredits: 372, jobId: "v5t8c2", result: { status: "picked", change: "Set Claims digest to cheap", link: "https://app.viktor.com/scheduled-tasks", approval: null } }
-      : { status: "not_evaluated", reason: null, estimatedCredits: 372 }),
-    // Nothing starts on its own: a task waits for a person to press Evaluate and confirm its estimate.
-    // Listed after the first listing: New until someone opens its row or evaluates it.
-    task("Denial letters", "/denial_letters", "smart", 260, { status: "not_evaluated", reason: null, estimatedCredits: 290, isNew: evaluated }),
-    task("Weekly payer report", "/weekly_payer_report", "balanced", 120, evaluated
-      ? { status: "failed", reason: "Viktor refused the request: each script argument may be at most 2,000 characters.", estimatedCredits: 1720, jobId: "v9k3r1" }
-      : { status: "not_evaluated", reason: null, estimatedCredits: 1720 }),
-    task("Inbox sync", "/inbox_sync", null, 0, { reason: "script task, no model" }),
-    task("Heartbeat", "/heartbeat", null, 0, {}),
-    task("Memory Dreaming", "/memory_dreaming", "gpt-6-luna#ReasoningLevel:high", 0, {}),
-    task("Skill Refining", "/skill_refining", "gpt-6.1-sol#ReasoningLevel:low", 0, {}),
-  ];
-}
-const viktorConnected = (evaluated: boolean): ViktorConnection => ({
-  connected: true, keyLast4: "eZnk", keyType: "personal", connectedAt: "2026-11-18T09:00:00Z", connectedBy: "user_amira",
-  creditsUsed: evaluated ? 322 : 0, creditsReserved: 0, listedAt: "2026-11-18T09:00:05Z", listingError: null, tasks: viktorTasks(evaluated),
-});
-
-function viktorReport(): Report {
-  const preset = (name: string, fields: Partial<MeasuredModel>): MeasuredModel => ({
-    model: name, endpoint: "viktor", endpointModel: name, role: "candidate", stage: "search", eci: null, inCatalogue: false, funding: "customer", status: "measured",
-    passes: 18, total: 18, costPerCallUsd: 0.01, costIsEstimate: false, latencyMs: 24_000, qualified: true, note: "", ...fields,
-  });
-  const smart = preset("smart", { role: "baseline", stage: "baseline", costPerCallUsd: 0.175, latencyMs: 61_000, qualified: false });
-  const cheap = preset("cheap", {});
-  const balanced = preset("balanced", { passes: 17, costPerCallUsd: 0.05, latencyMs: 38_000, qualified: false, note: "passed 17/18 vs the current model's 18/18" });
-  const checks = ["Every ticket gets exactly one of the four categories", "C1 is filed as billing", "Each ticket has a one-line summary", "One Slack message to #claims-ops", "Each line reads C<n> · <category> · <summary>", "No ticket is left out"].map((check, index) => ({ id: `check-${index + 1}`, check }));
-  return {
-    jobId: "v5t8c2", task: "Claims digest", createdAt: "2026-11-18T09:12:00Z", status: "picked",
-    pick: { model: "cheap", endpoint: "viktor", endpointModel: "cheap", passes: 18, total: 18, costPerCallUsd: 0.01, savingPerCallUsd: 0.165 },
-    top: [cheap], baseline: smart, candidates: [balanced, cheap], nearMisses: [{ ...balanced, cheaperThanCurrent: true }],
-    search: { pool: 2, unplaced: 0, samples: checks.slice(0, 5).map((check) => check.id), finalists: ["cheap", "balanced"], challengers: [], shortfall: null },
-    agentEval: null, edit: { edits: [], instructions: "Set Claims digest to cheap in Viktor's scheduled tasks (https://app.viktor.com/scheduled-tasks): open the task and change its model to cheap. OpenMerit does not change it." },
-    spend: { openmeritUsd: 0.21, customerUsd: 0.805 }, guardrails: { effective: {}, from: {}, rejected: [] },
-    notices: ["Test mode captured 9 outside actions, such as Slack posts, instead of sending them."], fixes: [],
-    reportUrl: "https://openmerit.ai/api/r/v5t8c2.md", catalogueVersion: "viktor-presets", cases: { total: 6, fromExamples: 0, written: 6 },
-    basedOn: ["Grader: a judge grading each test run on a checklist from the task's instructions, against the current model's runs, from viktor (/claims_digest).", "Cases: the task itself, run in Viktor's test mode from viktor (/claims_digest).", "Priority: $1.03 a month of recorded spend, from viktor (410 credits in the last 30 days)."],
-    connection: {
-      kind: "viktor", taskId: "claims_digest", taskTitle: "Claims digest", currentModel: "smart", change: { text: "Set Claims digest to cheap", link: "https://app.viktor.com/scheduled-tasks", model: "cheap" },
-      creditsUsed: 322, checks, copiesLeft: [],
-      runs: ["smart", "balanced", "cheap"].flatMap((model) => [1, 2, 3].map((repeat) => ({ model, repeat, status: "success", actions: ["Captured Slack message to C0CLAIMS; no Slack message was sent"], credits: { smart: 70, balanced: 20, cheap: 4 }[model] ?? null }))),
-    },
-    approved: null,
-  };
-}
-
-// A connected Langfuse project (fictional): three tasks by spend, the top one evaluated with a change to approve.
-function langfuseConnected(): LangfuseConnection {
-  const task = (id: string, name: string, model: string, generations: number, costUsd: number | null, fields: Partial<LangfuseTask>): LangfuseTask => ({ id, name, model, generations, costUsd, models: 1, status: "not_evaluated", reason: null, budgetUsd: 5, blocked: null, jobId: null, result: null, ...fields });
-  return {
-    connected: true, baseUrl: "https://cloud.langfuse.com", projectName: "sahra-claims", keyLast4: "9f2c", connectedAt: "2026-11-18T08:20:00Z", connectedBy: "user_amira", listedAt: "2026-11-18T08:20:04Z", listingError: null, truncated: false,
-    tasks: [
-      task("3a91c0de55aa", "adjudicate-claim › adjudicate-claim-generate", "anthropic/claude-sonnet-5.5", 2513, 10.44, { models: 3, status: "done", reason: null, jobId: "l2f9a4", result: { status: "picked", change: "Set adjudicate-claim-generate to `anthropic/claude-haiku-5-5`", link: null, approval: null } }),
-      task("b7e2d4410c19", "extract-claim › extract-claim-generate", "anthropic/claude-sonnet-5.5", 2203, 5.68, {}),
-      task("0c5f8a2b91e3", "(no trace name) › (no name)", "openai/gpt-5-mini", 12, 0.02, { status: "skipped", reason: "generations without a name", budgetUsd: null }),
-    ],
-  };
-}
-
-function langfuseReport(base: Report): Report {
-  // A screened-out model ran only the screen's samples, so it keeps its own counts.
-  const half = <T extends MeasuredModel>(item: T): T => (item.status === "screened_out" ? item : { ...item, passes: Math.round(item.passes / 2), total: item.total / 2 });
-  const change = { text: "Set adjudicate-claim-generate to `anthropic/claude-haiku-5-5`", link: null, model: "anthropic/claude-haiku-5-5", instructions: "Where your application makes the \"adjudicate-claim-generate\" call in \"adjudicate-claim\", set the model to anthropic/claude-haiku-5-5. OpenMerit does not change it." };
-  return {
-    ...base, jobId: "l2f9a4", task: "adjudicate-claim › adjudicate-claim-generate", createdAt: "2026-11-18T08:45:00Z",
-    // The same models on 20 replayed calls instead of 40 cases.
-    baseline: { ...base.baseline!, model: "anthropic/claude-sonnet-5.5", passes: 20, total: 20 }, pick: { ...base.pick!, passes: 20, total: 20 },
-    top: base.top.map(half), candidates: base.candidates.map(half), nearMisses: (base.nearMisses ?? []).map(half),
-    edit: { edits: [], instructions: change.instructions }, notices: [], fixes: [],
-    cases: { total: 20, fromExamples: 20, written: 0 },
-    basedOn: ["Grader: parity with the answers anthropic/claude-sonnet-5.5 recorded, compared by a judge, from langfuse (adjudicate-claim › adjudicate-claim-generate).", "Cases: 20 recorded production calls, replayed from langfuse (adjudicate-claim › adjudicate-claim-generate).", "Priority: $10.44 a month of recorded spend, from langfuse ($10.44 of recorded cost in the last 30 days)."],
-    langfuse: { taskId: "3a91c0de55aa", taskName: "adjudicate-claim › adjudicate-claim-generate", currentModel: "anthropic/claude-sonnet-5.5", change, dataset: null, replayed: 20 },
-    approved: null,
-  };
-}
-
 function emptyState(me: Me): State {
   const state = populated();
-  const { viktor: _viktor, langfuse: _langfuse, ...rest } = state;
-  return { ...rest, me: { ...me, plan: { ...me.plan, usedEvals: 0 } }, tasks: [], runs: [], reports: {}, jobs: {}, endpoints: [], spend: { ...state.spend, openmeritUsd: 0, customerUsd: 0 }, guardrails: { environment: {}, agent: {}, task: {} } };
+  return { ...state, me: { ...me, plan: { ...me.plan, usedEvals: 0 } }, tasks: [], runs: [], reports: {}, jobs: {}, endpoints: [], spend: { ...state.spend, openmeritUsd: 0, customerUsd: 0 }, guardrails: { environment: {}, agent: {}, task: {} } };
 }
 
 function scenario(name: string): State {
@@ -232,8 +148,6 @@ function advance(job: JobView, task: Task | undefined, since: number, now = Date
 export function createFakeApi(options: { appUrl?: string } = {}): (request: Request) => Promise<Response> {
   const states = new Map<string, State>();
   const since = Date.now();
-  // When each connection's pretend listing ends.
-  const listingUntil = new Map<string, number>();
   return async (request) => {
     const url = new URL(request.url), path = url.pathname, method = request.method;
     const bearer = /^Bearer preview-([a-z]+)(?:\.v(\d+))?$/.exec(request.headers.get("authorization") ?? "");
@@ -269,11 +183,7 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       if (!state.runs.some((run) => run.id === id)) return error(404, "No such run in this account.");
       const job = state.jobs[id];
       const found = state.reports[id] ?? (job && advance(job, state.tasks.find((task) => task.id === job.taskId), since));
-      // As the cloud app does: a connection run's task as the connection lists it now, for Evaluate again.
-      const run = state.runs.find((item) => item.id === id)!;
-      const listed = run.kind === "viktor" ? state.viktor?.tasks.find((task) => `viktor_${task.id}` === run.taskId) : run.kind === "langfuse" ? state.langfuse?.tasks.find((task) => `langfuse_${task.id}` === run.taskId) : undefined;
-      const evaluate = listed ? { evaluating: listed.status === "evaluating", blocked: listed.blocked, estimatedCredits: "estimatedCredits" in listed ? listed.estimatedCredits : null, budgetUsd: "budgetUsd" in listed ? listed.budgetUsd : null } : null;
-      return found ? json(200, { ...found, evaluate }) : error(404, "No such run in this account.");
+      return found ? json(200, found) : error(404, "No such run in this account.");
     }
     // As the cloud app does: run the task again, after setting its budget per job when budgetUsd is given.
     if ((match = /^\/api\/runs\/([\w-]+)\/rerun$/.exec(path)) && method === "POST") {
@@ -294,77 +204,6 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       };
       Object.assign(task, { status: "running", lastJobId: jobId, lastRunAt: startedAt });
       return json(201, { jobId, taskId: task.id });
-    }
-    // The Viktor connection, as cloud/src/api.ts serves it: the key is checked, never stored or returned.
-    // As the cloud app does: Refresh starts a listing and returns; the connection says listing until it ends, here 3 seconds later.
-    const listing = (kind: string) => (listingUntil.get(kind) ?? 0) > Date.now();
-    const relist = (kind: string) => { if (!listing(kind)) listingUntil.set(kind, Date.now() + 3000); };
-    if (path === "/api/connections/langfuse" && method === "GET") return json(200, state.langfuse ? { ...state.langfuse, listing: listing("langfuse") } : { connected: false, tasks: [] });
-    if (path === "/api/connections/langfuse" && method === "POST") {
-      if (denied) return denied;
-      const publicKey = typeof input?.publicKey === "string" ? input.publicKey.trim() : "", secretKey = typeof input?.secretKey === "string" ? input.secretKey.trim() : "";
-      if (!publicKey.startsWith("pk-lf-") || !secretKey.startsWith("sk-lf-")) return error(400, "Paste a Langfuse public key (pk-lf-…) and secret key (sk-lf-…) from Project Settings → API Keys.");
-      // The preview's stand-in for the Viewer check: a secret key containing "write" can write.
-      if (secretKey.includes("write")) return error(400, "This key pair can write to Langfuse. Create a separate Viewer key in Langfuse Project Settings → API Keys; OpenMerit only reads and keeps your tracing keys untouched.");
-      state.langfuse = { ...langfuseConnected(), keyLast4: publicKey.slice(-4), connectedAt: new Date().toISOString(), connectedBy: state.me.user.id };
-      return json(201, state.langfuse);
-    }
-    if (path === "/api/connections/langfuse" && method === "DELETE") {
-      if (denied) return denied;
-      if (!state.langfuse) return error(404, "Langfuse is not connected.");
-      delete state.langfuse;
-      return json(200, { deleted: true });
-    }
-    if (path === "/api/connections/langfuse/refresh" && method === "POST") { if (denied) return denied; relist("langfuse"); return json(202, { ...(state.langfuse ?? { connected: false, tasks: [] }), listing: true }); }
-    if ((match = /^\/api\/connections\/langfuse\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
-      if (denied) return denied;
-      const task = state.langfuse?.tasks.find((item) => item.id === match?.[1] && (item.status === "not_evaluated" || item.status === "failed") && !item.blocked);
-      if (!task) return error(409, "This task cannot be evaluated, or is being evaluated now.");
-      Object.assign(task, { status: "evaluating", reason: null });
-      return json(201, { started: [task.id] });
-    }
-    if (path === "/api/connections/viktor" && method === "GET") return json(200, state.viktor ? { ...state.viktor, listing: listing("viktor") } : { connected: false, tasks: [] });
-    if (path === "/api/connections/viktor" && method === "POST") {
-      if (denied) return denied;
-      const apiKey = typeof input?.apiKey === "string" ? input.apiKey.trim() : "";
-      if (apiKey.length < 12) return error(400, "Paste the Viktor API key from Settings → API Keys.");
-      if (!apiKey.startsWith("zt_live_sk_")) return error(400, "Viktor did not accept this key. Check that it is a current key from Settings → API Keys; Viktor gives API keys only to workspaces on a paid or Enterprise plan.");
-      // An older page may still send creditCap: there is no cap, so it is ignored.
-      state.viktor = { ...viktorConnected(false), keyLast4: apiKey.slice(-4), connectedAt: new Date().toISOString(), connectedBy: state.me.user.id };
-      return json(201, state.viktor);
-    }
-    if (path === "/api/connections/viktor" && method === "DELETE") {
-      if (denied) return denied;
-      if (!state.viktor) return error(404, "Viktor is not connected.");
-      delete state.viktor;
-      return json(200, { deleted: true });
-    }
-    if (path === "/api/connections/viktor/refresh" && method === "POST") { if (denied) return denied; relist("viktor"); return json(202, { ...(state.viktor ?? { connected: false, tasks: [] }), listing: true }); }
-    if ((match = /^\/api\/connections\/(viktor|langfuse)\/tasks\/([\w-]+)\/seen$/.exec(path)) && method === "POST") {
-      const tasks: { id: string; isNew?: boolean }[] = (match[1] === "viktor" ? state.viktor?.tasks : state.langfuse?.tasks) ?? [];
-      const task = tasks.find((item) => item.id === match?.[2]);
-      if (!task) return error(404, "No such task in this connection's listing.");
-      task.isNew = false;
-      return json(200, { seen: true });
-    }
-    if ((match = /^\/api\/connections\/viktor\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
-      if (denied) return denied;
-      const task = state.viktor?.tasks.find((item) => item.id === match?.[1] && (item.status === "not_evaluated" || item.status === "failed") && !item.blocked);
-      if (!task) return error(409, "This task cannot be evaluated, or is being evaluated now.");
-      Object.assign(task, { status: "evaluating", reason: null });
-      return json(201, { started: [task.id] });
-    }
-    // Approve change records who approved and when; the first approval stands.
-    if ((match = /^\/api\/runs\/([\w-]+)\/approve$/.exec(path)) && method === "POST") {
-      if (denied) return denied;
-      const found = state.reports[match[1] ?? ""];
-      if (!found) return error(404, "This run has no result yet.");
-      const change = found.connection?.change ?? found.langfuse?.change;
-      if (!change || !found.pick) return error(409, "This result proposes no change to approve.");
-      found.approved ??= { jobId: found.jobId, change: change.text, link: change.link, by: state.me.user.id, name: "Amira Haddad", email: null, at: new Date().toISOString() };
-      const row = state.viktor?.tasks.find((item) => item.jobId === found.jobId) ?? state.langfuse?.tasks.find((item) => item.jobId === found.jobId);
-      if (row?.result) row.result.approval = { by: found.approved.by, name: found.approved.name ?? null, at: found.approved.at };
-      return json(200, found.approved);
     }
     if (path === "/api/endpoints" && method === "GET") return json(200, state.endpoints);
     if (path === "/api/endpoints" && method === "POST") {

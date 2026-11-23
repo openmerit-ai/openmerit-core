@@ -2,11 +2,10 @@
 // the metering proxy. The eval contract (README "Eval contract"):
 // - OpenMerit sets OPENMERIT_MODEL (the model as the endpoint names it), OPENMERIT_BASE_URL and
 //   OPENMERIT_API_KEY (the proxy), the same values as OPENAI_BASE_URL and OPENAI_API_KEY,
-//   OPENMERIT_ITEMS (comma-separated dataset item IDs; empty for every item), OPENMERIT_EXPERIMENT
-//   (the experiment name to record under) and OPENMERIT_RESULT (a file path). `{{model}}`,
-//   `{{items}}` and `{{experiment}}` in the command or in `env` values become the same values.
-// - Per-item results come from the Langfuse experiment the eval records (read back by the caller),
-//   or from {"items": [{"id", "pass"}]} written to $OPENMERIT_RESULT or printed as stdout's last JSON line.
+//   OPENMERIT_ITEMS (comma-separated item IDs; empty for every item) and OPENMERIT_RESULT (a file
+//   path). `{{model}}` and `{{items}}` in the command or in `env` values become the same values.
+// - Per-item results are {"items": [{"id", "pass"}]}, written to $OPENMERIT_RESULT or printed as
+//   stdout's last JSON line.
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -50,18 +49,18 @@ function reportedItems(result: Record<string, unknown> | null): EvalOutcome["ite
   return items.length ? items : null;
 }
 
-export async function runEval(spec: EvalCommand, input: { root: string; model: string; baseUrl: string; token: string; items: readonly string[] | null; experiment: string; env?: Record<string, string | undefined>; signal?: AbortSignal }): Promise<EvalOutcome> {
+export async function runEval(spec: EvalCommand, input: { root: string; model: string; baseUrl: string; token: string; items: readonly string[] | null; env?: Record<string, string | undefined>; signal?: AbortSignal }): Promise<EvalOutcome> {
   const dir = mkdtempSync(join(tmpdir(), "openmerit-eval-"));
   const resultPath = join(dir, "result.json");
   const items = (input.items ?? []).join(",");
-  const fill = (text: string) => text.replaceAll("{{model}}", input.model).replaceAll("{{items}}", items).replaceAll("{{experiment}}", input.experiment);
+  const fill = (text: string) => text.replaceAll("{{model}}", input.model).replaceAll("{{items}}", items);
   const base = input.env ?? process.env;
   // Model calls go through the proxy with its one-unit token, never with the endpoint's own key.
-  // Other credentials (the app's Langfuse keys, for example) stay, so the eval records as it always does.
+  // Other credentials the eval needs stay, so it runs as it always does.
   const env: Record<string, string | undefined> = Object.fromEntries(Object.entries(base).filter(([key]) => !/^(OPENAI|OPENROUTER)_API_KEY$/.test(key)));
   Object.assign(env, {
     OPENMERIT_MODEL: input.model, OPENMERIT_BASE_URL: input.baseUrl, OPENMERIT_API_KEY: input.token, OPENMERIT_RESULT: resultPath,
-    OPENMERIT_ITEMS: items, OPENMERIT_EXPERIMENT: input.experiment, OPENAI_BASE_URL: input.baseUrl, OPENAI_API_KEY: input.token,
+    OPENMERIT_ITEMS: items, OPENAI_BASE_URL: input.baseUrl, OPENAI_API_KEY: input.token,
   }, Object.fromEntries(Object.entries(spec.env ?? {}).map(([key, value]) => [key, fill(value)])));
   const started = Date.now();
   try {

@@ -32,7 +32,8 @@ export interface Task {
   currentModel: string;
   pick: string | null;
   // new, running, the last result's status (picked, keep_current, baseline_failed, no_cases,
-  // no_candidates, agent_eval_failed), or a job that ended early (failed, stopped).
+  // no_candidates, agent_eval_failed), switched (the user approved the pick, now currentModel),
+  // or a job that ended early (failed, stopped).
   status: string;
   watching: boolean;
   // Watching is automatic. Proposed for the cloud app, which does not send it yet; the preview's
@@ -43,6 +44,8 @@ export interface Task {
   lastRunAt: string | null;
   lastJobId: string | null;
   monthlySavingUsd: number | null;
+  // The latest decision the user gave in their coding agent on one of the task's changes.
+  decision?: Decision | null;
 }
 
 export type TaskState = "watching" | "idle" | "frozen" | "retired";
@@ -52,8 +55,7 @@ export type JobStatus = "queued" | "running" | "needs_input" | "done" | "failed"
 // What a finished run's report found: its result status, the model it picked and the one in use then.
 export interface RunResult { status: string; task?: string | null; model: string | null; from: string | null; savingPerCallUsd: number | null }
 // askedBy is the name the asking coding agent's MCP client sent, such as claude-code; null for a watch run or an unnamed client.
-// title: a connection task's name, such as a Viktor task's title. startedBy: who pressed Start or Start again for a connection's job; null when it started on its own.
-export interface Run { id: string; taskId: string; kind: string; status: JobStatus | string; startedAt: string; finishedAt: string | null; askedBy: string | null; title?: string | null; startedBy?: string | null; startedByName?: string | null; result: RunResult | null }
+export interface Run { id: string; taskId: string; kind: string; status: JobStatus | string; startedAt: string; finishedAt: string | null; askedBy: string | null; result: RunResult | null }
 
 export interface MeasuredModel {
   model: string;
@@ -103,39 +105,18 @@ export interface JobResult {
   cases: { total: number; fromExamples: number; written: number };
   // The evidence each decision used, such as "Grader: the expected labels of your examples, from agent-bundle". Absent from older reports.
   basedOn?: string[];
-  // A connected app's task, such as a Viktor scheduled task: its cases are checks a judge wrote, and a cost per call is per test run.
-  connection?: ConnectionResult;
-  langfuse?: LangfuseResult;
 }
 
-export interface ConnectionResult {
-  kind: "viktor";
-  taskId: string;
-  taskTitle: string;
-  currentModel: string;
-  // "Set <task> to cheap" and where to make it; null when the task keeps its model.
-  change: { text: string; link: string; model: string } | null;
-  creditsUsed: number;
-  checks: { id: string; check: string }[];
-  runs: { model: string; repeat: number; status: string; actions: string[]; credits: number | null }[];
-  copiesLeft: string[];
-}
+// What the user decided about a result's change, as their coding agent sent it with openmerit_answer:
+// approved (the agent applied the edit) or declined. by is the user's ID; name is their name in Clerk, null when the lookup failed.
+export interface Decision { jobId: string; taskId: string; decision: "approved" | "declined"; change: string; by: string; name: string | null; email: string | null; at: string }
 
-// Who approved a result's change, and when (POST /api/runs/:id/approve). It changes nothing in the connected app.
-// by is the approver's user ID; name is their name in Clerk, null when the lookup failed.
-export interface Approval { jobId?: string; change: string; link: string | null; by: string; name?: string | null; email?: string | null; at: string }
-
-// GET /api/runs/:id: the saved report once the job has one, with its approval.
-export interface Report extends JobResult { jobId: string; task: string; createdAt: string; approved?: Approval | null; evaluate?: Evaluate | null }
-
-// A connected app's run: its task as the connection lists it now, for Evaluate again. Null when the task is no longer listed.
-export interface Evaluate { evaluating: boolean; blocked: string | null; estimatedCredits: number | null; budgetUsd: number | null }
+// GET /api/runs/:id: the saved report once the job has one, with the user's decision on its change.
+export interface Report extends JobResult { jobId: string; task: string; createdAt: string; decision?: Decision | null }
 
 // GET /api/runs/:id before then: the job's live state, with report null.
 export interface JobView {
   jobId: string;
-  /** Set for a connected app's evaluation, such as "viktor". */
-  connection?: string;
   taskId: string;
   task: string;
   status: JobStatus;
@@ -145,8 +126,6 @@ export interface JobView {
   progress: { measured: number; planned: number | null };
   result: JobResult | null;
   error: string | null;
-  // The error as recorded, with its line breaks, when `error` is a sentence about it (a connected app's job).
-  errorDetail?: string | null;
   provisional: { model: string; endpoint: string; reason: string; estCostPerCallUsd: number | null } | null;
   createdAt: string;
   report: null;
@@ -154,7 +133,6 @@ export interface JobView {
   // use today, and its pass rate after each case (cloud/src/actors/job.ts). Null between steps and
   // absent from jobs that started before it; pages fall back to progress then.
   live?: LiveProgress | null;
-  evaluate?: Evaluate | null;
 }
 export interface LiveProgress {
   model: string;
@@ -171,59 +149,6 @@ export interface LiveProgress {
 
 export type EndpointKind = "openrouter" | "openai-compatible" | "anthropic";
 export interface Endpoint { id: string; kind: EndpointKind; baseUrl: string; allowedModels: string[] | "all"; keyLast4: string; verifiedAt: string | null; builtIn: boolean }
-
-// GET /api/connections/viktor: the Viktor connection, without its key, and the workspace's scheduled tasks.
-export type ViktorTaskStatus = "skipped" | "not_evaluated" | "evaluating" | "done" | "failed";
-export interface ViktorTask {
-  id: string; title: string; path: string; model: string | null; defaultModel?: string | null; credits30d: number; paused: boolean;
-  status: ViktorTaskStatus;
-  reason: string | null;
-  estimatedCredits: number | null;
-  // Why Evaluate or Start again cannot start it now (the plan has no evaluations left); null when it can.
-  blocked: string | null;
-  // Listed after the connection's first listing, and not yet opened or evaluated: shown as New.
-  isNew?: boolean;
-  jobId: string | null;
-  result: { status: string; change: string | null; link: string | null; approval: { by: string; name?: string | null; at: string } | null } | null;
-}
-export interface ViktorConnection {
-  connected: boolean;
-  keyLast4?: string; keyType?: string | null; connectedAt?: string; connectedBy?: string;
-  creditsUsed?: number; creditsReserved?: number; listedAt?: string | null; listingError?: string | null;
-  // A listing is running (Refresh, a stale listing, or the schedule): the page polls until it ends.
-  listing?: boolean;
-  // The page could not load the connection, after retrying; not the same as not connected.
-  unavailable?: boolean;
-  tasks: ViktorTask[];
-}
-
-// GET /api/connections/langfuse: the Langfuse connection, without its keys, and the project's tasks over 30 days.
-export interface LangfuseTask {
-  id: string; name: string; model: string; generations: number; costUsd: number | null; models: number;
-  status: ViktorTaskStatus;
-  reason: string | null;
-  // The most an evaluation may spend on model calls, and why Evaluate cannot start it now.
-  budgetUsd: number | null;
-  blocked: string | null;
-  isNew?: boolean;
-  jobId: string | null;
-  result: { status: string; change: string | null; link: string | null; approval: { by: string; name?: string | null; at: string } | null } | null;
-}
-export interface LangfuseConnection {
-  connected: boolean;
-  baseUrl?: string; projectName?: string; keyLast4?: string; connectedAt?: string; connectedBy?: string;
-  listedAt?: string | null; listingError?: string | null; truncated?: boolean;
-  listing?: boolean;
-  unavailable?: boolean;
-  tasks: LangfuseTask[];
-}
-// A Langfuse result's change, made where the application or the prompt sets the model.
-export interface LangfuseResult {
-  taskId: string; taskName: string; currentModel: string;
-  change: { text: string; link: string | null; instructions: string; model: string } | null;
-  dataset: { experiment: string; items: number } | null;
-  replayed: number;
-}
 
 export interface GuardrailsAt {
   level: Level;

@@ -1,5 +1,5 @@
 // Settings. Global (~/.openmerit/config.json): how OpenMerit Harness is powered. Per repository
-// (<repo>/.openmerit/config.json): Langfuse, candidate endpoints, allowed models, evals and the eval
+// (<repo>/.openmerit/config.json): candidate endpoints, allowed models, evals and the eval
 // budget, with credential references only. Secret values live in ~/.openmerit/secrets.json (0600),
 // outside every repository. Writes keep keys OpenMerit does not know about.
 import { randomUUID } from "node:crypto";
@@ -42,42 +42,20 @@ export interface Endpoint {
   verifiedAt?: string;
 }
 
-/** Which Langfuse scores and traces measure a task. Read-only aggregates. */
-export interface LangfuseMapping {
-  task: string;
-  traceName: string;
-  scores: string[];
-}
-
-export interface LangfuseSettings {
-  baseUrl: string;
-  publicKey: CredentialRef;
-  secretKey: CredentialRef;
-  mappings: LangfuseMapping[];
-  verifiedAt?: string;
-}
-
 /** How OpenMerit runs a task's existing eval for one model. See README "Eval contract". */
 export interface EvalSpec {
   command: string;
   cwd?: string;
-  /** Extra variables for the eval; `{{model}}`, `{{items}}` and `{{experiment}}` are filled in. */
+  /** Extra variables for the eval; `{{model}}` and `{{items}}` are filled in. */
   env?: Record<string, string>;
   /** Helper files the harness wrote (and the user approved) to run the existing eval. */
   helpers?: string[];
   /** The eval's own acceptance threshold: the minimum pass rate, 0 to 1. */
   threshold?: number;
-  /**
-   * The eval records each run as a Langfuse experiment named $OPENMERIT_EXPERIMENT on this dataset,
-   * with a per-item score. OpenMerit reads pass/fail back with the Viewer key. Without it, the eval
-   * reports its items in $OPENMERIT_RESULT.
-   */
-  langfuse?: { dataset: string; score: string; min?: number };
   description?: string;
 }
 
 export interface RepoConfig {
-  langfuse?: LangfuseSettings;
   endpoints?: Endpoint[];
   budget?: { defaultUsd: number };
   evals?: Record<string, EvalSpec>;

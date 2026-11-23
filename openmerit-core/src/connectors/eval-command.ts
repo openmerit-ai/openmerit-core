@@ -8,8 +8,6 @@ import type { Rung } from "../engine/search.ts";
 
 export interface EvalCommandInput<T extends Rung> {
   command: string;
-  /** Where per-item results come from, such as a Langfuse score, for the report's \"Based on\" line. */
-  scoredBy?: string;
   /** Item count, when the eval says how many it runs. */
   items?: number | null;
   /** One run of the command for `option` (null: the current model) on `items` (null: every item). Null leaves the option unmeasured. */
@@ -19,10 +17,10 @@ export interface EvalCommandInput<T extends Rung> {
 }
 
 /** What the eval contributes: the customer's own grader, and its items as real cases. */
-export function evalEvidence(input: { command: string; scoredBy?: string; items?: number | null }): EvidencePart {
+export function evalEvidence(input: { command: string; items?: number | null }): EvidencePart {
   const source = { connector: "eval-command", detail: input.command };
   return {
-    graders: [{ value: { kind: "customer_eval", description: `your eval's pass or fail per item${input.scoredBy ? ` (${input.scoredBy})` : ""}` }, source }],
+    graders: [{ value: { kind: "customer_eval", description: "your eval's pass or fail per item" }, source }],
     cases: [{ value: { kind: "real", count: input.items ?? 0, description: input.items ? `${input.items} items of your eval` : "the items of your eval" }, source }],
   };
 }

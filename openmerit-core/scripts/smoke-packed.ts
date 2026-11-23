@@ -38,7 +38,7 @@ function harnessContent(messages: { role: string; content: unknown }[]): string 
     }
     return JSON.stringify({ tasks: [...tasks].map(([name, usageIds]) => ({ name, description: `the ${name}`, usageIds, usesTools: false, needsVision: false, structuredOutput: false })) });
   }
-  if (text.includes("eval")) return JSON.stringify({ found: true, command: "node evals/classify.eval.ts", cwd: ".", env: [{ name: "CLASSIFIER_MODEL", value: "{{model}}" }], threshold: null, langfuseDataset: "", passScore: "", passMin: null, helpers: [], explanation: "npm run eval:classify", missing: "" });
+  if (text.includes("eval")) return JSON.stringify({ found: true, command: "node evals/classify.eval.ts", cwd: ".", env: [{ name: "CLASSIFIER_MODEL", value: "{{model}}" }], threshold: null, helpers: [], explanation: "npm run eval:classify", missing: "" });
   return JSON.stringify({ status: "OPENMERIT_READY", harness: "fake" });
 }
 let endpointRequests = 0;
@@ -70,7 +70,7 @@ const prefix = join(work, "prefix");
 const home = join(work, "home");
 const repo = join(work, "app");
 const bin = join(prefix, "bin", "openmerit");
-const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(LANGFUSE_|OPENMERIT_)|^(ANTHROPIC|OPENAI|OPENROUTER|GEMINI|GOOGLE)_API_KEY$/.test(key)));
+const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^OPENMERIT_|^(ANTHROPIC|OPENAI|OPENROUTER|GEMINI|GOOGLE)_API_KEY$/.test(key)));
 const env: Record<string, string | undefined> = {
   ...inherited, PATH: `${join(prefix, "bin")}:${process.env.PATH}`, OPENMERIT_HOME: home, OPENMERIT_NO_UPDATE_CHECK: "1",
   // The installed package would send telemetry to the production project.

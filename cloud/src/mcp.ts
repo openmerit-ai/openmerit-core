@@ -6,14 +6,12 @@ import { capture } from "./analytics.ts";
 import { NO_ORGANIZATION, type Auth, type AuthResult, type Identity } from "./auth.ts";
 import type { Config } from "./config.ts";
 import type { Answers, JobView } from "./actors/job.ts";
-import { credits, explain, nearMissLine, reasonFor, type Fix, type JobResult } from "./report.ts";
+import { explain, nearMissLine, reasonFor, type Fix, type JobResult } from "./report.ts";
 import type { AppClient } from "./registry.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { bundleProblem, DEFAULT_ENVIRONMENT, rerunJob, startJob } from "./start.ts";
-import { langfuseView, type LangfuseView } from "./langfuse.ts";
-import { currentViktorView, VIKTOR, type ViktorView } from "./viktor.ts";
-import { modelLabel } from "../../openmerit-core/src/connectors/viktor/index.ts";
-import type { ViktorJobView } from "./actors/viktor-job.ts";
+import type { Decision } from "./actors/account.ts";
+import { OPENROUTER } from "./pool.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const VERSION = "0.1.0";
@@ -64,7 +62,7 @@ export const TOOLS = [
   },
   {
     name: "openmerit_answer", title: "OpenMerit: answer a job's questions",
-    description: "Sends the user's answers to a job's questions, keyed by question id, such as a label check. Returns the job's state, as openmerit_result does.",
+    description: "Sends the user's answers to a job's questions, keyed by question id, such as a label check. After a result, it also takes the user's decision on its change, keyed by the result's approval id (configure_<task>): true once you applied the edit they approved, false when they declined. Returns the job's state, as openmerit_result does.",
     inputSchema: { type: "object", required: ["job_id", "answers"], additionalProperties: false, properties: { job_id: string, answers: { type: "object", description: "Answers keyed by question id: strings, string lists, booleans or numbers", additionalProperties: { type: ["string", "array", "boolean", "number"] } } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
@@ -94,35 +92,25 @@ const json = (status: number, body: unknown, headers: Record<string, string> = {
 export const resourceMetadataUrl = (config: Config) => `${config.publicUrl}/.well-known/oauth-protected-resource/mcp`;
 
 /** Why the job's state stands where it does, for the coding agent. */
-export function describeJob(view: JobView | ViktorJobView, appUrl: string): string {
+export function describeJob(view: JobView, decision: Decision | null = null): string {
   const lines = [`Job ${view.jobId} for ${view.task}: ${view.status} (${view.phase}).`];
   if (view.questions.length) {
     lines.push(`It needs the user. Ask them, then call openmerit_answer with job_id "${view.jobId}" and answers keyed by question id:`);
     for (const question of view.questions) lines.push(`- [${question.id}] (${question.kind}) ${question.prompt}${question.options ? `\n  Options: ${question.options.map(option => option.value).join(" | ")}` : ""}${question.detail ? `\n  ${question.detail.split("\n").join("\n  ")}` : ""}${question.hint ? `\n  ${question.hint}` : ""}`);
   }
   const result = view.result;
-  if (result?.connection) {
-    // A connected app's task: the change is made there by a person; OpenMerit changes nothing.
-    const change = result.connection.change;
-    lines.push(change ? `Proposed change: ${change.text}. It passed ${result.pick?.passes}/${result.pick?.total} checks${result.baseline ? `, as ${result.baseline.model} passed ${result.baseline.passes}/${result.baseline.total}` : ""}, for ${credits(result.pick?.costPerCallUsd ?? null)} per test run instead of ${credits(result.baseline?.costPerCallUsd ?? null)}. A person approves it with Approve change at ${result.reportUrl}, then makes it in Viktor (${change.link}); OpenMerit does not change the task.` : `Keep ${result.connection.currentModel}: no cheaper preset passed every check it passed.`);
-    lines.push(`Viktor credits used: ${result.connection.creditsUsed}.`);
-  } else if (result?.langfuse && result.pick) {
-    // A Langfuse task: the change is made where the application or the prompt sets the model; OpenMerit writes nothing to Langfuse.
-    const change = result.langfuse.change;
-    lines.push(change ? `Proposed change: ${change.text.replaceAll("`", "")}, ${result.pick.passes}/${result.pick.total} cases passed${result.baseline ? ` (current model ${result.baseline.passes}/${result.baseline.total})` : ""}. A person approves it with Approve change at ${result.reportUrl}, then makes it: ${change.instructions}` : `Keep ${result.langfuse.currentModel}.`);
-  } else if (result?.pick) {
+  if (result?.pick) {
     lines.push(`Measured pick: ${result.pick.model} on ${result.pick.endpoint}, ${result.pick.passes}/${result.pick.total} cases passed${result.baseline ? ` (current model ${result.baseline.passes}/${result.baseline.total})` : ""}.`);
     if (result.edit.edits.length) lines.push("Edits:", ...result.edit.edits.map(edit => `- ${edit.file}:${edit.line}: ${edit.before} → ${edit.after}`));
     if (result.edit.instructions) lines.push(result.edit.instructions);
-    lines.push(`Ask the user before applying the edit${result.approval ? `: "${result.approval.prompt}"` : ""}.`);
+    if (decision) lines.push(decisionLine(decision));
+    else lines.push(`Ask the user before applying the edit${result.approval ? `: "${result.approval.prompt}" (${result.approval.detail})` : ""}. Apply it if they say yes, then send their answer with openmerit_answer, job_id "${view.jobId}" and answers {"${result.approval?.id ?? "configure"}": true}, or false if they decline.`);
   } else if (result) lines.push(`No switch proposed (${result.status}). ${reasonFor(result, result.baseline?.model ?? "the current model")}`);
-  if (result?.baseline && result.connection) lines.push(`Current preset ${result.baseline.model}: ${result.baseline.passes}/${result.baseline.total} checks passed, ${credits(result.baseline.costPerCallUsd)} per test run.`);
-  else if (result?.baseline) lines.push(`Current model ${result.baseline.model}: ${result.baseline.passes}/${result.baseline.total} cases passed, ${perCall(result.baseline.costPerCallUsd)} per call, ${result.baseline.latencyMs === null ? "latency unknown" : `${result.baseline.latencyMs} ms`}.`);
+  if (result?.baseline) lines.push(`Current model ${result.baseline.model}: ${result.baseline.passes}/${result.baseline.total} cases passed, ${perCall(result.baseline.costPerCallUsd)} per call, ${result.baseline.latencyMs === null ? "latency unknown" : `${result.baseline.latencyMs} ms`}.`);
   const misses = result && nearMissLine(result);
   if (misses) lines.push(misses);
   if (result?.basedOn?.length) lines.push(`Based on: ${result.basedOn.join(" ")}`);
   if (result) lines.push(`Report: ${result.reportUrl}`);
-  else if ((view.status === "running" || view.status === "queued") && !view.provisional) lines.push(`Testing in Viktor's test mode: ${view.progress.measured} of ${view.progress.planned ?? "?"} test runs finished (updated ${view.updatedAt}); call openmerit_result again later.`);
   else if (view.status === "running" || view.status === "queued") lines.push(`Provisional pick while it runs: ${view.provisional!.model}. ${view.provisional!.reason} Measured ${view.progress.measured}${view.progress.planned ? ` of about ${view.progress.planned}` : ""} candidate runs so far (updated ${view.updatedAt}); call openmerit_result again later.`);
   // A result's notices include the job's and those of its last stages, such as challengers left out.
   // A failed job's error is its own line; jobs that ended before that also kept it as a notice.
@@ -132,12 +120,15 @@ export function describeJob(view: JobView | ViktorJobView, appUrl: string): stri
     const fix = result?.fixes?.find(item => item.notice === notice);
     if (fix) lines.push(`Fix: ${fixLine(fix, view.jobId, new URL(result!.reportUrl).origin)}`);
   }
-  // A Viktor task has no bundle to rerun, and starting it again spends the workspace's Viktor credits: an admin does it in the app.
-  if (view.status === "failed" && !result) lines.push("connection" in view && view.connection ? `Fix: tell the user an admin can start it again with Start again at ${appUrl}/r/${view.jobId}/${view.connection === "viktor" ? "; it uses Viktor credits from the workspace" : ""}.` : `Fix: ask the user, then call openmerit_recommend with job_id "${view.jobId}" to run the task again.`);
+  if (view.status === "failed" && !result) lines.push(`Fix: ask the user, then call openmerit_recommend with job_id "${view.jobId}" to run the task again.`);
   if (view.error) lines.push(`Error: ${view.error}`);
-  // The sentence first, then the error as recorded.
-  if ("errorDetail" in view && view.errorDetail) lines.push("Details:", view.errorDetail);
   return lines.join("\n");
+}
+
+/** The user's recorded decision on a result's change, in one line. */
+export function decisionLine(decision: Decision): string {
+  const who = decision.name ?? decision.by, on = decision.at.slice(0, 10);
+  return decision.decision === "approved" ? `Decision: ${decision.change}, approved by ${who} on ${on}.` : `Decision: ${decision.change}, declined by ${who} on ${on}.`;
 }
 
 /** What the coding agent does about a notice. */
@@ -150,10 +141,10 @@ function fixLine(fix: Fix, jobId: string, appOrigin: string): string {
   }
 }
 
-const jobData = (view: JobView | ViktorJobView): Json => ({
+const jobData = (view: JobView, decision: Decision | null = null): Json => ({
   job_id: view.jobId, task: view.task, status: view.status, phase: view.phase, questions: view.questions, notices: view.notices, progress: view.progress,
   provisional: view.provisional, ...(view.error ? { error: view.error } : {}),
-  ...(view.result ? { result: resultData(view.result) } : {}),
+  ...(view.result ? { result: { ...resultData(view.result), decision } } : {}),
 });
 
 /** The result for the agent: the verdict and why, the current model's figures, and whether each top model is cheaper than it. */
@@ -166,7 +157,6 @@ function resultData(result: JobResult): Json {
     top,
     nearMisses: nearMisses.map(item => ({ model: item.model, endpoint: item.endpoint, passes: item.passes, total: item.total, costPerCallUsd: item.costPerCallUsd, cheaperThanCurrent: item.cheaperThanCurrent })),
     reportUrl: result.reportUrl, edit: result.edit, spend: result.spend, fixes: result.fixes ?? [], basedOn: result.basedOn ?? [], approval: result.approval ?? null,
-    ...(result.connection ? { connection: { kind: result.connection.kind, task: result.connection.taskTitle, currentModel: result.connection.currentModel, change: result.connection.change, creditsUsed: result.connection.creditsUsed } } : {}),
   };
 }
 const perCall = (value: number | null) => (value === null ? "unknown cost" : `$${value.toFixed(5)}`);
@@ -190,14 +180,10 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
   const account = client.account.getOrCreate([identity.accountId]);
   // Clerk's OAuth access tokens carry org_id but no role or slug, so the member's recorded role and the account's name stay as the web app last saw them. No MCP tool depends on the role.
   await account.touch({ userId: identity.userId, role: null, name: null });
-  const jobView = async (jobId: unknown): Promise<JobView | ViktorJobView | ToolResult> => {
+  const jobView = async (jobId: unknown): Promise<JobView | ToolResult> => {
     const row = typeof jobId === "string" ? await account.job(jobId) : null;
     if (!row) return { text: `No job ${String(jobId)} in this account.`, data: {}, isError: true };
-    if (row.kind !== VIKTOR) return client.job.get([row.id]).status();
-    // A Viktor job's actor keeps its state; its saved report is the one the app shows.
-    const view = await client.viktorJob.get([row.id]).status();
-    const report = view.result ? null : await account.report({ jobId: row.id });
-    return report ? { ...view, result: report.json as JobResult } : view;
+    return client.job.get([row.id]).status();
   };
   if (name === "openmerit_recommend") {
     const unknown = Object.keys(args).filter(key => !["bundle", "environment", "agent", "job_id", "budget_usd"].includes(key));
@@ -224,15 +210,19 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
   }
   if (name === "openmerit_result") {
     const view = await jobView(args.job_id);
-    return "jobId" in view ? { text: describeJob(view, deps.config.appUrl), data: jobData(view), ...(view.status === "failed" ? { isError: true } : {}) } : view;
+    if (!("jobId" in view)) return view;
+    const decision = await account.decision(view.jobId);
+    return { text: describeJob(view, decision), data: jobData(view, decision), ...(view.status === "failed" ? { isError: true } : {}) };
   }
   if (name === "openmerit_answer") {
     const view = await jobView(args.job_id);
     if (!("jobId" in view)) return view;
-    if ("connection" in view && view.connection === "viktor") return { text: `Job ${view.jobId} evaluates a Viktor task and asks no questions.\n${describeJob(view, deps.config.appUrl)}`, data: jobData(view) };
     const answers = args.answers;
     if (!answers || typeof answers !== "object" || Array.isArray(answers)) return { text: "answers must be an object keyed by question id.", data: {}, isError: true };
-    if (!view.questions.length) return { text: `Job ${view.jobId} has no open questions.\n${describeJob(view, deps.config.appUrl)}`, data: jobData(view) };
+    // The user's decision on a finished result's change: recorded once, and an approval moves the task onto the pick.
+    const approval = view.result?.approval;
+    if (approval && Object.hasOwn(answers, approval.id)) return decide(deps, identity, view, answers as Answers);
+    if (!view.questions.length) return { text: `Job ${view.jobId} has no open questions.\n${describeJob(view, await account.decision(view.jobId))}`, data: jobData(view) };
     const handle = client.job.get([view.jobId]);
     await handle.send("answers", { answers: answers as Answers });
     // The job applies the answers in a moment; return the state once it has, or as it stands after a few seconds.
@@ -242,16 +232,20 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
       next = await handle.status();
       if (next.updatedAt !== view.updatedAt) break;
     }
-    return { text: describeJob(next, deps.config.appUrl), data: jobData(next) };
+    return { text: describeJob(next), data: jobData(next) };
   }
   if (name === "openmerit_tasks") {
-    const [tasks, ready, connected, traced] = await Promise.all([account.tasks(), account.readySince(identity.userId), currentViktorView(client, identity.accountId, deps.auth, true), langfuseView(client, identity.accountId, deps.auth)]);
-    const apps = [...viktorLines(connected, deps.config.appUrl), ...langfuseLines(traced, deps.config.appUrl)];
-    const text = (tasks.length
-      ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} [${item.id}] (${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.status}, ${item.state}${item.idleSince ? ` since ${item.idleSince.slice(0, 10)}` : ""}`),
+    const [tasks, ready, decisions] = await Promise.all([account.tasks(), account.readySince(identity.userId), account.taskDecisions()]);
+    const decided = (item: (typeof tasks)[number]) => {
+      const decision = decisions[item.id];
+      if (decision && (decision.jobId === item.lastJobId || decision.decision === "approved")) return `, ${decision.decision === "approved" ? "switched" : "declined"}: ${decisionLine(decision).replace(/^Decision: /, "").replace(/\.$/, "")}`;
+      return item.pick ? ", waiting for a decision" : "";
+    };
+    const text = tasks.length
+      ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} [${item.id}] (${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.status}, ${item.state}${item.idleSince ? ` since ${item.idleSince.slice(0, 10)}` : ""}${decided(item)}`),
         ready.length ? `Ready since the last session: ${ready.map(item => `${item.id} (${item.status})`).join(", ")}. Call openmerit_result for each.` : "Nothing new since the last session."].join("\n")
-      : "No tasks yet. Call openmerit_recommend with a task bundle to start one.") + (apps.length ? `\n${apps.join("\n")}` : "");
-    return { text, data: { tasks, readySinceLastSession: ready, ...(connected.connected ? { viktor: { creditsUsed: connected.creditsUsed, tasks: connected.tasks } } : {}), ...(traced.connected ? { langfuse: { project: traced.projectName ?? null, tasks: traced.tasks } } : {}) } };
+      : "No tasks yet. Call openmerit_recommend with a task bundle to start one.";
+    return { text, data: { tasks: tasks.map(item => ({ ...item, decision: decisions[item.id] ?? null })), readySinceLastSession: ready } };
   }
   if (name === "openmerit_retire") {
     const row = typeof args.task_id === "string" ? await account.task(args.task_id) : null;
@@ -262,25 +256,23 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
   return { text: `Unknown tool ${name}`, data: {}, isError: true };
 }
 
-/** A task no one has evaluated: only a person starts it, with Evaluate in the app; MCP never does. */
-const notEvaluated = (cost: string, blocked: string | null, appUrl: string) => `not evaluated; an admin can evaluate it with Evaluate at ${appUrl}/connections/ (${cost})${blocked ? `, which is unavailable now: ${blocked}` : ""}`;
-
-/** The Viktor connection's tasks, for openmerit_tasks. */
-function viktorLines(view: ViktorView, appUrl: string): string[] {
-  if (!view.connected) return [];
-  return [`Viktor (${view.creditsUsed ?? 0} Viktor credits used by OpenMerit's tests): ${view.tasks.length} scheduled task${view.tasks.length === 1 ? "" : "s"}:`, ...view.tasks.map(task => `- ${task.title} (${modelLabel(task)}, ${task.credits30d} credits in 30 days): ${
-    task.status === "done" ? `${task.result?.change ?? "keep its model"}${task.result?.approval ? `, approved by ${task.result.approval.name ?? task.result.approval.by} on ${task.result.approval.at.slice(0, 10)}` : ""}; openmerit_result with job_id "${task.jobId}"`
-    : task.status === "evaluating" ? `evaluating, job_id "${task.jobId}"`
-    : task.status === "not_evaluated" ? notEvaluated(`about ${task.estimatedCredits} Viktor credits`, task.blocked, appUrl) : `${task.status}: ${task.reason}`}`)];
-}
-
-/** The Langfuse connection's tasks, for openmerit_tasks: most recorded spend first. */
-function langfuseLines(view: LangfuseView, appUrl: string): string[] {
-  if (!view.connected) return [];
-  return [`Langfuse (project ${view.projectName ?? "?"}): ${view.tasks.length} task${view.tasks.length === 1 ? "" : "s"} over the last 30 days${view.listingError ? ` (listing failed: ${view.listingError})` : ""}:`, ...view.tasks.map(task => `- ${task.name} (${task.model || "no model"}, ${task.generations} calls, ${task.costUsd === null ? "no recorded cost" : `$${task.costUsd.toFixed(2)}`} in 30 days): ${
-    task.status === "done" ? `${task.result?.change?.replaceAll("`", "") ?? "keep its model"}${task.result?.approval ? `, approved by ${task.result.approval.name ?? task.result.approval.by} on ${task.result.approval.at.slice(0, 10)}` : ""}; openmerit_result with job_id "${task.jobId}"`
-    : task.status === "evaluating" ? `evaluating, job_id "${task.jobId}"`
-    : task.status === "not_evaluated" ? notEvaluated(`up to $${task.budgetUsd} of model calls`, task.blocked, appUrl) : `${task.status}: ${task.reason}${task.jobId ? ` (job_id "${task.jobId}")` : ""}`}`)];
+/**
+ * Records the user's decision on a finished job's change, which the coding agent sends after asking
+ * the result's approval question. The first decision stands. An approval means the agent applied the
+ * edit, so the task's later runs measure the pick as its current model.
+ */
+async function decide(deps: McpDeps, identity: Identity, view: JobView, answers: Answers): Promise<ToolResult> {
+  const result = view.result!, approval = result.approval!, pick = result.pick;
+  const value = answers[approval.id];
+  if (typeof value !== "boolean") return { text: `${approval.id} takes true (the user approved and you applied the edit) or false (they declined).`, data: {}, isError: true };
+  if (!pick) return { text: `Job ${view.jobId} proposes no change to decide on.`, data: jobData(view), isError: true };
+  const account = deps.client.account.getOrCreate([identity.accountId]);
+  const person = await deps.auth?.person(identity.userId).catch(() => null) ?? null;
+  const change = `${result.baseline?.model ?? view.task} → ${pick.model} (${pick.endpoint})`;
+  const { recorded, decision } = await account.decide({ jobId: view.jobId, taskId: view.taskId, decision: value ? "approved" : "declined", change, by: identity.userId, name: person?.name ?? null, email: person?.email ?? null });
+  if (!recorded) return { text: `The decision on job ${view.jobId} was already recorded. ${decisionLine(decision)}`, data: jobData(view, decision), isError: true };
+  if (decision.decision === "approved") await deps.client.task.get([identity.accountId, view.taskId]).adopt({ model: pick.endpoint === OPENROUTER ? pick.model : pick.endpointModel, endpoint: pick.endpoint === OPENROUTER ? null : pick.endpoint, edits: result.edit.edits });
+  return { text: `Recorded. ${decisionLine(decision)}${decision.decision === "approved" ? ` OpenMerit now watches ${view.task} on ${pick.model}.` : ""}`, data: jobData(view, decision) };
 }
 
 /** /mcp. A missing or invalid token gets 401 with the protected-resource metadata, which starts the client's Clerk sign-in. */

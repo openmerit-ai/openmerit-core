@@ -9,4 +9,3 @@ export { localContext, missingSetup, startRun } from "./local.ts";
 export { createHarness, verifyHarness, detectAgents, type Harness } from "./harness/harness.ts";
 export { State, type RunRow, type Spend } from "./state/db.ts";
 export { serveMcp } from "./mcp.ts";
-export * as langfuse from "./connectors/langfuse/index.ts";

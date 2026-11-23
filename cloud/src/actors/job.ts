@@ -18,7 +18,6 @@ import { applyLabelCheck, BudgetRefused, completeWith, createClient, createMeasu
 import { approvalQuestion, basedOn, mergeEvidence, strongest } from "../engine.ts";
 import { baselineResult, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, FINALISTS, modelResult, newProgress, redact, SAMPLE_SIZE, score, taskResult, type CatalogueModel, type Ledger, type ModelResult, type ResolvedGuardrails } from "../engine.ts";
 import { agentBundle, caseEvidence } from "../../../openmerit-core/src/connectors/agent-bundle.ts";
-import { caseEvidence as langfuseEvidence, langfuse, LangfuseError, proposeChange as langfuseChange, readCases, type LangfuseTask } from "../../../openmerit-core/src/connectors/langfuse/connection.ts";
 import { buildPool, OPENROUTER, regionNotice, type Option, type Pool, type Provisional } from "../pool.ts";
 import { JOB_BUDGET } from "./account.ts";
 import { proposeEdit, renderMarkdown, type AgentEvalSummary, type Fix, type JobResult, type MeasuredModel } from "../report.ts";
@@ -56,12 +55,6 @@ export interface JobInput {
   userId?: string | null;
   provisional: Provisional;
   createdAt: string;
-  /**
-   * A connection's task, such as a Langfuse generation: the job reads its bundle and cases from the
-   * connection instead of the bundle's examples and written cases, and its result proposes the
-   * change there. It has no task actor, so no watch. Absent for an agent's task.
-   */
-  connection?: { kind: "langfuse"; task: LangfuseTask; links: { baseUrl: string; projectId: string } };
 }
 
 export type JobStatus = "queued" | "running" | "needs_input" | "done" | "failed" | "stopped";
@@ -84,8 +77,7 @@ export interface JobState {
   updatedAt: string;
 }
 
-/** `connection` names the connected app a connection's task comes from, such as "langfuse"; absent for an agent's task. */
-export interface JobView extends Omit<JobState, "input"> { jobId: string; taskId: string; task: string; provisional: Provisional; createdAt: string; connection?: "langfuse" }
+export interface JobView extends Omit<JobState, "input"> { jobId: string; taskId: string; task: string; provisional: Provisional; createdAt: string }
 
 /** The candidate a measure step runs, its pass rate after each case so far, and the current model's pass rate on the same cases. */
 export interface LiveProgress {
@@ -229,29 +221,11 @@ export const job = workflow({
           const { effective } = guardrails;
           await account.jobUpdate({ jobId, status: "running", budgetUsd: effective.budgetUsd ?? services().config.limits.defaultJobBudgetUsd, capOpenmeritUsd: effective.spendCapUsd ?? null, capCustomerUsd: effective.customerSpendCapUsd ?? null });
           s.state.status = "running"; s.state.phase = "cases"; s.state.updatedAt = now();
-          return { bundle, guardrails, accountId: input.accountId, environment: input.environment, agent: input.agent, provisional: input.provisional, connection: input.connection ?? null };
+          return { bundle, guardrails, accountId: input.accountId, environment: input.environment, agent: input.agent, provisional: input.provisional };
         },
       });
-      const linked = (source as { connection?: JobInput["connection"] | null }).connection ?? null;
-      // A connection's task: its bundle and cases from the connection, read once. A task with nothing
-      // to replay, or a key Langfuse refuses, fails at once; other errors are retried.
-      const read = linked ? await ctx.step({
-        name: "read", timeout: 900_000, maxRetries: INTERRUPTIONS,
-        run: async s => {
-          const sealed = await s.client<Registry>().account.getOrCreate([s.state.input.accountId]).connectionKey(linked.kind);
-          if (!sealed) throw new CriticalError("The Langfuse connection was removed, or its key no longer decrypts. Connect Langfuse again at app.openmerit.ai.");
-          try {
-            const read = await readCases(JSON.parse(sealed) as { baseUrl: string; publicKey: string; secretKey: string }, linked.task, { fetch: services().fetch, retries: 2 });
-            s.state.updatedAt = now();
-            return { ...read, bundle: redactBundle(read.bundle) };
-          } catch (error) {
-            if (error instanceof LangfuseError && (error.status === null ? /has no recorded request|cannot be evaluated/.test(error.message) : error.status < 500 && error.status !== 429)) throw new CriticalError(redact(error.message).slice(0, 500));
-            throw error;
-          }
-        },
-      }) : null;
       const { guardrails } = source as { guardrails: ResolvedGuardrails };
-      const bundle = read?.bundle ?? (source as { bundle: TaskBundle }).bundle;
+      const { bundle } = source as { bundle: TaskBundle };
       const input = { accountId: source.accountId, environment: source.environment, agent: source.agent };
       const taskId = taskIdFor(input.environment, bundle.task);
       const budgetUsd = guardrails.effective.budgetUsd ?? services().config.limits.defaultJobBudgetUsd;
@@ -268,7 +242,6 @@ export const job = workflow({
       const written = await ctx.step({
         name: "cases", timeout: 0, maxRetries: INTERRUPTIONS,
         run: async s => {
-          if (read) return read.cases;
           const { accountId, taskId } = s.state.input;
           const client = s.client<Registry>();
           const task = client.task.getOrCreate([accountId, taskId]);
@@ -562,17 +535,10 @@ export const job = workflow({
               status: jobStatus, top, nearMisses, baseline, candidates,
               pick: chosen ? { model: chosen.model, endpoint: chosen.endpoint, endpointModel: chosen.endpointModel, passes: chosen.passes, total: chosen.total, costPerCallUsd: chosen.costPerCallUsd, savingPerCallUsd: baseline.costPerCallUsd !== null && chosen.costPerCallUsd !== null ? baseline.costPerCallUsd - chosen.costPerCallUsd : null } : null,
               search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: result.samples, finalists: result.finalists, challengers: challenging.map(item => item.model), shortfall: result.searchShortfall },
-              agentEval, edit: chosen && !linked ? proposeEdit(bundle, optionOf(chosen), pool.baseline!.endpoint, index.find) : { edits: [], instructions: chosen && linked ? langfuseChange(linked.task, chosen, linked.links).instructions : null },
-              ...(linked && read ? { langfuse: {
-                taskId: linked.task.id, taskName: linked.task.name, currentModel: bundle.current.model, dataset: read.dataset, replayed: read.replayed,
-                change: chosen ? (({ text, link, instructions }) => ({ text, link, instructions: instructions!, model: chosen.model }))(langfuseChange(linked.task, chosen, linked.links)) : null,
-              } } : {}),
-              // The quality rule over the bundle's evidence, and the Approve question both hosts ask.
-              basedOn: basedOn(strongest(mergeEvidence(bundle.task, bundle.current.model, linked && read
-                ? [langfuse({ tasks: [linked.task], links: linked.links }).evidence(linked.task.id), langfuseEvidence(linked.task, read)]
-                : [agentBundle({ bundle, baselineEndpoint: pool.baseline!.endpoint, find: index.find }).evidence(), caseEvidence(bundle, usable)]))),
-              // A connection's change is approved in the app; the coding agent has nothing to ask.
-              approval: chosen && !linked ? approvalQuestion(bundle.task, bundle.current.model, chosen) : null,
+              agentEval, edit: chosen ? proposeEdit(bundle, optionOf(chosen), pool.baseline!.endpoint, index.find) : { edits: [], instructions: null },
+              // The quality rule over the bundle's evidence, and the approval question both hosts ask.
+              basedOn: basedOn(strongest(mergeEvidence(bundle.task, bundle.current.model, [agentBundle({ bundle, baselineEndpoint: pool.baseline!.endpoint, find: index.find }).evidence(), caseEvidence(bundle, usable)]))),
+              approval: chosen ? approvalQuestion(bundle.task, bundle.current.model, chosen) : null,
               spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices: [...s.state.notices, ...notices], fixes: [...(s.state.fixes ?? []), ...fixes],
               reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts,
             };
@@ -604,7 +570,7 @@ export const job = workflow({
   actions: {
     status: (c): JobView => {
       const { input, measuringSince: _since, ...rest } = c.state;
-      return { ...rest, live: rest.live ?? null, jobId: c.key[0]!, taskId: input.taskId, task: input.bundle.task, provisional: input.provisional, createdAt: input.createdAt, ...(input.connection ? { connection: input.connection.kind } : {}) };
+      return { ...rest, live: rest.live ?? null, jobId: c.key[0]!, taskId: input.taskId, task: input.bundle.task, provisional: input.provisional, createdAt: input.createdAt };
     },
     /** For deleting an account. */
     destroy: (c): void => { endpointKeys.delete(c.key[0]!); c.destroy(); },
@@ -625,8 +591,7 @@ async function finish(s: StepState, client: AppClient, jobId: string, status: "d
     const markdown = renderMarkdown({ jobId, bundle: input.bundle, result, provisional: input.provisional, createdAt: input.createdAt });
     await client.account.getOrCreate([input.accountId]).saveReport({ jobId, taskId: input.taskId, json: { jobId, task: input.bundle.task, createdAt: input.createdAt, ...result }, markdown });
   }
-  // A connection's task has no task actor: the connection's table shows its result.
-  if (!input.connection) await client.task.getOrCreate([input.accountId, input.taskId]).recordResult({ jobId, status, result });
+  await client.task.getOrCreate([input.accountId, input.taskId]).recordResult({ jobId, status, result });
   await client.account.getOrCreate([input.accountId]).jobUpdate({ jobId, status, measured: status === "done" });
   const ended = TERMINAL.has(s.state.status);
   s.state.status = status; s.state.phase = "done"; s.state.result = result; s.state.error = error; s.state.questions = []; s.state.live = null; s.state.updatedAt = now();

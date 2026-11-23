@@ -287,6 +287,67 @@ test("a job waits on its label check across a restart, then measures on OpenRout
   } finally { await stop(app); await models.close(); await posthog.close(); }
 });
 
+test("the coding agent sends back the user's decision on a result's change: an approval moves the watched task onto the pick, a decline keeps it", async () => {
+  const models = await fakeModels();
+  const app = await startApp({ models, env: { ...CLERK, TEST_CATALOGUE_VERSION: "next" } });
+  try {
+    await subscribe(app, "org_decide");
+    const agent = () => caller(app, "test:user_d:org_decide:admin");
+    const start = async (task: string) => (await agent().tool("openmerit_recommend", { bundle: bundle(task), environment: "acme/decide" })).data.job_id as string;
+    const [kept, dropped] = [await start("ticket classifier"), await start("reply router")];
+    const result = (jobId: string) => agent().tool("openmerit_result", { job_id: jobId });
+    const finish = async (jobId: string) => {
+      await waitFor(() => result(jobId), value => value.data.status === "needs_input");
+      await agent().tool("openmerit_answer", { job_id: jobId, answers: { "label_example-7": "billing", label_check: ["written-1", "written-2"] } });
+      return waitFor(() => result(jobId), value => ["done", "failed", "stopped"].includes(String(value.data.status)));
+    };
+    const [done, other] = [await finish(kept), await finish(dropped)];
+    const measured = done.data.result as Result & { approval: { id: string } };
+    assert.equal(measured.status, "picked", done.text);
+    const pick = measured.pick!.model;
+    // The result tells the agent to send the user's answer back, keyed by the approval question's ID.
+    assert.equal(measured.approval.id, "configure_ticket_classifier");
+    assert.match(done.text, /send their answer with openmerit_answer, job_id "[\w-]+" and answers \{"configure_ticket_classifier": true\}/);
+    const decide = (jobId: string, answers: Record<string, unknown>) => agent().tool("openmerit_answer", { job_id: jobId, answers });
+    assert.equal((await decide(kept, { configure_ticket_classifier: "yes" })).isError, true, "a decision is true or false");
+
+    const approved = await decide(kept, { configure_ticket_classifier: true });
+    assert.equal(approved.isError, false, approved.text);
+    assert.match(approved.text, new RegExp(`Decision: openai/gpt-5\\.4 → ${pick.replaceAll(".", "\\.")} \\(openrouter\\), approved by User D on \\d{4}-\\d{2}-\\d{2}\\.`));
+    // The first decision stands.
+    const again = await decide(kept, { configure_ticket_classifier: false });
+    assert.equal(again.isError, true);
+    assert.match(again.text, /already recorded[^]*approved by User D/);
+    assert.match((await result(kept)).text, /Decision: .*approved by User D/);
+    const run = await agent().api<{ decision: { decision: string; by: string; name: string } }>(`/api/runs/${kept}`);
+    assert.deepEqual([run.body.decision.decision, run.body.decision.by, run.body.decision.name], ["approved", "user_d", "User D"]);
+
+    assert.equal((other.data.result as Result).status, "picked", other.text);
+    assert.equal((await decide(dropped, { configure_reply_router: false })).isError, false);
+
+    // The approved task now runs the pick, and its code ref has the edited literal; the declined one is unchanged.
+    type TaskRow = { id: string; name: string; currentModel: string; decision: { decision: string } | null };
+    const tasks = (await agent().api<TaskRow[]>("/api/tasks")).body;
+    const classifier = tasks.find(task => task.name === "ticket classifier")!, router = tasks.find(task => task.name === "reply router")!;
+    assert.deepEqual([classifier.currentModel, classifier.decision?.decision], [pick, "approved"]);
+    assert.deepEqual([router.currentModel, router.decision?.decision], ["openai/gpt-5.4", "declined"]);
+    const saved = (await agent().api<{ bundle: TaskBundle }>(`/api/tasks/${classifier.id}`)).body.bundle;
+    assert.deepEqual([saved.current.model, saved.codeRefs?.[0]?.spelling], [pick, `const MODEL = "${pick}";`]);
+    const listed = (await agent().tool("openmerit_tasks", {})).text;
+    assert.match(listed, new RegExp(`ticket classifier .*: ${pick.replaceAll(".", "\\.")}, switched, watching, switched: .*approved by User D`));
+    assert.match(listed, /reply router .*: openai\/gpt-5\.4 → .*, picked, watching, declined: .*declined by User D/);
+
+    // The next watch run measures the pick as the current model.
+    const rivet = createClient<Registry>({ endpoint: `http://127.0.0.1:${app.enginePort}`, token: "test-token" });
+    await rivet.catalogue.getOrCreate(["global"]).refresh();
+    const runs = await waitFor(() => agent().api<{ id: string; taskId: string; kind: string; status: string }[]>("/api/runs"), value => value.body.some(item => item.kind === "watch" && item.taskId === classifier.id && item.status === "done"));
+    const watch = runs.body.find(item => item.kind === "watch" && item.taskId === classifier.id)!;
+    const watched = await agent().api<{ baseline: { model: string }; edit: { edits: { before: string }[] } }>(`/api/runs/${watch.id}`);
+    assert.equal(watched.body.baseline.model, pick);
+    assert.ok(watched.body.edit.edits.every(edit => edit.before === `const MODEL = "${pick}";`), "an edit proposed by the watch run matches the code as edited");
+  } finally { await stop(app); await models.close(); }
+});
+
 test("a task goes idle once no recommend call came for the idle period, and retired and frozen say why it stopped first", () => {
   const day = 24 * 60 * 60 * 1000, base = { retired: false, watch: undefined, lastRecommendAt: 0, idleAfterMs: 30 * day };
   assert.deepEqual(watchState({ ...base, now: 30 * day - 1 }), { state: "watching", idleSince: null });

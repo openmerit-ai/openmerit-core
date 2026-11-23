@@ -16,14 +16,14 @@ const TOOLS = [
   {
     name: "openmerit_status",
     title: "OpenMerit status",
-    description: "Read-only. Reports whether OpenMerit is set up for a repository (harness, candidate endpoints, Langfuse, eval budget), the installed package and catalogue versions, and whether a newer openmerit is available.",
+    description: "Read-only. Reports whether OpenMerit is set up for a repository (harness, candidate endpoints, eval budget), the installed package and catalogue versions, and whether a newer openmerit is available.",
     inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Repository directory (default: the server's working directory)" } }, additionalProperties: false },
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
   {
     name: "openmerit_scout",
     title: "OpenMerit Scout",
-    description: "Runs OpenMerit Scout: scans the repository's model usages, lets the user pick a model and its agents/tasks, runs Scout Model Binary Search with the task's existing eval (the current model on every item, ECI-ranked candidates screened on five items it passes, five finalists on every item; paid model requests, within the run's eval budget; per-item results read back read-only from the Langfuse experiment the eval records, or from the eval's own report), ranks the cheapest finalists at least as good as the current model, and can edit the application's model configuration. Call without runId to start; each call returns `questions` when it needs the user. Show every question (with its detail) to the user and pass their answers back in `answers`, keyed by question id, with the same runId. Never answer approval, budget or configuration questions on the user's behalf. Not read-only: it sends code context to the harness, spends on evals and can change files, each only after the matching approval.",
+    description: "Runs OpenMerit Scout: scans the repository's model usages, lets the user pick a model and its agents/tasks, runs Scout Model Binary Search with the task's existing eval (the current model on every item, ECI-ranked candidates screened on five items it passes, five finalists on every item; paid model requests, within the run's eval budget; per-item results from the eval's own report), ranks the cheapest finalists at least as good as the current model, and can edit the application's model configuration. Call without runId to start; each call returns `questions` when it needs the user. Show every question (with its detail) to the user and pass their answers back in `answers`, keyed by question id, with the same runId. Never answer approval, budget or configuration questions on the user's behalf. Not read-only: it sends code context to the harness, spends on evals and can change files, each only after the matching approval.",
     inputSchema: {
       type: "object",
       properties: {

@@ -80,7 +80,7 @@ function harness(): Harness {
         }
         return { tasks: [...byTask].map(([name, usageIds]) => ({ name, description: `the ${name}`, usageIds, usesTools: false, needsVision: false, structuredOutput: false })) } as T;
       }
-      return { found: true, command: "node evals/classify.eval.ts", cwd: ".", env: [{ name: "CLASSIFIER_MODEL", value: "{{model}}" }], threshold: null, langfuseDataset: "", passScore: "", passMin: null, helpers: [], explanation: "the classifier's eval", missing: "", items: null } as T;
+      return { found: true, command: "node evals/classify.eval.ts", cwd: ".", env: [{ name: "CLASSIFIER_MODEL", value: "{{model}}" }], threshold: null, helpers: [], explanation: "the classifier's eval", missing: "", items: null } as T;
     },
   };
 }
@@ -91,8 +91,7 @@ async function cliRun(models: FakeModels) {
   cpSync(fixture, root, { recursive: true });
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
   git("init", "-q"); git("add", "-A"); git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "fixture");
-  const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("LANGFUSE_")));
-  const env = { ...inherited, OPENMERIT_HOME: mkdtempSync(join(tmpdir(), "openmerit-home-")), FAKE_ROUTER_KEY: "or-test-key" };
+  const env = { ...process.env, OPENMERIT_HOME: mkdtempSync(join(tmpdir(), "openmerit-home-")), FAKE_ROUTER_KEY: "or-test-key" };
   updateGlobalConfig({ harness: { kind: "codex" } }, env);
   updateRepoConfig(root, { endpoints: [{ id: "openrouter", kind: "openrouter", baseUrl: `${models.url}/v1`, apiKey: { env: "FAKE_ROUTER_KEY" }, allowedModels: "all" }] });
   const scripted = harness();

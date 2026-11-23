@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Langfuse and the cloud app's connections removed; decisions recorded — 0.4.3, 23 November 2026
+
+Reviewed the homepage against removing Langfuse from the CLI (setup's Langfuse step, `OPENMERIT_EXPERIMENT` and `openmerit/sources`), removing the cloud app's Viktor and Langfuse connections, and the cloud app recording the decision a coding agent sends back on a result's change. `site/index.html` makes no claim about Langfuse, Viktor, connected apps, approvals or where per-item results come from. No homepage copy change is needed; the openmerit-core and cloud READMEs describe the new behaviour.
+
 ## Fewer Viktor key scopes — unreleased, 21 November 2026
 
 Reviewed the homepage against the cloud app's Viktor connection requiring only the scopes `scripts:execute`, `usage:read`, `threads:create`, `runs:create` and `runs:read`. `site/index.html` makes no claim about Viktor or the scopes a key needs. No homepage copy change is needed; the cloud README's Viktor section lists the scopes.

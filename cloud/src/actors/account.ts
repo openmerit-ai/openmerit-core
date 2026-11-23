@@ -29,9 +29,8 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, environment TEXT NOT NULL, agent TEXT, name TEXT NOT NULL, current_model TEXT NOT NULL,
     pick TEXT, status TEXT NOT NULL, last_run_at INTEGER, last_job_id TEXT, monthly_saving_usd REAL, retired INTEGER NOT NULL DEFAULT 0, last_recommend_at INTEGER)`,
   `CREATE TABLE IF NOT EXISTS deletions (task_id TEXT NOT NULL, name TEXT NOT NULL, environment TEXT NOT NULL, user_id TEXT NOT NULL, jobs INTEGER NOT NULL, deleted_at INTEGER NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS connections (kind TEXT PRIMARY KEY, sealed_key TEXT NOT NULL, key_last4 TEXT NOT NULL, key_type TEXT, team_id TEXT,
-    credit_cap INTEGER NOT NULL, connected_by TEXT NOT NULL, connected_at INTEGER NOT NULL, listing TEXT, listed_at INTEGER, listing_error TEXT)`,
-  `CREATE TABLE IF NOT EXISTS approvals (job_id TEXT PRIMARY KEY, change TEXT NOT NULL, link TEXT, approved_by TEXT NOT NULL, approved_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS decisions (job_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, decision TEXT NOT NULL, change TEXT NOT NULL,
+    decided_by TEXT NOT NULL, decided_by_name TEXT, decided_by_email TEXT, decided_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS reports (job_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, created_at INTEGER NOT NULL, json TEXT NOT NULL, markdown TEXT NOT NULL, share_token TEXT UNIQUE)`,
 ];
 
@@ -41,14 +40,11 @@ const FINAL = new Set(["done", "failed", "stopped"]);
 const ACTIVE_PLAN = new Set(["active", "trialing"]);
 
 /**
- * How many of the plan's evaluations a finished job counts: one per task, as an agent's run counts
- * (decision 8 for connections is still open, so this is the one place to change it).
+ * What the user decided about a result's change, as the coding agent sent it back: approved (the agent
+ * applied the edit) or declined. by is the Clerk user whose MCP token sent it; name and email are what
+ * Clerk had for them, null when the lookup failed.
  */
-export const EVALUATIONS_PER_JOB: Readonly<Record<string, number>> = { run: 1, watch: 1, viktor: 1, langfuse: 1 };
-
-export interface ConnectionRow { kind: string; keyLast4: string; keyType: string | null; teamId: string | null; creditCap: number; connectedBy: string; connectedAt: string; listing: unknown; listedAt: string | null; listingError: string | null }
-/** by is the approver's Clerk user ID; name and email are what Clerk had for them, null when the lookup failed. */
-export interface Approval { jobId: string; change: string; link: string | null; by: string; name: string | null; email: string | null; at: string }
+export interface Decision { jobId: string; taskId: string; decision: "approved" | "declined"; change: string; by: string; name: string | null; email: string | null; at: string }
 
 export interface Plan { name: string; status: string; periodStart: number | null; periodEnd: number | null; includedEvals: number; usedEvals: number; overage: "metered" | "refuse"; customerId: string | null }
 export interface EndpointView { id: string; kind: EndpointKind; baseUrl: string; allowedModels: string[] | "all"; keyLast4: string; verifiedAt: string | null; builtIn: boolean }
@@ -61,26 +57,15 @@ export type WatchState = "watching" | "idle" | "frozen" | "retired";
 /** `watching` is `state === "watching"`, for clients that predate `state`. `idleSince` is set only while idle. */
 export interface TaskRow { id: string; environment: string; agent: string | null; name: string; currentModel: string; pick: string | null; status: string; state: WatchState; idleSince: string | null; watching: boolean; lastRunAt: string | null; lastJobId: string | null; monthlySavingUsd: number | null }
 /** What a finished job's report found, so a list of runs can say it without loading each report. */
-/** task is the report's task name, which a connected app's task keeps after it leaves the app. */
 export interface RunResult { status: string; task: string | null; model: string | null; from: string | null; savingPerCallUsd: number | null }
 /** askedBy is the MCP client's name (clientInfo.name) for a run a coding agent started; null for a watch run or an unnamed client. */
 /** The end of a ledger refusal's reason when the job's own budget refused it, which raising the task's budget fixes. */
 export const JOB_BUDGET = "budget for this job";
 
-/**
- * title is a connection task's name, such as a Viktor task's title, kept so a run is labelled without its report.
- * startedBy is the user who pressed Start or Start again for a connection's job; null when it started on its own, or for an agent's run.
- */
-export interface JobRow { id: string; taskId: string; kind: string; status: string; startedAt: string; finishedAt: string | null; askedBy: string | null; title: string | null; startedBy: string | null; result: RunResult | null }
+export interface JobRow { id: string; taskId: string; kind: string; status: string; startedAt: string; finishedAt: string | null; askedBy: string | null; result: RunResult | null }
 export interface GuardrailSetting { key: string; value: unknown; kind: "constraint" | "default" }
 export type Started = { ok: true } | { ok: false; error: string };
 
-/** A connection listing's tasks: Viktor's listing is the tasks, Langfuse's has them under `tasks`. */
-type ListedTask = { id: string; firstSeenAt?: string | null; seenAt?: string | null };
-const listedTasks = (listing: unknown): ListedTask[] => {
-  const tasks = Array.isArray(listing) ? listing : listing && typeof listing === "object" && Array.isArray((listing as { tasks?: unknown }).tasks) ? (listing as { tasks: unknown[] }).tasks : [];
-  return tasks.filter((task): task is ListedTask => !!task && typeof task === "object" && typeof (task as { id?: unknown }).id === "string");
-};
 const iso = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toISOString() : null);
 const startOfMonth = (now: number) => { const date = new Date(now); return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1); };
 const scopeKey = (level: Level, input: { environment: string; agent?: string | null; taskId?: string }) =>
@@ -112,7 +97,7 @@ function runResult(json: unknown): RunResult | null {
 }
 const jobRow = (row: Row): JobRow => ({
   id: String(row.id), taskId: String(row.task_id), kind: String(row.kind), status: String(row.status), startedAt: iso(row.started_at)!, finishedAt: iso(row.finished_at),
-  askedBy: (row.asked_by as string | null) ?? null, title: (row.title as string | null) ?? null, startedBy: (row.started_by as string | null) ?? null, result: runResult(row.report_json),
+  askedBy: (row.asked_by as string | null) ?? null, result: runResult(row.report_json),
 });
 
 export const account = actor({
@@ -122,19 +107,9 @@ export const account = actor({
     const columns = await database.execute(`PRAGMA table_info(jobs)`);
     if (!columns.some(column => column.name === "asked_by")) await database.execute(`ALTER TABLE jobs ADD COLUMN asked_by TEXT`);
     if (!columns.some(column => column.name === "deleted_at")) await database.execute(`ALTER TABLE jobs ADD COLUMN deleted_at INTEGER`);
-    // Accounts created before connections: a connection's job records the credits it used or expects to use.
-    if (!columns.some(column => column.name === "credits")) await database.execute(`ALTER TABLE jobs ADD COLUMN credits REAL`);
-    // Accounts created before a connection's job kept its task's title and who started it.
-    if (!columns.some(column => column.name === "title")) {
-      await database.execute(`ALTER TABLE jobs ADD COLUMN title TEXT`);
-      await database.execute(`ALTER TABLE jobs ADD COLUMN started_by TEXT`);
-    }
-    // Approvals recorded before they kept the approver's name and email.
-    const approvalColumns = await database.execute(`PRAGMA table_info(approvals)`);
-    if (!approvalColumns.some(column => column.name === "approved_by_name")) {
-      await database.execute(`ALTER TABLE approvals ADD COLUMN approved_by_name TEXT`);
-      await database.execute(`ALTER TABLE approvals ADD COLUMN approved_by_email TEXT`);
-    }
+    // The Viktor and Langfuse connections' tables, from before they were removed.
+    await database.execute(`DROP TABLE IF EXISTS connections`);
+    await database.execute(`DROP TABLE IF EXISTS approvals`);
     // Accounts created before tasks could be retired or go idle. Their tasks become watched; a task's idle clock starts at its last recommend call.
     const taskColumns = await database.execute(`PRAGMA table_info(tasks)`);
     if (!taskColumns.some(column => column.name === "retired")) await database.execute(`ALTER TABLE tasks ADD COLUMN retired INTEGER NOT NULL DEFAULT 0`);
@@ -174,23 +149,8 @@ export const account = actor({
       return { applied: true };
     }, { name: "apply_stripe" }),
 
-    /**
-     * Why the plan would refuse one more evaluation of this kind now, counting the jobs still running
-     * as used, or null. A connected app's Evaluate button shows it, and starting checks it first.
-     */
-    evaluationRefusal: async (c, kind: string): Promise<string | null> => {
-      const appUrl = services().config.appUrl;
-      const current = await plan(c.db);
-      if (!current || !ACTIVE_PLAN.has(current.status)) return `This account has no active OpenMerit plan. Subscribe at ${appUrl}/plan/.`;
-      if (current.overage !== "refuse") return null;
-      const running = await c.db.execute(`SELECT kind FROM jobs WHERE status IN ('queued', 'running')`);
-      const left = current.includedEvals - current.usedEvals - running.reduce((sum, row) => sum + (EVALUATIONS_PER_JOB[String(row.kind)] ?? 1), 0);
-      if (left >= (EVALUATIONS_PER_JOB[kind] ?? 1)) return null;
-      return `The plan has no evaluations left this period. More start ${current.periodEnd ? `on ${new Date(current.periodEnd * 1000).toISOString().slice(0, 10)}` : "next period"}, or change the plan at ${appUrl}/plan/.`;
-    },
-
     /** Checks the plan and the account's job limits, then records the job. */
-    startJob: async (c, input: { jobId: string; taskId: string; kind: "run" | "watch" | "viktor" | "langfuse"; askedBy?: string | null; credits?: number | null; title?: string | null; startedBy?: string | null }): Promise<Started> => c.db.transaction(async tx => {
+    startJob: async (c, input: { jobId: string; taskId: string; kind: "run" | "watch"; askedBy?: string | null }): Promise<Started> => c.db.transaction(async tx => {
       const { limits, appUrl } = services().config;
       const current = await plan(tx);
       if (!current || !ACTIVE_PLAN.has(current.status)) return { ok: false, error: `This account has no active OpenMerit plan${current ? ` (Stripe says ${current.status})` : ""}. Subscribe at ${appUrl}/plan/, then try again.` };
@@ -200,21 +160,21 @@ export const account = actor({
       if (Number(hour?.n) >= limits.jobsPerHour) return { ok: false, error: `This account started ${limits.jobsPerHour} jobs in the last hour, its limit. Try again later.` };
       const [running] = await tx.execute(`SELECT count(*) AS n FROM jobs WHERE status IN ('queued', 'running')`);
       if (Number(running?.n) >= limits.concurrentJobs) return { ok: false, error: `This account has ${limits.concurrentJobs} jobs running, its limit. Try again when one finishes.` };
-      await tx.execute(`INSERT INTO jobs (id, task_id, kind, status, started_at, asked_by, credits, title, started_by) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)`, input.jobId, input.taskId, input.kind, now, input.askedBy ?? null, input.credits ?? null, input.title ?? null, input.startedBy ?? null);
+      await tx.execute(`INSERT INTO jobs (id, task_id, kind, status, started_at, asked_by) VALUES (?, ?, ?, 'queued', ?, ?)`, input.jobId, input.taskId, input.kind, now, input.askedBy ?? null);
       return { ok: true };
     }, { name: "start_job" }),
 
     /** A job's status and, once it knows them, its spend limits. Its first final status counts one evaluation. */
-    jobUpdate: async (c, input: { jobId: string; status: string; budgetUsd?: number; capOpenmeritUsd?: number | null; capCustomerUsd?: number | null; measured?: boolean; credits?: number }): Promise<void> => {
+    jobUpdate: async (c, input: { jobId: string; status: string; budgetUsd?: number; capOpenmeritUsd?: number | null; capCustomerUsd?: number | null; measured?: boolean }): Promise<void> => {
       const count = await c.db.transaction(async tx => {
-        const [job] = await tx.execute(`SELECT status, counted, kind FROM jobs WHERE id = ?`, input.jobId);
+        const [job] = await tx.execute(`SELECT status FROM jobs WHERE id = ?`, input.jobId);
         if (!job) return false;
         if (FINAL.has(String(job.status))) return false;
         const final = FINAL.has(input.status);
         await tx.execute(`UPDATE jobs SET status = ?, finished_at = CASE WHEN ? THEN ? ELSE finished_at END,
           budget_usd = COALESCE(?, budget_usd), cap_openmerit_usd = COALESCE(?, cap_openmerit_usd), cap_customer_usd = COALESCE(?, cap_customer_usd),
-          credits = COALESCE(?, credits), counted = CASE WHEN ? THEN ? ELSE counted END WHERE id = ?`,
-        input.status, final ? 1 : 0, Date.now(), input.budgetUsd ?? null, input.capOpenmeritUsd ?? null, input.capCustomerUsd ?? null, input.credits ?? null, final && input.measured ? 1 : 0, EVALUATIONS_PER_JOB[String(job.kind)] ?? 1, input.jobId);
+          counted = CASE WHEN ? THEN 1 ELSE counted END WHERE id = ?`,
+        input.status, final ? 1 : 0, Date.now(), input.budgetUsd ?? null, input.capOpenmeritUsd ?? null, input.capCustomerUsd ?? null, final && input.measured ? 1 : 0, input.jobId);
         return final && input.measured === true;
       }, { name: "job_update" });
       if (count) await meter(c.db, input.jobId);
@@ -348,11 +308,12 @@ export const account = actor({
 
     // The task index, which the task actors keep current.
     // A recommend call (lastRecommendAt) brings a retired task back; retired is set only by openmerit_retire.
+    // Status `switched` (the user approved the pick, now the current model) clears the pick.
     upsertTask: async (c, row: Pick<TaskRow, "id" | "environment" | "agent" | "name" | "currentModel" | "pick" | "status"> & { lastRunAt?: number; lastJobId?: string; lastRecommendAt?: number; retired?: boolean; monthlySavingUsd?: number | null }): Promise<void> => {
       const retired = row.retired === undefined ? (row.lastRecommendAt === undefined ? null : 0) : row.retired ? 1 : 0;
       await c.db.execute(`INSERT INTO tasks (id, environment, agent, name, current_model, pick, status, last_run_at, last_job_id, monthly_saving_usd, retired, last_recommend_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?) ON CONFLICT (id) DO UPDATE SET agent = excluded.agent, current_model = excluded.current_model,
-        pick = COALESCE(excluded.pick, tasks.pick), status = excluded.status, last_run_at = COALESCE(excluded.last_run_at, tasks.last_run_at),
+        pick = CASE WHEN excluded.status = 'switched' THEN NULL ELSE COALESCE(excluded.pick, tasks.pick) END, status = excluded.status, last_run_at = COALESCE(excluded.last_run_at, tasks.last_run_at),
         last_job_id = COALESCE(excluded.last_job_id, tasks.last_job_id), monthly_saving_usd = COALESCE(excluded.monthly_saving_usd, tasks.monthly_saving_usd),
         retired = COALESCE(?, tasks.retired), last_recommend_at = COALESCE(excluded.last_recommend_at, tasks.last_recommend_at)`,
       row.id, row.environment, row.agent, row.name, row.currentModel, row.pick, row.status, row.lastRunAt ?? null, row.lastJobId ?? null, row.monthlySavingUsd ?? null,
@@ -383,6 +344,7 @@ export const account = actor({
       const now = Date.now();
       await tx.execute(`UPDATE jobs SET deleted_at = ?, asked_by = NULL WHERE task_id = ? AND deleted_at IS NULL`, now, input.taskId);
       await tx.execute(`DELETE FROM reports WHERE task_id = ?`, input.taskId);
+      await tx.execute(`DELETE FROM decisions WHERE task_id = ?`, input.taskId);
       await tx.execute(`DELETE FROM guardrails WHERE level = 'task' AND scope = ?`, input.taskId);
       await tx.execute(`DELETE FROM tasks WHERE id = ?`, input.taskId);
       await tx.execute(`INSERT INTO deletions (task_id, name, environment, user_id, jobs, deleted_at) VALUES (?, ?, ?, ?, ?, ?)`, input.taskId, String(task.name), String(task.environment), input.userId, Number(jobs?.n ?? 0), now);
@@ -430,87 +392,17 @@ export const account = actor({
       await c.db.execute(`INSERT INTO account (id, mcp_revoked_before) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET mcp_revoked_before = excluded.mcp_revoked_before`, Math.floor(Date.now() / 1000));
     },
 
-    // App connections, such as Viktor. The key arrives only through /api/connections/<kind>, checked, and is stored encrypted.
-    /** `keyLast4` is what the app shows of the key; by default the key's own last four characters. */
-    saveConnection: async (c, input: { kind: string; apiKey: string; keyLast4?: string; keyType: string; teamId: string; creditCap: number; userId: string }): Promise<{ ok: true } | { ok: false; error: string }> => {
-      const { keyEncryptionKey } = services().config;
-      if (!keyEncryptionKey) return { ok: false, error: "Connections are not available yet: the app has no key-encryption key." };
-      const key = input.apiKey.trim();
-      await c.db.execute(`INSERT INTO connections (kind, sealed_key, key_last4, key_type, team_id, credit_cap, connected_by, connected_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (kind) DO UPDATE SET sealed_key = excluded.sealed_key, key_last4 = excluded.key_last4, key_type = excluded.key_type, team_id = excluded.team_id,
-        credit_cap = excluded.credit_cap, connected_by = excluded.connected_by, connected_at = excluded.connected_at`,
-      input.kind, encryptKey(keyEncryptionKey, `${c.key[0]!}:${input.kind}`, key), input.keyLast4 ?? key.slice(-4), input.keyType, input.teamId, Math.round(input.creditCap), input.userId, Date.now());
-      return { ok: true };
+    /** Records the user's decision on a job's change, as the coding agent sent it; the first decision stands. */
+    decide: async (c, input: Omit<Decision, "at">): Promise<{ recorded: boolean; decision: Decision }> => {
+      const inserted = await c.db.execute(`INSERT INTO decisions (job_id, task_id, decision, change, decided_by, decided_by_name, decided_by_email, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (job_id) DO NOTHING RETURNING job_id`, input.jobId, input.taskId, input.decision, input.change, input.by, input.name, input.email, Date.now());
+      return { recorded: inserted.length > 0, decision: (await decisionOf(c.db, input.jobId))! };
     },
-    connection: async (c, kind: string): Promise<ConnectionRow | null> => {
-      const [row] = await c.db.execute(`SELECT * FROM connections WHERE kind = ?`, kind);
-      return row ? connectionRow(row) : null;
-    },
-    /** The connection's key, for the server and the connection's jobs only. Null when there is none or it no longer decrypts. */
-    connectionKey: async (c, kind: string): Promise<string | null> => {
-      const [row] = await c.db.execute(`SELECT sealed_key FROM connections WHERE kind = ?`, kind);
-      const { keyEncryptionKey } = services().config;
-      if (!row || !keyEncryptionKey) return null;
-      try { return decryptKey(keyEncryptionKey, `${c.key[0]!}:${kind}`, String(row.sealed_key)); } catch { return null; }
-    },
-    /**
-     * Keeps a listing, or a listing's error with the last listing. Each task keeps when it was first
-     * listed (`firstSeenAt`) and when someone opened its row (`seenAt`): the first listing's tasks, and
-     * tasks from listings made before `firstSeenAt` was kept, count as seen when the connection was made.
-     */
-    saveListing: async (c, input: { kind: string; listing: unknown; error: string | null }): Promise<void> => {
-      if (input.error) return void await c.db.execute(`UPDATE connections SET listing_error = ? WHERE kind = ?`, input.error, input.kind);
-      const [row] = await c.db.execute(`SELECT listing, connected_at FROM connections WHERE kind = ?`, input.kind);
-      if (!row) return;
-      const before = new Map(listedTasks(row.listing ? JSON.parse(String(row.listing)) : null).map(task => [task.id, task]));
-      const now = new Date().toISOString(), connectedAt = iso(row.connected_at)!;
-      for (const task of listedTasks(input.listing)) {
-        const known = before.get(task.id);
-        task.firstSeenAt = known ? known.firstSeenAt ?? connectedAt : row.listing ? now : connectedAt;
-        task.seenAt = known?.seenAt ?? null;
-      }
-      await c.db.execute(`UPDATE connections SET listing = ?, listed_at = ?, listing_error = NULL WHERE kind = ?`, JSON.stringify(input.listing), Date.now(), input.kind);
-    },
-    /** Someone opened a listed task's row: it is no longer new. */
-    markSeen: async (c, input: { kind: string; taskId: string }): Promise<boolean> => {
-      const [row] = await c.db.execute(`SELECT listing FROM connections WHERE kind = ?`, input.kind);
-      const listing = row?.listing ? JSON.parse(String(row.listing)) as unknown : null;
-      const task = listedTasks(listing).find(item => item.id === input.taskId);
-      if (!task) return false;
-      task.seenAt ??= new Date().toISOString();
-      await c.db.execute(`UPDATE connections SET listing = ? WHERE kind = ?`, JSON.stringify(listing), input.kind);
-      return true;
-    },
-    /** Deletes the key and the listing. Runs, reports and approvals stay. */
-    removeConnection: async (c, kind: string): Promise<boolean> => {
-      const before = await c.db.execute(`SELECT kind FROM connections WHERE kind = ?`, kind);
-      await c.db.execute(`DELETE FROM connections WHERE kind = ?`, kind);
-      return before.length > 0;
-    },
-    /** A connection's jobs since it connected, newest first, with the credits each used or expects to use. */
-    connectionJobs: async (c, input: { kind: string; since: number }): Promise<(JobRow & { credits: number | null })[]> =>
-      (await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id WHERE jobs.kind = ? AND jobs.started_at >= ? AND jobs.deleted_at IS NULL ORDER BY jobs.started_at DESC`, input.kind, input.since))
-        .map(row => ({ ...jobRow(row), credits: (row.credits as number | null) ?? null })),
-
-    /** Records a person's approval of a result's change; the first approval stands. */
-    approve: async (c, input: Approval): Promise<Approval> => {
-      await c.db.execute(`INSERT INTO approvals (job_id, change, link, approved_by, approved_by_name, approved_by_email, approved_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (job_id) DO NOTHING`,
-        input.jobId, input.change, input.link, input.by, input.name, input.email, input.at);
-      return (await approvalOf(c.db, input.jobId))!;
-    },
-    approval: async (c, jobId: string): Promise<Approval | null> => approvalOf(c.db, jobId),
-    /** Names an approval recorded without its approver's name. */
-    nameApproval: async (c, input: { jobId: string; name: string; email: string | null }): Promise<Approval | null> => {
-      await c.db.execute(`UPDATE approvals SET approved_by_name = ?, approved_by_email = COALESCE(approved_by_email, ?) WHERE job_id = ? AND approved_by_name IS NULL`, input.name, input.email, input.jobId);
-      return approvalOf(c.db, input.jobId);
-    },
-    /** Records the title and starter of a connection's job recorded before the account kept them; once. */
-    setJobOrigin: async (c, input: { jobId: string; title: string; startedBy: string | null }): Promise<void> => {
-      await c.db.execute(`UPDATE jobs SET title = ?, started_by = ? WHERE id = ? AND title IS NULL`, input.title, input.startedBy, input.jobId);
-    },
-    /** Corrects the credits a connection's job recorded, such as an estimate kept by a job that spent none. */
-    setJobCredits: async (c, input: { jobId: string; credits: number }): Promise<void> => {
-      await c.db.execute(`UPDATE jobs SET credits = ? WHERE id = ?`, input.credits, input.jobId);
+    decision: async (c, jobId: string): Promise<Decision | null> => decisionOf(c.db, jobId),
+    /** The latest decision on each task, keyed by task ID. */
+    taskDecisions: async (c): Promise<Record<string, Decision>> => {
+      const rows = await c.db.execute(`SELECT * FROM decisions d WHERE decided_at = (SELECT max(decided_at) FROM decisions WHERE task_id = d.task_id)`);
+      return Object.fromEntries(rows.map(row => [String(row.task_id), decisionRow(row)]));
     },
 
     /** Everything the account holds, except keys. */
@@ -519,7 +411,7 @@ export const account = actor({
       return {
         account: c.key[0], exportedAt: new Date().toISOString(), plan: await plan(c.db), members: await all("members"), endpoints: await endpointViews(c.db),
         guardrails: (await all("guardrails")).map(row => ({ ...row, settings: JSON.parse(String(row.settings)) as unknown })), tasks: await (async () => { const watch = await watchGuardrails(c.db); return (await all("tasks")).map(row => taskRow(row, watch(row))); })(),
-        connections: (await all("connections")).map(connectionRow), approvals: await all("approvals"),
+        decisions: (await all("decisions")).map(decisionRow),
         jobs: (await c.db.execute(`SELECT * FROM jobs WHERE deleted_at IS NULL`)).map(jobRow), deletions: await all("deletions"), ledger: await all("ledger"), reports: (await all("reports")).map(row => ({ jobId: row.job_id, taskId: row.task_id, report: JSON.parse(String(row.json)) as unknown })),
       };
     },
@@ -531,19 +423,16 @@ export const account = actor({
 
 type Database = { execute: <T extends Row = Row>(query: string, ...args: unknown[]) => Promise<T[]> };
 
-function connectionRow(row: Row): ConnectionRow {
+function decisionRow(row: Row): Decision {
   return {
-    kind: String(row.kind), keyLast4: String(row.key_last4), keyType: (row.key_type as string | null) ?? null, teamId: (row.team_id as string | null) ?? null, creditCap: Number(row.credit_cap),
-    connectedBy: String(row.connected_by), connectedAt: iso(row.connected_at)!, listing: row.listing ? JSON.parse(String(row.listing)) as unknown : null, listedAt: iso(row.listed_at), listingError: (row.listing_error as string | null) ?? null,
+    jobId: String(row.job_id), taskId: String(row.task_id), decision: row.decision === "approved" ? "approved" : "declined", change: String(row.change), by: String(row.decided_by),
+    name: (row.decided_by_name as string | null) ?? null, email: (row.decided_by_email as string | null) ?? null, at: iso(row.decided_at)!,
   };
 }
 
-async function approvalOf(database: Database, jobId: string): Promise<Approval | null> {
-  const [row] = await database.execute(`SELECT * FROM approvals WHERE job_id = ?`, jobId);
-  return row ? {
-    jobId: String(row.job_id), change: String(row.change), link: (row.link as string | null) ?? null, by: String(row.approved_by),
-    name: (row.approved_by_name as string | null) ?? null, email: (row.approved_by_email as string | null) ?? null, at: String(row.approved_at),
-  } : null;
+async function decisionOf(database: Database, jobId: string): Promise<Decision | null> {
+  const [row] = await database.execute(`SELECT * FROM decisions WHERE job_id = ?`, jobId);
+  return row ? decisionRow(row) : null;
 }
 
 async function plan(database: Database): Promise<Plan | null> {

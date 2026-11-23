@@ -1,14 +1,11 @@
-// The app's Rivet registry: the account, task, job and catalogue actors, a Viktor task's evaluation, and
-// a connection's background re-list.
+// The app's Rivet registry: the account, task, job and catalogue actors.
 import { setup, type Client } from "rivetkit";
 import { account } from "./actors/account.ts";
 import { catalogue } from "./actors/catalogue.ts";
-import { connectionRelist } from "./actors/connection-relist.ts";
 import { job } from "./actors/job.ts";
 import { task } from "./actors/task.ts";
-import { viktorJob } from "./actors/viktor-job.ts";
 
-export const actors = { account, task, job, catalogue, viktorJob, connectionRelist };
+export const actors = { account, task, job, catalogue };
 
 /**
  * On a Rivet Cloud actor node, the cluster sets RIVET_ENDPOINT, RIVET_TOKEN and RIVET_POOL and the

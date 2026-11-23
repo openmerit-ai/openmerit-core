@@ -65,8 +65,8 @@ before(async () => {
 });
 after(() => { server.close(); });
 
-/** Scripted OpenAI Harness: maps usages by file and finds the fixture's eval (recording to Langfuse when `langfuse`). */
-function scriptedHarness(langfuse = false, discover: Record<string, unknown> = {}): Harness & { calls: string[] } {
+/** Scripted OpenAI Harness: maps usages by file and finds the fixture's eval. */
+function scriptedHarness(discover: Record<string, unknown> = {}): Harness & { calls: string[] } {
   const calls: string[] = [];
   return {
     kind: "codex", label: "codex", calls, usage: { calls: 0, costUsd: 0, unknownCost: 0, inputTokens: 0, outputTokens: 0 },
@@ -82,8 +82,8 @@ function scriptedHarness(langfuse = false, discover: Record<string, unknown> = {
         return { tasks: [...byTask].map(([name, usageIds]) => ({ name, description: `the ${name}`, usageIds, usesTools: false, needsVision: false, structuredOutput: false })) } as T;
       }
       calls.push(`discover:${/Task: ([^:]+):/.exec(request.prompt)?.[1]}`);
-      const env = [{ name: "CLASSIFIER_MODEL", value: "{{model}}" }, ...(langfuse ? [{ name: "CLASSIFY_LANGFUSE_DATASET", value: "support-tickets" }] : [])];
-      return { found: true, command: "node evals/classify.eval.ts", cwd: ".", env, threshold: null, langfuseDataset: langfuse ? "support-tickets" : "", passScore: langfuse ? "correct" : "", passMin: null, helpers: [], explanation: "npm run eval:classify", missing: "", items: null, ...discover } as T;
+      const env = [{ name: "CLASSIFIER_MODEL", value: "{{model}}" }];
+      return { found: true, command: "node evals/classify.eval.ts", cwd: ".", env, threshold: null, helpers: [], explanation: "npm run eval:classify", missing: "", items: null, ...discover } as T;
     },
   };
 }
@@ -97,12 +97,10 @@ function repo() {
 }
 
 function context(root: string, home: string, harness = scriptedHarness(), extraEnv: Record<string, string> = {}): Context & { harnessCalls: string[] } {
-  // The orb's own Langfuse keys must never reach the fixture eval: only a test's fake Langfuse.
-  const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("LANGFUSE_")));
-  const env = { ...inherited, OPENMERIT_HOME: home, FAKE_ENDPOINT_KEY: "sk-fake-endpoint", ...extraEnv };
+  const env = { ...process.env, OPENMERIT_HOME: home, FAKE_ENDPOINT_KEY: "sk-fake-endpoint", ...extraEnv };
   updateGlobalConfig({ harness: { kind: "codex" } }, env);
   if (!readRepoConfig(root).endpoints) updateRepoConfig(root, { endpoints: [{ id: "openai", kind: "openai", baseUrl, apiKey: { env: "FAKE_ENDPOINT_KEY" }, allowedModels: ALLOWED }] });
-  return { state: new State(env), repo: findRepo(root), catalogue: loadCatalogue(), env, harness: async () => harness, log: () => {}, harnessCalls: harness.calls, langfusePoll: { intervalMs: 5, timeoutMs: 3000 } };
+  return { state: new State(env), repo: findRepo(root), catalogue: loadCatalogue(), env, harness: async () => harness, log: () => {}, harnessCalls: harness.calls };
 }
 
 const DEFAULTS: Record<string, Answer> = { model: "openai/gpt-4.1-mini", corrections: "", tasks: ["ticket classifier"], approve_evals: true, retry_units: false, configure_ticket_classifier: false };
@@ -222,7 +220,7 @@ test("a project in a subdirectory of its Git repository keeps its settings, scan
 test("a run whose every task has no eval finishes, saying what was not reviewed and how to add an eval", async () => {
   const root = repo(), scripted = scriptedHarness();
   const harness: Harness & { calls: string[] } = { ...scripted, json: async <T>(request: JsonRequest) => (request.system.includes("map model usages") ? scripted.json<T>(request)
-    : { found: false, command: "", cwd: "", env: [], threshold: null, langfuseDataset: "", passScore: "", passMin: null, helpers: [], explanation: "", missing: "The repository has no labelled tickets. A runner would also be needed." } as T) };
+    : { found: false, command: "", cwd: "", env: [], threshold: null, helpers: [], explanation: "", missing: "The repository has no labelled tickets. A runner would also be needed." } as T) };
   const ctx = context(root, mkdtempSync(join(tmpdir(), "openmerit-home-")), harness);
   const runId = startRun(ctx);
   const { step, asked } = await drive(ctx, runId, { eval_ticket_classifier: "skip" });
@@ -256,7 +254,7 @@ test("an eval that fails before any model call shows why in the retry question a
   const root = repo(), scripted = scriptedHarness();
   const command = `node -e "console.error('ModuleNotFoundError: No module named langchain_openai'); process.exit(2)"`;
   const harness: Harness & { calls: string[] } = { ...scripted, json: async <T>(request: JsonRequest) => (request.system.includes("map model usages") ? scripted.json<T>(request)
-    : { found: true, command, cwd: ".", env: [], threshold: null, langfuseDataset: "", passScore: "", passMin: null, helpers: [], explanation: "", missing: "" } as T) };
+    : { found: true, command, cwd: ".", env: [], threshold: null, helpers: [], explanation: "", missing: "" } as T) };
   const ctx = context(root, mkdtempSync(join(tmpdir(), "openmerit-home-")), harness);
   const runId = startRun(ctx);
   const { step, asked } = await drive(ctx, runId);
@@ -386,73 +384,6 @@ test("when every qualified finalist costs more per item than the current model, 
   }
 });
 
-test("with a Langfuse eval, the eval records each run with the app's keys and Scout reads the results back with GETs only", async () => {
-  // Fake Langfuse v4: the app's keys write OTLP experiment spans and scores; the Viewer key gets 403 on
-  // writes. A run's items show up one poll late, as after ingestion.
-  const runItems: { experiment: string; itemId: string; traceId: string; spanId: string; at: string }[] = [];
-  const scores = new Map<string, number>(); // observation ID → value
-  const calls: { method: string; path: string; key: string }[] = [];
-  const polls = new Map<string, number>();
-  const lf = createServer((req, res) => {
-    let body = "";
-    req.on("data", chunk => { body += chunk; });
-    req.on("end", () => {
-      const url = new URL(req.url!, "http://x");
-      const key = Buffer.from((req.headers.authorization ?? "").replace(/^Basic /, ""), "base64").toString().split(":")[0]!;
-      calls.push({ method: req.method!, path: url.pathname, key });
-      const send = (status: number, value: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(value)); };
-      if (req.method !== "GET") {
-        if (key !== "pk-lf-app") return send(403, { message: "read-only key" });
-        if (url.pathname === "/api/public/otel/v1/traces") {
-          const parsed = JSON.parse(body) as { resourceSpans: { scopeSpans: { spans: { traceId: string; spanId: string; attributes: { key: string; value: { stringValue: string } }[] }[] }[] }[] };
-          for (const span of parsed.resourceSpans.flatMap(item => item.scopeSpans).flatMap(item => item.spans)) {
-            const attr = (name: string) => span.attributes.find(item => item.key === name)?.value.stringValue;
-            if (attr("langfuse.experiment.name")) runItems.push({ experiment: attr("langfuse.experiment.name")!, itemId: attr("langfuse.experiment.item.id")!, traceId: span.traceId, spanId: span.spanId, at: new Date().toISOString() });
-          }
-          return send(200, {});
-        }
-        if (url.pathname === "/api/public/scores") { for (const score of JSON.parse(body) as { observationId: string; value: number }[]) scores.set(score.observationId, score.value); return send(200, {}); }
-        return send(404, {});
-      }
-      if (url.pathname === "/api/public/v2/datasets/support-tickets") return send(200, { id: "ds-1", name: "support-tickets" });
-      if (url.pathname === "/api/public/dataset-items") return send(200, { data: [...tickets.keys()].map((_, index) => ({ id: `ticket-${String(index + 1).padStart(2, "0")}`, status: "ACTIVE" })), meta: { totalPages: 1 } });
-      if (url.pathname === "/api/public/experiment-items") {
-        const name = url.searchParams.get("experimentName")!;
-        polls.set(name, (polls.get(name) ?? 0) + 1);
-        const data = polls.get(name)! < 2 ? [] : runItems.filter(item => item.experiment === name).map(item => ({
-          experimentItemId: item.itemId, traceId: item.traceId, experimentId: name, experimentName: name, startTime: item.at,
-          scores: scores.has(item.spanId) ? [{ name: "correct", dataType: "BOOLEAN", value: scores.get(item.spanId) === 1, timestamp: item.at }] : [],
-        }));
-        return send(200, { data, meta: {} });
-      }
-      return send(404, {});
-    });
-  });
-  await new Promise<void>(resolve => lf.listen(0, "127.0.0.1", resolve));
-  const lfUrl = `http://127.0.0.1:${(lf.address() as AddressInfo).port}`;
-  try {
-    const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
-    updateRepoConfig(root, { langfuse: { baseUrl: lfUrl, publicKey: { env: "LF_VIEWER_PUBLIC" }, secretKey: { env: "LF_VIEWER_SECRET" }, mappings: [] } });
-    const ctx = context(root, home, scriptedHarness(true), { LANGFUSE_BASE_URL: lfUrl, LANGFUSE_PUBLIC_KEY: "pk-lf-app", LANGFUSE_SECRET_KEY: "sk-lf-app", LF_VIEWER_PUBLIC: "pk-lf-viewer", LF_VIEWER_SECRET: "sk-lf-viewer" });
-    const runId = startRun(ctx);
-    requests.length = 0;
-    const { step } = await drive(ctx, runId);
-    assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
-    assertSearch(ctx, runId, step);
-    const task = step.result!.tasks[0]!;
-    assert.equal(task.eval.langfuse, "score correct on dataset support-tickets");
-    assert.ok([task.baseline!, ...task.top].every(item => item.source === "langfuse"));
-    // Each eval run recorded its own experiment; Scout read it back under the same name.
-    const done = ctx.state.units(runId).filter(unit => unit.status === "done").map(unit => unit.result as { experiment: string; source: string });
-    assert.equal(new Set(done.map(item => item.experiment)).size, done.length);
-    assert.ok(done.every(item => item.source === "langfuse" && polls.get(item.experiment)! >= 2), "Scout waited for ingestion");
-    // OpenMerit's Viewer key only read; every write came from the eval with the app's keys.
-    const viewer = calls.filter(call => call.key === "pk-lf-viewer");
-    assert.ok(viewer.length > 0 && viewer.every(call => call.method === "GET"), JSON.stringify(viewer.filter(call => call.method !== "GET")));
-    assert.ok(calls.filter(call => call.method !== "GET").every(call => call.key === "pk-lf-app"));
-    assert.ok(calls.every(call => call.key === "pk-lf-viewer" || call.key === "pk-lf-app"));
-  } finally { lf.close(); }
-});
 
 test("Yes previews and applies only the approved edit", async () => {
   const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
@@ -488,7 +419,7 @@ test("an eval that sends no model request through the proxy stops after one run 
   // The eval answers from a file instead of calling the model: whatever it spends elsewhere is not metered, and it never ran the candidate.
   const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
   writeFileSync(join(root, "evals", "offline.ts"), `console.log(JSON.stringify({ items: Array.from({ length: 10 }, (_, index) => ({ id: "t" + index, pass: true })) }));\n`);
-  const ctx = context(root, home, scriptedHarness(false, { command: "node evals/offline.ts" }));
+  const ctx = context(root, home, scriptedHarness({ command: "node evals/offline.ts" }));
   requests.length = 0;
   const { step, asked } = await drive(ctx, startRun(ctx));
   assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
@@ -502,7 +433,7 @@ test("an eval that sends no model request through the proxy stops after one run 
 
 test("an eval the harness counts fewer than five items in is asked about before anything is spent", async () => {
   const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
-  const ctx = context(root, home, scriptedHarness(false, { items: 4 }));
+  const ctx = context(root, home, scriptedHarness({ items: 4 }));
   requests.length = 0;
   const { step, asked } = await drive(ctx, startRun(ctx), { eval_ticket_classifier: "skip" });
   assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
