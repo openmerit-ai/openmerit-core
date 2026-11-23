@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Prepares an Amp orb: installs the Node.js version CI uses and the npm dependencies of the
-# website (root), the openmerit package (openmerit-core/), the Sahra Health playground and the cloud app (cloud/).
+# website (root), the openmerit package (openmerit-core/), the Sahra Health playground and the cloud app (cloud/),
+# and Docker's buildx plugin for the cloud app's deploy.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -40,6 +41,22 @@ install_node() {
 step "Node.js $NODE_VERSION" install_node
 export PATH="$bin_dir:$PATH"
 node --version
+
+# The cloud app's deploy (cloud/scripts/deploy.ts) builds its image with `docker buildx`. The orb
+# image has Docker's engine and apt repository but not the buildx plugin. The daemon cannot run
+# from setup, so it is started when needed (see AGENTS.md).
+install_docker_buildx() {
+  local packages=()
+  command -v dockerd > /dev/null || packages+=(docker-ce docker-ce-cli containerd.io)
+  docker buildx version > /dev/null 2>&1 || packages+=(docker-buildx-plugin)
+  if ((${#packages[@]})); then
+    sudo apt-get update -q
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${packages[@]}"
+  else
+    echo "Docker and buildx already installed"
+  fi
+}
+step "Docker and buildx" install_docker_buildx
 
 # npm reads the NPM_TOKEN project secret at run time; the snapshot stores only this reference.
 npm_auth='//registry.npmjs.org/:_authToken=${NPM_TOKEN}'

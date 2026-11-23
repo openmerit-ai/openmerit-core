@@ -2,6 +2,8 @@
 
 `.agents/setup` installs Node.js 22.19.0 (the CI version) into `~/.local/bin` and runs `npm ci` at the repository root (the website), in `openmerit-core/` (the `openmerit` npm package), in `playground/` and in `cloud/` (the cloud app behind openmerit.ai/mcp), each with its own lockfile; `.agents/resume` checks they are still installed. Rerun `.agents/setup` after changing a lockfile. The project declares no orb services.
 
+Setup also installs Docker's buildx plugin, which the cloud app's deploy uses to build its image. The Docker daemon cannot be part of the snapshot, so start it before a cloud deploy with `amp orb service start docker --command 'sudo -n dockerd --group user'` (the `--group` gives the orb user the socket) and check it with `docker info`; stop it afterwards with `amp orb service stop docker`.
+
 `openmerit.ai` is the primary domain; `openmerit.site` hosts only legacy redirects. Use `.ai` in new links and copy; `docs/site-domain-migration.md` describes the routing.
 
 Orbs receive a project-wide `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` for Wrangler. The token also reaches other projects in the same Cloudflare account: never change the `docex.dev` zone or any Worker outside the OpenMerit configurations in this repository. Read-only commands are fine; deploys and DNS, route, or email changes need the user's explicit approval each time. Deploy only through `npm run deploy -- <worker>` (the cloud app: `npm run deploy --prefix cloud`, see `cloud/README.md`) and roll back as described in `docs/site-deployment.md`; `npm run deploy:status` is read-only. Load the `deploying-openmerit-workers` skill before any deploy, rollback or secret change; `.agents/skills/README.md` lists the project skills.
