@@ -38,8 +38,7 @@ let keyOkAt = 0;
 
 /**
  * Checks OpenMerit's OpenRouter key before a job starts, with OpenRouter's free `GET /key`, so a job
- * whose model calls would all fail, such as a Viktor job whose judge grades only after its test runs
- * spent the workspace's credits, does not start. A key OpenRouter refuses (401 or 403) refuses the
+ * whose model calls would all fail does not start. A key OpenRouter refuses (401 or 403) refuses the
  * job with MODEL_KEY_REFUSAL. An unconfigured key is left to the job, which says so; an unreachable
  * OpenRouter does not refuse, since a model call may still succeed. A working key is trusted for a minute.
  */

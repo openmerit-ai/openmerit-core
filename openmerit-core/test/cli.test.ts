@@ -1,5 +1,5 @@
-// Terminal prompts, update prompts, the stdio MCP server and the read-only Langfuse connector. No network: a local
-// HTTP server stands in for the npm registry, and Langfuse is a fake fetch.
+// Terminal prompts, update prompts and the stdio MCP server. No network: a local HTTP server stands in
+// for the npm registry.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync } from "node:fs";
@@ -10,7 +10,6 @@ import { isAbsolute, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { terminalPrompter } from "../src/cli/prompt.ts";
-import { createLangfuseConnector } from "../src/connectors/langfuse/index.ts";
 import { claudeBinary } from "../src/harness/claude-bridge.ts";
 import { checkForUpdate, newer, offerUpdate, packageVersion } from "../src/update.ts";
 
@@ -102,27 +101,4 @@ test("the MCP server keeps stdout to protocol messages and reports an available 
   const scout = byId(4).structuredContent as { status: string; missing: string[] };
   assert.equal(scout.status, "needs_setup", "missing setup is a structured answer, not a terminal prompt");
   assert.equal(scout.missing.length, 2);
-});
-
-test("the Langfuse connector only reads, and accepts nothing but a Viewer key", async () => {
-  const calls: { method: string; path: string; body?: string }[] = [];
-  const fake = (status: number) => (async (input: URL | string, init?: RequestInit) => {
-    const url = new URL(String(input));
-    calls.push({ method: init?.method ?? "GET", path: url.pathname, ...(typeof init?.body === "string" ? { body: init.body } : {}) });
-    if (init?.method === "POST") return new Response(JSON.stringify({ message: "nope" }), { status });
-    if (url.pathname.endsWith("/projects")) return Response.json({ data: [{ id: "p1", name: "support" }] });
-    const query = JSON.parse(url.searchParams.get("query")!) as { view: string };
-    return Response.json({ data: query.view === "observations" ? [{ providedModelName: "gpt-4.1-mini", count_count: 40, sum_totalCost: 0.12, p50_latency: 900 }] : [{ name: "queue-correct", avg_value: 0.92, count_count: 40 }] });
-  }) as unknown as typeof fetch;
-  const connection = { baseUrl: "https://langfuse.internal/lf", publicKey: "pk-lf-x", secretKey: "sk-lf-x" };
-  await assert.rejects(createLangfuseConnector(connection, { fetch: fake(400), retries: 0 }).verifyViewer(), /can write/);
-  calls.length = 0;
-  const viewer = createLangfuseConnector(connection, { fetch: fake(403), retries: 0 });
-  await viewer.verifyViewer();
-  const evidence = await viewer.taskEvidence({ traceName: "classify-ticket", scores: ["queue-correct"] });
-  assert.deepEqual(evidence.models, [{ model: "gpt-4.1-mini", generations: 40, costUsd: 0.12, p50LatencyMs: 900 }]);
-  assert.deepEqual(evidence.scores, [{ name: "queue-correct", average: 0.92, count: 40 }]);
-  // The only write-shaped request is the invalid {} probe; everything else is a GET on the self-hosted path prefix.
-  assert.deepEqual(calls.filter(call => call.method !== "GET"), [{ method: "POST", path: "/lf/api/public/v2/datasets", body: "{}" }]);
-  assert.ok(calls.every(call => call.path.startsWith("/lf/api/public/")));
 });

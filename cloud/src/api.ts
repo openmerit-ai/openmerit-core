@@ -6,8 +6,6 @@ import type { AuthResult, Identity } from "./auth.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
 import { explain, type JobResult } from "./report.ts";
 import { rerunJob } from "./start.ts";
-import { connectLangfuse, LANGFUSE, langfuseTaskId, langfuseView, startLangfuseTasks } from "./langfuse.ts";
-import { approveChange, disarmRelist, labelRuns, connectViktor, currentViktorView, namedApproval, startRelist, startViktorTasks, VIKTOR, viktorTaskId, viktorView } from "./viktor.ts";
 import type { EndpointKind } from "../../openmerit-core/src/ranking/index.ts";
 
 type Json = Record<string, unknown>;
@@ -74,7 +72,10 @@ export function apiRoutes(deps: AppDeps) {
       });
     }
 
-    if (path === "/api/tasks" && method === "GET") return json(200, await account.tasks());
+    if (path === "/api/tasks" && method === "GET") {
+      const [tasks, decisions] = await Promise.all([account.tasks(), account.taskDecisions()]);
+      return json(200, tasks.map(task => ({ ...task, decision: decisions[task.id] ?? null })));
+    }
     if (path === "/api/tasks/deleted" && method === "GET") return json(200, await account.deletions());
     if ((match = /^\/api\/tasks\/([\w-]+)$/.exec(path)) && method === "DELETE") {
       const denied = admin() ?? reverify(who); if (denied) return denied;
@@ -96,42 +97,18 @@ export function apiRoutes(deps: AppDeps) {
       return json(200, { ...row, bundle: info.bundle, lastResult: info.lastResult, notices: info.notices, jobs: await account.jobs({ taskId: row.id, limit: 20 }), guardrails: await account.resolveGuardrails({ environment: row.environment, agent: row.agent, taskId: row.id }) });
     }
 
-    if (path === "/api/runs" && method === "GET") return json(200, await labelRuns(client, deps.auth, who.accountId, await account.jobs({ limit: Math.min(200, Number(url.searchParams.get("limit") ?? 50) || 50) })));
+    if (path === "/api/runs" && method === "GET") return json(200, await account.jobs({ limit: Math.min(200, Number(url.searchParams.get("limit") ?? 50) || 50) }));
     if ((match = /^\/api\/runs\/([\w-]+)$/.exec(path)) && method === "GET") {
       const jobId = match[1]!;
       const row = await account.job(jobId);
       if (!row) return error(404, "No such run in this account.");
       const report = await account.report({ jobId });
-      // A connected app's task as its connection lists it now, for the run page's Evaluate again: its estimate, and why it cannot start now.
-      const listed = row.kind === VIKTOR ? (await viktorView(client, who.accountId)).tasks.find(task => viktorTaskId(task) === row.taskId)
-        : row.kind === LANGFUSE ? (await langfuseView(client, who.accountId)).tasks.find(task => langfuseTaskId(task) === row.taskId) : undefined;
-      const evaluate = listed && listed.status !== "skipped" ? { evaluating: listed.status === "evaluating", blocked: listed.blocked, estimatedCredits: "estimatedCredits" in listed ? listed.estimatedCredits : null, budgetUsd: "budgetUsd" in listed ? listed.budgetUsd : null } : null;
-      // The saved report, with the same reason and cheaperThanCurrent the coding agent gets, and a connection result's approval.
-      if (report) return json(200, { ...(report.json as JobResult), ...explain(report.json as JobResult), approved: await namedApproval(client, deps.auth, who.accountId, jobId), evaluate });
-      return json(200, { ...(row.kind === VIKTOR ? await client.viktorJob.get([jobId]).status() : await client.job.get([jobId]).status()), report: null, evaluate });
-    }
-    // Approve change: records who approved a connection result's change, and when. It changes nothing in the connected app.
-    if ((match = /^\/api\/runs\/([\w-]+)\/approve$/.exec(path)) && method === "POST") {
-      const denied = admin(); if (denied) return denied;
-      if (!(await account.job(match[1]!))) return error(404, "No such run in this account.");
-      const approved = await approveChange(client, deps.auth, { accountId: who.accountId, userId: who.userId, jobId: match[1]! });
-      return approved.ok ? json(200, approved.approval) : error(approved.status, approved.error);
+      // The saved report, with the same reason and cheaperThanCurrent the coding agent gets, and the decision the coding agent sent back.
+      if (report) return json(200, { ...(report.json as JobResult), ...explain(report.json as JobResult), decision: await account.decision(jobId) });
+      return json(200, { ...await client.job.get([jobId]).status(), report: null });
     }
     // A fix from a run's notes: run its task again, optionally with a higher budget per job.
     if ((match = /^\/api\/runs\/([\w-]+)\/rerun$/.exec(path)) && method === "POST") {
-      // A Viktor task has no bundle: run again evaluates it again, as Start again on Connections does.
-      const job = await account.job(match[1]!);
-      if (job?.kind === VIKTOR) {
-        const denied = admin(); if (denied) return denied;
-        const started = await startViktorTasks(client, { accountId: who.accountId, userId: who.userId, taskIds: [job.taskId.replace(/^viktor_/, "")] });
-        return started.jobIds[0] ? json(201, { jobId: started.jobIds[0], taskId: job.taskId }) : error(409, started.refused ?? "This task cannot be evaluated now, or is being evaluated.");
-      }
-      // A Langfuse task reads its cases from Langfuse again: run again evaluates it through the connection.
-      if (job?.kind === LANGFUSE) {
-        const denied = admin(); if (denied) return denied;
-        const started = await startLangfuseTasks(client, { accountId: who.accountId, userId: who.userId, taskIds: [job.taskId.replace(/^langfuse_/, "")] });
-        return started.jobIds[0] ? json(201, { jobId: started.jobIds[0], taskId: job.taskId }) : error(409, started.refused ?? "This task cannot be evaluated now, or is being evaluated.");
-      }
       const input = await body(request) ?? {};
       if (input.budgetUsd !== undefined && input.budgetUsd !== null && typeof input.budgetUsd !== "number") return error(400, "budgetUsd must be a number of US dollars.");
       const started = await rerunJob(client, { accountId: who.accountId, userId: who.userId, jobId: match[1]!, budgetUsd: typeof input.budgetUsd === "number" ? input.budgetUsd : null, trigger: "app" });
@@ -154,64 +131,6 @@ export function apiRoutes(deps: AppDeps) {
     if ((match = /^\/api\/endpoints\/([\w-]+)$/.exec(path)) && method === "DELETE") {
       const denied = admin(); if (denied) return denied;
       return (await account.removeEndpoint(match[1]!)) ? json(200, { deleted: true }) : error(404, "No such endpoint.");
-    }
-
-    // App connections: Viktor, with an API key. Connecting checks the key's scopes and lists the tasks; an admin picks which to evaluate.
-    if (path === "/api/connections/viktor" && method === "GET") return json(200, await currentViktorView(client, who.accountId, deps.auth));
-    if (path === "/api/connections/viktor" && method === "POST") {
-      const denied = admin(); if (denied) return denied;
-      const input = await body(request);
-      // An older client may still send creditCap; there is no cap any more, so it is ignored.
-      if (!input || typeof input.apiKey !== "string") return error(400, "Send the connection as JSON: {apiKey}.");
-      const connected = await connectViktor(client, { accountId: who.accountId, userId: who.userId, apiKey: input.apiKey });
-      return connected.ok ? json(201, connected.view) : error(connected.status, connected.error);
-    }
-    if (path === "/api/connections/viktor" && method === "DELETE") {
-      const denied = admin(); if (denied) return denied;
-      if (!(await account.removeConnection(VIKTOR))) return error(404, "Viktor is not connected.");
-      await disarmRelist(client, who.accountId, VIKTOR);
-      return json(200, { deleted: true });
-    }
-    if (path === "/api/connections/viktor/refresh" && method === "POST") {
-      const denied = admin(); if (denied) return denied;
-      // Returns once the listing has started, or at once when one is running: the page polls `listing`.
-      const { started } = await startRelist(client, who.accountId, VIKTOR);
-      return json(202, { ...await viktorView(client, who.accountId, deps.auth), started });
-    }
-    // Someone opened a listed task's row, Viktor's or Langfuse's: it is no longer marked New.
-    if ((match = /^\/api\/connections\/(viktor|langfuse)\/tasks\/([\w-]+)\/seen$/.exec(path)) && method === "POST") {
-      return (await account.markSeen({ kind: match[1]!, taskId: match[2]! })) ? json(200, { seen: true }) : error(404, "No such task in this connection's listing.");
-    }
-    if ((match = /^\/api\/connections\/viktor\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
-      const denied = admin(); if (denied) return denied;
-      const started = await startViktorTasks(client, { accountId: who.accountId, userId: who.userId, taskIds: [match[1]!] });
-      return started.started.length ? json(201, { started: started.started, jobIds: started.jobIds }) : error(409, started.refused ?? "This task cannot be evaluated, or is being evaluated now.");
-    }
-
-    // Langfuse, with a Viewer key pair: connecting refuses a key that can write and lists the tasks; an admin picks which to evaluate.
-    if (path === "/api/connections/langfuse" && method === "GET") return json(200, await langfuseView(client, who.accountId, deps.auth));
-    if (path === "/api/connections/langfuse" && method === "POST") {
-      const denied = admin(); if (denied) return denied;
-      const input = await body(request);
-      if (!input || typeof input.publicKey !== "string" || typeof input.secretKey !== "string" || (input.baseUrl !== undefined && typeof input.baseUrl !== "string")) return error(400, "Send the connection as JSON: {baseUrl, publicKey, secretKey}.");
-      const connected = await connectLangfuse(client, { accountId: who.accountId, userId: who.userId, publicKey: input.publicKey, secretKey: input.secretKey, ...(typeof input.baseUrl === "string" ? { baseUrl: input.baseUrl } : {}) });
-      return connected.ok ? json(201, connected.view) : error(connected.status, connected.error);
-    }
-    if (path === "/api/connections/langfuse" && method === "DELETE") {
-      const denied = admin(); if (denied) return denied;
-      if (!(await account.removeConnection(LANGFUSE))) return error(404, "Langfuse is not connected.");
-      await disarmRelist(client, who.accountId, LANGFUSE);
-      return json(200, { deleted: true });
-    }
-    if (path === "/api/connections/langfuse/refresh" && method === "POST") {
-      const denied = admin(); if (denied) return denied;
-      const { started } = await startRelist(client, who.accountId, LANGFUSE);
-      return json(202, { ...await langfuseView(client, who.accountId, deps.auth), started });
-    }
-    if ((match = /^\/api\/connections\/langfuse\/tasks\/([\w-]+)\/start$/.exec(path)) && method === "POST") {
-      const denied = admin(); if (denied) return denied;
-      const started = await startLangfuseTasks(client, { accountId: who.accountId, userId: who.userId, taskIds: [match[1]!] });
-      return started.started.length ? json(201, { started: started.started, jobIds: started.jobIds }) : error(409, started.refused ?? "This task cannot be evaluated, or is being evaluated now.");
     }
 
     if (path === "/api/guardrails" && method === "GET") {
@@ -265,7 +184,7 @@ export function apiRoutes(deps: AppDeps) {
       const denied = admin() ?? reverify(who); if (denied) return denied;
       const [tasks, jobs] = await Promise.all([account.tasks(), account.jobs({ limit: 100_000 })]);
       await client.catalogue.getOrCreate(["global"]).unsubscribe({ accountId: who.accountId });
-      for (const job of jobs) await (job.kind === VIKTOR ? client.viktorJob.get([job.id]) : client.job.get([job.id])).destroy().catch(() => null);
+      for (const job of jobs) await client.job.get([job.id]).destroy().catch(() => null);
       for (const task of tasks) await client.task.get([who.accountId, task.id]).destroy().catch(() => null);
       await account.destroy();
       return json(200, { deleted: true, tasks: tasks.length, jobs: jobs.length });

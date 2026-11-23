@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApiError, createApi, type GuardrailsAt, type JobView, type Me, type Report, type Run, type Spend, type Task, type LangfuseConnection, type ViktorConnection } from "../api.ts";
+import { ApiError, createApi, type GuardrailsAt, type JobView, type Me, type Report, type Run, type Spend, type Task } from "../api.ts";
 import { createFakeApi } from "../dev/fake-api.ts";
 import type { Account } from "../view.ts";
-import { connectionsView, retried, viktorActions } from "../views/connections.ts";
+import { connectionsView, retried } from "../views/connections.ts";
 import { choices, guardrailsView, parse } from "../views/guardrails.ts";
 import { planView } from "../views/plan.ts";
 import { runView } from "../views/run.ts";
@@ -21,8 +21,6 @@ const account = async (scenario = "populated"): Promise<Account> => {
   const me = await get<Me>("/api/me", scenario);
   return { ...me, account: { ...me.account, name: me.account.name ?? "Sahra Health" } };
 };
-/** A Langfuse connection that is not connected, for pages about other connections. */
-const NONE: LangfuseConnection = { connected: false, tasks: [] };
 const page = (me: Account, params = "", id: string | null = null) => ({ me, params: new URLSearchParams(params), id });
 const text = (html: { __html: string }): string => html.__html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").replaceAll("&#39;", "'").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
 
@@ -32,7 +30,7 @@ test("names from the cloud app are shown as text, never as markup", async () => 
   const tasks = (await get<Task[]>("/api/tasks")).map((task) => ({ ...task, name: hostile, environment: hostile }));
   const report = { ...await get<Report>("/api/runs/k7m2q9"), task: hostile, notices: [hostile] };
   const job = { ...await get<JobView>("/api/runs/z1c7m4"), error: hostile };
-  for (const html of [tasksView.render({ tasks, viktor: { connected: false, tasks: [] } }, page({ ...me, account: { ...me.account, name: hostile } })), runView.render(report, page(me)), runView.render(job, page(me))]) {
+  for (const html of [tasksView.render({ tasks }, page({ ...me, account: { ...me.account, name: hostile } })), runView.render(report, page(me)), runView.render(job, page(me))]) {
     assert.doesNotMatch(html.__html, /<img/);
     assert.match(html.__html, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
   }
@@ -150,146 +148,7 @@ test("a delete that needs a recent sign-in opens Clerk's prompt and retries once
   assert.equal(prompts, 2);
 });
 
-test("a Viktor connection lists its tasks with why some are skipped, and Approve change records the approval without changing the task", async () => {
-  const me = await account();
-  const viktor = await get<ViktorConnection>("/api/connections/viktor");
-  const listed = text(connectionsView.render({ endpoints: [], viktor, langfuse: NONE }, page(me)));
-  assert.match(listed, /Claims digest \/claims_digest smart 410 Set Claims digest to cheap/);
-  assert.match(listed, /Inbox sync \/inbox_sync Team default \(smart\) 0 Skipped script task, no model/);
-  assert.match(listed, /Heartbeat \/heartbeat Team default \(smart\) 0 Skipped Viktor's own task: it cannot be edited/);
-  const disconnected = connectionsView.render({ endpoints: [], viktor: { connected: false, tasks: [] }, langfuse: NONE }, page(me)).__html;
-  assert.match(disconnected, /data-action="connect-viktor"/);
-  assert.match(disconnected, /titled "\[OpenMerit\]: &lt;task title&gt;"/);
-  assert.doesNotMatch(connectionsView.render({ endpoints: [], viktor: { connected: false, tasks: [] }, langfuse: NONE }, page({ ...me, role: "member" })).__html, /data-action="connect-viktor"/);
-
-  const result = await get<Report>("/api/runs/v5t8c2");
-  const shown = runView.render(result, page(me)).__html;
-  assert.match(text({ __html: shown }), /Set Claims digest to cheap/);
-  assert.match(shown, /data-action="approve"/);
-  assert.match(shown, /href="https:\/\/app\.viktor\.com\/scheduled-tasks"/);
-  assert.doesNotMatch(runView.render(result, page({ ...me, role: "member" })).__html, /data-action="approve"/, "only an admin approves");
-
-  const approve = () => fake(new Request("https://openmerit.ai/api/runs/v5t8c2/approve", { method: "POST", headers: { authorization: "Bearer preview-populated" } }));
-  const first = await approve();
-  assert.equal(first.status, 200);
-  const approved = await get<Report>("/api/runs/v5t8c2");
-  assert.equal(approved.approved?.by, "user_amira");
-  const after = text(runView.render(approved, page(me)));
-  // The approver by name; an approval whose name Clerk did not have shows the user ID.
-  assert.match(after, /Approved by Amira Haddad on/);
-  assert.match(text(runView.render({ ...approved, approved: { ...approved.approved!, name: null } }, page(me))), /Approved by user_amira on/);
-  assert.match(text(connectionsView.render({ endpoints: [], viktor: await get<ViktorConnection>("/api/connections/viktor"), langfuse: NONE }, page(me))), /Approved by Amira Haddad on/);
-  assert.doesNotMatch(runView.render(approved, page(me)).__html, /data-action="approve"/);
-  const row = (await get<ViktorConnection>("/api/connections/viktor")).tasks.find((task) => task.id === "claims_digest");
-  assert.equal(row?.model, "smart", "approving changes nothing in Viktor");
-  // A Viktor evaluation that did not finish is started again through the connection, not rerun on a bundle.
-  const failed = { ...await get<JobView>("/api/runs/z1c7m4"), status: "failed" as const, error: "The test runs did not finish." };
-  assert.match(text(runView.render({ ...failed, connection: "viktor", evaluate: { evaluating: false, blocked: null, estimatedCredits: 372, budgetUsd: null } }, page(me))), /Start again About 372 Viktor credits/);
-  assert.match(text(runView.render(failed, page(me))), /Run again/);
-  // Jobs that failed before the error stopped being a notice too kept it in both: it shows once.
-  assert.equal(text(runView.render({ ...failed, notices: [failed.error] }, page(me))).split("The test runs did not finish.").length, 2);
-  const running = { ...failed, status: "running" as const, connection: "viktor" };
-  assert.match(text(runView.render(running, page(me))), /testing the task's presets on paused copies in Viktor's test mode/);
-  assert.doesNotMatch(text(runView.render(running, page(me))), /coding agent/);
-  const oneCredit = { ...result, pick: { ...result.pick!, costPerCallUsd: 0.0025 } };
-  assert.match(text(runView.render(oneCredit, page(me))), /1 credit per test run/);
-});
-
-test("a Langfuse connection lists its tasks by spend, and a result's change is approved in the app without writing to Langfuse", async () => {
-  const me = await account();
-  const [viktor, langfuse] = await Promise.all([get<ViktorConnection>("/api/connections/viktor"), get<LangfuseConnection>("/api/connections/langfuse")]);
-  const listed = text(connectionsView.render({ endpoints: [], viktor, langfuse }, page(me)));
-  assert.match(listed, /Project sahra-claims on cloud\.langfuse\.com · public key ending 9f2c/);
-  assert.match(listed, /adjudicate-claim › adjudicate-claim-generate 3 models recorded anthropic\/claude-sonnet-5\.5 2,513 \$10\.44 Set adjudicate-claim-generate to anthropic\/claude-haiku-5-5 Review and approve/);
-  assert.match(listed, /\(no trace name\) › \(no name\) openai\/gpt-5-mini 12 \$0\.02 Skipped generations without a name/);
-  const disconnected = { connected: false, tasks: [] };
-  assert.match(connectionsView.render({ endpoints: [], viktor, langfuse: disconnected }, page(me)).__html, /data-action="connect-langfuse"/);
-  assert.match(text(connectionsView.render({ endpoints: [], viktor, langfuse: disconnected }, page(me))), /refuses a key that can write/);
-  assert.doesNotMatch(connectionsView.render({ endpoints: [], viktor, langfuse: disconnected }, page({ ...me, role: "member" })).__html, /data-action="connect-langfuse"/);
-
-  // A key pair that can write is refused with why.
-  const refused = await fake(new Request("https://openmerit.ai/api/connections/langfuse", { method: "POST", headers: { authorization: "Bearer preview-populated", "content-type": "application/json" }, body: JSON.stringify({ baseUrl: "https://cloud.langfuse.com", publicKey: "pk-lf-1", secretKey: "sk-lf-write" }) }));
-  assert.equal(refused.status, 400);
-  assert.match((await refused.json() as { error: string }).error, /can write to Langfuse/);
-
-  const result = await get<Report>("/api/runs/l2f9a4");
-  const shown = runView.render(result, page(me)).__html;
-  assert.match(text({ __html: shown }), /Set adjudicate-claim-generate to anthropic\/claude-haiku-5-5 Where your application makes the "adjudicate-claim-generate" call in "adjudicate-claim", set the model to anthropic\/claude-haiku-5-5\./);
-  assert.match(shown, /data-action="approve"/);
-  assert.doesNotMatch(runView.render(result, page({ ...me, role: "member" })).__html, /data-action="approve"/, "only an admin approves");
-  assert.equal((await fake(new Request("https://openmerit.ai/api/runs/l2f9a4/approve", { method: "POST", headers: { authorization: "Bearer preview-populated" } }))).status, 200);
-  const approved = await get<Report>("/api/runs/l2f9a4");
-  assert.match(text(runView.render(approved, page(me))), /Approved by Amira Haddad on/);
-  assert.match(text(connectionsView.render({ endpoints: [], viktor, langfuse: await get<LangfuseConnection>("/api/connections/langfuse") }, page(me))), /Approved by Amira Haddad on/);
-});
-
-test("Runs labels a Viktor run by its task's title and says who started it, and a refused request reads as a sentence with the error behind Show details", async () => {
-  const me = await account();
-  const [runs, tasks] = await Promise.all([get<Run[]>("/api/runs"), get<Task[]>("/api/tasks")]);
-  const listed = text(runsView.render({ runs, tasks, jobs: [] }, page(me)));
-  assert.match(listed, /Claims digest Switch to cheap[^]*?Viktor connection \(automatic\)/);
-  assert.match(listed, /Weekly payer report Did not finish Started from the app by Amira Haddad/);
-  assert.doesNotMatch(listed, /viktor_/, "never a raw task or job ID");
-
-  const failed = await get<JobView>("/api/runs/v9k3r1");
-  const shown = runView.render(failed, page(me)).__html;
-  assert.equal(text({ __html: shown }).split("Viktor refused the request: each script argument may be at most 2,000 characters.").length, 2, "the sentence once");
-  assert.match(shown, /<details><summary>Show details<\/summary><pre class="error-detail">The job failed: Step &quot;put&quot;[^<]*# openmerit:batch\nimport asyncio/);
-  // There is no credit cap: Start again is on, with its estimate from the workspace's credits.
-  assert.match(shown, /data-action="rerun">Start again<\/button><span class="sub">About 1,720 Viktor credits from your workspace\. It counts as one evaluation on your plan\./);
-  assert.doesNotMatch(shown, /cap/);
-});
-
-test("only a person starts a connection's evaluation: Evaluate with its estimate on the task list and on the run page, off with why only when the plan would refuse it", async () => {
-  const me = await account();
-  const [viktor, langfuse] = await Promise.all([get<ViktorConnection>("/api/connections/viktor"), get<LangfuseConnection>("/api/connections/langfuse")]);
-  const html = connectionsView.render({ endpoints: [], viktor, langfuse }, page(me)).__html;
-  assert.match(text({ __html: html }), /Denial letters New \/denial_letters smart 260 Not evaluated Evaluate · about 290 Viktor credits/);
-  assert.match(html, /<button class="btn primary" type="button" data-action="start" data-id="denial_letters">Evaluate · about 290 Viktor credits<\/button>/);
-  // No credit cap: a large estimate is not refused, and nothing on the page mentions a cap or a Start button that waits.
-  assert.match(html, /data-action="start" data-id="weekly_payer_report">Start again · about 1,720 Viktor credits<\/button>/);
-  assert.doesNotMatch(text({ __html: html }), /credit cap|Credit cap|past the cap|of 2,000|wait with a Start button|on their own|highest spend first|OpenMerit: &lt;|"OpenMerit: /);
-  assert.doesNotMatch(html, /name="creditCap"/);
-  assert.match(text({ __html: html }), /322 Viktor credits used by OpenMerit's tests/);
-  assert.match(text({ __html: html }), /extract-claim › extract-claim-generate anthropic\/claude-sonnet-5\.5 2,203 \$5\.68 Not evaluated Evaluate Up to \$5 of model calls/);
-  assert.doesNotMatch(html, /Waiting|without being asked/);
-  // A member sees the estimate, not the button.
-  const member = connectionsView.render({ endpoints: [], viktor, langfuse }, page({ ...me, role: "member" })).__html;
-  assert.doesNotMatch(member, /data-action="start/);
-  assert.match(text({ __html: member }), /About 290 Viktor credits\. An admin can evaluate it\./);
-
-  // The run page is the task's own page in the app: a finished result offers Evaluate again.
-  const done = runView.render(await get<Report>("/api/runs/l2f9a4"), page(me)).__html;
-  assert.match(done, /data-action="rerun">Evaluate again<\/button><span class="sub">Up to \$5 of model calls\. It counts as one evaluation on your plan\./);
-  assert.doesNotMatch(runView.render(await get<Report>("/api/runs/l2f9a4"), page({ ...me, role: "member" })).__html, /data-action="rerun"/);
-  const plan = "The plan has no evaluations left this period.";
-  assert.match(runView.render({ ...await get<Report>("/api/runs/v5t8c2"), evaluate: { evaluating: false, blocked: plan, estimatedCredits: 372, budgetUsd: null } }, page(me)).__html, /disabled aria-describedby="why-again">Evaluate again[^]*The plan has no evaluations left this period\./);
-});
-
-test("a task listed after the first listing is New until someone opens its row; Refresh polls while the listing runs; a page that cannot load a connection never says it is not connected", async () => {
-  const me = await account();
-  const viktor = await get<ViktorConnection>("/api/connections/viktor");
-  const html = connectionsView.render({ endpoints: [], viktor, langfuse: NONE }, page(me)).__html;
-  // Only Denial letters came after the first listing; the first listing's tasks and an evaluated one are not New.
-  assert.equal(html.match(/>New<\/span>/g)?.length, 1);
-  assert.match(html, /<button class="task-open" type="button" data-action="seen" data-kind="viktor" data-id="denial_letters">Denial letters<\/button> <span class="pill good">New<\/span>/);
-  assert.equal((await fake(new Request("https://openmerit.ai/api/connections/viktor/tasks/denial_letters/seen", { method: "POST", headers: { authorization: "Bearer preview-populated" } }))).status, 200);
-  assert.doesNotMatch(connectionsView.render({ endpoints: [], viktor: await get<ViktorConnection>("/api/connections/viktor"), langfuse: NONE }, page(me)).__html, />New</);
-
-  // Refresh returns once the listing has started; the page shows it and turns Refresh off until it ends.
-  const refreshed = await fake(new Request("https://openmerit.ai/api/connections/viktor/refresh", { method: "POST", headers: { authorization: "Bearer preview-populated" } }));
-  assert.equal(refreshed.status, 202);
-  const listing = await get<ViktorConnection>("/api/connections/viktor");
-  assert.equal(listing.listing, true);
-  const busy = connectionsView.render({ endpoints: [], viktor: listing, langfuse: NONE }, page(me)).__html;
-  assert.match(busy, /data-action="refresh-viktor" disabled>Listing…<\/button>/);
-  assert.match(text({ __html: busy }), /Listing the tasks again…/);
-
-  // A connection the page could not read says so, and offers no connect form.
-  const down = connectionsView.render({ endpoints: [], viktor: { connected: false, unavailable: true, tasks: [] }, langfuse: NONE }, page(me)).__html;
-  assert.match(text({ __html: down }), /Viktor could not load: OpenMerit did not answer in time\. Reload the page to try again\./);
-  assert.doesNotMatch(down, /data-action="connect-viktor"|Viktor workspace\. Not connected/);
-
+test("a page asks the cloud app again while it wakes after a deploy, but not after a refusal", async () => {
   // A request that timed out or failed on the server is tried again; a refusal is not.
   let calls = 0;
   const flaky = () => { calls += 1; return calls < 3 ? Promise.reject(new ApiError(calls === 1 ? 0 : 503, "slow")) : Promise.resolve("ok"); };
@@ -300,54 +159,38 @@ test("a task listed after the first listing is New until someone opens its row; 
   assert.equal(calls, 1);
 });
 
-test("Tasks lists a connected Viktor workspace's tasks in their own section, with Evaluate for an admin, and none when Viktor is not connected", async () => {
+test("a result shows the decision the coding agent sent back, or that it waits for one; Connections has no app connections", async () => {
   const me = await account();
-  const tasks = await get<Task[]>("/api/tasks");
-  const viktor = await get<ViktorConnection>("/api/connections/viktor");
-  const shown = tasksView.render({ tasks, viktor }, page(me)).__html;
-  assert.match(shown, /<h2 id="viktor">Viktor<\/h2>/);
-  // The same rows as Connections: every task, with Evaluate on one not yet evaluated, and the skipped ones with why.
-  for (const task of viktor.tasks) assert.match(text({ __html: shown }), new RegExp(task.title));
-  assert.match(shown, /data-action="start" data-id="weekly_payer_report"/);
-  assert.match(text({ __html: shown }), /Skipped Viktor's own task: it cannot be edited/);
-  assert.match(text({ __html: shown }), new RegExp(`${viktor.tasks.length} Viktor tasks`));
-  // A member sees the estimate, not the button.
-  assert.doesNotMatch(tasksView.render({ tasks, viktor }, page({ ...me, role: "member" })).__html, /data-action="start"/);
-  // Not connected: no section; could not load: says so, never an empty table.
-  assert.doesNotMatch(tasksView.render({ tasks, viktor: { connected: false, tasks: [] } }, page(me)).__html, /id="viktor"/);
-  assert.match(text(tasksView.render({ tasks: [], viktor: { connected: false, unavailable: true, tasks: [] } }, page(me))), /Viktor's tasks could not load/);
-  // With no coding-agent tasks yet, the Viktor section still shows.
-  assert.match(tasksView.render({ tasks: [], viktor }, page(me)).__html, /id="viktor"/);
+  const approved = await get<Report>("/api/runs/k7m2q9");
+  const shown = text(runView.render(approved, page(me)));
+  assert.match(shown, /Approved Approved in the coding agent by Amira Haddad on /);
+  assert.doesNotMatch(runView.render(approved, page(me)).__html, /data-action="approve"/, "only the coding agent sends a decision");
+  // A decision recorded without a name in Clerk shows the user ID.
+  assert.match(text(runView.render({ ...approved, decision: { ...approved.decision!, name: null } }, page(me))), /by user_amira on/);
+  assert.match(text(runView.render(await get<Report>("/api/runs/b2v5h3"), page(me))), /Declined Declined in the coding agent by Amira Haddad on /);
+  const waiting = text(runView.render({ ...approved, decision: null }, page(me)));
+  assert.match(waiting, /asks you before applying it, and sends your answer back here/);
+  // Tasks: an approved task runs the pick now, with the decision; a pick without one waits for it.
+  // A fresh fake: earlier tests start runs in the shared one.
+  const listed = text(tasksView.render({ tasks: await (await createFakeApi()(new Request("https://openmerit.ai/api/tasks", { headers: { authorization: "Bearer preview-populated" } }))).json() as Task[] }, page(me)));
+  assert.match(listed, /Ticket router[^]*?claude-haiku-5-5[^]*?Switched to claude-haiku-5-5 saves about \$234 a month Approved in the coding agent by Amira Haddad[^]*?Bill and claim matcher/);
+  assert.match(listed, /Reply drafter[^]*?Switch to claude-haiku-5-5[^]*?Waiting for a decision in the coding agent/);
+  const connections = connectionsView.render({ endpoints: await get("/api/endpoints") }, page(me)).__html;
+  assert.doesNotMatch(connections, /Viktor|Langfuse|id="apps"/);
+  assert.match(connections, /id="endpoints"/);
 });
 
-test("Evaluate's confirmation states the estimate in Viktor credits, from the workspace's credits", async () => {
-  const me = await account();
-  const viktor = await get<ViktorConnection>("/api/connections/viktor");
-  let asked: { title: string; body: string } | null = null;
-  const sent: string[] = [];
-  const ctx = { me, params: new URLSearchParams(), id: null, api: { send: async (method: string, path: string) => { sent.push(`${method} ${path}`); return {}; } }, refresh: async () => {}, toast: () => {}, go: () => {}, download: () => {},
-    confirm: async (options: { title: string; body: string }) => { asked = options; return false; } } as unknown as Parameters<typeof viktorActions.start>[2];
-  const button = { dataset: { id: "denial_letters" } } as unknown as HTMLElement;
-  await viktorActions.start(button, viktor, ctx);
-  assert.equal(asked!.title, "Evaluate Denial letters?");
-  assert.match(asked!.body, /about 290 Viktor credits, taken from your workspace, not from OpenMerit\. It counts as one evaluation on your plan\./);
-  assert.doesNotMatch(asked!.body, /\$/, "the estimate is in credits only");
-  assert.deepEqual(sent, [], "a cancelled confirmation starts nothing");
-});
-
-test("a run whose current model could not run reads as failed, offers Start again and never says to keep the model; a measured one still says no switch", async () => {
+test("a run whose current model could not run reads as failed, offers Run again and never says to keep the model; a measured one still says no switch", async () => {
   const me = await account();
   const base = await get<Report>("/api/runs/k7m2q9");
   const why = "anthropic/claude-sonnet-5.5 could not run: anthropic/claude-sonnet-5.5 on openrouter: API key expired.";
-  // As the Langfuse run of 21 Nov 2026 saved it: no baseline, no connection fields, and the task's evaluate from the connection.
-  const { langfuse: _langfuse, connection: _connection, ...rest } = base;
-  const failed: Report = { ...rest, task: "assess-enrollment", status: "baseline_failed", pick: null, top: [], nearMisses: [], baseline: null, candidates: [],
-    edit: { edits: [], instructions: null }, notices: ["118 catalogue models without an ECI left out: the search places models by their capability index.", why], fixes: [{ kind: "rerun", notice: why }],
-    evaluate: { evaluating: false, blocked: null, estimatedCredits: null, budgetUsd: 5 } };
+  // As a run saved it when the current model's key had expired: no baseline.
+  const failed: Report = { ...base, task: "assess-enrollment", status: "baseline_failed", pick: null, top: [], nearMisses: [], baseline: null, candidates: [],
+    edit: { edits: [], instructions: null }, notices: ["118 catalogue models without an ECI left out: the search places models by their capability index.", why], fixes: [{ kind: "rerun", notice: why }] };
   const shown = text(runView.render(failed, page(me)));
   assert.match(shown, /assess-enrollment: the run did not finish/);
   assert.match(shown, /The run did not finish: anthropic\/claude-sonnet-5\.5 could not run: .*API key expired\./);
-  assert.match(shown, /Start again/);
+  assert.match(shown, /Run again/);
   assert.doesNotMatch(shown, /no switch|keep the model in use now/);
   assert.equal(runView.title?.(failed), "assess-enrollment: the run did not finish");
   // A current model that ran and passed too few cases was measured: that stays a verdict.

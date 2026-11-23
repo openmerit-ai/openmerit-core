@@ -1,8 +1,7 @@
-import type { Task, TaskState, ViktorConnection } from "../api.ts";
-import { day, html, model, plural, type Html } from "../html.ts";
+import type { Decision, Task, TaskState } from "../api.ts";
+import { date, day, html, model, plural, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { empty, header } from "./common.ts";
-import { retried, viktorActions, viktorTasks } from "./connections.ts";
 import { result } from "./runs.ts";
 
 const guardrails = (level: string, id: string, text: string) => html`<a href="/guardrails/?level=${level}&amp;id=${encodeURIComponent(id)}">${text}</a>`;
@@ -17,6 +16,14 @@ const states: Record<TaskState, (task: Task) => Html> = {
   retired: () => html`<span class="pill tag">Retired</span>`,
 };
 
+/** What the user decided in their coding agent about the task's latest change, or that the agent has not sent it yet. */
+export const decisionText = (decision: Decision): string =>
+  `${decision.decision === "approved" ? "Approved" : "Declined"} in the coding agent by ${decision.name ?? decision.by} on ${date(decision.at)}`;
+function decided(task: Task): Html {
+  if (task.decision && (task.decision.decision === "approved" || task.decision.jobId === task.lastJobId)) return html`<span class="sub">${decisionText(task.decision)}</span>`;
+  return task.pick ? html`<span class="sub">Waiting for a decision in the coding agent</span>` : html``;
+}
+
 function table(tasks: Task[]): Html {
   return html`<div class="tablewrap">
         <table>
@@ -26,7 +33,7 @@ function table(tasks: Task[]): Html {
               <td>${task.name}<span class="sub">${task.environment}${task.agent ? html` · agent ${guardrails("agent", `${task.environment}:${task.agent}`, task.agent)}` : ""} · ${guardrails("task", task.id, "Guardrails")}</span></td>
               <td>${model(task.currentModel)}</td>
               <td>${task.status === "running" ? "Running" : day(task.lastRunAt)}</td>
-              <td>${result(task, (text) => (task.lastJobId ? html`<a href="/r/${task.lastJobId}/">${text}</a>` : html`${text}`))}</td>
+              <td>${result(task, (text) => (task.lastJobId ? html`<a href="/r/${task.lastJobId}/">${text}</a>` : html`${text}`))}${decided(task)}</td>
               <td>${states[stateOf(task)](task)}</td>
             </tr>`)}
           </tbody>
@@ -34,33 +41,17 @@ function table(tasks: Task[]): Html {
       </div>`;
 }
 
-type Data = { tasks: Task[]; viktor: ViktorConnection };
-
-// A connected Viktor workspace's scheduled tasks, in their own section, as Connections lists them, with Evaluate.
-function viktorSection(viktor: ViktorConnection, admin: boolean): Html {
-  if (viktor.unavailable) return html`<section aria-labelledby="viktor"><h2 id="viktor">Viktor</h2><p class="note">Viktor's tasks could not load: OpenMerit did not answer in time. Reload the page to try again.</p></section>`;
-  if (!viktor.connected) return html``;
-  return html`<section aria-labelledby="viktor">
-      <h2 id="viktor">Viktor</h2>
-      <p class="note" style="margin: -2px 0 8px">Scheduled tasks in your Viktor workspace, most credits first. You pick which to evaluate; <a href="/connections/">Connections</a> has the key and Refresh.</p>
-      ${viktorTasks(viktor, admin)}
-    </section>`;
-}
+type Data = { tasks: Task[] };
 
 export const tasksView: View<Data> = {
   async load({ api }) {
-    const [tasks, viktor] = await Promise.all([
-      api.get<Task[]>("/api/tasks"),
-      retried(() => api.get<ViktorConnection>("/api/connections/viktor")).catch((): ViktorConnection => ({ connected: false, unavailable: true, tasks: [] })),
-    ]);
-    return { tasks, viktor };
+    return { tasks: await api.get<Task[]>("/api/tasks") };
   },
-  render({ tasks: all, viktor }, { me }) {
+  render({ tasks: all }, { me }) {
     const tasks = all.filter((task) => stateOf(task) !== "retired"), retired = all.filter((task) => stateOf(task) === "retired");
     const watching = all.filter((task) => stateOf(task) === "watching").length;
-    const top = header(me, "Tasks", "OpenMerit watches every task: it re-runs a task's tests when a new model could fit it or prices change, and tells you when a cheaper model matches the one you use.", [plural(tasks.length, "task"), `${watching} watched`, ...(viktor.connected ? [plural(viktor.tasks.length, "Viktor task")] : [])]);
-    const apps = viktorSection(viktor, me.role === "admin");
-    if (!all.length) return html`${top}<section aria-labelledby="tasks"><h2 id="tasks">All Tasks</h2>${empty("No tasks yet", "A task appears the first time a coding agent asks OpenMerit which model it should use.")}</section>${apps}`;
+    const top = header(me, "Tasks", "OpenMerit watches every task: it re-runs a task's tests when a new model could fit it or prices change, and tells you when a cheaper model matches the one you use.", [plural(tasks.length, "task"), `${watching} watched`]);
+    if (!all.length) return html`${top}<section aria-labelledby="tasks"><h2 id="tasks">All Tasks</h2>${empty("No tasks yet", "A task appears the first time a coding agent asks OpenMerit which model it should use.")}</section>`;
     return html`${top}
     <section aria-labelledby="tasks">
       <h2 id="tasks">All Tasks</h2>
@@ -69,11 +60,6 @@ export const tasksView: View<Data> = {
     </section>
     ${retired.length ? html`<section aria-labelledby="retired">
       <details><summary id="retired">${plural(retired.length, "retired task")}</summary>${table(retired)}</details>
-    </section>` : ""}
-    ${apps}`;
-  },
-  actions: {
-    start: (target, data, ctx) => viktorActions.start(target, data.viktor, ctx),
-    seen: (target, _data, ctx) => viktorActions.seen(target, ctx),
+    </section>` : ""}`;
   },
 };

@@ -20,10 +20,6 @@
       "types": "./dist/ranking/index.d.ts",
       "default": "./dist/ranking/index.js"
     },
-    "./sources": {
-      "types": "./dist/sources/index.d.ts",
-      "default": "./dist/sources/index.js"
-    },
     "./package.json": "./package.json"
   },
   "files": [

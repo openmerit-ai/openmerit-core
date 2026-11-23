@@ -9,8 +9,8 @@ measured with your own evals. Runs locally; no OpenMerit account.
 
 Usage:
   openmerit setup                 Connect OpenMerit Harness (as openmerit connect does), register the MCP
-                                  server, and configure this repository: read-only Langfuse, candidate
-                                  endpoints and allowed models, default eval budget. Rerunnable.
+                                  server, and configure this repository: candidate endpoints and allowed
+                                  models, default eval budget. Rerunnable.
   openmerit connect [claude-code|codex|api]
                                   Power OpenMerit Harness with Claude Code (its own login), Codex models
                                   (a ChatGPT Plus/Pro sign-in) or an API key. Signs in when needed.
@@ -37,7 +37,6 @@ Setup options (for scripts; interactive setup asks instead):
   --api-provider <pi provider> --api-model <id> --api-key-env <VAR>
   --endpoint <openrouter:VAR | openai:VAR | id=https://host/v1:VAR> (repeatable)
   --allowed-models <a,b>  --budget <usd>  --register-mcp | --no-register-mcp
-  --langfuse-url <url> --langfuse-public-key-env <VAR> --langfuse-secret-key-env <VAR>
   --yes                 Accept defaults; never prompt`;
 
 const started = Date.now();
@@ -73,7 +72,7 @@ async function setup(args: string[]) {
   const { values } = parseArgs({ args, options: {
     harness: { type: "string" }, "harness-model": { type: "string" }, "api-provider": { type: "string" }, "api-model": { type: "string" }, "api-key-env": { type: "string" },
     endpoint: { type: "string", multiple: true }, "allowed-models": { type: "string" }, budget: { type: "string" }, "register-mcp": { type: "boolean" }, "no-register-mcp": { type: "boolean" },
-    "langfuse-url": { type: "string" }, "langfuse-public-key-env": { type: "string" }, "langfuse-secret-key-env": { type: "string" }, yes: { type: "boolean" }, "device-code": { type: "boolean" },
+    yes: { type: "boolean" }, "device-code": { type: "boolean" },
   } });
   if (values.harness && !["claude-code", "codex", "api"].includes(values.harness)) throw new Error("--harness is claude-code, codex or api");
   const { runSetup } = await import("./setup.ts");
@@ -91,8 +90,7 @@ async function setup(args: string[]) {
         ...(values["device-code"] ? { deviceCode: true } : {}), ...(values["api-provider"] ? { apiProvider: values["api-provider"] } : {}), ...(values["api-model"] ? { apiModel: values["api-model"] } : {}), ...(values["api-key-env"] ? { apiKeyEnv: values["api-key-env"] } : {}),
         ...(values.endpoint ? { endpoints: values.endpoint } : {}), ...(values["allowed-models"] ? { allowedModels: values["allowed-models"].split(",").map(item => item.trim()).filter(Boolean) } : {}),
         ...(values.budget ? { budget: Number(values.budget) } : {}), ...(values["register-mcp"] ? { registerMcp: true } : values["no-register-mcp"] ? { registerMcp: false } : {}),
-        ...(values["langfuse-url"] ? { langfuseUrl: values["langfuse-url"] } : {}), ...(values["langfuse-public-key-env"] ? { langfusePublicKeyEnv: values["langfuse-public-key-env"] } : {}),
-        ...(values["langfuse-secret-key-env"] ? { langfuseSecretKeyEnv: values["langfuse-secret-key-env"] } : {}), ...(!interactive ? { nonInteractive: true } : {}),
+        ...(!interactive ? { nonInteractive: true } : {}),
       },
     });
     if (!result.harness) process.exitCode = 1;

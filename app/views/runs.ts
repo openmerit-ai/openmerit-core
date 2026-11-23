@@ -12,6 +12,8 @@ function describe(found: { status: string; pick: string | null; current: string;
     case "picked": return found.pick
       ? html`${link(html`Switch to ${model(found.pick)}`)}<span class="sub">from ${model(found.current)}${found.saving ? ` · ${found.saving}` : ""}</span>`
       : link("Cheaper model found");
+    // The user approved the pick in their coding agent, so it is now the current model.
+    case "switched": return html`${link(html`Switched to ${model(found.current)}`)}${found.saving ? html`<span class="sub">${found.saving}</span>` : ""}`;
     case "keep_current": return html`${link(html`Keep ${model(found.current)}`)}<span class="sub">no cheaper model passed as many cases</span>`;
     case "agent_eval_failed": return html`${link("Keep the current models")}<span class="sub">every cheaper switch failed the agent's eval</span>`;
     case "no_candidates": return html`${link("Keep the current model")}<span class="sub">no allowed model is cheaper</span>`;
@@ -46,13 +48,8 @@ function outcome(run: Run, task: Task | undefined): Html {
   return describe({ status: found.status, pick: found.model, current: found.from ?? task?.currentModel ?? "", saving }, (text) => html`${text}`);
 }
 
-// A connected app's runs, by the job's kind.
-const CONNECTIONS: Record<string, string> = { viktor: "Viktor", langfuse: "Langfuse" };
-
-// Who started the run: the coding agent that asked, by the name its MCP client sent, a watch, or a connection, on its own or from the app.
+// Who started the run: the coding agent that asked, by the name its MCP client sent, or a watch.
 function askedBy(run: Run): Html {
-  const app = CONNECTIONS[run.kind];
-  if (app) return run.startedBy ? html`Started from the app by ${run.startedByName ?? run.startedBy}` : html`${app} connection (automatic)`;
   if (run.kind === "watch") return html`${logo("openmerit")}OpenMerit<span class="sub">watching this task</span>`;
   if (!run.askedBy) return html`Coding agent`;
   const found = harness(run.askedBy);
@@ -137,7 +134,7 @@ export const runsView: View<{ runs: Run[]; tasks: Task[]; jobs: JobView[] }> = {
           <tbody>
             ${runs.map((run) => {
               const task = byId.get(run.taskId);
-              return html`<tr><td><a href="/r/${run.id}/">${task?.name ?? run.title ?? run.result?.task ?? run.taskId}</a><span class="sub">${task?.environment ?? ""}</span></td><td>${outcome(run, task)}</td><td>${askedBy(run)}</td><td class="num">${when(run.startedAt)}</td></tr>`;
+              return html`<tr><td><a href="/r/${run.id}/">${task?.name ?? run.result?.task ?? run.taskId}</a><span class="sub">${task?.environment ?? ""}</span></td><td>${outcome(run, task)}</td><td>${askedBy(run)}</td><td class="num">${when(run.startedAt)}</td></tr>`;
             })}
           </tbody>
         </table>

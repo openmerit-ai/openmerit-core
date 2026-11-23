@@ -16,7 +16,7 @@ function row(label: string, result: ModelResult): string[] {
 
 export function renderComparison(task: TaskComparison, runId?: string): string {
   if (task.status === "no_eval") return [`Task "${task.task}"`, `  Not reviewed: ${task.note}`].join("\n");
-  const lines = [`Task "${task.task}"`, `  Eval: ${task.eval.command || "none"} (${task.eval.source}; per-item results ${task.eval.langfuse ? `from Langfuse, ${task.eval.langfuse}` : "reported by the eval"}${task.eval.threshold !== null ? `; required pass rate ${task.eval.threshold}` : ""})`];
+  const lines = [`Task "${task.task}"`, `  Eval: ${task.eval.command || "none"} (${task.eval.source}; per-item results reported by the eval${task.eval.threshold !== null ? `; required pass rate ${task.eval.threshold}` : ""})`];
   if (task.search) lines.push(...renderSearch(task.search));
   const header = ["", "Model", "Endpoint", "Passed", "Cost/item", "Latency/request", "Status"];
   const table = [header, ...(task.baseline ? [row("Current", task.baseline)] : []), ...task.top.map((result, index) => row(`#${index + 1}`, result))];
@@ -24,13 +24,7 @@ export function renderComparison(task: TaskComparison, runId?: string): string {
   const others = task.candidates.filter(item => !task.top.includes(item) && !task.top.some(top => top.model === item.model));
   if (others.length) lines.push("  Other candidates:", pad([header, ...others.map(item => row("", item))]).split("\n").slice(1).map(line => `  ${line}`).join("\n"));
   lines.push(`  ${task.status === "ranked" ? "Top 3 cheapest models at least as good as the current model, measured on the same eval." : task.status === "no_qualified" ? "No finalist performed at least as well as the current model." : task.status === "non_discriminating" ? "The eval did not separate the models." : ""} ${task.note}`.trimEnd());
-  const experiments = [task.baseline, ...task.candidates].flatMap(item => item?.source === "langfuse" ? item.experiments : []);
-  if (experiments.length) lines.push(`  Read back from ${experiments.length} Langfuse experiments your eval recorded, named ${experiments.reduce((prefix, name) => { let at = 0; while (at < prefix.length && prefix[at] === name[at]) at++; return prefix.slice(0, at); }).replace(/[^-]*$/, "")}…; \`openmerit history\` lists each eval run's experiment.`);
   if (task.top.some(item => item.costIsEstimate) || task.baseline?.costIsEstimate) lines.push("  ~ cost estimated from list prices and reported tokens; the endpoint does not report cost.");
-  if (task.langfuse) {
-    if ("error" in task.langfuse) lines.push(`  Langfuse (read-only): not available (${task.langfuse.error})`);
-    else lines.push(`  Langfuse production evidence, ${task.langfuse.traceName} since ${task.langfuse.from.slice(0, 10)}: ${task.langfuse.models.map(model => `${model.model} ${model.generations} generations, ${model.costUsd === null ? "cost unknown" : `$${model.costUsd.toFixed(4)}`}`).join("; ") || "no generations"}${task.langfuse.scores.length ? `; scores ${task.langfuse.scores.map(score => `${score.name} ${score.average.toFixed(3)} (n=${score.count})`).join(", ")}` : ""}`);
-  }
   lines.push(`  Evidence: openmerit history ${runId ?? "<run id>"} lists every eval run (${[task.baseline, ...task.candidates].filter(Boolean).reduce((sum, item) => sum + item!.evidence.length, 0)} recorded).`);
   return lines.join("\n");
 }
@@ -89,7 +83,7 @@ export function renderRun(state: State, run: RunRow, step: Step): string {
     `Run ${run.id} (${run.status === "done" ? "done" : `${run.status} at ${run.phase}`})`, `  Repository ${run.repoRoot} at ${run.revision ?? "no commit"}`,
     `  openmerit ${run.packageVersion}, catalogue ${run.catalogueVersion}, harness ${run.harness}`, "",
     renderStep(step),
-    ...section("Eval runs:", state.units(run.id).map(unit => `  ${unit.status.padEnd(13)} ${unit.task} · ${unit.role} ${unit.model} on ${unit.endpoint} · run ${unit.repeat} · ${unit.attempts} attempt(s) · ${money(state.spend(run.id, unit.id).totalUsd)}${typeof unit.result?.total === "number" ? ` · ${String(unit.result.passes)}/${String(unit.result.total)} passed${unit.result.source === "langfuse" ? ` (Langfuse ${String(unit.result.experiment)})` : ""}` : ""}${unit.error ? ` · ${unit.error.split("\n")[0]}${unit.status === "failed" ? logTail(unit.error) : ""}` : ""}`), "none"),
+    ...section("Eval runs:", state.units(run.id).map(unit => `  ${unit.status.padEnd(13)} ${unit.task} · ${unit.role} ${unit.model} on ${unit.endpoint} · run ${unit.repeat} · ${unit.attempts} attempt(s) · ${money(state.spend(run.id, unit.id).totalUsd)}${typeof unit.result?.total === "number" ? ` · ${String(unit.result.passes)}/${String(unit.result.total)} passed` : ""}${unit.error ? ` · ${unit.error.split("\n")[0]}${unit.status === "failed" ? logTail(unit.error) : ""}` : ""}`), "none"),
     ...section("Budget:", state.budgetEvents(run.id).map(event => `  ${event.at.slice(0, 19)} ${event.kind}${event.toUsd !== null ? ` $${event.fromUsd.toFixed(2)} → $${event.toUsd.toFixed(2)} (${event.scope})` : ` at $${event.spentUsd.toFixed(4)} of $${event.fromUsd.toFixed(2)}`}`), `$${run.budgetUsd.toFixed(2)} for this run; not reached or changed.`),
     ...section("Decisions:", state.decisions(run.id).map(decision => `  ${decision.at.slice(0, 19)} ${decision.kind}: ${decision.decision}${decision.kind === "configure" && (decision.detail as { diff?: string }).diff ? `\n${(decision.detail as { diff: string }).diff.split("\n").map(line => `    ${line}`).join("\n")}` : ""}`), "none"),
     ...section("Events:", state.events(run.id).map(event => `  ${event.at.slice(0, 19)} ${event.kind}: ${event.message}`), "none"),

@@ -78,6 +78,25 @@ export const task = actor({
       });
     },
 
+    /**
+     * The user approved a result's change and the coding agent applied its edit: later runs, such as
+     * watch jobs, measure the pick as the current model, and each edited code ref has the code's new spelling.
+     */
+    adopt: async (c, input: { model: string; endpoint: string | null; edits: { file: string; line: number; before: string; after: string }[] }): Promise<void> => {
+      const bundle = c.state.bundle;
+      if (!bundle) return;
+      const { endpoint: _old, ...current } = bundle.current;
+      c.state.bundle = {
+        ...bundle, current: { ...current, model: input.model, ...(input.endpoint ? { endpoint: input.endpoint } : {}) },
+        ...(bundle.codeRefs ? { codeRefs: bundle.codeRefs.map(ref => ({ ...ref, spelling: input.edits.find(edit => edit.file === ref.file && edit.line === ref.line && edit.before === ref.spelling)?.after ?? ref.spelling })) } : {}),
+      };
+      await save(c);
+      await c.client<Registry>().account.getOrCreate([c.state.accountId]).upsertTask({
+        id: c.state.taskId, environment: c.state.environment, agent: c.state.agent, name: c.state.name, currentModel: input.model,
+        pick: null, status: "switched",
+      });
+    },
+
     /** The coding agent removed this model call from the code: stop watching, keep the runs. The next recommend call brings the task back. */
     retire: async (c): Promise<void> => {
       if (armed(c.state)) {
