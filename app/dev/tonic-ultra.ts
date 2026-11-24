@@ -6,7 +6,7 @@
 // use. Every name, number and price is fictional.
 import { resolveGuardrails, type Guardrails, type Level } from "../../openmerit-core/src/engine/guardrails.ts";
 import type { Endpoint, JobView, MeasuredModel, Report, Run, Task, TaskState } from "../api.ts";
-import type { State } from "./fake-api.ts";
+import { repo, repoReview, type State } from "./fake-api.ts";
 
 // Per call, on the task's typical prompt. eci is the catalogue's capability index; null is a model
 // outside the catalogue.
@@ -247,6 +247,11 @@ export function tonicUltra(): State {
   return {
     me: { user: { id: "user_jordan" }, account: { id: "org_tonic", name: "Tonic Ultra" }, role: "admin", plan: { name: "Cloud", status: "active", periodEnd: "2026-12-01T00:00:00Z", includedEvals: 100, usedEvals: 87 } },
     tasks: ordered, runs, reports, jobs, endpoints: endpoints.map((item) => ({ ...item })),
+    // Each repository the agency's tasks come from, reviewed: every task's model call. The reporting repository is private.
+    repos: Object.values(ENV).map((env, index) => repo(env, {
+      private: env === ENV.reports, tokenLast4: env === ENV.reports ? "7d0a" : null, addedAt: `2026-09-0${index + 1}T09:00:00Z`,
+      result: repoReview({ files: 60 + index * 37, modelCalls: specs.filter((spec) => spec.env === env).map((spec) => ({ file: spec.file, line: spec.line, value: spec.model, catalogueId: spec.model, dynamic: false, envVar: null })) }),
+    })),
     spend: { openmeritUsd: 211.4, customerUsd: 143.85, monthlyCapUsd: 250, customerCapUsd: 200, period: { start: "2026-11-01T00:00:00.000Z", end: "2026-12-01T00:00:00.000Z" } },
     guardrails: { environment: structuredClone(environmentGuardrails), agent: structuredClone(agentGuardrails), task: structuredClone(taskGuardrails) } satisfies Record<Level, Record<string, Guardrails>>,
     disconnected: 0, deleted: [],

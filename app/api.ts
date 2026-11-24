@@ -153,6 +153,29 @@ export interface LiveProgress {
 export type EndpointKind = "openrouter" | "openai-compatible" | "anthropic";
 export interface Endpoint { id: string; kind: EndpointKind; baseUrl: string; allowedModels: string[] | "all"; keyLast4: string; verifiedAt: string | null; builtIn: boolean }
 
+// A model call a repository's review found: where it is and the model it names, or the expression that picks it (cloud/src/github.ts).
+export interface ModelCall { file: string; line: number; value: string; catalogueId: string | null; dynamic: boolean; envVar: string | null }
+export interface RepoReview {
+  // scan lists the model calls; review, once the review prompt lands, also writes the task specs in tasks.
+  reviewer: string;
+  commit: string;
+  branch: string;
+  files: number;
+  bytes: number;
+  models: { value: string; catalogueId: string | null; calls: number }[];
+  modelCalls: ModelCall[];
+  totalCalls: number;
+  tasks: unknown[];
+  durationMs: number;
+}
+// A GitHub repository the account added (GET /api/repos). tokenLast4 is null for a public one added by its URL.
+// review.result is the last review that finished, kept while another runs or after one fails.
+export type ReviewStatus = "queued" | "reviewing" | "done" | "failed";
+export interface Repo {
+  id: string; fullName: string; url: string; private: boolean; defaultBranch: string; tokenLast4: string | null; addedAt: string; checkedAt: string;
+  review: { status: ReviewStatus; requestedAt: string; finishedAt: string | null; error: string | null; result: RepoReview | null };
+}
+
 export interface GuardrailsAt {
   level: Level;
   id: string;

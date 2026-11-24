@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApiError, createApi, type GuardrailsAt, type JobView, type Me, type Report, type Run, type Spend, type Task } from "../api.ts";
+import { ApiError, createApi, type Endpoint, type GuardrailsAt, type JobView, type Me, type Repo, type Report, type Run, type Spend, type Task } from "../api.ts";
 import { createFakeApi } from "../dev/fake-api.ts";
 import type { Account } from "../view.ts";
 import { connectionsView, retried } from "../views/connections.ts";
@@ -175,9 +175,47 @@ test("a result shows the decision the coding agent sent back, or that it waits f
   const listed = text(tasksView.render({ tasks: await (await createFakeApi()(new Request("https://openmerit.ai/api/tasks", { headers: { authorization: "Bearer preview-populated" } }))).json() as Task[] }, page(me)));
   assert.match(listed, /Ticket router[^]*?claude-haiku-5-5[^]*?Switched to claude-haiku-5-5 saves about \$234 a month Approved in the coding agent by Amira Haddad[^]*?Bill and claim matcher/);
   assert.match(listed, /Reply drafter[^]*?Switch to claude-haiku-5-5[^]*?Waiting for a decision in the coding agent/);
-  const connections = connectionsView.render({ endpoints: await get("/api/endpoints") }, page(me)).__html;
+  const connections = connectionsView.render({ endpoints: await get("/api/endpoints"), repos: [] }, page(me)).__html;
   assert.doesNotMatch(connections, /Viktor|Langfuse|id="apps"/);
   assert.match(connections, /id="endpoints"/);
+});
+
+test("Connections lists each repository with its model calls, how it is read, and its review's state, and only admins change them", async () => {
+  const me = await account();
+  const repos = await get<Repo[]>("/api/repos");
+  const endpoints = await get<Endpoint[]>("/api/endpoints");
+  const shown = text(connectionsView.render({ endpoints, repos }, page(me)));
+  assert.match(shown, /sahra-health\/claims-api 6 model calls: gpt-5, claude-sonnet-5\.5, gpt-5-mini, settings\.reply_model · 214 files at 4be1c07 on main Private · token ending 9c1e/);
+  assert.match(shown, /sahra-health\/enroll-web 1 model call: gpt-5-mini · 88 files at 4be1c07 on main Public/);
+  assert.match(shown, /src\/triage\.ts:14 gpt-5 from TRIAGE_MODEL/);
+  assert.match(shown, /never runs your code, pushes, or opens a pull request/);
+  assert.match(shown, /Contents: Read-only/);
+  // A review that failed says why and keeps what the last one found; one under way says so and cannot start again.
+  const failed = { ...repos[0]!, review: { ...repos[0]!.review, status: "failed" as const, error: "Cloning sahra-health/claims-api failed: took longer than 120 s" } };
+  const running = { ...repos[1]!, review: { ...repos[1]!.review, status: "reviewing" as const } };
+  const states = connectionsView.render({ endpoints, repos: [failed, running] }, page(me)).__html;
+  assert.match(text({ __html: states }), /The last review failed: Cloning sahra-health\/claims-api failed: took longer than 120 s 6 model calls/);
+  assert.match(text({ __html: states }), /enroll-web Reviewing the code, read-only… 1 model call/);
+  assert.match(states, /data-action="review" data-id="repo_sahrahealthenrollweb" disabled/);
+  // A member sees the repositories but no form and no buttons.
+  const member = connectionsView.render({ endpoints, repos }, page(await account("member"))).__html;
+  assert.doesNotMatch(member, /data-action="(addRepo|review|removeRepo)"/);
+  assert.match(text({ __html: member }), /Only an admin of Sahra Health can add, review or remove repositories/);
+});
+
+test("the preview's fake checks a repository like the cloud app: a private one needs a fine-grained token, and its review finishes", async () => {
+  const api = createFakeApi();
+  const send = async (body: object) => {
+    const response = await api(new Request("https://openmerit.ai/api/repos", { method: "POST", headers: { authorization: "Bearer preview-empty" }, body: JSON.stringify(body) }));
+    return { status: response.status, body: await response.json() as Repo & { error: string } };
+  };
+  assert.match((await send({ url: "https://gitlab.com/a/b" })).body.error, /GitHub URL/);
+  assert.match((await send({ url: "github.com/acme/private-app" })).body.error, /fine-grained token/);
+  assert.match((await send({ url: "github.com/acme/private-app", token: `ghp_${"x".repeat(36)}` })).body.error, /classic token/);
+  const added = await send({ url: "https://github.com/acme/private-app", token: `github_pat_${"x".repeat(30)}` });
+  assert.equal(added.status, 201);
+  assert.equal(added.body.review.status, "reviewing");
+  assert.equal(added.body.tokenLast4, "xxxx");
 });
 
 test("a run whose current model could not run reads as failed, offers Run again and never says to keep the model; a measured one still says no switch", async () => {

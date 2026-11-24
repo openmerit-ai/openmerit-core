@@ -5,10 +5,12 @@ import { randomBytes } from "node:crypto";
 import { actor } from "rivetkit";
 import { db } from "rivetkit/db";
 import type { PlanUpdate } from "../billing.ts";
-import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, settledUsd, type Funding, type GuardrailKey, type Guardrails, type Level, type ReserveResult, type ResolvedGuardrails, type Settlement } from "../engine.ts";
+import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, settledUsd, type Funding, type GuardrailKey, type Catalogue, type Guardrails, type Level, type ReserveResult, type ResolvedGuardrails, type Settlement } from "../engine.ts";
+import { checkRepo, parseRepoUrl, reviewRepository, tokenProblem, type RepoReview } from "../github.ts";
 import { decryptKey, encryptKey, endpointUrlProblem } from "../keys.ts";
 import { OPENROUTER, type EndpointInfo } from "../pool.ts";
 import type { EndpointConfig, EndpointKind } from "../../../openmerit-core/src/ranking/index.ts";
+import type { Registry } from "../registry.ts";
 import { services } from "../services.ts";
 
 type Row = Record<string, unknown>;
@@ -32,6 +34,10 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS decisions (job_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, decision TEXT NOT NULL, change TEXT NOT NULL,
     decided_by TEXT NOT NULL, decided_by_name TEXT, decided_by_email TEXT, decided_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS reports (job_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, created_at INTEGER NOT NULL, json TEXT NOT NULL, markdown TEXT NOT NULL, share_token TEXT UNIQUE)`,
+  `CREATE TABLE IF NOT EXISTS repos (id TEXT PRIMARY KEY, full_name TEXT NOT NULL UNIQUE COLLATE NOCASE, private INTEGER NOT NULL, default_branch TEXT NOT NULL,
+    sealed_token TEXT, token_last4 TEXT, added_at INTEGER NOT NULL, checked_at INTEGER NOT NULL,
+    review_status TEXT NOT NULL, review_requested_at INTEGER NOT NULL, review_finished_at INTEGER, review_error TEXT, review TEXT)`,
+  `CREATE TABLE IF NOT EXISTS repo_reviews (repo_id TEXT NOT NULL, requested_at INTEGER NOT NULL)`,
 ];
 
 /** What a ledger row counts: settled at its cost, reserved at its reservation, released not at all. */
@@ -64,6 +70,14 @@ export const JOB_BUDGET = "budget for this job";
 
 export interface JobRow { id: string; taskId: string; kind: string; status: string; startedAt: string; finishedAt: string | null; askedBy: string | null; result: RunResult | null }
 export interface GuardrailSetting { key: string; value: unknown; kind: "constraint" | "default" }
+/**
+ * A GitHub repository the account added. tokenLast4 is null for a public repository added by its URL
+ * alone. review.result is the last review that finished, kept while a new one runs or after it fails.
+ */
+export interface RepoView {
+  id: string; fullName: string; url: string; private: boolean; defaultBranch: string; tokenLast4: string | null; addedAt: string; checkedAt: string;
+  review: { status: "queued" | "reviewing" | "done" | "failed"; requestedAt: string; finishedAt: string | null; error: string | null; result: RepoReview | null };
+}
 export type Started = { ok: true } | { ok: false; error: string };
 
 const iso = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toISOString() : null);
@@ -276,6 +290,57 @@ export const account = actor({
       return before.length > 0;
     },
 
+    // GitHub repositories. A token arrives only through /api/repos and is stored encrypted, as endpoint keys are.
+    /** Checks that OpenMerit can read the repository, saves it and starts its review. Adding one again replaces its token. */
+    addRepo: async (c, input: { url: string; token?: string | null }): Promise<{ ok: true; repo: RepoView } | { ok: false; error: string }> => {
+      const { config, fetch } = services();
+      const ref = parseRepoUrl(typeof input.url === "string" ? input.url : "");
+      if (!ref) return { ok: false, error: "Paste the repository's GitHub URL, such as https://github.com/acme/app." };
+      const token = typeof input.token === "string" && input.token.trim() ? input.token.trim() : null;
+      if (token) {
+        const problem = tokenProblem(token);
+        if (problem) return { ok: false, error: problem };
+        if (!config.keyEncryptionKey) return { ok: false, error: "Private repositories are not available yet: the app has no key-encryption key." };
+      }
+      const [known] = await c.db.execute(`SELECT id FROM repos WHERE full_name = ?`, `${ref.owner}/${ref.name}`);
+      const [count] = await c.db.execute(`SELECT count(*) AS n FROM repos`);
+      if (!known && Number(count?.n) >= config.limits.repos) return { ok: false, error: `This account has ${config.limits.repos} repositories, its limit. Remove one to add another.` };
+      const busy = await reviewsRefusal(c.db);
+      if (busy) return { ok: false, error: busy };
+      const checked = await checkRepo(ref, token, config.github, fetch);
+      if (!checked.ok) return checked;
+      const { repo } = checked;
+      const now = Date.now();
+      const [existing] = await c.db.execute(`SELECT id FROM repos WHERE full_name = ?`, repo.fullName);
+      const id = existing ? String(existing.id) : `repo_${randomBytes(6).toString("hex")}`;
+      await c.db.execute(`INSERT INTO repos (id, full_name, private, default_branch, sealed_token, token_last4, added_at, checked_at, review_status, review_requested_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)
+        ON CONFLICT (id) DO UPDATE SET full_name = excluded.full_name, private = excluded.private, default_branch = excluded.default_branch, sealed_token = excluded.sealed_token,
+        token_last4 = excluded.token_last4, checked_at = excluded.checked_at`,
+      id, repo.fullName, repo.private ? 1 : 0, repo.defaultBranch, token ? encryptKey(config.keyEncryptionKey!, c.key[0]!, token) : null, token ? token.slice(-4) : null, now, now, now);
+      await startReview(c, id, () => c.client<Registry>().catalogue.getOrCreate(["global"]).get());
+      return { ok: true, repo: (await repoViews(c.db, id))[0]! };
+    },
+
+    repos: async (c): Promise<RepoView[]> => repoViews(c.db),
+
+    /** Reviews the repository again, unless a review is already queued or running. */
+    reviewRepo: async (c, id: string): Promise<{ ok: true; repo: RepoView } | { ok: false; status: 404 | 409; error: string }> => {
+      const [view] = await repoViews(c.db, id);
+      if (!view) return { ok: false, status: 404, error: "No such repository in this account." };
+      if (view.review.status === "queued" || view.review.status === "reviewing") return { ok: true, repo: view };
+      const busy = await reviewsRefusal(c.db);
+      if (busy) return { ok: false, status: 409, error: busy };
+      await startReview(c, id, () => c.client<Registry>().catalogue.getOrCreate(["global"]).get());
+      return { ok: true, repo: (await repoViews(c.db, id))[0]! };
+    },
+
+    /** Deletes the repository, its token and its review. A review still running finishes without saving. */
+    removeRepo: async (c, id: string): Promise<boolean> => {
+      const before = await c.db.execute(`SELECT id FROM repos WHERE id = ?`, id);
+      await c.db.execute(`DELETE FROM repos WHERE id = ?`, id);
+      return before.length > 0;
+    },
+
     /** The endpoints a job may call, without keys: OpenRouter on OpenMerit's key first, then the customer's. */
     endpointsForJob: async (c): Promise<EndpointInfo[]> => (await jobEndpoints(c.db, c.key[0]!, false)).map(({ apiKey: _key, ...info }) => info),
 
@@ -405,13 +470,13 @@ export const account = actor({
       return Object.fromEntries(rows.map(row => [String(row.task_id), decisionRow(row)]));
     },
 
-    /** Everything the account holds, except keys. */
+    /** Everything the account holds, except keys and repository tokens. */
     export: async (c): Promise<Record<string, unknown>> => {
       const all = async (table: string) => c.db.execute(`SELECT * FROM ${table}`);
       return {
         account: c.key[0], exportedAt: new Date().toISOString(), plan: await plan(c.db), members: await all("members"), endpoints: await endpointViews(c.db),
         guardrails: (await all("guardrails")).map(row => ({ ...row, settings: JSON.parse(String(row.settings)) as unknown })), tasks: await (async () => { const watch = await watchGuardrails(c.db); return (await all("tasks")).map(row => taskRow(row, watch(row))); })(),
-        decisions: (await all("decisions")).map(decisionRow),
+        decisions: (await all("decisions")).map(decisionRow), repos: await repoViews(c.db),
         jobs: (await c.db.execute(`SELECT * FROM jobs WHERE deleted_at IS NULL`)).map(jobRow), deletions: await all("deletions"), ledger: await all("ledger"), reports: (await all("reports")).map(row => ({ jobId: row.job_id, taskId: row.task_id, report: JSON.parse(String(row.json)) as unknown })),
       };
     },
@@ -482,6 +547,64 @@ async function watchGuardrails(database: Database): Promise<(row: Row) => boolea
 async function endpointViews(database: Database): Promise<EndpointView[]> {
   const rows = await database.execute(`SELECT id, kind, base_url, allowed_models, key_last4, verified_at FROM endpoints ORDER BY created_at`);
   return rows.map(row => ({ id: String(row.id), kind: row.kind as EndpointKind, baseUrl: String(row.base_url), allowedModels: JSON.parse(String(row.allowed_models)) as string[] | "all", keyLast4: String(row.key_last4), verifiedAt: iso(row.verified_at), builtIn: false }));
+}
+
+/** Why the account cannot start another review this hour, or null. */
+async function reviewsRefusal(database: Database): Promise<string | null> {
+  const { reviewsPerHour } = services().config.limits;
+  const [row] = await database.execute(`SELECT count(*) AS n FROM repo_reviews WHERE requested_at > ?`, Date.now() - 3_600_000);
+  return Number(row?.n) >= reviewsPerHour ? `This account started ${reviewsPerHour} repository reviews in the last hour, its limit. Try again later.` : null;
+}
+
+/** A review queued or running for longer than this stopped with its node, such as in a deploy, and can start again. */
+const reviewStaleMs = () => services().config.github.cloneTimeoutMs + 10 * 60_000;
+
+/**
+ * Queues a review and runs it after the action returns: the clone and scan take longer than an
+ * action may. The request time tells this review's result from a later one's: a review whose
+ * repository was added again or removed meanwhile saves nothing.
+ */
+async function startReview(c: { db: Database; key: readonly string[]; keepAwake: <T>(promise: Promise<T>) => Promise<T> }, id: string, catalogue: () => Promise<Catalogue>): Promise<void> {
+  const requestedAt = Date.now();
+  await c.db.execute(`UPDATE repos SET review_status = 'queued', review_requested_at = ? WHERE id = ?`, requestedAt, id);
+  await c.db.execute(`DELETE FROM repo_reviews WHERE requested_at < ?`, requestedAt - 3_600_000);
+  await c.db.execute(`INSERT INTO repo_reviews (repo_id, requested_at) VALUES (?, ?)`, id, requestedAt);
+  const current = `id = ? AND review_requested_at = ?`;
+  const run = async () => {
+    const [row] = await c.db.execute(`SELECT full_name, default_branch, sealed_token FROM repos WHERE ${current}`, id, requestedAt);
+    if (!row) return;
+    await c.db.execute(`UPDATE repos SET review_status = 'reviewing' WHERE ${current}`, id, requestedAt);
+    const { config } = services();
+    try {
+      let token: string | null = null;
+      if (row.sealed_token) {
+        try { token = decryptKey(config.keyEncryptionKey!, c.key[0]!, String(row.sealed_token)); } catch { throw new Error("OpenMerit can no longer read this repository's token. Add the repository again with its token."); }
+      }
+      const review = await reviewRepository({ fullName: String(row.full_name), branch: String(row.default_branch), token, config: config.github, catalogue: await catalogue() });
+      await c.db.execute(`UPDATE repos SET review_status = 'done', review_finished_at = ?, review_error = NULL, review = ? WHERE ${current}`, Date.now(), JSON.stringify(review), id, requestedAt);
+    } catch (error) {
+      await c.db.execute(`UPDATE repos SET review_status = 'failed', review_finished_at = ?, review_error = ? WHERE ${current}`, Date.now(), error instanceof Error ? error.message : "The review failed.", id, requestedAt);
+    }
+  };
+  void c.keepAwake(run()).catch(() => undefined);
+}
+
+async function repoViews(database: Database, id?: string): Promise<RepoView[]> {
+  const rows = id ? await database.execute(`SELECT * FROM repos WHERE id = ?`, id) : await database.execute(`SELECT * FROM repos ORDER BY added_at`);
+  const stale = Date.now() - reviewStaleMs();
+  return rows.map(row => {
+    const active = row.review_status === "queued" || row.review_status === "reviewing";
+    const stopped = active && Number(row.review_requested_at) < stale;
+    return {
+      id: String(row.id), fullName: String(row.full_name), url: `https://github.com/${String(row.full_name)}`, private: row.private === 1, defaultBranch: String(row.default_branch),
+      tokenLast4: (row.token_last4 as string | null) ?? null, addedAt: iso(row.added_at)!, checkedAt: iso(row.checked_at)!,
+      review: {
+        status: stopped ? "failed" : row.review_status as RepoView["review"]["status"], requestedAt: iso(row.review_requested_at)!, finishedAt: iso(row.review_finished_at),
+        error: stopped ? "The review stopped before it finished. Review the repository again." : (row.review_error as string | null) ?? null,
+        result: typeof row.review === "string" ? JSON.parse(row.review) as RepoReview : null,
+      },
+    };
+  });
 }
 
 async function jobEndpoints(database: Database, accountId: string, withKeys: boolean): Promise<(EndpointConfig & EndpointInfo)[]> {

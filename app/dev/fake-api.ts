@@ -6,16 +6,37 @@
 // just created), preview-noorg (a token without an organization), preview-error, preview-slow and preview-expired. Each scenario keeps its own in-memory
 // state, so actions change what later requests return. Every name and number is fictional.
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, type Guardrails, type Level } from "../../openmerit-core/src/engine/guardrails.ts";
-import type { Decision, DeletedTask, Endpoint, JobView, LiveProgress, MeasuredModel, Me, Report, Run, Spend, Task } from "../api.ts";
+import type { Decision, DeletedTask, Endpoint, JobView, LiveProgress, MeasuredModel, Me, Repo, RepoReview, Report, Run, Spend, Task } from "../api.ts";
 import { tonicUltra } from "./tonic-ultra.ts";
 
-export interface State { me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number; deleted: DeletedTask[] }
+export interface State { me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; repos: Repo[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number; deleted: DeletedTask[] }
 
 const ENV = "sahra-health/claims";
 const measured = (model: string, endpoint: string, fields: Partial<MeasuredModel>): MeasuredModel => ({
   model, endpoint, endpointModel: model.split("/").at(-1) ?? model, role: "candidate", stage: "search", eci: 120, inCatalogue: true, funding: "openmerit",
   status: "measured", passes: 38, total: 40, costPerCallUsd: 0.0001, costIsEstimate: false, latencyMs: 900, qualified: false, note: "", ...fields,
 });
+
+// A repository's review, as the cloud app's repository scan returns it: its model calls, and no task specs yet.
+export function repoReview(fields: Partial<RepoReview> & Pick<RepoReview, "modelCalls">): RepoReview {
+  const groups = new Map<string, RepoReview["models"][number]>();
+  for (const call of fields.modelCalls.filter((item) => !item.dynamic || item.catalogueId)) {
+    const key = call.catalogueId ?? call.value;
+    const group = groups.get(key) ?? { value: key, catalogueId: call.catalogueId, calls: 0 };
+    group.calls += 1;
+    groups.set(key, group);
+  }
+  return { reviewer: "scan", commit: "4be1c07d9a3f2e6b8c5d1a0f7e9b3c2d4a6f8e10", branch: "main", files: 214, bytes: 3_400_000, models: [...groups.values()].sort((a, b) => b.calls - a.calls),
+    totalCalls: fields.modelCalls.length, tasks: [], durationMs: 6200, ...fields };
+}
+export function repo(fullName: string, fields: Partial<Repo> & { result?: RepoReview | null; status?: Repo["review"]["status"]; error?: string | null }): Repo {
+  const { result = null, status = "done", error = null, ...rest } = fields;
+  return {
+    id: `repo_${fullName.replace(/\W/g, "")}`, fullName, url: `https://github.com/${fullName}`, private: false, defaultBranch: "main", tokenLast4: null, addedAt: "2026-11-20T09:00:00Z", checkedAt: "2026-11-20T09:00:00Z",
+    review: { status, requestedAt: "2026-11-20T09:00:00Z", finishedAt: status === "done" || status === "failed" ? "2026-11-20T09:00:07Z" : null, error, result }, ...rest,
+  };
+}
+const call = (file: string, line: number, value: string, catalogueId: string | null, envVar: string | null = null) => ({ file, line, value, catalogueId, dynamic: envVar !== null, envVar });
 
 function populated(): State {
   const task = (id: string, name: string, fields: Partial<Task>): Task => ({
@@ -93,6 +114,14 @@ function populated(): State {
       { id: "ep_openai", kind: "openai-compatible", baseUrl: "https://api.openai.com/v1", allowedModels: ["gpt-5", "gpt-5-mini", "gpt-5-nano"], keyLast4: "4f2a", verifiedAt: "2026-11-12T09:00:00Z", builtIn: false },
       { id: "ep_baseten", kind: "openai-compatible", baseUrl: "https://model-7q2.api.baseten.co/v1", allowedModels: ["sahra-triage-ft-2"], keyLast4: "91be", verifiedAt: null, builtIn: false },
     ],
+    repos: [
+      repo("sahra-health/claims-api", { private: true, tokenLast4: "9c1e", result: repoReview({ modelCalls: [
+        call("src/triage.ts", 14, "gpt-5", "openai/gpt-5", "TRIAGE_MODEL"), call("src/claims/match.ts", 41, "anthropic/claude-sonnet-5.5", "anthropic/claude-sonnet-5.5"),
+        call("src/claims/fraud.ts", 22, "anthropic/claude-sonnet-5.5", "anthropic/claude-sonnet-5.5"), call("src/replies/draft.py", 8, "gpt-5", "openai/gpt-5"),
+        call("config/models.yaml", 3, "gpt-5-mini", "openai/gpt-5-mini"), call("src/replies/draft.py", 31, "settings.reply_model", null),
+      ] }) }),
+      repo("sahra-health/enroll-web", { addedAt: "2026-11-22T09:00:00Z", result: repoReview({ files: 88, modelCalls: [call("app/enroll/check.ts", 12, "openai/gpt-5-mini", "openai/gpt-5-mini")] }) }),
+    ],
     spend: { openmeritUsd: 18.42, customerUsd: 6.1, monthlyCapUsd: 250, customerCapUsd: 50, period: { start: "2026-11-01T00:00:00.000Z", end: "2026-12-01T00:00:00.000Z" } },
     guardrails: {
       environment: { [ENV]: { allowedProviders: ["openai", "anthropic"], spendCapUsd: 25, repeats: 3, minPassRate: 0.95, watch: true, actionPolicy: "ask_first" }, "sahra-health/enroll": { region: "uae" } },
@@ -105,7 +134,7 @@ function populated(): State {
 
 function emptyState(me: Me): State {
   const state = populated();
-  return { ...state, me: { ...me, plan: { ...me.plan, usedEvals: 0 } }, tasks: [], runs: [], reports: {}, jobs: {}, endpoints: [], spend: { ...state.spend, openmeritUsd: 0, customerUsd: 0 }, guardrails: { environment: {}, agent: {}, task: {} } };
+  return { ...state, me: { ...me, plan: { ...me.plan, usedEvals: 0 } }, tasks: [], runs: [], reports: {}, jobs: {}, endpoints: [], repos: [], spend: { ...state.spend, openmeritUsd: 0, customerUsd: 0 }, guardrails: { environment: {}, agent: {}, task: {} } };
 }
 
 function scenario(name: string): State {
@@ -143,6 +172,14 @@ function advance(job: JobView, task: Task | undefined, since: number, now = Date
     done, total, passes, history: history.slice(-60), minutesLeft: done < total ? Math.max(1, Math.ceil((total - done) * 0.6)) : null,
   };
   return { ...job, progress: { measured: done, planned: total }, live };
+}
+
+// A review the preview started finishes REVIEW_MS later, finding one model call.
+const REVIEW_MS = 5000;
+function reviewed(item: Repo, now = Date.now()): Repo {
+  if (item.review.status !== "reviewing" || now - Date.parse(item.review.requestedAt) < REVIEW_MS) return item;
+  item.review = { ...item.review, status: "done", finishedAt: new Date(now).toISOString(), result: item.review.result ?? repoReview({ files: 31, bytes: 410_000, durationMs: 3100, modelCalls: [call("src/index.ts", 9, "openai/gpt-5-mini", "openai/gpt-5-mini")] }) };
+  return item;
 }
 
 export function createFakeApi(options: { appUrl?: string } = {}): (request: Request) => Promise<Response> {
@@ -227,6 +264,37 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       state.endpoints = state.endpoints.filter((item) => item.id !== match?.[1]);
       return before === state.endpoints.length ? error(404, "No such endpoint.") : json(200, { deleted: true });
     }
+    if (path === "/api/repos" && method === "GET") return json(200, state.repos.map((item) => reviewed(item)));
+    if (path === "/api/repos" && method === "POST") {
+      if (denied) return denied;
+      if (!input) return error(400, "Send the repository as JSON: {url, token}. The token is only for a private repository.");
+      const found = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/.*)?$/i.exec(String(input.url ?? "").trim());
+      if (!found) return error(400, "Paste the repository's GitHub URL, such as https://github.com/acme/app.");
+      const token = typeof input.token === "string" && input.token.trim() ? input.token.trim() : null;
+      if (token?.startsWith("ghp_")) return error(400, "This is a classic token, which can write to every repository you can. Create a fine-grained token instead, with Contents: Read-only on only the repositories OpenMerit reviews.");
+      if (token && !/^github_pat_\w{20,}$/.test(token)) return error(400, "This is not a GitHub fine-grained token: those start with github_pat_.");
+      const fullName = `${found[1]}/${found[2]}`;
+      // In the preview, a repository whose name says private is one GitHub shows only with a token.
+      if (/private/i.test(fullName) && !token) return error(400, `GitHub has no public repository ${fullName}. If it is private, add it with a fine-grained token that can read it.`);
+      const now = new Date().toISOString();
+      const added = repo(fullName, { private: token !== null, tokenLast4: token?.slice(-4) ?? null, addedAt: now, checkedAt: now, status: "reviewing" });
+      added.review.requestedAt = now;
+      state.repos = [...state.repos.filter((item) => item.fullName.toLowerCase() !== fullName.toLowerCase()), added];
+      return json(201, added);
+    }
+    if ((match = /^\/api\/repos\/([\w-]+)\/review$/.exec(path)) && method === "POST") {
+      if (denied) return denied;
+      const found = state.repos.find((item) => item.id === match?.[1]);
+      if (!found) return error(404, "No such repository in this account.");
+      found.review = { ...found.review, status: "reviewing", requestedAt: new Date().toISOString(), finishedAt: null, error: null };
+      return json(202, found);
+    }
+    if ((match = /^\/api\/repos\/([\w-]+)$/.exec(path)) && method === "DELETE") {
+      if (denied) return denied;
+      const before = state.repos.length;
+      state.repos = state.repos.filter((item) => item.id !== match?.[1]);
+      return before === state.repos.length ? error(404, "No such repository.") : json(200, { deleted: true });
+    }
     if (path === "/api/guardrails" && method === "GET") {
       const level = url.searchParams.get("level") as Level | null, id = url.searchParams.get("id") ?? "";
       if (!level || !LEVELS.includes(level) || !id) return error(400, "Pass level (environment, agent or task) and id (an environment name, environment:agent, or a task ID).");
@@ -263,8 +331,8 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       return json(200, { url: `${options.appUrl ?? ""}/__preview-stripe?portal` });
     }
     if (path === "/api/account/export" && method === "POST") {
-      const { tasks, runs, reports, endpoints, guardrails } = state;
-      return json(200, { account: state.me.account.id, exportedAt: new Date().toISOString(), endpoints, guardrails, tasks, jobs: runs, reports: Object.values(reports) });
+      const { tasks, runs, reports, endpoints, repos, guardrails } = state;
+      return json(200, { account: state.me.account.id, exportedAt: new Date().toISOString(), endpoints, repos, guardrails, tasks, jobs: runs, reports: Object.values(reports) });
     }
     if (path === "/api/disconnect" && method === "POST") { if (denied) return denied; state.disconnected += 1; return json(200, { disconnected: true }); }
     if ((match = /^\/api\/tasks\/([\w-]+)$/.exec(path)) && method === "DELETE") {

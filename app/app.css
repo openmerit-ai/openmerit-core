@@ -198,6 +198,16 @@ table.guardrails td { vertical-align: middle; }
 table.guardrails input, table.guardrails select { min-width: 140px; padding: 5px 8px; font-size: 13.5px; }
 .plan-card { max-width: 640px; }
 .endpoint-meta { text-align: right; margin-left: auto; }
+/* A repository: its row, then its model calls behind Show. */
+.repo { padding: 9px 0; border-bottom: 1px solid var(--line); }
+.repo:first-child { padding-top: 0; }
+.repo:last-child { border-bottom: 0; padding-bottom: 0; }
+.repo > .row { padding: 0; border: 0; }
+.repo .actions { display: flex; gap: 6px; }
+.repo details summary { margin-top: 6px; }
+table.calls { width: auto; margin-top: 6px; font-size: 13px; }
+table.calls td { padding: 4px 12px 4px 0; }
+table.calls td:first-child { font-family: var(--mono); font-size: 12px; }
 /* Dialogs share their card with Clerk's sign-in (app/auth.ts appearance): 400px, 12px corners,
    a serif title and the actions on a hairline footer. */
 .dialog { width: min(400px, calc(100vw - 32px)); margin: 14vh auto auto; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); box-shadow: 0 20px 60px var(--shadow); }
