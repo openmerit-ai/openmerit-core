@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Repositories through GitHub sign-in — unreleased, 24 November 2026
+
+Reviewed the homepage against members adding GitHub repositories through the OpenMerit GitHub App and their GitHub sign-in, with no token stored and Contents read-only. `site/index.html` makes no claim about how the cloud app reaches a repository, GitHub sign-in or the permissions it asks for, so no homepage change is needed. The app's Coding agents, Project settings and Data pages say how it works.
+
 ## Task evals in the cloud app — unreleased, 24 November 2026
 
 Reviewed the homepage against each task's eval becoming versioned in the cloud app, editable on the task's Eval tab, written to the repository's `.openmerit/evals/<task>/` by the coding agent only when the user agrees, and offered as drafts from repository reviews in a Review evals queue whose approval creates the task without running it. Deleting a task now deletes its eval; Retire keeps it. `site/index.html` makes no claim about where evals live, eval versions, editing cases or the repository copy. No homepage copy change is needed. The cloud README's Evals section and the openmerit-core README describe the behaviour.

@@ -108,6 +108,8 @@ export interface GuardrailSetting { key: string; value: unknown; kind: "constrai
  */
 export interface RepoView {
   id: string; projectId: string; fullName: string; url: string; private: boolean; defaultBranch: string; tokenLast4: string | null; addedAt: string; checkedAt: string;
+  /** How OpenMerit reads it: by its public URL, with a fine-grained token, or through the GitHub sign-in of the member who added it (`githubUser`, a Clerk user ID). */
+  access: "public" | "token" | "github"; githubUser: string | null;
   review: { status: "queued" | "reviewing" | "done" | "failed"; requestedAt: string; finishedAt: string | null; error: string | null; result: RepoReview | null };
 }
 export type Started = { ok: true } | { ok: false; error: string };
@@ -171,6 +173,9 @@ export const account = actor({
       const found = await database.execute(`PRAGMA table_info(${table})`);
       if (!found.some(column => column.name === "project_id")) await database.execute(`ALTER TABLE ${table} ADD COLUMN project_id TEXT NOT NULL DEFAULT '${DEFAULT_PROJECT}'`);
     }
+    // Accounts created before repositories could be added through a member's GitHub sign-in.
+    const repoColumns = await database.execute(`PRAGMA table_info(repos)`);
+    if (!repoColumns.some(column => column.name === "github_user")) await database.execute(`ALTER TABLE repos ADD COLUMN github_user TEXT`);
     // A guardrail's scope (an environment name, environment:agent or a task ID) is unique within its project only.
     const guardrailColumns = await database.execute(`PRAGMA table_info(guardrails)`);
     if (!guardrailColumns.some(column => column.name === "project_id")) {
@@ -385,16 +390,21 @@ export const account = actor({
 
     // GitHub repositories. A token arrives only through /api/repos and is stored encrypted, as endpoint keys are.
     /** Checks that OpenMerit can read the repository, saves it and starts its review. Adding one again replaces its token. */
-    addRepo: async (c, input: { projectId: string; url: string; token?: string | null }): Promise<{ ok: true; repo: RepoView } | { ok: false; error: string }> => {
+    addRepo: async (c, input: { projectId: string; url: string; token?: string | null; githubUser?: string | null }): Promise<{ ok: true; repo: RepoView } | { ok: false; error: string }> => {
       const { config, fetch } = services();
       // Reviews are part of a paid plan: without one, nothing reaches GitHub, is cloned or is spent.
       const unpaid = planRefusal(await plan(c.db));
       if (unpaid) return { ok: false, error: unpaid };
       const ref = parseRepoUrl(typeof input.url === "string" ? input.url : "");
       if (!ref) return { ok: false, error: "Paste the repository's GitHub URL, such as https://github.com/acme/app." };
-      const token = typeof input.token === "string" && input.token.trim() ? input.token.trim() : null;
-      if (token) {
-        const problem = tokenProblem(token);
+      const pasted = typeof input.token === "string" && input.token.trim() ? input.token.trim() : null;
+      // Through a member's GitHub sign-in, OpenMerit reads it with that member's GitHub token, which Clerk renews; it stores no token.
+      const githubUser = !pasted && input.githubUser ? input.githubUser : null;
+      const signIn = githubUser ? await services().githubToken(githubUser).catch(() => null) : null;
+      if (githubUser && !signIn) return { ok: false, error: "Your OpenMerit sign-in has no GitHub account. Sign in with GitHub, or add the repository with a fine-grained token." };
+      const token = pasted ?? signIn;
+      if (pasted) {
+        const problem = tokenProblem(pasted);
         if (problem) return { ok: false, error: problem };
         if (!config.keyEncryptionKey) return { ok: false, error: "Private repositories are not available yet: the app has no key-encryption key." };
       }
@@ -407,15 +417,15 @@ export const account = actor({
       const busy = await reviewsRefusal(c.db);
       if (busy) return { ok: false, error: busy };
       const checked = await checkRepo(ref, token, config.github, fetch);
-      if (!checked.ok) return checked;
+      if (!checked.ok) return { ok: false, error: githubUser ? checked.error.replace(/^This token cannot see (\S+)\. Check that its Repository access includes it\.$/, "The OpenMerit GitHub App cannot see $1 for you. Install it on the repository's account or organization and select the repository.") : checked.error };
       const { repo } = checked;
       const now = Date.now();
       const [existing] = await c.db.execute(`SELECT id FROM repos WHERE full_name = ?`, repo.fullName);
       const id = existing ? String(existing.id) : `repo_${randomBytes(6).toString("hex")}`;
-      await c.db.execute(`INSERT INTO repos (id, project_id, full_name, private, default_branch, sealed_token, token_last4, added_at, checked_at, review_status, review_requested_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)
+      await c.db.execute(`INSERT INTO repos (id, project_id, full_name, private, default_branch, sealed_token, token_last4, github_user, added_at, checked_at, review_status, review_requested_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)
         ON CONFLICT (id) DO UPDATE SET full_name = excluded.full_name, private = excluded.private, default_branch = excluded.default_branch, sealed_token = excluded.sealed_token,
-        token_last4 = excluded.token_last4, checked_at = excluded.checked_at`,
-      id, input.projectId, repo.fullName, repo.private ? 1 : 0, repo.defaultBranch, token ? encryptKey(config.keyEncryptionKey!, c.key[0]!, token) : null, token ? token.slice(-4) : null, now, now, now);
+        token_last4 = excluded.token_last4, github_user = excluded.github_user, checked_at = excluded.checked_at`,
+      id, input.projectId, repo.fullName, repo.private ? 1 : 0, repo.defaultBranch, pasted ? encryptKey(config.keyEncryptionKey!, c.key[0]!, pasted) : null, pasted ? pasted.slice(-4) : null, githubUser, now, now, now);
       await startReview(c, id, () => c.client<Registry>().catalogue.getOrCreate(["global"]).get());
       return { ok: true, repo: (await repoViews(c.db, { id }))[0]! };
     },
@@ -818,7 +828,7 @@ async function startReview(c: { db: Transactional; key: readonly string[]; keepA
   await c.db.execute(`INSERT INTO repo_reviews (repo_id, requested_at) VALUES (?, ?)`, id, requestedAt);
   const current = `id = ? AND review_requested_at = ?`;
   const run = async () => {
-    const [row] = await c.db.execute(`SELECT full_name, default_branch, sealed_token FROM repos WHERE ${current}`, id, requestedAt);
+    const [row] = await c.db.execute(`SELECT full_name, default_branch, sealed_token, github_user FROM repos WHERE ${current}`, id, requestedAt);
     if (!row) return;
     await c.db.execute(`UPDATE repos SET review_status = 'reviewing' WHERE ${current}`, id, requestedAt);
     const { config } = services();
@@ -832,6 +842,10 @@ async function startReview(c: { db: Transactional; key: readonly string[]; keepA
       let token: string | null = null;
       if (row.sealed_token) {
         try { token = decryptKey(config.keyEncryptionKey!, c.key[0]!, String(row.sealed_token)); } catch { throw new Error("OpenMerit can no longer read this repository's token. Add the repository again with its token."); }
+      } else if (row.github_user) {
+        // The adding member's GitHub token, fresh from Clerk: it lasts 8 hours and Clerk renews it.
+        token = await services().githubToken(String(row.github_user)).catch(() => null);
+        if (!token) throw new Error("The member who added this repository through GitHub sign-in no longer has a GitHub account on OpenMerit. Add it again from Coding agents with your GitHub sign-in, or with a fine-grained token.");
       }
       if (reviewer) {
         const refused = await reserveReview(c.db, key, reviewer.model, reviewer.budgetUsd);
@@ -865,6 +879,7 @@ async function repoViews(database: Database, input: { id?: string; projectId?: s
     return {
       id: String(row.id), projectId: String(row.project_id), fullName: String(row.full_name), url: `https://github.com/${String(row.full_name)}`, private: row.private === 1, defaultBranch: String(row.default_branch),
       tokenLast4: (row.token_last4 as string | null) ?? null, addedAt: iso(row.added_at)!, checkedAt: iso(row.checked_at)!,
+      access: row.sealed_token ? "token" : row.github_user ? "github" : "public", githubUser: (row.github_user as string | null) ?? null,
       review: {
         status: stopped ? "failed" : row.review_status as RepoView["review"]["status"], requestedAt: iso(row.review_requested_at)!, finishedAt: iso(row.review_finished_at),
         error: stopped ? "The review stopped before it finished. Review the repository again." : (row.review_error as string | null) ?? null,

@@ -6,7 +6,7 @@
 // just created), preview-noorg (a token without an organization), preview-error, preview-slow and preview-expired. Each scenario keeps its own in-memory
 // state, so actions change what later requests return. Every name and number is fictional.
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, type Guardrails, type Level } from "../../openmerit-core/src/engine/guardrails.ts";
-import type { Decision, DeletedTask, Endpoint, EvalCase, EvalDraft, EvalSpec, EvalVersionInfo, EvalView, JobView, LiveProgress, MeasuredModel, Me, Project, Repo, RepoReview, Report, Run, Spend, Subscriptions, Task, TaskOutput } from "../api.ts";
+import type { Decision, DeletedTask, Endpoint, EvalCase, EvalDraft, EvalSpec, EvalVersionInfo, EvalView, GitHubAccess, JobView, LiveProgress, MeasuredModel, Me, Project, Repo, RepoReview, Report, Run, Spend, Subscriptions, Task, TaskOutput } from "../api.ts";
 import { tonicUltra } from "./tonic-ultra.ts";
 
 // A task's eval in the fake: every version, newest first, the version in the repository, and the task's output shape.
@@ -437,6 +437,12 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       return before === state.endpoints.length ? error(404, "No such endpoint.") : json(200, { deleted: true });
     }
     if (path === "/api/repos" && method === "GET") return json(200, state.repos.map((item) => reviewed(item)));
+    // In the preview, Sahra Health's members signed in with GitHub and installed the OpenMerit GitHub App on sahra-health; the empty, new and Tonic Ultra accounts did not.
+    const github: GitHubAccess = ["populated", "noplan", "member"].includes(name ?? "")
+      ? { app: "openmeritai", installUrl: "https://github.com/apps/openmeritai/installations/new", signedIn: true, error: null, installations: [{ id: 41, account: "sahra-health", type: "Organization", selection: "selected", manageUrl: "https://github.com/organizations/sahra-health/settings/installations/41",
+        repos: [{ fullName: "sahra-health/claims-api", private: true, defaultBranch: "main" }, { fullName: "sahra-health/billing-worker", private: true, defaultBranch: "main" }, { fullName: "sahra-health/enroll-web", private: false, defaultBranch: "main" }] }] }
+      : { app: "openmeritai", installUrl: "https://github.com/apps/openmeritai/installations/new", signedIn: false, error: null, installations: [] };
+    if (path === "/api/github" && method === "GET") return json(200, github);
     // As the cloud app does, adding or reviewing a repository needs an active plan.
     const unpaid = state.me.plan.status === "active" || state.me.plan.status === "trialing" ? null
       : `This account has no active OpenMerit plan${state.me.plan.status === "none" ? "" : ` (Stripe says ${state.me.plan.status})`}. Subscribe at ${options.appUrl ?? "https://app.openmerit.ai"}/plan/, then try again.`;
@@ -447,6 +453,17 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       const found = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/.*)?$/i.exec(String(input.url ?? "").trim());
       if (!found) return error(400, "Paste the repository's GitHub URL, such as https://github.com/acme/app.");
       const token = typeof input.token === "string" && input.token.trim() ? input.token.trim() : null;
+      if (input.via === "github" && !token) {
+        const fullName = `${found[1]}/${found[2]}`;
+        if (!github.signedIn) return error(400, "Your OpenMerit sign-in has no GitHub account. Sign in with GitHub, or add the repository with a fine-grained token.");
+        const given = github.installations.flatMap((item) => item.repos).find((item) => item.fullName.toLowerCase() === fullName.toLowerCase());
+        if (!given) return error(400, `The OpenMerit GitHub App cannot see ${fullName} for you. Install it on the repository's account or organization and select the repository.`);
+        const now = new Date().toISOString();
+        const added = { ...repo(given.fullName, { private: given.private, addedAt: now, checkedAt: now, status: "reviewing" }), access: "github" as const, githubUser: state.me.user.id };
+        added.review.requestedAt = now;
+        state.repos = [...state.repos.filter((item) => item.fullName.toLowerCase() !== given.fullName.toLowerCase()), added];
+        return json(201, added);
+      }
       if (token?.startsWith("ghp_")) return error(400, "This is a classic token, which can write to every repository you can. Create a fine-grained token instead, with Contents: Read-only on only the repositories OpenMerit reviews.");
       if (token && !/^github_pat_\w{20,}$/.test(token)) return error(400, "This is not a GitHub fine-grained token: those start with github_pat_.");
       const fullName = `${found[1]}/${found[2]}`;

@@ -27,6 +27,8 @@ export interface GitHubConfig {
   maxBytes: number;
   /** Longest a clone may take. */
   cloneTimeoutMs: number;
+  /** The OpenMerit GitHub App's slug (github.com/apps/<slug>), whose installations let a user signed in with GitHub pick repositories; null hides that way of adding one. */
+  appSlug: string | null;
 }
 
 export interface RepoRef { owner: string; name: string }
@@ -117,6 +119,42 @@ export async function checkRepo(ref: RepoRef, token: string | null, config: GitH
     await commits!.body?.cancel();
   }
   return { ok: true, repo: { fullName: data.full_name, private: data.private === true, defaultBranch: data.default_branch, sizeKb } };
+}
+
+/** An installation of the OpenMerit GitHub App that the signed-in user can reach, and the repositories it gives OpenMerit. */
+export interface AppInstallation { id: number; account: string; type: string; selection: "all" | "selected"; manageUrl: string; repos: CheckedRepo[] }
+
+/**
+ * The repositories the user's GitHub token reaches through installations of the OpenMerit GitHub App:
+ * GET /user/installations, then each one's repositories, 100 a page. GitHub lists only this app's
+ * installations for its user tokens. Null with the reason when GitHub refuses the token.
+ */
+export async function appInstallations(token: string, config: GitHubConfig, fetcher: typeof fetch = fetch): Promise<{ ok: true; installations: AppInstallation[] } | { ok: false; error: string }> {
+  const get = async (path: string) => {
+    let response: Response;
+    try {
+      response = await fetcher(`${config.apiUrl}${path}`, { headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "OpenMerit", authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) });
+    } catch { return { error: "GitHub could not be reached. Try again in a moment." } as const; }
+    if (response.status === 401) return { error: "GitHub refused your GitHub sign-in's token. Sign out and sign in with GitHub again." } as const;
+    if (!response.ok) { await response.body?.cancel(); return { error: `GitHub answered ${response.status} for ${path.split("?")[0]}.` } as const; }
+    return { data: await response.json() as Record<string, unknown> } as const;
+  };
+  const listed = await get("/user/installations?per_page=100");
+  if ("error" in listed) return { ok: false, error: listed.error };
+  const installations: AppInstallation[] = [];
+  for (const item of (listed.data.installations ?? []) as { id: number; account?: { login?: string; type?: string }; repository_selection?: string; html_url?: string }[]) {
+    const repos: CheckedRepo[] = [];
+    for (let page = 1; page <= 10; page++) {
+      const found = await get(`/user/installations/${item.id}/repositories?per_page=100&page=${page}`);
+      if ("error" in found) return { ok: false, error: found.error };
+      const batch = (found.data.repositories ?? []) as { full_name: string; private?: boolean; default_branch?: string; size?: number }[];
+      repos.push(...batch.map(repo => ({ fullName: repo.full_name, private: repo.private === true, defaultBranch: repo.default_branch ?? "main", sizeKb: repo.size ?? 0 })));
+      if (batch.length < 100) break;
+    }
+    installations.push({ id: item.id, account: item.account?.login ?? "", type: item.account?.type ?? "User", selection: item.repository_selection === "all" ? "all" : "selected",
+      manageUrl: item.html_url ?? `https://github.com/settings/installations/${item.id}`, repos });
+  }
+  return { ok: true, installations };
 }
 
 /** Bytes under a directory, without following symlinks. */

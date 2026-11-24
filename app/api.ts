@@ -221,11 +221,19 @@ export interface RepoReview {
   costUsd?: number;
   durationMs: number;
 }
+// GET /api/github: the OpenMerit GitHub App's install link and, for a member signed in with GitHub, the installations
+// their GitHub token reaches and the repositories each gives OpenMerit. error is GitHub's refusal of that token.
+export interface GitHubAccess {
+  app: string | null; installUrl: string | null; signedIn: boolean; error: string | null;
+  installations: { id: number; account: string; type: string; selection: "all" | "selected"; manageUrl: string; repos: { fullName: string; private: boolean; defaultBranch: string }[] }[];
+}
 // A GitHub repository the account added (GET /api/repos). tokenLast4 is null for a public one added by its URL.
 // review.result is the last review that finished, kept while another runs or after one fails.
 export type ReviewStatus = "queued" | "reviewing" | "done" | "failed";
 export interface Repo {
   id: string; fullName: string; url: string; private: boolean; defaultBranch: string; tokenLast4: string | null; addedAt: string; checkedAt: string;
+  // How OpenMerit reads it: its public URL, a fine-grained token, or the GitHub sign-in of the member who added it (a Clerk user ID). Absent before 24 Nov 2026.
+  access?: "public" | "token" | "github"; githubUser?: string | null;
   review: { status: ReviewStatus; requestedAt: string; finishedAt: string | null; error: string | null; result: RepoReview | null };
 }
 
