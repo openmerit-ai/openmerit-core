@@ -80,10 +80,14 @@ export async function checkRepo(ref: RepoRef, token: string | null, config: GitH
   const refused = async (response: Response | null): Promise<string | null> => {
     if (!response) return "GitHub could not be reached. Try again in a moment.";
     if (response.status === 401) return "GitHub refused this token: it may have expired or been revoked.";
-    if (response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0") {
-      const reset = Number(response.headers.get("x-ratelimit-reset"));
-      const minutes = Number.isFinite(reset) && reset > 0 ? Math.max(1, Math.ceil((reset * 1000 - Date.now()) / 60_000)) : null;
-      return `GitHub's rate limit for OpenMerit is used up. Try again${minutes ? ` in ${minutes} min` : " later"}${token ? "" : ", or add the repository with a token"}.`;
+    // GitHub's limit: 60 checks an hour per address without a token, more per token. It answers 403 or 429,
+    // with the time the limit resets in x-ratelimit-reset (Unix seconds) or, for a 429, retry-after (seconds).
+    if ((response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0") || response.status === 429) {
+      await response.body?.cancel();
+      const reset = Number(response.headers.get("x-ratelimit-reset")), retry = Number(response.headers.get("retry-after"));
+      const at = reset > 0 ? reset * 1000 : retry > 0 ? Date.now() + retry * 1000 : null;
+      const after = at ? `after ${new Date(at).toISOString().slice(11, 16)} UTC` : "in an hour";
+      return `${token ? "GitHub's limit for this token's checks" : "GitHub's limit for checks without a token"} is used up; try again ${after}.`;
     }
     return null;
   };
