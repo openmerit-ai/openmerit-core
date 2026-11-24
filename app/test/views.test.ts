@@ -185,12 +185,19 @@ test("Connections lists each repository with its model calls, how it is read, an
   const repos = await get<Repo[]>("/api/repos");
   const endpoints = await get<Endpoint[]>("/api/endpoints");
   const shown = text(connectionsView.render({ endpoints, repos }, page(me)));
-  assert.match(shown, /sahra-health\/claims-api 6 model calls: gpt-5, claude-sonnet-5\.5, gpt-5-mini, settings\.reply_model · 3 more in tests, fixtures or docs, not listed · 214 files at 4be1c07 on main Private · token ending 9c1e/);
+  assert.match(shown, /sahra-health\/claims-api 6 model calls: gpt-5, claude-sonnet-5\.5, gpt-5-mini, settings\.reply_model · 3 more in tests, fixtures or docs, not listed · 2 task specs · 214 files at 4be1c07 on main Private · token ending 9c1e/);
   assert.match(shown, /src\/replies\/draft\.py:31 settings\.reply_model 3 more in tests, fixtures or docs, not listed\./);
   assert.match(shown, /sahra-health\/enroll-web 1 model call: gpt-5-mini · 88 files at 4be1c07 on main Public/);
   assert.match(shown, /src\/triage\.ts:14 gpt-5 from TRIAGE_MODEL/);
   assert.match(shown, /never runs your code, pushes, or opens a pull request/);
   assert.match(shown, /Contents: Read-only/);
+  // A review that wrote task specs counts them, and shows each one's checks, the calls in no spec and what it cost.
+  assert.match(shown, /Show the 2 task specs claim triage · Sorts an incoming claim into its review queue\. answers one of 3 labels · src\/triage\.ts:14 A right answer Sends claims with a missing policy number to adjuster\./);
+  assert.match(shown, /reply drafter · Drafts the reply .* answers in text · 1 tool · src\/replies\/draft\.py:8, src\/replies\/draft\.py:31 .* It must never Never shares another member's claim\. Never promises a payment date\./);
+  assert.match(shown, /2 model calls in no spec: The review of claim matching stopped: it reached its \$2\.00 budget\./);
+  assert.match(shown, /This review cost OpenMerit \$0\.38 in model calls, counted in your spend; it is not one of your plan's evaluations\./);
+  // A scan-only review has no specs to show.
+  assert.doesNotMatch(text(connectionsView.render({ endpoints, repos: [repos[1]!] }, page(me))), /\d task specs?/);
   // A repository whose model calls are all in tests lists none, and says how many it left out.
   const testsOnly = { ...repos[1]!, review: { ...repos[1]!.review, result: { ...repos[1]!.review.result!, models: [], modelCalls: [], totalCalls: 0, supportCalls: 2, notListed: "2 more in tests, fixtures or docs, not listed" } } };
   const none = text(connectionsView.render({ endpoints, repos: [testsOnly] }, page(me)));

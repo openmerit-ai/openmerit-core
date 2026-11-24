@@ -4,10 +4,13 @@
 // fetch, and never pushes, opens a pull request or writes to a repository. Nothing in a checkout runs:
 // git runs no hooks, checks symlinks out as plain files and gets no secret in its environment.
 import { spawn } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { lstat, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Catalogue } from "./engine.ts";
+import { createHarness, type Harness } from "../../openmerit-core/src/harness/harness.ts";
+import { reviewRepo } from "../../openmerit-core/src/review/index.ts";
 import { isSupportFile, scanRepo, type ScanResult } from "../../openmerit-core/src/scout/scan.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 
@@ -211,8 +214,8 @@ export async function withCheckout<T>(input: { fullName: string; branch: string;
 export interface ModelCall { file: string; line: number; value: string; catalogueId: string | null; dynamic: boolean; envVar: string | null }
 
 export interface RepoReview {
-  /** `scan` until openmerit-core's reviewRepo writes task specs; then `review`. */
-  reviewer: "scan";
+  /** `review` when openmerit-core's reviewRepo wrote the task specs; `scan` when the app has no reviewer key and only lists the model calls. */
+  reviewer: "scan" | "review";
   commit: string;
   branch: string;
   files: number;
@@ -227,10 +230,17 @@ export interface RepoReview {
   supportCalls: number;
   /** \`${supportCalls} more in tests, fixtures or docs, not listed\`, or null when there are none. */
   notListed: string | null;
-  /** One spec per task. Empty until the review prompt writes them. */
+  /** One spec per task the review found, written from the application's code only. */
   tasks: TaskBundle[];
+  /** Application model calls the review tied to no spec, and why, such as a task whose review failed. */
+  unmapped: { usageIds: string[]; reason: string }[];
+  /** What the review's model calls cost on OpenMerit's OpenRouter key, as the account's spend ledger records it. */
+  costUsd: number;
   durationMs: number;
 }
+
+/** The model that reviews a checkout, on OpenMerit's OpenRouter key, and the most one review may spend and take. */
+export interface ReviewerConfig { model: string; apiKey: string; baseUrl: string; budgetUsd: number; timeoutMs: number }
 
 const MAX_CALLS = 200;
 
@@ -246,27 +256,69 @@ export function applicationScan(scan: ScanResult): { scan: ScanResult; supportCa
   return { scan: { ...scan, usages: kept, models }, supportCalls };
 }
 
+const OPENROUTER_API = "https://openrouter.ai/api/v1";
+let agentDir: string | null = null;
+/**
+ * Pi's agent directory for the reviewer: one per process, since Pi keeps the first one it is given. It
+ * holds no credential. Only a test's OpenRouter base URL is written to its models.json: Pi's own entries
+ * send each OpenRouter model to the API it speaks there (chat completions or Anthropic's messages).
+ */
+function reviewerDir(baseUrl: string): string {
+  if (!agentDir) {
+    agentDir = join(tmpdir(), `openmerit-reviewer-${process.pid}`);
+    mkdirSync(agentDir, { recursive: true });
+    if (baseUrl !== OPENROUTER_API) writeFileSync(join(agentDir, "models.json"), JSON.stringify({ providers: { openrouter: { baseUrl } } }));
+  }
+  return agentDir;
+}
+
 /**
  * The review entry point: reads a checkout and returns its task specs, from the application's code
- * only. Until openmerit-core's `reviewRepo` is wired in here, it is the repository scan alone, which
- * lists the model calls and writes no task spec; `reviewRepo` then gets this application-only scan, so
- * no task spec is written from test code.
+ * only. openmerit-core's `reviewRepo` gets the application-only scan, so no task spec is written from
+ * test code; its model reads the checkout only through Pi's read-only tools, inside `root`, and nothing
+ * in the checkout runs. Without a reviewer it is the scan alone, which lists the model calls. A review
+ * that stops, at its budget, time limit or an error, keeps the listing and says why in `unmapped`.
  */
-export async function reviewCheckout(root: string, catalogue: Catalogue): Promise<{ reviewer: "scan"; scan: ScanResult; supportCalls: number; tasks: TaskBundle[] }> {
-  return { reviewer: "scan", ...applicationScan(scanRepo(root, catalogue)), tasks: [] };
+export async function reviewCheckout(root: string, catalogue: Catalogue, reviewer: ReviewerConfig | null): Promise<{ reviewer: RepoReview["reviewer"]; scan: ScanResult; supportCalls: number; tasks: TaskBundle[]; unmapped: RepoReview["unmapped"]; costUsd: number }> {
+  const { scan, supportCalls } = applicationScan(scanRepo(root, catalogue));
+  if (!reviewer) return { reviewer: "scan", scan, supportCalls, tasks: [], unmapped: [], costUsd: 0 };
+  // Nothing in the application's code to review: no model call is made.
+  if (!scan.usages.some(usage => usage.kind === "model")) return { reviewer: "review", scan, supportCalls, tasks: [], unmapped: [], costUsd: 0 };
+  const harness = await createHarness({ kind: "api", api: { provider: "openrouter", model: reviewer.model, apiKey: { env: "OPENROUTER_API_KEY" } } },
+    { OPENROUTER_API_KEY: reviewer.apiKey, PI_CODING_AGENT_DIR: reviewerDir(reviewer.baseUrl) });
+  // The review stops at its budget, checked before each request and as each model call reports its cost, and at its time limit.
+  const spent = new AbortController();
+  const watch = setInterval(() => { if (harness.usage.costUsd >= reviewer.budgetUsd) spent.abort(); }, 250);
+  const signal = AbortSignal.any([spent.signal, AbortSignal.timeout(reviewer.timeoutMs)]);
+  const stopped = () => spent.signal.aborted ? `it reached its $${reviewer.budgetUsd.toFixed(2)} budget` : signal.aborted ? `it ran past ${Math.round(reviewer.timeoutMs / 60_000)} minutes` : null;
+  // A model whose price Pi does not know bills the whole budget.
+  const costUsd = () => harness.usage.unknownCost ? Math.max(harness.usage.costUsd, reviewer.budgetUsd) : harness.usage.costUsd;
+  const calls = scan.usages.filter(usage => usage.kind === "model").map(usage => usage.id);
+  try {
+    const budgeted: Harness = { kind: harness.kind, label: harness.label, usage: harness.usage,
+      json: request => { if (harness.usage.costUsd >= reviewer.budgetUsd) spent.abort(); return signal.aborted ? Promise.reject(new Error("stopped")) : harness.json(request); } };
+    const reviewed = await reviewRepo({ root, scan, harness: budgeted, signal });
+    const why = stopped();
+    const unmapped = why ? reviewed.unmapped.map(item => ({ ...item, reason: item.reason.replace(/ failed: [\s\S]*$/, ` stopped: ${why}.`) })) : reviewed.unmapped;
+    return { reviewer: "review", scan, supportCalls, tasks: reviewed.tasks, unmapped, costUsd: costUsd() };
+  } catch (error) {
+    return { reviewer: "review", scan, supportCalls, tasks: [], unmapped: [{ usageIds: calls, reason: `The review stopped: ${stopped() ?? (error instanceof Error ? error.message : String(error))}.` }], costUsd: costUsd() };
+  } finally {
+    clearInterval(watch);
+  }
 }
 
 /** Clones, reviews and deletes the checkout. */
-export async function reviewRepository(input: { fullName: string; branch: string; token: string | null; config: GitHubConfig; catalogue: Catalogue }): Promise<RepoReview> {
+export async function reviewRepository(input: { fullName: string; branch: string; token: string | null; config: GitHubConfig; catalogue: Catalogue; reviewer: ReviewerConfig | null }): Promise<RepoReview> {
   const started = Date.now();
   return withCheckout(input, async checkout => {
-    const { reviewer, scan, supportCalls, tasks } = await reviewCheckout(checkout.root, input.catalogue);
+    const { reviewer, scan, supportCalls, tasks, unmapped, costUsd } = await reviewCheckout(checkout.root, input.catalogue, input.reviewer);
     const calls = scan.usages.filter(usage => usage.kind === "model");
     return {
       reviewer, commit: checkout.commit, branch: input.branch, files: scan.files, bytes: checkout.bytes,
       models: scan.models.map(model => ({ value: model.value, catalogueId: model.catalogueId, calls: model.usageIds.length })),
       modelCalls: calls.slice(0, MAX_CALLS).map(usage => ({ file: usage.file, line: usage.line, value: usage.value, catalogueId: usage.catalogueId, dynamic: usage.dynamic, envVar: usage.envVar ?? null })),
-      totalCalls: calls.length, supportCalls, notListed: supportCalls ? `${supportCalls} more in tests, fixtures or docs, not listed` : null, tasks, durationMs: Date.now() - started,
+      totalCalls: calls.length, supportCalls, notListed: supportCalls ? `${supportCalls} more in tests, fixtures or docs, not listed` : null, tasks, unmapped, costUsd, durationMs: Date.now() - started,
     };
   });
 }

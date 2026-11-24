@@ -492,6 +492,8 @@ export const account = actor({
 });
 
 type Database = { execute: <T extends Row = Row>(query: string, ...args: unknown[]) => Promise<T[]> };
+/** The actor's database, whose transactions run their checks and writes together. */
+type Transactional = Database & { transaction: <T>(run: (tx: Database) => Promise<T>, options: { name: string }) => Promise<T> };
 
 function decisionRow(row: Row): Decision {
   return {
@@ -510,9 +512,10 @@ async function plan(database: Database): Promise<Plan | null> {
   if (!row) return null;
   const start = typeof row.period_start === "number" ? row.period_start * 1000 : startOfMonth(Date.now());
   const [used] = await database.execute(`SELECT COALESCE(sum(counted), 0) AS n FROM jobs WHERE counted > 0 AND finished_at >= ?`, start);
+  const [reviews] = EVALUATIONS_PER_REVIEW ? await database.execute(`SELECT count(*) AS n FROM ledger WHERE key LIKE '${REVIEW_LEDGER}%' AND status = 'settled' AND created_at >= ?`, start) : [];
   return {
     name: String(row.name ?? "OpenMerit"), status: String(row.status ?? "incomplete"), periodStart: (row.period_start as number | null) ?? null, periodEnd: (row.period_end as number | null) ?? null,
-    includedEvals: Number(row.included_evals ?? 0), usedEvals: Number(used?.n ?? 0), overage: row.overage === "metered" ? "metered" : "refuse", customerId: (row.customer_id as string | null) ?? null,
+    includedEvals: Number(row.included_evals ?? 0), usedEvals: Number(used?.n ?? 0) + EVALUATIONS_PER_REVIEW * Number(reviews?.n ?? 0), overage: row.overage === "metered" ? "metered" : "refuse", customerId: (row.customer_id as string | null) ?? null,
   };
 }
 
@@ -571,14 +574,35 @@ async function reviewsRefusal(database: Database): Promise<string | null> {
 }
 
 /** A review queued or running for longer than this stopped with its node, such as in a deploy, and can start again. */
-const reviewStaleMs = () => services().config.github.cloneTimeoutMs + 10 * 60_000;
+const reviewStaleMs = () => services().config.github.cloneTimeoutMs + (services().config.limits.reviewMinutes + 5) * 60_000;
+
+/** Ledger keys, and job IDs, of repository reviews: `review/<repo id>/<requested at>`. */
+const REVIEW_LEDGER = "review/";
+
+/**
+ * Evaluations one repository review counts against the plan. None for now: whether a review is one is
+ * undecided, and this is the only place to change it. Its spend always goes into the ledger.
+ */
+const EVALUATIONS_PER_REVIEW = 0;
+
+/** Reserves a review's budget as OpenMerit-paid spend, or says which monthly cap refuses it. */
+async function reserveReview(database: Transactional, key: string, model: string, usd: number): Promise<string | null> {
+  return database.transaction(async tx => {
+    const cap = services().config.limits.monthlyCapUsd;
+    const [row] = await tx.execute(`SELECT COALESCE(sum(${COUNTED}), 0) AS usd FROM ledger WHERE funding = 'openmerit' AND created_at >= ?`, await periodStart(tx));
+    const used = Number(row?.usd ?? 0);
+    if (used + usd > cap + 1e-9) return `The review needs up to $${usd.toFixed(2)}, and this account has used or reserved $${used.toFixed(4)} of its $${cap.toFixed(2)} monthly OpenMerit-paid cap. Try again next period.`;
+    await tx.execute(`INSERT INTO ledger (key, job_id, funding, model, status, reserved_usd, created_at) VALUES (?, ?, 'openmerit', ?, 'reserved', ?, ?)`, key, key, model, usd, Date.now());
+    return null;
+  }, { name: "review_reserve" });
+}
 
 /**
  * Queues a review and runs it after the action returns: the clone and scan take longer than an
  * action may. The request time tells this review's result from a later one's: a review whose
  * repository was added again or removed meanwhile saves nothing.
  */
-async function startReview(c: { db: Database; key: readonly string[]; keepAwake: <T>(promise: Promise<T>) => Promise<T> }, id: string, catalogue: () => Promise<Catalogue>): Promise<void> {
+async function startReview(c: { db: Transactional; key: readonly string[]; keepAwake: <T>(promise: Promise<T>) => Promise<T> }, id: string, catalogue: () => Promise<Catalogue>): Promise<void> {
   const requestedAt = Date.now();
   await c.db.execute(`UPDATE repos SET review_status = 'queued', review_requested_at = ? WHERE id = ?`, requestedAt, id);
   await c.db.execute(`DELETE FROM repo_reviews WHERE requested_at < ?`, requestedAt - 3_600_000);
@@ -589,14 +613,28 @@ async function startReview(c: { db: Database; key: readonly string[]; keepAwake:
     if (!row) return;
     await c.db.execute(`UPDATE repos SET review_status = 'reviewing' WHERE ${current}`, id, requestedAt);
     const { config } = services();
+    const { limits, models, openrouter } = config;
+    // The review's model calls are OpenMerit-paid spend: its budget is reserved against the monthly cap before
+    // the clone, and settled at what the calls cost. It starts no job, so it is not one of the plan's evaluations.
+    const key = `${REVIEW_LEDGER}${id}/${requestedAt}`;
+    const reviewer = openrouter.apiKey ? { model: models.reviewer, apiKey: openrouter.apiKey, baseUrl: openrouter.baseUrl, budgetUsd: limits.reviewBudgetUsd, timeoutMs: limits.reviewMinutes * 60_000 } : null;
+    let reserved = false;
     try {
       let token: string | null = null;
       if (row.sealed_token) {
         try { token = decryptKey(config.keyEncryptionKey!, c.key[0]!, String(row.sealed_token)); } catch { throw new Error("OpenMerit can no longer read this repository's token. Add the repository again with its token."); }
       }
-      const review = await reviewRepository({ fullName: String(row.full_name), branch: String(row.default_branch), token, config: config.github, catalogue: await catalogue() });
+      if (reviewer) {
+        const refused = await reserveReview(c.db, key, reviewer.model, reviewer.budgetUsd);
+        if (refused) throw new Error(refused);
+        reserved = true;
+      }
+      const review = await reviewRepository({ fullName: String(row.full_name), branch: String(row.default_branch), token, config: config.github, catalogue: await catalogue(), reviewer });
+      if (reserved) await c.db.execute(`UPDATE ledger SET status = 'settled', actual_usd = ? WHERE key = ? AND status = 'reserved'`, review.costUsd, key);
       await c.db.execute(`UPDATE repos SET review_status = 'done', review_finished_at = ?, review_error = NULL, review = ? WHERE ${current}`, Date.now(), JSON.stringify(review), id, requestedAt);
     } catch (error) {
+      // Only the clone or the scan throws, before any model call: nothing was spent.
+      if (reserved) await c.db.execute(`UPDATE ledger SET status = 'released' WHERE key = ? AND status = 'reserved'`, key);
       await c.db.execute(`UPDATE repos SET review_status = 'failed', review_finished_at = ?, review_error = ? WHERE ${current}`, Date.now(), error instanceof Error ? error.message : "The review failed.", id, requestedAt);
     }
   };

@@ -12,9 +12,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import type { RepoView } from "../src/actors/account.ts";
-import { parseRepoUrl, withCheckout, type GitHubConfig } from "../src/github.ts";
+import { parseRepoUrl, reviewCheckout, withCheckout, type GitHubConfig } from "../src/github.ts";
 import { signStripePayload } from "../src/billing.ts";
-import { caller, fakeModels, startApp, stop, subscribe, waitFor, type App, type FakeModels } from "./helpers.ts";
+import { caller, catalogue, chatAnswer, fakeModels, startApp, stop, subscribe, waitFor, type App, type FakeModels } from "./helpers.ts";
 
 const TOKEN = `github_pat_${"A".repeat(30)}_good`;
 const NO_CONTENTS = `github_pat_${"B".repeat(30)}_meta`;
@@ -97,6 +97,30 @@ async function fakeGitHub(repos: Record<string, FakeRepo>, root: string): Promis
   return { api: `${base}/api`, git: `${base}/git`, requests, get limited() { return fake.limited; }, set limited(value) { fake.limited = value; }, close: () => new Promise(resolve => { server.closeAllConnections(); server.close(() => resolve()); }) };
 }
 
+/** A fake OpenRouter for the reviewer: it maps every usage it is shown to one task, then writes that task's spec. */
+interface FakeReviewer { url: string; prompts: string[]; close: () => Promise<void> }
+async function fakeReviewer(): Promise<FakeReviewer> {
+  const prompts: string[] = [];
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", chunk => { body += chunk; });
+    req.on("end", () => {
+      const parsed = JSON.parse(body) as { stream?: boolean; messages: { content: string | { text?: string }[] }[] };
+      const text = parsed.messages.map(message => typeof message.content === "string" ? message.content : message.content.map(part => part.text ?? "").join("")).join("\n");
+      prompts.push(text);
+      const answer = text.includes("map model usages")
+        ? { tasks: [{ name: "reply drafter", description: "Drafts a reply to a ticket.", usageIds: [...text.matchAll(/^### (u\d+) model/gm)].map(match => match[1]), usesTools: false, needsVision: false, structuredOutput: false }] }
+        : { description: "Drafts the reply to a support ticket.", input: "A customer's support ticket.", steps: [{ description: "Write the reply.", tools: [], access: "none", required: true, after: [] }],
+          criteria: ["Answers the customer's question.", "Stays polite."], guardrails: ["Never promises a refund."], system: "You draft replies to support tickets.", user: "{{ticket}}", tools: [],
+          output: { kind: "text", labels: [], schemaJson: "" }, examples: [], maxTurns: 0 };
+      // Pi prices the call itself from openai/gpt-5-mini's list price: $0.0025 in plus $0.001 out.
+      chatAnswer(res, parsed, JSON.stringify(answer), { prompt_tokens: 10_000, completion_tokens: 500 });
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, prompts, close: () => new Promise(resolve => { server.closeAllConnections(); server.close(() => resolve()); }) };
+}
+
 test("a pasted GitHub URL names its repository; anything else is refused", () => {
   for (const url of ["https://github.com/acme/app", "github.com/acme/app.git", "https://github.com/acme/app/tree/main/src", "git@github.com:acme/app.git", " https://www.github.com/acme/app/ "]) {
     assert.deepEqual(parseRepoUrl(url), { owner: "acme", name: "app" }, url);
@@ -106,8 +130,25 @@ test("a pasted GitHub URL names its repository; anything else is refused", () =>
   }
 });
 
+test("a review stops at its budget: the model calls already made are billed, and the tasks left say why", async () => {
+  const reviewer = await fakeReviewer();
+  const root = mkdtempSync(join(tmpdir(), "openmerit-budget-"));
+  mkdirSync(join(root, "src"));
+  writeFileSync(join(root, "src/reply.ts"), 'const MODEL = "openai/gpt-5-mini";\n');
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "-A"], { cwd: root });
+  try {
+    // The mapping call costs $0.0035, past the $0.003 budget, so the task's spec is never asked for.
+    const result = await reviewCheckout(root, catalogue, { model: "openai/gpt-5-mini", apiKey: "or-test-key", baseUrl: reviewer.url, budgetUsd: 0.003, timeoutMs: 60_000 });
+    assert.equal(reviewer.prompts.length, 1);
+    assert.deepEqual(result.tasks, []);
+    assert.deepEqual(result.unmapped.map(item => item.reason), ["The review of reply drafter stopped: it reached its $0.00 budget."]);
+    assert.ok(Math.abs(result.costUsd - 0.0035) < 1e-9, String(result.costUsd));
+  } finally { await reviewer.close(); }
+});
+
 describe("GitHub repositories", () => {
-  let models: FakeModels, github: FakeGitHub, app: App, sandboxes: string;
+  let models: FakeModels, reviewer: FakeReviewer, github: FakeGitHub, app: App, sandboxes: string;
   before(async () => {
     const root = mkdtempSync(join(tmpdir(), "openmerit-fake-github-"));
     // A file outside the repository that a symlink in it points to: followed, it would add a model call.
@@ -139,12 +180,14 @@ describe("GitHub repositories", () => {
       "acme/big-app": { private: false },
     }, root);
     models = await fakeModels();
+    reviewer = await fakeReviewer();
     sandboxes = mkdtempSync(join(tmpdir(), "openmerit-sandboxes-"));
-    app = await startApp({ models, env: { OPENMERIT_GITHUB_API_URL: github.api, OPENMERIT_GITHUB_URL: github.git, OPENMERIT_REPO_CLONE_SECONDS: "4", OPENMERIT_REVIEWS_PER_HOUR: "2", TMPDIR: sandboxes } });
+    app = await startApp({ models, env: { OPENMERIT_GITHUB_API_URL: github.api, OPENMERIT_GITHUB_URL: github.git, OPENMERIT_REPO_CLONE_SECONDS: "4", OPENMERIT_REVIEWS_PER_HOUR: "2", TMPDIR: sandboxes,
+      OPENROUTER_BASE_URL: reviewer.url, OPENMERIT_REVIEWER_MODEL: "openai/gpt-5-mini", PI_OFFLINE: "1" } });
   });
-  after(async () => { await stop(app); await models.close(); await github.close(); });
+  after(async () => { await stop(app); await models.close(); await reviewer.close(); await github.close(); });
   // Repository reviews need an active plan, as jobs do; every account here has one but org_np and org_lapse.
-  before(async () => { for (const org of ["org_gh", "org_gp", "org_rl", "org_mx", "org_gs", "org_lapse"]) await subscribe(app, org); });
+  before(async () => { for (const org of ["org_gh", "org_gp", "org_rl", "org_mx", "org_gs", "org_lapse", "org_rv"]) await subscribe(app, org); });
 
   const reviewed = (agent: ReturnType<typeof caller>, id: string) => waitFor(async () => (await agent.api<RepoView[]>("/api/repos")).body.find(repo => repo.id === id)!, repo => repo.review.status === "done" || repo.review.status === "failed", 60_000);
 
@@ -160,10 +203,10 @@ describe("GitHub repositories", () => {
     const repo = await reviewed(admin, added.body.id);
     assert.equal(repo.review.status, "done", repo.review.error ?? "");
     const result = repo.review.result!;
-    assert.equal(result.reviewer, "scan");
+    assert.equal(result.reviewer, "review");
     assert.equal(result.branch, "main");
     assert.match(result.commit, /^[0-9a-f]{40}$/);
-    assert.deepEqual(result.tasks, []);
+    assert.deepEqual(result.tasks.map(task => task.task), ["reply drafter"]);
     const calls = result.modelCalls.map(call => `${call.file}:${call.line} ${call.catalogueId ?? call.value}`);
     assert.ok(calls.includes("src/classify.ts:1 openai/gpt-5-mini"), calls.join("\n"));
     assert.ok(calls.includes("src/reply.py:1 anthropic/claude-haiku-5.5"), calls.join("\n"));
@@ -217,6 +260,36 @@ describe("GitHub repositories", () => {
     assert.equal(kept!.fullName, "acme/public-app");
     assert.equal(kept!.review.status, "done");
     assert.ok(kept!.review.result!.modelCalls.length > 0, "the last review is kept");
+  });
+
+  test("on an active plan, a review writes task specs from the application's code only, and bills its model calls to the ledger without counting an evaluation", async () => {
+    const admin = caller(app, "test:user_rv:org_rv:admin");
+    const seen = reviewer.prompts.length;
+    const added = await admin.api<RepoView>("/api/repos", { method: "POST", body: JSON.stringify({ url: "https://github.com/acme/mixed-app" }) });
+    assert.equal(added.status, 201);
+    const repo = await reviewed(admin, added.body.id);
+    assert.equal(repo.review.status, "done", repo.review.error ?? "");
+    const result = repo.review.result!;
+    assert.equal(result.reviewer, "review");
+    assert.deepEqual(result.unmapped, []);
+    const [spec] = result.tasks;
+    assert.equal(result.tasks.length, 1);
+    assert.equal(spec!.task, "reply drafter");
+    assert.deepEqual(spec!.criteria, ["Answers the customer's question.", "Stays polite."]);
+    assert.deepEqual(spec!.guardrails, ["Never promises a refund."]);
+    assert.equal(spec!.input?.description, "A customer's support ticket.");
+    // The spec is tied to the application's calls, src and examples; the reviewer was never shown a test file.
+    assert.deepEqual(spec!.codeRefs!.map(ref => `${ref.file}:${ref.line}`).sort(), ["examples/demo.ts:1", "src/app.ts:1"]);
+    const prompts = reviewer.prompts.slice(seen);
+    assert.equal(prompts.length, 2, "one mapping call and one spec");
+    assert.ok(prompts.every(prompt => !prompt.includes("app.test.ts") && !prompt.includes("tests/replies")), "no test file reached the reviewer");
+    // Two calls at $0.0035 each, settled as OpenMerit-paid spend; a review is not one of the plan's evaluations.
+    assert.ok(Math.abs(result.costUsd - 0.007) < 1e-9, String(result.costUsd));
+    const spend = await admin.api<{ openmeritUsd: number }>("/api/spend");
+    assert.ok(Math.abs(spend.body.openmeritUsd - 0.007) < 1e-9, String(spend.body.openmeritUsd));
+    assert.equal((await admin.api<{ plan: { usedEvals: number } }>("/api/me")).body.plan.usedEvals, 0);
+    const exported = await admin.api<{ ledger: { key: string; status: string; actual_usd: number }[] }>("/api/account/export", { method: "POST" });
+    assert.deepEqual(exported.body.ledger.map(row => [row.key.split("/")[0], row.status]), [["review", "settled"]]);
   });
 
   test("only the application's model calls are listed: examples stay, tests, fixtures and docs are counted apart", async () => {

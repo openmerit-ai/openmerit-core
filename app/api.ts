@@ -155,8 +155,13 @@ export interface Endpoint { id: string; kind: EndpointKind; baseUrl: string; all
 
 // A model call a repository's review found: where it is and the model it names, or the expression that picks it (cloud/src/github.ts).
 export interface ModelCall { file: string; line: number; value: string; catalogueId: string | null; dynamic: boolean; envVar: string | null }
+// A task spec a repository's review wrote (openmerit/ranking's TaskBundle): the fields the app shows.
+export interface TaskSpec {
+  task: string; description?: string; output: { kind: "text" | "json" | "label"; labels?: string[] }; tools?: { name: string }[];
+  criteria?: string[]; guardrails?: string[]; codeRefs?: { file: string; line: number }[];
+}
 export interface RepoReview {
-  // scan lists the model calls; review, once the review prompt lands, also writes the task specs in tasks.
+  // scan lists the model calls only (the app had no reviewer key, or the review predates 24 Nov 2026); review also writes the task specs in tasks.
   reviewer: string;
   commit: string;
   branch: string;
@@ -170,7 +175,11 @@ export interface RepoReview {
   // sentence that says so ("3 more in tests, fixtures or docs, not listed"). Absent from reviews before 24 Nov 2026.
   supportCalls?: number;
   notListed?: string | null;
-  tasks: unknown[];
+  tasks: TaskSpec[];
+  // Application model calls in no spec, and why, such as a review that reached its budget. Absent from scan-only reviews.
+  unmapped?: { usageIds: string[]; reason: string }[];
+  // What the review's model calls cost OpenMerit, counted in the account's spend.
+  costUsd?: number;
   durationMs: number;
 }
 // A GitHub repository the account added (GET /api/repos). tokenLast4 is null for a public one added by its URL.

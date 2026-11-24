@@ -22,7 +22,7 @@ export const dataView: View<Data> = {
         <div class="row"><span>Task context<span class="sub">The prompts, tool schemas, output shapes and examples your coding agents sent, with secrets redacted</span></span><span>${plural(tasks.length, "task")}</span></div>
         <div class="row"><span>Test cases and results<span class="sub">The cases OpenMerit wrote from that context, and each model's score per case</span></span><span>${plural(runs.length, "run")}</span></div>
         <div class="row"><span>Endpoint keys<span class="sub">Keys you added on Connections, stored encrypted and never shown again</span></span><span>${plural(keys, "key")}</span></div>
-        <div class="row"><span>Repositories<span class="sub">The GitHub repositories you added, with where each model call is and the model it names. OpenMerit copies the code only for a review and deletes the copy when the review ends. Tokens are stored encrypted and never shown again</span></span><span style="white-space: nowrap">${plural(repos.length, "repository", "repositories")}</span></div>
+        <div class="row"><span>Repositories<span class="sub">The GitHub repositories you added, with where each model call is, the model it names, and the task specs a review wrote, which quote the prompts, tool schemas and examples they came from. OpenMerit copies the code only for a review and deletes the copy when the review ends. Tokens are stored encrypted and never shown again</span></span><span style="white-space: nowrap">${plural(repos.length, "repository", "repositories")}</span></div>
       </div>
     </section>
     <section aria-labelledby="where">

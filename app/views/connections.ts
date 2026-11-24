@@ -1,4 +1,4 @@
-import type { Endpoint, EndpointKind, Repo } from "../api.ts";
+import type { Endpoint, EndpointKind, Repo, TaskSpec } from "../api.ts";
 import { ApiError } from "../api.ts";
 import { ago, date, html, logo, model, plural, provider, type Html } from "../html.ts";
 import type { View } from "../view.ts";
@@ -33,7 +33,7 @@ const REVIEWING = new Set(["queued", "reviewing"]);
 function reviewText(repo: Repo): Html {
   const { review } = repo, result = review.result;
   const found = result
-    ? html`<span class="sub">${result.totalCalls ? html`${plural(result.totalCalls, "model call")}: ${result.models.slice(0, 4).map((item, index) => html`${index ? ", " : ""}${item.catalogueId ? model(item.catalogueId) : item.value}`)}${result.models.length > 4 ? ` and ${result.models.length - 4} more` : ""}` : "No model calls in application code"}${result.notListed ? ` · ${result.notListed}` : ""} · ${plural(result.files, "file")} at ${result.commit.slice(0, 7)} on ${result.branch}</span>`
+    ? html`<span class="sub">${result.totalCalls ? html`${plural(result.totalCalls, "model call")}: ${result.models.slice(0, 4).map((item, index) => html`${index ? ", " : ""}${item.catalogueId ? model(item.catalogueId) : item.value}`)}${result.models.length > 4 ? ` and ${result.models.length - 4} more` : ""}` : "No model calls in application code"}${result.notListed ? ` · ${result.notListed}` : ""}${result.tasks.length ? ` · ${plural(result.tasks.length, "task spec")}` : ""} · ${plural(result.files, "file")} at ${result.commit.slice(0, 7)} on ${result.branch}</span>`
     : html``;
   if (REVIEWING.has(review.status)) return html`<span class="sub">Reviewing the code, read-only…</span>${found}`;
   if (review.status === "failed") return html`<span class="sub no">The last review failed: ${review.error ?? "no reason recorded"}</span>${found}`;
@@ -51,6 +51,25 @@ function modelCalls(repo: Repo): Html {
         </details>`;
 }
 
+// The task specs the review wrote from the code: what each task does, what makes its answer right and what it must never do.
+function taskSpecs(repo: Repo): Html {
+  const result = repo.review.result;
+  if (!result) return html``;
+  const unmapped = result.unmapped ?? [];
+  if (!result.tasks.length && !unmapped.length) return html``;
+  const output = (spec: TaskSpec) => spec.output.kind === "label" ? `answers one of ${plural(spec.output.labels?.length ?? 0, "label")}` : spec.output.kind === "json" ? "answers JSON" : "answers in text";
+  const list = (title: string, items: string[] | undefined) => items?.length ? html`<p class="sub">${title}</p><ul class="spec">${items.map((item) => html`<li>${item}</li>`)}</ul>` : "";
+  return html`<details><summary>Show the ${plural(result.tasks.length, "task spec")}</summary>
+          ${result.tasks.map((spec) => html`<div class="spec">
+            <p><strong>${spec.task}</strong>${spec.description ? ` · ${spec.description}` : ""}</p>
+            <p class="sub">${[output(spec), spec.tools?.length ? plural(spec.tools.length, "tool") : "", spec.codeRefs?.length ? spec.codeRefs.map((ref) => `${ref.file}:${ref.line}`).join(", ") : ""].filter(Boolean).join(" · ")}</p>
+            ${list("A right answer", spec.criteria)}${list("It must never", spec.guardrails)}
+          </div>`)}
+          ${unmapped.map((item) => html`<p class="note">${plural(item.usageIds.length, "model call")} in no spec: ${item.reason}</p>`)}
+          ${result.costUsd ? html`<p class="note">This review cost OpenMerit $${result.costUsd.toFixed(2)} in model calls, counted in your spend; it is not one of your plan's evaluations.</p>` : ""}
+        </details>`;
+}
+
 function repoRow(repo: Repo, admin: boolean): Html {
   const reviewing = REVIEWING.has(repo.review.status);
   const reviewed = repo.review.status === "done" && repo.review.finishedAt ? html`<span class="sub">Reviewed ${ago(repo.review.finishedAt)}</span>` : html``;
@@ -61,6 +80,7 @@ function repoRow(repo: Repo, admin: boolean): Html {
           ${admin ? html`<span class="actions"><button class="btn" type="button" data-action="review" data-id="${repo.id}"${reviewing ? html` disabled` : ""} aria-label="Review ${repo.fullName} again">Review again</button><button class="btn danger" type="button" data-action="removeRepo" data-id="${repo.id}" aria-label="Remove ${repo.fullName}">Remove</button></span>` : html`<span></span>`}
         </div>
         ${modelCalls(repo)}
+        ${taskSpecs(repo)}
       </div>`;
 }
 
@@ -98,7 +118,7 @@ export const connectionsView: View<Data> = {
   render({ endpoints, repos }, { me }) {
     const own = endpoints.filter((endpoint) => !endpoint.builtIn);
     const admin = me.role === "admin";
-    return html`${header(me, "Connections", "Your coding agents are how OpenMerit gets its work. On a plan, add a GitHub repository and OpenMerit reads its code to find the model calls, read-only. Your own endpoints are optional: OpenMerit measures on OpenRouter at its own cost.", [plural(repos.length, "repository", "repositories"), `${plural(own.length, "endpoint")} of yours`])}
+    return html`${header(me, "Connections", "Your coding agents are how OpenMerit gets its work. On a plan, add a GitHub repository and OpenMerit reads its code, read-only, to find the model calls and write each task's spec. Your own endpoints are optional: OpenMerit measures on OpenRouter at its own cost.", [plural(repos.length, "repository", "repositories"), `${plural(own.length, "endpoint")} of yours`])}
 
     <section aria-labelledby="agents">
       <h2 id="agents">Coding Agents</h2>
@@ -111,7 +131,7 @@ export const connectionsView: View<Data> = {
 
     <section aria-labelledby="repos">
       <h2 id="repos">Repositories</h2>
-      <p class="note" style="margin: -2px 0 8px">OpenMerit copies the default branch into a temporary folder, reads it to find the model calls, and deletes the copy. It never runs your code, pushes, or opens a pull request. It keeps where each model call is and the model it names, not your code.</p>
+      <p class="note" style="margin: -2px 0 8px">OpenMerit copies the default branch into a temporary folder, reads it to find the model calls and write each task's spec, and deletes the copy. It never runs your code, pushes, or opens a pull request. It keeps where each model call is, the model it names, and the task specs, which quote the prompts, tool schemas and examples they were written from; not your files.</p>
       ${paid(me) ? "" : html`<div class="card notice warn" role="status" style="margin: 0 0 24px"><p>Reviewing a repository needs an active plan. ${repos.length ? "Your repositories stay listed with their last review. " : ""}<a href="/plan/">Choose a plan</a> to add or review one.</p></div>`}
       ${repos.length ? html`<div class="card">${repos.map((repo) => repoRow(repo, admin))}</div>` : html`<div class="card"><p class="sub">No repositories yet.${admin ? " Add one below." : ""}</p></div>`}
       ${admin ? html`<form class="card form" data-action="addRepo" autocomplete="off" style="margin-top: 12px">
