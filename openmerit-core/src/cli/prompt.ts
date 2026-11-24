@@ -90,7 +90,17 @@ export async function askQuestion(prompter: Prompter, question: Question, log: (
   if (question.detail) log(`\n${question.detail}\n`);
   switch (question.kind) {
     case "confirm": return prompter.confirm(question.prompt, question.default === true);
-    case "choice": return prompter.choose(question.prompt, question.options ?? [], typeof question.default === "string" ? question.default : undefined);
+    case "choice": {
+      const options = question.options ?? [];
+      if (!question.hint) return prompter.choose(question.prompt, options, typeof question.default === "string" ? question.default : undefined);
+      // A choice with a hint, such as a grade, also takes a note after a colon: "2: <why>" or "bad: <why>".
+      log(`${question.prompt}\n${options.map((option, index) => `  ${index + 1}. ${option.label}`).join("\n")}`);
+      for (;;) {
+        const [, head = "", note] = /^([^:]*?)\s*(?::\s*([\s\S]*))?$/.exec(await prompter.ask("Choose a number, and add a note after a colon if you like, such as 2: <why>")) ?? [];
+        const picked = options[Number(head) - 1] ?? options.find(option => option.value === head.toLowerCase());
+        if (picked) return note?.trim() ? `${picked.value}: ${note.trim()}` : picked.value;
+      }
+    }
     case "multi": {
       const options = question.options ?? [];
       log(`${question.prompt}\n${options.map((option, index) => `  ${index + 1}. ${option.label}${option.detail ? `\n     ${option.detail}` : ""}`).join("\n")}`);

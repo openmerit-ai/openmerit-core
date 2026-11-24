@@ -9,7 +9,8 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { terminalPrompter } from "../src/cli/prompt.ts";
+import { askQuestion, terminalPrompter } from "../src/cli/prompt.ts";
+import { GRADE_HINT, type Question, readGrade } from "../src/scout/workflow.ts";
 import { claudeBinary } from "../src/harness/claude-bridge.ts";
 import { checkForUpdate, newer, offerUpdate, packageVersion } from "../src/update.ts";
 
@@ -29,6 +30,19 @@ test("a secret typed at a terminal prompt is not echoed", async () => {
   prompter.close();
   assert.ok(shown.includes("API key (input hidden):") && shown.includes("visible"), shown);
   assert.ok(!shown.includes("sk-typed-secret"), shown);
+});
+
+test("a grade typed at the terminal keeps its note", async () => {
+  const input = Object.assign(new PassThrough(), { isTTY: true, setRawMode: () => input });
+  const output = Object.assign(new PassThrough(), { isTTY: true, columns: 80 });
+  output.resume();
+  const prompter = terminalPrompter(input, output);
+  const question: Question = { id: "grade_t_r1_1", kind: "choice", prompt: "t, answer 1 of 2: does it look right?", options: [{ value: "good", label: "Looks good" }, { value: "bad", label: "Doesn't look right" }], hint: GRADE_HINT };
+  const typed = async (line: string) => { const answer = askQuestion(prompter, question, () => {}); input.write(`${line}\r`); return answer; };
+  assert.deepEqual(readGrade(await typed("2: the finding names code ALL, which is not a code")), { verdict: "bad", note: "the finding names code ALL, which is not a code" });
+  assert.deepEqual(readGrade(await typed("1")), { verdict: "good" });
+  assert.deepEqual(readGrade(await typed("bad")), { verdict: "bad" });
+  prompter.close();
 });
 
 test("--help after a command prints the usage instead of failing", () => {
