@@ -64,7 +64,10 @@ export const task = actor({
       });
     },
 
-    /** A task approved from a repository review: its bundle, for its first run, with no run and no watch until then. */
+    /**
+     * The bundle the task runs on next, set from the app: a task approved from a repository review, with no run
+     * and no watch until its first, or a changed task whose eval someone accepted.
+     */
     prepare: async (c, bundle: TaskBundle): Promise<void> => { c.state.bundle = bundle; await save(c); },
 
     labels: (c): TaskState["labels"] => c.state.labels,

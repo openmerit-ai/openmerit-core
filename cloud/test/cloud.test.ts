@@ -351,14 +351,16 @@ test("the coding agent sends back the user's decision on a result's change: an a
   } finally { await stop(app); await models.close(); }
 });
 
-test("a task goes idle once no recommend call came for the idle period, and retired and frozen say why it stopped first", () => {
-  const day = 24 * 60 * 60 * 1000, base = { retired: false, watch: undefined, lastRecommendAt: 0, idleAfterMs: 30 * day };
+test("a task goes idle once no recommend call came for the idle period, and retired, review and frozen say why it stopped first", () => {
+  const day = 24 * 60 * 60 * 1000, base = { retired: false, review: false, watch: undefined, lastRecommendAt: 0, idleAfterMs: 30 * day };
   assert.deepEqual(watchState({ ...base, now: 30 * day - 1 }), { state: "watching", idleSince: null });
   assert.deepEqual(watchState({ ...base, now: 30 * day }), { state: "idle", idleSince: new Date(30 * day).toISOString() });
   assert.deepEqual(watchState({ ...base, lastRecommendAt: null, now: 90 * day }), { state: "watching", idleSince: null });
   assert.equal(watchState({ ...base, watch: true, now: 30 * day }).state, "idle");
   assert.equal(watchState({ ...base, watch: false, now: 30 * day }).state, "frozen");
   assert.equal(watchState({ ...base, retired: true, watch: false, now: 30 * day }).state, "retired");
+  assert.equal(watchState({ ...base, review: true, watch: false, now: 30 * day }).state, "review");
+  assert.equal(watchState({ ...base, retired: true, review: true, now: 30 * day }).state, "retired");
 });
 
 test("a measure step replayed after a crash does not count its spend twice", async () => {

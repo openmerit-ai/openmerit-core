@@ -169,24 +169,39 @@ export function apiRoutes(deps: AppDeps) {
       const deleted = await account.deleteTask({ taskId: row.id, userId: who.userId });
       return json(200, { deleted: true, jobs: deleted.jobs });
     }
-    // A task's eval: the cloud keeps every version, the app edits it, and the coding agent writes the latest to the repository.
+    // A task's eval: the accepted one runs unchanged; a draft is reviewed in the app, saved in place and accepted as the next version.
     if ((match = /^\/api\/tasks\/([\w-]+)\/eval$/.exec(path)) && method === "GET") {
       const view = await account.eval(match[1]!);
       return view ? json(200, view) : error(404, "No such task in this account.");
     }
-    if ((match = /^\/api\/tasks\/([\w-]+)\/eval$/.exec(path)) && method === "PUT") {
+    if ((match = /^\/api\/tasks\/([\w-]+)\/eval\/(revise|draft|accept)$/.exec(path)) && (method === "POST" || method === "PUT" || method === "DELETE")) {
       const row = await account.task(match[1]!);
       if (!row) return error(404, "No such task in this account.");
+      const action = `${method} ${match[2]!}`;
+      if (action === "POST revise") return (await account.reviseEval({ taskId: row.id, by: who.userId })) ? json(200, await account.eval(row.id)) : error(409, "This eval has no accepted version, or a draft is open already.");
+      if (action === "DELETE draft") {
+        const discarded = await account.discardEvalDraft(row.id);
+        return discarded.ok ? json(200, await account.eval(row.id)) : error(409, discarded.error);
+      }
+      if (action !== "PUT draft" && action !== "POST accept") return error(405, "Use POST revise, PUT draft, DELETE draft or POST accept.");
+      const view = await account.eval(row.id);
       const input = await body(request);
       const bundle = (await client.task.get([who.accountId, row.id]).info()).bundle;
-      if (!input || !bundle) return error(400, "Send {spec, cases, baseVersion}.");
-      const problem = evalProblem(bundle, input.spec, input.cases);
+      if (!view?.draft || !bundle) return error(409, "This eval has no draft. Choose Revise eval first.");
+      // A changed task's draft is checked against its new output shape.
+      const target = view.draft.output ? { ...bundle, output: view.draft.output } : bundle;
+      const spec = (input?.spec ?? view.draft.spec) as EvalSpec, cases = (input?.cases ?? view.draft.cases) as Case[];
+      const problem = evalProblem(target, spec, cases);
       if (problem) return error(400, problem);
-      const saved = await account.saveEval({
-        taskId: row.id, projectId: row.projectId, spec: redactBundle(specOf(input.spec as TaskBundle)), cases: redactBundle(input.cases as Case[]), source: "app", author: who.userId,
-        note: typeof input.note === "string" ? input.note.slice(0, 500) : null, baseVersion: typeof input.baseVersion === "number" ? input.baseVersion : null,
-      });
-      if (!saved.ok) return error(409, saved.error);
+      const edit = { taskId: row.id, spec: redactBundle(specOf(spec as TaskBundle)), cases: redactBundle(cases), by: who.userId, base: typeof input?.base === "string" ? input.base : null };
+      if (action === "PUT draft") {
+        const saved = await account.saveEvalDraft(edit);
+        return saved.ok ? json(200, await account.eval(row.id)) : error(saved.status, saved.error);
+      }
+      const accepted = await account.acceptEval(edit);
+      if (!accepted.ok) return error(accepted.status, accepted.error);
+      // The changed task's bundle becomes the one its runs and watch use.
+      if (accepted.bundle) await client.task.get([who.accountId, row.id]).prepare(accepted.bundle);
       return json(200, await account.eval(row.id));
     }
     // A task approved from a review has not run: this starts its first run. Any task can run again from here.
@@ -228,8 +243,8 @@ export function apiRoutes(deps: AppDeps) {
       if (!row) return error(404, "No such task in this account.");
       const info = await client.task.get([who.accountId, row.id]).info();
       const evaluation = await account.eval(row.id);
-      const latest = evaluation?.latest;
-      return json(200, { ...row, eval: latest ? { version: latest.version, cases: latest.cases.length, repo: evaluation.repo } : null, bundle: info.bundle, lastResult: info.lastResult, notices: info.notices, jobs: await account.jobs({ taskId: row.id, limit: 20 }), guardrails: await account.resolveGuardrails({ projectId: row.projectId, environment: row.environment, agent: row.agent, taskId: row.id }) });
+      const latest = evaluation?.accepted;
+      return json(200, { ...row, eval: latest ? { version: latest.version, cases: latest.cases.length, repo: evaluation.repo, review: evaluation.draft?.reason ?? null } : null, bundle: info.bundle, lastResult: info.lastResult, notices: info.notices, jobs: await account.jobs({ taskId: row.id, limit: 20 }), guardrails: await account.resolveGuardrails({ projectId: row.projectId, environment: row.environment, agent: row.agent, taskId: row.id }) });
     }
 
     if (path === "/api/runs" && method === "GET") return json(200, await account.jobs({ projectId, limit: Math.min(200, Number(url.searchParams.get("limit") ?? 50) || 50) }));

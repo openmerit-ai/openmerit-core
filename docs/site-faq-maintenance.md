@@ -6,7 +6,7 @@ Reviewed the homepage against members adding GitHub repositories through the Ope
 
 ## Task evals in the cloud app — unreleased, 24 November 2026
 
-Reviewed the homepage against each task's eval becoming versioned in the cloud app, editable on the task's Eval tab, written to the repository's `.openmerit/evals/<task>/` by the coding agent only when the user agrees, and offered as drafts from repository reviews in a Review evals queue whose approval creates the task without running it. Deleting a task now deletes its eval; Retire keeps it. `site/index.html` makes no claim about where evals live, eval versions, editing cases or the repository copy. No homepage copy change is needed. The cloud README's Evals section and the openmerit-core README describe the behaviour.
+Reviewed the homepage against each task's eval living in the cloud app, accepted once and fixed until the task changes or someone revises it on the task's Eval tab (runs and the watch pause while a draft waits for review), written to the repository's `.openmerit/evals/<task>/` by the coding agent only when the user agrees, and offered as drafts from repository reviews in a Review evals queue whose approval creates the task without running it. Deleting a task now deletes its eval; Retire keeps it. `site/index.html` makes no claim about where evals live, eval versions, editing cases or the repository copy. No homepage copy change is needed. The cloud README's Evals section and the openmerit-core README describe the behaviour.
 
 ## Projects and members' own Claude and ChatGPT subscriptions in the cloud app — unreleased, 24 November 2026
 

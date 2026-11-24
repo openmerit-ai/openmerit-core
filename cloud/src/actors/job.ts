@@ -241,10 +241,11 @@ export const job = workflow({
       // A job recorded before this step returned its provisional pick has none here.
       const told = (source as { provisional?: Provisional }).provisional ?? null;
 
-      // 2. Cases. A task with an eval runs on its latest version: its cases, and its spec in place of the
-      // bundle's, since the app's edits win; examples the bundle adds join it. Before the task has one,
-      // the bundle's examples come first, with labels the user gave in earlier runs, then cases a model
-      // writes on OpenMerit's OpenRouter key or the member's subscription. Then the label check.
+      // 2. Cases. A task with an accepted eval runs on it unchanged: its cases, and its spec in place of the
+      // bundle's, with no label check; examples the bundle adds wait for someone to revise the eval. Before
+      // the task has one, the bundle's examples come first, with labels the user gave in earlier runs, then
+      // cases a model writes on OpenMerit's OpenRouter key or the member's subscription. Then the label check,
+      // whose answers make the eval the run accepts.
       const step = await ctx.step({
         name: "cases", timeout: 0, maxRetries: INTERRUPTIONS,
         run: async s => {
@@ -253,13 +254,12 @@ export const job = workflow({
           const task = client.task.getOrCreate([accountId, taskId]);
           const current = await client.account.getOrCreate([accountId]).evalFor(taskId);
           if (current) {
-            const known = new Set(current.seen.map(input => caseKey(input)));
+            const known = new Set(current.cases.map(item => caseKey(item.input)));
             const added = (await writeCases({ bundle: sent, complete: async () => "", count: 0 })).cases.filter(item => item.origin === "example" && !known.has(caseKey(item.input)));
-            if (added.length) s.state.notices.push(`${added.length} new example${added.length === 1 ? "" : "s"} from the coding agent joined the eval.`);
+            if (added.length) s.state.notices.push(`${added.length} example${added.length === 1 ? "" : "s"} the coding agent sent ${added.length === 1 ? "is" : "are"} not in the accepted eval, so the run did not use ${added.length === 1 ? "it" : "them"}: revise the eval in the app to add ${added.length === 1 ? "it" : "them"}.`);
             const differs = JSON.stringify(specOf(sent)) !== JSON.stringify(current.spec);
-            if (differs) s.state.notices.push(`The run used the criteria of eval version ${current.version}, not the ones the coding agent sent: the eval in the app is the one to edit.`);
-            const ids = new Set(current.cases.map(item => item.id));
-            return { cases: [...current.cases, ...added.map(item => ids.has(item.id) ? { ...item, id: `${item.id}-${caseKey(item.input).slice(0, 6)}` } : item)], version: current.version, spec: current.spec, source: "label_check" as EvalSource };
+            if (differs) s.state.notices.push(`The run used the criteria of accepted eval version ${current.version}, not the ones the coding agent sent: the eval in the app is the one to edit.`);
+            return { cases: current.cases, version: current.version, spec: current.spec, source: "app" as EvalSource };
           }
           const [saved, approved] = await Promise.all([task.labels(), task.written()]);
           const { config, fetch } = services();
@@ -316,7 +316,8 @@ export const job = workflow({
       const cases = await ctx.loop({
         name: "label-check", state: written.cases,
         run: async (loop, current) => {
-          const questions = labelQuestions(bundle, current);
+          // An accepted eval was reviewed already: its unanswered cases are left out, not asked about.
+          const questions = written.version === null ? labelQuestions(bundle, current) : [];
           if (!questions.length) return Loop.break(current);
           await loop.step("ask", async s => {
             s.state.status = "needs_input"; s.state.phase = "label_check"; s.state.questions = questions; s.state.live = null; s.state.updatedAt = now();
@@ -338,17 +339,12 @@ export const job = workflow({
           return Loop.continue(next);
         },
       });
-      // The cases this run measures on are the eval's next version when they changed, such as by label-check answers.
+      // A first run's cases, as the label check left them, are the eval it accepts as version 1.
       const evalVersion = await ctx.step({
         name: "eval", timeout: 60_000,
         run: async s => {
           const account = s.client<Registry>().account.getOrCreate([s.state.input.accountId]);
-          const saved = await account.saveEval({
-            taskId, projectId, spec: written.spec ?? specOf(sent), cases, source: written.version === null ? written.source : "label_check", author: s.state.input.userId ?? null,
-            note: written.version === null ? "Written by the task's first run" : null,
-          });
-          // Without a base version the save cannot be refused.
-          const version = saved.ok ? saved.version : written.version ?? 0;
+          const version = written.version ?? await account.acceptFirstEval({ taskId, projectId, bundle: sent, spec: specOf(sent), cases, source: written.source, by: s.state.input.userId ?? null });
           await account.setJobEval({ jobId, version });
           return version;
         },

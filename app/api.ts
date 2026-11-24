@@ -55,7 +55,8 @@ export interface Task {
   watching: boolean;
   // Watching is automatic. Proposed for the cloud app, which does not send it yet; the preview's
   // fake API does. idle: no coding agent call for 30 days, until the next one. frozen: a
-  // watch: false guardrail. retired: the coding agent retired it. Without it, watching decides.
+  // watch: false guardrail. retired: the coding agent retired it. review: its eval waits for a person,
+  // and no run starts until they accept it. Without it, watching decides.
   state?: TaskState;
   idleSince?: string | null;
   lastRunAt: string | null;
@@ -65,17 +66,22 @@ export interface Task {
   decision?: Decision | null;
 }
 
-// A task's eval (cloud/src/actors/account.ts): what the judge checks (spec) and the cases, versioned.
-// The cloud is its source of truth; the coding agent writes the latest version to the repository.
+// A task's eval (cloud/src/actors/account.ts): what the judge checks (spec) and the cases. The cloud is
+// its source of truth. The accepted eval runs unchanged; its version counts acceptances. A draft is the
+// eval under review, edited in place: reopened because the coding agent sent the task with a different
+// prompt, tools or output (task_changed, with the new output shape), or by a person (revise). While a
+// draft is open the task's runs and watch wait. The coding agent writes the accepted version to the repository.
 export interface EvalCase { id: string; input: Record<string, string>; expected?: unknown; origin: "example" | "written" | "trace"; kind?: string; approved?: boolean; toolResults?: unknown }
 export interface EvalSpec { description?: string; input?: { description: string }; steps?: { description: string; tools?: string[]; access?: string; required?: boolean; after?: number[] }[]; criteria?: string[]; guardrails?: string[] }
-export type EvalSource = "openmerit" | "claude" | "chatgpt" | "examples" | "review" | "app" | "label_check";
-export interface EvalVersionInfo { version: number; source: EvalSource; author: string | null; note: string | null; createdAt: string; runs: number }
+export type EvalSource = "openmerit" | "claude" | "chatgpt" | "examples" | "review" | "app";
+export type TaskPart = "prompt" | "tools" | "output";
+export interface EvalAccepted { version: number; spec: EvalSpec; cases: EvalCase[]; source: EvalSource; by: string | null; at: string; runs: number }
+export interface EvalRevision { reason: "task_changed" | "revise"; changed: TaskPart[]; spec: EvalSpec; cases: EvalCase[]; output: TaskOutput | null; by: string | null; at: string }
 export interface EvalView {
   taskId: string;
   projectId: string;
-  latest: (EvalVersionInfo & { spec: EvalSpec; cases: EvalCase[] }) | null;
-  versions: EvalVersionInfo[];
+  accepted: EvalAccepted | null;
+  draft: EvalRevision | null;
   // The version the coding agent last wrote to the repository, who signed in, and the agent.
   repo: { version: number; by: string; client: string | null; at: string } | null;
 }
@@ -84,9 +90,9 @@ export type TaskOutput = { kind: "text" } | { kind: "json"; schema: object } | {
 // An eval a repository review found, waiting for approval, which creates the task, or dismissal.
 export interface EvalDraft { id: string; projectId: string; repoId: string | null; environment: string; name: string; bundle: EvalSpec & { task: string; current: { model: string }; output: TaskOutput }; cases: EvalCase[]; status: "pending" | "approved" | "dismissed"; createdAt: string; taskId: string | null }
 // GET /api/tasks/:id: the task's row with its bundle, eval summary and latest runs.
-export interface TaskDetail extends Task { bundle: { output: TaskOutput; current: { model: string } } | null; eval: { version: number; cases: number; repo: EvalView["repo"] } | null; jobs: Run[] }
+export interface TaskDetail extends Task { bundle: { output: TaskOutput; current: { model: string } } | null; eval: { version: number; cases: number; repo: EvalView["repo"]; review: EvalRevision["reason"] | null } | null; jobs: Run[] }
 
-export type TaskState = "watching" | "idle" | "frozen" | "retired";
+export type TaskState = "watching" | "idle" | "frozen" | "retired" | "review";
 
 export type JobStatus = "queued" | "running" | "needs_input" | "done" | "failed" | "stopped";
 

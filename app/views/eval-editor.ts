@@ -1,6 +1,6 @@
 // The eval editor, shared by a task's Eval tab and the review queue: what the judge checks (criteria
 // and guardrails, one per line) and the cases, each with its input, its expected answer and whether
-// it is measured. The cloud app keeps every saved version; the coding agent writes the latest to the repository.
+// it is measured. The cloud app keeps the accepted eval and a draft under review; the coding agent writes the accepted one to the repository.
 import type { EvalCase, EvalSpec, TaskOutput } from "../api.ts";
 import { html, type Html } from "../html.ts";
 
@@ -20,9 +20,9 @@ function expectedField(item: EvalCase, index: number, output: TaskOutput): Html 
 /** A case is measured unless someone left it out: a written case unticked in the label check, or one unticked here. */
 export const measured = (item: EvalCase): boolean => item.approved !== false && item.expected !== undefined;
 
-export function evalForm(spec: EvalSpec, cases: EvalCase[], output: TaskOutput, options: { action: string; submit: string; baseVersion: number | null; id?: string; editable: boolean; extra?: Html }): Html {
+export function evalForm(spec: EvalSpec, cases: EvalCase[], output: TaskOutput, options: { action: string; submit: string; base: string | null; id?: string; editable: boolean; extra?: Html }): Html {
   const disabled = options.editable ? "" : html` disabled`;
-  return html`<form class="eval-form" data-action="${options.action}"${options.id ? html` data-id="${options.id}"` : ""} data-base="${options.baseVersion ?? ""}" autocomplete="off">
+  return html`<form class="eval-form" data-action="${options.action}"${options.id ? html` data-id="${options.id}"` : ""} data-base="${options.base ?? ""}" autocomplete="off">
     <fieldset${disabled}>
       <div class="card form eval-spec">
         <label>Criteria<span class="sub">What a right answer does, one per line. The judge checks every case on each.</span>

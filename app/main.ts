@@ -275,11 +275,13 @@ async function newProject(): Promise<void> {
   dialog.showModal();
 }
 
-// The sidebar's Review evals item: shown with its count only while a review's drafts wait in this project.
+// The sidebar's Review evals item: shown with its count only while a review's drafts, or tasks whose eval
+// waits for review, wait in this project.
 async function fillReview(api: Api): Promise<void> {
   const item = document.querySelector<HTMLElement>(".nav-action[href='/evals/']");
   if (!item) return;
-  const waiting = (await api.get<unknown[]>("/api/eval-drafts").catch((): unknown[] => [])).length;
+  const [drafts, tasks] = await Promise.all([api.get<unknown[]>("/api/eval-drafts").catch((): unknown[] => []), api.get<{ state?: string }[]>("/api/tasks").catch((): { state?: string }[] => [])]);
+  const waiting = drafts.length + tasks.filter((task) => task.state === "review").length;
   item.hidden = waiting === 0 && !item.hasAttribute("aria-current");
   item.querySelector(".count")!.textContent = waiting ? String(waiting) : "";
   item.title = waiting ? `Review evals: ${waiting} waiting` : "Review evals";

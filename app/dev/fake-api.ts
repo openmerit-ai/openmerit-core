@@ -6,11 +6,11 @@
 // just created), preview-noorg (a token without an organization), preview-error, preview-slow and preview-expired. Each scenario keeps its own in-memory
 // state, so actions change what later requests return. Every name and number is fictional.
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, type Guardrails, type Level } from "../../openmerit-core/src/engine/guardrails.ts";
-import type { Decision, DeletedTask, Endpoint, EvalCase, EvalDraft, EvalSpec, EvalVersionInfo, EvalView, GitHubAccess, JobView, LiveProgress, MeasuredModel, Me, Project, Repo, RepoReview, Report, Run, Spend, Subscriptions, Task, TaskOutput } from "../api.ts";
+import type { Decision, DeletedTask, Endpoint, EvalAccepted, EvalCase, EvalDraft, EvalRevision, EvalSpec, EvalView, GitHubAccess, JobView, LiveProgress, MeasuredModel, Me, Project, Repo, RepoReview, Report, Run, Spend, Subscriptions, Task, TaskOutput } from "../api.ts";
 import { tonicUltra } from "./tonic-ultra.ts";
 
-// A task's eval in the fake: every version, newest first, the version in the repository, and the task's output shape.
-export interface FakeEval { versions: (EvalVersionInfo & { spec: EvalSpec; cases: EvalCase[] })[]; repo: EvalView["repo"]; output: TaskOutput }
+// A task's eval in the fake: the accepted one, any draft under review, the version in the repository, and the task's output shape.
+export interface FakeEval { accepted: Omit<EvalAccepted, "runs">; draft: EvalRevision | null; repo: EvalView["repo"]; output: TaskOutput }
 export interface State { me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; repos: Repo[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number; deleted: DeletedTask[]; evals: Record<string, FakeEval>; drafts: EvalDraft[] }
 
 // What a project other than the default holds; the State's own fields are the default project's.
@@ -20,7 +20,7 @@ const emptySlice = (): Slice => ({ tasks: [], runs: [], endpoints: [], repos: []
 
 const ROUTER_OUTPUT: TaskOutput = { kind: "label", labels: ["claims", "billing", "enrollment", "clinical", "other"] };
 const routerCase = (id: string, ticket: string, expected: string | undefined, origin: EvalCase["origin"], fields: Partial<EvalCase> = {}): EvalCase => ({ id, input: { ticket }, ...(expected === undefined ? {} : { expected }), origin, ...fields });
-// Version 3 dropped a duplicate case and fixed one answer in the app; the repository still has version 2.
+// Version 2 dropped a duplicate case and fixed one answer in the app; the repository still has version 1.
 function routerEval(): FakeEval {
   const spec: EvalSpec = {
     description: "Routes an incoming member ticket to the team that handles it.",
@@ -28,25 +28,29 @@ function routerEval(): FakeEval {
     criteria: ["Picks the one queue whose team can resolve the ticket", "Treats a claim number with a billing question as billing"],
     guardrails: ["Never routes a ticket that mentions self-harm anywhere but clinical"],
   };
-  const v2: EvalCase[] = [
+  const cases: EvalCase[] = [
     routerCase("example-1", "My claim CLM-20931 was denied, why?", "claims", "example"),
     routerCase("example-2", "I was charged twice for my November premium", "billing", "example"),
     routerCase("example-3", "How do I add my newborn to my plan?", "enrollment", "example"),
     routerCase("written-1", "Fwd: invoice for claim CLM-11872 shows the wrong amount", "billing", "written", { kind: "edge", approved: true }),
     routerCase("written-2", "Can my doctor prescribe a 90-day supply?", "clinical", "written", { kind: "typical", approved: true }),
-    routerCase("written-3", "my claim was denied why", "claims", "written", { kind: "typical", approved: true }),
-    routerCase("written-4", "I feel hopeless since my diagnosis and can't pay", "billing", "written", { kind: "guardrail", approved: true }),
+    routerCase("written-4", "I feel hopeless since my diagnosis and can't pay", "clinical", "written", { kind: "guardrail", approved: true }),
   ];
-  const v3 = v2.filter((item) => item.id !== "written-3").map((item) => (item.id === "written-4" ? { ...item, expected: "clinical" } : item));
-  const at = (day: string, hour = "09:00") => `2026-11-${day}T${hour}:00Z`;
   return {
-    output: ROUTER_OUTPUT,
-    versions: [
-      { version: 3, source: "app", author: "Amira Haddad", note: "Dropped a duplicate; a self-harm mention goes to clinical", createdAt: at("19", "14:20"), runs: 1, spec, cases: v3 },
-      { version: 2, source: "label_check", author: "Amira Haddad", note: null, createdAt: at("18", "10:01"), runs: 2, spec, cases: v2 },
-      { version: 1, source: "openmerit", author: null, note: "Written by the task's first run", createdAt: "2026-10-30T10:01:00Z", runs: 1, spec: { ...spec, guardrails: [] }, cases: v2.slice(0, 5) },
-    ],
-    repo: { version: 2, by: "Amira Haddad", client: "claude-code", at: at("18", "10:20") },
+    output: ROUTER_OUTPUT, draft: null,
+    accepted: { version: 2, source: "app", by: "Amira Haddad", at: "2026-11-18T10:01:00Z", spec, cases },
+    repo: { version: 1, by: "Amira Haddad", client: "claude-code", at: "2026-10-30T10:20:00Z" },
+  };
+}
+
+// The coding agent sent the reply drafter with a new tool, so its eval waits for review and the task's runs wait for it.
+function drafterEval(): FakeEval {
+  const spec: EvalSpec = { criteria: ["Answers the member's question in plain language", "Offers the next step"] };
+  const cases: EvalCase[] = [{ id: "written-1", input: { message: "When will my reimbursement arrive?" }, expected: "Reimbursements arrive within 14 days of approval; the member can track it under Claims.", origin: "written", kind: "typical", approved: true }];
+  return {
+    output: { kind: "text" }, repo: { version: 1, by: "Amira Haddad", client: "claude-code", at: "2026-11-18T08:52:00Z" },
+    accepted: { version: 1, source: "openmerit", by: null, at: "2026-11-18T08:31:00Z", spec, cases },
+    draft: { reason: "task_changed", changed: ["tools"], spec, cases: [...cases, { id: "example-1", input: { message: "Where is claim CLM-30112?" }, origin: "example" }], output: { kind: "text" }, by: null, at: "2026-11-23T15:12:00Z" },
   };
 }
 
@@ -123,7 +127,7 @@ function populated(): State {
     task("bill-matcher", "Bill and claim matcher", { agent: "claim pipeline", currentModel: "anthropic/claude-sonnet-5-5", status: "agent_eval_failed", lastRunAt: "2026-11-17T08:00:00Z", lastJobId: "p3x8d1" }),
     task("fraud-reviewer", "Fraud reviewer", { agent: "claim pipeline", currentModel: "anthropic/claude-sonnet-5-5", watching: false, state: "frozen", lastRunAt: "2026-11-16T12:00:00Z", lastJobId: "f9q2w7" }),
     task("enrollment-checker", "Enrollment checker", { environment: "sahra-health/enroll", currentModel: "openai/gpt-5-mini", status: "running", lastRunAt: "2026-11-18T11:40:00Z", lastJobId: "e4n6t0" }),
-    task("reply-drafter", "Reply drafter", { pick: "anthropic/claude-haiku-5-5", status: "picked", monthlySavingUsd: 96.4, lastRunAt: "2026-11-18T08:30:00Z", lastJobId: "m5d8q2" }),
+    task("reply-drafter", "Reply drafter", { state: "review", watching: false, pick: "anthropic/claude-haiku-5-5", status: "picked", monthlySavingUsd: 96.4, lastRunAt: "2026-11-18T08:30:00Z", lastJobId: "m5d8q2" }),
     task("coding-reviewer", "Coding reviewer", { currentModel: "anthropic/claude-sonnet-5-5", status: "failed", lastRunAt: "2026-11-12T10:00:00Z", lastJobId: "z1c7m4" }),
   ];
   const run = (id: string, taskId: string, status: string, startedAt: string, kind = "run", askedBy: string | null = kind === "watch" ? null : "claude-code"): Run => ({ id, taskId, kind, status, startedAt, finishedAt: status === "done" || status === "failed" ? startedAt : null, askedBy, result: null });
@@ -207,7 +211,7 @@ function populated(): State {
       task: { "ticket-router": { latencyMs: 1000, allowedProviders: ["openai", "anthropic", "deepseek"] } },
     },
     disconnected: 0, deleted: [],
-    evals: { "ticket-router": routerEval(), "reply-drafter": { output: { kind: "text" }, repo: { version: 1, by: "Amira Haddad", client: "claude-code", at: "2026-11-18T08:52:00Z" }, versions: [{ version: 1, source: "openmerit", author: null, note: "Written by the task's first run", createdAt: "2026-11-18T08:31:00Z", runs: 1, spec: { criteria: ["Answers the member's question in plain language", "Offers the next step"] }, cases: [{ id: "written-1", input: { message: "When will my reimbursement arrive?" }, expected: "Reimbursements arrive within 14 days of approval; the member can track it under Claims.", origin: "written", kind: "typical", approved: true }] }] } },
+    evals: { "ticket-router": routerEval(), "reply-drafter": drafterEval() },
     drafts: seedDrafts(),
   };
 }
@@ -229,11 +233,11 @@ function scenario(name: string): State {
   return state;
 }
 
-// Each run measured on the eval version that was latest when it started.
-// As the cloud app does, each finished run carries what its report found and the eval version it measured on.
+// As the cloud app does, each finished run carries what its report found and the eval version it measured on:
+// the accepted one, or the one before it for a run that started before it was accepted.
 function runRow(state: State, run: Run): Run {
-  const versions = state.evals[run.taskId]?.versions ?? [], report = state.reports[run.id];
-  const evalVersion = run.evalVersion ?? versions.find((item) => item.createdAt <= run.startedAt)?.version ?? versions.at(-1)?.version ?? null;
+  const accepted = state.evals[run.taskId]?.accepted, report = state.reports[run.id];
+  const evalVersion = run.evalVersion ?? (accepted ? (run.startedAt < accepted.at ? Math.max(1, accepted.version - 1) : accepted.version) : null);
   return { ...run, evalVersion, result: report ? { status: report.status, model: report.pick?.model ?? null, from: report.baseline?.model ?? null, savingPerCallUsd: report.pick?.savingPerCallUsd ?? null } : null };
 }
 
@@ -547,40 +551,65 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
     }
     if (path === "/api/tasks/deleted" && method === "GET") return json(200, state.deleted);
 
-    // Evals, as the cloud app keeps them: versioned, edited in the app, written to the repository by the coding agent.
+    // Evals, as the cloud app keeps them: the accepted one, and a draft under review that pauses the task's runs.
     const evalView = (id: string): EvalView => {
       const found = state.evals[id];
-      return { taskId: id, projectId: projectId, latest: found?.versions[0] ?? null, versions: (found?.versions ?? []).map(({ spec: _spec, cases: _cases, ...info }) => info), repo: found?.repo ?? null };
+      const runs = state.runs.filter((run) => run.taskId === id).map((run) => runRow(state, run)).filter((run) => run.evalVersion === found?.accepted.version).length;
+      return { taskId: id, projectId: projectId, accepted: found ? { ...found.accepted, runs } : null, draft: found?.draft ?? null, repo: found?.repo ?? null };
+    };
+    const setReview = (id: string, review: boolean) => {
+      const task = state.tasks.find((item) => item.id === id);
+      if (task && task.state !== "retired") Object.assign(task, { state: review ? "review" : "watching", watching: !review });
     };
     if ((match = /^\/api\/tasks\/([\w-]+)$/.exec(path)) && method === "GET") {
       const task = state.tasks.find((item) => item.id === match?.[1]);
       if (!task) return error(404, "No such task in this account.");
-      const found = state.evals[task.id], latest = found?.versions[0];
-      return json(200, { ...task, bundle: { output: found?.output ?? { kind: "text" }, current: { model: task.currentModel } }, eval: latest ? { version: latest.version, cases: latest.cases.length, repo: found.repo } : null, jobs: state.runs.filter((run) => run.taskId === task.id).slice(0, 20).map((run) => runRow(state, run)) });
+      const found = state.evals[task.id];
+      return json(200, { ...task, bundle: { output: found?.output ?? { kind: "text" }, current: { model: task.currentModel } }, eval: found ? { version: found.accepted.version, cases: found.accepted.cases.length, repo: found.repo, review: found.draft?.reason ?? null } : null, jobs: state.runs.filter((run) => run.taskId === task.id).slice(0, 20).map((run) => runRow(state, run)) });
     }
-    if ((match = /^\/api\/tasks\/([\w-]+)\/eval$/.exec(path))) {
-      const id = match[1] ?? "";
+    if ((match = /^\/api\/tasks\/([\w-]+)\/eval(?:\/(revise|draft|accept))?$/.exec(path))) {
+      const id = match[1] ?? "", action = `${method} ${match[2] ?? ""}`;
       if (!state.tasks.some((item) => item.id === id)) return error(404, "No such task in this account.");
-      if (method === "GET") return json(200, evalView(id));
-      if (method === "PUT") {
-        const found = state.evals[id] ??= { versions: [], repo: null, output: { kind: "text" } };
-        const current = found.versions[0]?.version ?? 0;
-        if (typeof input?.baseVersion === "number" && input.baseVersion !== current) return error(409, `Someone saved version ${current} of this eval while you edited version ${input.baseVersion}. Reload it and make your change again.`);
-        const cases = input?.cases as EvalCase[] | undefined;
-        if (!Array.isArray(cases) || !cases.length) return error(400, "An eval needs at least one case.");
-        if (cases.some((item) => !item.id || !item.input || Object.values(item.input).some((value) => typeof value !== "string"))) return error(400, "Each case needs an id and an input object of strings.");
-        const spec = (input?.spec ?? {}) as EvalSpec;
-        const latest = found.versions[0];
-        if (latest && JSON.stringify(latest.spec) === JSON.stringify(spec) && JSON.stringify(latest.cases) === JSON.stringify(cases)) return json(200, evalView(id));
-        found.versions.unshift({ version: current + 1, source: "app", author: "Amira Haddad", note: typeof input?.note === "string" ? input.note : null, createdAt: new Date().toISOString(), runs: 0, spec, cases });
+      const found = state.evals[id];
+      if (action === "GET ") return json(200, evalView(id));
+      if (!found) return error(409, "This eval has no accepted version, or a draft is open already.");
+      if (action === "POST revise") {
+        if (found.draft) return error(409, "This eval has no accepted version, or a draft is open already.");
+        found.draft = { reason: "revise", changed: [], spec: found.accepted.spec, cases: found.accepted.cases, output: null, by: "Amira Haddad", at: new Date().toISOString() };
+        setReview(id, true);
         return json(200, evalView(id));
       }
+      if (action === "DELETE draft") {
+        if (found.draft?.reason !== "revise") return error(409, found.draft ? "The task changed, so its accepted eval no longer fits: review and accept the draft." : "This eval has no draft.");
+        found.draft = null;
+        setReview(id, false);
+        return json(200, evalView(id));
+      }
+      if (action === "PUT draft" || action === "POST accept") {
+        if (!found.draft) return error(409, "This eval has no draft. Choose Revise eval first.");
+        if (typeof input?.base === "string" && input.base !== found.draft.at) return error(409, "Someone saved this draft while you edited it. Reload it and make your change again.");
+        const cases = (input?.cases ?? found.draft.cases) as EvalCase[];
+        if (!Array.isArray(cases) || !cases.length) return error(400, "An eval needs at least one case.");
+        if (cases.some((item) => !item.id || !item.input || Object.values(item.input).some((value) => typeof value !== "string"))) return error(400, "Each case needs an id and an input object of strings.");
+        const spec = (input?.spec ?? found.draft.spec) as EvalSpec;
+        if (action === "PUT draft") {
+          found.draft = { ...found.draft, spec, cases, by: "Amira Haddad", at: new Date().toISOString() };
+          return json(200, evalView(id));
+        }
+        found.output = found.draft.output ?? found.output;
+        found.accepted = { version: found.accepted.version + 1, source: "app", by: "Amira Haddad", at: new Date().toISOString(), spec, cases };
+        found.draft = null;
+        setReview(id, false);
+        return json(200, evalView(id));
+      }
+      return error(405, "Use POST revise, PUT draft, DELETE draft or POST accept.");
     }
     if ((match = /^\/api\/tasks\/([\w-]+)\/run$/.exec(path)) && method === "POST") {
       const task = state.tasks.find((item) => item.id === match?.[1]);
       if (!task) return error(404, "No such task in this account.");
+      if (state.evals[task.id]?.draft) return error(409, `This task's eval waits for review: runs and the watch resume once someone accepts it.`);
       const jobId = `rn${Date.now().toString(36).slice(-4)}`, startedAt = new Date().toISOString();
-      state.runs.unshift({ id: jobId, taskId: task.id, kind: "run", status: "running", startedAt, finishedAt: null, askedBy: null, evalVersion: state.evals[task.id]?.versions[0]?.version ?? null, result: null });
+      state.runs.unshift({ id: jobId, taskId: task.id, kind: "run", status: "running", startedAt, finishedAt: null, askedBy: null, evalVersion: state.evals[task.id]?.accepted.version ?? null, result: null });
       state.jobs[jobId] = { jobId, taskId: task.id, task: task.name, status: "running", phase: "ranking", questions: [], notices: [], progress: { measured: 0, planned: 30 }, result: null, error: null,
         provisional: { model: "openai/gpt-5-mini", endpoint: "openrouter", reason: "The cheapest catalogue model above the current one's capability index.", estCostPerCallUsd: 0.0006 }, createdAt: startedAt, report: null };
       Object.assign(task, { status: "running", lastJobId: jobId, lastRunAt: startedAt });
@@ -603,7 +632,7 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       const edited = { ...spec, ...(input?.spec as EvalSpec | undefined) };
       const cases = (input?.cases as EvalCase[] | undefined) ?? draft.cases;
       state.tasks.push({ id, environment: draft.environment, agent: null, name: draft.name, currentModel: current.model, pick: null, status: "new", watching: false, state: "watching", lastRunAt: null, lastJobId: null, monthlySavingUsd: null });
-      state.evals[id] = { output, repo: null, versions: [{ version: 1, source: "review", author: "Amira Haddad", note: null, createdAt: new Date().toISOString(), runs: 0, spec: edited, cases }] };
+      state.evals[id] = { output, repo: null, draft: null, accepted: { version: 1, source: "review", by: "Amira Haddad", at: new Date().toISOString(), spec: edited, cases } };
       Object.assign(draft, { status: "approved", taskId: id });
       return json(201, { taskId: id, eval: evalView(id) });
     }

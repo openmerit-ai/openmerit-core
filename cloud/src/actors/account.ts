@@ -48,9 +48,12 @@ const SCHEMA = [
     sealed_token TEXT, token_last4 TEXT, added_at INTEGER NOT NULL, checked_at INTEGER NOT NULL,
     review_status TEXT NOT NULL, review_requested_at INTEGER NOT NULL, review_finished_at INTEGER, review_error TEXT, review TEXT)`,
   `CREATE TABLE IF NOT EXISTS repo_reviews (repo_id TEXT NOT NULL, requested_at INTEGER NOT NULL)`,
-  // A task's eval, versioned: its spec (what the judge checks) and its cases. Every change makes a version; a job records the one it ran.
-  `CREATE TABLE IF NOT EXISTS eval_versions (task_id TEXT NOT NULL, version INTEGER NOT NULL, project_id TEXT NOT NULL, spec TEXT NOT NULL, cases TEXT NOT NULL,
-    source TEXT NOT NULL, author TEXT, note TEXT, created_at INTEGER NOT NULL, PRIMARY KEY (task_id, version))`,
+  // A task's eval: the accepted one runs, unchanged, until the task changes or someone revises it. version counts acceptances;
+  // shape is the prompt, tools and output it was accepted for. The draft_ columns hold the eval under review, edited in place;
+  // draft_bundle is the changed task's bundle, which replaces the task's on acceptance.
+  `CREATE TABLE IF NOT EXISTS evals (task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, version INTEGER NOT NULL, spec TEXT NOT NULL, cases TEXT NOT NULL, shape TEXT NOT NULL,
+    source TEXT NOT NULL, accepted_by TEXT, accepted_at INTEGER NOT NULL,
+    draft_reason TEXT, draft_changed TEXT, draft_spec TEXT, draft_cases TEXT, draft_bundle TEXT, draft_by TEXT, draft_at INTEGER)`,
   // The version the coding agent last wrote to the repository's .openmerit/evals/.
   `CREATE TABLE IF NOT EXISTS eval_sync (task_id TEXT PRIMARY KEY, version INTEGER NOT NULL, synced_by TEXT NOT NULL, client TEXT, synced_at INTEGER NOT NULL)`,
   // Evals a repository review wrote, waiting for a person to approve (which creates the task) or dismiss them.
@@ -60,6 +63,8 @@ const SCHEMA = [
 
 /** What a ledger row counts: settled at its cost, reserved at its reservation, released not at all. */
 const COUNTED = `CASE status WHEN 'settled' THEN COALESCE(actual_usd, estimated_usd, reserved_usd) WHEN 'reserved' THEN reserved_usd ELSE 0 END`;
+/** Whether task t's eval has a draft open, which pauses its runs and watch. */
+const REVIEWING = `EXISTS (SELECT 1 FROM evals e WHERE e.task_id = t.id AND e.draft_reason IS NOT NULL)`;
 const FINAL = new Set(["done", "failed", "stopped"]);
 const ACTIVE_PLAN = new Set(["active", "trialing"]);
 
@@ -75,9 +80,10 @@ export interface EndpointView { id: string; kind: EndpointKind; baseUrl: string;
 /**
  * Whether OpenMerit re-runs a task when the catalogue changes. Every task is watched; it stops when the
  * `watch: false` guardrail freezes it, when no openmerit_recommend call came for `idleAfterMs` (idle),
- * or when the coding agent retired it with openmerit_retire. A later recommend call ends idle and retired.
+ * when the coding agent retired it with openmerit_retire, or while its eval waits for review (review). A later
+ * recommend call ends idle and retired; accepting the eval ends review.
  */
-export type WatchState = "watching" | "idle" | "frozen" | "retired";
+export type WatchState = "watching" | "idle" | "frozen" | "retired" | "review";
 /** `watching` is `state === "watching"`, for clients that predate `state`. `idleSince` is set only while idle. */
 export interface TaskRow { id: string; projectId: string; environment: string; agent: string | null; name: string; currentModel: string; pick: string | null; status: string; state: WatchState; idleSince: string | null; watching: boolean; lastRunAt: string | null; lastJobId: string | null; monthlySavingUsd: number | null }
 /** What a finished job's report found, so a list of runs can say it without loading each report. */
@@ -93,13 +99,32 @@ export interface JobRow { id: string; projectId: string; taskId: string; kind: s
  * A job runs the bundle the coding agent sent with these fields replaced by the eval's.
  */
 export type EvalSpec = Pick<TaskBundle, "description" | "input" | "steps" | "criteria" | "guardrails">;
-/** Who wrote a version: OpenMerit's case writer, a member's subscription, the coding agent's examples alone, a repository review, a person in the app, or answers to a run's label check. */
-export type EvalSource = "openmerit" | "claude" | "chatgpt" | "examples" | "review" | "app" | "label_check";
-export interface EvalVersion { version: number; spec: EvalSpec; cases: Case[]; source: EvalSource; author: string | null; note: string | null; createdAt: string; runs: number }
-export interface EvalView { taskId: string; projectId: string; latest: EvalVersion | null; versions: Omit<EvalVersion, "spec" | "cases">[]; repo: { version: number; by: string; client: string | null; at: string } | null }
+/** Who wrote the accepted eval: OpenMerit's case writer, a member's subscription or the coding agent's examples alone (each by a first run), a repository review, or a person in the app. */
+export type EvalSource = "openmerit" | "claude" | "chatgpt" | "examples" | "review" | "app";
+/** What about a task its eval was accepted for; a bundle that differs in one reopens the eval. */
+export type TaskPart = "prompt" | "tools" | "output";
+/**
+ * A task's eval. accepted is what runs, unchanged, until someone accepts a draft; its version counts the
+ * acceptances. draft is the eval under review, edited in place: reopened because the coding agent sent the
+ * task with a different prompt, tools or output (task_changed, with what changed and the new output shape)
+ * or by a person (revise). While a draft is open the task's runs and watch wait for it.
+ */
+export interface EvalView {
+  taskId: string; projectId: string;
+  accepted: { version: number; spec: EvalSpec; cases: Case[]; source: EvalSource; by: string | null; at: string; runs: number } | null;
+  draft: { reason: "task_changed" | "revise"; changed: TaskPart[]; spec: EvalSpec; cases: Case[]; output: TaskBundle["output"] | null; by: string | null; at: string } | null;
+  repo: { version: number; by: string; client: string | null; at: string } | null;
+}
 export interface EvalDraft { id: string; projectId: string; repoId: string | null; environment: string; name: string; bundle: TaskBundle; cases: Case[]; status: "pending" | "approved" | "dismissed"; createdAt: string; taskId: string | null }
 /** Where the coding agent keeps a task's eval in its repository, by the CLI's rule for a task name. */
 export const evalDir = (task: string) => `.openmerit/evals/${task.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "task"}`;
+/** JSON with object keys sorted, so the same value compares equal however the coding agent ordered it. */
+const canonical = (value: unknown): string => JSON.stringify(value, (_key, item: unknown) => item && typeof item === "object" && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
+/** The parts of a task its eval depends on. A tool's mockResult is test data, not the task. */
+export const shapeOf = (bundle: TaskBundle): Record<TaskPart, string> => ({
+  prompt: canonical(bundle.prompt), tools: canonical((bundle.tools ?? []).map(({ mockResult: _mock, ...tool }) => tool)), output: canonical(bundle.output),
+});
+const PARTS: TaskPart[] = ["prompt", "tools", "output"];
 export const specOf = (bundle: TaskBundle): EvalSpec => Object.fromEntries((["description", "input", "steps", "criteria", "guardrails"] as const).filter(key => bundle[key] !== undefined).map(key => [key, bundle[key]])) as EvalSpec;
 export interface GuardrailSetting { key: string; value: unknown; kind: "constraint" | "default" }
 /**
@@ -119,9 +144,10 @@ const startOfMonth = (now: number) => { const date = new Date(now); return Date.
 const scopeKey = (level: Level, input: { environment: string; agent?: string | null; taskId?: string }) =>
   level === "environment" ? input.environment : level === "agent" ? `${input.environment}:${input.agent ?? ""}` : input.taskId ?? "";
 
-/** A task's watch state. Retired wins over frozen, and frozen over idle: each says why the watch stopped, most deliberate first. */
-export function watchState(input: { retired: boolean; watch: boolean | undefined; lastRecommendAt: number | null; now: number; idleAfterMs: number }): { state: WatchState; idleSince: string | null } {
+/** A task's watch state. Retired wins over review, review over frozen, and frozen over idle: each says why the watch stopped, most deliberate first. */
+export function watchState(input: { retired: boolean; review: boolean; watch: boolean | undefined; lastRecommendAt: number | null; now: number; idleAfterMs: number }): { state: WatchState; idleSince: string | null } {
   if (input.retired) return { state: "retired", idleSince: null };
+  if (input.review) return { state: "review", idleSince: null };
   if (input.watch === false) return { state: "frozen", idleSince: null };
   const idleAt = input.lastRecommendAt === null ? null : input.lastRecommendAt + input.idleAfterMs;
   if (idleAt !== null && input.now >= idleAt) return { state: "idle", idleSince: new Date(idleAt).toISOString() };
@@ -129,7 +155,7 @@ export function watchState(input: { retired: boolean; watch: boolean | undefined
 }
 
 const taskRow = (row: Row, watch: boolean | undefined): TaskRow => {
-  const { state, idleSince } = watchState({ retired: row.retired === 1, watch, lastRecommendAt: (row.last_recommend_at as number | null) ?? null, now: Date.now(), idleAfterMs: services().config.idleAfterMs });
+  const { state, idleSince } = watchState({ retired: row.retired === 1, review: Boolean(row.eval_review), watch, lastRecommendAt: (row.last_recommend_at as number | null) ?? null, now: Date.now(), idleAfterMs: services().config.idleAfterMs });
   return {
     id: String(row.id), projectId: String(row.project_id), environment: String(row.environment), agent: (row.agent as string | null) ?? null, name: String(row.name), currentModel: String(row.current_model),
     pick: (row.pick as string | null) ?? null, status: String(row.status), state, idleSince, watching: state === "watching", lastRunAt: iso(row.last_run_at), lastJobId: (row.last_job_id as string | null) ?? null,
@@ -496,13 +522,13 @@ export const account = actor({
 
     /** One project's tasks, or every project's. */
     tasks: async (c, projectId?: string): Promise<TaskRow[]> => {
-      const rows = await c.db.execute(`SELECT * FROM tasks WHERE ? IS NULL OR project_id = ? ORDER BY COALESCE(last_run_at, 0) DESC`, projectId ?? null, projectId ?? null);
+      const rows = await c.db.execute(`SELECT t.*, ${REVIEWING} AS eval_review FROM tasks t WHERE ? IS NULL OR project_id = ? ORDER BY COALESCE(last_run_at, 0) DESC`, projectId ?? null, projectId ?? null);
       const watch = await watchGuardrails(c.db);
       return rows.map(row => taskRow(row, watch(row)));
     },
 
     task: async (c, id: string): Promise<TaskRow | null> => {
-      const [row] = await c.db.execute(`SELECT * FROM tasks WHERE id = ?`, id);
+      const [row] = await c.db.execute(`SELECT t.*, ${REVIEWING} AS eval_review FROM tasks t WHERE id = ?`, id);
       return row ? taskRow(row, (await watchGuardrails(c.db))(row)) : null;
     },
 
@@ -523,8 +549,8 @@ export const account = actor({
       await tx.execute(`DELETE FROM guardrails WHERE project_id = ? AND level = 'task' AND scope = ?`, String(task.project_id), input.taskId);
       const [synced] = await tx.execute(`SELECT version FROM eval_sync WHERE task_id = ?`, input.taskId);
       await tx.execute(`DELETE FROM tasks WHERE id = ?`, input.taskId);
-      // Its eval goes with it: every version and the record of the repository copy. A draft it was approved from keeps no content.
-      await tx.execute(`DELETE FROM eval_versions WHERE task_id = ?`, input.taskId);
+      // Its eval goes with it, with any draft and the record of the repository copy. A review draft it was approved from keeps no content.
+      await tx.execute(`DELETE FROM evals WHERE task_id = ?`, input.taskId);
       await tx.execute(`DELETE FROM eval_sync WHERE task_id = ?`, input.taskId);
       await tx.execute(`UPDATE eval_drafts SET bundle = '{}', cases = '[]' WHERE task_id = ?`, input.taskId);
       // The repository copy stays until the coding agent removes it: its directory is kept here until then, and the agent is asked on its next call.
@@ -593,50 +619,106 @@ export const account = actor({
       return Object.fromEntries(rows.map(row => [String(row.task_id), decisionRow(row)]));
     },
 
-    // Evals. The cloud holds every version; the coding agent writes the latest to the repository when the user agrees.
+    // Evals. The cloud holds each task's accepted eval and any draft under review; the coding agent writes the accepted one to the repository when the user agrees.
     eval: async (c, taskId: string): Promise<EvalView | null> => evalView(c.db, taskId),
 
-    /** Each task's latest eval version and the version in its repository, for the coding agent's task list. */
-    evalHeads: async (c): Promise<Record<string, { version: number; repo: number | null }>> =>
-      Object.fromEntries((await c.db.execute(`SELECT v.task_id, max(v.version) AS version, s.version AS repo FROM eval_versions v LEFT JOIN eval_sync s ON s.task_id = v.task_id GROUP BY v.task_id`))
-        .map(row => [String(row.task_id), { version: Number(row.version), repo: row.repo === null || row.repo === undefined ? null : Number(row.repo) }])),
+    /** Each task's accepted eval version, the version in its repository, and whether a draft waits for review, for the coding agent's task list. */
+    evalHeads: async (c): Promise<Record<string, { version: number; repo: number | null; review: boolean }>> =>
+      Object.fromEntries((await c.db.execute(`SELECT e.task_id, e.version, e.draft_reason, s.version AS repo FROM evals e LEFT JOIN eval_sync s ON s.task_id = e.task_id`))
+        .map(row => [String(row.task_id), { version: Number(row.version), repo: row.repo === null || row.repo === undefined ? null : Number(row.repo), review: row.draft_reason !== null && row.draft_reason !== undefined }])),
 
-    /**
-     * The latest version's spec and cases, for a job to run on, and the inputs of every case any version
-     * had, so an example someone removed is not added back; null before the task has an eval.
-     */
-    evalFor: async (c, taskId: string): Promise<{ version: number; spec: EvalSpec; cases: Case[]; seen: Case["input"][] } | null> => {
-      const latest = (await evalView(c.db, taskId))?.latest;
-      if (!latest) return null;
-      const seen = new Map<string, Case["input"]>();
-      for (const row of await c.db.execute(`SELECT cases FROM eval_versions WHERE task_id = ?`, taskId)) for (const item of JSON.parse(String(row.cases)) as Case[]) seen.set(JSON.stringify(item.input), item.input);
-      return { version: latest.version, spec: latest.spec, cases: latest.cases, seen: [...seen.values()] };
+    /** The accepted eval a job runs on, unchanged; null before the task has one. */
+    evalFor: async (c, taskId: string): Promise<{ version: number; spec: EvalSpec; cases: Case[] } | null> => {
+      const [row] = await c.db.execute(`SELECT version, spec, cases FROM evals WHERE task_id = ?`, taskId);
+      return row ? { version: Number(row.version), spec: JSON.parse(String(row.spec)) as EvalSpec, cases: JSON.parse(String(row.cases)) as Case[] } : null;
     },
 
     /**
-     * Saves a new version when the spec or cases changed. With baseVersion, as the app sends it, a version
-     * saved meanwhile refuses the change, so two people editing do not overwrite each other.
+     * Whether a job may start on this bundle. A task with no eval yet, or whose bundle has the prompt, tools and
+     * output its eval was accepted for, may. A bundle that differs reopens the eval as a draft: the accepted spec
+     * and cases with the bundle's new examples, which a person reviews before runs and the watch resume. While a
+     * draft is open no job starts; a bundle that changed again replaces the draft's.
      */
-    saveEval: async (c, input: { taskId: string; projectId: string; spec: EvalSpec; cases: Case[]; source: EvalSource; author: string | null; note?: string | null; baseVersion?: number | null }): Promise<{ ok: true; version: number; changed: boolean } | { ok: false; error: string }> => c.db.transaction(async tx => {
-      const [latest] = await tx.execute(`SELECT version, spec, cases FROM eval_versions WHERE task_id = ? ORDER BY version DESC LIMIT 1`, input.taskId);
-      const current = latest ? Number(latest.version) : 0;
-      if (input.baseVersion !== undefined && input.baseVersion !== null && input.baseVersion !== current) return { ok: false, error: `Someone saved version ${current} of this eval while you edited version ${input.baseVersion}. Reload it and make your change again.` };
-      const spec = JSON.stringify(input.spec), cases = JSON.stringify(input.cases);
-      if (latest && String(latest.spec) === spec && String(latest.cases) === cases) return { ok: true, version: current, changed: false };
-      await tx.execute(`INSERT INTO eval_versions (task_id, version, project_id, spec, cases, source, author, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        input.taskId, current + 1, input.projectId, spec, cases, input.source, input.author, input.note ?? null, Date.now());
-      return { ok: true, version: current + 1, changed: true };
-    }, { name: "save_eval" }),
+    evalGate: async (c, input: { taskId: string; bundle: TaskBundle; examples: Case[] }): Promise<{ ok: true } | { ok: false; error: string }> => c.db.transaction(async tx => {
+      const [row] = await tx.execute(`SELECT * FROM evals WHERE task_id = ?`, input.taskId);
+      if (!row) return { ok: true };
+      const accepted = JSON.parse(String(row.shape)) as Record<TaskPart, string>, sent = shapeOf(input.bundle);
+      const changed = PARTS.filter(part => accepted[part] !== sent[part]);
+      const url = `${services().config.appUrl}/tasks/?task=${encodeURIComponent(input.taskId)}&tab=eval`;
+      const drafted = row.draft_bundle ? shapeOf(JSON.parse(String(row.draft_bundle)) as TaskBundle) : null;
+      if (changed.length && (!drafted || PARTS.some(part => drafted[part] !== sent[part]))) {
+        const base = JSON.parse(String(row.draft_cases ?? row.cases)) as Case[];
+        const known = new Set(base.map(item => JSON.stringify(item.input))), ids = new Set(base.map(item => item.id));
+        const added = input.examples.filter(item => !known.has(JSON.stringify(item.input))).map(item => ids.has(item.id) ? { ...item, id: `${item.id}-new` } : item);
+        await tx.execute(`UPDATE evals SET draft_reason = 'task_changed', draft_changed = ?, draft_spec = COALESCE(draft_spec, spec), draft_cases = ?, draft_bundle = ?, draft_by = NULL, draft_at = ? WHERE task_id = ?`,
+          JSON.stringify(changed), JSON.stringify([...base, ...added]), JSON.stringify(input.bundle), Date.now(), input.taskId);
+        return { ok: false, error: `The task changed since its eval was accepted (its ${changed.join(", ")}), so its eval may no longer fit. Tell the user to review the eval at ${url}: runs and the watch resume once they accept it.` };
+      }
+      if (row.draft_reason) return { ok: false, error: `This task's eval waits for review at ${url}${row.draft_reason === "task_changed" ? " because the task changed" : ""}. Tell the user: runs and the watch resume once they accept it.` };
+      return { ok: true };
+    }, { name: "eval_gate" }),
+
+    /**
+     * The eval a task's first run wrote, after its label check, accepted as version 1 for the bundle it ran.
+     * An eval accepted meanwhile stays; the version returned is the one the job ran on.
+     */
+    acceptFirstEval: async (c, input: { taskId: string; projectId: string; bundle: TaskBundle; spec: EvalSpec; cases: Case[]; source: EvalSource; by: string | null }): Promise<number> => {
+      await c.db.execute(`INSERT INTO evals (task_id, project_id, version, spec, cases, shape, source, accepted_by, accepted_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?) ON CONFLICT (task_id) DO NOTHING`,
+        input.taskId, input.projectId, JSON.stringify(input.spec), JSON.stringify(input.cases), JSON.stringify(shapeOf(input.bundle)), input.source, input.by, Date.now());
+      const [row] = await c.db.execute(`SELECT version FROM evals WHERE task_id = ?`, input.taskId);
+      return Number(row?.version ?? 1);
+    },
+
+    /** Reopens an accepted eval for a person to revise. Runs and the watch wait until a draft is accepted or discarded. */
+    reviseEval: async (c, input: { taskId: string; by: string }): Promise<boolean> =>
+      (await c.db.execute(`UPDATE evals SET draft_reason = 'revise', draft_changed = '[]', draft_spec = spec, draft_cases = cases, draft_by = ?, draft_at = ? WHERE task_id = ? AND draft_reason IS NULL RETURNING task_id`, input.by, Date.now(), input.taskId)).length > 0,
+
+    /**
+     * Saves the draft in place; nothing keeps the earlier text. With base, the draft's time as the app loaded it,
+     * a save someone made meanwhile refuses the change, so two people reviewing do not overwrite each other.
+     */
+    saveEvalDraft: async (c, input: { taskId: string; spec: EvalSpec; cases: Case[]; by: string; base?: string | null }): Promise<{ ok: true } | { ok: false; status: 404 | 409; error: string }> => c.db.transaction(async tx => {
+      const [row] = await tx.execute(`SELECT draft_reason, draft_at FROM evals WHERE task_id = ?`, input.taskId);
+      if (!row?.draft_reason) return { ok: false, status: 409, error: "This eval is accepted, not under review. Choose Revise eval to change it." };
+      if (input.base && input.base !== iso(row.draft_at)) return { ok: false, status: 409, error: "Someone saved this draft while you edited it. Reload it and make your change again." };
+      await tx.execute(`UPDATE evals SET draft_spec = ?, draft_cases = ?, draft_by = ?, draft_at = ? WHERE task_id = ?`, JSON.stringify(input.spec), JSON.stringify(input.cases), input.by, Date.now(), input.taskId);
+      return { ok: true };
+    }, { name: "save_eval_draft" }),
+
+    /**
+     * Accepts the draft, with the reviewer's last edits, as the next version: runs and the watch resume on it,
+     * and the coding agent offers to write it to the repository. Returns the changed task's bundle, which the
+     * caller gives the task actor, or null when only the eval changed.
+     */
+    acceptEval: async (c, input: { taskId: string; spec: EvalSpec; cases: Case[]; by: string; base?: string | null }): Promise<{ ok: true; version: number; bundle: TaskBundle | null } | { ok: false; status: 409; error: string }> => c.db.transaction(async tx => {
+      const [row] = await tx.execute(`SELECT * FROM evals WHERE task_id = ?`, input.taskId);
+      if (!row?.draft_reason) return { ok: false, status: 409, error: "This eval has no draft to accept." };
+      if (input.base && input.base !== iso(row.draft_at)) return { ok: false, status: 409, error: "Someone saved this draft while you edited it. Reload it and make your change again." };
+      const bundle = row.draft_bundle ? JSON.parse(String(row.draft_bundle)) as TaskBundle : null;
+      const version = Number(row.version) + 1;
+      await tx.execute(`UPDATE evals SET version = ?, spec = ?, cases = ?, shape = COALESCE(?, shape), source = 'app', accepted_by = ?, accepted_at = ?,
+        draft_reason = NULL, draft_changed = NULL, draft_spec = NULL, draft_cases = NULL, draft_bundle = NULL, draft_by = NULL, draft_at = NULL WHERE task_id = ?`,
+        version, JSON.stringify(input.spec), JSON.stringify(input.cases), bundle ? JSON.stringify(shapeOf(bundle)) : null, input.by, Date.now(), input.taskId);
+      return { ok: true, version, bundle };
+    }, { name: "accept_eval" }),
+
+    /** Drops a draft a person opened, keeping the accepted eval. A changed task's draft stays: its accepted eval no longer fits. */
+    discardEvalDraft: async (c, taskId: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+      const [row] = await c.db.execute(`SELECT draft_reason FROM evals WHERE task_id = ?`, taskId);
+      if (row?.draft_reason !== "revise") return { ok: false, error: row?.draft_reason ? "The task changed, so its accepted eval no longer fits: review and accept the draft." : "This eval has no draft." };
+      await c.db.execute(`UPDATE evals SET draft_reason = NULL, draft_changed = NULL, draft_spec = NULL, draft_cases = NULL, draft_bundle = NULL, draft_by = NULL, draft_at = NULL WHERE task_id = ?`, taskId);
+      return { ok: true };
+    },
 
     /** The eval version a job runs on, recorded once it is known. */
     setJobEval: async (c, input: { jobId: string; version: number }): Promise<void> => {
       await c.db.execute(`UPDATE jobs SET eval_version = ? WHERE id = ?`, input.version, input.jobId);
     },
 
-    /** The coding agent wrote this version to the repository. */
+    /** The coding agent wrote the accepted version to the repository. */
     syncEval: async (c, input: { taskId: string; version: number; by: string; client: string | null }): Promise<{ ok: true } | { ok: false; error: string }> => {
-      const [found] = await c.db.execute(`SELECT version FROM eval_versions WHERE task_id = ? AND version = ?`, input.taskId, input.version);
-      if (!found) return { ok: false, error: `This task's eval has no version ${input.version}.` };
+      const [found] = await c.db.execute(`SELECT version FROM evals WHERE task_id = ?`, input.taskId);
+      if (!found || Number(found.version) !== input.version) return { ok: false, error: found ? `The accepted eval is version ${Number(found.version)}, not ${input.version}: call openmerit_eval for its files.` : "This task has no eval yet." };
       await c.db.execute(`INSERT INTO eval_sync (task_id, version, synced_by, client, synced_at) VALUES (?, ?, ?, ?, ?)
         ON CONFLICT (task_id) DO UPDATE SET version = excluded.version, synced_by = excluded.synced_by, client = excluded.client, synced_at = excluded.synced_at`, input.taskId, input.version, input.by, input.client, Date.now());
       return { ok: true };
@@ -652,8 +734,8 @@ export const account = actor({
       (await c.db.execute(`SELECT * FROM eval_drafts WHERE (? IS NULL OR project_id = ?) AND (? IS NULL OR status = ?) ORDER BY created_at`, input.projectId ?? null, input.projectId ?? null, input.status ?? null, input.status ?? null)).map(draftRow),
 
     /**
-     * Approves a pending draft: the task joins the project, not run yet, with the draft as its eval's first
-     * version, which its first run uses instead of writing cases. The caller creates the task actor with the bundle.
+     * Approves a pending draft: the task joins the project, not run yet, with the draft accepted as its eval's
+     * version 1, which its first run measures on instead of writing cases. The caller creates the task actor with the bundle.
      */
     approveDraft: async (c, input: { id: string; taskId: string; userId: string; bundle: TaskBundle; cases: Case[] }): Promise<{ ok: true } | { ok: false; status: 404 | 409; error: string }> => c.db.transaction(async tx => {
       const [row] = await tx.execute(`SELECT * FROM eval_drafts WHERE id = ?`, input.id);
@@ -664,8 +746,8 @@ export const account = actor({
       const now = Date.now();
       await tx.execute(`INSERT INTO tasks (id, project_id, environment, agent, name, current_model, pick, status, retired) VALUES (?, ?, ?, NULL, ?, ?, NULL, 'new', 0)`,
         input.taskId, String(row.project_id), String(row.environment), input.bundle.task, input.bundle.current.model);
-      await tx.execute(`INSERT INTO eval_versions (task_id, version, project_id, spec, cases, source, author, note, created_at) VALUES (?, 1, ?, ?, ?, 'review', ?, NULL, ?)`,
-        input.taskId, String(row.project_id), JSON.stringify(specOf(input.bundle)), JSON.stringify(input.cases), input.userId, now);
+      await tx.execute(`INSERT INTO evals (task_id, project_id, version, spec, cases, shape, source, accepted_by, accepted_at) VALUES (?, ?, 1, ?, ?, ?, 'review', ?, ?)`,
+        input.taskId, String(row.project_id), JSON.stringify(specOf(input.bundle)), JSON.stringify(input.cases), JSON.stringify(shapeOf(input.bundle)), input.userId, now);
       await tx.execute(`UPDATE eval_drafts SET status = 'approved', decided_by = ?, decided_at = ?, task_id = ? WHERE id = ?`, input.userId, now, input.taskId, input.id);
       return { ok: true };
     }, { name: "approve_draft" }),
@@ -679,9 +761,9 @@ export const account = actor({
       return {
         account: c.key[0], exportedAt: new Date().toISOString(), plan: await plan(c.db), members: await all("members"), projects: await projectViews(c.db),
         endpoints: (await all("endpoints")).map(row => ({ id: row.id, projectId: row.project_id, kind: row.kind, baseUrl: row.base_url, allowedModels: JSON.parse(String(row.allowed_models)) as unknown, keyLast4: row.key_last4 })),
-        guardrails: (await all("guardrails")).map(row => ({ ...row, settings: JSON.parse(String(row.settings)) as unknown })), tasks: await (async () => { const watch = await watchGuardrails(c.db); return (await all("tasks")).map(row => taskRow(row, watch(row))); })(),
+        guardrails: (await all("guardrails")).map(row => ({ ...row, settings: JSON.parse(String(row.settings)) as unknown })), tasks: await (async () => { const watch = await watchGuardrails(c.db); return (await c.db.execute(`SELECT t.*, ${REVIEWING} AS eval_review FROM tasks t`)).map(row => taskRow(row, watch(row))); })(),
         decisions: (await all("decisions")).map(decisionRow), repos: await repoViews(c.db),
-        evals: (await all("eval_versions")).map(row => ({ taskId: row.task_id, projectId: row.project_id, version: row.version, source: row.source, author: row.author, createdAt: iso(row.created_at), spec: JSON.parse(String(row.spec)) as unknown, cases: JSON.parse(String(row.cases)) as unknown })),
+        evals: await Promise.all((await all("evals")).map(async row => evalView(c.db, String(row.task_id)))),
         evalSync: await all("eval_sync"), evalDrafts: (await all("eval_drafts")).map(draftRow),
         jobs: (await c.db.execute(`SELECT * FROM jobs WHERE deleted_at IS NULL`)).map(jobRow), deletions: await all("deletions"), ledger: await all("ledger"), reports: (await all("reports")).map(row => ({ jobId: row.job_id, taskId: row.task_id, report: JSON.parse(String(row.json)) as unknown })),
       };
@@ -926,16 +1008,18 @@ async function addDrafts(database: Database, input: { projectId: string; repoId:
 }
 
 async function evalView(database: Database, taskId: string): Promise<EvalView | null> {
-  const rows = await database.execute(`SELECT v.*, (SELECT count(*) FROM jobs j WHERE j.task_id = v.task_id AND j.eval_version = v.version AND j.deleted_at IS NULL) AS runs FROM eval_versions v WHERE task_id = ? ORDER BY version DESC`, taskId);
   const [task] = await database.execute(`SELECT project_id FROM tasks WHERE id = ?`, taskId);
   if (!task) return null;
+  const [row] = await database.execute(`SELECT e.*, (SELECT count(*) FROM jobs j WHERE j.task_id = e.task_id AND j.eval_version = e.version AND j.deleted_at IS NULL) AS runs FROM evals e WHERE task_id = ?`, taskId);
   const [sync] = await database.execute(`SELECT * FROM eval_sync WHERE task_id = ?`, taskId);
-  const meta = (row: Row) => ({ version: Number(row.version), source: row.source as EvalSource, author: (row.author as string | null) ?? null, note: (row.note as string | null) ?? null, createdAt: iso(row.created_at)!, runs: Number(row.runs) });
-  const head = rows[0];
+  const draftBundle = row?.draft_bundle ? JSON.parse(String(row.draft_bundle)) as TaskBundle : null;
   return {
     taskId, projectId: String(task.project_id),
-    latest: head ? { ...meta(head), spec: JSON.parse(String(head.spec)) as EvalSpec, cases: JSON.parse(String(head.cases)) as Case[] } : null,
-    versions: rows.map(meta),
+    accepted: row ? { version: Number(row.version), spec: JSON.parse(String(row.spec)) as EvalSpec, cases: JSON.parse(String(row.cases)) as Case[], source: row.source as EvalSource, by: (row.accepted_by as string | null) ?? null, at: iso(row.accepted_at)!, runs: Number(row.runs) } : null,
+    draft: row?.draft_reason ? {
+      reason: row.draft_reason as "task_changed" | "revise", changed: JSON.parse(String(row.draft_changed ?? "[]")) as TaskPart[], spec: JSON.parse(String(row.draft_spec)) as EvalSpec, cases: JSON.parse(String(row.draft_cases)) as Case[],
+      output: draftBundle?.output ?? null, by: (row.draft_by as string | null) ?? null, at: iso(row.draft_at)!,
+    } : null,
     repo: sync ? { version: Number(sync.version), by: String(sync.synced_by), client: (sync.client as string | null) ?? null, at: iso(sync.synced_at)! } : null,
   };
 }
