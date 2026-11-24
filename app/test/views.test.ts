@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApiError, createApi, type Endpoint, type GuardrailsAt, type JobView, type Me, type Repo, type Report, type Run, type Spend, type Task } from "../api.ts";
+import { ApiError, createApi, type Endpoint, type Project, type Subscriptions, type GuardrailsAt, type JobView, type Me, type Repo, type Report, type Run, type Spend, type Task } from "../api.ts";
 import { createFakeApi } from "../dev/fake-api.ts";
 import type { Account } from "../view.ts";
 import { connectionsView, retried } from "../views/connections.ts";
+import { projectView } from "../views/project.ts";
+import { accountView } from "../views/account.ts";
 import { choices, guardrailsView, parse } from "../views/guardrails.ts";
 import { planView } from "../views/plan.ts";
 import { runView } from "../views/run.ts";
 import { runsView } from "../views/runs.ts";
 import { tasksView } from "../views/tasks.ts";
+import { evalsView } from "../views/evals.ts";
+import type { EvalDraft, EvalView, TaskDetail } from "../api.ts";
 
 // The pages render what the cloud app returns, as served by the local fake of its /api/*.
 const fake = createFakeApi();
@@ -22,6 +26,7 @@ const account = async (scenario = "populated"): Promise<Account> => {
   return { ...me, account: { ...me.account, name: me.account.name ?? "Sahra Health" } };
 };
 const page = (me: Account, params = "", id: string | null = null) => ({ me, params: new URLSearchParams(params), id });
+const claims: Project = { id: "default", name: "Claims", createdAt: "2026-10-01T09:00:00Z", tasks: 4, endpoints: 1, repos: ["sahra-health/claims-api"] };
 const text = (html: { __html: string }): string => html.__html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").replaceAll("&#39;", "'").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
 
 test("names from the cloud app are shown as text, never as markup", async () => {
@@ -159,7 +164,7 @@ test("a page asks the cloud app again while it wakes after a deploy, but not aft
   assert.equal(calls, 1);
 });
 
-test("a result shows the decision the coding agent sent back, or that it waits for one; Connections has no app connections", async () => {
+test("a result shows the decision the coding agent sent back, or that it waits for one; project settings have no app connections", async () => {
   const me = await account();
   const approved = await get<Report>("/api/runs/k7m2q9");
   const shown = text(runView.render(approved, page(me)));
@@ -175,16 +180,16 @@ test("a result shows the decision the coding agent sent back, or that it waits f
   const listed = text(tasksView.render({ tasks: await (await createFakeApi()(new Request("https://openmerit.ai/api/tasks", { headers: { authorization: "Bearer preview-populated" } }))).json() as Task[] }, page(me)));
   assert.match(listed, /Ticket router[^]*?claude-haiku-5-5[^]*?Switched to claude-haiku-5-5 saves about \$234 a month Approved in the coding agent by Amira Haddad[^]*?Bill and claim matcher/);
   assert.match(listed, /Reply drafter[^]*?Switch to claude-haiku-5-5[^]*?Waiting for a decision in the coding agent/);
-  const connections = connectionsView.render({ endpoints: await get("/api/endpoints"), repos: [] }, page(me)).__html;
-  assert.doesNotMatch(connections, /Viktor|Langfuse|id="apps"/);
-  assert.match(connections, /id="endpoints"/);
+  const settings = projectView.render({ project: claims, endpoints: await get("/api/endpoints"), repos: [] }, page(me)).__html;
+  assert.doesNotMatch(settings, /Viktor|Langfuse|id="apps"/);
+  assert.match(settings, /id="endpoints"/);
 });
 
-test("Connections lists each repository with its model calls, how it is read, and its review's state, and only admins change them", async () => {
+test("Project settings lists each repository with its model calls, how it is read, and its review's state, and only admins change them", async () => {
   const me = await account();
   const repos = await get<Repo[]>("/api/repos");
   const endpoints = await get<Endpoint[]>("/api/endpoints");
-  const shown = text(connectionsView.render({ endpoints, repos }, page(me)));
+  const shown = text(projectView.render({ project: claims, endpoints, repos }, page(me)));
   assert.match(shown, /sahra-health\/claims-api 6 model calls: gpt-5, claude-sonnet-5\.5, gpt-5-mini, settings\.reply_model · 3 more in tests, fixtures or docs, not listed · 2 task specs · 214 files at 4be1c07 on main Private · token ending 9c1e/);
   assert.match(shown, /src\/replies\/draft\.py:31 settings\.reply_model 3 more in tests, fixtures or docs, not listed\./);
   assert.match(shown, /sahra-health\/enroll-web 1 model call: gpt-5-mini · 88 files at 4be1c07 on main Public/);
@@ -197,32 +202,32 @@ test("Connections lists each repository with its model calls, how it is read, an
   assert.match(shown, /2 model calls in no spec: The review of claim matching stopped: it reached its \$2\.00 budget\./);
   assert.match(shown, /This review cost OpenMerit \$0\.38 in model calls, counted in your spend; it is not one of your plan's evaluations\./);
   // A scan-only review has no specs to show.
-  assert.doesNotMatch(text(connectionsView.render({ endpoints, repos: [repos[1]!] }, page(me))), /\d task specs?/);
+  assert.doesNotMatch(text(projectView.render({ project: claims, endpoints, repos: [repos[1]!] }, page(me))), /\d task specs?/);
   // A repository whose model calls are all in tests lists none, and says how many it left out.
   const testsOnly = { ...repos[1]!, review: { ...repos[1]!.review, result: { ...repos[1]!.review.result!, models: [], modelCalls: [], totalCalls: 0, supportCalls: 2, notListed: "2 more in tests, fixtures or docs, not listed" } } };
-  const none = text(connectionsView.render({ endpoints, repos: [testsOnly] }, page(me)));
+  const none = text(projectView.render({ project: claims, endpoints, repos: [testsOnly] }, page(me)));
   assert.match(none, /enroll-web No model calls in application code · 2 more in tests, fixtures or docs, not listed · 88 files/);
   assert.doesNotMatch(none, /Show the/);
   // A review that failed says why and keeps what the last one found; one under way says so and cannot start again.
   const failed = { ...repos[0]!, review: { ...repos[0]!.review, status: "failed" as const, error: "Cloning sahra-health/claims-api failed: took longer than 120 s" } };
   const running = { ...repos[1]!, review: { ...repos[1]!.review, status: "reviewing" as const } };
-  const states = connectionsView.render({ endpoints, repos: [failed, running] }, page(me)).__html;
+  const states = projectView.render({ project: claims, endpoints, repos: [failed, running] }, page(me)).__html;
   assert.match(text({ __html: states }), /The last review failed: Cloning sahra-health\/claims-api failed: took longer than 120 s 6 model calls/);
   assert.match(text({ __html: states }), /enroll-web Reviewing the code, read-only… 1 model call/);
   assert.match(states, /data-action="review" data-id="repo_sahrahealthenrollweb" disabled/);
   // A member sees the repositories but no form and no buttons.
-  const member = connectionsView.render({ endpoints, repos }, page(await account("member"))).__html;
+  const member = projectView.render({ project: claims, endpoints, repos }, page(await account("member"))).__html;
   assert.doesNotMatch(member, /data-action="(addRepo|review|removeRepo)"/);
   assert.match(text({ __html: member }), /Only an admin of Sahra Health can add, review or remove repositories/);
 });
 
-test("without an active plan, Connections keeps the repositories listed and says a review needs a plan; the fake refuses as the cloud app does", async () => {
+test("without an active plan, Project settings keep the repositories listed and says a review needs a plan; the fake refuses as the cloud app does", async () => {
   const me = await account("noplan");
   const repos = await get<Repo[]>("/api/repos", "noplan");
-  const shown = text(connectionsView.render({ endpoints: [], repos }, page(me)));
+  const shown = text(projectView.render({ project: claims, endpoints: [], repos }, page(me)));
   assert.match(shown, /sahra-health\/claims-api/);
   assert.match(shown, /Reviewing a repository needs an active plan\. Your repositories stay listed with their last review\. Choose a plan to add or review one\./);
-  assert.doesNotMatch(text(connectionsView.render({ endpoints: [], repos }, page(await account()))), /needs an active plan/);
+  assert.doesNotMatch(text(projectView.render({ project: claims, endpoints: [], repos }, page(await account()))), /needs an active plan/);
   const send = (path: string, body?: object) => createFakeApi()(new Request(`https://openmerit.ai${path}`, { method: "POST", headers: { authorization: "Bearer preview-noplan" }, ...(body ? { body: JSON.stringify(body) } : {}) }));
   const added = await send("/api/repos", { url: "https://github.com/acme/app" });
   assert.equal(added.status, 400);
@@ -261,4 +266,115 @@ test("a run whose current model could not run reads as failed, offers Run again 
   // A current model that ran and passed too few cases was measured: that stays a verdict.
   const measured = text(runView.render({ ...failed, baseline: base.baseline, fixes: [] }, page(me)));
   assert.match(measured, /assess-enrollment: no switch/);
+});
+
+test("each call names the open project, and a project's endpoints and repositories are its own", async () => {
+  const sent: (string | null)[] = [];
+  const api = createApi("https://openmerit.ai", async () => "preview-populated", async (input, init) => {
+    const request = new Request(input as URL, init);
+    sent.push(request.headers.get("x-openmerit-project"));
+    return fake(request);
+  }, undefined, () => "prj_enrollment");
+  assert.deepEqual(await api.get("/api/endpoints"), [], "the Enrollment project has no endpoints of its own");
+  assert.ok((await get<Endpoint[]>("/api/endpoints")).length > 0, "the default project keeps the organization's");
+  assert.deepEqual(sent, ["prj_enrollment"]);
+  const projects = await get<Project[]>("/api/projects");
+  assert.deepEqual(projects.map((item) => [item.id, item.name]), [["default", "Claims"], ["prj_enrollment", "Enrollment"]]);
+});
+
+test("Project settings let an admin rename the project and delete one without tasks; the default project is never deleted", async () => {
+  const me = await account();
+  const enrollment: Project = { id: "prj_enrollment", name: "Enrollment", createdAt: "2026-11-21T09:00:00Z", tasks: 0, endpoints: 0, repos: [] };
+  const empty = projectView.render({ project: enrollment, endpoints: [], repos: [] }, page(me)).__html;
+  assert.match(empty, /data-action="rename"/);
+  assert.match(empty, /data-action="deleteProject">Delete project/);
+  assert.match(projectView.render({ project: { ...enrollment, tasks: 2 }, endpoints: [], repos: [] }, page(me)).__html, /data-action="deleteProject" disabled/);
+  assert.doesNotMatch(projectView.render({ project: claims, endpoints: [], repos: [] }, page(me)).__html, /deleteProject/);
+  const member = projectView.render({ project: enrollment, endpoints: [], repos: [] }, page(await account("member"))).__html;
+  assert.doesNotMatch(member, /data-action="(rename|deleteProject|add|addRepo)"/);
+  // Coding agents keeps only adding OpenMerit and Disconnect.
+  const agents = connectionsView.render(null, page(me)).__html;
+  assert.match(agents, /data-action="disconnect"/);
+  assert.doesNotMatch(agents, /id="(endpoints|repos)"/);
+});
+
+test("Account settings walk through each sign-in and offer only a connected subscription as the case writer", async () => {
+  const me = await account();
+  const base = await get<Subscriptions>("/api/me/subscriptions");
+  const fresh = text(accountView.render(base, page(me)));
+  assert.match(fresh, /Claude Claude Pro or Max Not connected Sign in with Claude/);
+  assert.match(fresh, /ChatGPT ChatGPT Plus or Pro Not connected Sign in with ChatGPT/);
+  const options = accountView.render(base, page(me)).__html;
+  assert.match(options, /<option value="claude" disabled>/);
+  assert.match(options, /<option value="openmerit" selected>/);
+  const [claude, chatgpt] = base.subscriptions as [Subscriptions["subscriptions"][number], Subscriptions["subscriptions"][number]];
+  const signingIn: Subscriptions = { writer: "claude", subscriptions: [
+    { ...claude, connected: true, connectedAt: "2026-11-24T09:00:00Z" },
+    { ...chatgpt, signIn: { startedAt: "2026-11-24T09:00:00Z", userCode: "KQ7P-M2XW", verificationUri: "https://auth.openai.com/codex/device", url: null } },
+  ] };
+  const shown = accountView.render(signingIn, page(me)).__html;
+  assert.match(text({ __html: shown }), /Enter this code: KQ7P-M2XW/);
+  assert.match(shown, /<option value="claude" selected>/);
+  assert.match(shown, /<option value="chatgpt" disabled>/);
+  const claudeSignIn: Subscriptions = { writer: "openmerit", subscriptions: [{ ...claude, signIn: { startedAt: "2026-11-24T09:00:00Z", userCode: null, verificationUri: null, url: "https://claude.ai/oauth/authorize?x=1" } }, chatgpt] };
+  const pasting = accountView.render(claudeSignIn, page(me)).__html;
+  assert.match(pasting, /href="https:\/\/claude.ai\/oauth\/authorize\?x=1"/);
+  assert.match(pasting, /data-action="finishClaude"/);
+});
+
+test("approving a reviewed eval adds the task last, not run yet; dismissing one empties the queue", async () => {
+  const me = await account();
+  const call = createFakeApi();
+  const send = async <T>(path: string, method = "GET", body?: unknown): Promise<{ status: number; body: T }> => {
+    const response = await call(new Request(`https://openmerit.ai${path}`, { method, headers: { authorization: "Bearer preview-populated" }, ...(body ? { body: JSON.stringify(body) } : {}) }));
+    return { status: response.status, body: await response.json() as T };
+  };
+  const drafts = (await send<EvalDraft[]>("/api/eval-drafts")).body;
+  const queue = evalsView.render({ drafts }, page(me, "draft=draft_denial"));
+  assert.match(queue.__html, /<a href="\?draft=draft_denial" aria-current="page">Denial letter checker/);
+  assert.match(queue.__html, /<option value="missing_reason" selected>/, "a label task's expected answer is one of its labels");
+  assert.match(text(queue), /Approve and add task Dismiss/);
+  assert.match(text(evalsView.render({ drafts }, page(me))), /Claim summary writer From sahra-health\/claims-api[^]*2 cases of 3 can be measured now/);
+
+  const approved = await send<{ taskId: string }>("/api/eval-drafts/draft_summary/approve", "POST", { spec: { criteria: ["States the amount"] } });
+  assert.equal(approved.status, 201);
+  assert.equal((await send("/api/eval-drafts/draft_summary/approve", "POST")).status, 409);
+  const listed = text(tasksView.render({ tasks: (await send<Task[]>("/api/tasks")).body }, page(me)));
+  assert.match(listed, /Coding reviewer[^]*Claim summary writer [^]*Not run yet Not run yet starts with its first run/, "the new task is last and does not watch yet");
+  const detail = (await send<TaskDetail>(`/api/tasks/${approved.body.taskId}`)).body;
+  const evaluation = (await send<EvalView>(`/api/tasks/${approved.body.taskId}/eval`)).body;
+  assert.deepEqual(evaluation.latest!.spec.criteria, ["States the amount"]);
+  const runs = text(tasksView.render({ kind: "task", detail, eval: evaluation }, page(me, `task=${approved.body.taskId}`)));
+  assert.match(runs, /Not run yet This task was approved from a repository review[^]*Run now/);
+  assert.equal((await send(`/api/eval-drafts/draft_denial`, "DELETE")).status, 200);
+  assert.deepEqual((await send("/api/eval-drafts")).body, []);
+  assert.match(text(evalsView.render({ drafts: [] }, page(me))), /Nothing to review/);
+});
+
+test("a task's Eval tab shows its version, whether the repository copy is behind, and warns that runs on other versions are not comparable", async () => {
+  const me = await account();
+  const call = createFakeApi();
+  const send = async <T>(path: string, method = "GET", body?: unknown): Promise<{ status: number; body: T }> => {
+    const response = await call(new Request(`https://openmerit.ai${path}`, { method, headers: { authorization: "Bearer preview-populated" }, ...(body ? { body: JSON.stringify(body) } : {}) }));
+    return { status: response.status, body: await response.json() as T };
+  };
+  const detail = (await send<TaskDetail>("/api/tasks/ticket-router")).body;
+  const evaluation = (await send<EvalView>("/api/tasks/ticket-router/eval")).body;
+  const tab = tasksView.render({ kind: "task", detail, eval: evaluation }, page(me, "task=ticket-router&tab=eval"));
+  assert.match(text(tab), /Version 3 Edited in the app · Amira Haddad[^]*6 cases measured of 6 1 run on this version/);
+  assert.match(text(tab), /Behind \.openmerit\/evals\/ticket-router has version 2, written by Amira Haddad with claude-code/);
+  assert.match(tab.__html, /Save as version 4/);
+  assert.match(text(tab), /Version 2 Answers to a run's label check · Amira Haddad 2 runs[^]*Version 1 OpenMerit wrote the cases/);
+  const runs = text(tasksView.render({ kind: "task", detail, eval: evaluation }, page(me, "task=ticket-router")));
+  assert.match(runs, /measured on \d eval versions. Results from different versions are not comparable/);
+
+  // A save on a stale version is refused; one on the latest makes the next version.
+  const latest = evaluation.latest!;
+  assert.equal((await send("/api/tasks/ticket-router/eval", "PUT", { spec: latest.spec, cases: latest.cases.slice(1), baseVersion: 2 })).status, 409);
+  const saved = await send<EvalView>("/api/tasks/ticket-router/eval", "PUT", { spec: latest.spec, cases: latest.cases.slice(1), baseVersion: 3 });
+  assert.equal(saved.body.latest!.version, 4);
+  // A retired task's eval is read-only.
+  const retired = tasksView.render({ kind: "task", detail: { ...detail, state: "retired" }, eval: saved.body }, page(me, "task=ticket-router&tab=eval")).__html;
+  assert.match(retired, /<fieldset disabled>/);
+  assert.doesNotMatch(retired, /data-action="retire"/);
 });

@@ -6,10 +6,81 @@
 // just created), preview-noorg (a token without an organization), preview-error, preview-slow and preview-expired. Each scenario keeps its own in-memory
 // state, so actions change what later requests return. Every name and number is fictional.
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, type Guardrails, type Level } from "../../openmerit-core/src/engine/guardrails.ts";
-import type { Decision, DeletedTask, Endpoint, JobView, LiveProgress, MeasuredModel, Me, Repo, RepoReview, Report, Run, Spend, Task } from "../api.ts";
+import type { Decision, DeletedTask, Endpoint, EvalCase, EvalDraft, EvalSpec, EvalVersionInfo, EvalView, JobView, LiveProgress, MeasuredModel, Me, Project, Repo, RepoReview, Report, Run, Spend, Subscriptions, Task, TaskOutput } from "../api.ts";
 import { tonicUltra } from "./tonic-ultra.ts";
 
-export interface State { me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; repos: Repo[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number; deleted: DeletedTask[] }
+// A task's eval in the fake: every version, newest first, the version in the repository, and the task's output shape.
+export interface FakeEval { versions: (EvalVersionInfo & { spec: EvalSpec; cases: EvalCase[] })[]; repo: EvalView["repo"]; output: TaskOutput }
+export interface State { me: Me; tasks: Task[]; runs: Run[]; reports: Record<string, Report>; jobs: Record<string, JobView>; endpoints: Endpoint[]; repos: Repo[]; spend: Spend; guardrails: Record<Level, Record<string, Guardrails>>; disconnected: number; deleted: DeletedTask[]; evals: Record<string, FakeEval>; drafts: EvalDraft[] }
+
+// What a project other than the default holds; the State's own fields are the default project's.
+const SLICE = ["tasks", "runs", "endpoints", "repos", "guardrails", "deleted", "evals", "drafts"] as const;
+type Slice = Pick<State, (typeof SLICE)[number]>;
+const emptySlice = (): Slice => ({ tasks: [], runs: [], endpoints: [], repos: [], guardrails: { environment: {}, agent: {}, task: {} }, deleted: [], evals: {}, drafts: [] });
+
+const ROUTER_OUTPUT: TaskOutput = { kind: "label", labels: ["claims", "billing", "enrollment", "clinical", "other"] };
+const routerCase = (id: string, ticket: string, expected: string | undefined, origin: EvalCase["origin"], fields: Partial<EvalCase> = {}): EvalCase => ({ id, input: { ticket }, ...(expected === undefined ? {} : { expected }), origin, ...fields });
+// Version 3 dropped a duplicate case and fixed one answer in the app; the repository still has version 2.
+function routerEval(): FakeEval {
+  const spec: EvalSpec = {
+    description: "Routes an incoming member ticket to the team that handles it.",
+    input: { description: "A member's support message, often forwarded from email, sometimes with a claim number." },
+    criteria: ["Picks the one queue whose team can resolve the ticket", "Treats a claim number with a billing question as billing"],
+    guardrails: ["Never routes a ticket that mentions self-harm anywhere but clinical"],
+  };
+  const v2: EvalCase[] = [
+    routerCase("example-1", "My claim CLM-20931 was denied, why?", "claims", "example"),
+    routerCase("example-2", "I was charged twice for my November premium", "billing", "example"),
+    routerCase("example-3", "How do I add my newborn to my plan?", "enrollment", "example"),
+    routerCase("written-1", "Fwd: invoice for claim CLM-11872 shows the wrong amount", "billing", "written", { kind: "edge", approved: true }),
+    routerCase("written-2", "Can my doctor prescribe a 90-day supply?", "clinical", "written", { kind: "typical", approved: true }),
+    routerCase("written-3", "my claim was denied why", "claims", "written", { kind: "typical", approved: true }),
+    routerCase("written-4", "I feel hopeless since my diagnosis and can't pay", "billing", "written", { kind: "guardrail", approved: true }),
+  ];
+  const v3 = v2.filter((item) => item.id !== "written-3").map((item) => (item.id === "written-4" ? { ...item, expected: "clinical" } : item));
+  const at = (day: string, hour = "09:00") => `2026-11-${day}T${hour}:00Z`;
+  return {
+    output: ROUTER_OUTPUT,
+    versions: [
+      { version: 3, source: "app", author: "Amira Haddad", note: "Dropped a duplicate; a self-harm mention goes to clinical", createdAt: at("19", "14:20"), runs: 1, spec, cases: v3 },
+      { version: 2, source: "label_check", author: "Amira Haddad", note: null, createdAt: at("18", "10:01"), runs: 2, spec, cases: v2 },
+      { version: 1, source: "openmerit", author: null, note: "Written by the task's first run", createdAt: "2026-10-30T10:01:00Z", runs: 1, spec: { ...spec, guardrails: [] }, cases: v2.slice(0, 5) },
+    ],
+    repo: { version: 2, by: "Amira Haddad", client: "claude-code", at: at("18", "10:20") },
+  };
+}
+
+function seedDrafts(): EvalDraft[] {
+  const bundle = (task: string, output: TaskOutput, spec: EvalSpec) => ({ task, current: { model: "openai/gpt-5" }, output, ...spec });
+  return [
+    { id: "draft_summary", projectId: "default", repoId: "repo_sahrahealthclaimsapi", environment: "sahra-health/claims-api", name: "Claim summary writer", status: "pending", createdAt: "2026-11-23T16:02:00Z", taskId: null,
+      bundle: bundle("Claim summary writer", { kind: "text" }, { description: "Writes a two-sentence summary of a claim for the adjuster's queue.", criteria: ["States the claim's amount and its service date", "Says whether a prior authorization is on file"], guardrails: ["Never includes the member's diagnosis codes"] }),
+      cases: [
+        { id: "example-1", input: { claim: "CLM-30112: MRI lumbar spine, $1,840, 2026-10-02, PA-7781 approved" }, expected: "An MRI of the lumbar spine on 2 October 2026 for $1,840, with prior authorization PA-7781 approved.", origin: "example" },
+        { id: "example-2", input: { claim: "CLM-30140: physical therapy x6, $720, 2026-10-09, no PA" }, expected: "Six physical therapy sessions from 9 October 2026 for $720; no prior authorization is on file.", origin: "example" },
+        { id: "example-3", input: { claim: "CLM-30177: ER visit, $3,210, 2026-10-15, PA not required" }, origin: "example" },
+      ] },
+    { id: "draft_denial", projectId: "default", repoId: "repo_sahrahealthclaimsapi", environment: "sahra-health/claims-api", name: "Denial letter checker", status: "pending", createdAt: "2026-11-23T16:02:00Z", taskId: null,
+      bundle: bundle("Denial letter checker", { kind: "label", labels: ["complete", "missing_reason", "missing_appeal_rights"] }, { criteria: ["A letter with a reason and appeal rights is complete"] }),
+      cases: [
+        { id: "example-1", input: { letter: "Your claim was denied: the service is not covered. You may appeal within 180 days." }, expected: "complete", origin: "example" },
+        { id: "example-2", input: { letter: "Your claim was denied. Contact us with questions." }, expected: "missing_reason", origin: "example" },
+      ] },
+  ];
+}
+// The organization's projects and the member's subscriptions, kept beside each scenario's state.
+interface Extra { projects: { id: string; name: string; createdAt: string }[]; slices: Record<string, Slice>; subscriptions: Subscriptions; polls: number }
+function extra(name: string): Extra {
+  const projects = [{ id: "default", name: name === "tonic" ? "Tonic platform" : name === "populated" || name === "member" || name === "noplan" ? "Claims" : "Default project", createdAt: "2026-10-01T09:00:00Z" }];
+  if (name === "tonic" || name === "populated" || name === "member") projects.push({ id: "prj_enrollment", name: "Enrollment", createdAt: "2026-11-21T09:00:00Z" });
+  return {
+    projects, slices: Object.fromEntries(projects.slice(1).map((item) => [item.id, emptySlice()])), polls: 0,
+    subscriptions: { writer: "openmerit", subscriptions: [
+      { provider: "claude", name: "Claude", connected: false, connectedAt: null, problem: null, signIn: null },
+      { provider: "chatgpt", name: "ChatGPT", connected: false, connectedAt: null, problem: null, signIn: null },
+    ] },
+  };
+}
 
 const ENV = "sahra-health/claims";
 const measured = (model: string, endpoint: string, fields: Partial<MeasuredModel>): MeasuredModel => ({
@@ -136,12 +207,14 @@ function populated(): State {
       task: { "ticket-router": { latencyMs: 1000, allowedProviders: ["openai", "anthropic", "deepseek"] } },
     },
     disconnected: 0, deleted: [],
+    evals: { "ticket-router": routerEval(), "reply-drafter": { output: { kind: "text" }, repo: { version: 1, by: "Amira Haddad", client: "claude-code", at: "2026-11-18T08:52:00Z" }, versions: [{ version: 1, source: "openmerit", author: null, note: "Written by the task's first run", createdAt: "2026-11-18T08:31:00Z", runs: 1, spec: { criteria: ["Answers the member's question in plain language", "Offers the next step"] }, cases: [{ id: "written-1", input: { message: "When will my reimbursement arrive?" }, expected: "Reimbursements arrive within 14 days of approval; the member can track it under Claims.", origin: "written", kind: "typical", approved: true }] }] } },
+    drafts: seedDrafts(),
   };
 }
 
 function emptyState(me: Me): State {
   const state = populated();
-  return { ...state, me: { ...me, plan: { ...me.plan, usedEvals: 0 } }, tasks: [], runs: [], reports: {}, jobs: {}, endpoints: [], repos: [], spend: { ...state.spend, openmeritUsd: 0, customerUsd: 0 }, guardrails: { environment: {}, agent: {}, task: {} } };
+  return { ...state, me: { ...me, plan: { ...me.plan, usedEvals: 0 } }, tasks: [], runs: [], reports: {}, jobs: {}, endpoints: [], repos: [], spend: { ...state.spend, openmeritUsd: 0, customerUsd: 0 }, guardrails: { environment: {}, agent: {}, task: {} }, evals: {}, drafts: [] };
 }
 
 function scenario(name: string): State {
@@ -154,6 +227,14 @@ function scenario(name: string): State {
   if (name === "noplan") state.me.plan = { name: null, status: "none", periodEnd: null, includedEvals: 0, usedEvals: 0 };
   if (name === "member") state.me.role = "member";
   return state;
+}
+
+// Each run measured on the eval version that was latest when it started.
+// As the cloud app does, each finished run carries what its report found and the eval version it measured on.
+function runRow(state: State, run: Run): Run {
+  const versions = state.evals[run.taskId]?.versions ?? [], report = state.reports[run.id];
+  const evalVersion = run.evalVersion ?? versions.find((item) => item.createdAt <= run.startedAt)?.version ?? versions.at(-1)?.version ?? null;
+  return { ...run, evalVersion, result: report ? { status: report.status, model: report.pick?.model ?? null, from: report.baseline?.model ?? null, savingPerCallUsd: report.pick?.savingPerCallUsd ?? null } : null };
 }
 
 const json = (status: number, data: unknown): Response => Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
@@ -191,6 +272,7 @@ function reviewed(item: Repo, now = Date.now()): Repo {
 
 export function createFakeApi(options: { appUrl?: string } = {}): (request: Request) => Promise<Response> {
   const states = new Map<string, State>();
+  const extras = new Map<string, Extra>();
   const since = Date.now();
   return async (request) => {
     const url = new URL(request.url), path = url.pathname, method = request.method;
@@ -212,15 +294,98 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
     }
     const denied = state.me.role === "admin" ? null : error(403, "Only an organization admin can do this.");
     let match: RegExpExecArray | null;
+    let more = extras.get(name);
+    if (!more) extras.set(name, more = extra(name));
+    const { projects, slices } = more;
+    const projectView = (item: Extra["projects"][number]): Project => {
+      const held: Slice = item.id === "default" ? state! : slices[item.id]!;
+      return { ...item, tasks: held.tasks.length, endpoints: held.endpoints.length, repos: held.repos.map((entry) => entry.fullName) };
+    };
+
+    if (path === "/api/projects" && method === "GET") return json(200, projects.map(projectView));
+    if (path === "/api/projects" && method === "POST") {
+      if (denied) return denied;
+      const projectName = String(input?.name ?? "").trim();
+      if (!projectName) return error(400, "Name the project.");
+      if (projects.some((item) => item.name.toLowerCase() === projectName.toLowerCase())) return error(400, `This account already has a project named ${projectName}.`);
+      const created = { id: `prj_${projects.length}${Date.now().toString(36)}`, name: projectName, createdAt: new Date().toISOString() };
+      projects.push(created);
+      slices[created.id] = emptySlice();
+      return json(201, projectView(created));
+    }
+    if ((match = /^\/api\/projects\/([\w-]+)$/.exec(path)) && (method === "PUT" || method === "DELETE")) {
+      if (denied) return denied;
+      const found = projects.find((item) => item.id === match?.[1]);
+      if (!found) return error(404, "No such project in this account.");
+      if (method === "PUT") {
+        const projectName = String(input?.name ?? "").trim();
+        if (!projectName) return error(400, "Name the project.");
+        found.name = projectName;
+        return json(200, projectView(found));
+      }
+      if (found.id === "default") return error(409, "The default project cannot be deleted. Rename it instead.");
+      if (slices[found.id]!.tasks.length) return error(409, "This project has tasks. Delete them first.");
+      projects.splice(projects.indexOf(found), 1);
+      delete slices[found.id];
+      return json(200, { deleted: true });
+    }
+
+    // The member's subscriptions: a Claude code is any text, and a ChatGPT code counts as entered on the second check.
+    const subs = more.subscriptions, sub = (provider: string) => subs.subscriptions.find((item) => item.provider === provider)!;
+    const connect = (provider: string) => Object.assign(sub(provider), { connected: true, connectedAt: new Date().toISOString(), signIn: null });
+    if (path === "/api/me/subscriptions" && method === "GET") return json(200, subs);
+    if (path === "/api/me/subscriptions/claude" && method === "POST") {
+      sub("claude").signIn = { startedAt: new Date().toISOString(), userCode: null, verificationUri: null, url: "https://claude.ai/oauth/authorize?preview=1" };
+      return json(200, subs);
+    }
+    if (path === "/api/me/subscriptions/claude/code" && method === "POST") {
+      if (!sub("claude").signIn) return error(400, "This sign-in expired. Start again.");
+      if (!String(input?.code ?? "").trim()) return error(400, "Send {code}: the code Anthropic shows after you sign in.");
+      connect("claude");
+      return json(200, subs);
+    }
+    if (path === "/api/me/subscriptions/chatgpt" && method === "POST") {
+      more.polls = 0;
+      sub("chatgpt").signIn = { startedAt: new Date().toISOString(), userCode: "KQ7P-M2XW", verificationUri: "https://auth.openai.com/codex/device", url: null };
+      return json(200, subs);
+    }
+    if (path === "/api/me/subscriptions/chatgpt/poll" && method === "POST") {
+      if (!sub("chatgpt").signIn) return error(400, "No ChatGPT sign-in is waiting. Start one.");
+      more.polls += 1;
+      if (more.polls < 2) return json(200, { status: "pending", ...subs });
+      connect("chatgpt");
+      return json(200, { status: "connected", ...subs });
+    }
+    if ((match = /^\/api\/me\/subscriptions\/(claude|chatgpt)$/.exec(path)) && method === "DELETE") {
+      Object.assign(sub(match[1]!), { connected: false, connectedAt: null, signIn: null });
+      if (subs.writer === match[1]) subs.writer = "openmerit";
+      return json(200, subs);
+    }
+    if (path === "/api/me/case-writer" && method === "PUT") {
+      const writer = input?.writer;
+      if (writer !== "openmerit" && writer !== "claude" && writer !== "chatgpt") return error(400, "Send {writer}: openmerit, claude or chatgpt.");
+      if (writer !== "openmerit" && !sub(writer).connected) return error(409, `Connect your ${sub(writer).name} subscription first.`);
+      subs.writer = writer;
+      return json(200, subs);
+    }
+
+    // Every other route works in the project the header names: another project's state replaces the default's fields while it runs.
+    const projectId = request.headers.get("x-openmerit-project") || "default";
+    if (!projects.some((item) => item.id === projectId)) return error(404, "No such project in this account. Choose another project.");
+    if (projectId === "default") return route(state);
+    const slice = slices[projectId]!;
+    const scoped: State = { ...state, ...slice };
+    const response = await route(scoped);
+    for (const key of SLICE) Object.assign(slice, { [key]: scoped[key] });
+    return response;
+
+    async function route(state: State): Promise<Response> {
+    let match: RegExpExecArray | null;
 
     if (path === "/api/me" && method === "GET") return json(200, state.me);
     if (path === "/api/tasks" && method === "GET") return json(200, state.tasks);
     if (path === "/api/runs" && method === "GET") {
-      // As the cloud app does, each finished run carries what its report found.
-      return json(200, state.runs.map((run): Run => {
-        const report = state.reports[run.id];
-        return { ...run, result: report ? { status: report.status, model: report.pick?.model ?? null, from: report.baseline?.model ?? null, savingPerCallUsd: report.pick?.savingPerCallUsd ?? null } : null };
-      }));
+      return json(200, state.runs.map((run) => runRow(state, run)));
     }
     if ((match = /^\/api\/runs\/([\w-]+)$/.exec(path)) && method === "GET") {
       const id = match[1] ?? "";
@@ -343,8 +508,8 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       return json(200, { url: `${options.appUrl ?? ""}/__preview-stripe?portal` });
     }
     if (path === "/api/account/export" && method === "POST") {
-      const { tasks, runs, reports, endpoints, repos, guardrails } = state;
-      return json(200, { account: state.me.account.id, exportedAt: new Date().toISOString(), endpoints, repos, guardrails, tasks, jobs: runs, reports: Object.values(reports) });
+      const { tasks, runs, reports, endpoints, repos, guardrails, evals, drafts } = state;
+      return json(200, { account: state.me.account.id, exportedAt: new Date().toISOString(), endpoints, repos, guardrails, tasks, jobs: runs, reports: Object.values(reports), evals, evalDrafts: drafts });
     }
     if (path === "/api/disconnect" && method === "POST") { if (denied) return denied; state.disconnected += 1; return json(200, { disconnected: true }); }
     if ((match = /^\/api\/tasks\/([\w-]+)$/.exec(path)) && method === "DELETE") {
@@ -358,17 +523,87 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       for (const run of gone) { delete state.reports[run.id]; delete state.jobs[run.id]; }
       state.tasks = state.tasks.filter((task) => task.id !== id);
       state.runs = state.runs.filter((run) => run.taskId !== id);
-      state.deleted.unshift({ taskId: id, name: task.name, environment: task.environment, userId: state.me.user.id, jobs: gone.length, deletedAt: new Date().toISOString() });
+      const synced = state.evals[id]?.repo;
+      delete state.evals[id];
+      state.deleted.unshift({ taskId: id, name: task.name, environment: task.environment, userId: state.me.user.id, jobs: gone.length, deletedAt: new Date().toISOString(), repoCopy: synced ? `.openmerit/evals/${id}` : null });
       return json(200, { deleted: true, jobs: gone.length });
     }
     if (path === "/api/tasks/deleted" && method === "GET") return json(200, state.deleted);
+
+    // Evals, as the cloud app keeps them: versioned, edited in the app, written to the repository by the coding agent.
+    const evalView = (id: string): EvalView => {
+      const found = state.evals[id];
+      return { taskId: id, projectId: projectId, latest: found?.versions[0] ?? null, versions: (found?.versions ?? []).map(({ spec: _spec, cases: _cases, ...info }) => info), repo: found?.repo ?? null };
+    };
+    if ((match = /^\/api\/tasks\/([\w-]+)$/.exec(path)) && method === "GET") {
+      const task = state.tasks.find((item) => item.id === match?.[1]);
+      if (!task) return error(404, "No such task in this account.");
+      const found = state.evals[task.id], latest = found?.versions[0];
+      return json(200, { ...task, bundle: { output: found?.output ?? { kind: "text" }, current: { model: task.currentModel } }, eval: latest ? { version: latest.version, cases: latest.cases.length, repo: found.repo } : null, jobs: state.runs.filter((run) => run.taskId === task.id).slice(0, 20).map((run) => runRow(state, run)) });
+    }
+    if ((match = /^\/api\/tasks\/([\w-]+)\/eval$/.exec(path))) {
+      const id = match[1] ?? "";
+      if (!state.tasks.some((item) => item.id === id)) return error(404, "No such task in this account.");
+      if (method === "GET") return json(200, evalView(id));
+      if (method === "PUT") {
+        const found = state.evals[id] ??= { versions: [], repo: null, output: { kind: "text" } };
+        const current = found.versions[0]?.version ?? 0;
+        if (typeof input?.baseVersion === "number" && input.baseVersion !== current) return error(409, `Someone saved version ${current} of this eval while you edited version ${input.baseVersion}. Reload it and make your change again.`);
+        const cases = input?.cases as EvalCase[] | undefined;
+        if (!Array.isArray(cases) || !cases.length) return error(400, "An eval needs at least one case.");
+        if (cases.some((item) => !item.id || !item.input || Object.values(item.input).some((value) => typeof value !== "string"))) return error(400, "Each case needs an id and an input object of strings.");
+        const spec = (input?.spec ?? {}) as EvalSpec;
+        const latest = found.versions[0];
+        if (latest && JSON.stringify(latest.spec) === JSON.stringify(spec) && JSON.stringify(latest.cases) === JSON.stringify(cases)) return json(200, evalView(id));
+        found.versions.unshift({ version: current + 1, source: "app", author: "Amira Haddad", note: typeof input?.note === "string" ? input.note : null, createdAt: new Date().toISOString(), runs: 0, spec, cases });
+        return json(200, evalView(id));
+      }
+    }
+    if ((match = /^\/api\/tasks\/([\w-]+)\/run$/.exec(path)) && method === "POST") {
+      const task = state.tasks.find((item) => item.id === match?.[1]);
+      if (!task) return error(404, "No such task in this account.");
+      const jobId = `rn${Date.now().toString(36).slice(-4)}`, startedAt = new Date().toISOString();
+      state.runs.unshift({ id: jobId, taskId: task.id, kind: "run", status: "running", startedAt, finishedAt: null, askedBy: null, evalVersion: state.evals[task.id]?.versions[0]?.version ?? null, result: null });
+      state.jobs[jobId] = { jobId, taskId: task.id, task: task.name, status: "running", phase: "ranking", questions: [], notices: [], progress: { measured: 0, planned: 30 }, result: null, error: null,
+        provisional: { model: "openai/gpt-5-mini", endpoint: "openrouter", reason: "The cheapest catalogue model above the current one's capability index.", estCostPerCallUsd: 0.0006 }, createdAt: startedAt, report: null };
+      Object.assign(task, { status: "running", lastJobId: jobId, lastRunAt: startedAt });
+      return json(201, { jobId, taskId: task.id });
+    }
+    if ((match = /^\/api\/tasks\/([\w-]+)\/retire$/.exec(path)) && method === "POST") {
+      const task = state.tasks.find((item) => item.id === match?.[1]);
+      if (!task) return error(404, "No such task in this account.");
+      Object.assign(task, { state: "retired", watching: false });
+      return json(200, task);
+    }
+    if (path === "/api/eval-drafts" && method === "GET") return json(200, state.drafts.filter((item) => item.status === "pending"));
+    if ((match = /^\/api\/eval-drafts\/([\w-]+)\/approve$/.exec(path)) && method === "POST") {
+      const draft = state.drafts.find((item) => item.id === match?.[1]);
+      if (!draft) return error(404, "No such draft in this project.");
+      if (draft.status !== "pending") return error(409, `This draft was already ${draft.status}.`);
+      const id = draft.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      if (state.tasks.some((item) => item.id === id)) return error(409, "This project already has a task by that name. Dismiss the draft, or edit the task's eval.");
+      const { task: _task, current, output, ...spec } = draft.bundle;
+      const edited = { ...spec, ...(input?.spec as EvalSpec | undefined) };
+      const cases = (input?.cases as EvalCase[] | undefined) ?? draft.cases;
+      state.tasks.push({ id, environment: draft.environment, agent: null, name: draft.name, currentModel: current.model, pick: null, status: "new", watching: false, state: "watching", lastRunAt: null, lastJobId: null, monthlySavingUsd: null });
+      state.evals[id] = { output, repo: null, versions: [{ version: 1, source: "review", author: "Amira Haddad", note: null, createdAt: new Date().toISOString(), runs: 0, spec: edited, cases }] };
+      Object.assign(draft, { status: "approved", taskId: id });
+      return json(201, { taskId: id, eval: evalView(id) });
+    }
+    if ((match = /^\/api\/eval-drafts\/([\w-]+)$/.exec(path)) && method === "DELETE") {
+      const draft = state.drafts.find((item) => item.id === match?.[1] && item.status === "pending");
+      if (!draft) return error(404, "No such pending draft.");
+      draft.status = "dismissed";
+      return json(200, { dismissed: true });
+    }
     if (path === "/api/account" && method === "DELETE") {
       if (denied) return denied;
       if (unverified) return unverified;
       const { tasks, runs } = state;
-      states.set(name, emptyState(state.me));
+      if (name) { states.set(name, emptyState(state.me)); extras.delete(name); }
       return json(200, { deleted: true, tasks: tasks.length, jobs: runs.length });
     }
     return error(404, "Not found.");
+    }
   };
 }

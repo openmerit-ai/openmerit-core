@@ -40,7 +40,7 @@ const jobStatus: Record<string, Html> = {
 
 // Each finished run says what its report found. The task's latest run also shows the monthly
 // saving, which the task estimates from its traffic; older runs show the saving per 1,000 calls.
-function outcome(run: Run, task: Task | undefined): Html {
+export function outcome(run: Run, task: Task | undefined): Html {
   if (run.status !== "done") return jobStatus[run.status] ?? html`${run.status}`;
   if (task && task.lastJobId === run.id) return result(task);
   const found = run.result;

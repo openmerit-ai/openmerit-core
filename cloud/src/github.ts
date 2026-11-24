@@ -4,7 +4,7 @@
 // fetch, and never pushes, opens a pull request or writes to a repository. Nothing in a checkout runs:
 // git runs no hooks, checks symlinks out as plain files and gets no secret in its environment.
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { lstat, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +12,11 @@ import type { Catalogue } from "./engine.ts";
 import { createHarness, type Harness } from "../../openmerit-core/src/harness/harness.ts";
 import { reviewRepo } from "../../openmerit-core/src/review/index.ts";
 import { isSupportFile, scanRepo, type ScanResult } from "../../openmerit-core/src/scout/scan.ts";
-import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
+import type { Case, TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
+import { bundleProblem, redactBundle } from "./start.ts";
+
+/** openmerit-core's MANAGED_NOTE (eval/generated.ts): the note beside an eval copy app.openmerit.ai owns. */
+const MANAGED_NOTE = "MANAGED.md";
 
 export interface GitHubConfig {
   /** GitHub's REST API, https://api.github.com. Tests point it at a fake. */
@@ -308,17 +312,44 @@ export async function reviewCheckout(root: string, catalogue: Catalogue, reviewe
   }
 }
 
-/** Clones, reviews and deletes the checkout. */
-export async function reviewRepository(input: { fullName: string; branch: string; token: string | null; config: GitHubConfig; catalogue: Catalogue; reviewer: ReviewerConfig | null }): Promise<RepoReview> {
+/** An eval Scout wrote in the repository, which the review offers as a draft for the project. */
+export interface RepoEval { dir: string; bundle: TaskBundle; cases: Case[] }
+const MAX_REPO_EVALS = 50, MAX_EVAL_BYTES = 1024 * 1024;
+
+/**
+ * The evals Scout generated in `.openmerit/evals/<task>/` (bundle.json and cases.json), skipping the
+ * copies app.openmerit.ai manages, which carry MANAGED.md, and any that is not a usable bundle.
+ */
+export function repoEvals(root: string): RepoEval[] {
+  const base = join(root, ".openmerit", "evals");
+  if (!existsSync(base)) return [];
+  const found: RepoEval[] = [];
+  for (const entry of readdirSync(base, { withFileTypes: true })) {
+    if (!entry.isDirectory() || found.length >= MAX_REPO_EVALS) continue;
+    const dir = join(base, entry.name), files = ["bundle.json", "cases.json"].map(file => join(dir, file));
+    if (existsSync(join(dir, MANAGED_NOTE)) || !files.every(file => existsSync(file) && lstatSync(file).isFile() && statSync(file).size <= MAX_EVAL_BYTES)) continue;
+    try {
+      const bundle = JSON.parse(readFileSync(files[0]!, "utf8")) as unknown, cases = JSON.parse(readFileSync(files[1]!, "utf8")) as unknown;
+      if (bundleProblem(bundle) || !Array.isArray(cases)) continue;
+      const usable = (cases as Case[]).filter(item => item && typeof item.id === "string" && item.input && typeof item.input === "object");
+      found.push({ dir: `.openmerit/evals/${entry.name}`, bundle: redactBundle(bundle as TaskBundle), cases: redactBundle(usable) });
+    } catch { continue; }
+  }
+  return found;
+}
+
+/** Clones, reviews and deletes the checkout. The evals Scout wrote in it come back beside the review. */
+export async function reviewRepository(input: { fullName: string; branch: string; token: string | null; config: GitHubConfig; catalogue: Catalogue; reviewer: ReviewerConfig | null }): Promise<RepoReview & { evals: RepoEval[] }> {
   const started = Date.now();
   return withCheckout(input, async checkout => {
     const { reviewer, scan, supportCalls, tasks, unmapped, costUsd } = await reviewCheckout(checkout.root, input.catalogue, input.reviewer);
+    const evals = repoEvals(checkout.root);
     const calls = scan.usages.filter(usage => usage.kind === "model");
     return {
       reviewer, commit: checkout.commit, branch: input.branch, files: scan.files, bytes: checkout.bytes,
       models: scan.models.map(model => ({ value: model.value, catalogueId: model.catalogueId, calls: model.usageIds.length })),
       modelCalls: calls.slice(0, MAX_CALLS).map(usage => ({ file: usage.file, line: usage.line, value: usage.value, catalogueId: usage.catalogueId, dynamic: usage.dynamic, envVar: usage.envVar ?? null })),
-      totalCalls: calls.length, supportCalls, notListed: supportCalls ? `${supportCalls} more in tests, fixtures or docs, not listed` : null, tasks, unmapped, costUsd, durationMs: Date.now() - started,
+      totalCalls: calls.length, supportCalls, notListed: supportCalls ? `${supportCalls} more in tests, fixtures or docs, not listed` : null, tasks, unmapped, costUsd, durationMs: Date.now() - started, evals,
     };
   });
 }

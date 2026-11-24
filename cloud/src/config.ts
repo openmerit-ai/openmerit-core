@@ -45,6 +45,15 @@ export interface Limits {
   reviewMinutes: number;
 }
 
+/**
+ * Each member's own Claude and ChatGPT subscriptions (subscriptions.ts): the sign-in endpoints, the
+ * model that writes a task's cases on each, and, for tests only, the model API's base URL.
+ */
+export interface SubscriptionsConfig {
+  claude: { authorizeUrl: string; tokenUrl: string; redirectUri: string; model: string; apiUrl: string | null };
+  chatgpt: { authUrl: string; model: string; apiUrl: string | null };
+}
+
 /** Where analytics events go (analytics.ts). */
 export interface PostHogConfig { token: string; host: string }
 
@@ -72,6 +81,7 @@ export interface Config {
   posthog: PostHogConfig | null;
   /** GitHub's API and git host, and the clone limits (github.ts). */
   github: GitHubConfig;
+  subscriptions: SubscriptionsConfig;
 }
 
 const number = (value: string | undefined, fallback: number) => (value && Number.isFinite(Number(value)) ? Number(value) : fallback);
@@ -125,6 +135,20 @@ export function loadConfig(env: Env = process.env): Config {
       gitUrl: (env.OPENMERIT_GITHUB_URL || "https://github.com").replace(/\/$/, ""),
       maxBytes: number(env.OPENMERIT_REPO_MAX_MB, 200) * 1024 * 1024,
       cloneTimeoutMs: number(env.OPENMERIT_REPO_CLONE_SECONDS, 120) * 1000,
+    },
+    subscriptions: {
+      claude: {
+        authorizeUrl: env.OPENMERIT_CLAUDE_AUTHORIZE_URL || "https://claude.ai/oauth/authorize",
+        tokenUrl: env.OPENMERIT_CLAUDE_TOKEN_URL || "https://platform.claude.com/v1/oauth/token",
+        redirectUri: "https://platform.claude.com/oauth/code/callback",
+        model: env.OPENMERIT_CLAUDE_SUBSCRIPTION_MODEL || "claude-sonnet-5-5",
+        apiUrl: env.OPENMERIT_CLAUDE_API_URL || null,
+      },
+      chatgpt: {
+        authUrl: (env.OPENMERIT_OPENAI_AUTH_URL || "https://auth.openai.com").replace(/\/$/, ""),
+        model: env.OPENMERIT_CODEX_SUBSCRIPTION_MODEL || "gpt-5.6-terra",
+        apiUrl: env.OPENMERIT_CODEX_API_URL || null,
+      },
     },
     models: { caseWriter: env.OPENMERIT_CASE_WRITER_MODEL || "anthropic/claude-sonnet-5.5", judge: env.OPENMERIT_JUDGE_MODEL || "anthropic/claude-sonnet-5.5", reviewer: env.OPENMERIT_REVIEWER_MODEL || "anthropic/claude-sonnet-5.5" },
     watchIntervalMs: number(env.OPENMERIT_WATCH_INTERVAL_MS, 24 * 60 * 60 * 1000),

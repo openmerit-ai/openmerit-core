@@ -24,8 +24,25 @@ export interface Me {
   plan: Plan;
 }
 
+// A project in the organization (GET /api/projects): it holds tasks, runs, guardrails, endpoints and
+// GitHub repositories. The default project holds what the organization had before projects.
+export interface Project { id: string; name: string; createdAt: string; tasks: number; endpoints: number; repos: string[] }
+export const DEFAULT_PROJECT = "default";
+
+// The member's own Claude and ChatGPT subscriptions (GET /api/me/subscriptions), for every organization they
+// belong to. writer is who writes the cases of the runs they start. A sign-in under way has the page to open
+// (Claude) or the code to enter (ChatGPT); no token is ever sent to the page.
+export type SubscriptionProvider = "claude" | "chatgpt";
+export type CaseWriter = "openmerit" | SubscriptionProvider;
+export interface Subscription {
+  provider: SubscriptionProvider; name: string; connected: boolean; connectedAt: string | null; problem: string | null;
+  signIn: { startedAt: string; userCode: string | null; verificationUri: string | null; url: string | null } | null;
+}
+export interface Subscriptions { writer: CaseWriter; subscriptions: Subscription[] }
+
 export interface Task {
   id: string;
+  projectId?: string;
   environment: string;
   agent: string | null;
   name: string;
@@ -48,6 +65,27 @@ export interface Task {
   decision?: Decision | null;
 }
 
+// A task's eval (cloud/src/actors/account.ts): what the judge checks (spec) and the cases, versioned.
+// The cloud is its source of truth; the coding agent writes the latest version to the repository.
+export interface EvalCase { id: string; input: Record<string, string>; expected?: unknown; origin: "example" | "written" | "trace"; kind?: string; approved?: boolean; toolResults?: unknown }
+export interface EvalSpec { description?: string; input?: { description: string }; steps?: { description: string; tools?: string[]; access?: string; required?: boolean; after?: number[] }[]; criteria?: string[]; guardrails?: string[] }
+export type EvalSource = "openmerit" | "claude" | "chatgpt" | "examples" | "review" | "app" | "label_check";
+export interface EvalVersionInfo { version: number; source: EvalSource; author: string | null; note: string | null; createdAt: string; runs: number }
+export interface EvalView {
+  taskId: string;
+  projectId: string;
+  latest: (EvalVersionInfo & { spec: EvalSpec; cases: EvalCase[] }) | null;
+  versions: EvalVersionInfo[];
+  // The version the coding agent last wrote to the repository, who signed in, and the agent.
+  repo: { version: number; by: string; client: string | null; at: string } | null;
+}
+// A task's output shape, from the bundle the coding agent or review sent, for editing expected answers.
+export type TaskOutput = { kind: "text" } | { kind: "json"; schema: object } | { kind: "label"; labels: string[] };
+// An eval a repository review found, waiting for approval, which creates the task, or dismissal.
+export interface EvalDraft { id: string; projectId: string; repoId: string | null; environment: string; name: string; bundle: EvalSpec & { task: string; current: { model: string }; output: TaskOutput }; cases: EvalCase[]; status: "pending" | "approved" | "dismissed"; createdAt: string; taskId: string | null }
+// GET /api/tasks/:id: the task's row with its bundle, eval summary and latest runs.
+export interface TaskDetail extends Task { bundle: { output: TaskOutput; current: { model: string } } | null; eval: { version: number; cases: number; repo: EvalView["repo"] } | null; jobs: Run[] }
+
 export type TaskState = "watching" | "idle" | "frozen" | "retired";
 
 export type JobStatus = "queued" | "running" | "needs_input" | "done" | "failed" | "stopped";
@@ -55,7 +93,8 @@ export type JobStatus = "queued" | "running" | "needs_input" | "done" | "failed"
 // What a finished run's report found: its result status, the model it picked and the one in use then.
 export interface RunResult { status: string; task?: string | null; model: string | null; from: string | null; savingPerCallUsd: number | null }
 // askedBy is the name the asking coding agent's MCP client sent, such as claude-code; null for a watch run or an unnamed client.
-export interface Run { id: string; taskId: string; kind: string; status: JobStatus | string; startedAt: string; finishedAt: string | null; askedBy: string | null; result: RunResult | null }
+// evalVersion: the eval version the run measured on, once its cases are set; runs on different versions are not comparable.
+export interface Run { id: string; taskId: string; kind: string; status: JobStatus | string; startedAt: string; finishedAt: string | null; askedBy: string | null; evalVersion?: number | null; result: RunResult | null }
 
 export interface MeasuredModel {
   model: string;
@@ -201,7 +240,8 @@ export interface GuardrailsAt {
 }
 
 // GET /api/tasks/deleted: who deleted which task, with no task content. The export includes it.
-export interface DeletedTask { taskId: string; name: string; environment: string; userId: string; jobs: number; deletedAt: string }
+// repoCopy: the directory of the eval's repository copy, until the coding agent removes it.
+export interface DeletedTask { taskId: string; name: string; environment: string; userId: string; jobs: number; deletedAt: string; repoCopy?: string | null }
 
 export interface Spend { openmeritUsd: number; customerUsd: number; monthlyCapUsd: number; customerCapUsd: number; period: { start: string; end: string | null } }
 
@@ -227,7 +267,8 @@ interface ReverificationHint { clerk_error: { reason: "reverification-error"; me
 const isReverificationHint = (data: unknown): data is ReverificationHint =>
   typeof data === "object" && data !== null && (data as Partial<ReverificationHint>).clerk_error?.reason === "reverification-error";
 
-export function createApi(origin: string, token: () => Promise<string | null>, fetcher: typeof fetch = fetch, reverify?: Reverify): Api {
+// project names the project the calls work in (the X-OpenMerit-Project header); without one, the cloud app uses the default project.
+export function createApi(origin: string, token: () => Promise<string | null>, fetcher: typeof fetch = fetch, reverify?: Reverify, project: () => string | null = () => null): Api {
   async function call<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
     const bearer = await token();
     if (!bearer) throw new ApiError(401, "Sign in to continue.", "sign_in_required");
@@ -235,7 +276,7 @@ export function createApi(origin: string, token: () => Promise<string | null>, f
     try {
       response = await fetcher(new URL(path, origin), {
         method,
-        headers: { authorization: `Bearer ${bearer}`, accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }) },
+        headers: { authorization: `Bearer ${bearer}`, accept: "application/json", ...(project() ? { "x-openmerit-project": project()! } : {}), ...(body === undefined ? {} : { "content-type": "application/json" }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.timeout(20_000),
       });

@@ -1,4 +1,4 @@
-import type { DeletedTask, Endpoint, Repo, Run, Task } from "../api.ts";
+import type { DeletedTask, Endpoint, EvalView, Repo, Run, Task } from "../api.ts";
 import { ago, html, plural } from "../html.ts";
 import type { View } from "../view.ts";
 import { header } from "./common.ts";
@@ -20,8 +20,8 @@ export const dataView: View<Data> = {
       <h2 id="keeps">What OpenMerit Keeps</h2>
       <div class="card">
         <div class="row"><span>Task context<span class="sub">The prompts, tool schemas, output shapes and examples your coding agents sent, with secrets redacted</span></span><span>${plural(tasks.length, "task")}</span></div>
-        <div class="row"><span>Test cases and results<span class="sub">The cases OpenMerit wrote from that context, and each model's score per case</span></span><span>${plural(runs.length, "run")}</span></div>
-        <div class="row"><span>Endpoint keys<span class="sub">Keys you added on Connections, stored encrypted and never shown again</span></span><span>${plural(keys, "key")}</span></div>
+        <div class="row"><span>Evals and results<span class="sub">Each task's eval, every version of its cases and what the judge checks, and each model's score per case. Cases can hold real inputs from your examples, with secrets redacted</span></span><span>${plural(runs.length, "run")}</span></div>
+        <div class="row"><span>Endpoint keys<span class="sub">Keys you added on Project settings, stored encrypted and never shown again</span></span><span>${plural(keys, "key")}</span></div>
         <div class="row"><span>Repositories<span class="sub">The GitHub repositories you added, with where each model call is, the model it names, and the task specs a review wrote, which quote the prompts, tool schemas and examples they came from. OpenMerit copies the code only for a review and deletes the copy when the review ends. Tokens are stored encrypted and never shown again</span></span><span style="white-space: nowrap">${plural(repos.length, "repository", "repositories")}</span></div>
       </div>
     </section>
@@ -43,12 +43,12 @@ export const dataView: View<Data> = {
       <div class="card">
         ${tasks.map((task) => html`<div class="row"><span>${task.name}<span class="sub">${task.environment} · ${plural(count(task.id), "run")}${task.state === "retired" ? " · retired" : ""}</span></span>${admin ? html`<button class="btn danger" type="button" data-action="deleteTask" data-id="${task.id}" data-name="${task.name}" aria-label="Delete ${task.name}">Delete</button>` : html`<span class="sub">Admins only</span>`}</div>`)}
       </div>
-      <p class="note">Deletes the task's context, test cases, runs and run pages. To stop OpenMerit using a task but keep its history, have your coding agent retire it instead. A coding agent that asks about the task again starts it afresh.</p>
+      <p class="note">Deletes the task's context, its eval with every version, its runs and run pages. To stop OpenMerit using a task but keep its eval and history, retire it instead. A coding agent that asks about the task again starts it afresh.</p>
     </section>` : ""}
     ${deleted.length ? html`<section aria-labelledby="deleted">
       <h2 id="deleted">Deleted Tasks</h2>
       <div class="card">
-        ${deleted.map((item) => html`<div class="row"><span>${item.name}<span class="sub">${item.environment} · ${plural(item.jobs, "run")} · by ${item.userId === me.user.id ? "you" : item.userId}</span></span><span class="sub">${ago(item.deletedAt)}</span></div>`)}
+        ${deleted.map((item) => html`<div class="row"><span>${item.name}<span class="sub">${item.environment} · ${plural(item.jobs, "run")} · by ${item.userId === me.user.id ? "you" : item.userId}${item.repoCopy ? html` · its eval copy at <code>${item.repoCopy}</code> stays until your coding agent removes it` : ""}</span></span><span class="sub">${ago(item.deletedAt)}</span></div>`)}
       </div>
     </section>` : ""}`;
   },
@@ -58,13 +58,27 @@ export const dataView: View<Data> = {
       download(`openmerit-${me.account.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${new Date().toISOString().slice(0, 10)}.json`, data);
       toast("Export downloaded.");
     },
-    async deleteTask(target, _data, { api, confirm, refresh, toast }) {
+    async deleteTask(target, { runs, tasks }, { api, confirm, refresh, toast }) {
       const { id = "", name = "" } = target.dataset;
+      const evaluation = await api.get<EvalView>(`/api/tasks/${encodeURIComponent(id)}/eval`).catch((): null => null);
+      const latest = evaluation?.latest, count = runs.filter((run) => run.taskId === id).length;
+      const retired = tasks.find((task) => task.id === id)?.state === "retired";
       const ok = await confirm({
         title: `Delete ${name}?`,
-        body: "Its task context, test cases, runs and run pages are deleted and cannot be restored. Links to its runs stop loading. Its spend still counts toward this period's evaluations and caps. You may be asked to confirm it's you.",
+        body: "Deleting cannot be undone. It:",
+        items: [
+          latest ? `Deletes its eval: version ${latest.version} with ${plural(latest.cases.length, "case")}, and ${plural(evaluation.versions.length - 1, "earlier version")}` : "Deletes its task context",
+          `Deletes ${plural(count, "run")} with their reports, run pages and decisions`,
+          ...(evaluation?.repo ? ["Keeps the eval's copy in the repository until your coding agent removes it, which it offers on its next OpenMerit call"] : []),
+        ],
+        ...(retired ? {} : { alternative: "Retire instead" }),
         confirm: "Delete task", danger: true, typeToConfirm: name,
       });
+      if (ok === "alternative") {
+        await api.send("POST", `/api/tasks/${encodeURIComponent(id)}/retire`);
+        await refresh();
+        return toast(`${name} retired. Its eval and runs are kept.`);
+      }
       if (!ok) return;
       await api.send("DELETE", `/api/tasks/${encodeURIComponent(id)}`);
       await refresh();

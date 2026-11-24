@@ -622,6 +622,27 @@ test("Scout always writes an eval from its review of the code, runs the reposito
   assert.deepEqual(harness.calls, ["map"]);
 });
 
+test("an eval app.openmerit.ai manages is run as the coding agent wrote it: Scout neither reviews the task nor writes over the copy", async () => {
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  const harness = scriptedHarness({}, { cases: writtenCases() });
+  const ctx = context(root, home, harness);
+  // A first run writes the eval; then the coding agent replaces it with the app's version and its MANAGED.md, and no saved Eval names it.
+  assert.equal((await drive(ctx, startRun(ctx))).step.status, "done");
+  const dir = join(root, ".openmerit/evals/ticket-classifier");
+  const cases = (JSON.parse(readFileSync(join(dir, "cases.json"), "utf8")) as unknown[]).slice(0, 6);
+  writeFileSync(join(dir, "cases.json"), `${JSON.stringify(cases, null, 2)}\n`);
+  writeFileSync(join(dir, "MANAGED.md"), "Managed by app.openmerit.ai\n");
+  updateRepoConfig(root, { evals: {} });
+  const written = readFileSync(join(dir, "cases.json"), "utf8");
+  harness.calls.length = 0;
+  const { step, asked } = await drive(ctx, startRun(ctx));
+  assert.equal(step.status, "done", step.error ?? "");
+  assert.ok(!harness.calls.some(call => /^(review|write)/.test(call)), harness.calls.join(", "));
+  assert.match(asked.find(question => question.id === "approve_evals")!.detail!, /\.openmerit\/evals\/ticket-classifier/);
+  assert.equal(readFileSync(join(dir, "cases.json"), "utf8"), written, "the managed copy is unchanged after approval");
+  assert.equal(step.result!.tasks[0]!.baseline!.total % 6, 0, "the run measured the copy's six cases");
+});
+
 test("below the floor a person's grades decide: answers the eval failed look good to them, so it is written again from their note, and they accept the next version", async () => {
   const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
   // Six of the ten written cases expect the wrong queue: the current model passes 42 of 60 case runs, under the floor. The revised cases are right.
