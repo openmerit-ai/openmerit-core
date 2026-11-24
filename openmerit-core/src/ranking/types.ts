@@ -19,8 +19,13 @@ export interface TaskBundle {
   // The task spec a review of the code writes: input, steps, output (above), criteria and guardrails.
   /** What the call's input is and how it varies in production, such as "a customer's support email, often forwarded". */
   input?: { description: string };
-  /** What the model does, in order, with the tools each step uses and the access they have. */
-  steps?: { description: string; tools?: string[]; access?: "none" | "read" | "write" }[];
+  /**
+   * What the model does, in order, with the tools each step uses and the access they have. A
+   * `required` step must happen in every case: one of its tools is called and answers. `after` lists
+   * the 1-based numbers of earlier steps that must happen before it, where the order matters, such as
+   * when its input is an earlier tool's result; without it, the step's order is not checked.
+   */
+  steps?: { description: string; tools?: string[]; access?: "none" | "read" | "write"; required?: boolean; after?: number[] }[];
   /** What a right answer does, one statement each. Each is one judge check on every case. */
   criteria?: string[];
   /** What the call must never do, such as promise a refund or reveal another customer's data. One judge check each, on every case. */
@@ -45,7 +50,12 @@ export interface Case {
   origin: "example" | "written" | "trace";
   /** A written case's kind; examples and traces have none. */
   kind?: CaseKind;
-  /** Mocked tool results for this case, by tool name; a tool without one answers with its `mockResult`. */
+  /**
+   * Mocked tool results for this case, by tool name; a tool without one answers with its `mockResult`.
+   * A result may be a list of `{ when?, result }`, matched on the call's arguments: the first entry whose
+   * `when` fields all equal the call's, else the first entry without `when`. A call nothing matches is
+   * answered with an error, as a lookup that finds nothing.
+   */
   toolResults?: Record<string, unknown>;
   /** True once the user confirmed the expected answer in the label check. */
   approved?: boolean;

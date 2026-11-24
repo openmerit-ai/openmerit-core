@@ -9,7 +9,7 @@ import { after, before, beforeEach, test } from "node:test";
 import { loadCatalogue } from "../catalogue/catalogue.ts";
 import {
   applyLabelCheck, BudgetRefused, CandidateUnavailable, completeWith, createClient, createMeasure, exactMatch, graderFor, jsonSchema, judge,
-  labelMatch, LABEL_CHECK_QUESTION, DEFAULT_MAX_TURNS, MemoryLedger, writeCases, type Case, type EndpointConfig, type Ledger, type TaskBundle,
+  labelMatch, LABEL_CHECK_QUESTION, DEFAULT_MAX_TURNS, flow, invalidCases, MemoryLedger, stepChecksFor, checksBasedOn, writeCases, type Case, type EndpointConfig, type Ledger, type TaskBundle,
 } from "./index.ts";
 
 const LABELS: Record<string, string> = { "I was charged twice": "billing", "The app crashes on login": "technical", "Where is my parcel?": "shipping" };
@@ -50,6 +50,28 @@ function script(model: string, body: Record<string, unknown>, anthropic: boolean
       if (results.length === 0) return { tool: { name: "lookup_order", args: { id: "42" } }, cost: 0.001 };
       if (results.length === 1) return { tool: { name: "refund_order", args: { id: "42", reason: results[0]!.includes("damaged") ? "damaged" : "other" } }, cost: 0.001 };
       return { text: results[1]!.includes("refund-7") ? "billing" : "other", cost: 0.001 };
+    }
+    // Calls a tool the task does not offer, then answers.
+    case "inventor": return toolResults(body, anthropic).length ? { text: "billing", cost: 0.001 } : { tool: { name: "delete_account", args: { id: "42" } }, cost: 0.001 };
+    // Calls lookup_order without its required id; `fixer` then calls it again correctly, `stubborn` answers anyway.
+    case "fixer": case "stubborn": {
+      const results = toolResults(body, anthropic);
+      if (results.length === 0) return { tool: { name: "lookup_order", args: {} }, cost: 0.001 };
+      if (results.length === 1 && model === "fixer") return { tool: { name: "lookup_order", args: { id: "42" } }, cost: 0.001 };
+      return { text: results.at(-1)!.includes("refunded") ? "billing" : "other", cost: 0.001 };
+    }
+    // The agent's two tools the other way round: refunds, then looks the order up.
+    case "refund-first": {
+      const results = toolResults(body, anthropic);
+      if (results.length === 0) return { tool: { name: "refund_order", args: { id: "42", reason: "other" } }, cost: 0.001 };
+      if (results.length === 1) return { tool: { name: "lookup_order", args: { id: "42" } }, cost: 0.001 };
+      return { text: "billing", cost: 0.001 };
+    }
+    // Looks up two codes, then answers with both results.
+    case "coder": {
+      const results = toolResults(body, anthropic);
+      if (results.length < 2) return { tool: { name: "lookup_code", args: { code: results.length ? "Z99" : "M54.5" } }, cost: 0.001 };
+      return { text: results.join(" | "), cost: 0.001 };
     }
     case "json": return { text: "```json\n{\"queue\": \"billing\", \"urgent\": true, \"note\": \"anything\"}\n```", cost: 0.001 };
     // Says the right queue and, for the guardrail case, also promises what it must not.
@@ -267,6 +289,80 @@ test("an agent's tools answer from the case's mocked results in order, and the t
     const tight = createMeasure({ bundle: { ...agent, constraints: { maxTurns: 2 } }, cases: agentCases, client: client(), grader: labelMatch(), ledger: memoryLedger(), key: "job-1" });
     assert.deepEqual((await tight({ model: "agent", endpoint }, ["c1"])).results, [{ caseId: "c1", pass: false, failure: "tool_loop", reason: "It kept calling tools past the limit and never answered." }], `${endpoint}: two calls are not enough`);
     assert.equal(seen.length, 2, `${endpoint}: no third call`);
+  }
+});
+
+const order = { type: "object", properties: { id: { type: "string" } }, required: ["id"] };
+const refund = { type: "object", properties: { id: { type: "string" }, reason: { type: "string" } }, required: ["id", "reason"] };
+const orderTools: TaskBundle = { ...bundle, tools: [{ name: "lookup_order", parameters: order, mockResult: { status: "refunded" } }, { name: "refund_order", parameters: refund, mockResult: "refund-7" }] };
+const flowOf = async (task: TaskBundle, model: string, endpoint: string, caseList: Case[] = cases.slice(0, 1)) => {
+  const runs: NonNullable<Parameters<NonNullable<Parameters<typeof createMeasure>[0]["onCase"]>>[1]>[] = [];
+  const measure = createMeasure({ bundle: task, cases: caseList, client: client(), grader: flow(labelMatch()), ledger: memoryLedger(), key: "job-1", onCase: (_result, run) => { if (run) runs.push(run); } });
+  const result = await measure({ model, endpoint }, caseList.map(item => item.id));
+  return { result: result.results[0]!, run: runs[0]! };
+};
+
+test("flow: an invented tool fails the case; refused arguments go back to the model, which may fix them", async () => {
+  for (const endpoint of ["openrouter", "anthropic"]) {
+    const invented = await flowOf(orderTools, "inventor", endpoint);
+    assert.deepEqual(invented.result, { caseId: "c1", pass: false, reason: "It called delete_account, a tool the task does not offer." }, `${endpoint}: it answered right, but invented a tool`);
+    assert.deepEqual(invented.run.refused.map(call => [call.tool, call.kind]), [["delete_account", "unknown_tool"]]);
+
+    const fixed = await flowOf(orderTools, "fixer", endpoint);
+    assert.equal(fixed.result.pass, true, `${endpoint}: it called again correctly within the turn limit`);
+    assert.deepEqual(fixed.run.refused.map(call => [call.tool, call.kind]), [["lookup_order", "invalid_arguments"]], `${endpoint}: the refused call is recorded`);
+    assert.match(fixed.run.refused[0]!.error, /id/, "with the schema's error, which went back as the tool's result");
+    const results = fixed.run.transcript.filter(item => item.role === "toolResult");
+    assert.deepEqual(results.map(item => item.role === "toolResult" && item.isError), [true, false]);
+
+    const stubborn = await flowOf(orderTools, "stubborn", endpoint);
+    assert.deepEqual(stubborn.result, { caseId: "c1", pass: false, reason: "Its call to lookup_order was refused for its arguments, and it never called it again correctly." }, `${endpoint}: never fixed`);
+  }
+});
+
+test("a case with no mocked result for one of its tools is invalid for every model, and a measure will not run it", async () => {
+  const unmocked: TaskBundle = { ...orderTools, tools: [orderTools.tools![0]!, { name: "refund_order", parameters: refund }] };
+  const caseList: Case[] = [{ ...cases[0]!, toolResults: { refund_order: "refund-8" } }, cases[1]!, { ...cases[2]!, origin: "trace", input: { messages: "[]" } }];
+  assert.deepEqual(invalidCases(unmocked, caseList), [{ caseId: "c2", reason: "It gives no mocked result for refund_order, so the eval cannot answer a call to it." }], "the case's own result covers c1; a trace case runs no tool");
+  const measure = createMeasure({ bundle: unmocked, cases: caseList, client: client(), grader: flow(labelMatch()), ledger: memoryLedger(), key: "job-1" });
+  await assert.rejects(measure({ model: "agent", endpoint: "openrouter" }, ["c1", "c2"]), /c2 \(It gives no mocked result for refund_order/);
+  assert.equal(seen.length, 0, "nothing was sent");
+});
+
+test("a mocked result matched on the call's arguments answers each call, with the entry without `when` as the fallback", async () => {
+  const lookup = { name: "lookup_code", parameters: { type: "object", properties: { code: { type: "string" } }, required: ["code"] } };
+  const codes: TaskBundle = { ...bundle, output: { kind: "text" }, tools: [lookup] };
+  const caseWith = (toolResult: unknown): Case[] => [{ id: "c1", input: { ticket: "x" }, expected: "low back pain | no such code", origin: "written", toolResults: { lookup_code: toolResult } }];
+  const run = async (toolResult: unknown) => {
+    const runs: string[] = [];
+    const measure = createMeasure({ bundle: codes, cases: caseWith(toolResult), client: client(), grader: flow(exactMatch()), ledger: memoryLedger(), key: "job-1", onCase: (_result, ran) => runs.push(JSON.stringify(ran?.refused)) });
+    return { result: (await measure({ model: "coder", endpoint: "openrouter" }, ["c1"])).results[0]!, refused: runs[0] };
+  };
+  // The fallback comes first in the list, so a matcher that took the first entry would answer "no such code" twice.
+  const matched = await run([{ result: "no such code" }, { when: { code: "M54.5" }, result: "low back pain" }]);
+  assert.deepEqual(matched.result, { caseId: "c1", pass: true });
+  const strict = await run([{ when: { code: "M54.5" }, result: "low back pain" }]);
+  assert.deepEqual(strict.result, { caseId: "c1", pass: false, reason: "Its call to lookup_code found nothing for its arguments, and it never called it again with ones that did." }, "no entry matched Z99, and there is no fallback");
+  assert.match(strict.refused!, /no_match/);
+  // A list that is not all `{ when?, result }` entries is one result, sent as it is.
+  const plainList = await run([{ code: "M54.5", name: "low back pain" }]);
+  assert.match(plainList.result.reason ?? "", /^Answered "\[\{\\"code\\":\\"M54.5\\",\\"name\\":\\"low back pain\\"\}\] \| \[\{/);
+});
+
+test("steps: a required step must happen, and order is checked only where a step names earlier ones in `after`", async () => {
+  const steps = (after?: number[]): TaskBundle => ({ ...orderTools, steps: [
+    { description: "Look the order up", tools: ["lookup_order"], access: "read", required: true },
+    { description: "Refund it", tools: ["refund_order"], access: "write", required: true, ...(after ? { after } : {}) },
+    { description: "Tell the customer", required: true },
+  ] });
+  assert.deepEqual(stepChecksFor(steps([1])).unchecked.map(check => check.id), ["S3"], "a required step with no tools cannot be checked");
+  assert.equal(checksBasedOn({ ...steps([1]), criteria: ["a", "b"], guardrails: ["c"] }), "Checks: C1–C2 (criteria); G1 (guardrails); S1, S2 (the spec's steps, on each case's tool calls). S3 lists no tools, so it is not checked.");
+  for (const endpoint of ["openrouter", "anthropic"]) {
+    assert.equal((await flowOf(steps([1]), "agent", endpoint)).result.pass, true, `${endpoint}: in order, and S3 does not fail it`);
+    assert.deepEqual((await flowOf(steps([1]), "refund-first", endpoint)).result, { caseId: "c1", pass: false, reason: "S2: it called refund_order before step 1 (Look the order up)." }, `${endpoint}: out of order`);
+    assert.equal((await flowOf(steps(), "refund-first", endpoint)).result.pass, true, `${endpoint}: without after, either order passes`);
+    assert.equal((await flowOf(steps(), "agent", endpoint)).result.pass, true);
+    assert.deepEqual((await flowOf(steps(), "tool-user", endpoint)).result, { caseId: "c1", pass: false, reason: "S2: it never called refund_order (Refund it)." }, `${endpoint}: a required step it skipped`);
   }
 });
 
