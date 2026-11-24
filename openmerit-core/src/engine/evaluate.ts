@@ -24,8 +24,39 @@ export const EVAL_FLOOR = 0.8;
 /** Passes over item runs for one kind of item, such as typical, edge or guardrail cases. */
 export interface KindRate { kind: string; passes: number; total: number }
 
-/** One measured run: pass or fail per item, and what the candidate's calls cost (null when unknown). */
-export interface Measurement { items: Readonly<Record<string, boolean>>; costUsd: number | null; costIsEstimate?: boolean; latencyMs?: number | null }
+/**
+ * One measured run: pass or fail per item, and what the candidate's calls cost (null when unknown).
+ * `checks` names the spec's checks (C…, G…, S…) each failed item failed, when its grader named them.
+ */
+export interface Measurement { items: Readonly<Record<string, boolean>>; costUsd: number | null; costIsEstimate?: boolean; latencyMs?: number | null; checks?: Readonly<Record<string, readonly string[]>> }
+
+/** The share of cases a model must pass each criterion on, unless the task sets `criteriaPassRate`. */
+export const CRITERIA_PASS_RATE = 0.9;
+
+/** A task's criteria (C…) and the checks every case must pass: its guardrails (G…) and step checks (S…). */
+export interface Criteria { criteria: readonly string[]; guardrails: readonly string[]; passRate?: number }
+
+/**
+ * Whether runs meet the task's criteria: every guardrail and step check passes on every item run, and
+ * each criterion on at least `passRate` of them. A failed item run whose grader named no check, such
+ * as a wrong label or a failed call, counts against every criterion. `failed` lists the checks missed.
+ */
+export function meetsCriteria(runs: readonly Measurement[], spec: Criteria): { meets: boolean; failed: string[] } {
+  const rate = spec.passRate ?? CRITERIA_PASS_RATE;
+  let total = 0;
+  const misses = new Map<string, number>();
+  for (const run of runs) for (const [item, pass] of Object.entries(run.items)) {
+    total++;
+    if (pass) continue;
+    const named = run.checks?.[item]?.length ? run.checks[item]! : spec.criteria;
+    for (const check of new Set(named)) misses.set(check, (misses.get(check) ?? 0) + 1);
+  }
+  const failed = [
+    ...spec.guardrails.filter(check => misses.has(check)),
+    ...spec.criteria.filter(check => total && (total - (misses.get(check) ?? 0)) / total < rate - 1e-9),
+  ];
+  return { meets: total > 0 && !failed.length, failed };
+}
 
 /** What a measure call runs: the current model, a screen on the samples, or a full run of every item. */
 export interface MeasureCall {
@@ -53,8 +84,8 @@ const ends = (error: unknown): error is Error => error instanceof Error && error
 /** Totals over some runs. `score` is passes over total item runs; `costPerItemUsd` is null when any run's cost is unknown. */
 export interface Score { passes: number; total: number; score: number | null; costPerItemUsd: number | null; costIsEstimate: boolean; latencyMs: number | null }
 
-/** Why a measured model did not qualify, or null when it did. */
-export type Shortfall = "unmeasured" | "score" | "threshold" | "latency" | null;
+/** Why a measured model did not qualify, or null when it did. `criteria`: it missed the task's criteria. */
+export type Shortfall = "unmeasured" | "score" | "criteria" | "threshold" | "latency" | null;
 
 export interface Rules {
   /** The lowest pass rate (0 to 1) that qualifies, such as an eval's own threshold. */
@@ -100,6 +131,14 @@ export interface EvaluateInput<T extends Rung> {
   /** Each item's kind, for the current model's pass rate per kind. */
   kinds?: Readonly<Record<string, string>>;
   /**
+   * The bar once a person has marked the current model's own answers wrong: a model qualifies when it
+   * meets these criteria, not the current model's score, and the current model is one candidate among
+   * the others. No floor applies, screens sample every item, and challengers have no price ceiling, so
+   * the cheapest model that meets them is found even when it costs more than the current one. The
+   * caller's ladder must not be limited to models cheaper than the current one.
+   */
+  criteria?: Criteria | null;
+  /**
    * Runs `option` (null: the current model) on `items` (null: the items the caller's eval runs). Throws
    * CandidateUnavailable when the option cannot run, and EndChallengers to end the challengers. Returns
    * null when a full run will not be measured, which leaves the option unmeasured; any other throw stops
@@ -127,7 +166,8 @@ export interface EvaluateResult<T extends Rung> {
    * `below_floor`: it passed less than the floor of its own eval, so the eval cannot tell models apart.
    */
   status: "ranked" | "no_qualified" | "no_passing_model" | "too_few_reliable" | "below_floor";
-  baseline: Score & { runs: Measurement[]; byKind: KindRate[] };
+  /** With `criteria`, `failedChecks` lists the checks the current model misses. */
+  baseline: Score & { runs: Measurement[]; byKind: KindRate[]; failedChecks?: string[] };
   items: string[];
   reliable: string[];
   samples: string[];
@@ -181,10 +221,10 @@ export function score(runs: readonly Measurement[]): Score {
   };
 }
 
-/** Why a model does not qualify against the current model's score, or null when it does. */
-export function shortfall(item: { measured: boolean; score: number | null; latencyMs: number | null }, baselineScore: number, rules: Rules = {}): Shortfall {
+/** Why a model does not qualify against the current model's score, or against `criteria` when given; null when it qualifies. */
+export function shortfall(item: { measured: boolean; score: number | null; latencyMs: number | null; runs?: readonly Measurement[] }, baselineScore: number, rules: Rules = {}, criteria: Criteria | null = null): Shortfall {
   if (!item.measured || item.score === null) return "unmeasured";
-  if (item.score < baselineScore) return "score";
+  if (criteria ? !meetsCriteria(item.runs ?? [], criteria).meets : item.score < baselineScore) return criteria ? "criteria" : "score";
   if (rules.threshold !== undefined && rules.threshold !== null && item.score < rules.threshold) return "threshold";
   if (rules.maxLatencyMs !== undefined && rules.maxLatencyMs !== null && item.latencyMs !== null && item.latencyMs > rules.maxLatencyMs) return "latency";
   return null;
@@ -213,16 +253,19 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
   }
   const items = input.items ? [...input.items] : Object.keys(progress.baseline[0]!.items);
   const reliable = reliableOf();
-  const baseline = { ...score(progress.baseline), runs: progress.baseline, byKind: byKind(progress.baseline, input.kinds) };
+  const criteria = input.criteria ?? null;
+  const baseline = { ...score(progress.baseline), runs: progress.baseline, byKind: byKind(progress.baseline, input.kinds), ...(criteria ? { failedChecks: meetsCriteria(progress.baseline, criteria).failed } : {}) };
   const result = (status: EvaluateResult<T>["status"], rest: Partial<EvaluateResult<T>> = {}): EvaluateResult<T> => ({
     status, baseline, items, reliable, samples: [], search: null, candidates: [...tried.values()], top: [], cheaper: [], nearMisses: [], challenged: [], challengers: [], provisionalTried: false, ended: null, ...rest,
   });
-  const floor = input.floor === undefined ? EVAL_FLOOR : input.floor;
+  const floor = criteria ? null : input.floor === undefined ? EVAL_FLOOR : input.floor;
   if (floor !== null && baseline.score !== null && baseline.score < floor - 1e-9) return result("below_floor");
-  if (reliable.length < sampleSize) return result("too_few_reliable");
+  // Against the criteria, a screen may use items the current model fails: it is not the bar.
+  const pool = criteria ? items : reliable;
+  if (pool.length < sampleSize) return result("too_few_reliable");
 
   // 2. The samples.
-  const samples = [...await input.sample(reliable, sampleSize)];
+  const samples = [...await input.sample(pool, sampleSize)];
   const entry = (option: T, stage: Stage, provisional: boolean): Evaluated<T> => {
     let found = tried.get(option.key);
     if (!found) {
@@ -244,7 +287,8 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
       throw error;
     }
     if (!measurement) throw new Error(`The screen of ${option.key} returned no measurement.`);
-    const accepted = samples.every(item => measurement.items[item] === true);
+    // Against the criteria a screen passes when the samples meet them, as the full runs must.
+    const accepted = criteria ? meetsCriteria([measurement], criteria).meets : samples.every(item => measurement.items[item] === true);
     Object.assign(tracked, { screen: measurement, status: accepted ? "unmeasured" : "screened_out", ...score([measurement]) });
     on.trial?.({ stage, option, measurement, accepted });
     return accepted;
@@ -274,14 +318,14 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
   for (const finalist of search.finalists) await full(finalist, tried.get(finalist.key)?.stage ?? "search");
 
   const baselineScore = baseline.score!;
-  const qualifies = (item: Evaluated<T>) => shortfall({ measured: item.status === "measured", score: item.score, latencyMs: item.latencyMs }, baselineScore, rules) === null;
+  const qualifies = (item: Evaluated<T>) => shortfall({ measured: item.status === "measured", score: item.score, latencyMs: item.latencyMs, runs: item.runs }, baselineScore, rules, criteria) === null;
   const cheaperThanBaseline = (item: Evaluated<T>) => item.costPerItemUsd !== null && (baseline.costPerItemUsd === null || item.costPerItemUsd < baseline.costPerItemUsd);
   const finals = search.finalists.map(option => tried.get(option.key)!).filter(item => item.status === "measured");
   const leader = [...finals].sort((a, b) => b.score! - a.score! || (a.costPerItemUsd ?? Infinity) - (b.costPerItemUsd ?? Infinity) || strength(a.option) - strength(b.option))[0]?.option ?? null;
 
   // 4. The challengers, then the provisional pick.
   const finalCheaper = baseline.costPerItemUsd === null || finals.some(item => qualifies(item) && item.costPerItemUsd !== null && item.costPerItemUsd < baseline.costPerItemUsd!);
-  const ceiling = finalCheaper || input.baselinePrice === null ? {} : { maxPrice: input.baselinePrice };
+  const ceiling = finalCheaper || criteria || input.baselinePrice === null ? {} : { maxPrice: input.baselinePrice };
   const unplaced = input.unplaced ?? [];
   const keys = new Set(tried.keys());
   const challenged = leader ? challengers(input.ladder, leader, keys, { count: CHALLENGERS, strength, unplaced, ...ceiling }) : unplaced.filter(item => !keys.has(item.key));
@@ -305,7 +349,7 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
   const rank = () => {
     const candidates = [...tried.values()];
     for (const item of candidates) {
-      item.shortfall = shortfall({ measured: item.status === "measured", score: item.score, latencyMs: item.latencyMs }, baselineScore, rules);
+      item.shortfall = shortfall({ measured: item.status === "measured", score: item.score, latencyMs: item.latencyMs, runs: item.runs }, baselineScore, rules, criteria);
       item.qualified = item.shortfall === null;
     }
     const top = rankTop(candidates.filter(item => item.qualified), item => strength(item.option));

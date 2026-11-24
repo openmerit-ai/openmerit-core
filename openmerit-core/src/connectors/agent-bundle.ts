@@ -11,7 +11,10 @@ const SOURCE = { connector: "agent-bundle", detail: "openmerit_recommend" };
 
 /** The graders that apply to a job's cases: expected answers from the examples, answers the user confirmed in the label check, the answers the case writer wrote, or a judge for free text. */
 function graders(bundle: TaskBundle, cases: readonly Case[]): Grader[] {
-  if (bundle.output.kind === "text") return [{ kind: "judge", description: "a judge model against each case's reference answer" }];
+  const criteria = bundle.criteria?.length ?? 0, guardrails = bundle.guardrails?.length ?? 0;
+  const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const checks = [...(criteria ? [count(criteria, "criterion", "criteria")] : []), ...(guardrails ? [count(guardrails, "guardrail", "guardrails")] : [])].join(" and ");
+  if (bundle.output.kind === "text") return [{ kind: "judge", description: `a judge model against each case's reference answer${checks ? `, on ${checks}` : ""}` }];
   const what = bundle.output.kind === "label" ? "labels" : "JSON answers";
   const given = new Set((bundle.examples ?? []).filter(example => example.expected !== undefined).map(example => JSON.stringify(example.input)));
   const fromExamples = cases.some(item => item.origin === "example" && given.has(JSON.stringify(item.input)));
@@ -21,6 +24,8 @@ function graders(bundle: TaskBundle, cases: readonly Case[]): Grader[] {
     ...(fromExamples ? [{ kind: "expected_output" as const, description: `the expected ${what} of your examples` }] : []),
     ...(confirmed ? [{ kind: "confirmed_label" as const, description: `${what} you confirmed in the label check` }] : []),
     ...(unconfirmed ? [{ kind: "written_answer" as const, description: `the ${what} OpenMerit wrote for its cases` }] : []),
+    // A right label or JSON answer is also judged on the guardrails.
+    ...(guardrails ? [{ kind: "judge" as const, description: `a judge model on ${count(guardrails, "guardrail", "guardrails")}` }] : []),
   ];
 }
 

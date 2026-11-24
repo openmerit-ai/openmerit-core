@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## The grading loop and recommending a pricier model — unreleased, 24 November 2026
+
+Reviewed the homepage against Scout's grading loop (a person marks sampled answers Looks good or Doesn't look right, the eval is rewritten where they disagree, and an accepted Eval is saved, versioned) and against recommending the cheapest model that meets an accepted Eval's criteria even when it costs more than the current model. `site/index.html` has no FAQ block. Its copy says Scout helps "find the right models for your task, weighing quality and cost", and never that OpenMerit only recommends cheaper models, so recommending a pricier model that meets the criteria contradicts nothing there. No homepage copy change is needed.
+
 ## The cloud review writes task specs — unreleased, 24 November 2026
 
 Reviewed the homepage against the cloud app's GitHub repository review now writing task specs with a reviewer model on OpenMerit's OpenRouter key: the reviewer reads the copy through read-only tools, the account keeps the specs (which quote the call's prompt, tool schemas and examples) as well as the model calls, and the review's spend goes into the account's ledger without counting as an evaluation. `site/index.html` makes no claim about the cloud app reading or keeping code, so no homepage change is needed. The app's Connections and Data pages now say the specs are kept and what they quote.

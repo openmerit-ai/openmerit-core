@@ -359,10 +359,10 @@ test("steps: a required step must happen, and order is checked only where a step
   assert.equal(checksBasedOn({ ...steps([1]), criteria: ["a", "b"], guardrails: ["c"] }), "Checks: C1–C2 (criteria); G1 (guardrails); S1, S2 (the spec's steps, on each case's tool calls). S3 lists no tools, so it is not checked.");
   for (const endpoint of ["openrouter", "anthropic"]) {
     assert.equal((await flowOf(steps([1]), "agent", endpoint)).result.pass, true, `${endpoint}: in order, and S3 does not fail it`);
-    assert.deepEqual((await flowOf(steps([1]), "refund-first", endpoint)).result, { caseId: "c1", pass: false, reason: "S2: it called refund_order before step 1 (Look the order up)." }, `${endpoint}: out of order`);
+    assert.deepEqual((await flowOf(steps([1]), "refund-first", endpoint)).result, { caseId: "c1", pass: false, reason: "S2: it called refund_order before step 1 (Look the order up).", failedChecks: ["S2"] }, `${endpoint}: out of order`);
     assert.equal((await flowOf(steps(), "refund-first", endpoint)).result.pass, true, `${endpoint}: without after, either order passes`);
     assert.equal((await flowOf(steps(), "agent", endpoint)).result.pass, true);
-    assert.deepEqual((await flowOf(steps(), "tool-user", endpoint)).result, { caseId: "c1", pass: false, reason: "S2: it never called refund_order (Refund it)." }, `${endpoint}: a required step it skipped`);
+    assert.deepEqual((await flowOf(steps(), "tool-user", endpoint)).result, { caseId: "c1", pass: false, reason: "S2: it never called refund_order (Refund it).", failedChecks: ["S2"] }, `${endpoint}: a required step it skipped`);
   }
 });
 

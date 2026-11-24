@@ -22,6 +22,7 @@ const settings: Record<GuardrailKey, { label: string; shape: Shape; hint?: strin
   actionPolicy: { label: "What the agent may do with a pick", shape: "policy" },
   agentEvalRequired: { label: "Agent eval", shape: "text", hint: "warn or required" },
   minAgentPassRate: { label: "Minimum agent pass rate", shape: "percent" },
+  criteriaPassRate: { label: "Criteria pass rate", shape: "percent", hint: "Default 90%" },
 };
 // open_pr is a valid guardrail, but nothing opens pull requests yet: it is shown as launching soon
 // and offered only where it is already set.

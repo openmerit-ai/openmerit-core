@@ -84,10 +84,12 @@ export async function serveMcp(input: NodeJS.ReadableStream = process.stdin, out
         running.add(runId);
         try {
           const result = await advanceInDaemon({ runId, cwd, env, answers: (args.answers && typeof args.answers === "object" ? args.answers : {}) as Answers, log: line => { progress.push(line); log(line); } });
-          const questions = result.questions.map(question => `- [${question.id}] (${question.kind}) ${question.prompt}${question.options ? `\n  Options: ${question.options.map(option => `${option.value}${option.label !== option.value ? ` = ${option.label}` : ""}`).join(" | ")}` : ""}${question.detail ? `\n  ${question.detail.split("\n").join("\n  ")}` : ""}`).join("\n");
+          const questions = result.questions.map(question => `- [${question.id}] (${question.kind}) ${question.prompt}${question.options ? `\n  Options: ${question.options.map(option => `${option.value}${option.label !== option.value ? ` = ${option.label}` : ""}`).join(" | ")}` : ""}${question.detail ? `\n  ${question.detail.split("\n").join("\n  ")}` : ""}${question.hint ? `\n  Also: ${question.hint}` : ""}`).join("\n");
+          // The grading loop's answers are the person's own judgment: the agent shows them and relays the grade, never grades.
+          const grading = result.questions.some(question => question.id.startsWith("grade_")) ? " Show the person each answer below and relay their grade, good or bad with an optional note after a colon; do not grade answers yourself." : "";
           const text = [
             ...(notice ? [notice] : []), ...result.notices,
-            questions ? `Run ${runId} needs the user (${result.status}). Ask them, then call openmerit_scout again with runId "${runId}" and answers keyed by question id:\n${questions}` : renderStep(result),
+            questions ? `Run ${runId} needs the user (${result.status}). Ask them, then call openmerit_scout again with runId "${runId}" and answers keyed by question id.${grading}\n${questions}` : renderStep(result),
           ].join("\n\n");
           return { text, data: { ...result, progress: progress.slice(-40), ...(update ? { update } : {}) }, ...(result.status === "failed" ? { isError: true } : {}) };
         } finally { running.delete(runId); }
