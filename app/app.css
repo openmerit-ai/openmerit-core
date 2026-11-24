@@ -147,6 +147,8 @@ h2 .count { display: inline-block; margin-left: 6px; padding: 0 5px; min-width: 
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th { text-align: left; font-weight: 500; font-size: 12.5px; color: var(--muted); padding: 7px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 td { padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+/* Rows where the model changed: a run that found a cheaper model, a task that switched to one. */
+tr.switch td { background: var(--add); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr.current td { background: var(--soft); }
 tr.picked td:first-child { box-shadow: inset 3px 0 var(--green); }

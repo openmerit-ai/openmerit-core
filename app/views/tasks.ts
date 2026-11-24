@@ -35,7 +35,7 @@ function table(tasks: Task[]): Html {
         <table>
           <thead><tr><th>Task</th><th>Model in use</th><th>Last run</th><th>Latest</th><th>Watch</th></tr></thead>
           <tbody>
-            ${tasks.map((task) => html`<tr>
+            ${tasks.map((task) => html`<tr${task.status === "switched" ? html` class="switch"` : ""}>
               <td><a href="${taskLink(task)}">${task.name}</a><span class="sub">${task.environment}${task.agent ? html` · agent ${guardrails("agent", `${task.environment}:${task.agent}`, task.agent)}` : ""} · <a href="${taskLink(task, "eval")}">Eval</a> · ${guardrails("task", task.id, "Guardrails")}</span></td>
               <td>${model(task.currentModel)}</td>
               <td>${task.status === "running" ? "Running" : day(task.lastRunAt)}</td>

@@ -49,6 +49,14 @@ export function outcome(run: Run, task: Task | undefined): Html {
   return describe({ status: found.status, pick: found.model, current: found.from ?? task?.currentModel ?? "", saving }, (text) => html`${text}`);
 }
 
+// A finished run that found a cheaper model, whether or not the switch was approved since.
+// The task records the latest run's status, which turns "switched" once approved.
+export function proposedSwitch(run: Run, task: Task | undefined): boolean {
+  if (run.status !== "done") return false;
+  const status = task && task.lastJobId === run.id ? task.status : run.result?.status;
+  return status === "picked" || status === "switched";
+}
+
 // Who started the run: the coding agent that asked, by the name its MCP client sent, or a watch.
 function askedBy(run: Run): Html {
   if (run.kind === "watch") return html`${logo("openmerit")}OpenMerit<span class="sub">watching this task</span>`;
@@ -135,7 +143,7 @@ export const runsView: View<{ runs: Run[]; tasks: Task[]; jobs: JobView[] }> = {
           <tbody>
             ${runs.map((run) => {
               const task = byId.get(run.taskId);
-              return html`<tr><td><a href="/r/${run.id}/">${task?.name ?? run.result?.task ?? run.taskId}</a><span class="sub">${task?.environment ?? ""}</span></td><td>${outcome(run, task)}</td><td>${askedBy(run)}</td><td class="num">${when(run.startedAt)}</td></tr>`;
+              return html`<tr${proposedSwitch(run, task) ? html` class="switch"` : ""}><td><a href="/r/${run.id}/">${task?.name ?? run.result?.task ?? run.taskId}</a><span class="sub">${task?.environment ?? ""}</span></td><td>${outcome(run, task)}</td><td>${askedBy(run)}</td><td class="num">${when(run.startedAt)}</td></tr>`;
             })}
           </tbody>
         </table>
