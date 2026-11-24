@@ -18,8 +18,9 @@ import { applyLabelCheck, BudgetRefused, caseKind, checksBasedOn, completeWith, 
 import { approvalQuestion, basedOn, mergeEvidence, strongest } from "../engine.ts";
 import { baselineResult, byKind, floorNote, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, FINALISTS, modelResult, newProgress, redact, SAMPLE_SIZE, score, taskResult, type AgentRun, type CatalogueModel, type Ledger, type ModelResult, type ResolvedGuardrails } from "../engine.ts";
 import { agentBundle, caseEvidence } from "../../../openmerit-core/src/connectors/agent-bundle.ts";
+import { advanceLoop, completeHarness, criteriaOf, feedbackOf, gradeQuestions, MAX_ROUNDS, pickSamples, readGrade, reviseEval, startLoop, type CaseAnswer, type LoopState, type SampleGrade } from "../../../openmerit-core/src/eval/loop.ts";
 import { buildPool, OPENROUTER, regionNotice, type Option, type Pool, type Provisional } from "../pool.ts";
-import { DEFAULT_PROJECT, JOB_BUDGET, specOf, type EvalSource } from "./account.ts";
+import { DEFAULT_PROJECT, JOB_BUDGET, specOf, type EvalBar, type EvalSource } from "./account.ts";
 import { proposeEdit, renderMarkdown, type AgentEvalSummary, type Fix, type JobResult, type MeasuredModel } from "../report.ts";
 import { capture } from "../analytics.ts";
 import { services } from "../services.ts";
@@ -65,7 +66,8 @@ export type JobStatus = "queued" | "running" | "needs_input" | "done" | "failed"
 export interface JobState {
   input: JobInput;
   status: JobStatus;
-  phase: "source" | "cases" | "label_check" | "models" | "ranking" | "agent_eval" | "action" | "done";
+  /** `grading`: a person grades the round's sampled answers (the grading loop). */
+  phase: "source" | "cases" | "label_check" | "models" | "ranking" | "grading" | "agent_eval" | "action" | "done";
   questions: Question[];
   notices: string[];
   /** Fixes for notices recorded in steps; the result adds those of its last stages. Absent from jobs started before them. */
@@ -96,7 +98,8 @@ export interface LiveProgress {
   minutesLeft: number | null;
 }
 
-type Measured = ({ kind: "ok" } & MeasureResult) | { kind: "unavailable" | "refused" | "error"; reason: string };
+/** A measure step's outcome. A full first run of a round also keeps its answers, redacted, for the grading loop's samples. */
+type Measured = ({ kind: "ok"; answers?: CaseAnswer[] } & MeasureResult) | { kind: "unavailable" | "refused" | "error"; reason: string };
 
 /**
  * Retries for the steps that call models. @rivet-dev/workflows counts a step that the actor's stop
@@ -206,7 +209,8 @@ export const job = workflow({
   createState: (_c, input: JobInput): JobState => ({
     input, status: "queued", phase: "source", questions: [], notices: [], progress: { measured: 0, planned: null }, result: null, error: null, updatedAt: now(),
   }),
-  queues: { answers: queue<{ answers: Answers }>() },
+  // `by` is the Clerk user who sent the answers, when the sender knows it: a grade's author.
+  queues: { answers: queue<{ answers: Answers; by?: string | null }>() },
   run: async ctx => {
     const jobId = ctx.key[0]!;
     /** The report of what was measured so far, once the pool is known; a stopped or failed job saves it. */
@@ -259,7 +263,7 @@ export const job = workflow({
             if (added.length) s.state.notices.push(`${added.length} example${added.length === 1 ? "" : "s"} the coding agent sent ${added.length === 1 ? "is" : "are"} not in the accepted eval, so the run did not use ${added.length === 1 ? "it" : "them"}: revise the eval in the app to add ${added.length === 1 ? "it" : "them"}.`);
             const differs = JSON.stringify(specOf(sent)) !== JSON.stringify(current.spec);
             if (differs) s.state.notices.push(`The run used the criteria of accepted eval version ${current.version}, not the ones the coding agent sent: the eval in the app is the one to edit.`);
-            return { cases: current.cases, version: current.version, spec: current.spec, source: "app" as EvalSource };
+            return { cases: current.cases, version: current.version, spec: current.spec, source: "app" as EvalSource, bar: current.bar };
           }
           const [saved, approved] = await Promise.all([task.labels(), task.written()]);
           const { config, fetch } = services();
@@ -307,13 +311,14 @@ export const job = workflow({
             const label = saved[caseKey(item.input)];
             return item.expected === undefined && label ? { ...item, expected: label.expected, approved: label.approved } : item;
           });
-          return { cases: [...examples, ...(approved ?? made.cases.filter(item => item.origin === "written"))], version: null, spec: null, source };
+          return { cases: [...examples, ...(approved ?? made.cases.filter(item => item.origin === "written"))], version: null, spec: null, source, bar: "current" as EvalBar };
         },
       });
-      // A job recorded before evals had versions returned only the cases.
-      const written = Array.isArray(step) ? { cases: step as Case[], version: null, spec: null, source: "openmerit" as EvalSource } : step;
-      const bundle: TaskBundle = written.spec ? { ...sent, ...written.spec } : sent;
-      const cases = await ctx.loop({
+      // A job recorded before evals had versions returned only the cases, and one recorded before the grading loop no bar.
+      const written = Array.isArray(step) ? { cases: step as Case[], version: null, spec: null, source: "openmerit" as EvalSource, bar: "current" as EvalBar } : step;
+      // The bundle and cases change when the grading loop writes the eval again.
+      let bundle: TaskBundle = written.spec ? { ...sent, ...written.spec } : sent;
+      let cases = await ctx.loop({
         name: "label-check", state: written.cases,
         run: async (loop, current) => {
           // An accepted eval was reviewed already: its unanswered cases are left out, not asked about.
@@ -339,33 +344,49 @@ export const job = workflow({
           return Loop.continue(next);
         },
       });
-      // A first run's cases, as the label check left them, are the eval it accepts as version 1.
-      const evalVersion = await ctx.step({
-        name: "eval", timeout: 60_000,
+      // A case with no mocked result for one of the task's tools is the eval's defect, so no model runs it.
+      const casesOf = (from: readonly Case[]) => {
+        const invalid = invalidCases(bundle, from.filter(labeled));
+        const usable = from.filter(item => labeled(item) && !invalid.some(bad => bad.caseId === item.id));
+        return {
+          invalid, usable, caseIds: usable.map(item => item.id), kinds: Object.fromEntries(usable.map(item => [item.id, caseKind(item)])),
+          counts: { total: usable.length, fromExamples: usable.filter(item => item.origin === "example").length, written: usable.filter(item => item.origin !== "example").length },
+        };
+      };
+      let { invalid, usable, caseIds, kinds, counts } = casesOf(cases);
+
+      // The grading loop: in a task's first run, a person started, on cases OpenMerit wrote, a person grades sampled answers
+      // after each search (openmerit-core's eval/loop.ts, as the CLI's Scout does), and that is the review that accepts the
+      // eval. Where they and the eval disagree, OpenMerit writes the eval again and searches again; once they agree on every
+      // answer, the run accepts it as version 1. Jobs that had passed this point before the loop existed accept it here, as they began.
+      const gradingVersion = await ctx.getVersion("grading-loop", 2);
+      const grade = gradingVersion === 2 && await ctx.step("grading", async s =>
+        s.state.input.kind === "run" && written.version === null && usable.some(item => item.origin === "written") && !!services().config.openrouter.apiKey);
+      /** Accepts a first run's eval as version 1, as the job measures it, and records the version the job ran on. */
+      const acceptFirst = (name: string, source: EvalSource, bar: EvalBar, by: string | null) => ctx.step({
+        name, timeout: 60_000,
         run: async s => {
           const account = s.client<Registry>().account.getOrCreate([s.state.input.accountId]);
-          const version = written.version ?? await account.acceptFirstEval({ taskId, projectId, bundle: sent, spec: specOf(sent), cases, source: written.source, by: s.state.input.userId ?? null });
+          const version = written.version ?? await account.acceptFirstEval({ taskId, projectId, bundle: sent, spec: specOf(bundle), cases, source, by: by ?? s.state.input.userId ?? null, bar });
           await account.setJobEval({ jobId, version });
           return version;
         },
       });
-      // A case with no mocked result for one of the task's tools is the eval's defect, so no model runs it.
-      const invalid = invalidCases(bundle, cases.filter(labeled));
-      const usable = cases.filter(item => labeled(item) && !invalid.some(bad => bad.caseId === item.id));
-      const caseIds = usable.map(item => item.id);
-      const kinds = Object.fromEntries(usable.map(item => [item.id, caseKind(item)]));
+      // Without grading, a first run's cases, as the label check left them, are the eval it accepts as version 1. A graded run accepts it once the person agrees.
+      let evalVersion: number | null = grade ? null : await acceptFirst("eval", written.source, written.bar ?? "current", null);
       /** The current model's failed cases and why, from its recorded measure steps, so a replay rebuilds the same. */
       const failedCases = new Map<string, { caseId: string; kind: string; reason: string }>();
-      const counts = { total: usable.length, fromExamples: usable.filter(item => item.origin === "example").length, written: usable.filter(item => item.origin !== "example").length };
 
-      // 3. Models: the ECI-ordered pool over every allowed endpoint.
-      const models = await ctx.step({
-        name: "models", timeout: 60_000,
+      // 3. Models: the ECI-ordered pool over every allowed endpoint. A wide pool, for the criteria bar, takes every eligible model whatever its price.
+      // An eval a person accepted against the criteria keeps that bar in later runs, watch jobs among them.
+      const acceptedBar: EvalBar = written.bar ?? "current";
+      const poolStep = (name: string, wide: boolean) => ctx.step({
+        name, timeout: 60_000,
         run: async s => {
           const client = s.client<Registry>();
           const catalogue = await client.catalogue.getOrCreate(["global"]).get();
           const endpoints = await client.account.getOrCreate([s.state.input.accountId]).endpointsForJob(projectId);
-          const built = buildPool({ catalogue, endpoints, bundle, guardrails: guardrails.effective });
+          const built = buildPool({ catalogue, endpoints, bundle, guardrails: guardrails.effective, wide });
           // The catalogue entries the job's calls are priced by, by the name each endpoint calls the model, so every step prices on this version.
           const index = catalogueIndex(catalogue);
           const priced: Record<string, CatalogueModel> = {};
@@ -375,7 +396,10 @@ export const job = workflow({
           }
           const judgeModel = index.find(services().config.models.judge);
           if (judgeModel) priced[services().config.models.judge] = judgeModel;
-          s.state.phase = "ranking"; s.state.notices.push(...built.notices); s.state.updatedAt = now();
+          s.state.phase = "ranking"; s.state.updatedAt = now();
+          // A later round's wider pool repeats the first pool's notices; it adds none.
+          if (name !== "models") return { pool: built, priced, catalogueVersion: catalogue.version };
+          s.state.notices.push(...built.notices);
           if (invalid.length) {
             const notice = `${invalid.length === 1 ? "Case" : "Cases"} left out for every model, because the eval cannot run ${invalid.length === 1 ? "it" : "them"}: ${invalid.map(item => `${item.caseId} (${item.reason})`).join("; ")}`;
             s.state.notices.push(notice);
@@ -387,12 +411,13 @@ export const job = workflow({
           return { pool: built, priced, catalogueVersion: catalogue.version };
         },
       });
-      const pool = models.pool as Pool;
+      let models = await poolStep("models", acceptedBar === "criteria");
+      let pool = models.pool as Pool;
 
       // Old jobs that started measuring before the shared policy ran other measure steps: their recorded steps do not replay here.
       const policy = await ctx.getVersion("ranking-policy", 2);
       const repeats = Math.max(1, guardrails.effective.repeats ?? DEFAULT_REPEATS);
-      const progress = newProgress<Option>();
+      let progress = newProgress<Option>();
       const minPassRate = guardrails.effective.minPassRate ?? 0;
       const maxLatency = Math.min(guardrails.effective.latencyMs ?? Infinity, bundle.constraints?.maxLatencyMs ?? Infinity);
       const rules = { threshold: minPassRate ? minPassRate - 1e-9 : null, maxLatencyMs: Number.isFinite(maxLatency) ? maxLatency : null };
@@ -416,7 +441,7 @@ export const job = workflow({
         status, pick: null, top: [], nearMisses: [], baseline: baselineOf(), candidates: listed([...progress.tried.values()].map(item => modelResult(item, describe(item.option), score(progress.baseline), rules))),
         search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: [], finalists: [], challengers: [], shortfall: null }, agentEval: null, edit: { edits: [], instructions: null },
         spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices, fixes,
-        reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts, evalVersion,
+        reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts, ...(evalVersion === null ? {} : { evalVersion }),
       });
       /** The job's model client, and the grader the bundle's output calls for. */
       const grading = async (account: AccountHandle) => {
@@ -433,9 +458,10 @@ export const job = workflow({
       /**
        * One measure call as one workflow step: each repeat and each screen is its own step. Its ledger keys
        * start with the job and the step, so a replay reuses them; a retry after an error is a deliberate
-       * repeat, with its own keys.
+       * repeat, with its own keys. `keep` keeps the run's answers for the grading loop: the step's result
+       * is recorded, so they are redacted and cut short here, as the samples are.
        */
-      const measure = (option: Option, ids: string[]): Promise<Measured> => {
+      const measure = (option: Option, ids: string[], keep = false): Promise<Measured> => {
         const name = `measure-${++counter}`;
         const against = option !== pool.baseline && progress.baseline.length ? score(progress.baseline).score : null;
         return ctx.step({
@@ -453,17 +479,24 @@ export const job = workflow({
             s.state.live = live;
             const account = s.client<Registry>().account.getOrCreate([s.state.input.accountId]);
             const { client, grader } = await grading(account);
-            const onCase = (result: { pass: boolean }) => {
+            const byId = new Map(usable.map(item => [item.id, item]));
+            let answers: CaseAnswer[] = [];
+            const onCase = (result: { caseId: string; pass: boolean; reason?: string; failedChecks?: string[] }, ran: { output: string | null; toolCalls?: readonly { name: string; arguments: string }[] } | null) => {
               live.done += 1; live.passes += result.pass ? 1 : 0;
               live.history = [...live.history, { time: Date.now() / 1000, rate: live.passes / live.done * 100 }].slice(-60);
+              const item = byId.get(result.caseId);
+              if (keep && item) answers.push(...pickSamples([{ model: option.model, role: "current", answers: [{
+                caseId: item.id, kind: caseKind(item), input: item.input, output: ran?.output ?? "", toolCalls: (ran?.toolCalls ?? []).map(call => ({ name: call.name, arguments: call.arguments })),
+                pass: result.pass, failedChecks: result.failedChecks ?? [], ...(result.reason ? { reason: result.reason } : {}),
+              }] }], 1).map(({ id: _id, role: _role, model: _model, ...answer }) => answer));
             };
             const run = createMeasure({ bundle, cases: usable, client, grader, ledger: jobLedger(account, jobId), key: `${jobId}/${name}`, signal: s.abortSignal, onCase });
             for (let attempt = 1; ; attempt++) {
-              live.done = 0; live.passes = 0; live.history = [];
+              live.done = 0; live.passes = 0; live.history = []; answers = [];
               try {
                 const result = await run({ model: option.endpointModel, endpoint: option.endpoint }, ids, { run: String(attempt - 1) });
                 done(s);
-                return { kind: "ok" as const, ...result };
+                return { kind: "ok" as const, ...result, ...(keep ? { answers: ids.flatMap(id => answers.filter(answer => answer.caseId === id)) } : {}) };
               } catch (error) {
                 // An actor that is stopping aborts its calls: leave the step unrecorded so it runs again.
                 if (s.abortSignal.aborted) throw error;
@@ -496,42 +529,150 @@ export const job = workflow({
         if (!pool.baseline) throw new JobStop("failed", "baseline_failed", "No endpoint can run the current model: OpenMerit's OpenRouter key is not configured, and no endpoint of yours serves it.", { kind: "open", label: "Add an endpoint", path: "/project/" });
         const current = pool.baseline;
 
+        /** Each option's answers on its first full run of the round, for the samples. */
+        const answersOf = new Map<string, CaseAnswer[]>();
+
         // 4. Ranking: openmerit/engine's evaluateTask, the policy the CLI runs too. Each of its measure calls is one step.
         // The agent was told the provisional pick: when no measured model beats the current one per call, it is measured before keeping the current model.
-        const provisional = (told && [...pool.ranked, ...pool.unplaced].find(item => item.model === told.model && item.endpoint === told.endpoint)) || null;
-        const evaluated = await evaluateTask<Option>({
-          ladder: pool.ranked, unplaced: pool.unplaced, strength: item => item.eci ?? -Infinity, items: caseIds, repeats, provisional,
-          rules, kinds,
-          baselinePrice: current.price, progress,
-          measure: async (option, items, call) => {
-            const target = option ?? current;
-            if (call.provisional && call.role === "screen") plannedTotal = counter + 1 + repeats;
-            const result = await measure(target, [...(items ?? caseIds)]);
-            if (result.kind === "unavailable") {
-              if (!option) throw new JobStop("stopped", "baseline_failed", `${current.model} could not run: ${result.reason}`, { kind: "rerun" });
-              throw new CandidateUnavailable(result.reason);
-            }
-            if (result.kind !== "ok") {
-              const stop = stopFor(result, option ? target.model : `the current model ${current.model}`);
-              // The finalists are measured, so a challenger the budget refuses, or one that fails, ends the challengers only.
-              if (call.stage === "challenger") { endedFix = stop.fix; throw new EndChallengers(stop.message); }
-              throw stop;
-            }
-            if (!option) for (const item of result.results) if (!item.pass && item.reason && !failedCases.has(item.caseId)) failedCases.set(item.caseId, { caseId: item.caseId, kind: kinds[item.caseId] ?? "case", reason: item.reason });
-            return { items: Object.fromEntries(result.results.map(item => [item.caseId, item.pass])), costUsd: result.costUsd, costIsEstimate: result.costIsEstimate, latencyMs: result.latencyMs };
-          },
-          // Drawn in a recorded step, so a replay screens on the same cases.
-          sample: (reliable, count) => ctx.step("samples", async () => {
-            const left = [...reliable], picked: string[] = [];
-            for (let index = 0; index < count; index++) picked.push(left.splice(randomInt(left.length), 1)[0]!);
-            return picked;
-          }),
-          on: {
-            // The search is done: the finalists' runs and the challengers are left.
-            searched: search => { plannedTotal = counter + search.finalists.length * repeats + (Math.min(CHALLENGERS, pool.ranked.length) + pool.unplaced.length) * (1 + repeats); },
-            challengers: options => { plannedTotal = counter + options.length * (1 + repeats); },
-          },
-        });
+        let provisional = null as Option | null;
+        const rank = (round: number, bar: LoopState["bar"]) => {
+          provisional = (told && [...pool.ranked, ...pool.unplaced].find(item => item.model === told.model && item.endpoint === told.endpoint)) || null;
+          return evaluateTask<Option>({
+            ladder: pool.ranked, unplaced: pool.unplaced, strength: item => item.eci ?? -Infinity, items: caseIds, repeats, provisional,
+            rules, kinds,
+            baselinePrice: current.price, progress,
+            // Against the criteria, a model qualifies when it meets the eval's checks, whatever the current model scored.
+            criteria: bar === "criteria" ? criteriaOf(bundle, guardrails.effective.criteriaPassRate) : null,
+            measure: async (option, items, call) => {
+              const target = option ?? current;
+              if (call.provisional && call.role === "screen") plannedTotal = counter + 1 + repeats;
+              const result = await measure(target, [...(items ?? caseIds)], grade && call.role !== "screen" && call.repeat === 1);
+              if (result.kind === "unavailable") {
+                if (!option) throw new JobStop("stopped", "baseline_failed", `${current.model} could not run: ${result.reason}`, { kind: "rerun" });
+                throw new CandidateUnavailable(result.reason);
+              }
+              if (result.kind !== "ok") {
+                const stop = stopFor(result, option ? target.model : `the current model ${current.model}`);
+                // The finalists are measured, so a challenger the budget refuses, or one that fails, ends the challengers only.
+                if (call.stage === "challenger") { endedFix = stop.fix; throw new EndChallengers(stop.message); }
+                throw stop;
+              }
+              if (!option) for (const item of result.results) if (!item.pass && item.reason && !failedCases.has(item.caseId)) failedCases.set(item.caseId, { caseId: item.caseId, kind: kinds[item.caseId] ?? "case", reason: item.reason });
+              if (result.answers && !answersOf.has(target.key)) answersOf.set(target.key, result.answers);
+              // The checks a failed case missed, for the criteria bar (meetsCriteria).
+              const checks = Object.fromEntries(result.results.flatMap(item => (item.failedChecks?.length ? [[item.caseId, item.failedChecks]] : [])));
+              return { items: Object.fromEntries(result.results.map(item => [item.caseId, item.pass])), checks, costUsd: result.costUsd, costIsEstimate: result.costIsEstimate, latencyMs: result.latencyMs };
+            },
+            // Drawn in a recorded step, so a replay screens on the same cases.
+            sample: (reliable, count) => ctx.step(round === 1 ? "samples" : `samples-r${round}`, async () => {
+              const left = [...reliable], picked: string[] = [];
+              for (let index = 0; index < count; index++) picked.push(left.splice(randomInt(left.length), 1)[0]!);
+              return picked;
+            }),
+            on: {
+              // The search is done: the finalists' runs and the challengers are left.
+              searched: search => { plannedTotal = counter + search.finalists.length * repeats + (Math.min(CHALLENGERS, pool.ranked.length) + pool.unplaced.length) * (1 + repeats); },
+              challengers: options => { plannedTotal = counter + options.length * (1 + repeats); },
+            },
+          });
+        };
+        let loop: LoopState = startLoop(1, acceptedBar);
+        let evaluated = await rank(1, loop.bar);
+        let widened = acceptedBar === "criteria";
+        while (grade) {
+          const round = loop.round, suffix = round === 1 ? "" : `-r${round}`;
+          // The answers a person grades: the current model's first run, and the pick's, else the best measured finalist's.
+          const ranked = taskResult(evaluated, describe, describe(current), rules);
+          const others = [...answersOf.entries()].filter(([key]) => key !== current.key);
+          const rate = (answers: readonly CaseAnswer[]) => answers.filter(answer => answer.pass).length / Math.max(1, answers.length);
+          const candidateKey = (ranked.pick && answersOf.has(optionOf(ranked.pick).key) ? optionOf(ranked.pick).key : null) ?? others.sort(([, a], [, b]) => rate(b) - rate(a))[0]?.[0] ?? null;
+          const candidate = candidateKey ? [...pool.ranked, ...pool.unplaced].find(option => option.key === candidateKey) ?? null : null;
+          const samples = pickSamples([
+            { model: current.model, role: "current", answers: answersOf.get(current.key) ?? [] },
+            ...(candidate ? [{ model: candidate.model, role: "candidate" as const, answers: answersOf.get(candidate.key)! }] : []),
+          ]);
+          // No answer to grade: the eval is accepted as a first run's is without grading.
+          if (!samples.length) { evalVersion = await acceptFirst(`eval${suffix}`, written.source, loop.bar, null); break; }
+          loop = advanceLoop(loop, { type: "searched", artifact: { samples } });
+          const questions = gradeQuestions(bundle.task, loop);
+          const graded = await ctx.loop({
+            name: `grade${suffix}`, state: { grades: {} as Record<string, Omit<SampleGrade, "sampleId">>, by: null as string | null },
+            run: async (step, got) => {
+              const open = questions.filter(question => !got.grades[question.id]);
+              if (!open.length) return Loop.break(got);
+              await step.step("ask", async s => {
+                s.state.status = "needs_input"; s.state.phase = "grading"; s.state.questions = open; s.state.live = null; s.state.updatedAt = now();
+                await s.client<Registry>().account.getOrCreate([s.state.input.accountId]).jobUpdate({ jobId, status: "needs_input" });
+              });
+              const message = await step.queue.next("answer", { names: ["answers"] });
+              const next = await step.step("apply", async s => {
+                const grades = { ...got.grades }, problems: string[] = [];
+                for (const question of open) {
+                  const answer = message.body.answers[question.id];
+                  if (answer === undefined) continue;
+                  const read = readGrade(answer);
+                  if (read) grades[question.id] = read;
+                  else problems.push(`${question.id}: answer good or bad, with an optional note after a colon, such as "bad: <why>"`);
+                }
+                s.state.questions = []; s.state.status = "running"; s.state.phase = "ranking"; s.state.updatedAt = now();
+                s.state.notices = [...s.state.notices.filter(notice => !notice.startsWith("Answer not used: ")), ...problems.map(problem => `Answer not used: ${problem}`)];
+                await s.client<Registry>().account.getOrCreate([s.state.input.accountId]).jobUpdate({ jobId, status: "running" });
+                return { grades, by: message.body.by ?? got.by };
+              });
+              return Loop.continue(next);
+            },
+          });
+          const grades = questions.map((question, index): SampleGrade => ({ sampleId: samples[index]!.id, ...graded.grades[question.id]! }));
+          const artifact = loop.artifact!;
+          loop = advanceLoop(loop, { type: "graded", grades });
+          const by = graded.by;
+          if (loop.status === "accepted") {
+            evalVersion = await acceptFirst(`accept${suffix}`, "grading", loop.bar, by);
+            const accepted = { version: evalVersion, bar: loop.bar };
+            await ctx.step(`accepted${suffix}`, async s => {
+              s.state.notices.push(`You accepted the eval as version ${accepted.version}${accepted.bar === "criteria" ? ": since you marked the current model's own answers wrong, models are measured against its checks, and the cheapest that meets them is recommended even when it costs more" : ""}.`);
+            });
+            break;
+          }
+          if (loop.status === "regenerating") {
+            if (round >= MAX_ROUNDS) throw new JobStop("done", "not_accepted", `After ${MAX_ROUNDS} rounds of grading, the eval still disagrees with your grades, so it is not accepted and no model is recommended. Run the task again to start over.`, { kind: "rerun" });
+            const from = { bundle, cases, usable };
+            const revised = await ctx.step({
+              name: `revise${suffix}`, timeout: 0, maxRetries: INTERRUPTIONS,
+              run: async s => {
+                s.state.phase = "cases"; s.state.live = null; s.state.updatedAt = now();
+                const client = s.client<Registry>();
+                const account = client.account.getOrCreate([s.state.input.accountId]);
+                const { config, fetch } = services();
+                const index = catalogueIndex(await client.catalogue.getOrCreate(["global"]).get());
+                const writer = createClient(await keysFor(jobId, account, projectId), { fetch, model: model => index.find(model), timeoutMs: 600_000 });
+                // The reviser and the case writer run on OpenMerit's key, metered in the job's ledger under this round's keys.
+                const complete = completeWith(writer, { endpoint: OPENROUTER, model: config.models.caseWriter }, jobLedger(account, jobId), `${jobId}/revise-r${round}`, s.abortSignal);
+                let value;
+                try {
+                  value = await reviseEval({ bundle: from.bundle, cases: from.usable }, feedbackOf(artifact, grades), completeHarness(complete), s.abortSignal);
+                } catch (error) {
+                  if (s.abortSignal.aborted) throw error;
+                  return { error: redact(error instanceof Error ? error.message : String(error)).slice(0, 300) };
+                }
+                // The examples and their labels stay; the written cases are written again, from the person's grades, which stand in for the label check.
+                const next = [...from.cases.filter(item => item.origin === "example"), ...value.cases.filter(item => item.origin !== "example").map(item => ({ ...item, approved: true }))];
+                const spec = specOf(value.bundle);
+                // It is accepted once the person agrees with it, as version 1; until then it lives in this job.
+                s.state.notices.push(`OpenMerit wrote the eval again from your grades of round ${round}.`);
+                return { spec, cases: next };
+              },
+            });
+            if ("error" in revised) throw new JobStop("failed", "failed", `Writing the eval again from your grades failed: ${revised.error}`, { kind: "rerun" });
+            bundle = { ...sent, ...revised.spec }; cases = revised.cases;
+            ({ invalid, usable, caseIds, kinds, counts } = casesOf(cases));
+            loop = advanceLoop(loop, { type: "regenerated" });
+          }
+          // The next round measures from scratch, on the wide pool once the bar is the criteria.
+          if (loop.bar === "criteria" && !widened) { models = await poolStep("models-criteria", true); pool = models.pool as Pool; widened = true; }
+          progress = newProgress<Option>(); failedCases.clear(); answersOf.clear();
+          evaluated = await rank(loop.round, loop.bar);
+        }
 
         // The floor: the current model fails too much of its own eval for it to rank anything. A result, not a failure: it says why, with the failed cases.
         if (evaluated.status === "below_floor") {
@@ -550,20 +691,23 @@ export const job = workflow({
         const baseline = measuredModel(result.baseline);
         const candidates = listed(result.candidates);
         const top = result.top.map(measuredModel), cheaper = result.cheaper.map(measuredModel), nearMisses = result.nearMisses.map(measuredModel);
+        // Against the criteria, a current model that misses them is replaced by a model that meets them, whatever it costs.
+        const switches = result.failedChecks?.length ? top : cheaper;
         const notices: string[] = [], fixes: Fix[] = [];
         const { ended } = evaluated;
         if (ended && !ended.provisional) {
           const notice = `${ended.left.length === 1 ? "Challenger" : "Challengers"} not measured: ${ended.left.map(item => item.model).join(", ")}. ${ended.reason}`;
           notices.push(notice); fixes.push(...tie(endedFix, notice));
         }
-        if (provisional && evaluated.provisionalTried) {
-          const tried = evaluated.candidates.find(item => item.option.key === provisional.key);
-          if (ended?.provisional) fixes.push(...tie(endedFix, `The provisional pick ${provisional.model} was not measured. ${ended.reason}`));
-          notices.push(ended?.provisional ? `The provisional pick ${provisional.model} was not measured. ${ended.reason}`
-            : tried?.status === "screened_out" ? `No measured model that qualified was cheaper per call than ${current.model}, so the provisional pick ${provisional.model} was screened too, and failed the ${evaluated.samples.length} sample cases.`
-            : `No measured model that qualified was cheaper per call than ${current.model}, so the provisional pick ${provisional.model} was measured on every case too.`);
+        const picked = provisional;
+        if (picked && evaluated.provisionalTried) {
+          const tried = evaluated.candidates.find(item => item.option.key === picked.key);
+          if (ended?.provisional) fixes.push(...tie(endedFix, `The provisional pick ${picked.model} was not measured. ${ended.reason}`));
+          notices.push(ended?.provisional ? `The provisional pick ${picked.model} was not measured. ${ended.reason}`
+            : tried?.status === "screened_out" ? `No measured model that qualified was cheaper per call than ${current.model}, so the provisional pick ${picked.model} was screened too, and failed the ${evaluated.samples.length} sample cases.`
+            : `No measured model that qualified was cheaper per call than ${current.model}, so the provisional pick ${picked.model} was measured on every case too.`);
         }
-        const challenging = [...evaluated.challenged, ...(provisional && evaluated.provisionalTried ? [provisional] : [])];
+        const challenging = [...evaluated.challenged, ...(picked && evaluated.provisionalTried ? [picked] : [])];
 
         // 5. Agent eval: when the task is an agent (it offers tools, so it can take several model calls) or belongs to one,
         // the engine's rule checks the pick, then the next cheaper models. An agent task's own cases run end to end in
@@ -589,7 +733,7 @@ export const job = workflow({
           } : null;
           let agentCounter = 0;
           const checked = await checkAgent({
-            tasks: [{ task: bundle.task, options: cheaper.map(item => ({ key: `${item.endpoint} ${item.model}`, savingUsd: (baseline.costPerCallUsd ?? 0) - (item.costPerCallUsd ?? 0), item })) }],
+            tasks: [{ task: bundle.task, options: switches.map(item => ({ key: `${item.endpoint} ${item.model}`, savingUsd: (baseline.costPerCallUsd ?? 0) - (item.costPerCallUsd ?? 0), item })) }],
             measure: agentMeasure ? assignment => ctx.step({
               name: `agent-${++agentCounter}`, timeout: 0, maxRetries: INTERRUPTIONS,
               run: async s => agentMeasure(new Map([...assignment].map(([task, option]) => [task, { model: option.item.endpointModel, endpoint: option.item.endpoint }])), `${jobId}/agent-${agentCounter}`, s.client<Registry>().account.getOrCreate([input.accountId])),
@@ -617,7 +761,7 @@ export const job = workflow({
             const account = client.account.getOrCreate([input.accountId]);
             const spent = await account.spent({ jobId });
             const index = catalogueIndex(await client.catalogue.getOrCreate(["global"]).get());
-            const jobStatus: JobResult["status"] = chosen ? "picked" : agentEval && cheaper.length ? "agent_eval_failed" : !pool.ranked.length && !pool.unplaced.length ? "no_candidates" : "keep_current";
+            const jobStatus: JobResult["status"] = chosen ? "picked" : agentEval && switches.length ? "agent_eval_failed" : !pool.ranked.length && !pool.unplaced.length ? "no_candidates" : "keep_current";
             const report: JobResult = {
               failedCases: failedOf(), baselineByKind: evaluated.baseline.byKind, invalidCases: invalid,
               status: jobStatus, top, nearMisses, baseline, candidates,
@@ -628,7 +772,8 @@ export const job = workflow({
               basedOn: [...basedOn(strongest(mergeEvidence(bundle.task, bundle.current.model, [agentBundle({ bundle, baselineEndpoint: pool.baseline!.endpoint, find: index.find }).evidence(), caseEvidence(bundle, usable)]))), ...[checksBasedOn(bundle)].filter((line): line is string => line !== null)],
               approval: chosen ? approvalQuestion(bundle.task, bundle.current.model, chosen) : null,
               spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices: [...s.state.notices, ...notices], fixes: [...(s.state.fixes ?? []), ...fixes],
-              reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts, evalVersion,
+              reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts, ...(evalVersion === null ? {} : { evalVersion }),
+              ...(grade || acceptedBar === "criteria" ? { grading: { rounds: grade ? loop.round : 0, accepted: grade ? loop.status === "accepted" : true, bar: loop.bar, failedChecks: result.failedChecks ?? [], summary: result.summary ?? null } } : {}),
             };
             await finish(s, client, jobId, "done", report, null);
           },

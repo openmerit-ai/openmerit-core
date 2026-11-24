@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import type { EvalView, JobRow } from "../src/actors/account.ts";
-import { bundle, caller, fakeModels, startApp, stop, subscribe, waitFor, type App, type FakeModels } from "./helpers.ts";
+import { bundle, caller, fakeModels, startApp, stop, subscribe, untilDone, waitFor, type App, type FakeModels } from "./helpers.ts";
 
 interface Case { id: string; input: Record<string, string>; expected?: unknown; origin: string; approved?: boolean }
 
@@ -25,14 +25,15 @@ describe("evals", () => {
     const firstJob = first.data.job_id as string;
     await waitFor(result(firstJob), value => value.data.status === "needs_input");
     await me.tool("openmerit_answer", { job_id: firstJob, answers: { "label_example-7": "billing", label_check: ["written-1"] } });
-    const done = await waitFor(result(firstJob), finished);
+    const done = await untilDone(me, firstJob);
     assert.equal(done.data.status, "done", done.text);
     assert.match(done.text, /eval classifier's accepted eval is version 1; the repository has no copy/);
 
     const [task] = (await me.api<{ id: string }[]>("/api/tasks")).body;
     const evalUrl = `/api/tasks/${task!.id}/eval`;
     const first1 = (await me.api<EvalView>(evalUrl)).body;
-    assert.deepEqual([first1.accepted!.version, first1.accepted!.source, first1.accepted!.runs, first1.draft], [1, "openmerit", 1, null]);
+    // untilDone graded the run's answers as OpenMerit did, which is the review that accepted it.
+    assert.deepEqual([first1.accepted!.version, first1.accepted!.source, first1.accepted!.runs, first1.draft], [1, "grading", 1, null]);
     const cases = first1.accepted!.cases as Case[];
     assert.equal(cases.find(item => item.id === "example-7")!.expected, "billing", "the label-check answer is in the eval");
     assert.deepEqual(cases.filter(item => item.origin === "written").map(item => [item.id, item.approved]), [["written-1", true], ["written-2", false]]);

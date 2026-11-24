@@ -87,6 +87,30 @@ test("a run shows its saved report, or the job's live state until it has one", a
   assert.match(text(runView.render(await get<JobView>("/api/runs/z1c7m4"), page(me))), /Coding reviewer: the run did not finish .*no known answers/);
 });
 
+test("a run in the grading loop shows each sampled answer to grade, and a report says what the grades decided", async () => {
+  const me = await account();
+  const job = await get<JobView>("/api/runs/g4r9d2");
+  const shown = runView.render(job, page(me)).__html;
+  assert.equal(shown.match(/<fieldset class="card grade"/g)?.length, 2);
+  for (const question of job.questions) assert.match(shown, new RegExp(`name="${question.id}" value="good"[^>]*> Looks good`));
+  const read = text(runView.render(job, page(me)));
+  assert.match(read, /Grade its answers Grade them here or in your coding agent, which shows you the same 2 answers/);
+  assert.match(read, /Coding reviewer, answer 1 of 2: does it look right\? anthropic\/claude-sonnet-5\.5 \(your current model\), typical case written-1/);
+  assert.match(read, /OpenMerit: passed/);
+  assert.match(read, /OpenMerit: failed G3: The invalid_code finding for R5O\.9 has no activity_id\./);
+  assert.match(read, /Send 2 grades/);
+  // The fake applies grades as the cloud app does: once every answer has one, the run measures again.
+  const graded = await fake(new Request("https://openmerit.ai/api/runs/g4r9d2/answers", { method: "POST", headers: { authorization: "Bearer preview-populated", "content-type": "application/json" }, body: JSON.stringify({ answers: Object.fromEntries(job.questions.map(question => [question.id, "bad: placeholder code"])) }) }));
+  assert.deepEqual([graded.status, ((await graded.json()) as JobView).status], [200, "running"]);
+
+  const base = await get<Report>("/api/runs/k7m2q9");
+  const summary = "Your current model fails 1 of your checks (G3); the cheapest model that passes them is anthropic/claude-haiku-5-5, at $0.40 more per 1,000 calls.";
+  const criteria = text(runView.render({ ...base, grading: { rounds: 2, accepted: true, bar: "criteria", failedChecks: ["G3"], summary } }, page(me)));
+  assert.match(criteria, /You accepted the eval after 2 rounds of grading\. Since you marked answers of the model in use now wrong, every model was measured against the eval's checks/);
+  assert.ok(criteria.includes(summary), "the pick card says what the current model misses");
+  assert.doesNotMatch(text(runView.render(base, page(me))), /Your Grades/, "a run nobody graded has no grades section");
+});
+
 test("agent guardrails use environment:agent IDs, and show each value with the level it came from", async () => {
   const me = await account();
   const tasks = await get<Task[]>("/api/tasks");

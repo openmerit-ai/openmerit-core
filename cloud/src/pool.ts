@@ -67,7 +67,12 @@ export function allowedEndpoints(endpoints: readonly EndpointInfo[], guardrails:
   return allowed;
 }
 
-export function buildPool(input: { catalogue: Catalogue; endpoints: readonly EndpointInfo[]; bundle: TaskBundle; guardrails: Guardrails }): Pool {
+/**
+ * The job's pool. `wide`, for the criteria bar once a person marked the current model's own answers
+ * wrong: every eligible model whatever its price, as the CLI's wide pool, but the current model, which
+ * runs as the baseline.
+ */
+export function buildPool(input: { catalogue: Catalogue; endpoints: readonly EndpointInfo[]; bundle: TaskBundle; guardrails: Guardrails; wide?: boolean }): Pool {
   const notices: string[] = [];
   const { catalogue, bundle, guardrails } = input;
   const index = catalogueIndex(catalogue);
@@ -83,6 +88,7 @@ export function buildPool(input: { catalogue: Catalogue; endpoints: readonly End
     if (models && !models.has(option.model.toLowerCase()) && !models.has(option.endpointModel.toLowerCase())) return false;
     // openmerit/engine's rule, as the CLI applies it; a model outside the catalogue is placed by measurement only.
     const model = option.inCatalogue ? index.find(option.model) : null;
+    if (input.wide) return !model || (model.id !== current?.id && eligible(model, null, needs));
     return !model || eligible(model, current, needs);
   };
   const needs = { tools: !!bundle.tools?.length, vision: !!bundle.constraints?.needsVision, structuredOutput: bundle.output.kind === "json" };

@@ -50,9 +50,10 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS repo_reviews (repo_id TEXT NOT NULL, requested_at INTEGER NOT NULL)`,
   // A task's eval: the accepted one runs, unchanged, until the task changes or someone revises it. version counts acceptances;
   // shape is the prompt, tools and output it was accepted for. The draft_ columns hold the eval under review, edited in place;
-  // draft_bundle is the changed task's bundle, which replaces the task's on acceptance.
+  // draft_bundle is the changed task's bundle, which replaces the task's on acceptance. bar is `criteria` once a person grading
+  // a run's answers marked the current model's own wrong, so models are measured against the eval's checks; else null.
   `CREATE TABLE IF NOT EXISTS evals (task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, version INTEGER NOT NULL, spec TEXT NOT NULL, cases TEXT NOT NULL, shape TEXT NOT NULL,
-    source TEXT NOT NULL, accepted_by TEXT, accepted_at INTEGER NOT NULL,
+    source TEXT NOT NULL, accepted_by TEXT, accepted_at INTEGER NOT NULL, bar TEXT,
     draft_reason TEXT, draft_changed TEXT, draft_spec TEXT, draft_cases TEXT, draft_bundle TEXT, draft_by TEXT, draft_at INTEGER)`,
   // The version the coding agent last wrote to the repository's .openmerit/evals/.
   `CREATE TABLE IF NOT EXISTS eval_sync (task_id TEXT PRIMARY KEY, version INTEGER NOT NULL, synced_by TEXT NOT NULL, client TEXT, synced_at INTEGER NOT NULL)`,
@@ -99,8 +100,13 @@ export interface JobRow { id: string; projectId: string; taskId: string; kind: s
  * A job runs the bundle the coding agent sent with these fields replaced by the eval's.
  */
 export type EvalSpec = Pick<TaskBundle, "description" | "input" | "steps" | "criteria" | "guardrails">;
-/** Who wrote the accepted eval: OpenMerit's case writer, a member's subscription or the coding agent's examples alone (each by a first run), a repository review, or a person in the app. */
-export type EvalSource = "openmerit" | "claude" | "chatgpt" | "examples" | "review" | "app";
+/**
+ * Who wrote the accepted eval: OpenMerit's case writer, a member's subscription or the coding agent's examples alone (each by a first run),
+ * a repository review, a person in the app, or a person grading a run's answers, after OpenMerit wrote it again from any grades that disagreed.
+ */
+export type EvalSource = "openmerit" | "claude" | "chatgpt" | "examples" | "review" | "app" | "grading";
+/** What a model must meet: the current model's score, or the eval's checks once a person marked the current model's own answers wrong. */
+export type EvalBar = "current" | "criteria";
 /** What about a task its eval was accepted for; a bundle that differs in one reopens the eval. */
 export type TaskPart = "prompt" | "tools" | "output";
 /**
@@ -111,7 +117,7 @@ export type TaskPart = "prompt" | "tools" | "output";
  */
 export interface EvalView {
   taskId: string; projectId: string;
-  accepted: { version: number; spec: EvalSpec; cases: Case[]; source: EvalSource; by: string | null; at: string; runs: number } | null;
+  accepted: { version: number; spec: EvalSpec; cases: Case[]; source: EvalSource; by: string | null; at: string; runs: number; bar: EvalBar } | null;
   draft: { reason: "task_changed" | "revise"; changed: TaskPart[]; spec: EvalSpec; cases: Case[]; output: TaskBundle["output"] | null; by: string | null; at: string } | null;
   repo: { version: number; by: string; client: string | null; at: string } | null;
 }
@@ -627,10 +633,10 @@ export const account = actor({
       Object.fromEntries((await c.db.execute(`SELECT e.task_id, e.version, e.draft_reason, s.version AS repo FROM evals e LEFT JOIN eval_sync s ON s.task_id = e.task_id`))
         .map(row => [String(row.task_id), { version: Number(row.version), repo: row.repo === null || row.repo === undefined ? null : Number(row.repo), review: row.draft_reason !== null && row.draft_reason !== undefined }])),
 
-    /** The accepted eval a job runs on, unchanged; null before the task has one. */
-    evalFor: async (c, taskId: string): Promise<{ version: number; spec: EvalSpec; cases: Case[] } | null> => {
-      const [row] = await c.db.execute(`SELECT version, spec, cases FROM evals WHERE task_id = ?`, taskId);
-      return row ? { version: Number(row.version), spec: JSON.parse(String(row.spec)) as EvalSpec, cases: JSON.parse(String(row.cases)) as Case[] } : null;
+    /** The accepted eval a job runs on, unchanged, and the bar it was accepted against; null before the task has one. */
+    evalFor: async (c, taskId: string): Promise<{ version: number; spec: EvalSpec; cases: Case[]; bar: EvalBar } | null> => {
+      const [row] = await c.db.execute(`SELECT version, spec, cases, bar FROM evals WHERE task_id = ?`, taskId);
+      return row ? { version: Number(row.version), spec: JSON.parse(String(row.spec)) as EvalSpec, cases: JSON.parse(String(row.cases)) as Case[], bar: row.bar === "criteria" ? "criteria" : "current" } : null;
     },
 
     /**
@@ -660,11 +666,12 @@ export const account = actor({
 
     /**
      * The eval a task's first run wrote, after its label check, accepted as version 1 for the bundle it ran.
+     * A run whose answers a person graded accepts it once they agree with it, against the bar they graded to.
      * An eval accepted meanwhile stays; the version returned is the one the job ran on.
      */
-    acceptFirstEval: async (c, input: { taskId: string; projectId: string; bundle: TaskBundle; spec: EvalSpec; cases: Case[]; source: EvalSource; by: string | null }): Promise<number> => {
-      await c.db.execute(`INSERT INTO evals (task_id, project_id, version, spec, cases, shape, source, accepted_by, accepted_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?) ON CONFLICT (task_id) DO NOTHING`,
-        input.taskId, input.projectId, JSON.stringify(input.spec), JSON.stringify(input.cases), JSON.stringify(shapeOf(input.bundle)), input.source, input.by, Date.now());
+    acceptFirstEval: async (c, input: { taskId: string; projectId: string; bundle: TaskBundle; spec: EvalSpec; cases: Case[]; source: EvalSource; by: string | null; bar?: EvalBar }): Promise<number> => {
+      await c.db.execute(`INSERT INTO evals (task_id, project_id, version, spec, cases, shape, source, accepted_by, accepted_at, bar) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (task_id) DO NOTHING`,
+        input.taskId, input.projectId, JSON.stringify(input.spec), JSON.stringify(input.cases), JSON.stringify(shapeOf(input.bundle)), input.source, input.by, Date.now(), input.bar === "criteria" ? "criteria" : null);
       const [row] = await c.db.execute(`SELECT version FROM evals WHERE task_id = ?`, input.taskId);
       return Number(row?.version ?? 1);
     },
@@ -1015,7 +1022,7 @@ async function evalView(database: Database, taskId: string): Promise<EvalView | 
   const draftBundle = row?.draft_bundle ? JSON.parse(String(row.draft_bundle)) as TaskBundle : null;
   return {
     taskId, projectId: String(task.project_id),
-    accepted: row ? { version: Number(row.version), spec: JSON.parse(String(row.spec)) as EvalSpec, cases: JSON.parse(String(row.cases)) as Case[], source: row.source as EvalSource, by: (row.accepted_by as string | null) ?? null, at: iso(row.accepted_at)!, runs: Number(row.runs) } : null,
+    accepted: row ? { version: Number(row.version), spec: JSON.parse(String(row.spec)) as EvalSpec, cases: JSON.parse(String(row.cases)) as Case[], source: row.source as EvalSource, by: (row.accepted_by as string | null) ?? null, at: iso(row.accepted_at)!, runs: Number(row.runs), bar: row.bar === "criteria" ? "criteria" : "current" } : null,
     draft: row?.draft_reason ? {
       reason: row.draft_reason as "task_changed" | "revise", changed: JSON.parse(String(row.draft_changed ?? "[]")) as TaskPart[], spec: JSON.parse(String(row.draft_spec)) as EvalSpec, cases: JSON.parse(String(row.draft_cases)) as Case[],
       output: draftBundle?.output ?? null, by: (row.draft_by as string | null) ?? null, at: iso(row.draft_at)!,

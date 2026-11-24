@@ -11,7 +11,7 @@ import { watchState } from "../src/actors/account.ts";
 import { evaluateTask } from "../src/engine.ts";
 import { buildPool } from "../src/pool.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
-import { bundle, caller, costOf, crash, fakeCapture, fakeModels, startApp, stop, subscribe, waitFor, WEAK_BELOW, WRITTEN, TICKETS, catalogue, type App, type FakeModels } from "./helpers.ts";
+import { bundle, caller, costOf, crash, fakeCapture, fakeModels, startApp, stop, subscribe, untilDone, waitFor, WEAK_BELOW, WRITTEN, TICKETS, catalogue, type App, type FakeModels } from "./helpers.ts";
 
 const CLERK = { CLERK_SECRET_KEY: "sk_test_fake", CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from("clerk.openmerit.test$").toString("base64")}` };
 type Data = Record<string, unknown>;
@@ -175,7 +175,7 @@ test("a job waits on its label check across a restart, then measures on OpenRout
     // Unticking written-2 drops that case.
     const answered = await agent().tool("openmerit_answer", { job_id: jobId, answers: { "label_example-7": "billing", label_check: ["written-1"] } });
     assert.equal(answered.isError, false, answered.text);
-    const done = await waitFor(result, value => value.data.status === "done" || value.data.status === "failed" || value.data.status === "stopped");
+    const done = await untilDone(agent(), jobId);
     assert.equal(done.data.status, "done", done.text);
     const measured = done.data.result as Result;
     assert.equal(measured.status, "picked");
@@ -302,7 +302,7 @@ test("the coding agent sends back the user's decision on a result's change: an a
     const finish = async (jobId: string) => {
       await waitFor(() => result(jobId), value => value.data.status === "needs_input");
       await agent().tool("openmerit_answer", { job_id: jobId, answers: { "label_example-7": "billing", label_check: ["written-1", "written-2"] } });
-      return waitFor(() => result(jobId), value => ["done", "failed", "stopped"].includes(String(value.data.status)));
+      return untilDone(agent(), jobId);
     };
     const [done, other] = [await finish(kept), await finish(dropped)];
     const measured = done.data.result as Result & { approval: { id: string } };
@@ -381,7 +381,7 @@ test("a measure step replayed after a crash does not count its spend twice", asy
     await waitFor(async () => crashed, value => value !== null, 60_000);
     await crashed;
     app = await startApp({ models, env: app.env, storage: app.storage, enginePort: app.enginePort });
-    const done = await waitFor(() => agent().tool("openmerit_result", { job_id: jobId }), value => value.data.status === "done" || value.data.status === "failed", 180_000);
+    const done = await untilDone(agent(), jobId);
     assert.equal(done.data.status, "done", done.text);
 
     const expected = await cliPolicy("replayed classifier");
@@ -416,7 +416,7 @@ test("a challenger the budget refuses ends the challengers, and the job still re
     const jobId = started.data.job_id as string;
     await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => value.data.status === "needs_input");
     await agent.tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
-    const done = await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 180_000);
+    const done = await untilDone(agent, jobId);
     assert.equal(done.data.status, "done", done.text);
     const result = (await agent.api<Result & { top: unknown[]; notices: string[] }>(`/api/runs/${jobId}`)).body;
     assert.equal(result.status, "picked");
@@ -440,14 +440,15 @@ test("a job whose current model fails more than a fifth of its own eval recommen
   try {
     await subscribe(app, "org_floor");
     const agent = caller(app, "test:user_t:org_floor:admin");
-    // Three of the six examples carry the wrong queue, so the current model, which answers right, passes 5 of the 8 cases.
+    // Three of the six examples carry the wrong queue, so the current model, which answers right, passes 3 of the 6 cases.
+    // No written case is kept, so the eval is the bundle's own examples, which nobody grades: the floor ends the run.
     const wrong = bundle("floor classifier", false);
     for (const example of wrong.examples.slice(0, 3) as { expected?: string }[]) example.expected = example.expected === "billing" ? "account" : "billing";
     const started = await agent.tool("openmerit_recommend", { bundle: wrong });
     const jobId = started.data.job_id as string;
     await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => value.data.status === "needs_input");
-    await agent.tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
-    const done = await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 180_000);
+    await agent.tool("openmerit_answer", { job_id: jobId, answers: { label_check: [] } });
+    const done = await untilDone(agent, jobId);
     assert.equal(done.data.status, "done", done.text);
     const result = (await agent.api<Result & { approval: unknown; failedCases: { caseId: string; kind: string; reason: string }[]; baselineByKind: { kind: string; passes: number; total: number }[] }>(`/api/runs/${jobId}`)).body;
     assert.equal(result.status, "below_floor");
@@ -455,11 +456,64 @@ test("a job whose current model fails more than a fifth of its own eval recommen
     assert.equal(result.approval ?? null, null, "no approval question");
     assert.deepEqual(result.failedCases.map(item => [item.caseId, item.kind]), [["example-1", "example"], ["example-2", "example"], ["example-3", "example"]]);
     assert.match(result.failedCases[0]!.reason, /^Answered (billing|technical|account), expected (billing|account)\.$/);
-    assert.deepEqual(result.baselineByKind, [{ kind: "example", passes: 9, total: 18 }, { kind: "typical", passes: 6, total: 6 }]);
+    // Only 3 cases pass, fewer than a screen needs, so the current model runs once.
+    assert.deepEqual(result.baselineByKind, [{ kind: "example", passes: 3, total: 6 }]);
     assert.match(done.text, /passed under 80% of its own eval/);
-    assert.match(done.text, /Cases it failed, with the grader's reason \(passed by kind: example 9\/18, typical 6\/6\):\n- example-1 \(example\): Answered/);
+    assert.match(done.text, /Cases it failed, with the grader's reason:\n- example-1 \(example\): Answered/);
     // Only the current model ran: no candidate was screened.
     assert.deepEqual([...new Set(models.calls.filter(call => !call.ticket.startsWith("writer:")).map(call => call.model))], ["openai/gpt-5.4"]);
+  } finally { await stop(app); await models.close(); }
+});
+
+test("a person grades a run's answers: a disagreement writes the eval again, agreement accepts it, and later runs reuse it without asking", async () => {
+  const models = await fakeModels();
+  const app = await startApp({ models, env: CLERK });
+  try {
+    await subscribe(app, "org_grade");
+    const agent = caller(app, "test:user_g:org_grade:admin");
+    const started = await agent.tool("openmerit_recommend", { bundle: bundle("graded classifier", false), environment: "acme/grade" });
+    const jobId = started.data.job_id as string;
+    const result = () => agent.tool("openmerit_result", { job_id: jobId });
+    await waitFor(result, value => value.data.status === "needs_input");
+    await agent.tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
+
+    // Round 1: the current model's answers and the pick's, each with OpenMerit's grade. Every one passed.
+    const asked = await waitFor(result, value => value.data.phase === "grading");
+    const questions = asked.data.questions as { id: string; detail: string }[];
+    assert.ok(questions.length > 6 && questions.every(question => question.id.startsWith("grade_graded_classifier_r1_")), asked.text);
+    assert.match(asked.text, /It needs a person to grade its answers[^]*Never grade for them/);
+    assert.ok(questions.every(question => question.detail.endsWith("OpenMerit's grade: passed")), "the fake answers every case right");
+    const mine = questions.find(question => question.detail.startsWith("openai/gpt-5.4 (your current model)"))!;
+    // Grading is the review: nothing is accepted until the person agrees with the eval.
+    const [task] = (await agent.api<{ id: string }[]>("/api/tasks")).body;
+    assert.equal((await agent.api<{ accepted: unknown }>(`/api/tasks/${task!.id}/eval`)).body.accepted, null);
+    // A wrong grade is refused and asked again; a person grades in the app as the coding agent does.
+    const refused = await agent.api<{ notices: string[]; questions: unknown[] }>(`/api/runs/${jobId}/answers`, { method: "POST", body: JSON.stringify({ answers: { [mine.id]: "maybe" } }) });
+    assert.equal(refused.status, 200);
+    assert.ok(refused.body.notices.some(notice => notice.startsWith(`Answer not used: ${mine.id}`)), refused.body.notices.join("\n"));
+    const grades = Object.fromEntries(questions.map(question => [question.id, question === mine ? "bad: the queue should name the product area" : "good"]));
+    const sent = await agent.api(`/api/runs/${jobId}/answers`, { method: "POST", body: JSON.stringify({ answers: grades }) });
+    assert.equal(sent.status, 200);
+
+    // Round 2 runs on the eval written again from that grade, against its checks, since the current model's own answer looked wrong.
+    const again = await waitFor(result, value => value.data.phase === "grading" && (value.data.questions as { id: string }[])[0]!.id.includes("_r2_"), 120_000);
+    assert.ok(models.calls.some(call => call.ticket === "reviser"), "the reviser ran on OpenMerit's key");
+    assert.ok((again.data.notices as string[]).includes("OpenMerit wrote the eval again from your grades of round 1."), JSON.stringify(again.data.notices));
+    const done = await untilDone(agent, jobId);
+    assert.equal(done.data.status, "done", done.text);
+    const report = (await agent.api<{ grading: { rounds: number; accepted: boolean; bar: string; summary: string | null }; evalVersion: number }>(`/api/runs/${jobId}`)).body;
+    assert.deepEqual([report.grading.rounds, report.grading.accepted, report.grading.bar, report.evalVersion], [2, true, "criteria", 1]);
+    assert.match(report.grading.summary ?? "", /^Your current model passes your checks/);
+    const evaluation = (await agent.api<{ accepted: { version: number; source: string; by: string | null; bar: string; spec: { criteria?: string[] } } }>(`/api/tasks/${task!.id}/eval`)).body.accepted;
+    assert.deepEqual([evaluation.version, evaluation.source, evaluation.by, evaluation.bar], [1, "grading", "user_g", "criteria"]);
+    assert.deepEqual(evaluation.spec.criteria, ["The queue is the one the ticket's main problem belongs to."]);
+
+    // The next run measures on the accepted eval against its bar, and asks nothing.
+    const next = await agent.tool("openmerit_recommend", { bundle: bundle("graded classifier", false), environment: "acme/grade" });
+    const second = await waitFor(() => agent.tool("openmerit_result", { job_id: next.data.job_id }), value => ["done", "failed", "stopped", "needs_input"].includes(String(value.data.status)), 180_000);
+    assert.equal(second.data.status, "done", second.text);
+    const later = (await agent.api<{ grading: { rounds: number; accepted: boolean; bar: string }; evalVersion: number }>(`/api/runs/${String(next.data.job_id)}`)).body;
+    assert.deepEqual([later.grading.rounds, later.grading.accepted, later.grading.bar, later.evalVersion], [0, true, "criteria", 1]);
   } finally { await stop(app); await models.close(); }
 });
 
@@ -479,7 +533,7 @@ test("an agent's pick is checked on its whole transcript: a cheaper model that c
     const jobId = started.data.job_id as string;
     await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => value.data.status === "needs_input");
     await agent.tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
-    const done = await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 180_000);
+    const done = await untilDone(agent, jobId);
     assert.equal(done.data.status, "done", done.text);
     const result = (await agent.api<Result & { basedOn: string[]; agentEval: { status: string; passed: boolean; baseline: { passes: number; total: number }; tried: { passed: boolean }[] } }>(`/api/runs/${jobId}`)).body;
     assert.ok(result.basedOn.includes("Checks: S1 (the spec's steps, on each case's tool calls). S2 lists no tools, so it is not checked."), JSON.stringify(result.basedOn));
@@ -505,7 +559,7 @@ test("a job its budget stops offers to raise the budget, and the rerun it asks f
     const settle = async (id: string) => {
       const asked = await waitFor(() => agent.tool("openmerit_result", { job_id: id }), value => ["needs_input", "done", "failed", "stopped"].includes(value.data.status as string), 180_000);
       if (asked.data.status === "needs_input") await agent.tool("openmerit_answer", { job_id: id, answers: { label_check: ["written-1", "written-2"] } });
-      return waitFor(() => agent.tool("openmerit_result", { job_id: id }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 180_000);
+      return untilDone(agent, id);
     };
     const stopped = await settle(jobId);
     assert.equal(stopped.data.status, "stopped", stopped.text);
@@ -550,7 +604,7 @@ test("when no measured model is cheaper per call than the current one, the job m
       models.cost = model => (cheap(model, provisional) ? undefined : 0.01);
       await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => value.data.status === "needs_input");
       await agent.tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
-      const done = await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 180_000);
+      const done = await untilDone(agent, jobId);
       assert.equal(done.data.status, "done", done.text);
       type Top = { model: string; cheaperThanCurrent: boolean | null };
       const result = done.data.result as Result & { reason: string; baseline: { passes: number; total: number; costPerCallUsd: number; latencyMs: number | null }; top: Top[] };
@@ -606,7 +660,7 @@ test("a job whose actor a deploy's drain stops in the middle of a measure step r
     await agent().tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
     await reachedHold;
     app = await startApp({ models, env: { ...first.env, RIVET_NODE_VERSION: "2" }, storage: first.storage, enginePort: first.enginePort });
-    const done = await waitFor(result, value => ["done", "failed", "stopped"].includes(value.data.status as string), 180_000);
+    const done = await untilDone(agent(), jobId);
     release();
     assert.equal(done.data.status, "done", done.text);
     assert.equal((done.data.result as Result).status, "picked");
@@ -659,7 +713,7 @@ test("a measuring job shows the app the candidate under test, case by case, agai
     assert.equal(live.history.at(-1)!.rate, live.passes / live.done * 100);
     assert.ok(live.minutesLeft !== null && live.minutesLeft >= 1);
     release();
-    const done = await waitFor(() => agent().tool("openmerit_result", { job_id: jobId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 180_000);
+    const done = await untilDone(agent(), jobId);
     assert.equal(done.data.status, "done", done.text);
   } finally {
     release();
@@ -677,7 +731,7 @@ test("a job whose step fails for good ends failed with a report of what it measu
     const jobId = started.data.job_id as string;
     await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => value.data.status === "needs_input");
     await agent.tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
-    const ended = await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => value.data.status !== "running" && value.data.status !== "queued", 180_000);
+    const ended = await untilDone(agent, jobId);
     assert.equal(ended.data.status, "failed", ended.text);
     assert.equal(ended.isError, true);
     assert.match(String(ended.data.error), /agent-1.*the agent's eval harness is unreachable/);

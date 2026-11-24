@@ -34,10 +34,10 @@ import type { Repo } from "../state/paths.ts";
 import { allowedOn, baselineEndpoint, pool, type PoolModel } from "./pool.ts";
 import { context, isSupportFile, listFiles, scanRepo, type ScanResult, type Usage } from "./scan.ts";
 import { applicationUsages, mapTasks, reviewTask, type MappedTask } from "../review/index.ts";
-import { advanceLoop, feedbackOf, pickSamples, reviseEval, startLoop, type CaseAnswer, type LoopState, type SampleGrade } from "../eval/loop.ts";
+import { advanceLoop, criteriaOf, feedbackOf, gradeQuestions, MAX_ROUNDS, pickSamples, readGrade, reviseEval, startLoop, type CaseAnswer, type LoopState, type SampleGrade } from "../eval/loop.ts";
+export { GRADE_HINT, MAX_ROUNDS, readGrade } from "../eval/loop.ts";
 import { generateEval, generatedDir, isManaged, loadEvalVersion, loadGeneratedEval, REPO_ITEM, runGeneratedEval, saveGeneratedEval, type GeneratedEval, type GeneratedOutcome } from "../eval/generated.ts";
 import { caseKind } from "../ranking/types.ts";
-import { stepChecksFor } from "../ranking/graders.ts";
 
 export type Answer = string | string[] | boolean | number;
 export type Answers = Record<string, Answer>;
@@ -776,7 +776,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
 
   const evaluateTask = async (task: string, plan: PlannedEval) => {
     // Once a person marked the current model's answer wrong, the accepted Eval is the bar: every model that can run the task is a candidate, whatever it costs.
-    const criteria = data.loop?.[task]?.bar === "criteria" && plan.generated ? criteriaOf(data.generated?.[task] ?? loadGeneratedEval(ctx.repo.root, plan.generated), plan.criteriaPassRate) : null;
+    const criteria = data.loop?.[task]?.bar === "criteria" && plan.generated ? criteriaOf((data.generated?.[task] ?? loadGeneratedEval(ctx.repo.root, plan.generated)).bundle, plan.criteriaPassRate) : null;
     const candidates = criteria ? widePool(ctx, data, task) : data.pool![task] ?? [];
     const summary: SearchSummary = { status: "running", pool: candidates.length, unranked: data.unranked?.[task] ?? 0, sampleIds: [], pick: null, trials: [], skipped: [], finalists: [], challengers: [] };
     data.search![task] = summary;
@@ -862,9 +862,6 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
   return "grade";
 }
 
-/** Rounds of the grading loop one run takes before it stops asking for grades. */
-export const MAX_ROUNDS = 3;
-export const GRADE_HINT = "or bad: <why> to add a note. A person answers this, not a coding agent.";
 
 /** The grading loop for each generated eval: a person grades sampled answers, and the eval is accepted, written again or measured against its criteria. */
 async function gradePhase({ ctx, runId, data, answers, getHarness, save }: PhaseInput): Promise<Phase> {
@@ -927,32 +924,6 @@ function samplesOf(ctx: Context, runId: string, data: RunState, task: string) {
     ...(current ? [{ model: current.model, role: "current" as const, answers: answersOf(current) }] : []),
     ...(candidate ? [{ model: candidate.model, role: "candidate" as const, answers: answersOf(candidate) }] : []),
   ]);
-}
-
-function gradeQuestions(task: string, loop: LoopState): Question[] {
-  const samples = loop.artifact!.samples;
-  return samples.map((sample, index) => ({
-    // The round is in the ID: one advance can grade a round, measure the next and ask again, with the same answers.
-    id: `grade_${slug(task)}_r${loop.round}_${index + 1}`, kind: "choice", prompt: `${task}, answer ${index + 1} of ${samples.length}: does it look right?`,
-    detail: [
-      `${sample.model} (${sample.role === "current" ? "your current model" : "a candidate"}), ${sample.kind} case ${sample.caseId}${loop.round > 1 ? `, round ${loop.round}` : ""}`,
-      `Input:\n${sample.input}`,
-      `Answer:\n${sample.output || "(no text)"}`,
-      ...(sample.toolCalls.length ? [`Tool calls: ${sample.toolCalls.map(call => `${call.name}(${call.arguments})`).join("; ")}`] : []),
-      `OpenMerit's grade: ${sample.pass ? "passed" : `failed${sample.reason ? `: ${sample.reason}` : ""}`}`,
-    ].join("\n"),
-    options: [{ value: "good", label: "Looks good" }, { value: "bad", label: "Doesn't look right" }],
-    hint: GRADE_HINT,
-  }));
-}
-
-/** A grade from an answer: good or bad, or either with a note after a colon. */
-export function readGrade(answer: Answer | undefined): Omit<SampleGrade, "sampleId"> | null {
-  if (typeof answer !== "string") return null;
-  const match = /^\s*(good|bad|looks good|doesn'?t look right)\s*(?::\s*([\s\S]*))?$/i.exec(answer);
-  if (!match) return null;
-  const note = match[2]?.trim();
-  return { verdict: /^(good|looks good)$/i.test(match[1]!) ? "good" : "bad", ...(note ? { note: note.slice(0, 2000) } : {}) };
 }
 
 /** Saves the Eval a person accepted, versioned, and makes it the task's eval in the repository config. */
@@ -1095,14 +1066,6 @@ export function eligibleCandidates(catalogue: Catalogue, configured: readonly En
 }
 
 /** Measured eval cost of some units from the proxy ledger, or null when a request had no price. */
-/** A generated Eval's checks: its criteria (C…), and the guardrails (G…) and step checks (S…) every case must pass. */
-function criteriaOf(value: GeneratedEval, passRate?: number): Criteria {
-  return {
-    criteria: (value.bundle.criteria ?? []).map((_, index) => `C${index + 1}`),
-    guardrails: [...(value.bundle.guardrails ?? []).map((_, index) => `G${index + 1}`), ...stepChecksFor(value.bundle).checks.map(check => check.id)],
-    ...(passRate === undefined ? {} : { passRate }),
-  };
-}
 
 /** The candidates against the criteria: every eligible model whatever its price, but the current model, which runs as the baseline. */
 function widePool(ctx: Context, data: RunState, task: string): PoolEntry[] {
@@ -1177,7 +1140,7 @@ function compareTask(ctx: Context, runId: string, data: RunState, name: string, 
   if (baseline.status !== "measured") return { ...comparison, status: "baseline_failed", note: `The current model's eval did not complete (${baseline.note}), so no candidate can be compared. Fix the eval, then run \`openmerit scout\` again: it reuses the eval you approved.` };
   // A stopped search recommends nothing, but the finalists it measured keep their real comparison with the current model.
   if (data.stopped?.[name]) return { ...comparison, candidates: rank(comparison, false).candidates, status: "stopped", note: /no model is recommended/.test(data.stopped[name]) ? data.stopped[name] : `The search stopped, so no model is recommended: ${data.stopped[name]}` };
-  const criteria = data.loop?.[name]?.bar === "criteria" && plan.generated ? criteriaOf(data.generated?.[name] ?? loadGeneratedEval(ctx.repo.root, plan.generated), plan.criteriaPassRate) : null;
+  const criteria = data.loop?.[name]?.bar === "criteria" && plan.generated ? criteriaOf((data.generated?.[name] ?? loadGeneratedEval(ctx.repo.root, plan.generated)).bundle, plan.criteriaPassRate) : null;
   if (criteria) return { ...comparison, ...rankCriteria(comparison, units, criteria) };
   if (summary?.status === "no_passing_model") return { ...comparison, status: "no_passing_model", note: `No candidate in the pool passed all ${SAMPLE_SIZE} screening items the current model passes.` };
   const measured = candidates.filter(item => item.status === "measured");

@@ -7,9 +7,10 @@
 // Marking the current model's own answer Doesn't look right makes the accepted Eval the bar instead of
 // the current model's score (`bar: "criteria"`): the search then runs once more against the criteria,
 // with the current model as one candidate. The coding agent never grades; a person does.
-import { redact } from "../engine/index.ts";
+import { redact, type Criteria } from "../engine/index.ts";
 import type { Harness } from "../harness/harness.ts";
-import { writeCases } from "../ranking/cases.ts";
+import { writeCases, type Complete } from "../ranking/cases.ts";
+import { readJson, stepChecksFor } from "../ranking/graders.ts";
 import type { Case, TaskBundle } from "../ranking/types.ts";
 import { harnessWriter, GENERATED_CASES, type GeneratedEval } from "./generated.ts";
 
@@ -65,6 +66,34 @@ export const SAMPLES_PER_MODEL = 6;
 /** A loop measuring `evalVersion` (1 for a new eval, a saved Eval's own version to reuse it) against `bar`. */
 export function startLoop(evalVersion = 1, bar: LoopState["bar"] = "current"): LoopState {
   return { round: 1, evalVersion, savedVersion: 0, bar, status: "searching", artifact: null, history: [] };
+}
+
+/**
+ * A task's checks for the criteria bar: its criteria (C…), and the guardrails (G…) and step checks (S…)
+ * every case must pass. A task that lists no criteria, such as a label task, has one: the expected
+ * answer, which a failed case misses, so the bar is never met by a model that fails every case.
+ */
+export function criteriaOf(bundle: TaskBundle, passRate?: number): Criteria {
+  return {
+    criteria: bundle.criteria?.length ? bundle.criteria.map((_, index) => `C${index + 1}`) : ["the expected answer"],
+    guardrails: [...(bundle.guardrails ?? []).map((_, index) => `G${index + 1}`), ...stepChecksFor(bundle).checks.map(check => check.id)],
+    ...(passRate === undefined ? {} : { passRate }),
+  };
+}
+
+/**
+ * A harness that answers through `complete`, such as a host's metered model call, for `reviseEval` where
+ * no coding agent runs. It reads no files; the reply's cost is the caller's to count.
+ */
+export function completeHarness(complete: Complete): Harness {
+  return {
+    kind: "api", label: "OpenMerit", usage: { calls: 0, costUsd: 0, unknownCost: 0, inputTokens: 0, outputTokens: 0 },
+    async json<T>(request: { system: string; prompt: string; schema: Record<string, unknown> }): Promise<T> {
+      const read = readJson(await complete({ system: request.system, prompt: `${request.prompt}\n\nReply with JSON only, matching this JSON schema:\n${JSON.stringify(request.schema)}` }));
+      if (!read.ok || !read.value || typeof read.value !== "object") throw new Error("The eval's reviser did not answer with a JSON object.");
+      return read.value as T;
+    },
+  };
 }
 
 /** Where a person and the eval disagree: an answer the eval passed that does not look right, or one it failed that does. */
@@ -136,6 +165,42 @@ export function pickSamples(models: readonly { model: string; role: Sample["role
     }
   }
   return samples;
+}
+
+/** Rounds of the grading loop one run takes before it stops asking for grades. */
+export const MAX_ROUNDS = 3;
+export const GRADE_HINT = "or bad: <why> to add a note. A person answers this, not a coding agent.";
+
+/** A grade question, in the shape both hosts' questions take. */
+export interface GradeQuestion { id: string; kind: "choice"; prompt: string; detail: string; options: { value: "good" | "bad"; label: string }[]; hint: string }
+
+const slug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "task";
+
+/** One question per sample of a round, the same in the CLI and the cloud app: the answer with its input, tool calls and OpenMerit's grade. */
+export function gradeQuestions(task: string, loop: LoopState): GradeQuestion[] {
+  const samples = loop.artifact!.samples;
+  return samples.map((sample, index) => ({
+    // The round is in the ID: one advance can grade a round, measure the next and ask again, with the same answers.
+    id: `grade_${slug(task)}_r${loop.round}_${index + 1}`, kind: "choice", prompt: `${task}, answer ${index + 1} of ${samples.length}: does it look right?`,
+    detail: [
+      `${sample.model} (${sample.role === "current" ? "your current model" : "a candidate"}), ${sample.kind} case ${sample.caseId}${loop.round > 1 ? `, round ${loop.round}` : ""}`,
+      `Input:\n${sample.input}`,
+      `Answer:\n${sample.output || "(no text)"}`,
+      ...(sample.toolCalls.length ? [`Tool calls: ${sample.toolCalls.map(call => `${call.name}(${call.arguments})`).join("; ")}`] : []),
+      `OpenMerit's grade: ${sample.pass ? "passed" : `failed${sample.reason ? `: ${sample.reason}` : ""}`}`,
+    ].join("\n"),
+    options: [{ value: "good", label: "Looks good" }, { value: "bad", label: "Doesn't look right" }],
+    hint: GRADE_HINT,
+  }));
+}
+
+/** A grade from an answer: good or bad, or either with a note after a colon. */
+export function readGrade(answer: unknown): Omit<SampleGrade, "sampleId"> | null {
+  if (typeof answer !== "string") return null;
+  const match = /^\s*(good|bad|looks good|doesn'?t look right)\s*(?::\s*([\s\S]*))?$/i.exec(answer);
+  if (!match) return null;
+  const note = match[2]?.trim();
+  return { verdict: /^(good|looks good)$/i.test(match[1]!) ? "good" : "bad", ...(note ? { note: note.slice(0, 2000) } : {}) };
 }
 
 /** What a round's grades say about the eval, for the reviser and the case writer: each disagreement, with the person's note. */
