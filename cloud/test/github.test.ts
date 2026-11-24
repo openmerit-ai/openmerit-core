@@ -19,7 +19,8 @@ const TOKEN = `github_pat_${"A".repeat(30)}_good`;
 const NO_CONTENTS = `github_pat_${"B".repeat(30)}_meta`;
 
 interface FakeRepo { private: boolean; token?: string; sizeKb?: number; slowMs?: number }
-interface FakeGitHub { api: string; git: string; requests: { method: string; path: string; auth: string }[]; close: () => Promise<void> }
+/** Set `limited` to answer every REST call as GitHub does when its rate limit is used up. */
+interface FakeGitHub { api: string; git: string; requests: { method: string; path: string; auth: string }[]; limited: { status: 403 | 429; reset: number } | null; close: () => Promise<void> }
 
 /** A bare repository under root/<owner>/<name>.git with the given files committed on main. Values starting with -> are symlinks. */
 function bareRepo(root: string, fullName: string, files: Record<string, string>): void {
@@ -39,6 +40,7 @@ function bareRepo(root: string, fullName: string, files: Record<string, string>)
 
 async function fakeGitHub(repos: Record<string, FakeRepo>, root: string): Promise<FakeGitHub> {
   const requests: FakeGitHub["requests"] = [];
+  const fake = { limited: null as FakeGitHub["limited"] };
   const read = (req: IncomingMessage) => new Promise<Buffer>(resolve => { const chunks: Buffer[] = []; req.on("data", chunk => chunks.push(chunk as Buffer)); req.on("end", () => resolve(Buffer.concat(chunks))); });
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://fake");
@@ -46,6 +48,11 @@ async function fakeGitHub(repos: Record<string, FakeRepo>, root: string): Promis
     requests.push({ method: req.method ?? "GET", path: url.pathname, auth });
     const body = await read(req);
     const api = /^\/api\/repos\/([^/]+)\/([^/]+)(\/commits)?$/.exec(url.pathname);
+    if (api && fake.limited) {
+      res.writeHead(fake.limited.status, { "content-type": "application/json", "x-ratelimit-limit": "60", "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(fake.limited.reset) })
+        .end(JSON.stringify({ message: "API rate limit exceeded for 127.0.0.1." }));
+      return;
+    }
     if (api) {
       const fullName = `${api[1]}/${api[2]}`, repo = repos[fullName];
       const bearer = auth.replace(/^Bearer /, "");
@@ -86,7 +93,7 @@ async function fakeGitHub(repos: Record<string, FakeRepo>, root: string): Promis
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  return { api: `${base}/api`, git: `${base}/git`, requests, close: () => new Promise(resolve => { server.closeAllConnections(); server.close(() => resolve()); }) };
+  return { api: `${base}/api`, git: `${base}/git`, requests, get limited() { return fake.limited; }, set limited(value) { fake.limited = value; }, close: () => new Promise(resolve => { server.closeAllConnections(); server.close(() => resolve()); }) };
 }
 
 test("a pasted GitHub URL names its repository; anything else is refused", () => {
@@ -123,7 +130,7 @@ describe("GitHub repositories", () => {
     }, root);
     models = await fakeModels();
     sandboxes = mkdtempSync(join(tmpdir(), "openmerit-sandboxes-"));
-    app = await startApp({ models, env: { OPENMERIT_GITHUB_API_URL: github.api, OPENMERIT_GITHUB_URL: github.git, OPENMERIT_REPO_CLONE_SECONDS: "4", TMPDIR: sandboxes } });
+    app = await startApp({ models, env: { OPENMERIT_GITHUB_API_URL: github.api, OPENMERIT_GITHUB_URL: github.git, OPENMERIT_REPO_CLONE_SECONDS: "4", OPENMERIT_REVIEWS_PER_HOUR: "2", TMPDIR: sandboxes } });
   });
   after(async () => { await stop(app); await models.close(); await github.close(); });
 
@@ -209,6 +216,30 @@ describe("GitHub repositories", () => {
     });
     assert.equal(existsSync(seen), false);
     await assert.rejects(withCheckout({ fullName: "acme/big-app", branch: "main", token: null, config: { ...config, maxBytes: 300_000 } }, async () => assert.fail("the clone should stop")), /Cloning acme\/big-app failed: grew past/);
+  });
+
+  test("when GitHub's limit for checks without a token is used up, adding a repository says when to try again, counts no review, and Review again still clones", async () => {
+    const admin = caller(app, "test:user_rl:org_rl:admin");
+    const add = () => admin.api<RepoView & { error: string }>("/api/repos", { method: "POST", body: JSON.stringify({ url: "https://github.com/acme/public-app" }) });
+    const added = await add();
+    assert.equal(added.status, 201);
+    assert.equal((await reviewed(admin, added.body.id)).review.status, "done");
+    // 14:05 UTC: GitHub answers 403 or 429 with the reset time in x-ratelimit-reset.
+    const reset = Math.floor(Date.UTC(2026, 10, 24, 14, 5, 0) / 1000);
+    for (const status of [403, 429] as const) {
+      github.limited = { status, reset };
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const refused = await add();
+        assert.equal(refused.status, 400, `a ${status} is the add form's own error, not a generic one`);
+        assert.equal(refused.body.error, "GitHub's limit for checks without a token is used up; try again after 14:05 UTC.");
+      }
+    }
+    // Review again clones over git, which this limit does not cover. The six refused checks counted no review:
+    // the account's limit here is 2 an hour, and the add above was the first.
+    const again = await admin.api<RepoView & { error: string }>(`/api/repos/${added.body.id}/review`, { method: "POST" });
+    assert.equal(again.status, 202, again.body.error);
+    assert.equal((await reviewed(admin, added.body.id)).review.status, "done");
+    github.limited = null;
   });
 
   test("a clone that runs past its time limit fails the review and leaves no checkout behind", async () => {
