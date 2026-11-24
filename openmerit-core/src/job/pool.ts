@@ -1,8 +1,8 @@
 // A task's candidate models: the catalogue over OpenRouter and the account's own endpoints,
 // filtered by the task's needs and guardrails, as a ladder for the search. The provisional pick
 // comes from the same pool, by catalogue evidence alone.
-import { blendedPrice, catalogueIndex, eligible, ladder, pool, provisionalPick as pickFromCatalogue, type Catalogue, type CatalogueModel, type Funding, type Guardrails, type Provisional, type Ranked } from "./engine.ts";
-import { callCost, type EndpointKind, type TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
+import { blendedPrice, catalogueIndex, eligible, ladder, pool, provisionalPick as pickFromCatalogue, type Catalogue, type CatalogueModel, type Funding, type Guardrails, type Provisional, type Ranked } from "../engine/index.ts";
+import { callCost, type EndpointKind, type TaskBundle } from "../ranking/index.ts";
 
 export type { Provisional };
 

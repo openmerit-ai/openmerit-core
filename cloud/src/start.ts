@@ -3,12 +3,14 @@
 // results, and the job's workflow starts.
 import { createHash, randomBytes } from "node:crypto";
 import { redact } from "./engine.ts";
-import { buildPool, provisionalPick, type Provisional } from "./pool.ts";
+import { buildPool, provisionalPick, type Provisional } from "../../openmerit-core/src/job/pool.ts";
 import { modelKeyRefusal } from "./services.ts";
 import { writeCases, type TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import type { Guardrails } from "./engine.ts";
 import type { AppClient } from "./registry.ts";
-import type { JobTrigger } from "./actors/job.ts";
+import { redactBundle, taskIdFor, type JobTrigger } from "../../openmerit-core/src/job/workflow.ts";
+
+export { redactBundle, taskIdFor };
 import { DEFAULT_PROJECT } from "./actors/account.ts";
 
 export const DEFAULT_ENVIRONMENT = "default";
@@ -17,8 +19,6 @@ export const DEFAULT_ENVIRONMENT = "default";
  * A task's ID within its account: stable for the same project, environment and task name. The default
  * project keeps the ID tasks had before projects, so their runs, labels and guardrails stay theirs.
  */
-export const taskIdFor = (projectId: string, environment: string, task: string) =>
-  `t_${createHash("sha256").update(projectId === DEFAULT_PROJECT ? `${environment}\0${task}` : `${projectId}\0${environment}\0${task}`).digest("hex").slice(0, 16)}`;
 export const newJobId = () => `job_${new Date().toISOString().slice(0, 10).replaceAll("-", "")}_${randomBytes(6).toString("hex")}`;
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -46,13 +46,6 @@ export function bundleProblem(value: unknown): string | null {
   return null;
 }
 
-/** The bundle with secrets redacted from every string, by the CLI's rules, before it is stored anywhere. */
-export function redactBundle<T>(value: T): T {
-  if (typeof value === "string") return redact(value) as T;
-  if (Array.isArray(value)) return value.map(item => redactBundle(item)) as T;
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactBundle(item)])) as T;
-  return value;
-}
 
 /** The highest budget per job a rerun sets; the spend caps still apply. */
 export const MAX_RERUN_BUDGET_USD = 1000;

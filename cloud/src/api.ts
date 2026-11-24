@@ -6,7 +6,7 @@
 import type { AppDeps } from "./app.ts";
 import type { AuthResult, Identity } from "./auth.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
-import { explain, type JobResult } from "./report.ts";
+import { explain, type JobResult } from "../../openmerit-core/src/job/report.ts";
 import { bundleProblem, redactBundle, rerunJob, runTask, taskIdFor } from "./start.ts";
 import { DEFAULT_PROJECT, specOf, type EvalSpec } from "./actors/account.ts";
 import type { Answers } from "./actors/job.ts";

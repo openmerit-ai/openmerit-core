@@ -13,6 +13,7 @@
 !openmerit-core/src/connectors/agent-bundle.ts
 !openmerit-core/src/scout/scan.ts
 !openmerit-core/src/review
+!openmerit-core/src/job
 !openmerit-core/src/harness
 !openmerit-core/src/state/config.ts
 !openmerit-core/src/state/paths.ts
