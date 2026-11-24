@@ -1,12 +1,17 @@
-// Endpoint clients: one model call on OpenRouter, an OpenAI-compatible API (the CLI's `Endpoint`
-// shape) or Anthropic's Messages API. Every call reserves its expected cost in the ledger under the
-// caller's idempotency key before anything is sent, and settles once with what the final answer
-// cost: OpenRouter's reported cost, else a list-price estimate from the reported tokens or the
-// answer's size. The retry rules, reservation and estimates are the eval proxy's.
+// Endpoint clients: model calls on OpenRouter, an OpenAI-compatible API (the CLI's `Endpoint` shape)
+// or Anthropic's Messages API, made by Pi's model layer (pi-ai): its OpenAI chat completions API for
+// OpenRouter and OpenAI-compatible endpoints, its Anthropic Messages API for Anthropic. Every call
+// reserves its expected cost in the ledger under the caller's idempotency key once Pi has built the
+// request and before anything is sent, and settles once with what the final answer cost: the cost
+// OpenRouter reports, else a list-price estimate from the reported tokens or the answer's size.
+// Retries and the per-attempt timeout are OpenMerit's, in the fetch Pi sends with.
+import { normalizeContext, type Api, type AssistantMessage, type Context, type Message as PiMessage, type Model, type StreamFunction, type StreamOptions, type ToolCall as PiToolCall } from "@earendil-works/pi-ai";
+import { stream as anthropicMessages } from "@earendil-works/pi-ai/api/anthropic-messages";
+import { stream as openaiCompletions } from "@earendil-works/pi-ai/api/openai-completions";
 import { loadCatalogue } from "../catalogue/catalogue.ts";
 import { catalogueIndex, DEFAULT_OUTPUT_TOKENS, expectedCost, readUsage, redact, requestPrice, settledUsd, sizeEstimate, type CatalogueModel, type Funding, type Ledger, type Settlement } from "../engine/index.ts";
 import { withRetries } from "../eval/proxy.ts";
-import type { Completion, CompletionRequest, EndpointKind, ToolCall } from "./types.ts";
+import type { Completion, CompletionRequest, EndpointKind, Message, ToolCall } from "./types.ts";
 
 /** Thrown when the ledger refuses a call's reservation: nothing was sent. */
 export class BudgetRefused extends Error {
@@ -29,94 +34,81 @@ export interface EndpointConfig {
 /** How each call is metered: the ledger, the call's idempotency key, and the caller's signal. */
 export interface Meter { ledger: Ledger; key: string; signal?: AbortSignal }
 
+/** One metered call through Pi: its answer as Pi records it, and what it cost. */
+export interface ModelCall {
+  /** False when the endpoint answered with an error or did not answer; `status` 0 means it did not answer. */
+  ok: boolean;
+  status: number;
+  /** Pi's assistant message; its `stopReason` is "error" when `ok` is false. */
+  message: AssistantMessage;
+  usage: { input: number; output: number } | null;
+  costUsd: number;
+  costIsEstimate: boolean;
+  latencyMs: number;
+  /** The endpoint's error message, shortened, when `ok` is false. */
+  error?: string;
+}
+
 export interface ModelClient {
-  /** Throws BudgetRefused, before sending, when the ledger refuses the reservation. */
+  /** Pi's model for `model` on one of the client's endpoints, as Pi's agent loop takes it. Throws for an unknown endpoint. */
+  model(endpoint: string, model: string): Model<Api>;
+  /** One call with a Pi context. Throws BudgetRefused, before sending, when the ledger refuses the reservation. */
+  call(request: { endpoint: string; model: string; context: Context; maxTokens?: number }, meter: Meter): Promise<ModelCall>;
+  /** One call with a provider-neutral request, such as the case writer's or the judge's. Throws BudgetRefused like `call`. */
   complete(request: CompletionRequest, meter: Meter): Promise<Completion>;
 }
 
 const DEFAULT_BASE_URL: Partial<Record<EndpointKind, string>> = { openrouter: "https://openrouter.ai/api/v1", anthropic: "https://api.anthropic.com/v1" };
-const ANTHROPIC_VERSION = "2023-06-01";
 /** How long one attempt may wait for an answer. A ranking call's answer is short, so a model that says nothing for this long is not going to. */
 export const CALL_TIMEOUT_MS = 120_000;
 
-type Json = Record<string, unknown>;
-
 /** A tool's parameters as a JSON schema both APIs accept: a trace that recorded only a tool's name has `{}`. */
-const schemaOf = (parameters: object) => ("type" in parameters ? parameters : { type: "object", properties: {}, ...parameters });
+export const schemaOf = (parameters: object) => ("type" in parameters ? parameters : { type: "object", properties: {}, ...parameters });
 
-function openaiBody(endpoint: EndpointConfig, baseUrl: string, request: CompletionRequest): Json {
-  const messages: Json[] = request.system ? [{ role: "system", content: request.system }] : [];
-  for (const message of request.messages) {
-    if (message.role === "tool") messages.push({ role: "tool", tool_call_id: message.toolCallId, content: message.content });
-    else if (message.role === "assistant" && message.toolCalls?.length) {
-      messages.push({ role: "assistant", content: message.content || null, tool_calls: message.toolCalls.map(call => ({ id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } })) });
-    } else messages.push({ role: message.role, content: message.content });
-  }
-  // OpenAI's own API refuses max_tokens for reasoning models; other compatible APIs know max_tokens best.
-  const limit = baseUrl.includes("api.openai.com") ? "max_completion_tokens" : "max_tokens";
-  return {
-    model: request.model, messages, [limit]: request.maxTokens ?? DEFAULT_OUTPUT_TOKENS,
-    ...(request.tools?.length ? { tools: request.tools.map(tool => ({ type: "function", function: { name: tool.name, ...(tool.description ? { description: tool.description } : {}), parameters: schemaOf(tool.parameters) } })) } : {}),
-    ...(endpoint.kind === "openrouter" ? { usage: { include: true } } : {}),
-  };
+const NO_USAGE: AssistantMessage["usage"] = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+
+/** An assistant message Pi did not receive, such as a recorded one or a call that was refused before it was sent. */
+export function assistantMessage(model: Model<Api>, content: AssistantMessage["content"], stopReason: AssistantMessage["stopReason"], errorMessage?: string): AssistantMessage {
+  return { role: "assistant", content, api: model.api, provider: model.provider, model: model.id, usage: NO_USAGE, stopReason, ...(errorMessage ? { errorMessage } : {}), timestamp: Date.now() };
 }
 
-function anthropicBody(request: CompletionRequest): Json {
-  const messages: { role: "user" | "assistant"; content: string | Json[] }[] = [];
-  for (const message of request.messages) {
+const parseArguments = (text: string): PiToolCall["arguments"] => {
+  try { const value: unknown = JSON.parse(text || "{}"); return value && typeof value === "object" && !Array.isArray(value) ? value as PiToolCall["arguments"] : {}; } catch { return {}; }
+};
+
+/** Provider-neutral messages as Pi messages; `model` stands for the model that wrote the assistant turns. */
+export function piMessages(model: Model<Api>, messages: readonly Message[]): PiMessage[] {
+  const names = new Map<string, string>();
+  return messages.map((message): PiMessage => {
+    if (message.role === "user") return { role: "user", content: message.content, timestamp: Date.now() };
     if (message.role === "tool") {
-      // Tool results go back in one user turn, after the assistant turn that asked for them.
-      const block = { type: "tool_result", tool_use_id: message.toolCallId, content: message.content };
-      const last = messages.at(-1);
-      if (last?.role === "user" && Array.isArray(last.content) && last.content.every(item => item.type === "tool_result")) last.content.push(block);
-      else messages.push({ role: "user", content: [block] });
-    } else if (message.role === "assistant" && message.toolCalls?.length) {
-      messages.push({ role: "assistant", content: [...(message.content ? [{ type: "text", text: message.content }] : []), ...message.toolCalls.map(call => ({ type: "tool_use", id: call.id, name: call.name, input: parseArguments(call.arguments) }))] });
-    } else messages.push({ role: message.role, content: message.content });
-  }
-  return {
-    model: request.model, max_tokens: request.maxTokens ?? DEFAULT_OUTPUT_TOKENS, messages,
-    ...(request.system ? { system: request.system } : {}),
-    ...(request.tools?.length ? { tools: request.tools.map(tool => ({ name: tool.name, ...(tool.description ? { description: tool.description } : {}), input_schema: schemaOf(tool.parameters) })) } : {}),
-  };
+      return { role: "toolResult", toolCallId: message.toolCallId, toolName: message.name ?? names.get(message.toolCallId) ?? "", content: [{ type: "text", text: message.content }], isError: false, timestamp: Date.now() };
+    }
+    for (const call of message.toolCalls ?? []) names.set(call.id, call.name);
+    const calls = (message.toolCalls ?? []).map((call): PiToolCall => ({ type: "toolCall", id: call.id, name: call.name, arguments: parseArguments(call.arguments) }));
+    return assistantMessage(model, [...(message.content ? [{ type: "text" as const, text: message.content }] : []), ...calls], calls.length ? "toolUse" : "stop");
+  });
 }
 
-function parseArguments(text: string): unknown {
-  try { const value: unknown = JSON.parse(text || "{}"); return value && typeof value === "object" ? value : {}; } catch { return {}; }
-}
+/** An answer's text and its tool calls, with their arguments as JSON text. */
+export const textOf = (message: AssistantMessage) => message.content.flatMap(part => (part.type === "text" ? [part.text] : [])).join("");
+export const toolCallsOf = (message: AssistantMessage): ToolCall[] =>
+  message.content.flatMap(part => (part.type === "toolCall" ? [{ id: part.id, name: part.name, arguments: JSON.stringify(part.arguments) }] : []));
 
-interface Parsed { text: string; toolCalls: ToolCall[]; truncated: boolean; error?: string }
-
-function parseOpenai(value: Json): Parsed {
-  const choice = (value.choices as Json[] | undefined)?.[0];
-  if (!choice) return { text: "", toolCalls: [], truncated: false, error: errorMessage(value) ?? "the answer has no choices" };
-  const message = (choice.message ?? {}) as { content?: unknown; tool_calls?: { id?: string; function?: { name?: string; arguments?: string } }[] };
-  const content = typeof message.content === "string" ? message.content
-    : Array.isArray(message.content) ? message.content.map(part => (part && typeof part === "object" && typeof (part as Json).text === "string" ? (part as Json).text as string : "")).join("") : "";
-  const toolCalls = (message.tool_calls ?? []).map((call, index) => ({ id: call.id ?? `call_${index}`, name: call.function?.name ?? "", arguments: call.function?.arguments ?? "{}" }));
-  return { text: content, toolCalls, truncated: choice.finish_reason === "length" };
-}
-
-function parseAnthropic(value: Json): Parsed {
-  if (!Array.isArray(value.content)) return { text: "", toolCalls: [], truncated: false, error: errorMessage(value) ?? "the answer has no content" };
-  let text = "";
-  const toolCalls: ToolCall[] = [];
-  for (const block of value.content as Json[]) {
-    if (block.type === "text" && typeof block.text === "string") text += block.text;
-    if (block.type === "tool_use") toolCalls.push({ id: String(block.id), name: String(block.name), arguments: JSON.stringify(block.input ?? {}) });
-  }
-  return { text, toolCalls, truncated: value.stop_reason === "max_tokens" };
-}
-
-function errorMessage(value: Json): string | null {
-  const error = value.error as Json | string | undefined;
-  const message = typeof error === "string" ? error : typeof error?.message === "string" ? error.message : null;
-  return message === null ? null : redact(message).slice(0, 300);
+/** Pi's error text without its status prefix, with a JSON error body read as its message. */
+function errorText(text: string): string {
+  const body = text.replace(/^\d{3}\s*:?\s*/, "");
+  try {
+    const value = JSON.parse(body) as { error?: { message?: unknown } | string; message?: unknown };
+    const message = typeof value.error === "string" ? value.error : typeof value.error?.message === "string" ? value.error.message : typeof value.message === "string" ? value.message : null;
+    if (message) return redact(message).slice(0, 300);
+  } catch { /* not JSON */ }
+  return redact(body).slice(0, 300);
 }
 
 /**
  * A client for these endpoints. `model` finds a model's list prices for estimates and reservations;
- * the default looks it up in the bundled catalogue by ID or alias.
+ * the default looks it up in the bundled catalogue by ID or alias. `fetch` is what Pi sends with.
  */
 export function createClient(endpoints: readonly EndpointConfig[], options: { fetch?: typeof fetch; model?: (endpointModel: string) => CatalogueModel | null; timeoutMs?: number } = {}): ModelClient {
   const fetcher = options.fetch ?? fetch;
@@ -124,81 +116,131 @@ export function createClient(endpoints: readonly EndpointConfig[], options: { fe
   let index: ReturnType<typeof catalogueIndex> | undefined;
   const priced = options.model ?? ((model: string) => (index ??= catalogueIndex(loadCatalogue())).find(model));
   const byId = new Map(endpoints.map(endpoint => [endpoint.id, endpoint]));
-  return {
-    async complete(request, meter) {
-      const endpoint = byId.get(request.endpoint);
-      if (!endpoint) throw new Error(`Unknown endpoint ${request.endpoint}`);
-      const baseUrl = (endpoint.baseUrl ?? DEFAULT_BASE_URL[endpoint.kind] ?? "").replace(/\/$/, "");
-      if (!baseUrl) throw new Error(`Endpoint ${endpoint.id} needs a base URL`);
-      const failed = (status: number, error: string, latencyMs = 0, costUsd = 0): Completion => ({ ok: false, status, text: "", toolCalls: [], truncated: false, usage: null, costUsd, costIsEstimate: false, latencyMs, error });
-      if (Array.isArray(endpoint.allowedModels) && !endpoint.allowedModels.includes(request.model)) return failed(403, `${request.model} is not in ${endpoint.id}'s allowed models`);
+  const endpointOf = (id: string) => {
+    const endpoint = byId.get(id);
+    if (!endpoint) throw new Error(`Unknown endpoint ${id}`);
+    const baseUrl = (endpoint.baseUrl ?? DEFAULT_BASE_URL[endpoint.kind] ?? "").replace(/\/$/, "");
+    if (!baseUrl) throw new Error(`Endpoint ${endpoint.id} needs a base URL`);
+    return { endpoint, baseUrl };
+  };
 
-      const anthropic = endpoint.kind === "anthropic";
-      const body = anthropic ? anthropicBody(request) : openaiBody(endpoint, baseUrl, request);
-      const sent = JSON.stringify(body);
-      const sentBytes = Buffer.byteLength(sent);
-      const model = priced(request.model);
-      const expected = expectedCost(model, body, sentBytes);
-      const reservation = await meter.ledger.reserve({ key: meter.key, usd: expected.usd, funding: endpoint.funding, model: request.model, endpoint: endpoint.id });
-      if (!reservation.ok) throw new BudgetRefused(reservation.reason, reservation.neededUsd);
+  const model = (id: string, name: string): Model<Api> => {
+    const { endpoint, baseUrl } = endpointOf(id);
+    const price = priced(name);
+    const anthropic = endpoint.kind === "anthropic";
+    return {
+      id: name, name, provider: endpoint.kind === "openai-compatible" ? endpoint.id : endpoint.kind,
+      // Pi's Anthropic client adds /v1 itself.
+      api: anthropic ? "anthropic-messages" : "openai-completions", baseUrl: anthropic ? baseUrl.replace(/\/v1$/, "") : baseUrl,
+      input: ["text"], reasoning: false, contextWindow: price?.contextLength ?? 128_000, maxTokens: DEFAULT_OUTPUT_TOKENS,
+      cost: { input: price?.inputPerM ?? 0, output: price?.outputPerM ?? 0, cacheRead: 0, cacheWrite: 0 },
+      // OpenAI's own API takes max_completion_tokens and `store`; other compatible APIs know max_tokens best.
+      ...(anthropic || baseUrl.includes("api.openai.com") ? {} : { compat: { maxTokensField: "max_tokens", supportsStore: false } }),
+    } as Model<Api>;
+  };
 
-      const headers: Record<string, string> = anthropic
-        ? { "x-api-key": endpoint.apiKey, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json" }
-        : { authorization: `Bearer ${endpoint.apiKey}`, "content-type": "application/json", ...(endpoint.kind === "openrouter" ? { "x-title": "OpenMerit Ranking" } : {}) };
-      const started = Date.now();
-      let settled = false;
-      const settle = async (cost: Settlement) => { settled = true; await meter.ledger.settle(meter.key, { ...cost, latencyMs: Date.now() - started }); };
+  const call: ModelClient["call"] = async (request, meter) => {
+    const { endpoint } = endpointOf(request.endpoint);
+    const target = model(request.endpoint, request.model);
+    const started = Date.now();
+    const failed = (status: number, error: string, latencyMs = 0, message = assistantMessage(target, [], "error", error)): ModelCall =>
+      ({ ok: false, status, message: { ...message, stopReason: "error", errorMessage: error }, usage: null, costUsd: 0, costIsEstimate: false, latencyMs, error });
+    if (Array.isArray(endpoint.allowedModels) && !endpoint.allowedModels.includes(request.model)) return failed(403, `${request.model} is not in ${endpoint.id}'s allowed models`);
+
+    const price = priced(request.model);
+    let expectedUsd = 0, sentBytes = 0, reserved = false, refused: BudgetRefused | null = null;
+    let settled = false;
+    const settle = async (cost: Settlement) => { settled = true; await meter.ledger.settle(meter.key, { ...cost, latencyMs: Date.now() - started }); };
+    // The status of the attempt kept; 0 until an attempt is answered.
+    let status = 0, attempt: AbortSignal | undefined, unreachable: string | null = null;
+    // The kept answer as sent, read beside Pi: a cost the endpoint reports, which Pi reads only from OpenRouter.
+    let body: Promise<string> = Promise.resolve("");
+    const silent = () => new Error(`no answer in ${Math.round(timeoutMs / 1000)} s`);
+    // Only the last attempt is charged: providers do not bill the rate limits and errors a retry discards.
+    // Each attempt has its own timeout, which also covers reading the answer. An attempt that timed out is not retried.
+    const metered: typeof fetch = async (url, init) => {
+      let upstream: Response | Error;
       try {
-        // Only the last attempt is charged: providers do not bill the rate limits and errors a retry discards.
-        // Each attempt has its own timeout, which also covers reading the answer. An attempt that timed out is not retried.
-        let attemptSignal: AbortSignal | undefined;
-        const silent = () => new Error(`no answer in ${Math.round(timeoutMs / 1000)} s`);
-        let upstream: Response | Error;
-        try {
-          upstream = await withRetries(() => {
-            const attempt = AbortSignal.timeout(timeoutMs);
-            attemptSignal = meter.signal ? AbortSignal.any([meter.signal, attempt]) : attempt;
-            return fetcher(`${baseUrl}${anthropic ? "/messages" : "/chat/completions"}`, { method: "POST", headers, body: sent, signal: attemptSignal })
-              .catch((error: unknown) => {
-                if (attempt.aborted && !meter.signal?.aborted) throw silent();
-                return error instanceof Error ? error : new Error(String(error));
-              });
-          }, meter.signal);
-        } catch (error) {
-          meter.signal?.throwIfAborted();
-          upstream = error instanceof Error ? error : new Error(String(error));
-        }
-        if (upstream instanceof Error) {
-          meter.signal?.throwIfAborted();
-          await settle({ actualUsd: 0, estimatedUsd: null, failed: true });
-          return failed(0, `${endpoint.id} did not answer (${redact(upstream.message).slice(0, 200)})`, Date.now() - started);
-        }
-        let text: string;
-        try { text = await upstream.text(); } catch (error) {
-          meter.signal?.throwIfAborted();
-          // Cut off while answering: what was sent may have been billed, so the reservation stands as an estimate.
-          await settle({ actualUsd: null, estimatedUsd: null, failed: true });
-          return failed(0, `${endpoint.id} did not answer (${attemptSignal?.aborted ? silent().message : redact(error instanceof Error ? error.message : String(error)).slice(0, 200)})`, Date.now() - started);
-        }
-        const latencyMs = Date.now() - started;
-        const usage = readUsage(text);
-        let value: Json = {};
-        try { value = JSON.parse(text) as Json; } catch { /* not JSON */ }
-        if (!upstream.ok) {
-          await settle({ actualUsd: usage?.costUsd ?? 0, estimatedUsd: null, failed: true });
-          return failed(upstream.status, errorMessage(value) ?? `HTTP ${upstream.status}`, latencyMs, usage?.costUsd ?? 0);
-        }
-        // An answer without usage is estimated from its size; a model without a price keeps its reservation.
-        const cost: Settlement = { actualUsd: usage?.costUsd ?? null, estimatedUsd: usage ? requestPrice(model, usage.input, usage.output) : sizeEstimate(model, sentBytes, Buffer.byteLength(text)) };
-        await settle(cost);
-        const costUsd = settledUsd(expected.usd, cost), costIsEstimate = cost.actualUsd === null;
-        const parsed = anthropic ? parseAnthropic(value) : parseOpenai(value);
-        const base = { usage: usage ? { input: usage.input, output: usage.output } : null, costUsd, costIsEstimate, latencyMs, status: upstream.status, text: parsed.text, toolCalls: parsed.toolCalls, truncated: parsed.truncated };
-        return parsed.error ? { ...base, ok: false, error: parsed.error } : { ...base, ok: true };
-      } finally {
-        // Cut off part-way, such as by the caller's signal: what was sent may have been billed, so the reservation stands as an estimate.
-        if (!settled) await meter.ledger.settle(meter.key, { actualUsd: null, estimatedUsd: null, latencyMs: Date.now() - started, failed: true });
+        upstream = await withRetries(() => {
+          const timeout = attempt = AbortSignal.timeout(timeoutMs);
+          return fetcher(url, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout }).catch((error: unknown) => {
+            if (timeout.aborted && !meter.signal?.aborted) throw silent();
+            return error instanceof Error ? error : new Error(String(error));
+          });
+        }, meter.signal);
+      } catch (error) { upstream = error instanceof Error ? error : new Error(String(error)); }
+      if (upstream instanceof Error) { unreachable = upstream.message; throw upstream; }
+      status = upstream.status;
+      body = upstream.clone().text().catch(() => "");
+      return upstream;
+    };
+    // Each Pi API module types its own model; `target.api` picks the one that takes it.
+    const stream = (target.api === "anthropic-messages" ? anthropicMessages : openaiCompletions) as StreamFunction<Api, StreamOptions>;
+    try {
+      const message = await stream(target, normalizeContext(request.context), {
+        apiKey: endpoint.apiKey, fetch: metered, maxTokens: request.maxTokens ?? DEFAULT_OUTPUT_TOKENS, maxRetries: 0, cacheRetention: "none",
+        ...(meter.signal ? { signal: meter.signal } : {}),
+        ...(endpoint.kind === "openrouter" ? { headers: { "x-title": "OpenMerit Ranking" } } : {}),
+        // Pi has built the request: reserve its expected cost before it is sent.
+        onPayload: async payload => {
+          const body = { ...(payload as Record<string, unknown>), ...(endpoint.kind === "openrouter" ? { usage: { include: true } } : {}) };
+          sentBytes = Buffer.byteLength(JSON.stringify(body));
+          expectedUsd = expectedCost(price, body, sentBytes).usd;
+          const reservation = await meter.ledger.reserve({ key: meter.key, usd: expectedUsd, funding: endpoint.funding, model: request.model, endpoint: endpoint.id });
+          if (!reservation.ok) { refused = new BudgetRefused(reservation.reason, reservation.neededUsd); throw refused; }
+          reserved = true;
+          return body;
+        },
+      }).result();
+      const latencyMs = Date.now() - started;
+      if (refused) throw refused;
+      if (!reserved) return failed(0, `${endpoint.id} could not be called (${redact(message.errorMessage ?? "Pi did not build the request").slice(0, 200)})`, latencyMs);
+      meter.signal?.throwIfAborted();
+      const reason = message.errorMessage ?? message.stopReason;
+      const answered = message.stopReason !== "error" && message.stopReason !== "aborted";
+      const timedOut = !answered && !!attempt?.aborted;
+      if (timedOut || status === 0) {
+        // Cut off while answering: what was sent may have been billed, so the reservation stands as an estimate.
+        await settle(status ? { actualUsd: null, estimatedUsd: null, failed: true } : { actualUsd: 0, estimatedUsd: null, failed: true });
+        return failed(0, `${endpoint.id} did not answer (${timedOut ? silent().message : redact(unreachable ?? reason).slice(0, 200)})`, latencyMs, message);
       }
+      const billed = (usage: AssistantMessage["usage"]) => (usage.cost.totalFromProvider ? usage.cost.total : null);
+      if (status >= 400) {
+        const charged = readUsage(await body)?.costUsd ?? 0;
+        await settle({ actualUsd: charged, estimatedUsd: null, failed: true });
+        return { ...failed(status, errorText(reason), latencyMs, message), costUsd: charged };
+      }
+      const usage = message.usage, input = usage.input + usage.cacheRead + usage.cacheWrite;
+      const reported = input + usage.output > 0;
+      const actualUsd = billed(usage) ?? readUsage(await body)?.costUsd ?? null;
+      // An answer without usage is estimated from its size; a model without a price keeps its reservation.
+      const cost: Settlement = {
+        actualUsd,
+        estimatedUsd: reported ? requestPrice(price, input, usage.output) : sizeEstimate(price, sentBytes, Buffer.byteLength(JSON.stringify(message.content))),
+      };
+      await settle(answered || reported ? cost : { actualUsd: null, estimatedUsd: null, failed: true });
+      const costUsd = settledUsd(expectedUsd, answered || reported ? cost : { actualUsd: null, estimatedUsd: null }), costIsEstimate = actualUsd === null;
+      const base = { status, message, usage: reported ? { input, output: usage.output } : null, costUsd, costIsEstimate, latencyMs };
+      return answered ? { ...base, ok: true } : { ...base, ok: false, error: errorText(reason) };
+    } finally {
+      // Cut off part-way, such as by the caller's signal: what was sent may have been billed, so the reservation stands as an estimate.
+      if (reserved && !settled) await meter.ledger.settle(meter.key, { actualUsd: null, estimatedUsd: null, latencyMs: Date.now() - started, failed: true });
+    }
+  };
+
+  return {
+    model,
+    call,
+    async complete(request, meter) {
+      const target = model(request.endpoint, request.model);
+      const context: Context = {
+        ...(request.system ? { systemPrompt: request.system } : {}),
+        messages: piMessages(target, request.messages),
+        ...(request.tools?.length ? { tools: request.tools.map(tool => ({ name: tool.name, description: tool.description ?? "", parameters: schemaOf(tool.parameters) })) } : {}),
+      };
+      const answer = await call({ endpoint: request.endpoint, model: request.model, context, ...(request.maxTokens ? { maxTokens: request.maxTokens } : {}) }, meter);
+      const base = { status: answer.status, text: textOf(answer.message), toolCalls: toolCallsOf(answer.message), truncated: answer.message.stopReason === "length", usage: answer.usage, costUsd: answer.costUsd, costIsEstimate: answer.costIsEstimate, latencyMs: answer.latencyMs };
+      return answer.ok ? { ...base, ok: true } : { ...base, ok: false, ...(answer.error ? { error: answer.error } : {}) };
     },
   };
 }

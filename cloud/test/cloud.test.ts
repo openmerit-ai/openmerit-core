@@ -458,6 +458,31 @@ test("a job whose current model fails more than a fifth of its own eval recommen
   } finally { await stop(app); await models.close(); }
 });
 
+test("an agent's pick is checked on its whole transcript: a cheaper model that calls a tool the task does not offer is not picked", async () => {
+  const models = await fakeModels();
+  const app = await startApp({ models, env: CLERK });
+  try {
+    await subscribe(app, "org_agent");
+    const agent = caller(app, "test:user_t:org_agent:admin");
+    // Every model but the current one answers right after calling a tool the task does not offer.
+    const current = bundle().current.model;
+    models.misuse = model => model !== current;
+    const tools = [{ name: "lookup_ticket", description: "Finds the customer's plan", parameters: { type: "object", properties: { ticket: { type: "string" } }, required: ["ticket"] }, mockResult: { plan: "pro" } }];
+    const started = await agent.tool("openmerit_recommend", { bundle: { ...bundle("agent classifier", false), tools }, environment: "acme/agent" });
+    const jobId = started.data.job_id as string;
+    await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => value.data.status === "needs_input");
+    await agent.tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
+    const done = await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 180_000);
+    assert.equal(done.data.status, "done", done.text);
+    const result = (await agent.api<Result & { agentEval: { status: string; passed: boolean; baseline: { passes: number; total: number }; tried: { passed: boolean }[] } }>(`/api/runs/${jobId}`)).body;
+    assert.equal(result.status, "agent_eval_failed", "the task's eval passed cheaper models; their flows did not");
+    assert.equal(result.agentEval.status, "checked");
+    assert.equal(result.agentEval.baseline.passes, result.agentEval.baseline.total, "the current model's flow passes on every case");
+    assert.ok(result.agentEval.tried.length > 0 && result.agentEval.tried.every(item => !item.passed), JSON.stringify(result.agentEval));
+    assert.ok(models.calls.some(call => call.model !== current), "cheaper models were measured");
+  } finally { await stop(app); await models.close(); }
+});
+
 test("a job its budget stops offers to raise the budget, and the rerun it asks for runs the task again under the new budget", async () => {
   const models = await fakeModels();
   const app = await startApp({ models, env: CLERK });

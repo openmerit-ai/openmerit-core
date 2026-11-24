@@ -9,7 +9,7 @@ import { CandidateUnavailable } from "../engine/index.ts";
 import type { ModelClient } from "./clients.ts";
 import { oneSentence, type Grader } from "./graders.ts";
 import type { Ledger } from "../engine/index.ts";
-import { runCase, type CaseFailure } from "./runner.ts";
+import { runCase, type CaseFailure, type CaseRun } from "./runner.ts";
 import type { Case, TaskBundle } from "./types.ts";
 
 export interface CaseResult {
@@ -50,8 +50,11 @@ export function createMeasure(input: {
   /** The job's idempotency prefix, such as its ID. */
   key: string;
   signal?: AbortSignal; maxTokens?: number; concurrency?: number;
-  /** Called as each case finishes, in the order they finish, such as to show progress. */
-  onCase?: (result: CaseResult) => void;
+  /**
+   * Called as each case finishes, in the order they finish, such as to show progress. `run` has the
+   * candidate's output and Pi transcript, for the caller's run artifact; the measure keeps neither.
+   */
+  onCase?: (result: CaseResult, run: Pick<CaseRun, "output" | "toolCalls" | "transcript"> | null) => void;
 }): Measure {
   const byId = new Map(input.cases.map(item => [item.id, item]));
   return async (candidate, caseIds, options = {}) => {
@@ -61,7 +64,10 @@ export function createMeasure(input: {
     const run = options.run ?? "0";
     type Outcome = { result: CaseResult; costUsd: number; costIsEstimate: boolean; latencyMs: number | null; graderCostUsd: number; rejected?: string };
     const outcomes = new Array<Outcome>(ids.length);
-    const settle = (index: number, outcome: Outcome) => { outcomes[index] = outcome; input.onCase?.(outcome.result); };
+    const settle = (index: number, outcome: Outcome, ran: CaseRun | null = null) => {
+      outcomes[index] = outcome;
+      input.onCase?.(outcome.result, ran && { output: ran.output, toolCalls: ran.toolCalls, transcript: ran.transcript });
+    };
     let next = 0;
     // Once a call gets no answer at all, the candidate takes no new case: each would wait out the same timeout.
     let silent: string | null = null;
@@ -84,11 +90,11 @@ export function createMeasure(input: {
         if (ran.failure === "error" && (ran.status ?? 0) === 0) silent ??= ran.error ?? "it did not answer";
         const base = { costUsd: ran.costUsd, costIsEstimate: ran.costIsEstimate, latencyMs: answered ? ran.latencyMs : null };
         if (ran.output === null) {
-          settle(index, { ...base, result: { caseId: caseItem.id, pass: false, failure: ran.failure ?? "error", reason: failureReason(ran) }, graderCostUsd: 0, ...(ran.failure === "error" && rejects(ran.status ?? 0) ? { rejected: ran.error ?? `HTTP ${ran.status}` } : {}) });
+          settle(index, { ...base, result: { caseId: caseItem.id, pass: false, failure: ran.failure ?? "error", reason: failureReason(ran) }, graderCostUsd: 0, ...(ran.failure === "error" && rejects(ran.status ?? 0) ? { rejected: ran.error ?? `HTTP ${ran.status}` } : {}) }, ran);
           continue;
         }
-        const grade = await input.grader.grade({ bundle: input.bundle, caseItem, output: ran.output, toolCalls: ran.toolCalls, ledger: input.ledger, key, ...(input.signal ? { signal: input.signal } : {}) });
-        settle(index, { ...base, result: { caseId: caseItem.id, pass: grade.pass, ...(grade.pass ? {} : { reason: grade.reason ?? "The grader failed the answer." }) }, graderCostUsd: grade.costUsd });
+        const grade = await input.grader.grade({ bundle: input.bundle, caseItem, output: ran.output, toolCalls: ran.toolCalls, transcript: ran.transcript, ledger: input.ledger, key, ...(input.signal ? { signal: input.signal } : {}) });
+        settle(index, { ...base, result: { caseId: caseItem.id, pass: grade.pass, ...(grade.pass ? {} : { reason: grade.reason ?? "The grader failed the answer." }) }, graderCostUsd: grade.costUsd }, ran);
       }
     };
     await Promise.all(Array.from({ length: Math.min(input.concurrency ?? CASE_CONCURRENCY, ids.length) }, worker));

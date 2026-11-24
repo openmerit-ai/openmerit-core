@@ -9,7 +9,7 @@ import { after, before, beforeEach, test } from "node:test";
 import { loadCatalogue } from "../catalogue/catalogue.ts";
 import {
   applyLabelCheck, BudgetRefused, CandidateUnavailable, completeWith, createClient, createMeasure, exactMatch, graderFor, jsonSchema, judge,
-  labelMatch, LABEL_CHECK_QUESTION, MAX_TOOL_ROUNDS, MemoryLedger, writeCases, type Case, type EndpointConfig, type Ledger, type TaskBundle,
+  labelMatch, LABEL_CHECK_QUESTION, DEFAULT_MAX_TURNS, MemoryLedger, writeCases, type Case, type EndpointConfig, type Ledger, type TaskBundle,
 } from "./index.ts";
 
 const LABELS: Record<string, string> = { "I was charged twice": "billing", "The app crashes on login": "technical", "Where is my parcel?": "shipping" };
@@ -43,6 +43,13 @@ function script(model: string, body: Record<string, unknown>, anthropic: boolean
     case "tool-user": {
       const results = toolResults(body, anthropic);
       return results.length ? { text: results.join(" ").includes("refunded") ? "billing" : "other", cost: 0.001 } : { tool: { name: "lookup_order", args: { id: "42" } }, cost: 0.001 };
+    }
+    // An agent: looks the order up, then refunds it, then answers from both results.
+    case "agent": {
+      const results = toolResults(body, anthropic);
+      if (results.length === 0) return { tool: { name: "lookup_order", args: { id: "42" } }, cost: 0.001 };
+      if (results.length === 1) return { tool: { name: "refund_order", args: { id: "42", reason: results[0]!.includes("damaged") ? "damaged" : "other" } }, cost: 0.001 };
+      return { text: results[1]!.includes("refund-7") ? "billing" : "other", cost: 0.001 };
     }
     case "json": return { text: "```json\n{\"queue\": \"billing\", \"urgent\": true, \"note\": \"anything\"}\n```", cost: 0.001 };
     // Says the right queue and, for the guardrail case, also promises what it must not.
@@ -81,6 +88,13 @@ function memoryLedger(caps: ConstructorParameters<typeof MemoryLedger>[0] = {}):
   };
 }
 
+/** A streamed answer, as Pi asks for: Anthropic's named events, or OpenAI's chunks and [DONE]. */
+function events(res: import("node:http").ServerResponse, items: Record<string, unknown>[], anthropic: boolean) {
+  res.writeHead(200, { "content-type": "text/event-stream" });
+  for (const item of items) res.write(`${anthropic ? `event: ${String(item.type)}\n` : ""}data: ${JSON.stringify(item)}\n\n`);
+  res.end(anthropic ? "" : "data: [DONE]\n\n");
+}
+
 let server: Server;
 let base = "";
 before(async () => {
@@ -89,7 +103,7 @@ before(async () => {
     req.on("data", chunk => { raw += chunk; });
     req.on("end", () => {
       const body = JSON.parse(raw) as Record<string, unknown>;
-      const path = req.url ?? "";
+      const path = (req.url ?? "").replace(/\?.*/, "");
       seen.push({ path, headers: req.headers, body });
       const model = String(body.model);
       const json = (status: number, value: unknown, headers: Record<string, string> = {}) => { res.writeHead(status, { "content-type": "application/json", ...headers }); res.end(JSON.stringify(value)); };
@@ -103,16 +117,21 @@ before(async () => {
       const answer = script(model, body, anthropic);
       if (anthropic) {
         if (req.headers["x-api-key"] !== "sk-ant-fake" || req.headers["anthropic-version"] !== "2023-06-01") return json(401, { error: { message: "bad key" } });
-        const content = answer.tool ? [{ type: "tool_use", id: `toolu_${seen.length}`, name: answer.tool.name, input: answer.tool.args }] : [{ type: "text", text: answer.text }];
-        return json(200, { content, stop_reason: answer.tool ? "tool_use" : "end_turn", usage: { input_tokens: 1000, output_tokens: 100 } });
+        const block = answer.tool ? { type: "tool_use", id: `toolu_${seen.length}`, name: answer.tool.name, input: {} } : { type: "text", text: "" };
+        const delta = answer.tool ? { type: "input_json_delta", partial_json: JSON.stringify(answer.tool.args) } : { type: "text_delta", text: answer.text };
+        return events(res, [
+          { type: "message_start", message: { id: `msg_${seen.length}`, type: "message", role: "assistant", model, content: [], stop_reason: null, usage: { input_tokens: 1000, output_tokens: 0 } } },
+          { type: "content_block_start", index: 0, content_block: block }, { type: "content_block_delta", index: 0, delta }, { type: "content_block_stop", index: 0 },
+          { type: "message_delta", delta: { stop_reason: answer.tool ? "tool_use" : "end_turn" }, usage: { output_tokens: 100 } }, { type: "message_stop" },
+        ], true);
       }
       if (req.headers.authorization !== "Bearer sk-fake") return json(401, { error: { message: "bad key" } });
-      const message = answer.tool
-        ? { role: "assistant", content: null, tool_calls: [{ id: `call_${seen.length}`, type: "function", function: { name: answer.tool.name, arguments: JSON.stringify(answer.tool.args) } }] }
+      const delta = answer.tool
+        ? { role: "assistant", content: null, tool_calls: [{ index: 0, id: `call_${seen.length}`, type: "function", function: { name: answer.tool.name, arguments: JSON.stringify(answer.tool.args) } }] }
         : { role: "assistant", content: answer.text };
       // OpenRouter reports what the call cost; OpenAI-style endpoints report only tokens.
-      const usage = { prompt_tokens: 1000, completion_tokens: 100, ...(path.startsWith("/openrouter") ? { cost: answer.cost } : {}) };
-      json(200, { choices: [{ message, finish_reason: answer.tool ? "tool_calls" : "stop" }], usage });
+      const usage = { prompt_tokens: 1000, completion_tokens: 100, ...(path.startsWith("/openrouter") ? { cost: answer.cost, is_byok: false } : {}) };
+      events(res, [{ choices: [{ index: 0, delta, finish_reason: answer.tool ? "tool_calls" : "stop" }] }, { choices: [], usage }], false);
     });
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -215,8 +234,39 @@ test("tool calls get the bundle's mocked results, and a model that never stops c
     seen.length = 0;
     const looped = await measure({ model: "looper", endpoint }, ["c1"]);
     assert.deepEqual(looped.results, [{ caseId: "c1", pass: false, failure: "tool_loop", reason: "It kept calling tools past the limit and never answered." }]);
-    assert.equal(seen.length, MAX_TOOL_ROUNDS + 1, `${endpoint}: calls stop`);
-    assert.equal(ledger.keys.size, 2 + MAX_TOOL_ROUNDS + 1, `${endpoint}: each call has its own ledger key`);
+    assert.equal(seen.length, DEFAULT_MAX_TURNS, `${endpoint}: calls stop`);
+    assert.equal(ledger.keys.size, 2 + DEFAULT_MAX_TURNS, `${endpoint}: each call has its own ledger key`);
+  }
+});
+
+test("an agent's tools answer from the case's mocked results in order, and the task's turn limit stops it", async () => {
+  const agent: TaskBundle = {
+    ...bundle, constraints: { maxTurns: 3 },
+    tools: [
+      { name: "lookup_order", parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] }, mockResult: { status: "delivered" } },
+      { name: "refund_order", parameters: { type: "object", properties: { id: { type: "string" }, reason: { type: "string" } }, required: ["id", "reason"] }, mockResult: "refund-7" },
+    ],
+  };
+  // The case's own result for lookup_order replaces the tool's; refund_order keeps its mockResult.
+  const agentCases: Case[] = [{ ...cases[0]!, toolResults: { lookup_order: { status: "damaged" } } }];
+  for (const endpoint of ["openrouter", "anthropic"]) {
+    seen.length = 0;
+    const runs: { toolCalls: { name: string; arguments: string }[]; roles: string[] }[] = [];
+    const measure = createMeasure({
+      bundle: agent, cases: agentCases, client: client(), grader: labelMatch(), ledger: memoryLedger(), key: "job-1",
+      onCase: (_result, run) => runs.push({ toolCalls: run!.toolCalls, roles: run!.transcript.map(item => item.role) }),
+    });
+    const result = await measure({ model: "agent", endpoint }, ["c1"]);
+    assert.deepEqual(result.results.map(item => item.pass), [true], `${endpoint}: the refund's mocked result reached the answer`);
+    assert.equal(seen.length, 3);
+    assert.deepEqual(runs[0]!.toolCalls.map(call => [call.name, JSON.parse(call.arguments)]), [["lookup_order", { id: "42" }], ["refund_order", { id: "42", reason: "damaged" }]], `${endpoint}: in order, on the case's result`);
+    assert.deepEqual(runs[0]!.roles.filter(role => role !== "system"), ["user", "assistant", "toolResult", "assistant", "toolResult", "assistant"]);
+    assert.doesNotMatch(JSON.stringify(result), /refund-7|damaged/, "the measure keeps no output or transcript");
+
+    seen.length = 0;
+    const tight = createMeasure({ bundle: { ...agent, constraints: { maxTurns: 2 } }, cases: agentCases, client: client(), grader: labelMatch(), ledger: memoryLedger(), key: "job-1" });
+    assert.deepEqual((await tight({ model: "agent", endpoint }, ["c1"])).results, [{ caseId: "c1", pass: false, failure: "tool_loop", reason: "It kept calling tools past the limit and never answered." }], `${endpoint}: two calls are not enough`);
+    assert.equal(seen.length, 2, `${endpoint}: no third call`);
   }
 });
 
@@ -227,7 +277,7 @@ test("Anthropic gets its own request shape and the cost is estimated from its to
   assert.equal(result.results[0]!.pass, true);
   near(result.costUsd, 0.002);
   assert.equal(seen[0]!.path, "/anthropic/v1/messages");
-  assert.equal(seen[0]!.body.system, bundle.prompt.system);
+  assert.deepEqual(seen[0]!.body.system, [{ type: "text", text: bundle.prompt.system }]);
   assert.equal((seen[0]!.body.messages as unknown[]).length, 1);
 });
 
@@ -335,7 +385,7 @@ test("a trace case is sent as its recorded messages in one call, and graded by p
     assert.equal(seen.length, 1);
   }
   const anthropicRequest = (await (async () => { seen.length = 0; await measure({ model: "good", endpoint: "anthropic" }, ["t-text"]); return seen[0]!.body; })());
-  assert.equal(anthropicRequest.system, "Route tickets.");
+  assert.deepEqual(anthropicRequest.system, [{ type: "text", text: "Route tickets." }]);
 
   seen.length = 0;
   const textInsteadOfTool = await measure({ model: "good", endpoint: "openrouter" }, ["t-tool-call"]);

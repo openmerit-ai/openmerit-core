@@ -6,6 +6,7 @@
 import { Ajv, type ValidateFunction } from "ajv";
 import type { ModelClient } from "./clients.ts";
 import { redact, type Ledger } from "../engine/index.ts";
+import type { Message as PiMessage } from "@earendil-works/pi-ai";
 import type { Case, TaskBundle, ToolCall } from "./types.ts";
 
 export interface GradeInput {
@@ -13,8 +14,10 @@ export interface GradeInput {
   caseItem: Case;
   /** The candidate's final text. Graders never return it. */
   output: string;
-  /** A trace case's tool calls in the candidate's answer; absent or empty otherwise. */
+  /** Every tool call the candidate made, in order; a trace case's are those of its one answer. */
   toolCalls?: readonly ToolCall[];
+  /** The case's Pi transcript: the prompt, then each answer and tool result in order. */
+  transcript?: readonly PiMessage[];
   ledger: Ledger;
   /** The case's idempotency key; a grader that calls a model meters under keys below it. */
   key: string;
@@ -253,6 +256,20 @@ export function parity(options: { text?: Grader } = {}): Grader {
       }
       if (toolCalls.length) return free(false, `Called ${toolCalls.map(call => call.name).join(", ")} where the recorded answer was text.`);
       return (options.text ?? outputGrader(bundle)).grade(input);
+    },
+  };
+}
+
+/**
+ * An agent's whole flow: passes when `output` passes the answer and every tool call in the transcript
+ * ran, so none named a tool the task does not offer, had arguments its schema refuses, or reached a
+ * tool with no mocked result. A model that recovers from a refused call still fails the flow.
+ */
+export function flow(output: Grader): Grader {
+  return {
+    async grade(input) {
+      const refused = (input.transcript ?? []).filter(item => item.role === "toolResult" && item.isError).length;
+      return refused ? free(false) : output.grade(input);
     },
   };
 }

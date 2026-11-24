@@ -18,7 +18,7 @@ import { advance, type Answer, type Context, type Question, type Step } from "..
 import { updateGlobalConfig, updateRepoConfig } from "../../openmerit-core/src/state/config.ts";
 import { State } from "../../openmerit-core/src/state/db.ts";
 import { findRepo } from "../../openmerit-core/src/state/paths.ts";
-import { caller, catalogue, costOf, startApp, stop, subscribe, waitFor, type FakeModels } from "./helpers.ts";
+import { caller, catalogue, chatAnswer, costOf, startApp, stop, subscribe, waitFor, type FakeModels } from "./helpers.ts";
 
 const fixture = new URL("../../openmerit-core/test/fixtures/support-app/", import.meta.url).pathname;
 const tickets = readFileSync(join(fixture, "data/tickets.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line) as { id: string; ticket: string; queue: string });
@@ -48,7 +48,7 @@ async function fakeServer(): Promise<FakeModels & { newHost: () => void }> {
     req.on("end", () => {
       // OpenMerit checks its model key with OpenRouter's free GET /key before a job starts.
       if (req.url === "/key") { res.writeHead(fake.keyStatus ?? 200, { "content-type": "application/json" }); res.end(JSON.stringify(fake.keyStatus ? { error: { code: fake.keyStatus, message: "API key expired" } } : { data: { label: "test" } })); return; }
-      const parsed = JSON.parse(body) as { model: string; messages: { role: string; content: string }[] };
+      const parsed = JSON.parse(body) as { model: string; stream?: boolean; messages: { role: string; content: string }[] };
       const writer = parsed.messages[0]?.role === "system" && parsed.messages[0].content.startsWith("You write test cases");
       const text = parsed.messages.filter(message => message.role === "user").map(message => message.content).join("\n");
       const item = tickets.find(entry => text.includes(entry.ticket));
@@ -57,8 +57,7 @@ async function fakeServer(): Promise<FakeModels & { newHost: () => void }> {
       const flaky = item?.ticket === FLAKY && (parsed.model === CURRENT ? !flakyMissed : strength < RIGHT_FROM);
       if (flaky && parsed.model === CURRENT) flakyMissed = true;
       const answer = writer ? JSON.stringify({ cases: [] }) : strength < WEAK_BELOW || flaky ? "other" : item?.queue ?? "other";
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: answer } }], usage: { prompt_tokens: 50, completion_tokens: 2, cost: writer ? 0 : costOf(parsed.model) } }));
+      chatAnswer(res, parsed, answer, { prompt_tokens: 50, completion_tokens: 2, cost: writer ? 0 : costOf(parsed.model) });
     });
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));

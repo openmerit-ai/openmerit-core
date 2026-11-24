@@ -8,12 +8,13 @@ export interface TaskBundle {
   current: { model: string; endpoint?: string };
   /** The prompt the application sends, with `{{var}}` placeholders that each case's input fills. */
   prompt: { system?: string; messages: { role: "user" | "assistant"; content: string }[] };
-  /** Tools the call offers. The runner answers a call to one with its mocked result. */
+  /** Tools the call offers. The runner answers a call to one with the case's mocked result for it, else this `mockResult`. */
   tools?: { name: string; description?: string; parameters: object; mockResult?: unknown }[];
   output: { kind: "text" } | { kind: "json"; schema: object } | { kind: "label"; labels: string[] };
   /** Inputs the agent found, such as in tests or fixtures; they become the first cases. */
   examples?: { input: Record<string, string>; expected?: unknown }[];
-  constraints?: { maxLatencyMs?: number; needsVision?: boolean };
+  /** `maxTurns`: the most model calls one case may take, 5 when absent; a case still calling tools then fails. A trace case takes 1. */
+  constraints?: { maxLatencyMs?: number; needsVision?: boolean; maxTurns?: number };
   codeRefs?: { file: string; line: number; spelling: string }[];
   // The task spec a review of the code writes: input, steps, output (above), criteria and guardrails.
   /** What the call's input is and how it varies in production, such as "a customer's support email, often forwarded". */
@@ -44,6 +45,8 @@ export interface Case {
   origin: "example" | "written" | "trace";
   /** A written case's kind; examples and traces have none. */
   kind?: CaseKind;
+  /** Mocked tool results for this case, by tool name; a tool without one answers with its `mockResult`. */
+  toolResults?: Record<string, unknown>;
   /** True once the user confirmed the expected answer in the label check. */
   approved?: boolean;
 }

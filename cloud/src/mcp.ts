@@ -38,7 +38,7 @@ const BUNDLE_SCHEMA = {
       ],
     },
     examples: { type: "array", description: "Real inputs from the code or its tests, with the correct answer when known. These become the first test cases.", items: { type: "object", required: ["input"], properties: { input: { type: "object", additionalProperties: string }, expected: {} } } },
-    constraints: { type: "object", properties: { maxLatencyMs: { type: "number" }, needsVision: { type: "boolean" } } },
+    constraints: { type: "object", properties: { maxLatencyMs: { type: "number" }, needsVision: { type: "boolean" }, maxTurns: { type: "integer", minimum: 1, description: "The most model calls one case may take, for a task that calls tools in a loop (an agent). Default 5." } } },
     input: { type: "object", required: ["description"], description: "The task spec: what the call's input is and how it varies in production", properties: { description: string } },
     steps: { type: "array", description: "The task spec: what the model does, in order, with the tools each step uses and their access", items: { type: "object", required: ["description"], properties: { description: string, tools: { type: "array", items: string }, access: { enum: ["none", "read", "write"] } } } },
     criteria: { type: "array", description: "The task spec: what a right answer does, one statement each, from the code and its prompt. OpenMerit judges every case on each", items: string },

@@ -14,9 +14,9 @@
 import { createHash, randomInt } from "node:crypto";
 import { CriticalError, Loop, StepExhaustedError, workflow } from "@rivet-dev/workflows";
 import { queue } from "rivetkit";
-import { applyLabelCheck, BudgetRefused, caseKind, completeWith, createClient, createMeasure, graderFor, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
+import { applyLabelCheck, BudgetRefused, caseKind, completeWith, createClient, createMeasure, flow, graderFor, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
 import { approvalQuestion, basedOn, mergeEvidence, strongest } from "../engine.ts";
-import { baselineResult, byKind, floorNote, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, FINALISTS, modelResult, newProgress, redact, SAMPLE_SIZE, score, taskResult, type CatalogueModel, type Ledger, type ModelResult, type ResolvedGuardrails } from "../engine.ts";
+import { baselineResult, byKind, floorNote, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, FINALISTS, modelResult, newProgress, redact, SAMPLE_SIZE, score, taskResult, type AgentRun, type CatalogueModel, type Ledger, type ModelResult, type ResolvedGuardrails } from "../engine.ts";
 import { agentBundle, caseEvidence } from "../../../openmerit-core/src/connectors/agent-bundle.ts";
 import { buildPool, OPENROUTER, regionNotice, type Option, type Pool, type Provisional } from "../pool.ts";
 import { JOB_BUDGET } from "./account.ts";
@@ -361,6 +361,15 @@ export const job = workflow({
         spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices, fixes,
         reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts,
       });
+      /** The job's model client, and the grader the bundle's output calls for. */
+      const grading = async (account: AccountHandle) => {
+        const { config, fetch } = services();
+        const client = createClient(await keysFor(jobId, account), { fetch, model: model => models.priced[model] ?? null });
+        // Text answers go to a fixed judge on OpenMerit's key. Its calls count in the job's spend but not in the candidate's cost per call.
+        // The rubric is the task's own (rubricFor), with one check per criterion and guardrail of its spec.
+        const judge = (bundle.output.kind === "text" || bundle.guardrails?.length) && config.openrouter.apiKey ? { client, endpoint: OPENROUTER, model: config.models.judge } : undefined;
+        return { client, grader: graderFor(bundle, judge ? { judge } : {}) };
+      };
       let counter = 0;
       /** How many measure steps the job takes in all, once the search knows its size. Set outside steps, from the step count, so a replay sets the same. */
       let plannedTotal: number | null = null;
@@ -386,16 +395,12 @@ export const job = workflow({
             };
             s.state.live = live;
             const account = s.client<Registry>().account.getOrCreate([s.state.input.accountId]);
-            const { config, fetch } = services();
-            const client = createClient(await keysFor(jobId, account), { fetch, model: model => models.priced[model] ?? null });
-            // Text answers go to a fixed judge on OpenMerit's key. Its calls count in the job's spend but not in the candidate's cost per call.
-            // The rubric is the task's own (rubricFor), with one check per criterion and guardrail of its spec.
-            const judge = (bundle.output.kind === "text" || bundle.guardrails?.length) && config.openrouter.apiKey ? { client, endpoint: OPENROUTER, model: config.models.judge } : undefined;
+            const { client, grader } = await grading(account);
             const onCase = (result: { pass: boolean }) => {
               live.done += 1; live.passes += result.pass ? 1 : 0;
               live.history = [...live.history, { time: Date.now() / 1000, rate: live.passes / live.done * 100 }].slice(-60);
             };
-            const run = createMeasure({ bundle, cases: usable, client, grader: graderFor(bundle, judge ? { judge } : {}), ledger: jobLedger(account, jobId), key: `${jobId}/${name}`, signal: s.abortSignal, onCase });
+            const run = createMeasure({ bundle, cases: usable, client, grader, ledger: jobLedger(account, jobId), key: `${jobId}/${name}`, signal: s.abortSignal, onCase });
             for (let attempt = 1; ; attempt++) {
               live.done = 0; live.passes = 0; live.history = [];
               try {
@@ -503,18 +508,34 @@ export const job = workflow({
         }
         const challenging = [...evaluated.challenged, ...(provisional && evaluated.provisionalTried ? [provisional] : [])];
 
-        // 5. Agent eval: when the task belongs to an agent, the engine's rule checks the pick with every other task unchanged.
+        // 5. Agent eval: when the task is an agent (it offers tools, so it can take several model calls) or belongs to one,
+        // the engine's rule checks the pick, then the next cheaper models. An agent task's own cases run end to end in
+        // Pi, each graded on its whole transcript; a group of tasks runs its agent cases, which no source provides yet.
         let chosen = result.pick ? measuredModel(result.pick) : null;
         let agentEval: AgentEvalSummary | null = null;
-        if (chosen && input.agent !== null) {
+        const usesTools = !!bundle.tools?.length;
+        if (chosen && (input.agent !== null || usesTools)) {
           await ctx.step("agent-eval-start", async s => { s.state.phase = "agent_eval"; s.state.live = null; s.state.updatedAt = now(); });
-          const agentMeasure = services().agentEval({ accountId: input.accountId, environment: input.environment, agent: input.agent });
+          const grouped = input.agent === null ? null : services().agentEval({ accountId: input.accountId, environment: input.environment, agent: input.agent });
+          const current = pool.baseline!;
+          type AgentMeasure = (assignment: ReadonlyMap<string, { model: string; endpoint: string }>, key: string, account: AccountHandle) => Promise<AgentRun>;
+          const agentMeasure: AgentMeasure | null = grouped ? assignment => grouped(assignment) : usesTools ? async (assignment, key, account) => {
+            const { client, grader } = await grading(account);
+            const run = createMeasure({ bundle, cases: usable, client, grader: flow(grader), ledger: jobLedger(account, jobId), key });
+            try {
+              return await run(assignment.get(bundle.task) ?? { model: current.endpointModel, endpoint: current.endpoint }, caseIds);
+            } catch (error) {
+              // A refused budget leaves the option unchecked, so it is not accepted.
+              if (error instanceof BudgetRefused) return { results: [], costUsd: 0 };
+              throw error;
+            }
+          } : null;
           let agentCounter = 0;
           const checked = await checkAgent({
             tasks: [{ task: bundle.task, options: cheaper.map(item => ({ key: `${item.endpoint} ${item.model}`, savingUsd: (baseline.costPerCallUsd ?? 0) - (item.costPerCallUsd ?? 0), item })) }],
             measure: agentMeasure ? assignment => ctx.step({
               name: `agent-${++agentCounter}`, timeout: 0, maxRetries: INTERRUPTIONS,
-              run: async () => agentMeasure(new Map([...assignment].map(([task, option]) => [task, { model: option.item.endpointModel, endpoint: option.item.endpoint }]))),
+              run: async s => agentMeasure(new Map([...assignment].map(([task, option]) => [task, { model: option.item.endpointModel, endpoint: option.item.endpoint }])), `${jobId}/agent-${agentCounter}`, s.client<Registry>().account.getOrCreate([input.accountId])),
             }) : null,
             ...(guardrails.effective.minAgentPassRate !== undefined ? { minPassRate: guardrails.effective.minAgentPassRate } : {}),
             ...(guardrails.effective.agentEvalRequired ? { required: guardrails.effective.agentEvalRequired } : {}),
