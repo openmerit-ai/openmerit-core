@@ -42,6 +42,15 @@ export interface TaskResult {
   challengers: string[];
   /** Why the search found no model that passed its screen, when it found none. */
   searchShortfall: string | null;
+  /**
+   * `criteria` once a person marked the current model's own answers wrong: models were measured against
+   * the accepted Eval's checks, and `pick` is the cheapest model that meets them, even above the current
+   * model's price. `current` otherwise.
+   */
+  bar: "current" | "criteria";
+  /** With the criteria bar: the checks the current model misses, and the result in one plain sentence. */
+  failedChecks?: string[];
+  summary?: string;
 }
 
 /** The parts of an option a result shows. */
@@ -50,6 +59,7 @@ export interface Described { model: string; endpoint: string; endpointModel: str
 /** Why a measured model did not qualify, in the report's words; empty when it qualified with a measured cost. */
 export function qualificationNote(item: { shortfall: Shortfall; passes: number; total: number; costPerItemUsd: number | null }, baseline: { passes: number; total: number }, rules: Rules = {}): string {
   if (item.shortfall === "score") return `passed ${item.passes}/${item.total} vs the current model's ${baseline.passes}/${baseline.total}`;
+  if (item.shortfall === "criteria") return "misses your checks";
   if (item.shortfall === "threshold") return `below the eval's required pass rate ${rules.threshold}`;
   if (item.shortfall === "latency") return `slower than the ${rules.maxLatencyMs} ms latency limit`;
   if (item.shortfall === null && item.costPerItemUsd === null) return "qualifies; cost not measured";
@@ -82,10 +92,25 @@ export function taskResult<T extends Rung>(evaluated: EvaluateResult<T>, describ
     if (!found) results.set(item, found = modelResult(item, describe(item.option), evaluated.baseline, rules));
     return found;
   };
-  const cheaper = evaluated.cheaper.map(of);
+  const cheaper = evaluated.cheaper.map(of), top = evaluated.top.map(of);
+  const failedChecks = evaluated.baseline.failedChecks;
+  // Against the criteria, a current model that misses them is replaced by the cheapest model that meets them, whatever it costs.
+  const pick = failedChecks?.length ? top[0] ?? null : cheaper[0] ?? null;
   return {
-    status: evaluated.status, baseline: baselineResult(figures, current), candidates: evaluated.candidates.map(of), top: evaluated.top.map(of), cheaper, pick: cheaper[0] ?? null, nearMisses: evaluated.nearMisses.map(of),
+    status: evaluated.status, baseline: baselineResult(figures, current), candidates: evaluated.candidates.map(of), top, cheaper, pick, nearMisses: evaluated.nearMisses.map(of),
     samples: evaluated.samples, finalists: evaluated.search?.finalists.map(option => describe(option).model) ?? [], challengers: evaluated.challenged.map(option => describe(option).model),
     searchShortfall: evaluated.search?.shortfall ?? null,
+    bar: failedChecks ? "criteria" : "current",
+    ...(failedChecks ? { failedChecks, summary: criteriaSummary(failedChecks, figures, pick) } : {}),
   };
+}
+
+/** The criteria bar's result in one sentence, such as "Your current model fails 2 of your checks (C1, G2); the cheapest model that passes them is Y, at $0.40 more per 1,000 calls." */
+export function criteriaSummary(failedChecks: readonly string[], baseline: { costPerItemUsd: number | null }, pick: Pick<ModelResult, "model" | "costPerItemUsd"> | null): string {
+  if (!failedChecks.length) return pick ? `Your current model passes your checks; ${pick.model} passes them too, for less.` : "Your current model passes your checks, and no cheaper model OpenMerit tried does.";
+  const fails = `Your current model fails ${failedChecks.length} of your checks (${failedChecks.join(", ")})`;
+  if (!pick) return `${fails}, and no model OpenMerit tried passes them.`;
+  const delta = pick.costPerItemUsd === null || baseline.costPerItemUsd === null ? null : (pick.costPerItemUsd - baseline.costPerItemUsd) * 1000;
+  const price = delta === null ? "at a cost OpenMerit could not measure" : `at $${Math.abs(delta).toFixed(2)} ${delta >= 0 ? "more" : "less"} per 1,000 calls`;
+  return `${fails}; the cheapest model that passes them is ${pick.model}, ${price}.`;
 }

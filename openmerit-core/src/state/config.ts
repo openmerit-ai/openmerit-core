@@ -45,6 +45,8 @@ export interface Endpoint {
 /** How OpenMerit runs a task's existing eval for one model. See README "Eval contract". */
 export interface EvalSpec {
   command: string;
+  /** For a generated Eval: the share of cases (0 to 1) a model must pass each criterion on to meet the task's criteria; 0.9 when unset. */
+  criteriaPassRate?: number;
   cwd?: string;
   /** Extra variables for the eval; `{{model}}` and `{{items}}` are filled in. */
   env?: Record<string, string>;

@@ -34,6 +34,8 @@ export interface Guardrails {
   agentEvalRequired?: "warn" | "required";
   /** 0 to 1. */
   minAgentPassRate?: number;
+  /** 0 to 1: the share of cases a model must pass each criterion (C…) on to meet a task's criteria; 0.9 when unset. */
+  criteriaPassRate?: number;
 }
 
 export type GuardrailKey = keyof Guardrails;
@@ -41,7 +43,7 @@ export type GuardrailKind = "constraint" | "default";
 
 export const GUARDRAIL_KINDS = {
   allowedProviders: "constraint", allowedModels: "constraint", endpoints: "constraint", region: "constraint", spendCapUsd: "constraint", customerSpendCapUsd: "constraint",
-  budgetUsd: "default", repeats: "default", minPassRate: "default", latencyMs: "default", watch: "default", actionPolicy: "default", agentEvalRequired: "default", minAgentPassRate: "default",
+  budgetUsd: "default", repeats: "default", minPassRate: "default", latencyMs: "default", watch: "default", actionPolicy: "default", agentEvalRequired: "default", minAgentPassRate: "default", criteriaPassRate: "default",
 } as const satisfies Record<GuardrailKey, GuardrailKind>;
 
 export interface Rejection { key: string; level: Level; reason: string }
@@ -66,7 +68,7 @@ function invalid(key: GuardrailKey, value: unknown): string | null {
     case "region": return typeof value === "string" && value.trim() ? null : "must be a region name";
     case "spendCapUsd": case "customerSpendCapUsd": case "budgetUsd": case "latencyMs": return amount ? null : "must be a number of at least 0";
     case "repeats": return Number.isInteger(value) && (value as number) >= 1 ? null : "must be a whole number of at least 1";
-    case "minPassRate": case "minAgentPassRate": return amount && (value as number) <= 1 ? null : "must be between 0 and 1";
+    case "minPassRate": case "minAgentPassRate": case "criteriaPassRate": return amount && (value as number) <= 1 ? null : "must be between 0 and 1";
     case "watch": return typeof value === "boolean" ? null : "must be true or false";
     case "actionPolicy": return value === "open_pr" || value === "ask_first" || value === "instructions_only" ? null : "must be open_pr, ask_first or instructions_only";
     case "agentEvalRequired": return value === "warn" || value === "required" ? null : "must be warn or required";

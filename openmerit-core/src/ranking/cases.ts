@@ -36,7 +36,7 @@ export const WRITER_SYSTEM = [
   "Reply with JSON only: {\"cases\": [{\"kind\": ..., \"input\": {...}, \"expected\": ..., \"toolResults\": {...}}]}.",
 ].join("\n");
 
-function writerPrompt(bundle: TaskBundle, names: string[], count: number): string {
+function writerPrompt(bundle: TaskBundle, names: string[], count: number, guidance?: string): string {
   const output = bundle.output.kind === "label" ? `One of these labels, exactly: ${bundle.output.labels.join(", ")}. "expected" is that label.`
     : bundle.output.kind === "json" ? `JSON matching this schema:\n${JSON.stringify(bundle.output.schema)}\n"expected" is an object with only the fields whose value the input fully determines.`
       : "Free text. \"expected\" is a short reference answer a grader compares meaning against.";
@@ -51,6 +51,7 @@ function writerPrompt(bundle: TaskBundle, names: string[], count: number): strin
     ...(bundle.tools?.length ? [`Tools the call offers, with an example of what each returns (write each case's own in toolResults):\n${JSON.stringify(bundle.tools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters, example: tool.mockResult })), null, 2)}`] : []),
     `Output: ${output}`,
     ...(bundle.examples?.length ? [`Examples the application has:\n${JSON.stringify(bundle.examples.slice(0, 10), null, 2)}`] : []),
+    ...(guidance ? [`What a person who grades this task's answers said about the last eval; write cases that follow it:\n${guidance}`] : []),
     `Write ${count} cases: about ${edge} edge${guardrails ? `, about ${guardrails} guardrail` : ""} and the rest typical. Each "input" has a string for every one of: ${names.join(", ")}.`,
   ].join("\n\n");
 }
@@ -103,7 +104,8 @@ export interface WrittenCases {
   dropped: number;
 }
 
-export async function writeCases(input: { bundle: TaskBundle; complete: Complete; count?: number; labelCheck?: boolean }): Promise<WrittenCases> {
+/** `guidance`: what a person said about the last eval's answers, for a regenerated eval. */
+export async function writeCases(input: { bundle: TaskBundle; complete: Complete; count?: number; labelCheck?: boolean; guidance?: string }): Promise<WrittenCases> {
   const { bundle } = input;
   const names = placeholders(bundle);
   const seen = new Set<string>();
@@ -137,7 +139,7 @@ export async function writeCases(input: { bundle: TaskBundle; complete: Complete
     // One more request when the first answer gives too few usable cases.
     for (let attempt = 0; attempt < 2 && cases.filter(item => item.origin === "written").length < wanted; attempt++) {
       const missing = wanted - cases.filter(item => item.origin === "written").length;
-      const text = await input.complete({ system: WRITER_SYSTEM, prompt: writerPrompt(bundle, names, missing) });
+      const text = await input.complete({ system: WRITER_SYSTEM, prompt: writerPrompt(bundle, names, missing, input.guidance) });
       for (const raw of parseCases(text)) {
         if (cases.filter(item => item.origin === "written").length >= wanted) break;
         add(raw && typeof raw === "object" ? raw as { input?: unknown; expected?: unknown; kind?: unknown; toolResults?: unknown } : {}, "written");

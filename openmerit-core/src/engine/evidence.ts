@@ -68,3 +68,18 @@ export function basedOn(chosen: Chosen): string[] {
   if (chosen.priority) lines.push(`Priority: ${chosen.priority.value.kind === "spend" ? `$${chosen.priority.value.usdPerMonth.toFixed(2)} a month of recorded spend` : "you asked about this task"}, ${from(chosen.priority.source)}.`);
   return lines;
 }
+
+/**
+ * "Based on" for a run in which every grader and case source counted, such as Scout's generated eval
+ * beside the repository's own: the quality rule's grader first, then every other one, and every case
+ * source, so no evidence that counted is hidden.
+ */
+export function basedOnAll(evidence: TaskEvidence, minCases = 0): string[] {
+  const chosen = strongest(evidence, minCases);
+  const graders = [...new Map([...(chosen.grader ? [chosen.grader] : []), ...evidence.graders].map(item => [`${item.value.description}|${from(item.source)}`, item])).values()];
+  return [
+    ...(graders.length ? [`Grader: ${graders.map(item => `${item.value.description}, ${from(item.source)}`).join("; and ")}.`] : []),
+    ...(evidence.cases.length ? [`Cases: ${evidence.cases.map(item => `${item.value.description} ${from(item.source)}`).join("; ")}.`] : []),
+    ...basedOn(chosen).filter(line => line.startsWith("Priority:")),
+  ];
+}

@@ -14,6 +14,7 @@ import { renderRun } from "../src/cli/render.ts";
 import { EvalProxy } from "../src/eval/proxy.ts";
 import type { Harness, JsonRequest } from "../src/harness/harness.ts";
 import { startRun } from "../src/local.ts";
+import { advanceLoop, pickSamples, startLoop, type CaseAnswer } from "../src/eval/loop.ts";
 import { specBundle, type SpecReply } from "../src/review/index.ts";
 import { scanRepo } from "../src/scout/scan.ts";
 import { advance, CONFIGURE_QUESTION, TASK_QUESTION, type Answer, type Context, type Question, type Step } from "../src/scout/workflow.ts";
@@ -117,19 +118,28 @@ test("the review's spec keeps per-call lookups and step order as openmerit/ranki
  * `spec` (by default the classifier's), and the case writer writes `cases` (by default none, so
  * the repository's eval measures alone).
  */
-function scriptedHarness(discover: Record<string, unknown> = {}, generate: { spec?: object; cases?: { kind: string; ticket: string; queue: string }[] } = {}): Harness & { calls: string[] } {
+function scriptedHarness(discover: Record<string, unknown> = {}, generate: { spec?: object; cases?: { kind: string; ticket: string; queue: string }[]; revised?: { kind: string; ticket: string; queue: string }[] } = {}): Harness & { calls: string[]; prompts: string[] } {
+  const prompts: string[] = [];
   const calls: string[] = [];
   return {
-    kind: "codex", label: "codex", calls, usage: { calls: 0, costUsd: 0, unknownCost: 0, inputTokens: 0, outputTokens: 0 },
+    kind: "codex", label: "codex", calls, prompts, usage: { calls: 0, costUsd: 0, unknownCost: 0, inputTokens: 0, outputTokens: 0 },
     async json<T>(request: JsonRequest): Promise<T> {
       this.usage.calls++;
       if (request.system.includes("reviewing an application's code")) {
         calls.push(`review:${/Task: ([^:]+):/.exec(request.prompt)?.[1]}`);
         return { ...CLASSIFIER_SPEC, ...generate.spec } as T;
       }
+      if (request.system.includes("revising a task's eval")) {
+        calls.push("revise");
+        prompts.push(request.prompt);
+        return { criteria: ["Picks the queue the ticket belongs in, as the person graded it"], guardrails: [] } as T;
+      }
       if (request.system.includes("You write test cases")) {
-        calls.push("write");
-        return { cases: (generate.cases ?? []).map(item => ({ kind: item.kind, input: [{ name: "ticket", value: item.ticket }], expected: item.queue })) } as T;
+        // After a person's grades, the writer is told what they said, and writes the revised cases.
+        const revising = request.prompt.includes("What a person who grades");
+        calls.push(revising ? "rewrite" : "write");
+        const cases = revising ? generate.revised ?? generate.cases : generate.cases;
+        return { cases: (cases ?? []).map(item => ({ kind: item.kind, input: [{ name: "ticket", value: item.ticket }], expected: item.queue })) } as T;
       }
       if (request.system.includes("map model usages")) {
         calls.push("map");
@@ -155,7 +165,7 @@ function repo() {
   return root;
 }
 
-function context(root: string, home: string, harness = scriptedHarness(), extraEnv: Record<string, string> = {}): Context & { harnessCalls: string[] } {
+function context(root: string, home: string, harness: Harness & { calls: string[] } = scriptedHarness(), extraEnv: Record<string, string> = {}): Context & { harnessCalls: string[] } {
   const env = { ...process.env, OPENMERIT_HOME: home, FAKE_ENDPOINT_KEY: "sk-fake-endpoint", ...extraEnv };
   updateGlobalConfig({ harness: { kind: "codex" } }, env);
   if (!readRepoConfig(root).endpoints) updateRepoConfig(root, { endpoints: [{ id: "openai", kind: "openai", baseUrl, apiKey: { env: "FAKE_ENDPOINT_KEY" }, allowedModels: ALLOWED }] });
@@ -164,15 +174,21 @@ function context(root: string, home: string, harness = scriptedHarness(), extraE
 
 const DEFAULTS: Record<string, Answer> = { model: "openai/gpt-4.1-mini", corrections: "", tasks: ["ticket classifier"], approve_evals: true, retry_units: false, configure_ticket_classifier: false };
 
-/** Answers every question from `answers` (falling back to DEFAULTS) until the run stops asking or an answer is missing. */
-async function drive(ctx: Context, runId: string, answers: Record<string, Answer> = {}) {
+/** A person's grade by default: they agree with OpenMerit's grade of the answer. */
+const agree = (question: Question): Answer => (/OpenMerit's grade: passed/.test(question.detail ?? "") ? "good" : "bad");
+
+/**
+ * Answers every question from `answers` (falling back to DEFAULTS) until the run stops asking or an
+ * answer is missing. `grade` answers the grading loop's questions, by default agreeing with OpenMerit.
+ */
+async function drive(ctx: Context, runId: string, answers: Record<string, Answer> = {}, grade: (question: Question) => Answer = agree) {
   const asked: Question[] = [];
   let step: Step = await advance(ctx, runId, {});
   for (let guard = 0; step.questions.length && guard < 30; guard++) {
     asked.push(...step.questions);
     const next: Record<string, Answer> = {};
     for (const question of step.questions) {
-      const answer = answers[question.id] ?? DEFAULTS[question.id];
+      const answer = answers[question.id] ?? (question.id.startsWith("grade_") ? grade(question) : DEFAULTS[question.id]);
       if (answer === undefined) return { step, asked };
       next[question.id] = answer;
     }
@@ -232,6 +248,33 @@ test("usages in tests, fixtures and docs make no task: they are counted under th
   const stopped = await advance(onlyCtx, startRun(onlyCtx), {});
   assert.match(stopped.error ?? "", /Every model usage in this repository \(1\) is in tests, fixtures, docs or saved results/);
   assert.deepEqual(harness.calls, []);
+});
+
+test("the grading loop: a disagreement rewrites the eval, the current model's wrong answer makes the criteria the bar, and agreement accepts the version measured", () => {
+  const answer = (caseId: string, kind: string, pass: boolean): CaseAnswer => ({ caseId, kind, input: { ticket: `ticket ${caseId}` }, output: pass ? "billing" : "other", toolCalls: [], pass, failedChecks: pass ? [] : ["C1"], ...(pass ? {} : { reason: "C1: wrong queue." }) });
+  // Three failed and five passed answers over two kinds: three of each, failed first, kinds in turn.
+  const current = [answer("t1", "typical", true), answer("t2", "typical", false), answer("e1", "edge", true), answer("e2", "edge", false), answer("t3", "typical", true), answer("t4", "typical", true), answer("e3", "edge", false), answer("t5", "typical", true)];
+  const samples = pickSamples([{ model: "openai/gpt-4.1-mini", role: "current", answers: current }, { model: "openai/gpt-5-nano", role: "candidate", answers: [answer("t1", "typical", true)] }]);
+  assert.deepEqual(samples.map(sample => sample.id), ["current:t2", "current:e2", "current:e3", "current:t1", "current:e1", "current:t3", "candidate:t1"]);
+
+  let state = advanceLoop(startLoop(), { type: "searched", artifact: { samples } });
+  const all = (verdict: (id: string, pass: boolean) => "good" | "bad") => samples.map(sample => ({ sampleId: sample.id, verdict: verdict(sample.id, sample.pass) }));
+  assert.throws(() => advanceLoop(state, { type: "graded", grades: all(() => "good").slice(1) }), /current:t2 has no grade/);
+  // The eval passed current:t1, and it does not look right: the eval is rewritten, and the current model is no longer the bar.
+  state = advanceLoop(state, { type: "graded", grades: all((id, pass) => (id === "current:t1" ? "bad" : pass ? "good" : "bad")) });
+  assert.deepEqual([state.status, state.bar, state.evalVersion, state.savedVersion], ["regenerating", "criteria", 1, 0]);
+  state = advanceLoop(state, { type: "regenerated" });
+  assert.deepEqual([state.status, state.round, state.evalVersion], ["searching", 2, 2]);
+  // Round 2 against the criteria: the person agrees with every grade, so version 2 is accepted.
+  state = advanceLoop(state, { type: "searched", artifact: { samples } });
+  state = advanceLoop(state, { type: "graded", grades: all((_id, pass) => (pass ? "good" : "bad")) });
+  assert.deepEqual([state.status, state.bar, state.savedVersion, state.history.length], ["accepted", "criteria", 2, 2]);
+
+  // Agreeing that the current model's failed answers are wrong also ends "as good as the current model": the same eval is saved, then searched against the criteria.
+  let other = advanceLoop(startLoop(3), { type: "searched", artifact: { samples } });
+  other = advanceLoop(other, { type: "graded", grades: all((_id, pass) => (pass ? "good" : "bad")) });
+  assert.deepEqual([other.status, other.bar, other.evalVersion, other.savedVersion, other.round], ["searching", "criteria", 3, 3, 2]);
+  assert.throws(() => advanceLoop(other, { type: "regenerated" }), /not regenerating/);
 });
 
 test("history names every harness a run used, in order, when `openmerit connect` switched it between steps", async () => {
@@ -531,7 +574,7 @@ test("an eval that sends no model request through the proxy stops after one run 
 /** The fixture's ten tickets as written cases, with the first `wrong` of them given the wrong queue. */
 const writtenCases = (wrongAnswers = 0) => [...tickets].map(([ticket, queue], index) => ({ kind: "typical", ticket, queue: index < wrongAnswers ? (queue === "billing" ? "account" : "billing") : queue }));
 
-test("Scout always writes an eval from its review of the code, runs the repository's eval beside it, and saves the Eval it ran once approved", async () => {
+test("Scout always writes an eval from its review of the code, runs the repository's eval beside it, and saves the Eval once a person accepts it", async () => {
   const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
   const guardrail = "Reveals another customer's ticket";
   const harness = scriptedHarness({}, { spec: { guardrails: [guardrail] }, cases: writtenCases() });
@@ -543,7 +586,7 @@ test("Scout always writes an eval from its review of the code, runs the reposito
   // Ten tickets are fewer than the twelve cases asked for, so the writer is asked once more.
   assert.deepEqual(harness.calls.filter(call => call !== "map"), ["discover:ticket classifier", "review:ticket classifier", "write", "write"]);
   const approval = asked.find(question => question.id === "approve_evals")!.detail!;
-  assert.match(approval, /Eval: written by OpenMerit from its review of the code, 10 cases \(10 typical\), saved in \.openmerit\/evals\/ticket-classifier\/ once approved/);
+  assert.match(approval, /Eval: written by OpenMerit from its review of the code, 10 cases \(10 typical\), saved in \.openmerit\/evals\/ticket-classifier\/ once you accept it/);
   assert.match(approval, new RegExp(`Guardrails: ${guardrail}`));
   assert.match(approval, /Also the repository's eval, as extra evidence \(items repo:…\): node evals\/classify\.eval\.ts/);
   // The current model runs both evals: ten written cases and the repository's ten items, three times.
@@ -552,9 +595,18 @@ test("Scout always writes an eval from its review of the code, runs the reposito
   const first = ctx.state.units(runId).find(unit => unit.role === "baseline" && unit.repeat === 1)!.result as { items: Record<string, boolean> };
   assert.equal(Object.keys(first.items).filter(item => item.startsWith("repo:")).length, 10);
   assert.ok(task.top.length > 0, "a cheaper model qualified");
+  // Both evals counted, so "Based on" names both graders and both case sources.
+  assert.deepEqual(task.basedOn!.slice(0, 2), [
+    "Grader: your eval's pass or fail per item, from eval-command (node evals/classify.eval.ts); and the labels OpenMerit wrote for its cases, from repo-review (.openmerit/evals/ticket-classifier); and a judge model on 1 guardrail, from repo-review (.openmerit/evals/ticket-classifier).",
+    "Cases: 10 written cases from repo-review (the case writer); 10 items of your eval from eval-command (node evals/classify.eval.ts).",
+  ]);
   // A right label is also judged on the guardrail, through the proxy, so the judge's calls count in the run's budget.
   assert.ok(judged.count >= 30, `${judged.count} judge calls`);
-  // Approval saved the Eval and the repository's eval beside it; nothing else in the repository changed.
+  // The person agreed with every grade they were shown, the current model's and the pick's: that accepted the Eval, version 1.
+  const grades = asked.filter(question => question.id.startsWith("grade_"));
+  assert.ok(grades.some(question => /your current model/.test(question.detail!)) && grades.some(question => /a candidate/.test(question.detail!)), "both models' answers are shown");
+  assert.deepEqual(JSON.parse(readFileSync(join(root, ".openmerit/evals/ticket-classifier/eval.json"), "utf8")), { version: 1, bar: "current", acceptedAt: JSON.parse(readFileSync(join(root, ".openmerit/evals/ticket-classifier/eval.json"), "utf8")).acceptedAt });
+  // Accepting saved the Eval and the repository's eval beside it; nothing else in the repository changed.
   const saved = readRepoConfig(root).evals!["ticket classifier"]!;
   assert.equal(saved.generated, ".openmerit/evals/ticket-classifier");
   assert.equal(saved.repoEval?.command, "node evals/classify.eval.ts");
@@ -570,25 +622,34 @@ test("Scout always writes an eval from its review of the code, runs the reposito
   assert.deepEqual(harness.calls, ["map"]);
 });
 
-test("a generated eval the current model passes under 80% of recommends nothing, with the failed cases and why", async () => {
+test("below the floor a person's grades decide: answers the eval failed look good to them, so it is written again from their note, and they accept the next version", async () => {
   const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
-  // Six of the ten written cases expect the wrong queue: the current model passes 4 of them and all 10 of the repository's items.
-  const ctx = context(root, home, scriptedHarness({}, { cases: writtenCases(6) }));
+  // Six of the ten written cases expect the wrong queue: the current model passes 42 of 60 case runs, under the floor. The revised cases are right.
+  const harness = scriptedHarness({}, { cases: writtenCases(6), revised: writtenCases(0) });
+  const ctx = context(root, home, harness);
   requests.length = 0;
   const runId = startRun(ctx);
-  const { step } = await drive(ctx, runId);
+  const note = "the queue is right; the expected answer is wrong";
+  // Round 1: the person says the failed answers look good. Round 2: they agree with every grade.
+  const { step, asked } = await drive(ctx, runId, {}, question => (/, round 2/.test(question.detail!) ? agree(question) : `good: ${note}`));
   assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
+  const round1 = asked.filter(question => question.id.startsWith("grade_") && !/, round 2/.test(question.detail!));
+  assert.equal(round1.length, 6);
+  assert.ok(round1.every(question => /your current model/.test(question.detail!)), "below the floor nothing was screened, so only the current model's answers are shown");
+  assert.ok(round1.filter(question => /OpenMerit's grade: failed: Answered (billing|technical|account), expected/.test(question.detail!)).length >= 3, "failed answers first, with the grader's reason");
+  // The reviser heard what the person said, and the case writer was told it too.
+  assert.deepEqual(harness.calls.filter(call => call === "revise" || call === "rewrite"), ["revise", "rewrite", "rewrite"], "ten tickets are fewer than twelve cases, so the writer is asked twice");
+  assert.match(harness.prompts[0]!, /looks good, although the eval failed it/);
+  assert.ok(harness.prompts[0]!.includes(note));
+  assert.ok(ctx.state.units(runId).some(unit => unit.id.includes("|ticket_classifier~2|")), "round 2 measured afresh");
+  // Round 2 ranks against the current model again, and the accepted Eval is version 2 with the revised cases.
   const task = step.result!.tasks[0]!;
-  assert.equal(task.status, "stopped");
-  assert.deepEqual(task.top, []);
-  assert.match(task.note, /openai\/gpt-4\.1-mini passed 42 of 60 case runs of its own eval, under the 80% OpenMerit needs before the eval can tell models apart, so no model is recommended\./);
-  assert.match(task.note, /Failed cases: written-1: Answered (billing|technical|account), expected (billing|account)\./);
-  assert.ok(ctx.state.units(runId).every(unit => unit.role === "baseline"), "no candidate was screened");
-  // The Eval is set aside, so the next run reviews the task again; the repository's eval stays saved.
-  assert.match(task.note, /OpenMerit set this eval aside; the next `openmerit scout` reviews the task and writes it again\./);
-  assert.ok(!existsSync(join(root, ".openmerit/evals/ticket-classifier")));
-  assert.deepEqual(readRepoConfig(root).evals!["ticket classifier"]?.command, "node evals/classify.eval.ts");
-  assert.equal(readRepoConfig(root).evals!["ticket classifier"]?.generated, undefined);
+  assert.equal(task.status, "ranked");
+  const dir = join(root, ".openmerit/evals/ticket-classifier");
+  assert.deepEqual([JSON.parse(readFileSync(join(dir, "eval.json"), "utf8")).version, JSON.parse(readFileSync(join(dir, "eval.json"), "utf8")).bar], [2, "current"]);
+  const cases = JSON.parse(readFileSync(join(dir, "cases.json"), "utf8")) as { input: { ticket: string }; expected: string }[];
+  assert.ok(cases.every(item => tickets.get(item.input.ticket) === item.expected), "the saved cases are the revised ones");
+  assert.deepEqual(ctx.state.decisions(runId).filter(decision => decision.kind === "grade").map(decision => decision.decision), ["regenerating", "accepted"]);
 });
 
 test("an eval the harness counts fewer than five items in is not run alone: without a generated eval the task is skipped before anything is spent", async () => {

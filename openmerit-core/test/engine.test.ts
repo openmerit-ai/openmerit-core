@@ -6,7 +6,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { approve, basedOn, binarySearch, EVAL_FLOOR, challengers, checkAgent, evaluateTask, mergeEvidence, MemoryLedger, proposeEdit, strongest, taskResult, type EvidencePart, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
+import { approve, basedOn, binarySearch, CRITERIA_PASS_RATE, EVAL_FLOOR, meetsCriteria, challengers, checkAgent, evaluateTask, mergeEvidence, MemoryLedger, proposeEdit, strongest, taskResult, type EvidencePart, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
 import { State } from "../src/state/db.ts";
 
 test("the search keeps a ladder's own order, and unplaced options are always challengers", async () => {
@@ -306,4 +306,41 @@ test("the floor: under 80% of its own eval, the current model's eval ranks nothi
   // Exactly 80% is enough; and a caller whose eval has its own threshold turns the floor off.
   assert.equal((await run(["i9", "i10"])).result.status, "ranked");
   assert.equal((await run(["i8", "i9", "i10"], null)).result.status, "ranked");
+});
+
+test("against the task's criteria: every guardrail on every case, each criterion on 90% of them, and the cheapest model that meets them even above the current model's price", async () => {
+  // Twenty items. Each option fails the listed items on the listed check; the current model (price 10) misses C1 on 6 items.
+  const items = Array.from({ length: 20 }, (_, index) => `i${index + 1}`);
+  const criteria = { criteria: ["C1", "C2"], guardrails: ["G1", "S1"] };
+  const run = async (fails: Record<string, Record<string, string>>, mode: "criteria" | "current") => evaluateTask({
+    ladder: [{ key: "cheap", price: 1 }, { key: "mid", price: 5 }, { key: "dear", price: 20 }], strength: () => 1, items, repeats: 1, baselinePrice: 10,
+    ...(mode === "criteria" ? { criteria } : {}),
+    sample: pool => pool.slice(-5),
+    measure: async (option: Rung | null, ids: readonly string[] | null) => {
+      const missed = fails[option?.key ?? "current"] ?? {};
+      return { items: Object.fromEntries(ids!.map(id => [id, !missed[id]])), checks: Object.fromEntries(Object.entries(missed).map(([id, check]) => [id, [check]])), costUsd: (option?.price ?? 10) * 0.001 * ids!.length };
+    },
+  });
+  const current = Object.fromEntries(items.slice(0, 6).map(id => [id, "C1"]));
+  // cheap breaks a guardrail once; mid misses C2 on 2 of 20 cases, exactly 90%.
+  const atBoundary = await run({ current, cheap: { i1: "G1" }, mid: { i2: "C2", i3: "C2" } }, "criteria");
+  assert.equal(CRITERIA_PASS_RATE, 0.9);
+  assert.equal(atBoundary.status, "ranked", "no floor against the criteria, although the current model passes 70%");
+  assert.deepEqual(atBoundary.baseline.failedChecks, ["C1"]);
+  assert.equal(atBoundary.top[0]?.option.key, "mid");
+  assert.equal(atBoundary.candidates.find(item => item.option.key === "cheap")?.shortfall, "criteria", "one broken guardrail is enough");
+  // One more miss is 85%: the cheapest model that meets them now costs more than the current model.
+  const pricier = await run({ current, cheap: { i1: "G1" }, mid: { i2: "C2", i3: "C2", i4: "C2" } }, "criteria");
+  assert.equal(pricier.top[0]?.option.key, "dear");
+  assert.ok(pricier.top[0]!.costPerItemUsd! > pricier.baseline.costPerItemUsd!);
+  const describe = (option: Rung) => ({ model: option.key, endpoint: "e", endpointModel: option.key, eci: null });
+  const result = taskResult(pricier, describe, describe({ key: "current", price: 10 }));
+  assert.equal(result.bar, "criteria");
+  assert.equal(result.pick?.model, "dear", "the pick costs more than the current model");
+  assert.equal(result.summary, "Your current model fails 1 of your checks (C1); the cheapest model that passes them is dear, at $10.00 more per 1,000 calls.");
+  // The same answers against the current model stop at the floor.
+  assert.equal((await run({ current }, "current")).status, "below_floor");
+  // A failure the grader named no check for counts against every criterion, not against a guardrail.
+  assert.deepEqual(meetsCriteria([{ items: { a: false, b: true, c: true, d: true, e: true, f: true, g: true, h: true, i: true, j: true }, costUsd: 0 }], criteria), { meets: true, failed: [] });
+  assert.deepEqual(meetsCriteria([{ items: { a: false, b: false, c: true, d: true, e: true, f: true, g: true, h: true, i: true, j: true }, costUsd: 0 }], criteria).failed, ["C1", "C2"]);
 });

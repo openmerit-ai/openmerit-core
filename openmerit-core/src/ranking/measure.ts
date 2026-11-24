@@ -19,6 +19,8 @@ export interface CaseResult {
   failure?: CaseFailure;
   /** Why a failed case failed, in one redacted sentence: the grader's reason, or the failure's. */
   reason?: string;
+  /** The spec's checks (C…, G…, S…) it failed, when the grader named them. */
+  failedChecks?: string[];
 }
 
 export interface MeasureResult {
@@ -98,7 +100,7 @@ export function createMeasure(input: {
           continue;
         }
         const grade = await input.grader.grade({ bundle: input.bundle, caseItem, output: ran.output, toolCalls: ran.toolCalls, transcript: ran.transcript, refused: ran.refused, ledger: input.ledger, key, ...(input.signal ? { signal: input.signal } : {}) });
-        settle(index, { ...base, result: { caseId: caseItem.id, pass: grade.pass, ...(grade.pass ? {} : { reason: grade.reason ?? "The grader failed the answer." }) }, graderCostUsd: grade.costUsd }, ran);
+        settle(index, { ...base, result: { caseId: caseItem.id, pass: grade.pass, ...(grade.pass ? {} : { reason: grade.reason ?? "The grader failed the answer.", ...(grade.failed?.length ? { failedChecks: grade.failed } : {}) }) }, graderCostUsd: grade.costUsd }, ran);
       }
     };
     await Promise.all(Array.from({ length: Math.min(input.concurrency ?? CASE_CONCURRENCY, ids.length) }, worker));

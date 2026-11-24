@@ -34,6 +34,8 @@ export interface Grade {
   costIsEstimate: boolean;
   /** Why a failed case failed, in one redacted sentence; absent when it passed. */
   reason?: string;
+  /** The spec's checks (C…, G…, S…) a failed case failed; absent when the grader names none, such as a wrong label. */
+  failed?: string[];
 }
 
 export interface Grader { grade(input: GradeInput): Promise<Grade> }
@@ -224,7 +226,7 @@ export function judge(options: JudgeOptions): Grader {
       }, { ledger, key: `${key}/judge${options.only ? "-guardrails" : ""}`, ...(signal ? { signal } : {}) });
       const verdict = answer.ok ? readVerdict(answer.text, checks) : null;
       if (verdict === null) throw new Error(`The judge ${options.model} gave no verdict for case ${caseItem.id}${answer.error ? `: ${answer.error}` : ""}`);
-      return { pass: verdict.pass, costUsd: answer.costUsd, costIsEstimate: answer.costIsEstimate, ...(verdict.pass ? {} : { reason: verdict.reason || "The judge failed the answer without a reason." }) };
+      return { pass: verdict.pass, costUsd: answer.costUsd, costIsEstimate: answer.costIsEstimate, ...(verdict.pass ? {} : { reason: verdict.reason || "The judge failed the answer without a reason.", ...(verdict.failed.length ? { failed: verdict.failed } : {}) }) };
     },
   };
 }
@@ -344,7 +346,7 @@ export function flow(output: Grader): Grader {
           : unfixed.kind === "no_match" ? `Its call to ${unfixed.tool} found nothing for its arguments, and it never called it again with ones that did.` : `It called ${unfixed.tool}, which the eval has no mocked result for.`);
       }
       const step = failedStep(input.bundle, stepChecksFor(input.bundle).checks, answered);
-      if (step) return free(false, step);
+      if (step) return { ...free(false, step), failed: [step.split(":")[0]!] };
       return output.grade(input);
     },
   };
