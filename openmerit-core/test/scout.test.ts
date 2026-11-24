@@ -197,6 +197,43 @@ test("the task question lists each task once and takes a mapping correction", as
   assert.ok(!step.questions.some(question => question.id === "tasks"), "a task name answers the question");
 });
 
+test("usages in tests, fixtures and docs make no task: they are counted under their model, never offered, mapped or moved", async () => {
+  const root = repo();
+  mkdirSync(join(root, "tests"));
+  writeFileSync(join(root, "tests/classify.test.ts"), `const pinned = "gpt-4.1-mini";\nconst cheap = "gpt-5-nano";\n`);
+  execFileSync("git", ["add", "-A"], { cwd: root });
+  const ctx = context(root, mkdtempSync(join(tmpdir(), "openmerit-home-")));
+  const runId = startRun(ctx);
+  const inTests = scanRepo(root, loadCatalogue()).usages.filter(usage => usage.file === "tests/classify.test.ts");
+  assert.equal(inTests.length, 2);
+  let step = await advance(ctx, runId, {});
+  const models = step.questions[0]!.options!;
+  assert.match(models.find(option => option.value === "openai/gpt-4.1-mini")!.detail!, /\+1 in tests, fixtures or docs/);
+  assert.equal(models.find(option => option.value === "openai/gpt-5-nano")!.detail, "only 1 in tests, fixtures or docs");
+  // A model only tests name is offered only the tasks whose model is set at run time, which may be it.
+  step = await advance(ctx, runId, { model: "openai/gpt-5-nano" });
+  assert.ok(step.questions[0]!.options!.length && step.questions[0]!.options!.every(option => /its model is set at run time/.test(option.detail!)), JSON.stringify(step.questions));
+  step = await advance(ctx, startRun(ctx), {});
+  step = await advance(ctx, step.runId, { model: "openai/gpt-4.1-mini" });
+  const second = step.runId;
+  const options = step.questions[0]!.options!;
+  assert.deepEqual(options.map(option => option.value), ["ticket classifier", "reply drafter", "escalation router"], "no task for tests, fixtures and docs");
+  assert.ok(!options[0]!.detail!.includes("classify.test.ts"), "the harness never saw the test's usage, although it maps by file name");
+  step = await advance(ctx, second, { tasks: [`${inTests[0]!.id}=ticket classifier`] });
+  assert.match(step.notices!.join(" "), /is in tests\/classify\.test\.ts, a test, fixture, doc or saved result/);
+
+  // A repository whose only model usages are in tests stops at the scan, before the harness is asked.
+  const only = mkdtempSync(join(tmpdir(), "openmerit-repo-"));
+  mkdirSync(join(only, "tests"));
+  writeFileSync(join(only, "tests/classify.test.ts"), `const pinned = "gpt-4.1-mini";\n`);
+  execFileSync("git", ["init", "-q"], { cwd: only });
+  execFileSync("git", ["add", "-A"], { cwd: only });
+  const harness = scriptedHarness(), onlyCtx = context(only, mkdtempSync(join(tmpdir(), "openmerit-home-")), harness);
+  const stopped = await advance(onlyCtx, startRun(onlyCtx), {});
+  assert.match(stopped.error ?? "", /Every model usage in this repository \(1\) is in tests, fixtures, docs or saved results/);
+  assert.deepEqual(harness.calls, []);
+});
+
 test("history names every harness a run used, in order, when `openmerit connect` switched it between steps", async () => {
   const root = repo(), harness = scriptedHarness(), ctx = context(root, mkdtempSync(join(tmpdir(), "openmerit-home-")), harness);
   const runId = startRun(ctx);
