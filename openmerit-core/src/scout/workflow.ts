@@ -35,7 +35,7 @@ import { allowedOn, baselineEndpoint, pool, type PoolModel } from "./pool.ts";
 import { context, isSupportFile, listFiles, scanRepo, type ScanResult, type Usage } from "./scan.ts";
 import { applicationUsages, mapTasks, reviewTask, type MappedTask } from "../review/index.ts";
 import { advanceLoop, feedbackOf, pickSamples, reviseEval, startLoop, type CaseAnswer, type LoopState, type SampleGrade } from "../eval/loop.ts";
-import { generateEval, generatedDir, loadEvalVersion, loadGeneratedEval, REPO_ITEM, runGeneratedEval, saveGeneratedEval, type GeneratedEval, type GeneratedOutcome } from "../eval/generated.ts";
+import { generateEval, generatedDir, isManaged, loadEvalVersion, loadGeneratedEval, REPO_ITEM, runGeneratedEval, saveGeneratedEval, type GeneratedEval, type GeneratedOutcome } from "../eval/generated.ts";
 import { caseKind } from "../ranking/types.ts";
 import { stepChecksFor } from "../ranking/graders.ts";
 
@@ -450,6 +450,16 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
       const savedName = Object.keys(saved).find(other => other.toLowerCase() === name.toLowerCase());
       const savedSpec = savedName ? saved[savedName]! : null;
       // An Eval OpenMerit generated and the user approved is reused as it is, with the repository's own eval beside it.
+      // An eval app.openmerit.ai owns is edited there: Scout runs the copy the coding agent wrote, at the cloud's version, without grading it.
+      const managed = savedSpec?.generated ?? generatedDir(name);
+      if (isManaged(ctx.repo.root, managed)) {
+        data.evals[name] = { ...savedSpec, source: "saved", command: `openmerit eval ${managed}`, generated: managed };
+        const copy = loadEvalVersion(ctx.repo.root, managed);
+        (data.loop ??= {})[name] = { ...startLoop(copy.version, copy.bar), status: "accepted", savedVersion: copy.version };
+        ctx.state.event(runId, "discover", `${name}: runs version ${copy.version} of the eval app.openmerit.ai manages, from ${managed}; edit it in the app.`);
+        save();
+        continue;
+      }
       if (savedSpec?.generated) {
         data.evals[name] = { ...savedSpec, source: "saved" };
         // A person already accepted it: no grading, and the bar they left it at.

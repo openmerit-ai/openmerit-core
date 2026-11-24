@@ -64,7 +64,7 @@ describe("the cloud app", () => {
     const init = await signedIn.rpc("initialize", { protocolVersion: "2025-06-18" });
     assert.equal(init.body.result?.protocolVersion, "2025-06-18");
     const tools = await signedIn.rpc("tools/list");
-    assert.deepEqual(tools.body.result?.tools?.map(tool => tool.name), ["openmerit_recommend", "openmerit_result", "openmerit_answer", "openmerit_tasks", "openmerit_retire"]);
+    assert.deepEqual(tools.body.result?.tools?.map(tool => tool.name), ["openmerit_recommend", "openmerit_result", "openmerit_answer", "openmerit_tasks", "openmerit_eval", "openmerit_retire"]);
 
     const noOrganization = await caller(app, "test:user_b").tool("openmerit_tasks", {});
     assert.equal(noOrganization.isError, true);

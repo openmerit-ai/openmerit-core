@@ -69,6 +69,8 @@ export interface JobResult {
   reportUrl: string;
   catalogueVersion: string;
   cases: { total: number; fromExamples: number; written: number };
+  /** The eval version the run measured on; runs on different versions are not comparable. Absent from reports saved before evals had versions. */
+  evalVersion?: number;
   /** The evidence each decision used, by openmerit/engine's quality rule, such as "Grader: the expected labels of your examples, from agent-bundle". Absent from reports saved before it was added. */
   basedOn?: string[];
   /** The question that asks a person to approve the switch, as the CLI asks it; null with no pick. Absent from older reports. */

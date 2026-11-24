@@ -11,10 +11,10 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
-import type { RepoView } from "../src/actors/account.ts";
+import type { EvalView, RepoView } from "../src/actors/account.ts";
 import { parseRepoUrl, reviewCheckout, withCheckout, type GitHubConfig } from "../src/github.ts";
 import { signStripePayload } from "../src/billing.ts";
-import { caller, catalogue, chatAnswer, fakeModels, startApp, stop, subscribe, waitFor, type App, type FakeModels } from "./helpers.ts";
+import { bundle, caller, catalogue, chatAnswer, fakeModels, startApp, stop, subscribe, TICKETS, waitFor, type App, type FakeModels } from "./helpers.ts";
 
 const TOKEN = `github_pat_${"A".repeat(30)}_good`;
 const NO_CONTENTS = `github_pat_${"B".repeat(30)}_meta`;
@@ -99,12 +99,22 @@ async function fakeGitHub(repos: Record<string, FakeRepo>, root: string): Promis
 
 /** A fake OpenRouter for the reviewer: it maps every usage it is shown to one task, then writes that task's spec. */
 interface FakeReviewer { url: string; prompts: string[]; close: () => Promise<void> }
-async function fakeReviewer(): Promise<FakeReviewer> {
+/**
+ * The reviewer's model on OpenRouter. The app's jobs share OpenRouter's URL, so with `others` every
+ * request that is not the reviewer's, such as a job's key check and model calls, goes to that fake.
+ */
+async function fakeReviewer(others?: string): Promise<FakeReviewer> {
   const prompts: string[] = [];
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", chunk => { body += chunk; });
     req.on("end", () => {
+      if (others && !body.includes("You are OpenMerit Harness")) {
+        void fetch(`${others}${req.url ?? ""}`, { method: req.method ?? "GET", headers: Object.fromEntries(Object.entries(req.headers).filter(([name]) => name !== "host" && name !== "content-length").map(([name, value]) => [name, String(value)])), ...(body ? { body } : {}) })
+          .then(async answer => { res.writeHead(answer.status, { "content-type": answer.headers.get("content-type") ?? "application/json" }); res.end(Buffer.from(await answer.arrayBuffer())); })
+          .catch(() => { res.writeHead(502).end(); });
+        return;
+      }
       const parsed = JSON.parse(body) as { stream?: boolean; messages: { content: string | { text?: string }[] }[] };
       const text = parsed.messages.map(message => typeof message.content === "string" ? message.content : message.content.map(part => part.text ?? "").join("")).join("\n");
       prompts.push(text);
@@ -167,6 +177,15 @@ describe("GitHub repositories", () => {
       "tests/replies.test.py": 'model="openai/gpt-5"\nfallback = { model: "anthropic/claude-sonnet-5.5" }\n',
       "examples/demo.ts": 'const demo = { model: "anthropic/claude-haiku-5.5" };\n',
     });
+    // Evals Scout wrote: two to import, one copy app.openmerit.ai manages, and one that is not a usable bundle.
+    const evalFiles = (task: string) => ({ bundle: JSON.stringify({ ...bundle(task), examples: undefined }), cases: JSON.stringify(Object.entries(TICKETS).slice(0, 3).map(([ticket, queue], index) => ({ id: `example-${index + 1}`, input: { ticket }, expected: queue, origin: "example" }))) });
+    bareRepo(root, "acme/evals-app", {
+      "src/app.ts": 'const MODEL = "openai/gpt-5.4";\n',
+      ".openmerit/evals/ticket-router/bundle.json": evalFiles("ticket router").bundle, ".openmerit/evals/ticket-router/cases.json": evalFiles("ticket router").cases,
+      ".openmerit/evals/reply-drafter/bundle.json": evalFiles("reply drafter").bundle, ".openmerit/evals/reply-drafter/cases.json": evalFiles("reply drafter").cases,
+      ".openmerit/evals/managed/bundle.json": evalFiles("managed").bundle, ".openmerit/evals/managed/cases.json": evalFiles("managed").cases, ".openmerit/evals/managed/MANAGED.md": "Managed by app.openmerit.ai\n",
+      ".openmerit/evals/broken/bundle.json": "{\"task\": 1}", ".openmerit/evals/broken/cases.json": "[]",
+    });
     bareRepo(root, "acme/tests-only", { "tests/fixtures/calls.ts": 'export const MODEL = "openai/gpt-5";\n' });
     bareRepo(root, "acme/slow-app", { "app.ts": 'const model = "openai/gpt-5";\n' });
     bareRepo(root, "acme/big-app", { "data.bin": randomBytes(400_000).toString("base64") });
@@ -176,11 +195,12 @@ describe("GitHub repositories", () => {
       "acme/slow-app": { private: false, slowMs: 10_000 },
       "acme/mixed-app": { private: false },
       "acme/tests-only": { private: false },
+      "acme/evals-app": { private: false },
       "acme/huge-app": { private: false, sizeKb: 300 * 1024 },
       "acme/big-app": { private: false },
     }, root);
     models = await fakeModels();
-    reviewer = await fakeReviewer();
+    reviewer = await fakeReviewer(models.url);
     sandboxes = mkdtempSync(join(tmpdir(), "openmerit-sandboxes-"));
     app = await startApp({ models, env: { OPENMERIT_GITHUB_API_URL: github.api, OPENMERIT_GITHUB_URL: github.git, OPENMERIT_REPO_CLONE_SECONDS: "4", OPENMERIT_REVIEWS_PER_HOUR: "2", TMPDIR: sandboxes,
       OPENROUTER_BASE_URL: reviewer.url, OPENMERIT_REVIEWER_MODEL: "openai/gpt-5-mini", PI_OFFLINE: "1" } });
@@ -290,6 +310,75 @@ describe("GitHub repositories", () => {
     assert.equal((await admin.api<{ plan: { usedEvals: number } }>("/api/me")).body.plan.usedEvals, 0);
     const exported = await admin.api<{ ledger: { key: string; status: string; actual_usd: number }[] }>("/api/account/export", { method: "POST" });
     assert.deepEqual(exported.body.ledger.map(row => [row.key.split("/")[0], row.status]), [["review", "settled"]]);
+  });
+
+  test("a repository belongs to one project, and a coding agent's call from it lands in that project", async () => {
+    const admin = caller(app, "test:user_pp:org_pp:admin");
+    const project = await admin.api<{ id: string; repos: string[] }>("/api/projects", { method: "POST", body: JSON.stringify({ name: "Support bot" }) });
+    assert.equal(project.status, 201);
+    await subscribe(app, "org_pp");
+    const inProject = { "x-openmerit-project": project.body.id };
+    const added = await admin.api<RepoView>("/api/repos", { method: "POST", headers: inProject, body: JSON.stringify({ url: "https://github.com/acme/mixed-app" }) });
+    assert.equal(added.status, 201);
+    assert.equal((await waitFor(async () => (await admin.api<RepoView[]>("/api/repos", { headers: inProject })).body[0]!, repo => repo.review.status === "done" || repo.review.status === "failed", 60_000)).review.status, "done");
+    assert.deepEqual((await admin.api("/api/repos")).body, [], "the default project does not list another project's repository");
+    const twice = await admin.api<{ error: string }>("/api/repos", { method: "POST", body: JSON.stringify({ url: "https://github.com/Acme/Mixed-App" }) });
+    assert.equal(twice.status, 400);
+    assert.match(twice.body.error, /already in the project Support bot/);
+    assert.deepEqual((await admin.api<{ name: string; repos: string[] }[]>("/api/projects")).body.map(item => [item.name, item.repos]), [["Default project", []], ["Support bot", ["acme/mixed-app"]]]);
+
+    const started = await admin.tool("openmerit_recommend", { bundle: bundle(), environment: "acme/mixed-app" });
+    assert.equal(started.isError, false, started.text);
+    const tasks = await admin.api<{ id: string; projectId: string }[]>("/api/tasks", { headers: inProject });
+    assert.deepEqual(tasks.body.map(task => task.projectId), [project.body.id]);
+    assert.deepEqual((await admin.api("/api/tasks")).body, [], "the task is not in the default project");
+    assert.equal((await admin.api<unknown[]>("/api/runs", { headers: inProject })).body.length, 1);
+    // The run stops at its label check; waiting for it keeps it from calling the fakes after the suite.
+    await waitFor(() => admin.tool("openmerit_result", { job_id: started.data.job_id }), value => value.data.status !== "queued" && value.data.status !== "running");
+  });
+
+  test("a review offers the repository's evals as drafts; approving one creates the task, not run yet, with the draft as its eval", async () => {
+    const admin = caller(app, "test:user_ev:org_ev:admin");
+    const member = caller(app, "test:user_ev2:org_ev:member");
+    await subscribe(app, "org_ev");
+    const added = await admin.api<RepoView>("/api/repos", { method: "POST", body: JSON.stringify({ url: "https://github.com/acme/evals-app" }) });
+    assert.equal((await reviewed(admin, added.body.id)).review.status, "done");
+    const drafts = (await member.api<{ id: string; name: string; environment: string; cases: unknown[]; bundle: { criteria?: string[] } }[]>("/api/eval-drafts")).body;
+    assert.deepEqual(drafts.map(draft => [draft.name, draft.environment, draft.cases.length]).sort(), [["reply drafter", "acme/evals-app", 3], ["ticket router", "acme/evals-app", 3]], "the managed copy and the broken eval are not offered");
+
+    // A member approves one with an edit; the task waits for its first run.
+    const router = drafts.find(draft => draft.name === "ticket router")!;
+    const approved = await member.api<{ taskId: string }>(`/api/eval-drafts/${router.id}/approve`, { method: "POST", body: JSON.stringify({ spec: { criteria: ["Picks the queue that owns the ticket"] } }) });
+    assert.equal(approved.status, 201, JSON.stringify(approved.body));
+    assert.equal((await member.api(`/api/eval-drafts/${router.id}/approve`, { method: "POST" })).status, 409);
+    const [task] = (await admin.api<{ id: string; name: string; lastRunAt: string | null; status: string; eval: unknown }[]>("/api/tasks")).body;
+    assert.deepEqual([task!.id, task!.name, task!.lastRunAt, task!.status], [approved.body.taskId, "ticket router", null, "new"]);
+    const evaluation = (await admin.api<EvalView>(`/api/tasks/${task!.id}/eval`)).body;
+    assert.deepEqual([evaluation.latest!.version, evaluation.latest!.source, evaluation.latest!.author, evaluation.latest!.spec.criteria], [1, "review", "user_ev2", ["Picks the queue that owns the ticket"]]);
+    assert.match((await admin.tool("openmerit_tasks", {})).text, /ticket router \[t_\w+\] \(acme\/evals-app\): openai\/gpt-5.4, not run yet/);
+
+    // Dismissed and approved drafts are not offered again by the next review.
+    assert.equal((await member.api(`/api/eval-drafts/${drafts.find(draft => draft.name === "reply drafter")!.id}`, { method: "DELETE" })).status, 200);
+    await admin.api(`/api/repos/${added.body.id}/review`, { method: "POST" });
+    assert.equal((await reviewed(admin, added.body.id)).review.status, "done");
+    assert.deepEqual((await member.api("/api/eval-drafts")).body, []);
+
+    // Its first run measures on the approved eval and writes no cases.
+    const writerCalls = models.calls.filter(call => call.ticket.startsWith("writer:")).length;
+    const run = await admin.api<{ jobId: string }>(`/api/tasks/${task!.id}/run`, { method: "POST" });
+    assert.equal(run.status, 201, JSON.stringify(run.body));
+    const ran = await waitFor(async () => (await admin.api<{ id: string; evalVersion: number | null }[]>("/api/runs")).body.find(item => item.id === run.body.jobId), item => item?.evalVersion !== null && item?.evalVersion !== undefined, 60_000);
+    assert.equal(ran!.evalVersion, 1);
+    // The approved cases all have answers, so the run asks nothing; with three cases it ends before screening candidates.
+    const finished = await waitFor(() => admin.tool("openmerit_result", { job_id: run.body.jobId }), value => value.data.status !== "queued" && value.data.status !== "running");
+    assert.notEqual(finished.data.status, "needs_input", finished.text);
+    assert.match(finished.text, /Current model openai\/gpt-5\.4: 3\/3 cases passed/);
+    assert.equal(models.calls.filter(call => call.ticket.startsWith("writer:")).length, writerCalls);
+
+    // Retire instead of delete keeps the eval.
+    const retired = await member.api<{ state: string }>(`/api/tasks/${task!.id}/retire`, { method: "POST" });
+    assert.equal(retired.body.state, "retired");
+    assert.equal((await admin.api<EvalView>(`/api/tasks/${task!.id}/eval`)).body.latest!.version, 1);
   });
 
   test("only the application's model calls are listed: examples stay, tests, fixtures and docs are counted apart", async () => {

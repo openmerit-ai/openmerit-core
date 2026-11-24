@@ -27,8 +27,17 @@ export const generatedDir = (task: string) => `.openmerit/evals/${task.toLowerCa
 /** What `eval.json` says about a saved Eval: its version, the bar it measures against, and when a person accepted it. */
 export interface EvalVersion { version: number; bar: "current" | "criteria"; acceptedAt: string }
 
+/**
+ * The note the coding agent writes beside an eval app.openmerit.ai owns, a task's eval in the cloud,
+ * with the cloud's version in `eval.json`. The cloud is its source of truth: Scout runs such a copy as
+ * it is, never grades or revises it, and never writes over it.
+ */
+export const MANAGED_NOTE = "MANAGED.md";
+export const isManaged = (root: string, dir: string) => existsSync(join(resolve(root, dir), MANAGED_NOTE));
+
 /** Saves an Eval a person accepted: the spec, the cases and `eval.json`. */
 export function saveGeneratedEval(root: string, dir: string, value: GeneratedEval, version?: EvalVersion): void {
+  if (isManaged(root, dir)) return;
   const path = resolve(root, dir);
   mkdirSync(path, { recursive: true });
   writeFileSync(join(path, "bundle.json"), `${JSON.stringify(value.bundle, null, 2)}\n`);

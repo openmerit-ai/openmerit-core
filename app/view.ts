@@ -1,9 +1,10 @@
 // What a page is: it loads its data, renders it as Html, and handles the
 // actions its buttons and forms name with data-action. app/main.ts mounts it.
-import type { Api, Me } from "./api.ts";
+import type { Api, Me, Project } from "./api.ts";
 import type { Html } from "./html.ts";
 
-export interface ConfirmOptions { title: string; body: string; confirm: string; danger?: boolean; typeToConfirm?: string }
+// alternative: a second, gentler action, such as Retire instead of Delete; the dialog then resolves to "alternative".
+export interface ConfirmOptions { title: string; body: string; confirm: string; danger?: boolean; typeToConfirm?: string; items?: string[]; alternative?: string }
 
 // The signed-in member, with the organization's name filled in when Clerk has none.
 export type Account = Me & { account: { id: string; name: string } };
@@ -11,12 +12,15 @@ export type Account = Me & { account: { id: string; name: string } };
 export interface Ctx {
   api: Api;
   me: Account;
+  // The project the sidebar's switcher has open, and the organization's projects.
+  project: Project;
+  projects: Project[];
   // The query string, and the run ID on /r/<id>/.
   params: URLSearchParams;
   id: string | null;
   refresh(): Promise<void>;
   toast(message: string): void;
-  confirm(options: ConfirmOptions): Promise<boolean>;
+  confirm(options: ConfirmOptions): Promise<boolean | "alternative">;
   go(url: string): void;
   download(name: string, data: unknown): void;
 }

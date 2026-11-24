@@ -1,11 +1,12 @@
-// The app's Rivet registry: the account, task, job and catalogue actors.
+// The app's Rivet registry: the account, task, job, catalogue and user actors.
 import { setup, type Client } from "rivetkit";
 import { account } from "./actors/account.ts";
 import { catalogue } from "./actors/catalogue.ts";
 import { job } from "./actors/job.ts";
 import { task } from "./actors/task.ts";
+import { user } from "./actors/user.ts";
 
-export const actors = { account, task, job, catalogue };
+export const actors = { account, task, job, catalogue, user };
 
 /**
  * On a Rivet Cloud actor node, the cluster sets RIVET_ENDPOINT, RIVET_TOKEN and RIVET_POOL and the

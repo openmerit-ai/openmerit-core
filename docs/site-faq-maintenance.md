@@ -1,5 +1,13 @@
 # Website FAQ maintenance
 
+## Task evals in the cloud app — unreleased, 24 November 2026
+
+Reviewed the homepage against each task's eval becoming versioned in the cloud app, editable on the task's Eval tab, written to the repository's `.openmerit/evals/<task>/` by the coding agent only when the user agrees, and offered as drafts from repository reviews in a Review evals queue whose approval creates the task without running it. Deleting a task now deletes its eval; Retire keeps it. `site/index.html` makes no claim about where evals live, eval versions, editing cases or the repository copy. No homepage copy change is needed. The cloud README's Evals section and the openmerit-core README describe the behaviour.
+
+## Projects and members' own Claude and ChatGPT subscriptions in the cloud app — unreleased, 24 November 2026
+
+Reviewed the homepage against the cloud app splitting an organization into projects (each with its own tasks, runs, guardrails, GitHub repositories and model endpoints, picked with a switcher in app.openmerit.ai's sidebar) and against members signing in to their own Claude or ChatGPT plan on Account settings, which then writes the test cases of the runs they start. `site/index.html` makes no claim about projects, workspaces, Connections, subscriptions or who pays for writing cases. No homepage copy change is needed. The cloud README's Projects and Members' subscriptions sections describe the behaviour.
+
 ## The grading loop and recommending a pricier model — unreleased, 24 November 2026
 
 Reviewed the homepage against Scout's grading loop (a person marks sampled answers Looks good or Doesn't look right, the eval is rewritten where they disagree, and an accepted Eval is saved, versioned) and against recommending the cheapest model that meets an accepted Eval's criteria even when it costs more than the current model. `site/index.html` has no FAQ block. Its copy says Scout helps "find the right models for your task, weighing quality and cost", and never that OpenMerit only recommends cheaper models, so recommending a pricier model that meets the criteria contradicts nothing there. No homepage copy change is needed.

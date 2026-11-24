@@ -254,6 +254,6 @@ export function tonicUltra(): State {
     })),
     spend: { openmeritUsd: 211.4, customerUsd: 143.85, monthlyCapUsd: 250, customerCapUsd: 200, period: { start: "2026-11-01T00:00:00.000Z", end: "2026-12-01T00:00:00.000Z" } },
     guardrails: { environment: structuredClone(environmentGuardrails), agent: structuredClone(agentGuardrails), task: structuredClone(taskGuardrails) } satisfies Record<Level, Record<string, Guardrails>>,
-    disconnected: 0, deleted: [],
+    disconnected: 0, deleted: [], evals: {}, drafts: [],
   };
 }
