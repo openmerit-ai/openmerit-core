@@ -6,7 +6,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { approve, basedOn, binarySearch, CRITERIA_PASS_RATE, EVAL_FLOOR, meetsCriteria, challengers, checkAgent, evaluateTask, mergeEvidence, MemoryLedger, proposeEdit, strongest, taskResult, type EvidencePart, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
+import { approve, basedOn, binarySearch, CRITERIA_PASS_RATE, EVAL_FLOOR, meetsCriteria, challengers, checkAgent, evaluateTask, stableSample, mergeEvidence, MemoryLedger, proposeEdit, strongest, taskResult, type EvidencePart, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
 import { State } from "../src/state/db.ts";
 
 test("the search keeps a ladder's own order, and unplaced options are always challengers", async () => {
@@ -343,4 +343,61 @@ test("against the task's criteria: every guardrail on every case, each criterion
   // A failure the grader named no check for counts against every criterion, not against a guardrail.
   assert.deepEqual(meetsCriteria([{ items: { a: false, b: true, c: true, d: true, e: true, f: true, g: true, h: true, i: true, j: true }, costUsd: 0 }], criteria), { meets: true, failed: [] });
   assert.deepEqual(meetsCriteria([{ items: { a: false, b: false, c: true, d: true, e: true, f: true, g: true, h: true, i: true, j: true }, costUsd: 0 }], criteria).failed, ["C1", "C2"]);
+});
+
+test("a screen that misses one sampled item is screened once more on the next five; two misses, or a broken guardrail against the criteria, end it", async () => {
+  // Twenty items the current model always passes. The sampler returns them in order: i1–i5 screen, i6–i10 retry.
+  const items = Array.from({ length: 20 }, (_, index) => `i${index + 1}`);
+  const run = async (missed: Record<string, string>, criteria = false) => {
+    const screens: string[][] = [];
+    const result = await evaluateTask({
+      ladder: [{ key: "x", price: 1 }], strength: () => 1, items, repeats: 1, baselinePrice: 10,
+      ...(criteria ? { criteria: { criteria: ["C1"], guardrails: ["G1"] } } : {}),
+      sample: (pool, count) => pool.slice(0, count),
+      measure: async (option: Rung | null, ids: readonly string[] | null, call: MeasureCall) => {
+        if (call.role === "screen") screens.push([...ids!]);
+        const misses = option ? missed : {};
+        return { items: Object.fromEntries(ids!.map(id => [id, !misses[id]])), checks: Object.fromEntries(Object.entries(misses).map(([id, check]) => [id, [check]])), costUsd: ids!.length * (option ? 0.001 : 0.01) };
+      },
+    });
+    return { x: result.candidates.find(item => item.option.key === "x")!, screens, result };
+  };
+  const lucky = await run({ i3: "C1" });
+  assert.deepEqual(lucky.screens, [items.slice(0, 5), items.slice(5, 10)], "retried on the next five items");
+  assert.deepEqual([lucky.x.status, lucky.x.runs.length, lucky.result.samples], ["measured", 1, items.slice(0, 5)]);
+  const twice = await run({ i3: "C1", i7: "C1" });
+  assert.deepEqual([twice.x.status, twice.x.passes, twice.x.total], ["screened_out", 8, 10], "a miss in the retry too ends it");
+  const weak = await run({ i3: "C1", i4: "C1" });
+  assert.deepEqual([weak.x.status, weak.screens.length], ["screened_out", 1], "two misses are not retried");
+  // Against the criteria: a missed criterion is retried, a broken guardrail never is, since every case must pass it.
+  assert.equal((await run({ i3: "C1" }, true)).x.status, "measured");
+  const guardrail = await run({ i3: "G1" }, true);
+  assert.deepEqual([guardrail.x.status, guardrail.screens.length], ["screened_out", 1]);
+});
+
+test("a provisional pick listed under the cheapest qualified model is measured, so the task's last pick is not dropped for a dearer one", async () => {
+  // "lead" passes everything and costs less than the current model; "last", the last run's pick, is off the ladder the search took.
+  const items = Array.from({ length: 10 }, (_, index) => `i${index + 1}`);
+  const cost: Record<string, number> = { lead: 0.005, last: 0.001 };
+  const run = (last: Rung) => evaluateTask({
+    ladder: [{ key: "lead", price: 5 }], strength: () => 1, items, repeats: 1, baselinePrice: 10, provisional: last,
+    sample: (pool, count) => pool.slice(0, count),
+    measure: async (option: Rung | null, ids: readonly string[] | null) => ({ items: Object.fromEntries(ids!.map(id => [id, true])), costUsd: ids!.length * (option ? cost[option.key]! : 0.01) }),
+  });
+  const cheaper = await run({ key: "last", price: 1 });
+  assert.deepEqual([cheaper.provisionalTried, cheaper.top.map(item => item.option.key)], [true, ["last", "lead"]]);
+  const dearer = await run({ key: "last", price: 8 });
+  assert.deepEqual([dearer.provisionalTried, dearer.top.map(item => item.option.key)], [false, ["lead"]], "one listed above the cheapest qualifier is left");
+});
+
+test("stableSample draws the same items for the same eval, whatever the pool's order, and an item leaving the pool moves no other", () => {
+  const pool = Array.from({ length: 30 }, (_, index) => `case-${index + 1}`);
+  const key = (id: string) => `ticket router\n${id}`;
+  const drawn = stableSample(pool, 10, key);
+  assert.equal(new Set(drawn).size, 10);
+  assert.deepEqual(stableSample([...pool].reverse(), 10, key), drawn);
+  const left = pool.find(id => !drawn.includes(id))!;
+  assert.deepEqual(stableSample(pool.filter(id => id !== left), 10, key), drawn);
+  assert.deepEqual(stableSample(pool.filter(id => id !== drawn[2]), 10, key).slice(0, 9), drawn.filter(id => id !== drawn[2]), "only the item that left is replaced");
+  assert.notDeepEqual(stableSample(pool, 10, id => `refund triage\n${id}`), drawn, "another eval draws other items");
 });

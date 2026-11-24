@@ -23,7 +23,7 @@ export const SAMPLE_SIZE = 5;
 export const FINALISTS = 5;
 export const CHALLENGERS = 3;
 
-/** One option on a ladder. `price` is a list price used only to choose challengers; null when unknown or not per token. */
+/** One option on a ladder. `price` is a list price used to choose challengers and to decide whether a provisional pick is worth measuring; null when unknown or not per token. */
 export interface Rung { key: string; price: number | null }
 /** A catalogue option placed by its Epoch Capabilities Index. */
 export interface Ranked extends Rung { eci: number }
