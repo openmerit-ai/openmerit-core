@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Repository reviews need a paid plan — unreleased, 24 November 2026
+
+Reviewed the homepage and app copy against the decision that the cloud has no free plan: adding and reviewing a GitHub repository now need an active plan, as evaluations do, and only the self-hosted CLI is free. `site/index.html` makes no claim about the cloud app, its plans, prices or a free tier. No homepage copy change is needed. In the app, Connections said "Add a GitHub repository and OpenMerit reads its code" with no mention of a plan; it now says "On a plan", and shows a notice linking to Plan and usage when the account has none. The Plan page's no-plan card now says a plan also covers repository reviews.
+
 ## Only the application's model calls become tasks — unreleased, 24 November 2026
 
 Reviewed the homepage against Scout no longer mapping, offering or reviewing model usages in tests, fixtures, docs and saved results, which it still counts under their model. `site/index.html` has no FAQ block and makes no claim about which files Scout scans or which usages become tasks. No homepage copy change is needed.

@@ -265,8 +265,12 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       return before === state.endpoints.length ? error(404, "No such endpoint.") : json(200, { deleted: true });
     }
     if (path === "/api/repos" && method === "GET") return json(200, state.repos.map((item) => reviewed(item)));
+    // As the cloud app does, adding or reviewing a repository needs an active plan.
+    const unpaid = state.me.plan.status === "active" || state.me.plan.status === "trialing" ? null
+      : `This account has no active OpenMerit plan${state.me.plan.status === "none" ? "" : ` (Stripe says ${state.me.plan.status})`}. Subscribe at ${options.appUrl ?? "https://app.openmerit.ai"}/plan/, then try again.`;
     if (path === "/api/repos" && method === "POST") {
       if (denied) return denied;
+      if (unpaid) return error(400, unpaid);
       if (!input) return error(400, "Send the repository as JSON: {url, token}. The token is only for a private repository.");
       const found = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/.*)?$/i.exec(String(input.url ?? "").trim());
       if (!found) return error(400, "Paste the repository's GitHub URL, such as https://github.com/acme/app.");
@@ -284,6 +288,7 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
     }
     if ((match = /^\/api\/repos\/([\w-]+)\/review$/.exec(path)) && method === "POST") {
       if (denied) return denied;
+      if (unpaid) return error(402, unpaid);
       const found = state.repos.find((item) => item.id === match?.[1]);
       if (!found) return error(404, "No such repository in this account.");
       found.review = { ...found.review, status: "reviewing", requestedAt: new Date().toISOString(), finishedAt: null, error: null };

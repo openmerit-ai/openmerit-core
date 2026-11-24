@@ -80,6 +80,8 @@ export async function retried<T>(load: () => Promise<T>, delays: readonly number
 }
 
 const REVIEW_POLL_MS = 3000;
+// The cloud app's plan check: repository reviews, like evaluations, need a plan Stripe says is active or trialing.
+const paid = (me: { plan: { status: string } }): boolean => me.plan.status === "active" || me.plan.status === "trialing";
 let reviewTimer: ReturnType<typeof setTimeout> | undefined;
 
 export const connectionsView: View<Data> = {
@@ -96,7 +98,7 @@ export const connectionsView: View<Data> = {
   render({ endpoints, repos }, { me }) {
     const own = endpoints.filter((endpoint) => !endpoint.builtIn);
     const admin = me.role === "admin";
-    return html`${header(me, "Connections", "Your coding agents are how OpenMerit gets its work. Add a GitHub repository and OpenMerit reads its code to find the model calls, read-only. Your own endpoints are optional: OpenMerit measures on OpenRouter at its own cost.", [plural(repos.length, "repository", "repositories"), `${plural(own.length, "endpoint")} of yours`])}
+    return html`${header(me, "Connections", "Your coding agents are how OpenMerit gets its work. On a plan, add a GitHub repository and OpenMerit reads its code to find the model calls, read-only. Your own endpoints are optional: OpenMerit measures on OpenRouter at its own cost.", [plural(repos.length, "repository", "repositories"), `${plural(own.length, "endpoint")} of yours`])}
 
     <section aria-labelledby="agents">
       <h2 id="agents">Coding Agents</h2>
@@ -110,6 +112,7 @@ export const connectionsView: View<Data> = {
     <section aria-labelledby="repos">
       <h2 id="repos">Repositories</h2>
       <p class="note" style="margin: -2px 0 8px">OpenMerit copies the default branch into a temporary folder, reads it to find the model calls, and deletes the copy. It never runs your code, pushes, or opens a pull request. It keeps where each model call is and the model it names, not your code.</p>
+      ${paid(me) ? "" : html`<div class="card notice warn" role="status" style="margin: 0 0 24px"><p>Reviewing a repository needs an active plan. ${repos.length ? "Your repositories stay listed with their last review. " : ""}<a href="/plan/">Choose a plan</a> to add or review one.</p></div>`}
       ${repos.length ? html`<div class="card">${repos.map((repo) => repoRow(repo, admin))}</div>` : html`<div class="card"><p class="sub">No repositories yet.${admin ? " Add one below." : ""}</p></div>`}
       ${admin ? html`<form class="card form" data-action="addRepo" autocomplete="off" style="margin-top: 12px">
         <label>GitHub repository

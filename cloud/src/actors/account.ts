@@ -167,7 +167,7 @@ export const account = actor({
     startJob: async (c, input: { jobId: string; taskId: string; kind: "run" | "watch"; askedBy?: string | null }): Promise<Started> => c.db.transaction(async tx => {
       const { limits, appUrl } = services().config;
       const current = await plan(tx);
-      if (!current || !ACTIVE_PLAN.has(current.status)) return { ok: false, error: `This account has no active OpenMerit plan${current ? ` (Stripe says ${current.status})` : ""}. Subscribe at ${appUrl}/plan/, then try again.` };
+      if (!current || !ACTIVE_PLAN.has(current.status)) return { ok: false, error: planRefusal(current)! };
       if (current.overage === "refuse" && current.usedEvals >= current.includedEvals) return { ok: false, error: `This month's ${current.includedEvals} evaluations are used. More start at ${current.periodEnd ? new Date(current.periodEnd * 1000).toISOString().slice(0, 10) : "the next period"}, or change the plan at ${appUrl}/plan/.` };
       const now = Date.now();
       const [hour] = await tx.execute(`SELECT count(*) AS n FROM jobs WHERE started_at > ?`, now - 3_600_000);
@@ -294,6 +294,9 @@ export const account = actor({
     /** Checks that OpenMerit can read the repository, saves it and starts its review. Adding one again replaces its token. */
     addRepo: async (c, input: { url: string; token?: string | null }): Promise<{ ok: true; repo: RepoView } | { ok: false; error: string }> => {
       const { config, fetch } = services();
+      // Reviews are part of a paid plan: without one, nothing reaches GitHub, is cloned or is spent.
+      const unpaid = planRefusal(await plan(c.db));
+      if (unpaid) return { ok: false, error: unpaid };
       const ref = parseRepoUrl(typeof input.url === "string" ? input.url : "");
       if (!ref) return { ok: false, error: "Paste the repository's GitHub URL, such as https://github.com/acme/app." };
       const token = typeof input.token === "string" && input.token.trim() ? input.token.trim() : null;
@@ -324,10 +327,12 @@ export const account = actor({
     repos: async (c): Promise<RepoView[]> => repoViews(c.db),
 
     /** Reviews the repository again, unless a review is already queued or running. */
-    reviewRepo: async (c, id: string): Promise<{ ok: true; repo: RepoView } | { ok: false; status: 404 | 409; error: string }> => {
+    reviewRepo: async (c, id: string): Promise<{ ok: true; repo: RepoView } | { ok: false; status: 402 | 404 | 409; error: string }> => {
       const [view] = await repoViews(c.db, id);
       if (!view) return { ok: false, status: 404, error: "No such repository in this account." };
       if (view.review.status === "queued" || view.review.status === "reviewing") return { ok: true, repo: view };
+      const unpaid = planRefusal(await plan(c.db));
+      if (unpaid) return { ok: false, status: 402, error: unpaid };
       const busy = await reviewsRefusal(c.db);
       if (busy) return { ok: false, status: 409, error: busy };
       await startReview(c, id, () => c.client<Registry>().catalogue.getOrCreate(["global"]).get());
@@ -509,6 +514,15 @@ async function plan(database: Database): Promise<Plan | null> {
     name: String(row.name ?? "OpenMerit"), status: String(row.status ?? "incomplete"), periodStart: (row.period_start as number | null) ?? null, periodEnd: (row.period_end as number | null) ?? null,
     includedEvals: Number(row.included_evals ?? 0), usedEvals: Number(used?.n ?? 0), overage: row.overage === "metered" ? "metered" : "refuse", customerId: (row.customer_id as string | null) ?? null,
   };
+}
+
+/**
+ * Why the account cannot start paid work, or null: every evaluation and every repository review needs a
+ * plan that Stripe says is active or trialing. There is no free cloud plan; the CLI is the free option.
+ */
+function planRefusal(current: Plan | null): string | null {
+  if (current && ACTIVE_PLAN.has(current.status)) return null;
+  return `This account has no active OpenMerit plan${current ? ` (Stripe says ${current.status})` : ""}. Subscribe at ${services().config.appUrl}/plan/, then try again.`;
 }
 
 /** The start of the billing period in milliseconds: Stripe's, else the calendar month. */

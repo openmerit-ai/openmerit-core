@@ -13,7 +13,8 @@ import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import type { RepoView } from "../src/actors/account.ts";
 import { parseRepoUrl, withCheckout, type GitHubConfig } from "../src/github.ts";
-import { caller, fakeModels, startApp, stop, waitFor, type App, type FakeModels } from "./helpers.ts";
+import { signStripePayload } from "../src/billing.ts";
+import { caller, fakeModels, startApp, stop, subscribe, waitFor, type App, type FakeModels } from "./helpers.ts";
 
 const TOKEN = `github_pat_${"A".repeat(30)}_good`;
 const NO_CONTENTS = `github_pat_${"B".repeat(30)}_meta`;
@@ -142,6 +143,8 @@ describe("GitHub repositories", () => {
     app = await startApp({ models, env: { OPENMERIT_GITHUB_API_URL: github.api, OPENMERIT_GITHUB_URL: github.git, OPENMERIT_REPO_CLONE_SECONDS: "4", OPENMERIT_REVIEWS_PER_HOUR: "2", TMPDIR: sandboxes } });
   });
   after(async () => { await stop(app); await models.close(); await github.close(); });
+  // Repository reviews need an active plan, as jobs do; every account here has one but org_np and org_lapse.
+  before(async () => { for (const org of ["org_gh", "org_gp", "org_rl", "org_mx", "org_gs", "org_lapse"]) await subscribe(app, org); });
 
   const reviewed = (agent: ReturnType<typeof caller>, id: string) => waitFor(async () => (await agent.api<RepoView[]>("/api/repos")).body.find(repo => repo.id === id)!, repo => repo.review.status === "done" || repo.review.status === "failed", 60_000);
 
@@ -186,6 +189,34 @@ describe("GitHub repositories", () => {
     assert.equal((await reviewed(admin, repo.id)).review.status, "done");
     assert.equal((await admin.api(`/api/repos/${repo.id}`, { method: "DELETE" })).status, 200);
     assert.deepEqual((await admin.api("/api/repos")).body, []);
+  });
+
+  test("without an active plan, adding a repository and Review again refuse as jobs do, and nothing reaches GitHub", async () => {
+    const before = github.requests.length;
+    const planless = caller(app, "test:user_np:org_np:admin");
+    const refused = await planless.api<{ error: string }>("/api/repos", { method: "POST", body: JSON.stringify({ url: "https://github.com/acme/public-app" }) });
+    assert.equal(refused.status, 400);
+    assert.equal(refused.body.error, "This account has no active OpenMerit plan. Subscribe at https://app.openmerit.test/plan/, then try again.");
+    assert.equal(github.requests.length, before, "no access check, and no clone");
+    assert.deepEqual((await planless.api("/api/repos")).body, []);
+
+    // An account whose plan lapses keeps its repositories listed, with their last review, but cannot review them again.
+    const lapsing = caller(app, "test:user_lp:org_lapse:admin");
+    const added = await lapsing.api<RepoView>("/api/repos", { method: "POST", body: JSON.stringify({ url: "https://github.com/acme/public-app" }) });
+    assert.equal(added.status, 201);
+    assert.equal((await reviewed(lapsing, added.body.id)).review.status, "done");
+    const payload = JSON.stringify({ id: "evt_cancel_org_lapse", type: "customer.subscription.deleted", created: Math.floor(Date.now() / 1000) + 60,
+      data: { object: { id: "sub_org_lapse", customer: "cus_org_lapse", status: "canceled", metadata: { account_id: "org_lapse" }, items: { data: [{ price: { nickname: "Team", metadata: { included_evals: "50", overage: "refuse" } } }] } } } });
+    assert.equal((await fetch(`${app.url}/api/stripe/webhook`, { method: "POST", headers: { "content-type": "application/json", "stripe-signature": signStripePayload(payload, "whsec_test") }, body: payload })).status, 200);
+    const cloned = github.requests.length;
+    const again = await lapsing.api<{ error: string }>(`/api/repos/${added.body.id}/review`, { method: "POST" });
+    assert.equal(again.status, 402);
+    assert.equal(again.body.error, "This account has no active OpenMerit plan (Stripe says canceled). Subscribe at https://app.openmerit.test/plan/, then try again.");
+    assert.equal(github.requests.length, cloned, "nothing was cloned");
+    const [kept] = (await lapsing.api<RepoView[]>("/api/repos")).body;
+    assert.equal(kept!.fullName, "acme/public-app");
+    assert.equal(kept!.review.status, "done");
+    assert.ok(kept!.review.result!.modelCalls.length > 0, "the last review is kept");
   });
 
   test("only the application's model calls are listed: examples stay, tests, fixtures and docs are counted apart", async () => {
