@@ -15,7 +15,19 @@ export interface TaskBundle {
   examples?: { input: Record<string, string>; expected?: unknown }[];
   constraints?: { maxLatencyMs?: number; needsVision?: boolean };
   codeRefs?: { file: string; line: number; spelling: string }[];
+  // The task spec a review of the code writes: input, steps, output (above), criteria and guardrails.
+  /** What the call's input is and how it varies in production, such as "a customer's support email, often forwarded". */
+  input?: { description: string };
+  /** What the model does, in order, with the tools each step uses and the access they have. */
+  steps?: { description: string; tools?: string[]; access?: "none" | "read" | "write" }[];
+  /** What a right answer does, one statement each. Each is one judge check on every case. */
+  criteria?: string[];
+  /** What the call must never do, such as promise a refund or reveal another customer's data. One judge check each, on every case. */
+  guardrails?: string[];
 }
+
+/** How a written case tests the task: a typical input, an edge case, or one that tempts the model past a guardrail. */
+export type CaseKind = "typical" | "edge" | "guardrail";
 
 export interface Case {
   id: string;
@@ -30,9 +42,14 @@ export interface Case {
    */
   expected?: unknown;
   origin: "example" | "written" | "trace";
+  /** A written case's kind; examples and traces have none. */
+  kind?: CaseKind;
   /** True once the user confirmed the expected answer in the label check. */
   approved?: boolean;
 }
+
+/** The kind of case a pass rate is reported by: a written case's kind, else its origin. */
+export const caseKind = (item: Pick<Case, "kind" | "origin">): string => item.kind ?? item.origin;
 
 export type EndpointKind = "openrouter" | "openai-compatible" | "anthropic";
 

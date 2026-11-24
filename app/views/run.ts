@@ -14,6 +14,7 @@ const verdicts: Record<Report["status"], string> = {
   picked: "",
   keep_current: "No cheaper model passed as many cases, so the model in use now stays.",
   baseline_failed: "The model in use now could not be measured or passed none of the cases, so there was nothing to compare against.",
+  below_floor: "The model in use now passed under 80% of its own eval, so the eval cannot tell models apart and no model is recommended. Its failed cases below say why.",
   no_cases: "No case had a known correct answer, so nothing was measured.",
   no_candidates: "No allowed model is cheaper than the one in use now.",
   agent_eval_failed: "Every cheaper switch failed the agent's eval, so none is proposed.",
@@ -178,6 +179,14 @@ function report(data: Report, admin: boolean): Html {
       <div class="card">
         <p>${plural(misses.length, "model")} missed ${modelName(data.baseline.model)}'s ${data.baseline.passes}/${data.baseline.total} by at most one case per run, so ${misses.length === 1 ? "it does" : "they do"} not qualify. A rerun may place ${misses.length === 1 ? "it" : "them"} either side of the bar.</p>
         ${misses.map((item) => html`<div class="row"><span>${model(item.model)}<span class="sub">${endpointName(item.endpoint)} · ${item.passes}/${item.total} passed · ${per1k(item.costPerCallUsd)} per 1,000 calls${item.cheaperThanCurrent === true ? " · cheaper than now" : item.cheaperThanCurrent === false ? " · not cheaper than now" : ""}</span></span></div>`)}
+      </div>
+    </section>` : ""}
+
+    ${data.failedCases?.length && data.baseline ? html`<section aria-labelledby="failed-cases">
+      <h2 id="failed-cases">Cases ${modelName(data.baseline.model)} Failed</h2>
+      <div class="card">
+        ${(data.baselineByKind?.length ?? 0) > 1 ? html`<p class="note">Passed by kind of case: ${data.baselineByKind!.map((rate) => `${rate.kind} ${rate.passes}/${rate.total}`).join(", ")}.</p>` : ""}
+        ${data.failedCases.map((item) => html`<div class="row"><span>${item.caseId}<span class="sub">${item.kind} · ${item.reason}</span></span></div>`)}
       </div>
     </section>` : ""}
 

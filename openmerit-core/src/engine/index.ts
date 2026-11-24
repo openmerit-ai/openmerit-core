@@ -2,7 +2,7 @@
 // no Node.js-only imports at load time: the task-evaluation policy, the search over an ordered ladder, the catalogue types, the
 // spend ledger, the task result, the pool rule, the provisional pick, the proposed edit, the evidence and its quality rule, the connector ports, the guardrail resolver, the agent-eval rule and the redaction rules.
 export { binarySearch, challengers, order, outward, CandidateUnavailable, SAMPLE_SIZE, FINALISTS, CHALLENGERS, type Rung, type Ranked, type Stage, type SearchResult, type ChallengerOptions } from "./search.ts";
-export { evaluateTask, score, shortfall, rankTop, newProgress, EndChallengers, DEFAULT_REPEATS, TOP, type EvaluateInput, type EvaluateResult, type Evaluated, type Measurement, type MeasureCall, type Progress, type Rules, type Score, type Shortfall } from "./evaluate.ts";
+export { evaluateTask, score, shortfall, rankTop, newProgress, byKind, floorNote, EndChallengers, DEFAULT_REPEATS, TOP, EVAL_FLOOR, type KindRate, type EvaluateInput, type EvaluateResult, type Evaluated, type Measurement, type MeasureCall, type Progress, type Rules, type Score, type Shortfall } from "./evaluate.ts";
 export { pool, ladder, blendedPrice, eligible, type Needs } from "./pool.ts";
 export { taskResult, modelResult, baselineResult, qualificationNote, cheaperThanCurrent, type ModelResult, type TaskResult, type Described } from "./result.ts";
 export { provisionalPick, type Provisional } from "./provisional.ts";

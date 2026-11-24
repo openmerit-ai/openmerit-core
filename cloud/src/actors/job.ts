@@ -14,9 +14,9 @@
 import { createHash, randomInt } from "node:crypto";
 import { CriticalError, Loop, StepExhaustedError, workflow } from "@rivet-dev/workflows";
 import { queue } from "rivetkit";
-import { applyLabelCheck, BudgetRefused, completeWith, createClient, createMeasure, graderFor, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
+import { applyLabelCheck, BudgetRefused, caseKind, completeWith, createClient, createMeasure, graderFor, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
 import { approvalQuestion, basedOn, mergeEvidence, strongest } from "../engine.ts";
-import { baselineResult, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, FINALISTS, modelResult, newProgress, redact, SAMPLE_SIZE, score, taskResult, type CatalogueModel, type Ledger, type ModelResult, type ResolvedGuardrails } from "../engine.ts";
+import { baselineResult, byKind, floorNote, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, FINALISTS, modelResult, newProgress, redact, SAMPLE_SIZE, score, taskResult, type CatalogueModel, type Ledger, type ModelResult, type ResolvedGuardrails } from "../engine.ts";
 import { agentBundle, caseEvidence } from "../../../openmerit-core/src/connectors/agent-bundle.ts";
 import { buildPool, OPENROUTER, regionNotice, type Option, type Pool, type Provisional } from "../pool.ts";
 import { JOB_BUDGET } from "./account.ts";
@@ -109,10 +109,10 @@ type FixFor = Fix extends infer F ? F extends Fix ? Omit<F, "notice"> : never : 
 
 /** Ends the job early; caught by the workflow, which records why and what fixes it. */
 class JobStop extends Error {
-  readonly status: "stopped" | "failed";
+  readonly status: "done" | "stopped" | "failed";
   readonly resultStatus: JobResult["status"] | null;
   readonly fix: FixFor | null;
-  constructor(status: "stopped" | "failed", resultStatus: JobResult["status"] | null, message: string, fix: FixFor | null = null) { super(message); this.status = status; this.resultStatus = resultStatus; this.fix = fix; }
+  constructor(status: "done" | "stopped" | "failed", resultStatus: JobResult["status"] | null, message: string, fix: FixFor | null = null) { super(message); this.status = status; this.resultStatus = resultStatus; this.fix = fix; }
 }
 
 /** Endpoints with their keys, by job, in this process only. */
@@ -301,6 +301,9 @@ export const job = workflow({
       });
       const usable = cases.filter(labeled);
       const caseIds = usable.map(item => item.id);
+      const kinds = Object.fromEntries(usable.map(item => [item.id, caseKind(item)]));
+      /** The current model's failed cases and why, from its recorded measure steps, so a replay rebuilds the same. */
+      const failedCases = new Map<string, { caseId: string; kind: string; reason: string }>();
       const counts = { total: usable.length, fromExamples: usable.filter(item => item.origin === "example").length, written: usable.filter(item => item.origin !== "example").length };
 
       // 3. Models: the ECI-ordered pool over every allowed endpoint.
@@ -350,7 +353,9 @@ export const job = workflow({
       // A model that passed its screen but whose full runs did not finish is left out.
       const listed = (items: readonly ModelResult[]) => items.filter(item => item.status !== "unmeasured").map(measuredModel);
       const baselineOf = () => (pool.baseline && progress.baseline.length ? measuredModel(baselineResult(score(progress.baseline), describe(pool.baseline))) : null);
+      const failedOf = () => [...failedCases.values()].slice(0, 20);
       partial = (status, notices, fixes, spent) => ({
+        failedCases: failedOf(), baselineByKind: byKind(progress.baseline, kinds),
         status, pick: null, top: [], nearMisses: [], baseline: baselineOf(), candidates: listed([...progress.tried.values()].map(item => modelResult(item, describe(item.option), score(progress.baseline), rules))),
         search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: [], finalists: [], challengers: [], shortfall: null }, agentEval: null, edit: { edits: [], instructions: null },
         spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices, fixes,
@@ -384,10 +389,8 @@ export const job = workflow({
             const { config, fetch } = services();
             const client = createClient(await keysFor(jobId, account), { fetch, model: model => models.priced[model] ?? null });
             // Text answers go to a fixed judge on OpenMerit's key. Its calls count in the job's spend but not in the candidate's cost per call.
-            const judge = bundle.output.kind === "text" && config.openrouter.apiKey ? {
-              client, endpoint: OPENROUTER, model: config.models.judge,
-              rubric: bundle.description ? `The answer does this task well: ${bundle.description}` : "The answer does what the prompt asks and agrees with the reference answer.",
-            } : undefined;
+            // The rubric is the task's own (rubricFor), with one check per criterion and guardrail of its spec.
+            const judge = (bundle.output.kind === "text" || bundle.guardrails?.length) && config.openrouter.apiKey ? { client, endpoint: OPENROUTER, model: config.models.judge } : undefined;
             const onCase = (result: { pass: boolean }) => {
               live.done += 1; live.passes += result.pass ? 1 : 0;
               live.history = [...live.history, { time: Date.now() / 1000, rate: live.passes / live.done * 100 }].slice(-60);
@@ -436,7 +439,7 @@ export const job = workflow({
         const provisional = (told && [...pool.ranked, ...pool.unplaced].find(item => item.model === told.model && item.endpoint === told.endpoint)) || null;
         const evaluated = await evaluateTask<Option>({
           ladder: pool.ranked, unplaced: pool.unplaced, strength: item => item.eci ?? -Infinity, items: caseIds, repeats, provisional,
-          rules,
+          rules, kinds,
           baselinePrice: current.price, progress,
           measure: async (option, items, call) => {
             const target = option ?? current;
@@ -452,6 +455,7 @@ export const job = workflow({
               if (call.stage === "challenger") { endedFix = stop.fix; throw new EndChallengers(stop.message); }
               throw stop;
             }
+            if (!option) for (const item of result.results) if (!item.pass && item.reason && !failedCases.has(item.caseId)) failedCases.set(item.caseId, { caseId: item.caseId, kind: kinds[item.caseId] ?? "case", reason: item.reason });
             return { items: Object.fromEntries(result.results.map(item => [item.caseId, item.pass])), costUsd: result.costUsd, costIsEstimate: result.costIsEstimate, latencyMs: result.latencyMs };
           },
           // Drawn in a recorded step, so a replay screens on the same cases.
@@ -467,6 +471,11 @@ export const job = workflow({
           },
         });
 
+        // The floor: the current model fails too much of its own eval for it to rank anything. A result, not a failure: it says why, with the failed cases.
+        if (evaluated.status === "below_floor") {
+          throw new JobStop("done", "below_floor", floorNote(evaluated.baseline, current.model),
+            { kind: "ask_agent", prompt: `OpenMerit's eval for the task "${bundle.task}" could not tell models apart: ${current.model}, the model it uses now, failed too many of its cases. Show the user the failed cases and their reasons from openmerit_result, fix the task bundle's criteria, guardrails or examples with them, then call openmerit_recommend again.` });
+        }
         if (evaluated.status === "too_few_reliable") {
           const runs = evaluated.baseline.runs.length;
           throw new JobStop("stopped", "baseline_failed", !evaluated.baseline.passes
@@ -532,6 +541,7 @@ export const job = workflow({
             const index = catalogueIndex(await client.catalogue.getOrCreate(["global"]).get());
             const jobStatus: JobResult["status"] = chosen ? "picked" : agentEval && cheaper.length ? "agent_eval_failed" : !pool.ranked.length && !pool.unplaced.length ? "no_candidates" : "keep_current";
             const report: JobResult = {
+              failedCases: failedOf(), baselineByKind: evaluated.baseline.byKind,
               status: jobStatus, top, nearMisses, baseline, candidates,
               pick: chosen ? { model: chosen.model, endpoint: chosen.endpoint, endpointModel: chosen.endpointModel, passes: chosen.passes, total: chosen.total, costPerCallUsd: chosen.costPerCallUsd, savingPerCallUsd: baseline.costPerCallUsd !== null && chosen.costPerCallUsd !== null ? baseline.costPerCallUsd - chosen.costPerCallUsd : null } : null,
               search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: result.samples, finalists: result.finalists, challengers: challenging.map(item => item.model), shortfall: result.searchShortfall },

@@ -39,6 +39,10 @@ const BUNDLE_SCHEMA = {
     },
     examples: { type: "array", description: "Real inputs from the code or its tests, with the correct answer when known. These become the first test cases.", items: { type: "object", required: ["input"], properties: { input: { type: "object", additionalProperties: string }, expected: {} } } },
     constraints: { type: "object", properties: { maxLatencyMs: { type: "number" }, needsVision: { type: "boolean" } } },
+    input: { type: "object", required: ["description"], description: "The task spec: what the call's input is and how it varies in production", properties: { description: string } },
+    steps: { type: "array", description: "The task spec: what the model does, in order, with the tools each step uses and their access", items: { type: "object", required: ["description"], properties: { description: string, tools: { type: "array", items: string }, access: { enum: ["none", "read", "write"] } } } },
+    criteria: { type: "array", description: "The task spec: what a right answer does, one statement each, from the code and its prompt. OpenMerit judges every case on each", items: string },
+    guardrails: { type: "array", description: "The task spec: what the call must never do, one statement each, such as rules the code enforces after the call. OpenMerit judges every case on each, and writes cases that test them", items: string },
     codeRefs: { type: "array", description: "Where the code names the model, so the result can include the edit. spelling is the exact string literal that holds the model ID as the code writes it, with its quotes, such as '\"gpt-4.1-mini\"', or the expression around it, such as 'process.env.CLASSIFIER_MODEL ?? \"gpt-4.1-mini\"'; only that literal is edited. A config file or environment value that holds the model belongs in a ref of its own, at the line that sets it", items: { type: "object", required: ["file", "line", "spelling"], properties: { file: string, line: { type: "number" }, spelling: string } } },
   },
 };
@@ -107,6 +111,7 @@ export function describeJob(view: JobView, decision: Decision | null = null): st
     else lines.push(`Ask the user before applying the edit${result.approval ? `: "${result.approval.prompt}" (${result.approval.detail})` : ""}. Apply it if they say yes, then send their answer with openmerit_answer, job_id "${view.jobId}" and answers {"${result.approval?.id ?? "configure"}": true}, or false if they decline.`);
   } else if (result) lines.push(`No switch proposed (${result.status}). ${reasonFor(result, result.baseline?.model ?? "the current model")}`);
   if (result?.baseline) lines.push(`Current model ${result.baseline.model}: ${result.baseline.passes}/${result.baseline.total} cases passed, ${perCall(result.baseline.costPerCallUsd)} per call, ${result.baseline.latencyMs === null ? "latency unknown" : `${result.baseline.latencyMs} ms`}.`);
+  if (result?.failedCases?.length) lines.push(`Cases it failed, with the grader's reason${(result.baselineByKind?.length ?? 0) > 1 ? ` (passed by kind: ${result.baselineByKind!.map(rate => `${rate.kind} ${rate.passes}/${rate.total}`).join(", ")})` : ""}:`, ...result.failedCases.map(item => `- ${item.caseId} (${item.kind}): ${item.reason}`));
   const misses = result && nearMissLine(result);
   if (misses) lines.push(misses);
   if (result?.basedOn?.length) lines.push(`Based on: ${result.basedOn.join(" ")}`);

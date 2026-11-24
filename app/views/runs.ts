@@ -19,6 +19,7 @@ function describe(found: { status: string; pick: string | null; current: string;
     case "no_candidates": return html`${link("Keep the current model")}<span class="sub">no allowed model is cheaper</span>`;
     case "no_cases": return html`<span class="pill warn">No usable cases</span><span class="sub">${link("no case had a known answer")}</span>`;
     case "baseline_failed": return html`<span class="pill warn">Current model not measured</span><span class="sub">${link("nothing to compare against")}</span>`;
+    case "below_floor": return html`<span class="pill warn">Eval can't tell models apart</span><span class="sub">${link("the current model failed too many cases")}</span>`;
     case "stopped": return html`<span class="pill">Stopped</span><span class="sub">${link("View run")}</span>`;
     default: return html`<span class="pill bad">Did not finish</span><span class="sub">${link("View run")}</span>`;
   }

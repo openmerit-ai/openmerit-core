@@ -45,6 +45,15 @@ function script(model: string, body: Record<string, unknown>, anthropic: boolean
       return results.length ? { text: results.join(" ").includes("refunded") ? "billing" : "other", cost: 0.001 } : { tool: { name: "lookup_order", args: { id: "42" } }, cost: 0.001 };
     }
     case "json": return { text: "```json\n{\"queue\": \"billing\", \"urgent\": true, \"note\": \"anything\"}\n```", cost: 0.001 };
+    // Says the right queue and, for the guardrail case, also promises what it must not.
+    case "promiser": return { text: `${LABELS[user] ?? "billing"}. ${user.includes("refund") ? "I promise you a full refund today." : ""}`.trim(), cost: 0.001 };
+    // A judge that passes the rubric but fails guardrail G1 when the answer promises a refund, with a reason that holds a secret.
+    case "checker": return { text: user.includes("I promise you a full refund") ? JSON.stringify({ checks: [{ id: "C1", pass: true, reason: "right queue" }, { id: "G1", pass: false, reason: "It promised a refund, using key sk-or-v1-0123456789abcdef0123456789abcdef0123." }], pass: true, reason: "fine" }) : JSON.stringify({ checks: [{ id: "C1", pass: true, reason: "ok" }], pass: true, reason: "ok" }), cost: 0.01 };
+    case "spec-writer": return { text: JSON.stringify({ cases: [
+      { kind: "guardrail", input: { ticket: "Refund me now or I sue" }, expected: "billing" },
+      { kind: "edge", input: { ticket: "Parcel arrived broken and I was charged twice" }, expected: "billing" },
+      { kind: "made-up", input: { ticket: "My login code never comes" }, expected: "technical" },
+    ] }), cost: 0.1 };
     case "judge": return { text: user.includes("Answer to grade:\nbilling") ? "{\"pass\": true, \"reason\": \"right queue\"}" : "{\"pass\": false, \"reason\": \"wrong\"}", cost: 0.01 };
     case "writer": return {
       text: JSON.stringify({ cases: [
@@ -205,7 +214,7 @@ test("tool calls get the bundle's mocked results, and a model that never stops c
 
     seen.length = 0;
     const looped = await measure({ model: "looper", endpoint }, ["c1"]);
-    assert.deepEqual(looped.results, [{ caseId: "c1", pass: false, failure: "tool_loop" }]);
+    assert.deepEqual(looped.results, [{ caseId: "c1", pass: false, failure: "tool_loop", reason: "It kept calling tools past the limit and never answered." }]);
     assert.equal(seen.length, MAX_TOOL_ROUNDS + 1, `${endpoint}: calls stop`);
     assert.equal(ledger.keys.size, 2 + MAX_TOOL_ROUNDS + 1, `${endpoint}: each call has its own ledger key`);
   }
@@ -322,7 +331,7 @@ test("a trace case is sent as its recorded messages in one call, and graded by p
     assert.equal(seen.length, 2, `${endpoint}: one call per trace case, even when the answer is a tool call`);
     seen.length = 0;
     const wrong = await measure({ model: "looper", endpoint }, ["t-tool-call"]);
-    assert.deepEqual(wrong.results, [{ caseId: "t-tool-call", pass: false }], `${endpoint}: other arguments fail`);
+    assert.deepEqual(wrong.results, [{ caseId: "t-tool-call", pass: false, reason: "Called lookup_order with other arguments than the recorded call." }], `${endpoint}: other arguments fail`);
     assert.equal(seen.length, 1);
   }
   const anthropicRequest = (await (async () => { seen.length = 0; await measure({ model: "good", endpoint: "anthropic" }, ["t-text"]); return seen[0]!.body; })());
@@ -331,4 +340,48 @@ test("a trace case is sent as its recorded messages in one call, and graded by p
   seen.length = 0;
   const textInsteadOfTool = await measure({ model: "good", endpoint: "openrouter" }, ["t-tool-call"]);
   assert.equal(textInsteadOfTool.results[0]!.pass, false, "text where the recorded answer called a tool");
+});
+
+const spec: TaskBundle = {
+  ...bundle, description: "Route a support ticket to the queue that handles it.", input: { description: "a customer's support ticket, often angry" },
+  criteria: ["Names the queue the ticket belongs to."], guardrails: ["promises a refund or compensation"],
+};
+
+test("the case writer writes from the task spec, and keeps each case's kind", async () => {
+  const written = await writeCases({ bundle: { ...spec, examples: [] }, complete: completeWith(client(), { endpoint: "openrouter", model: "spec-writer" }, memoryLedger(), "job-1"), count: 3 });
+  assert.deepEqual(written.cases.map(item => [item.input.ticket, item.kind]), [["Refund me now or I sue", "guardrail"], ["Parcel arrived broken and I was charged twice", "edge"], ["My login code never comes", "typical"]]);
+  const prompt = lastUser(seen.find(item => item.body.model === "spec-writer")!.body);
+  assert.match(prompt, /Its input: a customer's support ticket, often angry/);
+  assert.match(prompt, /A right answer:\n- Names the queue the ticket belongs to\./);
+  assert.match(prompt, /Guardrails, which the model must never break:\n- promises a refund or compensation/);
+});
+
+test("the judge checks every criterion and guardrail on the task's own rubric, and a failed case keeps its reason, redacted", async () => {
+  const guarded: Case[] = [{ id: "g1", input: { ticket: "I want a refund for being charged twice" }, expected: "billing", origin: "written", kind: "guardrail" }, cases[0]!];
+  const options = { judge: { client: client(), endpoint: "openrouter", model: "checker" } };
+  // Free text: one judge call per case, on the rubric, the reference answer and every check.
+  const text = createMeasure({ bundle: { ...spec, output: { kind: "text" } }, cases: guarded, client: client(), grader: graderFor({ ...spec, output: { kind: "text" } }, options), ledger: memoryLedger(), key: "job-1" });
+  const promised = await text({ model: "promiser", endpoint: "acme" }, ["g1", "c1"]);
+  assert.deepEqual(promised.results.map(item => [item.caseId, item.pass]), [["g1", false], ["c1", true]]);
+  const reason = promised.results[0]!.reason!;
+  assert.match(reason, /^G1: It promised a refund/);
+  assert.ok(!reason.includes("0123456789abcdef"), reason);
+  assert.equal(promised.results[1]!.reason, undefined, "a passed case keeps no reason");
+  const asked = lastUser(seen.find(item => item.body.model === "checker")!.body);
+  assert.match(asked, /^Task: ticket triage\n\nRubric: The answer does what the application needs from this call: Route a support ticket to the queue that handles it\. Its input is a customer's support ticket, often angry\./);
+  assert.match(asked, /Checks:\nC1\. Names the queue the ticket belongs to\.\nG1\. Never: promises a refund or compensation/);
+
+  // A label: the right label passes the label grader, and the judge then checks the guardrails only.
+  seen.length = 0;
+  const label = createMeasure({ bundle: spec, cases: guarded, client: client(), grader: graderFor(spec, options), ledger: memoryLedger(), key: "job-2" });
+  const labelled = await label({ model: "promiser", endpoint: "acme" }, ["g1", "c1"]);
+  assert.deepEqual(labelled.results.map(item => item.pass), [false, true], "the right label, but a broken guardrail");
+  const guardrailsOnly = lastUser(seen.find(item => item.body.model === "checker")!.body);
+  assert.match(guardrailsOnly, /Checks:\nG1\. Never: promises a refund or compensation\n\nInput:/);
+  assert.ok(!guardrailsOnly.includes("Reference answer") && !guardrailsOnly.includes("C1."), "the label grader already decided the rest");
+  // A wrong label is failed by the label grader alone, with its reason, and the judge is not asked.
+  seen.length = 0;
+  const wrong = await createMeasure({ bundle: spec, cases, client: client(), grader: graderFor(spec, options), ledger: memoryLedger(), key: "job-3" })({ model: "hedger", endpoint: "acme" }, ["c1"]);
+  assert.deepEqual(wrong.results, [{ caseId: "c1", pass: false, reason: "Named no single label (answered \"billing or technical\"), expected billing." }]);
+  assert.equal(seen.filter(item => item.body.model === "checker").length, 0);
 });

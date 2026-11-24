@@ -5,7 +5,7 @@
 // message; every grader compares with its text.
 import { Ajv, type ValidateFunction } from "ajv";
 import type { ModelClient } from "./clients.ts";
-import type { Ledger } from "../engine/index.ts";
+import { redact, type Ledger } from "../engine/index.ts";
 import type { Case, TaskBundle, ToolCall } from "./types.ts";
 
 export interface GradeInput {
@@ -26,6 +26,8 @@ export interface Grade {
   /** What grading cost, such as the judge's calls; 0 for graders that call no model. */
   costUsd: number;
   costIsEstimate: boolean;
+  /** Why a failed case failed, in one redacted sentence; absent when it passed. */
+  reason?: string;
 }
 
 export interface Grader { grade(input: GradeInput): Promise<Grade> }
@@ -42,7 +44,8 @@ const contentText = (content: unknown): string => (typeof content === "string" ?
 /** What a case expects, with a recorded assistant message read as its text. */
 const expectedOf = (caseItem: Case): unknown => (isAssistantMessage(caseItem.expected) ? contentText(caseItem.expected.content) : caseItem.expected);
 
-const free = (pass: boolean): Grade => ({ pass, costUsd: 0, costIsEstimate: false });
+const free = (pass: boolean, reason?: string): Grade => ({ pass, costUsd: 0, costIsEstimate: false, ...(pass || !reason ? {} : { reason: oneSentence(reason) }) });
+const quote = (text: string) => JSON.stringify(text.length > 60 ? `${text.slice(0, 59)}…` : text);
 const normalize = (text: string, caseSensitive: boolean) => {
   const collapsed = text.trim().replace(/\s+/g, " ");
   return caseSensitive ? collapsed : collapsed.toLowerCase();
@@ -54,7 +57,7 @@ export function exactMatch(options: { caseSensitive?: boolean } = {}): Grader {
     async grade({ caseItem, output }) {
       const expected = expectedOf(caseItem);
       if (typeof expected !== "string") throw new Error(`Case ${caseItem.id} has no expected text for an exact match`);
-      return free(normalize(output, options.caseSensitive ?? false) === normalize(expected, options.caseSensitive ?? false));
+      return free(normalize(output, options.caseSensitive ?? false) === normalize(expected, options.caseSensitive ?? false), `Answered ${quote(output.trim())}, not the expected ${quote(expected.trim())}.`);
     },
   };
 }
@@ -82,7 +85,8 @@ export function labelMatch(): Grader {
       if (typeof recorded !== "string") throw new Error(`Case ${caseItem.id} has no expected label`);
       // A recorded answer is itself read as a label, so "Billing." expects billing.
       const expected = (isAssistantMessage(caseItem.expected) ? readLabel(recorded, bundle.output.labels) ?? recorded : recorded).toLowerCase();
-      return free(readLabel(output, bundle.output.labels)?.toLowerCase() === expected);
+      const given = readLabel(output, bundle.output.labels);
+      return free(given?.toLowerCase() === expected, given ? `Answered ${given}, expected ${expected}.` : `Named no single label (answered ${quote(output.trim())}), expected ${expected}.`);
     },
   };
 }
@@ -121,17 +125,19 @@ export function jsonSchema(): Grader {
       let validate = compiled.get(schema);
       if (!validate) { validate = ajv.compile(schema); compiled.set(schema, validate); }
       const parsed = readJson(output);
-      if (!parsed.ok || !validate(parsed.value)) return free(false);
+      if (!parsed.ok) return free(false, "The answer is not JSON.");
+      if (!validate(parsed.value)) return free(false, `The JSON does not match the schema: ${ajv.errorsText(validate.errors)}.`);
       // A recorded answer is JSON text: the candidate's must equal it, field by field.
       const recorded = isAssistantMessage(caseItem.expected) ? readJson(expectedOf(caseItem) as string) : null;
       const expected = recorded ? (recorded.ok ? recorded.value : undefined) : caseItem.expected;
       if (expected === undefined) return free(true);
       if (expected && typeof expected === "object" && !Array.isArray(expected)) {
         const value = parsed.value;
-        if (!value || typeof value !== "object" || Array.isArray(value)) return free(false);
-        return free(Object.entries(expected).every(([key, item]) => deepEqual((value as Record<string, unknown>)[key], item)));
+        if (!value || typeof value !== "object" || Array.isArray(value)) return free(false, "The JSON is not an object.");
+        const wrong = Object.entries(expected).filter(([key, item]) => !deepEqual((value as Record<string, unknown>)[key], item)).map(([key]) => key);
+        return free(!wrong.length, `Wrong ${wrong.length === 1 ? "field" : "fields"} ${wrong.join(", ")}: expected ${wrong.map(key => `${key}=${JSON.stringify((expected as Record<string, unknown>)[key])}`).join(", ")}.`);
       }
-      return free(deepEqual(parsed.value, expected));
+      return free(deepEqual(parsed.value, expected), "The JSON differs from the expected value.");
     },
   };
 }
@@ -141,44 +147,78 @@ export interface JudgeOptions {
   /** The fixed judge: the same model grades every candidate. */
   endpoint: string;
   model: string;
-  /** What a passing answer does, in plain words. */
-  rubric: string;
+  /** What a passing answer does, in plain words; by default the task itself (`rubricFor`). */
+  rubric?: string;
+  /** Judge only the guardrails, when another grader already decided the rest. */
+  only?: "guardrails";
   maxTokens?: number;
 }
 
 export const JUDGE_SYSTEM = [
   "You grade one answer a model gave for a task in an application.",
-  "Apply the rubric strictly. A reference answer, when given, shows what a right answer contains; the answer may word it differently.",
-  "Reply with JSON only: {\"pass\": true or false, \"reason\": \"one short sentence\"}.",
+  "Apply the rubric and every check strictly. A reference answer, when given, shows what a right answer contains; the answer may word it differently.",
+  "Reply with JSON only: {\"checks\": [{\"id\": \"C1\", \"pass\": true or false, \"reason\": \"one short sentence\"}], \"pass\": true or false, \"reason\": \"one short sentence\"}. \"checks\" has one entry per listed check; \"pass\" is true only when the answer meets the rubric and passes every check, and \"reason\" says why not when it does not.",
 ].join("\n");
 
-/** Reads the judge's verdict; null when it gave none. */
-export function readVerdict(text: string): boolean | null {
-  const parsed = readJson(text);
-  if (parsed.ok && parsed.value && typeof parsed.value === "object" && typeof (parsed.value as { pass?: unknown }).pass === "boolean") return (parsed.value as { pass: boolean }).pass;
-  const match = /"?pass"?\s*[:=]\s*(true|false)/i.exec(text);
-  return match ? match[1]!.toLowerCase() === "true" : null;
+/** The judge's rubric for a task: what it is for, from its spec, not where it was found. */
+export function rubricFor(bundle: TaskBundle): string {
+  const what = bundle.description?.trim() || `the task "${bundle.task}"`;
+  return `The answer does what the application needs from this call: ${what}${bundle.input?.description ? ` Its input is ${bundle.input.description.replace(/\.$/, "")}.` : ""}`;
 }
 
-/** Passes when the judge model says the output meets the rubric. Throws when the judge cannot answer. */
+/** The checks a case's answer is judged on: one per criterion (C1…) and one per guardrail (G1…). */
+export function checksFor(bundle: TaskBundle, only?: "guardrails"): { id: string; text: string }[] {
+  return [
+    ...(only ? [] : (bundle.criteria ?? []).map((text, index) => ({ id: `C${index + 1}`, text }))),
+    ...(bundle.guardrails ?? []).map((text, index) => ({ id: `G${index + 1}`, text: `Never: ${text}` })),
+  ];
+}
+
+export interface Verdict { pass: boolean; reason: string; failed: string[] }
+
+/** Reads the judge's verdict; null when it gave none. A listed check it failed fails the answer. */
+export function readVerdict(text: string, checks: readonly { id: string }[] = []): Verdict | null {
+  const parsed = readJson(text);
+  const value = parsed.ok && parsed.value && typeof parsed.value === "object" ? parsed.value as { pass?: unknown; reason?: unknown; checks?: unknown } : null;
+  let pass: boolean | null = typeof value?.pass === "boolean" ? value.pass : null;
+  if (pass === null) {
+    const match = /"?pass"?\s*[:=]\s*(true|false)/i.exec(text);
+    if (match) pass = match[1]!.toLowerCase() === "true";
+  }
+  if (pass === null) return null;
+  const listed = Array.isArray(value?.checks) ? value.checks as { id?: unknown; pass?: unknown; reason?: unknown }[] : [];
+  const failed = listed.filter(item => item && item.pass === false && typeof item.id === "string" && checks.some(check => check.id === item.id));
+  const reason = failed.length ? failed.map(item => `${item.id}: ${typeof item.reason === "string" ? item.reason : "failed"}`).join(" ") : typeof value?.reason === "string" ? value.reason : "";
+  return { pass: pass && !failed.length, reason: oneSentence(reason), failed: failed.map(item => item.id as string) };
+}
+
+/** A grader's reason as stored: redacted, on one line, at most 200 characters. */
+export const oneSentence = (text: string) => { const line = redact(text).replace(/\s+/g, " ").trim(); return line.length > 200 ? `${line.slice(0, 199)}…` : line; };
+
+/**
+ * Passes when the judge model says the output meets the task's rubric and every check: one per
+ * criterion and per guardrail in the bundle's spec. Throws when the judge cannot answer.
+ */
 export function judge(options: JudgeOptions): Grader {
   return {
     async grade({ bundle, caseItem, output, toolCalls, ledger, key, signal }) {
-      const expected = isAssistantMessage(caseItem.expected) ? describeAnswer(contentText(caseItem.expected.content), toolCallsOf(caseItem.expected)) : caseItem.expected;
+      const expected = options.only ? undefined : isAssistantMessage(caseItem.expected) ? describeAnswer(contentText(caseItem.expected.content), toolCallsOf(caseItem.expected)) : caseItem.expected;
       const input = caseItem.origin === "trace" ? caseItem.input.messages ?? "" : JSON.stringify(caseItem.input, null, 2);
+      const checks = checksFor(bundle, options.only);
       const prompt = [
-        `Task: ${bundle.task}${bundle.description ? ` (${bundle.description})` : ""}`,
-        `Rubric: ${options.rubric}`,
+        `Task: ${bundle.task}`,
+        `Rubric: ${options.only ? "The answer breaks none of the checks below." : options.rubric ?? rubricFor(bundle)}`,
+        ...(checks.length ? [`Checks:\n${checks.map(check => `${check.id}. ${check.text}`).join("\n")}`] : []),
         `Input:\n${input}`,
         ...(expected === undefined ? [] : [`Reference answer:\n${typeof expected === "string" ? expected : JSON.stringify(expected)}`]),
         `Answer to grade:\n${describeAnswer(output, toolCalls ?? [])}`,
       ].join("\n\n");
       const answer = await options.client.complete({
         endpoint: options.endpoint, model: options.model, system: JUDGE_SYSTEM, messages: [{ role: "user", content: prompt }], maxTokens: options.maxTokens ?? 2048,
-      }, { ledger, key: `${key}/judge`, ...(signal ? { signal } : {}) });
-      const verdict = answer.ok ? readVerdict(answer.text) : null;
+      }, { ledger, key: `${key}/judge${options.only ? "-guardrails" : ""}`, ...(signal ? { signal } : {}) });
+      const verdict = answer.ok ? readVerdict(answer.text, checks) : null;
       if (verdict === null) throw new Error(`The judge ${options.model} gave no verdict for case ${caseItem.id}${answer.error ? `: ${answer.error}` : ""}`);
-      return { pass: verdict, costUsd: answer.costUsd, costIsEstimate: answer.costIsEstimate };
+      return { pass: verdict.pass, costUsd: answer.costUsd, costIsEstimate: answer.costIsEstimate, ...(verdict.pass ? {} : { reason: verdict.reason || "The judge failed the answer without a reason." }) };
     },
   };
 }
@@ -207,9 +247,11 @@ export function parity(options: { text?: Grader } = {}): Grader {
       if (!isAssistantMessage(caseItem.expected)) throw new Error(`Case ${caseItem.id} has no recorded answer to compare with`);
       const recorded = toolCallsOf(caseItem.expected);
       if (recorded.length) {
-        return free(toolCalls.length === recorded.length && recorded.every((call, index) => toolCalls[index]!.name === call.name && sameArguments(toolCalls[index]!.arguments, call.arguments)));
+        const same = toolCalls.length === recorded.length && recorded.every((call, index) => toolCalls[index]!.name === call.name && sameArguments(toolCalls[index]!.arguments, call.arguments));
+        const names = (calls: readonly { name: string }[]) => calls.map(call => call.name).join(", ");
+        return free(same, names(toolCalls) === names(recorded) ? `Called ${names(toolCalls)} with other arguments than the recorded call.` : `Called ${names(toolCalls) || "no tool"}, not ${names(recorded)}.`);
       }
-      if (toolCalls.length) return free(false);
+      if (toolCalls.length) return free(false, `Called ${toolCalls.map(call => call.name).join(", ")} where the recorded answer was text.`);
       return (options.text ?? outputGrader(bundle)).grade(input);
     },
   };
@@ -218,12 +260,25 @@ export function parity(options: { text?: Grader } = {}): Grader {
 const outputGrader = (bundle: TaskBundle, judgeOptions?: JudgeOptions): Grader =>
   bundle.output.kind === "label" ? labelMatch() : bundle.output.kind === "json" ? jsonSchema() : judgeOptions ? judge(judgeOptions) : exactMatch();
 
+/** `first`, then, when it passes, the judge on the bundle's guardrails: a right label can still break one. */
+const thenGuardrails = (first: Grader, judgeOptions: JudgeOptions): Grader => ({
+  async grade(input) {
+    const decided = await first.grade(input);
+    if (!decided.pass) return decided;
+    const checked = await judge({ ...judgeOptions, only: "guardrails" }).grade(input);
+    return { ...checked, costUsd: decided.costUsd + checked.costUsd, costIsEstimate: decided.costIsEstimate || checked.costIsEstimate };
+  },
+});
+
 /**
  * The grader a bundle's output calls for: its labels, its JSON schema, or for text the judge when one
- * is given, else an exact match. Trace cases are graded by parity with their recorded answer.
+ * is given (on the task's rubric, its criteria and its guardrails), else an exact match. A label or
+ * JSON answer that is right is also judged on the guardrails, when the spec has any and a judge is
+ * given. Trace cases are graded by parity with their recorded answer.
  */
 export function graderFor(bundle: TaskBundle, options: { judge?: JudgeOptions } = {}): Grader {
-  const output = outputGrader(bundle, options.judge);
+  const base = outputGrader(bundle, options.judge);
+  const output = options.judge && bundle.output.kind !== "text" && bundle.guardrails?.length ? thenGuardrails(base, options.judge) : base;
   const trace = parity({ text: output });
   // Trace cases are graded by parity with what they recorded, other cases by the output's grader.
   return { grade: input => (input.caseItem.origin === "trace" ? trace : output).grade(input) };
