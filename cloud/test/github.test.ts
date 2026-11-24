@@ -18,6 +18,8 @@ import { bundle, caller, catalogue, chatAnswer, fakeModels, startApp, stop, subs
 
 const TOKEN = `github_pat_${"A".repeat(30)}_good`;
 const NO_CONTENTS = `github_pat_${"B".repeat(30)}_meta`;
+/** user_ga's GitHub token from Clerk's GitHub App sign-in: it reaches what installations of the app give user_ga. */
+const GHU = `ghu_${"G".repeat(36)}`;
 
 interface FakeRepo { private: boolean; token?: string; sizeKb?: number; slowMs?: number }
 /** Set `limited` to answer every REST call as GitHub does when its rate limit is used up. */
@@ -39,7 +41,10 @@ function bareRepo(root: string, fullName: string, files: Record<string, string>)
   run(root, "clone", "-q", "--bare", work, join(root, `${fullName}.git`));
 }
 
-async function fakeGitHub(repos: Record<string, FakeRepo>, root: string): Promise<FakeGitHub> {
+/** Installations of the OpenMerit GitHub App each user token reaches: GET /user/installations and their repositories. */
+type FakeInstallations = Record<string, { id: number; account: string; repos: string[] }[]>;
+
+async function fakeGitHub(repos: Record<string, FakeRepo>, root: string, installations: FakeInstallations = {}): Promise<FakeGitHub> {
   const requests: FakeGitHub["requests"] = [];
   const fake = { limited: null as FakeGitHub["limited"] };
   const read = (req: IncomingMessage) => new Promise<Buffer>(resolve => { const chunks: Buffer[] = []; req.on("data", chunk => chunks.push(chunk as Buffer)); req.on("end", () => resolve(Buffer.concat(chunks))); });
@@ -48,6 +53,21 @@ async function fakeGitHub(repos: Record<string, FakeRepo>, root: string): Promis
     const auth = String(req.headers.authorization ?? "");
     requests.push({ method: req.method ?? "GET", path: url.pathname, auth });
     const body = await read(req);
+    const mine = installations[auth.replace(/^Bearer /, "")];
+    if (url.pathname === "/api/user/installations") {
+      if (!mine) { res.writeHead(401).end(JSON.stringify({ message: "Bad credentials" })); return; }
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ total_count: mine.length,
+        installations: mine.map(item => ({ id: item.id, account: { login: item.account, type: "Organization" }, repository_selection: "selected", html_url: `https://github.com/organizations/${item.account}/settings/installations/${item.id}` })) }));
+      return;
+    }
+    const listed = /^\/api\/user\/installations\/(\d+)\/repositories$/.exec(url.pathname);
+    if (listed) {
+      const found = mine?.find(item => item.id === Number(listed[1]));
+      if (!found) { res.writeHead(404).end(JSON.stringify({ message: "Not Found" })); return; }
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ total_count: found.repos.length,
+        repositories: found.repos.map(name => ({ full_name: name, private: repos[name]?.private === true, default_branch: "main", size: 12 })) }));
+      return;
+    }
     const api = /^\/api\/repos\/([^/]+)\/([^/]+)(\/commits)?$/.exec(url.pathname);
     if (api && fake.limited) {
       res.writeHead(fake.limited.status, { "content-type": "application/json", "x-ratelimit-limit": "60", "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(fake.limited.reset) })
@@ -159,6 +179,9 @@ test("a review stops at its budget: the model calls already made are billed, and
 
 describe("GitHub repositories", () => {
   let models: FakeModels, reviewer: FakeReviewer, github: FakeGitHub, app: App, sandboxes: string;
+  // Who is signed in with GitHub, as Clerk's getUserOauthAccessToken would answer: user ID to token.
+  const signIns = join(mkdtempSync(join(tmpdir(), "openmerit-signins-")), "github.json");
+  writeFileSync(signIns, JSON.stringify({ user_ga: GHU }));
   before(async () => {
     const root = mkdtempSync(join(tmpdir(), "openmerit-fake-github-"));
     // A file outside the repository that a symlink in it points to: followed, it would add a model call.
@@ -171,6 +194,7 @@ describe("GitHub repositories", () => {
       "README.md": "An app.\n",
     });
     bareRepo(root, "acme/private-app", { "app.ts": 'const model = "anthropic/claude-sonnet-5.5";\n' });
+    bareRepo(root, "acme/app-private", { "src/route.ts": 'const model = "openai/gpt-5-mini";\n', "tests/route.test.ts": 'const model = "openai/gpt-5";\n' });
     bareRepo(root, "acme/mixed-app", {
       "src/app.ts": 'const MODEL = "openai/gpt-5-mini";\n',
       "src/app.test.ts": 'const MODEL = "openai/gpt-5";\n',
@@ -192,22 +216,23 @@ describe("GitHub repositories", () => {
     github = await fakeGitHub({
       "acme/public-app": { private: false },
       "acme/private-app": { private: true, token: TOKEN },
+      "acme/app-private": { private: true, token: GHU },
       "acme/slow-app": { private: false, slowMs: 10_000 },
       "acme/mixed-app": { private: false },
       "acme/tests-only": { private: false },
       "acme/evals-app": { private: false },
       "acme/huge-app": { private: false, sizeKb: 300 * 1024 },
       "acme/big-app": { private: false },
-    }, root);
+    }, root, { [GHU]: [{ id: 7, account: "acme", repos: ["acme/app-private", "acme/public-app"] }] });
     models = await fakeModels();
     reviewer = await fakeReviewer(models.url);
     sandboxes = mkdtempSync(join(tmpdir(), "openmerit-sandboxes-"));
-    app = await startApp({ models, env: { OPENMERIT_GITHUB_API_URL: github.api, OPENMERIT_GITHUB_URL: github.git, OPENMERIT_REPO_CLONE_SECONDS: "4", OPENMERIT_REVIEWS_PER_HOUR: "2", TMPDIR: sandboxes,
+    app = await startApp({ models, env: { OPENMERIT_GITHUB_API_URL: github.api, OPENMERIT_GITHUB_URL: github.git, OPENMERIT_REPO_CLONE_SECONDS: "4", OPENMERIT_REVIEWS_PER_HOUR: "2", TMPDIR: sandboxes, TEST_GITHUB_TOKENS: signIns,
       OPENROUTER_BASE_URL: reviewer.url, OPENMERIT_REVIEWER_MODEL: "openai/gpt-5-mini", PI_OFFLINE: "1" } });
   });
   after(async () => { await stop(app); await models.close(); await reviewer.close(); await github.close(); });
   // Repository reviews need an active plan, as jobs do; every account here has one but org_np and org_lapse.
-  before(async () => { for (const org of ["org_gh", "org_gp", "org_rl", "org_mx", "org_gs", "org_lapse", "org_rv"]) await subscribe(app, org); });
+  before(async () => { for (const org of ["org_gh", "org_gp", "org_rl", "org_mx", "org_gs", "org_lapse", "org_rv", "org_ga"]) await subscribe(app, org); });
 
   const reviewed = (agent: ReturnType<typeof caller>, id: string) => waitFor(async () => (await agent.api<RepoView[]>("/api/repos")).body.find(repo => repo.id === id)!, repo => repo.review.status === "done" || repo.review.status === "failed", 60_000);
 
@@ -404,6 +429,48 @@ describe("GitHub repositories", () => {
     assert.equal(testsOnly.notListed, "1 more in tests, fixtures or docs, not listed");
   });
 
+  test("a member signed in with GitHub picks a repository an installation of the GitHub App gives them, and adds it without a token", async () => {
+    const admin = caller(app, "test:user_ga:org_ga:admin");
+    const listed = await admin.api<{ app: string; installUrl: string; signedIn: boolean; installations: { id: number; account: string; repos: { fullName: string; private: boolean }[] }[]; error: string | null }>("/api/github");
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.installUrl, "https://github.com/apps/openmeritai/installations/new");
+    assert.equal(listed.body.signedIn, true);
+    assert.deepEqual(listed.body.installations.map(item => [item.id, item.account, item.repos.map(repo => `${repo.fullName}${repo.private ? " (private)" : ""}`)]), [[7, "acme", ["acme/app-private (private)", "acme/public-app"]]]);
+    // A member without a GitHub sign-in gets the install link and nothing from GitHub.
+    const before = github.requests.length;
+    const other = await caller(app, "test:user_gb:org_ga:admin").api<{ signedIn: boolean; installations: unknown[] }>("/api/github");
+    assert.deepEqual([other.body.signedIn, other.body.installations], [false, []]);
+    assert.equal((await caller(app, "test:user_gb:org_ga:admin").api<{ error: string }>("/api/repos", { method: "POST", body: JSON.stringify({ url: "https://github.com/acme/app-private", via: "github" }) })).body.error,
+      "Your OpenMerit sign-in has no GitHub account. Sign in with GitHub, or add the repository with a fine-grained token.");
+    assert.equal(github.requests.length, before, "no GitHub call without a GitHub sign-in");
+
+    const added = await admin.api<RepoView & { error: string }>("/api/repos", { method: "POST", body: JSON.stringify({ url: "https://github.com/acme/app-private", via: "github" }) });
+    assert.equal(added.status, 201, added.body.error);
+    assert.deepEqual([added.body.private, added.body.access, added.body.githubUser, added.body.tokenLast4], [true, "github", "user_ga", null]);
+    const repo = await reviewed(admin, added.body.id);
+    assert.equal(repo.review.status, "done", repo.review.error ?? "");
+    // Only the application's call is listed; the test's is counted apart.
+    assert.deepEqual(repo.review.result!.modelCalls.map(call => `${call.file}:${call.line}`), ["src/route.ts:1"]);
+    assert.equal(repo.review.result!.supportCalls, 1);
+    // git sent the user's token to GitHub in its header; OpenMerit stored no token, and no listing or export carries it.
+    assert.ok(github.requests.some(request => request.path.startsWith("/git/acme/app-private") && request.auth === `Basic ${Buffer.from(`x-access-token:${GHU}`).toString("base64")}`));
+    assert.ok(!JSON.stringify((await admin.api("/api/repos")).body).includes(GHU));
+    assert.ok(!JSON.stringify((await admin.api("/api/account/export", { method: "POST" })).body).includes(GHU));
+    // A repository the installation does not give the user says what to do.
+    assert.match((await admin.api<{ error: string }>("/api/repos", { method: "POST", body: JSON.stringify({ url: "https://github.com/acme/private-app", via: "github" }) })).body.error,
+      /The OpenMerit GitHub App cannot see acme\/private-app for you\. Install it/);
+
+    // Once the member unlinks GitHub, Review again fails and says how to add it back; the last review is kept.
+    writeFileSync(signIns, JSON.stringify({}));
+    const again = await admin.api<RepoView>(`/api/repos/${repo.id}/review`, { method: "POST" });
+    assert.equal(again.status, 202);
+    const failed = await reviewed(admin, repo.id);
+    assert.equal(failed.review.status, "failed");
+    assert.match(failed.review.error ?? "", /no longer has a GitHub account on OpenMerit\. Add it again/);
+    assert.ok(failed.review.result!.modelCalls.length > 0);
+    writeFileSync(signIns, JSON.stringify({ user_ga: GHU }));
+  });
+
   test("a private repository needs a fine-grained token that can read its contents, which is stored encrypted and sent only to GitHub", async () => {
     const admin = caller(app, "test:user_gp:org_gp:admin");
     const add = (body: object) => admin.api<RepoView & { error: string }>("/api/repos", { method: "POST", body: JSON.stringify(body) });
@@ -431,7 +498,7 @@ describe("GitHub repositories", () => {
   });
 
   test("a checkout holds a symlink as a plain file and no .git directory, and a clone that grows past the size limit stops", async () => {
-    const config: GitHubConfig = { apiUrl: github.api, gitUrl: github.git, maxBytes: 200 * 1024 * 1024, cloneTimeoutMs: 20_000 };
+    const config: GitHubConfig = { apiUrl: github.api, gitUrl: github.git, maxBytes: 200 * 1024 * 1024, cloneTimeoutMs: 20_000, appSlug: null };
     let seen = "";
     await withCheckout({ fullName: "acme/public-app", branch: "main", token: null, config }, async checkout => {
       seen = checkout.root;

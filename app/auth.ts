@@ -17,6 +17,8 @@ export interface ClerkUser {
   firstName?: string | null;
   primaryEmailAddress?: { emailAddress: string } | null;
   organizationMemberships?: { organization: ClerkOrganization; role: string }[];
+  // Links another sign-in, such as GitHub, to this user: Clerk answers with the provider's page to send the browser to.
+  createExternalAccount?(params: { strategy: string; redirectUrl: string }): Promise<{ verification?: { externalVerificationRedirectURL?: URL | string | null } | null }>;
 }
 export interface Clerk {
   session?: ClerkSession | null;

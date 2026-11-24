@@ -12,7 +12,7 @@ import { runView } from "../views/run.ts";
 import { runsView } from "../views/runs.ts";
 import { tasksView } from "../views/tasks.ts";
 import { evalsView } from "../views/evals.ts";
-import type { EvalDraft, EvalView, TaskDetail } from "../api.ts";
+import type { EvalDraft, EvalView, GitHubAccess, TaskDetail } from "../api.ts";
 
 // The pages render what the cloud app returns, as served by the local fake of its /api/*.
 const fake = createFakeApi();
@@ -293,9 +293,36 @@ test("Project settings let an admin rename the project and delete one without ta
   const member = projectView.render({ project: enrollment, endpoints: [], repos: [] }, page(await account("member"))).__html;
   assert.doesNotMatch(member, /data-action="(rename|deleteProject|add|addRepo)"/);
   // Coding agents keeps only adding OpenMerit and Disconnect.
-  const agents = connectionsView.render(null, page(me)).__html;
+  const agents = connectionsView.render({ github: { app: null, installUrl: null, signedIn: false, error: null, installations: [] }, repos: [], project: claims }, page(me)).__html;
   assert.match(agents, /data-action="disconnect"/);
-  assert.doesNotMatch(agents, /id="(endpoints|repos)"/);
+  assert.doesNotMatch(agents, /id="(endpoints|repos|github)"/);
+});
+
+test("Coding agents lets a member signed in with GitHub add the repositories the GitHub App gives them, and links the install for everyone else", async () => {
+  const me = await account();
+  const github = await get<GitHubAccess>("/api/github");
+  const repos = await get<Repo[]>("/api/repos");
+  const shown = connectionsView.render({ github, repos, project: claims }, page(me, "installation_id=41&setup_action=install")).__html;
+  assert.match(text({ __html: shown }), /The OpenMerit GitHub App is installed\. Its repositories are below\./);
+  assert.match(text({ __html: shown }), /sahra-health Every repository|sahra-health 3 repositories/);
+  // claims-api is already in the project; the other two can be added.
+  assert.match(text({ __html: shown }), /sahra-health\/claims-api Private In Claims/);
+  assert.match(shown, /data-action="addGithubRepo" data-repo="sahra-health\/billing-worker" aria-label="Add sahra-health\/billing-worker to Claims">/);
+  assert.match(shown, /href="https:\/\/github\.com\/apps\/openmeritai\/installations\/new"[^>]*>Install on another account or organization/);
+  // Without a plan the buttons stay, disabled, with the reason.
+  const unpaid = connectionsView.render({ github, repos, project: claims }, page({ ...me, plan: { ...me.plan, status: "none" } })).__html;
+  assert.match(unpaid, /data-repo="sahra-health\/billing-worker" disabled/);
+  assert.match(text({ __html: unpaid }), /Reviewing a repository needs an active plan/);
+  // A member sees the repositories but cannot add one.
+  assert.doesNotMatch(connectionsView.render({ github, repos, project: claims }, page(await account("member"))).__html, /data-action="addGithubRepo"/);
+  // Without a GitHub sign-in: Connect GitHub, and the fake refuses a GitHub add as the cloud app does.
+  const plain = await get<GitHubAccess>("/api/github", "empty");
+  assert.match(connectionsView.render({ github: plain, repos: [], project: claims }, page(me)).__html, /data-action="connectGithub">Connect GitHub/);
+  const send = (scenario: string, url: string) => createFakeApi()(new Request("https://openmerit.ai/api/repos", { method: "POST", headers: { authorization: `Bearer preview-${scenario}` }, body: JSON.stringify({ url, via: "github" }) }));
+  assert.match((await (await send("empty", "https://github.com/sahra-health/billing-worker")).json() as { error: string }).error, /no GitHub account/);
+  const added = await (await send("populated", "https://github.com/sahra-health/billing-worker")).json() as Repo;
+  assert.deepEqual([added.access, added.private, added.tokenLast4], ["github", true, null]);
+  assert.match(text(projectView.render({ project: claims, endpoints: [], repos: [added] }, page(me))), /billing-worker .*Private · GitHub sign-in/);
 });
 
 test("Account settings walk through each sign-in and offer only a connected subscription as the case writer", async () => {

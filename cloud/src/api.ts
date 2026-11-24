@@ -11,6 +11,7 @@ import { bundleProblem, redactBundle, rerunJob, runTask, taskIdFor } from "./sta
 import { DEFAULT_PROJECT, specOf, type EvalSpec } from "./actors/account.ts";
 import type { Case, TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { isSubscriptionProvider } from "./subscriptions.ts";
+import { appInstallations } from "./github.ts";
 import type { EndpointKind } from "../../openmerit-core/src/ranking/index.ts";
 
 type Json = Record<string, unknown>;
@@ -267,13 +268,22 @@ export function apiRoutes(deps: AppDeps) {
       return (await account.removeEndpoint({ projectId, id: match[1]! })) ? json(200, { deleted: true }) : error(404, "No such endpoint.");
     }
 
-    // GitHub repositories OpenMerit reviews, read-only: a public one by its URL, a private one with a fine-grained token.
+    // GitHub repositories OpenMerit reviews, read-only: a public one by its URL, a private one with a fine-grained token
+    // or, for a member signed in with GitHub, any repository an installation of the OpenMerit GitHub App gives them.
+    if (path === "/api/github" && method === "GET") {
+      const slug = config.github.appSlug;
+      const installUrl = slug ? `https://github.com/apps/${slug}/installations/new` : null;
+      const token = slug && deps.auth ? await deps.auth.githubToken(who.userId).catch(() => null) : null;
+      if (!slug || !token) return json(200, { app: slug, installUrl, signedIn: false, installations: [], error: null });
+      const found = await appInstallations(token, config.github, fetch);
+      return json(200, { app: slug, installUrl, signedIn: true, installations: found.ok ? found.installations : [], error: found.ok ? null : found.error });
+    }
     if (path === "/api/repos" && method === "GET") return json(200, await account.repos(projectId));
     if (path === "/api/repos" && method === "POST") {
       const denied = admin(); if (denied) return denied;
       const input = await body(request);
       if (!input) return error(400, "Send the repository as JSON: {url, token}. The token is only for a private repository.");
-      const added = await account.addRepo({ projectId, url: String(input.url ?? ""), token: typeof input.token === "string" ? input.token : null });
+      const added = await account.addRepo({ projectId, url: String(input.url ?? ""), token: typeof input.token === "string" ? input.token : null, githubUser: input.via === "github" ? who.userId : null });
       return added.ok ? json(201, added.repo) : error(400, added.error);
     }
     if ((match = /^\/api\/repos\/([\w-]+)\/review$/.exec(path)) && method === "POST") {

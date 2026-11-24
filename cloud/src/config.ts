@@ -135,6 +135,8 @@ export function loadConfig(env: Env = process.env): Config {
       gitUrl: (env.OPENMERIT_GITHUB_URL || "https://github.com").replace(/\/$/, ""),
       maxBytes: number(env.OPENMERIT_REPO_MAX_MB, 200) * 1024 * 1024,
       cloneTimeoutMs: number(env.OPENMERIT_REPO_CLONE_SECONDS, 120) * 1000,
+      // An empty OPENMERIT_GITHUB_APP_SLUG turns the GitHub App way of adding a repository off.
+      appSlug: (env.OPENMERIT_GITHUB_APP_SLUG ?? "openmeritai").trim() || null,
     },
     subscriptions: {
       claude: {

@@ -80,7 +80,7 @@ function repoRow(repo: Repo, admin: boolean): Html {
   return html`<div class="repo">
         <div class="row">
           <span>${logo("github")}<a href="${repo.url}" target="_blank" rel="noreferrer">${repo.fullName}</a>${reviewText(repo)}</span>
-          <span class="endpoint-meta"><span class="pill tag">${repo.tokenLast4 ? `Private · token ending ${repo.tokenLast4}` : "Public"}</span>${reviewing ? html`<span class="sub"><span class="pill live">Reviewing</span></span>` : reviewed}</span>
+          <span class="endpoint-meta"><span class="pill tag">${repo.access === "github" ? `${repo.private ? "Private" : "Public"} · GitHub sign-in` : repo.tokenLast4 ? `Private · token ending ${repo.tokenLast4}` : "Public"}</span>${reviewing ? html`<span class="sub"><span class="pill live">Reviewing</span></span>` : reviewed}</span>
           ${admin ? html`<span class="actions"><button class="btn" type="button" data-action="review" data-id="${repo.id}"${reviewing ? html` disabled` : ""} aria-label="Review ${repo.fullName} again">Review again</button><button class="btn danger" type="button" data-action="removeRepo" data-id="${repo.id}" aria-label="Remove ${repo.fullName}">Remove</button></span>` : html`<span></span>`}
         </div>
         ${modelCalls(repo)}
@@ -134,7 +134,7 @@ export const projectView: View<Data> = {
         </label>
         <label>Fine-grained token, for a private repository
           <input name="token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
-          <span class="sub">Leave this empty for a public repository. For a private one, <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">create a fine-grained token</a> with Repository access set to only the repositories OpenMerit reviews and Contents: Read-only. OpenMerit stores it encrypted and shows only its last four characters.</span>
+          <span class="sub">Leave this empty for a public repository. Signed in with GitHub? Pick repositories on <a href="/connections/">Coding agents</a>, no token needed. Otherwise, for a private one, <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">create a fine-grained token</a> with Repository access set to only the repositories OpenMerit reviews and Contents: Read-only. OpenMerit stores it encrypted and shows only its last four characters.</span>
         </label>
         <p class="form-error" role="alert" hidden></p>
         <p><button class="btn primary" type="submit">Add repository</button></p>
