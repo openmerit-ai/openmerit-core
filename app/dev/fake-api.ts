@@ -38,8 +38,8 @@ function routerEval(): FakeEval {
   ];
   return {
     output: ROUTER_OUTPUT, draft: null,
-    accepted: { version: 2, source: "app", by: "Amira Haddad", at: "2026-11-18T10:01:00Z", spec, cases },
-    repo: { version: 1, by: "Amira Haddad", client: "claude-code", at: "2026-10-30T10:20:00Z" },
+    accepted: { version: 2, source: "app", by: "user_amira", byName: "Amira Haddad", at: "2026-11-18T10:01:00Z", spec, cases },
+    repo: { version: 1, by: "user_amira", byName: "Amira Haddad", client: "claude-code", at: "2026-10-30T10:20:00Z" },
   };
 }
 
@@ -48,9 +48,9 @@ function drafterEval(): FakeEval {
   const spec: EvalSpec = { criteria: ["Answers the member's question in plain language", "Offers the next step"] };
   const cases: EvalCase[] = [{ id: "written-1", input: { message: "When will my reimbursement arrive?" }, expected: "Reimbursements arrive within 14 days of approval; the member can track it under Claims.", origin: "written", kind: "typical", approved: true }];
   return {
-    output: { kind: "text" }, repo: { version: 1, by: "Amira Haddad", client: "claude-code", at: "2026-11-18T08:52:00Z" },
+    output: { kind: "text" }, repo: { version: 1, by: "user_amira", byName: "Amira Haddad", client: "claude-code", at: "2026-11-18T08:52:00Z" },
     // Accepted by grading its first run's answers (run m5d8q2).
-    accepted: { version: 1, source: "grading", by: "Amira Haddad", at: "2026-11-18T08:31:00Z", spec, cases },
+    accepted: { version: 1, source: "grading", by: "user_amira", byName: "Amira Haddad", at: "2026-11-18T08:31:00Z", spec, cases },
     draft: { reason: "task_changed", changed: ["tools"], spec, cases: [...cases, { id: "example-1", input: { message: "Where is claim CLM-30112?" }, origin: "example" }], output: { kind: "text" }, by: null, at: "2026-11-23T15:12:00Z" },
   };
 }
@@ -597,7 +597,7 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       if (!found) return error(409, "This eval has no accepted version, or a draft is open already.");
       if (action === "POST revise") {
         if (found.draft) return error(409, "This eval has no accepted version, or a draft is open already.");
-        found.draft = { reason: "revise", changed: [], spec: found.accepted.spec, cases: found.accepted.cases, output: null, by: "Amira Haddad", at: new Date().toISOString() };
+        found.draft = { reason: "revise", changed: [], spec: found.accepted.spec, cases: found.accepted.cases, output: null, by: "user_amira", byName: "Amira Haddad", at: new Date().toISOString() };
         setReview(id, true);
         return json(200, evalView(id));
       }
@@ -615,11 +615,11 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
         if (cases.some((item) => !item.id || !item.input || Object.values(item.input).some((value) => typeof value !== "string"))) return error(400, "Each case needs an id and an input object of strings.");
         const spec = (input?.spec ?? found.draft.spec) as EvalSpec;
         if (action === "PUT draft") {
-          found.draft = { ...found.draft, spec, cases, by: "Amira Haddad", at: new Date().toISOString() };
+          found.draft = { ...found.draft, spec, cases, by: "user_amira", byName: "Amira Haddad", at: new Date().toISOString() };
           return json(200, evalView(id));
         }
         found.output = found.draft.output ?? found.output;
-        found.accepted = { version: found.accepted.version + 1, source: "app", by: "Amira Haddad", at: new Date().toISOString(), spec, cases };
+        found.accepted = { version: found.accepted.version + 1, source: "app", by: "user_amira", byName: "Amira Haddad", at: new Date().toISOString(), spec, cases };
         found.draft = null;
         setReview(id, false);
         return json(200, evalView(id));
@@ -654,7 +654,7 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       const edited = { ...spec, ...(input?.spec as EvalSpec | undefined) };
       const cases = (input?.cases as EvalCase[] | undefined) ?? draft.cases;
       state.tasks.push({ id, environment: draft.environment, agent: null, name: draft.name, currentModel: current.model, pick: null, status: "new", watching: false, state: "watching", lastRunAt: null, lastJobId: null, monthlySavingUsd: null });
-      state.evals[id] = { output, repo: null, draft: null, accepted: { version: 1, source: "review", by: "Amira Haddad", at: new Date().toISOString(), spec: edited, cases } };
+      state.evals[id] = { output, repo: null, draft: null, accepted: { version: 1, source: "review", by: "user_amira", byName: "Amira Haddad", at: new Date().toISOString(), spec: edited, cases } };
       Object.assign(draft, { status: "approved", taskId: id });
       return json(201, { taskId: id, eval: evalView(id) });
     }

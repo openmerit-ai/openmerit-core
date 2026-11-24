@@ -4,7 +4,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { redact } from "./engine.ts";
 import { buildPool, provisionalPick, type Provisional } from "../../openmerit-core/src/job/pool.ts";
-import { modelKeyRefusal } from "./services.ts";
+import { modelKeyRefusal, services } from "./services.ts";
 import { writeCases, type TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import type { Guardrails } from "./engine.ts";
 import type { AppClient } from "./registry.ts";
@@ -67,8 +67,49 @@ export async function startJob(client: AppClient, start: { accountId: string; pr
   const examples = (await writeCases({ bundle: input.bundle, complete: async () => "", count: 0 })).cases;
   const gate = await account.evalGate({ taskId, bundle: input.bundle, examples });
   if (!gate.ok) return gate;
+  await settleOrphans(client, input.accountId);
   const started = await account.startJob({ jobId, projectId: input.projectId, taskId, kind: input.kind, askedBy: input.askedBy ?? null });
   if (!started.ok) return started;
+  try {
+    return await launch(client, input, { jobId, taskId });
+  } catch (error) {
+    // The account recorded the job but its actor may not exist: left queued, it would never run, would hold one of the
+    // account's concurrent jobs and would block deleting its task. A job whose actor did start keeps going, and one
+    // Rivet cannot answer for is left for settleOrphans.
+    if (await jobExists(client, jobId) !== false) throw error;
+    await account.jobUpdate({ jobId, status: "failed" }).catch(() => undefined);
+    return { ok: false, error: `OpenMerit could not start the job (${redact(error instanceof Error ? error.message : String(error)).slice(0, 200)}). Nothing was charged: try again.` };
+  }
+}
+
+/** Whether a job's actor exists: false when Rivet says it does not, null when Rivet could not say. */
+async function jobExists(client: AppClient, jobId: string): Promise<boolean | null> {
+  try { await client.job.get([jobId]).status(); return true; } catch (error) {
+    const { group, code } = error as { group?: unknown; code?: unknown };
+    return group === "actor" && (code === "not_found" || code === "destroyed") ? false : null;
+  }
+}
+
+/**
+ * Marks failed the account's unfinished jobs whose actor does not exist, such as one whose start failed in an
+ * outage before startJob caught that: they would never finish. Only jobs older than config.orphanAfterMs, so a
+ * start under way is left alone. Returns the IDs it settled.
+ */
+export async function settleOrphans(client: AppClient, accountId: string, taskId?: string): Promise<string[]> {
+  const account = client.account.getOrCreate([accountId]);
+  const stale = (await account.unfinishedJobs()).filter(job => (!taskId || job.taskId === taskId) && Date.now() - job.startedAt > services().config.orphanAfterMs);
+  const settled: string[] = [];
+  for (const job of stale) {
+    if (await jobExists(client, job.id) !== false) continue;
+    await account.jobUpdate({ jobId: job.id, status: "failed" });
+    settled.push(job.id);
+  }
+  return settled;
+}
+
+async function launch(client: AppClient, input: { accountId: string; projectId: string; environment: string; agent: string | null; bundle: TaskBundle; kind: "run" | "watch"; trigger: JobTrigger; userId: string | null }, ids: { jobId: string; taskId: string }): Promise<StartResult> {
+  const { jobId, taskId } = ids;
+  const account = client.account.getOrCreate([input.accountId]);
   const task = client.task.getOrCreate([input.accountId, taskId], { createWithInput: { accountId: input.accountId, taskId, projectId: input.projectId, environment: input.environment, name: input.bundle.task } });
   const [catalogue, endpoints, guardrails, past] = await Promise.all([
     client.catalogue.getOrCreate(["global"]).get(), account.endpointsForJob(input.projectId),

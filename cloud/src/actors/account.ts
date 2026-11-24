@@ -102,12 +102,13 @@ export type TaskPart = "prompt" | "tools" | "output";
  * acceptances. draft is the eval under review, edited in place: reopened because the coding agent sent the
  * task with a different prompt, tools or output (task_changed, with what changed and the new output shape)
  * or by a person (revise). While a draft is open the task's runs and watch wait for it.
+ * by is a Clerk user ID; /api adds byName, that person's name or email from Clerk, or null when Clerk does not know them.
  */
 export interface EvalView {
   taskId: string; projectId: string;
-  accepted: { version: number; spec: EvalSpec; cases: Case[]; source: EvalSource; by: string | null; at: string; runs: number; bar: EvalBar } | null;
-  draft: { reason: "task_changed" | "revise"; changed: TaskPart[]; spec: EvalSpec; cases: Case[]; output: TaskBundle["output"] | null; by: string | null; at: string } | null;
-  repo: { version: number; by: string; client: string | null; at: string } | null;
+  accepted: { version: number; spec: EvalSpec; cases: Case[]; source: EvalSource; by: string | null; byName?: string | null; at: string; runs: number; bar: EvalBar } | null;
+  draft: { reason: "task_changed" | "revise"; changed: TaskPart[]; spec: EvalSpec; cases: Case[]; output: TaskBundle["output"] | null; by: string | null; byName?: string | null; at: string } | null;
+  repo: { version: number; by: string; byName?: string | null; client: string | null; at: string } | null;
 }
 export interface EvalDraft { id: string; projectId: string; repoId: string | null; environment: string; name: string; bundle: TaskBundle; cases: Case[]; status: "pending" | "approved" | "dismissed"; createdAt: string; taskId: string | null }
 /** Where the coding agent keeps a task's eval in its repository, by the CLI's rule for a task name. */
@@ -316,6 +317,10 @@ export const account = actor({
       const [row] = await c.db.execute(`SELECT jobs.*, reports.json AS report_json FROM jobs LEFT JOIN reports ON reports.job_id = jobs.id WHERE jobs.id = ? AND jobs.deleted_at IS NULL`, jobId);
       return row ? jobRow(row) : null;
     },
+
+    /** Jobs not finished yet, which hold the account's concurrent jobs, with when each started. */
+    unfinishedJobs: async (c): Promise<{ id: string; taskId: string; startedAt: number }[]> =>
+      (await c.db.execute(`SELECT id, task_id, started_at FROM jobs WHERE status IN ('queued', 'running') AND deleted_at IS NULL`)).map(row => ({ id: String(row.id), taskId: String(row.task_id), startedAt: Number(row.started_at) })),
 
     /** The account's jobs, newest first: one task's, one project's, or every project's. */
     jobs: async (c, input: { projectId?: string; taskId?: string; limit?: number } = {}): Promise<JobRow[]> => {

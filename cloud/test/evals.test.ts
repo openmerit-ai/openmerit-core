@@ -52,13 +52,13 @@ describe("evals", () => {
     // Saves overwrite the draft; one made on a stale copy is refused, and a malformed case is refused.
     const saved = await me.api<EvalView>(`${evalUrl}/draft`, { method: "PUT", body: JSON.stringify({ spec, cases: edited, base: opened.body.draft!.at }) });
     assert.equal(saved.status, 200, JSON.stringify(saved.body));
-    assert.deepEqual([saved.body.draft!.cases.length, saved.body.draft!.by, saved.body.accepted!.version], [edited.length, "user_e", 1]);
+    assert.deepEqual([saved.body.draft!.cases.length, saved.body.draft!.by, saved.body.draft!.byName, saved.body.accepted!.version], [edited.length, "user_e", "User E", 1]);
     const stale = await me.api<{ error: string }>(`${evalUrl}/draft`, { method: "PUT", body: JSON.stringify({ spec, cases, base: opened.body.draft!.at }) });
     assert.equal(stale.status, 409);
     assert.match(stale.body.error, /Someone saved this draft/);
     assert.equal((await me.api(`${evalUrl}/draft`, { method: "PUT", body: JSON.stringify({ spec, cases: [{ id: "x", input: { ticket: 3 }, origin: "example" }] }) })).status, 400);
     const accepted = await me.api<EvalView>(`${evalUrl}/accept`, { method: "POST", body: JSON.stringify({ base: saved.body.draft!.at }) });
-    assert.deepEqual([accepted.body.accepted!.version, accepted.body.accepted!.source, accepted.body.accepted!.by, accepted.body.draft], [2, "app", "user_e", null]);
+    assert.deepEqual([accepted.body.accepted!.version, accepted.body.accepted!.source, accepted.body.accepted!.by, accepted.body.accepted!.byName, accepted.body.draft], [2, "app", "user_e", "User E", null]);
     assert.equal((await me.api<{ state: string }[]>("/api/tasks")).body[0]!.state, "watching");
 
     // The coding agent writes the accepted copy it is given, read-only, and reports the version.
