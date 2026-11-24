@@ -73,7 +73,7 @@ export interface Task {
 // draft is open the task's runs and watch wait. The coding agent writes the accepted version to the repository.
 export interface EvalCase { id: string; input: Record<string, string>; expected?: unknown; origin: "example" | "written" | "trace"; kind?: string; approved?: boolean; toolResults?: unknown }
 export interface EvalSpec { description?: string; input?: { description: string }; steps?: { description: string; tools?: string[]; access?: string; required?: boolean; after?: number[] }[]; criteria?: string[]; guardrails?: string[] }
-export type EvalSource = "openmerit" | "claude" | "chatgpt" | "examples" | "review" | "app";
+export type EvalSource = "openmerit" | "claude" | "chatgpt" | "examples" | "review" | "app" | "grading";
 export type TaskPart = "prompt" | "tools" | "output";
 export interface EvalAccepted { version: number; spec: EvalSpec; cases: EvalCase[]; source: EvalSource; by: string | null; at: string; runs: number }
 export interface EvalRevision { reason: "task_changed" | "revise"; changed: TaskPart[]; spec: EvalSpec; cases: EvalCase[]; output: TaskOutput | null; by: string | null; at: string }
@@ -130,7 +130,10 @@ export type Fix =
   | { kind: "ask_agent"; notice: string; prompt: string };
 
 export interface JobResult {
-  status: "picked" | "keep_current" | "baseline_failed" | "below_floor" | "no_cases" | "no_candidates" | "agent_eval_failed" | "stopped" | "failed";
+  status: "picked" | "keep_current" | "baseline_failed" | "below_floor" | "no_cases" | "no_candidates" | "agent_eval_failed" | "not_accepted" | "stopped" | "failed";
+  // The grading loop, when a person graded the run's answers: its rounds, whether they accepted the eval, and the bar the
+  // result was measured against; with "criteria", summary says what the current model misses. Absent when nobody graded.
+  grading?: { rounds: number; accepted: boolean; bar: "current" | "criteria"; failedChecks: string[]; summary: string | null };
   // Up to 20 cases the current model failed, with the grader's reason; and its passes per kind of case. Absent from reports saved before 24 Nov 2026.
   failedCases?: { caseId: string; kind: string; reason: string }[];
   baselineByKind?: { kind: string; passes: number; total: number }[];
@@ -162,6 +165,10 @@ export interface Decision { jobId: string; taskId: string; decision: "approved" 
 // GET /api/runs/:id: the saved report once the job has one, with the user's decision on its change.
 export interface Report extends JobResult { jobId: string; task: string; createdAt: string; decision?: Decision | null }
 
+// A job's question. In the grading loop (phase "grading") each is one sampled answer: detail holds the model, the
+// input, the answer and OpenMerit's grade, and the answer is good or bad, with an optional note after a colon.
+export interface Question { id: string; kind: "choice" | "multi" | "confirm" | "text"; prompt: string; detail?: string; options?: { value: string; label: string }[]; hint?: string }
+
 // GET /api/runs/:id before then: the job's live state, with report null.
 export interface JobView {
   jobId: string;
@@ -169,7 +176,7 @@ export interface JobView {
   task: string;
   status: JobStatus;
   phase: string;
-  questions: unknown[];
+  questions: Question[];
   notices: string[];
   progress: { measured: number; planned: number | null };
   result: JobResult | null;

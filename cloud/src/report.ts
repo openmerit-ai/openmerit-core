@@ -44,7 +44,8 @@ export type Fix =
 export interface JobResult {
   /** `stopped`: the budget ran out before the finalists were measured; `failed`: a step failed for good. The report has what was measured until then. */
   /** `below_floor`: the current model passed under 80% of its own eval, which therefore cannot tell models apart. */
-  status: "picked" | "keep_current" | "baseline_failed" | "below_floor" | "no_cases" | "no_candidates" | "agent_eval_failed" | "stopped" | "failed";
+  /** `not_accepted`: after the last round of the grading loop, the eval still disagreed with a person's grades. */
+  status: "picked" | "keep_current" | "baseline_failed" | "below_floor" | "no_cases" | "no_candidates" | "agent_eval_failed" | "not_accepted" | "stopped" | "failed";
   /** Up to 20 cases the current model failed, each with the grader's one redacted sentence. Absent from reports saved before it was added. */
   failedCases?: { caseId: string; kind: string; reason: string }[];
   /** Cases no model was measured on, because the eval has no mocked result for one of the task's tools; the case writer fixes them. Absent from older reports. */
@@ -73,6 +74,13 @@ export interface JobResult {
   evalVersion?: number;
   /** The evidence each decision used, by openmerit/engine's quality rule, such as "Grader: the expected labels of your examples, from agent-bundle". Absent from reports saved before it was added. */
   basedOn?: string[];
+  /**
+   * The grading loop, when a person graded the run's answers: how many rounds it took, whether they
+   * accepted the eval, and the bar the result was measured against. With the `criteria` bar the pick is
+   * the cheapest model that meets the eval's checks, even when it costs more, and `summary` says so in
+   * one sentence. Absent when nobody graded, as for watch jobs and evals OpenMerit wrote no case of.
+   */
+  grading?: { rounds: number; accepted: boolean; bar: "current" | "criteria"; failedChecks: string[]; summary: string | null };
   /** The question that asks a person to approve the switch, as the CLI asks it; null with no pick. Absent from older reports. */
   approval?: { id: string; kind: "confirm"; default: false; prompt: string; detail: string } | null;
 }
@@ -103,8 +111,9 @@ const rate = (passes: number, total: number) => (total ? `${passes}/${total} (${
 /** One line saying what the run concluded and why, for the report and for the coding agent. */
 export function reasonFor(result: JobResult, current: string): string {
   const pick = result.pick;
-  if (pick) return `Switch from \`${current}\` to \`${pick.model}\` on ${pick.endpoint}: it passed ${rate(pick.passes, pick.total)} of the cases at ${usd(pick.costPerCallUsd)} a call${pick.savingPerCallUsd !== null ? `, ${usd(pick.savingPerCallUsd)} less than now` : ""}.`;
+  if (pick) return `Switch from \`${current}\` to \`${pick.model}\` on ${pick.endpoint}: it passed ${rate(pick.passes, pick.total)} of the cases at ${usd(pick.costPerCallUsd)} a call${pick.savingPerCallUsd !== null ? pick.savingPerCallUsd < 0 ? `, ${usd(-pick.savingPerCallUsd)} more than now` : `, ${usd(pick.savingPerCallUsd)} less than now` : ""}.${result.grading?.summary ? ` ${result.grading.summary}` : ""}`;
   if (result.status === "keep_current") {
+    if (result.grading?.bar === "criteria" && result.grading.summary) return `Keep \`${current}\`: ${result.grading.summary}`;
     const best = result.top[0];
     const baseline = result.baseline;
     return best && baseline
@@ -117,6 +126,7 @@ export function reasonFor(result: JobResult, current: string): string {
     no_cases: "No case has a known correct answer, so nothing was measured.",
     no_candidates: "No allowed model is cheaper than the current one.",
     agent_eval_failed: "Every qualified switch failed the agent's eval, so none is proposed.",
+    not_accepted: "After the last round of grading, the eval still disagreed with your grades, so no model is recommended. Run the task again to start over.",
     stopped: "The run stopped at its budget before the finalists were measured, so it proposes no switch. The models below are what it measured until then.",
     failed: "The run failed before it finished, so it proposes no switch. The models below are what it measured until then.",
     picked: "",

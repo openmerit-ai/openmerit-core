@@ -69,11 +69,16 @@ export async function fakeModels(): Promise<FakeModels> {
       const text = parsed.messages.filter(message => message.role === "user").map(message => message.content).join("\n");
       // openmerit/ranking's case writer: the same two cases each time, so its second request adds nothing new.
       const writer = parsed.messages[0]?.role === "system" && parsed.messages[0].content.startsWith("You write test cases");
-      const ticket = writer ? `writer:${/Write (\d+) cases/.exec(text)?.[1] ?? "?"}` : Object.keys(QUEUES).find(item => text.includes(item)) ?? "";
+      // The grading loop's reviser, on the cases' writer model: it adds one criterion from the grades.
+      const reviser = parsed.messages[0]?.role === "system" && parsed.messages[0].content.startsWith("You are OpenMerit Harness revising");
+      const ticket = reviser ? "reviser" : writer ? `writer:${/Write (\d+) cases/.exec(text)?.[1] ?? "?"}` : Object.keys(QUEUES).find(item => text.includes(item)) ?? "";
       const index = fake.calls.push({ model: parsed.model, ticket, auth: String(req.headers.authorization ?? "") }) - 1;
       if (fake.onCall) await fake.onCall(index);
       const weak = (eci.get(parsed.model) ?? 200) < WEAK_BELOW;
-      const answer = writer ? JSON.stringify({ cases: Object.entries(WRITTEN).map(([written, queue]) => ({ input: { ticket: written }, expected: queue })) })
+      // A writer asked through a harness (the reviser's) gives each input as a list of {name, value}.
+      const listed = text.includes("list of {name, value}");
+      const answer = reviser ? JSON.stringify({ criteria: ["The queue is the one the ticket's main problem belongs to."], guardrails: [] })
+        : writer ? JSON.stringify({ cases: Object.entries(WRITTEN).map(([written, queue]) => (listed ? { kind: "typical", input: [{ name: "ticket", value: written }], expected: queue, toolResults: [] } : { input: { ticket: written }, expected: queue })) })
         : weak ? "other" : QUEUES[ticket] ?? "other";
       const usage = { prompt_tokens: 50, completion_tokens: 2, cost: fake.cost?.(parsed.model) ?? costOf(parsed.model) };
       if (parsed.tools?.length && !parsed.messages.some(message => message.role === "tool")) {
@@ -214,6 +219,21 @@ export function bundle(task = "ticket classifier", unlabeled = true) {
 }
 
 export const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Polls a job's openmerit_result until it ends, grading its answers on the way as OpenMerit graded them:
+ * a person who agrees with the eval on every sample accepts it in the first round.
+ */
+export async function untilDone<T extends { text: string; data: Record<string, unknown> }>(agent: { tool: (name: string, args: Record<string, unknown>) => Promise<T> }, jobId: string, timeoutMs = 180_000): Promise<T> {
+  return waitFor(async () => {
+    const value = await agent.tool("openmerit_result", { job_id: jobId });
+    if (value.data.status === "needs_input" && value.data.phase === "grading") {
+      const questions = value.data.questions as { id: string; detail: string }[];
+      await agent.tool("openmerit_answer", { job_id: jobId, answers: Object.fromEntries(questions.map(question => [question.id, question.detail.includes("OpenMerit's grade: passed") ? "good" : "bad"])) });
+    }
+    return value;
+  }, value => ["done", "failed", "stopped"].includes(String(value.data.status)), timeoutMs);
+}
 
 /** Polls openmerit_result until `done` says so. */
 export async function waitFor<T>(read: () => Promise<T>, done: (value: T) => boolean, timeoutMs = 120_000): Promise<T> {

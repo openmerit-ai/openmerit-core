@@ -51,6 +51,7 @@ function table(tasks: Task[]): Html {
 const SOURCES: Record<EvalSource, string> = {
   openmerit: "OpenMerit wrote the cases", claude: "Written on a member's Claude subscription", chatgpt: "Written on a member's ChatGPT subscription",
   examples: "The coding agent's examples", review: "Approved from a repository review", app: "Accepted in the app",
+  grading: "Accepted by grading a run's answers",
 };
 const evalDir = (task: string) => `.openmerit/evals/${task.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "task"}`;
 const listed = (items: string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);

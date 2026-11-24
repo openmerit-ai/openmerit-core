@@ -193,7 +193,7 @@ function job(spec: Spec, id: string, at: string, outcome: Outcome): JobView {
   return {
     jobId: id, taskId: spec.id, task: spec.name, status: outcome as JobView["status"],
     phase: { running: "ranking", queued: "queued", needs_input: "label_check", failed: "cases", stopped: "ranking" }[outcome as "running"] ?? "ranking",
-    questions: outcome === "needs_input" ? [{ id: "labels" }] : [], notices: [],
+    questions: outcome === "needs_input" ? [{ id: "label_check", kind: "multi", prompt: "Which written cases have the right answer?" }] : [], notices: [],
     progress: outcome === "running" ? { measured: spec.id === "booking-chat" ? 7 : 21, planned: spec.id === "booking-chat" ? 36 : 28 } : outcome === "stopped" ? { measured: 9, planned: 30 } : { measured: 0, planned: null },
     result: null,
     error: outcome === "failed" ? "The task's examples had no expected outputs, and no case could be written from them." : outcome === "stopped" ? "stopped by Jordan Pike from the coding agent" : null,

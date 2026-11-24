@@ -68,7 +68,7 @@ export const TOOLS = [
   },
   {
     name: "openmerit_answer", title: "OpenMerit: answer a job's questions",
-    description: "Sends the user's answers to a job's questions, keyed by question id, such as a label check. After a result, it also takes the user's decision on its change, keyed by the result's approval id (configure_<task>): true once you applied the edit they approved, false when they declined. Returns the job's state, as openmerit_result does.",
+    description: "Sends the user's answers to a job's questions, keyed by question id, such as a label check, or a person's grades of a run's answers (good or bad, with an optional note after a colon; never grade them yourself). After a result, it also takes the user's decision on its change, keyed by the result's approval id (configure_<task>): true once you applied the edit they approved, false when they declined. Returns the job's state, as openmerit_result does.",
     inputSchema: { type: "object", required: ["job_id", "answers"], additionalProperties: false, properties: { job_id: string, answers: { type: "object", description: "Answers keyed by question id: strings, string lists, booleans or numbers", additionalProperties: { type: ["string", "array", "boolean", "number"] } } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
@@ -110,7 +110,9 @@ export const resourceMetadataUrl = (config: Config) => `${config.publicUrl}/.wel
 export function describeJob(view: JobView, decision: Decision | null = null): string {
   const lines = [`Job ${view.jobId} for ${view.task}: ${view.status} (${view.phase}).`];
   if (view.questions.length) {
-    lines.push(`It needs the user. Ask them, then call openmerit_answer with job_id "${view.jobId}" and answers keyed by question id:`);
+    lines.push(view.phase === "grading"
+      ? `It needs a person to grade its answers: show the user each answer below with its detail, ask whether it looks right, and send their verdicts with openmerit_answer, job_id "${view.jobId}", answers keyed by question id: good or bad, with their note after a colon ("bad: <why>"). Never grade for them. They can also grade on the run's page at app.openmerit.ai.`
+      : `It needs the user. Ask them, then call openmerit_answer with job_id "${view.jobId}" and answers keyed by question id:`);
     for (const question of view.questions) lines.push(`- [${question.id}] (${question.kind}) ${question.prompt}${question.options ? `\n  Options: ${question.options.map(option => option.value).join(" | ")}` : ""}${question.detail ? `\n  ${question.detail.split("\n").join("\n  ")}` : ""}${question.hint ? `\n  ${question.hint}` : ""}`);
   }
   const result = view.result;
@@ -253,7 +255,7 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     if (approval && Object.hasOwn(answers, approval.id)) return decide(deps, identity, view, answers as Answers);
     if (!view.questions.length) return { text: `Job ${view.jobId} has no open questions.\n${describeJob(view, await account.decision(view.jobId))}`, data: jobData(view) };
     const handle = client.job.get([view.jobId]);
-    await handle.send("answers", { answers: answers as Answers });
+    await handle.send("answers", { answers: answers as Answers, by: identity.userId });
     // The job applies the answers in a moment; return the state once it has, or as it stands after a few seconds.
     let next = view;
     for (let waited = 0; waited < 5000; waited += 250) {
@@ -304,7 +306,7 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
       [`${dir}/bundle.json`]: `${JSON.stringify({ ...info.bundle, ...latest.spec, examples: undefined }, null, 2)}\n`,
       [`${dir}/cases.json`]: `${JSON.stringify(latest.cases, null, 2)}\n`,
       // Scout reads the version from eval.json, as for an Eval a person accepted in the terminal.
-      [`${dir}/eval.json`]: `${JSON.stringify({ version: latest.version, bar: "current", acceptedAt: latest.at }, null, 2)}\n`,
+      [`${dir}/eval.json`]: `${JSON.stringify({ version: latest.version, bar: latest.bar, acceptedAt: latest.at }, null, 2)}\n`,
       [`${dir}/MANAGED.md`]: `# ${row.name}: eval version ${latest.version}\n\nManaged by app.openmerit.ai, the source of truth for this eval. Do not edit these files: revise the eval at ${url}, and once it is accepted your coding agent writes the new version here.\n\nTask: ${taskId}\n`,
     };
     return {

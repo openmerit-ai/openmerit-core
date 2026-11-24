@@ -12,6 +12,10 @@ Reviewed the homepage against each task's eval living in the cloud app, accepted
 
 Reviewed the homepage against the cloud app splitting an organization into projects (each with its own tasks, runs, guardrails, GitHub repositories and model endpoints, picked with a switcher in app.openmerit.ai's sidebar) and against members signing in to their own Claude or ChatGPT plan on Account settings, which then writes the test cases of the runs they start. `site/index.html` makes no claim about projects, workspaces, Connections, subscriptions or who pays for writing cases. No homepage copy change is needed. The cloud README's Projects and Members' subscriptions sections describe the behaviour.
 
+## The grading loop in the cloud app — unreleased, 24 November 2026
+
+Reviewed the homepage against the cloud app's grading loop: a person grades sampled answers in their coding agent or on the run's page, the eval is written again on OpenMerit's key where they disagree, an accepted eval is reused by later runs, and a run whose current model's answers a person marks wrong may recommend a pricier model that meets the eval's checks. `site/index.html` has no FAQ block and makes no claim about who grades, what a run keeps or that OpenMerit only recommends cheaper models. No homepage copy change is needed. app.openmerit.ai's Your data page now says a graded run keeps the answers it showed, redacted, with the grades and notes.
+
 ## The grading loop and recommending a pricier model — unreleased, 24 November 2026
 
 Reviewed the homepage against Scout's grading loop (a person marks sampled answers Looks good or Doesn't look right, the eval is rewritten where they disagree, and an accepted Eval is saved, versioned) and against recommending the cheapest model that meets an accepted Eval's criteria even when it costs more than the current model. `site/index.html` has no FAQ block. Its copy says Scout helps "find the right models for your task, weighing quality and cost", and never that OpenMerit only recommends cheaper models, so recommending a pricier model that meets the criteria contradicts nothing there. No homepage copy change is needed.

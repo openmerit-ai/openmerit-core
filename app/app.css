@@ -315,3 +315,14 @@ body.standalone main { min-height: 100vh; display: grid; place-items: start cent
 .sign-in { margin: 4px 0 10px 30px; }
 .sign-in .steps { margin: 0 0 8px; padding-left: 20px; display: grid; gap: 4px; }
 .device-code { font-family: var(--mono); font-size: 15px; letter-spacing: .08em; padding: 2px 8px; border-radius: 6px; background: var(--code-bg); color: var(--code-ink); }
+
+/* The grading loop: one card per sampled answer, with its input, answer and OpenMerit's grade, then the person's grade and note. */
+.grade-form > p:first-child { margin-bottom: 14px; }
+fieldset.grade { margin: 0 0 12px; min-width: 0; display: grid; gap: 8px; }
+fieldset.grade legend { font-weight: 600; padding: 0; float: left; width: 100%; }
+.grade-detail { font: 12px/1.6 var(--mono); background: var(--code-bg); color: var(--code-ink); border-radius: 8px; padding: 10px 14px; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; }
+.grade-choice { display: flex; gap: 18px; flex-wrap: wrap; }
+.grade-choice label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.grade-choice input { accent-color: var(--green); width: auto; padding: 0; margin: 0; }
+.grade-choice label { white-space: nowrap; }
+.grade-note { display: grid; gap: 2px; }

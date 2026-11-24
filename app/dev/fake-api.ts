@@ -49,7 +49,8 @@ function drafterEval(): FakeEval {
   const cases: EvalCase[] = [{ id: "written-1", input: { message: "When will my reimbursement arrive?" }, expected: "Reimbursements arrive within 14 days of approval; the member can track it under Claims.", origin: "written", kind: "typical", approved: true }];
   return {
     output: { kind: "text" }, repo: { version: 1, by: "Amira Haddad", client: "claude-code", at: "2026-11-18T08:52:00Z" },
-    accepted: { version: 1, source: "openmerit", by: null, at: "2026-11-18T08:31:00Z", spec, cases },
+    // Accepted by grading its first run's answers (run m5d8q2).
+    accepted: { version: 1, source: "grading", by: "Amira Haddad", at: "2026-11-18T08:31:00Z", spec, cases },
     draft: { reason: "task_changed", changed: ["tools"], spec, cases: [...cases, { id: "example-1", input: { message: "Where is claim CLM-30112?" }, origin: "example" }], output: { kind: "text" }, by: null, at: "2026-11-23T15:12:00Z" },
   };
 }
@@ -134,6 +135,7 @@ function populated(): State {
   const runs: Run[] = [
     run("e4n6t0", "enrollment-checker", "running", "2026-11-18T11:40:00Z"),
     run("w8r3k1", "ticket-router", "needs_input", "2026-11-18T11:20:00Z"),
+    run("g4r9d2", "coding-reviewer", "needs_input", "2026-11-18T11:30:00Z"),
     run("k7m2q9", "ticket-router", "done", "2026-11-18T09:40:00Z"),
     run("p3x8d1", "bill-matcher", "done", "2026-11-17T08:00:00Z", "watch"),
     run("f9q2w7", "fraud-reviewer", "done", "2026-11-16T12:00:00Z", "run", "codex"),
@@ -176,13 +178,22 @@ function populated(): State {
     reports: {
       k7m2q9: { ...report, decision: approved },
       // Picked, and the coding agent has not sent the user's answer yet.
-      m5d8q2: { ...report, jobId: "m5d8q2", task: "Reply drafter", createdAt: "2026-11-18T08:50:00Z", decision: null }, f9q2w7: keep, p3x8d1: failedEval,
+      // Picked after two rounds of grading against the eval's checks, and the coding agent has not sent the user's answer yet.
+      m5d8q2: { ...report, jobId: "m5d8q2", task: "Reply drafter", createdAt: "2026-11-18T08:50:00Z", decision: null,
+        grading: { rounds: 2, accepted: true, bar: "criteria", failedChecks: ["G2"], summary: "Your current model fails 1 of your checks (G2); the cheapest model that passes them is anthropic/claude-haiku-5-5, at $0.40 less per 1,000 calls." } }, f9q2w7: keep, p3x8d1: failedEval,
       b2v5h3: { ...report, jobId: "b2v5h3", createdAt: "2026-10-30T10:20:00Z", pick: { ...report.pick!, model: "openai/gpt-5-mini", endpoint: "ep_openai", endpointModel: "gpt-5-mini", passes: 39, costPerCallUsd: 0.00065, savingPerCallUsd: 0.0041 }, top: [], nearMisses: [], decision: declined,
         edit: { edits: [{ file: "src/triage.ts", line: 14, before: 'process.env.TRIAGE_MODEL ?? "gpt-5"', after: 'process.env.TRIAGE_MODEL ?? "gpt-5-mini"' }], instructions: null } },
     },
     jobs: {
       e4n6t0: job("e4n6t0", "enrollment-checker", "Enrollment checker", {}),
-      w8r3k1: job("w8r3k1", "ticket-router", "Ticket router", { status: "needs_input", phase: "label_check", questions: [{ id: "labels" }], progress: { measured: 0, planned: null }, createdAt: "2026-11-18T11:20:00Z" }),
+      w8r3k1: job("w8r3k1", "ticket-router", "Ticket router", { status: "needs_input", phase: "label_check", questions: [{ id: "label_check", kind: "multi", prompt: "Which written cases have the right answer?" }], progress: { measured: 0, planned: null }, createdAt: "2026-11-18T11:20:00Z" }),
+      // The grading loop: a person grades two sampled answers, as openmerit-core's gradeQuestions words them.
+      g4r9d2: job("g4r9d2", "coding-reviewer", "Coding reviewer", { status: "needs_input", phase: "grading", progress: { measured: 14, planned: 14 }, createdAt: "2026-11-18T11:30:00Z", questions: [
+        { id: "grade_coding_reviewer_r1_1", kind: "choice", prompt: "Coding reviewer, answer 1 of 2: does it look right?", options: [{ value: "good", label: "Looks good" }, { value: "bad", label: "Doesn't look right" }], hint: "or bad: <why> to add a note. A person answers this, not a coding agent.",
+          detail: 'anthropic/claude-sonnet-5.5 (your current model), typical case written-1\nInput:\n{\n  "claim_id": "FICT-CLM-1101"\n}\nAnswer:\nI recorded one info finding: the coding is in order and I found no problems.\nTool calls: get_claim({}); record_coding_review({"findings":[{"code":"ALL","severity":"info","kind":"other","message":"All codes valid for 2024."}]})\nOpenMerit\'s grade: passed' },
+        { id: "grade_coding_reviewer_r1_2", kind: "choice", prompt: "Coding reviewer, answer 2 of 2: does it look right?", options: [{ value: "good", label: "Looks good" }, { value: "bad", label: "Doesn't look right" }], hint: "or bad: <why> to add a note. A person answers this, not a coding agent.",
+          detail: 'google/gemini-4-carbon (a candidate), edge case written-8\nInput:\n{\n  "claim_id": "FICT-CLM-1108"\n}\nAnswer:\nR5O.9 is not a valid 2024 ICD-10-CM code, and 85027 is included in 85025 on the same claim.\nTool calls: get_claim({}); record_coding_review({"findings":[{"code":"R5O.9","severity":"error","kind":"invalid_code"}]})\nOpenMerit\'s grade: failed: G3: The invalid_code finding for R5O.9 has no activity_id.' },
+      ] }),
       z1c7m4: job("z1c7m4", "coding-reviewer", "Coding reviewer", { status: "failed", phase: "cases", error: "The task's examples had no known answers, and no case could be written from it.", provisional: null, createdAt: "2026-11-12T10:00:00Z" }),
     },
     endpoints: [
@@ -397,6 +408,17 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       const job = state.jobs[id];
       const found = state.reports[id] ?? (job && advance(job, state.tasks.find((task) => task.id === job.taskId), since));
       return found ? json(200, found) : error(404, "No such run in this account.");
+    }
+    // As the cloud app does: a running job's answers, such as grades, which it applies and asks nothing more.
+    if ((match = /^\/api\/runs\/([\w-]+)\/answers$/.exec(path)) && method === "POST") {
+      const job = state.jobs[match[1] ?? ""];
+      if (!job) return error(404, "No such run in this account.");
+      if (!job.questions.length) return error(409, "This run has no open questions.");
+      const answers = input?.answers;
+      if (!answers || typeof answers !== "object" || Array.isArray(answers)) return error(400, "Send the answers as JSON: {answers: {<question id>: <answer>}}.");
+      job.questions = job.questions.filter((question) => (answers as Record<string, unknown>)[question.id] === undefined);
+      if (!job.questions.length) Object.assign(job, { status: "running", phase: "ranking" });
+      return json(200, job);
     }
     // As the cloud app does: run the task again, after setting its budget per job when budgetUsd is given.
     if ((match = /^\/api\/runs\/([\w-]+)\/rerun$/.exec(path)) && method === "POST") {

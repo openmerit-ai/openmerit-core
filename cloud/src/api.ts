@@ -9,6 +9,7 @@ import { LEVELS, type Guardrails, type Level } from "./engine.ts";
 import { explain, type JobResult } from "./report.ts";
 import { bundleProblem, redactBundle, rerunJob, runTask, taskIdFor } from "./start.ts";
 import { DEFAULT_PROJECT, specOf, type EvalSpec } from "./actors/account.ts";
+import type { Answers } from "./actors/job.ts";
 import type { Case, TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { isSubscriptionProvider } from "./subscriptions.ts";
 import { appInstallations } from "./github.ts";
@@ -256,6 +257,25 @@ export function apiRoutes(deps: AppDeps) {
       // The saved report, with the same reason and cheaperThanCurrent the coding agent gets, and the decision the coding agent sent back.
       if (report) return json(200, { ...(report.json as JobResult), ...explain(report.json as JobResult), decision: await account.decision(jobId) });
       return json(200, { ...await client.job.get([jobId]).status(), report: null });
+    }
+    // Answers to a running job's questions, such as a member's grades in the grading loop ({"grade_<task>_r1_1": "bad: <why>"}).
+    if ((match = /^\/api\/runs\/([\w-]+)\/answers$/.exec(path)) && method === "POST") {
+      const jobId = match[1]!;
+      if (!await account.job(jobId)) return error(404, "No such run in this account.");
+      const input = await body(request);
+      const answers = input?.answers;
+      if (!answers || typeof answers !== "object" || Array.isArray(answers)) return error(400, "Send the answers as JSON: {answers: {<question id>: <answer>}}.");
+      const handle = client.job.get([jobId]);
+      const view = await handle.status();
+      if (!view.questions.length) return error(409, "This run has no open questions.");
+      await handle.send("answers", { answers: answers as Answers, by: who.userId });
+      // The job applies them in a moment: answer with its state once it has, or as it stands after a few seconds.
+      let next = view;
+      for (let waited = 0; waited < 5000 && next.updatedAt === view.updatedAt; waited += 250) {
+        await new Promise(resolve => setTimeout(resolve, 250));
+        next = await handle.status();
+      }
+      return json(200, next);
     }
     // A fix from a run's notes: run its task again, optionally with a higher budget per job.
     if ((match = /^\/api\/runs\/([\w-]+)\/rerun$/.exec(path)) && method === "POST") {
