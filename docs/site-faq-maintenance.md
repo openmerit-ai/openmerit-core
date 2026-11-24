@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## GitHub repositories in the cloud app — unreleased, 24 November 2026
+
+Reviewed the homepage against the cloud app reading GitHub repositories: an account adds a public repository by its URL or a private one with a fine-grained, read-only token; OpenMerit shallow-clones it into a temporary directory, lists its model calls and deletes the copy, and never writes to GitHub. `site/index.html` makes no claim about repository access, GitHub, what OpenMerit reads or whether it sees code. No homepage copy change is needed. app.openmerit.ai's Your data page said "OpenMerit has no repository access"; it now lists the repositories, what is kept and that tokens go only to GitHub. The cloud README's GitHub repositories section describes the behaviour and its limits.
+
 ## Task specs, criteria checks and the 80% floor — unreleased, 24 November 2026
 
 Reviewed the homepage against task bundles gaining a spec (input, steps, criteria and guardrails), the judge grading one check per criterion and guardrail, and the cloud app recommending nothing when the current model passes under 80% of its own eval. `site/index.html` has no FAQ block and makes no claim about how evals are written or graded, or about when a recommendation is made; its only mention of evals is that picking a model takes more than one. No homepage copy change is needed. The CLI still never writes an eval itself; the openmerit-core README keeps saying so until it does.

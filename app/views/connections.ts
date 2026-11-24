@@ -1,6 +1,6 @@
-import type { Endpoint, EndpointKind } from "../api.ts";
+import type { Endpoint, EndpointKind, Repo } from "../api.ts";
 import { ApiError } from "../api.ts";
-import { date, html, logo, plural, provider, type Html } from "../html.ts";
+import { ago, date, html, logo, model, plural, provider, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { header, install } from "./common.ts";
 
@@ -28,7 +28,42 @@ function endpointRow(endpoint: Endpoint, admin: boolean): Html {
         </div>`;
 }
 
-type Data = { endpoints: Endpoint[] };
+// A repository's review: what it found, that it is running, or why it failed with what the last one found.
+const REVIEWING = new Set(["queued", "reviewing"]);
+function reviewText(repo: Repo): Html {
+  const { review } = repo, result = review.result;
+  const found = result
+    ? html`<span class="sub">${result.models.length ? html`${plural(result.totalCalls, "model call")}: ${result.models.slice(0, 4).map((item, index) => html`${index ? ", " : ""}${item.catalogueId ? model(item.catalogueId) : item.value}`)}${result.models.length > 4 ? ` and ${result.models.length - 4} more` : ""}` : "No model calls found"} · ${plural(result.files, "file")} at ${result.commit.slice(0, 7)} on ${result.branch}</span>`
+    : html``;
+  if (REVIEWING.has(review.status)) return html`<span class="sub">Reviewing the code, read-only…</span>${found}`;
+  if (review.status === "failed") return html`<span class="sub no">The last review failed: ${review.error ?? "no reason recorded"}</span>${found}`;
+  return found;
+}
+
+function modelCalls(repo: Repo): Html {
+  const result = repo.review.result;
+  if (!result?.modelCalls.length) return html``;
+  const more = result.totalCalls - result.modelCalls.length;
+  return html`<details><summary>Show the ${plural(result.totalCalls, "model call")}</summary>
+          <table class="calls"><tbody>${result.modelCalls.map((call) => html`<tr><td><a href="${repo.url}/blob/${result.commit}/${call.file}#L${call.line}" target="_blank" rel="noreferrer">${call.file}:${call.line}</a></td><td>${call.catalogueId ? model(call.catalogueId) : html`<code>${call.value}</code>`}${call.envVar ? html`<span class="sub">from ${call.envVar}</span>` : call.dynamic ? html`<span class="sub">set at run time</span>` : ""}</td></tr>`)}</tbody></table>
+          ${more > 0 ? html`<p class="note">And ${plural(more, "more call")}.</p>` : ""}
+        </details>`;
+}
+
+function repoRow(repo: Repo, admin: boolean): Html {
+  const reviewing = REVIEWING.has(repo.review.status);
+  const reviewed = repo.review.status === "done" && repo.review.finishedAt ? html`<span class="sub">Reviewed ${ago(repo.review.finishedAt)}</span>` : html``;
+  return html`<div class="repo">
+        <div class="row">
+          <span>${logo("github")}<a href="${repo.url}" target="_blank" rel="noreferrer">${repo.fullName}</a>${reviewText(repo)}</span>
+          <span class="endpoint-meta"><span class="pill tag">${repo.tokenLast4 ? `Private · token ending ${repo.tokenLast4}` : "Public"}</span>${reviewing ? html`<span class="sub"><span class="pill live">Reviewing</span></span>` : reviewed}</span>
+          ${admin ? html`<span class="actions"><button class="btn" type="button" data-action="review" data-id="${repo.id}"${reviewing ? html` disabled` : ""} aria-label="Review ${repo.fullName} again">Review again</button><button class="btn danger" type="button" data-action="removeRepo" data-id="${repo.id}" aria-label="Remove ${repo.fullName}">Remove</button></span>` : html`<span></span>`}
+        </div>
+        ${modelCalls(repo)}
+      </div>`;
+}
+
+type Data = { endpoints: Endpoint[]; repos: Repo[] };
 
 // The cloud app can take a while to answer the first requests after a deploy, while it starts the
 // account. A request that timed out or failed on the server is tried again before the page gives up.
@@ -43,17 +78,24 @@ export async function retried<T>(load: () => Promise<T>, delays: readonly number
   }
 }
 
+const REVIEW_POLL_MS = 3000;
+let reviewTimer: ReturnType<typeof setTimeout> | undefined;
+
 export const connectionsView: View<Data> = {
   async load({ api }) {
-    return { endpoints: await retried(() => api.get<Endpoint[]>("/api/endpoints")) };
+    const [endpoints, repos] = await Promise.all([retried(() => api.get<Endpoint[]>("/api/endpoints")), retried(() => api.get<Repo[]>("/api/repos"))]);
+    return { endpoints, repos };
   },
-  bind(root) {
+  bind(root, { refresh }, { repos }) {
     bindKindSelect(root);
+    // While a review runs, the page looks again every few seconds and shows what it found.
+    clearTimeout(reviewTimer);
+    if (repos.some((repo) => REVIEWING.has(repo.review.status))) reviewTimer = setTimeout(() => { if (root.isConnected) void refresh(); }, REVIEW_POLL_MS);
   },
-  render({ endpoints }, { me }) {
+  render({ endpoints, repos }, { me }) {
     const own = endpoints.filter((endpoint) => !endpoint.builtIn);
     const admin = me.role === "admin";
-    return html`${header(me, "Connections", "Your coding agents are how OpenMerit gets its work. Your own endpoints are optional: OpenMerit measures on OpenRouter at its own cost.", [`${plural(own.length, "endpoint")} of yours`])}
+    return html`${header(me, "Connections", "Your coding agents are how OpenMerit gets its work. Add a GitHub repository and OpenMerit reads its code to find the model calls, read-only. Your own endpoints are optional: OpenMerit measures on OpenRouter at its own cost.", [plural(repos.length, "repository", "repositories"), `${plural(own.length, "endpoint")} of yours`])}
 
     <section aria-labelledby="agents">
       <h2 id="agents">Coding Agents</h2>
@@ -62,6 +104,23 @@ export const connectionsView: View<Data> = {
         <div style="margin-top: 8px">${install()}</div>
         <div class="row" style="margin-top: 10px"><span>Disconnect every coding agent<span class="sub">Signs out every coding agent session for ${me.account.name}. Each one's next call opens sign-in again. Tasks and runs are kept.</span></span>${admin ? html`<button class="btn danger" type="button" data-action="disconnect">Disconnect</button>` : html`<span class="sub">Admins only</span>`}</div>
       </div>
+    </section>
+
+    <section aria-labelledby="repos">
+      <h2 id="repos">Repositories</h2>
+      <p class="note" style="margin: -2px 0 8px">OpenMerit copies the default branch into a temporary folder, reads it to find the model calls, and deletes the copy. It never runs your code, pushes, or opens a pull request. It keeps where each model call is and the model it names, not your code.</p>
+      ${repos.length ? html`<div class="card">${repos.map((repo) => repoRow(repo, admin))}</div>` : html`<div class="card"><p class="sub">No repositories yet.${admin ? " Add one below." : ""}</p></div>`}
+      ${admin ? html`<form class="card form" data-action="addRepo" autocomplete="off" style="margin-top: 12px">
+        <label>GitHub repository
+          <input name="url" type="text" required spellcheck="false" placeholder="https://github.com/acme/app">
+        </label>
+        <label>Fine-grained token, for a private repository
+          <input name="token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+          <span class="sub">Leave this empty for a public repository. For a private one, <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">create a fine-grained token</a> with Repository access set to only the repositories OpenMerit reviews and Contents: Read-only. OpenMerit stores it encrypted and shows only its last four characters.</span>
+        </label>
+        <p class="form-error" role="alert" hidden></p>
+        <p><button class="btn primary" type="submit">Add repository</button></p>
+      </form>` : html`<p class="note">Only an admin of ${me.account.name} can add, review or remove repositories.</p>`}
     </section>
 
     <section aria-labelledby="endpoints">
@@ -117,6 +176,35 @@ export const connectionsView: View<Data> = {
       form.reset();
       await refresh();
       toast("Endpoint added. Its key will not be shown again.");
+    },
+    async addRepo(form, _data, { api, refresh, toast }) {
+      if (!(form instanceof HTMLFormElement)) return;
+      const fields = new FormData(form);
+      const error = form.querySelector<HTMLElement>(".form-error");
+      const token = String(fields.get("token") ?? "").trim();
+      let added: Repo;
+      try {
+        added = await api.send<Repo>("POST", "/api/repos", { url: String(fields.get("url") ?? "").trim(), ...(token ? { token } : {}) });
+      } catch (failure) {
+        if (!(failure instanceof ApiError) || failure.status !== 400 || !error) throw failure;
+        error.textContent = failure.message;
+        error.hidden = false;
+        return;
+      }
+      form.reset();
+      await refresh();
+      toast(`${added.fullName} added. OpenMerit is reviewing its code.`);
+    },
+    async review(target, _data, { api, refresh }) {
+      await api.send("POST", `/api/repos/${encodeURIComponent(target.dataset.id ?? "")}/review`);
+      await refresh();
+    },
+    async removeRepo(target, { repos }, { api, refresh, toast, confirm }) {
+      const repo = repos.find((item) => item.id === target.dataset.id);
+      if (!repo || !await confirm({ title: "Remove this repository?", body: `OpenMerit deletes what it found in ${repo.fullName}${repo.tokenLast4 ? ` and the token ending ${repo.tokenLast4}` : ""}, and stops reading it.`, confirm: "Remove repository", danger: true })) return;
+      await api.send("DELETE", `/api/repos/${encodeURIComponent(repo.id)}`);
+      await refresh();
+      toast("Repository removed.");
     },
     async remove(target, { endpoints }, { api, refresh, toast, confirm }) {
       const endpoint = endpoints.find((item) => item.id === target.dataset.id);

@@ -2,6 +2,8 @@
 # imports openmerit-core's engine and ranking from source:
 #   docker build -f cloud/Dockerfile .
 FROM node:22.19.0-bookworm-slim
+# git clones the GitHub repositories an account adds (src/github.ts), over HTTPS only.
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY cloud/package.json cloud/package-lock.json cloud/
 # The engine binary is only for tests and local development: a node connects to the cluster's engine.
@@ -15,6 +17,7 @@ COPY openmerit-core/src/ranking openmerit-core/src/ranking
 COPY openmerit-core/src/eval/proxy.ts openmerit-core/src/eval/
 COPY openmerit-core/src/catalogue openmerit-core/src/catalogue
 COPY openmerit-core/src/connectors/agent-bundle.ts openmerit-core/src/connectors/
+COPY openmerit-core/src/scout/scan.ts openmerit-core/src/scout/
 # openmerit-core's sources import their packages (ajv) from the nearest node_modules above them.
 RUN ln -s cloud/node_modules node_modules
 COPY openmerit-core/data/catalogue.json openmerit-core/data/

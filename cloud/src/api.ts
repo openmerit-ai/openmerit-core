@@ -1,6 +1,6 @@
 // /api/* for app.openmerit.ai, and reports as Markdown for agents. Requests carry a Clerk session
-// token; the account is the caller's active Clerk organization. Changing endpoints, environment
-// guardrails, billing and the account itself needs the organization's admin role.
+// token; the account is the caller's active Clerk organization. Changing endpoints, GitHub
+// repositories, environment guardrails, billing and the account itself needs the organization's admin role.
 import type { AppDeps } from "./app.ts";
 import type { AuthResult, Identity } from "./auth.ts";
 import { LEVELS, type Guardrails, type Level } from "./engine.ts";
@@ -131,6 +131,25 @@ export function apiRoutes(deps: AppDeps) {
     if ((match = /^\/api\/endpoints\/([\w-]+)$/.exec(path)) && method === "DELETE") {
       const denied = admin(); if (denied) return denied;
       return (await account.removeEndpoint(match[1]!)) ? json(200, { deleted: true }) : error(404, "No such endpoint.");
+    }
+
+    // GitHub repositories OpenMerit reviews, read-only: a public one by its URL, a private one with a fine-grained token.
+    if (path === "/api/repos" && method === "GET") return json(200, await account.repos());
+    if (path === "/api/repos" && method === "POST") {
+      const denied = admin(); if (denied) return denied;
+      const input = await body(request);
+      if (!input) return error(400, "Send the repository as JSON: {url, token}. The token is only for a private repository.");
+      const added = await account.addRepo({ url: String(input.url ?? ""), token: typeof input.token === "string" ? input.token : null });
+      return added.ok ? json(201, added.repo) : error(400, added.error);
+    }
+    if ((match = /^\/api\/repos\/([\w-]+)\/review$/.exec(path)) && method === "POST") {
+      const denied = admin(); if (denied) return denied;
+      const started = await account.reviewRepo(match[1]!);
+      return started.ok ? json(202, started.repo) : error(started.status, started.error);
+    }
+    if ((match = /^\/api\/repos\/([\w-]+)$/.exec(path)) && method === "DELETE") {
+      const denied = admin(); if (denied) return denied;
+      return (await account.removeRepo(match[1]!)) ? json(200, { deleted: true }) : error(404, "No such repository.");
     }
 
     if (path === "/api/guardrails" && method === "GET") {
