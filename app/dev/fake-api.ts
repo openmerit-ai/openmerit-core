@@ -17,7 +17,7 @@ const measured = (model: string, endpoint: string, fields: Partial<MeasuredModel
   status: "measured", passes: 38, total: 40, costPerCallUsd: 0.0001, costIsEstimate: false, latencyMs: 900, qualified: false, note: "", ...fields,
 });
 
-// A repository's review, as the cloud app's repository scan returns it: its model calls, and no task specs yet.
+// A repository's review, as the cloud app returns it: its model calls, and the task specs when the reviewer wrote them.
 export function repoReview(fields: Partial<RepoReview> & Pick<RepoReview, "modelCalls">): RepoReview {
   const groups = new Map<string, RepoReview["models"][number]>();
   for (const call of fields.modelCalls.filter((item) => !item.dynamic || item.catalogueId)) {
@@ -119,7 +119,14 @@ function populated(): State {
         call("src/triage.ts", 14, "gpt-5", "openai/gpt-5", "TRIAGE_MODEL"), call("src/claims/match.ts", 41, "anthropic/claude-sonnet-5.5", "anthropic/claude-sonnet-5.5"),
         call("src/claims/fraud.ts", 22, "anthropic/claude-sonnet-5.5", "anthropic/claude-sonnet-5.5"), call("src/replies/draft.py", 8, "gpt-5", "openai/gpt-5"),
         call("config/models.yaml", 3, "gpt-5-mini", "openai/gpt-5-mini"), call("src/replies/draft.py", 31, "settings.reply_model", null),
-      ], supportCalls: 3, notListed: "3 more in tests, fixtures or docs, not listed" }) }),
+      ], supportCalls: 3, notListed: "3 more in tests, fixtures or docs, not listed", reviewer: "review", costUsd: 0.38,
+        tasks: [
+          { task: "claim triage", description: "Sorts an incoming claim into its review queue.", output: { kind: "label", labels: ["auto-approve", "adjuster", "fraud-review"] }, codeRefs: [{ file: "src/triage.ts", line: 14 }],
+            criteria: ["Sends claims with a missing policy number to adjuster.", "Sends claims over $10,000 to adjuster or fraud-review, never auto-approve."], guardrails: ["Never auto-approves a claim the fraud check flagged."] },
+          { task: "reply drafter", description: "Drafts the reply to a member's question about their claim.", output: { kind: "text" }, tools: [{ name: "lookup_claim" }], codeRefs: [{ file: "src/replies/draft.py", line: 8 }, { file: "src/replies/draft.py", line: 31 }],
+            criteria: ["Answers from the claim lookup, not from memory.", "States the claim's status and the next step."], guardrails: ["Never shares another member's claim.", "Never promises a payment date."] },
+        ],
+        unmapped: [{ usageIds: ["u4", "u5"], reason: "The review of claim matching stopped: it reached its $2.00 budget." }] }) }),
       repo("sahra-health/enroll-web", { addedAt: "2026-11-22T09:00:00Z", result: repoReview({ files: 88, modelCalls: [call("app/enroll/check.ts", 12, "openai/gpt-5-mini", "openai/gpt-5-mini")] }) }),
     ],
     spend: { openmeritUsd: 18.42, customerUsd: 6.1, monthlyCapUsd: 250, customerCapUsd: 50, period: { start: "2026-11-01T00:00:00.000Z", end: "2026-12-01T00:00:00.000Z" } },

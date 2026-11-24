@@ -39,6 +39,10 @@ export interface Limits {
   /** GitHub repositories an account can add, and reviews it can start in an hour. */
   repos: number;
   reviewsPerHour: number;
+  /** Most a repository review's model calls may cost on OpenMerit's OpenRouter key; the review stops there. */
+  reviewBudgetUsd: number;
+  /** Longest a repository review's model calls may take, after the clone. */
+  reviewMinutes: number;
 }
 
 /** Where analytics events go (analytics.ts). */
@@ -58,8 +62,8 @@ export interface Config {
   /** Lets customer endpoints use http:// and private hosts. Tests only. */
   allowPrivateEndpoints: boolean;
   limits: Limits;
-  /** Models on OpenMerit's OpenRouter key that write a task's cases and judge text answers. */
-  models: { caseWriter: string; judge: string };
+  /** Models on OpenMerit's OpenRouter key that write a task's cases, judge text answers and review a repository's code. */
+  models: { caseWriter: string; judge: string; reviewer: string };
   /** How often a watched task checks the catalogue. */
   watchIntervalMs: number;
   /** A task with no openmerit_recommend call for this long is idle: its watch pauses until the next call. */
@@ -113,6 +117,8 @@ export function loadConfig(env: Env = process.env): Config {
       customerCapUsd: number(env.OPENMERIT_CUSTOMER_CAP_USD, 100),
       repos: number(env.OPENMERIT_REPOS, 20),
       reviewsPerHour: number(env.OPENMERIT_REVIEWS_PER_HOUR, 20),
+      reviewBudgetUsd: number(env.OPENMERIT_REVIEW_BUDGET_USD, 2),
+      reviewMinutes: number(env.OPENMERIT_REVIEW_MINUTES, 15),
     },
     github: {
       apiUrl: (env.OPENMERIT_GITHUB_API_URL || "https://api.github.com").replace(/\/$/, ""),
@@ -120,7 +126,7 @@ export function loadConfig(env: Env = process.env): Config {
       maxBytes: number(env.OPENMERIT_REPO_MAX_MB, 200) * 1024 * 1024,
       cloneTimeoutMs: number(env.OPENMERIT_REPO_CLONE_SECONDS, 120) * 1000,
     },
-    models: { caseWriter: env.OPENMERIT_CASE_WRITER_MODEL || "anthropic/claude-sonnet-5.5", judge: env.OPENMERIT_JUDGE_MODEL || "anthropic/claude-sonnet-5.5" },
+    models: { caseWriter: env.OPENMERIT_CASE_WRITER_MODEL || "anthropic/claude-sonnet-5.5", judge: env.OPENMERIT_JUDGE_MODEL || "anthropic/claude-sonnet-5.5", reviewer: env.OPENMERIT_REVIEWER_MODEL || "anthropic/claude-sonnet-5.5" },
     watchIntervalMs: number(env.OPENMERIT_WATCH_INTERVAL_MS, 24 * 60 * 60 * 1000),
     idleAfterMs: number(env.OPENMERIT_IDLE_DAYS, 30) * 24 * 60 * 60 * 1000,
     posthog: env.POSTHOG_PROJECT_TOKEN ? { token: env.POSTHOG_PROJECT_TOKEN, host: (env.POSTHOG_HOST || "https://us.i.posthog.com").replace(/\/$/, "") } : null,

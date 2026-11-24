@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## The cloud review writes task specs — unreleased, 24 November 2026
+
+Reviewed the homepage against the cloud app's GitHub repository review now writing task specs with a reviewer model on OpenMerit's OpenRouter key: the reviewer reads the copy through read-only tools, the account keeps the specs (which quote the call's prompt, tool schemas and examples) as well as the model calls, and the review's spend goes into the account's ledger without counting as an evaluation. `site/index.html` makes no claim about the cloud app reading or keeping code, so no homepage change is needed. The app's Connections and Data pages now say the specs are kept and what they quote.
+
 ## Repository reviews need a paid plan — unreleased, 24 November 2026
 
 Reviewed the homepage and app copy against the decision that the cloud has no free plan: adding and reviewing a GitHub repository now need an active plan, as evaluations do, and only the self-hosted CLI is free. `site/index.html` makes no claim about the cloud app, its plans, prices or a free tier. No homepage copy change is needed. In the app, Connections said "Add a GitHub repository and OpenMerit reads its code" with no mention of a plan; it now says "On a plan", and shows a notice linking to Plan and usage when the account has none. The Plan page's no-plan card now says a plan also covers repository reviews.

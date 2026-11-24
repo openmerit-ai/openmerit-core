@@ -205,6 +205,8 @@ table.guardrails input, table.guardrails select { min-width: 140px; padding: 5px
 .repo > .row { padding: 0; border: 0; }
 .repo .actions { display: flex; gap: 6px; }
 .repo details summary { margin-top: 6px; }
+.repo div.spec { margin-top: 10px; font-size: 13.5px; }
+ul.spec { margin: 2px 0 0; padding-left: 18px; }
 table.calls { width: auto; margin-top: 6px; font-size: 13px; }
 table.calls td { padding: 4px 12px 4px 0; }
 table.calls td:first-child { font-family: var(--mono); font-size: 12px; }
