@@ -210,11 +210,13 @@ function fillProfile(me: Account | null): void {
   const user = clerk?.user;
   const name = me ? user?.fullName || user?.primaryEmailAddress?.emailAddress || "Signed in" : "Sign in";
   const email = user?.primaryEmailAddress?.emailAddress ?? null;
-  const sub = me ? `${me.account.name} · ${me.plan.status !== "none" && me.plan.status !== "canceled" ? `${me.plan.name ?? "OpenMerit"} plan` : "No plan"}` : "OpenMerit";
-  const avatar = me ? html`${initial(name)}<span class="org-badge">${initial(me.account.name)}</span>` : html`?`;
+  // The session token names the organization by its slug; Clerk, on the page, has the name its members chose.
+  const organization = clerk?.organization?.name || me?.account.name;
+  const sub = me ? `${organization} · ${me.plan.status !== "none" && me.plan.status !== "canceled" ? `${me.plan.name ?? "OpenMerit"} plan` : "No plan"}` : "OpenMerit";
+  const avatar = me ? html`${initial(name)}<span class="org-badge">${initial(organization ?? "")}</span>` : html`?`;
   const profile = document.querySelector<HTMLElement>(".profile");
   if (profile) {
-    profile.title = me ? `${name} · ${me.account.name}` : "Sign in";
+    profile.title = me ? `${name} · ${organization}` : "Sign in";
     profile.querySelector(".avatar")!.innerHTML = avatar.__html;
     profile.querySelector(".label")!.innerHTML = html`${name}<span class="sub">${sub}</span>`.__html;
   }
