@@ -19,9 +19,9 @@ export const dataView: View<Data> = {
     <section aria-labelledby="keeps">
       <h2 id="keeps">What OpenMerit Keeps</h2>
       <div class="card">
-        <div class="row"><span>Task context<span class="sub">The prompts, tool schemas, output shapes and examples your coding agents sent, with secrets redacted</span></span><span>${plural(tasks.length, "task")}</span></div>
-        <div class="row"><span>Evals and results<span class="sub">Each task's eval, every version of its cases and what the judge checks, and each model's score per case. Cases can hold real inputs from your examples, with secrets redacted. A run you grade also keeps the answers it showed you, up to 12 a round with secrets redacted, and your grades and notes</span></span><span>${plural(runs.length, "run")}</span></div>
-        <div class="row"><span>Endpoint keys<span class="sub">Keys you added on Project settings, stored encrypted and never shown again</span></span><span>${plural(keys, "key")}</span></div>
+        <div class="row"><span>Task context<span class="sub">The prompts, tool schemas, output shapes and examples your coding agents sent, with secrets redacted</span></span><span style="white-space: nowrap">${plural(tasks.length, "task")}</span></div>
+        <div class="row"><span>Evals and results<span class="sub">Each task's eval, every version of its cases and what the judge checks, and each model's score per case. Cases can hold real inputs from your examples, with secrets redacted. A run you grade also keeps the answers it showed you, up to 12 a round with secrets redacted, and your grades and notes</span></span><span style="white-space: nowrap">${plural(runs.length, "run")}</span></div>
+        <div class="row"><span>Endpoint keys<span class="sub">Keys you added on Project settings, stored encrypted and never shown again</span></span><span style="white-space: nowrap">${plural(keys, "key")}</span></div>
         <div class="row"><span>Repositories<span class="sub">The GitHub repositories you added, with where each model call is, the model it names, and the task specs a review wrote, which quote the prompts, tool schemas and examples they came from. OpenMerit copies the code only for a review and deletes the copy when the review ends. A repository added through your GitHub sign-in stores no token. Tokens are stored encrypted and never shown again</span></span><span style="white-space: nowrap">${plural(repos.length, "repository", "repositories")}</span></div>
       </div>
     </section>
