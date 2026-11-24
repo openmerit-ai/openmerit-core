@@ -209,6 +209,20 @@ test("Connections lists each repository with its model calls, how it is read, an
   assert.match(text({ __html: member }), /Only an admin of Sahra Health can add, review or remove repositories/);
 });
 
+test("without an active plan, Connections keeps the repositories listed and says a review needs a plan; the fake refuses as the cloud app does", async () => {
+  const me = await account("noplan");
+  const repos = await get<Repo[]>("/api/repos", "noplan");
+  const shown = text(connectionsView.render({ endpoints: [], repos }, page(me)));
+  assert.match(shown, /sahra-health\/claims-api/);
+  assert.match(shown, /Reviewing a repository needs an active plan\. Your repositories stay listed with their last review\. Choose a plan to add or review one\./);
+  assert.doesNotMatch(text(connectionsView.render({ endpoints: [], repos }, page(await account()))), /needs an active plan/);
+  const send = (path: string, body?: object) => createFakeApi()(new Request(`https://openmerit.ai${path}`, { method: "POST", headers: { authorization: "Bearer preview-noplan" }, ...(body ? { body: JSON.stringify(body) } : {}) }));
+  const added = await send("/api/repos", { url: "https://github.com/acme/app" });
+  assert.equal(added.status, 400);
+  assert.match((await added.json() as { error: string }).error, /^This account has no active OpenMerit plan\. Subscribe at .*\/plan\/, then try again\.$/);
+  assert.equal((await send(`/api/repos/${repos[0]!.id}/review`)).status, 402);
+});
+
 test("the preview's fake checks a repository like the cloud app: a private one needs a fine-grained token, and its review finishes", async () => {
   const api = createFakeApi();
   const send = async (body: object) => {

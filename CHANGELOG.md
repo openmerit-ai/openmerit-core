@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Reviewing GitHub repositories in the cloud app needs an active plan, as evaluations do. Without one, adding a repository and Review again refuse with "This account has no active OpenMerit plan. Subscribe at app.openmerit.ai/plan/, then try again.", and nothing is cloned. Repositories added earlier stay listed with their last review. A review does not count as one of the plan's evaluations.
 - A GitHub repository's model calls at app.openmerit.ai and in `/api/repos` list only the application's code. Calls in tests, fixtures, docs and saved results are counted ("3 more in tests, fixtures or docs, not listed") and are never reviewed. Examples, scripts and demos stay listed.
 - When GitHub's limit for checks without a token is used up, adding a repository at app.openmerit.ai says so and when to try again, using GitHub's reset time; a 429 used to show only "GitHub answered 429". A refused check never counted against the account's hourly reviews, and still does not.
 - Scout lists only the application's model calls as tasks. Usages in tests, fixtures, docs and saved results are still counted under their model in the Choose step, but are no longer mapped, offered as the "unmapped: tests, fixtures and docs" task or moved into a task, and `reviewRepo` writes no spec from them. A repository whose model usages are all there stops at the scan.
