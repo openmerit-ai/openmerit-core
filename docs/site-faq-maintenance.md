@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Steadier picks: fixed screening cases, a retried screen and the last pick measured again — unreleased, 24 November 2026
+
+Reviewed the homepage against screens drawing the same cases for the same eval, a screen that misses one of five cases being retried once on five others, and the provisional pick being measured when it lists under the cheapest qualified model. `site/index.html` has no FAQ block and makes no claim about the search, its screening cases, screen size or run-to-run variance. No FAQ change.
+
 ## Repositories through GitHub sign-in — unreleased, 24 November 2026
 
 Reviewed the homepage against members adding GitHub repositories through the OpenMerit GitHub App and their GitHub sign-in, with no token stored and Contents read-only. `site/index.html` makes no claim about how the cloud app reaches a repository, GitHub sign-in or the permissions it asks for, so no homepage change is needed. The app's Coding agents, Project settings and Data pages say how it works.

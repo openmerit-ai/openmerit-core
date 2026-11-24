@@ -11,13 +11,13 @@
 // (plus cheaper, stronger challengers) run every item. Each eval run is a unit in SQLite, so a
 // resumed run replays the search from recorded results and never pays twice for a finished unit.
 // Per-item results come from the eval's own report in $OPENMERIT_RESULT.
-import { createHash, randomInt } from "node:crypto";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { catalogueIndex, type Catalogue, type CatalogueModel } from "../engine/catalogue.ts";
 import { blendedPrice, eligible, ladder } from "../engine/pool.ts";
 import { redact } from "../engine/redact.ts";
-import { EVAL_FLOOR, evaluateTask as runPolicy, floorNote, meetsCriteria, rankTop, shortfall, type Criteria } from "../engine/evaluate.ts";
+import { EVAL_FLOOR, evaluateTask as runPolicy, floorNote, meetsCriteria, rankTop, shortfall, stableSample, type Criteria } from "../engine/evaluate.ts";
 import { APPROVAL_PROMPT, approvalQuestion as configureQuestion } from "../engine/connector.ts";
 import { chosenTask, repoScan } from "../connectors/repo-scan.ts";
 import { evalCommand, evalEvidence } from "../connectors/eval-command.ts";
@@ -800,15 +800,14 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
         const id = unitId(runId, taskKey(data, task), call.role, entry, call.repeat);
         return { items: result.items, costUsd: unitCost(ctx, runId, state.units(runId).filter(unit => unit.id === id))?.cost ?? null, ...(result.checks ? { checks: result.checks } : {}) };
       },
-      sample: reliable => {
-        // Screens draw from items the current model passes in every run, so a 5/5 screen asks whether a candidate keeps up with it.
+      sample: (reliable, count) => {
+        // Screens draw from items the current model passes in every run, so a 5/5 screen asks whether a candidate keeps up with it;
+        // the next five retry a screen that missed one. The same items for the same eval (stableSample), so its runs search the same way.
         if (!data.samples![task]) {
-          const pool = [...reliable], picked: string[] = [];
-          for (let count = 0; count < SAMPLE_SIZE; count++) picked.push(pool.splice(randomInt(pool.length), 1)[0]!);
-          data.samples![task] = picked;
+          data.samples![task] = stableSample(reliable, count, item => `${task}\n${item}`);
           save();
         }
-        summary.sampleIds = data.samples![task]!;
+        summary.sampleIds = data.samples![task]!.slice(0, SAMPLE_SIZE);
         return data.samples![task]!;
       },
     });

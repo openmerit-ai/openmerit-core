@@ -16,10 +16,10 @@
 // This module imports nothing from @rivet-dev/workflows but `Loop`, whose results are plain objects: a
 // host and openmerit-core may load different copies of the package, so the workflow context is typed
 // structurally and step failures are told apart by their names.
-import { createHash, randomInt } from "node:crypto";
+import { createHash } from "node:crypto";
 import { Loop } from "@rivet-dev/workflows";
 import { applyLabelCheck, BudgetRefused, caseKind, checksBasedOn, completeWith, createClient, createMeasure, flow, graderFor, invalidCases, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../ranking/index.ts";
-import { approvalQuestion, basedOn, baselineResult, byKind, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, FINALISTS, floorNote, mergeEvidence, modelResult, newProgress, redact, SAMPLE_SIZE, score, strongest, taskResult, type AgentRun, type Catalogue, type CatalogueModel, type Funding, type Ledger, type ModelResult, type ReserveResult, type ResolvedGuardrails, type Settlement } from "../engine/index.ts";
+import { approvalQuestion, basedOn, baselineResult, byKind, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, stableSample, FINALISTS, floorNote, mergeEvidence, modelResult, newProgress, redact, SAMPLE_SIZE, score, strongest, taskResult, type AgentRun, type Catalogue, type CatalogueModel, type Funding, type Ledger, type ModelResult, type ReserveResult, type ResolvedGuardrails, type Settlement } from "../engine/index.ts";
 import { agentBundle, caseEvidence } from "../connectors/agent-bundle.ts";
 import { advanceLoop, completeHarness, criteriaOf, feedbackOf, gradeQuestions, MAX_ROUNDS, pickSamples, readGrade, reviseEval, startLoop, type CaseAnswer, type LoopState, type SampleGrade } from "../eval/loop.ts";
 import { buildPool, OPENROUTER, regionNotice, type EndpointInfo, type Option, type Pool, type Provisional } from "./pool.ts";
@@ -666,11 +666,10 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
             const checks = Object.fromEntries(result.results.flatMap(item => (item.failedChecks?.length ? [[item.caseId, item.failedChecks]] : [])));
             return { items: Object.fromEntries(result.results.map(item => [item.caseId, item.pass])), checks, costUsd: result.costUsd, costIsEstimate: result.costIsEstimate, latencyMs: result.latencyMs };
           },
-          // Drawn in a recorded step, so a replay screens on the same cases.
+          // The same cases for the same eval, placed by their content (stableSample), and recorded in a step, so a replay screens on the same cases.
           sample: (reliable, count) => ctx.step(round === 1 ? "samples" : `samples-r${round}`, async () => {
-            const left = [...reliable], picked: string[] = [];
-            for (let index = 0; index < count; index++) picked.push(left.splice(randomInt(left.length), 1)[0]!);
-            return picked;
+            const byId = new Map(usable.map(item => [item.id, item]));
+            return stableSample(reliable, count, id => JSON.stringify([bundle.task, id, byId.get(id)?.input ?? null, byId.get(id)?.expected ?? null]));
           }),
           on: {
             // The search is done: the finalists' runs and the challengers are left.

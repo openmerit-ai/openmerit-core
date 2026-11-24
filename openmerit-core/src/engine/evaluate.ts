@@ -4,14 +4,18 @@
 // 1. The current model runs every item `repeats` times. When it passes less than `floor` of its own
 //    eval (80% by default), the eval cannot tell models apart, and nothing is screened or recommended. Once fewer than `sampleSize` items have passed
 //    in every run so far, it stops early: another run cannot add any, and the search cannot screen.
-// 2. `sample` picks the screening items from those it passed in every run.
+// 2. `sample` picks the screening items from those it passed in every run, and as many again for a
+//    retry: an option that misses exactly one sampled item is screened once more on the retry items,
+//    since one miss in five is as likely chance as weakness. The caller should draw the same items for
+//    the same eval (`stableSample`), so runs of one eval search the same way.
 // 3. Scout Model Binary Search over the ladder (`binarySearch`), then the finalists run every item
 //    `repeats` times. The leader is the finalist with the best score, then the lowest measured cost.
 // 4. Challengers (`challengers`), capped at the leader's list price, or at the current model's when no
 //    qualified finalist costs less per item than it does. Each is screened first, and one that passes
-//    runs every item `repeats` times. Then, when a provisional pick is given and no qualified model is
-//    cheaper than the current one yet, it gets the same treatment, so a caller that showed it never
-//    keeps the current model without measuring it.
+//    runs every item `repeats` times. Then a provisional pick, such as the model the task's last run
+//    picked, gets the same treatment when no qualified model is cheaper than the current one yet, or
+//    when its list price is under the cheapest qualified model's: a caller that showed it never keeps
+//    the current model, or recommends a dearer model, without measuring it.
 // 5. A model qualifies when it scores at least what the current model scores, meets the threshold and
 //    is within the latency limit. The Top 3 are the qualified ones, cheapest per item first.
 import { binarySearch, challengers, CHALLENGERS, FINALISTS, SAMPLE_SIZE, type Rung, type SearchResult, type Stage } from "./search.ts";
@@ -63,7 +67,7 @@ export interface MeasureCall {
   role: "baseline" | "screen" | "final";
   /** How the option was reached; `baseline` for the current model. */
   stage: Stage | "baseline";
-  /** 1-based; screens are always 1. */
+  /** 1-based; a screen is 1, and 2 for its retry on the retry items. */
   repeat: number;
   /** The provisional pick's screen and runs. */
   provisional?: true;
@@ -145,7 +149,7 @@ export interface EvaluateInput<T extends Rung> {
    * the evaluation.
    */
   measure: (option: T | null, items: readonly string[] | null, call: MeasureCall) => Promise<Measurement | null>;
-  /** Picks `count` screening items from `reliable`, the same ones on a replay. */
+  /** Picks up to `count` screening items from `reliable`, the same ones on a replay: the screen's items, then the retry's. */
   sample: (reliable: readonly string[], count: number) => readonly string[] | Promise<readonly string[]>;
   progress?: Progress<T>;
   /** Called as the evaluation goes, such as to show the search path while it runs. */
@@ -207,6 +211,32 @@ export function floorNote(baseline: { passes: number; total: number; byKind: rea
   return `${current} passed ${baseline.passes} of ${baseline.total} case runs of its own eval${kinds}, under the ${Math.round(floor * 100)}% OpenMerit needs before the eval can tell models apart, so no model is recommended. Read why its cases failed: the expected answers or the checks may be wrong.`;
 }
 
+/** A screen and its retry as one measurement: every item either ran, and what both cost. */
+function merge(runs: readonly Measurement[]): Measurement {
+  if (runs.length === 1) return runs[0]!;
+  const latencies = runs.flatMap(run => (run.latencyMs === undefined || run.latencyMs === null ? [] : [run.latencyMs]));
+  return {
+    items: Object.assign({}, ...runs.map(run => run.items)), checks: Object.assign({}, ...runs.map(run => run.checks ?? {})),
+    costUsd: runs.some(run => run.costUsd === null) ? null : runs.reduce((sum, run) => sum + run.costUsd!, 0),
+    costIsEstimate: runs.some(run => run.costIsEstimate === true), latencyMs: latencies.length ? latencies.reduce((a, b) => a + b, 0) / latencies.length : null,
+  };
+}
+
+/**
+ * Up to `count` items of `pool`, the same ones for the same items, whatever the pool's order: each
+ * item's place is a hash of `keyOf(item)`, such as its content, so an eval screens on the same cases in
+ * every run until its cases change, and an item leaving the pool moves no other item.
+ */
+export function stableSample(pool: readonly string[], count: number, keyOf: (item: string) => string = item => item): string[] {
+  const place = (text: string) => {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193) >>> 0;
+    return hash;
+  };
+  const placed = pool.map(item => ({ item, at: place(keyOf(item)) }));
+  return placed.sort((a, b) => a.at - b.at || (a.item < b.item ? -1 : a.item > b.item ? 1 : 0)).slice(0, count).map(entry => entry.item);
+}
+
 export function score(runs: readonly Measurement[]): Score {
   let passes = 0, total = 0, cost: number | null = 0;
   const latencies: number[] = [];
@@ -264,8 +294,10 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
   const pool = criteria ? items : reliable;
   if (pool.length < sampleSize) return result("too_few_reliable");
 
-  // 2. The samples.
-  const samples = [...await input.sample(pool, sampleSize)];
+  // 2. The samples, and the retry's items when the pool has as many again.
+  const drawn = [...await input.sample(pool, Math.min(pool.length, 2 * sampleSize))];
+  const samples = drawn.slice(0, sampleSize);
+  const retry = drawn.length >= 2 * sampleSize ? drawn.slice(sampleSize, 2 * sampleSize) : [];
   const entry = (option: T, stage: Stage, provisional: boolean): Evaluated<T> => {
     let found = tried.get(option.key);
     if (!found) {
@@ -276,9 +308,25 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
   };
   const screen = async (option: T, stage: Stage, provisional = false): Promise<boolean> => {
     const tracked = entry(option, stage, provisional);
-    let measurement: Measurement | null;
+    const flag = provisional ? { provisional: true as const } : {};
+    // Against the criteria a screen passes when the samples meet them, as the full runs must.
+    const passes = (run: Measurement, items: readonly string[]) => criteria ? meetsCriteria([run], criteria).meets : items.every(item => run.items[item] === true);
+    const runs: Measurement[] = [];
+    let accepted: boolean;
     try {
-      measurement = await measure(option, samples, { role: "screen", stage, repeat: 1, ...(provisional ? { provisional: true as const } : {}) });
+      const first = await measure(option, samples, { role: "screen", stage, repeat: 1, ...flag });
+      if (!first) throw new Error(`The screen of ${option.key} returned no measurement.`);
+      runs.push(first);
+      accepted = passes(first, samples);
+      // One miss, and not of a guardrail or step check, which every case must pass: screen once more on the retry items.
+      const missed = samples.filter(item => first.items[item] !== true);
+      const broke = criteria ? meetsCriteria([first], criteria).failed.some(check => criteria.guardrails.includes(check)) : false;
+      if (!accepted && retry.length && missed.length === 1 && !broke) {
+        const second = await measure(option, retry, { role: "screen", stage, repeat: 2, ...flag });
+        if (!second) throw new Error(`The screen of ${option.key} returned no measurement.`);
+        runs.push(second);
+        accepted = passes(second, retry);
+      }
     } catch (error) {
       if (unavailable(error)) {
         Object.assign(tracked, { status: "unavailable", reason: error.message });
@@ -286,10 +334,8 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
       }
       throw error;
     }
-    if (!measurement) throw new Error(`The screen of ${option.key} returned no measurement.`);
-    // Against the criteria a screen passes when the samples meet them, as the full runs must.
-    const accepted = criteria ? meetsCriteria([measurement], criteria).meets : samples.every(item => measurement.items[item] === true);
-    Object.assign(tracked, { screen: measurement, status: accepted ? "unmeasured" : "screened_out", ...score([measurement]) });
+    const measurement = merge(runs);
+    Object.assign(tracked, { screen: measurement, status: accepted ? "unmeasured" : "screened_out", ...score(runs) });
     on.trial?.({ stage, option, measurement, accepted });
     return accepted;
   };
@@ -358,7 +404,8 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
   let ranked = rank();
   const provisional = input.provisional ?? null;
   let provisionalTried = false;
-  if (provisional && !ended && !ranked.cheaper.length && !tried.has(provisional.key)) {
+  const underCheapest = provisional?.price != null && ranked.top[0]?.option.price != null && provisional.price < ranked.top[0].option.price;
+  if (provisional && !ended && (!ranked.cheaper.length || underCheapest) && !tried.has(provisional.key)) {
     provisionalTried = true;
     try { await challenge(provisional, true); } catch (error) {
       if (!ends(error)) throw error;
