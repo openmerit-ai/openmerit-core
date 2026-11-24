@@ -61,13 +61,13 @@ export const dataView: View<Data> = {
     async deleteTask(target, { runs, tasks }, { api, confirm, refresh, toast }) {
       const { id = "", name = "" } = target.dataset;
       const evaluation = await api.get<EvalView>(`/api/tasks/${encodeURIComponent(id)}/eval`).catch((): null => null);
-      const latest = evaluation?.latest, count = runs.filter((run) => run.taskId === id).length;
+      const latest = evaluation?.accepted, count = runs.filter((run) => run.taskId === id).length;
       const retired = tasks.find((task) => task.id === id)?.state === "retired";
       const ok = await confirm({
         title: `Delete ${name}?`,
         body: "Deleting cannot be undone. It:",
         items: [
-          latest ? `Deletes its eval: version ${latest.version} with ${plural(latest.cases.length, "case")}, and ${plural(evaluation.versions.length - 1, "earlier version")}` : "Deletes its task context",
+          latest ? `Deletes its eval: accepted version ${latest.version} with ${plural(latest.cases.length, "case")}${evaluation.draft ? ", and the draft under review" : ""}` : "Deletes its task context",
           `Deletes ${plural(count, "run")} with their reports, run pages and decisions`,
           ...(evaluation?.repo ? ["Keeps the eval's copy in the repository until your coding agent removes it, which it offers on its next OpenMerit call"] : []),
         ],

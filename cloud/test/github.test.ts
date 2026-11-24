@@ -379,7 +379,7 @@ describe("GitHub repositories", () => {
     const [task] = (await admin.api<{ id: string; name: string; lastRunAt: string | null; status: string; eval: unknown }[]>("/api/tasks")).body;
     assert.deepEqual([task!.id, task!.name, task!.lastRunAt, task!.status], [approved.body.taskId, "ticket router", null, "new"]);
     const evaluation = (await admin.api<EvalView>(`/api/tasks/${task!.id}/eval`)).body;
-    assert.deepEqual([evaluation.latest!.version, evaluation.latest!.source, evaluation.latest!.author, evaluation.latest!.spec.criteria], [1, "review", "user_ev2", ["Picks the queue that owns the ticket"]]);
+    assert.deepEqual([evaluation.accepted!.version, evaluation.accepted!.source, evaluation.accepted!.by, evaluation.accepted!.spec.criteria, evaluation.draft], [1, "review", "user_ev2", ["Picks the queue that owns the ticket"], null]);
     assert.match((await admin.tool("openmerit_tasks", {})).text, /ticket router \[t_\w+\] \(acme\/evals-app\): openai\/gpt-5.4, not run yet/);
 
     // Dismissed and approved drafts are not offered again by the next review.
@@ -403,7 +403,7 @@ describe("GitHub repositories", () => {
     // Retire instead of delete keeps the eval.
     const retired = await member.api<{ state: string }>(`/api/tasks/${task!.id}/retire`, { method: "POST" });
     assert.equal(retired.body.state, "retired");
-    assert.equal((await admin.api<EvalView>(`/api/tasks/${task!.id}/eval`)).body.latest!.version, 1);
+    assert.equal((await admin.api<EvalView>(`/api/tasks/${task!.id}/eval`)).body.accepted!.version, 1);
   });
 
   test("only the application's model calls are listed: examples stay, tests, fixtures and docs are counted apart", async () => {

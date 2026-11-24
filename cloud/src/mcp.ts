@@ -50,7 +50,7 @@ const BUNDLE_SCHEMA = {
 export const TOOLS = [
   {
     name: "openmerit_recommend", title: "OpenMerit: recommend a model",
-    description: "Starts measuring cheaper models for one model call in the user's code. Send a task bundle: the task, the current model, the prompt, tools, output shape, examples and where the code names the model. Or, to run a past job's task again on the bundle OpenMerit saved, as a result's Fix line says, send its job_id instead, with budget_usd to raise the task's budget per job first. Returns a provisional pick from the catalogue at once, and a job_id; call openmerit_result with it later for the measured pick. Measuring makes paid model calls within the account's plan and budget: ask the user before a rerun or a higher budget.",
+    description: "Starts measuring cheaper models for one model call in the user's code. Send a task bundle: the task, the current model, the prompt, tools, output shape, examples and where the code names the model. Or, to run a past job's task again on the bundle OpenMerit saved, as a result's Fix line says, send its job_id instead, with budget_usd to raise the task's budget per job first. Returns a provisional pick from the catalogue at once, and a job_id; call openmerit_result with it later for the measured pick. A task whose prompt, tools or output changed since its eval was accepted is refused until the user reviews the eval in the app; tell them. Measuring makes paid model calls within the account's plan and budget: ask the user before a rerun or a higher budget.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       bundle: BUNDLE_SCHEMA, environment: { type: "string", description: "The repository or workspace, such as owner/repo. Default: default" },
       project: { type: "string", description: "The OpenMerit project, by name, when the user names one. Default: the project whose GitHub repository the environment names, else the default project" }, agent: { type: "string", description: "The agent this task belongs to, when the code groups calls into agents" },
@@ -74,15 +74,15 @@ export const TOOLS = [
   },
   {
     name: "openmerit_tasks", title: "OpenMerit: tasks",
-    description: "Lists the account's tasks with their ids and watch state, and the results that finished since the last session. A task is watching (OpenMerit re-runs it when the model catalogue changes), idle (no openmerit_recommend call for a while; the next one resumes it), frozen (a watch guardrail keeps its validated model) or retired.",
+    description: "Lists the account's tasks with their ids and watch state, and the results that finished since the last session. A task is watching (OpenMerit re-runs it when the model catalogue changes), idle (no openmerit_recommend call for a while; the next one resumes it), frozen (a watch guardrail keeps its validated model), review (its eval waits for the user to review it in the app; no runs until then) or retired.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
   {
     name: "openmerit_eval", title: "OpenMerit: a task's eval",
-    description: "A task's eval lives at app.openmerit.ai, where the user edits it; the repository keeps a copy in .openmerit/evals/<task>/ that Scout and `openmerit eval` run. When openmerit_tasks or a result says the copy is behind, call this with the task_id for the files, ask the user, write them as given (never edit them: changes are made in the app), then call it again with action synced and the version. For a task deleted in the app, ask the user whether to remove its copy, remove it, and call with action removed.",
+    description: "A task's eval lives at app.openmerit.ai, where the user reviews and accepts it; it stays as accepted until the task changes or the user revises it. the repository keeps a copy in .openmerit/evals/<task>/ that Scout and `openmerit eval` run. When openmerit_tasks or a result says the copy is behind, call this with the task_id for the files, ask the user, write them as given (never edit them: changes are made in the app), then call it again with action synced and the version. For a task deleted in the app, ask the user whether to remove its copy, remove it, and call with action removed.",
     inputSchema: { type: "object", required: ["task_id"], additionalProperties: false, properties: {
-      task_id: string, action: { enum: ["get", "synced", "removed"], description: "get (default): the files of the latest version. synced: you wrote version to the repository. removed: you removed a deleted task's copy, or the user chose to keep it" },
+      task_id: string, action: { enum: ["get", "synced", "removed"], description: "get (default): the files of the accepted version. synced: you wrote version to the repository. removed: you removed a deleted task's copy, or the user chose to keep it" },
       version: { type: "integer", description: "With synced: the version you wrote" },
     } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -275,7 +275,7 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
       return item.pick ? ", waiting for a decision" : "";
     };
     const text = tasks.length
-      ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} [${item.id}] (${inProject(item)}${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.lastRunAt ? `${item.status}, ${item.state}` : "not run yet: approved in the app from a repository review; ask the user, then call openmerit_recommend with its task_id"}${item.idleSince ? ` since ${item.idleSince.slice(0, 10)}` : ""}${decided(item)}${heads[item.id] ? `, eval v${heads[item.id]!.version}` : ""}`),
+      ? [`${tasks.length} task${tasks.length === 1 ? "" : "s"}:`, ...tasks.map(item => `- ${item.name} [${item.id}] (${inProject(item)}${item.environment}${item.agent ? `, agent ${item.agent}` : ""}): ${item.currentModel}${item.pick ? ` → ${item.pick}` : ""}, ${item.lastRunAt ? `${item.status}, ${item.state}` : "not run yet: approved in the app from a repository review; ask the user, then call openmerit_recommend with its task_id"}${item.idleSince ? ` since ${item.idleSince.slice(0, 10)}` : ""}${decided(item)}${heads[item.id] ? `, eval v${heads[item.id]!.version}${heads[item.id]!.review ? " (a draft waits for review in the app)" : ""}` : ""}`),
         ...tasks.flatMap(item => heads[item.id] && heads[item.id]!.repo !== heads[item.id]!.version ? [behindLine(item.name, item.id, heads[item.id]!)] : []),
         ...stale.map(item => `${item.name} was deleted at ${deps.config.appUrl}; its eval copy at ${item.dir} in ${item.environment} stays. Ask the user whether to remove it, then call openmerit_eval with task_id "${item.taskId}" and action removed.`),
         ready.length ? `Ready since the last session: ${ready.map(item => `${item.id} (${item.status})`).join(", ")}. Call openmerit_result for each.` : "Nothing new since the last session."].join("\n")
@@ -297,18 +297,18 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
     }
     if (action !== "get") return { text: "action is get, synced or removed.", data: {}, isError: true };
     const [view, info] = await Promise.all([account.eval(taskId), client.task.get([identity.accountId, taskId]).info()]);
-    const latest = view?.latest;
+    const latest = view?.accepted;
     if (!latest || !info.bundle) return { text: `${row.name} has no eval yet: its first run writes one.`, data: {}, isError: true };
     const dir = evalDir(row.name), url = `${deps.config.appUrl}/tasks/?task=${encodeURIComponent(taskId)}&tab=eval`;
     const files = {
       [`${dir}/bundle.json`]: `${JSON.stringify({ ...info.bundle, ...latest.spec, examples: undefined }, null, 2)}\n`,
       [`${dir}/cases.json`]: `${JSON.stringify(latest.cases, null, 2)}\n`,
       // Scout reads the version from eval.json, as for an Eval a person accepted in the terminal.
-      [`${dir}/eval.json`]: `${JSON.stringify({ version: latest.version, bar: "current", acceptedAt: latest.createdAt }, null, 2)}\n`,
-      [`${dir}/MANAGED.md`]: `# ${row.name}: eval version ${latest.version}\n\nManaged by app.openmerit.ai, the source of truth for this eval. Do not edit these files: edit the eval at ${url}, and your coding agent writes the new version here.\n\nTask: ${taskId}\n`,
+      [`${dir}/eval.json`]: `${JSON.stringify({ version: latest.version, bar: "current", acceptedAt: latest.at }, null, 2)}\n`,
+      [`${dir}/MANAGED.md`]: `# ${row.name}: eval version ${latest.version}\n\nManaged by app.openmerit.ai, the source of truth for this eval. Do not edit these files: revise the eval at ${url}, and once it is accepted your coding agent writes the new version here.\n\nTask: ${taskId}\n`,
     };
     return {
-      text: [`${row.name}'s eval, version ${latest.version} (${latest.cases.length} cases). The repository has ${view.repo ? `version ${view.repo.version}` : "no copy"}.`,
+      text: [`${row.name}'s accepted eval, version ${latest.version} (${latest.cases.length} cases). The repository has ${view.repo ? `version ${view.repo.version}` : "no copy"}.${view.draft ? " A draft of the next version waits for review in the app; these files are the accepted one." : ""}`,
         `Ask the user before writing these files, write them exactly as given, then call openmerit_eval with task_id "${taskId}", action synced and version ${latest.version}.`,
         ...Object.entries(files).map(([file, content]) => `--- ${file}\n${content}`)].join("\n"),
       data: { task_id: taskId, version: latest.version, dir, files },
@@ -402,5 +402,5 @@ export async function handleMcp(request: Request, deps: McpDeps): Promise<Respon
 
 /** The line that asks the coding agent to bring a task's repository copy of its eval up to date. */
 function behindLine(task: string, taskId: string, copy: { version: number; repo: number | null }): string {
-  return `${task}'s eval is at version ${copy.version}; the repository has ${copy.repo === null ? "no copy" : `version ${copy.repo}`}. Ask the user whether to write it, then call openmerit_eval with task_id "${taskId}".`;
+  return `${task}'s accepted eval is version ${copy.version}; the repository has ${copy.repo === null ? "no copy" : `version ${copy.repo}`}. Ask the user whether to write it, then call openmerit_eval with task_id "${taskId}".`;
 }

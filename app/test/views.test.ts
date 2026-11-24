@@ -357,11 +357,11 @@ test("approving a reviewed eval adds the task last, not run yet; dismissing one 
     return { status: response.status, body: await response.json() as T };
   };
   const drafts = (await send<EvalDraft[]>("/api/eval-drafts")).body;
-  const queue = evalsView.render({ drafts }, page(me, "draft=draft_denial"));
+  const queue = evalsView.render({ drafts, tasks: [] }, page(me, "draft=draft_denial"));
   assert.match(queue.__html, /<a href="\?draft=draft_denial" aria-current="page">Denial letter checker/);
   assert.match(queue.__html, /<option value="missing_reason" selected>/, "a label task's expected answer is one of its labels");
   assert.match(text(queue), /Approve and add task Dismiss/);
-  assert.match(text(evalsView.render({ drafts }, page(me))), /Claim summary writer From sahra-health\/claims-api[^]*2 cases of 3 can be measured now/);
+  assert.match(text(evalsView.render({ drafts, tasks: [] }, page(me))), /Claim summary writer From sahra-health\/claims-api[^]*2 cases of 3 can be measured now/);
 
   const approved = await send<{ taskId: string }>("/api/eval-drafts/draft_summary/approve", "POST", { spec: { criteria: ["States the amount"] } });
   assert.equal(approved.status, 201);
@@ -370,38 +370,59 @@ test("approving a reviewed eval adds the task last, not run yet; dismissing one 
   assert.match(listed, /Coding reviewer[^]*Claim summary writer [^]*Not run yet Not run yet starts with its first run/, "the new task is last and does not watch yet");
   const detail = (await send<TaskDetail>(`/api/tasks/${approved.body.taskId}`)).body;
   const evaluation = (await send<EvalView>(`/api/tasks/${approved.body.taskId}/eval`)).body;
-  assert.deepEqual(evaluation.latest!.spec.criteria, ["States the amount"]);
+  assert.deepEqual([evaluation.accepted!.version, evaluation.accepted!.spec.criteria, evaluation.draft], [1, ["States the amount"], null]);
   const runs = text(tasksView.render({ kind: "task", detail, eval: evaluation }, page(me, `task=${approved.body.taskId}`)));
   assert.match(runs, /Not run yet This task was approved from a repository review[^]*Run now/);
   assert.equal((await send(`/api/eval-drafts/draft_denial`, "DELETE")).status, 200);
   assert.deepEqual((await send("/api/eval-drafts")).body, []);
-  assert.match(text(evalsView.render({ drafts: [] }, page(me))), /Nothing to review/);
+  assert.match(text(evalsView.render({ drafts: [], tasks: [] }, page(me))), /Nothing to review/);
 });
 
-test("a task's Eval tab shows its version, whether the repository copy is behind, and warns that runs on other versions are not comparable", async () => {
+test("a task's Eval tab shows the accepted eval read-only; a revision pauses runs until it is accepted as the next version", async () => {
   const me = await account();
   const call = createFakeApi();
   const send = async <T>(path: string, method = "GET", body?: unknown): Promise<{ status: number; body: T }> => {
     const response = await call(new Request(`https://openmerit.ai${path}`, { method, headers: { authorization: "Bearer preview-populated" }, ...(body ? { body: JSON.stringify(body) } : {}) }));
     return { status: response.status, body: await response.json() as T };
   };
-  const detail = (await send<TaskDetail>("/api/tasks/ticket-router")).body;
-  const evaluation = (await send<EvalView>("/api/tasks/ticket-router/eval")).body;
-  const tab = tasksView.render({ kind: "task", detail, eval: evaluation }, page(me, "task=ticket-router&tab=eval"));
-  assert.match(text(tab), /Version 3 Edited in the app · Amira Haddad[^]*6 cases measured of 6 1 run on this version/);
-  assert.match(text(tab), /Behind \.openmerit\/evals\/ticket-router has version 2, written by Amira Haddad with claude-code/);
-  assert.match(tab.__html, /Save as version 4/);
-  assert.match(text(tab), /Version 2 Answers to a run's label check · Amira Haddad 2 runs[^]*Version 1 OpenMerit wrote the cases/);
-  const runs = text(tasksView.render({ kind: "task", detail, eval: evaluation }, page(me, "task=ticket-router")));
-  assert.match(runs, /measured on \d eval versions. Results from different versions are not comparable/);
+  const render = async (id: string, tab = "eval") => {
+    const [detail, evaluation] = [(await send<TaskDetail>(`/api/tasks/${id}`)).body, (await send<EvalView>(`/api/tasks/${id}/eval`)).body];
+    return { detail, evaluation, html: tasksView.render({ kind: "task", detail, eval: evaluation }, page(me, `task=${id}${tab ? `&tab=${tab}` : ""}`)) };
+  };
+  const router = await render("ticket-router");
+  assert.match(text(router.html), /Accepted: version 2 Accepted in the app · Amira Haddad[^]*6 cases measured of 6 1 run on this version/);
+  assert.match(text(router.html), /Behind \.openmerit\/evals\/ticket-router has version 1, written by Amira Haddad with claude-code/);
+  assert.match(router.html.__html, /<fieldset disabled>/, "an accepted eval is not edited in place");
+  assert.match(router.html.__html, /data-action="revise"/);
+  assert.doesNotMatch(router.html.__html, /Accept as version/);
+  assert.match(text((await render("ticket-router", "")).html), /measured on 2 eval versions. Results from different versions are not comparable/);
 
-  // A save on a stale version is refused; one on the latest makes the next version.
-  const latest = evaluation.latest!;
-  assert.equal((await send("/api/tasks/ticket-router/eval", "PUT", { spec: latest.spec, cases: latest.cases.slice(1), baseVersion: 2 })).status, 409);
-  const saved = await send<EvalView>("/api/tasks/ticket-router/eval", "PUT", { spec: latest.spec, cases: latest.cases.slice(1), baseVersion: 3 });
-  assert.equal(saved.body.latest!.version, 4);
-  // A retired task's eval is read-only.
-  const retired = tasksView.render({ kind: "task", detail: { ...detail, state: "retired" }, eval: saved.body }, page(me, "task=ticket-router&tab=eval")).__html;
+  // Revising opens a draft and pauses the task; saving keeps it a draft, and accepting makes version 3.
+  const draft = await send<EvalView>("/api/tasks/ticket-router/eval/revise", "POST");
+  assert.equal(draft.body.draft!.reason, "revise");
+  assert.equal((await send("/api/tasks/ticket-router/run", "POST")).status, 409, "runs wait for the revision");
+  const revising = await render("ticket-router");
+  assert.match(text(revising.html), /Needs review[^]*Draft of version 3[^]*Runs and the watch wait until you accept or discard it/);
+  assert.doesNotMatch(revising.html.__html, /data-action="run"/);
+  assert.match(revising.html.__html, /Accept as version 3[^]*data-action="saveDraft"[^]*data-action="discardDraft"/);
+  const cases = draft.body.draft!.cases.slice(1);
+  assert.equal((await send("/api/tasks/ticket-router/eval/draft", "PUT", { spec: draft.body.draft!.spec, cases, base: "2026-01-01T00:00:00Z" })).status, 409, "a save on a stale copy is refused");
+  const saved = await send<EvalView>("/api/tasks/ticket-router/eval/draft", "PUT", { spec: draft.body.draft!.spec, cases, base: draft.body.draft!.at });
+  assert.deepEqual([saved.body.accepted!.version, saved.body.draft!.cases.length], [2, cases.length]);
+  const accepted = await send<EvalView>("/api/tasks/ticket-router/eval/accept", "POST", { base: saved.body.draft!.at });
+  assert.deepEqual([accepted.body.accepted!.version, accepted.body.accepted!.cases.length, accepted.body.draft], [3, cases.length, null]);
+  assert.equal((await send<Task[]>("/api/tasks")).body.find((task) => task.id === "ticket-router")!.state, "watching");
+
+  // A changed task's draft says what changed, and cannot be discarded.
+  const drafter = await render("reply-drafter");
+  assert.match(text(drafter.html), /Your coding agent sent Reply drafter with its tools changed[^]*Runs and the watch wait until you accept it\./);
+  assert.doesNotMatch(drafter.html.__html, /data-action="discardDraft"/);
+  assert.equal((await send("/api/tasks/reply-drafter/eval/draft", "DELETE")).status, 409);
+  const queue = text(evalsView.render({ drafts: [], tasks: (await send<Task[]>("/api/tasks")).body.filter((task) => task.state === "review") }, page(me)));
+  assert.match(queue, /Tasks waiting for their eval Reply drafter/);
+
+  // A retired task's eval is read-only, with no revise.
+  const retired = tasksView.render({ kind: "task", detail: { ...router.detail, state: "retired" }, eval: accepted.body }, page(me, "task=ticket-router&tab=eval")).__html;
   assert.match(retired, /<fieldset disabled>/);
-  assert.doesNotMatch(retired, /data-action="retire"/);
+  assert.doesNotMatch(retired, /data-action="retire"|data-action="revise"/);
 });

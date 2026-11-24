@@ -18,6 +18,7 @@ const states: Record<TaskState, (task: Task) => Html> = {
   idle: (task) => html`<span class="pill">Idle</span><span class="sub">no call since ${day(task.idleSince ?? task.lastRunAt)}</span>`,
   frozen: (task) => html`<span class="pill tag">Frozen</span><span class="sub">${guardrails("task", task.id, "watch guardrail off")}</span>`,
   retired: () => html`<span class="pill tag">Retired</span>`,
+  review: (task) => html`<span class="pill warn">Needs review</span><span class="sub"><a href="${taskLink(task, "eval")}">its eval waits for you</a>; no runs until then</span>`,
 };
 const watch = (task: Task): Html => (notRun(task) && stateOf(task) !== "retired" ? html`<span class="pill tag">Not run yet</span><span class="sub">starts with its first run</span>` : states[stateOf(task)](task));
 
@@ -46,43 +47,55 @@ function table(tasks: Task[]): Html {
       </div>`;
 }
 
-// Who wrote an eval version, in the page's words.
+// Who wrote the accepted eval, in the page's words.
 const SOURCES: Record<EvalSource, string> = {
   openmerit: "OpenMerit wrote the cases", claude: "Written on a member's Claude subscription", chatgpt: "Written on a member's ChatGPT subscription",
-  examples: "The coding agent's examples", review: "Approved from a repository review", app: "Edited in the app", label_check: "Answers to a run's label check",
+  examples: "The coding agent's examples", review: "Approved from a repository review", app: "Accepted in the app",
 };
 const evalDir = (task: string) => `.openmerit/evals/${task.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "task"}`;
+const listed = (items: string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
 
 function repoState(task: Task, view: EvalView): Html {
-  const latest = view.latest!.version, repo = view.repo;
+  const accepted = view.accepted!.version, repo = view.repo;
   const where = html`<code>${evalDir(task.name)}</code>`;
-  if (!repo) return html`<span class="pill tag">Not in the repository</span><span class="sub">Your coding agent offers to write version ${latest} to ${where} on its next OpenMerit call.</span>`;
+  if (!repo) return html`<span class="pill tag">Not in the repository</span><span class="sub">Your coding agent offers to write version ${accepted} to ${where} on its next OpenMerit call.</span>`;
   const by = html`written by ${repo.by}${repo.client ? ` with ${repo.client}` : ""} ${ago(repo.at)}`;
-  if (repo.version === latest) return html`<span class="pill good">Up to date</span><span class="sub">Version ${repo.version} is in ${where}, ${by}.</span>`;
-  return html`<span class="pill warn">Behind</span><span class="sub">${where} has version ${repo.version}, ${by}. Your coding agent offers to write version ${latest} on its next OpenMerit call.</span>`;
+  if (repo.version === accepted) return html`<span class="pill good">Up to date</span><span class="sub">Version ${repo.version} is in ${where}, ${by}.</span>`;
+  return html`<span class="pill warn">Behind</span><span class="sub">${where} has version ${repo.version}, ${by}. Your coding agent offers to write version ${accepted} on its next OpenMerit call.</span>`;
 }
 
+// An accepted eval stays as it is until the task changes or someone revises it. A draft is saved in place
+// and accepted as the next version; until then the task's runs and watch wait.
 function evalTab(detail: TaskDetail, view: EvalView, editable: boolean): Html {
-  const latest = view.latest;
-  if (!latest) return html`<section>${empty("No eval yet", "The task's first run writes its eval from the task's examples and spec. It appears here, and you can edit it before later runs.", html``)}</section>`;
-  const output = detail.bundle?.output ?? { kind: "text" as const };
-  const runs = detail.jobs.filter((run) => run.evalVersion !== undefined && run.evalVersion !== null);
-  return html`<section aria-labelledby="version">
-      <h2 id="version">Version ${latest.version}</h2>
+  const accepted = view.accepted, draft = view.draft;
+  if (!accepted) return html`<section>${empty("No eval yet", "The task's first run writes its eval from the task's examples and spec, and your answers to its label check make it the accepted eval. It appears here.", html``)}</section>`;
+  const output = draft?.output ?? detail.bundle?.output ?? { kind: "text" as const };
+  const summary = html`<section aria-labelledby="version">
+      <h2 id="version">Accepted: version ${accepted.version}</h2>
       <div class="card">
-        <div class="row"><span>${SOURCES[latest.source]}${latest.author ? ` · ${latest.author}` : ""}<span class="sub">${latest.note ?? ""}${latest.note ? " · " : ""}${date(latest.createdAt)} · ${plural(latest.cases.filter(measured).length, "case")} measured of ${latest.cases.length}</span></span><span class="sub">${plural(latest.runs, "run")} on this version</span></div>
+        <div class="row"><span>${SOURCES[accepted.source]}${accepted.by ? ` · ${accepted.by}` : ""}<span class="sub">${date(accepted.at)} · ${plural(accepted.cases.filter(measured).length, "case")} measured of ${accepted.cases.length}</span></span><span class="sub">${plural(accepted.runs, "run")} on this version</span></div>
         <div class="row"><span>Repository copy ${repoState(detail, view)}</span><span></span></div>
       </div>
-      ${runs.length ? html`<p class="note">Saving makes version ${latest.version + 1}. Runs on different versions are not comparable: the cases or what the judge checks changed between them.</p>` : ""}
-    </section>
+    </section>`;
+  if (!draft) {
+    return html`${summary}
     <section aria-labelledby="edit">
-      <h2 id="edit">${editable ? "Edit" : "Cases"}</h2>
-      ${evalForm(latest.spec, latest.cases, output, { action: "saveEval", submit: `Save as version ${latest.version + 1}`, baseVersion: latest.version, editable })}
-    </section>
-    ${view.versions.length > 1 ? html`<section aria-labelledby="versions">
-      <h2 id="versions">Versions</h2>
-      <div class="card">${view.versions.map((item) => html`<div class="row"><span>Version ${item.version}${item.version === latest.version ? html` <span class="pill tag">Latest</span>` : ""}<span class="sub">${SOURCES[item.source]}${item.author ? ` · ${item.author}` : ""}${item.note ? ` · ${item.note}` : ""}</span></span><span class="sub">${plural(item.runs, "run")} · ${date(item.createdAt)}</span></div>`)}</div>
-    </section>` : ""}`;
+      <h2 id="edit">Cases</h2>
+      <p class="note" style="margin: -2px 0 10px">Runs and the watch measure on this eval as it is. It reopens for review when your coding agent sends the task with a different prompt, tools or output.${editable ? " To change it now, revise it: runs wait until you accept the revision." : ""}</p>
+      ${editable ? html`<p class="eval-actions" style="margin-bottom: 12px"><button class="btn" type="button" data-action="revise">Revise eval</button></p>` : ""}
+      ${evalForm(accepted.spec, accepted.cases, output, { action: "acceptEval", submit: "", base: null, editable: false })}
+    </section>`;
+  }
+  const why = draft.reason === "task_changed"
+    ? html`Your coding agent sent ${detail.name} with its ${listed(draft.changed)} changed${draft.at ? ` on ${date(draft.at)}` : ""}, so version ${accepted.version} may no longer fit it. Check the criteria and each expected answer; new examples the agent sent are at the end.`
+    : html`${draft.by ?? "Someone"} opened a revision on ${date(draft.at)}.`;
+  return html`${summary}
+    <section aria-labelledby="edit">
+      <h2 id="edit">Draft of version ${accepted.version + 1}</h2>
+      <div class="card notice warn" role="note" style="margin-bottom: 12px"><p>${why} Runs and the watch wait until ${draft.reason === "revise" ? "you accept or discard it" : "you accept it"}.</p></div>
+      ${evalForm(draft.spec, draft.cases, output, { action: "acceptEval", submit: `Accept as version ${accepted.version + 1}`, base: draft.at, editable,
+        extra: html`<button class="btn" type="button" data-action="saveDraft">Save draft</button>${draft.reason === "revise" ? html`<button class="btn" type="button" data-action="discardDraft">Discard</button>` : ""}` })}
+    </section>`;
 }
 
 function runsTab(detail: TaskDetail): Html {
@@ -107,6 +120,9 @@ function runsTab(detail: TaskDetail): Html {
 
 type Data = { kind?: "list"; tasks: Task[] } | { kind: "task"; detail: TaskDetail; eval: EvalView };
 
+const readDraft = (form: HTMLFormElement, data: Extract<Data, { kind: "task" }>) =>
+  readEvalForm(form, data.eval.draft!.spec, data.eval.draft!.cases, data.eval.draft!.output ?? data.detail.bundle?.output ?? { kind: "text" });
+
 export const tasksView: View<Data> = {
   async load({ api, params }) {
     const id = params.get("task");
@@ -123,12 +139,12 @@ export const tasksView: View<Data> = {
         <h1 class="title">${detail.name}</h1>
         <p class="lede">The code uses ${model(detail.currentModel)}. ${notRun(detail) ? "Approved from a repository review; it has not run yet." : html`Latest: ${result(detail)}`}</p>
         <p class="task-actions">${watch(detail)}
-          <button class="btn${notRun(detail) ? " primary" : ""}" type="button" data-action="run">${notRun(detail) ? "Run now" : "Run again"}</button>
+          ${stateOf(detail) === "review" ? "" : html`<button class="btn${notRun(detail) ? " primary" : ""}" type="button" data-action="run">${notRun(detail) ? "Run now" : "Run again"}</button>`}
           ${retired ? "" : html`<button class="btn" type="button" data-action="retire">Retire</button>`}
           ${me.role === "admin" ? html`<a class="btn danger" href="/data/#delete-task">Delete…</a>` : ""}</p>
         <nav class="tabs" aria-label="Task">
           <a href="${taskLink(detail)}"${tab === "runs" ? html` aria-current="page"` : ""}>Runs</a>
-          <a href="${taskLink(detail, "eval")}"${tab === "eval" ? html` aria-current="page"` : ""}>Eval${data.eval.latest ? ` v${data.eval.latest.version}` : ""}</a>
+          <a href="${taskLink(detail, "eval")}"${tab === "eval" ? html` aria-current="page"` : ""}>Eval${data.eval.accepted ? ` v${data.eval.accepted.version}` : ""}${data.eval.draft ? html` <span class="pill warn">Review</span>` : ""}</a>
         </nav>
         ${tab === "eval" ? evalTab(detail, data.eval, !retired) : runsTab(detail)}`;
     }
@@ -150,15 +166,35 @@ export const tasksView: View<Data> = {
     </section>` : ""}`;
   },
   actions: {
-    async saveEval(target, data, { api, refresh, toast }) {
-      if (data.kind !== "task" || !data.eval.latest) return;
-      const form = target as HTMLFormElement, latest = data.eval.latest;
+    async revise(_target, data, { api, refresh }) {
+      if (data.kind !== "task") return;
+      await api.send("POST", `/api/tasks/${encodeURIComponent(data.detail.id)}/eval/revise`);
+      await refresh();
+    },
+    async saveDraft(target, data, { api, refresh, toast }) {
+      const form = target.closest("form");
+      if (data.kind !== "task" || !data.eval.draft || !form) return;
       try {
-        const edited = readEvalForm(form, latest.spec, latest.cases, data.detail.bundle?.output ?? { kind: "text" });
-        const saved = await api.send<EvalView>("PUT", `/api/tasks/${encodeURIComponent(data.detail.id)}/eval`, { ...edited, baseVersion: latest.version });
+        await api.send("PUT", `/api/tasks/${encodeURIComponent(data.detail.id)}/eval/draft`, { ...readDraft(form, data), base: data.eval.draft.at });
         await refresh();
-        toast(saved.latest?.version === latest.version ? "Nothing changed." : `Saved version ${saved.latest?.version ?? ""}. Your coding agent offers to write it to the repository.`);
+        toast("Draft saved. Runs wait until you accept it.");
       } catch (failure) { formError(form, failure); }
+    },
+    async acceptEval(target, data, { api, refresh, toast }) {
+      if (data.kind !== "task" || !data.eval.draft) return;
+      const form = target as HTMLFormElement;
+      try {
+        const accepted = await api.send<EvalView>("POST", `/api/tasks/${encodeURIComponent(data.detail.id)}/eval/accept`, { ...readDraft(form, data), base: data.eval.draft.at });
+        await refresh();
+        toast(`Accepted version ${accepted.accepted?.version ?? ""}. Runs and the watch resume on it, and your coding agent offers to write it to the repository.`);
+      } catch (failure) { formError(form, failure); }
+    },
+    async discardDraft(_target, data, { api, confirm, refresh, toast }) {
+      if (data.kind !== "task") return;
+      if (!(await confirm({ title: "Discard this revision?", body: `Your changes are dropped, and runs resume on version ${data.eval.accepted?.version ?? ""} as accepted.`, confirm: "Discard" }))) return;
+      await api.send("DELETE", `/api/tasks/${encodeURIComponent(data.detail.id)}/eval/draft`);
+      await refresh();
+      toast("Revision discarded.");
     },
     async run(_target, data, { api, go }) {
       if (data.kind !== "task") return;

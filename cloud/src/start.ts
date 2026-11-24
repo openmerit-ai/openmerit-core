@@ -1,11 +1,11 @@
-// Starting a job, for openmerit_recommend and for a watched task: the account checks its plan and
-// limits, the task records the bundle, the provisional pick comes from the catalogue and past
+// Starting a job, for openmerit_recommend and for a watched task: the account checks that the task's
+// eval is not waiting for review, its plan and limits, the task records the bundle, the provisional pick comes from the catalogue and past
 // results, and the job's workflow starts.
 import { createHash, randomBytes } from "node:crypto";
 import { redact } from "./engine.ts";
 import { buildPool, provisionalPick, type Provisional } from "./pool.ts";
 import { modelKeyRefusal } from "./services.ts";
-import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
+import { writeCases, type TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import type { Guardrails } from "./engine.ts";
 import type { AppClient } from "./registry.ts";
 import type { JobTrigger } from "./actors/job.ts";
@@ -70,6 +70,10 @@ export async function startJob(client: AppClient, start: { accountId: string; pr
   const account = client.account.getOrCreate([input.accountId]);
   const keyRefusal = await modelKeyRefusal();
   if (keyRefusal) return { ok: false, error: keyRefusal };
+  // A task whose prompt, tools or output changed since its eval was accepted waits for a person to review the eval.
+  const examples = (await writeCases({ bundle: input.bundle, complete: async () => "", count: 0 })).cases;
+  const gate = await account.evalGate({ taskId, bundle: input.bundle, examples });
+  if (!gate.ok) return gate;
   const started = await account.startJob({ jobId, projectId: input.projectId, taskId, kind: input.kind, askedBy: input.askedBy ?? null });
   if (!started.ok) return started;
   const task = client.task.getOrCreate([input.accountId, taskId], { createWithInput: { accountId: input.accountId, taskId, projectId: input.projectId, environment: input.environment, name: input.bundle.task } });
