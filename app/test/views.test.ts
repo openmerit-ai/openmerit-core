@@ -204,6 +204,15 @@ test("a result shows the decision the coding agent sent back, or that it waits f
   const listed = text(tasksView.render({ tasks: await (await createFakeApi()(new Request("https://openmerit.ai/api/tasks", { headers: { authorization: "Bearer preview-populated" } }))).json() as Task[] }, page(me)));
   assert.match(listed, /Ticket router[^]*?claude-haiku-5-5[^]*?Switched to claude-haiku-5-5 saves about \$234 a month Approved in the coding agent by Amira Haddad[^]*?Bill and claim matcher/);
   assert.match(listed, /Reply drafter[^]*?Switch to claude-haiku-5-5[^]*?Waiting for a decision in the coding agent/);
+  // Tinted rows: Tasks marks only a model that changed; Runs marks every run that found a cheaper one,
+  // including a pick still waiting and an older one declined since.
+  const fresh = createFakeApi();
+  const load = async <T>(path: string): Promise<T> => await (await fresh(new Request(`https://openmerit.ai${path}`, { headers: { authorization: "Bearer preview-populated" } }))).json() as T;
+  const tinted = (html: { __html: string }) => [...html.__html.matchAll(/<tr class="switch">\s*<td><a href="[^"]*">([^<]+)<\/a>/g)].map((row) => row[1]);
+  const freshTasks = await load<Task[]>("/api/tasks");
+  assert.deepEqual(tinted(tasksView.render({ tasks: freshTasks }, page(me))), ["Ticket router"]);
+  const runRows = runsView.render({ runs: await load<Run[]>("/api/runs"), tasks: freshTasks, jobs: [] }, page(me)).__html;
+  assert.deepEqual([...runRows.matchAll(/<tr class="switch"><td><a href="\/r\/(\w+)\/">/g)].map((row) => row[1]).sort(), ["b2v5h3", "k7m2q9", "m5d8q2"]);
   const settings = projectView.render({ project: claims, endpoints: await get("/api/endpoints"), repos: [] }, page(me)).__html;
   assert.doesNotMatch(settings, /Viktor|Langfuse|id="apps"/);
   assert.match(settings, /id="endpoints"/);
