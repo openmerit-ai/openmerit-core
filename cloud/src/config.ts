@@ -75,6 +75,8 @@ export interface Config {
   models: { caseWriter: string; judge: string; reviewer: string };
   /** How often a watched task checks the catalogue. */
   watchIntervalMs: number;
+  /** A job still queued or running this long without a job actor had its start fail, and is marked failed. */
+  orphanAfterMs: number;
   /** A task with no openmerit_recommend call for this long is idle: its watch pauses until the next call. */
   idleAfterMs: number;
   /** Null without POSTHOG_PROJECT_TOKEN: no event is sent. */
@@ -154,6 +156,7 @@ export function loadConfig(env: Env = process.env): Config {
     },
     models: { caseWriter: env.OPENMERIT_CASE_WRITER_MODEL || "anthropic/claude-sonnet-5.5", judge: env.OPENMERIT_JUDGE_MODEL || "anthropic/claude-sonnet-5.5", reviewer: env.OPENMERIT_REVIEWER_MODEL || "anthropic/claude-sonnet-5.5" },
     watchIntervalMs: number(env.OPENMERIT_WATCH_INTERVAL_MS, 24 * 60 * 60 * 1000),
+    orphanAfterMs: number(env.OPENMERIT_ORPHAN_AFTER_MS, 2 * 60 * 1000),
     idleAfterMs: number(env.OPENMERIT_IDLE_DAYS, 30) * 24 * 60 * 60 * 1000,
     posthog: env.POSTHOG_PROJECT_TOKEN ? { token: env.POSTHOG_PROJECT_TOKEN, host: (env.POSTHOG_HOST || "https://us.i.posthog.com").replace(/\/$/, "") } : null,
   };

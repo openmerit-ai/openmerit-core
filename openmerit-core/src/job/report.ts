@@ -121,7 +121,7 @@ export function reasonFor(result: JobResult, current: string): string {
       : `Keep \`${current}\`: no cheaper model passed as many cases${baseline ? ` as its ${baseline.passes}/${baseline.total}` : ""}.`;
   }
   return {
-    baseline_failed: `\`${current}\` could not be measured or passed none of the cases, so there is nothing to compare against.`,
+    baseline_failed: `\`${current}\` could not be measured, or passed too few cases to compare against; the notes say which.`,
     below_floor: `\`${current}\` passed under 80% of its own eval, so the eval cannot tell models apart and no model is recommended. Its failed cases say why.`,
     no_cases: "No case has a known correct answer, so nothing was measured.",
     no_candidates: "No allowed model is cheaper than the current one.",

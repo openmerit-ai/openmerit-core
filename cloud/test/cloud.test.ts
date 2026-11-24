@@ -745,3 +745,36 @@ test("a job whose step fails for good ends failed with a report of what it measu
     assert.equal(me.plan.usedEvals, 0, "a failed job is not charged an evaluation");
   } finally { await stop(app); await models.close(); }
 });
+
+test("a job whose start fails after the account recorded it is marked failed, and deleting its task settles one an earlier failed start left queued", async () => {
+  const models = await fakeModels();
+  const app = await startApp({ models, env: { TEST_CATALOGUE: "broken", OPENMERIT_ORPHAN_AFTER_MS: "2000" } });
+  try {
+    await subscribe(app, "org_orphan");
+    const agent = caller(app, "test:user_o:org_orphan:admin:1");
+    const rivet = createClient<Registry>({ endpoint: `http://127.0.0.1:${app.enginePort}`, token: "test-token" });
+    type Run = { id: string; taskId: string; status: string };
+    const runs = async () => (await agent.api<Run[]>("/api/runs")).body;
+
+    // A task with a job that waits for answers, which a delete does not wait for.
+    const first = await agent.tool("openmerit_recommend", { bundle: bundle(), environment: "acme/support" });
+    await waitFor(() => agent.tool("openmerit_result", { job_id: first.data.job_id }), value => value.data.status === "needs_input");
+    const [task] = (await agent.api<{ id: string }[]>("/api/tasks")).body;
+    // What a start that failed in an outage left before startJob caught it: the account's row and no job actor.
+    const orphan = "job_20261124_0rphan000001";
+    assert.equal((await rivet.account.getOrCreate(["org_orphan"]).startJob({ jobId: orphan, projectId: "default", taskId: task!.id, kind: "run", askedBy: null })).ok, true);
+    assert.equal((await runs()).find(run => run.id === orphan)?.status, "queued");
+    await new Promise(resolve => setTimeout(resolve, 2_500));
+    const deleted = await agent.api<Data>(`/api/tasks/${task!.id}`, { method: "DELETE" });
+    assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
+    assert.deepEqual(await runs(), []);
+
+    // A start that fails after the account recorded the job: on a catalogue with no models, picking a provisional model throws.
+    assert.deepEqual(await rivet.catalogue.getOrCreate(["global"]).refresh(), { version: "broken", changed: true });
+    const failed = await agent.tool("openmerit_recommend", { bundle: bundle("reply router"), environment: "acme/support" });
+    assert.equal(failed.isError, true);
+    assert.match(failed.text, /OpenMerit could not start the job \(.*\)\. Nothing was charged: try again\./);
+    assert.deepEqual((await runs()).map(run => run.status), ["failed"], "the job is not left queued");
+    assert.equal((await agent.api<{ plan: { usedEvals: number } }>("/api/me")).body.plan.usedEvals, 0, "a job that never started is not charged an evaluation");
+  } finally { await stop(app); await models.close(); }
+});

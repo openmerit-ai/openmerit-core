@@ -150,6 +150,8 @@ export function createClient(endpoints: readonly EndpointConfig[], options: { fe
 
     const price = priced(request.model);
     let expectedUsd = 0, sentBytes = 0, reserved = false, refused: BudgetRefused | null = null;
+    // The ledger could not record the reservation, such as when its store timed out: nothing was sent, and the endpoint is not at fault.
+    let unrecorded: Error | null = null;
     let settled = false;
     const settle = async (cost: Settlement) => { settled = true; await meter.ledger.settle(meter.key, { ...cost, latencyMs: Date.now() - started }); };
     // The status of the attempt kept; 0 until an attempt is answered.
@@ -189,7 +191,8 @@ export function createClient(endpoints: readonly EndpointConfig[], options: { fe
           const body = { ...(payload as Record<string, unknown>), ...(endpoint.kind === "openrouter" ? { usage: { include: true } } : {}) };
           sentBytes = Buffer.byteLength(JSON.stringify(body));
           expectedUsd = expectedCost(price, body, sentBytes).usd;
-          const reservation = await meter.ledger.reserve({ key: meter.key, usd: expectedUsd, funding: endpoint.funding, model: request.model, endpoint: endpoint.id });
+          const reservation = await meter.ledger.reserve({ key: meter.key, usd: expectedUsd, funding: endpoint.funding, model: request.model, endpoint: endpoint.id })
+            .catch((error: unknown) => { unrecorded = error instanceof Error ? error : new Error(String(error)); throw unrecorded; });
           if (!reservation.ok) { refused = new BudgetRefused(reservation.reason, reservation.neededUsd); throw refused; }
           reserved = true;
           return body;
@@ -197,6 +200,8 @@ export function createClient(endpoints: readonly EndpointConfig[], options: { fe
       }).result();
       const latencyMs = Date.now() - started;
       if (refused) throw refused;
+      // Thrown, not returned as a failed call: a failed call with no status reads as an endpoint that never answers, which ends the candidate.
+      if (unrecorded) throw unrecorded;
       if (!reserved) return failed(0, `${endpoint.id} could not be called (${redact(message.errorMessage ?? "Pi did not build the request").slice(0, 200)})`, latencyMs);
       meter.signal?.throwIfAborted();
       const reason = message.errorMessage ?? message.stopReason;

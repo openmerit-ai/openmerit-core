@@ -13,7 +13,7 @@ const isLive = (data: Data): data is JobView => "report" in data && data.report 
 const verdicts: Record<Report["status"], string> = {
   picked: "",
   keep_current: "No cheaper model passed as many cases, so the model in use now stays.",
-  baseline_failed: "The model in use now could not be measured or passed none of the cases, so there was nothing to compare against.",
+  baseline_failed: "The model in use now could not be measured, or passed too few cases to compare against. The notes say which.",
   below_floor: "The model in use now passed under 80% of its own eval, so the eval cannot tell models apart and no model is recommended. Its failed cases below say why.",
   no_cases: "No case had a known correct answer, so nothing was measured.",
   no_candidates: "No allowed model is cheaper than the one in use now.",

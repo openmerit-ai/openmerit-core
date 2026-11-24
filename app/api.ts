@@ -75,15 +75,15 @@ export interface EvalCase { id: string; input: Record<string, string>; expected?
 export interface EvalSpec { description?: string; input?: { description: string }; steps?: { description: string; tools?: string[]; access?: string; required?: boolean; after?: number[] }[]; criteria?: string[]; guardrails?: string[] }
 export type EvalSource = "openmerit" | "claude" | "chatgpt" | "examples" | "review" | "app" | "grading";
 export type TaskPart = "prompt" | "tools" | "output";
-export interface EvalAccepted { version: number; spec: EvalSpec; cases: EvalCase[]; source: EvalSource; by: string | null; at: string; runs: number }
-export interface EvalRevision { reason: "task_changed" | "revise"; changed: TaskPart[]; spec: EvalSpec; cases: EvalCase[]; output: TaskOutput | null; by: string | null; at: string }
+export interface EvalAccepted { version: number; spec: EvalSpec; cases: EvalCase[]; source: EvalSource; by: string | null; byName?: string | null; at: string; runs: number }
+export interface EvalRevision { reason: "task_changed" | "revise"; changed: TaskPart[]; spec: EvalSpec; cases: EvalCase[]; output: TaskOutput | null; by: string | null; byName?: string | null; at: string }
 export interface EvalView {
   taskId: string;
   projectId: string;
   accepted: EvalAccepted | null;
   draft: EvalRevision | null;
   // The version the coding agent last wrote to the repository, who signed in, and the agent.
-  repo: { version: number; by: string; client: string | null; at: string } | null;
+  repo: { version: number; by: string; byName?: string | null; client: string | null; at: string } | null;
 }
 // A task's output shape, from the bundle the coding agent or review sent, for editing expected answers.
 export type TaskOutput = { kind: "text" } | { kind: "json"; schema: object } | { kind: "label"; labels: string[] };

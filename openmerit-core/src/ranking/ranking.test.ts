@@ -388,6 +388,20 @@ test("a candidate the endpoint refuses on every case is unavailable; a refused b
   assert.equal(seen.length, 0);
 });
 
+test("a ledger that cannot record a reservation fails the measure for its step to retry; the candidate is not unavailable", async () => {
+  const ledger = memoryLedger();
+  let outage = true;
+  const flaky: Ledger = { ...ledger, reserve: input => (outage ? Promise.reject(new Error("request_deadline_exceeded")) : ledger.reserve(input)) };
+  const measure = createMeasure({ bundle, cases, client: client(), grader: labelMatch(), ledger: flaky, key: "job-1", concurrency: 1 });
+  const failed = await measure({ model: "good", endpoint: "openrouter" }, ids).then(() => null, (error: unknown) => error);
+  assert.ok(failed instanceof Error && !(failed instanceof CandidateUnavailable), `rejected with ${String(failed)}`);
+  assert.equal(failed.message, "request_deadline_exceeded");
+  assert.equal(seen.length, 0, "nothing was sent without a reservation");
+  outage = false;
+  const retried = await measure({ model: "good", endpoint: "openrouter" }, ids);
+  assert.deepEqual(retried.results.map(item => item.pass), [true, true, true]);
+});
+
 test("a candidate that never answers ends its measure within one call timeout, without retries, and other candidates are unaffected", async () => {
   const ledger = memoryLedger();
   const timeoutMs = 400;

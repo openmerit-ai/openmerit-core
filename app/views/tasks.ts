@@ -60,7 +60,7 @@ function repoState(task: Task, view: EvalView): Html {
   const accepted = view.accepted!.version, repo = view.repo;
   const where = html`<code>${evalDir(task.name)}</code>`;
   if (!repo) return html`<span class="pill tag">Not in the repository</span><span class="sub">Your coding agent offers to write version ${accepted} to ${where} on its next OpenMerit call.</span>`;
-  const by = html`written by ${repo.by}${repo.client ? ` with ${repo.client}` : ""} ${ago(repo.at)}`;
+  const by = html`written by ${repo.byName ?? repo.by}${repo.client ? ` with ${repo.client}` : ""} ${ago(repo.at)}`;
   if (repo.version === accepted) return html`<span class="pill good">Up to date</span><span class="sub">Version ${repo.version} is in ${where}, ${by}.</span>`;
   return html`<span class="pill warn">Behind</span><span class="sub">${where} has version ${repo.version}, ${by}. Your coding agent offers to write version ${accepted} on its next OpenMerit call.</span>`;
 }
@@ -74,7 +74,7 @@ function evalTab(detail: TaskDetail, view: EvalView, editable: boolean): Html {
   const summary = html`<section aria-labelledby="version">
       <h2 id="version">Accepted: version ${accepted.version}</h2>
       <div class="card">
-        <div class="row"><span>${SOURCES[accepted.source]}${accepted.by ? ` · ${accepted.by}` : ""}<span class="sub">${date(accepted.at)} · ${plural(accepted.cases.filter(measured).length, "case")} measured of ${accepted.cases.length}</span></span><span class="sub">${plural(accepted.runs, "run")} on this version</span></div>
+        <div class="row"><span>${SOURCES[accepted.source]}${accepted.by ? ` · ${accepted.byName ?? accepted.by}` : ""}<span class="sub">${date(accepted.at)} · ${plural(accepted.cases.filter(measured).length, "case")} measured of ${accepted.cases.length}</span></span><span class="sub">${plural(accepted.runs, "run")} on this version</span></div>
         <div class="row"><span>Repository copy ${repoState(detail, view)}</span><span></span></div>
       </div>
     </section>`;
@@ -89,7 +89,7 @@ function evalTab(detail: TaskDetail, view: EvalView, editable: boolean): Html {
   }
   const why = draft.reason === "task_changed"
     ? html`Your coding agent sent ${detail.name} with its ${listed(draft.changed)} changed${draft.at ? ` on ${date(draft.at)}` : ""}, so version ${accepted.version} may no longer fit it. Check the criteria and each expected answer; new examples the agent sent are at the end.`
-    : html`${draft.by ?? "Someone"} opened a revision on ${date(draft.at)}.`;
+    : html`${draft.byName ?? draft.by ?? "Someone"} opened a revision on ${date(draft.at)}.`;
   return html`${summary}
     <section aria-labelledby="edit">
       <h2 id="edit">Draft of version ${accepted.version + 1}</h2>
