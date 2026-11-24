@@ -22,22 +22,27 @@ const object = (properties: Record<string, Schema>): Schema => ({ type: "object"
 const ref = (usage: Usage) => `${usage.file}:${usage.line}`;
 
 /**
- * Groups the scan's model usages into tasks with one harness call. It sees at most MAP_USAGES usages: the
- * application's own code before examples and scripts, those before tests, fixtures and docs, and in each a
- * catalogue model before a model set at run time. `names` are task names to reuse when usages serve them.
+ * Groups the scan's application usages into tasks with one harness call; usages in tests, fixtures, docs
+ * and saved results make no task. It sees at most MAP_USAGES usages: the application's own code before
+ * examples and scripts, and in each a catalogue model before a model set at run time. `names` are task
+ * names to reuse when usages serve them.
  */
+/** The scan's usages outside tests, fixtures, docs and saved results, which name models but run no production task. */
+export const applicationUsages = (scan: ScanResult): Usage[] => scan.usages.filter(usage => !isSupportFile(usage.file));
+
 export async function mapTasks(input: { root: string; scan: ScanResult; harness: Harness; names?: readonly string[]; signal?: AbortSignal }): Promise<MappedTask[]> {
-  const tier = (usage: Usage) => (isSupportFile(usage.file) ? 4 : isExampleFile(usage.file) ? 2 : 0) + (usage.catalogueId ? 0 : 1);
-  const shown = input.scan.usages.map((usage, index) => ({ usage, index })).sort((a, b) => tier(a.usage) - tier(b.usage) || a.index - b.index).slice(0, MAP_USAGES).map(item => item.usage);
+  const tier = (usage: Usage) => (isExampleFile(usage.file) ? 2 : 0) + (usage.catalogueId ? 0 : 1);
+  const usages = applicationUsages(input.scan);
+  const shown = usages.map((usage, index) => ({ usage, index })).sort((a, b) => tier(a.usage) - tier(b.usage) || a.index - b.index).slice(0, MAP_USAGES).map(item => item.usage);
   const listing = shown.map(usage => `### ${usage.id} ${usage.kind}${usage.dynamic ? " (dynamic)" : ""}: ${usage.value}${usage.catalogueId ? ` = catalogue ${usage.catalogueId}` : ""} at ${ref(usage)}\n${context(input.root, usage)}`).join("\n\n");
   const names = input.names ?? [];
   const reply = await input.harness.json<{ tasks: MappedTask[] }>({
     cwd: input.root, ...(input.signal ? { signal: input.signal } : {}),
     system: "You are OpenMerit Harness running OpenMerit Scout. You map model usages in a codebase to the agents or tasks they serve. Read files only to understand them; never change anything.",
-    prompt: `Repository: ${input.root}\n\nGroup these model usages into the agents or tasks they serve (one task per distinct job a model does in production, such as "ticket classifier" or "claim summary"). A model used by two jobs belongs to two tasks. Include every model usage of the application, including dynamic ones, in a task; leave out usages in tests, fixtures, recorded responses and docs unless they configure a production task. For each task say whether the call uses tool calls, image input, or structured (JSON) output. Use short task names, and describe each task in one short sentence.${names.length ? ` This repository has saved evals for these tasks; when usages serve one of them, use its exact name: ${names.map(name => JSON.stringify(name)).join(", ")}.` : ""}\n\n${listing}`,
+    prompt: `Repository: ${input.root}\n\nGroup these model usages into the agents or tasks they serve (one task per distinct job a model does in production, such as "ticket classifier" or "claim summary"). A model used by two jobs belongs to two tasks. Include every model usage, including dynamic ones, in a task. For each task say whether the call uses tool calls, image input, or structured (JSON) output. Use short task names, and describe each task in one short sentence.${names.length ? ` This repository has saved evals for these tasks; when usages serve one of them, use its exact name: ${names.map(name => JSON.stringify(name)).join(", ")}.` : ""}\n\n${listing}`,
     schema: object({ tasks: array(object({ name: string, description: string, usageIds: array(string), usesTools: { type: "boolean" }, needsVision: { type: "boolean" }, structuredOutput: { type: "boolean" } })) }),
   });
-  const known = new Set(input.scan.usages.map(usage => usage.id));
+  const known = new Set(usages.map(usage => usage.id));
   return (reply.tasks ?? []).map(task => ({ ...task, name: String(task.name).trim().slice(0, 80), usageIds: [...new Set(task.usageIds.filter(id => known.has(id)))] })).filter(task => task.name && task.usageIds.length);
 }
 
@@ -159,17 +164,21 @@ export async function reviewTask(input: { root: string; scan: ScanResult; harnes
 }
 
 /**
- * Reviews a checkout: maps its usages to tasks (unless `tasks` are given), then writes each task's spec.
+ * Reviews a checkout: maps its application usages to tasks (unless `tasks` are given), then writes each
+ * task's spec. Usages in tests, fixtures, docs and saved results make no task, even in a given one.
  * A task whose review fails is returned in `unmapped` with the reason, and the others go on.
  */
 export async function reviewRepo(input: { root: string; scan: ScanResult; harness: Harness; tasks?: readonly MappedTask[]; signal?: AbortSignal }): Promise<{ tasks: TaskBundle[]; unmapped: { usageIds: string[]; reason: string }[] }> {
-  const tasks = input.tasks ?? await mapTasks(input);
+  const app = new Set(applicationUsages(input.scan).map(usage => usage.id));
+  const tasks = (input.tasks ?? await mapTasks(input)).map(task => ({ ...task, usageIds: task.usageIds.filter(id => app.has(id)) })).filter(task => task.usageIds.length);
   const bundles: TaskBundle[] = [], unmapped: { usageIds: string[]; reason: string }[] = [];
   for (const task of tasks) {
     try { bundles.push(await reviewTask({ ...input, task })); } catch (error) { unmapped.push({ usageIds: task.usageIds, reason: `The review of ${task.name} failed: ${(error as Error).message}` }); }
   }
   const mapped = new Set(tasks.flatMap(task => task.usageIds));
-  const left = input.scan.usages.filter(usage => usage.kind === "model" && !mapped.has(usage.id)).map(usage => usage.id);
-  if (left.length) unmapped.push({ usageIds: left, reason: "The mapping left these usages out: tests, fixtures, docs or code it did not tie to a task." });
+  const models = input.scan.usages.filter(usage => usage.kind === "model" && !mapped.has(usage.id));
+  const left = models.filter(usage => app.has(usage.id)).map(usage => usage.id), support = models.filter(usage => !app.has(usage.id)).map(usage => usage.id);
+  if (left.length) unmapped.push({ usageIds: left, reason: "The mapping did not tie these usages to a task." });
+  if (support.length) unmapped.push({ usageIds: support, reason: "In tests, fixtures, docs or saved results, which OpenMerit does not review." });
   return { tasks: bundles, unmapped };
 }

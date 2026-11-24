@@ -33,7 +33,7 @@ import type { RunStatus, Spend, State, UnitRow } from "../state/db.ts";
 import type { Repo } from "../state/paths.ts";
 import { allowedOn, baselineEndpoint, pool, type PoolModel } from "./pool.ts";
 import { context, isSupportFile, listFiles, scanRepo, type ScanResult, type Usage } from "./scan.ts";
-import { mapTasks, reviewTask, type MappedTask } from "../review/index.ts";
+import { applicationUsages, mapTasks, reviewTask, type MappedTask } from "../review/index.ts";
 import { generateEval, generatedDir, loadGeneratedEval, REPO_ITEM, runGeneratedEval, saveGeneratedEval, type GeneratedEval } from "../eval/generated.ts";
 import { caseKind } from "../ranking/types.ts";
 
@@ -184,7 +184,6 @@ type Phase = typeof PHASES[number];
 export const TOP = 3;
 /** The model that judges a generated eval's text answers and guardrails, when an endpoint may run it. */
 export const JUDGE_MODEL = "anthropic/claude-sonnet-5.5";
-const UNMAPPED_SUPPORT = "unmapped: tests, fixtures and docs";
 const NO_EVAL_NEXT = "Run `openmerit scout` again to have OpenMerit write its eval, or add an eval that follows the eval contract in OpenMerit's README (it runs once per model and reports pass or fail per item), which Scout finds and runs.";
 export const TASK_QUESTION = "Select which Agents/Tasks do you want OpenMerit to review?";
 export const CONFIGURE_QUESTION = APPROVAL_PROMPT;
@@ -323,8 +322,8 @@ function tasksForModel(data: RunState): Task[] {
   const uses = (task: Task, test: (usage: Usage | undefined) => boolean) => task.usageIds.some(id => test(usages.get(id)));
   const direct = (data.tasks ?? []).filter(task => uses(task, usage => !!usage && usage.kind === "model" && modelKey(usage) === data.model));
   const offered = [...direct, ...(data.tasks ?? []).filter(task => !direct.includes(task) && uses(task, reviewed(data)))];
-  // Usages the harness did not map come last, tests, fixtures and docs at the very end.
-  const rank = (task: Task) => (task.name === UNMAPPED_SUPPORT ? 2 : task.name.startsWith("unmapped: ") ? 1 : 0);
+  // Usages the harness did not map come last.
+  const rank = (task: Task) => (task.name.startsWith("unmapped: ") ? 1 : 0);
   return offered.map((task, index) => ({ task, index })).sort((a, b) => rank(a.task) - rank(b.task) || a.index - b.index).map(item => item.task);
 }
 function repoConfig(ctx: Context): RepoConfig { return readRepoConfig(ctx.repo.root); }
@@ -357,6 +356,7 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
     const models = scan.usages.filter(usage => usage.kind === "model");
     ctx.state.event(runId, "scan", `Scanned ${scan.files} files: ${models.length} model usages (${models.filter(usage => usage.dynamic).length} dynamic), ${scan.usages.length - models.length} endpoint usages.`);
     if (!models.length) throw new Error("No model usages found in this repository. Scout looks for model IDs in code and configuration that Git does not ignore.");
+    if (models.every(usage => isSupportFile(usage.file))) throw new Error(`Every model usage in this repository (${models.length}) is in tests, fixtures, docs or saved results, and Scout reviews only the application's code. Scout looks for model IDs in code and configuration that Git does not ignore.`);
     return "map";
   },
 
@@ -369,9 +369,9 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
     const harness = await getHarness();
     // Saved evals are keyed by task name: ask for the same names again so an approved eval is reused, not found and paid for again.
     const tasks: Task[] = await mapTasks({ root: ctx.repo.root, scan, harness, names: Object.keys(repoConfig(ctx).evals ?? {}), ...(ctx.signal ? { signal: ctx.signal } : {}) });
-    // What the harness left out stays selectable: per file in application code, in one task for tests, fixtures and docs.
-    for (const usage of scan.usages.filter(item => item.kind === "model" && !tasks.some(task => task.usageIds.includes(item.id)))) {
-      const name = isSupportFile(usage.file) ? UNMAPPED_SUPPORT : `unmapped: ${usage.file}`;
+    // What the harness left out of the application's code stays selectable, per file; tests, fixtures, docs and saved results make no task.
+    for (const usage of applicationUsages(scan).filter(item => item.kind === "model" && !tasks.some(task => task.usageIds.includes(item.id)))) {
+      const name = `unmapped: ${usage.file}`;
       const existing = tasks.find(task => task.name === name);
       if (existing) existing.usageIds.push(usage.id);
       else tasks.push({ name, description: "Model usage the harness did not map to a task", usageIds: [usage.id], usesTools: false, needsVision: false, structuredOutput: false });
@@ -392,6 +392,7 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
       if (!match) throw new NeedsInput([modelQuestion(data)], "needs_input", [`${value} is not one of the models found in this repository.`]);
       data.model = match.catalogueId ?? `?${match.value}`;
       if (!match.catalogueId) throw new Error(`${match.value} is not in the bundled catalogue (version ${ctx.catalogue.version}), so Scout cannot price or place it. Update openmerit, or choose a catalogue model.`);
+      if (!tasksForModel(data).length) throw new NeedsInput([modelQuestion(data)], "needs_input", [`No task of the application uses ${data.model}: it is only in tests, fixtures, docs or saved results, which Scout does not review. Choose another model.`]);
       return "tasks";
     }
     if (!data.scan!.models.some(item => item.catalogueId)) throw new Error(`None of the models found in this repository is in the bundled catalogue (version ${ctx.catalogue.version}), so Scout cannot price or place them. Update openmerit.`);
@@ -409,6 +410,7 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
       const name = rest.join("=").trim();
       const usage = usageById(data).get(id.trim());
       if (!usage || !name) throw new NeedsInput([tasksQuestion(data)], "needs_input", [`Write a correction as <usage id>=<task name>, not "${item}".`]);
+      if (isSupportFile(usage.file)) throw new NeedsInput([tasksQuestion(data)], "needs_input", [`${usage.id} is in ${usage.file}, a test, fixture, doc or saved result, and Scout reviews only the application's code.`]);
       for (const task of data.tasks!) task.usageIds = task.usageIds.filter(other => other !== usage.id);
       const target = data.tasks!.find(task => task.name === name);
       if (target) target.usageIds.push(usage.id);

@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Only the application's model calls become tasks — unreleased, 24 November 2026
+
+Reviewed the homepage against Scout no longer mapping, offering or reviewing model usages in tests, fixtures, docs and saved results, which it still counts under their model. `site/index.html` has no FAQ block and makes no claim about which files Scout scans or which usages become tasks. No homepage copy change is needed.
+
 ## Scout writes the eval from a review of the code — unreleased, 24 November 2026
 
 Reviewed the homepage against Scout always writing an eval from its review of the code (a task spec with criteria and guardrails, cases with mocked tool results and a fixed judge), running the repository's own eval beside it when there is one, and saving an approved Eval in `.openmerit/evals/<task>/`. This reverses the README's "never invents an eval". `site/index.html` has no FAQ block. Its only mention of evals is that picking a model takes more than an eval, which still holds, and it makes no claim that OpenMerit needs or uses only the customer's own evals. No homepage copy change is needed. The openmerit-core README's Scout steps, data handling table and opening line, and the root README's package summary, now describe the written eval.
