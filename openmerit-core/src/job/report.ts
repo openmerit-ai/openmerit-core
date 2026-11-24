@@ -1,9 +1,9 @@
 // A job's result and its report: scores and picks, never raw model outputs. The same result goes to
 // the coding agent through openmerit_result, to /api/runs/:id as JSON, and to /api/r/:id.md as Markdown.
-import type { CatalogueModel, ResolvedGuardrails } from "./engine.ts";
-import { agentBundle } from "../../openmerit-core/src/connectors/agent-bundle.ts";
+import type { CatalogueModel, ResolvedGuardrails } from "../engine/index.ts";
+import { agentBundle } from "../connectors/agent-bundle.ts";
 import { OPENROUTER, type Option, type Provisional } from "./pool.ts";
-import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
+import type { TaskBundle } from "../ranking/index.ts";
 
 export interface MeasuredModel {
   model: string;

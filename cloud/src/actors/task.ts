@@ -5,7 +5,7 @@
 // Retiring disarms the schedule; the next openmerit_recommend call arms it again.
 import { actor } from "rivetkit";
 import type { Case, TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
-import type { JobResult } from "../report.ts";
+import type { JobResult } from "../../../openmerit-core/src/job/report.ts";
 import { services } from "../services.ts";
 import type { Registry } from "../registry.ts";
 import { startJob } from "../start.ts";

@@ -8,7 +8,7 @@ import type { PlanUpdate } from "../billing.ts";
 import { GUARDRAIL_KINDS, LEVELS, resolveGuardrails, settledUsd, type Funding, type GuardrailKey, type Catalogue, type Guardrails, type Level, type ReserveResult, type ResolvedGuardrails, type Settlement } from "../engine.ts";
 import { checkRepo, parseRepoUrl, reviewRepository, tokenProblem, type RepoReview } from "../github.ts";
 import { decryptKey, encryptKey, endpointUrlProblem } from "../keys.ts";
-import { OPENROUTER, type EndpointInfo } from "../pool.ts";
+import { OPENROUTER, type EndpointInfo } from "../../../openmerit-core/src/job/pool.ts";
 import type { Case, EndpointConfig, EndpointKind, TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
 import type { Registry } from "../registry.ts";
 import { services } from "../services.ts";
@@ -20,7 +20,9 @@ type Row = Record<string, unknown>;
  * The plan, members, spend caps and the ledger stay the organization's. Every account has the
  * default project, which holds what the account had before projects and can be renamed but not deleted.
  */
-export const DEFAULT_PROJECT = "default";
+// The project, eval and budget names the task job (openmerit-core/src/job/workflow.ts) shares with this actor.
+export { DEFAULT_PROJECT, JOB_BUDGET, specOf, type EvalBar, type EvalSource, type EvalSpec } from "../../../openmerit-core/src/job/workflow.ts";
+import { DEFAULT_PROJECT, JOB_BUDGET, specOf, type EvalBar, type EvalSource, type EvalSpec } from "../../../openmerit-core/src/job/workflow.ts";
 export const DEFAULT_PROJECT_NAME = "Default project";
 export interface Project { id: string; name: string; createdAt: string; tasks: number; repos: string[]; endpoints: number }
 
@@ -90,23 +92,9 @@ export interface TaskRow { id: string; projectId: string; environment: string; a
 /** What a finished job's report found, so a list of runs can say it without loading each report. */
 export interface RunResult { status: string; task: string | null; model: string | null; from: string | null; savingPerCallUsd: number | null }
 /** askedBy is the MCP client's name (clientInfo.name) for a run a coding agent started; null for a watch run or an unnamed client. */
-/** The end of a ledger refusal's reason when the job's own budget refused it, which raising the task's budget fixes. */
-export const JOB_BUDGET = "budget for this job";
 
 export interface JobRow { id: string; projectId: string; taskId: string; kind: string; status: string; startedAt: string; finishedAt: string | null; askedBy: string | null; evalVersion: number | null; result: RunResult | null }
 
-/**
- * The part of a task's spec its eval owns, which the app edits: what the judge checks each case on.
- * A job runs the bundle the coding agent sent with these fields replaced by the eval's.
- */
-export type EvalSpec = Pick<TaskBundle, "description" | "input" | "steps" | "criteria" | "guardrails">;
-/**
- * Who wrote the accepted eval: OpenMerit's case writer, a member's subscription or the coding agent's examples alone (each by a first run),
- * a repository review, a person in the app, or a person grading a run's answers, after OpenMerit wrote it again from any grades that disagreed.
- */
-export type EvalSource = "openmerit" | "claude" | "chatgpt" | "examples" | "review" | "app" | "grading";
-/** What a model must meet: the current model's score, or the eval's checks once a person marked the current model's own answers wrong. */
-export type EvalBar = "current" | "criteria";
 /** What about a task its eval was accepted for; a bundle that differs in one reopens the eval. */
 export type TaskPart = "prompt" | "tools" | "output";
 /**
@@ -131,7 +119,6 @@ export const shapeOf = (bundle: TaskBundle): Record<TaskPart, string> => ({
   prompt: canonical(bundle.prompt), tools: canonical((bundle.tools ?? []).map(({ mockResult: _mock, ...tool }) => tool)), output: canonical(bundle.output),
 });
 const PARTS: TaskPart[] = ["prompt", "tools", "output"];
-export const specOf = (bundle: TaskBundle): EvalSpec => Object.fromEntries((["description", "input", "steps", "criteria", "guardrails"] as const).filter(key => bundle[key] !== undefined).map(key => [key, bundle[key]])) as EvalSpec;
 export interface GuardrailSetting { key: string; value: unknown; kind: "constraint" | "default" }
 /**
  * A GitHub repository the account added. tokenLast4 is null for a public repository added by its URL

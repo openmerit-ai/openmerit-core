@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { plannedSteps } from "../src/actors/job.ts";
-import { buildPool, type EndpointInfo } from "../src/pool.ts";
+import { buildPool, type EndpointInfo } from "../../openmerit-core/src/job/pool.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { bundle, catalogue } from "./helpers.ts";
 

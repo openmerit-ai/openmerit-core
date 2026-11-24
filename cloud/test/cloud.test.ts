@@ -9,7 +9,7 @@ import { signStripePayload } from "../src/billing.ts";
 import type { Registry } from "../src/registry.ts";
 import { watchState } from "../src/actors/account.ts";
 import { evaluateTask } from "../src/engine.ts";
-import { buildPool } from "../src/pool.ts";
+import { buildPool } from "../../openmerit-core/src/job/pool.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { bundle, caller, costOf, crash, fakeCapture, fakeModels, startApp, stop, subscribe, untilDone, waitFor, WEAK_BELOW, WRITTEN, TICKETS, catalogue, type App, type FakeModels } from "./helpers.ts";
 

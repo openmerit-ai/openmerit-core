@@ -6,12 +6,12 @@ import { capture } from "./analytics.ts";
 import { NO_ORGANIZATION, type Auth, type AuthResult, type Identity } from "./auth.ts";
 import type { Config } from "./config.ts";
 import type { Answers, JobView } from "./actors/job.ts";
-import { explain, nearMissLine, reasonFor, type Fix, type JobResult } from "./report.ts";
+import { explain, nearMissLine, reasonFor, type Fix, type JobResult } from "../../openmerit-core/src/job/report.ts";
 import type { AppClient } from "./registry.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { bundleProblem, DEFAULT_ENVIRONMENT, rerunJob, runTask, startJob } from "./start.ts";
 import { evalDir, type Decision } from "./actors/account.ts";
-import { OPENROUTER } from "./pool.ts";
+import { OPENROUTER } from "../../openmerit-core/src/job/pool.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const VERSION = "0.1.0";

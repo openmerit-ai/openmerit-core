@@ -37,6 +37,7 @@ COPY openmerit-core/src/connectors/agent-bundle.ts openmerit-core/src/connectors
 COPY openmerit-core/src/scout/scan.ts openmerit-core/src/scout/
 # The repository review (src/github.ts): its prompt, and the harness that reads a checkout with Pi's read-only tools.
 COPY openmerit-core/src/review openmerit-core/src/review
+COPY openmerit-core/src/job openmerit-core/src/job
 COPY openmerit-core/src/harness openmerit-core/src/harness
 COPY openmerit-core/src/state/config.ts openmerit-core/src/state/paths.ts openmerit-core/src/state/
 # openmerit-core's sources import their packages (ajv) from the nearest node_modules above them.
