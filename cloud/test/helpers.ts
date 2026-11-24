@@ -3,7 +3,7 @@
 // credential reaches the child and no paid model is called.
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
-import { createServer, type Server } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,7 +31,30 @@ export function costOf(model: string): number {
 /** One call the fake answered. `ticket` is the ticket it classified, or `writer:<n>` for a request to write n cases. */
 /** `cost`, when set, overrides what a call to that model reports it cost. */
 /** `keyStatus`, when set, is what GET /key answers instead of 200, such as 401 for an expired key. */
-export interface FakeModels { url: string; calls: { model: string; ticket: string; auth: string }[]; onCall: ((index: number) => Promise<void>) | null; cost: ((model: string) => number | undefined) | null; keyStatus?: number; close: () => Promise<void> }
+/**
+ * Offered tools, the fake acts as an agent: it looks the ticket up once, then answers. A model `misuse`
+ * picks calls a tool the request does not offer instead, then answers the same.
+ */
+export interface FakeModels { url: string; calls: { model: string; ticket: string; auth: string }[]; onCall: ((index: number) => Promise<void>) | null; cost: ((model: string) => number | undefined) | null; keyStatus?: number; misuse?: (model: string) => boolean; close: () => Promise<void> }
+
+/**
+ * An OpenAI chat completions answer with OpenRouter's usage and cost: streamed as server-sent events
+ * when the request asks, as openmerit/ranking's Pi client does, else one JSON body.
+ */
+export function chatAnswer(res: ServerResponse, request: { stream?: boolean }, answer: string | { tool: string; args: object }, usage: Record<string, number>): void {
+  const billed = { ...usage, is_byok: false };
+  const message = typeof answer === "string" ? { role: "assistant", content: answer }
+    : { role: "assistant", content: null, tool_calls: [{ index: 0, id: `call_${Date.now()}`, type: "function", function: { name: answer.tool, arguments: JSON.stringify(answer.args) } }] };
+  const finish = typeof answer === "string" ? "stop" : "tool_calls";
+  if (!request.stream) {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ message, finish_reason: finish }], usage: billed }));
+    return;
+  }
+  res.writeHead(200, { "content-type": "text/event-stream" });
+  for (const chunk of [{ choices: [{ index: 0, delta: message, finish_reason: finish }] }, { choices: [], usage: billed }]) res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  res.end("data: [DONE]\n\n");
+}
 
 export async function fakeModels(): Promise<FakeModels> {
   const eci = new Map(catalogue.models.map(model => [model.id, model.eci]));
@@ -42,7 +65,7 @@ export async function fakeModels(): Promise<FakeModels> {
     req.on("end", async () => {
       // OpenMerit checks its model key with OpenRouter's free GET /key before a job starts.
       if (req.url === "/key") { res.writeHead(fake.keyStatus ?? 200, { "content-type": "application/json" }); res.end(JSON.stringify(fake.keyStatus ? { error: { code: fake.keyStatus, message: "API key expired" } } : { data: { label: "test" } })); return; }
-      const parsed = JSON.parse(body) as { model: string; messages: { role: string; content: string }[] };
+      const parsed = JSON.parse(body) as { model: string; stream?: boolean; tools?: unknown[]; messages: { role: string; content: string }[] };
       const text = parsed.messages.filter(message => message.role === "user").map(message => message.content).join("\n");
       // openmerit/ranking's case writer: the same two cases each time, so its second request adds nothing new.
       const writer = parsed.messages[0]?.role === "system" && parsed.messages[0].content.startsWith("You write test cases");
@@ -52,8 +75,11 @@ export async function fakeModels(): Promise<FakeModels> {
       const weak = (eci.get(parsed.model) ?? 200) < WEAK_BELOW;
       const answer = writer ? JSON.stringify({ cases: Object.entries(WRITTEN).map(([written, queue]) => ({ input: { ticket: written }, expected: queue })) })
         : weak ? "other" : QUEUES[ticket] ?? "other";
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: answer } }], usage: { prompt_tokens: 50, completion_tokens: 2, cost: fake.cost?.(parsed.model) ?? costOf(parsed.model) } }));
+      const usage = { prompt_tokens: 50, completion_tokens: 2, cost: fake.cost?.(parsed.model) ?? costOf(parsed.model) };
+      if (parsed.tools?.length && !parsed.messages.some(message => message.role === "tool")) {
+        return chatAnswer(res, parsed, fake.misuse?.(parsed.model) ? { tool: "close_ticket", args: { ticket } } : { tool: "lookup_ticket", args: { ticket } }, usage);
+      }
+      chatAnswer(res, parsed, answer, usage);
     });
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
