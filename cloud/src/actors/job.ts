@@ -14,7 +14,7 @@
 import { createHash, randomInt } from "node:crypto";
 import { CriticalError, Loop, StepExhaustedError, workflow } from "@rivet-dev/workflows";
 import { queue } from "rivetkit";
-import { applyLabelCheck, BudgetRefused, caseKind, completeWith, createClient, createMeasure, flow, graderFor, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
+import { applyLabelCheck, BudgetRefused, caseKind, checksBasedOn, completeWith, createClient, createMeasure, flow, graderFor, invalidCases, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../../../openmerit-core/src/ranking/index.ts";
 import { approvalQuestion, basedOn, mergeEvidence, strongest } from "../engine.ts";
 import { baselineResult, byKind, floorNote, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, FINALISTS, modelResult, newProgress, redact, SAMPLE_SIZE, score, taskResult, type AgentRun, type CatalogueModel, type Ledger, type ModelResult, type ResolvedGuardrails } from "../engine.ts";
 import { agentBundle, caseEvidence } from "../../../openmerit-core/src/connectors/agent-bundle.ts";
@@ -299,7 +299,9 @@ export const job = workflow({
           return Loop.continue(next);
         },
       });
-      const usable = cases.filter(labeled);
+      // A case with no mocked result for one of the task's tools is the eval's defect, so no model runs it.
+      const invalid = invalidCases(bundle, cases.filter(labeled));
+      const usable = cases.filter(item => labeled(item) && !invalid.some(bad => bad.caseId === item.id));
       const caseIds = usable.map(item => item.id);
       const kinds = Object.fromEntries(usable.map(item => [item.id, caseKind(item)]));
       /** The current model's failed cases and why, from its recorded measure steps, so a replay rebuilds the same. */
@@ -324,6 +326,11 @@ export const job = workflow({
           const judgeModel = index.find(services().config.models.judge);
           if (judgeModel) priced[services().config.models.judge] = judgeModel;
           s.state.phase = "ranking"; s.state.notices.push(...built.notices); s.state.updatedAt = now();
+          if (invalid.length) {
+            const notice = `${invalid.length === 1 ? "Case" : "Cases"} left out for every model, because the eval cannot run ${invalid.length === 1 ? "it" : "them"}: ${invalid.map(item => `${item.caseId} (${item.reason})`).join("; ")}`;
+            s.state.notices.push(notice);
+            s.state.fixes = [...(s.state.fixes ?? []), { kind: "ask_agent", notice, prompt: `OpenMerit left out cases of the task "${bundle.task}" because the eval has no mocked result for a tool they may call. Give each of the task bundle's tools a mockResult, a realistic answer taken from the code or its tests, then call openmerit_recommend again.` }];
+          }
           const region = guardrails.effective.region ? regionNotice(guardrails.effective.region) : null;
           if (region && built.notices.includes(region)) s.state.fixes = [...(s.state.fixes ?? []), { kind: "open", notice: region, label: "Add an endpoint", path: "/connections/" }];
           s.state.progress.planned = plannedSteps(built.ranked.length, built.unplaced.length, Math.max(1, guardrails.effective.repeats ?? DEFAULT_REPEATS));
@@ -355,7 +362,7 @@ export const job = workflow({
       const baselineOf = () => (pool.baseline && progress.baseline.length ? measuredModel(baselineResult(score(progress.baseline), describe(pool.baseline))) : null);
       const failedOf = () => [...failedCases.values()].slice(0, 20);
       partial = (status, notices, fixes, spent) => ({
-        failedCases: failedOf(), baselineByKind: byKind(progress.baseline, kinds),
+        failedCases: failedOf(), baselineByKind: byKind(progress.baseline, kinds), invalidCases: invalid,
         status, pick: null, top: [], nearMisses: [], baseline: baselineOf(), candidates: listed([...progress.tried.values()].map(item => modelResult(item, describe(item.option), score(progress.baseline), rules))),
         search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: [], finalists: [], challengers: [], shortfall: null }, agentEval: null, edit: { edits: [], instructions: null },
         spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices, fixes,
@@ -562,13 +569,13 @@ export const job = workflow({
             const index = catalogueIndex(await client.catalogue.getOrCreate(["global"]).get());
             const jobStatus: JobResult["status"] = chosen ? "picked" : agentEval && cheaper.length ? "agent_eval_failed" : !pool.ranked.length && !pool.unplaced.length ? "no_candidates" : "keep_current";
             const report: JobResult = {
-              failedCases: failedOf(), baselineByKind: evaluated.baseline.byKind,
+              failedCases: failedOf(), baselineByKind: evaluated.baseline.byKind, invalidCases: invalid,
               status: jobStatus, top, nearMisses, baseline, candidates,
               pick: chosen ? { model: chosen.model, endpoint: chosen.endpoint, endpointModel: chosen.endpointModel, passes: chosen.passes, total: chosen.total, costPerCallUsd: chosen.costPerCallUsd, savingPerCallUsd: baseline.costPerCallUsd !== null && chosen.costPerCallUsd !== null ? baseline.costPerCallUsd - chosen.costPerCallUsd : null } : null,
               search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: result.samples, finalists: result.finalists, challengers: challenging.map(item => item.model), shortfall: result.searchShortfall },
               agentEval, edit: chosen ? proposeEdit(bundle, optionOf(chosen), pool.baseline!.endpoint, index.find) : { edits: [], instructions: null },
               // The quality rule over the bundle's evidence, and the approval question both hosts ask.
-              basedOn: basedOn(strongest(mergeEvidence(bundle.task, bundle.current.model, [agentBundle({ bundle, baselineEndpoint: pool.baseline!.endpoint, find: index.find }).evidence(), caseEvidence(bundle, usable)]))),
+              basedOn: [...basedOn(strongest(mergeEvidence(bundle.task, bundle.current.model, [agentBundle({ bundle, baselineEndpoint: pool.baseline!.endpoint, find: index.find }).evidence(), caseEvidence(bundle, usable)]))), ...[checksBasedOn(bundle)].filter((line): line is string => line !== null)],
               approval: chosen ? approvalQuestion(bundle.task, bundle.current.model, chosen) : null,
               spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices: [...s.state.notices, ...notices], fixes: [...(s.state.fixes ?? []), ...fixes],
               reportUrl: `${services().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts,

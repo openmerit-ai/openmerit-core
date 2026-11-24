@@ -7,6 +7,7 @@ import { Ajv, type ValidateFunction } from "ajv";
 import type { ModelClient } from "./clients.ts";
 import { redact, type Ledger } from "../engine/index.ts";
 import type { Message as PiMessage } from "@earendil-works/pi-ai";
+import type { RefusedCall } from "./runner.ts";
 import type { Case, TaskBundle, ToolCall } from "./types.ts";
 
 export interface GradeInput {
@@ -18,6 +19,8 @@ export interface GradeInput {
   toolCalls?: readonly ToolCall[];
   /** The case's Pi transcript: the prompt, then each answer and tool result in order. */
   transcript?: readonly PiMessage[];
+  /** The tool calls the runner refused, in order. */
+  refused?: readonly RefusedCall[];
   ledger: Ledger;
   /** The case's idempotency key; a grader that calls a model meters under keys below it. */
   key: string;
@@ -260,16 +263,89 @@ export function parity(options: { text?: Grader } = {}): Grader {
   };
 }
 
+/** One step check (S1…): a spec step that must happen, or that must come after earlier steps. Numbers are 1-based, as in `after`. */
+export interface StepCheck { id: string; step: number; description: string; tools: string[]; required: boolean; after: number[] }
+
 /**
- * An agent's whole flow: passes when `output` passes the answer and every tool call in the transcript
- * ran, so none named a tool the task does not offer, had arguments its schema refuses, or reached a
- * tool with no mocked result. A model that recovers from a refused call still fails the flow.
+ * The step checks a bundle's spec asks for: one per step that is `required` or has `after`, named S
+ * and its step number. A step that lists no tools cannot be seen in a transcript, so it is returned
+ * in `unchecked` instead, and never fails a case.
+ */
+export function stepChecksFor(bundle: TaskBundle): { checks: StepCheck[]; unchecked: StepCheck[] } {
+  const all = (bundle.steps ?? []).flatMap((step, index): StepCheck[] => {
+    const after = (step.after ?? []).filter(number => Number.isInteger(number) && number >= 1 && number <= index);
+    return step.required || after.length ? [{ id: `S${index + 1}`, step: index + 1, description: step.description, tools: step.tools ?? [], required: !!step.required, after }] : [];
+  });
+  return { checks: all.filter(check => check.tools.length), unchecked: all.filter(check => !check.tools.length) };
+}
+
+/** The checks a case is graded on, for the report's "Based on": C… and G… by the judge, S… on each case's tool calls. */
+export function checksBasedOn(bundle: TaskBundle): string | null {
+  const ids = (prefix: string, count: number) => (count === 1 ? `${prefix}1` : `${prefix}1–${prefix}${count}`);
+  const { checks, unchecked } = stepChecksFor(bundle);
+  const parts = [
+    ...(bundle.criteria?.length ? [`${ids("C", bundle.criteria.length)} (criteria)`] : []),
+    ...(bundle.guardrails?.length ? [`${ids("G", bundle.guardrails.length)} (guardrails)`] : []),
+    ...(checks.length ? [`${checks.map(check => check.id).join(", ")} (the spec's steps, on each case's tool calls)`] : []),
+  ];
+  const note = unchecked.length ? ` ${unchecked.map(check => check.id).join(", ")} ${unchecked.length === 1 ? "lists" : "list"} no tools, so ${unchecked.length === 1 ? "it is" : "they are"} not checked.` : "";
+  return parts.length || note ? `Checks: ${parts.join("; ") || "none"}.${note}` : null;
+}
+
+/**
+ * The first failed step check on the tool calls that answered, as "S2: …"; null when all pass. A step
+ * happens at its first answered call to one of its tools. A step with `after` must have a call after
+ * each earlier step it names has happened; an earlier step that lists no tools cannot be ordered.
+ */
+function failedStep(bundle: TaskBundle, checks: readonly StepCheck[], answered: readonly ToolCall[]): string | null {
+  const steps = bundle.steps ?? [];
+  const toolsOf = (number: number) => steps[number - 1]?.tools ?? [];
+  const firstOf = (number: number) => answered.findIndex(call => toolsOf(number).includes(call.name));
+  for (const check of checks) {
+    const calls = answered.flatMap((call, index) => (check.tools.includes(call.name) ? [index] : []));
+    if (!calls.length) {
+      if (check.required) return `${check.id}: it never called ${check.tools.join(" or ")} (${check.description}).`;
+      continue;
+    }
+    for (const number of check.after) {
+      if (!toolsOf(number).length) continue;
+      const before = firstOf(number);
+      if (before < 0 || before > calls.at(-1)!) return `${check.id}: it called ${check.tools.join(" or ")} before step ${number} (${steps[number - 1]!.description}).`;
+    }
+  }
+  return null;
+}
+
+/**
+ * An agent's whole flow, from the case's transcript:
+ * - a call to a tool the task does not offer fails the case: the model invented a tool;
+ * - a call whose arguments the tool's schema refuses, or that no `when` of its mock matches, does not
+ *   fail it alone: the error went back as the tool's result, as a real API's would, and the case can
+ *   still pass if the model then calls that tool again and it answers. One it never fixed fails it;
+ * - every step check (S…) from the spec must pass;
+ * then `output` grades the answer. A call to a tool with no mocked result is the eval's defect, not
+ * the model's: `invalidCases` leaves such cases out before anything runs.
  */
 export function flow(output: Grader): Grader {
   return {
     async grade(input) {
-      const refused = (input.transcript ?? []).filter(item => item.role === "toolResult" && item.isError).length;
-      return refused ? free(false) : output.grade(input);
+      const refused = input.refused ?? [];
+      const invented = refused.find(call => call.kind === "unknown_tool");
+      if (invented) return free(false, `It called ${invented.tool}, a tool the task does not offer.`);
+      const calls = input.toolCalls ?? [], ids = new Set(refused.map(call => call.id));
+      const answered = calls.filter(call => !ids.has(call.id));
+      // A refused call is fixed by a later call to the same tool that answered.
+      const unfixed = refused.find(call => {
+        const at = calls.findIndex(item => item.id === call.id);
+        return !calls.some((later, index) => index > at && later.name === call.tool && !ids.has(later.id));
+      });
+      if (unfixed) {
+        return free(false, unfixed.kind === "invalid_arguments" ? `Its call to ${unfixed.tool} was refused for its arguments, and it never called it again correctly.`
+          : unfixed.kind === "no_match" ? `Its call to ${unfixed.tool} found nothing for its arguments, and it never called it again with ones that did.` : `It called ${unfixed.tool}, which the eval has no mocked result for.`);
+      }
+      const step = failedStep(input.bundle, stepChecksFor(input.bundle).checks, answered);
+      if (step) return free(false, step);
+      return output.grade(input);
     },
   };
 }

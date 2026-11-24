@@ -47,6 +47,8 @@ export interface JobResult {
   status: "picked" | "keep_current" | "baseline_failed" | "below_floor" | "no_cases" | "no_candidates" | "agent_eval_failed" | "stopped" | "failed";
   /** Up to 20 cases the current model failed, each with the grader's one redacted sentence. Absent from reports saved before it was added. */
   failedCases?: { caseId: string; kind: string; reason: string }[];
+  /** Cases no model was measured on, because the eval has no mocked result for one of the task's tools; the case writer fixes them. Absent from older reports. */
+  invalidCases?: { caseId: string; reason: string }[];
   /** The current model's passes per kind of case: typical, edge, guardrail, example. Absent from older reports. */
   baselineByKind?: { kind: string; passes: number; total: number }[];
   pick: { model: string; endpoint: string; endpointModel: string; passes: number; total: number; costPerCallUsd: number | null; savingPerCallUsd: number | null } | null;
@@ -130,6 +132,7 @@ export function renderMarkdown(input: { jobId: string; bundle: TaskBundle; resul
   if (result.edit.edits.length) lines.push("", "Edits:", ...result.edit.edits.map(edit => `- \`${edit.file}:${edit.line}\`: \`${edit.before}\` → \`${edit.after}\``));
   if (result.edit.instructions) lines.push("", result.edit.instructions);
   if (result.failedCases?.length) lines.push("", `## Cases \`${bundle.current.model}\` failed`, "", ...result.failedCases.map(item => `- \`${item.caseId}\` (${item.kind}): ${item.reason}`));
+  if (result.invalidCases?.length) lines.push("", "## Cases left out", "", "The eval cannot run these cases for any model, so they count in no pass rate:", "", ...result.invalidCases.map(item => `- \`${item.caseId}\`: ${item.reason}`));
   lines.push("", "## Models", "", "| Model | Endpoint | Paid by | Stage | Passed | Cost per call | Latency | Qualified |", "| --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const item of [result.baseline, ...result.candidates].filter((value): value is MeasuredModel => value !== null)) {
     lines.push(`| \`${item.model}\`${item.inCatalogue ? "" : " (measured only)"} | ${item.endpoint} | ${item.funding === "openmerit" ? "OpenMerit" : "you"} | ${item.stage} | ${item.status === "unavailable" ? "unavailable" : rate(item.passes, item.total)} | ${usd(item.costPerCallUsd)}${item.costIsEstimate ? " (estimate)" : ""} | ${item.latencyMs === null ? "–" : `${item.latencyMs} ms`} | ${item.role === "baseline" ? "current" : item.qualified ? "yes" : "no"} |`);

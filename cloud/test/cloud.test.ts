@@ -83,6 +83,9 @@ describe("the cloud app", () => {
     const secretInBundle = await agent.tool("openmerit_recommend", { bundle: { ...bundle(), tools: [{ name: "lookup", parameters: { type: "object" }, mockResult: { api_key: "x" } }] } });
     assert.equal(secretInBundle.isError, true);
     assert.match(secretInBundle.text, /must not contain keys/);
+    const laterStep = await agent.tool("openmerit_recommend", { bundle: { ...bundle(), steps: [{ description: "Answer", after: [1] }] } });
+    assert.equal(laterStep.isError, true, "a step can come only after earlier steps");
+    assert.match(laterStep.text, /after to the 1-based numbers of earlier steps/);
     assert.equal(models.calls.length, 0);
   });
 
@@ -468,13 +471,17 @@ test("an agent's pick is checked on its whole transcript: a cheaper model that c
     const current = bundle().current.model;
     models.misuse = model => model !== current;
     const tools = [{ name: "lookup_ticket", description: "Finds the customer's plan", parameters: { type: "object", properties: { ticket: { type: "string" } }, required: ["ticket"] }, mockResult: { plan: "pro" } }];
-    const started = await agent.tool("openmerit_recommend", { bundle: { ...bundle("agent classifier", false), tools }, environment: "acme/agent" });
+    // Looking the ticket up is a required step, which the current model's flow takes.
+    const steps = [{ description: "Look the ticket up", tools: ["lookup_ticket"], access: "read", required: true }, { description: "Pick the queue", after: [1] }];
+    const started = await agent.tool("openmerit_recommend", { bundle: { ...bundle("agent classifier", false), tools, steps }, environment: "acme/agent" });
     const jobId = started.data.job_id as string;
     await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => value.data.status === "needs_input");
     await agent.tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
     const done = await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 180_000);
     assert.equal(done.data.status, "done", done.text);
-    const result = (await agent.api<Result & { agentEval: { status: string; passed: boolean; baseline: { passes: number; total: number }; tried: { passed: boolean }[] } }>(`/api/runs/${jobId}`)).body;
+    const result = (await agent.api<Result & { basedOn: string[]; agentEval: { status: string; passed: boolean; baseline: { passes: number; total: number }; tried: { passed: boolean }[] } }>(`/api/runs/${jobId}`)).body;
+    assert.ok(result.basedOn.includes("Checks: S1 (the spec's steps, on each case's tool calls). S2 lists no tools, so it is not checked."), JSON.stringify(result.basedOn));
+    assert.match(done.text, /Based on: .*S1 \(the spec's steps/);
     assert.equal(result.status, "agent_eval_failed", "the task's eval passed cheaper models; their flows did not");
     assert.equal(result.agentEval.status, "checked");
     assert.equal(result.agentEval.baseline.passes, result.agentEval.baseline.total, "the current model's flow passes on every case");

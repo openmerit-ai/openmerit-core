@@ -34,6 +34,8 @@ export function bundleProblem(value: unknown): string | null {
   if (value.examples !== undefined && (!Array.isArray(value.examples) || !value.examples.every(example => object(example) && object(example.input) && Object.values(example.input).every(item => typeof item === "string")))) return "each example needs an input object of strings";
   for (const field of ["criteria", "guardrails"] as const) if (value[field] !== undefined && (!Array.isArray(value[field]) || !(value[field] as unknown[]).every(item => typeof item === "string" && item.trim()))) return `bundle.${field} must list statements as strings`;
   if (value.steps !== undefined && (!Array.isArray(value.steps) || !value.steps.every(item => object(item) && typeof item.description === "string"))) return "each of bundle.steps needs a description";
+  if (Array.isArray(value.steps) && !value.steps.every((item, index) => object(item) && (item.required === undefined || typeof item.required === "boolean")
+    && (item.after === undefined || (Array.isArray(item.after) && item.after.every(number => Number.isInteger(number) && number >= 1 && number <= index))))) return "each of bundle.steps may set required to true or false, and after to the 1-based numbers of earlier steps";
   // Keys are never model-visible arguments: they enter only through app.openmerit.ai.
   if (/"(api[_-]?key|authorization|secret|password)"\s*:/i.test(JSON.stringify(value))) return "bundle must not contain keys or secrets: add endpoint keys at app.openmerit.ai instead";
   return null;

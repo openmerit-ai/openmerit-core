@@ -9,7 +9,7 @@ import { CandidateUnavailable } from "../engine/index.ts";
 import type { ModelClient } from "./clients.ts";
 import { oneSentence, type Grader } from "./graders.ts";
 import type { Ledger } from "../engine/index.ts";
-import { runCase, type CaseFailure, type CaseRun } from "./runner.ts";
+import { invalidCases, runCase, type CaseFailure, type CaseRun } from "./runner.ts";
 import type { Case, TaskBundle } from "./types.ts";
 
 export interface CaseResult {
@@ -54,19 +54,23 @@ export function createMeasure(input: {
    * Called as each case finishes, in the order they finish, such as to show progress. `run` has the
    * candidate's output and Pi transcript, for the caller's run artifact; the measure keeps neither.
    */
-  onCase?: (result: CaseResult, run: Pick<CaseRun, "output" | "toolCalls" | "transcript"> | null) => void;
+  onCase?: (result: CaseResult, run: Pick<CaseRun, "output" | "toolCalls" | "transcript" | "refused"> | null) => void;
 }): Measure {
   const byId = new Map(input.cases.map(item => [item.id, item]));
+  const invalid = new Map(invalidCases(input.bundle, input.cases).map(item => [item.caseId, item.reason]));
   return async (candidate, caseIds, options = {}) => {
     const ids = [...new Set(caseIds)];
     const unknown = ids.filter(id => !byId.has(id));
     if (unknown.length) throw new Error(`Unknown case IDs: ${unknown.join(", ")}`);
+    // An invalid case counts for no model: the host leaves it out (invalidCases) before it measures.
+    const unrunnable = ids.filter(id => invalid.has(id));
+    if (unrunnable.length) throw new Error(`Cases the eval cannot run: ${unrunnable.map(id => `${id} (${invalid.get(id)})`).join("; ")}`);
     const run = options.run ?? "0";
     type Outcome = { result: CaseResult; costUsd: number; costIsEstimate: boolean; latencyMs: number | null; graderCostUsd: number; rejected?: string };
     const outcomes = new Array<Outcome>(ids.length);
     const settle = (index: number, outcome: Outcome, ran: CaseRun | null = null) => {
       outcomes[index] = outcome;
-      input.onCase?.(outcome.result, ran && { output: ran.output, toolCalls: ran.toolCalls, transcript: ran.transcript });
+      input.onCase?.(outcome.result, ran && { output: ran.output, toolCalls: ran.toolCalls, transcript: ran.transcript, refused: ran.refused });
     };
     let next = 0;
     // Once a call gets no answer at all, the candidate takes no new case: each would wait out the same timeout.
@@ -93,7 +97,7 @@ export function createMeasure(input: {
           settle(index, { ...base, result: { caseId: caseItem.id, pass: false, failure: ran.failure ?? "error", reason: failureReason(ran) }, graderCostUsd: 0, ...(ran.failure === "error" && rejects(ran.status ?? 0) ? { rejected: ran.error ?? `HTTP ${ran.status}` } : {}) }, ran);
           continue;
         }
-        const grade = await input.grader.grade({ bundle: input.bundle, caseItem, output: ran.output, toolCalls: ran.toolCalls, transcript: ran.transcript, ledger: input.ledger, key, ...(input.signal ? { signal: input.signal } : {}) });
+        const grade = await input.grader.grade({ bundle: input.bundle, caseItem, output: ran.output, toolCalls: ran.toolCalls, transcript: ran.transcript, refused: ran.refused, ledger: input.ledger, key, ...(input.signal ? { signal: input.signal } : {}) });
         settle(index, { ...base, result: { caseId: caseItem.id, pass: grade.pass, ...(grade.pass ? {} : { reason: grade.reason ?? "The grader failed the answer." }) }, graderCostUsd: grade.costUsd }, ran);
       }
     };
