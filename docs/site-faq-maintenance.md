@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Scout writes the eval from a review of the code — unreleased, 24 November 2026
+
+Reviewed the homepage against Scout always writing an eval from its review of the code (a task spec with criteria and guardrails, cases with mocked tool results and a fixed judge), running the repository's own eval beside it when there is one, and saving an approved Eval in `.openmerit/evals/<task>/`. This reverses the README's "never invents an eval". `site/index.html` has no FAQ block. Its only mention of evals is that picking a model takes more than an eval, which still holds, and it makes no claim that OpenMerit needs or uses only the customer's own evals. No homepage copy change is needed. The openmerit-core README's Scout steps, data handling table and opening line, and the root README's package summary, now describe the written eval.
+
 ## GitHub repositories in the cloud app — unreleased, 24 November 2026
 
 Reviewed the homepage against the cloud app reading GitHub repositories: an account adds a public repository by its URL or a private one with a fine-grained, read-only token; OpenMerit shallow-clones it into a temporary directory, lists its model calls and deletes the copy, and never writes to GitHub. `site/index.html` makes no claim about repository access, GitHub, what OpenMerit reads or whether it sees code. No homepage copy change is needed. app.openmerit.ai's Your data page said "OpenMerit has no repository access"; it now lists the repositories, what is kept and that tokens go only to GitHub. The cloud README's GitHub repositories section describes the behaviour and its limits.

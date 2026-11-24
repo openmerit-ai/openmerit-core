@@ -53,6 +53,10 @@ export interface EvalSpec {
   /** The eval's own acceptance threshold: the minimum pass rate, 0 to 1. */
   threshold?: number;
   description?: string;
+  /** For an eval OpenMerit generated: its directory, `.openmerit/evals/<task>`, with bundle.json and cases.json. */
+  generated?: string;
+  /** The repository's own eval, run beside a generated one as extra evidence; its items are prefixed `repo:`. */
+  repoEval?: EvalSpec;
 }
 
 export interface RepoConfig {

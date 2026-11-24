@@ -38,6 +38,8 @@ function harnessContent(messages: { role: string; content: unknown }[]): string 
     }
     return JSON.stringify({ tasks: [...tasks].map(([name, usageIds]) => ({ name, description: `the ${name}`, usageIds, usesTools: false, needsVision: false, structuredOutput: false })) });
   }
+  if (text.includes("reviewing an application's code")) return JSON.stringify({ description: "Routes a ticket", input: "a ticket", steps: [], criteria: ["Picks the right queue"], guardrails: [], system: "", user: "{{ticket}}", tools: [], output: { kind: "label", labels: ["billing", "technical", "account", "other"], schemaJson: "" }, examples: [], maxTurns: 0 });
+  if (text.includes("You write test cases")) return JSON.stringify({ cases: [] });
   if (text.includes("eval")) return JSON.stringify({ found: true, command: "node evals/classify.eval.ts", cwd: ".", env: [{ name: "CLASSIFIER_MODEL", value: "{{model}}" }], threshold: null, helpers: [], explanation: "npm run eval:classify", missing: "" });
   return JSON.stringify({ status: "OPENMERIT_READY", harness: "fake" });
 }

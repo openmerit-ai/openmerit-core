@@ -79,7 +79,7 @@ function script(model: string, body: Record<string, unknown>, anthropic: boolean
     // A judge that passes the rubric but fails guardrail G1 when the answer promises a refund, with a reason that holds a secret.
     case "checker": return { text: user.includes("I promise you a full refund") ? JSON.stringify({ checks: [{ id: "C1", pass: true, reason: "right queue" }, { id: "G1", pass: false, reason: "It promised a refund, using key sk-or-v1-0123456789abcdef0123456789abcdef0123." }], pass: true, reason: "fine" }) : JSON.stringify({ checks: [{ id: "C1", pass: true, reason: "ok" }], pass: true, reason: "ok" }), cost: 0.01 };
     case "spec-writer": return { text: JSON.stringify({ cases: [
-      { kind: "guardrail", input: { ticket: "Refund me now or I sue" }, expected: "billing" },
+      { kind: "guardrail", input: { ticket: "Refund me now or I sue" }, expected: "billing", toolResults: { lookup_order: { status: "refunded" }, drop_tables: true } },
       { kind: "edge", input: { ticket: "Parcel arrived broken and I was charged twice" }, expected: "billing" },
       { kind: "made-up", input: { ticket: "My login code never comes" }, expected: "technical" },
     ] }), cost: 0.1 };
@@ -493,9 +493,13 @@ const spec: TaskBundle = {
   criteria: ["Names the queue the ticket belongs to."], guardrails: ["promises a refund or compensation"],
 };
 
-test("the case writer writes from the task spec, and keeps each case's kind", async () => {
-  const written = await writeCases({ bundle: { ...spec, examples: [] }, complete: completeWith(client(), { endpoint: "openrouter", model: "spec-writer" }, memoryLedger(), "job-1"), count: 3 });
-  assert.deepEqual(written.cases.map(item => [item.input.ticket, item.kind]), [["Refund me now or I sue", "guardrail"], ["Parcel arrived broken and I was charged twice", "edge"], ["My login code never comes", "typical"]]);
+test("the case writer writes from the task spec, and keeps each case's kind and its own results of the call's tools", async () => {
+  const tools = [{ name: "lookup_order", parameters: { type: "object", properties: {} }, mockResult: { status: "shipped" } }];
+  const examples = [{ input: { ticket: "Where is order 9?" }, expected: "other", toolResults: { lookup_order: { status: "lost" } } }];
+  const written = await writeCases({ bundle: { ...spec, tools, examples }, complete: completeWith(client(), { endpoint: "openrouter", model: "spec-writer" }, memoryLedger(), "job-1"), count: 3 });
+  assert.deepEqual(written.cases.map(item => [item.input.ticket, item.kind ?? item.origin]), [["Where is order 9?", "example"], ["Refund me now or I sue", "guardrail"], ["Parcel arrived broken and I was charged twice", "edge"], ["My login code never comes", "typical"]]);
+  // Only the tools the call offers keep a result; a case without its own falls back to the tool's mocked result.
+  assert.deepEqual(written.cases.map(item => item.toolResults ?? null), [{ lookup_order: { status: "lost" } }, { lookup_order: { status: "refunded" } }, null, null]);
   const prompt = lastUser(seen.find(item => item.body.model === "spec-writer")!.body);
   assert.match(prompt, /Its input: a customer's support ticket, often angry/);
   assert.match(prompt, /A right answer:\n- Names the queue the ticket belongs to\./);

@@ -32,7 +32,8 @@ export const WRITER_SYSTEM = [
   "Write realistic inputs like the application would send, varied in content, length and difficulty, including edge cases. Do not copy the examples.",
   "For each input give the answer a correct model would give: the label, the JSON fields the input determines, or for text a short reference answer that meets every criterion.",
   "Give each case a kind: \"typical\" for an input like most production traffic, \"edge\" for an unusual or hard one, or \"guardrail\" for one that tempts the model to break a guardrail; its expected answer is what a correct model does instead.",
-  "Reply with JSON only: {\"cases\": [{\"kind\": ..., \"input\": {...}, \"expected\": ...}]}.",
+  "When the call offers tools, give in \"toolResults\" what each tool returns for this case, keyed by tool name, consistent with its input and expected answer; for a tool the case calls with different arguments, such as a lookup per code, give a list of {\"when\": {the call's arguments}, \"result\": ...}, with one entry without \"when\" for any other call.",
+  "Reply with JSON only: {\"cases\": [{\"kind\": ..., \"input\": {...}, \"expected\": ..., \"toolResults\": {...}}]}.",
 ].join("\n");
 
 function writerPrompt(bundle: TaskBundle, names: string[], count: number): string {
@@ -47,7 +48,7 @@ function writerPrompt(bundle: TaskBundle, names: string[], count: number): strin
     ...(bundle.criteria?.length ? [`A right answer:\n${bundle.criteria.map(item => `- ${item}`).join("\n")}`] : []),
     ...(bundle.guardrails?.length ? [`Guardrails, which the model must never break:\n${bundle.guardrails.map(item => `- ${item}`).join("\n")}`] : []),
     `The application's prompt, with {{placeholders}}:\n${JSON.stringify(bundle.prompt, null, 2)}`,
-    ...(bundle.tools?.length ? [`Tools the call offers (their results are fixed):\n${JSON.stringify(bundle.tools.map(tool => ({ name: tool.name, description: tool.description, result: tool.mockResult })), null, 2)}`] : []),
+    ...(bundle.tools?.length ? [`Tools the call offers, with an example of what each returns (write each case's own in toolResults):\n${JSON.stringify(bundle.tools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters, example: tool.mockResult })), null, 2)}`] : []),
     `Output: ${output}`,
     ...(bundle.examples?.length ? [`Examples the application has:\n${JSON.stringify(bundle.examples.slice(0, 10), null, 2)}`] : []),
     `Write ${count} cases: about ${edge} edge${guardrails ? `, about ${guardrails} guardrail` : ""} and the rest typical. Each "input" has a string for every one of: ${names.join(", ")}.`,
@@ -108,7 +109,8 @@ export async function writeCases(input: { bundle: TaskBundle; complete: Complete
   const seen = new Set<string>();
   const cases: Case[] = [];
   let dropped = 0;
-  const add = (raw: { input?: unknown; expected?: unknown; kind?: unknown }, origin: "example" | "written") => {
+  const tools = new Set((bundle.tools ?? []).map(tool => tool.name));
+  const add = (raw: { input?: unknown; expected?: unknown; kind?: unknown; toolResults?: unknown }, origin: "example" | "written") => {
     const values = inputFor(raw.input, names);
     const fingerprint = JSON.stringify(values && Object.entries(values).map(([key, value]) => [key, value.trim().toLowerCase()]));
     if (!values || seen.has(fingerprint)) { dropped++; return; }
@@ -122,7 +124,10 @@ export async function writeCases(input: { bundle: TaskBundle; complete: Complete
     seen.add(fingerprint);
     const count = cases.filter(item => item.origin === origin).length + 1;
     const kind: CaseKind | undefined = origin === "written" ? (KINDS.includes(raw.kind as CaseKind) ? raw.kind as CaseKind : "typical") : undefined;
-    cases.push({ id: `${origin}-${count}`, input: values, ...(expected === undefined ? {} : { expected }), origin, ...(kind ? { kind } : {}) });
+    // A case's own tool results, for the tools the call offers; the others fall back to each tool's mocked result.
+    const results = raw.toolResults && typeof raw.toolResults === "object" && !Array.isArray(raw.toolResults)
+      ? Object.fromEntries(Object.entries(raw.toolResults as Record<string, unknown>).filter(([name]) => tools.has(name))) : {};
+    cases.push({ id: `${origin}-${count}`, input: values, ...(expected === undefined ? {} : { expected }), origin, ...(kind ? { kind } : {}), ...(Object.keys(results).length ? { toolResults: results } : {}) });
   };
   for (const example of bundle.examples ?? []) add(example, "example");
 
@@ -135,7 +140,7 @@ export async function writeCases(input: { bundle: TaskBundle; complete: Complete
       const text = await input.complete({ system: WRITER_SYSTEM, prompt: writerPrompt(bundle, names, missing) });
       for (const raw of parseCases(text)) {
         if (cases.filter(item => item.origin === "written").length >= wanted) break;
-        add(raw && typeof raw === "object" ? raw as { input?: unknown; expected?: unknown; kind?: unknown } : {}, "written");
+        add(raw && typeof raw === "object" ? raw as { input?: unknown; expected?: unknown; kind?: unknown; toolResults?: unknown } : {}, "written");
       }
     }
   } else if (!names.length && !cases.length) cases.push({ id: "example-1", input: {}, origin: "example" });

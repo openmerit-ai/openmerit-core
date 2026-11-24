@@ -3,7 +3,7 @@
 // wrongly (or with HTTP 500) for others, so the right ranking is known in advance.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -14,6 +14,7 @@ import { renderRun } from "../src/cli/render.ts";
 import { EvalProxy } from "../src/eval/proxy.ts";
 import type { Harness, JsonRequest } from "../src/harness/harness.ts";
 import { startRun } from "../src/local.ts";
+import { specBundle, type SpecReply } from "../src/review/index.ts";
 import { scanRepo } from "../src/scout/scan.ts";
 import { advance, CONFIGURE_QUESTION, TASK_QUESTION, type Answer, type Context, type Question, type Step } from "../src/scout/workflow.ts";
 import { readRepoConfig, updateGlobalConfig, updateRepoConfig } from "../src/state/config.ts";
@@ -36,6 +37,8 @@ const cutOff = { model: "" };
 const wrong = new Set(["gpt-4o-mini"]);
 /** Models whose answers report 2,000 output tokens, so they cost more per item than their list price suggests. */
 const verbose = new Set<string>();
+/** Judge calls the fake endpoint answered. */
+const judged = { count: 0 };
 /** The model whose requests after its fifth fail with HTTP 500. */
 const flaky = { model: "gpt-5.6-luna" };
 let server: Server;
@@ -45,7 +48,14 @@ before(async () => {
     let body = "";
     req.on("data", chunk => { body += chunk; });
     req.on("end", () => {
-      const parsed = JSON.parse(body) as { model: string; messages: { role: string; content: string }[] };
+      const parsed = JSON.parse(body) as { model: string; stream?: boolean; messages: { role: string; content: string }[] };
+      // A streamed request (openmerit/ranking's Pi client, for a generated eval) gets server-sent events; the fixture's eval gets one JSON body.
+      const reply = (content: string, usage: { prompt_tokens: number; completion_tokens: number }) => {
+        if (!parsed.stream) { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }], usage })); }
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        for (const chunk of [{ choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: "stop" }] }, { choices: [], usage }]) res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+        return res.end("data: [DONE]\n\n");
+      };
       requests.push(parsed.model);
       // Retry-After 0 keeps the proxy's retries of a failing call fast.
       const fail = (status: number, message: string) => { res.writeHead(status, { "content-type": "application/json", "retry-after": "0" }); res.end(JSON.stringify({ error: { message } })); };
@@ -54,10 +64,14 @@ before(async () => {
       if (parsed.model === cutOff.model) { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: null }, finish_reason: "length" }], usage: { prompt_tokens: 100, completion_tokens: 2000 } })); }
       if (parsed.model === "gpt-4.1-nano") return fail(404, "The model `gpt-4.1-nano` does not exist or you do not have access to it.");
       if (parsed.model === flaky.model && requests.filter(model => model === flaky.model).length > 5) return fail(500, "upstream overloaded");
+      // A generated eval's judge: every check passes.
+      if (parsed.messages[0]?.role === "system" && parsed.messages[0].content.startsWith("You grade one answer")) {
+        judged.count++;
+        return reply(JSON.stringify({ checks: [{ id: "G1", pass: true, reason: "fine" }], pass: true, reason: "" }), { prompt_tokens: 300, completion_tokens: 20 });
+      }
       const ticket = parsed.messages.find(message => message.role === "user")!.content;
       const answer = wrong.has(parsed.model) ? "other" : tickets.get(ticket) ?? "other";
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: answer } }], usage: { prompt_tokens: 100, completion_tokens: verbose.has(parsed.model) ? 2000 : 5 } }));
+      reply(answer, { prompt_tokens: 100, completion_tokens: verbose.has(parsed.model) ? 2000 : 5 });
     });
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -65,13 +79,58 @@ before(async () => {
 });
 after(() => { server.close(); });
 
-/** Scripted OpenAI Harness: maps usages by file and finds the fixture's eval. */
-function scriptedHarness(discover: Record<string, unknown> = {}): Harness & { calls: string[] } {
+/** The classifier's task spec, as the review prompt writes it for the fixture. */
+const CLASSIFIER_SPEC = {
+  description: "Routes a support ticket to one queue.", input: "a customer's support ticket",
+  steps: [{ description: "Read the ticket and pick its queue", tools: [], access: "none" }],
+  criteria: ["Picks the queue the ticket belongs in"], guardrails: [],
+  system: "Classify the support ticket into exactly one queue: billing, technical, account, other. Reply with the queue name only, in lowercase.", user: "{{ticket}}",
+  tools: [], output: { kind: "label", labels: ["billing", "technical", "account", "other"], schemaJson: "" }, examples: [], maxTurns: 0,
+};
+
+test("the review's spec keeps per-call lookups and step order as openmerit/ranking takes them", () => {
+  const reply = {
+    ...CLASSIFIER_SPEC, output: { kind: "text", labels: [], schemaJson: "" },
+    steps: [
+      { description: "Look up each code", tools: ["lookup"], access: "read", required: true, after: [] },
+      { description: "Note the review", tools: ["note"], access: "write", required: false, after: [1] },
+      { description: "Answer", tools: [], access: "none", required: true, after: [1, 3, 5] },
+    ],
+    tools: [{ name: "lookup", description: "", parametersJson: "{}", mockResultJson: "{}" }, { name: "note", description: "", parametersJson: "{}", mockResultJson: "\"ok\"" }],
+    examples: [{ input: [{ name: "ticket", value: "A01, B02" }], expected: "done", toolResults: [
+      { name: "lookup", whenJson: "{\"code\":\"A01\"}", resultJson: "{\"valid\":true}" },
+      { name: "lookup", whenJson: "{\"code\":\"B02\"}", resultJson: "{\"valid\":false}" },
+      { name: "note", whenJson: "", resultJson: "\"saved\"" },
+      { name: "unknown", whenJson: "", resultJson: "1" },
+    ] }],
+  } as SpecReply;
+  const bundle = specBundle(reply, { name: "coder" }, [], "openai/gpt-5-mini");
+  assert.deepEqual(bundle.steps?.map(step => [step.required ?? false, step.after ?? []]), [[true, []], [false, [1]], [true, [1]]]);
+  assert.deepEqual(bundle.examples?.[0]?.toolResults, {
+    lookup: [{ when: { code: "A01" }, result: { valid: true } }, { when: { code: "B02" }, result: { valid: false } }],
+    note: "saved",
+  });
+});
+
+/**
+ * Scripted OpenAI Harness: maps usages by file and finds the fixture's eval. The review writes
+ * `spec` (by default the classifier's), and the case writer writes `cases` (by default none, so
+ * the repository's eval measures alone).
+ */
+function scriptedHarness(discover: Record<string, unknown> = {}, generate: { spec?: object; cases?: { kind: string; ticket: string; queue: string }[] } = {}): Harness & { calls: string[] } {
   const calls: string[] = [];
   return {
     kind: "codex", label: "codex", calls, usage: { calls: 0, costUsd: 0, unknownCost: 0, inputTokens: 0, outputTokens: 0 },
     async json<T>(request: JsonRequest): Promise<T> {
       this.usage.calls++;
+      if (request.system.includes("reviewing an application's code")) {
+        calls.push(`review:${/Task: ([^:]+):/.exec(request.prompt)?.[1]}`);
+        return { ...CLASSIFIER_SPEC, ...generate.spec } as T;
+      }
+      if (request.system.includes("You write test cases")) {
+        calls.push("write");
+        return { cases: (generate.cases ?? []).map(item => ({ kind: item.kind, input: [{ name: "ticket", value: item.ticket }], expected: item.queue })) } as T;
+      }
       if (request.system.includes("map model usages")) {
         calls.push("map");
         const byTask = new Map<string, string[]>();
@@ -218,16 +277,16 @@ test("a project in a subdirectory of its Git repository keeps its settings, scan
 });
 
 test("a run whose every task has no eval finishes, saying what was not reviewed and how to add an eval", async () => {
+  // The repository has no eval, and the case writer writes nothing usable.
   const root = repo(), scripted = scriptedHarness();
-  const harness: Harness & { calls: string[] } = { ...scripted, json: async <T>(request: JsonRequest) => (request.system.includes("map model usages") ? scripted.json<T>(request)
+  const harness: Harness & { calls: string[] } = { ...scripted, json: async <T>(request: JsonRequest) => (!request.system.includes("You find the eval") ? scripted.json<T>(request)
     : { found: false, command: "", cwd: "", env: [], threshold: null, helpers: [], explanation: "", missing: "The repository has no labelled tickets. A runner would also be needed." } as T) };
   const ctx = context(root, mkdtempSync(join(tmpdir(), "openmerit-home-")), harness);
   const runId = startRun(ctx);
-  const { step, asked } = await drive(ctx, runId, { eval_ticket_classifier: "skip" });
-  assert.ok(asked.some(question => question.id === "eval_ticket_classifier"));
+  const { step, asked } = await drive(ctx, runId);
   assert.equal(step.status, "done", step.error);
   assert.deepEqual(step.result!.tasks.map(task => task.status), ["no_eval"]);
-  assert.match(step.result!.tasks[0]!.note, /^Skipped for lack of an eval: The repository has no labelled tickets\. To review it, add an eval that follows the eval contract/);
+  assert.match(step.result!.tasks[0]!.note, /^OpenMerit wrote no eval for it \(the harness wrote no usable case from the task's spec\), and the repository has none\. Run `openmerit scout` again to have OpenMerit write its eval/);
   assert.ok(!asked.some(question => question.id === "approve_evals"), "nothing to approve");
 });
 
@@ -248,12 +307,13 @@ test("a later run reuses the approved eval although the harness names the task d
   assert.match(prompts[0]!, /saved evals for these tasks; when usages serve one of them, use its exact name: "ticket classifier"/);
   assert.deepEqual(step.questions.map(question => question.id), ["approve_evals"]);
   assert.ok(!scripted.calls.some(call => call.startsWith("discover")), "no harness call to find the eval again");
+  assert.deepEqual(scripted.calls.filter(call => call.startsWith("review")), ["review:Ticket Classifier"], "OpenMerit still reviews the task to write its eval");
 });
 
 test("an eval that fails before any model call shows why in the retry question and in history", async () => {
   const root = repo(), scripted = scriptedHarness();
   const command = `node -e "console.error('ModuleNotFoundError: No module named langchain_openai'); process.exit(2)"`;
-  const harness: Harness & { calls: string[] } = { ...scripted, json: async <T>(request: JsonRequest) => (request.system.includes("map model usages") ? scripted.json<T>(request)
+  const harness: Harness & { calls: string[] } = { ...scripted, json: async <T>(request: JsonRequest) => (!request.system.includes("You find the eval") ? scripted.json<T>(request)
     : { found: true, command, cwd: ".", env: [], threshold: null, helpers: [], explanation: "", missing: "" } as T) };
   const ctx = context(root, mkdtempSync(join(tmpdir(), "openmerit-home-")), harness);
   const runId = startRun(ctx);
@@ -431,15 +491,78 @@ test("an eval that sends no model request through the proxy stops after one run 
   assert.match(renderRun(ctx.state, ctx.state.getRun(step.runId)!, step), /stopped before screening any candidate/);
 });
 
-test("an eval the harness counts fewer than five items in is asked about before anything is spent", async () => {
+/** The fixture's ten tickets as written cases, with the first `wrong` of them given the wrong queue. */
+const writtenCases = (wrongAnswers = 0) => [...tickets].map(([ticket, queue], index) => ({ kind: "typical", ticket, queue: index < wrongAnswers ? (queue === "billing" ? "account" : "billing") : queue }));
+
+test("Scout always writes an eval from its review of the code, runs the repository's eval beside it, and saves the Eval it ran once approved", async () => {
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  const guardrail = "Reveals another customer's ticket";
+  const harness = scriptedHarness({}, { spec: { guardrails: [guardrail] }, cases: writtenCases() });
+  const ctx = context(root, home, harness);
+  requests.length = 0; judged.count = 0;
+  const runId = startRun(ctx);
+  const { step, asked } = await drive(ctx, runId);
+  assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
+  // Ten tickets are fewer than the twelve cases asked for, so the writer is asked once more.
+  assert.deepEqual(harness.calls.filter(call => call !== "map"), ["discover:ticket classifier", "review:ticket classifier", "write", "write"]);
+  const approval = asked.find(question => question.id === "approve_evals")!.detail!;
+  assert.match(approval, /Eval: written by OpenMerit from its review of the code, 10 cases \(10 typical\), saved in \.openmerit\/evals\/ticket-classifier\/ once approved/);
+  assert.match(approval, new RegExp(`Guardrails: ${guardrail}`));
+  assert.match(approval, /Also the repository's eval, as extra evidence \(items repo:…\): node evals\/classify\.eval\.ts/);
+  // The current model runs both evals: ten written cases and the repository's ten items, three times.
+  const task = step.result!.tasks[0]!;
+  assert.deepEqual([task.baseline!.passes, task.baseline!.total], [60, 60]);
+  const first = ctx.state.units(runId).find(unit => unit.role === "baseline" && unit.repeat === 1)!.result as { items: Record<string, boolean> };
+  assert.equal(Object.keys(first.items).filter(item => item.startsWith("repo:")).length, 10);
+  assert.ok(task.top.length > 0, "a cheaper model qualified");
+  // A right label is also judged on the guardrail, through the proxy, so the judge's calls count in the run's budget.
+  assert.ok(judged.count >= 30, `${judged.count} judge calls`);
+  // Approval saved the Eval and the repository's eval beside it; nothing else in the repository changed.
+  const saved = readRepoConfig(root).evals!["ticket classifier"]!;
+  assert.equal(saved.generated, ".openmerit/evals/ticket-classifier");
+  assert.equal(saved.repoEval?.command, "node evals/classify.eval.ts");
+  const bundle = JSON.parse(readFileSync(join(root, ".openmerit/evals/ticket-classifier/bundle.json"), "utf8")) as { guardrails: string[]; prompt: { messages: { content: string }[] } };
+  assert.deepEqual(bundle.guardrails, [guardrail]);
+  assert.equal(bundle.prompt.messages[0]!.content, "{{ticket}}");
+  assert.equal((JSON.parse(readFileSync(join(root, ".openmerit/evals/ticket-classifier/cases.json"), "utf8")) as unknown[]).length, 10);
+  // The next run reuses the saved Eval: no review, no case writing, no search for the repository's eval.
+  harness.calls.length = 0;
+  const next = await advance(ctx, startRun(ctx), {});
+  const again = await advance(ctx, next.runId, { model: "openai/gpt-4.1-mini", tasks: ["ticket classifier"] });
+  assert.deepEqual(again.questions.map(question => question.id), ["approve_evals"]);
+  assert.deepEqual(harness.calls, ["map"]);
+});
+
+test("a generated eval the current model passes under 80% of recommends nothing, with the failed cases and why", async () => {
+  const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
+  // Six of the ten written cases expect the wrong queue: the current model passes 4 of them and all 10 of the repository's items.
+  const ctx = context(root, home, scriptedHarness({}, { cases: writtenCases(6) }));
+  requests.length = 0;
+  const runId = startRun(ctx);
+  const { step } = await drive(ctx, runId);
+  assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
+  const task = step.result!.tasks[0]!;
+  assert.equal(task.status, "stopped");
+  assert.deepEqual(task.top, []);
+  assert.match(task.note, /openai\/gpt-4\.1-mini passed 42 of 60 case runs of its own eval, under the 80% OpenMerit needs before the eval can tell models apart, so no model is recommended\./);
+  assert.match(task.note, /Failed cases: written-1: Answered (billing|technical|account), expected (billing|account)\./);
+  assert.ok(ctx.state.units(runId).every(unit => unit.role === "baseline"), "no candidate was screened");
+  // The Eval is set aside, so the next run reviews the task again; the repository's eval stays saved.
+  assert.match(task.note, /OpenMerit set this eval aside; the next `openmerit scout` reviews the task and writes it again\./);
+  assert.ok(!existsSync(join(root, ".openmerit/evals/ticket-classifier")));
+  assert.deepEqual(readRepoConfig(root).evals!["ticket classifier"]?.command, "node evals/classify.eval.ts");
+  assert.equal(readRepoConfig(root).evals!["ticket classifier"]?.generated, undefined);
+});
+
+test("an eval the harness counts fewer than five items in is not run alone: without a generated eval the task is skipped before anything is spent", async () => {
   const root = repo(), home = mkdtempSync(join(tmpdir(), "openmerit-home-"));
   const ctx = context(root, home, scriptedHarness({ items: 4 }));
   requests.length = 0;
-  const { step, asked } = await drive(ctx, startRun(ctx), { eval_ticket_classifier: "skip" });
+  const { step, asked } = await drive(ctx, startRun(ctx));
   assert.equal(step.status, "done", step.error ?? JSON.stringify([step.questions, step.notices]).slice(0, 1500));
-  assert.match(asked.find(question => question.id === "eval_ticket_classifier")!.detail!, /has 4 labelled items, and Scout screens candidates on 5 items the current model passes/);
   assert.ok(!asked.some(question => question.id === "approve_evals"));
   assert.equal(step.result!.tasks[0]!.status, "no_eval");
+  assert.match(step.result!.tasks[0]!.note, /has 4 labelled items, fewer than the 5 Scout screens candidates on/);
   assert.equal(requests.length, 0, "no eval ran");
 });
 

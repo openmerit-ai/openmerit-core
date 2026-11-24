@@ -34,6 +34,9 @@ function harnessReply(body: { messages: { role: string; content: unknown }[] }, 
     }
     return { content: JSON.stringify({ tasks: [...tasks].map(([name, usageIds]) => ({ name, description: `the ${name}`, usageIds, usesTools: false, needsVision: false, structuredOutput: false })) }) };
   }
+  // The review and the case writer: a spec, and no written case, so the repository's eval measures alone.
+  if (text.includes("reviewing an application's code")) return { content: JSON.stringify({ description: "Routes a ticket", input: "a ticket", steps: [], criteria: ["Picks the right queue"], guardrails: [], system: "", user: "{{ticket}}", tools: [], output: { kind: "label", labels: ["billing", "technical", "account", "other"], schemaJson: "" }, examples: [], maxTurns: 0 }) };
+  if (text.includes("You write test cases")) return { content: JSON.stringify({ cases: [] }) };
   return { content: JSON.stringify({ found: true, command: "node evals/classify.eval.ts", cwd: ".", env: [{ name: "CLASSIFIER_MODEL", value: "{{model}}" }], threshold: null, helpers: [], explanation: "npm run eval:classify", missing: "" }) };
 }
 
@@ -55,7 +58,8 @@ test("a run survives a SIGKILL of the daemon at every question, and the harness 
     req.on("end", () => {
       if (req.url?.startsWith("/harness/")) {
         const parsed = JSON.parse(body) as { messages: { role: string; content: unknown }[] };
-        harnessCalls.push(JSON.stringify(parsed.messages).includes("map model usages") ? "map" : "discover");
+        const sent = JSON.stringify(parsed.messages);
+        harnessCalls.push(sent.includes("map model usages") ? "map" : sent.includes("reviewing an application's code") ? "review" : sent.includes("You write test cases") ? "write" : "discover");
         toolResults.push(...parsed.messages.filter(message => message.role === "tool").map(message => JSON.stringify(message.content)));
         const reply = harnessReply(parsed, `../${basename(outside)}`);
         const delta = "reads" in reply
@@ -119,7 +123,7 @@ test("a run survives a SIGKILL of the daemon at every question, and the harness 
     assert.ok(requests > 0);
     assert.doesNotMatch(readFileSync(join(home, "daemon.log"), "utf8"), /level=warn/, "rivetkit's warnings stay out of the daemon's log");
 
-    assert.deepEqual(harnessCalls, ["map", "map", "discover"], "mapping (one file-read round) and eval discovery each ran once across the restarts");
+    assert.deepEqual(harnessCalls, ["map", "map", "discover", "review", "write", "write"], "mapping (one file-read round), eval discovery, the review and the case writer (asked again for too few cases) each ran once across the restarts");
     assert.equal(toolResults.length, 2);
     assert.match(toolResults[0]!, /reads only files inside/, "the read outside the repository was refused");
     assert.ok(!toolResults.join("").includes("OUTSIDE-SECRET"));
