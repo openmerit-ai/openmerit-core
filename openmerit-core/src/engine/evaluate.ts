@@ -1,7 +1,8 @@
 // Scout's task evaluation: the one policy the local CLI and the cloud app both run, so a task gets the
 // same verdict from either. The caller supplies `measure`, its only side effect, and `sample`, so a
 // replay draws the same samples; everything else is decided here.
-// 1. The current model runs every item `repeats` times. Once fewer than `sampleSize` items have passed
+// 1. The current model runs every item `repeats` times. When it passes less than `floor` of its own
+//    eval (80% by default), the eval cannot tell models apart, and nothing is screened or recommended. Once fewer than `sampleSize` items have passed
 //    in every run so far, it stops early: another run cannot add any, and the search cannot screen.
 // 2. `sample` picks the screening items from those it passed in every run.
 // 3. Scout Model Binary Search over the ladder (`binarySearch`), then the finalists run every item
@@ -17,6 +18,11 @@ import { binarySearch, challengers, CHALLENGERS, FINALISTS, SAMPLE_SIZE, type Ru
 
 export const DEFAULT_REPEATS = 3;
 export const TOP = 3;
+/** The least share of its own eval the current model must pass for the eval to rank other models. */
+export const EVAL_FLOOR = 0.8;
+
+/** Passes over item runs for one kind of item, such as typical, edge or guardrail cases. */
+export interface KindRate { kind: string; passes: number; total: number }
 
 /** One measured run: pass or fail per item, and what the candidate's calls cost (null when unknown). */
 export interface Measurement { items: Readonly<Record<string, boolean>>; costUsd: number | null; costIsEstimate?: boolean; latencyMs?: number | null }
@@ -89,6 +95,10 @@ export interface EvaluateInput<T extends Rung> {
   baselinePrice: number | null;
   provisional?: T | null;
   sampleSize?: number;
+  /** The floor (default EVAL_FLOOR); null when the eval is the customer's own, whose threshold decides. */
+  floor?: number | null;
+  /** Each item's kind, for the current model's pass rate per kind. */
+  kinds?: Readonly<Record<string, string>>;
   /**
    * Runs `option` (null: the current model) on `items` (null: the items the caller's eval runs). Throws
    * CandidateUnavailable when the option cannot run, and EndChallengers to end the challengers. Returns
@@ -112,9 +122,12 @@ export interface EvaluateInput<T extends Rung> {
 }
 
 export interface EvaluateResult<T extends Rung> {
-  /** `too_few_reliable`: the current model passed fewer than `sampleSize` items in every run, so nothing was screened. */
-  status: "ranked" | "no_qualified" | "no_passing_model" | "too_few_reliable";
-  baseline: Score & { runs: Measurement[] };
+  /**
+   * `too_few_reliable`: the current model passed fewer than `sampleSize` items in every run, so nothing was screened.
+   * `below_floor`: it passed less than the floor of its own eval, so the eval cannot tell models apart.
+   */
+  status: "ranked" | "no_qualified" | "no_passing_model" | "too_few_reliable" | "below_floor";
+  baseline: Score & { runs: Measurement[]; byKind: KindRate[] };
   items: string[];
   reliable: string[];
   samples: string[];
@@ -133,6 +146,25 @@ export interface EvaluateResult<T extends Rung> {
   provisionalTried: boolean;
   /** Set when `measure` threw EndChallengers: what was left untried. */
   ended: { reason: string; left: T[]; provisional: boolean } | null;
+}
+
+/** Passes per kind of item over some runs, in the order kinds first appear; items without a kind are left out. */
+export function byKind(runs: readonly Measurement[], kinds: Readonly<Record<string, string>> = {}): KindRate[] {
+  const rates = new Map<string, KindRate>();
+  for (const run of runs) for (const [item, pass] of Object.entries(run.items)) {
+    const kind = kinds[item];
+    if (!kind) continue;
+    const rate = rates.get(kind) ?? { kind, passes: 0, total: 0 };
+    rate.total++; if (pass) rate.passes++;
+    rates.set(kind, rate);
+  }
+  return [...rates.values()];
+}
+
+/** The floor's verdict in words, for a result that recommends nothing. */
+export function floorNote(baseline: { passes: number; total: number; byKind: readonly KindRate[] }, current: string, floor = EVAL_FLOOR): string {
+  const kinds = baseline.byKind.length > 1 ? ` (${baseline.byKind.map(rate => `${rate.kind} ${rate.passes}/${rate.total}`).join(", ")})` : "";
+  return `${current} passed ${baseline.passes} of ${baseline.total} case runs of its own eval${kinds}, under the ${Math.round(floor * 100)}% OpenMerit needs before the eval can tell models apart, so no model is recommended. Read why its cases failed: the expected answers or the checks may be wrong.`;
 }
 
 export function score(runs: readonly Measurement[]): Score {
@@ -181,10 +213,12 @@ export async function evaluateTask<T extends Rung>(input: EvaluateInput<T>): Pro
   }
   const items = input.items ? [...input.items] : Object.keys(progress.baseline[0]!.items);
   const reliable = reliableOf();
-  const baseline = { ...score(progress.baseline), runs: progress.baseline };
+  const baseline = { ...score(progress.baseline), runs: progress.baseline, byKind: byKind(progress.baseline, input.kinds) };
   const result = (status: EvaluateResult<T>["status"], rest: Partial<EvaluateResult<T>> = {}): EvaluateResult<T> => ({
     status, baseline, items, reliable, samples: [], search: null, candidates: [...tried.values()], top: [], cheaper: [], nearMisses: [], challenged: [], challengers: [], provisionalTried: false, ended: null, ...rest,
   });
+  const floor = input.floor === undefined ? EVAL_FLOOR : input.floor;
+  if (floor !== null && baseline.score !== null && baseline.score < floor - 1e-9) return result("below_floor");
   if (reliable.length < sampleSize) return result("too_few_reliable");
 
   // 2. The samples.

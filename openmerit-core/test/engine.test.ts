@@ -6,7 +6,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { approve, basedOn, binarySearch, challengers, checkAgent, evaluateTask, mergeEvidence, MemoryLedger, proposeEdit, strongest, taskResult, type EvidencePart, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
+import { approve, basedOn, binarySearch, EVAL_FLOOR, challengers, checkAgent, evaluateTask, mergeEvidence, MemoryLedger, proposeEdit, strongest, taskResult, type EvidencePart, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
 import { State } from "../src/state/db.ts";
 
 test("the search keeps a ladder's own order, and unplaced options are always challengers", async () => {
@@ -279,4 +279,31 @@ test("an approval records who approved and when, and refuses one without either"
   assert.equal(approved.target, target);
   assert.throws(() => approve(change, target, { by: "  ", at: "2026-11-19T13:00:00Z" }), /person who approved/);
   assert.throws(() => approve(change, target, { by: "praveen@openmerit.ai", at: "yesterday" }), /time it was given/);
+});
+
+test("the floor: under 80% of its own eval, the current model's eval ranks nothing and screens no candidate", async () => {
+  // Ten items, the last four guardrail cases. `misses` items fail for the current model in every run; candidates pass everything.
+  const items = Array.from({ length: 10 }, (_, index) => `i${index + 1}`);
+  const kinds = Object.fromEntries(items.map((id, index) => [id, index < 6 ? "typical" : "guardrail"]));
+  const run = async (misses: string[], floor?: number | null) => {
+    const calls: string[] = [];
+    const result = await evaluateTask({
+      ladder: [{ key: "cheap", price: 1 }], strength: () => 1, items, repeats: 3, baselinePrice: 10, kinds, ...(floor === undefined ? {} : { floor }),
+      sample: reliable => reliable.slice(0, 5),
+      measure: async (option: Rung | null, ids: readonly string[] | null, call: MeasureCall) => {
+        calls.push(call.role);
+        return { items: Object.fromEntries(ids!.map(id => [id, !!option || !misses.includes(id)])), costUsd: 0.001 };
+      },
+    });
+    return { result, calls };
+  };
+  const below = await run(["i8", "i9", "i10"]);
+  assert.equal(EVAL_FLOOR, 0.8);
+  assert.equal(below.result.status, "below_floor");
+  assert.deepEqual(below.calls, ["baseline", "baseline", "baseline"], "nothing is screened");
+  assert.deepEqual(below.result.baseline.byKind, [{ kind: "typical", passes: 18, total: 18 }, { kind: "guardrail", passes: 3, total: 12 }]);
+  assert.deepEqual(below.result.top, []);
+  // Exactly 80% is enough; and a caller whose eval has its own threshold turns the floor off.
+  assert.equal((await run(["i9", "i10"])).result.status, "ranked");
+  assert.equal((await run(["i8", "i9", "i10"], null)).result.status, "ranked");
 });

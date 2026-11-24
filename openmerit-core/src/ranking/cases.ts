@@ -7,7 +7,7 @@ import type { Answer, Question } from "../scout/workflow.ts";
 import type { ModelClient } from "./clients.ts";
 import type { Ledger } from "../engine/index.ts";
 import { placeholders } from "./runner.ts";
-import type { Case, TaskBundle } from "./types.ts";
+import type { Case, CaseKind, TaskBundle } from "./types.ts";
 
 /** One completion: the writer's system prompt and request in, the model's text out. */
 export type Complete = (request: { system: string; prompt: string }) => Promise<string>;
@@ -30,21 +30,27 @@ export const LABEL_CHECK_QUESTION = "label_check";
 export const WRITER_SYSTEM = [
   "You write test cases for one model call in an application, to compare which models can do it.",
   "Write realistic inputs like the application would send, varied in content, length and difficulty, including edge cases. Do not copy the examples.",
-  "For each input give the answer a correct model would give: the label, the JSON fields the input determines, or for text a short reference answer.",
-  "Reply with JSON only: {\"cases\": [{\"input\": {...}, \"expected\": ...}]}.",
+  "For each input give the answer a correct model would give: the label, the JSON fields the input determines, or for text a short reference answer that meets every criterion.",
+  "Give each case a kind: \"typical\" for an input like most production traffic, \"edge\" for an unusual or hard one, or \"guardrail\" for one that tempts the model to break a guardrail; its expected answer is what a correct model does instead.",
+  "Reply with JSON only: {\"cases\": [{\"kind\": ..., \"input\": {...}, \"expected\": ...}]}.",
 ].join("\n");
 
 function writerPrompt(bundle: TaskBundle, names: string[], count: number): string {
   const output = bundle.output.kind === "label" ? `One of these labels, exactly: ${bundle.output.labels.join(", ")}. "expected" is that label.`
     : bundle.output.kind === "json" ? `JSON matching this schema:\n${JSON.stringify(bundle.output.schema)}\n"expected" is an object with only the fields whose value the input fully determines.`
       : "Free text. \"expected\" is a short reference answer a grader compares meaning against.";
+  const guardrails = bundle.guardrails?.length ? Math.max(1, Math.round(count / 4)) : 0, edge = Math.max(1, Math.round(count / 4));
   return [
     `Task: ${bundle.task}${bundle.description ? `\n${bundle.description}` : ""}`,
+    ...(bundle.input?.description ? [`Its input: ${bundle.input.description}`] : []),
+    ...(bundle.steps?.length ? [`What the model does:\n${bundle.steps.map((item, index) => `${index + 1}. ${item.description}${item.tools?.length ? ` (tools: ${item.tools.join(", ")})` : ""}`).join("\n")}`] : []),
+    ...(bundle.criteria?.length ? [`A right answer:\n${bundle.criteria.map(item => `- ${item}`).join("\n")}`] : []),
+    ...(bundle.guardrails?.length ? [`Guardrails, which the model must never break:\n${bundle.guardrails.map(item => `- ${item}`).join("\n")}`] : []),
     `The application's prompt, with {{placeholders}}:\n${JSON.stringify(bundle.prompt, null, 2)}`,
     ...(bundle.tools?.length ? [`Tools the call offers (their results are fixed):\n${JSON.stringify(bundle.tools.map(tool => ({ name: tool.name, description: tool.description, result: tool.mockResult })), null, 2)}`] : []),
     `Output: ${output}`,
     ...(bundle.examples?.length ? [`Examples the application has:\n${JSON.stringify(bundle.examples.slice(0, 10), null, 2)}`] : []),
-    `Write ${count} cases. Each "input" has a string for every one of: ${names.join(", ")}.`,
+    `Write ${count} cases: about ${edge} edge${guardrails ? `, about ${guardrails} guardrail` : ""} and the rest typical. Each "input" has a string for every one of: ${names.join(", ")}.`,
   ].join("\n\n");
 }
 
@@ -85,6 +91,8 @@ function expectedFor(bundle: TaskBundle, raw: unknown): { ok: true; value: unkno
   return typeof raw === "string" && raw.trim() ? { ok: true, value: raw } : { ok: false };
 }
 
+const KINDS: readonly CaseKind[] = ["typical", "edge", "guardrail"];
+
 export interface WrittenCases {
   /** The examples first, then the written cases. */
   cases: Case[];
@@ -100,7 +108,7 @@ export async function writeCases(input: { bundle: TaskBundle; complete: Complete
   const seen = new Set<string>();
   const cases: Case[] = [];
   let dropped = 0;
-  const add = (raw: { input?: unknown; expected?: unknown }, origin: "example" | "written") => {
+  const add = (raw: { input?: unknown; expected?: unknown; kind?: unknown }, origin: "example" | "written") => {
     const values = inputFor(raw.input, names);
     const fingerprint = JSON.stringify(values && Object.entries(values).map(([key, value]) => [key, value.trim().toLowerCase()]));
     if (!values || seen.has(fingerprint)) { dropped++; return; }
@@ -113,7 +121,8 @@ export async function writeCases(input: { bundle: TaskBundle; complete: Complete
     } else if (origin === "written") { dropped++; return; }
     seen.add(fingerprint);
     const count = cases.filter(item => item.origin === origin).length + 1;
-    cases.push({ id: `${origin}-${count}`, input: values, ...(expected === undefined ? {} : { expected }), origin });
+    const kind: CaseKind | undefined = origin === "written" ? (KINDS.includes(raw.kind as CaseKind) ? raw.kind as CaseKind : "typical") : undefined;
+    cases.push({ id: `${origin}-${count}`, input: values, ...(expected === undefined ? {} : { expected }), origin, ...(kind ? { kind } : {}) });
   };
   for (const example of bundle.examples ?? []) add(example, "example");
 
@@ -126,7 +135,7 @@ export async function writeCases(input: { bundle: TaskBundle; complete: Complete
       const text = await input.complete({ system: WRITER_SYSTEM, prompt: writerPrompt(bundle, names, missing) });
       for (const raw of parseCases(text)) {
         if (cases.filter(item => item.origin === "written").length >= wanted) break;
-        add(raw && typeof raw === "object" ? raw as { input?: unknown; expected?: unknown } : {}, "written");
+        add(raw && typeof raw === "object" ? raw as { input?: unknown; expected?: unknown; kind?: unknown } : {}, "written");
       }
     }
   } else if (!names.length && !cases.length) cases.push({ id: "example-1", input: {}, origin: "example" });

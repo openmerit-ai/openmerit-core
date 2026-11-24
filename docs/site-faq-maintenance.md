@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## Task specs, criteria checks and the 80% floor — unreleased, 24 November 2026
+
+Reviewed the homepage against task bundles gaining a spec (input, steps, criteria and guardrails), the judge grading one check per criterion and guardrail, and the cloud app recommending nothing when the current model passes under 80% of its own eval. `site/index.html` has no FAQ block and makes no claim about how evals are written or graded, or about when a recommendation is made; its only mention of evals is that picking a model takes more than one. No homepage copy change is needed. The CLI still never writes an eval itself; the openmerit-core README keeps saying so until it does.
+
 ## Langfuse and the cloud app's connections removed; decisions recorded — 0.4.3, 23 November 2026
 
 Reviewed the homepage against removing Langfuse from the CLI (setup's Langfuse step, `OPENMERIT_EXPERIMENT` and `openmerit/sources`), removing the cloud app's Viktor and Langfuse connections, and the cloud app recording the decision a coding agent sends back on a result's change. `site/index.html` makes no claim about Langfuse, Viktor, connected apps, approvals or where per-item results come from. No homepage copy change is needed; the openmerit-core and cloud READMEs describe the new behaviour.

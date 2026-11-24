@@ -32,6 +32,8 @@ export function bundleProblem(value: unknown): string | null {
   if (output.kind === "label" && (!Array.isArray(output.labels) || !output.labels.length || !output.labels.every(label => typeof label === "string"))) return "bundle.output.labels must list the labels";
   if (output.kind === "json" && !object(output.schema)) return "bundle.output.schema must be a JSON schema";
   if (value.examples !== undefined && (!Array.isArray(value.examples) || !value.examples.every(example => object(example) && object(example.input) && Object.values(example.input).every(item => typeof item === "string")))) return "each example needs an input object of strings";
+  for (const field of ["criteria", "guardrails"] as const) if (value[field] !== undefined && (!Array.isArray(value[field]) || !(value[field] as unknown[]).every(item => typeof item === "string" && item.trim()))) return `bundle.${field} must list statements as strings`;
+  if (value.steps !== undefined && (!Array.isArray(value.steps) || !value.steps.every(item => object(item) && typeof item.description === "string"))) return "each of bundle.steps needs a description";
   // Keys are never model-visible arguments: they enter only through app.openmerit.ai.
   if (/"(api[_-]?key|authorization|secret|password)"\s*:/i.test(JSON.stringify(value))) return "bundle must not contain keys or secrets: add endpoint keys at app.openmerit.ai instead";
   return null;

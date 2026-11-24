@@ -721,7 +721,8 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
       },
     });
     const evaluated = await runPolicy({
-      ladder: order(candidates), strength: item => item.eci, items: null, repeats, rules: { threshold: plan.threshold ?? null },
+      // The customer's own eval decides with its own threshold, not OpenMerit's floor.
+      ladder: order(candidates), strength: item => item.eci, items: null, repeats, rules: { threshold: plan.threshold ?? null }, floor: null,
       baselinePrice: currentModel ? blendedPrice(currentModel) : null, ...evals.measure,
       on: {
         trial: trial => summary.trials.push({ stage: trial.stage, model: trial.option.model, eci: trial.option.eci, passes: Object.values(trial.measurement.items).filter(Boolean).length, total: Object.keys(trial.measurement.items).length, accepted: trial.accepted }),

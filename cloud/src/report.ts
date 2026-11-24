@@ -43,7 +43,12 @@ export type Fix =
 
 export interface JobResult {
   /** `stopped`: the budget ran out before the finalists were measured; `failed`: a step failed for good. The report has what was measured until then. */
-  status: "picked" | "keep_current" | "baseline_failed" | "no_cases" | "no_candidates" | "agent_eval_failed" | "stopped" | "failed";
+  /** `below_floor`: the current model passed under 80% of its own eval, which therefore cannot tell models apart. */
+  status: "picked" | "keep_current" | "baseline_failed" | "below_floor" | "no_cases" | "no_candidates" | "agent_eval_failed" | "stopped" | "failed";
+  /** Up to 20 cases the current model failed, each with the grader's one redacted sentence. Absent from reports saved before it was added. */
+  failedCases?: { caseId: string; kind: string; reason: string }[];
+  /** The current model's passes per kind of case: typical, edge, guardrail, example. Absent from older reports. */
+  baselineByKind?: { kind: string; passes: number; total: number }[];
   pick: { model: string; endpoint: string; endpointModel: string; passes: number; total: number; costPerCallUsd: number | null; savingPerCallUsd: number | null } | null;
   /** Up to three qualified models, cheapest measured cost first. */
   top: MeasuredModel[];
@@ -104,6 +109,7 @@ export function reasonFor(result: JobResult, current: string): string {
   }
   return {
     baseline_failed: `\`${current}\` could not be measured or passed none of the cases, so there is nothing to compare against.`,
+    below_floor: `\`${current}\` passed under 80% of its own eval, so the eval cannot tell models apart and no model is recommended. Its failed cases say why.`,
     no_cases: "No case has a known correct answer, so nothing was measured.",
     no_candidates: "No allowed model is cheaper than the current one.",
     agent_eval_failed: "Every qualified switch failed the agent's eval, so none is proposed.",
@@ -123,6 +129,7 @@ export function renderMarkdown(input: { jobId: string; bundle: TaskBundle; resul
   lines.push(reasonFor(result, bundle.current.model));
   if (result.edit.edits.length) lines.push("", "Edits:", ...result.edit.edits.map(edit => `- \`${edit.file}:${edit.line}\`: \`${edit.before}\` → \`${edit.after}\``));
   if (result.edit.instructions) lines.push("", result.edit.instructions);
+  if (result.failedCases?.length) lines.push("", `## Cases \`${bundle.current.model}\` failed`, "", ...result.failedCases.map(item => `- \`${item.caseId}\` (${item.kind}): ${item.reason}`));
   lines.push("", "## Models", "", "| Model | Endpoint | Paid by | Stage | Passed | Cost per call | Latency | Qualified |", "| --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const item of [result.baseline, ...result.candidates].filter((value): value is MeasuredModel => value !== null)) {
     lines.push(`| \`${item.model}\`${item.inCatalogue ? "" : " (measured only)"} | ${item.endpoint} | ${item.funding === "openmerit" ? "OpenMerit" : "you"} | ${item.stage} | ${item.status === "unavailable" ? "unavailable" : rate(item.passes, item.total)} | ${usd(item.costPerCallUsd)}${item.costIsEstimate ? " (estimate)" : ""} | ${item.latencyMs === null ? "–" : `${item.latencyMs} ms`} | ${item.role === "baseline" ? "current" : item.qualified ? "yes" : "no"} |`);

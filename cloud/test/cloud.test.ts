@@ -429,6 +429,35 @@ test("a challenger the budget refuses ends the challengers, and the job still re
   } finally { await stop(app); await models.close(); }
 });
 
+test("a job whose current model fails more than a fifth of its own eval recommends nothing, asks no approval and lists why its cases failed", async () => {
+  const models = await fakeModels();
+  const app = await startApp({ models, env: CLERK });
+  try {
+    await subscribe(app, "org_floor");
+    const agent = caller(app, "test:user_t:org_floor:admin");
+    // Three of the six examples carry the wrong queue, so the current model, which answers right, passes 5 of the 8 cases.
+    const wrong = bundle("floor classifier", false);
+    for (const example of wrong.examples.slice(0, 3) as { expected?: string }[]) example.expected = example.expected === "billing" ? "account" : "billing";
+    const started = await agent.tool("openmerit_recommend", { bundle: wrong });
+    const jobId = started.data.job_id as string;
+    await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => value.data.status === "needs_input");
+    await agent.tool("openmerit_answer", { job_id: jobId, answers: { label_check: ["written-1", "written-2"] } });
+    const done = await waitFor(() => agent.tool("openmerit_result", { job_id: jobId }), value => ["done", "failed", "stopped"].includes(value.data.status as string), 180_000);
+    assert.equal(done.data.status, "done", done.text);
+    const result = (await agent.api<Result & { approval: unknown; failedCases: { caseId: string; kind: string; reason: string }[]; baselineByKind: { kind: string; passes: number; total: number }[] }>(`/api/runs/${jobId}`)).body;
+    assert.equal(result.status, "below_floor");
+    assert.equal(result.pick, null);
+    assert.equal(result.approval ?? null, null, "no approval question");
+    assert.deepEqual(result.failedCases.map(item => [item.caseId, item.kind]), [["example-1", "example"], ["example-2", "example"], ["example-3", "example"]]);
+    assert.match(result.failedCases[0]!.reason, /^Answered (billing|technical|account), expected (billing|account)\.$/);
+    assert.deepEqual(result.baselineByKind, [{ kind: "example", passes: 9, total: 18 }, { kind: "typical", passes: 6, total: 6 }]);
+    assert.match(done.text, /passed under 80% of its own eval/);
+    assert.match(done.text, /Cases it failed, with the grader's reason \(passed by kind: example 9\/18, typical 6\/6\):\n- example-1 \(example\): Answered/);
+    // Only the current model ran: no candidate was screened.
+    assert.deepEqual([...new Set(models.calls.filter(call => !call.ticket.startsWith("writer:")).map(call => call.model))], ["openai/gpt-5.4"]);
+  } finally { await stop(app); await models.close(); }
+});
+
 test("a job its budget stops offers to raise the budget, and the rerun it asks for runs the task again under the new budget", async () => {
   const models = await fakeModels();
   const app = await startApp({ models, env: CLERK });

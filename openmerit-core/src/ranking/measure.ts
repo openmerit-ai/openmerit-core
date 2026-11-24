@@ -1,12 +1,13 @@
 // `createMeasure`: the Ranking's measure function, the seam Scout Model Binary Search searches over.
 // It runs a candidate on the given cases and grades each output, and returns only pass or fail per
-// case, the candidate's cost and its mean latency per case: never the outputs.
+// case, with a failed case's one-sentence reason, the candidate's cost and its mean latency per
+// case: never the outputs.
 //
 // Ledger keys are `<key>/<run>/<endpoint>/<model>/<case>/call-<n>` (and `/judge`), so a workflow step
 // that replays with the same run is charged once. A deliberate repeat passes a different `run`.
 import { CandidateUnavailable } from "../engine/index.ts";
 import type { ModelClient } from "./clients.ts";
-import type { Grader } from "./graders.ts";
+import { oneSentence, type Grader } from "./graders.ts";
 import type { Ledger } from "../engine/index.ts";
 import { runCase, type CaseFailure } from "./runner.ts";
 import type { Case, TaskBundle } from "./types.ts";
@@ -16,6 +17,8 @@ export interface CaseResult {
   pass: boolean;
   /** Why the case failed before grading; absent when the grader decided. */
   failure?: CaseFailure;
+  /** Why a failed case failed, in one redacted sentence: the grader's reason, or the failure's. */
+  reason?: string;
 }
 
 export interface MeasureResult {
@@ -36,6 +39,11 @@ export const CASE_CONCURRENCY = 4;
 
 /** Statuses that mean the endpoint will not run this model at all, rather than that one call failed. */
 const rejects = (status: number) => status === 0 || status === 400 || status === 401 || status === 403 || status === 404 || status === 422;
+
+const failureReason = (ran: { failure?: CaseFailure; status?: number; error?: string }) => oneSentence(
+  ran.failure === "tool_loop" ? "It kept calling tools past the limit and never answered."
+    : ran.failure === "truncated" ? "It stopped at the output token limit before answering."
+      : `The call failed${ran.status ? ` (HTTP ${ran.status})` : ""}: ${ran.error ?? "no answer"}.`);
 
 export function createMeasure(input: {
   bundle: TaskBundle; cases: readonly Case[]; client: ModelClient; grader: Grader; ledger: Ledger;
@@ -67,7 +75,7 @@ export function createMeasure(input: {
         input.signal?.throwIfAborted();
         const caseItem = byId.get(ids[index]!)!;
         if (silent !== null) {
-          settle(index, { result: { caseId: caseItem.id, pass: false, failure: "error" }, costUsd: 0, costIsEstimate: false, latencyMs: null, graderCostUsd: 0, rejected: silent });
+          settle(index, { result: { caseId: caseItem.id, pass: false, failure: "error", reason: oneSentence(`Not run: ${silent}`) }, costUsd: 0, costIsEstimate: false, latencyMs: null, graderCostUsd: 0, rejected: silent });
           continue;
         }
         const key = `${input.key}/${run}/${candidate.endpoint}/${candidate.model}/${caseItem.id}`;
@@ -76,11 +84,11 @@ export function createMeasure(input: {
         if (ran.failure === "error" && (ran.status ?? 0) === 0) silent ??= ran.error ?? "it did not answer";
         const base = { costUsd: ran.costUsd, costIsEstimate: ran.costIsEstimate, latencyMs: answered ? ran.latencyMs : null };
         if (ran.output === null) {
-          settle(index, { ...base, result: { caseId: caseItem.id, pass: false, failure: ran.failure ?? "error" }, graderCostUsd: 0, ...(ran.failure === "error" && rejects(ran.status ?? 0) ? { rejected: ran.error ?? `HTTP ${ran.status}` } : {}) });
+          settle(index, { ...base, result: { caseId: caseItem.id, pass: false, failure: ran.failure ?? "error", reason: failureReason(ran) }, graderCostUsd: 0, ...(ran.failure === "error" && rejects(ran.status ?? 0) ? { rejected: ran.error ?? `HTTP ${ran.status}` } : {}) });
           continue;
         }
         const grade = await input.grader.grade({ bundle: input.bundle, caseItem, output: ran.output, toolCalls: ran.toolCalls, ledger: input.ledger, key, ...(input.signal ? { signal: input.signal } : {}) });
-        settle(index, { ...base, result: { caseId: caseItem.id, pass: grade.pass }, graderCostUsd: grade.costUsd });
+        settle(index, { ...base, result: { caseId: caseItem.id, pass: grade.pass, ...(grade.pass ? {} : { reason: grade.reason ?? "The grader failed the answer." }) }, graderCostUsd: grade.costUsd });
       }
     };
     await Promise.all(Array.from({ length: Math.min(input.concurrency ?? CASE_CONCURRENCY, ids.length) }, worker));

@@ -85,7 +85,10 @@ export type Fix =
   | { kind: "ask_agent"; notice: string; prompt: string };
 
 export interface JobResult {
-  status: "picked" | "keep_current" | "baseline_failed" | "no_cases" | "no_candidates" | "agent_eval_failed" | "stopped" | "failed";
+  status: "picked" | "keep_current" | "baseline_failed" | "below_floor" | "no_cases" | "no_candidates" | "agent_eval_failed" | "stopped" | "failed";
+  // Up to 20 cases the current model failed, with the grader's reason; and its passes per kind of case. Absent from reports saved before 24 Nov 2026.
+  failedCases?: { caseId: string; kind: string; reason: string }[];
+  baselineByKind?: { kind: string; passes: number; total: number }[];
   pick: { model: string; endpoint: string; endpointModel: string; passes: number; total: number; costPerCallUsd: number | null; savingPerCallUsd: number | null } | null;
   top: MeasuredModel[];
   // Measured models within one case per run of the current model's passes, with whether each costs less per call. Absent from reports saved before 19 Nov 2026.

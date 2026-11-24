@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `openmerit/ranking`'s `TaskBundle` takes a task spec: `input`, `steps` (with each step's tools and access), `criteria` and `guardrails`. The case writer writes from it and tags each written case `typical`, `edge` or `guardrail`. The judge's rubric is now the task itself, with one check per criterion and per guardrail, instead of a line of metadata; a right label or JSON answer is also judged on the guardrails. Failed cases keep the grader's redacted one-sentence reason.
+- `openmerit/engine`'s `evaluateTask` has a floor: when the current model passes under 80% of its own eval, the result is `below_floor`, nothing is screened and no model is recommended, since the eval cannot tell models apart. The CLI turns it off, because the customer's own eval keeps its threshold; its behaviour does not change.
+- The cloud app's `openmerit_recommend` bundle takes the same task spec. A run whose current model falls under the floor ends with "Eval can't tell models apart", no pick and no approval question, and lists the current model's failed cases with their reasons and its pass rate per kind of case, in `openmerit_result`, `GET /api/runs/<job>` and on app.openmerit.ai's run page. A run that recommended a switch on an eval its current model barely passed, such as 29 of 60, now recommends nothing.
+
 ## 0.4.3 — 2026-11-23
 
 Removes Langfuse and the cloud app's Viktor and Langfuse connections, adds the `openmerit/engine` and `openmerit/ranking` exports, and fixes from running the self-hosted flow on 29 open-source repositories that call models and from the 0.4.2 customer acceptance check.
