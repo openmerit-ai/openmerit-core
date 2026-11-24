@@ -33,7 +33,7 @@ const REVIEWING = new Set(["queued", "reviewing"]);
 function reviewText(repo: Repo): Html {
   const { review } = repo, result = review.result;
   const found = result
-    ? html`<span class="sub">${result.models.length ? html`${plural(result.totalCalls, "model call")}: ${result.models.slice(0, 4).map((item, index) => html`${index ? ", " : ""}${item.catalogueId ? model(item.catalogueId) : item.value}`)}${result.models.length > 4 ? ` and ${result.models.length - 4} more` : ""}` : "No model calls found"} · ${plural(result.files, "file")} at ${result.commit.slice(0, 7)} on ${result.branch}</span>`
+    ? html`<span class="sub">${result.totalCalls ? html`${plural(result.totalCalls, "model call")}: ${result.models.slice(0, 4).map((item, index) => html`${index ? ", " : ""}${item.catalogueId ? model(item.catalogueId) : item.value}`)}${result.models.length > 4 ? ` and ${result.models.length - 4} more` : ""}` : "No model calls in application code"}${result.notListed ? ` · ${result.notListed}` : ""} · ${plural(result.files, "file")} at ${result.commit.slice(0, 7)} on ${result.branch}</span>`
     : html``;
   if (REVIEWING.has(review.status)) return html`<span class="sub">Reviewing the code, read-only…</span>${found}`;
   if (review.status === "failed") return html`<span class="sub no">The last review failed: ${review.error ?? "no reason recorded"}</span>${found}`;
@@ -42,11 +42,12 @@ function reviewText(repo: Repo): Html {
 
 function modelCalls(repo: Repo): Html {
   const result = repo.review.result;
-  if (!result?.modelCalls.length) return html``;
+  if (!result?.modelCalls.length) return result?.notListed ? html`<p class="note">${result.notListed}.</p>` : html``;
   const more = result.totalCalls - result.modelCalls.length;
   return html`<details><summary>Show the ${plural(result.totalCalls, "model call")}</summary>
           <table class="calls"><tbody>${result.modelCalls.map((call) => html`<tr><td><a href="${repo.url}/blob/${result.commit}/${call.file}#L${call.line}" target="_blank" rel="noreferrer">${call.file}:${call.line}</a></td><td>${call.catalogueId ? model(call.catalogueId) : html`<code>${call.value}</code>`}${call.envVar ? html`<span class="sub">from ${call.envVar}</span>` : call.dynamic ? html`<span class="sub">set at run time</span>` : ""}</td></tr>`)}</tbody></table>
           ${more > 0 ? html`<p class="note">And ${plural(more, "more call")}.</p>` : ""}
+          ${result.notListed ? html`<p class="note">${result.notListed}.</p>` : ""}
         </details>`;
 }
 

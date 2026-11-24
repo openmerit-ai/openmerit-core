@@ -8,7 +8,7 @@ import { lstat, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Catalogue } from "./engine.ts";
-import { scanRepo, type ScanResult } from "../../openmerit-core/src/scout/scan.ts";
+import { isSupportFile, scanRepo, type ScanResult } from "../../openmerit-core/src/scout/scan.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 
 export interface GitHubConfig {
@@ -219,10 +219,14 @@ export interface RepoReview {
   bytes: number;
   /** The models the code names, the application's own code first, with how many calls name each. */
   models: { value: string; catalogueId: string | null; calls: number }[];
-  /** At most MAX_CALLS, in the order the scan found them. */
+  /** At most MAX_CALLS of the application's model calls, in the order the scan found them. */
   modelCalls: ModelCall[];
-  /** Every model call the scan found, including those past MAX_CALLS. */
+  /** Every model call in the application's code, including those past MAX_CALLS. Examples, scripts and demos count as the application. */
   totalCalls: number;
+  /** Model calls in tests, specs, mocks, fixtures, recorded responses, snapshots, docs and saved results (openmerit-core's `isSupportFile`): counted, never listed or reviewed. */
+  supportCalls: number;
+  /** \`${supportCalls} more in tests, fixtures or docs, not listed\`, or null when there are none. */
+  notListed: string | null;
   /** One spec per task. Empty until the review prompt writes them. */
   tasks: TaskBundle[];
   durationMs: number;
@@ -231,25 +235,38 @@ export interface RepoReview {
 const MAX_CALLS = 200;
 
 /**
- * The review entry point: reads a checkout and returns its task specs. Until openmerit-core's
- * `reviewRepo` (step 3 of the eval-generation plan) lands, it is the repository scan alone, which
- * lists the model calls and writes no task spec.
+ * The scan without usages in tests, fixtures, docs and other support files, which no production task
+ * runs, and how many model calls it left out. Its models keep only the usages it kept.
  */
-export async function reviewCheckout(root: string, catalogue: Catalogue): Promise<{ reviewer: "scan"; scan: ScanResult; tasks: TaskBundle[] }> {
-  return { reviewer: "scan", scan: scanRepo(root, catalogue), tasks: [] };
+export function applicationScan(scan: ScanResult): { scan: ScanResult; supportCalls: number } {
+  const kept = scan.usages.filter(usage => !isSupportFile(usage.file));
+  const ids = new Set(kept.map(usage => usage.id));
+  const models = scan.models.map(model => ({ ...model, usageIds: model.usageIds.filter(id => ids.has(id)) })).filter(model => model.usageIds.length);
+  const supportCalls = scan.usages.filter(usage => usage.kind === "model" && !ids.has(usage.id)).length;
+  return { scan: { ...scan, usages: kept, models }, supportCalls };
+}
+
+/**
+ * The review entry point: reads a checkout and returns its task specs, from the application's code
+ * only. Until openmerit-core's `reviewRepo` is wired in here, it is the repository scan alone, which
+ * lists the model calls and writes no task spec; `reviewRepo` then gets this application-only scan, so
+ * no task spec is written from test code.
+ */
+export async function reviewCheckout(root: string, catalogue: Catalogue): Promise<{ reviewer: "scan"; scan: ScanResult; supportCalls: number; tasks: TaskBundle[] }> {
+  return { reviewer: "scan", ...applicationScan(scanRepo(root, catalogue)), tasks: [] };
 }
 
 /** Clones, reviews and deletes the checkout. */
 export async function reviewRepository(input: { fullName: string; branch: string; token: string | null; config: GitHubConfig; catalogue: Catalogue }): Promise<RepoReview> {
   const started = Date.now();
   return withCheckout(input, async checkout => {
-    const { reviewer, scan, tasks } = await reviewCheckout(checkout.root, input.catalogue);
+    const { reviewer, scan, supportCalls, tasks } = await reviewCheckout(checkout.root, input.catalogue);
     const calls = scan.usages.filter(usage => usage.kind === "model");
     return {
       reviewer, commit: checkout.commit, branch: input.branch, files: scan.files, bytes: checkout.bytes,
       models: scan.models.map(model => ({ value: model.value, catalogueId: model.catalogueId, calls: model.usageIds.length })),
       modelCalls: calls.slice(0, MAX_CALLS).map(usage => ({ file: usage.file, line: usage.line, value: usage.value, catalogueId: usage.catalogueId, dynamic: usage.dynamic, envVar: usage.envVar ?? null })),
-      totalCalls: calls.length, tasks, durationMs: Date.now() - started,
+      totalCalls: calls.length, supportCalls, notListed: supportCalls ? `${supportCalls} more in tests, fixtures or docs, not listed` : null, tasks, durationMs: Date.now() - started,
     };
   });
 }

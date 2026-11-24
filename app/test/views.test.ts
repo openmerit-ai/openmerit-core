@@ -185,11 +185,17 @@ test("Connections lists each repository with its model calls, how it is read, an
   const repos = await get<Repo[]>("/api/repos");
   const endpoints = await get<Endpoint[]>("/api/endpoints");
   const shown = text(connectionsView.render({ endpoints, repos }, page(me)));
-  assert.match(shown, /sahra-health\/claims-api 6 model calls: gpt-5, claude-sonnet-5\.5, gpt-5-mini, settings\.reply_model · 214 files at 4be1c07 on main Private · token ending 9c1e/);
+  assert.match(shown, /sahra-health\/claims-api 6 model calls: gpt-5, claude-sonnet-5\.5, gpt-5-mini, settings\.reply_model · 3 more in tests, fixtures or docs, not listed · 214 files at 4be1c07 on main Private · token ending 9c1e/);
+  assert.match(shown, /src\/replies\/draft\.py:31 settings\.reply_model 3 more in tests, fixtures or docs, not listed\./);
   assert.match(shown, /sahra-health\/enroll-web 1 model call: gpt-5-mini · 88 files at 4be1c07 on main Public/);
   assert.match(shown, /src\/triage\.ts:14 gpt-5 from TRIAGE_MODEL/);
   assert.match(shown, /never runs your code, pushes, or opens a pull request/);
   assert.match(shown, /Contents: Read-only/);
+  // A repository whose model calls are all in tests lists none, and says how many it left out.
+  const testsOnly = { ...repos[1]!, review: { ...repos[1]!.review, result: { ...repos[1]!.review.result!, models: [], modelCalls: [], totalCalls: 0, supportCalls: 2, notListed: "2 more in tests, fixtures or docs, not listed" } } };
+  const none = text(connectionsView.render({ endpoints, repos: [testsOnly] }, page(me)));
+  assert.match(none, /enroll-web No model calls in application code · 2 more in tests, fixtures or docs, not listed · 88 files/);
+  assert.doesNotMatch(none, /Show the/);
   // A review that failed says why and keeps what the last one found; one under way says so and cannot start again.
   const failed = { ...repos[0]!, review: { ...repos[0]!.review, status: "failed" as const, error: "Cloning sahra-health/claims-api failed: took longer than 120 s" } };
   const running = { ...repos[1]!, review: { ...repos[1]!.review, status: "reviewing" as const } };
