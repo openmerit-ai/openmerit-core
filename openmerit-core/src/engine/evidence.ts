@@ -1,7 +1,7 @@
 // What is known about one task, merged from every connection, each piece with the connection it
 // came from; and the quality rule that picks the strongest evidence for each decision:
 // - graders, strongest first: the customer's own eval or scorer, expected outputs, parity with
-//   recorded answers, user-confirmed labels, then a judge;
+//   recorded answers, user-confirmed labels, a judge, then the answers a case writer wrote;
 // - cases: real ones (examples, dataset items, traces) before written ones;
 // - which task first: recorded spend before the agent's request.
 // The report's "Based on" lines say which evidence each decision used.
@@ -12,9 +12,9 @@ export interface Source { connector: string; detail: string }
 
 export interface Evidence<T> { value: T; source: Source }
 
-export type GraderKind = "customer_eval" | "expected_output" | "parity" | "confirmed_label" | "judge";
+export type GraderKind = "customer_eval" | "expected_output" | "parity" | "confirmed_label" | "judge" | "written_answer";
 /** Strongest first. */
-export const GRADER_STRENGTH: readonly GraderKind[] = ["customer_eval", "expected_output", "parity", "confirmed_label", "judge"];
+export const GRADER_STRENGTH: readonly GraderKind[] = ["customer_eval", "expected_output", "parity", "confirmed_label", "judge", "written_answer"];
 
 export interface Grader { kind: GraderKind; description: string }
 export interface Cases { kind: "real" | "written"; count: number; description: string }

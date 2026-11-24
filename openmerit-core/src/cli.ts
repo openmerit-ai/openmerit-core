@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 const HELP = `OpenMerit: find cheaper models that perform at least as well as the ones your code uses today,
-measured with your own evals. Runs locally; no OpenMerit account.
+measured with an eval OpenMerit writes from a review of your code, and your own evals when you have them.
+Runs locally; no OpenMerit account.
 
 Usage:
   openmerit setup                 Connect OpenMerit Harness (as openmerit connect does), register the MCP
@@ -18,6 +19,9 @@ Usage:
                                   candidates, compare with the current model, optionally configure.
   openmerit scout --resume <run>  Continue a paused, interrupted or failed run.
   openmerit history [<run>]       This repository's runs, or one run in detail.
+  openmerit eval <dir>            Run an eval Scout wrote (.openmerit/evals/<task>) under the eval contract: one model
+                                  (OPENMERIT_MODEL) on OPENAI_BASE_URL, the judge OPENMERIT_JUDGE_MODEL on the same
+                                  endpoint unless OPENMERIT_JUDGE_BASE_URL and OPENMERIT_JUDGE_API_KEY say otherwise.
   openmerit mcp                   The local MCP server (stdio), for Claude Code, Codex and other clients.
   openmerit daemon [status|stop]  The background process that runs Scout (started by scout and mcp when needed).
                                   Without an argument it runs in the foreground.
@@ -47,7 +51,7 @@ const isVersion = command === "--version" || command === "-v" || command === "ve
 // The command's name for telemetry, never its arguments. `mcp` reports each tool call instead, and the
 // daemon that scout and mcp start in the background is not a command someone ran.
 const tracked = isHelp ? "help" : isVersion ? "version" : command === "mcp" || (command === "daemon" && !rest[0]) ? null
-  : ["setup", "connect", "scout", "history", "daemon"].includes(command) ? command : "unknown";
+  : ["setup", "connect", "scout", "history", "daemon", "eval"].includes(command) ? command : "unknown";
 let handedOver = false;
 
 async function update(json: boolean): Promise<number | null> {
@@ -204,11 +208,31 @@ async function daemon(args: string[]) {
   process.stdout.write("not running\n");
 }
 
+/** `openmerit eval <dir>`: a generated eval under the eval contract, with its result in $OPENMERIT_RESULT or on stdout. */
+async function generatedEval(args: string[]) {
+  const { loadGeneratedEval, runGeneratedEval } = await import("./eval/generated.ts");
+  const { writeFileSync } = await import("node:fs");
+  const env = process.env, dir = args[0];
+  if (!dir) throw new Error("Usage: openmerit eval <dir>, such as .openmerit/evals/ticket-classifier.");
+  const model = env.OPENMERIT_MODEL, baseUrl = env.OPENMERIT_BASE_URL ?? env.OPENAI_BASE_URL, apiKey = env.OPENMERIT_API_KEY ?? env.OPENAI_API_KEY;
+  if (!model || !baseUrl || !apiKey) throw new Error("Set OPENMERIT_MODEL, OPENAI_BASE_URL and OPENAI_API_KEY, as the eval contract does.");
+  const judgeModel = env.OPENMERIT_JUDGE_MODEL;
+  const outcome = await runGeneratedEval(loadGeneratedEval(process.cwd(), dir), {
+    model, baseUrl, apiKey, items: env.OPENMERIT_ITEMS ? env.OPENMERIT_ITEMS.split(",").map(item => item.trim()).filter(Boolean) : null,
+    ...(judgeModel ? { judge: { model: judgeModel, baseUrl: env.OPENMERIT_JUDGE_BASE_URL ?? baseUrl, apiKey: env.OPENMERIT_JUDGE_API_KEY ?? apiKey } } : {}),
+  });
+  if (!outcome.ok) throw new Error(outcome.error ?? "the eval failed");
+  const result = JSON.stringify({ items: outcome.items, reasons: outcome.reasons });
+  if (env.OPENMERIT_RESULT) writeFileSync(env.OPENMERIT_RESULT, result);
+  else process.stdout.write(`${result}\n`);
+}
+
 async function main() {
   if (isHelp) return void process.stdout.write(`${HELP}\n`);
   if (isVersion) return void process.stdout.write(`${(await import("./update.ts")).packageVersion()}\n`);
   if (command === "mcp") return (await import("./mcp.ts")).serveMcp();
   if (command === "daemon") return daemon(rest);
+  if (command === "eval") return generatedEval(rest);
   if (!["setup", "connect", "scout", "history"].includes(command)) throw new Error(`Unknown command "${command}". Run \`openmerit help\`.`);
   const took = await update(rest.includes("--json"));
   // The updated version ran the command and reported it.

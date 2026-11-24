@@ -12,26 +12,30 @@
 // resumed run replays the search from recorded results and never pays twice for a finished unit.
 // Per-item results come from the eval's own report in $OPENMERIT_RESULT.
 import { createHash, randomInt } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { catalogueIndex, type Catalogue, type CatalogueModel } from "../engine/catalogue.ts";
 import { blendedPrice, eligible, ladder } from "../engine/pool.ts";
 import { redact } from "../engine/redact.ts";
-import { evaluateTask as runPolicy, rankTop, shortfall } from "../engine/evaluate.ts";
+import { EVAL_FLOOR, evaluateTask as runPolicy, floorNote, rankTop, shortfall } from "../engine/evaluate.ts";
 import { APPROVAL_PROMPT, approvalQuestion as configureQuestion } from "../engine/connector.ts";
 import { chosenTask, repoScan } from "../connectors/repo-scan.ts";
 import { evalCommand, evalEvidence } from "../connectors/eval-command.ts";
-import { basedOn, mergeEvidence, strongest } from "../engine/evidence.ts";
+import { basedOn, mergeEvidence, strongest, type EvidencePart } from "../engine/evidence.ts";
+import { caseEvidence } from "../connectors/agent-bundle.ts";
 import { qualificationNote } from "../engine/result.ts";
 import { CandidateUnavailable, CHALLENGERS, FINALISTS, order, SAMPLE_SIZE, type Stage } from "../engine/search.ts";
-import { EvalProxy, retryable } from "../eval/proxy.ts";
-import { runEval } from "../eval/runner.ts";
+import { EvalProxy, retryable, type UnitTally } from "../eval/proxy.ts";
+import { runEval, type EvalOutcome } from "../eval/runner.ts";
 import type { Harness, HarnessUsage } from "../harness/harness.ts";
 import { DEFAULT_BUDGET_USD, DEFAULT_REPEATS, readRepoConfig, resolveCredential, updateRepoConfig, type Endpoint, type EvalSpec, type RepoConfig } from "../state/config.ts";
 import type { RunStatus, Spend, State, UnitRow } from "../state/db.ts";
 import type { Repo } from "../state/paths.ts";
 import { allowedOn, baselineEndpoint, pool, type PoolModel } from "./pool.ts";
-import { context, isExampleFile, isSupportFile, listFiles, scanRepo, type ScanResult, type Usage } from "./scan.ts";
+import { context, isSupportFile, listFiles, scanRepo, type ScanResult, type Usage } from "./scan.ts";
+import { mapTasks, reviewTask, type MappedTask } from "../review/index.ts";
+import { generateEval, generatedDir, loadGeneratedEval, REPO_ITEM, runGeneratedEval, saveGeneratedEval, type GeneratedEval } from "../eval/generated.ts";
+import { caseKind } from "../ranking/types.ts";
 
 export type Answer = string | string[] | boolean | number;
 export type Answers = Record<string, Answer>;
@@ -47,20 +51,22 @@ export interface Question {
   hint?: string;
 }
 
-export interface Task { name: string; description: string; usageIds: string[]; usesTools: boolean; needsVision: boolean; structuredOutput: boolean }
+export type Task = MappedTask;
 
 /** A candidate in a task's pool: ECI-ranked, allowed, cheaper than the current model. */
 export interface PoolEntry { key: string; model: string; endpoint: string; endpointModel: string; eci: number; eciSource: string | null; price: number | null }
 
 interface ModelRef { model: string; endpoint: string; endpointModel: string }
 
-interface PlannedEval extends EvalSpec { source: "saved" | "harness" | "user"; helperFiles?: { path: string; content: string; purpose: string }[]; explanation?: string }
+interface PlannedEval extends EvalSpec { source: "saved" | "harness" | "user" | "generated"; helperFiles?: { path: string; content: string; purpose: string }[]; explanation?: string; /** Labelled items the harness counted in the repository's eval, when it could tell. */ items?: number | null }
 
 /** One eval run's result as recorded in SQLite: pass/fail per item, nothing else from the item. */
 export interface UnitResult {
   items: Record<string, boolean>; passes: number; total: number; source: "eval"; requests: number; durationMs: number;
   /** Answers cut off by their token limit before any text (absent in runs saved before it was counted). */
   cutOff?: number;
+  /** For a generated eval: why each failed item failed, in one redacted sentence. */
+  reasons?: Record<string, string>;
 }
 
 export interface SearchSummary {
@@ -128,6 +134,8 @@ export interface RunState {
   pool?: Record<string, PoolEntry[]>;
   unranked?: Record<string, number>;
   evals?: Record<string, PlannedEval | { skipped: string }>;
+  /** Evals OpenMerit wrote for this run, by task, until approval saves them in `.openmerit/evals/<task>/`. */
+  generated?: Record<string, GeneratedEval>;
   evalApproved?: boolean;
   repeats?: number;
   samples?: Record<string, string[]>;
@@ -174,10 +182,10 @@ export interface ScoutResult {
 const PHASES = ["scan", "disclose", "map", "model", "corrections", "tasks", "pool", "discover", "approve", "evaluate", "compare", "configure", "done"] as const;
 type Phase = typeof PHASES[number];
 export const TOP = 3;
-/** Usages the mapping step shows the harness, with their context. */
-const MAP_USAGES = 120;
+/** The model that judges a generated eval's text answers and guardrails, when an endpoint may run it. */
+export const JUDGE_MODEL = "anthropic/claude-sonnet-5.5";
 const UNMAPPED_SUPPORT = "unmapped: tests, fixtures and docs";
-const NO_EVAL_NEXT = "To review it, add an eval that follows the eval contract in OpenMerit's README (it runs once per model and reports pass or fail per item), then run `openmerit scout` again and give its command.";
+const NO_EVAL_NEXT = "Run `openmerit scout` again to have OpenMerit write its eval, or add an eval that follows the eval contract in OpenMerit's README (it runs once per model and reports pass or fail per item), which Scout finds and runs.";
 export const TASK_QUESTION = "Select which Agents/Tasks do you want OpenMerit to review?";
 export const CONFIGURE_QUESTION = APPROVAL_PROMPT;
 /** Provider answers that mean the model cannot run at all: skipped as untested, not failed. */
@@ -199,6 +207,21 @@ class NeedsInput {
 }
 /** Ends one task's search without a recommendation; the run goes on with the other tasks. */
 class StopTask extends Error {}
+
+/**
+ * Sets aside a generated Eval that cannot tell models apart, so the next run reviews the task again
+ * instead of reusing it: its files go, and the task's saved eval is the repository's own, if any.
+ */
+function forgetGeneratedEval(ctx: Context, task: string, dir: string): void {
+  rmSync(join(ctx.repo.root, dir), { recursive: true, force: true });
+  const evals = { ...repoConfig(ctx).evals };
+  const name = Object.keys(evals).find(other => other.toLowerCase() === task.toLowerCase());
+  if (!name) return;
+  const { repoEval, helpers } = evals[name]!;
+  if (repoEval) evals[name] = { ...repoEval, ...(helpers ? { helpers } : {}) };
+  else delete evals[name];
+  updateRepoConfig(ctx.repo.root, { evals });
+}
 
 export function newRunId() { return `run-${new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-")}-${hash(String(Math.random())).slice(0, 4)}`; }
 
@@ -310,6 +333,12 @@ function endpoints(ctx: Context): Endpoint[] {
   if (!configured.length) throw new Error("No candidate endpoints are configured for this repository. Run `openmerit setup`.");
   return configured;
 }
+/** The fixed judge of a generated eval: JUDGE_MODEL on the first endpoint allowed to run it, else the current model on its endpoint. */
+function judgeRef(ctx: Context, data: RunState): ModelRef {
+  const found = pool(endpoints(ctx), ctx.catalogue).find(item => item.model.id === JUDGE_MODEL);
+  return found ? { model: found.model.id, endpoint: found.endpoint.id, endpointModel: found.endpointModel } : baselineRef(ctx, data);
+}
+
 function baselineRef(ctx: Context, data: RunState): ModelRef {
   const base = baselineEndpoint(endpoints(ctx), ctx.catalogue, data.model!)!;
   return { model: base.model.id, endpoint: base.endpoint.id, endpointModel: base.endpointModel };
@@ -338,21 +367,8 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
     const scan = data.scan!;
     ctx.log(`Mapping ${scan.usages.length} usages to tasks…`);
     const harness = await getHarness();
-    // The harness sees at most MAP_USAGES usages with their context: the application's own code before examples and
-    // scripts, those before tests, fixtures and docs, and in each a catalogue model before a model set at run time.
-    const tier = (usage: Usage) => (isSupportFile(usage.file) ? 4 : isExampleFile(usage.file) ? 2 : 0) + (usage.catalogueId ? 0 : 1);
-    const shown = scan.usages.map((usage, index) => ({ usage, index })).sort((a, b) => tier(a.usage) - tier(b.usage) || a.index - b.index).slice(0, MAP_USAGES).map(item => item.usage);
     // Saved evals are keyed by task name: ask for the same names again so an approved eval is reused, not found and paid for again.
-    const savedTasks = Object.keys(repoConfig(ctx).evals ?? {});
-    const listing = shown.map(usage => `### ${usage.id} ${usage.kind}${usage.dynamic ? " (dynamic)" : ""}: ${usage.value}${usage.catalogueId ? ` = catalogue ${usage.catalogueId}` : ""} at ${ref(usage)}\n${context(ctx.repo.root, usage)}`).join("\n\n");
-    const reply = await harness.json<{ tasks: Task[] }>({
-      cwd: ctx.repo.root,
-      system: "You are OpenMerit Harness running OpenMerit Scout. You map model usages in a codebase to the agents or tasks they serve. Read files only to understand them; never change anything.",
-      prompt: `Repository: ${ctx.repo.root}\n\nGroup these model usages into the agents or tasks they serve (one task per distinct job a model does in production, such as \"ticket classifier\" or \"claim summary\"). A model used by two jobs belongs to two tasks. Include every model usage of the application, including dynamic ones, in a task; leave out usages in tests, fixtures, recorded responses and docs unless they configure a production task. For each task say whether the call uses tool calls, image input, or structured (JSON) output. Use short task names, and describe each task in one short sentence.${savedTasks.length ? ` This repository has saved evals for these tasks; when usages serve one of them, use its exact name: ${savedTasks.map(name => JSON.stringify(name)).join(", ")}.` : ""}\n\n${listing}`,
-      schema: strict({ tasks: { type: "array", items: strict({ name: { type: "string" }, description: { type: "string" }, usageIds: { type: "array", items: { type: "string" } }, usesTools: { type: "boolean" }, needsVision: { type: "boolean" }, structuredOutput: { type: "boolean" } }) } }),
-    });
-    const known = usageById(data);
-    const tasks = (reply.tasks ?? []).map(task => ({ ...task, name: String(task.name).trim().slice(0, 80), usageIds: [...new Set(task.usageIds.filter(id => known.has(id)))] })).filter(task => task.name && task.usageIds.length);
+    const tasks: Task[] = await mapTasks({ root: ctx.repo.root, scan, harness, names: Object.keys(repoConfig(ctx).evals ?? {}), ...(ctx.signal ? { signal: ctx.signal } : {}) });
     // What the harness left out stays selectable: per file in application code, in one task for tests, fixtures and docs.
     for (const usage of scan.usages.filter(item => item.kind === "model" && !tasks.some(task => task.usageIds.includes(item.id)))) {
       const name = isSupportFile(usage.file) ? UNMAPPED_SUPPORT : `unmapped: ${usage.file}`;
@@ -425,56 +441,52 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
     return "discover";
   },
 
-  async discover({ ctx, runId, data, answers, getHarness, save }) {
+  async discover({ ctx, runId, data, getHarness, save }) {
     data.evals ??= {};
+    data.generated ??= {};
     const saved = repoConfig(ctx).evals ?? {};
-    const missing: Question[] = [];
     for (const name of data.selected!) {
       if (data.evals[name]) continue;
-      const key = `eval_${slug(name)}`;
-      const answer = answers[key];
-      if (typeof answer === "string" && answer.trim()) {
-        const found = typeof data[`asked_${key}`] === "string" ? String(data[`asked_${key}`]).split(/(?<=\.)\s/)[0] : "";
-        data.evals[name] = /^skip$/i.test(answer.trim()) ? { skipped: `Skipped for lack of an eval${found ? `: ${found}` : ""}` } : { source: "user", command: answer.trim() };
-        continue;
-      }
       const savedName = Object.keys(saved).find(other => other.toLowerCase() === name.toLowerCase());
-      if (savedName) { data.evals[name] = { ...saved[savedName]!, source: "saved" }; continue; }
-      if (data[`asked_${key}`]) { missing.push(evalQuestion(name, String(data[`asked_${key}`]))); continue; }
-      ctx.log(`Finding the eval for ${name}…`);
+      const savedSpec = savedName ? saved[savedName]! : null;
+      // An Eval OpenMerit generated and the user approved is reused as it is, with the repository's own eval beside it.
+      if (savedSpec?.generated) { data.evals[name] = { ...savedSpec, source: "saved" }; continue; }
       const harness = await getHarness();
       const task = data.tasks!.find(item => item.name === name)!;
-      const usages = usageById(data);
-      const files = listFiles(ctx.repo.root).filter(file => /(eval|bench|test|spec|dataset|fixture|golden|score|grade)/i.test(file)).slice(0, 200);
-      const pkg = existsSync(join(ctx.repo.root, "package.json")) ? JSON.stringify((JSON.parse(readFileSync(join(ctx.repo.root, "package.json"), "utf8")) as { scripts?: unknown }).scripts ?? {}, null, 1) : "(no package.json)";
-      const reply = await harness.json<{ found: boolean; command: string; cwd: string; env: { name: string; value: string }[]; threshold: number | null; helpers: { path: string; content: string; purpose: string }[]; explanation: string; missing: string; items?: number | null }>({
-        cwd: ctx.repo.root,
-        system: "You are OpenMerit Harness running OpenMerit Scout's evaluation step. You find the eval a task already has and say exactly how to run it for another model. Never invent an eval, dataset or labels: if the repository has none for this task, say so.",
-        prompt: `Task: ${task.name}: ${task.description}\nUsages:\n${task.usageIds.map(id => usages.get(id)).filter((usage): usage is Usage => !!usage).map(usage => `- ${usage.value} at ${ref(usage)}\n${context(ctx.repo.root, usage, 4)}`).join("\n")}\n\npackage.json scripts: ${pkg}\nFiles that look like evals, tests or datasets:\n${files.join("\n")}\n\n${EVAL_CONTRACT}\n\nThe model under test is the one this task's usages call: the eval must send those calls to {{model}}, such as the judge's calls for a judge task, and leave its other model calls as they are. Every model call of the task must go to OPENAI_BASE_URL (or OPENMERIT_BASE_URL) with OPENAI_API_KEY: OpenMerit meters and caps eval spend there, and a call that goes elsewhere, such as through a provider SDK with its own key or a deployed service, is neither metered nor made with {{model}}. If the existing eval cannot be pointed there, add a helper that is. The repository's dependencies are installed, so the command runs the eval only, with no install or build step.\n\nThe eval must run only the OPENMERIT_ITEMS items when given, and report each item's pass or fail itself. Only if the existing eval cannot take the model or the items, or cannot report per-item results this way, may you add helper files, and only under .openmerit/evals/; they must call the existing eval code with the same inputs, prompts, tools and scoring. threshold is the minimum pass rate (0 to 1) the eval itself requires, or null. items is how many labelled items the eval runs in all, or null when you cannot tell from the repository. Set found false and explain in missing when there is no eval for this task.`,
-        schema: strict({ found: { type: "boolean" }, command: { type: "string" }, cwd: { type: "string" }, env: { type: "array", items: strict({ name: { type: "string" }, value: { type: "string" } }) }, threshold: { type: ["number", "null"] }, helpers: { type: "array", items: strict({ path: { type: "string" }, content: { type: "string" }, purpose: { type: "string" } }) }, explanation: { type: "string" }, missing: { type: "string" } }, { items: { type: ["number", "null"] } }),
-      });
-      // Too few items to screen on is known before any spend: ask, so the user can give a larger eval, insist on this one or skip.
-      const tooSmall = reply.found && typeof reply.items === "number" && reply.items < SAMPLE_SIZE;
-      if (!reply.found || !reply.command?.trim() || tooSmall) {
-        data[`asked_${key}`] = tooSmall ? `The eval the harness found (\`${redact(reply.command.trim())}\`) has ${reply.items} labelled item${reply.items === 1 ? "" : "s"}, and Scout screens candidates on ${SAMPLE_SIZE} items the current model passes, so it would stop after paying for the current model's first run. Add labelled items, then give the command; or give it anyway if that count is wrong.` : reply.missing || "The harness found no eval for this task.";
-        missing.push(evalQuestion(name, String(data[`asked_${key}`])));
+      // The repository's own eval, when it has one, runs beside the generated eval as extra evidence.
+      let own: PlannedEval | null = savedSpec ? { ...savedSpec, source: "saved" } : null;
+      if (!own) { ctx.log(`Finding the eval for ${name}…`); own = await findRepoEval(ctx, runId, data, name, harness); }
+      ctx.log(`Reviewing ${name} and writing its eval…`);
+      let generated: GeneratedEval | null = null, why = "the harness wrote no usable case from the task's spec";
+      try {
+        const bundle = await reviewTask({ root: ctx.repo.root, scan: data.scan!, harness, task, ...(data.model ? { currentModel: data.model } : {}), ...(ctx.signal ? { signal: ctx.signal } : {}) });
+        generated = await generateEval(bundle, harness, ctx.signal);
+      } catch (error) {
+        if (ctx.signal?.aborted) throw error;
+        why = `the review failed: ${redact((error as Error).message).split("\n")[0]}`;
+      }
+      if (!generated?.cases.length) {
+        // Without a generated eval, the repository's own eval measures alone, if it has enough items to screen on.
+        const small = own && typeof own.items === "number" && own.items < SAMPLE_SIZE ? own : null, tooSmall = !!small;
+        data.evals[name] = own && !tooSmall ? own
+          : { skipped: `OpenMerit wrote no eval for it (${why})${small ? `, and the repository's eval (\`${redact(small.command)}\`) has ${small.items} labelled item${small.items === 1 ? "" : "s"}, fewer than the ${SAMPLE_SIZE} Scout screens candidates on` : own ? "" : ", and the repository has none"}` };
+        ctx.state.event(runId, "discover", `${name}: ${why}${own && !tooSmall ? "; the repository's eval measures it alone" : "; skipped"}.`);
         save();
         continue;
       }
-      const helpers = (reply.helpers ?? []).map(helper => ({ ...helper, path: normalize(helper.path).replace(/^\.\//, "") }));
-      const outside = helpers.find(helper => !helper.path.startsWith(".openmerit/evals/") || helper.path.includes(".."));
-      if (outside) throw new Error(`The harness proposed a helper outside .openmerit/evals/ (${outside.path}); refusing it. Retry with \`openmerit scout --resume ${runId}\`.`);
-      const cwd = evalCwd(ctx.repo.root, reply.cwd);
-      data.evals[name] = {
-        source: "harness", command: reply.command.trim(), ...(cwd ? { cwd } : {}),
-        env: Object.fromEntries((reply.env ?? []).filter(item => item.name && !/(KEY|TOKEN|SECRET)/.test(item.name)).map(item => [item.name, item.value])),
-        ...(typeof reply.threshold === "number" ? { threshold: reply.threshold } : {}),
-        helperFiles: helpers, explanation: reply.explanation,
-      };
-      ctx.state.event(runId, "discover", `${name}: eval \`${redact(reply.command.trim())}\`, per-item results reported by the eval${helpers.length ? `, ${helpers.length} helper file(s)` : ""}.`);
+      const bundle = generated.bundle;
+      const dir = generatedDir(name);
+      data.generated[name] = generated;
+      const plan: PlannedEval = { source: "generated", command: `openmerit eval ${dir}`, generated: dir };
+      if (own) {
+        const { source: _source, helperFiles, explanation, generated: _generated, repoEval: _repoEval, items: _items, ...repoEval } = own;
+        Object.assign(plan, { repoEval, ...(helperFiles ? { helperFiles } : {}), ...(explanation ? { explanation } : {}) });
+      }
+      data.evals[name] = plan;
+      const kinds = Object.entries(generated.cases.reduce<Record<string, number>>((counts, item) => ({ ...counts, [caseKind(item)]: (counts[caseKind(item)] ?? 0) + 1 }), {})).map(([kind, count]) => `${count} ${kind}`).join(", ");
+      ctx.state.event(runId, "discover", `${name}: OpenMerit wrote an eval from the task's spec (${generated.cases.length} cases: ${kinds}; ${bundle.criteria?.length ?? 0} criteria, ${bundle.guardrails?.length ?? 0} guardrails)${own ? `, with the repository's eval \`${redact(own.command)}\` beside it` : ""}.`);
       save();
     }
-    if (missing.length) throw new NeedsInput(missing, "needs_input", ["Scout does not fabricate quality: each task needs its existing eval, or skip it."]);
     // Nothing to measure is an answer, not a failure: the comparison lists each task as not reviewed, and why.
     if (!plannedEvals(data).length) return "compare";
     return "approve";
@@ -493,7 +505,9 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, helper.content);
       }
-      const { source: _source, helperFiles, explanation: _explanation, ...spec } = plan;
+      const generated = data.generated?.[name];
+      if (plan.generated && generated) saveGeneratedEval(ctx.repo.root, plan.generated, generated);
+      const { source: _source, helperFiles, explanation: _explanation, items: _items, ...spec } = plan;
       evals[name] = { ...spec, ...(helperFiles?.length ? { helpers: helperFiles.map(helper => helper.path) } : {}) };
     }
     updateRepoConfig(ctx.repo.root, { evals });
@@ -571,6 +585,36 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
   async done() { return "done"; },
 };
 
+/** Each generated case's kind, for the current model's pass rate per kind. */
+const itemKinds = (value: GeneratedEval): Record<string, string> => Object.fromEntries(value.cases.map(item => [item.id, caseKind(item)]));
+
+/** The eval the repository already has for a task, as the harness finds it; null when it has none. */
+async function findRepoEval(ctx: Context, runId: string, data: RunState, name: string, harness: Harness): Promise<PlannedEval | null> {
+  const task = data.tasks!.find(item => item.name === name)!;
+  const usages = usageById(data);
+  const files = listFiles(ctx.repo.root).filter(file => /(eval|bench|test|spec|dataset|fixture|golden|score|grade)/i.test(file)).slice(0, 200);
+  const pkg = existsSync(join(ctx.repo.root, "package.json")) ? JSON.stringify((JSON.parse(readFileSync(join(ctx.repo.root, "package.json"), "utf8")) as { scripts?: unknown }).scripts ?? {}, null, 1) : "(no package.json)";
+  const reply = await harness.json<{ found: boolean; command: string; cwd: string; env: { name: string; value: string }[]; threshold: number | null; helpers: { path: string; content: string; purpose: string }[]; explanation: string; missing: string; items?: number | null }>({
+    cwd: ctx.repo.root,
+    system: "You are OpenMerit Harness running OpenMerit Scout's evaluation step. You find the eval a task already has and say exactly how to run it for another model. Never invent an eval, dataset or labels: if the repository has none for this task, say so.",
+    prompt: `Task: ${task.name}: ${task.description}\nUsages:\n${task.usageIds.map(id => usages.get(id)).filter((usage): usage is Usage => !!usage).map(usage => `- ${usage.value} at ${ref(usage)}\n${context(ctx.repo.root, usage, 4)}`).join("\n")}\n\npackage.json scripts: ${pkg}\nFiles that look like evals, tests or datasets:\n${files.join("\n")}\n\n${EVAL_CONTRACT}\n\nThe model under test is the one this task's usages call: the eval must send those calls to {{model}}, such as the judge's calls for a judge task, and leave its other model calls as they are. Every model call of the task must go to OPENAI_BASE_URL (or OPENMERIT_BASE_URL) with OPENAI_API_KEY: OpenMerit meters and caps eval spend there, and a call that goes elsewhere, such as through a provider SDK with its own key or a deployed service, is neither metered nor made with {{model}}. If the existing eval cannot be pointed there, add a helper that is. The repository's dependencies are installed, so the command runs the eval only, with no install or build step.\n\nThe eval must run only the OPENMERIT_ITEMS items when given, and report each item's pass or fail itself. Only if the existing eval cannot take the model or the items, or cannot report per-item results this way, may you add helper files, and only under .openmerit/evals/; they must call the existing eval code with the same inputs, prompts, tools and scoring. threshold is the minimum pass rate (0 to 1) the eval itself requires, or null. items is how many labelled items the eval runs in all, or null when you cannot tell from the repository. Set found false and explain in missing when there is no eval for this task.`,
+    schema: strict({ found: { type: "boolean" }, command: { type: "string" }, cwd: { type: "string" }, env: { type: "array", items: strict({ name: { type: "string" }, value: { type: "string" } }) }, threshold: { type: ["number", "null"] }, helpers: { type: "array", items: strict({ path: { type: "string" }, content: { type: "string" }, purpose: { type: "string" } }) }, explanation: { type: "string" }, missing: { type: "string" } }, { items: { type: ["number", "null"] } }),
+  });
+  if (!reply.found || !reply.command?.trim()) return null;
+  const helpers = (reply.helpers ?? []).map(helper => ({ ...helper, path: normalize(helper.path).replace(/^\.\//, "") }));
+  const outside = helpers.find(helper => !helper.path.startsWith(".openmerit/evals/") || helper.path.includes(".."));
+  if (outside) throw new Error(`The harness proposed a helper outside .openmerit/evals/ (${outside.path}); refusing it. Retry with \`openmerit scout --resume ${runId}\`.`);
+  const cwd = evalCwd(ctx.repo.root, reply.cwd);
+  const plan: PlannedEval = {
+    source: "harness", command: reply.command.trim(), ...(cwd ? { cwd } : {}),
+    env: Object.fromEntries((reply.env ?? []).filter(item => item.name && !/(KEY|TOKEN|SECRET)/.test(item.name)).map(item => [item.name, item.value])),
+    ...(typeof reply.threshold === "number" ? { threshold: reply.threshold } : {}),
+    helperFiles: helpers, explanation: reply.explanation, items: reply.items ?? null,
+  };
+  ctx.state.event(runId, "discover", `${name}: the repository's eval \`${redact(plan.command)}\`, per-item results reported by the eval${plan.helperFiles?.length ? `, ${plan.helperFiles.length} helper file(s)` : ""}.`);
+  return plan;
+}
+
 const EVAL_CONTRACT = `OpenMerit runs the eval once per model and item set with these environment variables: OPENMERIT_MODEL (the model ID, as the endpoint names it), OPENAI_BASE_URL and OPENAI_API_KEY (an OpenAI-compatible endpoint, also as OPENMERIT_BASE_URL and OPENMERIT_API_KEY), OPENMERIT_ITEMS (comma-separated item IDs to run; empty means every item) and OPENMERIT_RESULT (a file path). \`{{model}}\` and \`{{items}}\` in the command or env values are replaced by the same values; map them onto the eval's own variables in env when it reads others (for example CLASSIFIER_MODEL={{model}}). The eval writes {"items":[{"id": string, "pass": boolean}]} to $OPENMERIT_RESULT or prints it as its last JSON line.`;
 
 /** The binary search for every planned task. Replays finished units from SQLite; runs the rest. */
@@ -636,10 +680,35 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     // The baseline is the model already in production: it runs even when the candidate pool leaves it out.
     const allowed = kind === "baseline" ? (model: string) => (model.toLowerCase() === entry.endpointModel.toLowerCase() ? ctx.catalogue.models.find(item => item.id === entry.model) ?? null : pooled(model)) : pooled;
     const { token, tally } = proxy.open({ runId, unitId: id, endpointId: endpoint.id, baseUrl: endpoint.baseUrl, apiKey, model: entry.endpointModel, allowed });
-    let outcome;
-    try { outcome = await runEval(plan, { root: ctx.repo.root, model: entry.endpointModel, baseUrl: proxyUrl, token, items, env: ctx.env, ...(ctx.signal ? { signal: ctx.signal } : {}) }); } finally { proxy.close(token); }
-    if (tally.budgetHit) {
-      const need = tally.refusedLargest;
+    let outcome: EvalOutcome & { reasons?: Record<string, string> };
+    let judged: UnitTally | null = null;
+    try {
+      const run = (spec: EvalSpec, only: readonly string[] | null) => runEval(spec, { root: ctx.repo.root, model: entry.endpointModel, baseUrl: proxyUrl, token, items: only, env: ctx.env, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+      if (!plan.generated) outcome = await run(plan, items);
+      else {
+        // A generated eval runs in-process. Its judge calls go through the proxy under a unit of their own, so they count in the budget but not in this model's cost.
+        const judge = judgeRef(ctx, data), judgeEndpoint = configured.find(item => item.id === judge.endpoint);
+        const judgeKey = judgeEndpoint ? resolveCredential(judgeEndpoint.apiKey, ctx.env) : null;
+        if (!judgeEndpoint || !judgeKey) return fail(`Endpoint ${judge.endpoint} has no usable credential for the judge ${judge.model}; run \`openmerit setup\`.`);
+        const judging = proxy.open({ runId, unitId: `${id}/judge`, endpointId: judgeEndpoint.id, baseUrl: judgeEndpoint.baseUrl, apiKey: judgeKey, model: judge.endpointModel, allowed: model => (model.toLowerCase() === judge.endpointModel.toLowerCase() ? ctx.catalogue.models.find(item => item.id === judge.model) ?? null : null) });
+        judged = judging.tally;
+        try {
+          const ownIds = items?.filter(item => item.startsWith(REPO_ITEM)).map(item => item.slice(REPO_ITEM.length)) ?? null;
+          const generatedIds = items?.filter(item => !item.startsWith(REPO_ITEM)) ?? null;
+          const value = data.generated?.[task] ?? loadGeneratedEval(ctx.repo.root, plan.generated);
+          outcome = generatedIds && !generatedIds.length ? { ok: true, exitCode: 0, durationMs: 0, items: [] }
+            : await runGeneratedEval(value, { model: entry.endpointModel, baseUrl: proxyUrl, apiKey: token, items: generatedIds, judge: { model: judge.endpointModel, baseUrl: proxyUrl, apiKey: judging.token }, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+          // The repository's own eval, beside it: its items are prefixed so the two never collide.
+          if (outcome.ok && plan.repoEval && (!ownIds || ownIds.length)) {
+            const own = await run(plan.repoEval, ownIds);
+            outcome = !own.ok ? own : !own.items ? { ...own, ok: false, error: "The repository's eval reported no per-item results." }
+              : { ...outcome, durationMs: outcome.durationMs + own.durationMs, items: [...outcome.items ?? [], ...own.items.map(item => ({ id: `${REPO_ITEM}${item.id}`, pass: item.pass }))] };
+          }
+        } finally { proxy.close(judging.token); }
+      }
+    } finally { proxy.close(token); }
+    if (tally.budgetHit || judged?.budgetHit) {
+      const need = tally.refusedLargest ?? judged?.refusedLargest;
       state.setUnit(id, { status: "budget_paused", error: `Paused: the eval budget was reached${need ? `; a request needed about $${need.usd.toFixed(4)} for up to ${need.outputTokens} output tokens` : ""}.` });
       const run = state.getRun(runId)!, spend = state.spend(runId);
       state.budgetEvent(runId, { kind: "alert", fromUsd: run.budgetUsd, spentUsd: spend.totalUsd });
@@ -668,7 +737,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     if (absent.length) return fail(`The eval reported no result for ${absent.length} requested item(s): ${absent.slice(0, 10).join(", ")}.`);
     const results: Record<string, boolean> = Object.fromEntries(ids.map(item => [item, reported.get(item)!]));
     const passes = Object.values(results).filter(Boolean).length, total = Object.keys(results).length;
-    const result: UnitResult = { items: results, passes, total, source: "eval", requests: tally.requests, durationMs: outcome.durationMs, cutOff: tally.cutOff };
+    const result: UnitResult = { items: results, passes, total, source: "eval", requests: tally.requests, durationMs: outcome.durationMs, cutOff: tally.cutOff, ...(outcome.reasons && Object.keys(outcome.reasons).length ? { reasons: outcome.reasons } : {}) };
     // An eval that sends no request through the proxy did not use the model under test, and its spend was neither metered nor capped.
     if (!tally.requests) {
       const unmetered = `the eval made no model requests through OpenMerit's proxy (OPENAI_BASE_URL), so ${entry.endpointModel} was not what it ran, and any spend was not metered or capped by the budget`;
@@ -721,8 +790,9 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
       },
     });
     const evaluated = await runPolicy({
-      // The customer's own eval decides with its own threshold, not OpenMerit's floor.
-      ladder: order(candidates), strength: item => item.eci, items: null, repeats, rules: { threshold: plan.threshold ?? null }, floor: null,
+      // The customer's own eval alone decides with its own threshold; an eval OpenMerit generated has OpenMerit's floor.
+      ladder: order(candidates), strength: item => item.eci, items: null, repeats, rules: { threshold: plan.generated ? null : plan.threshold ?? null },
+      ...(plan.generated ? { kinds: itemKinds(data.generated?.[task] ?? loadGeneratedEval(ctx.repo.root, plan.generated)) } : { floor: null }),
       baselinePrice: currentModel ? blendedPrice(currentModel) : null, ...evals.measure,
       on: {
         trial: trial => summary.trials.push({ stage: trial.stage, model: trial.option.model, eci: trial.option.eci, passes: Object.values(trial.measurement.items).filter(Boolean).length, total: Object.keys(trial.measurement.items).length, accepted: trial.accepted }),
@@ -735,6 +805,11 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
         challenger: option => summary.challengers.push(option.model),
       },
     });
+    if (evaluated.status === "below_floor") {
+      const failed = Object.entries(Object.assign({}, ...baselineRuns.map(run => run.reasons ?? {})) as Record<string, string>).slice(0, 5);
+      if (plan.generated) forgetGeneratedEval(ctx, task, plan.generated);
+      throw new StopTask(`${floorNote(evaluated.baseline, base.model)}${plan.generated ? " OpenMerit set this eval aside; the next `openmerit scout` reviews the task and writes it again." : ""}${failed.length ? ` Failed cases: ${failed.map(([item, reason]) => `${item}: ${reason}`).join(" ")}` : ""}`);
+    }
     if (evaluated.status === "too_few_reliable") {
       // A reasoning default on the endpoint can use up a small token limit before any answer: say so, since it is not the model's quality.
       const cutOff = baselineRuns.reduce((sum, run) => sum + (run.cutOff ?? 0), 0), requests = baselineRuns.reduce((sum, run) => sum + run.requests, 0);
@@ -791,10 +866,6 @@ function tasksQuestion(data: RunState): Question {
   };
 }
 
-function evalQuestion(task: string, reason: string): Question {
-  return { id: `eval_${slug(task)}`, kind: "text", prompt: `No eval found for ${task}. Command to run it, or "skip":`, detail: `${reason}\n${EVAL_CONTRACT}` };
-}
-
 /** Upper estimate of eval runs: baseline and finals on every item, screens on the sample. */
 export function estimate(poolSize: number, repeats: number) {
   const probes = Math.ceil(Math.log2(poolSize + 1));
@@ -816,11 +887,24 @@ function approvalQuestion(ctx: Context, runId: string, data: RunState): Question
     const candidates = data.pool![name] ?? [];
     for (const candidate of candidates) destinations.add(endpointLabel(candidate.endpoint));
     const runs = estimate(candidates.length, repeats);
+    const own = plan.generated ? plan.repoEval : plan;
+    const generated = plan.generated ? data.generated?.[name] ?? null : null;
+    if (plan.generated) destinations.add(endpointLabel(judgeRef(ctx, data).endpoint));
+    const kinds = generated ? Object.entries(generated.cases.reduce<Record<string, number>>((counts, item) => ({ ...counts, [caseKind(item)]: (counts[caseKind(item)] ?? 0) + 1 }), {})).map(([kind, count]) => `${count} ${kind}`).join(", ") : "";
     return [
       `${name}`,
-      `  Command: ${plan.command}${plan.cwd ? ` (in ${plan.cwd})` : ""}`,
-      ...(plan.env && Object.keys(plan.env).length ? [`  Env: ${Object.entries(plan.env).map(([key, value]) => `${key}=${value}`).join(" ")}`] : []),
-      `  Results: $OPENMERIT_RESULT${plan.threshold !== undefined ? `; pass rate ≥ ${plan.threshold}` : ""}`,
+      ...(plan.generated ? [
+        `  Eval: written by OpenMerit from its review of the code${generated ? `, ${generated.cases.length} cases (${kinds})` : ""}, saved in ${plan.generated}/ once approved`,
+        ...(generated?.bundle.criteria?.length ? [`  Criteria: ${generated.bundle.criteria.join("; ")}`] : []),
+        ...(generated?.bundle.guardrails?.length ? [`  Guardrails: ${generated.bundle.guardrails.join("; ")}`] : []),
+        `  Judge: ${judgeRef(ctx, data).model}, for text answers and guardrails; its calls count in the budget, not in a model's cost per item`,
+        `  Floor: no recommendation if ${data.model} passes under ${Math.round(EVAL_FLOOR * 100)}% of the eval`,
+      ] : []),
+      ...(own ? [
+        `  ${plan.generated ? "Also the repository's eval, as extra evidence (items repo:…)" : "Command"}: ${own.command}${own.cwd ? ` (in ${own.cwd})` : ""}`,
+        ...(own.env && Object.keys(own.env).length ? [`  Env: ${Object.entries(own.env).map(([key, value]) => `${key}=${value}`).join(" ")}`] : []),
+        `  Results: $OPENMERIT_RESULT${own.threshold !== undefined && !plan.generated ? `; pass rate ≥ ${own.threshold}` : ""}`,
+      ] : []),
       `  Candidates: ${candidates.length} cheaper than ${data.model}${candidates.length ? `, ECI ${candidates[0]!.eci.toFixed(1)}–${candidates.at(-1)!.eci.toFixed(1)}` : ""}${data.unranked?.[name] ? ` (${data.unranked[name]} without ECI left out)` : ""}`,
       `  Runs: at most ${runs.fullRuns} full and ${runs.screens} ${SAMPLE_SIZE}-item screens`,
       ...(plan.helperFiles ?? []).map(helper => `  New helper file ${helper.path} (${helper.purpose}):\n${helper.content.split("\n").map(line => `    + ${line}`).join("\n")}`),
@@ -915,6 +999,15 @@ function measure(ctx: Context, runId: string, units: UnitRow[], repeats: number,
   };
 }
 
+/** What a task's eval contributes to "Based on": the generated eval's cases and grader, and the repository's eval beside it. */
+function evidenceOf(ctx: Context, data: RunState, name: string, plan: PlannedEval, baseline: ModelResult): EvidencePart[] {
+  const items = baseline.runs ? baseline.total / baseline.runs : null;
+  if (!plan.generated) return [chosenTask, evalEvidence({ command: redact(plan.command), items })];
+  const value = data.generated?.[name] ?? loadGeneratedEval(ctx.repo.root, plan.generated);
+  const own = items === null ? null : items - value.cases.length;
+  return [chosenTask, caseEvidence(value.bundle, value.cases, { connector: "repo-review", detail: plan.generated }), ...(plan.repoEval ? [evalEvidence({ command: redact(plan.repoEval.command), items: own })] : [])];
+}
+
 function compareTask(ctx: Context, runId: string, data: RunState, name: string, plan: PlannedEval): TaskComparison {
   const units = ctx.state.units(runId).filter(unit => unit.task === name);
   const repeats = data.repeats ?? DEFAULT_REPEATS;
@@ -930,11 +1023,11 @@ function compareTask(ctx: Context, runId: string, data: RunState, name: string, 
   const comparison: TaskComparison = {
     task: name, eval: { command: redact(plan.command), source: plan.source, threshold: plan.threshold ?? null },
     baseline, candidates, top: [], status: "incomplete", note: "", ...(summary ? { search: summary } : {}),
-    basedOn: basedOn(strongest(mergeEvidence(name, base.model, [chosenTask, evalEvidence({ command: redact(plan.command), items: baseline.runs ? baseline.total / baseline.runs : null })]))),
+    basedOn: basedOn(strongest(mergeEvidence(name, base.model, evidenceOf(ctx, data, name, plan, baseline)))),
   };
   if (baseline.status !== "measured") return { ...comparison, status: "baseline_failed", note: `The current model's eval did not complete (${baseline.note}), so no candidate can be compared. Fix the eval, then run \`openmerit scout\` again: it reuses the eval you approved.` };
   // A stopped search recommends nothing, but the finalists it measured keep their real comparison with the current model.
-  if (data.stopped?.[name]) return { ...comparison, candidates: rank(comparison, false).candidates, status: "stopped", note: `The search stopped, so no model is recommended: ${data.stopped[name]}` };
+  if (data.stopped?.[name]) return { ...comparison, candidates: rank(comparison, false).candidates, status: "stopped", note: /no model is recommended/.test(data.stopped[name]) ? data.stopped[name] : `The search stopped, so no model is recommended: ${data.stopped[name]}` };
   if (summary?.status === "no_passing_model") return { ...comparison, status: "no_passing_model", note: `No candidate in the pool passed all ${SAMPLE_SIZE} screening items the current model passes.` };
   const measured = candidates.filter(item => item.status === "measured");
   // Finalists pass the screen by construction; a failed screen already shows the eval separates models.

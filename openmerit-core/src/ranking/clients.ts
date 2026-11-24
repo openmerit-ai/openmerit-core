@@ -108,9 +108,10 @@ function errorText(text: string): string {
 
 /**
  * A client for these endpoints. `model` finds a model's list prices for estimates and reservations;
- * the default looks it up in the bundled catalogue by ID or alias. `fetch` is what Pi sends with.
+ * the default looks it up in the bundled catalogue by ID or alias. `fetch` is what Pi sends with. `retries: false`
+ * sends each call once, for calls that go through OpenMerit's eval proxy, which retries them itself.
  */
-export function createClient(endpoints: readonly EndpointConfig[], options: { fetch?: typeof fetch; model?: (endpointModel: string) => CatalogueModel | null; timeoutMs?: number } = {}): ModelClient {
+export function createClient(endpoints: readonly EndpointConfig[], options: { fetch?: typeof fetch; model?: (endpointModel: string) => CatalogueModel | null; timeoutMs?: number; retries?: boolean } = {}): ModelClient {
   const fetcher = options.fetch ?? fetch;
   const timeoutMs = options.timeoutMs ?? CALL_TIMEOUT_MS;
   let index: ReturnType<typeof catalogueIndex> | undefined;
@@ -161,13 +162,15 @@ export function createClient(endpoints: readonly EndpointConfig[], options: { fe
     const metered: typeof fetch = async (url, init) => {
       let upstream: Response | Error;
       try {
-        upstream = await withRetries(() => {
+        const send = () => {
           const timeout = attempt = AbortSignal.timeout(timeoutMs);
           return fetcher(url, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout }).catch((error: unknown) => {
             if (timeout.aborted && !meter.signal?.aborted) throw silent();
             return error instanceof Error ? error : new Error(String(error));
           });
-        }, meter.signal);
+        };
+        // `retries: false`: the call goes through OpenMerit's eval proxy, which retries it itself.
+        upstream = options.retries === false ? await send() : await withRetries(send, meter.signal);
       } catch (error) { upstream = error instanceof Error ? error : new Error(String(error)); }
       if (upstream instanceof Error) { unreachable = upstream.message; throw upstream; }
       status = upstream.status;

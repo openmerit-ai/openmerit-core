@@ -12,7 +12,8 @@ export interface TaskBundle {
   tools?: { name: string; description?: string; parameters: object; mockResult?: unknown }[];
   output: { kind: "text" } | { kind: "json"; schema: object } | { kind: "label"; labels: string[] };
   /** Inputs the agent found, such as in tests or fixtures; they become the first cases. */
-  examples?: { input: Record<string, string>; expected?: unknown }[];
+  /** `toolResults`: what each tool returns for that example, keyed by tool name, as a case's `toolResults`. */
+  examples?: { input: Record<string, string>; expected?: unknown; toolResults?: Record<string, unknown> }[];
   /** `maxTurns`: the most model calls one case may take, 5 when absent; a case still calling tools then fails. A trace case takes 1. */
   constraints?: { maxLatencyMs?: number; needsVision?: boolean; maxTurns?: number };
   codeRefs?: { file: string; line: number; spelling: string }[];
