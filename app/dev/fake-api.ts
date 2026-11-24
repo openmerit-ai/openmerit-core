@@ -27,7 +27,7 @@ export function repoReview(fields: Partial<RepoReview> & Pick<RepoReview, "model
     groups.set(key, group);
   }
   return { reviewer: "scan", commit: "4be1c07d9a3f2e6b8c5d1a0f7e9b3c2d4a6f8e10", branch: "main", files: 214, bytes: 3_400_000, models: [...groups.values()].sort((a, b) => b.calls - a.calls),
-    totalCalls: fields.modelCalls.length, tasks: [], durationMs: 6200, ...fields };
+    totalCalls: fields.modelCalls.length, supportCalls: 0, notListed: null, tasks: [], durationMs: 6200, ...fields };
 }
 export function repo(fullName: string, fields: Partial<Repo> & { result?: RepoReview | null; status?: Repo["review"]["status"]; error?: string | null }): Repo {
   const { result = null, status = "done", error = null, ...rest } = fields;
@@ -119,7 +119,7 @@ function populated(): State {
         call("src/triage.ts", 14, "gpt-5", "openai/gpt-5", "TRIAGE_MODEL"), call("src/claims/match.ts", 41, "anthropic/claude-sonnet-5.5", "anthropic/claude-sonnet-5.5"),
         call("src/claims/fraud.ts", 22, "anthropic/claude-sonnet-5.5", "anthropic/claude-sonnet-5.5"), call("src/replies/draft.py", 8, "gpt-5", "openai/gpt-5"),
         call("config/models.yaml", 3, "gpt-5-mini", "openai/gpt-5-mini"), call("src/replies/draft.py", 31, "settings.reply_model", null),
-      ] }) }),
+      ], supportCalls: 3, notListed: "3 more in tests, fixtures or docs, not listed" }) }),
       repo("sahra-health/enroll-web", { addedAt: "2026-11-22T09:00:00Z", result: repoReview({ files: 88, modelCalls: [call("app/enroll/check.ts", 12, "openai/gpt-5-mini", "openai/gpt-5-mini")] }) }),
     ],
     spend: { openmeritUsd: 18.42, customerUsd: 6.1, monthlyCapUsd: 250, customerCapUsd: 50, period: { start: "2026-11-01T00:00:00.000Z", end: "2026-12-01T00:00:00.000Z" } },

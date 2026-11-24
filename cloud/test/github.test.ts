@@ -119,12 +119,21 @@ describe("GitHub repositories", () => {
       "README.md": "An app.\n",
     });
     bareRepo(root, "acme/private-app", { "app.ts": 'const model = "anthropic/claude-sonnet-5.5";\n' });
+    bareRepo(root, "acme/mixed-app", {
+      "src/app.ts": 'const MODEL = "openai/gpt-5-mini";\n',
+      "src/app.test.ts": 'const MODEL = "openai/gpt-5";\n',
+      "tests/replies.test.py": 'model="openai/gpt-5"\nfallback = { model: "anthropic/claude-sonnet-5.5" }\n',
+      "examples/demo.ts": 'const demo = { model: "anthropic/claude-haiku-5.5" };\n',
+    });
+    bareRepo(root, "acme/tests-only", { "tests/fixtures/calls.ts": 'export const MODEL = "openai/gpt-5";\n' });
     bareRepo(root, "acme/slow-app", { "app.ts": 'const model = "openai/gpt-5";\n' });
     bareRepo(root, "acme/big-app", { "data.bin": randomBytes(400_000).toString("base64") });
     github = await fakeGitHub({
       "acme/public-app": { private: false },
       "acme/private-app": { private: true, token: TOKEN },
       "acme/slow-app": { private: false, slowMs: 10_000 },
+      "acme/mixed-app": { private: false },
+      "acme/tests-only": { private: false },
       "acme/huge-app": { private: false, sizeKb: 300 * 1024 },
       "acme/big-app": { private: false },
     }, root);
@@ -177,6 +186,29 @@ describe("GitHub repositories", () => {
     assert.equal((await reviewed(admin, repo.id)).review.status, "done");
     assert.equal((await admin.api(`/api/repos/${repo.id}`, { method: "DELETE" })).status, 200);
     assert.deepEqual((await admin.api("/api/repos")).body, []);
+  });
+
+  test("only the application's model calls are listed: examples stay, tests, fixtures and docs are counted apart", async () => {
+    const admin = caller(app, "test:user_mx:org_mx:admin");
+    const add = async (url: string) => {
+      const added = await admin.api<RepoView>("/api/repos", { method: "POST", body: JSON.stringify({ url }) });
+      assert.equal(added.status, 201);
+      const repo = await reviewed(admin, added.body.id);
+      assert.equal(repo.review.status, "done", repo.review.error ?? "");
+      return repo.review.result!;
+    };
+    const mixed = await add("https://github.com/acme/mixed-app");
+    assert.deepEqual(mixed.modelCalls.map(call => `${call.file}:${call.line} ${call.value}`), ["examples/demo.ts:1 anthropic/claude-haiku-5.5", "src/app.ts:1 openai/gpt-5-mini"]);
+    assert.equal(mixed.totalCalls, 2);
+    assert.equal(mixed.supportCalls, 3);
+    assert.equal(mixed.notListed, "3 more in tests, fixtures or docs, not listed");
+    // gpt-5 and claude-sonnet-5.5 appear only in tests, so they are not among the repository's models.
+    assert.deepEqual(mixed.models.map(model => `${model.value} ×${model.calls}`).sort(), ["anthropic/claude-haiku-5.5 ×1", "openai/gpt-5-mini ×1"]);
+    const testsOnly = await add("https://github.com/acme/tests-only");
+    assert.deepEqual(testsOnly.modelCalls, []);
+    assert.deepEqual(testsOnly.models, []);
+    assert.equal(testsOnly.totalCalls, 0);
+    assert.equal(testsOnly.notListed, "1 more in tests, fixtures or docs, not listed");
   });
 
   test("a private repository needs a fine-grained token that can read its contents, which is stored encrypted and sent only to GitHub", async () => {

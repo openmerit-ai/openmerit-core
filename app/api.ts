@@ -163,8 +163,13 @@ export interface RepoReview {
   files: number;
   bytes: number;
   models: { value: string; catalogueId: string | null; calls: number }[];
+  // The application's model calls only; examples, scripts and demos count as the application.
   modelCalls: ModelCall[];
   totalCalls: number;
+  // Model calls in tests, fixtures, docs and other support files, which are counted but not listed, and the
+  // sentence that says so ("3 more in tests, fixtures or docs, not listed"). Absent from reviews before 24 Nov 2026.
+  supportCalls?: number;
+  notListed?: string | null;
   tasks: unknown[];
   durationMs: number;
 }
