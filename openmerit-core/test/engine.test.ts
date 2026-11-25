@@ -6,7 +6,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { approve, basedOn, binarySearch, CRITERIA_PASS_RATE, EVAL_FLOOR, meetsCriteria, challengers, checkAgent, evaluateTask, stableSample, mergeEvidence, MemoryLedger, proposeEdit, strongest, taskResult, type EvidencePart, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
+import { approve, basedOn, binarySearch, CRITERIA_PASS_RATE, EVAL_FLOOR, meetsCriteria, MIN_SAVING, challengers, checkAgent, evaluateTask, stableSample, mergeEvidence, MemoryLedger, proposeEdit, strongest, taskResult, type EvidencePart, type CatalogueModel, resolveGuardrails, type AgentRun, type Ledger, type MeasureCall, type Rung } from "../src/engine/index.ts";
 import { State } from "../src/state/db.ts";
 
 test("the search keeps a ladder's own order, and unplaced options are always challengers", async () => {
@@ -72,6 +72,10 @@ test("a task's result picks the cheapest qualifier that costs less than the curr
   // Dearer than both: the Top 3 still shows them, and nothing is picked.
   const dearer = await run(0.001);
   assert.deepEqual([dearer.top.map(item => item.model), dearer.cheaper, dearer.pick], [["mid", "low"], [], null]);
+  // A saving under MIN_SAVING (10%) is not clearly better: $0.002 against $0.0021 keeps the current model; against $0.0023 it switches.
+  assert.equal(MIN_SAVING, 0.1);
+  assert.equal((await run(0.0021)).pick, null);
+  assert.equal((await run(0.0023)).pick?.model, "mid");
 });
 
 test("a proposed edit replaces only the model literal, keeps an SDK's provider prefix, and says when the literal is a fallback", () => {
@@ -328,7 +332,8 @@ test("against the task's criteria: every guardrail on every case, each criterion
   assert.equal(atBoundary.status, "ranked", "no floor against the criteria, although the current model passes 70%");
   assert.deepEqual(atBoundary.baseline.failedChecks, ["C1"]);
   assert.equal(atBoundary.top[0]?.option.key, "mid");
-  assert.equal(atBoundary.candidates.find(item => item.option.key === "cheap")?.shortfall, "criteria", "one broken guardrail is enough");
+  // Twenty items is a small eval, screened on every case, so the broken guardrail ends cheap at its screen.
+  assert.deepEqual(["status", "shortfall"].map(key => atBoundary.candidates.find(item => item.option.key === "cheap")?.[key as "status" | "shortfall"]), ["screened_out", "unmeasured"], "one broken guardrail is enough");
   // One more miss is 85%: the cheapest model that meets them now costs more than the current model.
   const pricier = await run({ current, cheap: { i1: "G1" }, mid: { i2: "C2", i3: "C2", i4: "C2" } }, "criteria");
   assert.equal(pricier.top[0]?.option.key, "dear");
@@ -346,8 +351,8 @@ test("against the task's criteria: every guardrail on every case, each criterion
 });
 
 test("a screen that misses one sampled item is screened once more on the next five; two misses, or a broken guardrail against the criteria, end it", async () => {
-  // Twenty items the current model always passes. The sampler returns them in order: i1–i5 screen, i6–i10 retry.
-  const items = Array.from({ length: 20 }, (_, index) => `i${index + 1}`);
+  // Thirty items the current model always passes, more than a small eval. The sampler returns them in order: i1–i5 screen, i6–i10 retry.
+  const items = Array.from({ length: 30 }, (_, index) => `i${index + 1}`);
   const run = async (missed: Record<string, string>, criteria = false) => {
     const screens: string[][] = [];
     const result = await evaluateTask({
@@ -373,6 +378,42 @@ test("a screen that misses one sampled item is screened once more on the next fi
   assert.equal((await run({ i3: "C1" }, true)).x.status, "measured");
   const guardrail = await run({ i3: "G1" }, true);
   assert.deepEqual([guardrail.x.status, guardrail.screens.length], ["screened_out", 1]);
+});
+
+test("a small eval screens on every case and retries a single miss on it; a failed call is measured again, never counted as a miss; and a model that loses a case the current model always passes does not qualify", async () => {
+  // Twelve items the current model always passes; "x" is the only option, cheaper than the current model.
+  const items = Array.from({ length: 12 }, (_, index) => `i${index + 1}`);
+  const run = async (answer: (option: Rung | null, id: string, call: MeasureCall) => boolean | "error") => {
+    const calls: string[] = [];
+    const result = await evaluateTask({
+      ladder: [{ key: "x", price: 1 }], strength: () => 1, items, repeats: 1, baselinePrice: 10,
+      sample: () => { throw new Error("a small eval is not sampled"); },
+      measure: async (option: Rung | null, ids: readonly string[] | null, call: MeasureCall) => {
+        calls.push(`${call.role}${call.attempt ? `#${call.attempt}` : ""}:${ids!.length}`);
+        const answers = ids!.map(id => [id, answer(option, id, call)] as const);
+        return { items: Object.fromEntries(answers.map(([id, value]) => [id, value === true])), errored: answers.filter(([, value]) => value === "error").map(([id]) => id), costUsd: ids!.length * (option ? 0.001 : 0.01) };
+      },
+    });
+    return { x: result.candidates.find(item => item.option.key === "x")!, calls, result };
+  };
+  // A timeout on the screen is retried on that item alone, then the screen passes on all twelve.
+  const flaky = await run((option, id, call) => option && id === "i4" && call.role === "screen" && !call.attempt ? "error" : true);
+  assert.deepEqual(flaky.calls, ["baseline:12", "screen:12", "screen#2:1", "final:12"]);
+  assert.deepEqual([flaky.result.status, flaky.result.top[0]?.option.key, flaky.result.evidence.screened], ["ranked", "x", 12]);
+  // Failing twice leaves it unavailable, not screened out.
+  const down = await run((option, id) => option && id === "i4" ? "error" : true);
+  assert.deepEqual([down.x.status, down.result.status], ["unavailable", "no_passing_model"]);
+  // A single wrong answer on the screen is retried on that case; a second wrong answer screens it out.
+  const once = await run((option, id, call) => !(option && id === "i4" && call.role === "screen" && call.repeat === 1));
+  assert.deepEqual([once.x.status, once.calls], ["measured", ["baseline:12", "screen:12", "screen:1", "final:12"]]);
+  assert.equal((await run((option, id, call) => !(option && id === "i4" && call.role === "screen"))).x.status, "screened_out");
+  // A current model that times out once is measured again: its own timeout is not a case it fails.
+  const slowBaseline = await run((option, id, call) => !option && id === "i2" && !call.attempt ? "error" : true);
+  assert.deepEqual([slowBaseline.result.reliable.length, slowBaseline.result.baseline.score], [12, 1]);
+  // Equal scores are not enough: x loses i1, which the current model always passes, and trades it for i2, which the current model fails.
+  const traded = await run((option, id, call) => option ? id !== "i1" || call.role === "screen" : id !== "i2");
+  assert.deepEqual([traded.x.status, traded.x.score, traded.result.baseline.score], ["measured", 11 / 12, 11 / 12]);
+  assert.deepEqual([traded.x.shortfall, traded.x.regressed, traded.result.status], ["regressed", ["i1"], "no_qualified"]);
 });
 
 test("a provisional pick listed under the cheapest qualified model is measured, so the task's last pick is not dropped for a dearer one", async () => {

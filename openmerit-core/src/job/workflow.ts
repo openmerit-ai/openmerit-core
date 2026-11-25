@@ -19,11 +19,11 @@
 import { createHash } from "node:crypto";
 import { Loop } from "@rivet-dev/workflows";
 import { applyLabelCheck, BudgetRefused, caseKind, checksBasedOn, completeWith, createClient, createMeasure, flow, graderFor, invalidCases, labelCheck, LABEL_CHECK_QUESTION, writeCases, WRITTEN_CASES, type Case, type Complete, type EndpointConfig, type MeasureResult, type TaskBundle } from "../ranking/index.ts";
-import { approvalQuestion, basedOn, baselineResult, byKind, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, stableSample, FINALISTS, floorNote, mergeEvidence, modelResult, newProgress, redact, SAMPLE_SIZE, score, strongest, taskResult, type AgentRun, type Catalogue, type CatalogueModel, type Funding, type Ledger, type ModelResult, type ReserveResult, type ResolvedGuardrails, type Settlement } from "../engine/index.ts";
+import { approvalQuestion, basedOn, baselineResult, byKind, CandidateUnavailable, catalogueIndex, CHALLENGERS, checkAgent, DEFAULT_REPEATS, EndChallengers, evaluateTask, stableSample, FINALISTS, floorNote, mergeEvidence, modelResult, newProgress, redact, SAMPLE_SIZE, score, SMALL_EVAL, strongest, taskResult, type AgentRun, type Catalogue, type CatalogueModel, type Funding, type Ledger, type ModelResult, type ReserveResult, type ResolvedGuardrails, type Settlement } from "../engine/index.ts";
 import { agentBundle, caseEvidence } from "../connectors/agent-bundle.ts";
 import { advanceLoop, completeHarness, criteriaOf, feedbackOf, gradeQuestions, MAX_ROUNDS, pickSamples, readGrade, reviseEval, startLoop, type CaseAnswer, type LoopState, type SampleGrade } from "../eval/loop.ts";
 import { buildPool, OPENROUTER, regionNotice, type EndpointInfo, type Option, type Pool, type Provisional } from "./pool.ts";
-import { proposeEdit, renderMarkdown, type AgentEvalSummary, type Fix, type JobResult, type MeasuredModel } from "./report.ts";
+import { paybackCalls, proposeEdit, renderMarkdown, type AgentEvalSummary, type Fix, type JobResult, type MeasuredModel } from "./report.ts";
 
 /** The project of jobs and tasks recorded before projects. */
 export const DEFAULT_PROJECT = "default";
@@ -302,6 +302,42 @@ const now = () => new Date().toISOString();
 export function plannedSteps(ranked: number, unplaced: number, repeats: number): number {
   const screens = Math.min(Math.ceil(Math.log2(ranked + 1)) + FINALISTS + 1, ranked);
   return repeats + screens + Math.min(FINALISTS, ranked) * repeats + (Math.min(CHALLENGERS, ranked) + unplaced) * (1 + repeats);
+}
+
+/** What a job will make, cost and take, roughly, before it spends: case runs, dollars (null when a price is unknown), the budget that caps them, and a range of minutes. */
+export interface JobEstimate { caseRuns: number; usd: number | null; budgetUsd: number; minutes: { low: number; high: number } }
+
+/**
+ * A job's estimate from its pool before anything runs, as the search's planned steps: the current model's
+ * runs and the finalists' and challengers' on every case, screens on every case of a small eval or on
+ * the sample, and a judge call per case run when the output needs one. A case run costs callCost on its
+ * model; candidates are priced at the pool's median. A step takes a quarter of a minute to a minute.
+ */
+export function estimateJob(pool: Pool, bundle: TaskBundle, input: { repeats: number; budgetUsd: number; costPerCall: (model: string) => number | null; judge: string | null }): JobEstimate {
+  const cases = (bundle.examples ?? []).filter(example => example.expected !== undefined).length + WRITTEN_CASES;
+  const ranked = pool.ranked.length, unplaced = pool.unplaced.length;
+  const searchScreens = Math.min(Math.ceil(Math.log2(ranked + 1)) + FINALISTS + 1, ranked);
+  const challengers = Math.min(CHALLENGERS, ranked) + unplaced;
+  const fullRuns = (Math.min(FINALISTS, ranked) + challengers) * input.repeats;
+  const screenRuns = (searchScreens + challengers) * (cases <= SMALL_EVAL ? cases : SAMPLE_SIZE);
+  const baselineRuns = input.repeats * cases, candidateRuns = screenRuns + fullRuns * cases;
+  const prices = [...pool.ranked, ...pool.unplaced].map(option => input.costPerCall(option.endpointModel)).filter((value): value is number => value !== null).sort((a, b) => a - b);
+  const median = prices.length ? prices[Math.floor(prices.length / 2)]! : null;
+  const baseline = pool.baseline ? input.costPerCall(pool.baseline.endpointModel) : null;
+  const judge = input.judge === null ? 0 : input.costPerCall(input.judge);
+  const usd = baseline === null || median === null || judge === null ? null : baselineRuns * baseline + candidateRuns * median + (baselineRuns + candidateRuns) * judge;
+  const steps = plannedSteps(ranked, unplaced, input.repeats);
+  return { caseRuns: baselineRuns + candidateRuns, usd: usd === null ? null : Math.min(usd, input.budgetUsd), budgetUsd: input.budgetUsd, minutes: { low: Math.max(1, Math.round(steps / 4)), high: Math.max(1, steps) } };
+}
+
+/** The estimate in one sentence, for the coding agent and the person it asks. */
+export const estimateLine = (estimate: JobEstimate) =>
+  `Measuring makes about ${estimate.caseRuns.toLocaleString("en-US")} case runs, ${estimate.usd === null ? "at a cost OpenMerit cannot estimate" : `about $${estimate.usd < 0.1 ? estimate.usd.toFixed(3) : estimate.usd.toFixed(2)}`}, never more than the $${estimate.budgetUsd.toFixed(2)} budget per job, and takes about ${estimate.minutes.low === estimate.minutes.high ? estimate.minutes.low : `${estimate.minutes.low} to ${estimate.minutes.high}`} minutes.`;
+
+/** The result's pick: its figures, the saving per call against the current model, and the calls that repay `runUsd`. */
+function pickOf(chosen: MeasuredModel, baseline: MeasuredModel, runUsd: number): NonNullable<JobResult["pick"]> {
+  const saving = baseline.costPerCallUsd !== null && chosen.costPerCallUsd !== null ? baseline.costPerCallUsd - chosen.costPerCallUsd : null;
+  return { model: chosen.model, endpoint: chosen.endpoint, endpointModel: chosen.endpointModel, passes: chosen.passes, total: chosen.total, costPerCallUsd: chosen.costPerCallUsd, savingPerCallUsd: saving, paybackCalls: paybackCalls(runUsd, saving) };
 }
 
 /** A new job's state. */
@@ -664,7 +700,9 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
             if (result.answers && !answersOf.has(target.key)) answersOf.set(target.key, result.answers);
             // The checks a failed case missed, for the criteria bar (meetsCriteria).
             const checks = Object.fromEntries(result.results.flatMap(item => (item.failedChecks?.length ? [[item.caseId, item.failedChecks]] : [])));
-            return { items: Object.fromEntries(result.results.map(item => [item.caseId, item.pass])), checks, costUsd: result.costUsd, costIsEstimate: result.costIsEstimate, latencyMs: result.latencyMs };
+            // Cases lost to a failed or timed-out call, not a wrong answer: the engine measures them once more.
+            const errored = result.results.flatMap(item => (!item.pass && item.failure === "error" ? [item.caseId] : []));
+            return { items: Object.fromEntries(result.results.map(item => [item.caseId, item.pass])), checks, errored, costUsd: result.costUsd, costIsEstimate: result.costIsEstimate, latencyMs: result.latencyMs };
           },
           // The same cases for the same eval, placed by their content (stableSample), and recorded in a step, so a replay screens on the same cases.
           sample: (reliable, count) => ctx.step(round === 1 ? "samples" : `samples-r${round}`, async () => {
@@ -730,9 +768,10 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
         const by = graded.by;
         if (loop.status === "accepted") {
           evalVersion = await acceptFirst(`accept${suffix}`, "grading", loop.bar, by);
-          const accepted = { version: evalVersion, bar: loop.bar };
+          const accepted = { version: evalVersion, barSet: loop.barSet ?? null };
           await ctx.step(`accepted${suffix}`, async s => {
-            s.state.notices.push(`You accepted the eval as version ${accepted.version}${accepted.bar === "criteria" ? ": since you marked the current model's own answers wrong, models are measured against its checks, and the cheapest that meets them is recommended even when it costs more" : ""}.`);
+            const set = accepted.barSet;
+            s.state.notices.push(`You accepted the eval as version ${accepted.version}.${set ? ` In round ${set.round} you graded the current model's answer${set.cases.length === 1 ? "" : "s"} to ${set.cases.join(", ")} as not looking right, so models are measured against the eval's checks instead of against the current model's score, and the cheapest that meets them is recommended even when it costs more.` : ""}`);
           });
           break;
         }
@@ -805,8 +844,9 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
         const tried = evaluated.candidates.find(item => item.option.key === picked.key);
         if (ended?.provisional) fixes.push(...tie(endedFix, `The provisional pick ${picked.model} was not measured. ${ended.reason}`));
         notices.push(ended?.provisional ? `The provisional pick ${picked.model} was not measured. ${ended.reason}`
-          : tried?.status === "screened_out" ? `No measured model that qualified was cheaper per call than ${current.model}, so the provisional pick ${picked.model} was screened too, and failed the ${evaluated.samples.length} sample cases.`
-          : `No measured model that qualified was cheaper per call than ${current.model}, so the provisional pick ${picked.model} was measured on every case too.`);
+          : tried?.status === "screened_out" ? `The provisional pick ${picked.model} was screened too, and missed ${tried.total - tried.passes} of its ${tried.total} screening case runs.`
+          : tried?.status === "measured" ? `The provisional pick ${picked.model} was measured on every case too${tried.qualified ? "" : ", and did not qualify"}.`
+          : `The provisional pick ${picked.model} could not be measured${tried?.reason ? `: ${tried.reason}` : ""}.`);
       }
       const challenging = [...evaluated.challenged, ...(picked && evaluated.provisionalTried ? [picked] : [])];
 
@@ -865,7 +905,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
           const report: JobResult = {
             failedCases: failedOf(), baselineByKind: evaluated.baseline.byKind, invalidCases: invalid,
             status: jobStatus, top, nearMisses, baseline, candidates,
-            pick: chosen ? { model: chosen.model, endpoint: chosen.endpoint, endpointModel: chosen.endpointModel, passes: chosen.passes, total: chosen.total, costPerCallUsd: chosen.costPerCallUsd, savingPerCallUsd: baseline.costPerCallUsd !== null && chosen.costPerCallUsd !== null ? baseline.costPerCallUsd - chosen.costPerCallUsd : null } : null,
+            pick: chosen ? pickOf(chosen, baseline, spent.openmeritUsd + spent.customerUsd) : null,
             search: { pool: pool.ranked.length, unplaced: pool.unplaced.length, samples: result.samples, finalists: result.finalists, challengers: challenging.map(item => item.model), shortfall: result.searchShortfall },
             agentEval, edit: chosen ? proposeEdit(bundle, optionOf(chosen), pool.baseline!.endpoint, index.find) : { edits: [], instructions: null },
             // The quality rule over the bundle's evidence, and the approval question both hosts ask.
@@ -873,7 +913,7 @@ export async function runTaskJob<S extends JobStepContext>(ctx: JobContext<S>, h
             approval: chosen ? approvalQuestion(bundle.task, bundle.current.model, chosen) : null,
             spend: { openmeritUsd: spent.openmeritUsd, customerUsd: spent.customerUsd }, guardrails, notices: [...s.state.notices, ...notices], fixes: [...(s.state.fixes ?? []), ...fixes],
             reportUrl: `${host.settings().config.appUrl}/r/${jobId}/`, catalogueVersion: models.catalogueVersion, cases: counts, ...(evalVersion === null ? {} : { evalVersion }),
-            ...(grade || acceptedBar === "criteria" ? { grading: { rounds: grade ? loop.round : 0, accepted: grade ? loop.status === "accepted" : true, bar: loop.bar, failedChecks: result.failedChecks ?? [], summary: result.summary ?? null } } : {}),
+            ...(grade || acceptedBar === "criteria" ? { grading: { rounds: grade ? loop.round : 0, accepted: grade ? loop.status === "accepted" : true, bar: loop.bar, failedChecks: result.failedChecks ?? [], summary: result.summary ?? null, barSet: loop.barSet ?? null } } : {}),
           };
           await finish(s, host, jobId, "done", report, null);
         },

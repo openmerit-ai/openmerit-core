@@ -45,7 +45,7 @@ export function outcome(run: Run, task: Task | undefined): Html {
   if (task && task.lastJobId === run.id) return result(task);
   const found = run.result;
   if (!found) return html`<span class="sub">Done</span>`;
-  const saving = found.savingPerCallUsd ? `saves ${per1k(found.savingPerCallUsd)} per 1,000 calls` : "";
+  const saving = !found.savingPerCallUsd ? "" : found.savingPerCallUsd > 0 ? `saves ${per1k(found.savingPerCallUsd)} per 1,000 calls` : `costs ${per1k(-found.savingPerCallUsd)} more per 1,000 calls`;
   return describe({ status: found.status, pick: found.model, current: found.from ?? task?.currentModel ?? "", saving }, (text) => html`${text}`);
 }
 

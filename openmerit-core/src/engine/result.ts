@@ -57,8 +57,9 @@ export interface TaskResult {
 export interface Described { model: string; endpoint: string; endpointModel: string; eci: number | null }
 
 /** Why a measured model did not qualify, in the report's words; empty when it qualified with a measured cost. */
-export function qualificationNote(item: { shortfall: Shortfall; passes: number; total: number; costPerItemUsd: number | null }, baseline: { passes: number; total: number }, rules: Rules = {}): string {
+export function qualificationNote(item: { shortfall: Shortfall; passes: number; total: number; costPerItemUsd: number | null; regressed?: readonly string[] }, baseline: { passes: number; total: number }, rules: Rules = {}): string {
   if (item.shortfall === "score") return `passed ${item.passes}/${item.total} vs the current model's ${baseline.passes}/${baseline.total}`;
+  if (item.shortfall === "regressed") return `failed ${item.regressed?.length ? item.regressed.join(", ") : "a case"}, which the current model passed in every run`;
   if (item.shortfall === "criteria") return "misses your checks";
   if (item.shortfall === "threshold") return `below the eval's required pass rate ${rules.threshold}`;
   if (item.shortfall === "latency") return `slower than the ${rules.maxLatencyMs} ms latency limit`;

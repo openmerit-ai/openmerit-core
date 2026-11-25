@@ -64,7 +64,7 @@ before(async () => {
       if (parsed.model === rateLimit.model && rateLimit.remaining-- > 0) { res.writeHead(429, { "content-type": "application/json", "retry-after": "0" }); return res.end(JSON.stringify({ error: { message: "rate-limited upstream" } })); }
       if (parsed.model === cutOff.model) { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: null }, finish_reason: "length" }], usage: { prompt_tokens: 100, completion_tokens: 2000 } })); }
       if (parsed.model === "gpt-4.1-nano") return fail(404, "The model `gpt-4.1-nano` does not exist or you do not have access to it.");
-      if (parsed.model === flaky.model && requests.filter(model => model === flaky.model).length > 5) return fail(500, "upstream overloaded");
+      if (parsed.model === flaky.model && requests.filter(model => model === flaky.model).length > 10) return fail(500, "upstream overloaded");
       // A generated eval's judge: every check passes.
       if (parsed.messages[0]?.role === "system" && parsed.messages[0].content.startsWith("You grade one answer")) {
         judged.count++;
@@ -426,10 +426,10 @@ function assertSearch(ctx: Context, runId: string, step: Step) {
   assert.equal(search.pick, "openai/gpt-5-nano");
   assert.deepEqual(search.finalists, ["openai/gpt-5-nano", "openai/gpt-5.4-nano", "openai/gpt-6-luna", "openai/gpt-5.6-luna"]);
   assert.match(search.shortfall ?? "", /Only 4 finalists/);
-  // Screens run on five items the current model passed in every run; finals and the baseline on all ten, three times.
+  // Ten items is a small eval: screens run on every item the current model passed in every run; finals and the baseline on all ten, three times.
   const units = ctx.state.units(runId);
   const screens = units.filter(unit => unit.role === "screen");
-  assert.equal(search.sampleIds.length, 5);
+  assert.equal(search.sampleIds.length, 10);
   assert.ok(screens.filter(unit => unit.status === "done").every(unit => JSON.stringify(Object.keys((unit.result as { items: object }).items).sort()) === JSON.stringify([...search.sampleIds].sort())));
   assert.deepEqual([task.baseline!.passes, task.baseline!.total, task.baseline!.runs], [30, 30, 3]);
   assert.deepEqual(task.candidates.map(item => [item.model, item.status, item.total]), [
@@ -441,11 +441,11 @@ function assertSearch(ctx: Context, runId: string, step: Step) {
   assert.ok(task.top[0]!.costIsEstimate);
   // Requests per model: the failing and rejected models stop after their screen; gpt-5-mini costs more than the current model and is never sent.
   const count = (model: string) => requests.filter(item => item === model).length;
-  assert.equal(count("gpt-4o-mini"), 5);
+  assert.equal(count("gpt-4o-mini"), 10);
   assert.equal(count("gpt-4.1-nano"), 1, "the eval stops at the first rejected request");
   assert.equal(count("gpt-5-mini"), 0);
   assert.equal(count("gpt-4.1-mini"), 30);
-  assert.equal(count("gpt-5-nano"), 35);
+  assert.equal(count("gpt-5-nano"), 40);
   assert.ok(requests.every(model => model === "gpt-4.1-mini" || ALLOWED.includes(model)));
   // The proxy sent gpt-5.6-luna's failing final request three more times; the ledger meters it once.
   assert.equal(ctx.state.spend(runId).requests, requests.length - 3, "the ledger accounts for every eval request");

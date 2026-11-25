@@ -6,12 +6,13 @@ import { capture } from "./analytics.ts";
 import { NO_ORGANIZATION, type Auth, type AuthResult, type Identity } from "./auth.ts";
 import type { Config } from "./config.ts";
 import type { Answers, JobView } from "./actors/job.ts";
-import { explain, nearMissLine, reasonFor, type Fix, type JobResult } from "../../openmerit-core/src/job/report.ts";
+import { explain, nearMissLine, paybackLine, reasonFor, type Fix, type JobResult } from "../../openmerit-core/src/job/report.ts";
 import type { AppClient } from "./registry.ts";
 import type { TaskBundle } from "../../openmerit-core/src/ranking/index.ts";
 import { bundleProblem, DEFAULT_ENVIRONMENT, rerunJob, runTask, startJob } from "./start.ts";
 import { evalDir, type Decision } from "./actors/account.ts";
 import { OPENROUTER } from "../../openmerit-core/src/job/pool.ts";
+import { estimateLine } from "../../openmerit-core/src/job/workflow.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const VERSION = "0.1.0";
@@ -41,7 +42,7 @@ const BUNDLE_SCHEMA = {
     constraints: { type: "object", properties: { maxLatencyMs: { type: "number" }, needsVision: { type: "boolean" }, maxTurns: { type: "integer", minimum: 1, description: "The most model calls one case may take, for a task that calls tools in a loop (an agent). Default 5." } } },
     input: { type: "object", required: ["description"], description: "The task spec: what the call's input is and how it varies in production", properties: { description: string } },
     steps: { type: "array", description: "The task spec: what the model does, in order, with the tools each step uses and their access", items: { type: "object", required: ["description"], properties: { description: string, tools: { type: "array", items: string }, access: { enum: ["none", "read", "write"] }, required: { type: "boolean", description: "True when the step must happen in every case, such as a write the code always makes: one of its tools is called and answers" }, after: { type: "array", items: { type: "integer", minimum: 1 }, description: "Only where the order matters, such as when this step's input is an earlier tool's result: the 1-based numbers of the earlier steps that must happen first" } } } },
-    criteria: { type: "array", description: "The task spec: what a right answer does, one statement each, from the code and its prompt. OpenMerit judges every case on each", items: string },
+    criteria: { type: "array", description: "The task spec: what a right answer does, one statement each, from the code and its prompt. OpenMerit judges every case on each. For a task with tools, OpenMerit runs the whole loop (each tool call, its mocked result, then the final answer) and the judge sees all of it, so describe the final answer and the tool calls it needs, not one response: write 'reports the temperature get_weather returned', not 'responds with tool calls instead of text'", items: string },
     guardrails: { type: "array", description: "The task spec: what the call must never do, one statement each, such as rules the code enforces after the call. OpenMerit judges every case on each, and writes cases that test them", items: string },
     codeRefs: { type: "array", description: "Where the code names the model, so the result can include the edit. spelling is the exact string literal that holds the model ID as the code writes it, with its quotes, such as '\"gpt-4.1-mini\"', or the expression around it, such as 'process.env.CLASSIFIER_MODEL ?? \"gpt-4.1-mini\"'; only that literal is edited. A config file or environment value that holds the model belongs in a ref of its own, at the line that sets it", items: { type: "object", required: ["file", "line", "spelling"], properties: { file: string, line: { type: "number" }, spelling: string } } },
   },
@@ -119,6 +120,8 @@ export function describeJob(view: JobView, decision: Decision | null = null): st
   const result = view.result;
   if (result?.pick) {
     lines.push(`Measured pick: ${result.pick.model} on ${result.pick.endpoint}, ${result.pick.passes}/${result.pick.total} cases passed${result.baseline ? ` (current model ${result.baseline.passes}/${result.baseline.total})` : ""}.`);
+    const payback = paybackLine(result);
+    if (payback) lines.push(payback);
     if (result.edit.edits.length) lines.push("Edits:", ...result.edit.edits.map(edit => `- ${edit.file}:${edit.line}: ${edit.before} → ${edit.after}`));
     if (result.edit.instructions) lines.push(result.edit.instructions);
     if (decision) lines.push(decisionLine(decision));
@@ -246,10 +249,10 @@ async function callTool(deps: McpDeps, identity: Identity, name: string, args: J
       if (key) await account.settleRecommendKey({ key, jobId: started?.ok ? started.jobId : null });
     }
     if (!started.ok) return { text: started.error, data: { status: "refused" }, isError: true };
-    const { provisional } = started;
+    const { provisional, estimate } = started;
     return {
-      text: `Started job ${started.jobId}. Provisional pick: ${provisional.model} on ${provisional.endpoint}. ${provisional.reason}\nCall openmerit_result with job_id "${started.jobId}" for questions and the measured result.`,
-      data: { job_id: started.jobId, provisional, status: "queued" },
+      text: `Started job ${started.jobId}. Provisional pick: ${provisional.model} on ${provisional.endpoint}. ${provisional.reason}\n${estimateLine(estimate)}\nCall openmerit_result with job_id "${started.jobId}" for questions and the measured result.`,
+      data: { job_id: started.jobId, provisional, estimate, status: "queued" },
     };
   }
   if (name === "openmerit_result") {

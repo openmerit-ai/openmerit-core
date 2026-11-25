@@ -164,7 +164,7 @@ function report(spec: Spec, id: string, at: string, outcome: Outcome, pick: stri
   const customer = candidates.concat(baseline).filter((item) => item.funding === "customer").length * 0.22;
   return {
     jobId: id, task: spec.name, createdAt: at, status,
-    pick: status === "picked" && picked ? { model: picked.model, endpoint: picked.endpoint, endpointModel: picked.endpointModel, passes: picked.passes, total, costPerCallUsd: picked.costPerCallUsd, savingPerCallUsd: saving } : null,
+    pick: status === "picked" && picked ? { model: picked.model, endpoint: picked.endpoint, endpointModel: picked.endpointModel, passes: picked.passes, total, costPerCallUsd: picked.costPerCallUsd, savingPerCallUsd: saving, paybackCalls: saving && saving > 0 ? Math.ceil((openmerit + customer) / saving) : null } : null,
     top: status === "picked" && picked ? [picked] : [], baseline, candidates,
     search: {
       pool: 9 + spec.candidates.length * 2, unplaced: spec.candidates.some((model) => MODELS[model]?.eci === null) ? 1 : 0, samples: ["c02", "c05", "c11", "c19", "c27"].slice(0, 3 + (index % 3)),

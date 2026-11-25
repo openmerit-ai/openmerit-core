@@ -27,6 +27,8 @@ export interface ProxyUnit {
 
 export interface UnitTally {
   requests: number; refused: number; budgetHit: boolean; poolViolations: string[]; upstreamErrors: number[];
+  /** Calls the eval gave up on (its timeout, or it exited) before the endpoint answered in full. */
+  abandoned: number;
   /** Answers the output token limit cut off before any text, as when the provider has the model reason first. */
   cutOff: number;
   /** The largest request refused on the budget: what it needed, and the output tokens it allowed. */
@@ -125,7 +127,7 @@ export class EvalProxy {
   /** A token for one eval unit; requests with it are metered against the unit's run. */
   open(unit: ProxyUnit): { token: string; tally: UnitTally } {
     const token = `om-eval-${randomBytes(18).toString("hex")}`;
-    const tally: UnitTally = { requests: 0, refused: 0, budgetHit: false, poolViolations: [], upstreamErrors: [], cutOff: 0 };
+    const tally: UnitTally = { requests: 0, refused: 0, budgetHit: false, poolViolations: [], upstreamErrors: [], abandoned: 0, cutOff: 0 };
     this.units.set(token, { unit, tally, ledger: this.state.ledger({ runId: unit.runId, unitId: unit.unitId }) });
     return { token, tally };
   }
@@ -206,6 +208,7 @@ export class EvalProxy {
       else await settle({ actualUsd: usage?.costUsd ?? null, estimatedUsd: usage ? requestPrice(catalogue ?? null, usage.input, usage.output) : sizeEstimate(catalogue, forwarded.length, received), latencyMs });
     } finally {
       // Cut off part-way: what arrived is estimated by its size; nothing arrived, nothing is charged.
+      if (!settled && signal.aborted) tally.abandoned++;
       if (!settled) await settle({ actualUsd: received ? null : 0, estimatedUsd: received ? sizeEstimate(catalogue, forwarded.length, received) : null, latencyMs: Date.now() - started, failed: true });
     }
   }

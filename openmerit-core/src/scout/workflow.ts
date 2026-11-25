@@ -17,7 +17,7 @@ import { basename, dirname, isAbsolute, join, normalize, relative, resolve } fro
 import { catalogueIndex, type Catalogue, type CatalogueModel } from "../engine/catalogue.ts";
 import { blendedPrice, eligible, ladder } from "../engine/pool.ts";
 import { redact } from "../engine/redact.ts";
-import { EVAL_FLOOR, evaluateTask as runPolicy, floorNote, meetsCriteria, rankTop, shortfall, stableSample, type Criteria } from "../engine/evaluate.ts";
+import { EVAL_FLOOR, evaluateTask as runPolicy, floorNote, meetsCriteria, MIN_SAVING, rankTop, regressions, shortfall, SMALL_EVAL, stableSample, type Criteria, type Measurement } from "../engine/evaluate.ts";
 import { APPROVAL_PROMPT, approvalQuestion as configureQuestion } from "../engine/connector.ts";
 import { chosenTask, repoScan } from "../connectors/repo-scan.ts";
 import { evalCommand, evalEvidence } from "../connectors/eval-command.ts";
@@ -65,6 +65,8 @@ interface PlannedEval extends EvalSpec { source: "saved" | "harness" | "user" | 
 /** One eval run's result as recorded in SQLite: pass/fail per item, nothing else from the item. */
 export interface UnitResult {
   items: Record<string, boolean>; passes: number; total: number; source: "eval"; requests: number; durationMs: number;
+  /** Failed items of a run in which a model call failed or the eval gave up on one: a timeout, not a wrong answer, may explain them. */
+  errored?: string[];
   /** Answers cut off by their token limit before any text (absent in runs saved before it was counted). */
   cutOff?: number;
   /** For a generated eval: why each failed item failed, in one redacted sentence. */
@@ -123,6 +125,8 @@ export interface TaskComparison {
   candidates: ModelResult[];
   /** Up to three qualified candidates, cheapest measured cost first. */
   top: ModelResult[];
+  /** The switch Configure proposes: the cheapest of `top` that saves at least MIN_SAVING per item, or against failed criteria the cheapest that meets them; null keeps the current model. */
+  pick?: ModelResult | null;
   status: "ranked" | "no_qualified" | "no_passing_model" | "stopped" | "baseline_failed" | "no_eval" | "non_discriminating" | "incomplete";
   note: string;
   search?: SearchSummary;
@@ -553,7 +557,7 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
       const key = `accept_${slug(name)}`;
       if (comparison.status === "non_discriminating") {
         const answer = answers[key] ?? data.accepted[name];
-        if (answer === "accept") { data.accepted[name] = "accept"; Object.assign(comparison, rank(comparison, true)); }
+        if (answer === "accept") { data.accepted[name] = "accept"; Object.assign(comparison, rank(comparison, taskUnits(ctx, runId, data, name), true)); }
         else if (answer === "stop") data.accepted[name] = "stop";
         else pending.push({ id: key, kind: "choice", prompt: `Every model scored the same on the ${name} eval. Rank by cost anyway?`, detail: comparison.note, options: [{ value: "accept", label: "Accept: rank the qualifying models by cost" }, { value: "stop", label: "Stop: no recommendation for this task until the eval is improved" }] });
       }
@@ -568,7 +572,7 @@ const PHASE_HANDLERS: Record<Phase, Handler> = {
   async configure({ ctx, runId, data, answers }) {
     data.configure ??= {};
     for (const comparison of Object.values(data.compare ?? {})) {
-      const winner = comparison.top[0];
+      const winner = comparison.pick;
       if (!winner) continue;
       const key = slug(comparison.task);
       const current = data.configure[comparison.task] ??= {};
@@ -678,8 +682,8 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
   const proxyUrl = await proxy.start();
 
   /** One eval run: replayed from SQLite when finished, otherwise run through the proxy and read back. */
-  const runUnit = async (task: string, plan: PlannedEval, kind: UnitRow["role"], entry: ModelRef, repeat: number, items: readonly string[] | null): Promise<UnitResult> => {
-    const id = unitId(runId, taskKey(data, task), kind, entry, repeat);
+  const runUnit = async (task: string, plan: PlannedEval, kind: UnitRow["role"], entry: ModelRef, repeat: number, items: readonly string[] | null, attempt = 1): Promise<UnitResult> => {
+    const id = unitId(runId, taskKey(data, task), kind, entry, repeat, attempt);
     const unit = state.ensureUnit({ id, runId, task, model: entry.model, endpoint: entry.endpoint, role: kind, repeat });
     const label = `${kind === "baseline" ? "current" : kind} ${entry.model}${kind === "screen" ? "" : ` ${repeat}/${repeats}`}`;
     if (unit.status === "done") return unit.result as unknown as UnitResult;
@@ -758,7 +762,8 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
     if (absent.length) return fail(`The eval reported no result for ${absent.length} requested item(s): ${absent.slice(0, 10).join(", ")}.`);
     const results: Record<string, boolean> = Object.fromEntries(ids.map(item => [item, reported.get(item)!]));
     const passes = Object.values(results).filter(Boolean).length, total = Object.keys(results).length;
-    const result: UnitResult = { items: results, passes, total, source: "eval", requests: tally.requests, durationMs: outcome.durationMs, cutOff: tally.cutOff, ...(outcome.reasons && Object.keys(outcome.reasons).length ? { reasons: outcome.reasons } : {}), ...(outcome.checks && Object.keys(outcome.checks).length ? { checks: outcome.checks } : {}), ...(outcome.answers?.length ? { answers: outcome.answers } : {}) };
+    const callsFailed = tally.upstreamErrors.length > 0 || tally.abandoned > 0 || (judged?.abandoned ?? 0) > 0;
+    const result: UnitResult = { items: results, passes, total, source: "eval", requests: tally.requests, durationMs: outcome.durationMs, cutOff: tally.cutOff, ...(callsFailed ? { errored: ids.filter(item => !results[item]) } : {}), ...(outcome.reasons && Object.keys(outcome.reasons).length ? { reasons: outcome.reasons } : {}), ...(outcome.checks && Object.keys(outcome.checks).length ? { checks: outcome.checks } : {}), ...(outcome.answers?.length ? { answers: outcome.answers } : {}) };
     // An eval that sends no request through the proxy did not use the model under test, and its spend was neither metered nor capped.
     if (!tally.requests) {
       const violations = [...new Set(tally.poolViolations)];
@@ -794,14 +799,15 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
         let result: UnitResult;
         try {
           // Screens run on the samples; the current model and finals on every item the eval runs.
-          result = await runUnit(task, plan, call.role, entry, call.repeat, call.role === "screen" ? items : null);
+          // A second attempt runs only the items the first lost to failed calls.
+          result = await runUnit(task, plan, call.role, entry, call.repeat, call.role === "screen" || call.attempt ? items : null, call.attempt ?? 1);
         } catch (error) {
           if (call.role === "final" && error instanceof StopTask) return null; // A declined failed final is listed as unmeasured.
           throw error;
         }
         if (call.role === "baseline") baselineRuns.push(result);
-        const id = unitId(runId, taskKey(data, task), call.role, entry, call.repeat);
-        return { items: result.items, costUsd: unitCost(ctx, runId, state.units(runId).filter(unit => unit.id === id))?.cost ?? null, ...(result.checks ? { checks: result.checks } : {}) };
+        const id = unitId(runId, taskKey(data, task), call.role, entry, call.repeat, call.attempt ?? 1);
+        return { items: result.items, costUsd: unitCost(ctx, runId, state.units(runId).filter(unit => unit.id === id))?.cost ?? null, ...(result.checks ? { checks: result.checks } : {}), ...(result.errored?.length ? { errored: result.errored } : {}) };
       },
       sample: (reliable, count) => {
         // Screens draw from items the current model passes in every run, so a 5/5 screen asks whether a candidate keeps up with it;
@@ -810,7 +816,6 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
           data.samples![task] = stableSample(reliable, count, item => `${task}\n${item}`);
           save();
         }
-        summary.sampleIds = data.samples![task]!.slice(0, SAMPLE_SIZE);
         return data.samples![task]!;
       },
     });
@@ -830,6 +835,7 @@ async function evaluatePhase({ ctx, runId, data, answers, save }: PhaseInput): P
         challenger: option => summary.challengers.push(option.model),
       },
     });
+    summary.sampleIds = [...evaluated.samples];
     if (evaluated.status === "below_floor") {
       // A person grades the current model's answers next: they say whether the eval or the model is wrong.
       summary.status = "below_floor";
@@ -1008,7 +1014,7 @@ function approvalQuestion(ctx: Context, runId: string, data: RunState): Question
         `  Results: $OPENMERIT_RESULT${own.threshold !== undefined && !plan.generated ? `; pass rate ≥ ${own.threshold}` : ""}`,
       ] : []),
       `  Candidates: ${candidates.length} cheaper than ${data.model}${candidates.length ? `, ECI ${candidates[0]!.eci.toFixed(1)}–${candidates.at(-1)!.eci.toFixed(1)}` : ""}${data.unranked?.[name] ? ` (${data.unranked[name]} without ECI left out)` : ""}`,
-      `  Runs: at most ${runs.fullRuns} full and ${runs.screens} ${SAMPLE_SIZE}-item screens`,
+      `  Runs: at most ${runs.fullRuns} full and ${runs.screens} screens, each on ${SAMPLE_SIZE} sampled items, or on every item of an eval of ${SMALL_EVAL} or fewer`,
       ...(plan.helperFiles ?? []).map(helper => `  New helper file ${helper.path} (${helper.purpose}):\n${helper.content.split("\n").map(line => `    + ${line}`).join("\n")}`),
     ].join("\n");
   });
@@ -1077,7 +1083,7 @@ function widePool(ctx: Context, data: RunState, task: string): PoolEntry[] {
 
 /** A task's unit key: its slug, with the grading loop's round after the first, so each round measures afresh. */
 const taskKey = (data: RunState, task: string) => { const round = data.loop?.[task]?.round ?? 1; return round > 1 ? `${slug(task)}~${round}` : slug(task); };
-const unitId = (runId: string, key: string, kind: UnitRow["role"], entry: ModelRef, repeat: number) => `${runId}|${key}|${kind}|${entry.endpoint}|${entry.model}|r${repeat}`;
+const unitId = (runId: string, key: string, kind: UnitRow["role"], entry: ModelRef, repeat: number, attempt = 1) => `${runId}|${key}|${kind}|${entry.endpoint}|${entry.model}|r${repeat}${attempt > 1 ? `|a${attempt}` : ""}`;
 /** A task's units in its current round. */
 const taskUnits = (ctx: Context, runId: string, data: RunState, task: string) => ctx.state.units(runId).filter(unit => unit.task === task && unit.id.startsWith(`${runId}|${taskKey(data, task)}|`));
 
@@ -1130,7 +1136,9 @@ function compareTask(ctx: Context, runId: string, data: RunState, name: string, 
   // A search that stopped on the baseline ran only the baseline runs it needed.
   const baseline = measure(ctx, runId, baseUnits, data.stopped?.[name] && !data.samples?.[name] ? baseUnits.length : repeats, "baseline", base, baseEci);
   const summary = data.search?.[name];
-  const byModel = new Map((data.pool?.[name] ?? []).map(entry => [entry.model, entry]));
+  const criteria = data.loop?.[name]?.bar === "criteria" && plan.generated ? criteriaOf((data.generated?.[name] ?? loadGeneratedEval(ctx.repo.root, plan.generated)).bundle, plan.criteriaPassRate) : null;
+  // The pool the search ran on: against the criteria, every model that can run the task.
+  const byModel = new Map((criteria ? widePool(ctx, data, name) : data.pool?.[name] ?? []).map(entry => [entry.model, entry]));
   const finals = [...(summary?.finalists ?? []), ...(summary?.challengers ?? [])].map(model => byModel.get(model)!).filter(Boolean);
   const candidates = finals.map(entry => measure(ctx, runId, units.filter(unit => unit.role === "final" && unit.model === entry.model), repeats, "candidate", entry, entry.eci));
   const comparison: TaskComparison = {
@@ -1141,49 +1149,60 @@ function compareTask(ctx: Context, runId: string, data: RunState, name: string, 
   };
   if (baseline.status !== "measured") return { ...comparison, status: "baseline_failed", note: `The current model's eval did not complete (${baseline.note}), so no candidate can be compared. Fix the eval, then run \`openmerit scout\` again: it reuses the eval you approved.` };
   // A stopped search recommends nothing, but the finalists it measured keep their real comparison with the current model.
-  if (data.stopped?.[name]) return { ...comparison, candidates: rank(comparison, false).candidates, status: "stopped", note: /no model is recommended/.test(data.stopped[name]) ? data.stopped[name] : `The search stopped, so no model is recommended: ${data.stopped[name]}` };
-  const criteria = data.loop?.[name]?.bar === "criteria" && plan.generated ? criteriaOf((data.generated?.[name] ?? loadGeneratedEval(ctx.repo.root, plan.generated)).bundle, plan.criteriaPassRate) : null;
+  if (data.stopped?.[name]) return { ...comparison, candidates: rank(comparison, units, false).candidates, status: "stopped", note: /no model is recommended/.test(data.stopped[name]) ? data.stopped[name] : `The search stopped, so no model is recommended: ${data.stopped[name]}` };
   if (criteria) return { ...comparison, ...rankCriteria(comparison, units, criteria) };
-  if (summary?.status === "no_passing_model") return { ...comparison, status: "no_passing_model", note: `No candidate in the pool passed all ${SAMPLE_SIZE} screening items the current model passes.` };
+  if (summary?.status === "no_passing_model") return { ...comparison, status: "no_passing_model", note: `No candidate in the pool passed all ${summary.sampleIds.length || SAMPLE_SIZE} screening items the current model passes.` };
   const measured = candidates.filter(item => item.status === "measured");
   // Finalists pass the screen by construction; a failed screen already shows the eval separates models.
   const screenFailed = summary?.trials.some(trial => !trial.accepted) ?? false;
   if (!screenFailed && measured.length && [baseline, ...measured].every(item => item.score === baseline.score)) {
     return { ...comparison, status: "non_discriminating", note: `The current model, every screened candidate and ${measured.length} finalist(s) all passed ${Math.round(baseline.score! * 100)}% of their item runs.` };
   }
-  return { ...comparison, ...rank(comparison, false) };
+  return { ...comparison, ...rank(comparison, units, false) };
 }
 
+/** A model's done runs of `role`, as the engine's measurements. */
+const runsOf = (units: readonly UnitRow[], role: UnitRow["role"], model: string): Measurement[] => units.filter(unit => unit.role === role && unit.model === model && unit.status === "done").map(unit => {
+  const result = unit.result as unknown as UnitResult;
+  return { items: result.items, costUsd: null, ...(result.checks ? { checks: result.checks } : {}) };
+});
+
+/** The switch to propose: the cheapest qualified model that saves at least MIN_SAVING per item, as the engine's `cheaper`. */
+const cheapestSwitch = (top: readonly ModelResult[], baseline: ModelResult) => top.find(item => item.costPerItemUsd !== null && (baseline.costPerItemUsd === null || item.costPerItemUsd <= baseline.costPerItemUsd * (1 - MIN_SAVING))) ?? null;
+
 /** Against the accepted Eval's checks: finalists that meet them qualify whatever they cost, cheapest first, and the note says what the current model misses. */
-function rankCriteria(comparison: TaskComparison, units: readonly UnitRow[], criteria: Criteria): Pick<TaskComparison, "candidates" | "top" | "status" | "note" | "bar" | "failedChecks"> {
-  const runsOf = (role: UnitRow["role"], model: string) => units.filter(unit => unit.role === role && unit.model === model && unit.status === "done").map(unit => {
-    const result = unit.result as unknown as UnitResult;
-    return { items: result.items, costUsd: null, ...(result.checks ? { checks: result.checks } : {}) };
-  });
+function rankCriteria(comparison: TaskComparison, units: readonly UnitRow[], criteria: Criteria): Pick<TaskComparison, "candidates" | "top" | "pick" | "status" | "note" | "bar" | "failedChecks"> {
   const baseline = comparison.baseline!;
-  const failedChecks = meetsCriteria(runsOf("baseline", baseline.model), criteria).failed;
+  const failedChecks = meetsCriteria(runsOf(units, "baseline", baseline.model), criteria).failed;
   const candidates = comparison.candidates.map(item => {
     if (item.status !== "measured") return { ...item, qualified: false };
-    const verdict = meetsCriteria(runsOf("final", item.model), criteria);
+    const verdict = meetsCriteria(runsOf(units, "final", item.model), criteria);
     return { ...item, qualified: verdict.meets, note: verdict.meets ? item.note : `misses your checks: ${verdict.failed.join(", ")}` };
   });
   const top = rankTop(candidates.filter(item => item.qualified), item => item.eci ?? 0);
-  return { candidates, top, status: top.length ? "ranked" : "no_qualified", note: criteriaSummary(failedChecks, baseline, top[0] ?? null), bar: "criteria", failedChecks };
+  // A current model that misses the checks is replaced by the cheapest model that meets them, whatever it costs.
+  const pick = failedChecks.length ? top[0] ?? null : cheapestSwitch(top, baseline);
+  return { candidates, top, pick, status: top.length ? "ranked" : "no_qualified", note: criteriaSummary(failedChecks, baseline, pick), bar: "criteria", failedChecks };
 }
 
 /** Qualifies finalists at least as good as the current model under the eval's own criteria, then ranks them cheapest first. */
-function rank(comparison: TaskComparison, accepted: boolean): Pick<TaskComparison, "candidates" | "top" | "status" | "note"> {
+function rank(comparison: TaskComparison, units: readonly UnitRow[], accepted: boolean): Pick<TaskComparison, "candidates" | "top" | "pick" | "status" | "note"> {
   const baseline = comparison.baseline!;
   const threshold = comparison.eval.threshold;
+  // Paired case by case, as the engine qualifies: the items the current model passed in every run.
+  const baseRuns = runsOf(units, "baseline", baseline.model);
+  const reliable = baseRuns.length ? Object.keys(baseRuns[0]!.items).filter(item => baseRuns.every(run => run.items[item] === true)) : [];
   const candidates = comparison.candidates.map(item => {
     if (item.status !== "measured" || item.score === null) return { ...item, qualified: false };
-    const missed = shortfall({ measured: true, score: item.score, latencyMs: item.meanLatencyMs }, baseline.score!, { threshold });
-    return { ...item, qualified: missed === null, note: item.note || qualificationNote({ ...item, shortfall: missed }, baseline, { threshold }) };
+    const runs = runsOf(units, "final", item.model);
+    const missed = shortfall({ measured: true, score: item.score, latencyMs: item.meanLatencyMs, runs }, baseline.score!, { threshold }, null, reliable);
+    return { ...item, qualified: missed === null, note: item.note || qualificationNote({ ...item, shortfall: missed, regressed: regressions(runs, reliable) }, baseline, { threshold }) };
   });
   const top = rankTop(candidates.filter(item => item.qualified), item => item.eci ?? 0);
+  const pick = cheapestSwitch(top, baseline);
   const failed = candidates.filter(item => item.status !== "measured").length;
   return {
-    candidates, top, status: top.length ? "ranked" : "no_qualified",
+    candidates, top, pick, status: top.length ? "ranked" : "no_qualified",
     note: `${candidates.filter(item => item.qualified).length} of ${candidates.length} finalists performed at least as well as ${baseline.model}${top.length ? `; the ${top.length} cheapest are shown` : ""}${failed ? `; ${failed} could not be measured` : ""}.${accepted ? " Accepted by the user although the eval did not separate the models." : ""}${top.some(item => baseline.costPerItemUsd !== null && item.costPerItemUsd !== null && item.costPerItemUsd >= baseline.costPerItemUsd) ? " Some qualifying finalists cost no less than the current model on this workload." : ""}`,
   };
 }
