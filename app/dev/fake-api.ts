@@ -81,7 +81,6 @@ function extra(name: string): Extra {
   return {
     projects, slices: Object.fromEntries(projects.slice(1).map((item) => [item.id, emptySlice()])), polls: 0,
     subscriptions: { writer: "openmerit", subscriptions: [
-      { provider: "claude", name: "Claude", connected: false, connectedAt: null, problem: null, signIn: null },
       { provider: "chatgpt", name: "ChatGPT", connected: false, connectedAt: null, problem: null, signIn: null },
     ] },
   };
@@ -345,23 +344,13 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       return json(200, { deleted: true });
     }
 
-    // The member's subscriptions: a Claude code is any text, and a ChatGPT code counts as entered on the second check.
+    // The member's subscription: a ChatGPT code counts as entered on the second check.
     const subs = more.subscriptions, sub = (provider: string) => subs.subscriptions.find((item) => item.provider === provider)!;
     const connect = (provider: string) => Object.assign(sub(provider), { connected: true, connectedAt: new Date().toISOString(), signIn: null });
     if (path === "/api/me/subscriptions" && method === "GET") return json(200, subs);
-    if (path === "/api/me/subscriptions/claude" && method === "POST") {
-      sub("claude").signIn = { startedAt: new Date().toISOString(), userCode: null, verificationUri: null, url: "https://claude.ai/oauth/authorize?preview=1" };
-      return json(200, subs);
-    }
-    if (path === "/api/me/subscriptions/claude/code" && method === "POST") {
-      if (!sub("claude").signIn) return error(400, "This sign-in expired. Start again.");
-      if (!String(input?.code ?? "").trim()) return error(400, "Send {code}: the code Anthropic shows after you sign in.");
-      connect("claude");
-      return json(200, subs);
-    }
     if (path === "/api/me/subscriptions/chatgpt" && method === "POST") {
       more.polls = 0;
-      sub("chatgpt").signIn = { startedAt: new Date().toISOString(), userCode: "KQ7P-M2XW", verificationUri: "https://auth.openai.com/codex/device", url: null };
+      sub("chatgpt").signIn = { startedAt: new Date().toISOString(), userCode: "KQ7P-M2XW", verificationUri: "https://auth.openai.com/codex/device" };
       return json(200, subs);
     }
     if (path === "/api/me/subscriptions/chatgpt/poll" && method === "POST") {
@@ -371,14 +360,14 @@ export function createFakeApi(options: { appUrl?: string } = {}): (request: Requ
       connect("chatgpt");
       return json(200, { status: "connected", ...subs });
     }
-    if ((match = /^\/api\/me\/subscriptions\/(claude|chatgpt)$/.exec(path)) && method === "DELETE") {
+    if ((match = /^\/api\/me\/subscriptions\/(chatgpt)$/.exec(path)) && method === "DELETE") {
       Object.assign(sub(match[1]!), { connected: false, connectedAt: null, signIn: null });
       if (subs.writer === match[1]) subs.writer = "openmerit";
       return json(200, subs);
     }
     if (path === "/api/me/case-writer" && method === "PUT") {
       const writer = input?.writer;
-      if (writer !== "openmerit" && writer !== "claude" && writer !== "chatgpt") return error(400, "Send {writer}: openmerit, claude or chatgpt.");
+      if (writer !== "openmerit" && writer !== "chatgpt") return error(400, "Send {writer}: openmerit or chatgpt.");
       if (writer !== "openmerit" && !sub(writer).connected) return error(409, `Connect your ${sub(writer).name} subscription first.`);
       subs.writer = writer;
       return json(200, subs);

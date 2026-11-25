@@ -39,7 +39,7 @@ export type EvalSpec = Pick<TaskBundle, "description" | "input" | "steps" | "cri
  * Who wrote the accepted eval: OpenMerit's case writer, a member's subscription or the coding agent's examples alone (each by a first run),
  * a repository review, a person in the app, or a person grading a run's answers, after OpenMerit wrote it again from any grades that disagreed.
  */
-export type EvalSource = "openmerit" | "claude" | "chatgpt" | "examples" | "review" | "app" | "grading";
+export type EvalSource = "openmerit" | "chatgpt" | "examples" | "review" | "app" | "grading";
 /** What a model must meet: the current model's score, or the eval's checks once a person marked the current model's own answers wrong. */
 export type EvalBar = "current" | "criteria";
 export const specOf = (bundle: TaskBundle): EvalSpec => Object.fromEntries((["description", "input", "steps", "criteria", "guardrails"] as const).filter(key => bundle[key] !== undefined).map(key => [key, bundle[key]])) as EvalSpec;

@@ -46,11 +46,10 @@ export interface Limits {
 }
 
 /**
- * Each member's own Claude and ChatGPT subscriptions (subscriptions.ts): the sign-in endpoints, the
- * model that writes a task's cases on each, and, for tests only, the model API's base URL.
+ * Each member's own ChatGPT subscription (subscriptions.ts): the sign-in endpoint, the model that
+ * writes a task's cases on it, and, for tests only, the model API's base URL.
  */
 export interface SubscriptionsConfig {
-  claude: { authorizeUrl: string; tokenUrl: string; redirectUri: string; model: string; apiUrl: string | null };
   chatgpt: { authUrl: string; model: string; apiUrl: string | null };
 }
 
@@ -141,13 +140,6 @@ export function loadConfig(env: Env = process.env): Config {
       appSlug: (env.OPENMERIT_GITHUB_APP_SLUG ?? "openmeritai").trim() || null,
     },
     subscriptions: {
-      claude: {
-        authorizeUrl: env.OPENMERIT_CLAUDE_AUTHORIZE_URL || "https://claude.ai/oauth/authorize",
-        tokenUrl: env.OPENMERIT_CLAUDE_TOKEN_URL || "https://platform.claude.com/v1/oauth/token",
-        redirectUri: "https://platform.claude.com/oauth/code/callback",
-        model: env.OPENMERIT_CLAUDE_SUBSCRIPTION_MODEL || "claude-sonnet-5-5",
-        apiUrl: env.OPENMERIT_CLAUDE_API_URL || null,
-      },
       chatgpt: {
         authUrl: (env.OPENMERIT_OPENAI_AUTH_URL || "https://auth.openai.com").replace(/\/$/, ""),
         model: env.OPENMERIT_CODEX_SUBSCRIPTION_MODEL || "gpt-5.6-terra",
