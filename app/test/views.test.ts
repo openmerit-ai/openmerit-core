@@ -358,28 +358,20 @@ test("Coding agents lets a member signed in with GitHub add the repositories the
   assert.match(text(projectView.render({ project: claims, endpoints: [], repos: [added] }, page(me))), /billing-worker .*Private · GitHub sign-in/);
 });
 
-test("Account settings walk through each sign-in and offer only a connected subscription as the case writer", async () => {
+test("Account settings walk through the ChatGPT sign-in and offer it as the case writer only once connected", async () => {
   const me = await account();
   const base = await get<Subscriptions>("/api/me/subscriptions");
   const fresh = text(accountView.render(base, page(me)));
-  assert.match(fresh, /Claude Claude Pro or Max Not connected Sign in with Claude/);
   assert.match(fresh, /ChatGPT ChatGPT Plus or Pro Not connected Sign in with ChatGPT/);
+  assert.doesNotMatch(fresh, /Claude/, "the hosted app offers no Claude sign-in");
   const options = accountView.render(base, page(me)).__html;
-  assert.match(options, /<option value="claude" disabled>/);
+  assert.match(options, /<option value="chatgpt" disabled>/);
   assert.match(options, /<option value="openmerit" selected>/);
-  const [claude, chatgpt] = base.subscriptions as [Subscriptions["subscriptions"][number], Subscriptions["subscriptions"][number]];
-  const signingIn: Subscriptions = { writer: "claude", subscriptions: [
-    { ...claude, connected: true, connectedAt: "2026-11-24T09:00:00Z" },
-    { ...chatgpt, signIn: { startedAt: "2026-11-24T09:00:00Z", userCode: "KQ7P-M2XW", verificationUri: "https://auth.openai.com/codex/device", url: null } },
-  ] };
-  const shown = accountView.render(signingIn, page(me)).__html;
-  assert.match(text({ __html: shown }), /Enter this code: KQ7P-M2XW/);
-  assert.match(shown, /<option value="claude" selected>/);
-  assert.match(shown, /<option value="chatgpt" disabled>/);
-  const claudeSignIn: Subscriptions = { writer: "openmerit", subscriptions: [{ ...claude, signIn: { startedAt: "2026-11-24T09:00:00Z", userCode: null, verificationUri: null, url: "https://claude.ai/oauth/authorize?x=1" } }, chatgpt] };
-  const pasting = accountView.render(claudeSignIn, page(me)).__html;
-  assert.match(pasting, /href="https:\/\/claude.ai\/oauth\/authorize\?x=1"/);
-  assert.match(pasting, /data-action="finishClaude"/);
+  const [chatgpt] = base.subscriptions as [Subscriptions["subscriptions"][number]];
+  const signingIn: Subscriptions = { writer: "openmerit", subscriptions: [{ ...chatgpt, signIn: { startedAt: "2026-11-24T09:00:00Z", userCode: "KQ7P-M2XW", verificationUri: "https://auth.openai.com/codex/device" } }] };
+  assert.match(text(accountView.render(signingIn, page(me))), /Enter this code: KQ7P-M2XW/);
+  const connected: Subscriptions = { writer: "chatgpt", subscriptions: [{ ...chatgpt, connected: true, connectedAt: "2026-11-24T09:00:00Z" }] };
+  assert.match(accountView.render(connected, page(me)).__html, /<option value="chatgpt" selected>/);
 });
 
 test("approving a reviewed eval adds the task last, not run yet; dismissing one empties the queue", async () => {

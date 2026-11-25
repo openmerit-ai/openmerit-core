@@ -29,14 +29,14 @@ export interface Me {
 export interface Project { id: string; name: string; createdAt: string; tasks: number; endpoints: number; repos: string[] }
 export const DEFAULT_PROJECT = "default";
 
-// The member's own Claude and ChatGPT subscriptions (GET /api/me/subscriptions), for every organization they
-// belong to. writer is who writes the cases of the runs they start. A sign-in under way has the page to open
-// (Claude) or the code to enter (ChatGPT); no token is ever sent to the page.
-export type SubscriptionProvider = "claude" | "chatgpt";
+// The member's own ChatGPT subscription (GET /api/me/subscriptions), for every organization they belong to.
+// writer is who writes the cases of the runs they start. A sign-in under way has the code to enter; no
+// token is ever sent to the page.
+export type SubscriptionProvider = "chatgpt";
 export type CaseWriter = "openmerit" | SubscriptionProvider;
 export interface Subscription {
   provider: SubscriptionProvider; name: string; connected: boolean; connectedAt: string | null; problem: string | null;
-  signIn: { startedAt: string; userCode: string | null; verificationUri: string | null; url: string | null } | null;
+  signIn: { startedAt: string; userCode: string; verificationUri: string } | null;
 }
 export interface Subscriptions { writer: CaseWriter; subscriptions: Subscription[] }
 
@@ -73,7 +73,7 @@ export interface Task {
 // draft is open the task's runs and watch wait. The coding agent writes the accepted version to the repository.
 export interface EvalCase { id: string; input: Record<string, string>; expected?: unknown; origin: "example" | "written" | "trace"; kind?: string; approved?: boolean; toolResults?: unknown }
 export interface EvalSpec { description?: string; input?: { description: string }; steps?: { description: string; tools?: string[]; access?: string; required?: boolean; after?: number[] }[]; criteria?: string[]; guardrails?: string[] }
-export type EvalSource = "openmerit" | "claude" | "chatgpt" | "examples" | "review" | "app" | "grading";
+export type EvalSource = "openmerit" | "chatgpt" | "examples" | "review" | "app" | "grading";
 export type TaskPart = "prompt" | "tools" | "output";
 export interface EvalAccepted { version: number; spec: EvalSpec; cases: EvalCase[]; source: EvalSource; by: string | null; byName?: string | null; at: string; runs: number }
 export interface EvalRevision { reason: "task_changed" | "revise"; changed: TaskPart[]; spec: EvalSpec; cases: EvalCase[]; output: TaskOutput | null; by: string | null; byName?: string | null; at: string }

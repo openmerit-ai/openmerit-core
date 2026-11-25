@@ -1,5 +1,5 @@
-// The user actor, one per Clerk user across their organizations: the member's own Claude and ChatGPT
-// subscriptions, a sign-in waiting to finish, and which of them writes their tasks' cases. Tokens are
+// The user actor, one per Clerk user across their organizations: the member's own ChatGPT
+// subscription, a sign-in waiting to finish, and which of them writes their tasks' cases. Tokens are
 // encrypted with OPENMERIT_KEY_ENCRYPTION_KEY, with `user:<id>` as associated data, and leave the
 // actor only for a job's memory (`writer`); no list or export returns them.
 import { actor } from "rivetkit";
@@ -7,7 +7,7 @@ import { db } from "rivetkit/db";
 import { decryptKey, encryptKey } from "../keys.ts";
 import { services } from "../services.ts";
 import {
-  chatgptDeviceCode, chatgptPoll, CLAUDE_SIGN_IN_TTL_MS, claudeExchange, claudeSignIn, PROVIDER_NAMES, refreshSubscription, SUBSCRIPTION_PROVIDERS,
+  chatgptDeviceCode, chatgptPoll, PROVIDER_NAMES, refreshSubscription, SUBSCRIPTION_PROVIDERS,
   type CaseWriter, type DeviceCode, type SubscriptionCredential, type SubscriptionProvider,
 } from "../subscriptions.ts";
 
@@ -21,11 +21,11 @@ const SCHEMA = [
 const RENEW_BEFORE_MS = 10 * 60_000;
 
 /** What the account settings page shows: never a token. */
-export interface SubscriptionView { provider: SubscriptionProvider; name: string; connected: boolean; connectedAt: string | null; problem: string | null; signIn: { startedAt: string; userCode: string | null; verificationUri: string | null; url: string | null } | null }
+export interface SubscriptionView { provider: SubscriptionProvider; name: string; connected: boolean; connectedAt: string | null; problem: string | null; signIn: { startedAt: string; userCode: string; verificationUri: string } | null }
 export interface SubscriptionsView { writer: CaseWriter; subscriptions: SubscriptionView[] }
 
 type Database = { execute: (query: string, ...args: unknown[]) => Promise<Record<string, unknown>[]> };
-type Pending = { kind: "claude"; verifier: string; url: string } | ({ kind: "chatgpt" } & DeviceCode);
+type Pending = { kind: "chatgpt" } & DeviceCode;
 
 const iso = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toISOString() : null);
 const sealKey = () => {
@@ -48,7 +48,7 @@ async function view(database: Database, userId: string): Promise<SubscriptionsVi
       if (started) {
         try {
           const value = unseal<Pending>(userId, started.sealed);
-          signIn = { startedAt: iso(started.started_at)!, userCode: value.kind === "chatgpt" ? value.userCode : null, verificationUri: value.kind === "chatgpt" ? value.verificationUri : null, url: value.kind === "claude" ? value.url : null };
+          signIn = { startedAt: iso(started.started_at)!, userCode: value.userCode, verificationUri: value.verificationUri };
         } catch { signIn = null; }
       }
       return { provider, name: PROVIDER_NAMES[provider], connected: !!row, connectedAt: iso(row?.connected_at), problem: (row?.last_error as string | null) ?? null, signIn };
@@ -71,26 +71,6 @@ export const user = actor({
   actions: {
     subscriptions: async (c): Promise<SubscriptionsView> => view(c.db, c.key[0]!),
 
-    /** Starts a Claude sign-in: the page the member opens. The code it shows finishes it. */
-    startClaude: async (c): Promise<SubscriptionsView> => {
-      const started = claudeSignIn(services().config.subscriptions.claude);
-      await c.db.execute(`INSERT INTO sign_ins (provider, sealed, started_at) VALUES ('claude', ?, ?) ON CONFLICT (provider) DO UPDATE SET sealed = excluded.sealed, started_at = excluded.started_at`,
-        seal(c.key[0]!, { kind: "claude", verifier: started.verifier, url: started.url } satisfies Pending), Date.now());
-      return view(c.db, c.key[0]!);
-    },
-
-    finishClaude: async (c, code: string): Promise<{ ok: true; view: SubscriptionsView } | { ok: false; error: string }> => {
-      const [row] = await c.db.execute(`SELECT sealed, started_at FROM sign_ins WHERE provider = 'claude'`);
-      if (!row || Number(row.started_at) < Date.now() - CLAUDE_SIGN_IN_TTL_MS) return { ok: false, error: "This sign-in expired. Start again." };
-      const pending = unseal<Pending>(c.key[0]!, row.sealed);
-      if (pending.kind !== "claude") return { ok: false, error: "Start the Claude sign-in again." };
-      try {
-        const { config, fetch } = services();
-        await save(c.db, c.key[0]!, "claude", await claudeExchange(config.subscriptions.claude, fetch, pending.verifier, code));
-      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "The sign-in failed." }; }
-      return { ok: true, view: await view(c.db, c.key[0]!) };
-    },
-
     /** Starts a ChatGPT sign-in: the code the member enters at OpenAI. `pollChatgpt` finishes it. */
     startChatgpt: async (c): Promise<{ ok: true; view: SubscriptionsView } | { ok: false; error: string }> => {
       const { config, fetch } = services();
@@ -106,7 +86,6 @@ export const user = actor({
       const [row] = await c.db.execute(`SELECT sealed FROM sign_ins WHERE provider = 'chatgpt'`);
       if (!row) return { status: "failed", error: "No ChatGPT sign-in is waiting. Start one.", view: await view(c.db, c.key[0]!) };
       const pending = unseal<Pending>(c.key[0]!, row.sealed);
-      if (pending.kind !== "chatgpt") return { status: "failed", error: "Start the ChatGPT sign-in again.", view: await view(c.db, c.key[0]!) };
       const { config, fetch } = services();
       let polled;
       try { polled = await chatgptPoll(config.subscriptions.chatgpt, fetch, pending); } catch (error) { polled = { status: "failed" as const, error: error instanceof Error ? error.message : "The sign-in failed." }; }

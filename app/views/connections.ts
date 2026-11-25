@@ -69,7 +69,7 @@ export const connectionsView: View<Data> = {
         <div style="margin-top: 8px">${install()}</div>
         <div class="row" style="margin-top: 10px"><span>Disconnect every coding agent<span class="sub">Signs out every coding agent session for ${me.account.name}. Each one's next call opens sign-in again. Tasks and runs are kept.</span></span>${admin ? html`<button class="btn danger" type="button" data-action="disconnect">Disconnect</button>` : html`<span class="sub">Admins only</span>`}</div>
       </div>
-      <p class="note">To write your tasks' test cases on your own Claude or ChatGPT plan, sign in on <a href="/account/">Account settings</a>.</p>
+      <p class="note">To write your tasks' test cases on your own ChatGPT plan, sign in on <a href="/account/">Account settings</a>.</p>
     </section>
 
     ${githubSection(data, admin, paid(me), params)}`;

@@ -116,18 +116,11 @@ export function apiRoutes(deps: AppDeps) {
       return deleted.ok ? json(200, { deleted: true }) : error(deleted.status, deleted.error);
     }
 
-    // The member's own Claude and ChatGPT subscriptions, which write the cases of the runs they start. They are the user's, in every organization.
+    // The member's own ChatGPT subscription, which write the cases of the runs they start. They are the user's, in every organization.
     if (path.startsWith("/api/me/")) {
       const mine = client.user.getOrCreate([who.userId]);
       if (!config.keyEncryptionKey && method !== "GET") return error(503, "Subscriptions are not available yet: the app has no key-encryption key.");
       if (path === "/api/me/subscriptions" && method === "GET") return json(200, await mine.subscriptions());
-      if (path === "/api/me/subscriptions/claude" && method === "POST") return json(200, await mine.startClaude());
-      if (path === "/api/me/subscriptions/claude/code" && method === "POST") {
-        const code = (await body(request))?.code;
-        if (typeof code !== "string" || !code.trim()) return error(400, "Send {code}: the code Anthropic shows after you sign in.");
-        const finished = await mine.finishClaude(code);
-        return finished.ok ? json(200, finished.view) : error(400, finished.error);
-      }
       if (path === "/api/me/subscriptions/chatgpt" && method === "POST") {
         const started = await mine.startChatgpt();
         return started.ok ? json(200, started.view) : error(502, started.error);
@@ -137,12 +130,12 @@ export function apiRoutes(deps: AppDeps) {
         return polled.status === "failed" ? json(400, { error: polled.error, ...polled.view }) : json(200, { status: polled.status, ...polled.view });
       }
       if ((match = /^\/api\/me\/subscriptions\/([\w-]+)$/.exec(path)) && method === "DELETE") {
-        if (!isSubscriptionProvider(match[1])) return error(404, "No such subscription: claude or chatgpt.");
+        if (!isSubscriptionProvider(match[1])) return error(404, "No such subscription: chatgpt.");
         return json(200, await mine.disconnect(match[1]));
       }
       if (path === "/api/me/case-writer" && method === "PUT") {
         const writer = (await body(request))?.writer;
-        if (writer !== "openmerit" && !isSubscriptionProvider(writer)) return error(400, "Send {writer}: openmerit, claude or chatgpt.");
+        if (writer !== "openmerit" && !isSubscriptionProvider(writer)) return error(400, "Send {writer}: openmerit or chatgpt.");
         const saved = await mine.setWriter(writer);
         return saved.ok ? json(200, saved.view) : error(409, saved.error);
       }

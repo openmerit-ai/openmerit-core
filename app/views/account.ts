@@ -1,36 +1,22 @@
-// Account settings: the member's own Claude and ChatGPT subscriptions, which they sign in to once
-// for every organization they belong to, and which of them writes the test cases of the runs they
-// start. The page never sees a token: the cloud app keeps them encrypted.
+// Account settings: the member's own ChatGPT subscription, which they sign in to once for every
+// organization they belong to, and whether it writes the test cases of the runs they start. The page never sees a token: the cloud app keeps them encrypted.
 import type { CaseWriter, Subscription, SubscriptionProvider, Subscriptions } from "../api.ts";
-import { ApiError } from "../api.ts";
 import { date, html, logo, type Html } from "../html.ts";
 import type { View } from "../view.ts";
 import { header } from "./common.ts";
 import { retried } from "./connections.ts";
 
 const plans: Record<SubscriptionProvider, { plan: string; logo: string; site: string }> = {
-  claude: { plan: "Claude Pro or Max", logo: "claude", site: "claude.ai" },
   chatgpt: { plan: "ChatGPT Plus or Pro", logo: "openai", site: "chatgpt.com" },
 };
 
 function signIn(item: Subscription): Html {
   const started = item.signIn;
   if (!started) return html``;
-  if (item.provider === "claude") {
-    return html`<form class="form sign-in" data-action="finishClaude" data-provider="claude" autocomplete="off">
-          <ol class="steps">
-            <li><a href="${started.url ?? "#"}" target="_blank" rel="noreferrer">Open claude.ai and sign in</a> with the account that has your Claude plan, then allow OpenMerit.</li>
-            <li>Anthropic shows a code. Paste it here.</li>
-          </ol>
-          <label>Code from Anthropic<input name="code" type="text" required spellcheck="false" placeholder="code#state"></label>
-          <p class="form-error" role="alert" hidden></p>
-          <p><button class="btn primary" type="submit">Connect Claude</button> <button class="btn" type="button" data-action="disconnect" data-provider="claude">Cancel</button></p>
-        </form>`;
-  }
   return html`<div class="sign-in">
           <ol class="steps">
-            <li>Open <a href="${started.verificationUri ?? "#"}" target="_blank" rel="noreferrer">${(started.verificationUri ?? "").replace(/^https:\/\//, "")}</a> and sign in with the account that has your ChatGPT plan.</li>
-            <li>Enter this code: <code class="device-code">${started.userCode ?? ""}</code></li>
+            <li>Open <a href="${started.verificationUri}" target="_blank" rel="noreferrer">${started.verificationUri.replace(/^https:\/\//, "")}</a> and sign in with the account that has your ChatGPT plan.</li>
+            <li>Enter this code: <code class="device-code">${started.userCode}</code></li>
           </ol>
           <p class="sub"><span class="pill live">Waiting</span> This page connects once you enter the code. It expires 15 minutes after you start.</p>
           <p><button class="btn" type="button" data-action="disconnect" data-provider="chatgpt">Cancel</button></p>
@@ -44,7 +30,7 @@ function row(item: Subscription): Html {
     : item.signIn ? html`<span class="pill tag">Signing in</span>` : html`<span class="pill tag">Not connected</span>`;
   const action = item.connected
     ? html`<button class="btn danger" type="button" data-action="disconnect" data-provider="${item.provider}" aria-label="Disconnect ${item.name}">Disconnect</button>`
-    : item.signIn ? html`<span></span>` : html`<button class="btn primary" type="button" data-action="${item.provider === "claude" ? "startClaude" : "startChatgpt"}">Sign in with ${item.name}</button>`;
+    : item.signIn ? html`<span></span>` : html`<button class="btn primary" type="button" data-action="startChatgpt">Sign in with ${item.name}</button>`;
   return html`<div class="repo">
         <div class="row">
           <span>${logo(mark)}${item.name}<span class="sub">${plan}</span>${item.problem ? html`<span class="sub no">${item.problem}</span>` : ""}</span>
@@ -57,7 +43,6 @@ function row(item: Subscription): Html {
 
 const writers: { value: CaseWriter; label: string }[] = [
   { value: "openmerit", label: "OpenMerit's key (OpenMerit pays)" },
-  { value: "claude", label: "My Claude subscription" },
   { value: "chatgpt", label: "My ChatGPT subscription" },
 ];
 
@@ -83,11 +68,11 @@ export const accountView: View<Subscriptions> = {
   },
   render(data, { me }) {
     const connected = new Set(data.subscriptions.filter((item) => item.connected).map((item) => item.provider));
-    return html`${header(me, "Account settings", "Your own settings, the same in every organization you belong to. Sign in to your Claude or ChatGPT plan, and it writes the test cases of the runs you start instead of OpenMerit's key.")}
+    return html`${header(me, "Account settings", "Your own settings, the same in every organization you belong to. Sign in to your ChatGPT plan, and it writes the test cases of the runs you start instead of OpenMerit's key.")}
 
     <section aria-labelledby="subscriptions">
       <h2 id="subscriptions">Subscriptions</h2>
-      <p class="note" style="margin: -2px 0 8px">The sign-in is the one Claude Code and Codex use. OpenMerit keeps its tokens encrypted, never shows them, and uses them only to write your tasks' test cases. Those calls count toward your plan's usage limits.</p>
+      <p class="note" style="margin: -2px 0 8px">The sign-in is the one Codex uses. OpenMerit keeps its tokens encrypted, never shows them, and uses them only to write your tasks' test cases. Those calls count toward your plan's usage limits.</p>
       <div class="card">${data.subscriptions.map(row)}</div>
     </section>
 
@@ -102,26 +87,6 @@ export const accountView: View<Subscriptions> = {
     </section>`;
   },
   actions: {
-    async startClaude(_target, _data, { api, refresh }) {
-      const started = await api.send<Subscriptions>("POST", "/api/me/subscriptions/claude");
-      const url = started.subscriptions.find((item) => item.provider === "claude")?.signIn?.url;
-      if (url) window.open(url, "_blank", "noreferrer");
-      await refresh();
-    },
-    async finishClaude(form, _data, { api, refresh, toast }) {
-      if (!(form instanceof HTMLFormElement)) return;
-      const error = form.querySelector<HTMLElement>(".form-error");
-      try {
-        await api.send("POST", "/api/me/subscriptions/claude/code", { code: String(new FormData(form).get("code") ?? "").trim() });
-      } catch (failure) {
-        if (!(failure instanceof ApiError) || failure.status !== 400 || !error) throw failure;
-        error.textContent = failure.message;
-        error.hidden = false;
-        return;
-      }
-      await refresh();
-      toast("Claude connected.");
-    },
     async startChatgpt(_target, _data, { api, refresh }) {
       await api.send("POST", "/api/me/subscriptions/chatgpt");
       await refresh();

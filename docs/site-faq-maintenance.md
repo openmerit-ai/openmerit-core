@@ -1,5 +1,9 @@
 # Website FAQ maintenance
 
+## No Claude sign-in in the cloud app — unreleased, 25 November 2026
+
+Reviewed the homepage against the cloud app dropping its Claude sign-in, so a member's own ChatGPT plan is the only subscription that can write their runs' test cases. `site/index.html` makes no claim about subscriptions, sign-ins or who pays for writing cases. No homepage change is needed. The cloud README's Members' subscriptions section describes the behaviour.
+
 ## Steadier picks: fixed screening cases, a retried screen and the last pick measured again — unreleased, 24 November 2026
 
 Reviewed the homepage against screens drawing the same cases for the same eval, a screen that misses one of five cases being retried once on five others, and the provisional pick being measured when it lists under the cheapest qualified model. `site/index.html` has no FAQ block and makes no claim about the search, its screening cases, screen size or run-to-run variance. No FAQ change.
